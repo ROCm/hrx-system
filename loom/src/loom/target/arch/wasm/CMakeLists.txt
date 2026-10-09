@@ -127,6 +127,7 @@ loom_check_test_suite(
     "test/source_low/numeric_unsigned_remainder.loom-test"
     "test/source_low/numeric_vector_constants.loom-test"
     "test/source_low/numeric_vector_f32_values.loom-test"
+    "test/source_low/predicate_carriers.loom-test"
     "test/source_low/predicate_extract.loom-test"
     "test/source_low/selected_payload_transport.loom-test"
     "test/source_low/semantic_assertions.loom-test"

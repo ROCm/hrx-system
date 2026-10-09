@@ -1447,6 +1447,21 @@ def test_guard_row_emits_i64_attr_sum_relation() -> None:
     assert guard_payload_row(row) == [".i64 = INT64_MIN"]
 
 
+def test_guard_row_emits_low_value_representation_payload() -> None:
+    row = LowerGuard(
+        kind=GuardKind.LOW_VALUE_REPRESENTATION,
+        value_ref_index=3,
+        u64=17,
+    )
+
+    fields = guard_row({}, row, payload_ordinal=1)
+
+    assert ".kind = LOOM_LOW_LOWER_GUARD_LOW_VALUE_REPRESENTATION" in fields
+    assert ".selector.value.value_ref_index = 3" in fields
+    assert ".payload_ordinal = 1" in fields
+    assert guard_payload_row(row) == [".u64 = UINT64_C(17)"]
+
+
 def test_guard_row_overlays_array_element_index_and_range() -> None:
     row = LowerGuard(
         kind=GuardKind.I64_ARRAY_ELEMENT_RANGE,

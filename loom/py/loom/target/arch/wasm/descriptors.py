@@ -359,24 +359,7 @@ _OP_F32X4_EXTRACT_LANE = _simd_encoding_id(0x1F)
 _OP_F32X4_REPLACE_LANE = _simd_encoding_id(0x20)
 _OP_F64X2_EXTRACT_LANE = _simd_encoding_id(0x21)
 _OP_F64X2_REPLACE_LANE = _simd_encoding_id(0x22)
-_OP_I8X16_EQ = _simd_encoding_id(0x23)
-_OP_I16X8_EQ = _simd_encoding_id(0x2D)
-_OP_I32X4_EQ = _simd_encoding_id(0x37)
-_OP_I32X4_NE = _simd_encoding_id(0x38)
-_OP_I32X4_LT_S = _simd_encoding_id(0x39)
-_OP_I32X4_LT_U = _simd_encoding_id(0x3A)
-_OP_I32X4_GT_S = _simd_encoding_id(0x3B)
-_OP_I32X4_GT_U = _simd_encoding_id(0x3C)
-_OP_I32X4_LE_S = _simd_encoding_id(0x3D)
-_OP_I32X4_LE_U = _simd_encoding_id(0x3E)
-_OP_I32X4_GE_S = _simd_encoding_id(0x3F)
-_OP_I32X4_GE_U = _simd_encoding_id(0x40)
-_OP_F32X4_EQ = _simd_encoding_id(0x41)
-_OP_F32X4_NE = _simd_encoding_id(0x42)
-_OP_F32X4_LT = _simd_encoding_id(0x43)
-_OP_F32X4_GT = _simd_encoding_id(0x44)
-_OP_F32X4_LE = _simd_encoding_id(0x45)
-_OP_F32X4_GE = _simd_encoding_id(0x46)
+_OP_V128_NOT = _simd_encoding_id(0x4D)
 _OP_V128_AND = _simd_encoding_id(0x4E)
 _OP_V128_OR = _simd_encoding_id(0x50)
 _OP_V128_XOR = _simd_encoding_id(0x51)
@@ -387,8 +370,6 @@ _OP_F32X4_TRUNC = _simd_encoding_id(0x69)
 _OP_F32X4_NEAREST = _simd_encoding_id(0x6A)
 _OP_I16X8_EXTMUL_LOW_I8X16_U = _simd_encoding_id(0x9E)
 _OP_I16X8_EXTMUL_HIGH_I8X16_U = _simd_encoding_id(0x9F)
-_OP_I64X2_EQ = _simd_encoding_id(0xD6)
-_OP_I64X2_LT_S = _simd_encoding_id(0xD8)
 _OP_F32X4_ABS = _simd_encoding_id(0xE0)
 _OP_F32X4_NEG = _simd_encoding_id(0xE1)
 _OP_F32X4_SQRT = _simd_encoding_id(0xE3)
@@ -410,6 +391,93 @@ class WasmIntegerArithmeticInstruction:
     semantic: str
     subopcode: int
     arity: int
+
+
+@dataclass(frozen=True)
+class WasmSimdCompareInstruction:
+    """One native SIMD128 comparison over a physical lane family."""
+
+    shape: str
+    element: str
+    element_bit_count: int
+    predicate: str
+    operation: str
+    subopcode: int
+    floating: bool = False
+
+
+_INTEGER_COMPARE_OPERATIONS = (
+    ("eq", "eq"),
+    ("ne", "ne"),
+    ("slt", "lt_s"),
+    ("ult", "lt_u"),
+    ("sgt", "gt_s"),
+    ("ugt", "gt_u"),
+    ("sle", "le_s"),
+    ("ule", "le_u"),
+    ("sge", "ge_s"),
+    ("uge", "ge_u"),
+)
+_FLOAT_COMPARE_OPERATIONS = (
+    ("oeq", "eq"),
+    ("une", "ne"),
+    ("olt", "lt"),
+    ("ogt", "gt"),
+    ("ole", "le"),
+    ("oge", "ge"),
+)
+
+# The complete native SIMD128 comparison matrix. The i64x2 ISA family omits
+# unsigned relations; source contracts compose those by biasing the sign bit.
+WASM_SIMD_COMPARE_INSTRUCTIONS = (
+    *(
+        WasmSimdCompareInstruction(
+            shape,
+            element,
+            element_bit_count,
+            predicate,
+            operation,
+            base_subopcode + operation_index,
+        )
+        for shape, element, element_bit_count, base_subopcode in (
+            ("i8x16", "i8", 8, 0x23),
+            ("i16x8", "i16", 16, 0x2D),
+            ("i32x4", "i32", 32, 0x37),
+        )
+        for operation_index, (predicate, operation) in enumerate(
+            _INTEGER_COMPARE_OPERATIONS
+        )
+    ),
+    *(
+        WasmSimdCompareInstruction("i64x2", "i64", 64, predicate, operation, subopcode)
+        for predicate, operation, subopcode in (
+            ("eq", "eq", 0xD6),
+            ("ne", "ne", 0xD7),
+            ("slt", "lt_s", 0xD8),
+            ("sgt", "gt_s", 0xD9),
+            ("sle", "le_s", 0xDA),
+            ("sge", "ge_s", 0xDB),
+        )
+    ),
+    *(
+        WasmSimdCompareInstruction(
+            shape,
+            element,
+            element_bit_count,
+            predicate,
+            operation,
+            base_subopcode + operation_index,
+            floating=True,
+        )
+        for shape, element, element_bit_count, base_subopcode in (
+            ("f32x4", "f32", 32, 0x41),
+            ("f64x2", "f64", 64, 0x47),
+        )
+        for operation_index, (predicate, operation) in enumerate(
+            _FLOAT_COMPARE_OPERATIONS
+        )
+    ),
+)
 
 
 # Direct SIMD128 cells. Source contracts consume this same table and add compact
@@ -612,6 +680,33 @@ def _integer_simd_arithmetic_descriptor(
             if instruction.element_bit_count == 64
             else _SCHEDULE_SIMD_I32X4
         ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _simd_compare_descriptor(
+    instruction: WasmSimdCompareInstruction,
+) -> Descriptor:
+    if instruction.floating:
+        schedule_class = (
+            _SCHEDULE_SIMD_F32X4
+            if instruction.element_bit_count == 32
+            else _SCHEDULE_SIMD_F64X2
+        )
+    else:
+        schedule_class = (
+            _SCHEDULE_SIMD_I64X2
+            if instruction.element_bit_count == 64
+            else _SCHEDULE_SIMD_I32X4
+        )
+    return Descriptor(
+        key=f"wasm.{instruction.shape}.{instruction.operation}",
+        mnemonic=f"{instruction.shape}.{instruction.operation}",
+        semantic_tag=f"vector.cmp.{instruction.predicate}.{instruction.shape}",
+        encoding_id=_simd_encoding_id(instruction.subopcode),
+        operands=(_v128_result(), _v128_operand("lhs"), _v128_operand("rhs")),
+        asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+        schedule_class=schedule_class,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -1317,126 +1412,8 @@ WASM_CORE_SIMD128_DESCRIPTOR_SET = DescriptorSet(
             _OP_F64X2_REPLACE_LANE,
         ),
         *(
-            Descriptor(
-                key=f"wasm.{shape_name}.eq",
-                mnemonic=f"{shape_name}.eq",
-                semantic_tag=f"vector.cmp.eq.{shape_name}",
-                encoding_id=encoding_id,
-                operands=(
-                    _v128_result(),
-                    _v128_operand("lhs"),
-                    _v128_operand("rhs"),
-                ),
-                asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
-                schedule_class=schedule_class,
-                flags=(DescriptorFlag.DEAD_REMOVABLE,),
-            )
-            for shape_name, encoding_id, schedule_class in (
-                ("i8x16", _OP_I8X16_EQ, _SCHEDULE_SIMD_I32X4),
-                ("i16x8", _OP_I16X8_EQ, _SCHEDULE_SIMD_I32X4),
-                ("i32x4", _OP_I32X4_EQ, _SCHEDULE_SIMD_I32X4),
-                ("i64x2", _OP_I64X2_EQ, _SCHEDULE_SIMD_I64X2),
-            )
-        ),
-        Descriptor(
-            key="wasm.i64x2.lt_s",
-            mnemonic="i64x2.lt_s",
-            semantic_tag="vector.cmp.slt.i64x2",
-            encoding_id=_OP_I64X2_LT_S,
-            operands=(_v128_result(), _v128_operand("lhs"), _v128_operand("rhs")),
-            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
-            schedule_class=_SCHEDULE_SIMD_I64X2,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        Descriptor(
-            key="wasm.i32x4.ne",
-            mnemonic="i32x4.ne",
-            semantic_tag="vector.cmp.ne.i32x4",
-            encoding_id=_OP_I32X4_NE,
-            operands=(_v128_result(), _v128_operand("lhs"), _v128_operand("rhs")),
-            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
-            schedule_class=_SCHEDULE_SIMD_I32X4,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        Descriptor(
-            key="wasm.i32x4.lt_s",
-            mnemonic="i32x4.lt_s",
-            semantic_tag="vector.cmp.slt.i32x4",
-            encoding_id=_OP_I32X4_LT_S,
-            operands=(_v128_result(), _v128_operand("lhs"), _v128_operand("rhs")),
-            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
-            schedule_class=_SCHEDULE_SIMD_I32X4,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        Descriptor(
-            key="wasm.i32x4.lt_u",
-            mnemonic="i32x4.lt_u",
-            semantic_tag="vector.cmp.ult.i32x4",
-            encoding_id=_OP_I32X4_LT_U,
-            operands=(_v128_result(), _v128_operand("lhs"), _v128_operand("rhs")),
-            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
-            schedule_class=_SCHEDULE_SIMD_I32X4,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        Descriptor(
-            key="wasm.i32x4.gt_s",
-            mnemonic="i32x4.gt_s",
-            semantic_tag="vector.cmp.sgt.i32x4",
-            encoding_id=_OP_I32X4_GT_S,
-            operands=(_v128_result(), _v128_operand("lhs"), _v128_operand("rhs")),
-            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
-            schedule_class=_SCHEDULE_SIMD_I32X4,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        Descriptor(
-            key="wasm.i32x4.gt_u",
-            mnemonic="i32x4.gt_u",
-            semantic_tag="vector.cmp.ugt.i32x4",
-            encoding_id=_OP_I32X4_GT_U,
-            operands=(_v128_result(), _v128_operand("lhs"), _v128_operand("rhs")),
-            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
-            schedule_class=_SCHEDULE_SIMD_I32X4,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        Descriptor(
-            key="wasm.i32x4.le_s",
-            mnemonic="i32x4.le_s",
-            semantic_tag="vector.cmp.sle.i32x4",
-            encoding_id=_OP_I32X4_LE_S,
-            operands=(_v128_result(), _v128_operand("lhs"), _v128_operand("rhs")),
-            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
-            schedule_class=_SCHEDULE_SIMD_I32X4,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        Descriptor(
-            key="wasm.i32x4.le_u",
-            mnemonic="i32x4.le_u",
-            semantic_tag="vector.cmp.ule.i32x4",
-            encoding_id=_OP_I32X4_LE_U,
-            operands=(_v128_result(), _v128_operand("lhs"), _v128_operand("rhs")),
-            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
-            schedule_class=_SCHEDULE_SIMD_I32X4,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        Descriptor(
-            key="wasm.i32x4.ge_s",
-            mnemonic="i32x4.ge_s",
-            semantic_tag="vector.cmp.sge.i32x4",
-            encoding_id=_OP_I32X4_GE_S,
-            operands=(_v128_result(), _v128_operand("lhs"), _v128_operand("rhs")),
-            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
-            schedule_class=_SCHEDULE_SIMD_I32X4,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        Descriptor(
-            key="wasm.i32x4.ge_u",
-            mnemonic="i32x4.ge_u",
-            semantic_tag="vector.cmp.uge.i32x4",
-            encoding_id=_OP_I32X4_GE_U,
-            operands=(_v128_result(), _v128_operand("lhs"), _v128_operand("rhs")),
-            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
-            schedule_class=_SCHEDULE_SIMD_I32X4,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+            _simd_compare_descriptor(instruction)
+            for instruction in WASM_SIMD_COMPARE_INSTRUCTIONS
         ),
         *(
             _integer_simd_arithmetic_descriptor(instruction)
@@ -1483,13 +1460,17 @@ WASM_CORE_SIMD128_DESCRIPTOR_SET = DescriptorSet(
                 ("div", "div", _OP_F32X4_DIV),
                 ("min", "minimum", _OP_F32X4_MIN),
                 ("max", "maximum", _OP_F32X4_MAX),
-                ("eq", "cmp.oeq", _OP_F32X4_EQ),
-                ("ne", "cmp.une", _OP_F32X4_NE),
-                ("lt", "cmp.olt", _OP_F32X4_LT),
-                ("gt", "cmp.ogt", _OP_F32X4_GT),
-                ("le", "cmp.ole", _OP_F32X4_LE),
-                ("ge", "cmp.oge", _OP_F32X4_GE),
             )
+        ),
+        Descriptor(
+            key="wasm.v128.not",
+            mnemonic="v128.not",
+            semantic_tag="vector.not.v128",
+            encoding_id=_OP_V128_NOT,
+            operands=(_v128_result(), _v128_operand("input")),
+            asm_forms=_asm(results=("dst",), operands=("input",)),
+            schedule_class=_SCHEDULE_SIMD_I32X4,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),
         *(
             Descriptor(

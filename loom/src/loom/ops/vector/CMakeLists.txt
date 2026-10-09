@@ -9,14 +9,16 @@
 
 iree_add_all_subdirs()
 
-loom_generated_file(
+loom_generated_file_family(
   NAME
     scalarization_rows_gen
   GENERATOR
     loom::py::loom::gen::ops::c_vector_scalarization
-  OUTPUT
+  OUTPUTS
+    "cast_legalizer_rows.inl"
     "scalarization_rows.inl"
-  OUTPUT_FLAG
+  OUTPUT_FLAGS
+    "--cast-legalizer-rows"
     "--rows"
 )
 
@@ -40,6 +42,7 @@ loom_generated_cc_library(
     "type_transfer.c"
     "verify.c"
   TEXTUAL_HDRS
+    "cast_legalizer_rows.inl"
     "ops.inc"
     "scalarization_rows.inl"
   GENERATED_SRC_FLAGS

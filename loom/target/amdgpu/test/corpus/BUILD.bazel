@@ -139,7 +139,6 @@ loom_corpus_build(
             "numeric/conversion/float8_facts.loom:@float8_facts": "TARGET/034",
             "numeric/conversion/integer_floating.loom:@loop_carried_floating_conversions": "TARGET/003",
             "numeric/vector/conversion.loom:@pack_nibbles": "AMDGPU/023,TARGET/003",
-            "numeric/vector/conversion.loom:@truncate_halfwords": "AMDGPU/023,TARGET/003",
         },
         "//loom/target/amdgpu:without_bf16_fma": {
             "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16": "TARGET/003",
@@ -205,7 +204,6 @@ loom_scenario_test(
             "numeric/vector/address_conversion.loom:@vector_address_conversion_values": "TARGET/001",
             "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16_values": "TARGET/003",
             "numeric/vector/constants.loom:@vector_predicate_constant_values": "TARGET/001",
-            "numeric/vector/conversion.loom:@halfword_truncation_values": "AMDGPU/023,TARGET/003",
             "numeric/vector/conversion.loom:@packed_nibble_values": "AMDGPU/023,TARGET/003",
             "numeric/vector/float_extrema.loom:@vector_float_extrema_bf16_values": "TARGET/003",
             "numeric/vector/float_extrema.loom:@vector_float_extrema_f16_values": "TARGET/003",

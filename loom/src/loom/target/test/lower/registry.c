@@ -189,25 +189,31 @@ iree_status_t loom_test_low_lower_map_contract_value(
   if (loom_test_low_is_i32(source_type) || loom_test_low_is_i1(source_type) ||
       loom_test_low_is_index_like(source_type)) {
     *out_mapped_value = loom_low_lower_rule_mapped_value_register(
-        TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 1);
+        TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, LOOM_LOW_REPRESENTATION_ID_NONE,
+        1);
   } else if (loom_test_low_is_i8(source_type)) {
     *out_mapped_value = loom_low_lower_rule_mapped_value_register(
-        TEST_LOW_CORE_REG_CLASS_ID_TEST_I8, 1);
+        TEST_LOW_CORE_REG_CLASS_ID_TEST_I8, LOOM_LOW_REPRESENTATION_ID_NONE, 1);
   } else if (loom_test_low_is_f32(source_type)) {
     *out_mapped_value = loom_low_lower_rule_mapped_value_register(
-        TEST_LOW_CORE_REG_CLASS_ID_TEST_F32, 1);
+        TEST_LOW_CORE_REG_CLASS_ID_TEST_F32, LOOM_LOW_REPRESENTATION_ID_NONE,
+        1);
   } else if (loom_test_low_is_vector_4xi32(source_type)) {
     *out_mapped_value = loom_low_lower_rule_mapped_value_register(
-        TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 4);
+        TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, LOOM_LOW_REPRESENTATION_ID_NONE,
+        4);
   } else if (loom_test_low_is_vector_4xf32(source_type)) {
     *out_mapped_value = loom_low_lower_rule_mapped_value_register(
-        TEST_LOW_CORE_REG_CLASS_ID_TEST_F32, 4);
+        TEST_LOW_CORE_REG_CLASS_ID_TEST_F32, LOOM_LOW_REPRESENTATION_ID_NONE,
+        4);
   } else if (loom_test_low_is_vector_4xi1(source_type)) {
     *out_mapped_value = loom_low_lower_rule_mapped_value_register(
-        TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 4);
+        TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, LOOM_LOW_REPRESENTATION_ID_NONE,
+        4);
   } else if (loom_test_low_is_vector_16xi8(source_type)) {
     *out_mapped_value = loom_low_lower_rule_mapped_value_register(
-        TEST_LOW_CORE_REG_CLASS_ID_TEST_I8, 16);
+        TEST_LOW_CORE_REG_CLASS_ID_TEST_I8, LOOM_LOW_REPRESENTATION_ID_NONE,
+        16);
   }
   return iree_ok_status();
 }

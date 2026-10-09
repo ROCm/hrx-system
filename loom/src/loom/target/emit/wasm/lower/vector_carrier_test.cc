@@ -26,7 +26,7 @@ loom_type_t Vector2D(loom_scalar_type_t element_type, int64_t row_count,
                              /*encoding_id=*/0);
 }
 
-TEST(VectorCarrierTest, MapsCompleteScalarFamily) {
+TEST(VectorCarrierTest, MapsNumericAndAddressScalarFamily) {
   struct Case {
     loom_scalar_type_t element_type;
     uint8_t element_bit_count;
@@ -34,12 +34,11 @@ TEST(VectorCarrierTest, MapsCompleteScalarFamily) {
   };
   static constexpr Case kCases[] = {
       {LOOM_SCALAR_TYPE_INDEX, 32, 4},  {LOOM_SCALAR_TYPE_OFFSET, 32, 4},
-      {LOOM_SCALAR_TYPE_I1, 32, 4},     {LOOM_SCALAR_TYPE_I8, 8, 16},
-      {LOOM_SCALAR_TYPE_I16, 16, 8},    {LOOM_SCALAR_TYPE_I32, 32, 4},
-      {LOOM_SCALAR_TYPE_I64, 64, 2},    {LOOM_SCALAR_TYPE_F8E4M3, 8, 16},
-      {LOOM_SCALAR_TYPE_F8E5M2, 8, 16}, {LOOM_SCALAR_TYPE_F16, 16, 8},
-      {LOOM_SCALAR_TYPE_BF16, 16, 8},   {LOOM_SCALAR_TYPE_F32, 32, 4},
-      {LOOM_SCALAR_TYPE_F64, 64, 2},
+      {LOOM_SCALAR_TYPE_I8, 8, 16},     {LOOM_SCALAR_TYPE_I16, 16, 8},
+      {LOOM_SCALAR_TYPE_I32, 32, 4},    {LOOM_SCALAR_TYPE_I64, 64, 2},
+      {LOOM_SCALAR_TYPE_F8E4M3, 8, 16}, {LOOM_SCALAR_TYPE_F8E5M2, 8, 16},
+      {LOOM_SCALAR_TYPE_F16, 16, 8},    {LOOM_SCALAR_TYPE_BF16, 16, 8},
+      {LOOM_SCALAR_TYPE_F32, 32, 4},    {LOOM_SCALAR_TYPE_F64, 64, 2},
   };
   for (const Case& test_case : kCases) {
     SCOPED_TRACE(loom_scalar_type_name(test_case.element_type));
@@ -100,12 +99,20 @@ TEST(VectorCarrierTest, KeepsCallableAbiAtExactV128) {
   EXPECT_TRUE(
       loom_wasm_vector_type_is_callable(Vector1D(LOOM_SCALAR_TYPE_I1, 4)));
   EXPECT_TRUE(
+      loom_wasm_vector_type_is_callable(Vector1D(LOOM_SCALAR_TYPE_I1, 2)));
+  EXPECT_TRUE(
+      loom_wasm_vector_type_is_callable(Vector1D(LOOM_SCALAR_TYPE_I1, 8)));
+  EXPECT_TRUE(
+      loom_wasm_vector_type_is_callable(Vector1D(LOOM_SCALAR_TYPE_I1, 16)));
+  EXPECT_TRUE(
       loom_wasm_vector_type_is_callable(Vector1D(LOOM_SCALAR_TYPE_F64, 2)));
 
   EXPECT_FALSE(
       loom_wasm_vector_type_is_callable(Vector1D(LOOM_SCALAR_TYPE_INDEX, 4)));
   EXPECT_FALSE(
       loom_wasm_vector_type_is_callable(Vector1D(LOOM_SCALAR_TYPE_I8, 8)));
+  EXPECT_FALSE(
+      loom_wasm_vector_type_is_callable(Vector1D(LOOM_SCALAR_TYPE_I1, 3)));
   EXPECT_FALSE(
       loom_wasm_vector_type_is_callable(Vector2D(LOOM_SCALAR_TYPE_I8, 4, 4)));
 }

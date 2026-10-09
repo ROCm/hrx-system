@@ -982,7 +982,14 @@ def test_vector_packed_float_conversion_rules_publish_contract_only_shape_rows()
 
 def test_vector_integer_conversion_contracts_preserve_storage_and_lane_counts() -> None:
     compiled = _compiled_arithmetic_rules()
-    widening = {("i8", "i16"), ("i8", "i32"), ("i16", "i32")}
+    widening = {
+        ("i8", "i16"),
+        ("i8", "i32"),
+        ("i8", "i64"),
+        ("i16", "i32"),
+        ("i16", "i64"),
+        ("i32", "i64"),
+    }
     narrowing = {
         ("i16", "i8"),
         ("i32", "i8"),

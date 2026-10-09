@@ -10,7 +10,13 @@ from loom.dialect.scf import defs as scf
 from loom.dialect.vector import defs as vector
 from loom.ir import ScalarType
 from loom.scalar_type import ScalarTypeKind, scalar_type_name
-from loom.target.contracts import DescriptorRule, GuardKind, ValueAliasRule, ValueRef
+from loom.target.contracts import (
+    DescriptorRule,
+    GuardKind,
+    UnsupportedRule,
+    ValueAliasRule,
+    ValueRef,
+)
 from loom.target.emit.wasm.contracts import WASM_CORE_SIMD128_CONTRACT_FRAGMENT
 
 _FLOAT_KINDS = frozenset(
@@ -405,18 +411,15 @@ def test_dynamic_insert_masks_select_exactly_one_complete_physical_lane() -> Non
             for guard in rule.guards
             if guard.kind is GuardKind.VALUE_TYPE and guard.field == "result"
         )
+        if result_type.elements == ("i1",):
+            # Predicate representations have their own exhaustive family test.
+            continue
         if result_type.lanes is not None:
             physical_lane_count = result_type.lanes
         else:
             element_bit_count = int(result_type.elements[0][1:])
             physical_lane_count = 128 // element_bit_count
         lane_counts.add(physical_lane_count)
-        if result_type.elements == ("i1",):
-            assert [emit.descriptor.key for emit in rule.emit[:2]] == [
-                "wasm.i32.const",
-                "wasm.i32.sub",
-            ]
-            assert len(rule.emit) == 7
         constant, index, compare, splat, select = rule.emit[-5:]
         assert constant.descriptor.key == "wasm.v128.const"
         assert index.descriptor.key == "wasm.i8x16.splat"
@@ -472,6 +475,14 @@ def test_partial_integer_bitcasts_alias_every_element_type_pair() -> None:
         )
     }
     assert actual == {(source, result) for source in shapes for result in shapes}
+
+
+def test_vector_cast_family_explicitly_rejects_every_unmatched_native_case() -> None:
+    assert {
+        rule.source_op
+        for rule in WASM_CORE_SIMD128_CONTRACT_FRAGMENT.cases
+        if isinstance(rule, UnsupportedRule)
+    } == set(vector.VECTOR_CAST_OPS)
 
 
 def test_narrow_scalar_selection_uses_integer_payloads() -> None:

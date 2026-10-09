@@ -121,6 +121,7 @@ from loom.target.contracts.rules import (
     RecipeRule,
     SourceNode,
     SourceNodeRelation,
+    UnsupportedRule,
     ValueAliasRule,
     ValueElideRule,
 )
@@ -245,6 +246,7 @@ __all__ = [
     "SourceNodeRelation",
     "TypePattern",
     "UnsignedDivisorMagicKind",
+    "UnsupportedRule",
     "ValueAliasRule",
     "ValueElideRule",
     "ValueMaterializer",

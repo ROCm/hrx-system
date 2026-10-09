@@ -811,6 +811,92 @@ TEST_F(LowLowerRuleMatchTest, ContractQueriesMaySelectContractOnlyRules) {
   EXPECT_EQ(selection.rule, &rules[0]);
 }
 
+TEST_F(LowLowerRuleMatchTest, MatchesSelectedLowValueRepresentation) {
+  loom_low_lower_guard_t guard = {};
+  guard.kind = LOOM_LOW_LOWER_GUARD_LOW_VALUE_REPRESENTATION;
+  guard.diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
+  guard.payload_ordinal = 1;
+  const loom_low_lower_guard_payload_t guard_payload = {
+      /*.u64=*/17,
+  };
+  const loom_low_lower_guard_ref_t guard_ref = 0;
+  loom_low_lower_value_ref_t value_ref = {};
+  value_ref.kind = LOOM_LOW_LOWER_VALUE_REF_RESULT;
+  loom_low_lower_rule_t rule = {};
+  rule.guard_count = 1;
+  const loom_low_lower_rule_span_t span = {
+      /*.source_op_kind=*/LOOM_OP_INDEX_CONSTANT,
+      /*.rule_start=*/0,
+      /*.rule_count=*/1,
+  };
+  loom_low_lower_rule_set_t rule_set = {};
+  rule_set.spans = &span;
+  rule_set.span_count = 1;
+  rule_set.rules = &rule;
+  rule_set.rule_count = 1;
+  rule_set.guard_payloads = &guard_payload;
+  rule_set.guard_payload_count = 1;
+  rule_set.guards = &guard;
+  rule_set.guard_count = 1;
+  rule_set.guard_refs = &guard_ref;
+  rule_set.guard_ref_count = 1;
+  rule_set.value_refs = &value_ref;
+  rule_set.value_ref_count = 1;
+  const loom_op_t* source_op = BuildConstant(5);
+
+  struct MappedValue {
+    loom_low_representation_id_t representation;
+    bool is_register;
+  } mapped_value = {
+      /*.representation=*/17,
+      /*.is_register=*/true,
+  };
+  loom_low_lower_rule_match_context_t match_context = {};
+  match_context.module = module_;
+  match_context.map_value = {
+      /*.fn=*/[](void* user_data, const loom_low_lower_rule_match_context_t*,
+                 const loom_op_t*, loom_value_id_t,
+                 loom_low_lower_rule_mapped_value_t* out_mapped_value)
+                  -> iree_status_t {
+        const auto& mapped_value = *static_cast<MappedValue*>(user_data);
+        if (!mapped_value.is_register) {
+          *out_mapped_value = loom_low_lower_rule_mapped_value_none();
+          return iree_ok_status();
+        }
+        *out_mapped_value = loom_low_lower_rule_mapped_value_register(
+            /*descriptor_register_class_id=*/0, mapped_value.representation,
+            /*register_unit_count=*/1);
+        return iree_ok_status();
+      },
+      /*.user_data=*/&mapped_value,
+  };
+  loom_low_lower_rule_selection_t selection = {};
+
+  IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+      &match_context, &rule_set, source_op, &selection));
+  EXPECT_EQ(selection.rule, &rule);
+
+  mapped_value.representation = 18;
+  IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+      &match_context, &rule_set, source_op, &selection));
+  EXPECT_EQ(selection.rule, nullptr);
+
+  mapped_value.representation = LOOM_LOW_REPRESENTATION_ID_NONE;
+  IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+      &match_context, &rule_set, source_op, &selection));
+  EXPECT_EQ(selection.rule, nullptr);
+
+  match_context.flags = LOOM_LOW_LOWER_RULE_MATCH_FLAG_CONTRACT_ONLY;
+  IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+      &match_context, &rule_set, source_op, &selection));
+  EXPECT_EQ(selection.rule, &rule);
+
+  mapped_value.is_register = false;
+  IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+      &match_context, &rule_set, source_op, &selection));
+  EXPECT_EQ(selection.rule, nullptr);
+}
+
 TEST_F(LowLowerRuleMatchTest, SelectsAdjacentUniqueUserSourceNode) {
   const loom_value_id_t lhs =
       loom_scalar_constant_result(BuildScalarConstant(2));

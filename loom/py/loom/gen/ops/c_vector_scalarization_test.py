@@ -7,6 +7,7 @@
 """Family-completeness tests for vector scalarization metadata."""
 
 from loom.dialect.vector import ALL_VECTOR_OPS
+from loom.dialect.vector.defs import VECTOR_CAST_OPS
 from loom.gen.ops.c_traits import (
     _is_shape_preserving_elementwise_vector_decomposable,
 )
@@ -27,3 +28,10 @@ def test_vector_index_cast_uses_index_dialect_scalar_semantics() -> None:
     rows = {row.vector_op.name: row for row in collect_vector_scalarization_rows()}
 
     assert rows["vector.index_cast"].scalar_op.name == "index.cast"
+
+
+def test_vector_casts_have_reference_lane_programs() -> None:
+    generated_scalarizations = {row.vector_op.name for row in collect_vector_scalarization_rows()}
+    cast_ops = {op.name for op in VECTOR_CAST_OPS}
+
+    assert cast_ops - generated_scalarizations == {"vector.bitcast"}

@@ -627,7 +627,8 @@ static void loom_amdgpu_map_contract_register(
   IREE_ASSERT_LT(descriptor_register_class_id,
                  environment->descriptor_set->reg_class_count);
   *out_mapped_value = loom_low_lower_rule_mapped_value_register(
-      descriptor_register_class_id, register_unit_count);
+      descriptor_register_class_id, LOOM_LOW_REPRESENTATION_ID_NONE,
+      register_unit_count);
 }
 
 iree_status_t loom_amdgpu_map_contract_value(

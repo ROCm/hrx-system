@@ -72,6 +72,7 @@ class GuardKind(Enum):
     DESCRIPTOR_AVAILABLE = "descriptor_available"
     VALUE_MATERIALIZABLE = "value_materializable"
     LOW_VALUE_REGISTER_CLASS = "low_value_register_class"
+    LOW_VALUE_REPRESENTATION = "low_value_representation"
     LOW_VALUE_REGISTER_UNIT_COUNT = "low_value_register_unit_count"
     VALUE_STATIC_DIM0_MULTIPLE = "value_static_dim0_multiple"
     LOW_VALUE_REGISTER_UNIT_COUNT_EQ = "low_value_register_unit_count_eq"
@@ -110,6 +111,7 @@ class GuardKind(Enum):
 
 _LOW_VALUE_GUARD_KINDS = (
     GuardKind.LOW_VALUE_REGISTER_CLASS,
+    GuardKind.LOW_VALUE_REPRESENTATION,
     GuardKind.LOW_VALUE_REGISTER_UNIT_COUNT,
     GuardKind.VALUE_STATIC_DIM0_MULTIPLE,
     GuardKind.LOW_VALUE_REGISTER_UNIT_COUNT_EQ,
@@ -393,6 +395,21 @@ class Guard:
             kind=GuardKind.LOW_VALUE_REGISTER_CLASS,
             field=field,
             register_class=register_class,
+            diagnostic=diagnostic,
+        )
+
+    @classmethod
+    def low_value_representation(
+        cls,
+        field: str,
+        representation: int,
+        *,
+        diagnostic: GuardDiagnostic | None = None,
+    ) -> Self:
+        return cls(
+            kind=GuardKind.LOW_VALUE_REPRESENTATION,
+            field=field,
+            count=representation,
             diagnostic=diagnostic,
         )
 
@@ -1161,6 +1178,12 @@ def _validate_low_value_guard(
     if guard.kind == GuardKind.LOW_VALUE_REGISTER_CLASS:
         if guard.register_class is None:
             raise ValueError(f"{source_op.name}: {subject} needs a register class")
+        return
+    if guard.kind == GuardKind.LOW_VALUE_REPRESENTATION:
+        if guard.count is None or guard.count < 0 or guard.count >= 0xFFFF:
+            raise ValueError(
+                f"{source_op.name}: {subject} needs a representation in [0, 65534]"
+            )
         return
     if guard.kind == GuardKind.LOW_VALUE_REGISTER_UNIT_COUNT:
         if guard.count is None or guard.count <= 0:

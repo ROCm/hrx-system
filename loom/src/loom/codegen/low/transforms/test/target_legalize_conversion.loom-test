@@ -36,18 +36,6 @@ func.def target(@test_target) @toward_zero(%half: f16, %bfloat: bf16) -> (i8, i1
   func.return %signed_half, %unsigned_half, %signed_bfloat, %unsigned_bfloat : i8, i16, i32, i64
 }
 
-func.def target(@test_target) @vector_shape(%input: vector<2x3xi16>) -> (vector<2x3xbf16>, vector<2x3xf16>) {
-  %bfloat = vector.sitofp %input : vector<2x3xi16> to vector<2x3xbf16>
-  %half = vector.uitofp %input : vector<2x3xi16> to vector<2x3xf16>
-  func.return %bfloat, %half : vector<2x3xbf16>, vector<2x3xf16>
-}
-
-func.def target(@test_target) @vector_toward_zero(%half: vector<3xf16>, %bfloat: vector<3xbf16>) -> (vector<3xi32>, vector<3xi16>) {
-  %signed = vector.fptosi %half : vector<3xf16> to vector<3xi32>
-  %unsigned = vector.fptoui %bfloat : vector<3xbf16> to vector<3xi16>
-  func.return %signed, %unsigned : vector<3xi32>, vector<3xi16>
-}
-
 func.def target(@test_target) @single_precision_unchanged(%integer: i32, %single: f32) -> (f32, f32, i32, i32) {
   %signed_float = scalar.sitofp %integer : i32 to f32
   %unsigned_float = scalar.uitofp %integer : i32 to f32
@@ -56,46 +44,30 @@ func.def target(@test_target) @single_precision_unchanged(%integer: i32, %single
   func.return %signed_float, %unsigned_float, %signed_integer, %unsigned_integer : f32, f32, i32, i32
 }
 
-func.def target(@test_target) @fp8_scalars(%byte: i8, %word: i32, %e4m3: f8E4M3, %e5m2: f8E5M2) -> (f8E4M3, f8E5M2, i8, i64) {
-  %saturated = scalar.sitofp %byte : i8 to f8E4M3
-  %rounded = scalar.uitofp %word : i32 to f8E5M2
-  %signed = scalar.fptosi %e4m3 : f8E4M3 to i8
-  %unsigned = scalar.fptoui %e5m2 : f8E5M2 to i64
-  func.return %saturated, %rounded, %signed, %unsigned : f8E4M3, f8E5M2, i8, i64
-}
-
-func.def target(@test_target) @fp8_vectors(%words: vector<3xi16>, %bytes: vector<4xi8>, %e4m3: vector<3xf8E4M3>, %e5m2: vector<4xf8E5M2>) -> (vector<3xf8E4M3>, vector<4xf8E5M2>, vector<3xi32>, vector<4xi16>) {
-  %saturated = vector.uitofp %words : vector<3xi16> to vector<3xf8E4M3>
-  %rounded = vector.sitofp %bytes : vector<4xi8> to vector<4xf8E5M2>
-  %signed = vector.fptosi %e4m3 : vector<3xf8E4M3> to vector<3xi32>
-  %unsigned = vector.fptoui %e5m2 : vector<4xf8E5M2> to vector<4xi16>
-  func.return %saturated, %rounded, %signed, %unsigned : vector<3xf8E4M3>, vector<4xf8E5M2>, vector<3xi32>, vector<4xi16>
-}
-
 // ----
 test.target<low_core> @test_target
 
 func.def target(@test_target) @signed_narrow_integer(%byte: i8, %word: i16) -> (bf16, f16) {
-  %84 = scalar.sitofp %byte : i8 to f32
-  %bfloat = scalar.fptrunc %84 : f32 to bf16
-  %82 = scalar.sitofp %word : i16 to f32
-  %half = scalar.fptrunc %82 : f32 to f16
+  %49 = scalar.sitofp %byte : i8 to f32
+  %bfloat = scalar.fptrunc %49 : f32 to bf16
+  %47 = scalar.sitofp %word : i16 to f32
+  %half = scalar.fptrunc %47 : f32 to f16
   func.return %bfloat, %half : bf16, f16
 }
 
 func.def target(@test_target) @unsigned_narrow_integer(%byte: i8, %word: i16) -> (f16, bf16) {
-  %88 = scalar.uitofp %byte : i8 to f32
-  %half = scalar.fptrunc %88 : f32 to f16
-  %86 = scalar.uitofp %word : i16 to f32
-  %bfloat = scalar.fptrunc %86 : f32 to bf16
+  %53 = scalar.uitofp %byte : i8 to f32
+  %half = scalar.fptrunc %53 : f32 to f16
+  %51 = scalar.uitofp %word : i16 to f32
+  %bfloat = scalar.fptrunc %51 : f32 to bf16
   func.return %half, %bfloat : f16, bf16
 }
 
 func.def target(@test_target) @wide_integer_half(%word: i32) -> (f16, f16) {
-  %92 = scalar.sitofp %word : i32 to f32
-  %signed = scalar.fptrunc %92 : f32 to f16
-  %90 = scalar.uitofp %word : i32 to f32
-  %unsigned = scalar.fptrunc %90 : f32 to f16
+  %57 = scalar.sitofp %word : i32 to f32
+  %signed = scalar.fptrunc %57 : f32 to f16
+  %55 = scalar.uitofp %word : i32 to f32
+  %unsigned = scalar.fptrunc %55 : f32 to f16
   func.return %signed, %unsigned : f16, f16
 }
 
@@ -108,31 +80,15 @@ func.def target(@test_target) @single_rounding_required(%word: i32, %wide: i64) 
 }
 
 func.def target(@test_target) @toward_zero(%half: f16, %bfloat: bf16) -> (i8, i16, i32, i64) {
-  %100 = scalar.extf %half : f16 to f32
-  %signed_half = scalar.fptosi %100 : f32 to i8
-  %98 = scalar.extf %half : f16 to f32
-  %unsigned_half = scalar.fptoui %98 : f32 to i16
-  %96 = scalar.extf %bfloat : bf16 to f32
-  %signed_bfloat = scalar.fptosi %96 : f32 to i32
-  %94 = scalar.extf %bfloat : bf16 to f32
-  %unsigned_bfloat = scalar.fptoui %94 : f32 to i64
+  %65 = scalar.extf %half : f16 to f32
+  %signed_half = scalar.fptosi %65 : f32 to i8
+  %63 = scalar.extf %half : f16 to f32
+  %unsigned_half = scalar.fptoui %63 : f32 to i16
+  %61 = scalar.extf %bfloat : bf16 to f32
+  %signed_bfloat = scalar.fptosi %61 : f32 to i32
+  %59 = scalar.extf %bfloat : bf16 to f32
+  %unsigned_bfloat = scalar.fptoui %59 : f32 to i64
   func.return %signed_half, %unsigned_half, %signed_bfloat, %unsigned_bfloat : i8, i16, i32, i64
-}
-
-func.def target(@test_target) @vector_shape(%input: vector<2x3xi16>) -> (vector<2x3xbf16>, vector<2x3xf16>) {
-  %104 = vector.sitofp %input : vector<2x3xi16> to vector<2x3xf32>
-  %bfloat = vector.fptrunc %104 : vector<2x3xf32> to vector<2x3xbf16>
-  %102 = vector.uitofp %input : vector<2x3xi16> to vector<2x3xf32>
-  %half = vector.fptrunc %102 : vector<2x3xf32> to vector<2x3xf16>
-  func.return %bfloat, %half : vector<2x3xbf16>, vector<2x3xf16>
-}
-
-func.def target(@test_target) @vector_toward_zero(%half: vector<3xf16>, %bfloat: vector<3xbf16>) -> (vector<3xi32>, vector<3xi16>) {
-  %108 = vector.extf %half : vector<3xf16> to vector<3xf32>
-  %signed = vector.fptosi %108 : vector<3xf32> to vector<3xi32>
-  %106 = vector.extf %bfloat : vector<3xbf16> to vector<3xf32>
-  %unsigned = vector.fptoui %106 : vector<3xf32> to vector<3xi16>
-  func.return %signed, %unsigned : vector<3xi32>, vector<3xi16>
 }
 
 func.def target(@test_target) @single_precision_unchanged(%integer: i32, %single: f32) -> (f32, f32, i32, i32) {
@@ -143,139 +99,197 @@ func.def target(@test_target) @single_precision_unchanged(%integer: i32, %single
   func.return %signed_float, %unsigned_float, %signed_integer, %unsigned_integer : f32, f32, i32, i32
 }
 
-func.def target(@test_target) @fp8_scalars(%byte: i8, %word: i32, %e4m3: f8E4M3, %e5m2: f8E5M2) -> (f8E4M3, f8E5M2, i8, i64) {
-  %229 = scalar.sitofp %byte : i8 to f32
-  %saturated = scalar.fptrunc %229 : f32 to f8E4M3
-  %227 = scalar.uitofp %word : i32 to f32
-  %rounded = scalar.fptrunc %227 : f32 to f8E5M2
-  %168 = scalar.bitcast %e4m3 : f8E4M3 to i8
-  %169 = scalar.extui %168 : i8 to i32
-  %170 = scalar.constant 128 : i32
-  %171 = scalar.andi %169, %170 : i32
-  %172 = scalar.constant 24 : i32
-  %173 = scalar.shli %171, %172 : i32
-  %174 = scalar.constant 120 : i32
-  %175 = scalar.andi %169, %174 : i32
-  %176 = scalar.constant 3 : i32
-  %177 = scalar.shrui %175, %176 : i32
-  %178 = scalar.constant 7 : i32
-  %179 = scalar.andi %169, %178 : i32
-  %180 = scalar.constant 120 : i32
-  %181 = scalar.addi %177, %180 : i32
-  %182 = scalar.constant 23 : i32
-  %183 = scalar.shli %181, %182 : i32
-  %184 = scalar.constant 20 : i32
-  %185 = scalar.shli %179, %184 : i32
-  %186 = scalar.ori %173, %183 : i32
-  %187 = scalar.ori %186, %185 : i32
-  %188 = scalar.constant 0 : i32
-  %189 = scalar.constant 2 : i32
-  %190 = scalar.andi %179, %189 : i32
-  %191 = scalar.constant 0 : i32
-  %192 = scalar.cmpi ne, %190, %191 : i32
-  %193 = scalar.constant 1 : i32
-  %194 = scf.select %192, %193, %188 : i32
-  %195 = scalar.constant 4 : i32
-  %196 = scalar.andi %179, %195 : i32
-  %197 = scalar.constant 0 : i32
-  %198 = scalar.cmpi ne, %196, %197 : i32
-  %199 = scalar.constant 2 : i32
-  %200 = scf.select %198, %199, %194 : i32
-  %201 = scalar.constant 118 : i32
-  %202 = scalar.addi %200, %201 : i32
-  %203 = scalar.constant 23 : i32
-  %204 = scalar.shli %202, %203 : i32
-  %205 = scalar.constant 23 : i32
-  %206 = scalar.subi %205, %200 : i32
-  %207 = scalar.shli %179, %206 : i32
-  %208 = scalar.constant 8388607 : i32
-  %209 = scalar.andi %207, %208 : i32
-  %210 = scalar.ori %173, %204 : i32
-  %211 = scalar.ori %210, %209 : i32
-  %212 = scalar.constant 0 : i32
-  %213 = scalar.cmpi eq, %179, %212 : i32
-  %214 = scf.select %213, %173, %211 : i32
-  %215 = scalar.constant 0 : i32
-  %216 = scalar.cmpi eq, %177, %215 : i32
-  %217 = scf.select %216, %214, %187 : i32
-  %218 = scalar.constant 15 : i32
-  %219 = scalar.cmpi eq, %177, %218 : i32
-  %220 = scalar.constant 2143289344 : i32
-  %221 = scalar.constant 7 : i32
-  %222 = scalar.cmpi eq, %179, %221 : i32
-  %223 = scalar.constant 0 : i1
-  %224 = scf.select %219, %222, %223 : i1
-  %225 = scf.select %224, %220, %217 : i32
-  %226 = scalar.bitcast %225 : i32 to f32
-  %signed = scalar.fptosi %226 : f32 to i8
-  %112 = scalar.bitcast %e5m2 : f8E5M2 to i8
-  %113 = scalar.extui %112 : i8 to i32
-  %114 = scalar.constant 128 : i32
-  %115 = scalar.andi %113, %114 : i32
-  %116 = scalar.constant 24 : i32
-  %117 = scalar.shli %115, %116 : i32
-  %118 = scalar.constant 124 : i32
-  %119 = scalar.andi %113, %118 : i32
-  %120 = scalar.constant 2 : i32
-  %121 = scalar.shrui %119, %120 : i32
-  %122 = scalar.constant 3 : i32
-  %123 = scalar.andi %113, %122 : i32
-  %124 = scalar.constant 112 : i32
-  %125 = scalar.addi %121, %124 : i32
-  %126 = scalar.constant 23 : i32
-  %127 = scalar.shli %125, %126 : i32
-  %128 = scalar.constant 21 : i32
-  %129 = scalar.shli %123, %128 : i32
-  %130 = scalar.ori %117, %127 : i32
-  %131 = scalar.ori %130, %129 : i32
-  %132 = scalar.constant 0 : i32
-  %133 = scalar.constant 2 : i32
-  %134 = scalar.andi %123, %133 : i32
-  %135 = scalar.constant 0 : i32
-  %136 = scalar.cmpi ne, %134, %135 : i32
-  %137 = scalar.constant 1 : i32
-  %138 = scf.select %136, %137, %132 : i32
-  %139 = scalar.constant 111 : i32
-  %140 = scalar.addi %138, %139 : i32
-  %141 = scalar.constant 23 : i32
-  %142 = scalar.shli %140, %141 : i32
-  %143 = scalar.constant 23 : i32
-  %144 = scalar.subi %143, %138 : i32
-  %145 = scalar.shli %123, %144 : i32
-  %146 = scalar.constant 8388607 : i32
-  %147 = scalar.andi %145, %146 : i32
-  %148 = scalar.ori %117, %142 : i32
-  %149 = scalar.ori %148, %147 : i32
-  %150 = scalar.constant 0 : i32
-  %151 = scalar.cmpi eq, %123, %150 : i32
-  %152 = scf.select %151, %117, %149 : i32
-  %153 = scalar.constant 0 : i32
-  %154 = scalar.cmpi eq, %121, %153 : i32
-  %155 = scf.select %154, %152, %131 : i32
-  %156 = scalar.constant 31 : i32
-  %157 = scalar.cmpi eq, %121, %156 : i32
-  %158 = scalar.constant 2143289344 : i32
-  %159 = scalar.constant 2139095040 : i32
-  %160 = scalar.ori %117, %159 : i32
-  %161 = scalar.constant 0 : i32
-  %162 = scalar.cmpi eq, %123, %161 : i32
-  %163 = scf.select %162, %160, %158 : i32
-  %164 = scf.select %157, %163, %155 : i32
-  %165 = scalar.bitcast %164 : i32 to f32
-  %unsigned = scalar.fptoui %165 : f32 to i64
-  func.return %saturated, %rounded, %signed, %unsigned : f8E4M3, f8E5M2, i8, i64
+// ====
+
+// Keep the large FP8 reference expansions isolated so changes in one
+// conversion do not renumber the others.
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @integer_to_e4m3(%byte: i8) -> (f8E4M3) {
+  %result = scalar.sitofp %byte : i8 to f8E4M3
+  func.return %result : f8E4M3
 }
 
-func.def target(@test_target) @fp8_vectors(%words: vector<3xi16>, %bytes: vector<4xi8>, %e4m3: vector<3xf8E4M3>, %e5m2: vector<4xf8E5M2>) -> (vector<3xf8E4M3>, vector<4xf8E5M2>, vector<3xi32>, vector<4xi16>) {
-  %237 = vector.uitofp %words : vector<3xi16> to vector<3xf32>
-  %saturated = vector.fptrunc %237 : vector<3xf32> to vector<3xf8E4M3>
-  %235 = vector.sitofp %bytes : vector<4xi8> to vector<4xf32>
-  %rounded = vector.fptrunc %235 : vector<4xf32> to vector<4xf8E5M2>
-  %233 = vector.extf %e4m3 : vector<3xf8E4M3> to vector<3xf32>
-  %signed = vector.fptosi %233 : vector<3xf32> to vector<3xi32>
-  %231 = vector.extf %e5m2 : vector<4xf8E5M2> to vector<4xf32>
-  %unsigned = vector.fptoui %231 : vector<4xf32> to vector<4xi16>
-  func.return %saturated, %rounded, %signed, %unsigned : vector<3xf8E4M3>, vector<4xf8E5M2>, vector<3xi32>, vector<4xi16>
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @integer_to_e4m3(%byte: i8) -> (f8E4M3) {
+  %3 = scalar.sitofp %byte : i8 to f32
+  %result = scalar.fptrunc %3 : f32 to f8E4M3
+  func.return %result : f8E4M3
+}
+
+// ====
+
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @integer_to_e5m2(%word: i32) -> (f8E5M2) {
+  %result = scalar.uitofp %word : i32 to f8E5M2
+  func.return %result : f8E5M2
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @integer_to_e5m2(%word: i32) -> (f8E5M2) {
+  %3 = scalar.uitofp %word : i32 to f32
+  %result = scalar.fptrunc %3 : f32 to f8E5M2
+  func.return %result : f8E5M2
+}
+
+// ====
+
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @e4m3_to_integer(%value: f8E4M3) -> (i8) {
+  %result = scalar.fptosi %value : f8E4M3 to i8
+  func.return %result : i8
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @e4m3_to_integer(%value: f8E4M3) -> (i8) {
+  %5 = scalar.bitcast %value : f8E4M3 to i8
+  %6 = scalar.extui %5 : i8 to i32
+  %7 = scalar.constant 128 : i32
+  %8 = scalar.andi %6, %7 : i32
+  %9 = scalar.constant 24 : i32
+  %10 = scalar.shli %8, %9 : i32
+  %11 = scalar.constant 120 : i32
+  %12 = scalar.andi %6, %11 : i32
+  %13 = scalar.constant 3 : i32
+  %14 = scalar.shrui %12, %13 : i32
+  %15 = scalar.constant 7 : i32
+  %16 = scalar.andi %6, %15 : i32
+  %17 = scalar.constant 120 : i32
+  %18 = scalar.addi %14, %17 : i32
+  %19 = scalar.constant 23 : i32
+  %20 = scalar.shli %18, %19 : i32
+  %21 = scalar.constant 20 : i32
+  %22 = scalar.shli %16, %21 : i32
+  %23 = scalar.ori %10, %20 : i32
+  %24 = scalar.ori %23, %22 : i32
+  %25 = scalar.constant 0 : i32
+  %26 = scalar.constant 2 : i32
+  %27 = scalar.andi %16, %26 : i32
+  %28 = scalar.constant 0 : i32
+  %29 = scalar.cmpi ne, %27, %28 : i32
+  %30 = scalar.constant 1 : i32
+  %31 = scf.select %29, %30, %25 : i32
+  %32 = scalar.constant 4 : i32
+  %33 = scalar.andi %16, %32 : i32
+  %34 = scalar.constant 0 : i32
+  %35 = scalar.cmpi ne, %33, %34 : i32
+  %36 = scalar.constant 2 : i32
+  %37 = scf.select %35, %36, %31 : i32
+  %38 = scalar.constant 118 : i32
+  %39 = scalar.addi %37, %38 : i32
+  %40 = scalar.constant 23 : i32
+  %41 = scalar.shli %39, %40 : i32
+  %42 = scalar.constant 23 : i32
+  %43 = scalar.subi %42, %37 : i32
+  %44 = scalar.shli %16, %43 : i32
+  %45 = scalar.constant 8388607 : i32
+  %46 = scalar.andi %44, %45 : i32
+  %47 = scalar.ori %10, %41 : i32
+  %48 = scalar.ori %47, %46 : i32
+  %49 = scalar.constant 0 : i32
+  %50 = scalar.cmpi eq, %16, %49 : i32
+  %51 = scf.select %50, %10, %48 : i32
+  %52 = scalar.constant 0 : i32
+  %53 = scalar.cmpi eq, %14, %52 : i32
+  %54 = scf.select %53, %51, %24 : i32
+  %55 = scalar.constant 15 : i32
+  %56 = scalar.cmpi eq, %14, %55 : i32
+  %57 = scalar.constant 2143289344 : i32
+  %58 = scalar.constant 7 : i32
+  %59 = scalar.cmpi eq, %16, %58 : i32
+  %60 = scalar.constant 0 : i1
+  %61 = scf.select %56, %59, %60 : i1
+  %62 = scf.select %61, %57, %54 : i32
+  %63 = scalar.bitcast %62 : i32 to f32
+  %result = scalar.fptosi %63 : f32 to i8
+  func.return %result : i8
+}
+
+// ====
+
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @e5m2_to_integer(%value: f8E5M2) -> (i64) {
+  %result = scalar.fptoui %value : f8E5M2 to i64
+  func.return %result : i64
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @e5m2_to_integer(%value: f8E5M2) -> (i64) {
+  %5 = scalar.bitcast %value : f8E5M2 to i8
+  %6 = scalar.extui %5 : i8 to i32
+  %7 = scalar.constant 128 : i32
+  %8 = scalar.andi %6, %7 : i32
+  %9 = scalar.constant 24 : i32
+  %10 = scalar.shli %8, %9 : i32
+  %11 = scalar.constant 124 : i32
+  %12 = scalar.andi %6, %11 : i32
+  %13 = scalar.constant 2 : i32
+  %14 = scalar.shrui %12, %13 : i32
+  %15 = scalar.constant 3 : i32
+  %16 = scalar.andi %6, %15 : i32
+  %17 = scalar.constant 112 : i32
+  %18 = scalar.addi %14, %17 : i32
+  %19 = scalar.constant 23 : i32
+  %20 = scalar.shli %18, %19 : i32
+  %21 = scalar.constant 21 : i32
+  %22 = scalar.shli %16, %21 : i32
+  %23 = scalar.ori %10, %20 : i32
+  %24 = scalar.ori %23, %22 : i32
+  %25 = scalar.constant 0 : i32
+  %26 = scalar.constant 2 : i32
+  %27 = scalar.andi %16, %26 : i32
+  %28 = scalar.constant 0 : i32
+  %29 = scalar.cmpi ne, %27, %28 : i32
+  %30 = scalar.constant 1 : i32
+  %31 = scf.select %29, %30, %25 : i32
+  %32 = scalar.constant 111 : i32
+  %33 = scalar.addi %31, %32 : i32
+  %34 = scalar.constant 23 : i32
+  %35 = scalar.shli %33, %34 : i32
+  %36 = scalar.constant 23 : i32
+  %37 = scalar.subi %36, %31 : i32
+  %38 = scalar.shli %16, %37 : i32
+  %39 = scalar.constant 8388607 : i32
+  %40 = scalar.andi %38, %39 : i32
+  %41 = scalar.ori %10, %35 : i32
+  %42 = scalar.ori %41, %40 : i32
+  %43 = scalar.constant 0 : i32
+  %44 = scalar.cmpi eq, %16, %43 : i32
+  %45 = scf.select %44, %10, %42 : i32
+  %46 = scalar.constant 0 : i32
+  %47 = scalar.cmpi eq, %14, %46 : i32
+  %48 = scf.select %47, %45, %24 : i32
+  %49 = scalar.constant 31 : i32
+  %50 = scalar.cmpi eq, %14, %49 : i32
+  %51 = scalar.constant 2143289344 : i32
+  %52 = scalar.constant 2139095040 : i32
+  %53 = scalar.ori %10, %52 : i32
+  %54 = scalar.constant 0 : i32
+  %55 = scalar.cmpi eq, %16, %54 : i32
+  %56 = scf.select %55, %53, %51 : i32
+  %57 = scf.select %50, %56, %48 : i32
+  %58 = scalar.bitcast %57 : i32 to f32
+  %result = scalar.fptoui %58 : f32 to i64
+  func.return %result : i64
 }
 
 // ====
@@ -292,39 +306,19 @@ func.def target(@test_target) @scalar_integer_widths(%flag: i1, %wide: i64) -> (
   func.return %signed_flag, %unsigned_flag, %signed_wide, %unsigned_wide : bf16, f16, f8E4M3, f8E5M2
 }
 
-func.def target(@test_target) @vector_integer_widths(%flags: vector<4xi1>, %wide: vector<3xi64>) -> (vector<4xbf16>, vector<4xf16>, vector<3xf8E4M3>, vector<3xf16>) {
-  %signed_flags = vector.sitofp %flags : vector<4xi1> to vector<4xbf16>
-  %unsigned_flags = vector.uitofp %flags : vector<4xi1> to vector<4xf16>
-  %signed_wide = vector.sitofp %wide : vector<3xi64> to vector<3xf8E4M3>
-  %unsigned_wide = vector.uitofp %wide : vector<3xi64> to vector<3xf16>
-  func.return %signed_flags, %unsigned_flags, %signed_wide, %unsigned_wide : vector<4xbf16>, vector<4xf16>, vector<3xf8E4M3>, vector<3xf16>
-}
-
 // ----
 test.target<low_core> @test_target
 
 func.def target(@test_target) @scalar_integer_widths(%flag: i1, %wide: i64) -> (bf16, f16, f8E4M3, f8E5M2) {
-  %26 = scalar.sitofp %flag : i1 to f32
-  %signed_flag = scalar.fptrunc %26 : f32 to bf16
-  %24 = scalar.uitofp %flag : i1 to f32
-  %unsigned_flag = scalar.fptrunc %24 : f32 to f16
-  %22 = scalar.sitofp %wide : i64 to f32
-  %signed_wide = scalar.fptrunc %22 : f32 to f8E4M3
-  %20 = scalar.uitofp %wide : i64 to f32
-  %unsigned_wide = scalar.fptrunc %20 : f32 to f8E5M2
+  %16 = scalar.sitofp %flag : i1 to f32
+  %signed_flag = scalar.fptrunc %16 : f32 to bf16
+  %14 = scalar.uitofp %flag : i1 to f32
+  %unsigned_flag = scalar.fptrunc %14 : f32 to f16
+  %12 = scalar.sitofp %wide : i64 to f32
+  %signed_wide = scalar.fptrunc %12 : f32 to f8E4M3
+  %10 = scalar.uitofp %wide : i64 to f32
+  %unsigned_wide = scalar.fptrunc %10 : f32 to f8E5M2
   func.return %signed_flag, %unsigned_flag, %signed_wide, %unsigned_wide : bf16, f16, f8E4M3, f8E5M2
-}
-
-func.def target(@test_target) @vector_integer_widths(%flags: vector<4xi1>, %wide: vector<3xi64>) -> (vector<4xbf16>, vector<4xf16>, vector<3xf8E4M3>, vector<3xf16>) {
-  %34 = vector.sitofp %flags : vector<4xi1> to vector<4xf32>
-  %signed_flags = vector.fptrunc %34 : vector<4xf32> to vector<4xbf16>
-  %32 = vector.uitofp %flags : vector<4xi1> to vector<4xf32>
-  %unsigned_flags = vector.fptrunc %32 : vector<4xf32> to vector<4xf16>
-  %30 = vector.sitofp %wide : vector<3xi64> to vector<3xf32>
-  %signed_wide = vector.fptrunc %30 : vector<3xf32> to vector<3xf8E4M3>
-  %28 = vector.uitofp %wide : vector<3xi64> to vector<3xf32>
-  %unsigned_wide = vector.fptrunc %28 : vector<3xf32> to vector<3xf16>
-  func.return %signed_flags, %unsigned_flags, %signed_wide, %unsigned_wide : vector<4xbf16>, vector<4xf16>, vector<3xf8E4M3>, vector<3xf16>
 }
 
 // ====

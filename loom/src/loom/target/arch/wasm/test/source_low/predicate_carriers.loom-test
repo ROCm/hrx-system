@@ -1,0 +1,145 @@
+// RUN: emit source-low target=wasm:simd128 output=low
+
+// Sixteen logical predicates use byte lanes through dynamic insertion,
+// permutation, and scalar observation.
+func.def @byte_predicate_lanes(%input: vector<16xi1>, %replacement: i1, %position: index) -> (vector<16xi1>, i1) {
+  %lane = index.assume %position [range(%position, 0, 15)] : index
+  %updated = vector.insert %replacement into %input[%lane] : i1, vector<16xi1>
+  %reversed = vector.shuffle<[15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]> %updated : vector<16xi1>
+  %last = vector.extract %reversed[15] : vector<16xi1> -> i1
+  func.return %reversed, %last : vector<16xi1>, i1
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @byte_predicate_lanes(%input: reg<wasm.v128>, %replacement: reg<wasm.i32>, %lane: reg<wasm.i32>) -> (reg<wasm.v128>, reg<wasm.i32>) asm {
+  %14 = i32.const 0
+  %15 = i32.sub %14, %replacement
+  %16 = v128.const 506097522914230528, 1084818905618843912
+  %17 = i8x16.splat %lane
+  %18 = i8x16.eq %16, %17
+  %19 = i8x16.splat %15
+  %updated = v128.bitselect %19, %input, %18
+  %reversed = i8x16.shuffle %updated, %updated, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
+  %22 = i8x16.extract_lane_u %reversed, 15
+  %23 = i32.const 1
+  %last = i32.and %22, %23
+  return %reversed, %last
+}
+
+// ====
+
+// The qword representation requires sign-extending scalar truth values before
+// building a vector mask.
+func.def @qword_predicate_constructor(%first: i1, %second: i1) -> (vector<2xi1>) {
+  %result = vector.from_elements %first, %second : vector<2xi1>
+  func.return %result : vector<2xi1>
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @qword_predicate_constructor(%first: reg<wasm.i32>, %second: reg<wasm.i32>) -> (reg<wasm.v128>) asm {
+  %7 = i32.const 0
+  %8 = i32.sub %7, %first
+  %9 = i64.extend_i32_s %8
+  %10 = i64x2.splat %9
+  %11 = i32.sub %7, %second
+  %12 = i64.extend_i32_s %11
+  %result = i64x2.replace_lane %10, %12, 1
+  return %result
+}
+
+// ====
+
+// A callable predicate result pins the comparison to dword lanes. Selecting
+// halfword payloads converts that mask once before the bit select.
+func.def @converted_word_select(%lhs: vector<4xi32>, %rhs: vector<4xi32>, %true_value: i16, %false_value: i16) -> (vector<4xi1>, i16, i16, i16, i16) {
+  %condition = vector.cmpi slt, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %true_values = vector.splat %true_value : vector<4xi16>
+  %false_values = vector.splat %false_value : vector<4xi16>
+  %selected = vector.select %condition, %true_values, %false_values : vector<4xi16>
+  %lane0 = vector.extract %selected[0] : vector<4xi16> -> i16
+  %lane1 = vector.extract %selected[1] : vector<4xi16> -> i16
+  %lane2 = vector.extract %selected[2] : vector<4xi16> -> i16
+  %lane3 = vector.extract %selected[3] : vector<4xi16> -> i16
+  func.return %condition, %lane0, %lane1, %lane2, %lane3 : vector<4xi1>, i16, i16, i16, i16
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @converted_word_select(%lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %true_value: reg<wasm.i32>, %false_value: reg<wasm.i32>) -> (reg<wasm.v128>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %condition = i32x4.lt_s %lhs, %rhs
+  %true_values = i16x8.splat %true_value
+  %false_values = i16x8.splat %false_value
+  %29 = i8x16.shuffle %condition, %condition, 0, 0, 4, 4, 8, 8, 12, 12, 0, 0, 0, 0, 0, 0, 0, 0
+  %selected = v128.bitselect %true_values, %false_values, %29
+  %lane0 = i16x8.extract_lane_u %selected, 0
+  %lane1 = i16x8.extract_lane_u %selected, 1
+  %lane2 = i16x8.extract_lane_u %selected, 2
+  %lane3 = i16x8.extract_lane_u %selected, 3
+  return %condition, %lane0, %lane1, %lane2, %lane3
+}
+
+// ====
+
+// Wasm has no unsigned i64x2 relation, so sign-bit biasing maps the comparison
+// to the signed instruction while retaining a native qword mask for selection.
+func.def @unsigned_qword_select(%lhs: vector<2xi64>, %rhs: vector<2xi64>, %true_value: vector<2xi64>, %false_value: vector<2xi64>) -> (vector<2xi64>) {
+  %condition = vector.cmpi ult, %lhs, %rhs : vector<2xi64> -> vector<2xi1>
+  %result = vector.select %condition, %true_value, %false_value : vector<2xi64>
+  func.return %result : vector<2xi64>
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @unsigned_qword_select(%lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %true_value: reg<wasm.v128>, %false_value: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
+  %12 = v128.const -9223372036854775808, -9223372036854775808
+  %13 = v128.xor %lhs, %12
+  %14 = v128.xor %rhs, %12
+  %condition = i64x2.lt_s %13, %14
+  %result = v128.bitselect %true_value, %false_value, %condition
+  return %result
+}
+
+// ====
+
+// General unordered equality preserves NaN behavior with a composed sequence;
+// nnan admits the direct equality instruction.
+func.def @floating_qword_predicates(%lhs: vector<2xf64>, %rhs: vector<2xf64>) -> (vector<2xi1>, vector<2xi1>) {
+  %general = vector.cmpf ueq, %lhs, %rhs : vector<2xf64> -> vector<2xi1>
+  %no_nan = vector.cmpf<nnan> ueq, %lhs, %rhs : vector<2xf64> -> vector<2xi1>
+  func.return %general, %no_nan : vector<2xi1>, vector<2xi1>
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @floating_qword_predicates(%lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>) -> (reg<wasm.v128>, reg<wasm.v128>) asm {
+  %10 = f64x2.lt %lhs, %rhs
+  %11 = f64x2.gt %lhs, %rhs
+  %12 = v128.or %10, %11
+  %general = v128.not %12
+  %no_nan = f64x2.eq %lhs, %rhs
+  return %general, %no_nan
+}
+
+// ====
+
+// Packet legalization joins native dword comparison masks into one eight-lane
+// predicate before selecting word payloads.
+func.def @packetized_word_select(%lhs0: vector<4xi32>, %rhs0: vector<4xi32>, %lhs1: vector<4xi32>, %rhs1: vector<4xi32>, %true_value: i16, %false_value: i16) -> (vector<8xi16>) {
+  %condition0 = vector.cmpi ne, %lhs0, %rhs0 : vector<4xi32> -> vector<4xi1>
+  %condition1 = vector.cmpi ne, %lhs1, %rhs1 : vector<4xi32> -> vector<4xi1>
+  %condition = vector.concat<0> %condition0, %condition1 : vector<4xi1>, vector<4xi1> -> vector<8xi1>
+  %true_values = vector.splat %true_value : vector<8xi16>
+  %false_values = vector.splat %false_value : vector<8xi16>
+  %result = vector.select %condition, %true_values, %false_values : vector<8xi16>
+  func.return %result : vector<8xi16>
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @packetized_word_select(%lhs0: reg<wasm.v128>, %rhs0: reg<wasm.v128>, %lhs1: reg<wasm.v128>, %rhs1: reg<wasm.v128>, %true_value: reg<wasm.i32>, %false_value: reg<wasm.i32>) -> (reg<wasm.v128>) asm {
+  %20 = i32x4.ne %lhs0, %rhs0
+  %condition0 = i8x16.shuffle %20, %20, 0, 0, 4, 4, 8, 8, 12, 12, 0, 0, 0, 0, 0, 0, 0, 0
+  %22 = i32x4.ne %lhs1, %rhs1
+  %condition1 = i8x16.shuffle %22, %22, 0, 0, 4, 4, 8, 8, 12, 12, 0, 0, 0, 0, 0, 0, 0, 0
+  %condition = i8x16.shuffle %condition0, %condition1, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23
+  %true_values = i16x8.splat %true_value
+  %false_values = i16x8.splat %false_value
+  %result = v128.bitselect %true_values, %false_values, %condition
+  return %result
+}

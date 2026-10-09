@@ -17,6 +17,7 @@ from pathlib import Path
 from loom.dialect.index import defs as index
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.vector import ALL_VECTOR_OPS
+from loom.dialect.vector.defs import VECTOR_CAST_OPS
 from loom.dsl import ATTR_TYPE_FLAGS, Op
 from loom.gen.ops.c_names import c_enum_name
 from loom.gen.support.files import write_text_file
@@ -208,20 +209,41 @@ def generate_vector_scalarization_rows() -> str:
     return "\n".join(lines)
 
 
+def generate_vector_cast_legalizer_rows() -> str:
+    """Generates target-reference fallback rows for the vector cast family."""
+
+    lines = [
+        *line_comment_header("//", generator=_GENERATOR),
+        "// clang-format off",
+        "",
+    ]
+    lines.extend(f"LOOM_VECTOR_CAST_LEGALIZER_ROW({c_enum_name(op)})" for op in VECTOR_CAST_OPS)
+    lines.extend(["", "// clang-format on", ""])
+    return "\n".join(lines)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generates vector scalarization relation rows.")
     parser.add_argument("--rows", type=Path, help="Generated C row include.")
+    parser.add_argument(
+        "--cast-legalizer-rows",
+        type=Path,
+        help="Generated target-reference rows for every vector cast operation.",
+    )
     parser.add_argument(
         "--check",
         action="store_true",
         help="Validate scalarization relations without writing output.",
     )
     args = parser.parse_args(argv)
-    if args.check == (args.rows is not None):
-        parser.error("select exactly one of --check or --rows")
-    contents = generate_vector_scalarization_rows()
+    has_output = args.rows is not None or args.cast_legalizer_rows is not None
+    if args.check == has_output:
+        parser.error("select --check or at least one output")
+    scalarization_contents = generate_vector_scalarization_rows()
     if args.rows is not None:
-        write_text_file(args.rows, contents)
+        write_text_file(args.rows, scalarization_contents)
+    if args.cast_legalizer_rows is not None:
+        write_text_file(args.cast_legalizer_rows, generate_vector_cast_legalizer_rows())
     return 0
 
 

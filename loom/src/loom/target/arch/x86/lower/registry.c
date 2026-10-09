@@ -367,8 +367,8 @@ static iree_status_t loom_x86_map_avx2_contract_value(
   loom_x86_register_class_t register_class = 0;
   if (loom_x86_avx2_predicate_register_class(source_type, representation,
                                              &register_class)) {
-    *out_mapped_value =
-        loom_low_lower_rule_mapped_value_register(register_class, 1);
+    *out_mapped_value = loom_low_lower_rule_mapped_value_register(
+        register_class, representation, 1);
   }
   return iree_ok_status();
 }
@@ -389,8 +389,8 @@ static iree_status_t loom_x86_map_avx2_features_contract_value(
           source_type, feature_bits, &register_class) &&
       loom_x86_type_is_low_xmm_16bit_payload(source_type,
                                              LOOM_SCALAR_TYPE_SET_BF16)) {
-    *out_mapped_value =
-        loom_low_lower_rule_mapped_value_register(register_class, 1);
+    *out_mapped_value = loom_low_lower_rule_mapped_value_register(
+        register_class, LOOM_LOW_REPRESENTATION_ID_NONE, 1);
     return iree_ok_status();
   }
   return loom_x86_map_avx2_contract_value(user_data, environment, source_op,
@@ -416,8 +416,8 @@ static iree_status_t loom_x86_map_avx512_contract_value(
   loom_x86_register_class_t register_class = 0;
   if (loom_x86_avx512_predicate_register_class(source_type, representation,
                                                &register_class)) {
-    *out_mapped_value =
-        loom_low_lower_rule_mapped_value_register(register_class, 1);
+    *out_mapped_value = loom_low_lower_rule_mapped_value_register(
+        register_class, representation, 1);
   }
   return iree_ok_status();
 }
@@ -563,8 +563,8 @@ static iree_status_t loom_x86_map_avx512_features_contract_value(
       (loom_x86_type_is_scalar_f16(source_type) ||
        loom_x86_type_is_low_xmm_16bit_payload(
            source_type, LOOM_SCALAR_TYPE_SET_F16 | LOOM_SCALAR_TYPE_SET_I16))) {
-    *out_mapped_value =
-        loom_low_lower_rule_mapped_value_register(register_class, 1);
+    *out_mapped_value = loom_low_lower_rule_mapped_value_register(
+        register_class, LOOM_LOW_REPRESENTATION_ID_NONE, 1);
     return iree_ok_status();
   }
   return loom_x86_map_avx512_contract_value(user_data, environment, source_op,

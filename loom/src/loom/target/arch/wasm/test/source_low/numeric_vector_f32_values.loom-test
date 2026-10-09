@@ -1,4 +1,4 @@
-// RUN: with-checks emit source-low target=wasm:simd128 output=low
+// RUN: emit source-low target=wasm:simd128 output=low
 
 func.def @vector_f32_unary(%input_buffer: buffer, %output_buffer: buffer) {
   %base = index.constant 0 : offset
@@ -23,13 +23,24 @@ func.def @vector_f32_unary(%input_buffer: buffer, %output_buffer: buffer) {
 }
 
 // ----
-CHECK: * = f32x4.abs *
-CHECK: * = f32x4.neg *
-CHECK: * = f32x4.ceil *
-CHECK: * = f32x4.floor *
-CHECK: * = f32x4.nearest *
-CHECK: * = f32x4.trunc *
-CHECK: * = f32x4.sqrt *
+low.func.def target<wasm.core.simd128> abi(wasm_function) @vector_f32_unary(%input_buffer: reg<wasm.i32>, %output_buffer: reg<wasm.i32>) asm {
+  %input = v128.load %input_buffer
+  %absolute = f32x4.abs %input
+  v128.store %output_buffer, %absolute
+  %negated = f32x4.neg %input
+  v128.store %output_buffer, %negated {offset = 16}
+  %ceil = f32x4.ceil %input
+  v128.store %output_buffer, %ceil {offset = 32}
+  %floor = f32x4.floor %input
+  v128.store %output_buffer, %floor {offset = 48}
+  %roundeven = f32x4.nearest %input
+  v128.store %output_buffer, %roundeven {offset = 64}
+  %trunc = f32x4.trunc %input
+  v128.store %output_buffer, %trunc {offset = 80}
+  %square_root = f32x4.sqrt %input
+  v128.store %output_buffer, %square_root {offset = 96}
+  return
+}
 
 // ====
 
@@ -52,10 +63,19 @@ func.def @vector_f32_arithmetic(%lhs_buffer: buffer, %rhs_buffer: buffer, %outpu
 }
 
 // ----
-CHECK: * = f32x4.add *
-CHECK: * = f32x4.sub *
-CHECK: * = f32x4.mul *
-CHECK: * = f32x4.div *
+low.func.def target<wasm.core.simd128> abi(wasm_function) @vector_f32_arithmetic(%lhs_buffer: reg<wasm.i32>, %rhs_buffer: reg<wasm.i32>, %output_buffer: reg<wasm.i32>) asm {
+  %lhs = v128.load %lhs_buffer
+  %rhs = v128.load %rhs_buffer
+  %sum = f32x4.add %lhs, %rhs
+  v128.store %output_buffer, %sum
+  %difference = f32x4.sub %lhs, %rhs
+  v128.store %output_buffer, %difference {offset = 16}
+  %product = f32x4.mul %lhs, %rhs
+  v128.store %output_buffer, %product {offset = 32}
+  %quotient = f32x4.div %lhs, %rhs
+  v128.store %output_buffer, %quotient {offset = 48}
+  return
+}
 
 // ====
 
@@ -74,8 +94,15 @@ func.def @vector_f32_extrema(%lhs_buffer: buffer, %rhs_buffer: buffer, %output_b
 }
 
 // ----
-CHECK: * = f32x4.min *
-CHECK: * = f32x4.max *
+low.func.def target<wasm.core.simd128> abi(wasm_function) @vector_f32_extrema(%lhs_buffer: reg<wasm.i32>, %rhs_buffer: reg<wasm.i32>, %output_buffer: reg<wasm.i32>) asm {
+  %lhs = v128.load %lhs_buffer
+  %rhs = v128.load %rhs_buffer
+  %minimum = f32x4.min %lhs, %rhs
+  v128.store %output_buffer, %minimum
+  %maximum = f32x4.max %lhs, %rhs
+  v128.store %output_buffer, %maximum {offset = 16}
+  return
+}
 
 // ====
 
@@ -110,12 +137,33 @@ func.def @vector_f32_comparisons(%lhs_buffer: buffer, %rhs_buffer: buffer, %outp
 }
 
 // ----
-CHECK: * = f32x4.eq *
-CHECK: * = f32x4.gt *
-CHECK: * = f32x4.ge *
-CHECK: * = f32x4.lt *
-CHECK: * = f32x4.le *
-CHECK: * = f32x4.ne *
+low.func.def target<wasm.core.simd128> abi(wasm_function) @vector_f32_comparisons(%lhs_buffer: reg<wasm.i32>, %rhs_buffer: reg<wasm.i32>, %output_buffer: reg<wasm.i32>) asm {
+  %lhs = v128.load %lhs_buffer
+  %rhs = v128.load %rhs_buffer
+  %28 = i32.const -1
+  %true = i32x4.splat %28
+  %30 = i32.const 0
+  %false = i32x4.splat %30
+  %equal = f32x4.eq %lhs, %rhs
+  %equal_words = v128.bitselect %true, %false, %equal
+  v128.store %output_buffer, %equal_words
+  %greater = f32x4.gt %lhs, %rhs
+  %greater_words = v128.bitselect %true, %false, %greater
+  v128.store %output_buffer, %greater_words {offset = 16}
+  %greater_equal = f32x4.ge %lhs, %rhs
+  %greater_equal_words = v128.bitselect %true, %false, %greater_equal
+  v128.store %output_buffer, %greater_equal_words {offset = 32}
+  %less = f32x4.lt %lhs, %rhs
+  %less_words = v128.bitselect %true, %false, %less
+  v128.store %output_buffer, %less_words {offset = 48}
+  %less_equal = f32x4.le %lhs, %rhs
+  %less_equal_words = v128.bitselect %true, %false, %less_equal
+  v128.store %output_buffer, %less_equal_words {offset = 64}
+  %not_equal_or_unordered = f32x4.ne %lhs, %rhs
+  %not_equal_or_unordered_words = v128.bitselect %true, %false, %not_equal_or_unordered
+  v128.store %output_buffer, %not_equal_or_unordered_words {offset = 80}
+  return
+}
 
 // ====
 
@@ -151,9 +199,30 @@ func.def @vector_f32_comparisons_no_nan(%lhs_buffer: buffer, %rhs_buffer: buffer
 }
 
 // ----
-CHECK: * = f32x4.ne *
-CHECK: * = f32x4.eq *
-CHECK: * = f32x4.gt *
-CHECK: * = f32x4.ge *
-CHECK: * = f32x4.lt *
-CHECK: * = f32x4.le *
+low.func.def target<wasm.core.simd128> abi(wasm_function) @vector_f32_comparisons_no_nan(%lhs_buffer: reg<wasm.i32>, %rhs_buffer: reg<wasm.i32>, %output_buffer: reg<wasm.i32>) asm {
+  %lhs = v128.load %lhs_buffer
+  %rhs = v128.load %rhs_buffer
+  %28 = i32.const -1
+  %true = i32x4.splat %28
+  %30 = i32.const 0
+  %false = i32x4.splat %30
+  %not_equal = f32x4.ne %lhs, %rhs
+  %not_equal_words = v128.bitselect %true, %false, %not_equal
+  v128.store %output_buffer, %not_equal_words
+  %unordered_equal = f32x4.eq %lhs, %rhs
+  %unordered_equal_words = v128.bitselect %true, %false, %unordered_equal
+  v128.store %output_buffer, %unordered_equal_words {offset = 16}
+  %unordered_greater = f32x4.gt %lhs, %rhs
+  %unordered_greater_words = v128.bitselect %true, %false, %unordered_greater
+  v128.store %output_buffer, %unordered_greater_words {offset = 32}
+  %unordered_greater_equal = f32x4.ge %lhs, %rhs
+  %unordered_greater_equal_words = v128.bitselect %true, %false, %unordered_greater_equal
+  v128.store %output_buffer, %unordered_greater_equal_words {offset = 48}
+  %unordered_less = f32x4.lt %lhs, %rhs
+  %unordered_less_words = v128.bitselect %true, %false, %unordered_less
+  v128.store %output_buffer, %unordered_less_words {offset = 64}
+  %unordered_less_equal = f32x4.le %lhs, %rhs
+  %unordered_less_equal_words = v128.bitselect %true, %false, %unordered_less_equal
+  v128.store %output_buffer, %unordered_less_equal_words {offset = 80}
+  return
+}

@@ -22,8 +22,6 @@ enum {
   LOOM_WASM_VECTOR_CARRIER_PACKET_BYTE_COUNT = 16,
   // Physical Wasm representation of source index and offset lanes.
   LOOM_WASM_ADDRESS_CARRIER_BIT_COUNT = 32,
-  // Physical Wasm representation of source predicate lanes.
-  LOOM_WASM_PREDICATE_CARRIER_BIT_COUNT = 32,
 };
 
 typedef struct loom_wasm_vector_carrier_t {
@@ -35,14 +33,24 @@ typedef struct loom_wasm_vector_carrier_t {
   uint8_t element_bit_count;
 } loom_wasm_vector_carrier_t;
 
-// Returns the physical Wasm lane width for |element_type|. Predicates and
-// address domains use their target representation instead of their abstract
-// source width.
+// Returns the fixed physical Wasm lane width for |element_type|. Address
+// domains use their target representation instead of their abstract source
+// width. Predicates return zero because their width is selected per value.
 uint16_t loom_wasm_scalar_type_physical_bit_count(
     loom_scalar_type_t element_type);
 
-// Returns the complete internal Wasm carrier mapping for |type|. Unsupported,
-// dynamic, empty, and over-bound vectors return a zero carrier.
+// Returns the Wasm carrier for |type| when each logical element occupies
+// |physical_element_bit_count| bits. The physical width must be byte-aligned;
+// unsupported, dynamic, empty, and over-bound vectors return a zero carrier.
+// Target representation policies use this after selecting a physical width
+// that differs from the source element type.
+loom_wasm_vector_carrier_t loom_wasm_vector_carrier_for_physical_element(
+    loom_type_t type, uint16_t physical_element_bit_count);
+
+// Returns the default internal Wasm carrier mapping for |type|. Predicate
+// vectors use the widest 8/16/32/64-bit lane representation that fits one
+// v128 packet. Unsupported, dynamic, empty, and over-bound vectors return a
+// zero carrier.
 loom_wasm_vector_carrier_t loom_wasm_vector_carrier_for_type(loom_type_t type);
 
 // Returns true when |type| is one exact v128 vector admitted at a Wasm

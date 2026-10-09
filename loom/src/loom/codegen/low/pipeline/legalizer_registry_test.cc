@@ -54,6 +54,29 @@ static void ExpectReferenceProvider(
   }
 }
 
+static const loom_target_legalizer_entry_t* ExpectReferenceProviders(
+    const loom_target_legalizer_registry_t* registry, loom_op_kind_t op_kind,
+    iree_string_view_t first_expected_name,
+    iree_string_view_t second_expected_name) {
+  const loom_target_legalizer_op_entry_t op_entry =
+      loom_target_legalizer_registry_lookup_kind(registry, op_kind);
+  EXPECT_EQ(op_entry.entry_count, 2u);
+  if (op_entry.entry_count != 2) {
+    return nullptr;
+  }
+  const loom_target_legalizer_entry_t* entries =
+      &registry->entries[op_entry.entry_start];
+  EXPECT_TRUE(
+      iree_string_view_equal(entries[0].provider_name, first_expected_name));
+  EXPECT_TRUE(
+      iree_string_view_equal(entries[1].provider_name, second_expected_name));
+  EXPECT_EQ(entries[0].provider_strategy,
+            LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE);
+  EXPECT_EQ(entries[1].provider_strategy,
+            LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE);
+  return entries;
+}
+
 TEST(LowLegalizerRegistryTest, TargetProvidersPrecedeGenericProviders) {
   const loom_target_legalizer_rule_t target_rules[] = {
       {/*.flags=*/LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
@@ -100,12 +123,12 @@ TEST(LowLegalizerRegistryTest, TargetProvidersPrecedeGenericProviders) {
   ExpectReferenceProvider(registry, LOOM_OP_BUFFER_COPY, IREE_SV("buffer"));
   ExpectReferenceProvider(registry, LOOM_OP_SCALAR_SITOFP,
                           IREE_SV("conversion"));
-  ExpectReferenceProvider(registry, LOOM_OP_VECTOR_SITOFP,
-                          IREE_SV("conversion"));
+  ExpectReferenceProviders(registry, LOOM_OP_VECTOR_SITOFP,
+                           IREE_SV("conversion"), IREE_SV("vector"));
   ExpectReferenceProvider(registry, LOOM_OP_SCALAR_FPTOUI,
                           IREE_SV("conversion"));
-  ExpectReferenceProvider(registry, LOOM_OP_VECTOR_FPTOUI,
-                          IREE_SV("conversion"));
+  ExpectReferenceProviders(registry, LOOM_OP_VECTOR_FPTOUI,
+                           IREE_SV("conversion"), IREE_SV("vector"));
   ExpectReferenceProvider(registry, LOOM_OP_VECTOR_REDUCE, IREE_SV("vector"));
   ExpectReferenceProvider(registry, LOOM_OP_VECTOR_MASK_RANGE,
                           IREE_SV("vector"));
@@ -140,11 +163,24 @@ TEST(LowLegalizerRegistryTest, TargetProvidersPrecedeGenericProviders) {
             LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16);
   EXPECT_EQ(scalar_extui_entries[1].flags,
             LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION);
-  const loom_target_legalizer_entry_t* predicate_extension =
-      LookupOnlyEntry(registry, LOOM_OP_VECTOR_EXTUI);
-  ASSERT_NE(predicate_extension, nullptr);
-  EXPECT_EQ(predicate_extension->first_operand_element_types,
+  const loom_target_legalizer_entry_t* signed_predicate_extension =
+      ExpectReferenceProviders(registry, LOOM_OP_VECTOR_EXTSI,
+                               IREE_SV("vector"), IREE_SV("vector"));
+  ASSERT_NE(signed_predicate_extension, nullptr);
+  EXPECT_EQ(signed_predicate_extension[0].first_operand_element_types,
             LOOM_SCALAR_TYPE_SET_I1);
+  EXPECT_EQ(signed_predicate_extension[1].first_operand_element_types, 0u);
+  EXPECT_EQ(signed_predicate_extension[1].flags,
+            LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION);
+  const loom_target_legalizer_entry_t* unsigned_predicate_extension =
+      ExpectReferenceProviders(registry, LOOM_OP_VECTOR_EXTUI,
+                               IREE_SV("vector"), IREE_SV("vector"));
+  ASSERT_NE(unsigned_predicate_extension, nullptr);
+  EXPECT_EQ(unsigned_predicate_extension[0].first_operand_element_types,
+            LOOM_SCALAR_TYPE_SET_I1);
+  EXPECT_EQ(unsigned_predicate_extension[1].first_operand_element_types, 0u);
+  EXPECT_EQ(unsigned_predicate_extension[1].flags,
+            LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION);
 
   loom_target_legalizer_registry_storage_deinitialize(&storage);
 }
