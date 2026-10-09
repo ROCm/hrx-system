@@ -725,6 +725,17 @@ class PresubmitTest(unittest.TestCase):
             )
             self.assertFalse(presubmit.is_clang_tidy_candidate_file("other/src/file.c"))
 
+    def test_clang_tidy_candidates_include_loom_c_binding_implementations(self):
+        self.assertTrue(
+            presubmit.is_clang_tidy_candidate_file("loom/binding/c/src/loom.cc")
+        )
+        self.assertTrue(
+            presubmit.is_clang_tidy_candidate_file("loom/binding/c/test/loom_test.cc")
+        )
+        self.assertFalse(
+            presubmit.is_clang_tidy_candidate_file("loom/binding/python/loom.cc")
+        )
+
     def test_clang_tidy_bazel_command_uses_aspect_output_group(self):
         command = presubmit.clang_tidy_bazel_command(["//runtime/src/iree/base:all"])
 

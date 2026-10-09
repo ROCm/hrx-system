@@ -127,7 +127,7 @@ CLANG_TIDY_FIXES_OUTPUT_GROUP = "iree_clang_tidy_fixes"
 CLANG_TIDY_LOCAL_FIXES_OUTPUT_GROUP = "iree_clang_tidy_local_fixes"
 CLANG_TIDY_LOCAL_OUTPUT_GROUP = "iree_clang_tidy_local_reports"
 CLANG_TIDY_OUTPUT_GROUP = "iree_clang_tidy_reports"
-CLANG_TIDY_PATH_PREFIXES = SEMGREP_PATH_PREFIXES
+CLANG_TIDY_PATH_PREFIXES = SEMGREP_PATH_PREFIXES + ("loom/binding/c/",)
 CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
 CLANG_TIDY_CONFIG = REPO_ROOT / "build_tools/clang_tidy/clang_tidy_config.yaml"
 CLANG_TIDY_CMAKE_BUILD_DIR = REPO_ROOT / ".tmp" / "iree-clang-tidy-plugin"
