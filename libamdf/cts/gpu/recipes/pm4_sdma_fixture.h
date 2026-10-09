@@ -86,6 +86,12 @@ class Pm4SdmaTest : public Pm4DispatchTest {
       std::array<amdf_cache_operations_t, kTransferPhaseCount>*
           inout_operations);
 
+  // Checks a queried actor's exact cache contract and accumulates SDMA work.
+  // The derived recipe emits PM4 work and owns the ordering separately.
+  void ResolveTransition(const amdf_cache_transition_t& transition, Site site,
+                         amdf_cache_operation_t operation,
+                         amdf_cache_operations_t* inout_sdma_operations);
+
   // Transfer family selected passively on the same endpoint as compute.
   amdf_queue_family_info_t sdma_family_ = {};
 
@@ -94,9 +100,6 @@ class Pm4SdmaTest : public Pm4DispatchTest {
   amdf_memory_profile_site_t ProfileSite(Site site,
                                          amdf_memory_map_flags_t host_access);
   amdf_memory_site_t ConcreteSite(const GpuMemory& memory, Site site);
-  void ResolveTransition(const amdf_cache_transition_t& transition, Site site,
-                         amdf_cache_operation_t operation,
-                         amdf_cache_operations_t* inout_sdma_operations);
   void ResolvePairs(PairQuery query_kind,
                     const std::array<Backing, kBackingCount>& backings,
                     std::span<const Edge> edges,

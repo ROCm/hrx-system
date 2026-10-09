@@ -167,6 +167,17 @@ publication and 64 KiB command rings; they perform no mid-stream host refill
 or payload service. Their results establish correctness, not a performance
 ordering between transfer layouts.
 
+The [PM4 reader-reuse cases](recipes/pm4-reader-reuse.md) separate source-page
+reuse after SDMA completion from destination reuse after every independent
+reader. A PM4 stream refills source slots, SDMA copies to SYSTEM or LOCAL slots,
+and one or two PM4 queues consume each copy. A rotating held reader waits until
+the original source has been overwritten with different bytes. The same finite
+packet program has explicit USER and KERNEL publication cases, including native
+submission retirement on Windows. All streams are resident before the first
+publication, and the host captures complete outputs after their in-stream final
+join, before native retirement. These cases use pre-recorded transfers; they
+do not require or establish device-generated SDMA publication.
+
 The [bounded streaming cases](recipes/pm4_sdma_streaming_test.cc) reuse
 1/2/4/8 payload slots across a longer sequence of graphs. They require mapped
 USER publication on one PM4 queue and two independent SDMA queues. The CPU

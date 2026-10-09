@@ -27,7 +27,8 @@ amdf_queue_publication_modes_t SelectGpuHostPublication(
 void GpuCommandQueue::Initialize(
     const amdf_api_t* api, const amdf_gpu_api_t* gpu_api, amdf_device_t* device,
     amdf_memory_scope_t* system_scope, const amdf_queue_family_info_t& family,
-    amdf_queue_publication_modes_t publication_mode) {
+    amdf_queue_publication_modes_t publication_mode,
+    uint64_t command_byte_length) {
   ASSERT_TRUE(family.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 ||
               family.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
   command_type_ = family.command_type;
@@ -38,7 +39,8 @@ void GpuCommandQueue::Initialize(
       publication_mode == AMDF_QUEUE_PUBLICATION_MODE_USER ? "user" : "kernel");
   if (publication_mode == AMDF_QUEUE_PUBLICATION_MODE_USER) {
     ASSERT_NO_FATAL_FAILURE(user_queue_.Initialize(
-        api, gpu_api, device, family, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {}));
+        api, gpu_api, device, family, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
+        AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, command_byte_length));
     words_ = {reinterpret_cast<uint32_t*>(user_queue_.host.ring_address),
               user_queue_.host.ring_byte_length / sizeof(uint32_t)};
     device_id_ = user_queue_.info.device_id;
@@ -91,8 +93,10 @@ void GpuCommandQueue::Initialize(
   create_memory.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
   create_memory.access_count = 1;
   create_memory.accesses = &access;
+  const uint64_t requested_byte_length =
+      command_byte_length ? command_byte_length : 4096;
   create_memory.byte_length =
-      (4096 + granularity - 1) / granularity * granularity;
+      (requested_byte_length + granularity - 1) / granularity * granularity;
   create_memory.minimum_alignment = profile.allocation.minimum_alignment;
   ASSERT_NO_FATAL_FAILURE(commands_.Create(api, system_scope, create_memory));
   words_ = {reinterpret_cast<uint32_t*>(commands_.host.pointer),

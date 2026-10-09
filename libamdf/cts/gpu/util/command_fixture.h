@@ -69,9 +69,12 @@ class GpuCommandTest : public GpuDeviceFixture {
                    amdf_user_queue_capabilities_t required_capabilities =
                        AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
                    uint64_t ring_byte_length = 0);
-  void CreateQueue(GpuCommandQueue** out_queue);
+  // Requests finite command storage; zero retains the native/default capacity.
+  void CreateQueue(GpuCommandQueue** out_queue,
+                   uint64_t command_byte_length = 0);
   void CreateQueue(const amdf_queue_family_info_t& family,
-                   GpuCommandQueue** out_queue);
+                   GpuCommandQueue** out_queue,
+                   uint64_t command_byte_length = 0);
 
   // Exact family chosen passively before borrowing the cached native device.
   amdf_queue_family_info_t family_ = {};

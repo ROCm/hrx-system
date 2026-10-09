@@ -26,10 +26,13 @@ amdf_queue_publication_modes_t SelectGpuHostPublication(
 // KERNEL callers may also submit their own already-published command buffers.
 class GpuCommandQueue {
  public:
+  // Zero command length retains default storage. A positive length requests
+  // that native USER ring capacity or at least that much KERNEL IB backing.
   void Initialize(const amdf_api_t* api, const amdf_gpu_api_t* gpu_api,
                   amdf_device_t* device, amdf_memory_scope_t* system_scope,
                   const amdf_queue_family_info_t& family,
-                  amdf_queue_publication_modes_t publication_mode);
+                  amdf_queue_publication_modes_t publication_mode,
+                  uint64_t command_byte_length = 0);
 
   std::span<uint32_t> words() const { return words_; }
   // PM4 USER commands enter on the primary ring; KERNEL commands enter in an
