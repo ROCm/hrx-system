@@ -364,10 +364,12 @@ iree_example_t example = {
 
 This structural fix is limited to trivial local aggregates followed immediately
 by direct member assignments in declaration order. The check rejects unions,
-base or anonymous aggregates, default member initializers, volatile or atomic
-members, nontrivial initialization or assignment, narrowing conversions,
-self-reference, macros, reordered assignments, and setup split by later member
-assignments. Value evaluation order is preserved.
+base subobjects, anonymous structs, default member initializers, volatile or
+atomic members, nontrivial initialization or assignment, narrowing
+conversions, self-reference, macros, reordered assignments, and setup split by
+later member assignments. A standard anonymous union may be omitted or name one
+promoted member directly; selecting multiple members remains assignment-based.
+Value evaluation order is preserved.
 
 `EnableCommentLabelConversion` and `EnableSetupBlockFolding` both default to
 `true`. Disable one while applying the other migration so token-local label

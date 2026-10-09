@@ -55,7 +55,7 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
                 "aggregate setup cannot be folded: member assignments are not in "
                 "declaration order",
                 "aggregate setup cannot be folded: an assignment value may change "
-                "initialization semantics",
+                "initialization semantics (member 'value')",
                 "aggregate setup cannot be folded: member assignments are separated "
                 "by observation or control flow",
                 "aggregate setup cannot be folded: union member activation differs "
@@ -110,6 +110,19 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
             fixed_source,
         )
         self.assertIn("Numbers sized = {.first = sizeof(sized)};", fixed_source)
+        self.assertIn(
+            "WithAnonymous anonymous_setup = {.integer = 42, .tail = 43};",
+            fixed_source,
+        )
+        self.assertIn(
+            "WithAnonymous omitted_anonymous_union = {.tail = 44};", fixed_source
+        )
+        self.assertIn(
+            "PointerConfig qualified_pointer = {.pointer = values};", fixed_source
+        )
+        self.assertIn(
+            "PointerConfig null_pointer = {.pointer = nullptr};", fixed_source
+        )
 
         self.assertIn("/*.ordinal=*/7", fixed_source)
         self.assertIn("/*.flags=*/8", fixed_source)
@@ -133,6 +146,8 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn("conditional.first = 30;", fixed_source)
         self.assertIn("union_setup.integer = 31;", fixed_source)
         self.assertIn("defaulted.second = 32;", fixed_source)
+        self.assertIn("switched_union_member.real = 32.0f;", fixed_source)
+        self.assertIn("not in declaration order (member 'real')", output)
         self.assertIn("nontrivial.member = 33;", fixed_source)
         self.assertIn("narrowing.value = -1;", fixed_source)
         self.assertIn("macro_initialized.first = 34;", fixed_source)

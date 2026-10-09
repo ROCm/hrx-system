@@ -268,6 +268,18 @@ const VarDecl* ReferencedVariable(const Expr* Expression) {
   return Reference ? dyn_cast<VarDecl>(Reference->getDecl()) : nullptr;
 }
 
+const VarDecl* PromotedMemberBaseVariable(const MemberExpr* Member) {
+  const Expr* Base = Member->getBase()->IgnoreParenImpCasts();
+  while (const auto* BaseMember = dyn_cast<MemberExpr>(Base)) {
+    const auto* BaseField = dyn_cast<FieldDecl>(BaseMember->getMemberDecl());
+    if (!BaseField || !BaseField->isAnonymousStructOrUnion()) {
+      return nullptr;
+    }
+    Base = BaseMember->getBase()->IgnoreParenImpCasts();
+  }
+  return ReferencedVariable(Base);
+}
+
 struct ParsedMemberAssignment {
   const FieldDecl* field;
   const Expr* value;
@@ -297,7 +309,7 @@ std::optional<ParsedMemberAssignment> ParseMemberAssignment(
   }
   const auto* Member = dyn_cast<MemberExpr>(Left->IgnoreParenImpCasts());
   if (!Member || Member->isArrow() ||
-      ReferencedVariable(Member->getBase()) != Variable) {
+      PromotedMemberBaseVariable(Member) != Variable) {
     return std::nullopt;
   }
   const auto* Field = dyn_cast<FieldDecl>(Member->getMemberDecl());
@@ -363,6 +375,28 @@ std::optional<unsigned> FieldIndex(const RecordDecl* Record,
   return std::nullopt;
 }
 
+std::optional<unsigned> DesignatorFieldIndex(const RecordDecl* Record,
+                                             const FieldDecl* Field) {
+  if (Field->getParent()->getCanonicalDecl() == Record->getCanonicalDecl()) {
+    return FieldIndex(Record, Field);
+  }
+  unsigned Index = 0;
+  for (const FieldDecl* Candidate : Record->fields()) {
+    if (Candidate->isUnnamedBitField()) {
+      continue;
+    }
+    const RecordDecl* AnonymousRecord = DefinedRecord(Candidate->getType());
+    if (Candidate->isAnonymousStructOrUnion() && AnonymousRecord &&
+        AnonymousRecord->isUnion() &&
+        AnonymousRecord->getCanonicalDecl() ==
+            Field->getParent()->getCanonicalDecl()) {
+      return Index;
+    }
+    ++Index;
+  }
+  return std::nullopt;
+}
+
 bool IntegerConstantFits(const Expr* Expression, QualType TargetType,
                          ASTContext& Context) {
   if (!TargetType->isIntegerType() || TargetType->isBooleanType()) {
@@ -400,13 +434,12 @@ bool CanMoveAssignmentValue(const Expr* Value, const FieldDecl* Field,
   if (IntegerConstantFits(SourceValue, FieldType, Context)) {
     return true;
   }
-  if (FieldType->isPointerType() &&
-      Context.hasSameUnqualifiedType(FieldType, Value->getType())) {
-    return SourceValue->getType()->isPointerType() ||
-           SourceValue->getType()->isArrayType() ||
-           SourceValue->getType()->isFunctionType() ||
-           SourceValue->isNullPointerConstant(
-               Context, Expr::NPC_ValueDependentIsNotNull);
+  if (FieldType->isPointerType()) {
+    // The assignment's semantic analysis already proved that its right-hand
+    // side has an implicit conversion sequence to the pointer field. Pointer
+    // copy-initialization accepts the same sequence; unlike arithmetic list
+    // initialization, it does not introduce a narrowing restriction.
+    return true;
   }
   return false;
 }
@@ -531,7 +564,10 @@ std::optional<StringRef> SetupAggregateIssue(const VarDecl* Variable,
   }
   for (const FieldDecl* Field : Record->fields()) {
     if (Field->isAnonymousStructOrUnion()) {
-      return "the aggregate contains an anonymous struct or union";
+      const RecordDecl* AnonymousRecord = DefinedRecord(Field->getType());
+      if (!AnonymousRecord || !AnonymousRecord->isUnion()) {
+        return "the aggregate contains an anonymous struct";
+      }
     }
     if (Field->hasInClassInitializer()) {
       return "the aggregate has a default member initializer";
@@ -549,6 +585,14 @@ void DiagnoseSetupIssue(DesignatedInitializerCheck& Check,
   Check.diag(Initializer->getLBraceLoc(),
              "aggregate setup cannot be folded: %0")
       << Issue;
+}
+
+void DiagnoseSetupAssignmentIssue(DesignatedInitializerCheck& Check,
+                                  const InitListExpr* Initializer,
+                                  StringRef Issue, const FieldDecl* Field) {
+  Check.diag(Initializer->getLBraceLoc(),
+             "aggregate setup cannot be folded: %0 (member '%1')")
+      << Issue << Field->getName();
 }
 
 void CheckCommentLabels(DesignatedInitializerCheck& Check,
@@ -722,6 +766,7 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
 
     std::vector<MemberAssignment> Assignments;
     std::optional<StringRef> Rejection;
+    const FieldDecl* RejectedField = nullptr;
     unsigned PreviousFieldIndex = 0;
     bool HasPreviousField = false;
     SourceLocation PreviousStatementEnd = InitializerEnd;
@@ -732,7 +777,8 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
       if (!Parsed) {
         break;
       }
-      std::optional<unsigned> Index = FieldIndex(Record, Parsed->field);
+      std::optional<unsigned> Index =
+          DesignatorFieldIndex(Record, Parsed->field);
       std::optional<std::string> ValueText =
           SourceText(Parsed->value, SourceManager, Context.getLangOpts());
       std::optional<CharSourceRange> RemovalRange = WholeLineStatementRange(
@@ -740,9 +786,10 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
       bool PreservesInterstatementText = ContainsOnlyWhitespaceOrSemicolon(
           PreviousStatementEnd, Statements[NextStatement]->getBeginLoc(),
           SourceManager);
-      if (!Index || Parsed->field->getParent()->getCanonicalDecl() !=
-                        Record->getCanonicalDecl()) {
-        Rejection = "an assignment does not name a direct aggregate member";
+      if (!Index) {
+        Rejection =
+            "an assignment cannot be represented by a direct C++20 "
+            "designator";
       } else if (HasPreviousField && *Index <= PreviousFieldIndex) {
         Rejection = "member assignments are not in declaration order";
       } else if (!CanMoveAssignmentValue(Parsed->value, Parsed->field, Variable,
@@ -754,6 +801,7 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
             "comments or macros";
       }
       if (Rejection) {
+        RejectedField = Parsed->field;
         Assignments.clear();
         break;
       }
@@ -767,7 +815,8 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
       PreviousStatementEnd = RemovalRange->getEnd();
     }
     if (Rejection) {
-      DiagnoseSetupIssue(Check, Initializer, *Rejection);
+      DiagnoseSetupAssignmentIssue(Check, Initializer, *Rejection,
+                                   RejectedField);
       continue;
     }
     if (Assignments.empty()) {

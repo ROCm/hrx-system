@@ -80,6 +80,10 @@ struct NarrowConfig {
   unsigned char value;
 };
 
+struct PointerConfig {
+  const int* pointer;
+};
+
 #define MAKE_CONFIG(value) \
   Config { /*.ordinal=*/ value }
 
@@ -188,6 +192,20 @@ void FoldSetupBlocks() {
   Numbers sized = {};
   sized.first = sizeof(sized);
   Observe(sized);
+
+  WithAnonymous anonymous_setup = {};
+  anonymous_setup.integer = 42;
+  anonymous_setup.tail = 43;
+
+  WithAnonymous omitted_anonymous_union = {};
+  omitted_anonymous_union.tail = 44;
+
+  int values[1] = {};
+  PointerConfig qualified_pointer = {};
+  qualified_pointer.pointer = values;
+
+  PointerConfig null_pointer = {};
+  null_pointer.pointer = nullptr;
 }
 
 void PreserveUnsafeSetupBlocks(bool condition) {
@@ -220,6 +238,10 @@ void PreserveUnsafeSetupBlocks(bool condition) {
   WithDefault defaulted = {};
   defaulted.second = 32;
 
+  WithAnonymous switched_union_member = {};
+  switched_union_member.integer = 31;
+  switched_union_member.real = 32.0f;
+
   NontrivialAggregate nontrivial = {};
   nontrivial.member = 33;
 
@@ -251,6 +273,7 @@ void PreserveUnsafeSetupBlocks(bool condition) {
   (void)conditional;
   (void)union_setup;
   (void)defaulted;
+  (void)switched_union_member;
   (void)nontrivial;
   (void)narrowing;
   (void)macro_initialized;
