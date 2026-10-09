@@ -110,9 +110,7 @@ iree_status_t loom_run_hal_testbench_context_add_module_runtime_requirements(
       IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_NONE;
   IREE_RETURN_IF_ERROR(
       iree_status_from_loomc(loomc_iree_hal_module_query_runtime_features(
-          module, sanitizer_options,
-          loomc_allocator_from_iree(context->host_allocator),
-          &runtime_features)));
+          module, sanitizer_options, &runtime_features)));
   const iree_hal_device_runtime_feature_flags_t missing_features =
       runtime_features & ~context->runtime_features;
   if (context->runtime_initialized && missing_features != 0) {

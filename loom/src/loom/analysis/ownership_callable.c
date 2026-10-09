@@ -244,22 +244,20 @@ static iree_status_t loom_ownership_lifetime_visit_successors(
       .visitor = visitor,
   };
   loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
-  iree_arena_reset(graph->walk_arena);
   return loom_walk_function(
       graph->module_state->module, graph->nodes[node].summary->function,
       LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_ownership_lifetime_visit_successor_call,
                              &walk},
-      graph->walk_arena, &walk_result);
+      &walk_result);
 }
 
 iree_status_t loom_ownership_lifetime_build_graph(
     loom_ownership_lifetime_module_state_t* module_state,
-    iree_arena_allocator_t* arena, iree_arena_allocator_t* walk_arena,
-    loom_ownership_lifetime_graph_t* out_graph, loom_scc_list_t* out_sccs) {
+    iree_arena_allocator_t* arena, loom_ownership_lifetime_graph_t* out_graph,
+    loom_scc_list_t* out_sccs) {
   memset(out_graph, 0, sizeof(*out_graph));
   out_graph->module_state = module_state;
-  out_graph->walk_arena = walk_arena;
   out_graph->symbol_to_node_count = module_state->summary_count;
   if (module_state->summary_count == 0) {
     *out_sccs = (loom_scc_list_t){0};

@@ -90,10 +90,8 @@ typedef struct loom_refine_boundaries_graph_t {
   // Module being refined.
   loom_module_t* module;
 
-  // Reusable scratch for graph walks and per-function boundary application.
-  // Nested successor walks preserve live caller frames through stack-ordered
-  // arena checkpoints.
-  iree_arena_allocator_t* walk_arena;
+  // Reusable scratch for per-function boundary application.
+  iree_arena_allocator_t* scratch_arena;
 
   // Dense function nodes.
   loom_refine_boundaries_function_t* functions;
@@ -122,10 +120,10 @@ bool loom_refine_boundaries_callee_node(
     iree_host_size_t* out_node);
 
 // Builds graph nodes, argument projections and bottom-up SCC order in |arena|.
-// |walk_arena| is borrowed scratch for graph walks and must outlive the graph.
+// |scratch_arena| is borrowed by the graph and must outlive it.
 iree_status_t loom_refine_boundaries_build_graph(
     loom_module_t* module, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* walk_arena,
+    iree_arena_allocator_t* scratch_arena,
     loom_refine_boundaries_graph_t* out_graph, loom_scc_list_t* out_sccs);
 
 #ifdef __cplusplus

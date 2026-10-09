@@ -6,6 +6,7 @@
 
 #include "loom/util/walk.h"
 
+#include "iree/base/internal/arena.h"
 #include "loom/ops/op_defs.h"
 
 //===----------------------------------------------------------------------===//
@@ -13,57 +14,78 @@
 //===----------------------------------------------------------------------===//
 
 typedef struct loom_walk_frame_t {
+  // Block whose operations this frame visits.
   loom_block_t* block;
-  loom_region_t* region;
+  // Operation owning the region containing |block|, or NULL at the root.
   loom_op_t* parent_op;
+  // Next operation in |block| to visit.
   loom_op_t* next_op;
-  uint16_t depth;
   // For post-order: the op whose children have just been visited.
   // When non-NULL, the callback fires for this op before advancing
   // to the next op in the block.
   loom_op_t* deferred_post_op;
+  // Region nesting depth of operations in |block|.
+  uint16_t depth;
 } loom_walk_frame_t;
 
+static_assert(sizeof(loom_walk_frame_t) == (IREE_PTR_SIZE == 8 ? 40 : 20),
+              "walk frames must retain their pointer-width layout");
+
+#define LOOM_WALK_INLINE_STACK_CAPACITY 8
+
 typedef struct loom_walk_stack_t {
+  // Active frame storage, initially |inline_frames| and then spill storage.
   loom_walk_frame_t* frames;
+  // Number of active frames.
   iree_host_size_t count;
+  // Number of frames available in |frames|.
   iree_host_size_t capacity;
+  // Whether |spill_arena| was initialized after exhausting inline storage.
+  bool spill_initialized;
+  // Invocation-local storage for frames beyond |inline_frames|.
+  iree_arena_allocator_t spill_arena;
+  // Frame storage covering common shallow region trees without allocation.
+  loom_walk_frame_t inline_frames[LOOM_WALK_INLINE_STACK_CAPACITY];
 } loom_walk_stack_t;
 
-#define LOOM_WALK_INITIAL_STACK_CAPACITY 32
-
-static iree_status_t loom_walk_stack_initialize(iree_arena_allocator_t* arena,
-                                                loom_walk_stack_t* stack) {
+static void loom_walk_stack_initialize(loom_walk_stack_t* stack) {
+  stack->frames = stack->inline_frames;
   stack->count = 0;
-  stack->capacity = LOOM_WALK_INITIAL_STACK_CAPACITY;
-  return iree_arena_allocate_array(arena, stack->capacity,
-                                   sizeof(loom_walk_frame_t),
-                                   (void**)&stack->frames);
+  stack->capacity = IREE_ARRAYSIZE(stack->inline_frames);
+  stack->spill_initialized = false;
 }
 
-static iree_status_t loom_walk_stack_reserve(loom_walk_stack_t* stack,
-                                             iree_arena_allocator_t* arena,
-                                             iree_host_size_t additional) {
+static void loom_walk_stack_deinitialize(loom_walk_stack_t* stack) {
+  if (stack->spill_initialized) {
+    iree_arena_deinitialize(&stack->spill_arena);
+  }
+}
+
+static iree_status_t loom_walk_stack_reserve(
+    loom_walk_stack_t* stack, iree_arena_block_pool_t* block_pool,
+    iree_host_size_t additional) {
   iree_host_size_t required = stack->count + additional;
   if (required <= stack->capacity) {
     return iree_ok_status();
   }
-  return iree_arena_grow_array(arena, stack->count, required,
+  if (!stack->spill_initialized) {
+    iree_arena_initialize(block_pool, &stack->spill_arena);
+    stack->spill_initialized = true;
+  }
+  return iree_arena_grow_array(&stack->spill_arena, stack->count, required,
                                sizeof(loom_walk_frame_t), &stack->capacity,
                                (void**)&stack->frames);
 }
 
 static void loom_walk_stack_push(loom_walk_stack_t* stack, loom_block_t* block,
-                                 loom_region_t* region, loom_op_t* parent_op,
-                                 uint16_t depth) {
+                                 loom_op_t* parent_op, uint16_t depth) {
   IREE_ASSERT(stack->count < stack->capacity);
   stack->frames[stack->count++] = (loom_walk_frame_t){
       .block = block,
-      .region = region,
       .parent_op = parent_op,
       .next_op = block->first_op,
-      .depth = depth,
       .deferred_post_op = NULL,
+      .depth = depth,
   };
 }
 
@@ -102,16 +124,16 @@ static void loom_walk_push_region_frames(loom_walk_stack_t* stack,
       continue;
     }
     if (region->block_count == 1) {
-      loom_walk_stack_push(stack, loom_region_entry_block(region), region,
+      loom_walk_stack_push(stack, loom_region_entry_block(region),
                            (loom_op_t*)op, child_depth);
     } else {
       // Push non-entry blocks in reverse order.
       for (int32_t b = (int32_t)region->block_count - 1; b >= 1; --b) {
         loom_walk_stack_push(stack, loom_region_block(region, (uint16_t)b),
-                             region, (loom_op_t*)op, child_depth);
+                             (loom_op_t*)op, child_depth);
       }
       // Push entry block on top — processed first.
-      loom_walk_stack_push(stack, loom_region_entry_block(region), region,
+      loom_walk_stack_push(stack, loom_region_entry_block(region),
                            (loom_op_t*)op, child_depth);
     }
   }
@@ -124,7 +146,6 @@ static void loom_walk_push_region_frames(loom_walk_stack_t* stack,
 iree_status_t loom_walk_region(const loom_module_t* module,
                                loom_region_t* region, loom_walk_order_t order,
                                loom_walk_callback_t callback,
-                               iree_arena_allocator_t* arena,
                                loom_walk_result_t* out_result) {
   *out_result = LOOM_WALK_CONTINUE;
   if (!region || region->block_count == 0) {
@@ -132,25 +153,23 @@ iree_status_t loom_walk_region(const loom_module_t* module,
   }
 
   loom_walk_stack_t stack;
-  IREE_RETURN_IF_ERROR(loom_walk_stack_initialize(arena, &stack));
+  loom_walk_stack_initialize(&stack);
 
   // Push the region's blocks onto the stack. For multi-block regions,
   // entry block goes on top (processed first).
-  IREE_RETURN_IF_ERROR(
-      loom_walk_stack_reserve(&stack, arena, region->block_count));
-  if (region->block_count == 1) {
-    loom_walk_stack_push(&stack, loom_region_entry_block(region), region, NULL,
-                         0);
-  } else {
+  iree_status_t status = loom_walk_stack_reserve(
+      &stack, module->arena.block_pool, region->block_count);
+  if (iree_status_is_ok(status) && region->block_count == 1) {
+    loom_walk_stack_push(&stack, loom_region_entry_block(region), NULL, 0);
+  } else if (iree_status_is_ok(status)) {
     for (int32_t b = (int32_t)region->block_count - 1; b >= 1; --b) {
-      loom_walk_stack_push(&stack, loom_region_block(region, (uint16_t)b),
-                           region, NULL, 0);
+      loom_walk_stack_push(&stack, loom_region_block(region, (uint16_t)b), NULL,
+                           0);
     }
-    loom_walk_stack_push(&stack, loom_region_entry_block(region), region, NULL,
-                         0);
+    loom_walk_stack_push(&stack, loom_region_entry_block(region), NULL, 0);
   }
 
-  while (stack.count > 0) {
+  while (iree_status_is_ok(status) && stack.count > 0) {
     loom_walk_frame_t* frame = &stack.frames[stack.count - 1];
 
     // Handle deferred post-order callback: the op's children have
@@ -158,17 +177,20 @@ iree_status_t loom_walk_region(const loom_module_t* module,
     if (frame->deferred_post_op) {
       loom_walk_context_t context = {
           .block = frame->block,
-          .region = frame->region,
+          .region = frame->block->parent_region,
           .parent_op = frame->parent_op,
           .depth = frame->depth,
       };
       loom_walk_result_t result = LOOM_WALK_CONTINUE;
-      IREE_RETURN_IF_ERROR(callback.fn(
-          callback.user_data, frame->deferred_post_op, &context, &result));
+      status = callback.fn(callback.user_data, frame->deferred_post_op,
+                           &context, &result);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
       frame->deferred_post_op = NULL;
       if (result == LOOM_WALK_ABORT) {
         *out_result = LOOM_WALK_ABORT;
-        return iree_ok_status();
+        break;
       }
       // SKIP in post-order is a no-op (children already visited).
       continue;
@@ -188,7 +210,7 @@ iree_status_t loom_walk_region(const loom_module_t* module,
 
     loom_walk_context_t context = {
         .block = frame->block,
-        .region = frame->region,
+        .region = frame->block->parent_region,
         .parent_op = frame->parent_op,
         .depth = frame->depth,
     };
@@ -197,11 +219,13 @@ iree_status_t loom_walk_region(const loom_module_t* module,
 
     if (order == LOOM_WALK_PRE_ORDER) {
       loom_walk_result_t result = LOOM_WALK_CONTINUE;
-      IREE_RETURN_IF_ERROR(
-          callback.fn(callback.user_data, op, &context, &result));
+      status = callback.fn(callback.user_data, op, &context, &result);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
       if (result == LOOM_WALK_ABORT) {
         *out_result = LOOM_WALK_ABORT;
-        return iree_ok_status();
+        break;
       }
       if (result == LOOM_WALK_SKIP) {
         skip_regions = true;
@@ -212,8 +236,11 @@ iree_status_t loom_walk_region(const loom_module_t* module,
     if (op->region_count > 0 && !skip_regions) {
       iree_host_size_t child_block_count = loom_walk_total_block_count(op);
       if (child_block_count > 0) {
-        IREE_RETURN_IF_ERROR(
-            loom_walk_stack_reserve(&stack, arena, child_block_count));
+        status = loom_walk_stack_reserve(&stack, module->arena.block_pool,
+                                         child_block_count);
+        if (!iree_status_is_ok(status)) {
+          break;
+        }
         // Re-fetch frame pointer — reserve may have reallocated.
         frame = &stack.frames[stack.count - 1];
 
@@ -228,23 +255,25 @@ iree_status_t loom_walk_region(const loom_module_t* module,
     } else if (order == LOOM_WALK_POST_ORDER) {
       // No regions (or skipped): fire callback immediately.
       loom_walk_result_t result = LOOM_WALK_CONTINUE;
-      IREE_RETURN_IF_ERROR(
-          callback.fn(callback.user_data, op, &context, &result));
+      status = callback.fn(callback.user_data, op, &context, &result);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
       if (result == LOOM_WALK_ABORT) {
         *out_result = LOOM_WALK_ABORT;
-        return iree_ok_status();
+        break;
       }
     }
   }
 
-  return iree_ok_status();
+  loom_walk_stack_deinitialize(&stack);
+  return status;
 }
 
 iree_status_t loom_walk_function(const loom_module_t* module,
                                  loom_func_like_t function,
                                  loom_walk_order_t order,
                                  loom_walk_callback_t callback,
-                                 iree_arena_allocator_t* arena,
                                  loom_walk_result_t* out_result) {
   *out_result = LOOM_WALK_CONTINUE;
   for (uint8_t i = 0; i < loom_func_like_region_count(function); ++i) {
@@ -253,7 +282,7 @@ iree_status_t loom_walk_function(const loom_module_t* module,
       continue;
     }
     IREE_RETURN_IF_ERROR(
-        loom_walk_region(module, region, order, callback, arena, out_result));
+        loom_walk_region(module, region, order, callback, out_result));
     if (*out_result == LOOM_WALK_ABORT) {
       break;
     }

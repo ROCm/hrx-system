@@ -410,8 +410,7 @@ iree_status_t loom_cmd_parameter_layout_build(
   loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
   IREE_RETURN_IF_ERROR(loom_walk_function(
       module, program, LOOM_WALK_PRE_ORDER,
-      (loom_walk_callback_t){loom_cmd_parameter_visit, &build}, scratch_arena,
-      &walk_result));
+      (loom_walk_callback_t){loom_cmd_parameter_visit, &build}, &walk_result));
   IREE_ASSERT_EQ(walk_result, LOOM_WALK_CONTINUE);
 
   bool* fixed_bindings = NULL;

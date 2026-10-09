@@ -33,7 +33,6 @@ loom_cc_library(
         "//loom/src/loom/ops/sanitizer",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
     ],
 )
 

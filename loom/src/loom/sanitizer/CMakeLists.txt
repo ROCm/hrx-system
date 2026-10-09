@@ -31,7 +31,6 @@ loom_cc_library(
   DEPS
     ::options
     iree::base
-    iree::base::internal::arena
     loom::ir
     loom::ops::kernel
     loom::ops::op_defs

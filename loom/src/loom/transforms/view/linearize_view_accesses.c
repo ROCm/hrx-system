@@ -1351,7 +1351,7 @@ iree_status_t loom_linearize_view_accesses_run(loom_pass_t* pass,
                              .fn = loom_linearize_view_accesses_collect_access,
                              .user_data = &collect_context,
                          },
-                         pass->arena, &walk_result));
+                         &walk_result));
   if (accesses.count == 0) {
     return iree_ok_status();
   }

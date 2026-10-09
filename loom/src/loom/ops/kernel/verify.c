@@ -1033,7 +1033,7 @@ static iree_status_t loom_kernel_verify_barrier_controls(
                            .fn = loom_kernel_verify_barrier_control_walk,
                            .user_data = &verifier,
                        },
-                       &arena, &walk_result);
+                       &walk_result);
   iree_arena_deinitialize(&arena);
   return status;
 }

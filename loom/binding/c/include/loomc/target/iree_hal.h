@@ -55,7 +55,6 @@ typedef struct loomc_iree_hal_target_provider_t
 /// @param module Source module that will be compiled and executed.
 /// @param sanitizer_options Sanitizer compilation options, or `NULL` when no
 /// instrumentation is requested.
-/// @param allocator Host allocator used for transient query storage.
 /// @param out_runtime_features Receives the required HAL runtime feature bits.
 /// Receives `IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_NONE` on failure.
 /// @return OK when the requirements were queried. Non-OK statuses represent
@@ -63,12 +62,10 @@ typedef struct loomc_iree_hal_target_provider_t
 ///
 /// @thread_safety
 /// The query holds no mutable process-global state. It may run concurrently
-/// with other read-only module operations when no mutation is active and the
-/// supplied allocator supports concurrent use.
+/// with other read-only module operations when no mutation is active.
 LOOMC_API_EXPORT loomc_status_t loomc_iree_hal_module_query_runtime_features(
     const loomc_module_t* module,
     const loomc_sanitizer_options_t* sanitizer_options,
-    loomc_allocator_t allocator,
     iree_hal_device_runtime_feature_flags_t* out_runtime_features);
 
 /// One compiler-and-loader target selected from an IREE HAL device.

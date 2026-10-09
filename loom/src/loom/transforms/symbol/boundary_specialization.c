@@ -199,7 +199,7 @@ static iree_status_t loom_refine_boundaries_collect_specialization_call(
 
 static iree_status_t loom_refine_boundaries_collect_specialization_plans(
     loom_module_t* module, const loom_refine_boundaries_graph_t* graph,
-    iree_arena_allocator_t* arena, iree_arena_allocator_t* walk_arena,
+    iree_arena_allocator_t* arena,
     loom_refine_boundaries_specialization_plan_t** out_plans) {
   *out_plans = NULL;
   if (graph->function_count == 0) {
@@ -218,12 +218,11 @@ static iree_status_t loom_refine_boundaries_collect_specialization_plans(
       .arena = arena,
   };
   loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
-  iree_arena_reset(walk_arena);
   IREE_RETURN_IF_ERROR(loom_walk_region(
       module, module->body, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_refine_boundaries_collect_specialization_call,
                              &walk},
-      walk_arena, &walk_result));
+      &walk_result));
 
   *out_plans = plans;
   return iree_ok_status();
@@ -434,12 +433,11 @@ static iree_status_t loom_refine_boundaries_create_specializations(
 
 iree_status_t loom_refine_boundaries_specialize_internal_boundaries(
     loom_module_t* module, const loom_refine_boundaries_graph_t* graph,
-    iree_arena_allocator_t* arena, iree_arena_allocator_t* walk_arena,
-    int64_t* out_specialization_count) {
+    iree_arena_allocator_t* arena, int64_t* out_specialization_count) {
   *out_specialization_count = 0;
   loom_refine_boundaries_specialization_plan_t* plans = NULL;
   IREE_RETURN_IF_ERROR(loom_refine_boundaries_collect_specialization_plans(
-      module, graph, arena, walk_arena, &plans));
+      module, graph, arena, &plans));
   if (!plans) {
     return iree_ok_status();
   }

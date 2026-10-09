@@ -802,7 +802,7 @@ int iree_run_loom_main(int argc, char** argv,
     status =
         iree_status_from_loomc(loomc_iree_hal_module_query_runtime_features(
             module, sanitizer_enabled ? &sanitizer_options : NULL,
-            loom_allocator, &runtime_features));
+            &runtime_features));
   }
   if (iree_status_is_ok(status) && exit_code == 0) {
     loom_run_hal_runtime_options_t runtime_options;

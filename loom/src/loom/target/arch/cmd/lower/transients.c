@@ -570,7 +570,7 @@ iree_status_t loom_cmd_transient_layout_build(
   IREE_RETURN_IF_ERROR(loom_walk_function(
       module, program, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_cmd_transient_range_visit, &build},
-      scratch_arena, &walk_result));
+      &walk_result));
   IREE_ASSERT_EQ(walk_result, LOOM_WALK_CONTINUE);
 
   *out_layout = (loom_cmd_transient_layout_t){

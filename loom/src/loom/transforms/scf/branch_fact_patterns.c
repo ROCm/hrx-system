@@ -864,7 +864,7 @@ static iree_status_t loom_branch_facts_materialize_edge_assumes(
   IREE_RETURN_IF_ERROR(loom_walk_region(
       rewriter->module, region, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_branch_facts_scan_region_uses, &scan},
-      rewriter->arena, &walk_result));
+      &walk_result));
 
   loom_block_t* entry_block = loom_region_entry_block(region);
   if (!entry_block || !entry_block->first_op) {
@@ -976,7 +976,7 @@ static iree_status_t loom_branch_facts_materialize_edge_assumes(
       rewriter->module, region, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_branch_facts_replace_region_uses,
                              &replacement},
-      rewriter->arena, &walk_result);
+      &walk_result);
 }
 
 static iree_status_t loom_branch_facts_materialize_condition_facts_in_region(

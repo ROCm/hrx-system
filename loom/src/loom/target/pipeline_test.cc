@@ -282,20 +282,17 @@ class TargetPipelineTest : public ::testing::Test {
     PipelineRunCountContext count_context = {
         /*.module=*/module,
     };
-    iree_arena_allocator_t arena;
-    iree_arena_initialize(&block_pool_, &arena);
     loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
     IREE_EXPECT_OK(loom_walk_region(
         module, loom_pass_pipeline_body(pipeline_op), LOOM_WALK_PRE_ORDER,
-        (loom_walk_callback_t){InspectPipelineRun, &count_context}, &arena,
+        (loom_walk_callback_t){InspectPipelineRun, &count_context},
         &walk_result));
     EXPECT_EQ(walk_result, LOOM_WALK_CONTINUE);
     counts = count_context.counts;
-    iree_arena_deinitialize(&arena);
     return counts;
   }
 
-  // Block pool backing test modules and walk scratch arenas.
+  // Block pool backing test modules.
   iree_arena_block_pool_t block_pool_;
   // IR context with all dialects registered.
   loom_context_t context_;

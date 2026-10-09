@@ -98,7 +98,7 @@ iree_status_t loom_materialize_locations_run(loom_pass_t* pass,
   IREE_RETURN_IF_ERROR(loom_walk_region(
       module, module->body, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_materialize_locations_collect, &captures},
-      pass->arena, &walk_result));
+      &walk_result));
   if (!captures.count) {
     return iree_ok_status();
   }

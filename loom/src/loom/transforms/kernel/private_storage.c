@@ -960,7 +960,7 @@ iree_status_t loom_private_storage_plan_build(
   IREE_RETURN_IF_ERROR(loom_walk_function(
       module, function, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_private_storage_collect_allocation, out_plan},
-      pass->arena, &result));
+      &result));
   if (!out_plan->allocations) {
     return iree_ok_status();
   }

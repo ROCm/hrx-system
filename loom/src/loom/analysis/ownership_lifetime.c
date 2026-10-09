@@ -1838,22 +1838,19 @@ static iree_status_t loom_ownership_lifetime_run_module(
   };
 
   iree_arena_allocator_t analysis_arena = {0};
-  iree_arena_allocator_t walk_arena = {0};
   iree_arena_initialize(options->arena->block_pool, &analysis_arena);
-  iree_arena_initialize(options->arena->block_pool, &walk_arena);
   iree_status_t status =
       loom_ownership_lifetime_initialize_module_summaries(&module_state);
   if (iree_status_is_ok(status)) {
     loom_ownership_lifetime_graph_t graph = {0};
     loom_scc_list_t sccs = {0};
     status = loom_ownership_lifetime_build_graph(&module_state, options->arena,
-                                                 &walk_arena, &graph, &sccs);
+                                                 &graph, &sccs);
     if (iree_status_is_ok(status)) {
       status =
           loom_ownership_lifetime_analyze_sccs(&graph, &sccs, &analysis_arena);
     }
   }
-  iree_arena_deinitialize(&walk_arena);
   iree_arena_deinitialize(&analysis_arena);
   return status;
 }

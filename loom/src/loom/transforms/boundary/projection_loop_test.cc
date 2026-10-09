@@ -562,8 +562,7 @@ class LoopBoundaryProjectionTest : public ::testing::Test {
     loom_walk_result_t result = LOOM_WALK_CONTINUE;
     IREE_CHECK_OK(loom_walk_function(
         module_, function, LOOM_WALK_POST_ORDER,
-        {/*.fn=*/CollectLoopWithModule, /*.user_data=*/&collector},
-        &pass_arena_, &result));
+        {/*.fn=*/CollectLoopWithModule, /*.user_data=*/&collector}, &result));
     return loops;
   }
 

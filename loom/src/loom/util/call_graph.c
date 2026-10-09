@@ -346,7 +346,7 @@ iree_status_t loom_call_graph_build(const loom_module_t* module,
     loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
     IREE_RETURN_IF_ERROR(loom_walk_region(
         module, body, LOOM_WALK_PRE_ORDER,
-        (loom_walk_callback_t){loom_call_collector_visit, &collector}, arena,
+        (loom_walk_callback_t){loom_call_collector_visit, &collector},
         &walk_result));
 
     out_graph->nodes[node_index].callee_count = edge_lists[node_index].count;

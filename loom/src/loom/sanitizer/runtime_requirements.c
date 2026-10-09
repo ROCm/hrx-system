@@ -6,7 +6,6 @@
 
 #include "loom/sanitizer/runtime_requirements.h"
 
-#include "iree/base/internal/arena.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/sanitizer/ops.h"
@@ -87,7 +86,6 @@ static iree_status_t loom_sanitizer_runtime_requirements_visit(
 
 iree_status_t loom_sanitizer_runtime_requirements_query(
     const loom_module_t* module, const loom_sanitizer_options_t* options,
-    iree_allocator_t host_allocator,
     loom_sanitizer_runtime_requirements_t* out_requirements) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(out_requirements);
@@ -111,10 +109,6 @@ iree_status_t loom_sanitizer_runtime_requirements_query(
     return iree_ok_status();
   }
 
-  iree_arena_block_pool_t block_pool;
-  iree_arena_block_pool_initialize(4096, host_allocator, &block_pool);
-  iree_arena_allocator_t walk_arena;
-  iree_arena_initialize(&block_pool, &walk_arena);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        iree_status_is_ok(status) && i < module->symbols.count; ++i) {
@@ -129,14 +123,11 @@ iree_status_t loom_sanitizer_runtime_requirements_query(
         module, function, LOOM_WALK_PRE_ORDER,
         (loom_walk_callback_t){loom_sanitizer_runtime_requirements_visit,
                                &state},
-        &walk_arena, &walk_result);
-    iree_arena_reset(&walk_arena);
+        &walk_result);
     if (walk_result == LOOM_WALK_ABORT) {
       break;
     }
   }
-  iree_arena_deinitialize(&walk_arena);
-  iree_arena_block_pool_deinitialize(&block_pool);
   if (iree_status_is_ok(status)) {
     *out_requirements = state.requirements;
   }

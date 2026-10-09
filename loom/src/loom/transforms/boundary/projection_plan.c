@@ -792,7 +792,7 @@ static iree_status_t loom_boundary_projection_collect_function(
     IREE_RETURN_IF_ERROR(loom_walk_function(
         plan->module, function->function, LOOM_WALK_PRE_ORDER,
         (loom_walk_callback_t){loom_boundary_projection_collect_op, &collect},
-        plan->arena, &walk_result));
+        &walk_result));
   }
 
   bool may_have_block_slot = false;

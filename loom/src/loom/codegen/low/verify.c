@@ -35,7 +35,7 @@ typedef struct loom_low_verify_state_t {
   loom_low_verify_result_t* result;
   uint32_t max_errors;
   iree_arena_allocator_t arena;
-  iree_arena_allocator_t walk_arena;
+  iree_arena_allocator_t function_arena;
   loom_symbol_fact_table_t symbol_facts;
   // Version handles densely indexed by the observed module symbol table.
   loom_target_function_version_snapshot_t function_version_snapshot;
@@ -161,7 +161,7 @@ const loom_low_resolved_target_t* loom_low_verify_context_target(
 
 iree_arena_allocator_t* loom_low_verify_context_arena(
     loom_low_verify_context_t* context) {
-  return &context->function_state->state->walk_arena;
+  return &context->function_state->state->function_arena;
 }
 
 void* loom_low_verify_context_provider_module_state(
@@ -1971,7 +1971,7 @@ static iree_status_t loom_low_verify_begin_function_providers(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      &function_state->state->walk_arena, provider_list.count,
+      &function_state->state->function_arena, provider_list.count,
       sizeof(*function_state->provider_states),
       (void**)&function_state->provider_states));
   memset(function_state->provider_states, 0,
@@ -2205,7 +2205,7 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
       .register_parts =
           {
               .masks = state->scratch->value_scratch,
-              .arena = &state->walk_arena,
+              .arena = &state->function_arena,
           },
       .function_name =
           loom_low_diagnostic_function_name(state->module, low_func_op),
@@ -2252,7 +2252,7 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
     status = loom_walk_region(
         state->module, body, LOOM_WALK_PRE_ORDER,
         (loom_walk_callback_t){loom_low_verify_walk_op, &function_state},
-        &state->walk_arena, &walk_result);
+        &walk_result);
   }
   if (iree_status_is_ok(status) && !loom_low_verify_should_stop(state)) {
     status = loom_low_verify_resolve_register_parts(&function_state);
@@ -2303,7 +2303,7 @@ iree_status_t loom_low_verify_module(const loom_module_t* module,
       .max_errors = options->max_errors,
   };
   iree_arena_initialize(module->arena.block_pool, &state.arena);
-  iree_arena_initialize(module->arena.block_pool, &state.walk_arena);
+  iree_arena_initialize(module->arena.block_pool, &state.function_arena);
   loom_symbol_fact_table_initialize(&state.symbol_facts, &state.arena);
   loom_value_u32_scratch_acquire_zeroed(scratch->value_scratch,
                                         module->values.count);
@@ -2322,7 +2322,7 @@ iree_status_t loom_low_verify_module(const loom_module_t* module,
         continue;
       }
       status = loom_low_verify_function(&state, op);
-      iree_arena_reset(&state.walk_arena);
+      iree_arena_reset(&state.function_arena);
       if (!iree_status_is_ok(status) || loom_low_verify_should_stop(&state)) {
         break;
       }
@@ -2333,7 +2333,7 @@ iree_status_t loom_low_verify_module(const loom_module_t* module,
   }
 
   loom_value_u32_scratch_release_zeroed(scratch->value_scratch);
-  iree_arena_deinitialize(&state.walk_arena);
+  iree_arena_deinitialize(&state.function_arena);
   iree_arena_deinitialize(&state.arena);
   return status;
 }

@@ -1090,7 +1090,7 @@ static iree_status_t loom_stage_loop_carried_fragments_collect_candidates(
           .fn = loom_stage_loop_carried_fragments_collect_candidate,
           .user_data = &collect,
       },
-      pass->arena, &walk_result);
+      &walk_result);
 }
 
 iree_status_t loom_stage_loop_carried_fragments_run(loom_pass_t* pass,

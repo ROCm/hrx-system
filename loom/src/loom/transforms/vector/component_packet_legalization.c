@@ -957,7 +957,7 @@ iree_status_t loom_vector_component_packet_legalize(
                            .fn = loom_vector_component_classify_op,
                            .user_data = plan,
                        },
-                       context->arena, &walk_result));
+                       &walk_result));
   out_query_cache->plan = plan;
   if (plan->demanded_record_count == 0) {
     return iree_ok_status();

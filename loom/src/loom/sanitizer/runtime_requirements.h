@@ -45,7 +45,6 @@ loom_sanitizer_runtime_requirements_from_options(
 // is walked once and no result retains module storage.
 iree_status_t loom_sanitizer_runtime_requirements_query(
     const loom_module_t* module, const loom_sanitizer_options_t* options,
-    iree_allocator_t host_allocator,
     loom_sanitizer_runtime_requirements_t* out_requirements);
 
 #ifdef __cplusplus

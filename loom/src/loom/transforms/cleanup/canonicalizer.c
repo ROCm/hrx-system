@@ -514,7 +514,7 @@ static iree_status_t loom_canonicalize_begin_iteration(
         driver->module, region, LOOM_WALK_PRE_ORDER,
         (loom_walk_callback_t){loom_canonicalize_initialize_region_op,
                                &initialization},
-        driver->scratch_arena, &walk_result));
+        &walk_result));
     *out_changed = initialization.changed;
   }
   state->region_initialization_complete = true;

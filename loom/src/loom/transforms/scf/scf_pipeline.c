@@ -1336,7 +1336,7 @@ iree_status_t loom_scf_pipeline_run(loom_pass_t* pass, loom_module_t* module,
       module, function, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){.fn = loom_scf_pipeline_collect_loop,
                              .user_data = &loops},
-      pass->arena, &result));
+      &result));
   loom_scf_pipeline_finish_scopes(&loops, 0);
   if (loops.pipeline_count == 0) {
     return iree_ok_status();

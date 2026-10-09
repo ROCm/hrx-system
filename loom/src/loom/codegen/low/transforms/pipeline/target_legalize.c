@@ -979,7 +979,7 @@ static iree_status_t loom_low_target_legalize_capture_report_source_ops(
           .fn = loom_low_target_legalize_capture_report_source_op,
           .user_data = state,
       },
-      state->query_scope_arena, &walk_result));
+      &walk_result));
   loom_low_target_legalize_sort_report_sources(state->report_decisions.entries,
                                                state->report_decisions.count);
   return iree_ok_status();

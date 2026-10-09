@@ -608,7 +608,7 @@ static iree_status_t loom_view_transport_prepare(
       plan->module, function, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){.fn = loom_view_transport_plan_operands,
                              .user_data = plan},
-      plan->arena, &result));
+      &result));
   IREE_RETURN_IF_ERROR(loom_view_transport_select(plan));
   return loom_view_transport_rewrite(plan, rewriter,
                                      loom_view_transport_statistics(pass));
@@ -627,7 +627,7 @@ iree_status_t loom_decompose_view_transports_run(loom_pass_t* pass,
       module, function, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){.fn = loom_view_transport_collect,
                              .user_data = &plan},
-      pass->arena, &result));
+      &result));
   if (plan.value_count == 0) {
     return iree_ok_status();
   }
@@ -992,7 +992,7 @@ iree_status_t loom_decompose_view_root_selections_run(
       module, function, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){.fn = loom_view_root_selection_collect,
                              .user_data = &plan},
-      pass->arena, &result));
+      &result));
   if (plan.selection_count == 0) {
     return iree_ok_status();
   }

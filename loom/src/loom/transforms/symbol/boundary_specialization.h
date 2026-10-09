@@ -14,13 +14,11 @@ extern "C" {
 #endif
 
 // Groups calls to internal functions by concrete result types, clones each
-// needed specialization and retargets its calls. Plans live in |arena| and
-// walks use |walk_arena|. New definitions and changed calls invalidate the
-// graph.
+// needed specialization and retargets its calls. Plans live in |arena|. New
+// definitions and changed calls invalidate the graph.
 iree_status_t loom_refine_boundaries_specialize_internal_boundaries(
     loom_module_t* module, const loom_refine_boundaries_graph_t* graph,
-    iree_arena_allocator_t* arena, iree_arena_allocator_t* walk_arena,
-    int64_t* out_specialization_count);
+    iree_arena_allocator_t* arena, int64_t* out_specialization_count);
 
 #ifdef __cplusplus
 }  // extern "C"

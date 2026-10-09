@@ -303,7 +303,7 @@ iree_status_t loom_pipeline_outline_run(loom_pass_t* pass,
     IREE_RETURN_IF_ERROR(loom_walk_region(
         module, body, LOOM_WALK_PRE_ORDER,
         (loom_walk_callback_t){loom_pipeline_outline_collect, &collection},
-        pass->arena, &walk_result));
+        &walk_result));
   }
   if (!collection.count) {
     return iree_ok_status();

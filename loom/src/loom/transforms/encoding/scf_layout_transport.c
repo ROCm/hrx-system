@@ -1727,7 +1727,7 @@ iree_status_t loom_decompose_scf_layout_transports_run(
   iree_status_t status = loom_walk_function(
       module, function, LOOM_WALK_POST_ORDER,
       (loom_walk_callback_t){.fn = loom_scf_layout_collect, .user_data = &plan},
-      &arena, &walk_result);
+      &walk_result);
   if (iree_status_is_ok(status) && plan.candidate_count != 0) {
     status = loom_local_value_domain_acquire_for_region_tree(
         module, body, &arena, &plan.domain);

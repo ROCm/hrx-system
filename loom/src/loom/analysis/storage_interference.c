@@ -849,7 +849,7 @@ iree_status_t loom_storage_interference_analyze_function(
           .fn = loom_storage_interference_walk_op,
           .user_data = analysis,
       },
-      arena, &walk_result));
+      &walk_result));
   IREE_ASSERT_EQ(walk_result, LOOM_WALK_CONTINUE);
   IREE_RETURN_IF_ERROR(
       loom_storage_interference_propagate_memberships(analysis));

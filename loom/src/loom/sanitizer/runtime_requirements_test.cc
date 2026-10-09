@@ -216,8 +216,8 @@ class SanitizerRuntimeRequirementsTest
     };
     loom_sanitizer_runtime_requirements_t requirements =
         LOOM_SANITIZER_RUNTIME_REQUIREMENT_NONE;
-    IREE_EXPECT_OK(loom_sanitizer_runtime_requirements_query(
-        module_, &options, iree_allocator_system(), &requirements));
+    IREE_EXPECT_OK(loom_sanitizer_runtime_requirements_query(module_, &options,
+                                                             &requirements));
     return requirements;
   }
 

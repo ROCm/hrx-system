@@ -1266,7 +1266,7 @@ iree_status_t loom_promote_private_fragments_run(loom_pass_t* pass,
               .fn = loom_promote_private_fragments_collect_view,
               .user_data = &collect_context,
           },
-          pass->arena, &walk_result);
+          &walk_result);
     }
 
     loom_promote_private_fragments_context_t context = {

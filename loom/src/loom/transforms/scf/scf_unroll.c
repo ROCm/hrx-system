@@ -1897,7 +1897,7 @@ static iree_status_t loom_scf_unroll_process_function_once(
                              .fn = loom_scf_unroll_collect_loop,
                              .user_data = &collect_context,
                          },
-                         context->pass->arena, &walk_result));
+                         &walk_result));
 
   // Fact computation is proportional to the entire function. Avoid it when
   // the terminal convergence iteration has no loops or when all remaining

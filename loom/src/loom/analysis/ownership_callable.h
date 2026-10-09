@@ -88,8 +88,6 @@ typedef struct loom_ownership_lifetime_graph_node_t {
 typedef struct loom_ownership_lifetime_graph_t {
   // Module-level analysis state.
   loom_ownership_lifetime_module_state_t* module_state;
-  // Reset before each graph successor walk.
-  iree_arena_allocator_t* walk_arena;
   // Dense bodyful function nodes.
   loom_ownership_lifetime_graph_node_t* nodes;
   // Number of entries in |nodes|.
@@ -112,11 +110,11 @@ iree_status_t loom_ownership_lifetime_initialize_module_summaries(
     loom_ownership_lifetime_module_state_t* module_state);
 
 // Builds the bodyful call graph with one structural walk per function.
-// Summaries and graph data live in |arena|; the walk reuses |walk_arena|.
+// Summaries and graph data live in |arena|.
 iree_status_t loom_ownership_lifetime_build_graph(
     loom_ownership_lifetime_module_state_t* module_state,
-    iree_arena_allocator_t* arena, iree_arena_allocator_t* walk_arena,
-    loom_ownership_lifetime_graph_t* out_graph, loom_scc_list_t* out_sccs);
+    iree_arena_allocator_t* arena, loom_ownership_lifetime_graph_t* out_graph,
+    loom_scc_list_t* out_sccs);
 
 // Returns the nested execution operation requiring CFG lowering when the
 // function may own resources, or NULL when its control boundary is supported.

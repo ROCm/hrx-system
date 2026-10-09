@@ -22,9 +22,9 @@
 //     (pre-order: parent op before children; post-order: children
 //     before parent op).
 //
-// The walker is iterative (no recursion) with an arena-allocated
-// stack. Stack growth uses iree_arena_grow_array for O(1) amortized
-// push.
+// The walker is iterative (no recursion) with a bounded inline stack.
+// Unusually deep walks spill into invocation-local storage obtained from the
+// module's block pool and returned before the walk completes.
 //
 // Usage:
 //
@@ -40,14 +40,13 @@
 //   IREE_RETURN_IF_ERROR(loom_walk_function(
 //       module, function, LOOM_WALK_PRE_ORDER,
 //       (loom_walk_callback_t){my_visitor, &my_state},
-//       &arena, &walk_result));
+//       &walk_result));
 //   if (walk_result == LOOM_WALK_ABORT) { /* ... */ }
 
 #ifndef LOOM_UTIL_WALK_H_
 #define LOOM_UTIL_WALK_H_
 
 #include "iree/base/api.h"
-#include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -99,9 +98,8 @@ typedef struct loom_walk_context_t {
 //===----------------------------------------------------------------------===//
 
 // Walk callback function. |user_data| is the first parameter for
-// register placement. Returns iree_status_t for infrastructure
-// failures (OOM, invalid IR). Walk control is via |out_result|,
-// which must always be written.
+// register placement. Returns iree_status_t for allocation or callback
+// failures. Walk control is via |out_result|, which must always be written.
 typedef iree_status_t (*loom_walk_fn_t)(void* user_data, loom_op_t* op,
                                         const loom_walk_context_t* context,
                                         loom_walk_result_t* out_result);
@@ -123,13 +121,13 @@ typedef struct loom_walk_callback_t {
 // completed normally, or LOOM_WALK_ABORT if the callback aborted.
 // LOOM_WALK_SKIP is consumed internally and never returned here.
 //
-// The walker uses an arena-allocated stack that grows as needed.
-// All stack memory is allocated from |arena| and freed when the
-// arena is reset/deinitialized.
+// Traversal storage has invocation lifetime and never aliases or remains in
+// callback-owned storage. Callback allocations therefore remain valid after
+// the walk returns. Stack growth can fail if the module's block pool cannot
+// provide temporary spill storage.
 iree_status_t loom_walk_region(const loom_module_t* module,
                                loom_region_t* region, loom_walk_order_t order,
                                loom_walk_callback_t callback,
-                               iree_arena_allocator_t* arena,
                                loom_walk_result_t* out_result);
 
 // Walks all ops in |function|'s root regions. Regions are visited in physical
@@ -140,7 +138,6 @@ iree_status_t loom_walk_function(const loom_module_t* module,
                                  loom_func_like_t function,
                                  loom_walk_order_t order,
                                  loom_walk_callback_t callback,
-                                 iree_arena_allocator_t* arena,
                                  loom_walk_result_t* out_result);
 
 #ifdef __cplusplus

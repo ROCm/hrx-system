@@ -48,8 +48,6 @@ struct loom_target_low_legality_context_t {
   loom_op_kind_t callable_exit_kind;
   // Result object receiving counters and selected descriptor set.
   loom_target_low_legality_result_t* result;
-  // Scratch arena for the IR walker.
-  iree_arena_allocator_t arena;
 };
 
 static const loom_target_bundle_t* loom_target_low_legality_options_bundle(
@@ -986,8 +984,6 @@ iree_status_t loom_target_low_verify_function_legality(
                                          LOOM_ERR_TARGET_089, params,
                                          IREE_ARRAYSIZE(params));
   }
-  iree_arena_initialize(module->arena.block_pool, &context.arena);
-
   iree_status_t status = iree_ok_status();
   if (iree_status_is_ok(status)) {
     status = loom_target_low_legality_verify_function_signature(&context);
@@ -997,9 +993,7 @@ iree_status_t loom_target_low_verify_function_legality(
     status = loom_walk_region(
         module, body, LOOM_WALK_PRE_ORDER,
         (loom_walk_callback_t){loom_target_low_legality_walk_op, &context},
-        &context.arena, &walk_result);
+        &walk_result);
   }
-
-  iree_arena_deinitialize(&context.arena);
   return status;
 }

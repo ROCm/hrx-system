@@ -178,9 +178,6 @@ loom_cc_library(
     iree::base::threading
     iree::hal
     iree::tooling::device_util
-    loom::ir
-    loom::sanitizer::options
-    loom::sanitizer::runtime_requirements
   PUBLIC
 )
 

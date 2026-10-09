@@ -465,39 +465,39 @@ static iree_status_t loom_refine_boundaries_rewrite_pruned_call(
 static iree_status_t loom_refine_boundaries_preflight_pruned_calls(
     loom_module_t* module, const loom_refine_boundaries_graph_t* graph,
     loom_refine_boundaries_prune_plan_t* plans,
-    iree_arena_allocator_t* walk_arena) {
+    iree_arena_allocator_t* scratch_arena) {
   loom_refine_boundaries_prune_call_walk_t walk = {
       .graph = graph,
       .plans = plans,
   };
   loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
-  iree_arena_reset(walk_arena);
+  iree_arena_reset(scratch_arena);
   return loom_walk_region(module, module->body, LOOM_WALK_PRE_ORDER,
                           (loom_walk_callback_t){
                               loom_refine_boundaries_preflight_pruned_call,
                               &walk,
                           },
-                          walk_arena, &walk_result);
+                          &walk_result);
 }
 
 static iree_status_t loom_refine_boundaries_rewrite_pruned_calls(
     loom_module_t* module, const loom_refine_boundaries_graph_t* graph,
     loom_refine_boundaries_prune_plan_t* plans,
-    iree_arena_allocator_t* walk_arena) {
+    iree_arena_allocator_t* scratch_arena) {
   loom_refine_boundaries_rewrite_call_walk_t walk = {
       .module = module,
       .graph = graph,
       .plans = plans,
-      .arena = walk_arena,
+      .arena = scratch_arena,
   };
   loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
-  iree_arena_reset(walk_arena);
+  iree_arena_reset(scratch_arena);
   return loom_walk_region(module, module->body, LOOM_WALK_PRE_ORDER,
                           (loom_walk_callback_t){
                               loom_refine_boundaries_rewrite_pruned_call,
                               &walk,
                           },
-                          walk_arena, &walk_result);
+                          &walk_result);
 }
 
 typedef struct loom_refine_boundaries_return_list_t {
@@ -543,7 +543,7 @@ static iree_status_t loom_refine_boundaries_append_return_op(
 static iree_status_t loom_refine_boundaries_collect_return_ops(
     loom_module_t* module,
     const loom_refine_boundaries_function_t* function_info,
-    iree_arena_allocator_t* arena, iree_arena_allocator_t* walk_arena,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     loom_refine_boundaries_return_list_t* out_list) {
   memset(out_list, 0, sizeof(*out_list));
   out_list->body = function_info->body;
@@ -555,11 +555,11 @@ static iree_status_t loom_refine_boundaries_collect_return_ops(
                                                  (void**)&out_list->ops));
 
   loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
-  iree_arena_reset(walk_arena);
+  iree_arena_reset(scratch_arena);
   return loom_walk_function(
       module, function_info->function, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_refine_boundaries_append_return_op, out_list},
-      walk_arena, &walk_result);
+      &walk_result);
 }
 
 static iree_status_t loom_refine_boundaries_rewrite_pruned_return(
@@ -609,7 +609,7 @@ static iree_status_t loom_refine_boundaries_rewrite_pruned_return(
 static iree_status_t loom_refine_boundaries_rewrite_pruned_returns(
     loom_module_t* module, const loom_refine_boundaries_graph_t* graph,
     loom_refine_boundaries_prune_plan_t* plans, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* walk_arena) {
+    iree_arena_allocator_t* scratch_arena) {
   for (iree_host_size_t node = 0; node < graph->function_count; ++node) {
     const loom_refine_boundaries_prune_plan_t* plan = &plans[node];
     if (!plan->has_prunable_results) {
@@ -618,7 +618,7 @@ static iree_status_t loom_refine_boundaries_rewrite_pruned_returns(
 
     loom_refine_boundaries_return_list_t returns = {0};
     IREE_RETURN_IF_ERROR(loom_refine_boundaries_collect_return_ops(
-        module, &graph->functions[node], arena, walk_arena, &returns));
+        module, &graph->functions[node], arena, scratch_arena, &returns));
     for (iree_host_size_t i = 0; i < returns.count; ++i) {
       IREE_RETURN_IF_ERROR(loom_refine_boundaries_rewrite_pruned_return(
           module, returns.ops[i], plan, arena));
@@ -678,7 +678,7 @@ static iree_status_t loom_refine_boundaries_remove_pruned_arguments(
 
 iree_status_t loom_refine_boundaries_prune_internal_boundaries(
     loom_module_t* module, const loom_refine_boundaries_graph_t* graph,
-    iree_arena_allocator_t* arena, iree_arena_allocator_t* walk_arena,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     int64_t* out_pruned_argument_count, int64_t* out_pruned_result_count) {
   *out_pruned_argument_count = 0;
   *out_pruned_result_count = 0;
@@ -690,11 +690,11 @@ iree_status_t loom_refine_boundaries_prune_internal_boundaries(
   }
 
   IREE_RETURN_IF_ERROR(loom_refine_boundaries_preflight_pruned_calls(
-      module, graph, plans, walk_arena));
+      module, graph, plans, scratch_arena));
   IREE_RETURN_IF_ERROR(loom_refine_boundaries_rewrite_pruned_calls(
-      module, graph, plans, walk_arena));
+      module, graph, plans, scratch_arena));
   IREE_RETURN_IF_ERROR(loom_refine_boundaries_rewrite_pruned_returns(
-      module, graph, plans, arena, walk_arena));
+      module, graph, plans, arena, scratch_arena));
   IREE_RETURN_IF_ERROR(loom_refine_boundaries_remove_pruned_results(
       module, graph, plans, arena, out_pruned_result_count));
   return loom_refine_boundaries_remove_pruned_arguments(

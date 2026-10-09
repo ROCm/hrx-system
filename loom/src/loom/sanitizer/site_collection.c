@@ -257,7 +257,7 @@ iree_status_t loom_sanitizer_site_collection_build_region(
   IREE_RETURN_IF_ERROR(loom_walk_region(
       module, region, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_sanitizer_site_count_visitor, &count_state},
-      arena, &walk_result));
+      &walk_result));
 
   loom_sanitizer_site_collection_t collection = {0};
   IREE_RETURN_IF_ERROR(loom_sanitizer_site_collection_allocate_rows(
@@ -272,7 +272,7 @@ iree_status_t loom_sanitizer_site_collection_build_region(
       loom_walk_region(module, region, LOOM_WALK_PRE_ORDER,
                        (loom_walk_callback_t){
                            loom_sanitizer_site_collect_visitor, &collect_state},
-                       arena, &walk_result));
+                       &walk_result));
   *out_collection = collection;
   return iree_ok_status();
 }
@@ -289,7 +289,7 @@ iree_status_t loom_sanitizer_site_collection_build_function(
   IREE_RETURN_IF_ERROR(loom_walk_function(
       module, function, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_sanitizer_site_count_visitor, &count_state},
-      arena, &walk_result));
+      &walk_result));
 
   loom_sanitizer_site_collection_t collection = {0};
   IREE_RETURN_IF_ERROR(loom_sanitizer_site_collection_allocate_rows(
@@ -304,7 +304,7 @@ iree_status_t loom_sanitizer_site_collection_build_function(
       module, function, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_sanitizer_site_collect_visitor,
                              &collect_state},
-      arena, &walk_result));
+      &walk_result));
   *out_collection = collection;
   return iree_ok_status();
 }

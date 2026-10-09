@@ -356,7 +356,7 @@ iree_status_t loom_scf_body_build(
       module, block->parent_region, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){.fn = loom_scf_body_capture_operation,
                              .user_data = &builder},
-      arena, &result);
+      &result);
   *out_unstructured_op = builder.unstructured_op;
   return status;
 }

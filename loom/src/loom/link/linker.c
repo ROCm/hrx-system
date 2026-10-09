@@ -1522,7 +1522,7 @@ static iree_status_t loom_linker_mark_function_apply_dependencies_live(
                                 .fn = loom_linker_visit_apply_dependency,
                                 .user_data = &walk,
                             },
-                            source->arena, &walk_result);
+                            &walk_result);
 }
 
 static iree_status_t loom_linker_mark_apply_dependencies_live(
