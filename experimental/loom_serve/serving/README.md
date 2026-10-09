@@ -299,16 +299,19 @@ promise that a particular request will fit.
 
 ### Pull-based event history
 
-Embedding and decision services publish typed events into a bounded 128-record
-overwriting ring (about 20 KiB per model), independently of their always-on
-request/model counters. Publication performs no formatting, allocation or sink
+Text services publish typed events into a bounded 256-record ring; image,
+embedding and decision services use 128 records (about 20 KiB), independently
+of their always-on request/model counters. Publication performs no formatting, allocation or sink
 I/O. `--heartbeat_ms` adds periodic snapshots; zero disables periodic samples,
 not counters or request/invocation events. The HTTP transport owns a separate
 stream for peer, capacity, routing and tokenizer errors through shutdown. Its
 existing connection-state mutex serializes diagnostic producers; readers never
 take it. No ordinary HTTP diagnostic writes to stderr.
-Text/image still use their existing stderr paths; they are not covered by this
-guarantee.
+Text request/session/epoch events and image preparation/execution/encoding
+measurements follow the same ownership contract. CPU borrowers return timings
+with completed jobs; only the serialized service owner publishes. Cold startup
+compiler/residency diagnostics and terminal CLI failures are separate from
+these serving-work streams.
 
 `GET /logz` returns a bounded JSONL poll of server diagnostics. `X-Loom-Model`
 instead selects a deployment's stream:
@@ -337,6 +340,13 @@ cursors return 400. A service without this observation interface returns 501.
 Positions/identities are experimental native-lifetime values, not durable log
 storage keys. Periodic external pollers can write these JSONL responses to a
 file/stdout without putting that sink on a model worker.
+
+The [observer](../tools/observe.py) owns an independent cursor per deployment
+and writes file/stdout JSONL; it never launches or signals the server. The
+[dashboard](../tools/dashboard.py) displays per-incarnation counter snapshots,
+not sums reconstructed from retained events. Gaps therefore lose history but
+not cumulative totals. Shared-device memory is labeled separately from model
+charges and is never added once per model.
 
 Counters distinguish successful carrier acceptance, rejection, peer/shutdown
 cancellation and execution/transport failure. `input_tokens` counts completed

@@ -45,4 +45,8 @@ py_test(
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
+    deps = [
+        "//experimental/loom_serve/http:logs_client",
+        "//experimental/loom_serve/tools:observe_lib",
+    ],
 )

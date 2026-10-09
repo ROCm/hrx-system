@@ -524,34 +524,42 @@ score or HTTP latency measurement. `trajectory` events preserve exact input IDs;
 
 ### Run telemetry
 
-`observe.py` launches the runner and combines its stdout/stderr with independent
-Linux system samples. It uses only the Python standard library; no sensor
-subprocesses or OS polling enter the inference process. Build the exact server
-target first, then place the observer inside the benchmark lease when measuring:
+`observe.py` attaches to a running HTTP server and polls `/logz` independently
+for server diagnostics and each discovered model. It uses only the Python
+standard library. No file, terminal or sensor I/O enters a serving worker:
 
 ```sh
-python -B -m experimental.loom_serve.tools.observe --log=/private/runs/run.jsonl -- \
-  bazel-bin/experimental/loom_serve/text/server \
-  --model=experimental/loom_serve/models/qwen \
-  --epoch=128:8 \
-  --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
-  --tokenizer=/path/to/tokenizer.json --rows=8
+python -B -m experimental.loom_serve.tools.observe \
+  --url=http://127.0.0.1:8080 --log=/private/runs/run.jsonl
 ```
 
-The log is created exclusively; an existing run is never overwritten. The
-default system interval is one second (`--interval`), independent of the native
-service heartbeat interval. `--quiet` suppresses console mirroring, not logging.
-SIGINT/SIGTERM reach the owned server and wait for its normal retirement. A log
-or observer failure stops the server and reports failure while continuing to
-drain its output through shutdown. There is no silent lossy queue or automatic
-log rotation. The caller owns log retention and available disk space. Logs
-contain command paths and application diagnostics and are private run data.
+`--log=-` emits JSONL to stdout. Files are created exclusively. `--model` can
+select a subset of deployments; otherwise the fixed catalog is discovered once.
+Each round reads at most 64 retained records from each stream, followed by fresh
+owner counters. `--interval` defaults to 0.25 seconds; `--timeout` limits network
+observation, not submitted inference. `--heartbeat_ms` separately controls the
+server's periodic work/memory samples. Request counters remain enabled at zero.
 
-Each line is a version-1 envelope containing `sequence`, `unix_time_ns`,
-monotonic `elapsed_ns`, `source`, and `data`. Sequence and timestamps describe
-observer receipt, not device event time or ordering between stdout and stderr.
-Native JSON events remain unchanged inside `data`; plain output becomes a
-`diagnostic` event. `run`/`process_start`/`run_end` delimit child lifetime.
+The observer neither launches nor signals the server. SIGINT/SIGTERM stops only
+observation. A blocked sink pauses only its reader, and a failed sink terminates
+only that observer. Resuming may reveal overwritten records. The caller owns
+file retention and disk capacity; these logs can include private diagnostics.
+Network/protocol failures are explicit; stream reincarnation returns a
+`stream_reset` record and begins a fresh cursor rather than merging lifetimes.
+
+Each line has a version-1 envelope with `sequence`, `unix_time_ns`, monotonic
+`elapsed_ns`, `source` and `data`. Server records also carry `stream` metadata
+with scope, deployment name and incarnation. Envelope sequence/time describe
+observer receipt, not device timing or cross-model execution order. Native
+record sequence/time, partial starts, gap ranges, counters and cursor footers
+remain intact. `observation_begin`/`observation_end` delimit this reader's
+lifetime, not the server's. Independent readers never acknowledge or pin data.
+
+Optional `--local-pid=PID` adds Linux `/proc` and `/sys` sampling for the observer's
+host and that local process. It is explicit because a remote HTTP address does
+not identify the observer's hardware. Run on the inference host and pass its
+actual server PID for matched system measurements. The log records the sensor
+host separately from the server URL. Sensors are disabled by default.
 
 The `system_inventory` event gives stable channel indices, labels, source paths,
 units and runtime-power guards. Each `system` event supplies the corresponding
@@ -584,10 +592,10 @@ scroll vertically. `q` exits, arrows or `j`/`k` scroll, PageUp/PageDown move a
 page, Home returns to the top, and `a` exposes all channels with their exact
 source paths. The `--all-sensors` option selects that view initially. The
 display separates prompt inputs, decode inputs and selected outputs including
-EOS; planned token-slot occupancy is not GPU utilization. Heartbeat, last-epoch
-and system-sample ages remain independent so a stalled device cannot appear
-healthy just because the host sampler is running. A recorded prefix without
-`run_end` is not claimed to be a successful or still-running server.
+EOS; sampled committed token-slot occupancy is not GPU utilization. Model
+snapshot and local system-sample ages remain independent so a stalled device
+cannot appear healthy just because the host sampler is running. Observer
+completion never claims anything about server completion.
 
 The viewer retains latest state and short histories, not the entire run.
 Partial trailing records wait for completion; malformed complete records fail

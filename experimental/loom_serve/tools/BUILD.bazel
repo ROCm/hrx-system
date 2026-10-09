@@ -31,13 +31,20 @@ py_library(
 py_library(
     name = "observe_lib",
     srcs = ["observe.py"],
-    deps = [":system_stats"],
+    visibility = ["//experimental/loom_serve/models/fixtures:__pkg__"],
+    deps = [
+        ":system_stats",
+        "//experimental/loom_serve/http:logs_client",
+    ],
 )
 
 py_binary(
     name = "observe",
     srcs = ["observe.py"],
-    deps = [":system_stats"],
+    deps = [
+        ":system_stats",
+        "//experimental/loom_serve/http:logs_client",
+    ],
 )
 
 py_test(
@@ -47,6 +54,7 @@ py_test(
     deps = [
         ":observe_lib",
         ":system_stats",
+        "//experimental/loom_serve/http:logs_client",
     ],
 )
 

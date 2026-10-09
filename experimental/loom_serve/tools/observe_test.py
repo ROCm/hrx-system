@@ -4,19 +4,18 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-import contextlib
 import errno
 import io
 import json
-import signal
-import subprocess
 import sys
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib.parse import urlsplit
 
+from experimental.loom_serve.http.logs import LogBatch, LogClient
 from experimental.loom_serve.tools import observe, system_stats
 
 
@@ -116,14 +115,6 @@ class SystemStatsTest(unittest.TestCase):
 
 
 class ObserverTest(unittest.TestCase):
-    def setUp(self):
-        self.directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
-        self.path = Path(self.directory.name) / "run.jsonl"
-
-    def records(self):
-        return [json.loads(line) for line in self.path.read_text().splitlines()]
-
     def test_concurrent_events_are_whole_and_ordered(self):
         stream = io.StringIO()
         log = observe.EventLog(stream)
@@ -145,149 +136,84 @@ class ObserverTest(unittest.TestCase):
             [r["elapsed_ns"] for r in records], sorted(r["elapsed_ns"] for r in records)
         )
 
-    def test_real_child_output_and_nonzero_exit_are_preserved(self):
-        command = [
-            sys.executable,
-            "-c",
-            'import sys; print("model output"); print(\'{"event":"heartbeat","active_rows":4}\',file=sys.stderr); sys.exit(7)',
-        ]
-        self.assertEqual(observe.record_run(command, self.path, quiet=True), 7)
-        records = self.records()
-        self.assertTrue(
-            any(r["data"] == {"event": "heartbeat", "active_rows": 4} for r in records)
-        )
-        self.assertTrue(
-            any(
-                r["data"] == {"event": "diagnostic", "text": "model output"}
-                for r in records
+    def client(self):
+        client = mock.Mock(spec=LogClient)
+        client.address = urlsplit("http://127.0.0.1:8080")
+        client.models.return_value = ["chat", "image"]
+
+        def poll(model):
+            return LogBatch(
+                {
+                    "scope": "server" if model is None else "model",
+                    **({} if model is None else {"model": model}),
+                    "identity": "1:1",
+                },
+                [{"event": "stream"}, {"event": "cursor", "value": "1:1:0"}],
             )
+
+        client.poll.side_effect = poll
+        return client
+
+    def test_one_bounded_round_preserves_routing_without_local_sampling(self):
+        client, stopped = self.client(), threading.Event()
+
+        class Sink(io.StringIO):
+            def write(self, line):
+                record = json.loads(line)
+                if (
+                    record.get("stream", {}).get("model") == "image"
+                    and record["data"]["event"] == "cursor"
+                ):
+                    stopped.set()
+                return super().write(line)
+
+        sink = Sink()
+        with mock.patch.object(observe, "SystemStats") as stats:
+            observe.record_streams(client, observe.EventLog(sink), stopped)
+            stats.assert_not_called()
+        self.assertEqual(
+            client.poll.call_args_list,
+            [mock.call(None), mock.call("chat"), mock.call("image")],
         )
-        self.assertEqual(records[-1]["data"], {"event": "run_end", "return_code": 7})
-        self.assertTrue(any(r["data"]["event"] == "system_inventory" for r in records))
+        records = [json.loads(line) for line in sink.getvalue().splitlines()]
+        self.assertEqual(records[0]["data"]["event"], "observation_begin")
+        self.assertEqual(records[-1]["data"]["event"], "observation_end")
+        self.assertEqual(
+            [r["stream"].get("model") for r in records[1:-1]],
+            [None, None, "chat", "chat", "image", "image"],
+        )
+
+    def test_sink_failure_stops_only_this_reader(self):
+        client = self.client()
+
+        class Sink(io.StringIO):
+            def write(self, line):
+                if json.loads(line)["source"] == "server":
+                    raise OSError(errno.ENOSPC, "full observer disk")
+                return super().write(line)
+
+        with self.assertRaises(OSError) as raised:
+            observe.record_streams(client, observe.EventLog(Sink()), threading.Event())
+        self.assertEqual(raised.exception.errno, errno.ENOSPC)
+        self.assertEqual(client.poll.call_args_list, [mock.call(None)])
+
+    def test_failed_source_is_not_silently_replaced_by_empty_data(self):
+        client, sink = self.client(), io.StringIO()
+        client.poll.side_effect = ConnectionResetError("server closed")
+        with self.assertRaises(ConnectionResetError):
+            observe.record_streams(client, observe.EventLog(sink), threading.Event())
+        self.assertNotIn("observation_end", sink.getvalue())
 
     def test_existing_log_is_never_overwritten(self):
-        self.path.write_text("valuable evidence\n")
-        with self.assertRaises(FileExistsError):
-            observe.record_run(["does-not-exist"], self.path)
-        self.assertEqual(self.path.read_text(), "valuable evidence\n")
-
-    def test_sink_failure_drains_child_cleanup(self):
-        original_open = Path.open
-        log_path = self.path
-
-        class FailingSink:
-            def __init__(self, stream):
-                self.stream = stream
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                self.stream.close()
-
-            def write(self, text):
-                if '"event":"sink_trigger"' in text:
-                    raise OSError(errno.ENOSPC, "injected full log filesystem")
-                return self.stream.write(text)
-
-            def flush(self):
-                self.stream.flush()
-
-        def open_sink(path, *args, **kwargs):
-            stream = original_open(path, *args, **kwargs)
-            return FailingSink(stream) if path == log_path else stream
-
-        # More than a pipe's capacity must drain after the sink has failed.
-        # Only the child's explicit event triggers failure, not a timer.
-        child = (
-            "import signal,sys\n"
-            "def retire(*args):\n"
-            " print('x'*131072,file=sys.stderr,flush=True)\n"
-            " print('child-retired',file=sys.stderr,flush=True)\n"
-            " sys.exit(0)\n"
-            "signal.signal(signal.SIGTERM,retire)\n"
-            'print(\'{"event":"sink_trigger"}\',file=sys.stderr,flush=True)\n'
-            "signal.pause()\n"
-        )
-        errors = io.StringIO()
-        with (
-            mock.patch.object(Path, "open", open_sink),
-            contextlib.redirect_stderr(errors),
-        ):
-            with self.assertRaises(ExceptionGroup) as raised:
-                observe.record_run([sys.executable, "-c", child], self.path, quiet=True)
-        self.assertTrue(
-            any(
-                isinstance(error, OSError) and error.errno == errno.ENOSPC
-                for error in raised.exception.exceptions
-            )
-        )
-        self.assertIn("child-retired", errors.getvalue())
-
-    def test_broken_console_still_drains_child_cleanup(self):
-        class BrokenConsole:
-            def write(self, text):
-                raise BrokenPipeError(errno.EPIPE, "closed console")
-
-        child = (
-            "import signal,sys\n"
-            "def retire(*args):\n"
-            " print('x'*131072,flush=True)\n"
-            " print('child-retired',file=sys.stderr,flush=True)\n"
-            " sys.exit(0)\n"
-            "signal.signal(signal.SIGTERM,retire)\n"
-            "print('READY',flush=True)\n"
-            "signal.pause()\n"
-        )
-        errors = io.StringIO()
-        with (
-            contextlib.redirect_stdout(BrokenConsole()),
-            contextlib.redirect_stderr(errors),
-        ):
-            with self.assertRaises(ExceptionGroup) as raised:
-                observe.record_run([sys.executable, "-c", child], self.path)
-        self.assertTrue(
-            any(
-                isinstance(error, BrokenPipeError)
-                for error in raised.exception.exceptions
-            )
-        )
-        self.assertIn("child-retired", errors.getvalue())
-
-    def test_signal_forwarding_waits_for_child_cleanup(self):
-        child = 'import signal,sys; signal.signal(signal.SIGTERM,lambda *args: sys.exit(0)); print("READY",flush=True); signal.pause()'
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-B",
-                "-m",
-                "experimental.loom_serve.tools.observe",
-                "--log",
-                str(self.path),
-                "--",
-                sys.executable,
-                "-c",
-                child,
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        try:
-            self.assertEqual(process.stdout.readline(), "READY\n")
-            process.send_signal(signal.SIGTERM)
-            output, errors = process.communicate()
-            self.assertEqual(process.returncode, 0, errors)
-            self.assertEqual(output, "")
-            self.assertEqual(
-                self.records()[-1]["data"], {"event": "run_end", "return_code": 0}
-            )
-        finally:
-            if process.poll() is None:
-                process.terminate()
-            process.wait()
-            process.stdout.close()
-            process.stderr.close()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "run.jsonl"
+            path.write_text("valuable evidence\n")
+            with mock.patch.object(
+                sys, "argv", ["observe", "--url=http://localhost:8080", f"--log={path}"]
+            ):
+                with self.assertRaises(FileExistsError):
+                    observe.main()
+            self.assertEqual(path.read_text(), "valuable evidence\n")
 
 
 if __name__ == "__main__":

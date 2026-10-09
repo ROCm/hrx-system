@@ -7,7 +7,8 @@
 """Read-only terminal dashboard for observe.py JSONL, live or recorded.
 
 The viewer never connects to a model or samples this machine. Its bounded state
-contains the latest measurements, aggregate epoch counters and short histories.
+contains per-incarnation owner snapshots and short sampled histories. Totals
+never depend on retaining all events. Stream gaps remain visible.
 --snapshot prints the same view; --at selects a recorded elapsed time.
 """
 
@@ -48,52 +49,98 @@ def history(values, maximum=None):
     return "".join(levels[min(9, max(0, int(value / maximum * 9)))] for value in values)
 
 
+class StreamView:
+    def __init__(self, metadata, resets=0):
+        self.metadata = metadata
+        self.resets = resets
+        self.partial = False
+        self.missed = 0
+        self.latest = {}
+        self.event_times = {}
+        self.counters = None
+        self.counter_time_ns = None
+        self.output_rates = collections.deque(maxlen=60)
+        self.fill_history = collections.deque(maxlen=60)
+
+    def apply(self, data, elapsed_ns):
+        event = data["event"]
+        if event == "stream" and event not in self.latest:
+            self.partial = data["partial"]
+        if event == "gap":
+            self.missed += data["to"] - data["from"]
+        self.latest[event] = data
+        self.event_times[event] = elapsed_ns
+        counters = (
+            data.get("values")
+            if event == "counters"
+            else data.get("counters")
+            if event == "snapshot"
+            else None
+        )
+        if counters is not None:
+            when = data["time_ns"]
+            # Historical snapshots can follow a newer poll-time snapshot.
+            # They remain event evidence, not a reason to roll totals backward.
+            if self.counter_time_ns is None or when > self.counter_time_ns:
+                if self.counters is not None:
+                    delta = counters["output_tokens"] - self.counters["output_tokens"]
+                    if delta < 0:
+                        raise ValueError(
+                            "counters regressed within one stream incarnation"
+                        )
+                    self.output_rates.append(
+                        delta * 1e9 / (when - self.counter_time_ns)
+                    )
+                self.counters, self.counter_time_ns = counters, when
+        if event == "epoch":
+            self.fill_history.append(
+                (data["prefill_tokens"] + data["decode_tokens"])
+                / data["token_capacity"]
+            )
+
+
 class RunView:
     def __init__(self):
         self.last = None
         self.latest = {}
         self.event_times = {}
-        self.epoch_totals = collections.Counter()
-        self.output_rates = collections.deque(maxlen=60)
-        self.fill_history = collections.deque(maxlen=60)
+        # Only the current incarnation of each catalog entry is retained.
+        self.streams = {}
         self.messages = collections.deque(maxlen=6)
 
     def apply(self, record):
         self.last = record
-        data = record["data"]
+        data, elapsed_ns = record["data"], record["elapsed_ns"]
         event = data["event"]
-        if event in (
-            "run",
-            "run_end",
-            "ready",
-            "heartbeat",
-            "epoch",
-            "system",
-            "system_inventory",
-        ):
+        if record["source"] == "server":
+            metadata = record["stream"]
+            key = (metadata["scope"], metadata.get("model"))
+            stream = self.streams.get(key)
+            if stream is None or stream.metadata["identity"] != metadata["identity"]:
+                stream = StreamView(
+                    metadata, 0 if stream is None else stream.resets + 1
+                )
+                self.streams[key] = stream
+            stream.apply(data, elapsed_ns)
+        else:
             self.latest[event] = data
-            self.event_times[event] = record["elapsed_ns"]
-        if event == "epoch":
-            self.epoch_totals["epochs"] += 1
-            for key in (
-                "prefill_tokens",
-                "decode_tokens",
-                "selected_tokens_including_eos",
-                "traversals",
-                "model_ms",
-                "token_capacity",
-            ):
-                self.epoch_totals[key] += data[key]
-            self.fill_history.append(
-                (data["prefill_tokens"] + data["decode_tokens"])
-                / data["token_capacity"]
+            self.event_times[event] = elapsed_ns
+        if event in (
+            "diagnostic",
+            "error",
+            "request_end",
+            "session_end",
+            "gap",
+            "stream_reset",
+        ):
+            name = record.get("stream", {}).get("model", record["source"])
+            self.messages.append(
+                text(
+                    name
+                    + ": "
+                    + json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+                )[:512]
             )
-        elif event == "heartbeat":
-            self.output_rates.append(data["interval_output_tokens_per_second"])
-        elif event == "diagnostic":
-            self.messages.append(text(data["text"])[:512])
-        elif event in ("admit", "complete", "cancel", "evict"):
-            self.messages.append(text(json.dumps(data, separators=(",", ":")))[:512])
 
 
 class LogReader:
@@ -146,71 +193,123 @@ def render(view, all_sensors=False, now_ns=None, width=None):
     if view.last is None:
         return ["LOOM SERVE  |  waiting for a complete log record"]
     latest = view.latest
-    ended = latest.get("run_end")
+    ended = "observation_end" in latest
     elapsed_ns = view.last["elapsed_ns"]
     lag = 0 if now_ns is None or ended else max(0, now_ns - view.last["unix_time_ns"])
     cursor_ns = elapsed_ns + lag
     state = (
-        f"FINISHED exit={ended['return_code']}"
+        "OBSERVER STOPPED (server lifetime independent)"
         if ended
-        else "RECORDED (no run_end at cursor)"
+        else "RECORDED"
         if now_ns is None
-        else f"record age {lag / 1e9:.1f}s (no run_end)"
+        else f"record age {lag / 1e9:.1f}s"
     )
-    hostname = latest.get("run", {}).get("host", {}).get("node", "unknown host")
+    begin = latest.get("observation_begin", {})
     lines = [
-        f"LOOM SERVE  |  {text(hostname)}  |  +{elapsed_ns / 1e9:.1f}s  |  {state}"
+        f"LOOM SERVE  |  {text(begin.get('url', '--'))}  |  +{elapsed_ns / 1e9:.1f}s  |  {state}",
+        f"Observed streams {len(view.streams)}  record #{view.last['sequence']}  totals come from owner snapshots",
     ]
-    ready = latest.get("ready", {})
-    lines.append(
-        f"Scheduler {text(ready.get('scheduler', '--'))}  rows {ready.get('rows', '--')}"
-        f"  packing {text(ready.get('packing', '--'))}  cached shapes {ready.get('shape_count', '--')}"
-        f"  record #{view.last['sequence']}"
-    )
 
-    def age(event):
-        when = view.event_times.get(event)
+    def age(times, event):
+        when = times.get(event)
         return "--" if when is None else number((cursor_ns - when) / 1e9, "s")
 
-    heartbeat = latest.get("heartbeat", {})
-    epoch = latest.get("epoch", {})
-    totals = view.epoch_totals
-    lines.extend(
-        [
-            "",
-            "SCHEDULING",
-            f"Phase {text(heartbeat.get('phase', 'loading'))}  heartbeat age {age('heartbeat')}"
-            f"  last completed epoch age {age('epoch')}",
-            f"Rows active {heartbeat.get('active_rows', '--')}  prefill {heartbeat.get('prefill_rows', '--')}"
-            f"  decode {heartbeat.get('decode_rows', '--')}  backpressured {heartbeat.get('backpressured_rows', '--')}",
-            f"Interval rates: output {number(heartbeat.get('interval_output_tokens_per_second'), ' tok/s')}"
-            f"  prefill {number(heartbeat.get('interval_prefill_tokens_per_second'), ' tok/s')}  (output includes EOS)",
-            f"Totals: {totals['prefill_tokens']:,} prompt inputs + {totals['decode_tokens']:,} decode inputs"
-            f" -> {totals['selected_tokens_including_eos']:,} selected outputs",
-            f"Completed {totals['epochs']:,} epochs / {totals['traversals']:,} traversals"
-            f"  model wall {totals['model_ms'] / 1000:.2f}s",
-        ]
-    )
-    if epoch:
-        useful = epoch["prefill_tokens"] + epoch["decode_tokens"]
-        fill = useful / epoch["token_capacity"]
-        filled = round(fill * 24)
-        lines.append(
-            f"Last epoch {epoch['epoch']}: {epoch['spans']} spans  "
-            f"{epoch['prefill_tokens']}P + {epoch['decode_tokens']}D / {epoch['token_capacity']} slots"
-            f"  [{('#' * filled).ljust(24, '.')}] {fill:.0%}  {epoch['model_ms']:.1f}ms"
+    for stream in view.streams.values():
+        metadata, values = stream.metadata, stream.latest
+        label = (
+            "SERVER"
+            if metadata["scope"] == "server"
+            else "MODEL " + text(metadata["model"])
         )
+        lines.extend(
+            [
+                "",
+                label + f"  [{text(metadata['identity'])}]",
+                f"History {'partial' if stream.partial else 'from start'}  missed {stream.missed:,} records  resets {stream.resets}",
+            ]
+        )
+        counters = stream.counters
+        if counters is None:
+            lines.append("Work counters unavailable")
+        else:
+            lines.extend(
+                [
+                    f"Requests {counters['requests']:,}  completed {counters['completed']:,}  rejected {counters['rejected']:,}"
+                    f"  cancelled {counters['cancelled']:,}  failed {counters['failed']:,}",
+                    f"Device work: {counters['input_tokens']:,} input tokens  {counters['output_tokens']:,} selected outputs (includes EOS)"
+                    f"  {counters['batches']:,} completed invocations",
+                ]
+            )
+        snapshot = values.get("snapshot")
+        if snapshot:
+            lines.append(
+                f"Phase {text(snapshot['phase'])}  active {snapshot['active']}  queued {snapshot['queued']}"
+                f"  snapshot age {age(stream.event_times, 'snapshot')}"
+            )
+        activity = values.get("text_activity")
+        if activity:
+            lines.append(
+                f"Rows prefill {activity['prefill_rows']}  decode {activity['decode_rows']}"
+                f"  backpressured {activity['backpressured_rows']}"
+            )
+        work = values.get("text_work")
+        if work:
+            lines.append(
+                f"Work snapshot: {work['prefill_tokens']:,} prompt + {work['decode_tokens']:,} decode inputs"
+                f"  {work['completed_epochs']:,} epochs / {work['traversals']:,} traversals"
+                f"  host-observed model {work['model_ns'] / 1e9:.2f}s"
+            )
+        epoch = values.get("epoch")
+        if epoch:
+            useful = epoch["prefill_tokens"] + epoch["decode_tokens"]
+            lines.append(
+                f"Last epoch {epoch['epoch']}: {epoch['spans']} spans  "
+                f"{epoch['prefill_tokens']}P + {epoch['decode_tokens']}D / {epoch['token_capacity']} slots"
+                f"  {useful / epoch['token_capacity']:.0%}  {epoch['model_ns'] / 1e6:.1f}ms"
+            )
+            lines.append(
+                "Sampled committed fill |"
+                + history(stream.fill_history, 1)
+                + "| (not GPU utilization)"
+            )
+        if stream.output_rates:
+            lines.append(
+                "Output rate |"
+                + history(stream.output_rates)
+                + "| latest "
+                + number(stream.output_rates[-1], " tok/s")
+            )
+        memory = values.get("text_memory")
+        if memory:
+            pool = memory["pool"]
+            lines.append(
+                f"KV positions resident {pool['resident_tokens']:,}  reserved {pool['reserved_tokens']:,}"
+                f" / {pool['capacity_tokens']:,}  state {size(memory['elastic_state']['committed_bytes'])}"
+                f"  weights {size(memory['elastic_parameters']['committed_bytes'])}"
+            )
+        shared = values.get("shared_device_memory")
+        if shared:
+            lines.append(
+                f"Shared pool snapshot (not a model charge): workspace {size(shared['workspace_live_bytes'])}"
+                f" live / {size(shared['workspace_committed_bytes'])} backing"
+            )
+        image = values.get("image_work")
+        if image:
+            lines.extend(
+                [
+                    f"Image work: {image['generated_images']:,} images / {image['generated_pixels']:,} pixels"
+                    f"  {number(image['png_bytes'] / 2**20, ' MiB')} PNG",
+                    f"Cumulative host timings: preparation {image['prepare_ns'] / 1e9:.2f}s"
+                    f"  device readiness {image['execution_ns'] / 1e9:.2f}s"
+                    f"  PNG {image['png_ns'] / 1e9:.2f}s  JSON {image['json_ns'] / 1e9:.2f}s",
+                ]
+            )
+
     lines.extend(
         [
-            "Committed fill |"
-            + history(view.fill_history, 1)
-            + "|  0..100% (not GPU utilization)",
-            "Output rate   |"
-            + history(view.output_rates)
-            + "|  peak "
-            + number(max(view.output_rates, default=0), " tok/s"),
             "",
-            f"SYSTEM  (sample age {age('system')})",
+            f"LOCAL SYSTEM  |  {text(begin.get('observer_host', '--'))}"
+            f"  (sample age {age(view.event_times, 'system')}; not inferred from server URL)",
         ]
     )
     sample = latest.get("system", {})
@@ -219,7 +318,7 @@ def render(view, all_sensors=False, now_ns=None, width=None):
     process = sample.get("process", {})
     lines.append(
         f"CPU {number(host.get('cpu_busy_percent'), '%')}  load {text(host.get('load_average', '--'))}"
-        f"  server {number(process.get('cpu_percent'), '%')} / {size(process.get('resident_bytes'))} RSS"
+        f"  local PID {process.get('pid', '--')} {number(process.get('cpu_percent'), '%')} / {size(process.get('resident_bytes'))} RSS"
     )
     lines.append(
         f"RAM available {size(memory.get('MemAvailable'))} / {size(memory.get('MemTotal'))}"
@@ -367,7 +466,14 @@ def display(screen, reader, view, through_ns, all_sensors):
             if row < height - 1:
                 style = curses.A_NORMAL
                 if line.startswith(
-                    ("LOOM SERVE", "SCHEDULING", "SYSTEM", "SENSORS", "RECENT")
+                    (
+                        "LOOM SERVE",
+                        "MODEL",
+                        "SERVER",
+                        "LOCAL SYSTEM",
+                        "SENSORS",
+                        "RECENT",
+                    )
                 ):
                     style = curses.A_BOLD | (
                         curses.color_pair(1) if curses.has_colors() else 0

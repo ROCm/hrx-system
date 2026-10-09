@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
 
 package(
@@ -69,6 +70,19 @@ loom_cc_library(
         "//runtime/src/iree/tokenizer",
         "//runtime/src/iree/tokenizer/vocab",
     ],
+)
+
+py_library(
+    name = "logs_client",
+    srcs = ["logs.py"],
+)
+
+py_test(
+    name = "logs_client_test",
+    size = "small",
+    srcs = ["logs_test.py"],
+    main = "logs_test.py",
+    deps = [":logs_client"],
 )
 
 loom_cc_library(

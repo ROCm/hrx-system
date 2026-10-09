@@ -15,6 +15,7 @@ import argparse
 import base64
 import contextlib
 import http.client
+import io
 import json
 import signal
 import socket
@@ -26,6 +27,102 @@ import zlib
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+from experimental.loom_serve.http.logs import LogClient
+from experimental.loom_serve.tools.observe import EventLog, record_streams
+
+
+@contextlib.contextmanager
+def stalled_observer(client, rounds):
+    """Run the real pull consumer with its output sink held across model work."""
+    stopped, blocked, released = (threading.Event() for _ in range(3))
+
+    class Sink(io.StringIO):
+        def __init__(self):
+            super().__init__()
+            self.expected = None
+            self.seen = {}
+
+        def write(self, line):
+            value = json.loads(line)
+            model = value.get("stream", {}).get("model")
+            event = value["data"]
+            if (
+                model == "fixture-text"
+                and event["event"] == "cursor"
+                and not blocked.is_set()
+            ):
+                blocked.set()
+                released.wait()
+            if (
+                self.expected is not None
+                and model is not None
+                and event["event"] == "counters"
+            ):
+                self.seen[model] = event["values"]
+                if self.seen == self.expected:
+                    stopped.set()
+            return super().write(line)
+
+    sink = Sink()
+    url = "http://" + client.address
+
+    def observe():
+        try:
+            record_streams(LogClient(url, timeout=None), EventLog(sink), stopped)
+        finally:
+            blocked.set()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        observer = executor.submit(observe)
+        try:
+            blocked.wait()
+            if observer.done():
+                observer.result()
+                raise AssertionError("observer exited before its sink was blocked")
+            yield
+            fast = LogClient(url, timeout=None)
+            expected = {}
+            for model in fast.models():
+                batch = fast.poll(model)
+                expected[model] = next(
+                    record["values"]
+                    for record in batch.records
+                    if record["event"] == "counters"
+                )
+                counts = expected[model]
+                assert counts["requests"] == sum(
+                    counts[name]
+                    for name in ("completed", "rejected", "cancelled", "failed")
+                ), counts
+            for model in ("pixels", "vectors", "judge"):
+                assert (
+                    expected[model]["requests"]
+                    == expected[model]["completed"]
+                    == rounds
+                ), expected[model]
+                assert expected[model]["output_tokens"] == 0, expected[model]
+            assert expected["pixels"]["batches"] == rounds
+            assert expected["vectors"]["input_tokens"] == sum(
+                iteration + 6 for iteration in range(rounds)
+            )
+            sink.expected = expected
+            released.set()
+            observer.result()
+            records = [json.loads(line) for line in sink.getvalue().splitlines()]
+            assert any(
+                record["data"]["event"] == "gap"
+                and record.get("stream", {}).get("model") == "fixture-text"
+                for record in records
+            )
+            assert records[-1]["data"]["event"] == "observation_end"
+            assert sink.seen == expected
+            # Stopping the observer has no authority over the serving process.
+            assert client.request("/readyz") == {"status": "ready"}
+        finally:
+            stopped.set()
+            released.set()
+            observer.result()
 
 
 def complete(messages, maximum):
@@ -448,17 +545,18 @@ def main():
                     "judge",
                     "fixture-text",
                 ]
-                for iteration in range(arguments.rounds):
-                    print(
-                        json.dumps(
-                            {
-                                "event": "catalog_churn",
-                                "workers": workers,
-                                **run_round(client, iteration),
-                            }
-                        ),
-                        flush=True,
-                    )
+                with stalled_observer(client, arguments.rounds):
+                    for iteration in range(arguments.rounds):
+                        print(
+                            json.dumps(
+                                {
+                                    "event": "catalog_churn",
+                                    "workers": workers,
+                                    **run_round(client, iteration),
+                                }
+                            ),
+                            flush=True,
+                        )
             print(
                 json.dumps({"event": "catalog_joined", "workers": workers}), flush=True
             )
