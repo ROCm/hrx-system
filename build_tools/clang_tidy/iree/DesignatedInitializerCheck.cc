@@ -22,9 +22,42 @@
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Lex/Lexer.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/YAMLParser.h"
 
 namespace clang::tidy::iree {
 namespace {
+
+// Clang-tidy's boolean option accessors are out-of-line template
+// specializations that some distributions do not export to loadable plugins.
+// Use the exported string and YAML APIs while preserving upstream semantics.
+bool GetBooleanOption(ClangTidyCheck::OptionsView& Options, StringRef CheckName,
+                      StringRef OptionName, bool Default,
+                      ClangTidyContext* Context) {
+  std::optional<StringRef> Value = Options.get(OptionName);
+  if (!Value) {
+    return Default;
+  }
+  if (std::optional<bool> Parsed = llvm::yaml::parseBool(*Value)) {
+    return *Parsed;
+  }
+  long long Number = 0;
+  if (!Value->getAsInteger(10, Number)) {
+    return Number != 0;
+  }
+
+  std::string FullName = (CheckName + "." + OptionName).str();
+  Context->configurationDiag(
+      "invalid configuration value '%0' for option '%1'; expected a bool")
+      << *Value << FullName;
+  return Default;
+}
+
+void StoreBooleanOption(ClangTidyCheck::OptionsView& Options,
+                        ClangTidyOptions::OptionMap& OptionMap,
+                        StringRef OptionName, bool Value) {
+  Options.store(OptionMap, OptionName,
+                Value ? StringRef("true") : StringRef("false"));
+}
 
 struct FieldLabel {
   SourceLocation location;
@@ -865,10 +898,10 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
 DesignatedInitializerCheck::DesignatedInitializerCheck(
     StringRef Name, ClangTidyContext* Context)
     : ClangTidyCheck(Name, Context),
-      enable_comment_label_conversion_(
-          Options.get("EnableCommentLabelConversion", true)),
-      enable_setup_block_folding_(
-          Options.get("EnableSetupBlockFolding", true)) {}
+      enable_comment_label_conversion_(GetBooleanOption(
+          Options, Name, "EnableCommentLabelConversion", true, Context)),
+      enable_setup_block_folding_(GetBooleanOption(
+          Options, Name, "EnableSetupBlockFolding", true, Context)) {}
 
 void DesignatedInitializerCheck::registerMatchers(
     ast_matchers::MatchFinder* Finder) {
@@ -919,10 +952,10 @@ void DesignatedInitializerCheck::check(
 
 void DesignatedInitializerCheck::storeOptions(
     ClangTidyOptions::OptionMap& Options) {
-  this->Options.store(Options, "EnableCommentLabelConversion",
-                      enable_comment_label_conversion_);
-  this->Options.store(Options, "EnableSetupBlockFolding",
-                      enable_setup_block_folding_);
+  StoreBooleanOption(this->Options, Options, "EnableCommentLabelConversion",
+                     enable_comment_label_conversion_);
+  StoreBooleanOption(this->Options, Options, "EnableSetupBlockFolding",
+                     enable_setup_block_folding_);
 }
 
 }  // namespace clang::tidy::iree

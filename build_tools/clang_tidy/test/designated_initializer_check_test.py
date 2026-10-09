@@ -225,6 +225,36 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn("/*.ordinal=*/1,", fixed_source)
         self.assertIn("Numbers configured = {.first = 20, .second = 21};", fixed_source)
 
+    def test_invalid_boolean_option_is_diagnosed_and_uses_default(self):
+        source = clang_tidy_test.source_path(
+            __file__, "designated_initializer_check.cc"
+        )
+        output, fixed_source, _ = clang_tidy_test.run_clang_tidy_fix_and_compile(
+            clang_tidy=_ARGS.clang_tidy,
+            clangxx=_ARGS.clangxx,
+            plugin=_ARGS.plugin,
+            checks="-*,iree-cpp-designated-initializer",
+            source=source,
+            companion_files=[
+                clang_tidy_test.source_path(__file__, "designated_initializer_check.h")
+            ],
+            compiler_args=["-std=c++20", "-pedantic-errors", "-Werror"],
+            clang_tidy_args=[
+                '--config={"CheckOptions": {'
+                '"iree-cpp-designated-initializer.EnableSetupBlockFolding": '
+                '"invalid"}}'
+            ],
+        )
+
+        self.assertIn(
+            "invalid configuration value 'invalid' for option "
+            "'iree-cpp-designated-initializer.EnableSetupBlockFolding'; "
+            "expected a bool",
+            output,
+        )
+        self.assertIn("fold aggregate setup", output)
+        self.assertIn("Numbers configured = {.first = 20, .second = 21};", fixed_source)
+
     def test_check_is_inactive_before_cxx20(self):
         output = clang_tidy_test.run_clang_tidy(
             clang_tidy=_ARGS.clang_tidy,
