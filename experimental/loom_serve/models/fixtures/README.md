@@ -154,6 +154,15 @@ assertion. Real model quality and controlled performance runs follow the
 
 The [catalog workload](catalog_test.py) launches the actual shared executable
 with all four source-model families and a temporary 76-byte text checkpoint.
+It copies the source packages into an external deployment root, dereferencing
+runfiles symlinks, and moves numerical providers into sibling library directories
+referenced by each `sources.txt`. The separate VM preparation/control programs,
+weight policy and tokenizer assets remain in their packages. The child runs
+from that new root with relative model/asset paths and a nested deployment
+catalog; it cannot satisfy those paths through the original repository cwd.
+This checks source-package closure without adding a package format or changing
+the server's cwd-relative deployment semantics.
+
 Twenty concurrent client operations share two resident text rows and a
 128-position logical pool. Variable-length conversations run alongside image,
 embedding, decision and tokenizer requests; partial-prefix forks and rewind

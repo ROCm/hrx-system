@@ -181,17 +181,20 @@ def collect_events(client, models, stopped, record, *, ready=None):
 
 
 @contextlib.contextmanager
-def running_server(command, log_path, on_event=None):
+def running_server(command, log_path, on_event=None, *, cwd=None):
     """Own a child and optional independent HTTP capture through joined shutdown.
 
     log_path holds cold stdout/stderr diagnostics. Its .events.jsonl sibling
     holds scoped native /logz records. Both are test artifacts, not server sinks.
     Observation ends before shutdown: teardown-only records are not promised by
     a pull endpoint whose lifetime ends with the server.
+    An explicit cwd selects the child's deployment root without changing the
+    client's working directory or interpreting its catalog paths.
     """
     with log_path.open("x") as log, ThreadPoolExecutor(max_workers=2) as readers:
         process = subprocess.Popen(
             command,
+            cwd=cwd,
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.PIPE,

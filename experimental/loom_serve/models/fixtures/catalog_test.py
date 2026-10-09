@@ -17,6 +17,7 @@ import contextlib
 import http.client
 import io
 import json
+import shutil
 import socket
 import struct
 import tempfile
@@ -337,13 +338,13 @@ class Client:
 
 
 @contextlib.contextmanager
-def running_server(server, catalog, workers):
+def running_server(server, directory, catalog, workers):
     events = Events()
     log_path = catalog.parent / f"server-{workers}.log"
     with child_server(
         [
             str(server),
-            f"--models={catalog}",
+            f"--models={catalog.relative_to(directory)}",
             "--port=0",
             f"--workers={workers}",
             "--pool_backing=fixed",
@@ -351,6 +352,7 @@ def running_server(server, catalog, workers):
         ],
         log_path,
         events.record,
+        cwd=directory,
     ) as (_, address):
         try:
             assert address is not None, log_path.read_text()
@@ -534,13 +536,39 @@ def run_round(client, iteration, observations):
     }
 
 
+def copy_package(source, directory, kind):
+    """Relocate a fixture with numerical providers outside its model directory.
+
+    The separate prepare/control/weight-policy leaves and tokenizer stay in the
+    model package. Only sources.txt locates the sibling numerical providers;
+    neither the child's cwd nor its deployment catalog can supply that base.
+    Copies dereference runfiles symlinks without preserving their read-only cache
+    permissions, so the child reads independent, editable deployment files.
+    """
+    package = directory / "models" / kind
+    shutil.copytree(source, package, copy_function=shutil.copyfile)
+    providers = directory / "providers" / kind
+    providers.mkdir(parents=True)
+    catalog = package / "sources.txt"
+    names = [
+        line.strip()
+        for line in catalog.read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    for name in names:
+        (package / name).rename(providers / name)
+    catalog.write_text("".join(f"../../providers/{kind}/{name}\n" for name in names))
+    return package.relative_to(directory)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", type=Path, required=True)
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--rounds", type=int, default=4, choices=range(1, 17))
     arguments = parser.parse_args()
-    with tempfile.TemporaryDirectory(prefix="loom-catalog-churn-") as temporary:
+    server = arguments.server.absolute()
+    with tempfile.TemporaryDirectory(prefix="loom catalog ") as temporary:
         directory = Path(temporary)
         weights = directory / "text.safetensors"
         header = b'{"bias":{"dtype":"I32","shape":[1],"data_offsets":[0,4]}}'
@@ -549,13 +577,19 @@ def main():
             struct.pack("<Q", len(header)) + header + struct.pack("<I", 2)
         )
         catalog = json.loads(arguments.catalog.read_text())
-        text = arguments.catalog.parent / "text"
+        for model in catalog["models"]:
+            package = copy_package(Path(model["source"]), directory, model["kind"])
+            model["source"] = str(package)
+            for field in ("checkpoint", "assets"):
+                if field in model:
+                    model[field] = str(package)
+        text = copy_package(arguments.catalog.parent / "text", directory, "text")
         catalog["models"].append(
             {
                 "kind": "text",
                 "name": "fixture-text",
                 "source": str(text),
-                "weights": str(weights),
+                "weights": weights.name,
                 "tokenizer": str(text / "tokenizer.json"),
                 "rows": 2,
                 "context_capacity": 128,
@@ -567,10 +601,11 @@ def main():
                 "pending_requests": 32,
             }
         )
-        catalog_path = directory / "models.json"
+        catalog_path = directory / "configuration" / "models.json"
+        catalog_path.parent.mkdir()
         catalog_path.write_text(json.dumps(catalog))
         for workers in (1, 4):
-            with running_server(arguments.server, catalog_path, workers) as (
+            with running_server(server, directory, catalog_path, workers) as (
                 client,
                 observations,
             ):
@@ -595,7 +630,14 @@ def main():
                             flush=True,
                         )
             print(
-                json.dumps({"event": "catalog_joined", "workers": workers}), flush=True
+                json.dumps(
+                    {
+                        "event": "catalog_joined",
+                        "workers": workers,
+                        "external_sources": True,
+                    }
+                ),
+                flush=True,
             )
 
 
