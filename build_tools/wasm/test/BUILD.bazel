@@ -9,6 +9,7 @@
 
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//build_tools/bazel:cc_opts.bzl", "cc_opts")
 load(
     "//build_tools/bazel:executable.bzl",
     "iree_executable_test",
@@ -17,6 +18,8 @@ load(
 load(":wasm_rules_test.bzl", "wasm_rules_test_suite")
 
 package(default_visibility = ["//visibility:public"])
+
+_CXX_OPTIONS = cc_opts.iree_cxx_standard_options()
 
 platform(
     name = "wasm32_platform",
@@ -31,6 +34,8 @@ cc_binary(
         "wasi_toolchain_smoke.c",
         "wasi_toolchain_smoke.cc",
     ],
+    cxxopts = _CXX_OPTIONS.cxxopts,
+    features = _CXX_OPTIONS.features,
     tags = ["manual"],
     target_compatible_with = [
         "@platforms//cpu:wasm32",

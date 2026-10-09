@@ -998,9 +998,11 @@ TEST(AmdgpuHsacoTest, WritesGfx942CodeObjectTargetFlags) {
   ASSERT_GE(bytes.size(), 64u);
   EXPECT_EQ((uint8_t)bytes[7], LOOM_NATIVE_ELF_OS_ABI_AMDGPU_HSA);
   EXPECT_EQ((uint8_t)bytes[8], LOOM_NATIVE_ELF_ABI_VERSION_AMDGPU_HSA_V6);
-  EXPECT_EQ(LoadLeU32(bytes, 48), LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX942 |
-                                      LOOM_AMDGPU_ELF_FEATURE_XNACK_ANY_V4 |
-                                      LOOM_AMDGPU_ELF_FEATURE_SRAMECC_ANY_V4);
+  const uint32_t expected_flags =
+      static_cast<uint32_t>(LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX942) |
+      static_cast<uint32_t>(LOOM_AMDGPU_ELF_FEATURE_XNACK_ANY_V4) |
+      static_cast<uint32_t>(LOOM_AMDGPU_ELF_FEATURE_SRAMECC_ANY_V4);
+  EXPECT_EQ(LoadLeU32(bytes, 48), expected_flags);
 }
 
 TEST(AmdgpuHsacoTest, WritesTargetFeatureSuffixCodeObjectFlags) {
@@ -1028,9 +1030,11 @@ TEST(AmdgpuHsacoTest, WritesTargetFeatureSuffixCodeObjectFlags) {
   const std::string bytes = StreamBytes(stream.get());
 
   ASSERT_GE(bytes.size(), 64u);
-  EXPECT_EQ(LoadLeU32(bytes, 48), LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX942 |
-                                      LOOM_AMDGPU_ELF_FEATURE_SRAMECC_ON_V4 |
-                                      LOOM_AMDGPU_ELF_FEATURE_XNACK_OFF_V4);
+  const uint32_t expected_flags =
+      static_cast<uint32_t>(LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX942) |
+      static_cast<uint32_t>(LOOM_AMDGPU_ELF_FEATURE_SRAMECC_ON_V4) |
+      static_cast<uint32_t>(LOOM_AMDGPU_ELF_FEATURE_XNACK_OFF_V4);
+  EXPECT_EQ(LoadLeU32(bytes, 48), expected_flags);
 }
 
 }  // namespace

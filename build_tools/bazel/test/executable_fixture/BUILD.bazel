@@ -12,6 +12,8 @@ load("//build_tools/bazel:cc_opts.bzl", "cc_opts")
 
 package(default_visibility = ["//build_tools/bazel/test:__pkg__"])
 
+_CXX_OPTIONS = cc_opts.iree_cxx_standard_options()
+
 iree_cc_library(
     name = "library",
     testonly = True,
@@ -27,6 +29,8 @@ cc_binary(
     name = "binary",
     testonly = True,
     srcs = ["main.cc"],
+    cxxopts = _CXX_OPTIONS.cxxopts,
+    features = _CXX_OPTIONS.features,
     linkopts = cc_opts.iree_code_link_options(),
     linkstatic = False,
     tags = ["manual"],

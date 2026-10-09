@@ -8,10 +8,13 @@ load("@iree_clang_tidy_llvm//:config.bzl", "CLANG_TIDY_LLVM_COPTS", "CLANG_TIDY_
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//python:defs.bzl", "py_binary", "py_test")
+load("//build_tools/bazel:cc_opts.bzl", "cc_opts")
 load(":clang_tidy.bzl", "iree_clang_tidy", "iree_recursion_analysis")
 load(":test/clang_tidy_test.bzl", "clang_tidy_test_plugin")
 
 package(default_visibility = ["//visibility:public"])
+
+_CXX_OPTIONS = cc_opts.iree_cxx_standard_options()
 
 exports_files([
     "clang_tidy_config.yaml",
@@ -91,6 +94,8 @@ cc_binary(
         "iree/TraceChecks.h",
     ],
     copts = CLANG_TIDY_LLVM_COPTS,
+    cxxopts = _CXX_OPTIONS.cxxopts,
+    features = _CXX_OPTIONS.features,
     includes = ["."],
     linkshared = True,
     tags = ["manual"],
@@ -343,7 +348,8 @@ cc_library(
         "test/action_smoke.c",
         "test/action_smoke.cc",
     ],
-    features = ["layering_check"],
+    cxxopts = _CXX_OPTIONS.cxxopts,
+    features = _CXX_OPTIONS.features + ["layering_check"],
     tags = ["manual"],
 )
 

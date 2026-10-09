@@ -20,7 +20,7 @@ _CXX_ATTRIBUTES = {
     ),
     "cxx_standard": attr.string(
         configurable = False,
-        default = "c++17",
+        default = "c++20",
         values = ["c++17", "c++20", "c++23"],
         doc = "C++ language standard for this target.",
     ),
@@ -35,7 +35,7 @@ def _with_loom_compiler_options(
         copts,
         conlyopts,
         cxxopts,
-        cxx_standard = "c++17",
+        cxx_standard = "c++20",
         cxx_features = None,
         features = None):
     return cc_opts.iree_code_compiler_options(

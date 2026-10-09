@@ -45,7 +45,6 @@ _CLANG_COPTS = [
 _CLANG_CONLYOPTS = []
 
 _CLANG_CXXOPTS = [
-    "-Wno-c++20-extensions",
     "-Wno-ambiguous-member-template",
     "-Wno-invalid-offsetof",
     "-Wno-unused-lambda-capture",
@@ -172,11 +171,35 @@ def _compiler_options(
         "//conditions:default": clang_options,
     })
 
+def _iree_cxx_standard_options(cxx_standard = "c++20"):
+    """Returns compiler options selecting a first-party C++ language mode."""
+    if cxx_standard not in ["c++17", "c++20", "c++23"]:
+        fail("unsupported C++ standard: " + cxx_standard)
+
+    windows_cxx_options = []
+    windows_features = []
+
+    # rules_cc owns the Windows C++17 default. A target selecting another
+    # standard replaces that feature instead of overriding its command line.
+    if cxx_standard != "c++17":
+        windows_standard = "c++latest" if cxx_standard == "c++23" else cxx_standard
+        windows_cxx_options.append("/std:" + windows_standard)
+        windows_features.append("-default_cpp_std")
+    return struct(
+        features = _compiler_options([], [], windows_features, windows_features),
+        cxxopts = _compiler_options(
+            ["-std=" + cxx_standard],
+            ["-std=" + cxx_standard],
+            windows_cxx_options,
+            windows_cxx_options,
+        ),
+    )
+
 def _iree_code_compiler_options(
         copts = None,
         conlyopts = None,
         cxxopts = None,
-        cxx_standard = "c++17",
+        cxx_standard = "c++20",
         cxx_features = None,
         features = None):
     """Returns compiler options for first-party IREE C/C++ targets.
@@ -193,24 +216,16 @@ def _iree_code_compiler_options(
     for cxx_feature in cxx_features:
         if cxx_feature not in ["exceptions", "rtti"]:
             fail("unsupported C++ feature: " + cxx_feature)
+    standard_options = _iree_cxx_standard_options(cxx_standard)
     unix_cxx_options = [
-        "-std=" + cxx_standard,
         "-fexceptions" if "exceptions" in cxx_features else "-fno-exceptions",
         "-frtti" if "rtti" in cxx_features else "-fno-rtti",
     ]
     windows_cxx_options = ["/GR" if "rtti" in cxx_features else "/GR-"]
-    windows_features = []
-
-    # rules_cc owns the Windows C++17 default. A target selecting another
-    # standard replaces that feature instead of overriding its command line.
-    if cxx_standard != "c++17":
-        windows_standard = "c++latest" if cxx_standard == "c++23" else cxx_standard
-        windows_cxx_options.append("/std:" + windows_standard)
-        windows_features.append("-default_cpp_std")
     return struct(
         features = _append(
             features,
-            _compiler_options([], [], windows_features, windows_features),
+            standard_options.features,
         ),
         copts = _append(
             _compiler_options(
@@ -231,7 +246,7 @@ def _iree_code_compiler_options(
             conlyopts,
         ),
         cxxopts = _append(
-            _compiler_options(
+            standard_options.cxxopts + _compiler_options(
                 unix_cxx_options + _CLANG_CXXOPTS,
                 unix_cxx_options + _GCC_CXXOPTS,
                 windows_cxx_options + _CLANG_CL_CXXOPTS,
@@ -248,4 +263,5 @@ def _iree_code_link_options(linkopts = None):
 cc_opts = struct(
     iree_code_compiler_options = _iree_code_compiler_options,
     iree_code_link_options = _iree_code_link_options,
+    iree_cxx_standard_options = _iree_cxx_standard_options,
 )

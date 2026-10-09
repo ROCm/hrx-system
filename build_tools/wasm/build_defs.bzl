@@ -10,6 +10,9 @@ load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//build_tools/bazel:cc_opts.bzl", "cc_opts")
+
+_CXX_OPTIONS = cc_opts.iree_cxx_standard_options()
 
 IreeWasmJsInfo = provider(
     doc = "JavaScript companion sources for a wasm import module.",
@@ -150,6 +153,8 @@ _WASM32_COMPATIBLE_WITH = ["@platforms//cpu:wasm32"]
 
 def _with_wasm_target_compatibility(kwargs):
     kwargs = dict(kwargs)
+    kwargs["cxxopts"] = _CXX_OPTIONS.cxxopts + kwargs.get("cxxopts", [])
+    kwargs["features"] = _CXX_OPTIONS.features + kwargs.get("features", [])
     kwargs["target_compatible_with"] = kwargs.get("target_compatible_with", []) + _WASM32_COMPATIBLE_WITH
     return kwargs
 

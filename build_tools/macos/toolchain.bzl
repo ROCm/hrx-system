@@ -149,7 +149,7 @@ def macos_cc_toolchains(name, repository_path, metadata, minimum_os, cross):
     cc_args(
         name = "libcxx",
         actions = [_ACTIONS + "cpp_compile_actions"],
-        args = ["-std=c++17", "-nostdinc++", "-isystem", repository_path + "/cxx"],
+        args = ["-std=c++20", "-nostdinc++", "-isystem", repository_path + "/cxx"],
         data = ["cxx/" + path for path in metadata["cxx_headers"]],
     )
     cc_args(

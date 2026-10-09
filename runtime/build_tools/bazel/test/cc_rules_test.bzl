@@ -175,18 +175,18 @@ def _test_runtime_cxx_binary_applies_cxx_options_impl(env, target):
     compile_action = _find_compile_action(env, target)
     compiler_path = compile_action.argv[0].lower()
 
-    # Inspect the effective command: the Windows toolchain supplies C++17,
-    # while Unix targets select it through their private compiler options.
+    # Inspect the effective command: first-party targets replace the Windows
+    # toolchain default and select C++20 explicitly on every platform.
     standard_options = [
         option
         for option in compile_action.argv
         if option.startswith("/std:") or option.startswith("-std=")
     ]
     if "/W3" in copts:
-        env.expect.that_collection(standard_options).contains_exactly(["/std:c++17"])
+        env.expect.that_collection(standard_options).contains_exactly(["/std:c++20"])
     else:
         # Unix toolchains may emit a default before the target's selection.
-        env.expect.that_collection(standard_options[-1:]).contains_exactly(["-std=c++17"])
+        env.expect.that_collection(standard_options[-1:]).contains_exactly(["-std=c++20"])
     if compiler_path.endswith("clang-cl.exe"):
         _expect_value(env, compile_action.argv, "-Wno-invalid-offsetof")
 
