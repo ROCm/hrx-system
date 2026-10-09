@@ -145,6 +145,26 @@ iree_status_t iree_hal_amdgpu_loaded_code_object_query_range(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_amdgpu_loaded_code_object_query_load_info(
+    const iree_hal_amdgpu_libhsa_t* libhsa,
+    hsa_loaded_code_object_t loaded_code_object,
+    iree_hal_amdgpu_loaded_code_object_load_info_t* out_load_info) {
+  IREE_ASSERT_ARGUMENT(out_load_info);
+  memset(out_load_info, 0, sizeof(*out_load_info));
+
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_loaded_code_object_query_range(
+      libhsa, loaded_code_object, &out_load_info->range));
+  hsa_status_t hsa_status =
+      libhsa->amd_loader.hsa_ven_amd_loader_loaded_code_object_get_info(
+          loaded_code_object,
+          HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_DELTA,
+          &out_load_info->load_delta);
+  return iree_status_from_hsa_status(
+      __FILE__, __LINE__, hsa_status,
+      "hsa_ven_amd_loader_loaded_code_object_get_info",
+      "querying loaded executable code-object load delta");
+}
+
 iree_status_t iree_hal_amdgpu_loaded_code_object_query_agent_range(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_executable_t executable,
     hsa_agent_t device_agent,
@@ -157,4 +177,18 @@ iree_status_t iree_hal_amdgpu_loaded_code_object_query_agent_range(
       libhsa, executable, device_agent, &loaded_code_object));
   return iree_hal_amdgpu_loaded_code_object_query_range(
       libhsa, loaded_code_object, out_range);
+}
+
+iree_status_t iree_hal_amdgpu_loaded_code_object_query_agent_load_info(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_executable_t executable,
+    hsa_agent_t device_agent,
+    iree_hal_amdgpu_loaded_code_object_load_info_t* out_load_info) {
+  IREE_ASSERT_ARGUMENT(out_load_info);
+  memset(out_load_info, 0, sizeof(*out_load_info));
+
+  hsa_loaded_code_object_t loaded_code_object = {0};
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_loaded_code_object_find(
+      libhsa, executable, device_agent, &loaded_code_object));
+  return iree_hal_amdgpu_loaded_code_object_query_load_info(
+      libhsa, loaded_code_object, out_load_info);
 }

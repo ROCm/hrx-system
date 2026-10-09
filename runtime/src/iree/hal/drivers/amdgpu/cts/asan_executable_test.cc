@@ -15,8 +15,79 @@
 #include "iree/hal/drivers/amdgpu/abi/asan.h"
 #include "iree/hal/drivers/amdgpu/abi/feedback.h"
 #include "iree/hal/drivers/amdgpu/api.h"
+#include "iree/hal/drivers/amdgpu/buffer.h"
+#include "iree/hal/drivers/amdgpu/logical_device.h"
 
 namespace iree::hal::cts {
+
+static iree_status_t QueryExecutableGlobalDeviceAddress(
+    iree_hal_executable_t* executable, iree_string_view_t name,
+    iree_device_size_t expected_length, uint64_t* out_address) {
+  *out_address = 0;
+  bool found = false;
+  iree_hal_executable_global_t global = iree_hal_executable_global_invalid();
+  IREE_RETURN_IF_ERROR(iree_hal_executable_try_lookup_global_by_name(
+      executable, name, &found, &global));
+  if (!found) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "executable global `%.*s` not found",
+                            (int)name.size, name.data);
+  }
+
+  iree_hal_executable_global_info_t info;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_executable_global_info(executable, global, &info));
+  if (info.byte_length != expected_length) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "executable global `%.*s` has length %" PRIu64 ", expected %" PRIu64,
+        (int)name.size, name.data, (uint64_t)info.byte_length,
+        (uint64_t)expected_length);
+  }
+
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_executable_global_buffer(executable, global, &buffer));
+  iree_hal_buffer_t* allocated_buffer =
+      iree_hal_buffer_allocated_buffer(buffer);
+  const uint64_t allocation_address =
+      (uint64_t)(uintptr_t)iree_hal_amdgpu_buffer_device_pointer(
+          allocated_buffer);
+  if (!allocation_address) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "executable global `%.*s` has no native AMDGPU allocation",
+        (int)name.size, name.data);
+  }
+  if (!iree_checked_add_u64(allocation_address,
+                            iree_hal_buffer_byte_offset(buffer), out_address)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "executable global `%.*s` address overflows",
+                            (int)name.size, name.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t ReadAsanShadowBytes(
+    iree_hal_amdgpu_logical_device_t* logical_device,
+    uint64_t application_address, iree_device_size_t application_length,
+    std::vector<uint8_t>* out_shadow_bytes) {
+  out_shadow_bytes->clear();
+  iree_hal_amdgpu_shadow_map_t* shadow_map =
+      iree_hal_amdgpu_asan_state_shadow_map(&logical_device->asan);
+  if (!shadow_map) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "AMDGPU ASAN shadow map is disabled");
+  }
+
+  iree_hal_amdgpu_shadow_map_range_t shadow_range;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_shadow_map_calculate_range(
+      shadow_map, application_address, application_length, &shadow_range));
+  out_shadow_bytes->resize(shadow_range.shadow_length);
+  return iree_hsa_memory_copy(
+      IREE_LIBHSA(logical_device->asan.libhsa), out_shadow_bytes->data(),
+      (void*)(uintptr_t)shadow_range.shadow_address, out_shadow_bytes->size());
+}
 
 class AsanExecutableTest : public ::testing::TestWithParam<BackendInfo> {
  protected:
@@ -49,13 +120,21 @@ class AsanExecutableTest : public ::testing::TestWithParam<BackendInfo> {
     ASSERT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
               target_result.outcome);
 
+    executable_target_ = target_result.target;
+
+    IREE_ASSERT_OK(
+        LoadExecutable("asan_executable_test.bin", executable_.out()));
+  }
+
+  iree_status_t LoadExecutable(std::string_view executable_file,
+                               iree_hal_executable_t** out_executable) {
     iree_hal_executable_load_params_t load_params;
     iree_hal_executable_load_params_initialize(&load_params);
     load_params.executable_data = GetParam().executable_data(
-        iree_make_cstring_view("asan_executable_test.bin"));
-    IREE_ASSERT_OK(iree_hal_executable_load(iree_hal_queue_family(queue()),
-                                            target_result.target, &load_params,
-                                            executable_.out()));
+        iree_make_string_view(executable_file.data(), executable_file.size()));
+    return iree_hal_executable_load(iree_hal_queue_family(queue()),
+                                    executable_target_, &load_params,
+                                    out_executable);
   }
 
   void TearDown() override {
@@ -75,8 +154,64 @@ class AsanExecutableTest : public ::testing::TestWithParam<BackendInfo> {
   }
 
   SanitizerCachedBackendDevice asan_device_;
+  const iree_hal_executable_target_t* executable_target_ = nullptr;
   Ref<iree_hal_executable_t> executable_;
 };
+
+TEST_P(AsanExecutableTest, RevokesAndRepublishesGlobalLayout) {
+  constexpr iree_device_size_t kObjectLength = 16;
+  constexpr iree_device_size_t kObjectAndRedzoneLength = 24;
+  constexpr uint8_t kAddressableShadowValue = 0x00;
+  constexpr uint8_t kHeapRedzoneShadowValue = 0xFA;
+  const iree_string_view_t object_name =
+      iree_make_cstring_view("iree_asan_global_layout_data");
+  auto* logical_device =
+      reinterpret_cast<iree_hal_amdgpu_logical_device_t*>(device());
+
+  Ref<iree_hal_executable_t> first_executable;
+  IREE_ASSERT_OK(
+      LoadExecutable("asan_global_layout_test.bin", first_executable.out()));
+  uint64_t first_address = 0;
+  IREE_ASSERT_OK(QueryExecutableGlobalDeviceAddress(
+      first_executable, object_name, kObjectLength, &first_address));
+
+  std::vector<uint8_t> shadow_bytes;
+  IREE_ASSERT_OK(ReadAsanShadowBytes(logical_device, first_address,
+                                     kObjectAndRedzoneLength, &shadow_bytes));
+  ASSERT_EQ(shadow_bytes.size(), 3u);
+  EXPECT_EQ(shadow_bytes[0], kAddressableShadowValue);
+  EXPECT_EQ(shadow_bytes[1], kAddressableShadowValue);
+  EXPECT_EQ(shadow_bytes[2], kHeapRedzoneShadowValue);
+
+  first_executable.reset();
+  IREE_ASSERT_OK(ReadAsanShadowBytes(logical_device, first_address,
+                                     kObjectAndRedzoneLength, &shadow_bytes));
+  ASSERT_EQ(shadow_bytes.size(), 3u);
+  EXPECT_EQ(shadow_bytes[0], kHeapRedzoneShadowValue);
+  EXPECT_EQ(shadow_bytes[1], kHeapRedzoneShadowValue);
+  EXPECT_EQ(shadow_bytes[2], kHeapRedzoneShadowValue);
+
+  Ref<iree_hal_executable_t> second_executable;
+  IREE_ASSERT_OK(
+      LoadExecutable("asan_global_layout_test.bin", second_executable.out()));
+  uint64_t second_address = 0;
+  IREE_ASSERT_OK(QueryExecutableGlobalDeviceAddress(
+      second_executable, object_name, kObjectLength, &second_address));
+  IREE_ASSERT_OK(ReadAsanShadowBytes(logical_device, second_address,
+                                     kObjectAndRedzoneLength, &shadow_bytes));
+  ASSERT_EQ(shadow_bytes.size(), 3u);
+  EXPECT_EQ(shadow_bytes[0], kAddressableShadowValue);
+  EXPECT_EQ(shadow_bytes[1], kAddressableShadowValue);
+  EXPECT_EQ(shadow_bytes[2], kHeapRedzoneShadowValue);
+
+  second_executable.reset();
+  IREE_ASSERT_OK(ReadAsanShadowBytes(logical_device, second_address,
+                                     kObjectAndRedzoneLength, &shadow_bytes));
+  ASSERT_EQ(shadow_bytes.size(), 3u);
+  EXPECT_EQ(shadow_bytes[0], kHeapRedzoneShadowValue);
+  EXPECT_EQ(shadow_bytes[1], kHeapRedzoneShadowValue);
+  EXPECT_EQ(shadow_bytes[2], kHeapRedzoneShadowValue);
+}
 
 TEST_P(AsanExecutableTest, PublishesConfigGlobal) {
   bool found = false;

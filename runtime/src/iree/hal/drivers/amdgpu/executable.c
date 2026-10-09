@@ -791,6 +791,14 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
 // iree_hal_amdgpu_executable_t
 //===----------------------------------------------------------------------===//
 
+// ASAN shadow publication for one HSA loader-owned executable allocation.
+typedef struct iree_hal_amdgpu_executable_asan_publication_t {
+  // Device-visible base of the published loader allocation.
+  uint64_t application_address;
+  // Byte length of the published loader allocation.
+  iree_device_size_t mapped_length;
+} iree_hal_amdgpu_executable_asan_publication_t;
+
 typedef struct iree_hal_amdgpu_executable_load_variant_t {
   // Loaded HSA executable handle for this variant.
   hsa_executable_t handle;
@@ -800,6 +808,9 @@ typedef struct iree_hal_amdgpu_executable_load_variant_t {
 
   // Executable global lookup and per-device buffer alias cache for |handle|.
   iree_hal_amdgpu_global_table_t global_table;
+
+  // Loader allocation published into the logical-device ASAN shadow.
+  iree_hal_amdgpu_executable_asan_publication_t asan_publication;
 
   // Physical queue ordinal represented by this variant.
   iree_host_size_t physical_queue_ordinal;
@@ -815,8 +826,8 @@ typedef struct iree_hal_amdgpu_executable_t {
   // executable.
   const iree_hal_amdgpu_libhsa_t* libhsa;
 
-  // Borrowed HAL device used for global-buffer placement metadata.
-  iree_hal_device_t* device;
+  // Borrowed logical-device ASAN state used for executable shadow lifetime.
+  iree_hal_amdgpu_asan_state_t* asan_state;
 
   // Executable-owned copy of the exact HSACO bytes backing
   // |code_object_reader|.
@@ -899,9 +910,10 @@ iree_hal_amdgpu_executable_const_cast(const iree_hal_executable_t* base_value) {
 }
 
 static iree_status_t iree_hal_amdgpu_executable_create_empty(
-    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology,
+    iree_hal_amdgpu_asan_state_t* asan_state,
     iree_host_size_t physical_device_ordinal, iree_host_size_t export_count,
     iree_host_size_t load_variant_capacity, iree_host_size_t queue_scope_count,
     const iree_hal_amdgpu_queue_scope_t* queue_scopes,
@@ -988,7 +1000,7 @@ static iree_status_t iree_hal_amdgpu_executable_create_empty(
       queue_family, &iree_hal_amdgpu_executable_vtable, &executable->base);
   executable->host_allocator = host_allocator;
   executable->libhsa = libhsa;
-  executable->device = device;
+  executable->asan_state = asan_state;
   executable->kernel_count = export_count;
   uint8_t* executable_storage = (uint8_t*)executable;
   executable->export_infos =
@@ -1169,26 +1181,135 @@ iree_hal_amdgpu_executable_try_lookup_required_config_global(
   return iree_ok_status();
 }
 
+static bool iree_hal_amdgpu_executable_apply_load_delta(
+    uint64_t virtual_address, int64_t load_delta,
+    uint64_t* out_application_address) {
+  if (load_delta >= 0) {
+    return iree_checked_add_u64(virtual_address, (uint64_t)load_delta,
+                                out_application_address);
+  }
+  const uint64_t magnitude = (uint64_t)(-(load_delta + 1)) + 1;
+  if (virtual_address < magnitude) {
+    return false;
+  }
+  *out_application_address = virtual_address - magnitude;
+  return true;
+}
+
+static iree_status_t iree_hal_amdgpu_executable_publish_asan_data_layout(
+    iree_hal_amdgpu_executable_t* executable,
+    iree_hal_amdgpu_executable_load_variant_t* load_variant,
+    const iree_hal_amdgpu_hsaco_metadata_t* hsaco_metadata,
+    const iree_hal_amdgpu_asan_config_t* config) {
+  if (hsaco_metadata->data_object_count == 0) {
+    return iree_ok_status();
+  }
+  if (IREE_UNLIKELY(config->shadow_scale_shift !=
+                    IREE_HAL_AMDGPU_ASAN_GLOBAL_LAYOUT_V0_SHADOW_SCALE_SHIFT)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU ASAN global layout v0 requires shadow scale shift %u but the "
+        "logical device uses %u",
+        IREE_HAL_AMDGPU_ASAN_GLOBAL_LAYOUT_V0_SHADOW_SCALE_SHIFT,
+        config->shadow_scale_shift);
+  }
+
+  const iree_host_size_t physical_device_ordinal =
+      executable->physical_device_ordinal;
+  iree_hal_amdgpu_loaded_code_object_load_info_t load_info;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_loaded_code_object_query_agent_load_info(
+          executable->libhsa, load_variant->handle,
+          executable->device_agents[physical_device_ordinal], &load_info),
+      "querying ASAN code-object placement on physical device %" PRIhsz,
+      physical_device_ordinal);
+  uint64_t allocation_end = 0;
+  if (IREE_UNLIKELY(!iree_checked_add_u64(load_info.range.device_pointer,
+                                          load_info.range.byte_length,
+                                          &allocation_end))) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AMDGPU loaded code-object allocation [0x%016" PRIx64 ", +%" PRIu64
+        ") overflows",
+        load_info.range.device_pointer, load_info.range.byte_length);
+  }
+
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_asan_state_publish_allocated_range(
+          executable->asan_state, load_info.range.device_pointer,
+          load_info.range.byte_length, load_info.range.device_pointer,
+          /*accessible_length=*/0),
+      "poisoning loaded code-object allocation on physical device %" PRIhsz,
+      physical_device_ordinal);
+  load_variant->asan_publication =
+      (iree_hal_amdgpu_executable_asan_publication_t){
+          .application_address = load_info.range.device_pointer,
+          .mapped_length = load_info.range.byte_length,
+      };
+
+  const uint64_t shadow_granule = UINT64_C(1) << config->shadow_scale_shift;
+  for (iree_host_size_t i = 0; i < hsaco_metadata->data_object_count; ++i) {
+    const iree_hal_amdgpu_hsaco_metadata_data_object_t* data_object =
+        &hsaco_metadata->data_objects[i];
+    uint64_t application_address = 0;
+    uint64_t application_end = 0;
+    if (IREE_UNLIKELY(!iree_hal_amdgpu_executable_apply_load_delta(
+                          data_object->virtual_address, load_info.load_delta,
+                          &application_address) ||
+                      (application_address & (shadow_granule - 1)) != 0 ||
+                      !iree_checked_add_u64(application_address,
+                                            data_object->byte_length,
+                                            &application_end) ||
+                      application_address < load_info.range.device_pointer ||
+                      application_end > allocation_end)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU ASAN data symbol `%.*s` relocated range [0x%016" PRIx64
+          ", +%" PRIu64
+          ") escapes or misaligns loader allocation "
+          "[0x%016" PRIx64 ", +%" PRIu64 ")",
+          (int)data_object->name.size, data_object->name.data,
+          application_address, data_object->byte_length,
+          load_info.range.device_pointer, load_info.range.byte_length);
+    }
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_asan_state_publish_imported_range(
+                             executable->asan_state, application_address,
+                             data_object->byte_length),
+                         "publishing AMDGPU ASAN data symbol `%.*s`",
+                         (int)data_object->name.size, data_object->name.data);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amdgpu_executable_publish_asan_config(
     iree_hal_amdgpu_executable_t* executable,
     iree_hal_amdgpu_executable_load_variant_t* load_variant,
-    const iree_hal_amdgpu_asan_state_t* asan_state) {
+    const iree_hal_amdgpu_hsaco_metadata_t* hsaco_metadata) {
   iree_hal_executable_global_t global = iree_hal_executable_global_invalid();
   bool found = false;
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_executable_try_lookup_required_config_global(
           &load_variant->global_table, IREE_HAL_AMDGPU_ASAN_CONFIG_GLOBAL_NAME,
           sizeof(iree_hal_amdgpu_asan_config_t),
-          iree_hal_amdgpu_asan_state_is_enabled(asan_state),
+          iree_hal_amdgpu_asan_state_is_enabled(executable->asan_state),
           "AMDGPU ASAN shadow memory",
           "enable HAL ASAN runtime support before loading this executable",
           &found, &global));
   if (!found) {
+    if (IREE_UNLIKELY(hsaco_metadata->data_object_count != 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU executable advertises an ASAN global layout without the "
+          "required `%s` runtime global",
+          IREE_HAL_AMDGPU_ASAN_CONFIG_GLOBAL_NAME);
+    }
     return iree_ok_status();
   }
 
   iree_hal_amdgpu_asan_config_t config;
-  iree_hal_amdgpu_asan_state_populate_config(asan_state, &config);
+  iree_hal_amdgpu_asan_state_populate_config(executable->asan_state, &config);
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_publish_asan_data_layout(
+      executable, load_variant, hsaco_metadata, &config));
 
   iree_hal_buffer_t* global_buffer = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_global_table_buffer(
@@ -1675,7 +1796,7 @@ static iree_status_t iree_hal_amdgpu_executable_resolve_metadata_kernel_args(
 }
 
 static iree_status_t iree_hal_amdgpu_executable_initialize_variant_global_table(
-    iree_hal_amdgpu_executable_t* executable,
+    iree_hal_amdgpu_executable_t* executable, iree_hal_device_t* device,
     iree_hal_amdgpu_executable_load_variant_t* load_variant,
     iree_allocator_t host_allocator) {
   const iree_host_size_t physical_device_ordinal =
@@ -1685,7 +1806,7 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_variant_global_table(
           .host_allocator = host_allocator,
           .physical_device_ordinal = physical_device_ordinal,
           .libhsa = executable->libhsa,
-          .device = executable->device,
+          .device = device,
           .executable = load_variant->handle,
           .device_agent = executable->device_agents[physical_device_ordinal],
       };
@@ -1694,7 +1815,7 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_variant_global_table(
 }
 
 static iree_status_t iree_hal_amdgpu_executable_load_variant(
-    iree_hal_amdgpu_executable_t* executable,
+    iree_hal_amdgpu_executable_t* executable, iree_hal_device_t* device,
     const iree_hal_amdgpu_topology_t* topology,
     iree_host_size_t physical_device_ordinal,
     const iree_hal_executable_load_params_t* load_params,
@@ -1706,7 +1827,7 @@ static iree_status_t iree_hal_amdgpu_executable_load_variant(
       executable->code_object_reader, &out_load_variant->handle);
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_executable_initialize_variant_global_table(
-        executable, out_load_variant, host_allocator);
+        executable, device, out_load_variant, host_allocator);
   }
   return status;
 }
@@ -1719,7 +1840,7 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
     const iree_hal_executable_load_params_t* load_params,
     uint64_t executable_id, const iree_hal_amdgpu_executable_limits_t* limits,
     const iree_hal_amdgpu_feedback_state_t* feedback_state,
-    const iree_hal_amdgpu_asan_state_t* asan_state,
+    iree_hal_amdgpu_asan_state_t* asan_state,
     const iree_hal_amdgpu_tsan_state_t* tsan_state,
     iree_host_size_t physical_device_count,
     iree_hal_amdgpu_physical_device_t* const* physical_device_list,
@@ -1752,7 +1873,7 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
       load_variant_capacity = topology->gpu_agent_queue_count;
     }
     status = iree_hal_amdgpu_executable_create_empty(
-        device, queue_family, libhsa, topology, physical_device_ordinal,
+        queue_family, libhsa, topology, asan_state, physical_device_ordinal,
         metadata_counts.export_count, load_variant_capacity, queue_scope_count,
         queue_scopes, host_allocator, &executable);
   }
@@ -1786,7 +1907,7 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
   // Load executable and register it with selected GPU agents.
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_executable_load_variant(
-        executable, topology, physical_device_ordinal, load_params,
+        executable, device, topology, physical_device_ordinal, load_params,
         /*physical_queue_ordinal=*/0, host_allocator,
         iree_hal_amdgpu_executable_primary_variant(executable));
   }
@@ -1816,7 +1937,7 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
            iree_status_is_ok(status);
            ++physical_queue_ordinal) {
         status = iree_hal_amdgpu_executable_load_variant(
-            executable, topology, physical_device_ordinal, load_params,
+            executable, device, topology, physical_device_ordinal, load_params,
             physical_queue_ordinal, host_allocator,
             &executable->load_variants[physical_queue_ordinal]);
         if (iree_status_is_ok(status)) {
@@ -1836,7 +1957,7 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
     iree_hal_amdgpu_executable_load_variant_t* load_variant =
         &executable->load_variants[variant_ordinal];
     status = iree_hal_amdgpu_executable_publish_asan_config(
-        executable, load_variant, asan_state);
+        executable, load_variant, &hsaco_metadata);
     if (iree_status_is_ok(status)) {
       status = iree_hal_amdgpu_executable_publish_tsan_config(
           executable, load_variant, tsan_state);
@@ -2115,6 +2236,10 @@ static void iree_hal_amdgpu_executable_destroy(
        variant_ordinal < executable->load_variant_count; ++variant_ordinal) {
     iree_hal_amdgpu_executable_load_variant_t* load_variant =
         &executable->load_variants[variant_ordinal];
+    iree_hal_amdgpu_asan_state_publish_released_range(
+        executable->asan_state,
+        load_variant->asan_publication.application_address,
+        load_variant->asan_publication.mapped_length);
     iree_hal_amdgpu_global_table_deinitialize(&load_variant->global_table);
     if (load_variant->handle.handle) {
       iree_hal_amdgpu_hsa_cleanup_assert_success(

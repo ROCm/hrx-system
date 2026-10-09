@@ -143,11 +143,18 @@ iree_runtime_cc_test(
 
 iree_runtime_cc_library(
     name = "hsaco_metadata",
-    srcs = ["hsaco_metadata.c"],
+    srcs = [
+        "hsaco_data_layout.c",
+        "hsaco_data_layout.h",
+        "hsaco_elf.c",
+        "hsaco_elf.h",
+        "hsaco_metadata.c",
+    ],
     hdrs = ["hsaco_metadata.h"],
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/abi",
     ],
 )
 
@@ -157,6 +164,7 @@ iree_runtime_cc_test(
     deps = [
         ":hsaco_metadata",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amdgpu/abi",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
