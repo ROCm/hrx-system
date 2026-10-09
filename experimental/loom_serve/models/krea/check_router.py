@@ -33,27 +33,9 @@ from experimental.loom_serve.testing.http import (
     Events,
     control,
     running_server,
+    wait_counters,
+    wait_status,
 )
-
-
-def wait_event(events, kind, **fields):
-    def match():
-        return next(
-            (
-                event
-                for event in events.values
-                if event.get("event") == kind
-                and all(event.get(key) == value for key, value in fields.items())
-            ),
-            None,
-        )
-
-    with events.condition:
-        events.condition.wait_for(lambda: match() or events.closed)
-        value = match()
-        if value is None:
-            raise RuntimeError(f"server closed before {kind}: {fields}")
-        return value
 
 
 def send_image(address):
@@ -137,13 +119,23 @@ def run(command, directory, isolated=None):
                 request, address, "conversation", messages, 128, model="scout"
             )
             if isolated:
-                events.wait("admit", "conversation", model="scout")
+                wait_status(
+                    address, model="scout", active_requests=1, queued_requests=0
+                )
                 with send_image(address) as waiting:
-                    wait_event(
-                        events, "image_heartbeat", active_request=1, phase="waiting"
+                    wait_status(
+                        address,
+                        model="illustrator",
+                        active_requests=1,
+                        queued_requests=0,
+                        phase="waiting",
                     )
                     cancel(waiting)
-                wait_event(events, "image_cancelled", request=1, phase="active")
+                wait_counters(
+                    address,
+                    lambda counts: counts["cancelled"] == 1,
+                    model="illustrator",
+                )
                 print(
                     json.dumps({"event": "cancelled_before_image_admission"}),
                     flush=True,
@@ -153,15 +145,28 @@ def run(command, directory, isolated=None):
             followup = continuation(messages, first)
             if isolated:
                 with send_image(address) as image:
-                    wait_event(
-                        events, "image_heartbeat", active_request=2, phase="generating"
+                    wait_status(
+                        address,
+                        model="illustrator",
+                        active_requests=1,
+                        queued_requests=0,
+                        phase="generating",
                     )
                     # A second pending image must own no device storage and be
                     # cancellable without delaying the active image or text.
                     with send_image(address) as queued:
-                        wait_event(events, "image_accepted", request=3)
+                        wait_status(
+                            address,
+                            model="illustrator",
+                            active_requests=1,
+                            queued_requests=1,
+                        )
                         cancel(queued)
-                    wait_event(events, "image_cancelled", request=3, phase="queued")
+                    wait_counters(
+                        address,
+                        lambda counts: counts["cancelled"] == 2,
+                        model="illustrator",
+                    )
                     second_task = client.submit(
                         request,
                         address,
@@ -171,12 +176,8 @@ def run(command, directory, isolated=None):
                         checkpoint="anchor",
                         model="scout",
                     )
-                    wait_event(
-                        events,
-                        "enqueue",
-                        session="conversation",
-                        model="scout",
-                        request=2,
+                    wait_status(
+                        address, model="scout", active_requests=0, queued_requests=1
                     )
                     if control(address, "GET", "/healthz", 200) != {"status": "ready"}:
                         raise RuntimeError("health failed during image work")
@@ -276,30 +277,38 @@ def main():
         compare(baseline, candidate)
     sequence = runs[1][1]
     image_completions = [
-        index
-        for index, event in enumerate(sequence)
-        if event.get("event") == "image_execution"
+        event
+        for event in sequence
+        if event["event"] == "image_generated" and event["model"] == "illustrator"
     ]
-    continuation_admission = next(
-        index
-        for index, event in enumerate(sequence)
-        if event.get("event") == "admit"
-        and event.get("model") == "scout"
-        and event.get("request") == 2
-    )
-    if len(image_completions) != 1 or continuation_admission <= image_completions[0]:
+    admissions = [
+        event
+        for event in sequence
+        if event["event"] == "admit" and event["model"] == "scout"
+    ]
+    # Separate stream reads have no cross-model order. The native producer
+    # timestamps establish successful pin release before text readmission.
+    if (
+        len(image_completions) != 1
+        or len(admissions) != 2
+        or not admissions[1]["retained_tokens"]
+        or admissions[1]["time_ns"] <= image_completions[0]["time_ns"]
+    ):
         raise RuntimeError("cancellation or shared-pressure handoff failed")
-    heartbeats = [event for event in runs[1][1] if event.get("event") == "heartbeat"]
+    memory = [
+        event
+        for event in sequence
+        if event["event"] == "text_memory" and event["model"] == "scout"
+    ]
     if not any(
         event["elastic_parameters"]["committed_bytes"] == 0
         and event["elastic_parameters"]["released_bytes"] > 0
-        for event in heartbeats
+        for event in memory
     ):
         raise RuntimeError("text weights were not evicted during the image")
-    peak = max(
-        event["device_memory"]["retained_committed_bytes"] for event in heartbeats
-    )
-    reuse = max(event["device_memory"]["workspace_reuse_count"] for event in heartbeats)
+    shared = [event for event in sequence if event["event"] == "shared_device_memory"]
+    peak = max(event["retained_committed_bytes"] for event in shared)
+    reuse = max(event["workspace_reuse_count"] for event in shared)
     if peak > args.memory_bytes or reuse == 0:
         raise RuntimeError(f"shared pool contract failed: {peak=}, {reuse=}")
     print(
