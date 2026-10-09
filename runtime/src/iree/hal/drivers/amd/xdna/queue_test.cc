@@ -2703,21 +2703,76 @@ TEST(XdnaQueueTest, FinalPublicationAllowsImmediateDeviceRelease) {
 // These paths deliberately preserve live native ownership until process exit.
 // Child processes verify the retained resources and use _Exit so deliberate
 // retention does not become an accidental LeakSanitizer failure at exit.
+static void RunCleanupFailurePreservesParentOwnershipChild() {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  harness.native.destroy_status =
+      amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
+  harness.ReleaseDevice();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilQueueDestroyAttempted());
+  EXPECT_EQ(harness.native.queue_destroy_count, 1u);
+  EXPECT_EQ(harness.native.context_destroy_count, 0u);
+  EXPECT_EQ(harness.diagnostic_count, 1u);
+  std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
+}
+
+static void RunObserverFailurePreservesAcceptedOwnershipChild(Outcome outcome) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  harness.native.outcome = outcome;
+  ASSERT_NO_FATAL_FAILURE(harness.Submit());
+  const auto expected = outcome == Outcome::kUnretiredFailure
+                            ? IREE_STATUS_DATA_LOSS
+                            : IREE_STATUS_INTERNAL;
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(expected));
+  EXPECT_EQ(harness.live_memories_at_completion, 3u);
+  EXPECT_EQ(harness.native.live_memories, 3u);
+  harness.ReleaseDevice();
+  EXPECT_EQ(harness.native.queue_destroy_count, 0u);
+  EXPECT_EQ(harness.native.context_destroy_count, 0u);
+  EXPECT_GE(harness.diagnostic_count, 1u);
+  std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
+}
+
+static void RunObserverFailurePreservesEveryPendingInvocationChild() {
+  QueueHarness harness;
+  harness.native.pending_capacity = 2;
+  harness.native.hold_retirement = true;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  iree_hal_semaphore_t* second = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &second));
+  ASSERT_NO_FATAL_FAILURE(harness.Submit());
+  ASSERT_NO_FATAL_FAILURE(harness.Submit(second));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(2));
+  harness.native.outcome = Outcome::kRefreshFailure;
+  harness.native.Wake();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_INTERNAL));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_INTERNAL, second));
+  EXPECT_EQ(harness.native.live_memories, 6u);
+  harness.ReleaseDevice();
+  iree_hal_semaphore_release(second);
+  EXPECT_EQ(harness.native.queue_destroy_count, 0u);
+  EXPECT_EQ(harness.native.context_destroy_count, 0u);
+  std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
+}
+
+static void RunBusyNativeDestroyPreservesParentChild() {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  harness.native.destroy_status = amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
+  harness.ReleaseDevice();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilQueueDestroyAttempted());
+  EXPECT_EQ(harness.native.queue_destroy_count, 1u);
+  EXPECT_EQ(harness.native.context_destroy_count, 0u);
+  EXPECT_EQ(harness.diagnostic_count, 1u);
+  std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
+}
+
 TEST(XdnaQueueDeathTest, CleanupFailurePreservesParentOwnership) {
-  ASSERT_EXIT(
-      {
-        QueueHarness harness;
-        ASSERT_NO_FATAL_FAILURE(harness.Initialize());
-        harness.native.destroy_status =
-            amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
-        harness.ReleaseDevice();
-        ASSERT_NO_FATAL_FAILURE(harness.PollUntilQueueDestroyAttempted());
-        EXPECT_EQ(harness.native.queue_destroy_count, 1u);
-        EXPECT_EQ(harness.native.context_destroy_count, 0u);
-        EXPECT_EQ(harness.diagnostic_count, 1u);
-        std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
-      },
-      ::testing::ExitedWithCode(0), "");
+  ASSERT_EXIT(RunCleanupFailurePreservesParentOwnershipChild(),
+              ::testing::ExitedWithCode(0), "");
 }
 
 TEST(XdnaQueueDeathTest, ObserverFailuresPreserveAcceptedOwnership) {
@@ -2725,72 +2780,19 @@ TEST(XdnaQueueDeathTest, ObserverFailuresPreserveAcceptedOwnership) {
        {Outcome::kNotificationFailure, Outcome::kRefreshFailure,
         Outcome::kUnretiredFailure, Outcome::kInactiveWithoutFailure}) {
     SCOPED_TRACE(static_cast<int>(outcome));
-    EXPECT_EXIT(
-        {
-          QueueHarness harness;
-          ASSERT_NO_FATAL_FAILURE(harness.Initialize());
-          harness.native.outcome = outcome;
-          ASSERT_NO_FATAL_FAILURE(harness.Submit());
-          const auto expected = outcome == Outcome::kUnretiredFailure
-                                    ? IREE_STATUS_DATA_LOSS
-                                    : IREE_STATUS_INTERNAL;
-          ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(expected));
-          EXPECT_EQ(harness.live_memories_at_completion, 3u);
-          EXPECT_EQ(harness.native.live_memories, 3u);
-          harness.ReleaseDevice();
-          EXPECT_EQ(harness.native.queue_destroy_count, 0u);
-          EXPECT_EQ(harness.native.context_destroy_count, 0u);
-          EXPECT_GE(harness.diagnostic_count, 1u);
-          std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
-        },
-        ::testing::ExitedWithCode(0), "");
+    EXPECT_EXIT(RunObserverFailurePreservesAcceptedOwnershipChild(outcome),
+                ::testing::ExitedWithCode(0), "");
   }
 }
 
 TEST(XdnaQueueDeathTest, ObserverFailurePreservesEveryPendingInvocation) {
-  EXPECT_EXIT(
-      {
-        QueueHarness harness;
-        harness.native.pending_capacity = 2;
-        harness.native.hold_retirement = true;
-        ASSERT_NO_FATAL_FAILURE(harness.Initialize());
-        iree_hal_semaphore_t* second = nullptr;
-        IREE_ASSERT_OK(iree_hal_semaphore_create(
-            harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-            IREE_HAL_SEMAPHORE_FLAG_NONE, &second));
-        ASSERT_NO_FATAL_FAILURE(harness.Submit());
-        ASSERT_NO_FATAL_FAILURE(harness.Submit(second));
-        ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(2));
-        harness.native.outcome = Outcome::kRefreshFailure;
-        harness.native.Wake();
-        ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_INTERNAL));
-        ASSERT_NO_FATAL_FAILURE(
-            harness.PollUntilDone(IREE_STATUS_INTERNAL, second));
-        EXPECT_EQ(harness.native.live_memories, 6u);
-        harness.ReleaseDevice();
-        iree_hal_semaphore_release(second);
-        EXPECT_EQ(harness.native.queue_destroy_count, 0u);
-        EXPECT_EQ(harness.native.context_destroy_count, 0u);
-        std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
-      },
-      ::testing::ExitedWithCode(0), "");
+  EXPECT_EXIT(RunObserverFailurePreservesEveryPendingInvocationChild(),
+              ::testing::ExitedWithCode(0), "");
 }
 
 TEST(XdnaQueueDeathTest, BusyNativeDestroyPreservesParent) {
-  EXPECT_EXIT(
-      {
-        QueueHarness harness;
-        ASSERT_NO_FATAL_FAILURE(harness.Initialize());
-        harness.native.destroy_status =
-            amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
-        harness.ReleaseDevice();
-        ASSERT_NO_FATAL_FAILURE(harness.PollUntilQueueDestroyAttempted());
-        EXPECT_EQ(harness.native.queue_destroy_count, 1u);
-        EXPECT_EQ(harness.native.context_destroy_count, 0u);
-        EXPECT_EQ(harness.diagnostic_count, 1u);
-        std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
-      },
-      ::testing::ExitedWithCode(0), "");
+  EXPECT_EXIT(RunBusyNativeDestroyPreservesParentChild(),
+              ::testing::ExitedWithCode(0), "");
 }
 
 #endif  // IREE_ASYNC_HAVE_EVENTFD || IREE_ASYNC_HAVE_WIN32_HANDLE
