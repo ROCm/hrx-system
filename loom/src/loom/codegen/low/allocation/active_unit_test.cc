@@ -38,6 +38,20 @@ loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
   return descriptor_set;
 }
 
+loom_low_allocation_live_range_sweep_t LiveRangeSweep(
+    const loom_low_allocation_assignment_t* assignments,
+    iree_host_size_t assignment_count, uint32_t point,
+    std::vector<uint32_t>* segment_starts) {
+  segment_starts->resize(assignment_count);
+  for (iree_host_size_t i = 0; i < assignment_count; ++i) {
+    (*segment_starts)[i] = assignments[i].liveness_segments.start;
+  }
+  return {
+      /*.point=*/point,
+      /*.segment_starts_by_assignment_index=*/segment_starts->data(),
+  };
+}
+
 TEST(LowAllocationActiveUnitTest, FindsAndRemovesIndexedConflicts) {
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(/*block_size=*/4096, iree_allocator_system(),
@@ -60,6 +74,9 @@ TEST(LowAllocationActiveUnitTest, FindsAndRemovesIndexedConflicts) {
                  /*start_point=*/5, /*end_point=*/10, /*location_base=*/5,
                  /*location_count=*/2, /*unit_point_start=*/2),
   };
+  std::vector<uint32_t> segment_starts;
+  loom_low_allocation_live_range_sweep_t live_range_sweep = LiveRangeSweep(
+      assignments, IREE_ARRAYSIZE(assignments), /*point=*/5, &segment_starts);
 
   loom_low_allocation_active_unit_index_t index = {};
   IREE_ASSERT_OK(loom_low_allocation_active_unit_index_initialize(
@@ -72,14 +89,14 @@ TEST(LowAllocationActiveUnitTest, FindsAndRemovesIndexedConflicts) {
       /*assignment_index=*/0);
   EXPECT_NE(index.entry_starts_by_assignment_index[0], UINT32_MAX);
   EXPECT_TRUE(loom_low_allocation_active_unit_index_conflicts(
-      &index, &descriptor_set, &unit_liveness, assignments,
+      &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1],
       /*ignored_value_ids=*/nullptr,
       /*ignored_value_count=*/0));
   uint32_t conflict_indices[2] = {};
   uint16_t conflict_count = 0;
   IREE_ASSERT_OK(loom_low_allocation_active_unit_index_collect_conflicts(
-      &index, &descriptor_set, &unit_liveness, assignments,
+      &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1],
       /*ignored_value_ids=*/nullptr,
       /*ignored_value_count=*/0, conflict_indices,
@@ -89,12 +106,12 @@ TEST(LowAllocationActiveUnitTest, FindsAndRemovesIndexedConflicts) {
 
   const loom_value_id_t ignored_value_ids[] = {1};
   EXPECT_FALSE(loom_low_allocation_active_unit_index_conflicts(
-      &index, &descriptor_set, &unit_liveness, assignments,
+      &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1], ignored_value_ids,
       IREE_ARRAYSIZE(ignored_value_ids)));
   conflict_count = 0;
   IREE_ASSERT_OK(loom_low_allocation_active_unit_index_collect_conflicts(
-      &index, &descriptor_set, &unit_liveness, assignments,
+      &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1], ignored_value_ids,
       IREE_ARRAYSIZE(ignored_value_ids), conflict_indices,
       IREE_ARRAYSIZE(conflict_indices), &conflict_count));
@@ -104,7 +121,7 @@ TEST(LowAllocationActiveUnitTest, FindsAndRemovesIndexedConflicts) {
       &index, assignments, IREE_ARRAYSIZE(assignments), /*assignment_index=*/0);
   EXPECT_EQ(index.entry_starts_by_assignment_index[0], UINT32_MAX);
   EXPECT_FALSE(loom_low_allocation_active_unit_index_conflicts(
-      &index, &descriptor_set, &unit_liveness, assignments,
+      &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1],
       /*ignored_value_ids=*/nullptr,
       /*ignored_value_count=*/0));
@@ -132,6 +149,9 @@ TEST(LowAllocationActiveUnitTest, RecyclesEntriesAcrossAssignmentLifetimes) {
         /*start_point=*/0, /*end_point=*/10, /*location_base=*/i % kUnitCount,
         /*location_count=*/1, /*unit_point_start=*/0);
   }
+  std::vector<uint32_t> segment_starts;
+  loom_low_allocation_live_range_sweep_t live_range_sweep = LiveRangeSweep(
+      assignments, kAssignmentCount, /*point=*/0, &segment_starts);
   uint32_t unit_end_points[] = {10};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
   unit_liveness.end_points = unit_end_points;
@@ -155,8 +175,8 @@ TEST(LowAllocationActiveUnitTest, RecyclesEntriesAcrossAssignmentLifetimes) {
     uint32_t conflict_indices[kUnitCount];
     uint16_t conflict_count = 0;
     IREE_ASSERT_OK(loom_low_allocation_active_unit_index_collect_conflicts(
-        &index, &descriptor_set, &unit_liveness, assignments, kAssignmentCount,
-        &assignments[i], /*ignored_value_ids=*/nullptr,
+        &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
+        kAssignmentCount, &assignments[i], /*ignored_value_ids=*/nullptr,
         /*ignored_value_count=*/0, conflict_indices, kUnitCount,
         &conflict_count));
     ASSERT_EQ(conflict_count, 1u);
@@ -451,6 +471,9 @@ TEST(LowAllocationActiveUnitTest, RefinesIndexedConflictByUnitStart) {
   };
   assignments[0].flags =
       LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS;
+  std::vector<uint32_t> segment_starts;
+  loom_low_allocation_live_range_sweep_t live_range_sweep = LiveRangeSweep(
+      assignments, IREE_ARRAYSIZE(assignments), /*point=*/2, &segment_starts);
 
   loom_low_allocation_active_unit_index_t index = {};
   IREE_ASSERT_OK(loom_low_allocation_active_unit_index_initialize(
@@ -461,12 +484,12 @@ TEST(LowAllocationActiveUnitTest, RefinesIndexedConflictByUnitStart) {
       /*assignment_index=*/0);
 
   EXPECT_FALSE(loom_low_allocation_active_unit_index_conflicts(
-      &index, &descriptor_set, &unit_liveness, assignments,
+      &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1],
       /*ignored_value_ids=*/nullptr,
       /*ignored_value_count=*/0));
   EXPECT_TRUE(loom_low_allocation_active_unit_index_conflicts(
-      &index, &descriptor_set, &unit_liveness, assignments,
+      &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[2],
       /*ignored_value_ids=*/nullptr,
       /*ignored_value_count=*/0));
@@ -600,6 +623,9 @@ TEST(LowAllocationActiveUnitTest, IndexesExplicitRegisterAtomicUnits) {
                  /*start_point=*/0, /*end_point=*/10, /*location_base=*/2,
                  /*location_count=*/1, /*unit_point_start=*/1),
   };
+  std::vector<uint32_t> segment_starts;
+  loom_low_allocation_live_range_sweep_t live_range_sweep = LiveRangeSweep(
+      assignments, IREE_ARRAYSIZE(assignments), /*point=*/0, &segment_starts);
 
   loom_low_allocation_active_unit_index_t index = {};
   IREE_ASSERT_OK(loom_low_allocation_active_unit_index_initialize(
@@ -610,12 +636,12 @@ TEST(LowAllocationActiveUnitTest, IndexesExplicitRegisterAtomicUnits) {
       /*assignment_index=*/0);
 
   EXPECT_TRUE(loom_low_allocation_active_unit_index_conflicts(
-      &index, &descriptor_set, &unit_liveness, assignments,
+      &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1],
       /*ignored_value_ids=*/nullptr,
       /*ignored_value_count=*/0));
   EXPECT_FALSE(loom_low_allocation_active_unit_index_conflicts(
-      &index, &descriptor_set, &unit_liveness, assignments,
+      &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[2],
       /*ignored_value_ids=*/nullptr,
       /*ignored_value_count=*/0));
@@ -623,7 +649,7 @@ TEST(LowAllocationActiveUnitTest, IndexesExplicitRegisterAtomicUnits) {
       &index, assignments, IREE_ARRAYSIZE(assignments),
       /*assignment_index=*/0);
   EXPECT_FALSE(loom_low_allocation_active_unit_index_conflicts(
-      &index, &descriptor_set, &unit_liveness, assignments,
+      &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1],
       /*ignored_value_ids=*/nullptr,
       /*ignored_value_count=*/0));

@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation/active_unit.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/descriptors.h"
 
@@ -46,6 +47,8 @@ typedef struct loom_low_allocation_active_set_t {
   iree_host_size_t next_expiration_point;
   // Number of active entries in |assignment_indices|.
   iree_host_size_t count;
+  // Monotone sparse-liveness cursors for active conflict queries.
+  loom_low_allocation_live_range_sweep_t live_range_sweep;
   // Hash index for active register-like assignment units.
   loom_low_allocation_active_unit_index_t units;
 } loom_low_allocation_active_set_t;
@@ -63,9 +66,11 @@ iree_status_t loom_low_allocation_active_set_initialize(
 // sparse segment ranges, when present, index
 // |unit_liveness->storage_segments.entries|.
 bool loom_low_allocation_active_assignment_conflicts(
+    loom_low_allocation_live_range_sweep_t* live_range_sweep,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
-    const loom_low_allocation_assignment_t* existing,
+    const loom_low_allocation_assignment_t* assignments,
+    iree_host_size_t assignment_count, uint32_t existing_assignment_index,
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count);
 
@@ -88,10 +93,11 @@ bool loom_low_allocation_active_set_conflicts(
 // separate checks. Construction visits the active assignments without
 // allocating.
 uint64_t loom_low_allocation_active_set_conflicting_locations(
-    const loom_low_allocation_active_set_t* active_set,
+    loom_low_allocation_active_set_t* active_set,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_assignment_t* assignments,
+    iree_host_size_t assignment_count,
     const loom_low_allocation_assignment_t* candidate_template);
 
 // Removes assignments ending at or before |start_point|. Calls advance

@@ -20,6 +20,25 @@
 extern "C" {
 #endif
 
+// Monotone sparse-liveness cursors retained during interval allocation.
+//
+// Each cursor is initialized from its assignment's sparse segment start when
+// that assignment enters the active set. Queries advance cursors past history
+// covered by |point|, so each segment is consumed at most once across the
+// allocation sweep. The final assignment records remain unchanged.
+typedef struct loom_low_allocation_live_range_sweep_t {
+  // Current allocation acquisition point.
+  uint32_t point;
+  // Next sparse segment indexed by assignment index.
+  uint32_t* segment_starts_by_assignment_index;
+} loom_low_allocation_live_range_sweep_t;
+
+enum {
+  // Cursor maintenance becomes cheaper than repeated exact merges above this
+  // sparse-segment count. Short ranges stay on the ordinary query path.
+  LOOM_LOW_ALLOCATION_LIVE_RANGE_CURSOR_MIN_SEGMENT_COUNT = 17u,
+};
+
 // Returns true when |assignment|'s storage lifetime overlaps |interval|'s
 // semantic lifetime.
 bool loom_low_allocation_live_range_assignment_overlaps_interval(
@@ -97,6 +116,20 @@ bool loom_low_allocation_live_range_assignments_conflict(
     iree_host_size_t unit_point_count,
     const loom_low_allocation_assignment_t* lhs,
     const loom_low_allocation_assignment_t* rhs);
+
+// Returns true when active |existing| conflicts with |candidate| at or after
+// |sweep_point|. |inout_existing_segment_start| must have been initialized
+// from the existing assignment's sparse range when it entered the active set.
+// Calls advance the cursor monotonically without changing the assignment's
+// final sparse range. The caller routes short ranges to the exact query.
+bool loom_low_allocation_live_range_sweep_assignments_conflict(
+    uint32_t sweep_point, uint32_t* inout_existing_segment_start,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_liveness_segment_t* storage_segments,
+    const uint32_t* unit_start_points, const uint32_t* unit_end_points,
+    iree_host_size_t unit_point_count,
+    const loom_low_allocation_assignment_t* existing,
+    const loom_low_allocation_assignment_t* candidate);
 
 #ifdef __cplusplus
 }  // extern "C"

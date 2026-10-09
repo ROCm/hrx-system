@@ -890,7 +890,7 @@ bool loom_low_allocation_search_find_free_location(
         loom_low_allocation_active_set_conflicting_locations(
             context->active_set, context->descriptor_set,
             context->unit_liveness, context->assignment_map->assignments,
-            &candidate_template);
+            context->assignment_map->assignment_count, &candidate_template);
   }
   if (uses_explicit_physical_registers && interval->unit_count == 1) {
     query.physical_domain = loom_low_allocation_physical_domains_for_interval(
@@ -1102,8 +1102,9 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
   if (active_unit_index_enabled) {
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_active_unit_index_collect_conflicts(
-            &context->active_set->units, context->descriptor_set,
-            context->unit_liveness, context->assignment_map->assignments,
+            &context->active_set->units, &context->active_set->live_range_sweep,
+            context->descriptor_set, context->unit_liveness,
+            context->assignment_map->assignments,
             context->assignment_map->assignment_count, &candidate,
             /*ignored_value_ids=*/NULL,
             /*ignored_value_count=*/0, assignment_indices,
@@ -1114,10 +1115,10 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
           context->active_set->assignment_indices[i];
       IREE_ASSERT_LT(assignment_index,
                      context->assignment_map->assignment_count);
-      const loom_low_allocation_assignment_t* assignment =
-          &context->assignment_map->assignments[assignment_index];
       if (!loom_low_allocation_active_assignment_conflicts(
-              context->descriptor_set, context->unit_liveness, assignment,
+              &context->active_set->live_range_sweep, context->descriptor_set,
+              context->unit_liveness, context->assignment_map->assignments,
+              context->assignment_map->assignment_count, assignment_index,
               &candidate,
               /*ignored_value_ids=*/NULL,
               /*ignored_value_count=*/0)) {

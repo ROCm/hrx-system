@@ -12,7 +12,7 @@
 #include "loom/codegen/low/allocation/storage.h"
 
 static bool loom_low_allocation_active_set_scan_conflicts(
-    const loom_low_allocation_active_set_t* active_set,
+    loom_low_allocation_active_set_t* active_set,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_assignment_t* assignments,
@@ -22,10 +22,9 @@ static bool loom_low_allocation_active_set_scan_conflicts(
   for (iree_host_size_t i = 0; i < active_set->count; ++i) {
     const uint32_t assignment_index = active_set->assignment_indices[i];
     IREE_ASSERT_LT(assignment_index, assignment_count);
-    const loom_low_allocation_assignment_t* existing =
-        &assignments[assignment_index];
     if (loom_low_allocation_active_assignment_conflicts(
-            descriptor_set, unit_liveness, existing, candidate,
+            &active_set->live_range_sweep, descriptor_set, unit_liveness,
+            assignments, assignment_count, assignment_index, candidate,
             ignored_value_ids, ignored_value_count)) {
       return true;
     }
@@ -50,6 +49,12 @@ iree_status_t loom_low_allocation_active_set_initialize(
       arena, assignment_capacity, sizeof(*out_active_set->entries),
       (void**)&out_active_set->entries));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, assignment_capacity,
+      sizeof(
+          *out_active_set->live_range_sweep.segment_starts_by_assignment_index),
+      (void**)&out_active_set->live_range_sweep
+          .segment_starts_by_assignment_index));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, program_point_count, sizeof(*out_active_set->expiration_heads),
       (void**)&out_active_set->expiration_heads));
   if (program_point_count != 0) {
@@ -62,15 +67,21 @@ iree_status_t loom_low_allocation_active_set_initialize(
 }
 
 bool loom_low_allocation_active_assignment_conflicts(
+    loom_low_allocation_live_range_sweep_t* live_range_sweep,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
-    const loom_low_allocation_assignment_t* existing,
+    const loom_low_allocation_assignment_t* assignments,
+    iree_host_size_t assignment_count, uint32_t existing_assignment_index,
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count) {
+  IREE_ASSERT_ARGUMENT(live_range_sweep);
   IREE_ASSERT_ARGUMENT(descriptor_set);
   IREE_ASSERT_ARGUMENT(unit_liveness);
-  IREE_ASSERT_ARGUMENT(existing);
+  IREE_ASSERT_ARGUMENT(assignments);
+  IREE_ASSERT_LT(existing_assignment_index, assignment_count);
   IREE_ASSERT_ARGUMENT(candidate);
+  const loom_low_allocation_assignment_t* existing =
+      &assignments[existing_assignment_index];
   if (loom_low_allocation_unit_liveness_storage_is_ignored(
           unit_liveness, existing->value_id, ignored_value_ids,
           ignored_value_count)) {
@@ -79,7 +90,17 @@ bool loom_low_allocation_active_assignment_conflicts(
   if (existing->location_kind != candidate->location_kind) {
     return false;
   }
-  return loom_low_allocation_live_range_assignments_conflict(
+  if (existing->liveness_segments.count <
+      LOOM_LOW_ALLOCATION_LIVE_RANGE_CURSOR_MIN_SEGMENT_COUNT) {
+    return loom_low_allocation_live_range_assignments_conflict(
+        descriptor_set, unit_liveness->storage_segments.entries,
+        unit_liveness->start_points, unit_liveness->end_points,
+        unit_liveness->point_count, existing, candidate);
+  }
+  return loom_low_allocation_live_range_sweep_assignments_conflict(
+      live_range_sweep->point,
+      &live_range_sweep
+           ->segment_starts_by_assignment_index[existing_assignment_index],
       descriptor_set, unit_liveness->storage_segments.entries,
       unit_liveness->start_points, unit_liveness->end_points,
       unit_liveness->point_count, existing, candidate);
@@ -99,8 +120,9 @@ bool loom_low_allocation_active_set_conflicts(
   IREE_ASSERT_ARGUMENT(candidate);
   if (loom_low_allocation_active_unit_index_is_enabled(&active_set->units)) {
     return loom_low_allocation_active_unit_index_conflicts(
-        &active_set->units, descriptor_set, unit_liveness, assignments,
-        assignment_count, candidate, ignored_value_ids, ignored_value_count);
+        &active_set->units, &active_set->live_range_sweep, descriptor_set,
+        unit_liveness, assignments, assignment_count, candidate,
+        ignored_value_ids, ignored_value_count);
   }
   return loom_low_allocation_active_set_scan_conflicts(
       active_set, descriptor_set, unit_liveness, assignments, assignment_count,
@@ -108,15 +130,17 @@ bool loom_low_allocation_active_set_conflicts(
 }
 
 uint64_t loom_low_allocation_active_set_conflicting_locations(
-    const loom_low_allocation_active_set_t* active_set,
+    loom_low_allocation_active_set_t* active_set,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_assignment_t* assignments,
+    iree_host_size_t assignment_count,
     const loom_low_allocation_assignment_t* candidate_template) {
   uint64_t conflicts = 0;
   for (iree_host_size_t i = 0; i < active_set->count; ++i) {
+    const uint32_t assignment_index = active_set->assignment_indices[i];
     const loom_low_allocation_assignment_t* existing =
-        &assignments[active_set->assignment_indices[i]];
+        &assignments[assignment_index];
     if (existing->location_base >= 64 ||
         !loom_low_allocation_storage_assignment_classes_share(
             descriptor_set, existing, candidate_template)) {
@@ -134,7 +158,8 @@ uint64_t loom_low_allocation_active_set_conflicting_locations(
       loom_low_allocation_assignment_t candidate = *candidate_template;
       candidate.location_base = location;
       if (loom_low_allocation_active_assignment_conflicts(
-              descriptor_set, unit_liveness, existing, &candidate,
+              &active_set->live_range_sweep, descriptor_set, unit_liveness,
+              assignments, assignment_count, assignment_index, &candidate,
               /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0)) {
         conflicts |= bit;
       }
@@ -163,6 +188,7 @@ void loom_low_allocation_active_set_expire(
     loom_low_allocation_active_set_t* active_set,
     const loom_low_allocation_assignment_t* assignments,
     iree_host_size_t assignment_count, uint32_t start_point) {
+  IREE_ASSERT_GE(start_point, active_set->live_range_sweep.point);
   const iree_host_size_t end_point =
       iree_min((uint64_t)start_point + 1, active_set->program_point_count);
   while (active_set->next_expiration_point < end_point) {
@@ -178,6 +204,7 @@ void loom_low_allocation_active_set_expire(
       assignment_index = entry->next_expiration;
     }
   }
+  active_set->live_range_sweep.point = start_point;
 }
 
 void loom_low_allocation_active_set_insert(
@@ -197,6 +224,9 @@ void loom_low_allocation_active_set_insert(
       .position = (uint32_t)active_set->count,
       .next_expiration = active_set->expiration_heads[end_point],
   };
+  active_set->live_range_sweep
+      .segment_starts_by_assignment_index[assignment_index] =
+      assignments[assignment_index].liveness_segments.start;
   active_set->expiration_heads[end_point] = assignment_index;
   active_set->assignment_indices[active_set->count++] = assignment_index;
   loom_low_allocation_active_unit_index_insert_assignment(

@@ -357,3 +357,44 @@ bool loom_low_allocation_live_range_assignments_conflict(
   }
   return false;
 }
+
+bool loom_low_allocation_live_range_sweep_assignments_conflict(
+    uint32_t sweep_point, uint32_t* inout_existing_segment_start,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_liveness_segment_t* storage_segments,
+    const uint32_t* unit_start_points, const uint32_t* unit_end_points,
+    iree_host_size_t unit_point_count,
+    const loom_low_allocation_assignment_t* existing,
+    const loom_low_allocation_assignment_t* candidate) {
+  IREE_ASSERT_ARGUMENT(inout_existing_segment_start);
+  IREE_ASSERT_ARGUMENT(existing);
+  IREE_ASSERT_ARGUMENT(storage_segments);
+  IREE_ASSERT_GE(candidate->start_point, sweep_point,
+                 "allocation candidates must not precede the active-set sweep");
+  const uint32_t range_start = existing->liveness_segments.start;
+  const uint32_t range_end = range_start + existing->liveness_segments.count;
+  IREE_ASSERT_GE(*inout_existing_segment_start, range_start);
+  IREE_ASSERT_LE(*inout_existing_segment_start, range_end);
+  while (*inout_existing_segment_start < range_end &&
+         storage_segments[*inout_existing_segment_start].end_point <=
+             sweep_point) {
+    ++*inout_existing_segment_start;
+  }
+  if (*inout_existing_segment_start == range_end) {
+    return false;
+  }
+  if (*inout_existing_segment_start == range_start) {
+    return loom_low_allocation_live_range_assignments_conflict(
+        descriptor_set, storage_segments, unit_start_points, unit_end_points,
+        unit_point_count, existing, candidate);
+  }
+
+  loom_low_allocation_assignment_t remaining = *existing;
+  remaining.liveness_segments = (loom_liveness_segment_range_t){
+      .start = *inout_existing_segment_start,
+      .count = range_end - *inout_existing_segment_start,
+  };
+  return loom_low_allocation_live_range_assignments_conflict(
+      descriptor_set, storage_segments, unit_start_points, unit_end_points,
+      unit_point_count, &remaining, candidate);
+}

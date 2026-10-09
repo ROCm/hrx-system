@@ -383,8 +383,10 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
       const loom_low_allocation_assignment_t* assignment =
           &state->result.assignments[assignment_index];
       if (!loom_low_allocation_active_assignment_conflicts(
+              &state->active.live_range_sweep,
               state->context->target->descriptor_set,
-              state->context->unit_liveness, assignment, &candidate,
+              state->context->unit_liveness, state->result.assignments,
+              state->result.assignment_count, assignment_index, &candidate,
               /*ignored_value_ids=*/NULL,
               /*ignored_value_count=*/0)) {
         continue;

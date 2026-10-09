@@ -479,12 +479,18 @@ static bool loom_low_allocation_active_unit_mark_assignment_seen(
 }
 
 static bool loom_low_allocation_active_assignment_conflicts(
+    loom_low_allocation_live_range_sweep_t* live_range_sweep,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
-    const loom_low_allocation_assignment_t* existing,
+    const loom_low_allocation_assignment_t* assignments,
+    iree_host_size_t assignment_count, uint32_t existing_assignment_index,
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count) {
+  IREE_ASSERT_ARGUMENT(live_range_sweep);
   IREE_ASSERT_ARGUMENT(unit_liveness);
+  IREE_ASSERT_LT(existing_assignment_index, assignment_count);
+  const loom_low_allocation_assignment_t* existing =
+      &assignments[existing_assignment_index];
   if (loom_low_allocation_unit_liveness_storage_is_ignored(
           unit_liveness, existing->value_id, ignored_value_ids,
           ignored_value_count)) {
@@ -493,7 +499,17 @@ static bool loom_low_allocation_active_assignment_conflicts(
   if (existing->location_kind != candidate->location_kind) {
     return false;
   }
-  return loom_low_allocation_live_range_assignments_conflict(
+  if (existing->liveness_segments.count <
+      LOOM_LOW_ALLOCATION_LIVE_RANGE_CURSOR_MIN_SEGMENT_COUNT) {
+    return loom_low_allocation_live_range_assignments_conflict(
+        descriptor_set, unit_liveness->storage_segments.entries,
+        unit_liveness->start_points, unit_liveness->end_points,
+        unit_liveness->point_count, existing, candidate);
+  }
+  return loom_low_allocation_live_range_sweep_assignments_conflict(
+      live_range_sweep->point,
+      &live_range_sweep
+           ->segment_starts_by_assignment_index[existing_assignment_index],
       descriptor_set, unit_liveness->storage_segments.entries,
       unit_liveness->start_points, unit_liveness->end_points,
       unit_liveness->point_count, existing, candidate);
@@ -694,6 +710,7 @@ bool loom_low_allocation_active_unit_index_find_unoccupied_location(
 
 bool loom_low_allocation_active_unit_index_conflicts(
     loom_low_allocation_active_unit_index_t* index,
+    loom_low_allocation_live_range_sweep_t* live_range_sweep,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_assignment_t* assignments,
@@ -701,6 +718,7 @@ bool loom_low_allocation_active_unit_index_conflicts(
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count) {
   IREE_ASSERT_ARGUMENT(index);
+  IREE_ASSERT_ARGUMENT(live_range_sweep);
   IREE_ASSERT_ARGUMENT(descriptor_set);
   IREE_ASSERT_ARGUMENT(assignments);
   IREE_ASSERT_ARGUMENT(candidate);
@@ -736,8 +754,9 @@ bool loom_low_allocation_active_unit_index_conflicts(
           !loom_low_allocation_active_unit_mark_assignment_seen(
               index, assignment_index, generation) &&
           loom_low_allocation_active_assignment_conflicts(
-              descriptor_set, unit_liveness, existing, candidate,
-              ignored_value_ids, ignored_value_count)) {
+              live_range_sweep, descriptor_set, unit_liveness, assignments,
+              assignment_count, assignment_index, candidate, ignored_value_ids,
+              ignored_value_count)) {
         return true;
       }
       entry_index = entry->next_entry;
@@ -748,6 +767,7 @@ bool loom_low_allocation_active_unit_index_conflicts(
 
 iree_status_t loom_low_allocation_active_unit_index_collect_conflicts(
     loom_low_allocation_active_unit_index_t* index,
+    loom_low_allocation_live_range_sweep_t* live_range_sweep,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_assignment_t* assignments,
@@ -788,8 +808,9 @@ iree_status_t loom_low_allocation_active_unit_index_collect_conflicts(
           !loom_low_allocation_active_unit_mark_assignment_seen(
               index, assignment_index, generation) &&
           loom_low_allocation_active_assignment_conflicts(
-              descriptor_set, unit_liveness, existing, candidate,
-              ignored_value_ids, ignored_value_count)) {
+              live_range_sweep, descriptor_set, unit_liveness, assignments,
+              assignment_count, assignment_index, candidate, ignored_value_ids,
+              ignored_value_count)) {
         if (*inout_assignment_count == assignment_capacity) {
           return iree_make_status(
               IREE_STATUS_RESOURCE_EXHAUSTED,

@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/descriptors.h"
 
@@ -112,6 +113,7 @@ bool loom_low_allocation_active_unit_index_find_unoccupied_location(
 // |unit_liveness->storage_segments.entries|.
 bool loom_low_allocation_active_unit_index_conflicts(
     loom_low_allocation_active_unit_index_t* index,
+    loom_low_allocation_live_range_sweep_t* live_range_sweep,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_assignment_t* assignments,
@@ -125,6 +127,7 @@ bool loom_low_allocation_active_unit_index_conflicts(
 // |unit_liveness->storage_segments.entries|.
 iree_status_t loom_low_allocation_active_unit_index_collect_conflicts(
     loom_low_allocation_active_unit_index_t* index,
+    loom_low_allocation_live_range_sweep_t* live_range_sweep,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_assignment_t* assignments,
