@@ -38,16 +38,16 @@ TEST_F(LowLowerMemoryEffectsTest, RetainedOriginSurvivesAnalysisRetirement) {
   DefineFacts(uniform, uniform_facts);
   DefineFacts(varying, loom_value_facts_make(0, 3, 1));
 
-  loom_low_source_memory_access_plan_t source = {};
-  source.root_value_id = 7;
-  source.root_uniform_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP;
-  source.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
-  source.element_byte_count = 4;
-  source.vector_lane_count = 2;
-  source.vector_lane_byte_stride = 4;
-  source.static_byte_offset = 160;
-  source.physical_root_byte_offset = 128;
-  source.dynamic_term_count = 2;
+  loom_low_source_memory_access_plan_t source = {
+      .root_value_id = 7,
+      .root_uniform_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP,
+      .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
+      .element_byte_count = 4,
+      .vector_lane_count = 2,
+      .vector_lane_byte_stride = 4,
+      .static_byte_offset = 160,
+      .physical_root_byte_offset = 128,
+      .dynamic_term_count = 2};
   source.dynamic_terms[0].index = uniform;
   source.dynamic_terms[0].byte_stride = 16;
   source.dynamic_terms[0].byte_facts = loom_value_facts_make(0, 16384, 16);
@@ -80,9 +80,9 @@ TEST_F(LowLowerMemoryEffectsTest, RetainedOriginSurvivesAnalysisRetirement) {
   ASSERT_TRUE(loom_low_lower_memory_packet_interval(
       origin, &source, loom_value_facts_make(0, 4, 4), &right,
       &lane_byte_count));
-  loom_low_memory_access_summary_t left_access = {};
-  left_access.memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP;
-  left_access.relative_interval = &left;
+  loom_low_memory_access_summary_t left_access = {
+      .memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP,
+      .relative_interval = &left};
   auto right_access = left_access;
   right_access.relative_interval = &right;
   EXPECT_FALSE(loom_low_memory_access_summaries_may_alias(
