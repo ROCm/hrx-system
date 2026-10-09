@@ -1709,25 +1709,6 @@ endif()
 if(LOOM_IMPORT_CXX)
 loom_generated_file_family(
   NAME
-    typed_views_checks_gen
-  GENERATOR
-    loom::py::loom::gen::test::cxx_kernel_cases
-  OUTPUTS
-    "typed_views_checks.loom"
-    "typed_views_arrays"
-  OUTPUT_FLAGS
-    "--output"
-    "--arrays"
-  ARGS
-    "kernel"
-    "--group=typed_views"
-  TESTONLY
-)
-endif()
-
-if(LOOM_IMPORT_CXX)
-loom_generated_file_family(
-  NAME
     vector_depth_checks_gen
   GENERATOR
     loom::py::loom::gen::test::cxx_kernel_cases
@@ -2059,21 +2040,6 @@ endif()
 if(LOOM_IMPORT_CXX)
 loom_test_module(
   NAME
-    typed_views_module
-  SRCS
-    "typed_views.cxx"
-    "${CMAKE_CURRENT_BINARY_DIR}/typed_views_checks.loom"
-  DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/typed_views_arrays"
-    "${CMAKE_CURRENT_BINARY_DIR}/typed_views_checks.loom"
-  INPUTOPTS
-
-)
-endif()
-
-if(LOOM_IMPORT_CXX)
-loom_test_module(
-  NAME
     vector_depth_module
   SRCS
     "vector_depth.cxx"
@@ -2128,6 +2094,16 @@ loom_test_module(
     "${CMAKE_CURRENT_BINARY_DIR}/volatile_memory_checks.loom"
   INPUTOPTS
 
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_test_module(
+  NAME
+    typed_views_module
+  SRCS
+    "typed_views.cxx"
+    "typed_views.loom"
 )
 endif()
 

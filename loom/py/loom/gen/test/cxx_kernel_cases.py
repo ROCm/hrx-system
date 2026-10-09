@@ -994,64 +994,6 @@ def symbol_exports(arrays):
     return "kernel.decl @library.dispatch() launch(%output: buffer, %input: buffer)\n\n" + "\n".join(cases)
 
 
-def typed_views(arrays):
-    cases = []
-    for ordinal, (rows, input_stride, input_origin, output_origin) in enumerate([(0, 8, 0, 0), (1, 8, 3, 2), (3, 11, 5, 4), (7, 17, 7, 6)]):
-        logical_end = input_origin + ((rows - 1) * input_stride + 8 if rows else 0)
-        input_count = logical_end + 3
-        inputs = [float(index - 512) for index in range(input_count)]
-        expected_values = []
-        for row in range(rows):
-            for column in range(8):
-                value = float(row * 32 + column) + 0.25
-                inputs[input_origin + row * input_stride + column] = value
-                expected_values.append(value)
-
-        expected = [-123.0] * output_origin + expected_values + [-123.0] * 3
-        case = Case(arrays, f"typed_views_{ordinal}", "f32", len(expected))
-        case.array("input", inputs)
-        case.array("original", inputs)
-        case.scalar("rows", rows, "i32")
-        case.scalar("input_stride", input_stride, "i32")
-        case.scalar("input_origin", input_origin, "i32")
-        case.scalar("output_origin", output_origin, "i32")
-        case.launch(
-            "typed_view_copy",
-            "%input, %output, %rows, %input_stride, %input_origin, %output_origin",
-            f"tensor<{len(inputs)}xf32>, tensor<{len(expected)}xf32>, i32, i32, i32, i32",
-        )
-        case.lines.append(f"  check.expect.bitwise actual(%input) expected(%original) : tensor<{len(inputs)}xf32>")
-        cases.append(case.finish(expected))
-    for origin in (0, 3, 15):
-        inputs = [float(index) + 0.25 for index in range(origin + 33)]
-        case = Case(arrays, f"typed_view_static_layouts_{origin}", "f32", 2)
-        case.array("input", inputs)
-        case.array("original", inputs)
-        case.scalar("origin", origin, "i32")
-        case.launch("typed_view_static_layouts", "%input, %output, %origin", f"tensor<{len(inputs)}xf32>, tensor<2xf32>, i32")
-        case.lines.append(f"  check.expect.bitwise actual(%input) expected(%original) : tensor<{len(inputs)}xf32>")
-        cases.append(case.finish([inputs[origin + 2 * stride + 3] for stride in (8, 11)]))
-    payload = [signed_bits(index * 17 + 3, 8) for index in range(32)]
-    case = Case(arrays, "typed_storage_rank3_copy", "i8", 16)
-    case.array("input", payload)
-    case.array("original", payload)
-    case.scalar("rows", 2, "i32")
-    case.scalar("tiles", 1, "i32")
-    case.launch(
-        "typed_storage_rank3",
-        "%input, %output, %rows, %tiles",
-        "tensor<32xi8>, tensor<16xi8>, i32, i32",
-    )
-    case.lines.append("  check.expect.bitwise actual(%input) expected(%original) : tensor<32xi8>")
-    cases.append(case.finish(payload[:16]))
-    declarations = (
-        "kernel.decl @typed_view_copy() launch(%input: buffer, %output: buffer, %rows: i32, %input_stride: i32, %input_origin: i32, %output_origin: i32)\n\n"
-        "kernel.decl @typed_view_static_layouts() launch(%input: buffer, %output: buffer, %input_origin: i32)\n\n"
-        "kernel.decl @typed_storage_rank3() launch(%input: buffer, %output: buffer, %rows: i32, %tiles: i32)\n\n"
-    )
-    return declarations + "\n".join(cases)
-
-
 def volatile_memory(arrays):
     cases = []
     inputs = [signed_bits(index * 0x10203041 + 0x7FFFFF00, 32) for index in range(64)]
@@ -1387,7 +1329,6 @@ KERNEL_GROUPS = {
     "short_circuit": short_circuit,
     "structured_continue": lambda arrays: "\n".join(reference(arrays) for reference in (continue_values, continue_scheduled, continue_copy, continue_pointers, continue_vectors)),
     "symbol_exports": symbol_exports,
-    "typed_views": typed_views,
     "vector_depth": lambda arrays: vector_depth(arrays) + "\n" + vector_depth_span(arrays),
     "vector_initializers": vector_initializers,
     "vector_values": lambda arrays: vector_control(arrays) + "\n" + vector_masks(arrays),

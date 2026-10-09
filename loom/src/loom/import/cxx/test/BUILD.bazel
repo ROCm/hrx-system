@@ -509,7 +509,7 @@ loom_test_module(
 # A source file and its independent reference cases form one test module.
 # Kernel names, launch configuration, and schedule variants belong to those files.
 # Target packages select applicable modules and own their execution policy.
-_KERNEL_SOURCES = [
+_GENERATED_KERNEL_SOURCES = [
     "aiter_swiglu_f16",
     "assumptions",
     "constant_loops",
@@ -527,11 +527,14 @@ _KERNEL_SOURCES = [
     "short_circuit",
     "structured_continue",
     "symbol_exports",
-    "typed_views",
     "vector_depth",
     "vector_initializers",
     "vector_values",
     "volatile_memory",
+]
+
+_AUTHORED_KERNEL_SOURCES = [
+    "typed_views",
 ]
 
 [
@@ -553,7 +556,7 @@ _KERNEL_SOURCES = [
             source + "_arrays",
         ],
     )
-    for source in _KERNEL_SOURCES
+    for source in _GENERATED_KERNEL_SOURCES
 ]
 
 [
@@ -571,7 +574,21 @@ _KERNEL_SOURCES = [
         ] else [],
         target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
     )
-    for source in _KERNEL_SOURCES
+    for source in _GENERATED_KERNEL_SOURCES
+]
+
+# Authored scenarios replace generated harnesses and payload files as each
+# kernel family migrates.
+[
+    loom_test_module(
+        name = source + "_module",
+        srcs = [
+            source + ".cxx",
+            source + ".loom",
+        ],
+        target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    )
+    for source in _AUTHORED_KERNEL_SOURCES
 ]
 
 test_suite(

@@ -1,0 +1,211 @@
+kernel.decl @typed_view_copy() launch(%input: buffer, %output: buffer, %rows: i32, %input_stride: i32, %input_origin: i32, %output_origin: i32)
+
+kernel.decl @typed_view_static_layouts() launch(%input: buffer, %output: buffer, %input_origin: i32)
+
+kernel.decl @typed_storage_rank3() launch(%input: buffer, %output: buffer, %rows: i32, %tiles: i32)
+
+// Rows contain row count, input stride, input origin, output origin, input
+// element count, output element count, and guarded-storage element count.
+global.rodata.def @typed_view_copy_trials = align(4) bytes("00000000080000000000000000000000030000000300000023000000010000000800000003000000020000000e0000000d0000002d000000030000000b0000000500000004000000260000001f0000003f00000007000000110000000700000006000000780000004100000061000000")
+
+func.def @typed_view_copy_config(%trial: index) -> (i32, i32, i32, i32, index, index, index) {
+  %origin = index.constant 0 : offset
+  %bounded_trial = index.assume %trial [range(%trial, 0, 3)] : index
+  %trial_buffer = global.load @typed_view_copy_trials : buffer
+  %trials = buffer.view %trial_buffer[%origin] : buffer -> view<4x7xi32>
+  %rows_i32 = view.load %trials[%bounded_trial, 0] : view<4x7xi32> -> i32
+  %input_stride_i32 = view.load %trials[%bounded_trial, 1] : view<4x7xi32> -> i32
+  %input_origin_i32 = view.load %trials[%bounded_trial, 2] : view<4x7xi32> -> i32
+  %output_origin_i32 = view.load %trials[%bounded_trial, 3] : view<4x7xi32> -> i32
+  %input_count_i32 = view.load %trials[%bounded_trial, 4] : view<4x7xi32> -> i32
+  %output_count_i32 = view.load %trials[%bounded_trial, 5] : view<4x7xi32> -> i32
+  %storage_count_i32 = view.load %trials[%bounded_trial, 6] : view<4x7xi32> -> i32
+  %input_count_unbounded = index.cast %input_count_i32 : i32 to index
+  %output_count_unbounded = index.cast %output_count_i32 : i32 to index
+  %storage_count_unbounded = index.cast %storage_count_i32 : i32 to index
+  %input_count = index.assume %input_count_unbounded [range(%input_count_unbounded, 3, 120)] : index
+  %output_count = index.assume %output_count_unbounded [range(%output_count_unbounded, 3, 65)] : index
+  %storage_count = index.assume %storage_count_unbounded [range(%storage_count_unbounded, 35, 97)] : index
+  func.return %rows_i32, %input_stride_i32, %input_origin_i32, %output_origin_i32, %input_count, %output_count, %storage_count : i32, i32, i32, i32, index, index, index
+}
+
+// Overlays logical values that reveal row/column swaps on the padded iota.
+func.def @typed_view_copy_inputs(%input: buffer, %rows_i32: i32, %input_stride_i32: i32, %input_origin_i32: i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %column_count = index.constant 8 : index
+  %logical_row_stride = index.constant 32 : index
+  %element_bytes = index.constant 4 : index
+  %quarter = scalar.constant 0.25 : f32
+  %rows_unbounded = index.cast %rows_i32 : i32 to index
+  %input_stride_unbounded = index.cast %input_stride_i32 : i32 to index
+  %input_origin_unbounded = index.cast %input_origin_i32 : i32 to index
+  %rows = index.assume %rows_unbounded [range(%rows_unbounded, 0, 7)] : index
+  %input_stride = index.assume %input_stride_unbounded [range(%input_stride_unbounded, 8, 17)] : index
+  %input_origin = index.assume %input_origin_unbounded [range(%input_origin_unbounded, 0, 7)] : index
+  %input_storage = buffer.assume.memory_space<global> %input : buffer
+  scf.for %row = [%begin to %rows step %step] {
+    %input_row = index.mul %row, %input_stride : index
+    %input_row_origin = index.add %input_origin, %input_row : index
+    %input_byte_index = index.mul %input_row_origin, %element_bytes : index
+    %input_byte_offset = index.cast %input_byte_index : index to offset
+    %input_row_values = buffer.view %input_storage[%input_byte_offset] : buffer -> view<8xf32>
+    scf.for %column = [%begin to %column_count step %step] {
+      %logical_row = index.mul %row, %logical_row_stride : index
+      %logical_position = index.add %logical_row, %column : index
+      %logical_i32 = index.cast %logical_position : index to i32
+      %logical_f32 = scalar.sitofp %logical_i32 : i32 to f32
+      %value = scalar.addf %logical_f32, %quarter : f32
+      view.store %value, %input_row_values[%column] : f32, view<8xf32>
+    }
+  }
+  func.return
+}
+
+func.def @typed_view_copy_oracle(%input: buffer, %output: buffer, %rows_i32: i32, %input_stride_i32: i32, %input_origin_i32: i32, %output_origin_i32: i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %column_count = index.constant 8 : index
+  %element_bytes = index.constant 4 : index
+  %rows_unbounded = index.cast %rows_i32 : i32 to index
+  %input_stride_unbounded = index.cast %input_stride_i32 : i32 to index
+  %input_origin_unbounded = index.cast %input_origin_i32 : i32 to index
+  %output_origin_unbounded = index.cast %output_origin_i32 : i32 to index
+  %rows = index.assume %rows_unbounded [range(%rows_unbounded, 0, 7)] : index
+  %input_stride = index.assume %input_stride_unbounded [range(%input_stride_unbounded, 8, 17)] : index
+  %input_origin = index.assume %input_origin_unbounded [range(%input_origin_unbounded, 0, 7)] : index
+  %output_origin = index.assume %output_origin_unbounded [range(%output_origin_unbounded, 0, 6)] : index
+  scf.for %row = [%begin to %rows step %step] {
+    %input_row = index.mul %row, %input_stride : index
+    %input_row_origin = index.add %input_origin, %input_row : index
+    %input_byte_index = index.mul %input_row_origin, %element_bytes : index
+    %input_byte_offset = index.cast %input_byte_index : index to offset
+    %input_row_values = buffer.view %input[%input_byte_offset] : buffer -> view<8xf32>
+    %output_row = index.mul %row, %column_count : index
+    %output_row_origin = index.add %output_origin, %output_row : index
+    %output_byte_index = index.mul %output_row_origin, %element_bytes : index
+    %output_byte_offset = index.cast %output_byte_index : index to offset
+    %output_row_values = buffer.view %output[%output_byte_offset] : buffer -> view<8xf32>
+    scf.for %column = [%begin to %column_count step %step] {
+      %value = view.load %input_row_values[%column] : view<8xf32> -> f32
+      view.store %value, %output_row_values[%column] : f32, view<8xf32>
+    }
+  }
+  func.return
+}
+
+// Rows contain the input origin and the exact input element count.
+global.rodata.def @typed_view_static_trials = align(4) bytes("000000002100000003000000240000000f00000030000000")
+
+func.def @typed_view_static_config(%trial: index) -> (i32, index) {
+  %origin = index.constant 0 : offset
+  %bounded_trial = index.assume %trial [range(%trial, 0, 2)] : index
+  %trial_buffer = global.load @typed_view_static_trials : buffer
+  %trials = buffer.view %trial_buffer[%origin] : buffer -> view<3x2xi32>
+  %input_origin = view.load %trials[%bounded_trial, 0] : view<3x2xi32> -> i32
+  %input_count_i32 = view.load %trials[%bounded_trial, 1] : view<3x2xi32> -> i32
+  %input_count_unbounded = index.cast %input_count_i32 : i32 to index
+  %input_count = index.assume %input_count_unbounded [range(%input_count_unbounded, 33, 48)] : index
+  func.return %input_origin, %input_count : i32, index
+}
+
+func.def @typed_view_static_layouts_oracle(%input: buffer, %output: buffer, %input_origin_i32: i32) {
+  %origin = index.constant 0 : offset
+  %dense_offset = index.constant 19 : index
+  %strided_offset = index.constant 25 : index
+  %element_bytes = index.constant 4 : index
+  %input_origin_unbounded = index.cast %input_origin_i32 : i32 to index
+  %input_origin = index.assume %input_origin_unbounded [range(%input_origin_unbounded, 0, 15)] : index
+  %dense_position = index.add %input_origin, %dense_offset : index
+  %strided_position = index.add %input_origin, %strided_offset : index
+  %dense_byte_index = index.mul %dense_position, %element_bytes : index
+  %strided_byte_index = index.mul %strided_position, %element_bytes : index
+  %dense_byte_offset = index.cast %dense_byte_index : index to offset
+  %strided_byte_offset = index.cast %strided_byte_index : index to offset
+  %dense_input = buffer.view %input[%dense_byte_offset] : buffer -> view<1xf32>
+  %strided_input = buffer.view %input[%strided_byte_offset] : buffer -> view<1xf32>
+  %output_values = buffer.view %output[%origin] : buffer -> view<2xf32>
+  %dense_value = view.load %dense_input[0] : view<1xf32> -> f32
+  %strided_value = view.load %strided_input[0] : view<1xf32> -> f32
+  view.store %dense_value, %output_values[0] : f32, view<2xf32>
+  view.store %strided_value, %output_values[1] : f32, view<2xf32>
+  func.return
+}
+
+func.def @typed_storage_rank3_inputs(%input: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %input_count = index.constant 32 : index
+  %multiplier = scalar.constant 17 : i32
+  %bias = scalar.constant 3 : i32
+  %input_storage = buffer.assume.memory_space<global> %input : buffer
+  %input_values = buffer.view %input_storage[%origin] : buffer -> view<32xi8>
+  scf.for %position = [%begin to %input_count step %step] {
+    %position_i32 = index.cast %position : index to i32
+    %scaled = scalar.muli %position_i32, %multiplier : i32
+    %shifted = scalar.addi %scaled, %bias : i32
+    %value = scalar.trunci %shifted : i32 to i8
+    view.store %value, %input_values[%position] : i8, view<32xi8>
+  }
+  func.return
+}
+
+func.def @typed_storage_rank3_oracle(%input: buffer, %output: buffer, %rows: i32, %tiles: i32) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  %input_values = buffer.view %input[%origin] : buffer -> view<32xi8>
+  %output_values = buffer.view %output[%origin] : buffer -> view<16xi8>
+  scf.for %position = [%begin to %end step %step] {
+    %value = view.load %input_values[%position] : view<32xi8> -> i8
+    view.store %value, %output_values[%position] : i8, view<16xi8>
+  }
+  func.return
+}
+
+check.scenario @typed_view_copy_values {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %rows, %input_stride, %input_origin, %output_origin, %input_count, %output_count, %storage_count = check.generate<@typed_view_copy_config>(%trial) : (index) -> (i32, i32, i32, i32, index, index, index)
+    %input = check.generate.iota offset(-512.0) step(1.0) : tensor<[%input_count]xf32>
+    check.generate<@typed_view_copy_inputs>(%input, %rows, %input_stride, %input_origin) : (tensor<[%input_count]xf32>, i32, i32, i32) -> ()
+    %storage = check.generate.fill value(-123.0) : tensor<[%storage_count]xf32>
+    %output = check.tensor.view %storage offset(64) : tensor<[%storage_count]xf32> -> tensor<[%output_count]xf32>
+    check.compare<@typed_view_copy, @typed_view_copy_oracle>(%input, %output, %rows, %input_stride, %input_origin, %output_origin) : (tensor<[%input_count]xf32>, tensor<[%output_count]xf32>, i32, i32, i32, i32) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%input_count]xf32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<[%storage_count]xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario @typed_view_static_layout_values {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %input_origin, %input_count = check.generate<@typed_view_static_config>(%trial) : (index) -> (i32, index)
+    %input = check.generate.iota offset(0.25) step(1.0) : tensor<[%input_count]xf32>
+    %storage = check.generate.fill value(-123.0) : tensor<34xf32>
+    %output = check.tensor.view %storage offset(64) : tensor<34xf32> -> tensor<2xf32>
+    check.compare<@typed_view_static_layouts, @typed_view_static_layouts_oracle>(%input, %output, %input_origin) : (tensor<[%input_count]xf32>, tensor<2xf32>, i32) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%input_count]xf32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<34xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario @typed_storage_rank3_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(0) : tensor<32xi8>
+    check.generate<@typed_storage_rank3_inputs>(%input) : (tensor<32xi8>) -> ()
+    %storage = check.generate.fill value(-123) : tensor<48xi8>
+    %output = check.tensor.view %storage offset(16) : tensor<48xi8> -> tensor<16xi8>
+    %rows = check.literal value(2) : i32
+    %tiles = check.literal value(1) : i32
+    check.compare<@typed_storage_rank3, @typed_storage_rank3_oracle>(%input, %output, %rows, %tiles) : (tensor<32xi8>, tensor<16xi8>, i32, i32) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<32xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<48xi8>
+    }
+  }
+  check.return
+}
