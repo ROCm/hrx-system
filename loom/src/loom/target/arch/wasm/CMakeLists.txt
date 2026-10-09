@@ -120,6 +120,7 @@ loom_check_test_suite(
     "test/source_low/numeric_index_operands.loom-test"
     "test/source_low/numeric_integer_arithmetic.loom-test"
     "test/source_low/numeric_integer_division.loom-test"
+    "test/source_low/numeric_integer_extensions.loom-test"
     "test/source_low/numeric_integer_extrema.loom-test"
     "test/source_low/numeric_integer_shift_report.loom-test"
     "test/source_low/numeric_integer_shifts.loom-test"
