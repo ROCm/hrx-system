@@ -70,10 +70,10 @@ TEST(DispatchTest, EmplaceImplicitArgsWritesSuffix) {
       /*kernarg_size=*/32 + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
       /*kernarg_alignment=*/16);
   iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout = {
-      /*.explicit_kernarg_size=*/32,
-      /*.implicit_args_offset=*/32,
-      /*.total_kernarg_size=*/32 + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
-      /*.has_implicit_args=*/true,
+      .explicit_kernarg_size = 32,
+      .implicit_args_offset = 32,
+      .total_kernarg_size = 32 + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
+      .has_implicit_args = true,
   };
   const uint32_t workgroup_count[3] = {7, 8, 9};
   alignas(16) std::array<uint8_t, 256> kernargs = {};
@@ -140,10 +140,10 @@ TEST(DispatchTest, EmplaceCustomKernargsCopiesRawBlob) {
 
 TEST(DispatchTest, EmplaceCustomKernargsCopiesFixedExplicitPrefix) {
   iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout = {
-      /*.explicit_kernarg_size=*/16,
-      /*.implicit_args_offset=*/0,
-      /*.total_kernarg_size=*/32,
-      /*.has_implicit_args=*/false,
+      .explicit_kernarg_size = 16,
+      .implicit_args_offset = 0,
+      .total_kernarg_size = 32,
+      .has_implicit_args = false,
   };
   std::array<uint8_t, 24> custom_kernargs = {};
   for (size_t i = 0; i < custom_kernargs.size(); ++i) {
@@ -165,11 +165,11 @@ TEST(DispatchTest, EmplaceCustomKernargsCopiesFixedExplicitPrefix) {
 TEST(DispatchTest, EmplaceCustomKernargsZeroesImplicitArgsGap) {
   constexpr size_t kImplicitArgsOffset = 16;
   iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout = {
-      /*.explicit_kernarg_size=*/0,
-      /*.implicit_args_offset=*/kImplicitArgsOffset,
-      /*.total_kernarg_size=*/kImplicitArgsOffset +
-          IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
-      /*.has_implicit_args=*/true,
+      .explicit_kernarg_size = 0,
+      .implicit_args_offset = kImplicitArgsOffset,
+      .total_kernarg_size =
+          kImplicitArgsOffset + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
+      .has_implicit_args = true,
   };
   const std::array<uint8_t, 8> custom_kernargs = {
       0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7,
@@ -192,10 +192,10 @@ TEST(DispatchTest, EmplaceCustomKernargsZeroesImplicitArgsGap) {
 
 TEST(DispatchTest, EmplaceCustomKernargsClampsCopyToTotalSize) {
   iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout = {
-      /*.explicit_kernarg_size=*/0,
-      /*.implicit_args_offset=*/0,
-      /*.total_kernarg_size=*/16,
-      /*.has_implicit_args=*/false,
+      .explicit_kernarg_size = 0,
+      .implicit_args_offset = 0,
+      .total_kernarg_size = 16,
+      .has_implicit_args = false,
   };
   std::array<uint8_t, 24> custom_kernargs = {};
   for (size_t i = 0; i < custom_kernargs.size(); ++i) {

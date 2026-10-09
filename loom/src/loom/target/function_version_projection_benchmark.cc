@@ -96,8 +96,8 @@ static const loom_target_profile_type_t kTestProfileType = {
 };
 
 static const loom_target_provider_t kTestProvider = {
-    /*.profile_type=*/&kTestProfileType,
-    /*.materialize_definition=*/MaterializeTestTargetDefinition,
+    .profile_type = &kTestProfileType,
+    .materialize_definition = MaterializeTestTargetDefinition,
 };
 
 static loom_symbol_ref_t AddSymbol(loom_module_t* module,
@@ -107,7 +107,7 @@ static loom_symbol_ref_t AddSymbol(loom_module_t* module,
       builder, iree_make_cstring_view(name), &name_id));
   loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-  return {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+  return {.module_id = 0, .symbol_id = symbol_id};
 }
 
 static loom_func_like_t AddFunction(loom_module_t* module,
@@ -213,8 +213,8 @@ class FunctionVersionProjectionFixture {
             AddSymbol(source_module_, &builder, name);
         authored_target_refs.push_back(symbol);
         const loom_resolved_target_t resolved_target = {
-            /*.provider=*/&kTestProvider,
-            /*.facts=*/&facts_[i],
+            .provider = &kTestProvider,
+            .facts = &facts_[i],
         };
         IREE_CHECK_OK(MaterializeTestTargetDefinition(
             &builder, &resolved_target, symbol, LOOM_LOCATION_UNKNOWN));
@@ -239,29 +239,29 @@ class FunctionVersionProjectionFixture {
         const bool authored_target_is_exact =
             shape == ProjectionShape::kExactAuthoredContexts;
         versions_[i] = loom_target_function_version_t{
-            /*.base=*/
-            {
-                /*.type=*/&loom_target_function_version_type,
-                /*.function=*/functions_[i],
-            },
-            /*.authored_target_name=*/{},
-            /*.target_requirement_facts=*/
-            authored_target_is_exact ? &facts_[context_ordinal] : nullptr,
-            /*.resolved_target=*/
-            {
-                /*.provider=*/&kTestProvider,
-                /*.facts=*/&facts_[context_ordinal],
-            },
-            /*.target_context_ordinal=*/
-            static_cast<loom_target_context_ordinal_t>(context_ordinal),
-            /*.authored_target_is_exact=*/authored_target_is_exact,
-            /*.function_target_facts=*/&facts_[context_ordinal],
+            .base =
+                {
+                    .type = &loom_target_function_version_type,
+                    .function = functions_[i],
+                },
+            .authored_target_name = {},
+            .target_requirement_facts =
+                authored_target_is_exact ? &facts_[context_ordinal] : nullptr,
+            .resolved_target =
+                {
+                    .provider = &kTestProvider,
+                    .facts = &facts_[context_ordinal],
+                },
+            .target_context_ordinal =
+                static_cast<loom_target_context_ordinal_t>(context_ordinal),
+            .authored_target_is_exact = authored_target_is_exact,
+            .function_target_facts = &facts_[context_ordinal],
         };
         version_handles_[i] = &versions_[i].base;
       }
       version_list_ = {
-          /*.values=*/version_handles_.data(),
-          /*.count=*/version_handles_.size(),
+          .values = version_handles_.data(),
+          .count = version_handles_.size(),
       };
     }
 

@@ -274,12 +274,12 @@ uint32_t FindFreeLocationWithPlacement(
   loom_low_placement_table_t placement = {};
   if (relation != nullptr) {
     result_ranges[relation->result_ordinal] = {
-        /*.start=*/0,
-        /*.count=*/1,
+        .start = 0,
+        .count = 1,
     };
     source_ranges[relation->source_ordinal] = {
-        /*.start=*/0,
-        /*.count=*/1,
+        .start = 0,
+        .count = 1,
     };
     placement.value_ids = value_ids;
     placement.value_count = IREE_ARRAYSIZE(value_ids);
@@ -532,19 +532,18 @@ uint32_t FindFreeLocationWithStorageLeaseAtResidencyCliff(
   const iree_string_view_t resource_names[] = {IREE_SVL("register")};
   const loom_target_residency_cliff_t cliffs[] = {
       {
-          /*.resource_id=*/0,
-          /*.cliff_units=*/cliff_units,
-          /*.tier_before=*/4,
-          /*.tier_after=*/2,
+          .resource_id = 0,
+          .cliff_units = cliff_units,
+          .tier_before = 4,
+          .tier_after = 2,
       },
   };
   const loom_target_residency_cliff_range_t cliff_ranges[] = {
-      {/*.start=*/0, /*.count=*/1},
+      {.start = 0, .count = 1},
   };
   const loom_target_residency_model_t residency_model = {
-      /*.best_tier=*/4,
-      /*.direct_resources=*/
-      {
+      .best_tier = 4,
+      .direct_resources = {
           /*.names=*/resource_names,
           /*.cliffs=*/cliffs,
           /*.cliff_count=*/IREE_ARRAYSIZE(cliffs),
@@ -657,8 +656,8 @@ TEST_F(LowAllocationSearchTest,
                                        unrelated_scalar_value};
   const loom_liveness_pressure_summary_t pressure_summaries[] = {
       {
-          /*.value_class=*/value_class,
-          /*.peak_live_units=*/5,
+          .value_class = value_class,
+          .peak_live_units = 5,
       },
   };
   loom_liveness_analysis_t liveness = {};
@@ -755,10 +754,10 @@ TEST_F(LowAllocationSearchTest,
   EXPECT_EQ(location_base, 3u);
 
   loom_low_allocation_resolved_reserved_range_t reserved_range = {
-      /*.descriptor_reg_class_id=*/0,
-      /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-      /*.location_base=*/0,
-      /*.location_count=*/5,
+      .descriptor_reg_class_id = 0,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = 0,
+      .location_count = 5,
   };
   target_constraints.reserved_ranges = &reserved_range;
   target_constraints.reserved_range_count = 1;
@@ -985,10 +984,10 @@ TEST_F(LowAllocationSearchTest, FindsFreeLocationAfterActiveAndReservedRanges) {
   uint32_t max_assigned_location_end_by_reg_class[] = {0};
   loom_low_allocation_resolved_reserved_range_t reserved_ranges[] = {
       {
-          /*.descriptor_reg_class_id=*/0,
-          /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-          /*.location_base=*/2,
-          /*.location_count=*/2,
+          .descriptor_reg_class_id = 0,
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_base = 2,
+          .location_count = 2,
       },
   };
   loom_low_allocation_target_constraints_t target_constraints = {};
@@ -1324,16 +1323,16 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   loom_low_allocation_spill_plan_traffic_t spill_traffic[] = {
       {},
       {
-          /*.store_count=*/1,
-          /*.store_bytes=*/8,
-          /*.reload_count=*/8,
-          /*.reload_bytes=*/64,
+          .store_count = 1,
+          .store_bytes = 8,
+          .reload_count = 8,
+          .reload_bytes = 64,
       },
       {
-          /*.store_count=*/1,
-          /*.store_bytes=*/8,
-          /*.reload_count=*/1,
-          /*.reload_bytes=*/8,
+          .store_count = 1,
+          .store_bytes = 8,
+          .reload_count = 1,
+          .reload_bytes = 8,
       },
   };
   loom_low_allocation_search_context_t context = {};
@@ -1463,22 +1462,22 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
   loom_low_allocation_spill_plan_traffic_t spill_traffic[] = {
       {},
       {
-          /*.store_count=*/1,
-          /*.store_bytes=*/8,
-          /*.reload_count=*/8,
-          /*.reload_bytes=*/64,
+          .store_count = 1,
+          .store_bytes = 8,
+          .reload_count = 8,
+          .reload_bytes = 64,
       },
       {
-          /*.store_count=*/1,
-          /*.store_bytes=*/4,
-          /*.reload_count=*/1,
-          /*.reload_bytes=*/4,
+          .store_count = 1,
+          .store_bytes = 4,
+          .reload_count = 1,
+          .reload_bytes = 4,
       },
       {
-          /*.store_count=*/1,
-          /*.store_bytes=*/4,
-          /*.reload_count=*/1,
-          /*.reload_bytes=*/4,
+          .store_count = 1,
+          .store_bytes = 4,
+          .reload_count = 1,
+          .reload_bytes = 4,
       },
   };
   loom_low_allocation_search_context_t context = {};

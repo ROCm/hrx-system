@@ -174,11 +174,11 @@ TEST_F(SymbolicExprTest, FactIdentityExpansionPreservesOrdinalRelations) {
   const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   const loom_type_t result_types[] = {index_type, index_type};
   const loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_LT,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{left, right},
+      .kind = LOOM_PREDICATE_LT,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {left, right},
   };
   loom_op_t* assertion_op = nullptr;
   IREE_ASSERT_OK(loom_sanitizer_assert_value_build(
@@ -362,11 +362,11 @@ TEST_F(SymbolicExprTest, MemoGrowthPreservesOuterExpansion) {
   loom_value_id_t source = DefineI64Value();
   loom_type_t i64_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_GE,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-      /*.reserved=*/{},
-      /*.args=*/{source, 0},
+      .kind = LOOM_PREDICATE_GE,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+      .reserved = {},
+      .args = {source, 0},
   };
   loom_op_t* assume_op = nullptr;
   IREE_ASSERT_OK(loom_scalar_assume_build(&builder_, &source, 1, &predicate, 1,

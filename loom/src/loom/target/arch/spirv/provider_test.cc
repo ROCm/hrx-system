@@ -52,8 +52,8 @@ class SpirvProviderTest : public ::testing::Test {
 
   ModulePtr Parse(iree_string_view_t source) {
     loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/{},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {},
+        .max_errors = 20,
     };
     loom_module_t* module = nullptr;
     IREE_CHECK_OK(loom_text_parse(source, IREE_SV("spirv_provider_test.loom"),
@@ -70,8 +70,8 @@ class SpirvProviderTest : public ::testing::Test {
     const uint16_t symbol_id = loom_module_find_symbol(module, name_id);
     IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
     return (loom_symbol_ref_t){
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
   }
 
@@ -154,15 +154,15 @@ TEST_F(SpirvProviderTest, MaterializesAuthoredRefinements) {
   IREE_ASSERT_OK(
       loom_module_add_symbol(materialized.get(), symbol_name_id, &symbol_id));
   const loom_symbol_ref_t symbol = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/symbol_id,
+      .module_id = 0,
+      .symbol_id = symbol_id,
   };
   loom_builder_t builder;
   loom_builder_initialize(materialized.get(), &materialized->arena,
                           loom_module_block(materialized.get()), &builder);
   const loom_resolved_target_t resolved_target = {
-      /*.provider=*/&loom_spirv_target_provider,
-      /*.facts=*/source_symbol_facts->projection,
+      .provider = &loom_spirv_target_provider,
+      .facts = source_symbol_facts->projection,
   };
   ASSERT_NE(loom_spirv_target_provider.materialize_definition, nullptr);
   IREE_ASSERT_OK(loom_spirv_target_provider.materialize_definition(
@@ -250,24 +250,24 @@ TEST_F(SpirvProviderTest, ProjectedProfileSatisfiesStructuredRequirements) {
                     "spirv.target<vulkan1_3> @float64 "
                     "{contract_feature_bits = 16}\n"));
   loom_target_bundle_storage_t live_storage = {
-      /*.snapshot=*/*loom_spirv_low_target_bundle_vulkan1_3.snapshot,
-      /*.export_plan=*/*loom_spirv_low_target_bundle_vulkan1_3.export_plan,
-      /*.config=*/*loom_spirv_low_target_bundle_vulkan1_3.config,
-      /*.bundle=*/loom_spirv_low_target_bundle_vulkan1_3,
+      .snapshot = *loom_spirv_low_target_bundle_vulkan1_3.snapshot,
+      .export_plan = *loom_spirv_low_target_bundle_vulkan1_3.export_plan,
+      .config = *loom_spirv_low_target_bundle_vulkan1_3.config,
+      .bundle = loom_spirv_low_target_bundle_vulkan1_3,
   };
   loom_target_bundle_storage_rebind(&live_storage);
   live_storage.bundle.name = IREE_SV("live-vulkan-device");
   live_storage.snapshot.max_workgroup_size = {
-      /*.x=*/256,
-      /*.y=*/128,
-      /*.z=*/64,
+      .x = 256,
+      .y = 128,
+      .z = 64,
   };
   live_storage.snapshot.max_flat_workgroup_size = 256;
   live_storage.snapshot.subgroup_size = 32;
   live_storage.snapshot.max_workgroup_count = {
-      /*.x=*/65535,
-      /*.y=*/65535,
-      /*.z=*/65535,
+      .x = 65535,
+      .y = 65535,
+      .z = 65535,
   };
   live_storage.export_plan.abi_kind = LOOM_TARGET_ABI_HAL_KERNEL;
   live_storage.config.contract_feature_bits |= LOOM_SPIRV_FEATURE_FLOAT16;

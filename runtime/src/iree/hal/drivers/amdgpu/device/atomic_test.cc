@@ -167,9 +167,9 @@ TEST(AtomicTest, StoreX64SelectsWidth) {
   packet.setup = 0xA5A5u;
   iree_hal_amdgpu_device_atomic_store_kernargs_t kernargs = {};
   const iree_hal_atomic_store_params_t params = {
-      /*.value=*/0xFEDCBA9876543210ull,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_NONE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
+      .value = 0xFEDCBA9876543210ull,
+      .flags = IREE_HAL_ATOMIC_FLAG_NONE,
+      .width = IREE_HAL_ATOMIC_WIDTH_64,
   };
 
   iree_hal_amdgpu_device_atomic_store_emplace(&kernels, &packet,
@@ -217,10 +217,10 @@ TEST(AtomicTest, RmwX64SelectsWidth) {
   packet.setup = 0xA5A5u;
   iree_hal_amdgpu_device_atomic_rmw_kernargs_t kernargs = {};
   const iree_hal_atomic_rmw_params_t params = {
-      /*.operand=*/0x0123456789ABCDEFull,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_NONE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
-      /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_SUBTRACT,
+      .operand = 0x0123456789ABCDEFull,
+      .flags = IREE_HAL_ATOMIC_FLAG_NONE,
+      .width = IREE_HAL_ATOMIC_WIDTH_64,
+      .operation = IREE_HAL_ATOMIC_RMW_OPERATION_SUBTRACT,
   };
 
   iree_hal_amdgpu_device_atomic_rmw_emplace(&kernels, &packet,

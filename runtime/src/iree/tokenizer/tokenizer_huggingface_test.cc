@@ -1095,8 +1095,8 @@ static StatusOr<PairEncodeDetailedResult> EncodePairDetailed(
       type_ids.data(), output_capacity);
 
   iree_tokenizer_offset_run_list_t offset_run_list = {
-      /*.capacity=*/offset_runs.size(),
-      /*.values=*/offset_runs.data(),
+      .capacity = offset_runs.size(),
+      .values = offset_runs.data(),
   };
   IREE_RETURN_IF_ERROR(iree_tokenizer_encode_batch(
       tokenizer, &item, 1, IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS,

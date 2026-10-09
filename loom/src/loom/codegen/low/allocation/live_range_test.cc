@@ -312,8 +312,10 @@ TEST(LowAllocationLiveRangeTest, PreservesSparseGapsAgainstContiguousStorage) {
   const uint16_t candidate_ordinals[] = {0};
   const uint16_t allocation_ordinals[] = {0};
   const loom_low_physical_register_t physical_registers[] = {
-      {/*.name_string_ref=*/0, /*.atomic_unit_start=*/0,
-       /*.atomic_unit_count=*/1, /*.reserved=*/0},
+      {.name_string_ref = 0,
+       .atomic_unit_start = 0,
+       .atomic_unit_count = 1,
+       .reserved = 0},
   };
   const loom_liveness_segment_t segments[] = {{0, 4}, {20, 30}};
   for (const uint32_t flags :
@@ -384,13 +386,13 @@ TEST(LowAllocationLiveRangeTest, AssignmentConflictsUsePhysicalStorageOverlap) {
 
   const loom_liveness_block_info_t blocks[] = {
       {
-          /*.block=*/nullptr,
-          /*.start_point=*/40,
-          /*.end_point=*/80,
-          /*.live_in_values=*/nullptr,
-          /*.live_in_count=*/0,
-          /*.live_out_values=*/nullptr,
-          /*.live_out_count=*/0,
+          .block = nullptr,
+          .start_point = 40,
+          .end_point = 80,
+          .live_in_values = nullptr,
+          .live_in_count = 0,
+          .live_out_values = nullptr,
+          .live_out_count = 0,
       },
   };
   const loom_liveness_analysis_t liveness =

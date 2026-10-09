@@ -712,14 +712,14 @@ TEST_P(TcpCarrierTest, GeneratedPrefixSupportsFastAndScatterOverflowPaths) {
                     /*receive_buffer_count=*/8);
 
   PrefixWriter small_writer = {
-      /*.value=*/0x31,
+      .value = 0x31,
   };
   SendResult small_result;
   iree_net_send_params_t small_params = {
       {
-          /*.length=*/32,
-          /*.write=*/PrefixWriter::Write,
-          /*.user_data=*/&small_writer,
+          .length = 32,
+          .write = PrefixWriter::Write,
+          .user_data = &small_writer,
       },
       iree_async_span_list_empty(),
       {SendCompleted, &small_result},
@@ -727,7 +727,7 @@ TEST_P(TcpCarrierTest, GeneratedPrefixSupportsFastAndScatterOverflowPaths) {
   IREE_ASSERT_OK(iree_net_carrier_send(client_carrier_, &small_params));
 
   PrefixWriter overflow_writer = {
-      /*.value=*/0x32,
+      .value = 0x32,
   };
   std::array<uint8_t, IREE_ASYNC_SOCKET_SEND_MAX_BUFFERS> suffix_bytes = {};
   std::array<iree_async_span_t, IREE_ASYNC_SOCKET_SEND_MAX_BUFFERS>
@@ -741,9 +741,9 @@ TEST_P(TcpCarrierTest, GeneratedPrefixSupportsFastAndScatterOverflowPaths) {
   SendResult overflow_result;
   iree_net_send_params_t overflow_params = {
       {
-          /*.length=*/kOverflowPrefixLength,
-          /*.write=*/PrefixWriter::Write,
-          /*.user_data=*/&overflow_writer,
+          .length = kOverflowPrefixLength,
+          .write = PrefixWriter::Write,
+          .user_data = &overflow_writer,
       },
       iree_async_span_list_make(suffix_spans.data(), suffix_spans.size()),
       {SendCompleted, &overflow_result},
@@ -781,16 +781,16 @@ TEST_P(TcpCarrierTest, OverflowAllocationFailurePrecedesSendAdmission) {
                     /*receive_buffer_count=*/4, server_allocator.allocator());
 
   PrefixWriter writer = {
-      /*.value=*/0x31,
+      .value = 0x31,
   };
   SendResult failed_result;
   constexpr iree_host_size_t kOverflowPrefixLength =
       IREE_NET_TCP_DEFAULT_GENERATED_PREFIX_CAPACITY + 1;
   iree_net_send_params_t failed_params = {
       {
-          /*.length=*/kOverflowPrefixLength,
-          /*.write=*/PrefixWriter::Write,
-          /*.user_data=*/&writer,
+          .length = kOverflowPrefixLength,
+          .write = PrefixWriter::Write,
+          .user_data = &writer,
       },
       iree_async_span_list_empty(),
       {SendCompleted, &failed_result},

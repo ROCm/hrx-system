@@ -100,8 +100,8 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
     return loom_symbol_ref_t{
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
   }
 
@@ -160,14 +160,12 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     const loom_target_bundle_t* target_bundle =
         loom_target_facts_bundle(&target_facts_.base);
     return (loom_low_resolved_target_t){
-        /*.target_facts=*/&target_facts_.base,
-        /*.target_name=*/
-        loom_target_facts_identity_name(&target_facts_.base),
-        /*.descriptor_set_key=*/
-        loom_low_descriptor_set_string(descriptor_set,
-                                       descriptor_set->key_string_ref),
-        /*.feature_bits=*/target_bundle->config->contract_feature_bits,
-        /*.descriptor_set=*/descriptor_set,
+        .target_facts = &target_facts_.base,
+        .target_name = loom_target_facts_identity_name(&target_facts_.base),
+        .descriptor_set_key = loom_low_descriptor_set_string(
+            descriptor_set, descriptor_set->key_string_ref),
+        .feature_bits = target_bundle->config->contract_feature_bits,
+        .descriptor_set = descriptor_set,
     };
   }
 

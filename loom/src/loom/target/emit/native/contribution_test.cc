@@ -45,30 +45,30 @@ TEST(NativeContributionTest, AssemblesAlignedSectionsAndCopiesStorage) {
   const uint8_t text1[] = {0x10, 0x11};
   const loom_native_section_contribution_t contributions[] = {
       {
-          /*.section_name=*/iree_make_string_view(
-              text_section_name, sizeof(text_section_name) - 1u),
-          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
-          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-              LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
-          /*.contribution_alignment=*/4,
-          /*.contents=*/iree_make_const_byte_span(text0, sizeof(text0)),
+          .section_name = iree_make_string_view(text_section_name,
+                                                sizeof(text_section_name) - 1u),
+          .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+          .access = LOOM_NATIVE_SECTION_ACCESS_READ |
+                    LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
+          .contribution_alignment = 4,
+          .contents = iree_make_const_byte_span(text0, sizeof(text0)),
       },
       {
-          /*.section_name=*/iree_make_string_view(
+          .section_name = iree_make_string_view(
               rodata_section_name, sizeof(rodata_section_name) - 1u),
-          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
-          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ,
-          /*.contribution_alignment=*/1,
-          /*.contents=*/iree_make_const_byte_span(rodata0, sizeof(rodata0)),
+          .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+          .access = LOOM_NATIVE_SECTION_ACCESS_READ,
+          .contribution_alignment = 1,
+          .contents = iree_make_const_byte_span(rodata0, sizeof(rodata0)),
       },
       {
-          /*.section_name=*/iree_make_string_view(
-              text_section_name, sizeof(text_section_name) - 1u),
-          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
-          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-              LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
-          /*.contribution_alignment=*/8,
-          /*.contents=*/iree_make_const_byte_span(text1, sizeof(text1)),
+          .section_name = iree_make_string_view(text_section_name,
+                                                sizeof(text_section_name) - 1u),
+          .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+          .access = LOOM_NATIVE_SECTION_ACCESS_READ |
+                    LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
+          .contribution_alignment = 8,
+          .contents = iree_make_const_byte_span(text1, sizeof(text1)),
       },
   };
 

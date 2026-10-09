@@ -63,8 +63,8 @@ struct SendCompletion {
 
   iree_net_send_completion_callback_t callback() {
     return {
-        /*.fn=*/Callback,
-        /*.user_data=*/this,
+        .fn = Callback,
+        .user_data = this,
     };
   }
 };
@@ -73,8 +73,8 @@ class TestEndpoint {
  public:
   iree_net_message_endpoint_t endpoint() {
     return {
-        /*.self=*/this,
-        /*.vtable=*/&vtable_,
+        .self = this,
+        .vtable = &vtable_,
     };
   }
 
@@ -182,11 +182,11 @@ class TestEndpoint {
 };
 
 const iree_net_message_endpoint_vtable_t TestEndpoint::vtable_ = {
-    /*.set_callbacks=*/TestEndpoint::SetCallbacks,
-    /*.activate=*/TestEndpoint::Activate,
-    /*.deactivate=*/TestEndpoint::Deactivate,
-    /*.send=*/TestEndpoint::Send,
-    /*.query_send_budget=*/TestEndpoint::QuerySendBudget,
+    .set_callbacks = TestEndpoint::SetCallbacks,
+    .activate = TestEndpoint::Activate,
+    .deactivate = TestEndpoint::Deactivate,
+    .send = TestEndpoint::Send,
+    .query_send_budget = TestEndpoint::QuerySendBudget,
 };
 
 struct CallbackState {
@@ -229,10 +229,10 @@ struct CallbackState {
 
   iree_net_control_channel_callbacks_t callbacks() {
     return {
-        /*.on_data=*/OnData,
-        /*.on_goaway=*/OnGoaway,
-        /*.on_error=*/OnError,
-        /*.user_data=*/this,
+        .on_data = OnData,
+        .on_goaway = OnGoaway,
+        .on_error = OnError,
+        .user_data = this,
     };
   }
 };

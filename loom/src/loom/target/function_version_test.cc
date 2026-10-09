@@ -115,8 +115,8 @@ test.func @second() {
       /*.name=*/IREE_SVL("other"),
   };
   loom_function_version_t other_version = {
-      /*.type=*/&other_type,
-      /*.function=*/FindFunction(module.get(), IREE_SV("other_version_type")),
+      .type = &other_type,
+      .function = FindFunction(module.get(), IREE_SV("other_version_type")),
   };
   loom_function_version_t* version_values[] = {
       &second_version.base,

@@ -84,12 +84,12 @@ static iree_status_t BarrierSpyExecutionBarrier(
 }
 
 static const iree_hal_command_buffer_vtable_t kBarrierSpyVtable = {
-    /*.destroy=*/BarrierSpyDestroy,
-    /*.begin=*/nullptr,
-    /*.end=*/nullptr,
-    /*.begin_debug_group=*/nullptr,
-    /*.end_debug_group=*/nullptr,
-    /*.barrier=*/BarrierSpyExecutionBarrier,
+    .destroy = BarrierSpyDestroy,
+    .begin = nullptr,
+    .end = nullptr,
+    .begin_debug_group = nullptr,
+    .end_debug_group = nullptr,
+    .barrier = BarrierSpyExecutionBarrier,
 };
 
 class GraphBarrierTest : public ::testing::Test {
@@ -198,8 +198,7 @@ TEST_F(GraphBarrierTest, OverflowForcesConservativeDependencyBarrier) {
 TEST_F(GraphBarrierTest, AdditionalDependencyEdgeBarriersLikeInlineEdge) {
   TestNode a(0, {});
   TestNode b(1, {});
-  hrx_graph_edge_t edge = {/*.next=*/nullptr, /*.from=*/a.get(),
-                           /*.to=*/b.get()};
+  hrx_graph_edge_t edge = {.next = nullptr, .from = a.get(), .to = b.get()};
   EXPECT_FALSE(Record(a, &edge));
   EXPECT_TRUE(Record(b, &edge));
   EXPECT_EQ(command_buffer_.barrier_count, 1u);
@@ -262,8 +261,8 @@ TEST(GraphScheduleTest, AdditionalDependencyStaysOnProducerWorkstream) {
     block->nodes[i] = nodes[i]->get();
   }
 
-  hrx_graph_edge_t edge = {/*.next=*/nullptr, /*.from=*/nodes[0]->get(),
-                           /*.to=*/nodes[16]->get()};
+  hrx_graph_edge_t edge = {
+      .next = nullptr, .from = nodes[0]->get(), .to = nodes[16]->get()};
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
   iree_arena_allocator_t arena;
@@ -312,8 +311,8 @@ TEST_F(GraphExecSemaphoreTest,
   // Host calls are not recordable so each one forms its own partition; a chain
   // of three yields two internal semaphores.
   const hrx_graph_host_call_node_attrs_t attrs = {
-      /*.fn=*/[](void* user_data) -> hrx_status_t { return hrx_ok_status(); },
-      /*.user_data=*/nullptr,
+      .fn = [](void* user_data) -> hrx_status_t { return hrx_ok_status(); },
+      .user_data = nullptr,
   };
   hrx_graph_node_t previous_node = nullptr;
   for (int i = 0; i < 3; ++i) {

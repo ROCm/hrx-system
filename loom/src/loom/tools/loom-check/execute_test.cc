@@ -261,13 +261,13 @@ iree_status_t TestForeignInputImport(
   }
 
   const loomc_source_options_t text_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(text_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_source_identifier(source),
-      /*.contents=*/loomc_source_contents(source),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_BORROWED,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(text_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_source_identifier(source),
+      .contents = loomc_source_contents(source),
+      .storage = LOOMC_SOURCE_STORAGE_BORROWED,
   };
   loomc_source_t* text_source = nullptr;
   iree_status_t status = iree_status_from_loomc(loomc_source_create(
@@ -282,36 +282,34 @@ iree_status_t TestForeignInputImport(
 }
 
 const loom_check_environment_t kExecuteTestEnvironment = {
-    /*.input_providers=*/{},
-    /*.register_context=*/
-    {
-        /*.fn=*/RegisterTestContext,
-        /*.user_data=*/nullptr,
-    },
-    /*.target_environment=*/{},
-    /*.compile_session=*/nullptr,
-    /*.cleanup_pattern_provider_set=*/
-    loom_cleanup_configured_pattern_provider_set(),
+    .input_providers = {},
+    .register_context =
+        {
+            .fn = RegisterTestContext,
+            .user_data = nullptr,
+        },
+    .target_environment = {},
+    .compile_session = nullptr,
+    .cleanup_pattern_provider_set =
+        loom_cleanup_configured_pattern_provider_set(),
 };
 
 const loom_check_environment_t kExecuteTestProviderEnvironment = {
-    /*.input_providers=*/{},
-    /*.register_context=*/
-    {
-        /*.fn=*/RegisterTestContext,
-        /*.user_data=*/nullptr,
-    },
-    /*.target_environment=*/{},
-    /*.compile_session=*/nullptr,
-    /*.cleanup_pattern_provider_set=*/
-    loom_cleanup_configured_pattern_provider_set(),
-    /*.emit_providers=*/
-    {
+    .input_providers = {},
+    .register_context =
+        {
+            .fn = RegisterTestContext,
+            .user_data = nullptr,
+        },
+    .target_environment = {},
+    .compile_session = nullptr,
+    .cleanup_pattern_provider_set =
+        loom_cleanup_configured_pattern_provider_set(),
+    .emit_providers = {
         /*.providers=*/kTestEmitProviders,
         /*.provider_count=*/IREE_ARRAYSIZE(kTestEmitProviders),
     },
-    /*.requirement_providers=*/
-    {
+    .requirement_providers = {
         /*.providers=*/kTestRequirementProviders,
         /*.provider_count=*/IREE_ARRAYSIZE(kTestRequirementProviders),
     },
@@ -334,9 +332,9 @@ class ExecuteTest : public ::testing::Test {
     execute_environment_ = kExecuteTestEnvironment;
     execute_environment_.target_environment = target_environment_;
     compile_session_ = {
-        /*.provider=*/nullptr,
-        /*.host_allocator=*/iree_allocator_system(),
-        /*.target_environment=*/public_target_environment,
+        .provider = nullptr,
+        .host_allocator = iree_allocator_system(),
+        .target_environment = public_target_environment,
     };
     execute_environment_.compile_session = &compile_session_;
     execute_environment_.emit_providers = {
@@ -1430,8 +1428,8 @@ TEST_F(ExecuteTest, EmitProviderCanOwnTarget) {
 TEST_F(ExecuteTest, NativeEmitProviderUsesOnePublicAdmission) {
   TestForeignImportState import_state;
   const loom_check_compile_provider_t compile_provider = {
-      /*.import=*/TestForeignInputImport,
-      /*.import_user_data=*/&import_state,
+      .import = TestForeignInputImport,
+      .import_user_data = &import_state,
   };
   compile_session_.provider = &compile_provider;
   provider_environment_.input_providers = {

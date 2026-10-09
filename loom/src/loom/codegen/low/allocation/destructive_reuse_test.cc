@@ -82,17 +82,17 @@ class DestructiveReuseTest : public ::testing::Test {
     };
 
     const loom_liveness_segment_t segments[] = {
-        {/*.start_point=*/0,
-         /*.end_point=*/low_live_at_write ? low_end : write_point},
-        {/*.start_point=*/write_point + 1, /*.end_point=*/low_end},
-        {/*.start_point=*/0, /*.end_point=*/high_end},
+        {.start_point = 0,
+         .end_point = low_live_at_write ? low_end : write_point},
+        {.start_point = write_point + 1, .end_point = low_end},
+        {.start_point = 0, .end_point = high_end},
     };
     const loom_liveness_segment_range_t segment_ranges[] = {
         {},
         {},
         {},
-        {/*.start=*/0, /*.count=*/low_live_at_write ? 1u : 2u},
-        {/*.start=*/2, /*.count=*/1},
+        {.start = 0, .count = low_live_at_write ? 1u : 2u},
+        {.start = 2, .count = 1},
     };
     const loom_liveness_interval_t intervals[] = {
         Interval(/*value_id=*/0, /*start_point=*/0, /*end_point=*/write_point,
@@ -193,11 +193,11 @@ TEST_F(DestructiveReuseTest, PreservesRequiredTiedFamilyObservations) {
   };
 
   const loom_liveness_segment_t segments[] = {
-      {/*.start_point=*/0, /*.end_point=*/4},
-      {/*.start_point=*/6, /*.end_point=*/7},
+      {.start_point = 0, .end_point = 4},
+      {.start_point = 6, .end_point = 7},
   };
   const loom_liveness_segment_range_t segment_ranges[] = {
-      {}, {}, {/*.start=*/0, /*.count=*/1}, {/*.start=*/1, /*.count=*/1}};
+      {}, {}, {.start = 0, .count = 1}, {.start = 1, .count = 1}};
   const loom_liveness_interval_t intervals[] = {
       Interval(/*value_id=*/0, /*start_point=*/0, /*end_point=*/4,
                /*unit_count=*/1),

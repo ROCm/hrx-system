@@ -153,18 +153,42 @@ std::vector<uint8_t> MakeAmdgpuElfWithGlobalSymbols() {
   const size_t symbol_offset = elf.size();
   const Elf64Symbol symbols[] = {
       {},
-      {/*.name=*/managed_name, /*.info=*/0x11, /*.other=*/0,
-       /*.section_index=*/1, /*.value=*/0, /*.size=*/64},
-      {/*.name=*/ordinary_name, /*.info=*/0x21, /*.other=*/0,
-       /*.section_index=*/1, /*.value=*/0, /*.size=*/32},
-      {/*.name=*/descriptor_name, /*.info=*/0x11, /*.other=*/0,
-       /*.section_index=*/1, /*.value=*/0, /*.size=*/16},
-      {/*.name=*/local_name, /*.info=*/0x01, /*.other=*/0,
-       /*.section_index=*/1, /*.value=*/0, /*.size=*/8},
-      {/*.name=*/undefined_name, /*.info=*/0x11, /*.other=*/0,
-       /*.section_index=*/0, /*.value=*/0, /*.size=*/8},
-      {/*.name=*/function_name, /*.info=*/0x12, /*.other=*/0,
-       /*.section_index=*/1, /*.value=*/0, /*.size=*/8},
+      {.name = managed_name,
+       .info = 0x11,
+       .other = 0,
+       .section_index = 1,
+       .value = 0,
+       .size = 64},
+      {.name = ordinary_name,
+       .info = 0x21,
+       .other = 0,
+       .section_index = 1,
+       .value = 0,
+       .size = 32},
+      {.name = descriptor_name,
+       .info = 0x11,
+       .other = 0,
+       .section_index = 1,
+       .value = 0,
+       .size = 16},
+      {.name = local_name,
+       .info = 0x01,
+       .other = 0,
+       .section_index = 1,
+       .value = 0,
+       .size = 8},
+      {.name = undefined_name,
+       .info = 0x11,
+       .other = 0,
+       .section_index = 0,
+       .value = 0,
+       .size = 8},
+      {.name = function_name,
+       .info = 0x12,
+       .other = 0,
+       .section_index = 1,
+       .value = 0,
+       .size = 8},
   };
   AppendBytes(elf, symbols, sizeof(symbols));
 
@@ -174,13 +198,26 @@ std::vector<uint8_t> MakeAmdgpuElfWithGlobalSymbols() {
   const size_t section_offset = elf.size();
   const Elf64SectionHeader sections[] = {
       {},
-      {/*.name=*/0, /*.type=*/3, /*.flags=*/0, /*.address=*/0,
-       /*.offset=*/string_offset, /*.size=*/sizeof(kStrings), /*.link=*/0,
-       /*.info=*/0, /*.address_alignment=*/1, /*.entry_size=*/0},
-      {/*.name=*/0, /*.type=*/2, /*.flags=*/0, /*.address=*/0,
-       /*.offset=*/symbol_offset, /*.size=*/sizeof(symbols), /*.link=*/1,
-       /*.info=*/0, /*.address_alignment=*/8,
-       /*.entry_size=*/sizeof(Elf64Symbol)},
+      {.name = 0,
+       .type = 3,
+       .flags = 0,
+       .address = 0,
+       .offset = string_offset,
+       .size = sizeof(kStrings),
+       .link = 0,
+       .info = 0,
+       .address_alignment = 1,
+       .entry_size = 0},
+      {.name = 0,
+       .type = 2,
+       .flags = 0,
+       .address = 0,
+       .offset = symbol_offset,
+       .size = sizeof(symbols),
+       .link = 1,
+       .info = 0,
+       .address_alignment = 8,
+       .entry_size = sizeof(Elf64Symbol)},
   };
   AppendBytes(elf, sections, sizeof(sections));
 
@@ -219,9 +256,9 @@ std::vector<uint8_t> MakeBundle(
   uint64_t next_payload_offset = payload_offset;
   for (const auto& entry : entries) {
     const BundleEntry bundle_entry = {
-        /*.offset=*/next_payload_offset,
-        /*.size=*/entry.second.size(),
-        /*.triple_size=*/entry.first.size(),
+        .offset = next_payload_offset,
+        .size = entry.second.size(),
+        .triple_size = entry.first.size(),
     };
     AppendBytes(bundle, &bundle_entry, sizeof(bundle_entry));
     AppendBytes(bundle, entry.first.data(), entry.first.size());
@@ -266,8 +303,8 @@ TEST(FatBinaryTest, SelectsExactTargetBeforeGeneric) {
                            IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC, 50),
   };
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_targets[0]},
-      {/*.executable_target=*/&executable_targets[1]},
+      {.executable_target = &executable_targets[0]},
+      {.executable_target = &executable_targets[1]},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -394,8 +431,8 @@ TEST(FatBinaryTest, FallsBackToGenericTarget) {
                            IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC, 50),
   };
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_targets[0]},
-      {/*.executable_target=*/&executable_targets[1]},
+      {.executable_target = &executable_targets[0]},
+      {.executable_target = &executable_targets[1]},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -421,8 +458,8 @@ TEST(FatBinaryTest, MatchesBareGenericTarget) {
                            IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC, 50),
   };
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_targets[0]},
-      {/*.executable_target=*/&executable_targets[1]},
+      {.executable_target = &executable_targets[0]},
+      {.executable_target = &executable_targets[1]},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -448,8 +485,8 @@ TEST(FatBinaryTest, ReportsMissingRankedTargets) {
                            IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC, 50),
   };
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_targets[0]},
-      {/*.executable_target=*/&executable_targets[1]},
+      {.executable_target = &executable_targets[0]},
+      {.executable_target = &executable_targets[1]},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   EXPECT_THAT(
@@ -469,7 +506,7 @@ TEST(FatBinaryTest, SelectsRawElfWithCompatibleFeatures) {
       MakeExecutableTarget(IREE_SV("gfx942:sramecc+:xnack-"),
                            IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100);
   const iree_hal_streaming_fat_binary_target_t target = {
-      /*.executable_target=*/&executable_target,
+      .executable_target = &executable_target,
   };
 
   iree_hal_streaming_fat_binary_extract_t extract = {};
@@ -487,16 +524,16 @@ TEST(FatBinaryTest, SelectsRawElfWithCompatibleFeatures) {
 TEST(FatBinaryTest, MeasuresSectionDataAfterSectionTable) {
   std::vector<uint8_t> elf = MakeMinimalAmdgpuElf();
   Elf64SectionHeader section = {
-      /*.name=*/0,
-      /*.type=*/1,
-      /*.flags=*/0,
-      /*.address=*/0,
-      /*.offset=*/sizeof(Elf64Header) + sizeof(Elf64SectionHeader),
-      /*.size=*/17,
-      /*.link=*/0,
-      /*.info=*/0,
-      /*.address_alignment=*/1,
-      /*.entry_size=*/0,
+      .name = 0,
+      .type = 1,
+      .flags = 0,
+      .address = 0,
+      .offset = sizeof(Elf64Header) + sizeof(Elf64SectionHeader),
+      .size = 17,
+      .link = 0,
+      .info = 0,
+      .address_alignment = 1,
+      .entry_size = 0,
   };
   AppendBytes(elf, &section, sizeof(section));
   elf.resize(section.offset + section.size, uint8_t{0xA5});
@@ -519,14 +556,14 @@ TEST(FatBinaryTest, MeasuresSectionDataAfterSectionTable) {
 TEST(FatBinaryTest, MeasuresProgramSegmentWithoutSectionTable) {
   std::vector<uint8_t> elf = MakeMinimalAmdgpuElf();
   Elf64ProgramHeader program = {
-      /*.type=*/1,
-      /*.flags=*/0,
-      /*.offset=*/sizeof(Elf64Header) + sizeof(Elf64ProgramHeader) + 8,
-      /*.virtual_address=*/0,
-      /*.physical_address=*/0,
-      /*.file_size=*/29,
-      /*.memory_size=*/29,
-      /*.alignment=*/8,
+      .type = 1,
+      .flags = 0,
+      .offset = sizeof(Elf64Header) + sizeof(Elf64ProgramHeader) + 8,
+      .virtual_address = 0,
+      .physical_address = 0,
+      .file_size = 29,
+      .memory_size = 29,
+      .alignment = 8,
   };
   AppendBytes(elf, &program, sizeof(program));
   elf.resize(program.offset + program.file_size, uint8_t{0x5A});
@@ -565,7 +602,7 @@ TEST(FatBinaryTest, FiltersIncompatibleConcatenatedElfFeatures) {
       MakeExecutableTarget(IREE_SV("gfx942:sramecc+:xnack-"),
                            IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100);
   const iree_hal_streaming_fat_binary_target_t target = {
-      /*.executable_target=*/&executable_target,
+      .executable_target = &executable_target,
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -598,7 +635,7 @@ TEST(FatBinaryTest, ClonesSizeLessBundleIntoOwnedStorage) {
   const iree_hal_executable_target_t executable_target = MakeExecutableTarget(
       IREE_SV("gfx1100"), IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100);
   const iree_hal_streaming_fat_binary_target_t target = {
-      /*.executable_target=*/&executable_target,
+      .executable_target = &executable_target,
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -618,10 +655,10 @@ TEST(FatBinaryTest, ClonesWrapperAndRebasesPayloadPointer) {
   std::vector<uint8_t> bundle =
       MakeBundle({{"hipv4-amdgcn-amd-amdhsa--gfx1100", elf}});
   HipFatBinaryHeader wrapper = {
-      /*.magic=*/kHipFatBinaryMagic,
-      /*.version=*/1,
-      /*.binary=*/bundle.data(),
-      /*.reserved=*/nullptr,
+      .magic = kHipFatBinaryMagic,
+      .version = 1,
+      .binary = bundle.data(),
+      .reserved = nullptr,
   };
 
   void* clone = nullptr;
@@ -642,7 +679,7 @@ TEST(FatBinaryTest, ClonesWrapperAndRebasesPayloadPointer) {
   const iree_hal_executable_target_t executable_target = MakeExecutableTarget(
       IREE_SV("gfx1100"), IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100);
   const iree_hal_streaming_fat_binary_target_t target = {
-      /*.executable_target=*/&executable_target,
+      .executable_target = &executable_target,
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(

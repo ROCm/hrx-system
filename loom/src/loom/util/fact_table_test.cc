@@ -77,9 +77,9 @@ static loom_value_fact_exact_lane_origin_t ExactLaneOrigin(
     loom_value_id_t source_value_id, uint32_t source_lane_offset = 0,
     uint32_t source_lane_stride = 1) {
   return {
-      /*.source_value_id=*/source_value_id,
-      /*.source_lane_offset=*/source_lane_offset,
-      /*.source_lane_stride=*/source_lane_stride,
+      .source_value_id = source_value_id,
+      .source_lane_offset = source_lane_offset,
+      .source_lane_stride = source_lane_stride,
   };
 }
 
@@ -183,10 +183,10 @@ static iree_status_t FactTableTestRawWidenExtension(
 }
 
 static const loom_value_fact_domain_t kTestRawFactDomain = {
-    /*.extensions_equal=*/FactTableTestRawExtensionsEqual,
-    /*.clone_extension=*/FactTableTestRawCloneExtension,
-    /*.meet_extension=*/FactTableTestRawMeetExtension,
-    /*.widen_extension=*/FactTableTestRawWidenExtension,
+    .extensions_equal = FactTableTestRawExtensionsEqual,
+    .clone_extension = FactTableTestRawCloneExtension,
+    .meet_extension = FactTableTestRawMeetExtension,
+    .widen_extension = FactTableTestRawWidenExtension,
 };
 
 //===----------------------------------------------------------------------===//
@@ -883,9 +883,9 @@ TEST_F(FactTableTest, VectorIotaExtensionRoundTrips) {
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
 
   loom_value_fact_vector_iota_t iota = {
-      /*.base=*/loom_value_facts_exact_i64(2),
-      /*.step=*/loom_value_facts_exact_i64(3),
-      /*.bit_count=*/8,
+      .base = loom_value_facts_exact_i64(2),
+      .step = loom_value_facts_exact_i64(3),
+      .bit_count = 8,
   };
   loom_value_facts_t facts = loom_value_facts_unknown();
   IREE_ASSERT_OK(
@@ -929,9 +929,9 @@ TEST_F(FactTableTest, IotaElementsWrapInEveryFixedWidthCarrier) {
     const int64_t maximum = INT64_MAX >> (64 - bit_count);
     const int64_t minimum = -maximum - 1;
     loom_value_fact_vector_iota_t iota = {
-        /*.base=*/loom_value_facts_exact_i64(maximum),
-        /*.step=*/loom_value_facts_exact_i64(1),
-        /*.bit_count=*/bit_count,
+        .base = loom_value_facts_exact_i64(maximum),
+        .step = loom_value_facts_exact_i64(1),
+        .bit_count = bit_count,
     };
     EXPECT_EQ(loom_value_fact_vector_iota_element(iota, 0).range_lo, maximum);
     EXPECT_EQ(loom_value_fact_vector_iota_element(iota, 1).range_lo, minimum);
@@ -952,9 +952,9 @@ TEST_F(FactTableTest, IotaElementsWrapInEveryFixedWidthCarrier) {
 
 TEST_F(FactTableTest, IotaMathematicalIndicesRemainUnknownOnOverflow) {
   loom_value_fact_vector_iota_t iota = {
-      /*.base=*/loom_value_facts_exact_i64(INT64_MAX),
-      /*.step=*/loom_value_facts_exact_i64(1),
-      /*.bit_count=*/0,
+      .base = loom_value_facts_exact_i64(INT64_MAX),
+      .step = loom_value_facts_exact_i64(1),
+      .bit_count = 0,
   };
   EXPECT_TRUE(loom_value_facts_is_unknown(
       loom_value_fact_vector_iota_element(iota, 1)));
@@ -969,9 +969,9 @@ TEST_F(FactTableTest, IotaBoundsRequireBothEndpointsToFit) {
     const int64_t maximum = INT64_MAX >> (64 - bit_count);
     const int64_t minimum = -maximum - 1;
     loom_value_fact_vector_iota_t iota = {
-        /*.base=*/loom_value_facts_make(maximum - 3, maximum - 2, 1),
-        /*.step=*/loom_value_facts_make(1, 2, 1),
-        /*.bit_count=*/bit_count,
+        .base = loom_value_facts_make(maximum - 3, maximum - 2, 1),
+        .step = loom_value_facts_make(1, 2, 1),
+        .bit_count = bit_count,
     };
     int64_t lower = 0;
     int64_t upper = 0;
@@ -1095,9 +1095,9 @@ TEST_F(FactTableTest, VectorPrefixMaskExtensionRoundTrips) {
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
 
   loom_value_fact_vector_prefix_mask_t mask = {
-      /*.lower_bound=*/loom_value_facts_exact_i64(0),
-      /*.upper_bound=*/loom_value_facts_make(0, 16, 1),
-      /*.step=*/loom_value_facts_exact_i64(1),
+      .lower_bound = loom_value_facts_exact_i64(0),
+      .upper_bound = loom_value_facts_make(0, 16, 1),
+      .step = loom_value_facts_exact_i64(1),
   };
   loom_value_facts_t facts = loom_value_facts_unknown();
   IREE_ASSERT_OK(
@@ -1116,14 +1116,14 @@ TEST_F(FactTableTest, EncodingSummaryDenseLayoutRoundTrips) {
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
 
   loom_value_fact_encoding_summary_t summary = {
-      /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-      /*.static_spec_encoding_id=*/0,
-      /*.address_layout=*/
-      {
-          /*.kind=*/LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE,
-          /*.rank=*/0,
-          /*.strides=*/nullptr,
-      },
+      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      .static_spec_encoding_id = 0,
+      .address_layout =
+          {
+              .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE,
+              .rank = 0,
+              .strides = nullptr,
+          },
   };
   loom_value_facts_t facts = loom_value_facts_unknown();
   IREE_ASSERT_OK(
@@ -1155,10 +1155,9 @@ TEST_F(FactTableTest, EncodingSummaryStridedLayoutInternsStrideFacts) {
       loom_value_facts_exact_i64(1),
   };
   loom_value_fact_encoding_summary_t summary = {
-      /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-      /*.static_spec_encoding_id=*/0,
-      /*.address_layout=*/
-      {
+      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      .static_spec_encoding_id = 0,
+      .address_layout = {
           /*.kind=*/LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
           /*.rank=*/IREE_ARRAYSIZE(strides),
           /*.strides=*/strides,
@@ -1218,10 +1217,9 @@ TEST_F(FactTableTest, CloneValuesReinternsExtensions) {
       loom_value_facts_exact_i64(1),
   };
   loom_value_fact_encoding_summary_t summary = {
-      /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-      /*.static_spec_encoding_id=*/0,
-      /*.address_layout=*/
-      {
+      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      .static_spec_encoding_id = 0,
+      .address_layout = {
           /*.kind=*/LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
           /*.rank=*/IREE_ARRAYSIZE(strides),
           /*.strides=*/strides,
@@ -1375,10 +1373,9 @@ TEST_F(FactTableTest, CrossTableFactsEqualComparesExtensionPayloads) {
       loom_value_facts_exact_i64(1),
   };
   loom_value_fact_encoding_summary_t summary = {
-      /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-      /*.static_spec_encoding_id=*/0,
-      /*.address_layout=*/
-      {
+      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      .static_spec_encoding_id = 0,
+      .address_layout = {
           /*.kind=*/LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
           /*.rank=*/IREE_ARRAYSIZE(strides),
           /*.strides=*/strides,

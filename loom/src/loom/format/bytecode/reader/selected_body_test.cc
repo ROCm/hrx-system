@@ -69,8 +69,8 @@ TEST_F(BytecodeSelectedBodyTest, ProjectsHighValueReferencesToCompactIds) {
   std::vector<loom_bytecode_table_entry_metadata_t> types(kSourceOrdinal + 1);
   for (uint32_t i = 0; i < kSourceOrdinal; ++i) {
     types[i] = {
-        /*.entry_offset=*/i,
-        /*.entry_length=*/1,
+        .entry_offset = i,
+        .entry_length = 1,
     };
   }
   types[kSourceOrdinal].entry_offset = bytecode.size();
@@ -87,8 +87,8 @@ TEST_F(BytecodeSelectedBodyTest, ProjectsHighValueReferencesToCompactIds) {
       &context_, &metadata, &table_arena_, module_,
       loom_bytecode_selected_symbol_resolver_empty(), &tables);
   loom_bytecode_selected_body_materializer_t materializer = {
-      /*.tables=*/&tables,
-      /*.block_pool=*/&block_pool_,
+      .tables = &tables,
+      .block_pool = &block_pool_,
   };
 
   iree_arena_allocator_t body_arena;

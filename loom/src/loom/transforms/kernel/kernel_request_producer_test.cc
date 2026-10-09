@@ -220,13 +220,13 @@ kernel.def @classified() {
 
   loom_link_plan_materialization_environment_t MaterializationEnvironment() {
     return loom_link_plan_materialization_environment_t{
-        /*.context=*/&context_,
-        /*.block_pool=*/&block_pool_,
-        /*.low_repr_environment=*/{},
-        /*.diagnostic_sink=*/nullptr,
-        /*.prepare_module=*/nullptr,
-        /*.user_data=*/nullptr,
-        /*.allocator=*/iree_allocator_system(),
+        .context = &context_,
+        .block_pool = &block_pool_,
+        .low_repr_environment = {},
+        .diagnostic_sink = nullptr,
+        .prepare_module = nullptr,
+        .user_data = nullptr,
+        .allocator = iree_allocator_system(),
     };
   }
 
@@ -251,12 +251,12 @@ kernel.def @classified() {
     out_argument_values[0] = 0;
     out_argument_values[1] = 1;
     out_sites[0] = {
-        /*.facts=*/out_facts,
-        /*.argument_values=*/&out_argument_values[0],
+        .facts = out_facts,
+        .argument_values = &out_argument_values[0],
     };
     out_sites[1] = {
-        /*.facts=*/out_facts,
-        /*.argument_values=*/&out_argument_values[1],
+        .facts = out_facts,
+        .argument_values = &out_argument_values[1],
     };
   }
 
@@ -282,7 +282,7 @@ TEST_F(KernelRequestProducerTest,
   BuildSites(&scratch_arena, &site_facts, sites, argument_values);
 
   RequestCapture capture = {
-      /*.block_pool=*/&block_pool_,
+      .block_pool = &block_pool_,
   };
   const loom_kernel_class_collection_options_t collection_options =
       loom_kernel_class_collection_options_default();

@@ -640,17 +640,17 @@ static double DotKRecordWithQ8_1X4(GgmlOracleKind weight_kind,
 }
 
 static const loom_encoding_family_fixed_metadata_t kFixedRecordMetadata = {
-    /*.operand_summary=*/{},
-    /*.required_auxiliary_keys=*/{},
-    /*.record=*/
-    {
-        /*.geometry=*/
+    .operand_summary = {},
+    .required_auxiliary_keys = {},
+    .record =
         {
-            /*.logical_element_count=*/32,
-            /*.storage_byte_count=*/18,
-            /*.required_alignment=*/2,
+            .geometry =
+                {
+                    .logical_element_count = 32,
+                    .storage_byte_count = 18,
+                    .required_alignment = 2,
+                },
         },
-    },
 };
 static const loom_encoding_family_descriptor_t kFixedRecordDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(17, "test.fixed_record"),
@@ -663,7 +663,7 @@ static const loom_encoding_family_descriptor_t kFixedRecordDescriptor = {
     /*.fixed_metadata=*/&kFixedRecordMetadata,
 };
 static const loom_encoding_vtable_t kFixedRecordVtable = {
-    /*.descriptor=*/&kFixedRecordDescriptor,
+    .descriptor = &kFixedRecordDescriptor,
 };
 
 class EncodingStorageTest : public ::testing::Test {
@@ -803,18 +803,17 @@ TEST_F(EncodingStorageTest, InternExactComposedStorageSummary) {
       loom_value_facts_exact_i64(1),
   };
   const loom_value_fact_encoding_summary_t summary = {
-      /*.role=*/LOOM_ENCODING_ROLE_PHYSICAL_STORAGE,
-      /*.static_spec_encoding_id=*/0,
-      /*.address_layout=*/
-      {
+      .role = LOOM_ENCODING_ROLE_PHYSICAL_STORAGE,
+      .static_spec_encoding_id = 0,
+      .address_layout = {
           /*.kind=*/LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
           /*.rank=*/IREE_ARRAYSIZE(stride_facts),
           /*.strides=*/stride_facts,
       },
-      /*.storage_schema=*/
-      {
-          /*.static_spec_encoding_id=*/schema_encoding_id,
-      },
+      .storage_schema =
+          {
+              .static_spec_encoding_id = schema_encoding_id,
+          },
   };
   uint16_t storage_encoding_id = 0;
   IREE_ASSERT_OK(loom_encoding_intern_exact_summary(module, &summary,

@@ -136,8 +136,8 @@ class LowLowerPassTest : public ::testing::Test {
 
   ModulePtr Parse(iree_string_view_t source) {
     loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/{},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {},
+        .max_errors = 20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &registry_.registry, &parse_options.low_asm_environment);
@@ -155,7 +155,7 @@ class LowLowerPassTest : public ::testing::Test {
     IREE_ASSERT(name_id != LOOM_STRING_ID_INVALID);
     const uint16_t symbol_id = loom_module_find_symbol(module, name_id);
     IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
-    return (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    return (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id};
   }
 
   iree_status_t RunSourceToLow(
@@ -170,13 +170,13 @@ class LowLowerPassTest : public ::testing::Test {
     std::vector<uint8_t> statistic_storage(
         pass_info->statistic_layout->storage_size, 0);
     const loom_codegen_pass_environment_options_t environment_options = {
-        /*.descriptor_registry=*/&registry_.registry,
-        /*.lower_policy_registry=*/policy_registry,
-        /*.legality_provider_list=*/nullptr,
-        /*.legalizer_registry=*/nullptr,
-        /*.math_policy_registry=*/nullptr,
-        /*.compile_report=*/nullptr,
-        /*.target_environment=*/nullptr,
+        .descriptor_registry = &registry_.registry,
+        .lower_policy_registry = policy_registry,
+        .legality_provider_list = nullptr,
+        .legalizer_registry = nullptr,
+        .math_policy_registry = nullptr,
+        .compile_report = nullptr,
+        .target_environment = nullptr,
     };
     loom_codegen_pass_environment_storage_t codegen_environment_storage;
     loom_pass_environment_t environment =
@@ -193,8 +193,8 @@ class LowLowerPassTest : public ::testing::Test {
     pass.value_facts = &value_facts;
     if (collector != nullptr) {
       pass.diagnostic_emitter = {
-          /*.fn=*/CollectDiagnosticEmission,
-          /*.user_data=*/collector,
+          .fn = CollectDiagnosticEmission,
+          .user_data = collector,
       };
     }
 
@@ -291,13 +291,13 @@ class LowLowerPassTest : public ::testing::Test {
     };
 
     const loom_codegen_pass_environment_options_t environment_options = {
-        /*.descriptor_registry=*/&registry_.registry,
-        /*.lower_policy_registry=*/&policy_registry_,
-        /*.legality_provider_list=*/nullptr,
-        /*.legalizer_registry=*/nullptr,
-        /*.math_policy_registry=*/nullptr,
-        /*.compile_report=*/nullptr,
-        /*.target_environment=*/nullptr,
+        .descriptor_registry = &registry_.registry,
+        .lower_policy_registry = &policy_registry_,
+        .legality_provider_list = nullptr,
+        .legalizer_registry = nullptr,
+        .math_policy_registry = nullptr,
+        .compile_report = nullptr,
+        .target_environment = nullptr,
     };
     loom_codegen_pass_environment_storage_t codegen_environment_storage;
     loom_pass_environment_t environment =
@@ -305,16 +305,16 @@ class LowLowerPassTest : public ::testing::Test {
             &environment_options, function_versions,
             &codegen_environment_storage);
     loom_pass_tool_run_options_t run_options = {
-        /*.registry=*/&kPassRegistry,
-        /*.environment=*/environment,
-        /*.function_versions=*/function_versions,
-        /*.predicate_provider=*/{},
-        /*.block_pool=*/&block_pool_,
+        .registry = &kPassRegistry,
+        .environment = environment,
+        .function_versions = function_versions,
+        .predicate_provider = {},
+        .block_pool = &block_pool_,
     };
     if (collector != nullptr) {
       run_options.diagnostic_emitter = {
-          /*.fn=*/CollectDiagnosticEmission,
-          /*.user_data=*/collector,
+          .fn = CollectDiagnosticEmission,
+          .user_data = collector,
       };
     }
     loom_pass_run_result_t run_result = {};
@@ -337,13 +337,13 @@ class LowLowerPassTest : public ::testing::Test {
     std::vector<uint8_t> statistic_storage(
         pass_info->statistic_layout->storage_size, 0);
     const loom_codegen_pass_environment_options_t environment_options = {
-        /*.descriptor_registry=*/&registry_.registry,
-        /*.lower_policy_registry=*/&policy_registry_,
-        /*.legality_provider_list=*/nullptr,
-        /*.legalizer_registry=*/nullptr,
-        /*.math_policy_registry=*/nullptr,
-        /*.compile_report=*/nullptr,
-        /*.target_environment=*/nullptr,
+        .descriptor_registry = &registry_.registry,
+        .lower_policy_registry = &policy_registry_,
+        .legality_provider_list = nullptr,
+        .legalizer_registry = nullptr,
+        .math_policy_registry = nullptr,
+        .compile_report = nullptr,
+        .target_environment = nullptr,
     };
     loom_codegen_pass_environment_storage_t codegen_environment_storage;
     loom_pass_environment_t environment =
@@ -438,10 +438,10 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionTargetFacts) {
       /*.count=*/IREE_ARRAYSIZE(function_version_values),
   };
   loom_low_source_selection_options_t options = {
-      /*.policy_registry=*/&policy_registry,
-      /*.diagnostic_emitter=*/{},
-      /*.function_versions=*/&function_versions,
-      /*.collect_target_candidates=*/false,
+      .policy_registry = &policy_registry,
+      .diagnostic_emitter = {},
+      .function_versions = &function_versions,
+      .collect_target_candidates = false,
   };
   loom_low_source_selection_list_t selections = {};
   IREE_ASSERT_OK(loom_low_select_lowering_symbols(module.get(), &options,

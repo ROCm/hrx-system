@@ -99,18 +99,18 @@ class DispatchPipelineTest : public CtsTestBase<> {
         IREE_HAL_ACCESS_SCOPE_DISPATCH_READ | IREE_HAL_ACCESS_SCOPE_MEMORY_READ,
     };
     const iree_hal_barrier_t execution_barrier = {
-        /*.source_stage_mask=*/IREE_HAL_EXECUTION_STAGE_DISPATCH |
-            IREE_HAL_EXECUTION_STAGE_TRANSFER |
-            IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-        /*.target_stage_mask=*/IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE |
-            IREE_HAL_EXECUTION_STAGE_DISPATCH |
-            IREE_HAL_EXECUTION_STAGE_TRANSFER,
-        /*.flags=*/IREE_HAL_BARRIER_FLAG_NONE,
-        /*.effects=*/{},
-        /*.memory_barrier_count=*/1,
-        /*.memory_barriers=*/&memory_barrier,
-        /*.buffer_barrier_count=*/0,
-        /*.buffer_barriers=*/nullptr,
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH |
+                             IREE_HAL_EXECUTION_STAGE_TRANSFER |
+                             IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE |
+                             IREE_HAL_EXECUTION_STAGE_DISPATCH |
+                             IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .flags = IREE_HAL_BARRIER_FLAG_NONE,
+        .effects = {},
+        .memory_barrier_count = 1,
+        .memory_barriers = &memory_barrier,
+        .buffer_barrier_count = 0,
+        .buffer_barriers = nullptr,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(cmd, &execution_barrier));
   }
@@ -271,8 +271,8 @@ TEST_P(DispatchPipelineTest, TransientInputPipeline) {
   alloca_params.queue_family_affinity = iree_hal_make_queue_family_affinity(
       iree_hal_queue_family_ordinal(iree_hal_queue_family(transfer_queue_)));
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/alloca_params,
-      /*.allocation_size=*/kBufferSize,
+      .params = alloca_params,
+      .allocation_size = kBufferSize,
   };
   iree_hal_buffer_t* raw = nullptr;
   IREE_ASSERT_OK(iree_hal_queue_alloca(transfer_queue_, empty_wait,

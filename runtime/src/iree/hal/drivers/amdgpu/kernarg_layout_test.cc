@@ -28,14 +28,14 @@ static std::vector<uint8_t> AllocateStorage(
 
 TEST(KernargLayoutTest, InitializesPackedBindingPrefixLayout) {
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {/*.target_qword_index=*/0},
-      {/*.target_qword_index=*/1},
+      {.target_qword_index = 0},
+      {.target_qword_index = 1},
   };
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          /*.target_byte_offset=*/16,
-          /*.source_byte_offset=*/0,
-          /*.byte_length=*/8,
+          .target_byte_offset = 16,
+          .source_byte_offset = 0,
+          .byte_length = 8,
       },
   };
   std::vector<uint8_t> storage = AllocateStorage(
@@ -84,18 +84,18 @@ TEST(KernargLayoutTest, InitializesPackedBindingPrefixLayout) {
 
 TEST(KernargLayoutTest, MarksSparseInterleavedLayoutForZeroFill) {
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {/*.target_qword_index=*/1},
+      {.target_qword_index = 1},
   };
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          /*.target_byte_offset=*/0,
-          /*.source_byte_offset=*/0,
-          /*.byte_length=*/3,
+          .target_byte_offset = 0,
+          .source_byte_offset = 0,
+          .byte_length = 3,
       },
       {
-          /*.target_byte_offset=*/20,
-          /*.source_byte_offset=*/3,
-          /*.byte_length=*/2,
+          .target_byte_offset = 20,
+          .source_byte_offset = 3,
+          .byte_length = 2,
       },
   };
   std::vector<uint8_t> storage = AllocateStorage(
@@ -129,7 +129,7 @@ TEST(KernargLayoutTest, MarksSparseInterleavedLayoutForZeroFill) {
 
 TEST(KernargLayoutTest, MarksImplicitArgsLayoutForZeroFill) {
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {/*.target_qword_index=*/0},
+      {.target_qword_index = 0},
   };
   std::vector<uint8_t> storage = AllocateStorage(IREE_ARRAYSIZE(binding_slots),
                                                  /*constant_span_count=*/0);
@@ -177,14 +177,14 @@ TEST(KernargLayoutTest, RejectsImplicitBlockCountWithoutImplicitArgs) {
 
 TEST(KernargLayoutTest, EmplacesPackedBindingPrefixLayout) {
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {/*.target_qword_index=*/0},
-      {/*.target_qword_index=*/1},
+      {.target_qword_index = 0},
+      {.target_qword_index = 1},
   };
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          /*.target_byte_offset=*/16,
-          /*.source_byte_offset=*/0,
-          /*.byte_length=*/4,
+          .target_byte_offset = 16,
+          .source_byte_offset = 0,
+          .byte_length = 4,
       },
   };
   std::vector<uint8_t> storage = AllocateStorage(
@@ -226,18 +226,18 @@ TEST(KernargLayoutTest, EmplacesPackedBindingPrefixLayout) {
 
 TEST(KernargLayoutTest, EmplacesSparseInterleavedLayoutWithZeroFill) {
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {/*.target_qword_index=*/1},
+      {.target_qword_index = 1},
   };
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          /*.target_byte_offset=*/0,
-          /*.source_byte_offset=*/0,
-          /*.byte_length=*/3,
+          .target_byte_offset = 0,
+          .source_byte_offset = 0,
+          .byte_length = 3,
       },
       {
-          /*.target_byte_offset=*/20,
-          /*.source_byte_offset=*/3,
-          /*.byte_length=*/2,
+          .target_byte_offset = 20,
+          .source_byte_offset = 3,
+          .byte_length = 2,
       },
   };
   std::vector<uint8_t> storage = AllocateStorage(
@@ -294,13 +294,13 @@ TEST(KernargLayoutTest, RejectsKernargPacketsBeyondLayoutLimit) {
 
 TEST(KernargLayoutTest, RejectsOverlappingTargetRanges) {
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {/*.target_qword_index=*/0},
+      {.target_qword_index = 0},
   };
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          /*.target_byte_offset=*/4,
-          /*.source_byte_offset=*/0,
-          /*.byte_length=*/4,
+          .target_byte_offset = 4,
+          .source_byte_offset = 0,
+          .byte_length = 4,
       },
   };
   iree_hal_amdgpu_kernarg_layout_params_t params = {
@@ -328,9 +328,9 @@ TEST(KernargLayoutTest, RejectsOverlappingTargetRanges) {
 TEST(KernargLayoutTest, RejectsConstantSourceGaps) {
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          /*.target_byte_offset=*/0,
-          /*.source_byte_offset=*/2,
-          /*.byte_length=*/2,
+          .target_byte_offset = 0,
+          .source_byte_offset = 2,
+          .byte_length = 2,
       },
   };
   iree_hal_amdgpu_kernarg_layout_params_t params = {

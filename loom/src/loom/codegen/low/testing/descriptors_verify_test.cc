@@ -1334,14 +1334,14 @@ TEST(LowDescriptorsTest, AcceptsSlicedImmediateEncoding) {
   InitializeTestTables(&tables);
   tables.immediates[0].encoding_slice_count = 2;
   tables.immediate_encoding_slices[0] = {
-      /*.encoding_field_id=*/7,
-      /*.source_bit_offset=*/0,
-      /*.bit_count=*/16,
+      .encoding_field_id = 7,
+      .source_bit_offset = 0,
+      .bit_count = 16,
   };
   tables.immediate_encoding_slices[1] = {
-      /*.encoding_field_id=*/8,
-      /*.source_bit_offset=*/16,
-      /*.bit_count=*/16,
+      .encoding_field_id = 8,
+      .source_bit_offset = 16,
+      .bit_count = 16,
   };
   tables.set.immediate_encoding_slice_count = 2;
 
@@ -1354,9 +1354,9 @@ TEST(LowDescriptorsTest, RejectsImmediateWithDirectAndSlicedEncoding) {
   tables.immediates[0].encoding_field_id = 7;
   tables.immediates[0].encoding_slice_count = 1;
   tables.immediate_encoding_slices[0] = {
-      /*.encoding_field_id=*/8,
-      /*.source_bit_offset=*/0,
-      /*.bit_count=*/32,
+      .encoding_field_id = 8,
+      .source_bit_offset = 0,
+      .bit_count = 32,
   };
   tables.set.immediate_encoding_slice_count = 1;
 
@@ -1369,9 +1369,9 @@ TEST(LowDescriptorsTest, RejectsIncompleteSlicedImmediateEncoding) {
   InitializeTestTables(&tables);
   tables.immediates[0].encoding_slice_count = 1;
   tables.immediate_encoding_slices[0] = {
-      /*.encoding_field_id=*/7,
-      /*.source_bit_offset=*/0,
-      /*.bit_count=*/16,
+      .encoding_field_id = 7,
+      .source_bit_offset = 0,
+      .bit_count = 16,
   };
   tables.set.immediate_encoding_slice_count = 1;
 

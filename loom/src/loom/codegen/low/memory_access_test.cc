@@ -29,9 +29,9 @@ static loom_low_memory_access_summary_t MakeStridedSummary(
           LOOM_LOW_MEMORY_ACCESS_PRECISION_STRIDED_INTERVAL,
       /*.strided_interval=*/
       {
-          /*.stride_bytes=*/stride_bytes,
-          /*.begin_bytes=*/begin_bytes,
-          /*.end_bytes=*/end_bytes,
+          .stride_bytes = stride_bytes,
+          .begin_bytes = begin_bytes,
+          .end_bytes = end_bytes,
       },
   };
 }
@@ -310,12 +310,12 @@ TEST(MemoryAccessTest, AffinePingPongBanksShareOneParityIdentity) {
   constexpr loom_value_id_t kParityValue = 17;
   const int scope = 0;
   const loom_symbolic_term_t terms[2] = {
-      {/*.coefficient=*/kStageBytes,
-       /*.value_id=*/kParityValue,
-       /*.relation_value_id=*/kParityValue},
-      {/*.coefficient=*/-kStageBytes,
-       /*.value_id=*/kParityValue,
-       /*.relation_value_id=*/kParityValue},
+      {.coefficient = kStageBytes,
+       .value_id = kParityValue,
+       .relation_value_id = kParityValue},
+      {.coefficient = -kStageBytes,
+       .value_id = kParityValue,
+       .relation_value_id = kParityValue},
   };
   loom_low_memory_relative_interval_t intervals[2] = {};
   loom_low_memory_access_summary_t accesses[2] = {};
@@ -346,12 +346,8 @@ TEST(MemoryAccessTest, AffinePingPongBanksRequireTheSameParityIdentity) {
   constexpr int64_t kStageBytes = 34048;
   const int scope = 0;
   const loom_symbolic_term_t terms[2] = {
-      {/*.coefficient=*/kStageBytes,
-       /*.value_id=*/17,
-       /*.relation_value_id=*/17},
-      {/*.coefficient=*/-kStageBytes,
-       /*.value_id=*/18,
-       /*.relation_value_id=*/18},
+      {.coefficient = kStageBytes, .value_id = 17, .relation_value_id = 17},
+      {.coefficient = -kStageBytes, .value_id = 18, .relation_value_id = 18},
   };
   loom_low_memory_relative_interval_t intervals[2] = {};
   loom_low_memory_access_summary_t accesses[2] = {};

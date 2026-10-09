@@ -61,12 +61,11 @@ static iree_status_t CaptureKernelRequest(
       request->kernel_request, capture->block_pool, iree_allocator_system(),
       &product));
   capture->requests.push_back((CapturedKernelRequest){
-      /*.entry_requirement_index=*/request->entry_requirement_index,
-      /*.source_symbol_ordinal=*/
-      request->kernel_request->source_symbol_ordinal,
-      /*.class_ordinal=*/request->kernel_request->class_ordinal,
-      /*.member_count=*/request->kernel_request->member_count,
-      /*.product=*/product,
+      .entry_requirement_index = request->entry_requirement_index,
+      .source_symbol_ordinal = request->kernel_request->source_symbol_ordinal,
+      .class_ordinal = request->kernel_request->class_ordinal,
+      .member_count = request->kernel_request->member_count,
+      .product = product,
   });
   return iree_ok_status();
 }
@@ -195,7 +194,7 @@ class CmdProgramPlanTest : public ::testing::Test {
     IREE_ASSERT_NE(name_id, LOOM_STRING_ID_INVALID);
     const loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
     IREE_ASSERT_NE(symbol_id, LOOM_SYMBOL_ID_INVALID);
-    return (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    return (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id};
   }
 
   // Shared arena block pool backing source and prepared modules.
@@ -220,9 +219,9 @@ command.program.def public @root() launch() {
   CleanupPatternVisitState visit_state = {};
   const CleanupPatternVisitData pattern_data = {&visit_state};
   const loom_rewrite_pattern_t pattern = {
-      /*.root_kind=*/LOOM_OP_INDEX_CONSTANT,
-      /*.match_and_rewrite=*/CountCleanupPatternVisits,
-      /*.user_data=*/&pattern_data,
+      .root_kind = LOOM_OP_INDEX_CONSTANT,
+      .match_and_rewrite = CountCleanupPatternVisits,
+      .user_data = &pattern_data,
   };
   const loom_rewrite_pattern_provider_t provider = {
       /*.name=*/IREE_SVL("cmd-program-plan-test"),
@@ -231,12 +230,11 @@ command.program.def public @root() launch() {
   };
   const loom_rewrite_pattern_provider_t* providers[] = {&provider};
   const loom_cleanup_pattern_provider_set_t provider_set = {
-      /*.region_initialization=*/{},
-      /*.universal_pre_fold=*/
-      loom_rewrite_pattern_provider_list_make(providers,
-                                              IREE_ARRAYSIZE(providers)),
-      /*.universal_post_type=*/{},
-      /*.source_combine=*/{},
+      .region_initialization = {},
+      .universal_pre_fold = loom_rewrite_pattern_provider_list_make(
+          providers, IREE_ARRAYSIZE(providers)),
+      .universal_post_type = {},
+      .source_combine = {},
   };
 
   const loom_symbol_ref_t root_ref =
@@ -417,13 +415,13 @@ command.program.def public @selected_schedule() launch(%storage: buffer) {
   DiagnosticEmissionCapture diagnostic_capture;
   bool valid = false;
   const loom_link_plan_materialization_environment_t environment = {
-      /*.context=*/&context_,
-      /*.block_pool=*/&block_pool_,
-      /*.low_repr_environment=*/{},
-      /*.diagnostic_sink=*/nullptr,
-      /*.prepare_module=*/nullptr,
-      /*.user_data=*/nullptr,
-      /*.allocator=*/iree_allocator_system(),
+      .context = &context_,
+      .block_pool = &block_pool_,
+      .low_repr_environment = {},
+      .diagnostic_sink = nullptr,
+      .prepare_module = nullptr,
+      .user_data = nullptr,
+      .allocator = iree_allocator_system(),
   };
   iree_status_t status = loom_cmd_program_plan_build_from_index(
       index, &root_symbol_ordinal, 1, /*options=*/nullptr,
@@ -526,13 +524,13 @@ command.program.def public @root() launch() {
               body_payload->length, UINT8_C(0xFF));
 
   const loom_link_plan_materialization_environment_t environment = {
-      /*.context=*/&context_,
-      /*.block_pool=*/&block_pool_,
-      /*.low_repr_environment=*/{},
-      /*.diagnostic_sink=*/nullptr,
-      /*.prepare_module=*/nullptr,
-      /*.user_data=*/nullptr,
-      /*.allocator=*/iree_allocator_system(),
+      .context = &context_,
+      .block_pool = &block_pool_,
+      .low_repr_environment = {},
+      .diagnostic_sink = nullptr,
+      .prepare_module = nullptr,
+      .user_data = nullptr,
+      .allocator = iree_allocator_system(),
   };
   iree_arena_allocator_t body_blind_arena;
   iree_arena_initialize(&block_pool_, &body_blind_arena);
@@ -551,13 +549,13 @@ command.program.def public @root() launch() {
   iree_arena_deinitialize(&body_blind_arena);
 
   KernelRequestCapture request_capture = {
-      /*.block_pool=*/&block_pool_,
+      .block_pool = &block_pool_,
   };
   loom_cmd_program_plan_index_options_t request_options;
   loom_cmd_program_plan_index_options_initialize(&request_options);
   request_options.kernel_request_sink = {
-      /*.publish=*/CaptureKernelRequest,
-      /*.user_data=*/&request_capture,
+      .publish = CaptureKernelRequest,
+      .user_data = &request_capture,
   };
   iree_arena_allocator_t request_arena;
   iree_arena_initialize(&block_pool_, &request_arena);
@@ -657,22 +655,22 @@ command.program.def public @root_b() launch(%storage: buffer) {
   };
 
   KernelRequestCapture request_capture = {
-      /*.block_pool=*/&block_pool_,
+      .block_pool = &block_pool_,
   };
   loom_cmd_program_plan_index_options_t plan_options;
   loom_cmd_program_plan_index_options_initialize(&plan_options);
   plan_options.kernel_request_sink = {
-      /*.publish=*/CaptureKernelRequest,
-      /*.user_data=*/&request_capture,
+      .publish = CaptureKernelRequest,
+      .user_data = &request_capture,
   };
   const loom_link_plan_materialization_environment_t environment = {
-      /*.context=*/&context_,
-      /*.block_pool=*/&block_pool_,
-      /*.low_repr_environment=*/{},
-      /*.diagnostic_sink=*/nullptr,
-      /*.prepare_module=*/nullptr,
-      /*.user_data=*/nullptr,
-      /*.allocator=*/iree_allocator_system(),
+      .context = &context_,
+      .block_pool = &block_pool_,
+      .low_repr_environment = {},
+      .diagnostic_sink = nullptr,
+      .prepare_module = nullptr,
+      .user_data = nullptr,
+      .allocator = iree_allocator_system(),
   };
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(&block_pool_, &scratch_arena);
@@ -689,8 +687,8 @@ command.program.def public @root_b() launch(%storage: buffer) {
 
   RejectKernelRequestState reject_state = {};
   plan_options.kernel_request_sink = {
-      /*.publish=*/RejectKernelRequest,
-      /*.user_data=*/&reject_state,
+      .publish = RejectKernelRequest,
+      .user_data = &reject_state,
   };
   iree_arena_allocator_t reject_scratch_arena;
   iree_arena_initialize(&block_pool_, &reject_scratch_arena);

@@ -486,9 +486,9 @@ std::vector<uint8_t> MakeBundle(
   uint64_t next_payload_offset = payload_offset;
   for (const auto& entry : entries) {
     const BundleEntry bundle_entry = {
-        /*.offset=*/next_payload_offset,
-        /*.size=*/entry.second.size(),
-        /*.triple_size=*/entry.first.size(),
+        .offset = next_payload_offset,
+        .size = entry.second.size(),
+        .triple_size = entry.first.size(),
     };
     AppendBytes(bundle, &bundle_entry, sizeof(bundle_entry));
     AppendBytes(bundle, entry.first.data(), entry.first.size());
@@ -2342,7 +2342,7 @@ TEST(KpackIntegration, HipkWrapperResolvesToElf) {
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_target},
+      {.executable_target = &executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -2369,7 +2369,7 @@ TEST(KpackIntegration, HipkWrapperNoMatchReportsNotFound) {
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx942"));  // not in the archive
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_target},
+      {.executable_target = &executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   EXPECT_THAT(
@@ -2398,7 +2398,7 @@ TEST(KpackIntegration, HipkResolvesBundleCodeObject) {
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_target},
+      {.executable_target = &executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -2427,7 +2427,7 @@ TEST(KpackIntegration, HipkResolvedGarbageRejected) {
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_target},
+      {.executable_target = &executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   EXPECT_THAT(
@@ -2456,7 +2456,7 @@ TEST(KpackIntegration, HipkReservedSelectsCoIndex) {
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_target},
+      {.executable_target = &executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(

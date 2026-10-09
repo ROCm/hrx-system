@@ -68,33 +68,33 @@ static const loom_target_profile_type_t kTestProfileType = {
 
 static TestTargetProfile MakeTestProfile(loom_test_target_kind_t kind) {
   return TestTargetProfile{
-      /*.base=*/
-      {
-          /*.type=*/&kTestProfileType,
-          /*.target_bundle=*/
-          loom_target_bundle_table_lookup(&loom_test_target_bundles, kind),
-      },
-      /*.kind=*/kind,
-      /*.projection_count=*/nullptr,
+      .base =
+          {
+              .type = &kTestProfileType,
+              .target_bundle = loom_target_bundle_table_lookup(
+                  &loom_test_target_bundles, kind),
+          },
+      .kind = kind,
+      .projection_count = nullptr,
   };
 }
 
 static const loom_target_provider_t kTestProvider = {
-    /*.profile_type=*/&kTestProfileType,
-    /*.materialize_definition=*/nullptr,
-    /*.register_context=*/nullptr,
-    /*.initialize_low_descriptor_registry=*/nullptr,
-    /*.initialize_low_lower_policy_registry=*/nullptr,
-    /*.initialize_math_policy_registry=*/nullptr,
-    /*.low_legality_provider_list=*/{},
-    /*.legalizer_provider_list=*/{},
-    /*.low_packet_diagnostic_provider_list=*/{},
-    /*.low_asm_diagnostic_provider_list=*/{},
-    /*.low_verify_provider_list=*/{},
-    /*.emitter_list=*/{},
-    /*.canonical_module_emitter=*/nullptr,
-    /*.pass_registry=*/nullptr,
-    /*.contribute_pipeline=*/nullptr,
+    .profile_type = &kTestProfileType,
+    .materialize_definition = nullptr,
+    .register_context = nullptr,
+    .initialize_low_descriptor_registry = nullptr,
+    .initialize_low_lower_policy_registry = nullptr,
+    .initialize_math_policy_registry = nullptr,
+    .low_legality_provider_list = {},
+    .legalizer_provider_list = {},
+    .low_packet_diagnostic_provider_list = {},
+    .low_asm_diagnostic_provider_list = {},
+    .low_verify_provider_list = {},
+    .emitter_list = {},
+    .canonical_module_emitter = nullptr,
+    .pass_registry = nullptr,
+    .contribute_pipeline = nullptr,
 };
 
 static const loom_target_provider_t* const kTestProviders[] = {
@@ -196,8 +196,8 @@ class TargetSpecializationTest : public ::testing::Test {
       DiagnosticCollector* diagnostic_collector = nullptr) {
     return SpecializeInputs(module,
                             {
-                                /*.values=*/requests,
-                                /*.count=*/request_count,
+                                .values = requests,
+                                .count = request_count,
                             },
                             /*bindings=*/{}, diagnostic_collector);
   }

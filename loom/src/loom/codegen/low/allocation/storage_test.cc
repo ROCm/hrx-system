@@ -171,7 +171,7 @@ TEST(LowAllocationStorageTest, EvaluatesConcretePlacementRelations) {
       /*.result_unit_offset=*/0,
       /*.source_unit_offset=*/0,
       /*.unit_count=*/1,
-      {/*.location_mask=*/1},
+      {.location_mask = 1},
       /*.kind=*/LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION,
   };
   EXPECT_TRUE(loom_low_allocation_storage_placement_relation_satisfied(
@@ -216,22 +216,22 @@ TEST(LowAllocationStorageTest, MatchesExplicitRegisterAtomicStorage) {
   const uint16_t atomic_units[] = {0, 1, 0, 2, 3};
   const loom_low_physical_register_t physical_registers[] = {
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/0,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 0,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/2,
-          /*.atomic_unit_count=*/1,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 2,
+          .atomic_unit_count = 1,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/3,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 3,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
   };
   reg_classes[0].candidate_lookup.register_count = 3;
@@ -655,7 +655,7 @@ TEST(LowAllocationStorageTest, MatchesExplicitRegisterCandidateOrdinals) {
       /*.result_unit_offset=*/0,
       /*.source_unit_offset=*/0,
       /*.unit_count=*/1,
-      {/*.location_mask=*/0},
+      {.location_mask = 0},
       /*.kind=*/LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL,
   };
 

@@ -164,20 +164,20 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   descriptors[7].semantic_tag_string_ref = kMatrixSmfmacTag;
   const loom_low_effect_t effects[] = {
       {
-          /*.kind=*/LOOM_LOW_EFFECT_KIND_READ,
-          /*.memory_space=*/LOOM_LOW_MEMORY_SPACE_STACK,
-          /*.scope_id=*/{},
-          /*.flags=*/{},
-          /*.counter_id=*/{},
-          /*.width_bits=*/32,
+          .kind = LOOM_LOW_EFFECT_KIND_READ,
+          .memory_space = LOOM_LOW_MEMORY_SPACE_STACK,
+          .scope_id = {},
+          .flags = {},
+          .counter_id = {},
+          .width_bits = 32,
       },
       {
-          /*.kind=*/LOOM_LOW_EFFECT_KIND_WRITE,
-          /*.memory_space=*/LOOM_LOW_MEMORY_SPACE_STACK,
-          /*.scope_id=*/{},
-          /*.flags=*/{},
-          /*.counter_id=*/{},
-          /*.width_bits=*/128,
+          .kind = LOOM_LOW_EFFECT_KIND_WRITE,
+          .memory_space = LOOM_LOW_MEMORY_SPACE_STACK,
+          .scope_id = {},
+          .flags = {},
+          .counter_id = {},
+          .width_bits = 128,
       },
   };
   const loom_low_schedule_class_t schedule_classes[5] = {};
@@ -216,8 +216,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   loom_low_descriptor_set_t descriptor_set = {};
   descriptor_set.stable_id = 1;
   descriptor_set.string_pool = {
-      /*.data=*/kDescriptorStringPool,
-      /*.data_length=*/sizeof(kDescriptorStringPool) - 1,
+      .data = kDescriptorStringPool,
+      .data_length = sizeof(kDescriptorStringPool) - 1,
   };
   descriptor_set.descriptors = descriptors;
   descriptor_set.descriptor_views = descriptor_views;
@@ -303,65 +303,67 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   const loom_op_t peak_op = {};
   const loom_liveness_pressure_summary_t pressure_summaries[] = {
       {
-          /*.value_class=*/{
-              /*.type_kind=*/LOOM_TYPE_REGISTER,
-              /*.element_type=*/{},
-              /*.register_class_id=*/0,
-              /*.register_descriptor_set_stable_id=*/1,
-          },
-          /*.peak_live_units=*/7,
-          /*.peak_live_values=*/5,
-          /*.peak_block=*/{},
-          /*.peak_op=*/{},
-          /*.peak_point=*/3,
+          .value_class =
+              {
+                  .type_kind = LOOM_TYPE_REGISTER,
+                  .element_type = {},
+                  .register_class_id = 0,
+                  .register_descriptor_set_stable_id = 1,
+              },
+          .peak_live_units = 7,
+          .peak_live_values = 5,
+          .peak_block = {},
+          .peak_op = {},
+          .peak_point = 3,
       },
       {
-          /*.value_class=*/{
-              /*.type_kind=*/LOOM_TYPE_REGISTER,
-              /*.element_type=*/{},
-              /*.register_class_id=*/1,
-              /*.register_descriptor_set_stable_id=*/1,
-          },
-          /*.peak_live_units=*/11,
-          /*.peak_live_values=*/2,
-          /*.peak_block=*/{},
-          /*.peak_op=*/&peak_op,
-          /*.peak_point=*/9,
+          .value_class =
+              {
+                  .type_kind = LOOM_TYPE_REGISTER,
+                  .element_type = {},
+                  .register_class_id = 1,
+                  .register_descriptor_set_stable_id = 1,
+              },
+          .peak_live_units = 11,
+          .peak_live_values = 2,
+          .peak_block = {},
+          .peak_op = &peak_op,
+          .peak_point = 9,
       },
   };
   const loom_low_allocation_assignment_t assignments[] = {
       {
-          /*.value_id=*/4,
-          /*.descriptor_reg_class_id=*/0,
-          /*.flags=*/{},
-          /*.start_point=*/{},
-          /*.end_point=*/{},
-          /*.unit_count=*/{},
-          /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT,
-          /*.location_base=*/0,
-          /*.location_count=*/1,
+          .value_id = 4,
+          .descriptor_reg_class_id = 0,
+          .flags = {},
+          .start_point = {},
+          .end_point = {},
+          .unit_count = {},
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT,
+          .location_base = 0,
+          .location_count = 1,
       },
       {
-          /*.value_id=*/5,
-          /*.descriptor_reg_class_id=*/1,
-          /*.flags=*/{},
-          /*.start_point=*/{},
-          /*.end_point=*/{},
-          /*.unit_count=*/{},
-          /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT,
-          /*.location_base=*/1,
-          /*.location_count=*/1,
+          .value_id = 5,
+          .descriptor_reg_class_id = 1,
+          .flags = {},
+          .start_point = {},
+          .end_point = {},
+          .unit_count = {},
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT,
+          .location_base = 1,
+          .location_count = 1,
       },
       {
-          /*.value_id=*/6,
-          /*.descriptor_reg_class_id=*/0,
-          /*.flags=*/{},
-          /*.start_point=*/2,
-          /*.end_point=*/6,
-          /*.unit_count=*/2,
-          /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-          /*.location_base=*/7,
-          /*.location_count=*/2,
+          .value_id = 6,
+          .descriptor_reg_class_id = 0,
+          .flags = {},
+          .start_point = 2,
+          .end_point = 6,
+          .unit_count = 2,
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_base = 7,
+          .location_count = 2,
       },
   };
   const loom_value_id_t liveness_value_ids[] = {
@@ -376,25 +378,25 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   };
   const loom_liveness_interval_t liveness_intervals[] = {
       {
-          /*.value_id=*/4,
-          /*.start_point=*/0,
-          /*.end_point=*/8,
-          /*.value_class=*/pressure_summaries[0].value_class,
-          /*.unit_count=*/1,
+          .value_id = 4,
+          .start_point = 0,
+          .end_point = 8,
+          .value_class = pressure_summaries[0].value_class,
+          .unit_count = 1,
       },
       {
-          /*.value_id=*/5,
-          /*.start_point=*/1,
-          /*.end_point=*/12,
-          /*.value_class=*/pressure_summaries[1].value_class,
-          /*.unit_count=*/2,
+          .value_id = 5,
+          .start_point = 1,
+          .end_point = 12,
+          .value_class = pressure_summaries[1].value_class,
+          .unit_count = 2,
       },
       {
-          /*.value_id=*/6,
-          /*.start_point=*/2,
-          /*.end_point=*/6,
-          /*.value_class=*/pressure_summaries[0].value_class,
-          /*.unit_count=*/2,
+          .value_id = 6,
+          .start_point = 2,
+          .end_point = 6,
+          .value_class = pressure_summaries[0].value_class,
+          .unit_count = 2,
       },
   };
   const uint32_t assignment_indices_by_value_ordinal[] = {
@@ -404,63 +406,63 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   };
   const loom_low_allocation_copy_decision_t copy_decisions[] = {
       {
-          /*.source_value_id=*/4,
-          /*.result_value_id=*/5,
-          /*.source_assignment_index=*/kSourceAssignmentIndex,
-          /*.result_assignment_index=*/kResultAssignmentIndex,
-          /*.kind=*/LOOM_LOW_ALLOCATION_COPY_MATERIALIZED,
+          .source_value_id = 4,
+          .result_value_id = 5,
+          .source_assignment_index = kSourceAssignmentIndex,
+          .result_assignment_index = kResultAssignmentIndex,
+          .kind = LOOM_LOW_ALLOCATION_COPY_MATERIALIZED,
       },
   };
   const loom_low_move_t moves[] = {
       {
-          /*.destination=*/
-          {
-              /*.location_kind=*/
-              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-              /*.descriptor_reg_class_id=*/0,
-              /*.location=*/1,
-          },
-          /*.source=*/
-          {
-              /*.location_kind=*/
-              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-              /*.descriptor_reg_class_id=*/0,
-              /*.location=*/0,
-          },
+          .destination =
+              {
+                  .location_kind =
+                      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                  .descriptor_reg_class_id = 0,
+                  .location = 1,
+              },
+          .source =
+              {
+                  .location_kind =
+                      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                  .descriptor_reg_class_id = 0,
+                  .location = 0,
+              },
       },
       {
-          /*.destination=*/
-          {
-              /*.location_kind=*/
-              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-              /*.descriptor_reg_class_id=*/0,
-              /*.location=*/2,
-          },
-          /*.source=*/
-          {
-              /*.location_kind=*/
-              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-              /*.descriptor_reg_class_id=*/0,
-              /*.location=*/1,
-          },
+          .destination =
+              {
+                  .location_kind =
+                      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                  .descriptor_reg_class_id = 0,
+                  .location = 2,
+              },
+          .source =
+              {
+                  .location_kind =
+                      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                  .descriptor_reg_class_id = 0,
+                  .location = 1,
+              },
       },
   };
   const loom_low_allocation_packet_move_group_t packet_move_groups[] = {
       {
-          /*.source_ordinal=*/0,
-          /*.transfer_start=*/0,
-          /*.transfer_count=*/0,
-          /*.cause=*/LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY,
-          /*.transfer_flags=*/
-          LOOM_LOW_ALLOCATION_PACKET_TRANSFER_GROUP_FLAG_MATERIALIZED,
-          /*.move_group=*/
-          {
-              /*.moves=*/
+          .source_ordinal = 0,
+          .transfer_start = 0,
+          .transfer_count = 0,
+          .cause = LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY,
+          .transfer_flags =
+              LOOM_LOW_ALLOCATION_PACKET_TRANSFER_GROUP_FLAG_MATERIALIZED,
+          .move_group =
               {
-                  /*.start=*/0,
-                  /*.count=*/1,
+                  .moves =
+                      {
+                          .start = 0,
+                          .count = 1,
+                      },
               },
-          },
       },
   };
   const loom_low_allocation_edge_copy_t edge_copies[kEdgeCopyCount] = {
@@ -479,71 +481,71 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   };
   const loom_low_allocation_edge_copy_group_t edge_copy_groups[] = {
       {
-          /*.terminator_op=*/{},
-          /*.source_ordinal=*/{},
-          /*.copy_start=*/0,
-          /*.copy_count=*/kEdgeCopyCount,
-          /*.move_group=*/
-          {
-              /*.moves=*/
+          .terminator_op = {},
+          .source_ordinal = {},
+          .copy_start = 0,
+          .copy_count = kEdgeCopyCount,
+          .move_group =
               {
-                  /*.start=*/1,
-                  /*.count=*/1,
+                  .moves =
+                      {
+                          .start = 1,
+                          .count = 1,
+                      },
               },
-          },
       },
   };
   const loom_low_allocation_spill_plan_t spill_plans[] = {
       {
-          /*.value_id=*/4,
-          /*.assignment_index=*/0,
-          /*.slot_index=*/0,
-          /*.slot_space=*/LOOM_LOW_SPILL_SLOT_SPACE_STACK,
-          /*.byte_size=*/16,
-          /*.byte_alignment=*/8,
-          /*.store_count=*/1,
-          /*.reload_count=*/2,
+          .value_id = 4,
+          .assignment_index = 0,
+          .slot_index = 0,
+          .slot_space = LOOM_LOW_SPILL_SLOT_SPACE_STACK,
+          .byte_size = 16,
+          .byte_alignment = 8,
+          .store_count = 1,
+          .reload_count = 2,
       },
       {
-          /*.value_id=*/5,
-          /*.assignment_index=*/1,
-          /*.slot_index=*/1,
-          /*.slot_space=*/LOOM_LOW_SPILL_SLOT_SPACE_SCRATCH,
-          /*.byte_size=*/32,
-          /*.byte_alignment=*/16,
-          /*.store_count=*/3,
-          /*.reload_count=*/4,
+          .value_id = 5,
+          .assignment_index = 1,
+          .slot_index = 1,
+          .slot_space = LOOM_LOW_SPILL_SLOT_SPACE_SCRATCH,
+          .byte_size = 32,
+          .byte_alignment = 16,
+          .store_count = 3,
+          .reload_count = 4,
       },
   };
   const loom_low_allocation_materialized_spill_t materialized_spills[] = {
       {
-          /*.value_id=*/6,
-          /*.descriptor_reg_class_id=*/0,
-          /*.flags=*/0,
-          /*.assignment_index=*/2,
-          /*.slot_index=*/7,
-          /*.slot_space=*/LOOM_LOW_SPILL_SLOT_SPACE_PRIVATE,
-          /*.byte_size=*/64,
-          /*.byte_alignment=*/16,
-          /*.store_count=*/5,
-          /*.store_bytes=*/320,
-          /*.reload_count=*/6,
-          /*.reload_bytes=*/384,
+          .value_id = 6,
+          .descriptor_reg_class_id = 0,
+          .flags = 0,
+          .assignment_index = 2,
+          .slot_index = 7,
+          .slot_space = LOOM_LOW_SPILL_SLOT_SPACE_PRIVATE,
+          .byte_size = 64,
+          .byte_alignment = 16,
+          .store_count = 5,
+          .store_bytes = 320,
+          .reload_count = 6,
+          .reload_bytes = 384,
       },
       {
-          /*.value_id=*/4,
-          /*.descriptor_reg_class_id=*/0,
-          /*.flags=*/
-          LOOM_LOW_ALLOCATION_MATERIALIZED_SPILL_FLAG_VALUE_WAS_BLOCK_ARGUMENT,
-          /*.assignment_index=*/0,
-          /*.slot_index=*/8,
-          /*.slot_space=*/LOOM_LOW_SPILL_SLOT_SPACE_PRIVATE,
-          /*.byte_size=*/4,
-          /*.byte_alignment=*/4,
-          /*.store_count=*/2,
-          /*.store_bytes=*/8,
-          /*.reload_count=*/3,
-          /*.reload_bytes=*/12,
+          .value_id = 4,
+          .descriptor_reg_class_id = 0,
+          .flags =
+              LOOM_LOW_ALLOCATION_MATERIALIZED_SPILL_FLAG_VALUE_WAS_BLOCK_ARGUMENT,
+          .assignment_index = 0,
+          .slot_index = 8,
+          .slot_space = LOOM_LOW_SPILL_SLOT_SPACE_PRIVATE,
+          .byte_size = 4,
+          .byte_alignment = 4,
+          .store_count = 2,
+          .store_bytes = 8,
+          .reload_count = 3,
+          .reload_bytes = 12,
       },
   };
   loom_low_allocation_materialized_spill_vec_t materialized_spill_vec = {
@@ -567,11 +569,11 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   schedule_nodes[1].value_ordinals.inline_value_ordinals[0] = 2;
   const loom_low_schedule_block_t schedule_blocks[] = {
       {
-          /*.block=*/{},
-          /*.node_start=*/0,
-          /*.node_count=*/8,
-          /*.scheduled_node_start=*/0,
-          /*.scheduled_node_count=*/8,
+          .block = {},
+          .node_start = 0,
+          .node_count = 8,
+          .scheduled_node_start = 0,
+          .scheduled_node_count = 8,
       },
   };
   const uint32_t scheduled_node_indices[] = {0, 1, 2, 3, 4, 5, 6, 7};
@@ -582,16 +584,16 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   loom_target_facts_builder_initialize(&loom_test_target_fact_type,
                                        target_bundle, &target_facts);
   const loom_low_resolved_target_t target = {
-      /*.target_facts=*/GetParam() == TargetBinding::kFacts ? &target_facts
-                                                            : nullptr,
-      /*.target_name=*/GetParam() == TargetBinding::kFacts
-          ? target_bundle->name
-          : iree_string_view_empty(),
-      /*.descriptor_set_key=*/target_bundle->config->contract_set_key,
-      /*.feature_bits=*/GetParam() == TargetBinding::kFacts
-          ? target_bundle->config->contract_feature_bits
-          : 0,
-      /*.descriptor_set=*/&descriptor_set,
+      .target_facts =
+          GetParam() == TargetBinding::kFacts ? &target_facts : nullptr,
+      .target_name = GetParam() == TargetBinding::kFacts
+                         ? target_bundle->name
+                         : iree_string_view_empty(),
+      .descriptor_set_key = target_bundle->config->contract_set_key,
+      .feature_bits = GetParam() == TargetBinding::kFacts
+                          ? target_bundle->config->contract_feature_bits
+                          : 0,
+      .descriptor_set = &descriptor_set,
   };
   loom_low_schedule_table_t schedule = {};
   schedule.module = module;

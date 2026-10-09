@@ -101,12 +101,12 @@ class BlockingPrintfProtocolTest : public ::testing::Test {
     iree_hip_blocking_printf_protocol_initialize(
         storage_.data(), kDeviceAddress, kDoorbellToken, &layout_, &protocol_);
     iree_hip_blocking_printf_output_sink_t output_sink = {
-        /*.fn=*/CaptureOutput,
-        /*.user_data=*/&recorder_,
+        .fn = CaptureOutput,
+        .user_data = &recorder_,
     };
     iree_hal_hostcall_error_callback_t error_callback = {
-        /*.fn=*/CaptureFailure,
-        /*.user_data=*/&recorder_,
+        .fn = CaptureFailure,
+        .user_data = &recorder_,
     };
     iree_hip_blocking_printf_service_initialize(
         &protocol_, output_sink, error_callback, iree_allocator_system(),

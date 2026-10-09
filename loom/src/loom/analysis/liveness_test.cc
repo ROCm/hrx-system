@@ -273,8 +273,8 @@ func.def @ordered(%a: i32, %b: i32) -> (i32) {
       /*.op_count=*/IREE_ARRAYSIZE(ordered_ops),
   };
   const loom_liveness_order_t order = {
-      /*.blocks=*/&block_order,
-      /*.block_count=*/1,
+      .blocks = &block_order,
+      .block_count = 1,
   };
   loom_local_value_domain_t value_domain = {};
   IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
@@ -1152,9 +1152,9 @@ low.func.def target<test.low.core>(@test_target) @high_pressure(%a0: reg<test.i3
   EXPECT_EQ(pressure->peak_live_units, 6u);
 
   loom_liveness_pressure_budget_t budget = {
-      /*.value_class=*/pressure->value_class,
-      /*.max_live_units=*/4,
-      /*.max_live_values=*/4,
+      .value_class = pressure->value_class,
+      .max_live_units = 4,
+      .max_live_values = 4,
   };
   const loom_liveness_pressure_budget_violation_t* violations = nullptr;
   iree_host_size_t violation_count = 0;

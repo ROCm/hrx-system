@@ -188,45 +188,45 @@ class ManualBinaryClassifier {
   explicit ManualBinaryClassifier(bool has_generic_residual) {
     predicate_count_ = has_generic_residual ? 1 : 2;
     predicates_[0] = {
-        /*.kind=*/LOOM_PREDICATE_GE,
-        /*.operand_count=*/2,
-        /*.reserved=*/{},
-        /*.operands=*/
-        {
-            loom_decision_program_argument_ref(0),
-            loom_decision_program_constant_ref(0),
-        },
+        .kind = LOOM_PREDICATE_GE,
+        .operand_count = 2,
+        .reserved = {},
+        .operands =
+            {
+                loom_decision_program_argument_ref(0),
+                loom_decision_program_constant_ref(0),
+            },
     };
     predicates_[1] = {
-        /*.kind=*/LOOM_PREDICATE_LT,
-        /*.operand_count=*/2,
-        /*.reserved=*/{},
-        /*.operands=*/
-        {
-            loom_decision_program_argument_ref(0),
-            loom_decision_program_constant_ref(0),
-        },
+        .kind = LOOM_PREDICATE_LT,
+        .operand_count = 2,
+        .reserved = {},
+        .operands =
+            {
+                loom_decision_program_argument_ref(0),
+                loom_decision_program_constant_ref(0),
+            },
     };
     choices_[0] = {
-        /*.conjunction=*/
-        {
-            /*.first_predicate=*/0,
-            /*.first_feature=*/0,
-            /*.predicate_count=*/1,
-            /*.feature_count=*/0,
-        },
-        /*.action_ordinal=*/0,
+        .conjunction =
+            {
+                .first_predicate = 0,
+                .first_feature = 0,
+                .predicate_count = 1,
+                .feature_count = 0,
+            },
+        .action_ordinal = 0,
     };
     choices_[1] = {
-        /*.conjunction=*/
-        {
-            /*.first_predicate=*/1,
-            /*.first_feature=*/0,
-            /*.predicate_count=*/
-            static_cast<uint16_t>(has_generic_residual ? 0 : 1),
-            /*.feature_count=*/0,
-        },
-        /*.action_ordinal=*/1,
+        .conjunction =
+            {
+                .first_predicate = 1,
+                .first_feature = 0,
+                .predicate_count =
+                    static_cast<uint16_t>(has_generic_residual ? 0 : 1),
+                .feature_count = 0,
+            },
+        .action_ordinal = 1,
     };
     for (uint32_t i = 0; i < 2; ++i) {
       actions_[0][i].choice_ordinal = i;
@@ -241,44 +241,43 @@ class ManualBinaryClassifier {
       priority_group_count_ = 1;
     }
     model_.program = {
-        /*.predicates=*/predicates_,
-        /*.choices=*/choices_,
-        /*.priority_groups=*/priority_groups_,
-        /*.constants=*/constants_,
-        /*.hard_requirements=*/{},
-        /*.predicate_count=*/predicate_count_,
-        /*.feature_count=*/0,
-        /*.constant_count=*/1,
-        /*.choice_count=*/2,
-        /*.priority_group_count=*/priority_group_count_,
+        .predicates = predicates_,
+        .choices = choices_,
+        .priority_groups = priority_groups_,
+        .constants = constants_,
+        .hard_requirements = {},
+        .predicate_count = predicate_count_,
+        .feature_count = 0,
+        .constant_count = 1,
+        .choice_count = 2,
+        .priority_group_count = priority_group_count_,
     };
 
     for (uint16_t i = 0; i < 2; ++i) {
       projection_terms_[i] = {
-          /*.coefficient=*/1,
-          /*.argument_ordinal=*/i,
-          /*.reserved=*/{},
+          .coefficient = 1,
+          .argument_ordinal = i,
+          .reserved = {},
       };
       projections_[i] = {
-          /*.source_value_id=*/i,
-          /*.kind=*/LOOM_KERNEL_CLASS_PROJECTION_AFFINE,
-          /*.reserved=*/{},
-          /*.constant=*/0,
-          /*.terms=*/&projection_terms_[i],
-          /*.static_facts=*/{},
-          /*.term_count=*/1,
-          /*.trailing_reserved=*/{},
+          .source_value_id = i,
+          .kind = LOOM_KERNEL_CLASS_PROJECTION_AFFINE,
+          .reserved = {},
+          .constant = 0,
+          .terms = &projection_terms_[i],
+          .static_facts = {},
+          .term_count = 1,
+          .trailing_reserved = {},
       };
       decisions_[i] = {
-          /*.demand=*/nullptr,
-          /*.model=*/&model_,
-          /*.argument_values=*/&projection_value_ids_[i],
-          /*.result_values=*/nullptr,
-          /*.projection_ordinals=*/&projection_ordinals_[i],
-          /*.feature_outcomes=*/nullptr,
-          /*.actions=*/actions_[i],
-          /*.generic_result=*/
-          {
+          .demand = nullptr,
+          .model = &model_,
+          .argument_values = &projection_value_ids_[i],
+          .result_values = nullptr,
+          .projection_ordinals = &projection_ordinals_[i],
+          .feature_outcomes = nullptr,
+          .actions = actions_[i],
+          .generic_result = {
               /*.kind=*/static_cast<loom_decision_program_result_kind_t>(
                   has_generic_residual
                       ? LOOM_DECISION_PROGRAM_RESULT_SELECTED
@@ -291,24 +290,24 @@ class ManualBinaryClassifier {
               /*.unresolved_constraint=*/
               LOOM_DECISION_PROGRAM_CONSTRAINT_INVALID,
           },
-          /*.argument_count=*/1,
-          /*.result_count=*/0,
-          /*.projection_count=*/1,
-          /*.unavailable_reason=*/LOOM_KERNEL_CLASS_DECISION_AVAILABLE,
-          /*.hard_requirement_flags=*/0,
-          /*.reserved=*/{},
+          .argument_count = 1,
+          .result_count = 0,
+          .projection_count = 1,
+          .unavailable_reason = LOOM_KERNEL_CLASS_DECISION_AVAILABLE,
+          .hard_requirement_flags = 0,
+          .reserved = {},
       };
     }
     classifier_ = {
-        /*.module=*/nullptr,
-        /*.kernel_symbol_id=*/0,
-        /*.projections=*/projections_,
-        /*.decisions=*/decisions_,
-        /*.projection_count=*/2,
-        /*.decision_count=*/2,
-        /*.maximum_provider_count=*/2,
-        /*.kernel_argument_count=*/2,
-        /*.reserved=*/{},
+        .module = nullptr,
+        .kernel_symbol_id = 0,
+        .projections = projections_,
+        .decisions = decisions_,
+        .projection_count = 2,
+        .decision_count = 2,
+        .maximum_provider_count = 2,
+        .kernel_argument_count = 2,
+        .reserved = {},
     };
 
     fact_table_.entries = fact_entries_;
@@ -323,8 +322,8 @@ class ManualBinaryClassifier {
       fact_entries_[first_value + 1] =
           loom_value_facts_exact_i64(static_cast<int64_t>(i % 2));
       sites_[i] = {
-          /*.facts=*/&fact_table_,
-          /*.argument_values=*/argument_values_[i],
+          .facts = &fact_table_,
+          .argument_values = argument_values_[i],
       };
     }
   }
@@ -433,8 +432,8 @@ TEST_F(KernelClassClassifierTest,
     const loom_value_slice_t arguments = loom_kernel_launch_arguments(op);
     ASSERT_EQ(arguments.count, 3u);
     sites.push_back({
-        /*.facts=*/&program_facts,
-        /*.argument_values=*/arguments.values,
+        .facts = &program_facts,
+        .argument_values = arguments.values,
     });
     launches.push_back(op);
   }

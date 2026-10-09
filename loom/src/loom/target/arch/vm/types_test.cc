@@ -23,8 +23,8 @@ static const loom_type_descriptor_t kResourceDescriptor = {
     /*.fact_domain=*/nullptr,
     /*.semantics=*/
     {
-        /*.semantic=*/LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE,
-        /*.contract_families=*/0,
+        .semantic = LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE,
+        .contract_families = 0,
     },
     /*.format_elements=*/nullptr,
     /*.format_element_count=*/0,

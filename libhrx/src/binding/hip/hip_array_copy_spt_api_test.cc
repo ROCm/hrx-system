@@ -272,11 +272,11 @@ class HipArrayCopySptApiTest : public testing::Test {
 
   void AllocateArray(size_t width, size_t height) {
     const hipChannelFormatDesc descriptor = {
-        /*.x=*/8,
-        /*.y=*/0,
-        /*.z=*/0,
-        /*.w=*/0,
-        /*.f=*/hipChannelFormatKindUnsigned,
+        .x = 8,
+        .y = 0,
+        .z = 0,
+        .w = 0,
+        .f = hipChannelFormatKindUnsigned,
     };
     ASSERT_EQ(hipSuccess, api_.malloc_array(&array_, &descriptor, width, height,
                                             /*flags=*/0));
@@ -362,11 +362,11 @@ TEST_F(HipArrayCopySptApiTest, ValidatesBeforeSubmittingOrAcceptingNoOps) {
 
   hipArray_t stale_array = nullptr;
   const hipChannelFormatDesc descriptor = {
-      /*.x=*/8,
-      /*.y=*/0,
-      /*.z=*/0,
-      /*.w=*/0,
-      /*.f=*/hipChannelFormatKindUnsigned,
+      .x = 8,
+      .y = 0,
+      .z = 0,
+      .w = 0,
+      .f = hipChannelFormatKindUnsigned,
   };
   ASSERT_EQ(hipSuccess, api_.malloc_array(&stale_array, &descriptor, kWidth,
                                           kHeight, /*flags=*/0));
@@ -782,11 +782,11 @@ TEST_F(HipArrayCopySptApiTest, CrossDeviceCopiesUseTheSelectedStream) {
   }
 
   const hipChannelFormatDesc descriptor = {
-      /*.x=*/8,
-      /*.y=*/0,
-      /*.z=*/0,
-      /*.w=*/0,
-      /*.f=*/hipChannelFormatKindUnsigned,
+      .x = 8,
+      .y = 0,
+      .z = 0,
+      .w = 0,
+      .f = hipChannelFormatKindUnsigned,
   };
   hipArray_t destination_array = nullptr;
   ASSERT_EQ(hipSuccess, api_.set_device(/*device_id=*/0));
@@ -945,7 +945,7 @@ TEST_F(HipArrayCopySptApiTest, PageableCopiesWaitOnlyForTheirSelectedStream) {
   parameters.dstPtr.pitch = kWidth;
   parameters.dstPtr.xsize = kWidth;
   parameters.dstPtr.ysize = 1;
-  parameters.extent = {/*.width=*/kWidth, /*.height=*/1, /*.depth=*/1};
+  parameters.extent = {.width = kWidth, .height = 1, .depth = 1};
   parameters.kind = hipMemcpyDeviceToHost;
   EXPECT_EQ(hipSuccess, api_.memcpy_3d_async(&parameters, nullptr));
 
@@ -1240,11 +1240,11 @@ TEST_F(HipArrayCopySptApiTest,
        LegacySynchronousEntryPointsHoldLeaseThroughDispatch) {
   constexpr size_t kWidth = 32;
   const hipChannelFormatDesc descriptor = {
-      /*.x=*/8,
-      /*.y=*/0,
-      /*.z=*/0,
-      /*.w=*/0,
-      /*.f=*/hipChannelFormatKindUnsigned,
+      .x = 8,
+      .y = 0,
+      .z = 0,
+      .w = 0,
+      .f = hipChannelFormatKindUnsigned,
   };
   AllocateHost(2 * kWidth);
   auto* source = static_cast<uint8_t*>(host_pointer_);
@@ -1322,11 +1322,11 @@ TEST_F(HipArrayCopySptApiTest,
        LegacyAsyncEntryPointsKeepAcceptedWorkAliveAfterLeaseRelease) {
   constexpr size_t kWidth = 32;
   const hipChannelFormatDesc descriptor = {
-      /*.x=*/8,
-      /*.y=*/0,
-      /*.z=*/0,
-      /*.w=*/0,
-      /*.f=*/hipChannelFormatKindUnsigned,
+      .x = 8,
+      .y = 0,
+      .z = 0,
+      .w = 0,
+      .f = hipChannelFormatKindUnsigned,
   };
   AllocateHost(2 * kWidth);
   auto* source = static_cast<uint8_t*>(host_pointer_);
@@ -1398,11 +1398,11 @@ TEST_F(HipArrayCopySptApiTest,
 TEST_F(HipArrayCopySptApiTest, LegacyAtoAHoldsBothArrayLeasesThroughDispatch) {
   constexpr size_t kWidth = 32;
   const hipChannelFormatDesc descriptor = {
-      /*.x=*/8,
-      /*.y=*/0,
-      /*.z=*/0,
-      /*.w=*/0,
-      /*.f=*/hipChannelFormatKindUnsigned,
+      .x = 8,
+      .y = 0,
+      .z = 0,
+      .w = 0,
+      .f = hipChannelFormatKindUnsigned,
   };
   hipArray_t source_array = nullptr;
   hipArray_t destination_array = nullptr;

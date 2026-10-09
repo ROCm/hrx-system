@@ -324,8 +324,8 @@ TEST(IrpaBuilderIntegrationTest, BuildsEmbeddedArchiveAtReportedOffset) {
   BuildArchiveTarget target;
   target.link_from_file_start = true;
   const iree_io_parameter_archive_file_open_callback_t open_callback = {
-      /*.fn=*/OpenBuildArchiveTarget,
-      /*.user_data=*/&target,
+      .fn = OpenBuildArchiveTarget,
+      .user_data = &target,
   };
   const iree_io_physical_offset_t requested_offset =
       sizeof(iree_io_parameter_archive_header_v0_t) + 1;
@@ -392,8 +392,8 @@ TEST(IrpaBuilderIntegrationTest, RejectsEmbeddedRangeBeforeOpen) {
       iree_io_parameter_index_create(iree_allocator_system(), &target_index));
   BuildArchiveTarget target;
   const iree_io_parameter_archive_file_open_callback_t open_callback = {
-      /*.fn=*/OpenBuildArchiveTarget,
-      /*.user_data=*/&target,
+      .fn = OpenBuildArchiveTarget,
+      .user_data = &target,
   };
 
   IREE_EXPECT_STATUS_IS(

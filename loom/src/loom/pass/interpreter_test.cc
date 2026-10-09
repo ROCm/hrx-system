@@ -134,8 +134,8 @@ TEST_F(PassInterpreterTest, SelectsFunctionsEnteredByModuleProgram) {
   iree_string_view_t selected_name = IREE_SV("second");
   loom_pass_interpreter_options_t options = InterpreterOptions(&trace);
   options.function_selector = {
-      /*.select=*/SelectNamedFunction,
-      /*.user_data=*/&selected_name,
+      .select = SelectNamedFunction,
+      .user_data = &selected_name,
   };
   loom_pass_run_result_t result = {};
   IREE_ASSERT_OK(loom_pass_interpreter_run_module(&storage.program, module,
@@ -165,8 +165,8 @@ TEST_F(PassInterpreterTest, RunsFunctionRootProgram) {
       /*.name=*/IREE_SVL("test"),
   };
   loom_function_version_t version = {
-      /*.type=*/&version_type,
-      /*.function=*/Function(module, 1),
+      .type = &version_type,
+      .function = Function(module, 1),
   };
   loom_function_version_t* version_values[] = {&version};
   const loom_function_version_list_t versions = {
@@ -535,12 +535,12 @@ TEST_F(PassInterpreterTest, AppliesProviderPredicateToCurrentFunction) {
       /*.name=*/IREE_SVL("test"),
   };
   loom_function_version_t selected_version = {
-      /*.type=*/&version_type,
-      /*.function=*/Function(module, 1),
+      .type = &version_type,
+      .function = Function(module, 1),
   };
   loom_function_version_t skipped_version = {
-      /*.type=*/&version_type,
-      /*.function=*/Function(module, 2),
+      .type = &version_type,
+      .function = Function(module, 2),
   };
   loom_function_version_t* version_values[] = {
       &selected_version,
@@ -775,8 +775,8 @@ TEST_F(PassInterpreterTest, PropagatesDescriptorCallbackFailure) {
   DiagnosticCapture diagnostic_capture;
   loom_pass_interpreter_options_t options =
       InterpreterOptions(&trace, (iree_diagnostic_emitter_t){
-                                     /*.fn=*/CaptureDiagnostic,
-                                     /*.user_data=*/&diagnostic_capture,
+                                     .fn = CaptureDiagnostic,
+                                     .user_data = &diagnostic_capture,
                                  });
   loom_pass_run_result_t result = {};
   IREE_EXPECT_STATUS_IS(

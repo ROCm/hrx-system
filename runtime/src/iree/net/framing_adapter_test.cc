@@ -50,9 +50,9 @@ static iree_status_t TestFrameLength(void* user_data,
 
 static iree_net_frame_length_callback_t TestFrameLengthCallback() {
   return {
-      /*.fn=*/TestFrameLength,
-      /*.user_data=*/nullptr,
-      /*.max_header_size=*/kHeaderSize,
+      .fn = TestFrameLength,
+      .user_data = nullptr,
+      .max_header_size = kHeaderSize,
   };
 }
 
@@ -238,12 +238,12 @@ struct MockCarrier {
 };
 
 const iree_net_carrier_vtable_t MockCarrier::kVtable = {
-    /*.destroy=*/MockCarrier::Destroy,
-    /*.activate=*/MockCarrier::Activate,
-    /*.deactivate=*/MockCarrier::Deactivate,
-    /*.query_send_budget=*/MockCarrier::QuerySendBudget,
-    /*.send=*/MockCarrier::Send,
-    /*.shutdown=*/MockCarrier::Shutdown,
+    .destroy = MockCarrier::Destroy,
+    .activate = MockCarrier::Activate,
+    .deactivate = MockCarrier::Deactivate,
+    .query_send_budget = MockCarrier::QuerySendBudget,
+    .send = MockCarrier::Send,
+    .shutdown = MockCarrier::Shutdown,
 };
 
 //===----------------------------------------------------------------------===//
@@ -461,9 +461,9 @@ TEST_F(FramingAdapterTest, AllocateRequiresFrameLengthFn) {
   auto carrier = MockCarrier::Create();
   iree_net_framing_adapter_t* adapter = nullptr;
   iree_net_frame_length_callback_t frame_length = {
-      /*.fn=*/nullptr,
-      /*.user_data=*/nullptr,
-      /*.max_header_size=*/kHeaderSize,
+      .fn = nullptr,
+      .user_data = nullptr,
+      .max_header_size = kHeaderSize,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -897,10 +897,10 @@ TEST_F(FramingAdapterTest, SendCopiesTransientPrefix) {
   iree_async_span_t span = iree_async_span_from_ptr(data.data(), data.size());
   SendCompletion completion;
   iree_net_message_endpoint_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+      .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span(prefix.data(), prefix.size())),
-      /*.data=*/iree_async_span_list_make(&span, 1),
-      /*.completion_callback=*/completion.callback(),
+      .data = iree_async_span_list_make(&span, 1),
+      .completion_callback = completion.callback(),
   };
 
   IREE_ASSERT_OK(iree_net_message_endpoint_send(endpoint_, &params));
@@ -924,10 +924,10 @@ TEST_F(FramingAdapterTest, SendCopiesPrefixOnlyMessage) {
   const std::vector<uint8_t> expected_prefix = prefix;
   SendCompletion completion;
   iree_net_message_endpoint_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+      .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span(prefix.data(), prefix.size())),
-      /*.data=*/iree_async_span_list_empty(),
-      /*.completion_callback=*/completion.callback(),
+      .data = iree_async_span_list_empty(),
+      .completion_callback = completion.callback(),
   };
 
   IREE_ASSERT_OK(iree_net_message_endpoint_send(endpoint_, &params));
@@ -948,10 +948,10 @@ TEST_F(FramingAdapterTest, GeneratedPrefixForwardsTerminalCompletion) {
   const uint8_t payload[] = {0x01, 0x02, 0x03, 0x04};
   SendCompletion completion;
   iree_net_message_endpoint_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+      .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span(payload, sizeof(payload))),
-      /*.data=*/iree_async_span_list_empty(),
-      /*.completion_callback=*/completion.callback(),
+      .data = iree_async_span_list_empty(),
+      .completion_callback = completion.callback(),
   };
   IREE_ASSERT_OK(iree_net_message_endpoint_send(endpoint_, &params));
   EXPECT_EQ(completion.count, 0);
@@ -991,10 +991,10 @@ TEST_F(FramingAdapterTest, SendCopiedPrefixForwardsAsynchronousError) {
   std::vector<uint8_t> prefix = {0x10, 0x20, 0x30};
   SendCompletion completion;
   iree_net_message_endpoint_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+      .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span(prefix.data(), prefix.size())),
-      /*.data=*/iree_async_span_list_empty(),
-      /*.completion_callback=*/completion.callback(),
+      .data = iree_async_span_list_empty(),
+      .completion_callback = completion.callback(),
   };
   IREE_ASSERT_OK(iree_net_message_endpoint_send(endpoint_, &params));
   std::fill(prefix.begin(), prefix.end(), 0xFF);
@@ -1013,9 +1013,9 @@ TEST_F(FramingAdapterTest, SendRequiresCompletionCallback) {
   std::vector<uint8_t> data = {0x01};
   iree_async_span_t span = iree_async_span_from_ptr(data.data(), data.size());
   iree_net_message_endpoint_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_empty(),
-      /*.data=*/iree_async_span_list_make(&span, 1),
-      /*.completion_callback=*/{nullptr, nullptr},
+      .generated_prefix = iree_net_send_prefix_empty(),
+      .data = iree_async_span_list_make(&span, 1),
+      .completion_callback = {nullptr, nullptr},
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -1028,9 +1028,9 @@ TEST_F(FramingAdapterTest, SendRequiresNonEmptyMessage) {
 
   SendCompletion completion;
   iree_net_message_endpoint_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_empty(),
-      /*.data=*/iree_async_span_list_empty(),
-      /*.completion_callback=*/completion.callback(),
+      .generated_prefix = iree_net_send_prefix_empty(),
+      .data = iree_async_span_list_empty(),
+      .completion_callback = completion.callback(),
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_message_endpoint_send(endpoint_, &params));
@@ -1049,10 +1049,10 @@ TEST_F(FramingAdapterTest, SendCompletesNullGeneratedPrefixSource) {
 
   SendCompletion completion;
   iree_net_message_endpoint_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+      .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span(nullptr, 1)),
-      /*.data=*/iree_async_span_list_empty(),
-      /*.completion_callback=*/completion.callback(),
+      .data = iree_async_span_list_empty(),
+      .completion_callback = completion.callback(),
   };
   IREE_ASSERT_OK(iree_net_message_endpoint_send(endpoint_, &params));
   EXPECT_TRUE(mock_carrier_->sends.empty());
@@ -1068,10 +1068,10 @@ TEST_F(FramingAdapterTest, SendRejectsMessageLengthOverflow) {
   iree_async_span_t span = iree_async_span_from_ptr(&byte, 1);
   SendCompletion completion;
   iree_net_message_endpoint_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+      .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span(&byte, IREE_HOST_SIZE_MAX)),
-      /*.data=*/iree_async_span_list_make(&span, 1),
-      /*.completion_callback=*/completion.callback(),
+      .data = iree_async_span_list_make(&span, 1),
+      .completion_callback = completion.callback(),
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         iree_net_message_endpoint_send(endpoint_, &params));
@@ -1119,10 +1119,10 @@ TEST_F(FramingAdapterTest, DeactivationDrainsRetainedCopiedPrefix) {
   std::vector<uint8_t> prefix = {0x10, 0x20, 0x30};
   SendCompletion completion;
   iree_net_message_endpoint_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+      .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span(prefix.data(), prefix.size())),
-      /*.data=*/iree_async_span_list_empty(),
-      /*.completion_callback=*/completion.callback(),
+      .data = iree_async_span_list_empty(),
+      .completion_callback = completion.callback(),
   };
   IREE_ASSERT_OK(iree_net_message_endpoint_send(endpoint_, &params));
   std::fill(prefix.begin(), prefix.end(), 0xFF);
@@ -1362,8 +1362,8 @@ TEST_F(FramingAdapterTest, CallbackSwapRedirectsMessages) {
 TEST_F(FramingAdapterTest, CallbackSwapInsideMessageRedirectsFollowingFrame) {
   SecondHandler second_handler;
   HandoffHandler handoff_handler = {
-      /*.endpoint=*/endpoint_,
-      /*.next_handler=*/&second_handler,
+      .endpoint = endpoint_,
+      .next_handler = &second_handler,
   };
   iree_net_message_endpoint_set_callbacks(endpoint_,
                                           handoff_handler.MakeCallbacks());

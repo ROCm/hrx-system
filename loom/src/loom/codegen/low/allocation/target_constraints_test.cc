@@ -50,11 +50,11 @@ class LowAllocationTargetConstraintsTest : public ::testing::Test {
     loom_target_facts_builder_initialize(&loom_test_target_fact_type,
                                          target_bundle, &target_facts_);
     target_ = (loom_low_resolved_target_t){
-        /*.target_facts=*/&target_facts_,
-        /*.target_name=*/target_bundle->name,
-        /*.descriptor_set_key=*/target_bundle->config->contract_set_key,
-        /*.feature_bits=*/target_bundle->config->contract_feature_bits,
-        /*.descriptor_set=*/loom_test_low_core_descriptor_set(),
+        .target_facts = &target_facts_,
+        .target_name = target_bundle->name,
+        .descriptor_set_key = target_bundle->config->contract_set_key,
+        .feature_bits = target_bundle->config->contract_feature_bits,
+        .descriptor_set = loom_test_low_core_descriptor_set(),
     };
   }
 
@@ -177,8 +177,8 @@ TEST_F(LowAllocationTargetConstraintsTest,
 
   DiagnosticCapture capture = {};
   const iree_diagnostic_emitter_t emitter = {
-      /*.fn=*/CaptureDiagnostic,
-      /*.user_data=*/&capture,
+      .fn = CaptureDiagnostic,
+      .user_data = &capture,
   };
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
@@ -290,8 +290,8 @@ TEST_F(LowAllocationTargetConstraintsTest,
 
   DiagnosticCapture capture = {};
   const iree_diagnostic_emitter_t emitter = {
-      /*.fn=*/CaptureDiagnostic,
-      /*.user_data=*/&capture,
+      .fn = CaptureDiagnostic,
+      .user_data = &capture,
   };
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(

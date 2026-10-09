@@ -76,10 +76,10 @@ static const loom_encoding_family_descriptor_t kRequiresLayoutDescriptor = {
     /*.dynamic_parameter_descriptors=*/kRequiresLayoutDynamicParameters,
 };
 static const loom_encoding_vtable_t kRequiresLayoutEncodingVtable = {
-    /*.descriptor=*/&kRequiresLayoutDescriptor,
-    /*.is_static_valid=*/{},
-    /*.diagnose_static=*/{},
-    /*.verify_define=*/VerifyRequiresLayoutDefine,
+    .descriptor = &kRequiresLayoutDescriptor,
+    .is_static_valid = {},
+    .diagnose_static = {},
+    .verify_define = VerifyRequiresLayoutDefine,
 };
 
 class EncodingVerifyTest : public ::testing::Test {
@@ -219,9 +219,9 @@ TEST_F(EncodingVerifyTest, UnusedMalformedStaticEncodingIsDiagnosed) {
   IREE_ASSERT_OK(
       loom_module_intern_string(module, IREE_SV("thirty_two"), &value_id));
   loom_named_attr_t parameter = {
-      /*.name_id=*/parameter_name_id,
-      /*.reserved=*/{},
-      /*.value=*/loom_attr_string(value_id),
+      .name_id = parameter_name_id,
+      .reserved = {},
+      .value = loom_attr_string(value_id),
   };
   loom_encoding_t encoding = {
       /*.name_id=*/encoding_name_id,

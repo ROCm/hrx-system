@@ -39,32 +39,30 @@ struct EncodingIds {
 
 EncodingIds ResolveEncodingIds() {
   return {
-      /*.nop=*/loom_aie2p_encoding_find_instruction(IREE_SV("NOP")),
-      /*.ret=*/loom_aie2p_encoding_find_instruction(IREE_SV("RET")),
-      /*.vector_add_8=*/loom_aie2p_encoding_find_instruction(IREE_SV("VADD_8")),
-      /*.vector_add_16=*/
-      loom_aie2p_encoding_find_instruction(IREE_SV("VADD_16")),
-      /*.vector_add_32=*/
-      loom_aie2p_encoding_find_instruction(IREE_SV("VADD_32")),
-      /*.vector_load_a=*/
-      loom_aie2p_encoding_find_instruction(IREE_SV("VLDA_dmx_lda_x_idx_imm")),
-      /*.vector_load_b=*/
-      loom_aie2p_encoding_find_instruction(IREE_SV("VLDB_dmx_ldb_x_idx_imm")),
-      /*.vector_store=*/
-      loom_aie2p_encoding_find_instruction(IREE_SV("VST_dmx_sts_x_idx_imm")),
-      /*.d=*/loom_aie2p_encoding_find_field(IREE_SV("d")),
-      /*.dst=*/loom_aie2p_encoding_find_field(IREE_SV("dst")),
-      /*.imm=*/loom_aie2p_encoding_find_field(IREE_SV("imm")),
-      /*.ptr=*/loom_aie2p_encoding_find_field(IREE_SV("ptr")),
-      /*.s1=*/loom_aie2p_encoding_find_field(IREE_SV("s1")),
-      /*.s2=*/loom_aie2p_encoding_find_field(IREE_SV("s2")),
-      /*.src=*/loom_aie2p_encoding_find_field(IREE_SV("src")),
-      /*.i16_nop=*/loom_aie2p_encoding_find_bundle_format(IREE_SV("I16_NOP")),
-      /*.i32_alu=*/loom_aie2p_encoding_find_bundle_format(IREE_SV("I32_ALU")),
-      /*.i32_mv=*/loom_aie2p_encoding_find_bundle_format(IREE_SV("I32_MV")),
-      /*.i32_st=*/loom_aie2p_encoding_find_bundle_format(IREE_SV("I32_ST")),
-      /*.i48_lda_ldb=*/
-      loom_aie2p_encoding_find_bundle_format(IREE_SV("I48_LDA_LDB")),
+      .nop = loom_aie2p_encoding_find_instruction(IREE_SV("NOP")),
+      .ret = loom_aie2p_encoding_find_instruction(IREE_SV("RET")),
+      .vector_add_8 = loom_aie2p_encoding_find_instruction(IREE_SV("VADD_8")),
+      .vector_add_16 = loom_aie2p_encoding_find_instruction(IREE_SV("VADD_16")),
+      .vector_add_32 = loom_aie2p_encoding_find_instruction(IREE_SV("VADD_32")),
+      .vector_load_a = loom_aie2p_encoding_find_instruction(
+          IREE_SV("VLDA_dmx_lda_x_idx_imm")),
+      .vector_load_b = loom_aie2p_encoding_find_instruction(
+          IREE_SV("VLDB_dmx_ldb_x_idx_imm")),
+      .vector_store = loom_aie2p_encoding_find_instruction(
+          IREE_SV("VST_dmx_sts_x_idx_imm")),
+      .d = loom_aie2p_encoding_find_field(IREE_SV("d")),
+      .dst = loom_aie2p_encoding_find_field(IREE_SV("dst")),
+      .imm = loom_aie2p_encoding_find_field(IREE_SV("imm")),
+      .ptr = loom_aie2p_encoding_find_field(IREE_SV("ptr")),
+      .s1 = loom_aie2p_encoding_find_field(IREE_SV("s1")),
+      .s2 = loom_aie2p_encoding_find_field(IREE_SV("s2")),
+      .src = loom_aie2p_encoding_find_field(IREE_SV("src")),
+      .i16_nop = loom_aie2p_encoding_find_bundle_format(IREE_SV("I16_NOP")),
+      .i32_alu = loom_aie2p_encoding_find_bundle_format(IREE_SV("I32_ALU")),
+      .i32_mv = loom_aie2p_encoding_find_bundle_format(IREE_SV("I32_MV")),
+      .i32_st = loom_aie2p_encoding_find_bundle_format(IREE_SV("I32_ST")),
+      .i48_lda_ldb =
+          loom_aie2p_encoding_find_bundle_format(IREE_SV("I48_LDA_LDB")),
   };
 }
 

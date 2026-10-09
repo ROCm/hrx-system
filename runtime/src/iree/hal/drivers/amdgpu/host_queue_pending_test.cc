@@ -183,8 +183,8 @@ static iree_status_t QueueAlloca(iree_hal_amdgpu_host_queue_t* queue,
   params.queue_family_affinity = iree_hal_make_queue_family_affinity(
       iree_hal_queue_family_ordinal(iree_hal_queue_family(&queue->base)));
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/allocation_size,
+      .params = params,
+      .allocation_size = allocation_size,
   };
   return iree_hal_queue_alloca(&queue->base, iree_hal_semaphore_list_empty(),
                                signal_list, pool,
@@ -539,8 +539,8 @@ static iree_status_t SeedWaitableFixedBlockReservation(
   iree_hal_buffer_params_t params = {};
   params.min_alignment = 1;
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/allocation_size,
+      .params = params,
+      .allocation_size = allocation_size,
   };
   IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservations(
       pool, 1, &request, /*requester_frontier=*/NULL,
@@ -753,8 +753,8 @@ TEST_F(HostQueuePendingTest, CapacityParkedHostActionRetriesAfterPostDrain) {
     status = iree_hal_amdgpu_host_queue_enqueue_host_action(
         queue, iree_hal_semaphore_list_empty(),
         iree_hal_amdgpu_reclaim_action_t{
-            /*.fn=*/RecordHostAction,
-            /*.user_data=*/&action_state,
+            .fn = RecordHostAction,
+            .user_data = &action_state,
         },
         /*operation_resources=*/NULL, /*operation_resource_count=*/0,
         (iree_hal_amdgpu_queue_barrier_t){0});

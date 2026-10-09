@@ -41,15 +41,14 @@ TEST(Aie2pTileLinkTest, PlacesExecutableContribution) {
       /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
   };
   const loom_aie2p_leaf_contribution_t contribution = {
-      /*.object=*/
-      {
-          /*.sections=*/&section,
-          /*.section_count=*/1,
-          /*.symbols=*/&symbol,
-          /*.symbol_count=*/1,
-      },
-      /*.realization=*/
-      {
+      .object =
+          {
+              .sections = &section,
+              .section_count = 1,
+              .symbols = &symbol,
+              .symbol_count = 1,
+          },
+      .realization = {
           /*.target_identity=*/LOOM_AIE2P_LEAF_TARGET_IDENTITY,
           /*.abi_identity=*/LOOM_AIE2P_LEAF_ABI_IDENTITY,
           /*.entry_symbol_index=*/0,
@@ -63,18 +62,18 @@ TEST(Aie2pTileLinkTest, PlacesExecutableContribution) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
   const loom_aie2p_tile_link_layout_t undersized_layout = {
-      /*.program_address=*/0,
-      /*.program_owner_offset=*/0,
-      /*.program_byte_capacity=*/sizeof(code) - 1u,
+      .program_address = 0,
+      .program_owner_offset = 0,
+      .program_byte_capacity = sizeof(code) - 1u,
   };
   loom_aie2p_linked_tile_t linked_tile = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         loom_aie2p_tile_link(&contribution, &undersized_layout,
                                              &arena, &linked_tile));
   const loom_aie2p_tile_link_layout_t layout = {
-      /*.program_address=*/0,
-      /*.program_owner_offset=*/0,
-      /*.program_byte_capacity=*/16 * 1024,
+      .program_address = 0,
+      .program_owner_offset = 0,
+      .program_byte_capacity = 16 * 1024,
   };
   IREE_ASSERT_OK(
       loom_aie2p_tile_link(&contribution, &layout, &arena, &linked_tile));
@@ -132,16 +131,14 @@ TEST(Aie2pTileLinkTest, AppliesBranchFixupAfterContributionPlacement) {
       /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
   };
   const loom_native_object_fixup_t fixup = {
-      /*.section_contribution_index=*/1,
-      /*.section_offset=*/0,
-      /*.relocation_kind=*/
-      LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_BRANCH_ABSOLUTE,
-      /*.target_symbol_index=*/0,
-      /*.addend=*/16,
+      .section_contribution_index = 1,
+      .section_offset = 0,
+      .relocation_kind = LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_BRANCH_ABSOLUTE,
+      .target_symbol_index = 0,
+      .addend = 16,
   };
   const loom_aie2p_leaf_contribution_t contribution = {
-      /*.object=*/
-      {
+      .object = {
           /*.sections=*/sections,
           /*.section_count=*/IREE_ARRAYSIZE(sections),
           /*.symbols=*/&symbol,
@@ -149,8 +146,7 @@ TEST(Aie2pTileLinkTest, AppliesBranchFixupAfterContributionPlacement) {
           /*.fixups=*/&fixup,
           /*.fixup_count=*/1,
       },
-      /*.realization=*/
-      {
+      .realization = {
           /*.target_identity=*/LOOM_AIE2P_LEAF_TARGET_IDENTITY,
           /*.abi_identity=*/LOOM_AIE2P_LEAF_ABI_IDENTITY,
           /*.entry_symbol_index=*/0,
@@ -164,9 +160,9 @@ TEST(Aie2pTileLinkTest, AppliesBranchFixupAfterContributionPlacement) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
   const loom_aie2p_tile_link_layout_t layout = {
-      /*.program_address=*/0,
-      /*.program_owner_offset=*/0,
-      /*.program_byte_capacity=*/16 * 1024,
+      .program_address = 0,
+      .program_owner_offset = 0,
+      .program_byte_capacity = 16 * 1024,
   };
   loom_aie2p_linked_tile_t linked_tile = {};
   IREE_ASSERT_OK(
@@ -262,12 +258,12 @@ TEST(Aie2pTileLinkTest, RelocatesMovxmInsideAMultiSlotBundle) {
       /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_DATA,
   };
   const loom_native_object_fixup_t fixup = {
-      /*.section_contribution_index=*/0,
-      /*.section_offset=*/0,
-      /*.relocation_kind=*/
-      LOOM_AIE2P_NATIVE_RELOCATION_KIND_LOCAL_ADDRESS_ABSOLUTE,
-      /*.target_symbol_index=*/0,
-      /*.addend=*/144,
+      .section_contribution_index = 0,
+      .section_offset = 0,
+      .relocation_kind =
+          LOOM_AIE2P_NATIVE_RELOCATION_KIND_LOCAL_ADDRESS_ABSOLUTE,
+      .target_symbol_index = 0,
+      .addend = 144,
   };
   const loom_native_object_contribution_t object = {
       /*.sections=*/sections,
@@ -370,20 +366,19 @@ TEST(Aie2pTileLinkTest, PlacesAndRelocatesReadOnlyData) {
       },
   };
   const loom_native_object_fixup_t fixup = {
-      /*.section_contribution_index=*/0,
-      /*.section_offset=*/0,
-      /*.relocation_kind=*/
-      LOOM_AIE2P_NATIVE_RELOCATION_KIND_LOCAL_ADDRESS_ABSOLUTE,
-      /*.target_symbol_index=*/1,
-      /*.addend=*/0,
+      .section_contribution_index = 0,
+      .section_offset = 0,
+      .relocation_kind =
+          LOOM_AIE2P_NATIVE_RELOCATION_KIND_LOCAL_ADDRESS_ABSOLUTE,
+      .target_symbol_index = 1,
+      .addend = 0,
   };
   const loom_aie2p_leaf_read_only_data_domain_t read_only_data = {
-      /*.section_contribution_index=*/1,
-      /*.symbol_index=*/1,
+      .section_contribution_index = 1,
+      .symbol_index = 1,
   };
   const loom_aie2p_leaf_contribution_t contribution = {
-      /*.object=*/
-      {
+      .object = {
           /*.sections=*/sections,
           /*.section_count=*/IREE_ARRAYSIZE(sections),
           /*.symbols=*/symbols,
@@ -391,8 +386,7 @@ TEST(Aie2pTileLinkTest, PlacesAndRelocatesReadOnlyData) {
           /*.fixups=*/&fixup,
           /*.fixup_count=*/1,
       },
-      /*.realization=*/
-      {
+      .realization = {
           /*.target_identity=*/LOOM_AIE2P_LEAF_TARGET_IDENTITY,
           /*.abi_identity=*/LOOM_AIE2P_LEAF_ABI_IDENTITY,
           /*.entry_symbol_index=*/0,
@@ -405,18 +399,18 @@ TEST(Aie2pTileLinkTest, PlacesAndRelocatesReadOnlyData) {
       },
   };
   const loom_aie2p_tile_read_only_data_placement_t data_placement = {
-      /*.owner_offset=*/0x4020,
-      /*.load_address=*/0x74020,
-      /*.byte_length=*/table.size(),
+      .owner_offset = 0x4020,
+      .load_address = 0x74020,
+      .byte_length = table.size(),
   };
   const loom_aie2p_tile_link_layout_t layout = {
-      /*.program_address=*/0,
-      /*.program_owner_offset=*/0,
-      /*.program_byte_capacity=*/16 * 1024,
-      /*.storage_placements=*/nullptr,
-      /*.storage_placement_count=*/0,
-      /*.read_only_data_placements=*/&data_placement,
-      /*.read_only_data_placement_count=*/1,
+      .program_address = 0,
+      .program_owner_offset = 0,
+      .program_byte_capacity = 16 * 1024,
+      .storage_placements = nullptr,
+      .storage_placement_count = 0,
+      .read_only_data_placements = &data_placement,
+      .read_only_data_placement_count = 1,
   };
 
   iree_arena_block_pool_t block_pool;
@@ -515,21 +509,20 @@ TEST(Aie2pTileLinkTest, PlacesAndRelocatesFunctionLocalStorage) {
       },
   };
   const loom_native_object_fixup_t fixup = {
-      /*.section_contribution_index=*/0,
-      /*.section_offset=*/0,
-      /*.relocation_kind=*/
-      LOOM_AIE2P_NATIVE_RELOCATION_KIND_LOCAL_ADDRESS_ABSOLUTE,
-      /*.target_symbol_index=*/1,
-      /*.addend=*/144,
+      .section_contribution_index = 0,
+      .section_offset = 0,
+      .relocation_kind =
+          LOOM_AIE2P_NATIVE_RELOCATION_KIND_LOCAL_ADDRESS_ABSOLUTE,
+      .target_symbol_index = 1,
+      .addend = 144,
   };
   const loom_aie2p_leaf_storage_domain_t storage_domain = {
-      /*.storage_space=*/LOOM_STORAGE_SPACE_WORKGROUP,
-      /*.section_contribution_index=*/1,
-      /*.symbol_index=*/1,
+      .storage_space = LOOM_STORAGE_SPACE_WORKGROUP,
+      .section_contribution_index = 1,
+      .symbol_index = 1,
   };
   const loom_aie2p_leaf_contribution_t contribution = {
-      /*.object=*/
-      {
+      .object = {
           /*.sections=*/sections,
           /*.section_count=*/IREE_ARRAYSIZE(sections),
           /*.symbols=*/symbols,
@@ -537,8 +530,7 @@ TEST(Aie2pTileLinkTest, PlacesAndRelocatesFunctionLocalStorage) {
           /*.fixups=*/&fixup,
           /*.fixup_count=*/1,
       },
-      /*.realization=*/
-      {
+      .realization = {
           /*.target_identity=*/LOOM_AIE2P_LEAF_TARGET_IDENTITY,
           /*.abi_identity=*/LOOM_AIE2P_LEAF_ABI_IDENTITY,
           /*.entry_symbol_index=*/0,
@@ -558,16 +550,16 @@ TEST(Aie2pTileLinkTest, PlacesAndRelocatesFunctionLocalStorage) {
       },
   };
   const loom_aie2p_tile_storage_placement_t storage_placement = {
-      /*.storage_space=*/LOOM_STORAGE_SPACE_WORKGROUP,
-      /*.owner_offset=*/0,
-      /*.load_address=*/0x70000,
+      .storage_space = LOOM_STORAGE_SPACE_WORKGROUP,
+      .owner_offset = 0,
+      .load_address = 0x70000,
   };
   const loom_aie2p_tile_link_layout_t layout = {
-      /*.program_address=*/0,
-      /*.program_owner_offset=*/0,
-      /*.program_byte_capacity=*/16 * 1024,
-      /*.storage_placements=*/&storage_placement,
-      /*.storage_placement_count=*/1,
+      .program_address = 0,
+      .program_owner_offset = 0,
+      .program_byte_capacity = 16 * 1024,
+      .storage_placements = &storage_placement,
+      .storage_placement_count = 1,
   };
 
   iree_arena_block_pool_t block_pool;

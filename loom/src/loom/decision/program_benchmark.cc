@@ -40,13 +40,14 @@ struct ProgramFixture {
                       ? LOOM_DECISION_TRUTH_FALSE
                       : LOOM_DECISION_TRUTH_TRUE;
       choices[i] = {
-          /*.conjunction=*/{
-              /*.first_predicate=*/0,
-              /*.first_feature=*/i,
-              /*.predicate_count=*/0,
-              /*.feature_count=*/1,
-          },
-          /*.action_ordinal=*/i,
+          .conjunction =
+              {
+                  .first_predicate = 0,
+                  .first_feature = i,
+                  .predicate_count = 0,
+                  .feature_count = 1,
+              },
+          .action_ordinal = i,
       };
     }
     if (shape == ProgramShape::kDecisivePrefix) {
@@ -61,20 +62,20 @@ struct ProgramFixture {
       groups[0].choice_count = choice_count;
     }
     program = {
-        /*.predicates=*/nullptr,
-        /*.choices=*/choices.data(),
-        /*.priority_groups=*/groups.data(),
-        /*.constants=*/nullptr,
-        /*.hard_requirements=*/{},
-        /*.predicate_count=*/0,
-        /*.feature_count=*/choice_count,
-        /*.constant_count=*/0,
-        /*.choice_count=*/choice_count,
-        /*.priority_group_count=*/static_cast<uint32_t>(groups.size()),
+        .predicates = nullptr,
+        .choices = choices.data(),
+        .priority_groups = groups.data(),
+        .constants = nullptr,
+        .hard_requirements = {},
+        .predicate_count = 0,
+        .feature_count = choice_count,
+        .constant_count = 0,
+        .choice_count = choice_count,
+        .priority_group_count = static_cast<uint32_t>(groups.size()),
     };
     feature_evaluator = {
-        /*.fn=*/EvaluateFeature,
-        /*.user_data=*/truths.data(),
+        .fn = EvaluateFeature,
+        .user_data = truths.data(),
     };
   }
 

@@ -19,7 +19,7 @@ TEST(ExecutableLibraryUtilTest, AcceptsCurrentLibraryVersion) {
       /*.version=*/IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST,
   };
   const iree_hal_executable_library_v0_t library = {
-      /*.header=*/&header,
+      .header = &header,
   };
   const iree_hal_executable_library_v0_t* result = nullptr;
 
@@ -33,7 +33,7 @@ TEST(ExecutableLibraryUtilTest, RejectsPreviousLibraryVersion) {
       /*.version=*/IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST - 1,
   };
   const iree_hal_executable_library_v0_t library = {
-      /*.header=*/&header,
+      .header = &header,
   };
   const iree_hal_executable_library_v0_t* result = nullptr;
 
@@ -45,23 +45,23 @@ TEST(ExecutableLibraryUtilTest, RejectsPreviousLibraryVersion) {
 
 TEST(ExecutableLibraryUtilTest, ReportsFixedWorkgroupLocalMemory) {
   const iree_hal_executable_dispatch_attrs_v0_t attributes = {
-      /*.flags=*/{},
-      /*.local_memory_pages=*/3,
-      /*.binding_count=*/{},
-      /*.reserved_0=*/{},
-      /*.workgroup_size_x=*/4,
-      /*.workgroup_size_y=*/2,
-      /*.workgroup_size_z=*/1,
-      /*.parameter_count=*/{},
+      .flags = {},
+      .local_memory_pages = 3,
+      .binding_count = {},
+      .reserved_0 = {},
+      .workgroup_size_x = 4,
+      .workgroup_size_y = 2,
+      .workgroup_size_z = 1,
+      .parameter_count = {},
   };
   const iree_hal_executable_library_v0_t library = {
-      /*.header=*/{},
-      /*.exports=*/
-      {
-          /*.count=*/1,
-          /*.ptrs=*/{},
-          /*.attrs=*/&attributes,
-      },
+      .header = {},
+      .exports =
+          {
+              .count = 1,
+              .ptrs = {},
+              .attrs = &attributes,
+          },
   };
 
   iree_hal_executable_function_info_t output;
@@ -90,24 +90,24 @@ TEST(ExecutableLibraryUtilTest, InitializesUnspecifiedParameterFields) {
       &parameter,
   };
   const iree_hal_executable_dispatch_attrs_v0_t attributes = {
-      /*.flags=*/{},
-      /*.local_memory_pages=*/{},
-      /*.binding_count=*/{},
-      /*.reserved_0=*/{},
-      /*.workgroup_size_x=*/{},
-      /*.workgroup_size_y=*/{},
-      /*.workgroup_size_z=*/{},
-      /*.parameter_count=*/1,
+      .flags = {},
+      .local_memory_pages = {},
+      .binding_count = {},
+      .reserved_0 = {},
+      .workgroup_size_x = {},
+      .workgroup_size_y = {},
+      .workgroup_size_z = {},
+      .parameter_count = 1,
   };
   const iree_hal_executable_library_v0_t library = {
-      /*.header=*/{},
-      /*.exports=*/
-      {
-          /*.count=*/1,
-          /*.ptrs=*/{},
-          /*.attrs=*/&attributes,
-          /*.params=*/parameters,
-      },
+      .header = {},
+      .exports =
+          {
+              .count = 1,
+              .ptrs = {},
+              .attrs = &attributes,
+              .params = parameters,
+          },
   };
 
   iree_hal_executable_function_parameter_t output;

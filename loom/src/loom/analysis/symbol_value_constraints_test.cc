@@ -18,25 +18,25 @@ TEST(SymbolValueConstraintsTest, ChecksExactIntegerValue) {
   const loom_value_id_t contract_value = 7;
   loom_predicate_t predicates[] = {
       {
-          /*.kind=*/LOOM_PREDICATE_GE,
-          /*.arg_count=*/2,
-          /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-          /*.reserved=*/{},
-          /*.args=*/{contract_value, 32},
+          .kind = LOOM_PREDICATE_GE,
+          .arg_count = 2,
+          .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+          .reserved = {},
+          .args = {contract_value, 32},
       },
       {
-          /*.kind=*/LOOM_PREDICATE_MULTIPLE_OF,
-          /*.arg_count=*/2,
-          /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-          /*.reserved=*/{},
-          /*.args=*/{contract_value, 16},
+          .kind = LOOM_PREDICATE_MULTIPLE_OF,
+          .arg_count = 2,
+          .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+          .reserved = {},
+          .args = {contract_value, 16},
       },
       {
-          /*.kind=*/LOOM_PREDICATE_POWER_OF_TWO,
-          /*.arg_count=*/1,
-          /*.arg_tags=*/{LOOM_PRED_ARG_VALUE},
-          /*.reserved=*/{},
-          /*.args=*/{contract_value},
+          .kind = LOOM_PREDICATE_POWER_OF_TWO,
+          .arg_count = 1,
+          .arg_tags = {LOOM_PRED_ARG_VALUE},
+          .reserved = {},
+          .args = {contract_value},
       },
   };
 
@@ -49,12 +49,12 @@ TEST(SymbolValueConstraintsTest, ChecksExactIntegerValue) {
 TEST(SymbolValueConstraintsTest, RejectsViolatedIntegerPredicate) {
   const loom_value_id_t contract_value = 3;
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_RANGE,
-      /*.arg_count=*/3,
-      /*.arg_tags=*/
-      {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST, LOOM_PRED_ARG_CONST},
-      /*.reserved=*/{},
-      /*.args=*/{contract_value, 16, 63},
+      .kind = LOOM_PREDICATE_RANGE,
+      .arg_count = 3,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                   LOOM_PRED_ARG_CONST},
+      .reserved = {},
+      .args = {contract_value, 16, 63},
   };
 
   IREE_EXPECT_STATUS_IS(
@@ -68,11 +68,11 @@ TEST(SymbolValueConstraintsTest, RejectsViolatedIntegerPredicate) {
 TEST(SymbolValueConstraintsTest, ChecksUnsignedCarrierOrder) {
   const loom_value_id_t contract_value = 3;
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_ULE,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-      /*.reserved=*/{},
-      /*.args=*/{contract_value, -1},
+      .kind = LOOM_PREDICATE_ULE,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+      .reserved = {},
+      .args = {contract_value, -1},
   };
 
   IREE_ASSERT_OK(loom_symbol_value_constraints_check_exact(
@@ -93,11 +93,11 @@ TEST(SymbolValueConstraintsTest, RejectsNonPositiveMultipleDivisor) {
   const loom_value_id_t contract_value = 3;
   for (int64_t divisor : {INT64_C(-16), INT64_C(0)}) {
     loom_predicate_t predicate = {
-        /*.kind=*/LOOM_PREDICATE_MULTIPLE_OF,
-        /*.arg_count=*/2,
-        /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-        /*.reserved=*/{},
-        /*.args=*/{contract_value, divisor},
+        .kind = LOOM_PREDICATE_MULTIPLE_OF,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+        .reserved = {},
+        .args = {contract_value, divisor},
     };
 
     IREE_EXPECT_STATUS_IS(
@@ -135,11 +135,11 @@ TEST(SymbolValueConstraintsTest, ChecksExactFloatingClassifications) {
         SCOPED_TRACE(loom_predicate_kind_name(predicate_kind));
         SCOPED_TRACE(value_index);
         loom_predicate_t predicate = {
-            /*.kind=*/predicate_kind,
-            /*.arg_count=*/1,
-            /*.arg_tags=*/{LOOM_PRED_ARG_VALUE},
-            /*.reserved=*/{},
-            /*.args=*/{contract_value},
+            .kind = predicate_kind,
+            .arg_count = 1,
+            .arg_tags = {LOOM_PRED_ARG_VALUE},
+            .reserved = {},
+            .args = {contract_value},
         };
 
         // E4M3 has finite-only overflow semantics: infinities saturate to its
@@ -174,11 +174,11 @@ TEST(SymbolValueConstraintsTest, ChecksExactFloatingClassifications) {
 TEST(SymbolValueConstraintsTest, ChecksExactFloatingEquality) {
   const loom_value_id_t contract_value = 5;
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_EQ,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-      /*.reserved=*/{},
-      /*.args=*/{contract_value, 2},
+      .kind = LOOM_PREDICATE_EQ,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+      .reserved = {},
+      .args = {contract_value, 2},
   };
 
   IREE_ASSERT_OK(loom_symbol_value_constraints_check_exact(
@@ -195,11 +195,11 @@ TEST(SymbolValueConstraintsTest, ChecksExactFloatingEquality) {
 TEST(SymbolValueConstraintsTest, FloatingEqualityUsesDeclaredTypeValue) {
   const loom_value_id_t contract_value = 5;
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_EQ,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-      /*.reserved=*/{},
-      /*.args=*/{contract_value, 2048},
+      .kind = LOOM_PREDICATE_EQ,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+      .reserved = {},
+      .args = {contract_value, 2048},
   };
 
   // 2049 rounds to 2048 in f16 before it becomes an exact config value.
@@ -219,11 +219,11 @@ TEST(SymbolValueConstraintsTest, FloatingEqualityUsesDeclaredTypeValue) {
 TEST(SymbolValueConstraintsTest, IgnoresPredicatesForOtherValues) {
   const loom_value_id_t contract_value = 3;
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_EQ,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-      /*.reserved=*/{},
-      /*.args=*/{contract_value + 1, 0},
+      .kind = LOOM_PREDICATE_EQ,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+      .reserved = {},
+      .args = {contract_value + 1, 0},
   };
 
   IREE_ASSERT_OK(loom_symbol_value_constraints_check_exact(

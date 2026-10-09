@@ -109,14 +109,12 @@ bool SelectAtomicTestConfiguration(const iree_hal_device_spec_t* device_spec,
       out_configuration->queue_family_ordinal =
           (iree_hal_queue_family_ordinal_t)family_index;
       out_configuration->buffer_params = {
-          /*.usage=*/requirements.buffer_usage,
-          /*.access=*/requirements.memory_access,
-          /*.type=*/memory_type.memory_type,
-          /*.queue_family_affinity=*/
-          iree_hal_make_queue_family_affinity(
+          .usage = requirements.buffer_usage,
+          .access = requirements.memory_access,
+          .type = memory_type.memory_type,
+          .queue_family_affinity = iree_hal_make_queue_family_affinity(
               (iree_hal_queue_family_ordinal_t)family_index),
-          /*.min_alignment=*/
-          iree_hal_atomic_width_byte_count(requirements.width),
+          .min_alignment = iree_hal_atomic_width_byte_count(requirements.width),
       };
       return true;
     }

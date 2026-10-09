@@ -44,7 +44,7 @@ static const loom_encoding_family_descriptor_t kDenseEncodingDescriptor = {
     /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
 };
 static const loom_encoding_vtable_t kDenseEncodingVtable = {
-    /*.descriptor=*/&kDenseEncodingDescriptor,
+    .descriptor = &kDenseEncodingDescriptor,
 };
 
 static const loom_attr_descriptor_t kQ8_0EncodingParameters[] = {{
@@ -60,7 +60,7 @@ static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
     /*.parameter_descriptors=*/kQ8_0EncodingParameters,
 };
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    /*.descriptor=*/&kQ8_0EncodingDescriptor,
+    .descriptor = &kQ8_0EncodingDescriptor,
 };
 
 static const loom_encoding_family_descriptor_t kQ6KEncodingDescriptor = {
@@ -68,7 +68,7 @@ static const loom_encoding_family_descriptor_t kQ6KEncodingDescriptor = {
     /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
 };
 static const loom_encoding_vtable_t kQ6KEncodingVtable = {
-    /*.descriptor=*/&kQ6KEncodingDescriptor,
+    .descriptor = &kQ6KEncodingDescriptor,
 };
 
 static const loom_attr_descriptor_t kQuantizationEncodingParameters[] = {{
@@ -83,7 +83,7 @@ static const loom_encoding_family_descriptor_t kQuantizationDescriptor = {
     /*.parameter_descriptors=*/kQuantizationEncodingParameters,
 };
 static const loom_encoding_vtable_t kQuantizationEncodingVtable = {
-    /*.descriptor=*/&kQuantizationDescriptor,
+    .descriptor = &kQuantizationDescriptor,
 };
 
 class ParserTest : public ::testing::Test {
@@ -1096,8 +1096,8 @@ TEST_F(ParserTest, ReturnsSymbolReferencesFromParsedSnapshot) {
       "test.record @dependency\n";
   capture_.Reset();
   loom_text_parse_options_t options = {
-      /*.diagnostic_sink=*/capture_.sink(),
-      /*.max_errors=*/100,
+      .diagnostic_sink = capture_.sink(),
+      .max_errors = 100,
   };
   iree_arena_allocator_t symbol_reference_arena;
   iree_arena_initialize(&block_pool_, &symbol_reference_arena);

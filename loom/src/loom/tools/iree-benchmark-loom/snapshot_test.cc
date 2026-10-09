@@ -125,8 +125,8 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
   result.timing.p50_ns = 30;
   result.timing.p90_ns = 40;
   iree_benchmark_loom_workload_value_t workload_values[] = {
-      {/*.type=*/LOOM_SCALAR_TYPE_INDEX, /*.value=*/4096},
-      {/*.type=*/LOOM_SCALAR_TYPE_I32, /*.value=*/513},
+      {.type = LOOM_SCALAR_TYPE_INDEX, .value = 4096},
+      {.type = LOOM_SCALAR_TYPE_I32, .value = 513},
   };
   iree_benchmark_loom_launch_record_t launch_record = {
       /*.case_sample_ordinal=*/0,
@@ -136,14 +136,14 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
       /*.workload_value_count=*/IREE_ARRAYSIZE(workload_values),
       /*.launch_config=*/
       {
-          /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-          /*.structure_size=*/sizeof(loomc_launch_config_t),
-          /*.next=*/nullptr,
-          /*.workgroup_count=*/{64, 2, 1},
-          /*.workgroup_size=*/{64, 1, 1},
-          /*.workgroup_cluster_size=*/{2, 1, 1},
-          /*.subgroup_size=*/32,
-          /*.workgroup_storage_bytes=*/0,
+          .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+          .structure_size = sizeof(loomc_launch_config_t),
+          .next = nullptr,
+          .workgroup_count = {64, 2, 1},
+          .workgroup_size = {64, 1, 1},
+          .workgroup_cluster_size = {2, 1, 1},
+          .subgroup_size = 32,
+          .workgroup_storage_bytes = 0,
       },
   };
   iree_benchmark_loom_launch_evidence_t launch_evidence = {
@@ -494,11 +494,11 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedCompileReport) {
   ByteSequencePtr compile_report_contents =
       CopyByteSequence(compile_report_json);
   const loomc_artifact_t compile_report_artifact = {
-      /*.kind=*/LOOMC_ARTIFACT_KIND_REPORT,
-      /*.format=*/
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON),
-      /*.identifier=*/loomc_make_cstring_view("compile_report"),
-      /*.contents=*/compile_report_contents.get(),
+      .kind = LOOMC_ARTIFACT_KIND_REPORT,
+      .format =
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON),
+      .identifier = loomc_make_cstring_view("compile_report"),
+      .contents = compile_report_contents.get(),
   };
 
   iree_benchmark_loom_run_identity_t run = {};

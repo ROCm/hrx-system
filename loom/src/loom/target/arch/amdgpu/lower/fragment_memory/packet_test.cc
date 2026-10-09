@@ -242,20 +242,20 @@ TEST(AmdgpuFragmentMemoryPacketTest,
       2, axis_strides, &address_layout, runtime_axes, nullptr));
   const uint32_t static_axis_byte_strides[2] = {32, 2};
   const loom_amdgpu_fragment_memory_publication_query_t query = {
-      /*.descriptor_set=*/descriptor_set,
-      /*.layout=*/layout,
-      /*.address_layout=*/&address_layout,
-      /*.runtime_axes=*/runtime_axes,
-      /*.static_axis_byte_strides=*/static_axis_byte_strides,
-      /*.memory_space=*/LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
-      /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-      /*.representation_flags=*/representation->flags,
-      /*.payload_form=*/
-      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16,
-      /*.register_count=*/layout->result.register_count,
-      /*.element_byte_count=*/2,
-      /*.view_rank=*/2,
-      /*.source_flags=*/LOOM_AMDGPU_FRAGMENT_PUBLICATION_SOURCE_FLAG_NONE,
+      .descriptor_set = descriptor_set,
+      .layout = layout,
+      .address_layout = &address_layout,
+      .runtime_axes = runtime_axes,
+      .static_axis_byte_strides = static_axis_byte_strides,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
+      .role = LOOM_CONTRACT_OPERAND_ROLE_RESULT,
+      .representation_flags = representation->flags,
+      .payload_form =
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16,
+      .register_count = layout->result.register_count,
+      .element_byte_count = 2,
+      .view_rank = 2,
+      .source_flags = LOOM_AMDGPU_FRAGMENT_PUBLICATION_SOURCE_FLAG_NONE,
   };
   loom_amdgpu_fragment_memory_publication_choice_t choice = {};
   ASSERT_TRUE(loom_amdgpu_fragment_memory_select_publication(&query, &choice));

@@ -99,17 +99,17 @@ TEST(NativeElfTest, WritesAieElf32ExecutableEnvelope) {
       /*.contents=*/iree_make_const_byte_span(text, sizeof(text)),
   }};
   const loom_native_elf_segment_t segments[] = {{
-      /*.type=*/LOOM_NATIVE_ELF_PROGRAM_TYPE_LOAD,
-      /*.flags=*/LOOM_NATIVE_ELF_PROGRAM_FLAG_READ |
-          LOOM_NATIVE_ELF_PROGRAM_FLAG_EXECUTE,
-      /*.file_offset=*/0,
-      /*.file_size=*/0,
-      /*.memory_size=*/64,
-      /*.first_section=*/0,
-      /*.section_count=*/1,
-      /*.virtual_address=*/0,
-      /*.physical_address=*/0,
-      /*.alignment=*/16,
+      .type = LOOM_NATIVE_ELF_PROGRAM_TYPE_LOAD,
+      .flags = LOOM_NATIVE_ELF_PROGRAM_FLAG_READ |
+               LOOM_NATIVE_ELF_PROGRAM_FLAG_EXECUTE,
+      .file_offset = 0,
+      .file_size = 0,
+      .memory_size = 64,
+      .first_section = 0,
+      .section_count = 1,
+      .virtual_address = 0,
+      .physical_address = 0,
+      .alignment = 16,
   }};
   const loom_native_elf32le_file_t file = {
       /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_EXEC,
@@ -215,17 +215,17 @@ TEST(NativeElfTest, WritesNobitsMemoryWithoutFilePayload) {
       /*.zero_fill_length=*/256,
   }};
   const loom_native_elf_segment_t segments[] = {{
-      /*.type=*/LOOM_NATIVE_ELF_PROGRAM_TYPE_LOAD,
-      /*.flags=*/LOOM_NATIVE_ELF_PROGRAM_FLAG_READ |
-          LOOM_NATIVE_ELF_PROGRAM_FLAG_WRITE,
-      /*.file_offset=*/0,
-      /*.file_size=*/0,
-      /*.memory_size=*/256,
-      /*.first_section=*/0,
-      /*.section_count=*/1,
-      /*.virtual_address=*/0x70000,
-      /*.physical_address=*/0x70000,
-      /*.alignment=*/64,
+      .type = LOOM_NATIVE_ELF_PROGRAM_TYPE_LOAD,
+      .flags = LOOM_NATIVE_ELF_PROGRAM_FLAG_READ |
+               LOOM_NATIVE_ELF_PROGRAM_FLAG_WRITE,
+      .file_offset = 0,
+      .file_size = 0,
+      .memory_size = 256,
+      .first_section = 0,
+      .section_count = 1,
+      .virtual_address = 0x70000,
+      .physical_address = 0x70000,
+      .alignment = 64,
   }};
   const loom_native_elf32le_file_t file = {
       /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_EXEC,
@@ -282,14 +282,14 @@ TEST(NativeElfTest, RejectsMixedPayloadAndZeroFillSectionStates) {
       /*.zero_fill_length=*/4,
   };
   loom_native_elf32le_file_t file = {
-      /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_EXEC,
-      /*.machine=*/LOOM_NATIVE_ELF_MACHINE_AIE,
-      /*.os_abi=*/LOOM_NATIVE_ELF_OS_ABI_NONE,
-      /*.abi_version=*/LOOM_NATIVE_ELF_ABI_VERSION_NONE,
-      /*.flags=*/3,
-      /*.entry=*/0,
-      /*.sections=*/&section,
-      /*.section_count=*/1,
+      .type = LOOM_NATIVE_ELF_FILE_TYPE_EXEC,
+      .machine = LOOM_NATIVE_ELF_MACHINE_AIE,
+      .os_abi = LOOM_NATIVE_ELF_OS_ABI_NONE,
+      .abi_version = LOOM_NATIVE_ELF_ABI_VERSION_NONE,
+      .flags = 3,
+      .entry = 0,
+      .sections = &section,
+      .section_count = 1,
   };
 
   TestArena arena;
@@ -361,16 +361,16 @@ TEST(NativeElfTest, WritesAmdgpuNoteElfEnvelope) {
       /*.contents=*/iree_make_const_byte_span(note.data(), note.size()),
   }};
   const loom_native_elf_segment_t segments[] = {{
-      /*.type=*/LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
-      /*.flags=*/LOOM_NATIVE_ELF_PROGRAM_FLAG_READ,
-      /*.file_offset=*/{},
-      /*.file_size=*/{},
-      /*.memory_size=*/{},
-      /*.first_section=*/0,
-      /*.section_count=*/1,
-      /*.virtual_address=*/0,
-      /*.physical_address=*/0,
-      /*.alignment=*/4,
+      .type = LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
+      .flags = LOOM_NATIVE_ELF_PROGRAM_FLAG_READ,
+      .file_offset = {},
+      .file_size = {},
+      .memory_size = {},
+      .first_section = 0,
+      .section_count = 1,
+      .virtual_address = 0,
+      .physical_address = 0,
+      .alignment = 4,
   }};
   const loom_native_elf64le_file_t file = {
       /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_DYN,
@@ -554,16 +554,16 @@ TEST(NativeElfTest, RejectsInvalidSegmentRange) {
       /*.contents=*/iree_make_const_byte_span(contents, sizeof(contents)),
   }};
   const loom_native_elf_segment_t segments[] = {{
-      /*.type=*/LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
-      /*.flags=*/{},
-      /*.file_offset=*/{},
-      /*.file_size=*/{},
-      /*.memory_size=*/{},
-      /*.first_section=*/1,
-      /*.section_count=*/1,
-      /*.virtual_address=*/{},
-      /*.physical_address=*/{},
-      /*.alignment=*/4,
+      .type = LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
+      .flags = {},
+      .file_offset = {},
+      .file_size = {},
+      .memory_size = {},
+      .first_section = 1,
+      .section_count = 1,
+      .virtual_address = {},
+      .physical_address = {},
+      .alignment = 4,
   }};
   const loom_native_elf64le_file_t file = {
       /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_DYN,
@@ -599,16 +599,16 @@ TEST(NativeElfTest, RejectsSectionBackedSegmentMemoryUnderflow) {
       /*.contents=*/iree_make_const_byte_span(contents, sizeof(contents)),
   }};
   const loom_native_elf_segment_t segments[] = {{
-      /*.type=*/LOOM_NATIVE_ELF_PROGRAM_TYPE_LOAD,
-      /*.flags=*/LOOM_NATIVE_ELF_PROGRAM_FLAG_READ,
-      /*.file_offset=*/0,
-      /*.file_size=*/0,
-      /*.memory_size=*/8,
-      /*.first_section=*/0,
-      /*.section_count=*/1,
-      /*.virtual_address=*/0,
-      /*.physical_address=*/0,
-      /*.alignment=*/4,
+      .type = LOOM_NATIVE_ELF_PROGRAM_TYPE_LOAD,
+      .flags = LOOM_NATIVE_ELF_PROGRAM_FLAG_READ,
+      .file_offset = 0,
+      .file_size = 0,
+      .memory_size = 8,
+      .first_section = 0,
+      .section_count = 1,
+      .virtual_address = 0,
+      .physical_address = 0,
+      .alignment = 4,
   }};
   const loom_native_elf32le_file_t file = {
       /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_EXEC,

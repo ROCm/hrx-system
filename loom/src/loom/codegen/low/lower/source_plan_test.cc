@@ -155,10 +155,10 @@ class LowLowerSourcePlanTest : public ::testing::Test {
 
   inline static const loom_low_lower_source_plan_observer_t
       kSourcePlanObserver = {
-          /*.begin=*/BeginSourcePlanObservation,
-          /*.observe=*/ObserveSourcePlanOp,
-          /*.end=*/EndSourcePlanObservation,
-          /*.user_data=*/nullptr,
+          .begin = BeginSourcePlanObservation,
+          .observe = ObserveSourcePlanOp,
+          .end = EndSourcePlanObservation,
+          .user_data = nullptr,
       };
 
   static iree_status_t PlanControl(void* user_data,
@@ -347,8 +347,8 @@ class LowLowerSourcePlanTest : public ::testing::Test {
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
     const loom_symbol_ref_t symbol = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
     const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
     const loom_type_t argument_types[] = {i32_type, i32_type};
@@ -942,13 +942,13 @@ TEST_F(LowLowerSourcePlanTest,
   IREE_ASSERT_OK(
       loom_module_add_symbol(module_, callee_name_id, &callee_symbol_id));
   const loom_symbol_ref_t callee_ref = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/callee_symbol_id,
+      .module_id = 0,
+      .symbol_id = callee_symbol_id,
   };
   const loom_tied_result_t tied_result = {
-      /*.result_index=*/0,
-      /*.operand_index=*/0,
-      /*.has_type_change=*/false,
+      .result_index = 0,
+      .operand_index = 0,
+      .has_type_change = false,
   };
   loom_op_t* declaration_op = nullptr;
   IREE_ASSERT_OK(loom_test_decl_build(
@@ -963,8 +963,8 @@ TEST_F(LowLowerSourcePlanTest,
   IREE_ASSERT_OK(
       loom_module_add_symbol(module_, caller_name_id, &caller_symbol_id));
   const loom_symbol_ref_t caller_ref = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/caller_symbol_id,
+      .module_id = 0,
+      .symbol_id = caller_symbol_id,
   };
   loom_op_t* caller_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(

@@ -667,11 +667,11 @@ TEST(StreamValueWaitLaneTest,
   ASSERT_NE(foreign_queue, wait_queue);
 
   const iree_hal_buffer_params_t buffer_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE |
-          IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+               IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       iree_hal_device_allocator(device), buffer_params, sizeof(uint32_t),

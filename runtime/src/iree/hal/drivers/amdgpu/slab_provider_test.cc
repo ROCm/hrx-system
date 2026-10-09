@@ -246,8 +246,8 @@ TEST_F(SlabProviderTest, SelectedQueuePoolServesLargeRequests) {
       &physical_device->default_pool_set, params, allocation_size);
   ASSERT_EQ(pool, physical_device->default_pool);
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/allocation_size,
+      .params = params,
+      .allocation_size = allocation_size,
   };
 
   iree_hal_buffer_t* buffer = NULL;
@@ -302,10 +302,9 @@ TEST_F(SlabProviderTest, DefaultPhysicalDevicePoolGrowsAdditionalSlabs) {
   iree_hal_pool_acquire_result_t first_result = IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
   iree_hal_buffer_params_t params = {};
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/
-      device->physical_devices[0]
-          ->default_pool_options.tlsf_options.range_length,
+      .params = params,
+      .allocation_size = device->physical_devices[0]
+                             ->default_pool_options.tlsf_options.range_length,
   };
   iree::Status first_status(iree_hal_pool_acquire_reservations(
       default_pool, 1, &request, /*requester_frontier=*/NULL,

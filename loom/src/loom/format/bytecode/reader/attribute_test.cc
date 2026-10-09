@@ -62,19 +62,19 @@ class BytecodeAttributeTest : public ::testing::Test {
 
   loom_bytecode_attribute_validator_t MakeValidator() {
     return loom_bytecode_attribute_validator_t{
-        /*.decoder=*/&decoder_,
-        /*.context=*/&context_,
-        /*.module_view=*/&module_view_,
+        .decoder = &decoder_,
+        .context = &context_,
+        .module_view = &module_view_,
     };
   }
 
   loom_bytecode_attribute_materializer_t MakeMaterializer() {
     return loom_bytecode_attribute_materializer_t{
-        /*.decoder=*/&decoder_,
-        /*.context=*/&context_,
-        /*.module_view=*/&module_view_,
-        /*.scratch_arena=*/&scratch_arena_,
-        /*.output_module=*/module_,
+        .decoder = &decoder_,
+        .context = &context_,
+        .module_view = &module_view_,
+        .scratch_arena = &scratch_arena_,
+        .output_module = module_,
     };
   }
 

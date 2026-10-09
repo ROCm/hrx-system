@@ -146,9 +146,9 @@ void EmitEvent(loom_low_packet_progress_emit_fn_t emit, void* emit_user_data,
                uint16_t progress_class_id,
                loom_low_packet_progress_action_t action, uint32_t units) {
   const loom_low_packet_progress_event_t event = {
-      /*.progress_class_id=*/progress_class_id,
-      /*.action=*/action,
-      /*.units=*/units,
+      .progress_class_id = progress_class_id,
+      .action = action,
+      .units = units,
   };
   emit(emit_user_data, &event);
 }
@@ -157,10 +157,10 @@ loom_low_packet_progress_record_t MakeProgressRecord(
     iree_host_size_t packet_index, uint16_t progress_class_id,
     loom_low_packet_progress_action_t action, uint32_t units) {
   return {
-      /*.packet_index=*/packet_index,
-      /*.progress_class_id=*/progress_class_id,
-      /*.action=*/action,
-      /*.units=*/units,
+      .packet_index = packet_index,
+      .progress_class_id = progress_class_id,
+      .action = action,
+      .units = units,
   };
 }
 
@@ -242,10 +242,10 @@ void AuditEmptyProgressQuery(void* user_data,
 
 TEST_F(LowPacketProgressTest, BuildsSyntheticTargetProgressRecords) {
   const loom_low_packet_progress_provider_t provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/3,
-      /*.query=*/SyntheticProgressQuery,
-      /*.class_name=*/SyntheticProgressClassName,
+      .user_data = {},
+      .event_count = 3,
+      .query = SyntheticProgressQuery,
+      .class_name = SyntheticProgressClassName,
   };
   loom_low_packet_progress_table_t table = {};
   IREE_ASSERT_OK(loom_low_packet_progress_build(
@@ -284,10 +284,10 @@ TEST_F(LowPacketProgressTest, BuildsSyntheticTargetProgressRecords) {
 
 TEST_F(LowPacketProgressTest, BuildsEmptyProgressTable) {
   const loom_low_packet_progress_provider_t provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/0,
-      /*.query=*/EmptyProgressQuery,
-      /*.class_name=*/SyntheticProgressClassName,
+      .user_data = {},
+      .event_count = 0,
+      .query = EmptyProgressQuery,
+      .class_name = SyntheticProgressClassName,
   };
   loom_low_packet_progress_table_t table = {};
   IREE_ASSERT_OK(loom_low_packet_progress_build(
@@ -299,10 +299,10 @@ TEST_F(LowPacketProgressTest, BuildsEmptyProgressTable) {
 TEST_F(LowPacketProgressTest, QueriesProviderExactlyOncePerPacket) {
   ProgressQueryAudit audit;
   const loom_low_packet_progress_provider_t provider = {
-      /*.user_data=*/&audit,
-      /*.event_count=*/0,
-      /*.query=*/AuditEmptyProgressQuery,
-      /*.class_name=*/SyntheticProgressClassName,
+      .user_data = &audit,
+      .event_count = 0,
+      .query = AuditEmptyProgressQuery,
+      .class_name = SyntheticProgressClassName,
   };
   loom_low_packet_progress_table_t table = {};
   IREE_ASSERT_OK(loom_low_packet_progress_build(
@@ -315,10 +315,10 @@ TEST_F(LowPacketProgressTest, QueriesProviderExactlyOncePerPacket) {
 
 TEST_F(LowPacketProgressTest, IndexesRecordsByProgressClass) {
   const loom_low_packet_progress_provider_t provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/3,
-      /*.query=*/SyntheticProgressQuery,
-      /*.class_name=*/SyntheticProgressClassName,
+      .user_data = {},
+      .event_count = 3,
+      .query = SyntheticProgressQuery,
+      .class_name = SyntheticProgressClassName,
   };
   loom_low_packet_progress_table_t table = {};
   IREE_ASSERT_OK(loom_low_packet_progress_build(
@@ -489,10 +489,10 @@ TEST_F(LowPacketProgressTest, RecordsReusePoolBlocksAcrossEpochs) {
     {
       ProgressQueryAudit audit;
       const loom_low_packet_progress_provider_t provider = {
-          /*.user_data=*/&audit,
-          /*.event_count=*/kPacketCount,
-          /*.query=*/SequentialProgressQuery,
-          /*.class_name=*/SyntheticProgressClassName,
+          .user_data = &audit,
+          .event_count = kPacketCount,
+          .query = SequentialProgressQuery,
+          .class_name = SyntheticProgressClassName,
       };
       IREE_ASSERT_OK(loom_low_packet_progress_build(
           &state_.schedule, &state_.allocation, &provider, &arena_, &table));
@@ -536,10 +536,10 @@ TEST_F(LowPacketProgressTest,
        BackingFailureDoesNotVisitProviderOrPublishTable) {
   ProgressQueryAudit audit;
   const loom_low_packet_progress_provider_t provider = {
-      /*.user_data=*/&audit,
-      /*.event_count=*/2,
-      /*.query=*/SequentialProgressQuery,
-      /*.class_name=*/SyntheticProgressClassName,
+      .user_data = &audit,
+      .event_count = 2,
+      .query = SequentialProgressQuery,
+      .class_name = SyntheticProgressClassName,
   };
   loom_low_packet_progress_table_t table = {};
   table.schedule = &state_.schedule;

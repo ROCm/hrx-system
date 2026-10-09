@@ -69,12 +69,11 @@ static iree_status_t QueueReadbackAndWait(iree_hal_device_t* device,
                                           iree_hal_buffer_t* source_buffer,
                                           iree_byte_span_t target) {
   const iree_hal_buffer_params_t readback_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_OPTIMAL |
-          IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      /*.queue_family_affinity=*/kQueueFamilyAffinity0,
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_OPTIMAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+              IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .queue_family_affinity = kQueueFamilyAffinity0,
   };
   Ref<iree_hal_buffer_t> readback_buffer;
   IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
@@ -93,31 +92,31 @@ static iree_status_t QueueReadbackAndWait(iree_hal_device_t* device,
 
 static iree_hal_buffer_params_t DeviceLocalVirtualMemoryParams() {
   return (iree_hal_buffer_params_t){
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-      /*.queue_family_affinity=*/kQueueFamilyAffinity0,
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .queue_family_affinity = kQueueFamilyAffinity0,
   };
 }
 
 static iree_hal_buffer_params_t HostLocalVirtualMemoryParams() {
   return (iree_hal_buffer_params_t){
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/
-      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      /*.queue_family_affinity=*/kQueueFamilyAffinity0,
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .queue_family_affinity = kQueueFamilyAffinity0,
   };
 }
 
 static iree_hal_buffer_params_t DeviceLocalHostVisibleVirtualMemoryParams() {
   return (iree_hal_buffer_params_t){
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-          IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-          IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
-      /*.queue_family_affinity=*/kQueueFamilyAffinity0,
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+              IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+              IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+      .queue_family_affinity = kQueueFamilyAffinity0,
   };
 }
 

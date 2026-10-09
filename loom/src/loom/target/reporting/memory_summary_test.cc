@@ -20,15 +20,14 @@ constexpr uint32_t kTestSourceRejectionDetail = 4;
 static loom_target_compile_report_memory_interval_t MakeExactSourceInterval(
     int64_t begin_bytes, int64_t end_bytes) {
   return {
-      /*.flags=*/
-      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
-          LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE |
-          LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH,
-      /*.begin_min_bytes=*/begin_bytes,
-      /*.begin_max_bytes=*/begin_bytes,
-      /*.end_min_bytes=*/end_bytes,
-      /*.end_max_bytes=*/end_bytes,
-      /*.exact_length_bytes=*/static_cast<uint64_t>(end_bytes - begin_bytes),
+      .flags = LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
+               LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE |
+               LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH,
+      .begin_min_bytes = begin_bytes,
+      .begin_max_bytes = begin_bytes,
+      .end_min_bytes = end_bytes,
+      .end_max_bytes = end_bytes,
+      .exact_length_bytes = static_cast<uint64_t>(end_bytes - begin_bytes),
   };
 }
 
@@ -37,19 +36,18 @@ static loom_target_compile_report_memory_interval_t MakeExactSymbolicInterval(
     int64_t end_max_bytes, uint64_t exact_length_bytes, uint32_t begin_expr_id,
     uint32_t end_expr_id) {
   return {
-      /*.flags=*/
-      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
-          LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE |
-          LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH |
-          LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_EXPR |
-          LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_EXPR,
-      /*.begin_min_bytes=*/begin_min_bytes,
-      /*.begin_max_bytes=*/begin_max_bytes,
-      /*.end_min_bytes=*/end_min_bytes,
-      /*.end_max_bytes=*/end_max_bytes,
-      /*.exact_length_bytes=*/exact_length_bytes,
-      /*.begin_expr_id=*/begin_expr_id,
-      /*.end_expr_id=*/end_expr_id,
+      .flags = LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
+               LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE |
+               LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH |
+               LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_EXPR |
+               LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_EXPR,
+      .begin_min_bytes = begin_min_bytes,
+      .begin_max_bytes = begin_max_bytes,
+      .end_min_bytes = end_min_bytes,
+      .end_max_bytes = end_max_bytes,
+      .exact_length_bytes = exact_length_bytes,
+      .begin_expr_id = begin_expr_id,
+      .end_expr_id = end_expr_id,
   };
 }
 
@@ -121,9 +119,9 @@ static void SetSubgroupAccess(
   row->subgroup_access.active_lane_count = 32;
   row->subgroup_access.lane_term_count = 1;
   row->subgroup_access.lane_terms[0] = {
-      /*.divisor=*/1,
-      /*.modulus=*/0,
-      /*.byte_stride=*/4,
+      .divisor = 1,
+      .modulus = 0,
+      .byte_stride = 4,
   };
   row->subgroup_access.per_lane_packet_byte_count = 4;
   row->subgroup_access.linear_lane_byte_stride = 4;
@@ -753,7 +751,7 @@ TEST(CompileReportFormatTest, KeepsAmbiguousMixedSourceLowMemoryIntervals) {
   EXPECT_EQ(root_summary->interval_envelope.unique_byte_count, 8u);
 
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
 
   iree_string_builder_t builder;
@@ -834,21 +832,20 @@ TEST(CompileReportFormatTest, FormatsSourceLowMemoryIntervals) {
   row.dynamic_stride_bytes = 16;
   row.vector_lane_stride_bytes = 4;
   row.source_interval = {
-      /*.flags=*/
-      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
-          LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE |
-          LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH,
-      /*.begin_min_bytes=*/4,
-      /*.begin_max_bytes=*/12,
-      /*.end_min_bytes=*/12,
-      /*.end_max_bytes=*/20,
-      /*.exact_length_bytes=*/8,
+      .flags = LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
+               LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE |
+               LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH,
+      .begin_min_bytes = 4,
+      .begin_max_bytes = 12,
+      .end_min_bytes = 12,
+      .end_max_bytes = 20,
+      .exact_length_bytes = 8,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_record_source_low_memory_row(&report, &row));
 
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
 
   iree_string_builder_t builder;
@@ -939,7 +936,7 @@ TEST(CompileReportFormatTest, FormatsSourceLowMemorySummaryEconomics) {
       &report, &store_row));
 
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -1015,7 +1012,7 @@ TEST(CompileReportFormatTest, FormatsExactSymbolicSourceLowMemoryIntervals) {
       loom_target_compile_report_record_source_low_memory_row(&report, &row));
 
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
 
   iree_string_builder_t builder;
@@ -1070,7 +1067,7 @@ TEST(CompileReportFormatTest, FormatsExactStaticSourceLowMemoryIntervals) {
       loom_target_compile_report_record_source_low_memory_row(&report, &row));
 
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
 
   iree_string_builder_t builder;

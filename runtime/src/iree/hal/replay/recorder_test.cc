@@ -582,11 +582,11 @@ TEST(ReplayRecorderTest, RecordsExactQueueTransferTransaction) {
   ASSERT_NE(nullptr, queue);
 
   const iree_hal_buffer_params_t buffer_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER |
-          IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage =
+          IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(wrapped_device);
   iree_hal_buffer_t* source_buffer = nullptr;
@@ -607,9 +607,9 @@ TEST(ReplayRecorderTest, RecordsExactQueueTransferTransaction) {
       /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
   uint64_t signal_value = 1;
   const iree_hal_semaphore_list_t signal_list = {
-      /*.count=*/1,
-      /*.semaphores=*/&signal_semaphore,
-      /*.payload_values=*/&signal_value,
+      .count = 1,
+      .semaphores = &signal_semaphore,
+      .payload_values = &signal_value,
   };
 
   const uint8_t fill_pattern = 0xA5;
@@ -701,11 +701,11 @@ TEST(ReplayRecorderTest, WaitfulUploadRemainsLiveAndIsMarkedUnsupported) {
   ASSERT_NE(nullptr, queue);
 
   const iree_hal_buffer_params_t buffer_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER |
-          IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage =
+          IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
   iree_hal_buffer_t* target_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
@@ -722,15 +722,15 @@ TEST(ReplayRecorderTest, WaitfulUploadRemainsLiveAndIsMarkedUnsupported) {
       /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
   uint64_t wait_value = 1;
   const iree_hal_semaphore_list_t wait_list = {
-      /*.count=*/1,
-      /*.semaphores=*/&wait_semaphore,
-      /*.payload_values=*/&wait_value,
+      .count = 1,
+      .semaphores = &wait_semaphore,
+      .payload_values = &wait_value,
   };
   uint64_t signal_value = 1;
   const iree_hal_semaphore_list_t signal_list = {
-      /*.count=*/1,
-      /*.semaphores=*/&signal_semaphore,
-      /*.payload_values=*/&signal_value,
+      .count = 1,
+      .semaphores = &signal_semaphore,
+      .payload_values = &signal_value,
   };
 
   uint8_t upload_data[] = {0x10, 0x11, 0x12, 0x13};
@@ -791,9 +791,9 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsHostCallAsUnsupported) {
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
   uint64_t signal_value = 1;
   const iree_hal_semaphore_list_t signal_semaphore_list = {
-      /*.count=*/1,
-      /*.semaphores=*/&signal_semaphore,
-      /*.payload_values=*/&signal_value,
+      .count = 1,
+      .semaphores = &signal_semaphore,
+      .payload_values = &signal_value,
   };
   const uint64_t args[4] = {0, 1, 2, 3};
   IREE_ASSERT_OK(iree_hal_queue_host_call(
@@ -1123,10 +1123,10 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteWithSparseBindings) {
   ASSERT_NE(nullptr, wrapped_queue);
 
   const iree_hal_buffer_params_t buffer_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_WRITE,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+      .access = IREE_HAL_MEMORY_ACCESS_WRITE,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
   };
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
@@ -1170,7 +1170,7 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteWithSparseBindings) {
       signal_values,
   };
   const iree_hal_buffer_binding_t bindings[] = {
-      {/*.buffer=*/nullptr, /*.offset=*/0, /*.length=*/0},
+      {.buffer = nullptr, .offset = 0, .length = 0},
       {buffer, /*offset=*/0, IREE_HAL_WHOLE_BUFFER},
   };
   IREE_ASSERT_OK(iree_hal_queue_execute(
@@ -1216,10 +1216,10 @@ TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
   ASSERT_NE(nullptr, wrapped_queue);
 
   const iree_hal_buffer_params_t buffer_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
   };
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
@@ -1383,11 +1383,11 @@ TEST(ReplayRecorderTest, RecordsAndReplaysVersion2ExactQueueAtomicOperations) {
   ASSERT_NE(nullptr, queue);
 
   const iree_hal_buffer_params_t buffer_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE |
-          IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage =
+          IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
@@ -1864,26 +1864,25 @@ static iree_status_t RecorderVmmAllocatorAdvise(
 }
 
 const iree_hal_allocator_vtable_t recorder_vmm_allocator_vtable = {
-    /*.destroy=*/RecorderVmmAllocatorDestroy,
-    /*.host_allocator=*/RecorderVmmAllocatorHostAllocator,
-    /*.trim=*/nullptr,
-    /*.query_statistics=*/nullptr,
-    /*.query_memory_heaps=*/nullptr,
-    /*.query_buffer_compatibility=*/nullptr,
-    /*.allocate_buffer=*/RecorderVmmAllocatorAllocateBuffer,
-    /*.deallocate_buffer=*/nullptr,
-    /*.import_buffer=*/nullptr,
-    /*.supports_virtual_memory=*/RecorderVmmAllocatorSupportsVirtualMemory,
-    /*.virtual_memory_query_granularity=*/
-    RecorderVmmAllocatorQueryGranularity,
-    /*.virtual_memory_reserve=*/RecorderVmmAllocatorReserve,
-    /*.virtual_memory_release=*/RecorderVmmAllocatorRelease,
-    /*.physical_memory_allocate=*/RecorderVmmAllocatorAllocatePhysicalMemory,
-    /*.physical_memory_free=*/RecorderVmmAllocatorFreePhysicalMemory,
-    /*.virtual_memory_map=*/RecorderVmmAllocatorMap,
-    /*.virtual_memory_unmap=*/RecorderVmmAllocatorUnmap,
-    /*.virtual_memory_protect=*/RecorderVmmAllocatorProtect,
-    /*.virtual_memory_advise=*/RecorderVmmAllocatorAdvise,
+    .destroy = RecorderVmmAllocatorDestroy,
+    .host_allocator = RecorderVmmAllocatorHostAllocator,
+    .trim = nullptr,
+    .query_statistics = nullptr,
+    .query_memory_heaps = nullptr,
+    .query_buffer_compatibility = nullptr,
+    .allocate_buffer = RecorderVmmAllocatorAllocateBuffer,
+    .deallocate_buffer = nullptr,
+    .import_buffer = nullptr,
+    .supports_virtual_memory = RecorderVmmAllocatorSupportsVirtualMemory,
+    .virtual_memory_query_granularity = RecorderVmmAllocatorQueryGranularity,
+    .virtual_memory_reserve = RecorderVmmAllocatorReserve,
+    .virtual_memory_release = RecorderVmmAllocatorRelease,
+    .physical_memory_allocate = RecorderVmmAllocatorAllocatePhysicalMemory,
+    .physical_memory_free = RecorderVmmAllocatorFreePhysicalMemory,
+    .virtual_memory_map = RecorderVmmAllocatorMap,
+    .virtual_memory_unmap = RecorderVmmAllocatorUnmap,
+    .virtual_memory_protect = RecorderVmmAllocatorProtect,
+    .virtual_memory_advise = RecorderVmmAllocatorAdvise,
 };
 
 static iree_hal_allocator_t* CreateRecorderVmmAllocator(

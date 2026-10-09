@@ -342,7 +342,7 @@ TEST_F(HalInvocationTest,
        DispatchBatchRejectsZeroDispatchCountBeforeDeviceUse) {
   loom_run_hal_runtime_t runtime = {};
   loom_run_hal_prepared_candidate_t candidate = {
-      /*.executable=*/reinterpret_cast<iree_hal_executable_t*>(1),
+      .executable = reinterpret_cast<iree_hal_executable_t*>(1),
   };
   loom_run_hal_invocation_plan_t plan = {};
   loom_run_hal_invocation_plan_initialize(&plan);

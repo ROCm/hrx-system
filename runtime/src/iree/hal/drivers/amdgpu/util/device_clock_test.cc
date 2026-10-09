@@ -14,10 +14,10 @@ namespace {
 
 TEST(DeviceClockTest, ValidateCounters) {
   iree_hal_amdgpu_device_clock_counters_t counters = {
-      /*.device_clock_counter=*/1,
-      /*.host_cpu_timestamp_ns=*/2,
-      /*.host_system_timestamp=*/3,
-      /*.host_system_frequency_hz=*/4,
+      .device_clock_counter = 1,
+      .host_cpu_timestamp_ns = 2,
+      .host_system_timestamp = 3,
+      .host_system_frequency_hz = 4,
   };
   IREE_EXPECT_OK(
       iree_hal_amdgpu_device_clock_counters_validate(1234, &counters));
@@ -48,14 +48,14 @@ TEST(DeviceClockTest, ValidateCounters) {
 
 TEST(DeviceClockTest, UnavailableSourceSampleFailsExplicitly) {
   iree_hal_amdgpu_device_clock_source_t source = {
-      /*.type=*/IREE_HAL_AMDGPU_DEVICE_CLOCK_SOURCE_TYPE_UNAVAILABLE,
-      /*.platform_handle=*/-1,
+      .type = IREE_HAL_AMDGPU_DEVICE_CLOCK_SOURCE_TYPE_UNAVAILABLE,
+      .platform_handle = -1,
   };
   iree_hal_amdgpu_device_clock_counters_t counters = {
-      /*.device_clock_counter=*/1,
-      /*.host_cpu_timestamp_ns=*/2,
-      /*.host_system_timestamp=*/3,
-      /*.host_system_frequency_hz=*/4,
+      .device_clock_counter = 1,
+      .host_cpu_timestamp_ns = 2,
+      .host_system_timestamp = 3,
+      .host_system_frequency_hz = 4,
   };
 
   IREE_EXPECT_STATUS_IS(

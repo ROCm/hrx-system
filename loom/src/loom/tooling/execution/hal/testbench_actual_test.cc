@@ -70,13 +70,13 @@ class HalTestbenchActualTest : public ::testing::Test {
 loomc_module_t* HalTestbenchActualTest::ParsePublicModule(
     iree_string_view_t source) {
   const loomc_source_options_t source_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(source_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("hal_testbench_actual_test.loom"),
-      /*.contents=*/loomc_make_byte_span(source.data, source.size),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(source_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("hal_testbench_actual_test.loom"),
+      .contents = loomc_make_byte_span(source.data, source.size),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* compiler_source = nullptr;
   IREE_EXPECT_OK(iree_status_from_loomc(loomc_source_create(
@@ -97,11 +97,11 @@ loomc_launch_config_program_t* HalTestbenchActualTest::LoadLaunchConfigProgram(
     iree_string_view_t source) {
   loomc_module_t* module = ParsePublicModule(source);
   const loomc_module_serialize_options_t serialize_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(serialize_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
-      /*.identifier=*/loomc_make_cstring_view("launch_config.loombc"),
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(serialize_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_BYTECODE,
+      .identifier = loomc_make_cstring_view("launch_config.loombc"),
   };
   loomc_source_t* serialized_source = nullptr;
   IREE_EXPECT_OK(iree_status_from_loomc(loomc_module_serialize_to_source(
@@ -112,10 +112,10 @@ loomc_launch_config_program_t* HalTestbenchActualTest::LoadLaunchConfigProgram(
       loomc_byte_sequence_create_copy(loomc_source_contents(serialized_source),
                                       loomc_allocator_system(), &contents)));
   const loomc_artifact_t artifact = {
-      /*.kind=*/LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
-      /*.format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE),
-      /*.identifier=*/loomc_make_cstring_view("launch_config.loombc"),
-      /*.contents=*/contents,
+      .kind = LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+      .format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE),
+      .identifier = loomc_make_cstring_view("launch_config.loombc"),
+      .contents = contents,
   };
   loomc_launch_config_program_t* program = nullptr;
   IREE_EXPECT_OK(iree_status_from_loomc(loomc_launch_config_program_load(
@@ -211,8 +211,8 @@ static iree_status_t InitializeFakeHalContext(
       /*.flags=*/IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
   };
   const iree_hal_device_queue_spec_t queues = {
-      /*.family_count=*/1,
-      /*.families=*/&queue_family,
+      .family_count = 1,
+      .families = &queue_family,
   };
   iree_hal_device_spec_params_t params = {};
   params.queues = &queues;
@@ -234,8 +234,8 @@ static iree_status_t InitializeFakeHalContext(
 
   out_dispatch_queue->queue_family = iree_hal_device_queue_family(device, 0);
   context->runtime = (loom_run_hal_runtime_t){
-      /*.device=*/device,
-      /*.dispatch_queue=*/out_dispatch_queue,
+      .device = device,
+      .dispatch_queue = out_dispatch_queue,
   };
   context->runtime_initialized = true;
   return iree_ok_status();
@@ -495,16 +495,16 @@ TEST_F(HalTestbenchActualTest, IndexInputUsesSignedReflectedFourByteRange) {
   };
   iree_hal_executable_function_parameter_t input_parameters[] = {
       {
-          /*.type=*/IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
-          /*.flags=*/{},
-          /*.size=*/4,
-          /*.offset=*/0,
+          .type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
+          .flags = {},
+          .size = 4,
+          .offset = 0,
       },
       {
-          /*.type=*/IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
-          /*.flags=*/{},
-          /*.size=*/4,
-          /*.offset=*/4,
+          .type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
+          .flags = {},
+          .size = 4,
+          .offset = 4,
       },
   };
   loom_run_hal_invocation_options_t options = {};
@@ -532,10 +532,10 @@ TEST_F(HalTestbenchActualTest,
       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
   };
   iree_hal_executable_function_parameter_t input_parameters[] = {{
-      /*.type=*/IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
-      /*.flags=*/{},
-      /*.size=*/4,
-      /*.offset=*/0,
+      .type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
+      .flags = {},
+      .size = 4,
+      .offset = 0,
   }};
   loom_run_hal_invocation_options_t options = {};
   loom_run_hal_invocation_options_initialize(&options);
@@ -560,16 +560,16 @@ TEST_F(HalTestbenchActualTest, MixedInputsUseReflectedWidthsAndOffsets) {
   };
   iree_hal_executable_function_parameter_t input_parameters[] = {
       {
-          /*.type=*/IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
-          /*.flags=*/{},
-          /*.size=*/8,
-          /*.offset=*/0,
+          .type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
+          .flags = {},
+          .size = 8,
+          .offset = 0,
       },
       {
-          /*.type=*/IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
-          /*.flags=*/{},
-          /*.size=*/4,
-          /*.offset=*/8,
+          .type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
+          .flags = {},
+          .size = 4,
+          .offset = 8,
       },
   };
   loom_run_hal_invocation_options_t options = {};
@@ -644,10 +644,10 @@ TEST_F(HalTestbenchActualTest, OffsetInputUsesReflectedFourByteWidth) {
       loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
   };
   iree_hal_executable_function_parameter_t input_parameters[] = {{
-      /*.type=*/IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
-      /*.flags=*/{},
-      /*.size=*/4,
-      /*.offset=*/0,
+      .type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
+      .flags = {},
+      .size = 4,
+      .offset = 0,
   }};
   loom_run_hal_invocation_options_t options = {};
   loom_run_hal_invocation_options_initialize(&options);
@@ -673,10 +673,10 @@ TEST_F(HalTestbenchActualTest,
       loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
   };
   iree_hal_executable_function_parameter_t input_parameters[] = {{
-      /*.type=*/IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
-      /*.flags=*/{},
-      /*.size=*/4,
-      /*.offset=*/0,
+      .type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
+      .flags = {},
+      .size = 4,
+      .offset = 0,
   }};
   loom_run_hal_invocation_options_t options = {};
   loom_run_hal_invocation_options_initialize(&options);

@@ -19,35 +19,34 @@ static constexpr iree_hal_queue_priority_t kQueuePriorities[] = {
 };
 static constexpr iree_hal_queue_execution_resource_group_spec_t
     kExecutionResourceGroups[] = {
-        {/*.minimum_selected_resource_count=*/1},
+        {.minimum_selected_resource_count = 1},
 };
 static constexpr iree_hal_queue_execution_resource_spec_t
     kExecutionResources[] = {
-        {/*.group_ordinal=*/0,
-         /*.first_execution_unit_ordinal=*/0,
-         /*.execution_unit_count=*/2},
-        {/*.group_ordinal=*/0,
-         /*.first_execution_unit_ordinal=*/2,
-         /*.execution_unit_count=*/2},
-        {/*.group_ordinal=*/0,
-         /*.first_execution_unit_ordinal=*/4,
-         /*.execution_unit_count=*/2},
-        {/*.group_ordinal=*/0,
-         /*.first_execution_unit_ordinal=*/6,
-         /*.execution_unit_count=*/2},
+        {.group_ordinal = 0,
+         .first_execution_unit_ordinal = 0,
+         .execution_unit_count = 2},
+        {.group_ordinal = 0,
+         .first_execution_unit_ordinal = 2,
+         .execution_unit_count = 2},
+        {.group_ordinal = 0,
+         .first_execution_unit_ordinal = 4,
+         .execution_unit_count = 2},
+        {.group_ordinal = 0,
+         .first_execution_unit_ordinal = 6,
+         .execution_unit_count = 2},
 };
 
 static iree_hal_device_spec_t* CreateDeviceSpec() {
   const iree_hal_physical_device_spec_t physical_device = {
-      /*.identity=*/
-      {
+      .identity = {
           /*.display_name=*/IREE_SV("Test GPU"),
           /*.backend_path=*/IREE_SV("test://gpu"),
       },
-      /*.physical_ordinal=*/0,
-      /*.partition_ordinal=*/0,
-      /*.partition_count=*/1,
-      /*.physical_device_affinity=*/1,
+      .physical_ordinal = 0,
+      .partition_ordinal = 0,
+      .partition_count = 1,
+      .physical_device_affinity = 1,
   };
   const iree_hal_device_identity_spec_t identity = {
       /*.logical_device_id=*/IREE_SV("hip-resource-descriptor-test"),
@@ -112,10 +111,10 @@ static iree_hal_device_spec_t* CreateDeviceSpec() {
       /*.families=*/queue_families,
   };
   const iree_hal_device_spec_params_t params = {
-      /*.identity=*/&identity,
-      /*.memory=*/nullptr,
-      /*.virtual_memory=*/nullptr,
-      /*.queues=*/&queues,
+      .identity = &identity,
+      .memory = nullptr,
+      .virtual_memory = nullptr,
+      .queues = &queues,
   };
   iree_hal_device_spec_t* device_spec = nullptr;
   IREE_CHECK_OK(iree_hal_device_spec_create(&params, iree_allocator_system(),

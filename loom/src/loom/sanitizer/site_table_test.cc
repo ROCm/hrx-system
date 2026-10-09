@@ -129,14 +129,14 @@ TEST_F(SiteTableTest, EncodesRecordsPayloadsSourcesAndUnknownLocations) {
 
   loom_sanitizer_site_row_t rows[3] = {};
   rows[0] = (loom_sanitizer_site_row_t){
-      /*.site_id=*/0,
-      /*.op=*/nullptr,
-      /*.op_kind=*/LOOM_OP_SANITIZER_ASSERT_ACCESS,
-      /*.location=*/source_location,
-      /*.payload_location=*/source_location,
-      /*.source_location=*/source_location,
-      /*.flags=*/LOOM_SANITIZER_SITE_ROW_HAS_PAYLOAD,
-      /*.payload=*/payload,
+      .site_id = 0,
+      .op = nullptr,
+      .op_kind = LOOM_OP_SANITIZER_ASSERT_ACCESS,
+      .location = source_location,
+      .payload_location = source_location,
+      .source_location = source_location,
+      .flags = LOOM_SANITIZER_SITE_ROW_HAS_PAYLOAD,
+      .payload = payload,
   };
   rows[1] = (loom_sanitizer_site_row_t){
       /*.site_id=*/1,
@@ -309,8 +309,8 @@ TEST_F(SiteTableTest, ResolvesSourcesThroughTaggedAndFusedLocations) {
       /*.payload=*/{},
   };
   loom_sanitizer_site_collection_t collection = {
-      /*.rows=*/&row,
-      /*.row_count=*/1,
+      .rows = &row,
+      .row_count = 1,
   };
 
   iree_const_byte_span_t table = iree_const_byte_span_empty();

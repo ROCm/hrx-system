@@ -549,14 +549,14 @@ TEST_F(CpuStreamingContextTest, ContextRecordWaitsForEveryCurrentStream) {
   IREE_ASSERT_OK(CreateGate(/*release_value=*/2, &second_gate));
   uint64_t gate_value = 1;
   const iree_hal_semaphore_list_t first_wait = {
-      /*.count=*/1,
-      /*.semaphores=*/&first_gate,
-      /*.payload_values=*/&gate_value,
+      .count = 1,
+      .semaphores = &first_gate,
+      .payload_values = &gate_value,
   };
   const iree_hal_semaphore_list_t second_wait = {
-      /*.count=*/1,
-      /*.semaphores=*/&second_gate,
-      /*.payload_values=*/&gate_value,
+      .count = 1,
+      .semaphores = &second_gate,
+      .payload_values = &gate_value,
   };
   IREE_ASSERT_OK(
       iree_hal_streaming_stream_wait_semaphores(first_stream, first_wait));
@@ -615,9 +615,9 @@ TEST_F(CpuStreamingContextTest, ContextWaitOrdersCurrentAndLaterStreams) {
   IREE_ASSERT_OK(CreateGate(/*release_value=*/1, &gate));
   uint64_t gate_value = 1;
   const iree_hal_semaphore_list_t gate_wait = {
-      /*.count=*/1,
-      /*.semaphores=*/&gate,
-      /*.payload_values=*/&gate_value,
+      .count = 1,
+      .semaphores = &gate,
+      .payload_values = &gate_value,
   };
   IREE_ASSERT_OK(
       iree_hal_streaming_stream_wait_semaphores(source_stream, gate_wait));
@@ -671,9 +671,9 @@ TEST_F(CpuStreamingContextTest, CrossContextWaitOrdersCurrentAndLaterStreams) {
   IREE_ASSERT_OK(CreateGate(/*release_value=*/1, &gate));
   uint64_t gate_value = 1;
   const iree_hal_semaphore_list_t gate_wait = {
-      /*.count=*/1,
-      /*.semaphores=*/&gate,
-      /*.payload_values=*/&gate_value,
+      .count = 1,
+      .semaphores = &gate,
+      .payload_values = &gate_value,
   };
   IREE_ASSERT_OK(
       iree_hal_streaming_stream_wait_semaphores(source_stream, gate_wait));
@@ -724,15 +724,15 @@ TEST_F(CpuStreamingContextTest,
   IREE_ASSERT_OK(CreateGate(/*release_value=*/1, &second_gate));
   uint64_t first_gate_value = 1;
   const iree_hal_semaphore_list_t first_wait = {
-      /*.count=*/1,
-      /*.semaphores=*/&first_gate,
-      /*.payload_values=*/&first_gate_value,
+      .count = 1,
+      .semaphores = &first_gate,
+      .payload_values = &first_gate_value,
   };
   uint64_t second_gate_value = 1;
   const iree_hal_semaphore_list_t second_wait = {
-      /*.count=*/1,
-      /*.semaphores=*/&second_gate,
-      /*.payload_values=*/&second_gate_value,
+      .count = 1,
+      .semaphores = &second_gate,
+      .payload_values = &second_gate_value,
   };
   IREE_ASSERT_OK(
       iree_hal_streaming_stream_wait_semaphores(first_stream, first_wait));
@@ -829,9 +829,9 @@ TEST_F(CpuStreamingContextTest,
   IREE_ASSERT_OK(CreateGate(/*release_value=*/1, &prior_gate));
   uint64_t prior_value = 1;
   const iree_hal_semaphore_list_t prior_wait = {
-      /*.count=*/1,
-      /*.semaphores=*/&prior_gate,
-      /*.payload_values=*/&prior_value,
+      .count = 1,
+      .semaphores = &prior_gate,
+      .payload_values = &prior_value,
   };
   IREE_ASSERT_OK(iree_hal_streaming_stream_wait_semaphores(stream, prior_wait));
 

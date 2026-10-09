@@ -1164,12 +1164,12 @@ TEST_F(HipExecutionResourceApiTest,
                 /*block_dim_z=*/1, /*shared_memory_bytes=*/0, stream,
                 /*kernel_parameters=*/nullptr));
   hipLaunchParams multi_device_launch = {
-      /*.func=*/const_cast<void*>(function),
-      /*.gridDim=*/one,
-      /*.blockDim=*/one,
-      /*.args=*/nullptr,
-      /*.sharedMem=*/0,
-      /*.stream=*/stream,
+      .func = const_cast<void*>(function),
+      .gridDim = one,
+      .blockDim = one,
+      .args = nullptr,
+      .sharedMem = 0,
+      .stream = stream,
   };
   EXPECT_EQ(hipErrorStreamDetached,
             api_.launch_multi_device(&multi_device_launch,

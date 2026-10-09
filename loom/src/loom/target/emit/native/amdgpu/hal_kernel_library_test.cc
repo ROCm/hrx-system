@@ -281,16 +281,16 @@ std::vector<Section> ReadSections(const std::string& bytes) {
     const uint32_t name_offset = LoadLeU32(bytes, header_offset);
     EXPECT_LT(name_offset, section_name_size);
     sections.push_back({
-        /*.index=*/i,
-        /*.name=*/
-        ReadNullTerminatedString(bytes, section_name_offset + name_offset),
-        /*.type=*/LoadLeU32(bytes, header_offset + 4),
-        /*.flags=*/LoadLeU64(bytes, header_offset + 8),
-        /*.address=*/LoadLeU64(bytes, header_offset + 16),
-        /*.offset=*/LoadLeU64(bytes, header_offset + 24),
-        /*.size=*/LoadLeU64(bytes, header_offset + 32),
-        /*.link=*/LoadLeU32(bytes, header_offset + 40),
-        /*.entry_size=*/LoadLeU64(bytes, header_offset + 56),
+        .index = i,
+        .name =
+            ReadNullTerminatedString(bytes, section_name_offset + name_offset),
+        .type = LoadLeU32(bytes, header_offset + 4),
+        .flags = LoadLeU64(bytes, header_offset + 8),
+        .address = LoadLeU64(bytes, header_offset + 16),
+        .offset = LoadLeU64(bytes, header_offset + 24),
+        .size = LoadLeU64(bytes, header_offset + 32),
+        .link = LoadLeU32(bytes, header_offset + 40),
+        .entry_size = LoadLeU64(bytes, header_offset + 56),
     });
   }
   return sections;
@@ -334,13 +334,13 @@ DynamicSymbol FindDynamicSymbol(const std::string& bytes,
     const size_t offset = (size_t)dynamic_symbol_table.offset +
                           i * dynamic_symbol_table.entry_size;
     DynamicSymbol symbol = {
-        /*.index=*/i,
-        /*.name=*/
-        ReadNullTerminatedString(dynamic_strings, LoadLeU32(bytes, offset)),
-        /*.info=*/(uint8_t)bytes[offset + 4],
-        /*.section_index=*/LoadLeU16(bytes, offset + 6),
-        /*.value=*/LoadLeU64(bytes, offset + 8),
-        /*.size=*/LoadLeU64(bytes, offset + 16),
+        .index = i,
+        .name =
+            ReadNullTerminatedString(dynamic_strings, LoadLeU32(bytes, offset)),
+        .info = (uint8_t)bytes[offset + 4],
+        .section_index = LoadLeU16(bytes, offset + 6),
+        .value = LoadLeU64(bytes, offset + 8),
+        .size = LoadLeU64(bytes, offset + 16),
     };
     if (symbol.name == name) {
       return symbol;
@@ -428,8 +428,8 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
   void ParseSource(iree_string_view_t source, loom_module_t** out_module) {
     DiagnosticCapture parse_capture;
     loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/parse_capture.sink(),
-        /*.max_errors=*/20,
+        .diagnostic_sink = parse_capture.sink(),
+        .max_errors = 20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &low_registry_.registry, &parse_options.low_asm_environment);
@@ -603,15 +603,15 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
     *out_module = nullptr;
     const loomc_allocator_t allocator = loomc_allocator_system();
     loomc_context_target_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.target_environment=*/target_environment_,
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+        .structure_size = sizeof(target_options),
+        .next = nullptr,
+        .target_environment = target_environment_,
     };
     loomc_context_options_t context_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-        /*.structure_size=*/sizeof(context_options),
-        /*.next=*/&target_options,
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+        .structure_size = sizeof(context_options),
+        .next = &target_options,
     };
     loomc_context_t* compiler_context = nullptr;
     IREE_ASSERT_OK(iree_status_from_loomc(
@@ -633,13 +633,13 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
     loomc_result_release(program_result);
 
     const loomc_source_options_t source_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-        /*.structure_size=*/sizeof(source_options),
-        /*.next=*/nullptr,
-        /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-        /*.identifier=*/loomc_make_cstring_view("amdgpu_emit_test.loom"),
-        /*.contents=*/loomc_make_byte_span(source.data, source.size),
-        /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+        .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+        .structure_size = sizeof(source_options),
+        .next = nullptr,
+        .format = LOOMC_SOURCE_FORMAT_TEXT,
+        .identifier = loomc_make_cstring_view("amdgpu_emit_test.loom"),
+        .contents = loomc_make_byte_span(source.data, source.size),
+        .storage = LOOMC_SOURCE_STORAGE_COPY,
     };
     loomc_source_t* compiler_source = nullptr;
     IREE_ASSERT_OK(iree_status_from_loomc(
@@ -1189,9 +1189,9 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   IREE_ASSERT_OK(
       loom_amdgpu_target_info_lookup_target(IREE_SV("gfx942"), &gfx942));
   cases.push_back({
-      /*.target=*/gfx942,
-      /*.target_attrs=*/"features = [sramecc, -xnack]",
-      /*.features_json=*/"\"features\":[\"sramecc+\",\"xnack-\"]",
+      .target = gfx942,
+      .target_attrs = "features = [sramecc, -xnack]",
+      .features_json = "\"features\":[\"sramecc+\",\"xnack-\"]",
   });
 
   const iree_host_size_t target_count = loom_amdgpu_target_info_target_count();
@@ -1214,9 +1214,9 @@ TEST_F(AmdgpuHalKernelLibraryTest,
     }
     if (shares_processor) {
       cases.push_back({
-          /*.target=*/target,
-          /*.target_attrs=*/{},
-          /*.features_json=*/{},
+          .target = target,
+          .target_attrs = {},
+          .features_json = {},
       });
     }
   }

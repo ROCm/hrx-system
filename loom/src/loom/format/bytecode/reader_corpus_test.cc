@@ -77,8 +77,8 @@ static bool ReorderedResolveDescriptor(
     return false;
   }
   *out_value = {
-      /*.ordinal=*/kReorderedAddI32Ordinal,
-      /*.effective_traits=*/LOOM_TRAIT_PURE,
+      .ordinal = kReorderedAddI32Ordinal,
+      .effective_traits = LOOM_TRAIT_PURE,
   };
   return true;
 }
@@ -109,17 +109,17 @@ static iree_string_view_t ReorderedEnumValueToken(
 }
 
 static const loom_low_repr_environment_vtable_t kReorderedEnvironmentVtable = {
-    /*.lookup_descriptor_set=*/ReorderedLookupDescriptorSet,
-    /*.resolve_descriptor=*/ReorderedResolveDescriptor,
-    /*.descriptor_key=*/ReorderedDescriptorKey,
-    /*.resolve_packet_attributes=*/ReorderedResolvePacketAttributes,
-    /*.enum_value_token=*/ReorderedEnumValueToken,
+    .lookup_descriptor_set = ReorderedLookupDescriptorSet,
+    .resolve_descriptor = ReorderedResolveDescriptor,
+    .descriptor_key = ReorderedDescriptorKey,
+    .resolve_packet_attributes = ReorderedResolvePacketAttributes,
+    .enum_value_token = ReorderedEnumValueToken,
 };
 
 static const loom_low_repr_environment_t kReorderedEnvironment = {
-    /*.vtable=*/&kReorderedEnvironmentVtable,
+    .vtable = &kReorderedEnvironmentVtable,
     // This codec has no state beyond its function table.
-    /*.state=*/nullptr,
+    .state = nullptr,
 };
 
 class ReaderCorpusTest : public ::testing::Test {
@@ -144,8 +144,8 @@ class ReaderCorpusTest : public ::testing::Test {
 
   loom_module_t* Parse(iree_string_view_t source, iree_string_view_t filename) {
     loom_text_parse_options_t options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &low_registry_.registry, &options.low_asm_environment);
@@ -234,12 +234,12 @@ class ReaderCorpusTest : public ::testing::Test {
       const loom_low_repr_environment_t& low_repr_environment,
       loom_module_t** out_module, std::vector<std::string>* error_ids) {
     loom_bytecode_read_options_t options = {
-        /*.diagnostic_sink=*/
-        {
-            /*.fn=*/CaptureDiagnostic,
-            /*.user_data=*/error_ids,
-        },
-        /*.low_repr_environment=*/low_repr_environment,
+        .diagnostic_sink =
+            {
+                .fn = CaptureDiagnostic,
+                .user_data = error_ids,
+            },
+        .low_repr_environment = low_repr_environment,
     };
     loom_bytecode_read_result_t result = {0};
     IREE_EXPECT_OK(loom_bytecode_read_module(

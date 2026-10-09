@@ -85,12 +85,12 @@ static iree_status_t PlanDuplicateLoopState(
   suffixes[0] = IREE_SV("first");
   suffixes[1] = IREE_SV("second");
   *out_schema = {
-      /*.rule=*/rule,
-      /*.component_types=*/component_types,
-      /*.component_name_suffixes=*/suffixes,
-      /*.component_count=*/2,
-      /*.destination_mode=*/LOOM_BOUNDARY_PROJECTION_DESTINATION_RECONSTRUCT,
-      /*.rule_plan=*/nullptr,
+      .rule = rule,
+      .component_types = component_types,
+      .component_name_suffixes = suffixes,
+      .component_count = 2,
+      .destination_mode = LOOM_BOUNDARY_PROJECTION_DESTINATION_RECONSTRUCT,
+      .rule_plan = nullptr,
   };
   *out_claimed = true;
   return iree_ok_status();
@@ -142,13 +142,12 @@ static iree_status_t PlanZeroComponentLoopState(
   *out_claimed = role == LOOM_BOUNDARY_PROJECTION_SLOT_LOOP_STATE;
   if (*out_claimed) {
     *out_schema = {
-        /*.rule=*/rule,
-        /*.component_types=*/nullptr,
-        /*.component_name_suffixes=*/nullptr,
-        /*.component_count=*/0,
-        /*.destination_mode=*/
-        LOOM_BOUNDARY_PROJECTION_DESTINATION_RECONSTRUCT,
-        /*.rule_plan=*/nullptr,
+        .rule = rule,
+        .component_types = nullptr,
+        .component_name_suffixes = nullptr,
+        .component_count = 0,
+        .destination_mode = LOOM_BOUNDARY_PROJECTION_DESTINATION_RECONSTRUCT,
+        .rule_plan = nullptr,
     };
   }
   return iree_ok_status();
@@ -207,9 +206,9 @@ static iree_status_t PlanTestSource(
     }
   }
   *out_source = {
-      /*.rule=*/rule,
-      /*.rule_plan=*/source_plan,
-      /*.boundary_op=*/boundary_op,
+      .rule = rule,
+      .rule_plan = source_plan,
+      .boundary_op = boundary_op,
   };
   *out_planned = true;
   return iree_ok_status();
@@ -320,10 +319,10 @@ static const loom_boundary_projection_rule_t kDuplicateF32Rule = {
     /*.plan_slot=*/PlanDuplicateLoopState,
     /*.transport=*/
     {
-        /*.plan_source=*/PlanTestSource,
-        /*.materialize_source=*/MaterializeTestSource,
-        /*.reconstruct=*/ReconstructFromFirstComponent,
-        /*.eliminate=*/nullptr,
+        .plan_source = PlanTestSource,
+        .materialize_source = MaterializeTestSource,
+        .reconstruct = ReconstructFromFirstComponent,
+        .eliminate = nullptr,
     },
 };
 
@@ -341,10 +340,10 @@ static const loom_boundary_projection_rule_t kDuplicateIndexRule = {
     /*.plan_slot=*/PlanDuplicateLoopState,
     /*.transport=*/
     {
-        /*.plan_source=*/PlanTestSource,
-        /*.materialize_source=*/MaterializeTestSource,
-        /*.reconstruct=*/ReconstructFromFirstComponent,
-        /*.eliminate=*/nullptr,
+        .plan_source = PlanTestSource,
+        .materialize_source = MaterializeTestSource,
+        .reconstruct = ReconstructFromFirstComponent,
+        .eliminate = nullptr,
     },
 };
 
@@ -362,10 +361,10 @@ static const loom_boundary_projection_rule_t kEliminativeF32Rule = {
     /*.plan_slot=*/PlanEliminativeDuplicateLoopState,
     /*.transport=*/
     {
-        /*.plan_source=*/PlanTestSource,
-        /*.materialize_source=*/MaterializeTestSource,
-        /*.reconstruct=*/nullptr,
-        /*.eliminate=*/EliminateWithFirstComponent,
+        .plan_source = PlanTestSource,
+        .materialize_source = MaterializeTestSource,
+        .reconstruct = nullptr,
+        .eliminate = EliminateWithFirstComponent,
     },
 };
 
@@ -383,10 +382,10 @@ static const loom_boundary_projection_rule_t kZeroF32Rule = {
     /*.plan_slot=*/PlanZeroComponentLoopState,
     /*.transport=*/
     {
-        /*.plan_source=*/PlanTestSource,
-        /*.materialize_source=*/MaterializeTestSource,
-        /*.reconstruct=*/ReconstructZeroComponent,
-        /*.eliminate=*/nullptr,
+        .plan_source = PlanTestSource,
+        .materialize_source = MaterializeTestSource,
+        .reconstruct = ReconstructZeroComponent,
+        .eliminate = nullptr,
     },
 };
 
@@ -404,10 +403,10 @@ static const loom_boundary_projection_rule_t kRejectingIndexRule = {
     /*.plan_slot=*/PlanRejectingDuplicateLoopState,
     /*.transport=*/
     {
-        /*.plan_source=*/PlanTestSource,
-        /*.materialize_source=*/MaterializeTestSource,
-        /*.reconstruct=*/ReconstructFromFirstComponent,
-        /*.eliminate=*/nullptr,
+        .plan_source = PlanTestSource,
+        .materialize_source = MaterializeTestSource,
+        .reconstruct = ReconstructFromFirstComponent,
+        .eliminate = nullptr,
     },
 };
 
@@ -462,7 +461,7 @@ class LoopBoundaryProjectionTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(&module_builder_, name, &name_id));
     loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    return {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    return {.module_id = 0, .symbol_id = symbol_id};
   }
 
   loom_func_like_t BuildFunction(iree_string_view_t name,
@@ -531,8 +530,8 @@ class LoopBoundaryProjectionTest : public ::testing::Test {
 
   void Verify() {
     const loom_verify_options_t options = {
-        /*.sink=*/{loom_diagnostic_stderr_sink, nullptr},
-        /*.max_errors=*/20,
+        .sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 20,
     };
     loom_verify_result_t result = {};
     IREE_EXPECT_OK(loom_verify_module(module_, &options, &result));
@@ -558,7 +557,7 @@ class LoopBoundaryProjectionTest : public ::testing::Test {
 
   std::vector<loom_op_t*> CollectLoops(loom_func_like_t function) {
     std::vector<loom_op_t*> loops;
-    LoopCollector collector = {/*.module=*/module_, /*.loops=*/&loops};
+    LoopCollector collector = {.module = module_, .loops = &loops};
     loom_walk_result_t result = LOOM_WALK_CONTINUE;
     IREE_CHECK_OK(loom_walk_function(
         module_, function, LOOM_WALK_POST_ORDER,
@@ -585,9 +584,9 @@ TEST_F(LoopBoundaryProjectionTest,
   const loom_value_id_t step = Index(&builder, 1);
   const loom_value_id_t initial = Constant(&builder, loom_attr_f64(1.0), f32);
   const loom_tied_result_t tie = {
-      /*.result_index=*/0,
-      /*.operand_index=*/3,
-      /*.has_type_change=*/false,
+      .result_index = 0,
+      .operand_index = 3,
+      .has_type_change = false,
   };
   loom_op_t* source_loop = nullptr;
   IREE_ASSERT_OK(loom_test_loop_build(&builder, lower, upper, step, &initial, 1,
@@ -867,9 +866,9 @@ TEST_F(LoopBoundaryProjectionTest, RejectsMismatchedOwnershipTieAtomically) {
   const loom_value_id_t step = Index(&builder, 1);
   const loom_value_id_t initial = Constant(&builder, loom_attr_f64(1.0), f32);
   const loom_tied_result_t tie = {
-      /*.result_index=*/0,
-      /*.operand_index=*/0,
-      /*.has_type_change=*/true,
+      .result_index = 0,
+      .operand_index = 0,
+      .has_type_change = true,
   };
   loom_op_t* source_loop = nullptr;
   IREE_ASSERT_OK(loom_test_loop_build(&builder, lower, upper, step, &initial, 1,

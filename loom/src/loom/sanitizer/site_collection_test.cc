@@ -106,7 +106,7 @@ class SiteCollectionTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
     loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
     IREE_ASSERT_OK(loom_module_intern_type(module_, index_type, &index_type));
     IREE_ASSERT_OK(loom_kernel_def_build(

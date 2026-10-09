@@ -384,8 +384,8 @@ TEST_P(AsanAllocationTest, QueueDeallocaReleaseReportsAfterSignal) {
   params.queue_family_affinity = iree_hal_make_queue_family_affinity(
       iree_hal_queue_family_ordinal(iree_hal_queue_family(queue)));
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/kAsanAllocationBufferLength,
+      .params = params,
+      .allocation_size = kAsanAllocationBufferLength,
   };
   enum class PoolKind { kNative, kTLSF, kFixedBlock };
   for (auto kind :

@@ -49,83 +49,82 @@ class KernelClassClassifierBenchmarkFixture {
       fact_entries_[first_argument + 2] =
           loom_value_facts_exact_i64(static_cast<int64_t>(1000003 * i + 17));
       sites_[i] = {
-          /*.facts=*/&fact_table_,
-          /*.argument_values=*/&argument_values_[first_argument],
+          .facts = &fact_table_,
+          .argument_values = &argument_values_[first_argument],
       };
     }
 
     predicate_ = {
-        /*.kind=*/LOOM_PREDICATE_GE,
-        /*.operand_count=*/2,
-        /*.reserved=*/{},
-        /*.operands=*/
-        {
-            loom_decision_program_argument_ref(0),
-            loom_decision_program_constant_ref(0),
-        },
+        .kind = LOOM_PREDICATE_GE,
+        .operand_count = 2,
+        .reserved = {},
+        .operands =
+            {
+                loom_decision_program_argument_ref(0),
+                loom_decision_program_constant_ref(0),
+            },
     };
     choices_[0] = {
-        /*.conjunction=*/
-        {
-            /*.first_predicate=*/0,
-            /*.first_feature=*/0,
-            /*.predicate_count=*/1,
-            /*.feature_count=*/0,
-        },
-        /*.action_ordinal=*/0,
+        .conjunction =
+            {
+                .first_predicate = 0,
+                .first_feature = 0,
+                .predicate_count = 1,
+                .feature_count = 0,
+            },
+        .action_ordinal = 0,
     };
     choices_[1] = {
-        /*.conjunction=*/{},
-        /*.action_ordinal=*/1,
+        .conjunction = {},
+        .action_ordinal = 1,
     };
     actions_[0].choice_ordinal = 0;
     actions_[1].choice_ordinal = 1;
     priority_groups_[0].choice_count = 1;
     priority_groups_[1].choice_count = 1;
     model_.program = {
-        /*.predicates=*/&predicate_,
-        /*.choices=*/choices_,
-        /*.priority_groups=*/priority_groups_,
-        /*.constants=*/constants_,
-        /*.hard_requirements=*/{},
-        /*.predicate_count=*/1,
-        /*.feature_count=*/0,
-        /*.constant_count=*/1,
-        /*.choice_count=*/2,
-        /*.priority_group_count=*/2,
+        .predicates = &predicate_,
+        .choices = choices_,
+        .priority_groups = priority_groups_,
+        .constants = constants_,
+        .hard_requirements = {},
+        .predicate_count = 1,
+        .feature_count = 0,
+        .constant_count = 1,
+        .choice_count = 2,
+        .priority_group_count = 2,
     };
 
     projection_terms_[0] = {
-        /*.coefficient=*/1,
-        /*.argument_ordinal=*/0,
-        /*.reserved=*/{},
+        .coefficient = 1,
+        .argument_ordinal = 0,
+        .reserved = {},
     };
     projection_terms_[1] = {
-        /*.coefficient=*/1,
-        /*.argument_ordinal=*/1,
-        /*.reserved=*/{},
+        .coefficient = 1,
+        .argument_ordinal = 1,
+        .reserved = {},
     };
     projection_ = {
-        /*.source_value_id=*/0,
-        /*.kind=*/LOOM_KERNEL_CLASS_PROJECTION_AFFINE,
-        /*.reserved=*/{},
-        /*.constant=*/0,
-        /*.terms=*/projection_terms_,
-        /*.static_facts=*/{},
-        /*.term_count=*/2,
-        /*.trailing_reserved=*/{},
+        .source_value_id = 0,
+        .kind = LOOM_KERNEL_CLASS_PROJECTION_AFFINE,
+        .reserved = {},
+        .constant = 0,
+        .terms = projection_terms_,
+        .static_facts = {},
+        .term_count = 2,
+        .trailing_reserved = {},
     };
     for (loom_kernel_class_decision_t& decision : decisions_) {
       decision = {
-          /*.demand=*/nullptr,
-          /*.model=*/&model_,
-          /*.argument_values=*/&projection_value_id_,
-          /*.result_values=*/nullptr,
-          /*.projection_ordinals=*/&projection_ordinal_,
-          /*.feature_outcomes=*/nullptr,
-          /*.actions=*/actions_,
-          /*.generic_result=*/
-          {
+          .demand = nullptr,
+          .model = &model_,
+          .argument_values = &projection_value_id_,
+          .result_values = nullptr,
+          .projection_ordinals = &projection_ordinal_,
+          .feature_outcomes = nullptr,
+          .actions = actions_,
+          .generic_result = {
               /*.kind=*/LOOM_DECISION_PROGRAM_RESULT_SELECTED,
               /*.reserved=*/{},
               /*.action_ordinal=*/1,
@@ -134,24 +133,24 @@ class KernelClassClassifierBenchmarkFixture {
               /*.unresolved_constraint=*/
               LOOM_DECISION_PROGRAM_CONSTRAINT_INVALID,
           },
-          /*.argument_count=*/1,
-          /*.result_count=*/0,
-          /*.projection_count=*/1,
-          /*.unavailable_reason=*/LOOM_KERNEL_CLASS_DECISION_AVAILABLE,
-          /*.hard_requirement_flags=*/0,
-          /*.reserved=*/{},
+          .argument_count = 1,
+          .result_count = 0,
+          .projection_count = 1,
+          .unavailable_reason = LOOM_KERNEL_CLASS_DECISION_AVAILABLE,
+          .hard_requirement_flags = 0,
+          .reserved = {},
       };
     }
     classifier_ = {
-        /*.module=*/nullptr,
-        /*.kernel_symbol_id=*/0,
-        /*.projections=*/&projection_,
-        /*.decisions=*/decisions_.data(),
-        /*.projection_count=*/1,
-        /*.decision_count=*/decision_count,
-        /*.maximum_provider_count=*/2,
-        /*.kernel_argument_count=*/kKernelArgumentCount,
-        /*.reserved=*/{},
+        .module = nullptr,
+        .kernel_symbol_id = 0,
+        .projections = &projection_,
+        .decisions = decisions_.data(),
+        .projection_count = 1,
+        .decision_count = decision_count,
+        .maximum_provider_count = 2,
+        .kernel_argument_count = kKernelArgumentCount,
+        .reserved = {},
     };
   }
 

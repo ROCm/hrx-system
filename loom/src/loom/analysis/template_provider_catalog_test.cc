@@ -87,7 +87,7 @@ class TemplateProviderCatalogTest : public ::testing::Test {
     IREE_CHECK_OK(loom_template_provider_catalog_build_local(&catalog_, module,
                                                              &fact_table_));
     return loom_template_provider_catalog_lookup(
-        &catalog_, {/*.module_id=*/0, /*.symbol_id=*/FindSymbol(module, name)});
+        &catalog_, {.module_id = 0, .symbol_id = FindSymbol(module, name)});
   }
 
   const loom_template_provider_summary_t* FindProvider(
@@ -103,8 +103,8 @@ class TemplateProviderCatalogTest : public ::testing::Test {
   void AddUkernelProvider(loom_module_t* module, iree_string_view_t family,
                           iree_string_view_t name, int64_t priority) {
     const loom_symbol_ref_t family_ref = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/FindSymbol(module, family),
+        .module_id = 0,
+        .symbol_id = FindSymbol(module, family),
     };
     loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
     IREE_ASSERT_OK(loom_module_intern_string(module, name, &name_id));
@@ -188,8 +188,8 @@ template.def<@qwen.q4.matmul> public priority(10) @fast(%arg0: i32) -> (i32) {
 
   loom_template_provider_slice_t other = loom_template_provider_catalog_lookup(
       &catalog_,
-      {/*.module_id=*/0,
-       /*.symbol_id=*/FindSymbol(module.get(), IREE_SV("other.contract"))});
+      {.module_id = 0,
+       .symbol_id = FindSymbol(module.get(), IREE_SV("other.contract"))});
   ASSERT_EQ(other.count, 1u);
   EXPECT_TRUE(
       iree_string_view_equal(other.providers[0].name, IREE_SV("other")));
@@ -318,12 +318,12 @@ template.decl @target.family(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]x
       source_providers.providers[0];
 
   const loom_symbol_ref_t target_target = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/FindSymbol(target.get(), IREE_SV("target.gfx11")),
+      .module_id = 0,
+      .symbol_id = FindSymbol(target.get(), IREE_SV("target.gfx11")),
   };
   const loom_symbol_ref_t target_family = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/FindSymbol(target.get(), IREE_SV("target.family")),
+      .module_id = 0,
+      .symbol_id = FindSymbol(target.get(), IREE_SV("target.family")),
   };
   const iree_host_size_t target_value_count_before = target->values.count;
   loom_template_provider_summary_t bound = {};

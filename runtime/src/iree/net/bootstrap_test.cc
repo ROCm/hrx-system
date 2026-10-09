@@ -54,14 +54,14 @@ static iree_net_bootstrap_message_t MakePeerMessage(
     const std::vector<iree_async_frontier_entry_t>& axes,
     iree_const_byte_span_t application_data) {
   iree_net_bootstrap_peer_info_t peer = {
-      /*.capabilities=*/IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER |
-          IREE_NET_BOOTSTRAP_CAPABILITY_RDMA,
-      /*.application_endpoint_count=*/2,
-      /*.axes=*/axes.data(),
-      /*.axis_count=*/static_cast<uint32_t>(axes.size()),
-      /*.application_data=*/application_data,
-      /*.machine_index=*/3,
-      /*.session_epoch=*/7,
+      .capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER |
+                      IREE_NET_BOOTSTRAP_CAPABILITY_RDMA,
+      .application_endpoint_count = 2,
+      .axes = axes.data(),
+      .axis_count = static_cast<uint32_t>(axes.size()),
+      .application_data = application_data,
+      .machine_index = 3,
+      .session_epoch = 7,
   };
   iree_net_bootstrap_message_t message;
   std::memset(&message, 0, sizeof(message));
@@ -77,10 +77,10 @@ static iree_net_bootstrap_message_t MakePeerMessage(
 static std::vector<iree_async_frontier_entry_t> MakeAxes() {
   return {
       {
-          /*.axis=*/iree_async_axis_make_queue(
+          .axis = iree_async_axis_make_queue(
               /*session_epoch=*/7, /*machine_index=*/3, /*device_index=*/1,
               /*queue_index=*/2, /*queue_incarnation=*/3),
-          /*.epoch=*/123,
+          .epoch = 123,
       },
       {
           /*.axis=*/iree_async_axis_make(

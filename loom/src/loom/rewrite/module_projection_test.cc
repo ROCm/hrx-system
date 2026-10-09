@@ -123,8 +123,8 @@ func.def @helper(%x: i32) -> (i32) {
         loom_module_add_symbol(target, target_name_id, &target_symbol_id));
     target->symbols.entries[target_symbol_id].flags = source_symbol->flags;
     target_symbols[source_symbol_id] = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/target_symbol_id,
+        .module_id = 0,
+        .symbol_id = target_symbol_id,
     };
   }
 
@@ -133,8 +133,8 @@ func.def @helper(%x: i32) -> (i32) {
       source, target, target_symbols.data(), target_symbols.size(),
       &projection));
   loom_ir_remap_op_projection_t operation_projection[] = {
-      {/*.source_op=*/live_call, /*.target_op=*/nullptr},
-      {/*.source_op=*/entry_return, /*.target_op=*/nullptr},
+      {.source_op = live_call, .target_op = nullptr},
+      {.source_op = entry_return, .target_op = nullptr},
   };
   IREE_ASSERT_OK(loom_ir_module_projection_track_operations(
       &projection, operation_projection, IREE_ARRAYSIZE(operation_projection)));

@@ -148,8 +148,8 @@ class PlannerCatalogFixture {
       benchmark_modules_.push_back(module);
       BuildIdentityModule(module, name_view);
       const loom_link_module_index_add_options_t library_options = {
-          /*.provider_name=*/name_view,
-          /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+          .provider_name = name_view,
+          .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
       };
       CheckStatus(loom_link_module_index_add_materialized(
           index, module, &library_options,
@@ -190,8 +190,8 @@ class PlannerCatalogFixture {
     loom_builder_initialize(module, &module->arena, loom_module_block(module),
                             &module_builder);
     const loom_symbol_ref_t symbol_ref = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
     loom_op_t* function_op = nullptr;
     CheckStatus(loom_test_func_build(
@@ -236,8 +236,8 @@ class PlannerCatalogFixture {
                             &module_builder);
     for (uint32_t i = 0; i < symbol_count_; ++i) {
       const loom_symbol_ref_t symbol_ref = {
-          /*.module_id=*/0,
-          /*.symbol_id=*/symbol_ids[i],
+          .module_id = 0,
+          .symbol_id = symbol_ids[i],
       };
       loom_op_t* function_op = nullptr;
       CheckStatus(loom_test_func_build(
@@ -265,8 +265,8 @@ class PlannerCatalogFixture {
       loom_value_id_t result = arguments[0];
       if (i + 1 < symbol_count_) {
         const loom_symbol_ref_t callee_ref = {
-            /*.module_id=*/0,
-            /*.symbol_id=*/symbol_ids[i + 1],
+            .module_id = 0,
+            .symbol_id = symbol_ids[i + 1],
         };
         loom_op_t* invoke_op = nullptr;
         CheckStatus(loom_test_invoke_build(
@@ -362,13 +362,13 @@ static void BenchmarkPlan(benchmark::State& state, loom_link_plan_mode_t mode,
   iree_string_view_list_t root_symbols = iree_string_view_list_empty();
   if (mode == LOOM_LINK_PLAN_LINK) {
     root_symbols = (iree_string_view_list_t){
-        /*.count=*/1,
-        /*.values=*/&root,
+        .count = 1,
+        .values = &root,
     };
   }
   const loom_link_plan_options_t options = {
-      /*.mode=*/mode,
-      /*.root_symbols=*/root_symbols,
+      .mode = mode,
+      .root_symbols = root_symbols,
   };
 
   iree_host_size_t selected_facet_count = 0;
@@ -414,9 +414,9 @@ static void BM_Plan_InputExport_UnrelatedLibraryProviders(
   loom_link_module_index_t* index =
       fixture.BuildUnrelatedProviderIndex(library_provider_count);
   const loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_LINK,
-      /*.root_symbols=*/iree_string_view_list_empty(),
-      /*.include_input_exports=*/true,
+      .mode = LOOM_LINK_PLAN_LINK,
+      .root_symbols = iree_string_view_list_empty(),
+      .include_input_exports = true,
   };
 
   for (auto _ : state) {
@@ -479,8 +479,8 @@ static void BenchmarkProjection(benchmark::State& state, uint32_t root_ordinal,
   const iree_string_view_t root =
       iree_make_string_view(root_name.data(), root_name.size());
   const loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_LINK,
-      /*.root_symbols=*/{/*.count=*/1, /*.values=*/&root},
+      .mode = LOOM_LINK_PLAN_LINK,
+      .root_symbols = {.count = 1, .values = &root},
   };
   loom_link_plan_t* plan = nullptr;
   CheckStatus(
@@ -535,8 +535,8 @@ static void BenchmarkExactLink(benchmark::State& state,
     }
   }
   const loom_linker_source_symbol_list_t source_symbols = {
-      /*.count=*/source_symbol_ordinals.size(),
-      /*.ordinals=*/source_symbol_ordinals.data(),
+      .count = source_symbol_ordinals.size(),
+      .ordinals = source_symbol_ordinals.data(),
   };
   const loom_linker_options_t linker_options = {
       /*.module_name=*/IREE_SV("linked"),
@@ -607,8 +607,8 @@ static void BenchmarkLinkMaterializeAndLink(
   const iree_string_view_t root =
       iree_make_string_view(root_name.data(), root_name.size());
   const loom_link_plan_options_t plan_options = {
-      /*.mode=*/LOOM_LINK_PLAN_LINK,
-      /*.root_symbols=*/{/*.count=*/1, /*.values=*/&root},
+      .mode = LOOM_LINK_PLAN_LINK,
+      .root_symbols = {.count = 1, .values = &root},
   };
   loom_link_plan_t* plan = nullptr;
   CheckStatus(loom_link_plan_build(index, &plan_options,
@@ -656,8 +656,8 @@ static void BenchmarkLinkMaterializeAndLink(
         &provider->bytecode.metadata,
         (uint16_t)selection.source_module->provider_module_ordinal,
         (loom_bytecode_symbol_ordinal_list_t){
-            /*.count=*/source_symbol_ordinals.size(),
-            /*.ordinals=*/source_symbol_ordinals.data(),
+            .count = source_symbol_ordinals.size(),
+            .ordinals = source_symbol_ordinals.data(),
         },
         &read_options, &read_result, &selected_module,
         iree_allocator_system()));

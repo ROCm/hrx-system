@@ -201,8 +201,8 @@ class XdnaArtifactTest : public ::testing::Test {
 
   iree_status_t ParseModule(iree_string_view_t source, ModulePtr* out_module) {
     loom_text_parse_options_t options = {
-        /*.diagnostic_sink=*/{},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {},
+        .max_errors = 20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &low_registry_.registry, &options.low_asm_environment);
@@ -229,13 +229,13 @@ TEST_F(XdnaArtifactTest, EmitsPrivateRetainedControlFreeResidentProduct) {
   IREE_ASSERT_OK(ParseModule(IREE_SV(kResidentNeighborSource), &module));
 
   const loom_aie2p_xdna_artifact_request_t request = {
-      /*.module=*/module.get(),
-      /*.function_versions=*/nullptr,
-      /*.low_descriptor_registry=*/&low_registry_.registry,
-      /*.compile_report=*/&compile_report_,
-      /*.diagnostic_emitter=*/{},
-      /*.scratch_arena=*/&scratch_arena_,
-      /*.allocator=*/iree_allocator_system(),
+      .module = module.get(),
+      .function_versions = nullptr,
+      .low_descriptor_registry = &low_registry_.registry,
+      .compile_report = &compile_report_,
+      .diagnostic_emitter = {},
+      .scratch_arena = &scratch_arena_,
+      .allocator = iree_allocator_system(),
   };
   bool emitted = false;
   IREE_ASSERT_OK(
@@ -283,13 +283,13 @@ TEST_F(XdnaArtifactTest, RejectsNonArtifactEntryRootWithDiagnostic) {
   IREE_ASSERT_OK(ParseModule(IREE_SV(kCoreRootSource), &module));
   DiagnosticEmissionCapture capture;
   const loom_aie2p_xdna_artifact_request_t request = {
-      /*.module=*/module.get(),
-      /*.function_versions=*/nullptr,
-      /*.low_descriptor_registry=*/&low_registry_.registry,
-      /*.compile_report=*/nullptr,
-      /*.diagnostic_emitter=*/capture.emitter(),
-      /*.scratch_arena=*/&scratch_arena_,
-      /*.allocator=*/iree_allocator_null(),
+      .module = module.get(),
+      .function_versions = nullptr,
+      .low_descriptor_registry = &low_registry_.registry,
+      .compile_report = nullptr,
+      .diagnostic_emitter = capture.emitter(),
+      .scratch_arena = &scratch_arena_,
+      .allocator = iree_allocator_null(),
   };
   bool emitted = false;
   IREE_ASSERT_OK(
@@ -307,13 +307,13 @@ TEST_F(XdnaArtifactTest, RejectsGenericProfileWithDiagnostic) {
   IREE_ASSERT_OK(ParseModule(IREE_SV(kGenericProfileSource), &module));
   DiagnosticEmissionCapture capture;
   const loom_aie2p_xdna_artifact_request_t request = {
-      /*.module=*/module.get(),
-      /*.function_versions=*/nullptr,
-      /*.low_descriptor_registry=*/&low_registry_.registry,
-      /*.compile_report=*/nullptr,
-      /*.diagnostic_emitter=*/capture.emitter(),
-      /*.scratch_arena=*/&scratch_arena_,
-      /*.allocator=*/iree_allocator_null(),
+      .module = module.get(),
+      .function_versions = nullptr,
+      .low_descriptor_registry = &low_registry_.registry,
+      .compile_report = nullptr,
+      .diagnostic_emitter = capture.emitter(),
+      .scratch_arena = &scratch_arena_,
+      .allocator = iree_allocator_null(),
   };
   bool emitted = false;
   IREE_ASSERT_OK(
@@ -330,13 +330,13 @@ TEST_F(XdnaArtifactTest, RejectsMixedProfilesWithDiagnostic) {
   IREE_ASSERT_OK(ParseModule(IREE_SV(kMixedProfileSource), &module));
   DiagnosticEmissionCapture capture;
   const loom_aie2p_xdna_artifact_request_t request = {
-      /*.module=*/module.get(),
-      /*.function_versions=*/nullptr,
-      /*.low_descriptor_registry=*/&low_registry_.registry,
-      /*.compile_report=*/nullptr,
-      /*.diagnostic_emitter=*/capture.emitter(),
-      /*.scratch_arena=*/&scratch_arena_,
-      /*.allocator=*/iree_allocator_null(),
+      .module = module.get(),
+      .function_versions = nullptr,
+      .low_descriptor_registry = &low_registry_.registry,
+      .compile_report = nullptr,
+      .diagnostic_emitter = capture.emitter(),
+      .scratch_arena = &scratch_arena_,
+      .allocator = iree_allocator_null(),
   };
   bool emitted = false;
   IREE_ASSERT_OK(
@@ -356,13 +356,13 @@ TEST_F(XdnaArtifactTest, RejectsEmptyArrayWithDiagnostic) {
   IREE_ASSERT_OK(ParseModule(IREE_SV(kEmptyArraySource), &module));
   DiagnosticEmissionCapture capture;
   const loom_aie2p_xdna_artifact_request_t request = {
-      /*.module=*/module.get(),
-      /*.function_versions=*/nullptr,
-      /*.low_descriptor_registry=*/&low_registry_.registry,
-      /*.compile_report=*/nullptr,
-      /*.diagnostic_emitter=*/capture.emitter(),
-      /*.scratch_arena=*/&scratch_arena_,
-      /*.allocator=*/iree_allocator_null(),
+      .module = module.get(),
+      .function_versions = nullptr,
+      .low_descriptor_registry = &low_registry_.registry,
+      .compile_report = nullptr,
+      .diagnostic_emitter = capture.emitter(),
+      .scratch_arena = &scratch_arena_,
+      .allocator = iree_allocator_null(),
   };
   bool emitted = false;
   IREE_ASSERT_OK(
@@ -381,13 +381,13 @@ TEST_F(XdnaArtifactTest, RejectsAggregateBindingCountBeforeResidentCompile) {
       ParseModule(IREE_SV(kAggregateBindingOverflowSource), &module));
   DiagnosticEmissionCapture capture;
   const loom_aie2p_xdna_artifact_request_t request = {
-      /*.module=*/module.get(),
-      /*.function_versions=*/nullptr,
-      /*.low_descriptor_registry=*/&low_registry_.registry,
-      /*.compile_report=*/&compile_report_,
-      /*.diagnostic_emitter=*/capture.emitter(),
-      /*.scratch_arena=*/&scratch_arena_,
-      /*.allocator=*/iree_allocator_system(),
+      .module = module.get(),
+      .function_versions = nullptr,
+      .low_descriptor_registry = &low_registry_.registry,
+      .compile_report = &compile_report_,
+      .diagnostic_emitter = capture.emitter(),
+      .scratch_arena = &scratch_arena_,
+      .allocator = iree_allocator_system(),
   };
   bool emitted = false;
   IREE_ASSERT_OK(

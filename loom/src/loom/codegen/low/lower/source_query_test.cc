@@ -104,8 +104,8 @@ class LowLowerSourceQueryTest : public ::testing::Test {
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
     const loom_symbol_ref_t symbol = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
     const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
     const loom_type_t argument_types[] = {i32_type, i32_type};
@@ -240,11 +240,10 @@ TEST_F(LowLowerSourceQueryTest, ContractQueriesRetainSourceScopeState) {
   } probe;
   loom_low_lower_policy_t policy = *options_.policy;
   policy.map_contract_value = {
-      /*.fn=*/[](void* user_data,
-                 const loom_target_contract_query_environment_t* environment,
-                 const loom_op_t*, loom_value_id_t,
-                 loom_low_lower_rule_mapped_value_t* out_value)
-                  -> iree_status_t {
+      .fn = [](void* user_data,
+               const loom_target_contract_query_environment_t* environment,
+               const loom_op_t*, loom_value_id_t,
+               loom_low_lower_rule_mapped_value_t* out_value) -> iree_status_t {
         auto* probe = static_cast<MappingProbe*>(user_data);
         void* state = nullptr;
         IREE_RETURN_IF_ERROR(
@@ -256,7 +255,7 @@ TEST_F(LowLowerSourceQueryTest, ContractQueriesRetainSourceScopeState) {
         *out_value = loom_low_lower_rule_mapped_value_none();
         return iree_ok_status();
       },
-      /*.user_data=*/&probe,
+      .user_data = &probe,
   };
   options_.policy = &policy;
   CreateQueryScope();
@@ -270,14 +269,14 @@ TEST_F(LowLowerSourceQueryTest, ContractQueriesRetainSourceScopeState) {
 
   environment.arena = &analysis_arena_;
   environment.target_state_allocator = {
-      /*.fn=*/[](void* user_data, const void*, iree_host_size_t,
-                 void** out_data) -> iree_status_t {
+      .fn = [](void* user_data, const void*, iree_host_size_t,
+               void** out_data) -> iree_status_t {
         auto* probe = static_cast<MappingProbe*>(user_data);
         probe->used_foreign_allocator = true;
         *out_data = probe->expected_state;
         return iree_ok_status();
       },
-      /*.user_data=*/&probe,
+      .user_data = &probe,
   };
   const auto callback =
       loom_low_lower_source_query_scope_callback(query_scope_);
@@ -454,14 +453,14 @@ TEST_F(LowLowerSourceQueryTest, TargetOwnedContractComposesWithGeneratedCases) {
     const loom_op_t* handled_op = nullptr;
     // True when the callback observed source-scope analyses.
     bool observed_source_scope = false;
-  } probe = {/*.handled_op=*/mapped_source_op_};
+  } probe = {.handled_op = mapped_source_op_};
   loom_low_lower_policy_t policy = *options_.policy;
   policy.query_op_contract = {
-      /*.fn=*/[](void* user_data,
-                 const loom_target_contract_query_environment_t* environment,
-                 const loom_op_t* source_op,
-                 loom_target_contract_query_result_t* out_result)
-                  -> iree_status_t {
+      .fn =
+          [](void* user_data,
+             const loom_target_contract_query_environment_t* environment,
+             const loom_op_t* source_op,
+             loom_target_contract_query_result_t* out_result) -> iree_status_t {
         auto* probe = static_cast<QueryProbe*>(user_data);
         probe->observed_source_scope |= environment->value_domain != nullptr &&
                                         environment->view_regions != nullptr;
@@ -471,7 +470,7 @@ TEST_F(LowLowerSourceQueryTest, TargetOwnedContractComposesWithGeneratedCases) {
         }
         return iree_ok_status();
       },
-      /*.user_data=*/&probe,
+      .user_data = &probe,
   };
   options_.policy = &policy;
   CreateQueryScope();

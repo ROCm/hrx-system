@@ -104,8 +104,8 @@ class LinkIndexMaterializerTest : public ::testing::Test {
                                    iree_string_view_t name,
                                    loom_link_provider_role_t role) {
     const loom_link_module_index_add_options_t options = {
-        /*.provider_name=*/name,
-        /*.role=*/role,
+        .provider_name = name,
+        .role = role,
     };
     iree_host_size_t provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
     IREE_CHECK_OK(loom_link_module_index_add_materialized(
@@ -118,8 +118,8 @@ class LinkIndexMaterializerTest : public ::testing::Test {
                                iree_string_view_t name,
                                loom_link_provider_role_t role) {
     const loom_link_module_index_add_options_t options = {
-        /*.provider_name=*/name,
-        /*.role=*/role,
+        .provider_name = name,
+        .role = role,
     };
     iree_host_size_t provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
     IREE_CHECK_OK(loom_link_module_index_add_bytecode(
@@ -132,8 +132,8 @@ class LinkIndexMaterializerTest : public ::testing::Test {
                            iree_string_view_t source, iree_string_view_t name,
                            loom_link_provider_role_t role) {
     const loom_link_module_index_add_options_t options = {
-        /*.provider_name=*/name,
-        /*.role=*/role,
+        .provider_name = name,
+        .role = role,
     };
     loom_text_parse_options_t parse_options = {};
     parse_options.diagnostic_sink.fn = loom_diagnostic_stderr_sink;
@@ -194,7 +194,7 @@ class LinkIndexMaterializerTest : public ::testing::Test {
       const loom_link_module_index_t* index,
       loom_link_index_materialization_t* out_materialization) {
     const loom_link_plan_options_t plan_options = {
-        /*.mode=*/LOOM_LINK_PLAN_MERGE,
+        .mode = LOOM_LINK_PLAN_MERGE,
     };
     return TryMaterializeWithOptions(index, &plan_options, out_materialization);
   }
@@ -1422,14 +1422,13 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
         IREE_SV("@private_root"),
     };
     loom_link_plan_options_t options = {
-        /*.mode=*/LOOM_LINK_PLAN_LINK,
-        /*.root_symbols=*/
-        {
+        .mode = LOOM_LINK_PLAN_LINK,
+        .root_symbols = {
             /*.count=*/IREE_ARRAYSIZE(explicit_roots),
             /*.values=*/explicit_roots,
         },
-        /*.include_input_exports=*/true,
-        /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
+        .include_input_exports = true,
+        .unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
     };
     loom_link_index_materialization_t materialization = {};
     IREE_ASSERT_OK(

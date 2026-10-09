@@ -41,17 +41,17 @@ TEST_F(GraphBufferTest, RecordsAndInstantiatesHandleBasedCopyAndFill) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph)));
 
   const hrx_graph_copy_buffer_node_attrs_t copy_attrs = {
-      /*.src=*/{source_, 4, 16},
-      /*.dst=*/{destination_, 8, 16},
+      .src = {source_, 4, 16},
+      .dst = {destination_, 8, 16},
   };
   hrx_graph_node_t copy_node = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_copy_buffer_node(
       graph, nullptr, 0, &copy_attrs, &copy_node)));
 
   const hrx_graph_fill_buffer_node_attrs_t fill_attrs = {
-      /*.dst=*/{destination_, 24, 8},
-      /*.pattern=*/0xA5A5A5A5u,
-      /*.pattern_size=*/4,
+      .dst = {destination_, 24, 8},
+      .pattern = 0xA5A5A5A5u,
+      .pattern_size = 4,
   };
   hrx_graph_node_t fill_node = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
@@ -82,17 +82,17 @@ TEST_F(GraphBufferTest, DependentFillThenCopyProducesExpectedContents) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph)));
 
   const hrx_graph_fill_buffer_node_attrs_t fill_attrs = {
-      /*.dst=*/{source_, 0, 64},
-      /*.pattern=*/0xA5u,
-      /*.pattern_size=*/1,
+      .dst = {source_, 0, 64},
+      .pattern = 0xA5u,
+      .pattern_size = 1,
   };
   hrx_graph_node_t fill_node = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
       graph, nullptr, 0, &fill_attrs, &fill_node)));
 
   const hrx_graph_copy_buffer_node_attrs_t copy_attrs = {
-      /*.src=*/{source_, 0, 64},
-      /*.dst=*/{destination_, 0, 64},
+      .src = {source_, 0, 64},
+      .dst = {destination_, 0, 64},
   };
   hrx_graph_node_t copy_node = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_copy_buffer_node(
@@ -124,8 +124,8 @@ TEST_F(GraphBufferTest, LaunchFlushesPendingStreamWorkBeforeGraphCommands) {
   hrx_graph_t graph = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph)));
   const hrx_graph_copy_buffer_node_attrs_t copy_attrs = {
-      /*.src=*/{source_, 0, 64},
-      /*.dst=*/{destination_, 0, 64},
+      .src = {source_, 0, 64},
+      .dst = {destination_, 0, 64},
   };
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_graph_add_copy_buffer_node(graph, nullptr, 0, &copy_attrs, nullptr)));
@@ -153,17 +153,17 @@ TEST_F(GraphBufferTest, AddedDependencyOrdersFillBeforeCopy) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph)));
 
   const hrx_graph_fill_buffer_node_attrs_t fill_attrs = {
-      /*.dst=*/{source_, 0, 64},
-      /*.pattern=*/0x3Cu,
-      /*.pattern_size=*/1,
+      .dst = {source_, 0, 64},
+      .pattern = 0x3Cu,
+      .pattern_size = 1,
   };
   hrx_graph_node_t fill_node = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
       graph, nullptr, 0, &fill_attrs, &fill_node)));
 
   const hrx_graph_copy_buffer_node_attrs_t copy_attrs = {
-      /*.src=*/{source_, 0, 64},
-      /*.dst=*/{destination_, 0, 64},
+      .src = {source_, 0, 64},
+      .dst = {destination_, 0, 64},
   };
   hrx_graph_node_t copy_node = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_copy_buffer_node(
@@ -194,8 +194,8 @@ TEST_F(GraphBufferTest, RejectsInvalidHandleRangesAndPatterns) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph)));
 
   hrx_graph_copy_buffer_node_attrs_t copy_attrs = {
-      /*.src=*/{source_, 60, 8},
-      /*.dst=*/{destination_, 0, 8},
+      .src = {source_, 60, 8},
+      .dst = {destination_, 0, 8},
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         hrx_status_to_iree(hrx_graph_add_copy_buffer_node(
@@ -207,9 +207,9 @@ TEST_F(GraphBufferTest, RejectsInvalidHandleRangesAndPatterns) {
                             graph, nullptr, 0, &copy_attrs, nullptr)));
 
   hrx_graph_fill_buffer_node_attrs_t fill_attrs = {
-      /*.dst=*/{destination_, 0, 8},
-      /*.pattern=*/0,
-      /*.pattern_size=*/3,
+      .dst = {destination_, 0, 8},
+      .pattern = 0,
+      .pattern_size = 3,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         hrx_status_to_iree(hrx_graph_add_fill_buffer_node(

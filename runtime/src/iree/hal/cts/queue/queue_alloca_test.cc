@@ -39,8 +39,8 @@ iree_hal_buffer_params_t MakeAllocationParams(iree_hal_queue_t* queue) {
 iree_hal_pool_reservation_request_t MakeRequest(iree_hal_queue_t* queue,
                                                 iree_device_size_t size) {
   return {
-      /*.params=*/MakeAllocationParams(queue),
-      /*.allocation_size=*/size,
+      .params = MakeAllocationParams(queue),
+      .allocation_size = size,
   };
 }
 
@@ -75,74 +75,74 @@ class SubspanSlabProvider : public iree_hal_slab_provider_t {
 };
 
 const iree_hal_slab_provider_vtable_t SubspanSlabProvider::vtable_ = {
-    /*.destroy=*/[](iree_hal_slab_provider_t* provider) {
-      delete Cast(provider);
-    },
-    /*.acquire_slab=*/
-    [](iree_hal_slab_provider_t* provider, iree_device_size_t min_length,
-       iree_device_size_t min_alignment, iree_hal_slab_t* out_slab) {
-      return iree_hal_slab_provider_acquire_slab(
-          Cast(provider)->inner_, min_length, min_alignment, out_slab);
-    },
-    /*.release_slab=*/
-    [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab) {
-      iree_hal_slab_provider_release_slab(Cast(provider)->inner_, slab);
-    },
-    /*.wrap_buffer=*/
-    [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab,
-       iree_device_size_t slab_offset, iree_device_size_t allocation_size,
-       iree_hal_buffer_params_t params,
-       iree_hal_buffer_release_callback_t release_callback,
-       iree_hal_buffer_t** out_buffer) {
-      auto* self = Cast(provider);
-      Ref<iree_hal_buffer_t> backing;
-      IREE_RETURN_IF_ERROR(iree_hal_slab_provider_wrap_buffer(
-          self->inner_, slab, 0, slab->length, params,
-          iree_hal_buffer_release_callback_null(), backing.out()));
-      IREE_RETURN_IF_ERROR(iree_hal_subspan_buffer_create_with_callback(
-          backing, iree_hal_buffer_byte_offset(backing) + slab_offset,
-          allocation_size, release_callback, iree_allocator_system(),
-          out_buffer));
-      self->views.push_back(*out_buffer);
-      return iree_ok_status();
-    },
-    /*.validate_asan_options=*/
-    [](const iree_hal_slab_provider_t* provider,
-       const iree_hal_asan_pool_options_t* options) {
-      return iree_hal_slab_provider_validate_asan_options(
-          Cast(provider)->inner_, options);
-    },
-    /*.advise_asan_range=*/
-    [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab,
-       iree_device_size_t backing_offset,
-       iree_hal_asan_range_advice_flags_t flags,
-       const iree_hal_asan_allocation_layout_t* layout) {
-      iree_hal_slab_provider_advise_asan_range(Cast(provider)->inner_, slab,
-                                               backing_offset, flags, layout);
-    },
-    /*.prefault=*/
-    [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab,
-       iree_device_size_t offset, iree_device_size_t length) {
-      iree_hal_slab_provider_prefault(Cast(provider)->inner_, slab, offset,
-                                      length);
-    },
-    /*.trim=*/
-    [](iree_hal_slab_provider_t* provider, iree_hal_pool_trim_flags_t flags) {
-      iree_hal_slab_provider_trim(Cast(provider)->inner_, flags);
-    },
-    /*.query_stats=*/
-    [](const iree_hal_slab_provider_t* provider,
-       iree_hal_slab_provider_visited_set_t* visited,
-       iree_hal_slab_provider_stats_t* out_stats) {
-      iree_hal_slab_provider_query_stats(Cast(provider)->inner_, visited,
-                                         out_stats);
-    },
-    /*.query_properties=*/
-    [](const iree_hal_slab_provider_t* provider,
-       iree_hal_slab_provider_properties_t* properties) {
-      iree_hal_slab_provider_query_properties(Cast(provider)->inner_,
-                                              properties);
-    },
+    .destroy =
+        [](iree_hal_slab_provider_t* provider) { delete Cast(provider); },
+    .acquire_slab =
+        [](iree_hal_slab_provider_t* provider, iree_device_size_t min_length,
+           iree_device_size_t min_alignment, iree_hal_slab_t* out_slab) {
+          return iree_hal_slab_provider_acquire_slab(
+              Cast(provider)->inner_, min_length, min_alignment, out_slab);
+        },
+    .release_slab =
+        [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab) {
+          iree_hal_slab_provider_release_slab(Cast(provider)->inner_, slab);
+        },
+    .wrap_buffer =
+        [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab,
+           iree_device_size_t slab_offset, iree_device_size_t allocation_size,
+           iree_hal_buffer_params_t params,
+           iree_hal_buffer_release_callback_t release_callback,
+           iree_hal_buffer_t** out_buffer) {
+          auto* self = Cast(provider);
+          Ref<iree_hal_buffer_t> backing;
+          IREE_RETURN_IF_ERROR(iree_hal_slab_provider_wrap_buffer(
+              self->inner_, slab, 0, slab->length, params,
+              iree_hal_buffer_release_callback_null(), backing.out()));
+          IREE_RETURN_IF_ERROR(iree_hal_subspan_buffer_create_with_callback(
+              backing, iree_hal_buffer_byte_offset(backing) + slab_offset,
+              allocation_size, release_callback, iree_allocator_system(),
+              out_buffer));
+          self->views.push_back(*out_buffer);
+          return iree_ok_status();
+        },
+    .validate_asan_options =
+        [](const iree_hal_slab_provider_t* provider,
+           const iree_hal_asan_pool_options_t* options) {
+          return iree_hal_slab_provider_validate_asan_options(
+              Cast(provider)->inner_, options);
+        },
+    .advise_asan_range =
+        [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab,
+           iree_device_size_t backing_offset,
+           iree_hal_asan_range_advice_flags_t flags,
+           const iree_hal_asan_allocation_layout_t* layout) {
+          iree_hal_slab_provider_advise_asan_range(
+              Cast(provider)->inner_, slab, backing_offset, flags, layout);
+        },
+    .prefault =
+        [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab,
+           iree_device_size_t offset, iree_device_size_t length) {
+          iree_hal_slab_provider_prefault(Cast(provider)->inner_, slab, offset,
+                                          length);
+        },
+    .trim =
+        [](iree_hal_slab_provider_t* provider,
+           iree_hal_pool_trim_flags_t flags) {
+          iree_hal_slab_provider_trim(Cast(provider)->inner_, flags);
+        },
+    .query_stats =
+        [](const iree_hal_slab_provider_t* provider,
+           iree_hal_slab_provider_visited_set_t* visited,
+           iree_hal_slab_provider_stats_t* out_stats) {
+          iree_hal_slab_provider_query_stats(Cast(provider)->inner_, visited,
+                                             out_stats);
+        },
+    .query_properties =
+        [](const iree_hal_slab_provider_t* provider,
+           iree_hal_slab_provider_properties_t* properties) {
+          iree_hal_slab_provider_query_properties(Cast(provider)->inner_,
+                                                  properties);
+        },
 };
 
 }  // namespace

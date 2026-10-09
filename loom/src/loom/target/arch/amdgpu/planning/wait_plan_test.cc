@@ -247,18 +247,18 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     nodes_.back().scheduled_ordinal = 1;
     blocks_.resize(2);
     blocks_[0] = {
-        /*.block=*/block_.block,
-        /*.node_start=*/producer_node,
-        /*.node_count=*/2,
-        /*.scheduled_node_start=*/0,
-        /*.scheduled_node_count=*/2,
+        .block = block_.block,
+        .node_start = producer_node,
+        .node_count = 2,
+        .scheduled_node_start = 0,
+        .scheduled_node_count = 2,
     };
     blocks_[1] = {
-        /*.block=*/successor,
-        /*.node_start=*/consumer_node,
-        /*.node_count=*/2,
-        /*.scheduled_node_start=*/2,
-        /*.scheduled_node_count=*/2,
+        .block = successor,
+        .node_start = consumer_node,
+        .node_count = 2,
+        .scheduled_node_start = 2,
+        .scheduled_node_count = 2,
     };
     schedule_.blocks = blocks_.data();
     schedule_.block_count = blocks_.size();

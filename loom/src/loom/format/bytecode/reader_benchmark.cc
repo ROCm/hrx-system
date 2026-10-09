@@ -149,8 +149,7 @@ class CatalogBytecodeFixture final : public SerializedBytecodeFixture {
       loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
       IgnoreStatusOrAbort(loom_module_add_symbol(module, name_id, &symbol_id));
 
-      loom_symbol_ref_t symbol = {/*.module_id=*/0,
-                                  /*.symbol_id=*/symbol_id};
+      loom_symbol_ref_t symbol = {.module_id = 0, .symbol_id = symbol_id};
       loom_type_t argument_types[] = {i32_type};
       loom_type_t result_types[] = {i32_type};
       loom_op_t* function_op = nullptr;
@@ -257,7 +256,7 @@ class TypePlanBytecodeFixture final : public SerializedBytecodeFixture {
     loom_op_t* declaration_op = nullptr;
     IgnoreStatusOrAbort(loom_test_decl_build(
         &builder, /*build_flags=*/0, /*visibility=*/0, /*cc=*/0,
-        (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id},
+        (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id},
         root_types.data(), root_types.size(), /*result_types=*/nullptr,
         /*result_count=*/0, /*tied_results=*/nullptr,
         /*tied_result_count=*/0, LOOM_LOCATION_UNKNOWN, &declaration_op));
@@ -268,11 +267,11 @@ class TypePlanBytecodeFixture final : public SerializedBytecodeFixture {
 
 static loom_bytecode_read_options_t ReadOptions(uint32_t* diagnostic_count) {
   return loom_bytecode_read_options_t{
-      /*.diagnostic_sink=*/
-      {
-          /*.fn=*/IgnoreDiagnostic,
-          /*.user_data=*/diagnostic_count,
-      },
+      .diagnostic_sink =
+          {
+              .fn = IgnoreDiagnostic,
+              .user_data = diagnostic_count,
+          },
   };
 }
 
@@ -282,11 +281,11 @@ static void BenchmarkReadMetadata(benchmark::State& state, uint8_t preset) {
   iree_arena_block_pool_initialize(65536, iree_allocator_system(), &block_pool);
   uint32_t diagnostic_count = 0;
   loom_bytecode_index_options_t options = {
-      /*.diagnostic_sink=*/
-      {
-          /*.fn=*/IgnoreDiagnostic,
-          /*.user_data=*/&diagnostic_count,
-      },
+      .diagnostic_sink =
+          {
+              .fn = IgnoreDiagnostic,
+              .user_data = &diagnostic_count,
+          },
   };
 
   for (auto _ : state) {
@@ -321,8 +320,8 @@ static void BenchmarkReadModule(benchmark::State& state, uint8_t preset,
         &result, &module, iree_allocator_system()));
     if (verify_module) {
       const loom_verify_options_t verify_options = {
-          /*.sink=*/options.diagnostic_sink,
-          /*.max_errors=*/16,
+          .sink = options.diagnostic_sink,
+          .max_errors = 16,
       };
       loom_verify_result_t verify_result = {0};
       IgnoreStatusOrAbort(
@@ -363,11 +362,11 @@ static CatalogMetadataStats InspectCatalogMetadata(
 
   const loom_bytecode_module_metadata_t& module = metadata.modules[0];
   CatalogMetadataStats stats = {
-      /*.body_bytes=*/0,
-      /*.retained_owned_bytes=*/metadata_arena.total_allocation_size,
-      /*.retained_used_bytes=*/metadata_arena.used_allocation_size,
-      /*.body_op_count=*/module.summary.op_count,
-      /*.symbol_count=*/module.symbol_count,
+      .body_bytes = 0,
+      .retained_owned_bytes = metadata_arena.total_allocation_size,
+      .retained_used_bytes = metadata_arena.used_allocation_size,
+      .body_op_count = module.summary.op_count,
+      .symbol_count = module.symbol_count,
   };
   for (iree_host_size_t i = 0; i < module.region_payload_count; ++i) {
     stats.body_bytes += module.region_payloads[i].length;
@@ -489,15 +488,15 @@ static SelectedMaterializationStats InspectSelectedMaterialization(
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(block_pool, &scratch_arena);
   const loom_bytecode_selected_module_materializer_t materializer = {
-      /*.decoder=*/&decoder,
-      /*.bytecode=*/
-      iree_make_const_byte_span(fixture.bytes().data(), fixture.bytes().size()),
-      /*.context=*/fixture.context(),
-      /*.scratch_arena=*/&scratch_arena,
-      /*.block_pool=*/block_pool,
-      /*.metadata=*/&metadata,
-      /*.low_repr_environment=*/{},
-      /*.host_allocator=*/iree_allocator_system(),
+      .decoder = &decoder,
+      .bytecode = iree_make_const_byte_span(fixture.bytes().data(),
+                                            fixture.bytes().size()),
+      .context = fixture.context(),
+      .scratch_arena = &scratch_arena,
+      .block_pool = block_pool,
+      .metadata = &metadata,
+      .low_repr_environment = {},
+      .host_allocator = iree_allocator_system(),
   };
   loom_module_t* output_module = nullptr;
   IgnoreStatusOrAbort(loom_bytecode_selected_module_materialize(
@@ -507,15 +506,16 @@ static SelectedMaterializationStats InspectSelectedMaterialization(
   }
 
   SelectedMaterializationStats stats = {
-      /*.body_bytes=*/0,
-      /*.body_count=*/0,
-      /*.output_owned_bytes=*/output_module->arena.total_allocation_size +
+      .body_bytes = 0,
+      .body_count = 0,
+      .output_owned_bytes =
+          output_module->arena.total_allocation_size +
           output_module->type_uses.arena.total_allocation_size,
-      /*.output_used_bytes=*/output_module->arena.used_allocation_size +
-          output_module->type_uses.arena.used_allocation_size,
-      /*.scratch_owned_bytes=*/scratch_arena.total_allocation_size,
-      /*.scratch_used_bytes=*/scratch_arena.used_allocation_size,
-      /*.type_count=*/output_module->types.count,
+      .output_used_bytes = output_module->arena.used_allocation_size +
+                           output_module->type_uses.arena.used_allocation_size,
+      .scratch_owned_bytes = scratch_arena.total_allocation_size,
+      .scratch_used_bytes = scratch_arena.used_allocation_size,
+      .type_count = output_module->types.count,
   };
   for (iree_host_size_t ordinal : ordinals) {
     const loom_bytecode_symbol_metadata_t& symbol = metadata.symbols[ordinal];
@@ -574,8 +574,8 @@ static void BenchmarkMaterializeSelectedCatalog(benchmark::State& state) {
         IREE_SV("catalog_benchmark.loombc"), fixture.context(), &block_pool,
         &file_metadata, /*module_ordinal=*/0,
         (loom_bytecode_symbol_ordinal_list_t){
-            /*.count=*/ordinals.size(),
-            /*.ordinals=*/ordinals.data(),
+            .count = ordinals.size(),
+            .ordinals = ordinals.data(),
         },
         &options, &result, &module, iree_allocator_system()));
     if (result.error_count != 0 || module == nullptr ||

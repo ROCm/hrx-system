@@ -125,7 +125,7 @@ class WriterFixture {
           module_, iree_make_cstring_view(name), &name_id));
       loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
       AbortOnError(loom_module_add_symbol(module_, name_id, &symbol_id));
-      symbols.push_back({/*.module_id=*/0, /*.symbol_id=*/symbol_id});
+      symbols.push_back({.module_id = 0, .symbol_id = symbol_id});
     }
 
     // Define functions in reverse ID order so every write exercises the wire
@@ -170,8 +170,8 @@ class WriterFixture {
     AbortOnError(
         loom_module_add_symbol(module_, function_name_id, &function_symbol_id));
     const loom_symbol_ref_t function_symbol = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/function_symbol_id,
+        .module_id = 0,
+        .symbol_id = function_symbol_id,
     };
     loom_op_t* function_op = nullptr;
     AbortOnError(loom_test_func_build(
@@ -225,11 +225,11 @@ class WriterFixture {
       loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
       AbortOnError(loom_module_define_value(module_, index_type, &value_id));
       predicates[value_ordinal] = loom_predicate_t{
-          /*.kind=*/LOOM_PREDICATE_MULTIPLE_OF,
-          /*.arg_count=*/2,
-          /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-          /*.reserved=*/{},
-          /*.args=*/{(int64_t)value_id, 1},
+          .kind = LOOM_PREDICATE_MULTIPLE_OF,
+          .arg_count = 2,
+          .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+          .reserved = {},
+          .args = {(int64_t)value_id, 1},
       };
     }
 
@@ -243,8 +243,8 @@ class WriterFixture {
     AbortOnError(
         loom_module_add_symbol(module_, global_name_id, &global_symbol_id));
     const loom_symbol_ref_t global_symbol = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/global_symbol_id,
+        .module_id = 0,
+        .symbol_id = global_symbol_id,
     };
     loom_op_t* global_op = nullptr;
     AbortOnError(loom_global_constant_build(

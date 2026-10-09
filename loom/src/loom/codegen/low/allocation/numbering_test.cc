@@ -166,10 +166,12 @@ TEST_F(LowAllocationNumberingTest, ImprovesCostWithoutGrowingStorage) {
 
 TEST_F(LowAllocationNumberingTest, EntryIdentitiesKeepExternalCoordinates) {
   const loom_low_allocation_abi_location_t entry[] = {
-      {/*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-       /*.descriptor_reg_class_id=*/0, /*.location_base=*/0},
-      {/*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-       /*.descriptor_reg_class_id=*/0, /*.location_base=*/4},
+      {.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+       .descriptor_reg_class_id = 0,
+       .location_base = 0},
+      {.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+       .descriptor_reg_class_id = 0,
+       .location_base = 4},
   };
   context_.entry_locations = entry;
   context_.entry_location_count = IREE_ARRAYSIZE(entry);
@@ -181,8 +183,9 @@ TEST_F(LowAllocationNumberingTest, EntryMoveSourceKeepsExternalCoordinates) {
   const loom_low_allocation_abi_location_t entry[] = {
       {},
       {},
-      {/*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-       /*.descriptor_reg_class_id=*/0, /*.location_base=*/4}};
+      {.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+       .descriptor_reg_class_id = 0,
+       .location_base = 4}};
   loom_low_move_t move = {};
   move.source.location_kind = move.destination.location_kind =
       LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;

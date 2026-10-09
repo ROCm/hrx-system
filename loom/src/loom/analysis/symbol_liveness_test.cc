@@ -134,8 +134,8 @@ func.def @dead() {
 )");
 
   loom_symbol_liveness_options_t options = {
-      /*.flags=*/{},
-      /*.root_query=*/RootPublicFunc,
+      .flags = {},
+      .root_query = RootPublicFunc,
   };
   loom_symbol_liveness_t liveness = ComputeLiveness(module.get(), &options);
 
@@ -168,13 +168,12 @@ func.def @dead() {
       FindSymbol(module.get(), IREE_SV("entry")),
   };
   loom_symbol_liveness_options_t options = {
-      /*.flags=*/{},
-      /*.root_query=*/{},
-      /*.root_query_user_data=*/{},
-      /*.contributors=*/{},
-      /*.contributor_count=*/{},
-      /*.root_symbol_ids=*/
-      {
+      .flags = {},
+      .root_query = {},
+      .root_query_user_data = {},
+      .contributors = {},
+      .contributor_count = {},
+      .root_symbol_ids = {
           /*.values=*/root_symbol_ids,
           /*.count=*/IREE_ARRAYSIZE(root_symbol_ids),
       },
@@ -200,8 +199,8 @@ func.def public @entry() {
 )");
 
   loom_symbol_liveness_options_t options = {
-      /*.flags=*/LOOM_SYMBOL_LIVENESS_INCLUDE_MODULE_EDGES,
-      /*.root_query=*/RootPublicFunc,
+      .flags = LOOM_SYMBOL_LIVENESS_INCLUDE_MODULE_EDGES,
+      .root_query = RootPublicFunc,
   };
   loom_symbol_liveness_t liveness = ComputeLiveness(module.get(), &options);
 
@@ -242,20 +241,19 @@ func.def @dead_user(%arg0: i32) -> (i32) {
 )");
 
   ApplyEdgeTestState apply_state = {
-      /*.family_symbol_id=*/
-      FindSymbol(module.get(), IREE_SV("demo.contract")),
-      /*.provider_symbol_id=*/FindSymbol(module.get(), IREE_SV("provider")),
+      .family_symbol_id = FindSymbol(module.get(), IREE_SV("demo.contract")),
+      .provider_symbol_id = FindSymbol(module.get(), IREE_SV("provider")),
   };
   loom_symbol_liveness_contributor_t contributor = {
-      /*.visit_template_demand=*/MarkProviderForDemand,
-      /*.user_data=*/&apply_state,
+      .visit_template_demand = MarkProviderForDemand,
+      .user_data = &apply_state,
   };
   loom_symbol_liveness_options_t options = {
-      /*.flags=*/{},
-      /*.root_query=*/RootPublicFunc,
-      /*.root_query_user_data=*/{},
-      /*.contributors=*/&contributor,
-      /*.contributor_count=*/1,
+      .flags = {},
+      .root_query = RootPublicFunc,
+      .root_query_user_data = {},
+      .contributors = &contributor,
+      .contributor_count = 1,
   };
   loom_symbol_liveness_t liveness = ComputeLiveness(module.get(), &options);
 

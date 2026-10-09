@@ -54,7 +54,7 @@ class InterfaceTest : public ::testing::Test {
                                               IREE_SV("host_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    func_ref_ = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    func_ref_ = {.module_id = 0, .symbol_id = symbol_id};
     IREE_ASSERT_OK(loom_test_func_build(&module_builder, 0, 0, 0, func_ref_,
                                         NULL, 0, NULL, 0, NULL, 0, NULL, 0,
                                         LOOM_LOCATION_UNKNOWN, &func_op_));
@@ -154,8 +154,8 @@ TEST_F(InterfaceTest, CallLikeCastReturnsValidForInvoke) {
   IREE_ASSERT_OK(loom_module_add_symbol(module_, replacement_name_id,
                                         &replacement_symbol_id));
   const loom_symbol_ref_t replacement_ref = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/replacement_symbol_id,
+      .module_id = 0,
+      .symbol_id = replacement_symbol_id,
   };
   loom_call_like_set_callee(module_, call, replacement_ref);
   EXPECT_EQ(loom_call_like_callee(call).symbol_id, replacement_symbol_id);
@@ -273,8 +273,8 @@ TEST_F(InterfaceTest, FuncLikeBodyDescriptorReturnsNullForDeclaration) {
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
   const loom_symbol_ref_t symbol = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/symbol_id,
+      .module_id = 0,
+      .symbol_id = symbol_id,
   };
   loom_op_t* declaration_op = nullptr;
   IREE_ASSERT_OK(loom_test_decl_build(

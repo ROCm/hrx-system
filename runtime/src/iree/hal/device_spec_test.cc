@@ -17,20 +17,20 @@ namespace {
 static constexpr iree_hal_queue_priority_t kQueuePriorities[] = {-2, 0, 1};
 static constexpr iree_hal_queue_execution_resource_group_spec_t
     kQueueExecutionResourceGroups[] = {
-        {/*.minimum_selected_resource_count=*/1},
-        {/*.minimum_selected_resource_count=*/0},
+        {.minimum_selected_resource_count = 1},
+        {.minimum_selected_resource_count = 0},
 };
 static constexpr iree_hal_queue_execution_resource_spec_t
     kQueueExecutionResources[] = {
-        {/*.group_ordinal=*/0,
-         /*.first_execution_unit_ordinal=*/0,
-         /*.execution_unit_count=*/2},
-        {/*.group_ordinal=*/0,
-         /*.first_execution_unit_ordinal=*/2,
-         /*.execution_unit_count=*/2},
-        {/*.group_ordinal=*/1,
-         /*.first_execution_unit_ordinal=*/6,
-         /*.execution_unit_count=*/1},
+        {.group_ordinal = 0,
+         .first_execution_unit_ordinal = 0,
+         .execution_unit_count = 2},
+        {.group_ordinal = 0,
+         .first_execution_unit_ordinal = 2,
+         .execution_unit_count = 2},
+        {.group_ordinal = 1,
+         .first_execution_unit_ordinal = 6,
+         .execution_unit_count = 1},
 };
 
 static void ExpectStringViewEq(iree_string_view_t actual,
@@ -54,59 +54,59 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
     iree_hal_device_spec_facet_t* out_facets,
     iree_const_byte_span_t facet_payload) {
   out_physical_devices[0] = {
-      /*.identity=*/
-      {
-          /*.display_name=*/iree_make_cstring_view("Test GPU"),
-          /*.backend_path=*/iree_make_cstring_view("pci:0000:01:00.0"),
-          /*.vendor_id=*/0x1002,
-          /*.device_id=*/0x744c,
-          /*.revision_id=*/1,
-          /*.uuid=*/{{0}},
-          /*.pci=*/{0, 1, 0, 0},
-          /*.numa=*/{0},
-          /*.flags=*/IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS,
-      },
-      /*.physical_ordinal=*/0,
-      /*.partition_ordinal=*/0,
-      /*.partition_count=*/1,
-      /*.physical_device_affinity=*/1,
+      .identity =
+          {
+              .display_name = iree_make_cstring_view("Test GPU"),
+              .backend_path = iree_make_cstring_view("pci:0000:01:00.0"),
+              .vendor_id = 0x1002,
+              .device_id = 0x744c,
+              .revision_id = 1,
+              .uuid = {{0}},
+              .pci = {0, 1, 0, 0},
+              .numa = {0},
+              .flags = IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS,
+          },
+      .physical_ordinal = 0,
+      .partition_ordinal = 0,
+      .partition_count = 1,
+      .physical_device_affinity = 1,
   };
   *out_identity = {
-      /*.logical_device_id=*/iree_make_cstring_view("test-device-0"),
-      /*.display_name=*/iree_make_cstring_view("Test Device"),
-      /*.driver_id=*/iree_make_cstring_view("test"),
-      /*.driver_version=*/iree_make_cstring_view("1.0"),
-      /*.backend_id=*/iree_make_cstring_view("test-backend"),
-      /*.device_path=*/iree_make_cstring_view("test://0"),
-      /*.vendor_name=*/iree_make_cstring_view("Example"),
-      /*.vendor_id=*/0x1002,
-      /*.device_id=*/0x744c,
-      /*.revision_id=*/1,
-      /*.logical_ordinal=*/0,
-      /*.physical_device_count=*/1,
-      /*.physical_devices=*/out_physical_devices,
-      /*.flags=*/IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+      .logical_device_id = iree_make_cstring_view("test-device-0"),
+      .display_name = iree_make_cstring_view("Test Device"),
+      .driver_id = iree_make_cstring_view("test"),
+      .driver_version = iree_make_cstring_view("1.0"),
+      .backend_id = iree_make_cstring_view("test-backend"),
+      .device_path = iree_make_cstring_view("test://0"),
+      .vendor_name = iree_make_cstring_view("Example"),
+      .vendor_id = 0x1002,
+      .device_id = 0x744c,
+      .revision_id = 1,
+      .logical_ordinal = 0,
+      .physical_device_count = 1,
+      .physical_devices = out_physical_devices,
+      .flags = IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
   };
 
   out_memory_heaps[0] = {
-      /*.name=*/iree_make_cstring_view("device-local"),
-      /*.capacity_bytes=*/1024ull * 1024ull * 1024ull,
-      /*.allocation_granularity=*/4096,
-      /*.allocation_alignment=*/256,
-      /*.maximum_allocation_size=*/512ull * 1024ull * 1024ull,
-      /*.physical_device_affinity=*/1,
-      /*.flags=*/IREE_HAL_MEMORY_HEAP_SPEC_FLAG_NONE,
+      .name = iree_make_cstring_view("device-local"),
+      .capacity_bytes = 1024ull * 1024ull * 1024ull,
+      .allocation_granularity = 4096,
+      .allocation_alignment = 256,
+      .maximum_allocation_size = 512ull * 1024ull * 1024ull,
+      .physical_device_affinity = 1,
+      .flags = IREE_HAL_MEMORY_HEAP_SPEC_FLAG_NONE,
   };
   out_memory_types[0] = {
-      /*.heap_index=*/0,
-      /*.memory_type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-      /*.allowed_buffer_usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT,
-      /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.minimum_alignment=*/256,
-      /*.optimal_transfer_granularity=*/4096,
-      /*.atomic_operations=*/{},
-      /*.flags=*/IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
+      .heap_index = 0,
+      .memory_type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .allowed_buffer_usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
+      .allowed_memory_access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .minimum_alignment = 256,
+      .optimal_transfer_granularity = 4096,
+      .atomic_operations = {},
+      .flags = IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
   };
   out_memory_types[0].atomic_operations.device_scope_32 =
       IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
@@ -163,53 +163,53 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
   };
 
   *out_dispatch = {
-      /*.launch=*/
-      {
-          /*.maximum_workgroup_invocations=*/1024,
-          /*.maximum_workgroup_size=*/{1024, 1024, 64},
-          /*.maximum_workgroup_count=*/{65535, 65535, 65535},
-      },
-      /*.subgroup=*/
-      {
-          /*.default_size=*/64,
-          /*.minimum_size=*/32,
-          /*.maximum_size=*/64,
-          /*.supported_size_mask=*/1ull << 32,
-      },
-      /*.execution=*/
-      {
-          /*.unit_count=*/120,
-          /*.group_count=*/1,
-          /*.maximum_resident_workgroup_count=*/16,
-          /*.maximum_resident_invocation_count=*/2048,
-          /*.maximum_resident_subgroup_count=*/0,
-          /*.maximum_register_count=*/65536,
-          /*.maximum_workgroup_register_count=*/65536,
-          /*.maximum_local_memory_size=*/64 * 1024,
-          /*.maximum_workgroup_local_memory_size=*/64 * 1024,
-          /*.maximum_workgroup_local_memory_size_optin=*/64 * 1024,
-      },
-      /*.addressing=*/
-      {
-          /*.pointer_size_bits=*/64,
-          /*.address_space_bits=*/64,
-          /*.minimum_buffer_device_address_alignment=*/0,
-      },
-      /*.flags=*/IREE_HAL_DEVICE_DISPATCH_SPEC_FLAG_NONE,
+      .launch =
+          {
+              .maximum_workgroup_invocations = 1024,
+              .maximum_workgroup_size = {1024, 1024, 64},
+              .maximum_workgroup_count = {65535, 65535, 65535},
+          },
+      .subgroup =
+          {
+              .default_size = 64,
+              .minimum_size = 32,
+              .maximum_size = 64,
+              .supported_size_mask = 1ull << 32,
+          },
+      .execution =
+          {
+              .unit_count = 120,
+              .group_count = 1,
+              .maximum_resident_workgroup_count = 16,
+              .maximum_resident_invocation_count = 2048,
+              .maximum_resident_subgroup_count = 0,
+              .maximum_register_count = 65536,
+              .maximum_workgroup_register_count = 65536,
+              .maximum_local_memory_size = 64 * 1024,
+              .maximum_workgroup_local_memory_size = 64 * 1024,
+              .maximum_workgroup_local_memory_size_optin = 64 * 1024,
+          },
+      .addressing =
+          {
+              .pointer_size_bits = 64,
+              .address_space_bits = 64,
+              .minimum_buffer_device_address_alignment = 0,
+          },
+      .flags = IREE_HAL_DEVICE_DISPATCH_SPEC_FLAG_NONE,
   };
   *out_timing = {
-      /*.timestamp_valid_bits=*/64,
-      /*.timestamp_frequency_hz=*/1000000000ull,
-      /*.flags=*/IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS,
+      .timestamp_valid_bits = 64,
+      .timestamp_frequency_hz = 1000000000ull,
+      .flags = IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS,
   };
 
   out_executable_targets[0] = {
-      /*.family=*/iree_make_cstring_view("amdgpu"),
-      /*.target_key=*/iree_make_cstring_view("gfx1100:xnack-"),
-      /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-      /*.priority=*/100,
-      /*.physical_device_affinity=*/1,
-      /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+      .family = iree_make_cstring_view("amdgpu"),
+      .target_key = iree_make_cstring_view("gfx1100:xnack-"),
+      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
+      .priority = 100,
+      .physical_device_affinity = 1,
+      .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
   };
   out_executable_targets[1] = out_executable_targets[0];
   out_executable_targets[1].target_key =
@@ -220,30 +220,30 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
   out_executable_targets[2].target_key =
       iree_make_cstring_view("gfx11-generic-alt");
   *out_executables = {
-      /*.target_count=*/3,
-      /*.targets=*/out_executable_targets,
-      /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
+      .target_count = 3,
+      .targets = out_executable_targets,
+      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
   };
 
   *out_sanitizer = {
-      /*.flags=*/IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN,
-      /*.asan=*/
-      {
-          /*.pool_options=*/
+      .flags = IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN,
+      .asan =
           {
-              /*.mode=*/IREE_HAL_ASAN_POOL_MODE_SHADOW,
-              /*.shadow_granule_size=*/8,
-              /*.redzone_size=*/64,
-              /*.backing_alignment=*/4096,
-              /*.quarantine_size=*/1024 * 1024,
+              .pool_options =
+                  {
+                      .mode = IREE_HAL_ASAN_POOL_MODE_SHADOW,
+                      .shadow_granule_size = 8,
+                      .redzone_size = 64,
+                      .backing_alignment = 4096,
+                      .quarantine_size = 1024 * 1024,
+                  },
           },
-      },
   };
 
   out_facets[0] = {
-      /*.schema_id=*/iree_make_cstring_view("test.facet"),
-      /*.schema_version=*/1,
-      /*.payload=*/facet_payload,
+      .schema_id = iree_make_cstring_view("test.facet"),
+      .schema_version = 1,
+      .payload = facet_payload,
   };
 
   return {
@@ -310,10 +310,10 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
                       sizeof(facet_payload_storage)));
 
   iree_hal_executable_target_selection_t exact_selection = {
-      /*.family=*/iree_make_cstring_view("amdgpu"),
-      /*.target_key=*/iree_string_view_empty(),
-      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
-      /*.physical_device_affinity=*/0,
+      .family = iree_make_cstring_view("amdgpu"),
+      .target_key = iree_string_view_empty(),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+      .physical_device_affinity = 0,
   };
   iree_hal_executable_target_selection_result_t selection_result =
       iree_hal_device_spec_select_executable_target(spec, &exact_selection);
@@ -324,10 +324,10 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   ExpectStringViewEq(selection_result.target->target_key, "gfx1100:xnack-");
 
   iree_hal_executable_target_selection_t generic_selection = {
-      /*.family=*/iree_make_cstring_view("amdgpu"),
-      /*.target_key=*/iree_string_view_empty(),
-      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
-      /*.physical_device_affinity=*/0,
+      .family = iree_make_cstring_view("amdgpu"),
+      .target_key = iree_string_view_empty(),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
+      .physical_device_affinity = 0,
   };
   selection_result =
       iree_hal_device_spec_select_executable_target(spec, &generic_selection);
@@ -337,10 +337,10 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   EXPECT_EQ(selection_result.target_ordinal, IREE_HOST_SIZE_MAX);
 
   iree_hal_executable_target_selection_t key_selection = {
-      /*.family=*/iree_make_cstring_view("amdgpu"),
-      /*.target_key=*/iree_make_cstring_view("gfx11-generic-alt"),
-      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
-      /*.physical_device_affinity=*/0,
+      .family = iree_make_cstring_view("amdgpu"),
+      .target_key = iree_make_cstring_view("gfx11-generic-alt"),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
+      .physical_device_affinity = 0,
   };
   selection_result =
       iree_hal_device_spec_select_executable_target(spec, &key_selection);
@@ -443,10 +443,10 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
 
 TEST(DeviceSpecTest, RejectsInvalidExternalTimepointHandleTypes) {
   iree_hal_external_timepoint_handle_spec_t external_timepoint_handle = {
-      /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_NONE,
-      /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT,
-      /*.compatibility=*/IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT,
-      /*.flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_NONE,
+      .handle_type = IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_NONE,
+      .direction_flags = IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT,
+      .compatibility = IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT,
+      .flags = IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_NONE,
   };
   iree_hal_device_queue_spec_t queues = {
       /*.family_count=*/0,
@@ -483,52 +483,52 @@ TEST(DeviceSpecTest, RejectsInvalidExternalTimepointHandleTypes) {
 
 TEST(DeviceSpecTest, RejectsInvalidPhysicalDeviceAffinityFacts) {
   iree_hal_physical_device_spec_t physical_device = {
-      /*.identity=*/{},
-      /*.physical_ordinal=*/0,
-      /*.partition_ordinal=*/0,
-      /*.partition_count=*/1,
-      /*.physical_device_affinity=*/3,
+      .identity = {},
+      .physical_ordinal = 0,
+      .partition_ordinal = 0,
+      .partition_count = 1,
+      .physical_device_affinity = 3,
   };
   iree_hal_device_identity_spec_t identity = {
-      /*.logical_device_id=*/iree_make_cstring_view("test-device"),
-      /*.display_name=*/iree_make_cstring_view("Test Device"),
-      /*.driver_id=*/iree_make_cstring_view("test"),
-      /*.driver_version=*/iree_string_view_empty(),
-      /*.backend_id=*/iree_make_cstring_view("test"),
-      /*.device_path=*/iree_string_view_empty(),
-      /*.vendor_name=*/iree_string_view_empty(),
-      /*.vendor_id=*/0,
-      /*.device_id=*/0,
-      /*.revision_id=*/0,
-      /*.logical_ordinal=*/0,
-      /*.physical_device_count=*/1,
-      /*.physical_devices=*/&physical_device,
-      /*.flags=*/IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+      .logical_device_id = iree_make_cstring_view("test-device"),
+      .display_name = iree_make_cstring_view("Test Device"),
+      .driver_id = iree_make_cstring_view("test"),
+      .driver_version = iree_string_view_empty(),
+      .backend_id = iree_make_cstring_view("test"),
+      .device_path = iree_string_view_empty(),
+      .vendor_name = iree_string_view_empty(),
+      .vendor_id = 0,
+      .device_id = 0,
+      .revision_id = 0,
+      .logical_ordinal = 0,
+      .physical_device_count = 1,
+      .physical_devices = &physical_device,
+      .flags = IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
   };
   iree_hal_executable_target_t target = {
-      /*.family=*/iree_make_cstring_view("test"),
-      /*.target_key=*/iree_make_cstring_view("test-target"),
-      /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-      /*.priority=*/0,
-      /*.physical_device_affinity=*/1,
-      /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+      .family = iree_make_cstring_view("test"),
+      .target_key = iree_make_cstring_view("test-target"),
+      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
+      .priority = 0,
+      .physical_device_affinity = 1,
+      .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
   };
   iree_hal_device_executable_spec_t executables = {
-      /*.target_count=*/1,
-      /*.targets=*/&target,
-      /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
+      .target_count = 1,
+      .targets = &target,
+      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
   };
   iree_hal_device_spec_params_t params = {
-      /*.identity=*/&identity,
-      /*.memory=*/nullptr,
-      /*.virtual_memory=*/nullptr,
-      /*.queues=*/nullptr,
-      /*.dispatch=*/nullptr,
-      /*.timing=*/nullptr,
-      /*.executables=*/&executables,
-      /*.sanitizer=*/nullptr,
-      /*.facet_count=*/0,
-      /*.facets=*/nullptr,
+      .identity = &identity,
+      .memory = nullptr,
+      .virtual_memory = nullptr,
+      .queues = nullptr,
+      .dispatch = nullptr,
+      .timing = nullptr,
+      .executables = &executables,
+      .sanitizer = nullptr,
+      .facet_count = 0,
+      .facets = nullptr,
   };
 
   iree_hal_device_spec_t* spec = nullptr;
@@ -555,18 +555,18 @@ TEST(DeviceSpecTest,
      ExecutableTargetSelectionRequiresFullPhysicalDeviceCoverage) {
   iree_hal_physical_device_spec_t physical_devices[2] = {
       {
-          /*.identity=*/{},
-          /*.physical_ordinal=*/0,
-          /*.partition_ordinal=*/0,
-          /*.partition_count=*/1,
-          /*.physical_device_affinity=*/1u << 0,
+          .identity = {},
+          .physical_ordinal = 0,
+          .partition_ordinal = 0,
+          .partition_count = 1,
+          .physical_device_affinity = 1u << 0,
       },
       {
-          /*.identity=*/{},
-          /*.physical_ordinal=*/1,
-          /*.partition_ordinal=*/0,
-          /*.partition_count=*/1,
-          /*.physical_device_affinity=*/1u << 1,
+          .identity = {},
+          .physical_ordinal = 1,
+          .partition_ordinal = 0,
+          .partition_count = 1,
+          .physical_device_affinity = 1u << 1,
       },
   };
   iree_hal_device_identity_spec_t identity = {
@@ -587,20 +587,20 @@ TEST(DeviceSpecTest,
   };
   iree_hal_executable_target_t targets[2] = {
       {
-          /*.family=*/iree_make_cstring_view("test"),
-          /*.target_key=*/iree_make_cstring_view("device-0"),
-          /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-          /*.priority=*/100,
-          /*.physical_device_affinity=*/1u << 0,
-          /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+          .family = iree_make_cstring_view("test"),
+          .target_key = iree_make_cstring_view("device-0"),
+          .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
+          .priority = 100,
+          .physical_device_affinity = 1u << 0,
+          .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
       },
       {
-          /*.family=*/iree_make_cstring_view("test"),
-          /*.target_key=*/iree_make_cstring_view("both-devices"),
-          /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
-          /*.priority=*/10,
-          /*.physical_device_affinity=*/(1u << 0) | (1u << 1),
-          /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+          .family = iree_make_cstring_view("test"),
+          .target_key = iree_make_cstring_view("both-devices"),
+          .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
+          .priority = 10,
+          .physical_device_affinity = (1u << 0) | (1u << 1),
+          .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
       },
   };
   iree_hal_device_executable_spec_t executables = {
@@ -609,26 +609,26 @@ TEST(DeviceSpecTest,
       /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
   };
   iree_hal_device_spec_params_t params = {
-      /*.identity=*/&identity,
-      /*.memory=*/nullptr,
-      /*.virtual_memory=*/nullptr,
-      /*.queues=*/nullptr,
-      /*.dispatch=*/nullptr,
-      /*.timing=*/nullptr,
-      /*.executables=*/&executables,
-      /*.sanitizer=*/nullptr,
-      /*.facet_count=*/0,
-      /*.facets=*/nullptr,
+      .identity = &identity,
+      .memory = nullptr,
+      .virtual_memory = nullptr,
+      .queues = nullptr,
+      .dispatch = nullptr,
+      .timing = nullptr,
+      .executables = &executables,
+      .sanitizer = nullptr,
+      .facet_count = 0,
+      .facets = nullptr,
   };
   iree_hal_device_spec_t* spec = nullptr;
   IREE_ASSERT_OK(
       iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
 
   iree_hal_executable_target_selection_t selection = {
-      /*.family=*/iree_make_cstring_view("test"),
-      /*.target_key=*/iree_string_view_empty(),
-      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_NONE,
-      /*.physical_device_affinity=*/(1u << 0) | (1u << 1),
+      .family = iree_make_cstring_view("test"),
+      .target_key = iree_string_view_empty(),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_NONE,
+      .physical_device_affinity = (1u << 0) | (1u << 1),
   };
   const iree_hal_executable_target_selection_result_t result =
       iree_hal_device_spec_select_executable_target(spec, &selection);
@@ -643,14 +643,14 @@ TEST(DeviceSpecTest,
 TEST(DeviceSpecTest, RejectsInvalidExtensionFacets) {
   iree_hal_device_spec_facet_t facets[2] = {
       {
-          /*.schema_id=*/iree_string_view_empty(),
-          /*.schema_version=*/1,
-          /*.payload=*/iree_const_byte_span_empty(),
+          .schema_id = iree_string_view_empty(),
+          .schema_version = 1,
+          .payload = iree_const_byte_span_empty(),
       },
       {
-          /*.schema_id=*/iree_make_cstring_view("test.facet"),
-          /*.schema_version=*/2,
-          /*.payload=*/iree_const_byte_span_empty(),
+          .schema_id = iree_make_cstring_view("test.facet"),
+          .schema_version = 2,
+          .payload = iree_const_byte_span_empty(),
       },
   };
   iree_hal_device_spec_params_t params = {
@@ -763,118 +763,118 @@ TEST(DeviceObservationTest, MemoryTotalFromSpecSkipsUnknownCapacity) {
 TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
   iree_hal_memory_heap_spec_t memory_heaps[1] = {
       {
-          /*.name=*/iree_make_cstring_view("device-local"),
-          /*.capacity_bytes=*/1024ull * 1024ull * 1024ull,
-          /*.allocation_granularity=*/4096,
-          /*.allocation_alignment=*/256,
-          /*.maximum_allocation_size=*/512ull * 1024ull * 1024ull,
-          /*.physical_device_affinity=*/1,
-          /*.flags=*/IREE_HAL_MEMORY_HEAP_SPEC_FLAG_NONE,
+          .name = iree_make_cstring_view("device-local"),
+          .capacity_bytes = 1024ull * 1024ull * 1024ull,
+          .allocation_granularity = 4096,
+          .allocation_alignment = 256,
+          .maximum_allocation_size = 512ull * 1024ull * 1024ull,
+          .physical_device_affinity = 1,
+          .flags = IREE_HAL_MEMORY_HEAP_SPEC_FLAG_NONE,
       },
   };
   iree_hal_memory_type_spec_t memory_types[2] = {
       {
-          /*.heap_index=*/0,
-          /*.memory_type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-          /*.allowed_buffer_usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT,
-          /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-          /*.minimum_alignment=*/256,
-          /*.optimal_transfer_granularity=*/4096,
-          /*.atomic_operations=*/{},
-          /*.flags=*/IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
+          .heap_index = 0,
+          .memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+          .allowed_buffer_usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
+          .allowed_memory_access = IREE_HAL_MEMORY_ACCESS_ALL,
+          .minimum_alignment = 256,
+          .optimal_transfer_granularity = 4096,
+          .atomic_operations = {},
+          .flags = IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
       },
       {
-          /*.heap_index=*/0,
-          /*.memory_type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
-          /*.allowed_buffer_usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
-          /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_READ,
-          /*.minimum_alignment=*/64,
-          /*.optimal_transfer_granularity=*/4096,
-          /*.atomic_operations=*/{},
-          /*.flags=*/IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
+          .heap_index = 0,
+          .memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+          .allowed_buffer_usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+          .allowed_memory_access = IREE_HAL_MEMORY_ACCESS_READ,
+          .minimum_alignment = 64,
+          .optimal_transfer_granularity = 4096,
+          .atomic_operations = {},
+          .flags = IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
       },
   };
   iree_hal_external_buffer_handle_spec_t external_buffer_handles[2] = {
       {
-          /*.handle_type_mask=*/IREE_HAL_TOPOLOGY_HANDLE_TYPE_OPAQUE_FD |
-              IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,
-          /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
-              IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
-          /*.allowed_buffer_usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER |
-              IREE_HAL_BUFFER_USAGE_STORAGE_READ,
-          /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_READ |
-              IREE_HAL_MEMORY_ACCESS_WRITE,
-          /*.compatible_memory_type_mask=*/1u << 0,
-          /*.flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS |
-              IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_OWNING,
+          .handle_type_mask = IREE_HAL_TOPOLOGY_HANDLE_TYPE_OPAQUE_FD |
+                              IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,
+          .direction_flags = IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
+                             IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
+          .allowed_buffer_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
+                                  IREE_HAL_BUFFER_USAGE_STORAGE_READ,
+          .allowed_memory_access =
+              IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+          .compatible_memory_type_mask = 1u << 0,
+          .flags = IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS |
+                   IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_OWNING,
       },
       {
-          /*.handle_type_mask=*/IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM,
-          /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT,
-          /*.allowed_buffer_usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
-          /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_READ,
-          /*.compatible_memory_type_mask=*/1u << 1,
-          /*.flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_BORROWED,
+          .handle_type_mask = IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM,
+          .direction_flags = IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT,
+          .allowed_buffer_usage = IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+          .allowed_memory_access = IREE_HAL_MEMORY_ACCESS_READ,
+          .compatible_memory_type_mask = 1u << 1,
+          .flags = IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_BORROWED,
       },
   };
   iree_hal_device_memory_spec_t memory = {
-      /*.heap_count=*/1,
-      /*.heaps=*/memory_heaps,
-      /*.memory_type_count=*/2,
-      /*.memory_types=*/memory_types,
-      /*.external_buffer_handle_count=*/2,
-      /*.external_buffer_handles=*/external_buffer_handles,
-      /*.flags=*/IREE_HAL_DEVICE_MEMORY_SPEC_FLAG_NONE,
+      .heap_count = 1,
+      .heaps = memory_heaps,
+      .memory_type_count = 2,
+      .memory_types = memory_types,
+      .external_buffer_handle_count = 2,
+      .external_buffer_handles = external_buffer_handles,
+      .flags = IREE_HAL_DEVICE_MEMORY_SPEC_FLAG_NONE,
   };
 
   iree_hal_virtual_memory_class_spec_t virtual_memory_classes[2] = {
       {
-          /*.compatible_memory_type_mask=*/1u << 0,
-          /*.allowed_buffer_usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT,
-          /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-          /*.minimum_page_size=*/4096,
-          /*.recommended_page_size=*/65536,
-          /*.maximum_reservation_size=*/1ull << 32,
-          /*.maximum_physical_allocation_size=*/1ull << 30,
-          /*.operation_flags=*/IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_RESERVE |
-              IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_RELEASE |
-              IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_MAP |
-              IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_UNMAP |
-              IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_PROTECT |
-              IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_ADVISE,
-          /*.protection_flags=*/IREE_HAL_MEMORY_PROTECTION_READ_WRITE,
-          /*.advice_flags=*/IREE_HAL_MEMORY_ADVICE_WILL_NEED,
-          /*.flags=*/IREE_HAL_VIRTUAL_MEMORY_CLASS_SPEC_FLAG_NONE,
+          .compatible_memory_type_mask = 1u << 0,
+          .allowed_buffer_usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
+          .allowed_memory_access = IREE_HAL_MEMORY_ACCESS_ALL,
+          .minimum_page_size = 4096,
+          .recommended_page_size = 65536,
+          .maximum_reservation_size = 1ull << 32,
+          .maximum_physical_allocation_size = 1ull << 30,
+          .operation_flags = IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_RESERVE |
+                             IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_RELEASE |
+                             IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_MAP |
+                             IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_UNMAP |
+                             IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_PROTECT |
+                             IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_ADVISE,
+          .protection_flags = IREE_HAL_MEMORY_PROTECTION_READ_WRITE,
+          .advice_flags = IREE_HAL_MEMORY_ADVICE_WILL_NEED,
+          .flags = IREE_HAL_VIRTUAL_MEMORY_CLASS_SPEC_FLAG_NONE,
       },
       {
-          /*.compatible_memory_type_mask=*/1u << 1,
-          /*.allowed_buffer_usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
-          /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_READ,
-          /*.minimum_page_size=*/4096,
-          /*.recommended_page_size=*/4096,
-          /*.maximum_reservation_size=*/1ull << 20,
-          /*.maximum_physical_allocation_size=*/1ull << 20,
-          /*.operation_flags=*/IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_RESERVE |
-              IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_RELEASE,
-          /*.protection_flags=*/IREE_HAL_MEMORY_PROTECTION_READ,
-          /*.advice_flags=*/IREE_HAL_MEMORY_ADVICE_NORMAL,
-          /*.flags=*/IREE_HAL_VIRTUAL_MEMORY_CLASS_SPEC_FLAG_NONE,
+          .compatible_memory_type_mask = 1u << 1,
+          .allowed_buffer_usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+          .allowed_memory_access = IREE_HAL_MEMORY_ACCESS_READ,
+          .minimum_page_size = 4096,
+          .recommended_page_size = 4096,
+          .maximum_reservation_size = 1ull << 20,
+          .maximum_physical_allocation_size = 1ull << 20,
+          .operation_flags = IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_RESERVE |
+                             IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_RELEASE,
+          .protection_flags = IREE_HAL_MEMORY_PROTECTION_READ,
+          .advice_flags = IREE_HAL_MEMORY_ADVICE_NORMAL,
+          .flags = IREE_HAL_VIRTUAL_MEMORY_CLASS_SPEC_FLAG_NONE,
       },
   };
   iree_hal_device_virtual_memory_spec_t virtual_memory = {
-      /*.class_count=*/2,
-      /*.classes=*/virtual_memory_classes,
-      /*.flags=*/IREE_HAL_DEVICE_VIRTUAL_MEMORY_SPEC_FLAG_NONE,
+      .class_count = 2,
+      .classes = virtual_memory_classes,
+      .flags = IREE_HAL_DEVICE_VIRTUAL_MEMORY_SPEC_FLAG_NONE,
   };
 
   iree_hal_external_timepoint_handle_spec_t external_timepoint_handles[1] = {
       {
-          /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE,
-          /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
-              IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
-          /*.compatibility=*/IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT |
-              IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_SIGNAL,
-          /*.flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_NONE,
+          .handle_type = IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE,
+          .direction_flags = IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
+                             IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
+          .compatibility = IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT |
+                           IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_SIGNAL,
+          .flags = IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_NONE,
       },
   };
   iree_hal_device_queue_spec_t queues = {
@@ -902,13 +902,13 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
       iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
 
   iree_hal_virtual_memory_class_selection_t virtual_memory_selection = {
-      /*.compatible_memory_type_mask=*/1u << 0,
-      /*.buffer_usage=*/IREE_HAL_BUFFER_USAGE_STORAGE_READ,
-      /*.memory_access=*/IREE_HAL_MEMORY_ACCESS_READ,
-      /*.operation_flags=*/IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_MAP |
-          IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_UNMAP,
-      /*.protection_flags=*/IREE_HAL_MEMORY_PROTECTION_READ,
-      /*.advice_flags=*/IREE_HAL_MEMORY_ADVICE_WILL_NEED,
+      .compatible_memory_type_mask = 1u << 0,
+      .buffer_usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ,
+      .memory_access = IREE_HAL_MEMORY_ACCESS_READ,
+      .operation_flags = IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_MAP |
+                         IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_UNMAP,
+      .protection_flags = IREE_HAL_MEMORY_PROTECTION_READ,
+      .advice_flags = IREE_HAL_MEMORY_ADVICE_WILL_NEED,
   };
   const iree_hal_virtual_memory_class_spec_t* virtual_memory_class =
       iree_hal_device_spec_find_virtual_memory_class(spec,
@@ -928,13 +928,13 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
             nullptr);
 
   iree_hal_external_buffer_handle_selection_t buffer_handle_selection = {
-      /*.handle_type_mask=*/IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,
-      /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
-      /*.buffer_usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
-      /*.memory_access=*/IREE_HAL_MEMORY_ACCESS_READ,
-      /*.compatible_memory_type_mask=*/1u << 0,
-      /*.capability_flags=*/
-      IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS,
+      .handle_type_mask = IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,
+      .direction_flags = IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
+      .buffer_usage = IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+      .memory_access = IREE_HAL_MEMORY_ACCESS_READ,
+      .compatible_memory_type_mask = 1u << 0,
+      .capability_flags =
+          IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS,
   };
   const iree_hal_external_buffer_handle_spec_t* buffer_handle =
       iree_hal_device_spec_find_external_buffer_handle(
@@ -952,10 +952,10 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
             nullptr);
 
   iree_hal_external_timepoint_handle_selection_t timepoint_selection = {
-      /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE,
-      /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT,
-      /*.compatibility=*/IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT,
-      /*.capability_flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_NONE,
+      .handle_type = IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE,
+      .direction_flags = IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT,
+      .compatibility = IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT,
+      .capability_flags = IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_NONE,
   };
   const iree_hal_external_timepoint_handle_spec_t* timepoint_handle =
       iree_hal_device_spec_find_external_timepoint_handle(spec,
@@ -1000,46 +1000,46 @@ TEST(DeviceSpecBuilderTest, CopiesInputsAndFinalizes) {
       /*.flags=*/IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
   };
   iree_hal_device_dispatch_spec_t dispatch = {
-      /*.launch=*/
-      {
-          /*.maximum_workgroup_invocations=*/256,
-          /*.maximum_workgroup_size=*/{256, 1, 1},
-          /*.maximum_workgroup_count=*/{1024, 1, 1},
-      },
-      /*.subgroup=*/
-      {
-          /*.default_size=*/32,
-          /*.minimum_size=*/32,
-          /*.maximum_size=*/32,
-          /*.supported_size_mask=*/1ull << 32,
-      },
-      /*.execution=*/
-      {
-          /*.unit_count=*/1,
-          /*.group_count=*/1,
-          /*.maximum_resident_workgroup_count=*/1,
-          /*.maximum_resident_invocation_count=*/256,
-          /*.maximum_resident_subgroup_count=*/0,
-          /*.maximum_register_count=*/65536,
-          /*.maximum_workgroup_register_count=*/65536,
-          /*.maximum_local_memory_size=*/32 * 1024,
-          /*.maximum_workgroup_local_memory_size=*/32 * 1024,
-          /*.maximum_workgroup_local_memory_size_optin=*/32 * 1024,
-      },
-      /*.addressing=*/
-      {
-          /*.pointer_size_bits=*/64,
-          /*.address_space_bits=*/64,
-          /*.minimum_buffer_device_address_alignment=*/0,
-      },
-      /*.flags=*/IREE_HAL_DEVICE_DISPATCH_SPEC_FLAG_NONE,
+      .launch =
+          {
+              .maximum_workgroup_invocations = 256,
+              .maximum_workgroup_size = {256, 1, 1},
+              .maximum_workgroup_count = {1024, 1, 1},
+          },
+      .subgroup =
+          {
+              .default_size = 32,
+              .minimum_size = 32,
+              .maximum_size = 32,
+              .supported_size_mask = 1ull << 32,
+          },
+      .execution =
+          {
+              .unit_count = 1,
+              .group_count = 1,
+              .maximum_resident_workgroup_count = 1,
+              .maximum_resident_invocation_count = 256,
+              .maximum_resident_subgroup_count = 0,
+              .maximum_register_count = 65536,
+              .maximum_workgroup_register_count = 65536,
+              .maximum_local_memory_size = 32 * 1024,
+              .maximum_workgroup_local_memory_size = 32 * 1024,
+              .maximum_workgroup_local_memory_size_optin = 32 * 1024,
+          },
+      .addressing =
+          {
+              .pointer_size_bits = 64,
+              .address_space_bits = 64,
+              .minimum_buffer_device_address_alignment = 0,
+          },
+      .flags = IREE_HAL_DEVICE_DISPATCH_SPEC_FLAG_NONE,
   };
   uint8_t payload_storage[] = {0xaa, 0xbb};
   iree_hal_device_spec_facet_t facet = {
-      /*.schema_id=*/iree_make_cstring_view("builder.facet"),
-      /*.schema_version=*/7,
-      /*.payload=*/
-      iree_make_const_byte_span(payload_storage, sizeof(payload_storage)),
+      .schema_id = iree_make_cstring_view("builder.facet"),
+      .schema_version = 7,
+      .payload =
+          iree_make_const_byte_span(payload_storage, sizeof(payload_storage)),
   };
 
   iree_hal_device_spec_builder_t builder;
@@ -1049,18 +1049,18 @@ TEST(DeviceSpecBuilderTest, CopiesInputsAndFinalizes) {
   IREE_ASSERT_OK(
       iree_hal_device_spec_builder_set_dispatch(&builder, &dispatch));
   iree_hal_device_sanitizer_spec_t sanitizer = {
-      /*.flags=*/IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN,
-      /*.asan=*/
-      {
-          /*.pool_options=*/
+      .flags = IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN,
+      .asan =
           {
-              /*.mode=*/IREE_HAL_ASAN_POOL_MODE_SHADOW,
-              /*.shadow_granule_size=*/16,
-              /*.redzone_size=*/128,
-              /*.backing_alignment=*/4096,
-              /*.quarantine_size=*/0,
+              .pool_options =
+                  {
+                      .mode = IREE_HAL_ASAN_POOL_MODE_SHADOW,
+                      .shadow_granule_size = 16,
+                      .redzone_size = 128,
+                      .backing_alignment = 4096,
+                      .quarantine_size = 0,
+                  },
           },
-      },
   };
   IREE_ASSERT_OK(
       iree_hal_device_spec_builder_set_sanitizer(&builder, &sanitizer));

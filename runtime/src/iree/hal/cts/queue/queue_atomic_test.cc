@@ -35,16 +35,16 @@ class QueueAtomicTest : public CtsTestBase<> {
       iree_hal_atomic_wait_condition_flags_t wait_condition_flags,
       AtomicTestConfiguration* out_configuration) {
     const AtomicTestRequirements requirements = {
-        /*.operation_flags=*/operation_flags,
-        /*.wait_condition_flags=*/wait_condition_flags,
-        /*.memory_type=*/IREE_HAL_MEMORY_TYPE_NONE,
-        /*.buffer_usage=*/IREE_HAL_BUFFER_USAGE_STORAGE |
-            IREE_HAL_BUFFER_USAGE_TRANSFER,
-        /*.memory_access=*/IREE_HAL_MEMORY_ACCESS_READ |
-            IREE_HAL_MEMORY_ACCESS_WRITE,
-        /*.width=*/width,
-        /*.atomic_flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
-            IREE_HAL_ATOMIC_FLAG_RELEASE,
+        .operation_flags = operation_flags,
+        .wait_condition_flags = wait_condition_flags,
+        .memory_type = IREE_HAL_MEMORY_TYPE_NONE,
+        .buffer_usage =
+            IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+        .memory_access =
+            IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+        .width = width,
+        .atomic_flags =
+            IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE,
     };
     if (!SelectAtomicTestConfiguration(iree_hal_device_spec(device_),
                                        requirements, out_configuration)) {
@@ -140,8 +140,8 @@ class QueueAtomicTest : public CtsTestBase<> {
     std::promise<void> released;
     std::future<void> released_future = released.get_future();
     iree_hal_buffer_release_callback_t release_callback = {
-        /*.fn=*/NotifyBufferReleased,
-        /*.user_data=*/&released,
+        .fn = NotifyBufferReleased,
+        .user_data = &released,
     };
     iree_hal_external_buffer_t external_buffer = {};
     external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION;
@@ -178,13 +178,13 @@ class QueueAtomicTest : public CtsTestBase<> {
                 atomic_queue_, empty_wait, signal, buffer,
                 /*target_offset=*/0,
                 (iree_hal_atomic_wait_params_t){
-                    /*.value=*/0,
-                    /*.mask=*/width == IREE_HAL_ATOMIC_WIDTH_32 ? UINT32_MAX
-                                                                : UINT64_MAX,
-                    /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE,
-                    /*.width=*/width,
-                    /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
-                    /*.target_error_mode=*/mode,
+                    .value = 0,
+                    .mask = width == IREE_HAL_ATOMIC_WIDTH_32 ? UINT32_MAX
+                                                              : UINT64_MAX,
+                    .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+                    .width = width,
+                    .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+                    .target_error_mode = mode,
                 },
                 /*barriers=*/NULL);
             break;
@@ -193,10 +193,10 @@ class QueueAtomicTest : public CtsTestBase<> {
                 atomic_queue_, empty_wait, signal, buffer,
                 /*target_offset=*/0,
                 (iree_hal_atomic_store_params_t){
-                    /*.value=*/1,
-                    /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE,
-                    /*.width=*/width,
-                    /*.target_error_mode=*/mode,
+                    .value = 1,
+                    .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
+                    .width = width,
+                    .target_error_mode = mode,
                 },
                 /*barriers=*/NULL);
             break;
@@ -205,12 +205,12 @@ class QueueAtomicTest : public CtsTestBase<> {
                 atomic_queue_, empty_wait, signal, buffer,
                 /*target_offset=*/0,
                 (iree_hal_atomic_rmw_params_t){
-                    /*.operand=*/1,
-                    /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
-                        IREE_HAL_ATOMIC_FLAG_RELEASE,
-                    /*.width=*/width,
-                    /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
-                    /*.target_error_mode=*/mode,
+                    .operand = 1,
+                    .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
+                             IREE_HAL_ATOMIC_FLAG_RELEASE,
+                    .width = width,
+                    .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+                    .target_error_mode = mode,
                 },
                 /*barriers=*/NULL);
             break;
@@ -257,18 +257,18 @@ class QueueAtomicTest : public CtsTestBase<> {
     const iree_hal_atomic_flags_t atomic_flags =
         IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE;
     const iree_hal_atomic_store_params_t store_params = {
-        /*.value=*/10,
-        /*.flags=*/atomic_flags,
-        /*.width=*/width,
+        .value = 10,
+        .flags = atomic_flags,
+        .width = width,
     };
     IREE_ASSERT_OK(QueueStoreAndWait(buffer, store_params));
     EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(10));
 
     iree_hal_atomic_rmw_params_t rmw_params = {
-        /*.operand=*/5,
-        /*.flags=*/atomic_flags,
-        /*.width=*/width,
-        /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+        .operand = 5,
+        .flags = atomic_flags,
+        .width = width,
+        .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
     };
     IREE_ASSERT_OK(QueueRmwAndWait(buffer, rmw_params));
     EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(15));
@@ -310,18 +310,18 @@ class QueueAtomicTest : public CtsTestBase<> {
     IREE_ASSERT_OK(AllocateAtomicBuffer(configuration, buffer.out()));
 
     const iree_hal_atomic_store_params_t store_params = {
-        /*.value=*/0x12,
-        /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE,
-        /*.width=*/width,
+        .value = 0x12,
+        .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
+        .width = width,
     };
     IREE_ASSERT_OK(QueueStoreAndWait(buffer, store_params));
 
     iree_hal_atomic_wait_params_t wait_params = {
-        /*.value=*/0x2,
-        /*.mask=*/0xF,
-        /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE,
-        /*.width=*/width,
-        /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+        .value = 0x2,
+        .mask = 0xF,
+        .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+        .width = width,
+        .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
     };
     IREE_ASSERT_OK(SubmitAtomicWaitAndAwaitCompletion(buffer, wait_params));
 

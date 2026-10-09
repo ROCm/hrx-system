@@ -120,12 +120,12 @@ static iree_status_t MaterializeTestTargetDefinition(
 }
 
 static const loom_target_provider_t kTestProvider = {
-    /*.profile_type=*/&kTestProfileType,
-    /*.materialize_definition=*/MaterializeTestTargetDefinition,
+    .profile_type = &kTestProfileType,
+    .materialize_definition = MaterializeTestTargetDefinition,
 };
 
 static const loom_target_provider_t kMissingMaterializerProvider = {
-    /*.profile_type=*/&kTestProfileType,
+    .profile_type = &kTestProfileType,
 };
 
 static const loom_target_provider_t* const kTestProviders[] = {
@@ -149,14 +149,14 @@ static TestTargetProfile MakeTestProfile(
     loom_test_target_kind_t kind,
     loom_target_fact_field_set_t explicit_fields = 0) {
   return TestTargetProfile{
-      /*.base=*/
-      {
-          /*.type=*/&kTestProfileType,
-          /*.target_bundle=*/
-          loom_target_bundle_table_lookup(&loom_test_target_bundles, kind),
-      },
-      /*.kind=*/kind,
-      /*.explicit_fields=*/explicit_fields,
+      .base =
+          {
+              .type = &kTestProfileType,
+              .target_bundle = loom_target_bundle_table_lookup(
+                  &loom_test_target_bundles, kind),
+          },
+      .kind = kind,
+      .explicit_fields = explicit_fields,
   };
 }
 
@@ -316,21 +316,21 @@ class TargetFunctionVersionProjectionTest : public ::testing::Test {
       const loom_target_provider_t* provider,
       const loom_target_facts_t* facts) {
     return loom_target_function_version_t{
-        /*.base=*/
-        {
-            /*.type=*/&loom_target_function_version_type,
-            /*.function=*/FindFunction(module, function_name),
-        },
-        /*.authored_target_name=*/{},
-        /*.target_requirement_facts=*/nullptr,
-        /*.resolved_target=*/
-        {
-            /*.provider=*/provider,
-            /*.facts=*/facts,
-        },
-        /*.target_context_ordinal=*/0,
-        /*.authored_target_is_exact=*/false,
-        /*.function_target_facts=*/facts,
+        .base =
+            {
+                .type = &loom_target_function_version_type,
+                .function = FindFunction(module, function_name),
+            },
+        .authored_target_name = {},
+        .target_requirement_facts = nullptr,
+        .resolved_target =
+            {
+                .provider = provider,
+                .facts = facts,
+            },
+        .target_context_ordinal = 0,
+        .authored_target_is_exact = false,
+        .function_target_facts = facts,
     };
   }
 
@@ -887,8 +887,8 @@ func.def public @entry() {
       /*.name=*/IREE_SVL("other"),
   };
   loom_function_version_t version = {
-      /*.type=*/&other_type,
-      /*.function=*/FindFunction(source.get(), IREE_SV("entry")),
+      .type = &other_type,
+      .function = FindFunction(source.get(), IREE_SV("entry")),
   };
   loom_function_version_t* version_values[] = {&version};
   const loom_function_version_list_t versions = {

@@ -57,8 +57,8 @@ static const loom_target_profile_type_t kTargetProfileType = {
     /*.project_facts=*/ProjectTargetFacts,
 };
 static const loom_target_profile_t kTargetProfile = {
-    /*.type=*/&kTargetProfileType,
-    /*.target_bundle=*/&kTargetBundle,
+    .type = &kTargetProfileType,
+    .target_bundle = &kTargetBundle,
 };
 
 static iree_status_t EmitDiagnosticFormat(
@@ -710,8 +710,7 @@ command.program.def public @Command123() launch() {
       IREE_SV("@Command123"),
   };
   const loom_compile_request_options_t options = {
-      /*.roots=*/
-      {
+      .roots = {
           /*.count=*/IREE_ARRAYSIZE(roots),
           /*.values=*/roots,
       },
@@ -733,9 +732,9 @@ kernel.def @Kernel123() {
 }
 )");
   const loom_compile_request_options_t options = {
-      /*.roots=*/{},
-      /*.format=*/{},
-      /*.target_profile=*/&kTargetProfile,
+      .roots = {},
+      .format = {},
+      .target_profile = &kTargetProfile,
   };
   const loom_compile_request_t request = Resolve(module.get(), options);
 
@@ -807,9 +806,9 @@ kernel.def @Untargeted() {
 }
 )");
   const loom_compile_request_options_t options = {
-      /*.roots=*/{},
-      /*.format=*/{},
-      /*.target_profile=*/&kTargetProfile,
+      .roots = {},
+      .format = {},
+      .target_profile = &kTargetProfile,
   };
   const loom_compile_request_t request = Resolve(module.get(), options);
 

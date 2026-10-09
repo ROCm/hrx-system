@@ -528,7 +528,7 @@ TEST_F(ModuleTypeUsesTest,
     loom_string_id_t key = LOOM_STRING_ID_INVALID;
     IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("nested"), &key));
     const loom_named_attr_t metadata[] = {
-        {/*.name_id=*/key, /*.reserved=*/0, /*.value=*/loom_attr_type(second)}};
+        {.name_id = key, .reserved = 0, .value = loom_attr_type(second)}};
     const loom_attribute_t parameters[] = {
         loom_attr_type(first), loom_attr_absent(),
         loom_make_canonical_attr_dict(metadata, IREE_ARRAYSIZE(metadata))};

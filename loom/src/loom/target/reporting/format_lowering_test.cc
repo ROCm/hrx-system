@@ -220,9 +220,9 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   memory.subgroup_access.active_lane_count = 32;
   memory.subgroup_access.lane_term_count = 1;
   memory.subgroup_access.lane_terms[0] = {
-      /*.divisor=*/1,
-      /*.modulus=*/0,
-      /*.byte_stride=*/64,
+      .divisor = 1,
+      .modulus = 0,
+      .byte_stride = 64,
   };
   memory.subgroup_access.per_lane_packet_byte_count = 8;
   memory.subgroup_access.linear_lane_byte_stride = 64;
@@ -240,7 +240,7 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_text(&report, &options, &builder));
@@ -467,7 +467,7 @@ TEST(CompileReportFormatTest,
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -508,7 +508,7 @@ TEST(CompileReportFormatTest, LegalizationPeaksDoNotRequireDetailedRows) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -555,7 +555,7 @@ TEST(CompileReportFormatTest, KeepsUnmodeledBankCoverageWithoutAModel) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -633,7 +633,7 @@ TEST(CompileReportFormatTest, FormatsMathAndTargetLegalization) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_text(&report, &options, &builder));

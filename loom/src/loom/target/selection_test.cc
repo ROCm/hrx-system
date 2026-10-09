@@ -47,8 +47,8 @@ static const loom_target_profile_type_t kTargetProfileType = {
     /*.project_facts=*/ProjectTargetFacts,
 };
 static const loom_target_profile_t kTargetProfile = {
-    /*.type=*/&kTargetProfileType,
-    /*.target_bundle=*/&kTargetBundle,
+    .type = &kTargetProfileType,
+    .target_bundle = &kTargetBundle,
 };
 static const loom_target_fact_type_t kOtherTargetFactType = {
     /*.name=*/IREE_SVL("other"),
@@ -60,8 +60,8 @@ static const loom_target_profile_type_t kOtherTargetProfileType = {
     /*.project_facts=*/ProjectTargetFacts,
 };
 static const loom_target_profile_t kOtherTargetProfile = {
-    /*.type=*/&kOtherTargetProfileType,
-    /*.target_bundle=*/&kTargetBundle,
+    .type = &kOtherTargetProfileType,
+    .target_bundle = &kTargetBundle,
 };
 
 static iree_status_t SelectFakeProfile(
@@ -98,12 +98,12 @@ static iree_status_t SelectOwnedCpuProfile(
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(allocator, sizeof(*profile), (void**)&profile));
   *profile = {
-      /*.type=*/profile_type,
-      /*.target_bundle=*/&kTargetBundle,
+      .type = profile_type,
+      .target_bundle = &kTargetBundle,
   };
   *out_selection = {
-      /*.profile=*/profile,
-      /*.destroy=*/DestroyCpuProfile,
+      .profile = profile,
+      .destroy = DestroyCpuProfile,
   };
   return iree_ok_status();
 }
@@ -290,7 +290,7 @@ TEST(TargetSelectionTest, TransfersOwnedCpuProfile) {
 
   gDestroyedCpuProfileCount = 0;
   const iree_cpu_data_t cpu_data = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
   };
   loom_target_profile_selection_t selection = {};
   IREE_ASSERT_OK(loom_target_environment_select_cpu_profile(
@@ -325,7 +325,7 @@ TEST(TargetSelectionTest, ReleasesOwnedCpuProfilesOnAmbiguity) {
 
   gDestroyedCpuProfileCount = 0;
   const iree_cpu_data_t cpu_data = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
   };
   loom_target_profile_selection_t selection = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -356,7 +356,7 @@ TEST(TargetSelectionTest, ReleasesOwnedCpuProfileOnLaterProviderFailure) {
 
   gDestroyedCpuProfileCount = 0;
   const iree_cpu_data_t cpu_data = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
   };
   loom_target_profile_selection_t selection = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,

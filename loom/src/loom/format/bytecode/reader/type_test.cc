@@ -125,14 +125,14 @@ class BytecodeTypeTest : public ::testing::Test {
   loom_bytecode_type_materializer_t MakeMaterializer(const uint8_t* data,
                                                      iree_host_size_t length) {
     return loom_bytecode_type_materializer_t{
-        /*.decoder=*/&decoder_,
-        /*.bytecode=*/iree_make_const_byte_span(data, length),
-        /*.context=*/&context_,
-        /*.module_view=*/&module_view_,
-        /*.scratch_arena=*/&scratch_arena_,
-        /*.output_module=*/module_,
-        /*.position=*/0,
-        /*.next_fact=*/module_view_.types.facts,
+        .decoder = &decoder_,
+        .bytecode = iree_make_const_byte_span(data, length),
+        .context = &context_,
+        .module_view = &module_view_,
+        .scratch_arena = &scratch_arena_,
+        .output_module = module_,
+        .position = 0,
+        .next_fact = module_view_.types.facts,
     };
   }
 

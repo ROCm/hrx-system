@@ -428,21 +428,21 @@ TEST(ReplayFileReaderTest, QueueBarriersPreserveDefaultAndEmptyLists) {
 TEST(ReplayFileReaderTest, RejectsRecipeEffectsWithoutOperations) {
   const iree_hal_replay_queue_barrier_payload_t operation = {};
   const iree_hal_replay_command_buffer_execution_barrier_payload_t barrier = {
-      /*.source_stage_mask=*/0,
-      /*.target_stage_mask=*/0,
-      /*.flags=*/0,
-      /*.memory_barrier_count=*/0,
-      /*.buffer_barrier_count=*/1,
+      .source_stage_mask = 0,
+      .target_stage_mask = 0,
+      .flags = 0,
+      .memory_barrier_count = 0,
+      .buffer_barrier_count = 1,
   };
   const iree_hal_replay_buffer_barrier_payload_t buffer = {};
   const iree_hal_replay_memory_transition_recipe_payload_t recipe = {
-      /*.effects=*/1,
-      /*.operation_count=*/0,
+      .effects = 1,
+      .operation_count = 0,
   };
   const iree_hal_replay_queue_barriers_footer_t footer = {
-      /*.payload_length=*/sizeof(barrier) + sizeof(buffer) + sizeof(recipe),
-      /*.before_count=*/1,
-      /*.after_count=*/0,
+      .payload_length = sizeof(barrier) + sizeof(buffer) + sizeof(recipe),
+      .before_count = 1,
+      .after_count = 0,
   };
   iree_hal_replay_file_record_header_t header = {};
   header.header_length = sizeof(header);

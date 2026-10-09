@@ -77,8 +77,8 @@ class VectorToScalarTest : public ::testing::Test {
 
   loom_module_t* Parse(iree_string_view_t source) {
     const loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/{},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {},
+        .max_errors = 20,
     };
     loom_module_t* module = nullptr;
     IREE_CHECK_OK(loom_text_parse(source, IREE_SV("to_scalar_test.loom"),
@@ -107,9 +107,9 @@ static const loom_matrix_fragment_coordinate_projection_term_t
 
 static const loom_matrix_fragment_coordinate_projection_plan_t
     kTinyDistributedMmaLhsPlan = {
-        /*.terms=*/kTinyDistributedMmaLhsTerms,
-        /*.forward_term_count=*/2,
-        /*.inverse_term_count=*/2,
+        .terms = kTinyDistributedMmaLhsTerms,
+        .forward_term_count = 2,
+        .inverse_term_count = 2,
 };
 
 static const loom_matrix_fragment_coordinate_projection_term_t
@@ -126,9 +126,9 @@ static const loom_matrix_fragment_coordinate_projection_term_t
 
 static const loom_matrix_fragment_coordinate_projection_plan_t
     kTinyDistributedMmaRhsPlan = {
-        /*.terms=*/kTinyDistributedMmaRhsTerms,
-        /*.forward_term_count=*/2,
-        /*.inverse_term_count=*/2,
+        .terms = kTinyDistributedMmaRhsTerms,
+        .forward_term_count = 2,
+        .inverse_term_count = 2,
 };
 
 static const loom_matrix_fragment_coordinate_projection_term_t
@@ -145,9 +145,9 @@ static const loom_matrix_fragment_coordinate_projection_term_t
 
 static const loom_matrix_fragment_coordinate_projection_plan_t
     kTinyDistributedMmaResultPlan = {
-        /*.terms=*/kTinyDistributedMmaResultTerms,
-        /*.forward_term_count=*/2,
-        /*.inverse_term_count=*/2,
+        .terms = kTinyDistributedMmaResultTerms,
+        .forward_term_count = 2,
+        .inverse_term_count = 2,
 };
 
 static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
@@ -156,62 +156,62 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
     /*.wave_size=*/2,
     /*.tile_shape=*/
     {
-        /*.block_count=*/1,
-        /*.result_row_count=*/2,
-        /*.result_column_count=*/2,
-        /*.reduction_count=*/2,
+        .block_count = 1,
+        .result_row_count = 2,
+        .result_column_count = 2,
+        .reduction_count = 2,
     },
     /*.lhs=*/
     {
-        /*.register_count=*/1,
-        /*.element_bit_count=*/16,
-        /*.payload_element_count=*/2,
-        /*.coordinate_element_count=*/2,
-        /*.reserved=*/0,
-        /*.coordinate_element_stride=*/1,
-        /*.packed_b16_publications=*/{},
-        /*.packed_element_axis=*/LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION,
-        /*.reduction_group=*/{},
-        /*.coordinate_projection_plan=*/&kTinyDistributedMmaLhsPlan,
+        .register_count = 1,
+        .element_bit_count = 16,
+        .payload_element_count = 2,
+        .coordinate_element_count = 2,
+        .reserved = 0,
+        .coordinate_element_stride = 1,
+        .packed_b16_publications = {},
+        .packed_element_axis = LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION,
+        .reduction_group = {},
+        .coordinate_projection_plan = &kTinyDistributedMmaLhsPlan,
     },
     /*.rhs=*/
     {
-        /*.register_count=*/1,
-        /*.element_bit_count=*/16,
-        /*.payload_element_count=*/2,
-        /*.coordinate_element_count=*/2,
-        /*.reserved=*/0,
-        /*.coordinate_element_stride=*/1,
-        /*.packed_b16_publications=*/{},
-        /*.packed_element_axis=*/LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION,
-        /*.reduction_group=*/{},
-        /*.coordinate_projection_plan=*/&kTinyDistributedMmaRhsPlan,
+        .register_count = 1,
+        .element_bit_count = 16,
+        .payload_element_count = 2,
+        .coordinate_element_count = 2,
+        .reserved = 0,
+        .coordinate_element_stride = 1,
+        .packed_b16_publications = {},
+        .packed_element_axis = LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION,
+        .reduction_group = {},
+        .coordinate_projection_plan = &kTinyDistributedMmaRhsPlan,
     },
     /*.accumulator=*/
     {
-        /*.register_count=*/2,
-        /*.element_bit_count=*/32,
-        /*.payload_element_count=*/2,
-        /*.coordinate_element_count=*/2,
-        /*.reserved=*/0,
-        /*.coordinate_element_stride=*/1,
-        /*.packed_b16_publications=*/{},
-        /*.packed_element_axis=*/LOOM_MATRIX_FRAGMENT_AXIS_COUNT,
-        /*.reduction_group=*/{},
-        /*.coordinate_projection_plan=*/&kTinyDistributedMmaResultPlan,
+        .register_count = 2,
+        .element_bit_count = 32,
+        .payload_element_count = 2,
+        .coordinate_element_count = 2,
+        .reserved = 0,
+        .coordinate_element_stride = 1,
+        .packed_b16_publications = {},
+        .packed_element_axis = LOOM_MATRIX_FRAGMENT_AXIS_COUNT,
+        .reduction_group = {},
+        .coordinate_projection_plan = &kTinyDistributedMmaResultPlan,
     },
     /*.result=*/
     {
-        /*.register_count=*/2,
-        /*.element_bit_count=*/32,
-        /*.payload_element_count=*/2,
-        /*.coordinate_element_count=*/2,
-        /*.reserved=*/0,
-        /*.coordinate_element_stride=*/1,
-        /*.packed_b16_publications=*/{},
-        /*.packed_element_axis=*/LOOM_MATRIX_FRAGMENT_AXIS_COUNT,
-        /*.reduction_group=*/{},
-        /*.coordinate_projection_plan=*/&kTinyDistributedMmaResultPlan,
+        .register_count = 2,
+        .element_bit_count = 32,
+        .payload_element_count = 2,
+        .coordinate_element_count = 2,
+        .reserved = 0,
+        .coordinate_element_stride = 1,
+        .packed_b16_publications = {},
+        .packed_element_axis = LOOM_MATRIX_FRAGMENT_AXIS_COUNT,
+        .reduction_group = {},
+        .coordinate_projection_plan = &kTinyDistributedMmaResultPlan,
     },
 };
 
@@ -255,8 +255,8 @@ static uint32_t CountOps(loom_region_t* region, loom_op_kind_t kind) {
 
 static void ExpectModuleVerifies(const loom_module_t* module) {
   const loom_verify_options_t verify_options = {
-      /*.sink=*/{},
-      /*.max_errors=*/20,
+      .sink = {},
+      .max_errors = 20,
   };
   loom_verify_result_t verify_result = {};
   IREE_ASSERT_OK(loom_verify_module(module, &verify_options, &verify_result));
@@ -325,8 +325,8 @@ TEST_F(VectorToScalarTest, TargetFragmentLayoutEnablesDistributedMmaFallback) {
                        LOOM_CONTRACT_REJECTION_FRAGMENT));
 
   const loom_vector_mma_to_scalar_options_t distributed_options = {
-      /*.matrix_fragment_layout=*/&kTinyDistributedMmaLayout,
-      /*.flags=*/LOOM_VECTOR_TO_SCALAR_FLAG_ALLOW_SUBGROUP_COMMUNICATION,
+      .matrix_fragment_layout = &kTinyDistributedMmaLayout,
+      .flags = LOOM_VECTOR_TO_SCALAR_FLAG_ALLOW_SUBGROUP_COMMUNICATION,
   };
   EXPECT_EQ(loom_vector_mma_to_scalar_reference_rejection_bits(
                 &pass, &rewriter, mma_op, distributed_options),

@@ -20,33 +20,33 @@ TEST(KernelArgumentsTest,
   constexpr iree_host_size_t kNativeArgumentSize = 32;
   std::array<iree_hal_streaming_parameter_op_t, 3> operations = {};
   operations[0].copy = {
-      /*.size=*/sizeof(uint32_t),
-      /*.native_abi_destination_offset=*/4,
-      /*.source_offset=*/0,
-      /*.source_ordinal=*/0,
-      /*.constant_destination_offset=*/0,
+      .size = sizeof(uint32_t),
+      .native_abi_destination_offset = 4,
+      .source_offset = 0,
+      .source_ordinal = 0,
+      .constant_destination_offset = 0,
   };
   operations[1].copy = {
-      /*.size=*/sizeof(uint16_t),
-      /*.native_abi_destination_offset=*/28,
-      /*.source_offset=*/12,
-      /*.source_ordinal=*/2,
-      /*.constant_destination_offset=*/4,
+      .size = sizeof(uint16_t),
+      .native_abi_destination_offset = 28,
+      .source_offset = 12,
+      .source_ordinal = 2,
+      .constant_destination_offset = 4,
   };
   operations[2].resolve = {
-      /*.native_abi_destination_offset=*/16,
-      /*.reserved=*/0,
-      /*.source_offset=*/4,
-      /*.source_ordinal=*/1,
-      /*.destination_ordinal=*/0,
+      .native_abi_destination_offset = 16,
+      .reserved = 0,
+      .source_offset = 4,
+      .source_ordinal = 1,
+      .destination_ordinal = 0,
   };
   const iree_hal_streaming_parameter_info_t parameters = {
-      /*.buffer_size=*/14,
-      /*.constant_bytes=*/6,
-      /*.direct_arg_bytes=*/kNativeArgumentSize,
-      /*.binding_count=*/1,
-      /*.copy_count=*/2,
-      /*.ops=*/operations.data(),
+      .buffer_size = 14,
+      .constant_bytes = 6,
+      .direct_arg_bytes = kNativeArgumentSize,
+      .binding_count = 1,
+      .copy_count = 2,
+      .ops = operations.data(),
   };
 
   uint32_t scalar0 = 0x11223344u;
@@ -80,19 +80,19 @@ TEST(KernelArgumentsTest,
      RawArgsPackingRejectsSourceOrdinalOutsideOperationCount) {
   iree_hal_streaming_parameter_op_t operation = {};
   operation.copy = {
-      /*.size=*/sizeof(uint32_t),
-      /*.native_abi_destination_offset=*/0,
-      /*.source_offset=*/0,
-      /*.source_ordinal=*/1,
-      /*.constant_destination_offset=*/0,
+      .size = sizeof(uint32_t),
+      .native_abi_destination_offset = 0,
+      .source_offset = 0,
+      .source_ordinal = 1,
+      .constant_destination_offset = 0,
   };
   const iree_hal_streaming_parameter_info_t parameters = {
-      /*.buffer_size=*/sizeof(uint32_t),
-      /*.constant_bytes=*/sizeof(uint32_t),
-      /*.direct_arg_bytes=*/sizeof(uint32_t),
-      /*.binding_count=*/0,
-      /*.copy_count=*/1,
-      /*.ops=*/&operation,
+      .buffer_size = sizeof(uint32_t),
+      .constant_bytes = sizeof(uint32_t),
+      .direct_arg_bytes = sizeof(uint32_t),
+      .binding_count = 0,
+      .copy_count = 1,
+      .ops = &operation,
   };
   uint32_t value = 7;
   std::array<void*, 1> arguments = {&value};
@@ -109,26 +109,26 @@ TEST(KernelArgumentsTest,
 TEST(KernelArgumentsTest, RawArgsPackingRejectsDecreasingSourceOrdinals) {
   std::array<iree_hal_streaming_parameter_op_t, 2> operations = {};
   operations[0].copy = {
-      /*.size=*/sizeof(uint32_t),
-      /*.native_abi_destination_offset=*/0,
-      /*.source_offset=*/0,
-      /*.source_ordinal=*/1,
-      /*.constant_destination_offset=*/0,
+      .size = sizeof(uint32_t),
+      .native_abi_destination_offset = 0,
+      .source_offset = 0,
+      .source_ordinal = 1,
+      .constant_destination_offset = 0,
   };
   operations[1].copy = {
-      /*.size=*/sizeof(uint32_t),
-      /*.native_abi_destination_offset=*/4,
-      /*.source_offset=*/4,
-      /*.source_ordinal=*/0,
-      /*.constant_destination_offset=*/4,
+      .size = sizeof(uint32_t),
+      .native_abi_destination_offset = 4,
+      .source_offset = 4,
+      .source_ordinal = 0,
+      .constant_destination_offset = 4,
   };
   const iree_hal_streaming_parameter_info_t parameters = {
-      /*.buffer_size=*/2 * sizeof(uint32_t),
-      /*.constant_bytes=*/2 * sizeof(uint32_t),
-      /*.direct_arg_bytes=*/2 * sizeof(uint32_t),
-      /*.binding_count=*/0,
-      /*.copy_count=*/2,
-      /*.ops=*/operations.data(),
+      .buffer_size = 2 * sizeof(uint32_t),
+      .constant_bytes = 2 * sizeof(uint32_t),
+      .direct_arg_bytes = 2 * sizeof(uint32_t),
+      .binding_count = 0,
+      .copy_count = 2,
+      .ops = operations.data(),
   };
   std::array<uint32_t, 2> values = {7, 11};
   std::array<void*, 2> arguments = {&values[0], &values[1]};

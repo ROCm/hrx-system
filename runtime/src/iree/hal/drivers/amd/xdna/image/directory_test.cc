@@ -155,10 +155,10 @@ TEST(ImageDirectoryTest, PreservesTargetFlagsForQualification) {
       MakeProgramHeader(IREE_XDNA_ELF_PROGRAM_TYPE_LOAD, 256, 8);
   const std::vector<uint8_t> bytes =
       make_image({program_header}, {
-                                       /*.target_flags=*/0x12345678,
-                                       /*.section_header_offset=*/0,
-                                       /*.section_header_count=*/0,
-                                       /*.minimum_source_length=*/512,
+                                       .target_flags = 0x12345678,
+                                       .section_header_offset = 0,
+                                       .section_header_count = 0,
+                                       .minimum_source_length = 512,
                                    });
   DirectoryPtr directory = open_directory(bytes);
   EXPECT_EQ(iree_hal_amd_xdna_image_directory_target_flags(directory.get()),
@@ -170,10 +170,10 @@ TEST(ImageDirectoryTest, AcceptsBoundedDiagnosticSectionDirectory) {
       MakeProgramHeader(IREE_XDNA_ELF_PROGRAM_TYPE_LOAD, 256, 16);
   const std::vector<uint8_t> bytes = make_image(
       {program_header}, {
-                            /*.target_flags=*/IREE_XDNA_ELF_AIE2P_FLAGS,
-                            /*.section_header_offset=*/320,
-                            /*.section_header_count=*/2,
-                            /*.minimum_source_length=*/416,
+                            .target_flags = IREE_XDNA_ELF_AIE2P_FLAGS,
+                            .section_header_offset = 320,
+                            .section_header_count = 2,
+                            .minimum_source_length = 416,
                         });
   DirectoryPtr directory = open_directory(bytes);
   EXPECT_EQ(iree_hal_amd_xdna_image_directory_source_length(directory.get()),
@@ -234,9 +234,9 @@ static iree_status_t test_segmented_sequence_enumerate(
 }
 
 static const iree_byte_sequence_vtable_t test_segmented_sequence_vtable = {
-    /*.destroy=*/test_segmented_sequence_destroy,
-    /*.enumerate=*/test_segmented_sequence_enumerate,
-    /*.try_get_contiguous_span=*/nullptr,
+    .destroy = test_segmented_sequence_destroy,
+    .enumerate = test_segmented_sequence_enumerate,
+    .try_get_contiguous_span = nullptr,
 };
 
 TEST(ImageDirectoryTest, ReadsFieldsAndPayloadAcrossArbitrarySegments) {
@@ -256,10 +256,10 @@ TEST(ImageDirectoryTest, ReadsFieldsAndPayloadAcrossArbitrarySegments) {
       bytes.data() + previous_boundary, bytes.size() - previous_boundary));
   int destroy_count = 0;
   test_segmented_sequence_t sequence = {
-      /*.base=*/{},
-      /*.segments=*/segments.data(),
-      /*.segment_count=*/segments.size(),
-      /*.destroy_count=*/&destroy_count,
+      .base = {},
+      .segments = segments.data(),
+      .segment_count = segments.size(),
+      .destroy_count = &destroy_count,
   };
   iree_byte_sequence_initialize(&test_segmented_sequence_vtable, bytes.size(),
                                 &sequence.base);
@@ -315,8 +315,8 @@ TEST(ImageDirectoryTest, RejectsInvalidRangeAndDestinationSize) {
   expect_status(Status(iree_hal_amd_xdna_image_directory_enumerate_source_range(
                     directory.get(),
                     {
-                        /*.offset=*/510,
-                        /*.length=*/8,
+                        .offset = 510,
+                        .length = 8,
                     },
                     {
                         append_source_segment,
@@ -408,10 +408,10 @@ TEST(ImageDirectoryTest, RejectsSectionDirectoryOverlappingPayload) {
       MakeProgramHeader(IREE_XDNA_ELF_PROGRAM_TYPE_LOAD, 320, 80);
   const std::vector<uint8_t> bytes = make_image(
       {program_header}, {
-                            /*.target_flags=*/IREE_XDNA_ELF_AIE2P_FLAGS,
-                            /*.section_header_offset=*/384,
-                            /*.section_header_count=*/1,
-                            /*.minimum_source_length=*/512,
+                            .target_flags = IREE_XDNA_ELF_AIE2P_FLAGS,
+                            .section_header_offset = 384,
+                            .section_header_count = 1,
+                            .minimum_source_length = 512,
                         });
   expect_status(open_directory_status(bytes), StatusCode::kInvalidArgument,
                 "overlaps an ELF directory");

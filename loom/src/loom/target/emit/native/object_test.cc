@@ -116,11 +116,11 @@ TEST(NativeObjectTest, ResolvesSymbolsAndFixupsThroughContributionLayout) {
   EXPECT_EQ(layouts[2].section_offset, 0u);
 
   const loom_native_object_fixup_t fixups[] = {{
-      /*.section_contribution_index=*/2,
-      /*.section_offset=*/3,
-      /*.relocation_kind=*/1,
-      /*.target_symbol_index=*/0,
-      /*.addend=*/-4,
+      .section_contribution_index = 2,
+      .section_offset = 3,
+      .relocation_kind = 1,
+      .target_symbol_index = 0,
+      .addend = -4,
   }};
   loom_native_object_fixup_layout_t fixup_layouts[IREE_ARRAYSIZE(fixups)] = {};
   IREE_ASSERT_OK(loom_native_object_resolve_fixup_layouts(
@@ -133,17 +133,17 @@ TEST(NativeObjectTest, ResolvesSymbolsAndFixupsThroughContributionLayout) {
 
 TEST(NativeObjectTest, RejectsMissingSymbolName) {
   const loom_native_section_contribution_layout_t section_layouts[] = {{
-      /*.section_index=*/0,
-      /*.section_offset=*/0,
+      .section_index = 0,
+      .section_offset = 0,
   }};
   const loom_native_object_symbol_t symbol = {
-      /*.name=*/iree_string_view_empty(),
-      /*.section_contribution_index=*/0,
-      /*.section_offset=*/{},
-      /*.size=*/{},
-      /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
-      /*.visibility=*/{},
-      /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      .name = iree_string_view_empty(),
+      .section_contribution_index = 0,
+      .section_offset = {},
+      .size = {},
+      .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+      .visibility = {},
+      .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
   };
   loom_native_object_symbol_layout_t layout = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -154,8 +154,8 @@ TEST(NativeObjectTest, RejectsMissingSymbolName) {
 
 TEST(NativeObjectTest, RejectsInvalidSectionContributionIndex) {
   const loom_native_section_contribution_layout_t section_layouts[] = {{
-      /*.section_index=*/0,
-      /*.section_offset=*/0,
+      .section_index = 0,
+      .section_offset = 0,
   }};
   const loom_native_object_symbol_t symbol = {
       /*.name=*/IREE_SV("bad"),
@@ -175,8 +175,8 @@ TEST(NativeObjectTest, RejectsInvalidSectionContributionIndex) {
 
 TEST(NativeObjectTest, RejectsOffsetOverflow) {
   const loom_native_section_contribution_layout_t section_layouts[] = {{
-      /*.section_index=*/0,
-      /*.section_offset=*/std::numeric_limits<uint64_t>::max(),
+      .section_index = 0,
+      .section_offset = std::numeric_limits<uint64_t>::max(),
   }};
   const loom_native_object_symbol_t symbol = {
       /*.name=*/IREE_SV("overflow"),
@@ -196,14 +196,14 @@ TEST(NativeObjectTest, RejectsOffsetOverflow) {
 
 TEST(NativeObjectTest, RejectsFixupWithoutRelocationKind) {
   const loom_native_section_contribution_layout_t section_layouts[] = {{
-      /*.section_index=*/0,
-      /*.section_offset=*/0,
+      .section_index = 0,
+      .section_offset = 0,
   }};
   const loom_native_object_fixup_t fixup = {
-      /*.section_contribution_index=*/0,
-      /*.section_offset=*/{},
-      /*.relocation_kind=*/0,
-      /*.target_symbol_index=*/0,
+      .section_contribution_index = 0,
+      .section_offset = {},
+      .relocation_kind = 0,
+      .target_symbol_index = 0,
   };
   loom_native_object_fixup_layout_t layout = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -214,14 +214,14 @@ TEST(NativeObjectTest, RejectsFixupWithoutRelocationKind) {
 
 TEST(NativeObjectTest, RejectsFixupInvalidTargetSymbol) {
   const loom_native_section_contribution_layout_t section_layouts[] = {{
-      /*.section_index=*/0,
-      /*.section_offset=*/0,
+      .section_index = 0,
+      .section_offset = 0,
   }};
   const loom_native_object_fixup_t fixup = {
-      /*.section_contribution_index=*/0,
-      /*.section_offset=*/{},
-      /*.relocation_kind=*/1,
-      /*.target_symbol_index=*/1,
+      .section_contribution_index = 0,
+      .section_offset = {},
+      .relocation_kind = 1,
+      .target_symbol_index = 1,
   };
   loom_native_object_fixup_layout_t layout = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,

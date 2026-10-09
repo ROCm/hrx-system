@@ -388,9 +388,9 @@ TEST(BlitTest, FillEmplaceRejectsUnsupportedPatternLengthWithoutMutation) {
   packet.setup = 0x55AAu;
   packet.kernel_object = 0xDEADCAFEu;
   iree_hal_amdgpu_device_buffer_fill_kernargs_t kernargs = {
-      /*.target_ptr=*/(void*)0x1234,
-      /*.element_length=*/7,
-      /*.pattern=*/0x99,
+      .target_ptr = (void*)0x1234,
+      .element_length = 7,
+      .pattern = 0x99,
   };
 
   EXPECT_FALSE(iree_hal_amdgpu_device_buffer_fill_emplace(

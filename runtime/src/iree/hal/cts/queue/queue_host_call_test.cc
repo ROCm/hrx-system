@@ -38,7 +38,7 @@ static void DestroyHostCallResourceState(iree_hal_resource_t* base_resource) {
 }
 
 static const iree_hal_resource_vtable_t kHostCallResourceStateVtable = {
-    /*.destroy=*/DestroyHostCallResourceState,
+    .destroy = DestroyHostCallResourceState,
 };
 
 static HostCallResourceState* CreateHostCallResourceState(

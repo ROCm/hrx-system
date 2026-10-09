@@ -114,9 +114,9 @@ class TargetPredicateTest : public ::testing::Test {
     iree_arena_allocator_t scratch_arena;
     iree_arena_initialize(&block_pool_, &scratch_arena);
     const loom_pass_verify_options_t options = {
-        /*.registry=*/{},
-        /*.environment=*/{},
-        /*.predicate_provider=*/predicate_provider_,
+        .registry = {},
+        .environment = {},
+        .predicate_provider = predicate_provider_,
     };
     iree_status_t status = loom_pass_verify_pipeline_op(
         module, FindPipeline(module, pipeline_name), &options, &scratch_arena);

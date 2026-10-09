@@ -103,9 +103,9 @@ class VectorMemoryTest : public ::testing::Test {
     int64_t strides[] = {stride};
     loom_named_attr_t attributes[] = {
         {
-            /*.name_id=*/strides_name,
-            /*.reserved=*/{},
-            /*.value=*/loom_attr_i64_array(strides, IREE_ARRAYSIZE(strides)),
+            .name_id = strides_name,
+            .reserved = {},
+            .value = loom_attr_i64_array(strides, IREE_ARRAYSIZE(strides)),
         },
     };
     return AddEncoding(IREE_SV("encoding.layout.strided"), attributes,
@@ -121,14 +121,14 @@ class VectorMemoryTest : public ::testing::Test {
         loom_module_intern_string(module_, IREE_SV("schema"), &schema_name));
     loom_named_attr_t attributes[] = {
         {
-            /*.name_id=*/layout_name,
-            /*.reserved=*/{},
-            /*.value=*/loom_attr_encoding(layout),
+            .name_id = layout_name,
+            .reserved = {},
+            .value = loom_attr_encoding(layout),
         },
         {
-            /*.name_id=*/schema_name,
-            /*.reserved=*/{},
-            /*.value=*/loom_attr_encoding(schema),
+            .name_id = schema_name,
+            .reserved = {},
+            .value = loom_attr_encoding(schema),
         },
     };
     return AddEncoding(IREE_SV("encoding.storage"), attributes,
@@ -158,14 +158,14 @@ class VectorMemoryTest : public ::testing::Test {
         loom_module_intern_string(module_, IREE_SV("schema"), &schema_name));
     loom_named_value_t params[] = {
         {
-            /*.name_id=*/layout_name,
-            /*.reserved=*/{},
-            /*.value_id=*/layout,
+            .name_id = layout_name,
+            .reserved = {},
+            .value_id = layout,
         },
         {
-            /*.name_id=*/schema_name,
-            /*.reserved=*/{},
-            /*.value_id=*/schema,
+            .name_id = schema_name,
+            .reserved = {},
+            .value_id = schema,
         },
     };
     loom_op_t* storage = nullptr;

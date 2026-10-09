@@ -15,17 +15,17 @@ iree_hal_amd_xdna_image_program_header_t MakeProgramHeader(uint32_t type,
                                                            uint32_t file_offset,
                                                            uint32_t file_size) {
   return {
-      /*.type=*/type,
-      /*.file_range=*/
-      {
-          /*.offset=*/file_offset,
-          /*.length=*/file_size,
-      },
-      /*.virtual_address=*/0,
-      /*.physical_address=*/0,
-      /*.memory_size=*/file_size,
-      /*.flags=*/IREE_XDNA_ELF_PROGRAM_FLAG_READ,
-      /*.alignment=*/4,
+      .type = type,
+      .file_range =
+          {
+              .offset = file_offset,
+              .length = file_size,
+          },
+      .virtual_address = 0,
+      .physical_address = 0,
+      .memory_size = file_size,
+      .flags = IREE_XDNA_ELF_PROGRAM_FLAG_READ,
+      .alignment = 4,
   };
 }
 
@@ -34,9 +34,9 @@ ImageBuilder::ImageBuilder(ImageBuilderOptions options) : options_(options) {}
 ImageBuilder& ImageBuilder::AddProgram(
     iree_hal_amd_xdna_image_program_header_t program_header) {
   programs_.push_back({
-      /*.header=*/program_header,
-      /*.payload=*/{},
-      /*.has_payload=*/false,
+      .header = program_header,
+      .payload = {},
+      .has_payload = false,
   });
   return *this;
 }
@@ -46,9 +46,9 @@ ImageBuilder& ImageBuilder::AddProgram(
     std::vector<uint8_t> payload) {
   IREE_ASSERT(payload.size() == program_header.file_range.length);
   programs_.push_back({
-      /*.header=*/program_header,
-      /*.payload=*/std::move(payload),
-      /*.has_payload=*/true,
+      .header = program_header,
+      .payload = std::move(payload),
+      .has_payload = true,
   });
   return *this;
 }

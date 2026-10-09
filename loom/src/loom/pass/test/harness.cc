@@ -71,9 +71,9 @@ PassReportStorage::~PassReportStorage() {
 loom_pass_predicate_provider_t PassTestTargetPredicateProvider(
     PassTestPredicateCapture* capture) {
   return (loom_pass_predicate_provider_t){
-      /*.verify=*/VerifyTargetPredicate,
-      /*.evaluate=*/EvaluateTargetPredicate,
-      /*.user_data=*/capture,
+      .verify = VerifyTargetPredicate,
+      .evaluate = EvaluateTargetPredicate,
+      .user_data = capture,
   };
 }
 
@@ -131,8 +131,8 @@ loom_module_t* PassTestHarness::Parse(iree_string_view_t source) {
 loom_module_t* PassTestHarness::Parse(iree_string_view_t source,
                                       iree_string_view_t source_name) {
   loom_text_parse_options_t options = {
-      /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
-      /*.max_errors=*/20,
+      .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+      .max_errors = 20,
   };
   loom_module_t* module = nullptr;
   IREE_EXPECT_OK(loom_text_parse(source, source_name, &context_, &block_pool_,
@@ -215,9 +215,9 @@ iree_status_t PassTestHarness::VerifyModule(
     const loom_module_t* module, loom_pass_environment_t environment,
     loom_pass_predicate_provider_t predicate_provider) {
   loom_pass_verify_options_t options = {
-      /*.registry=*/loom_test_pass_registry(),
-      /*.environment=*/environment,
-      /*.predicate_provider=*/predicate_provider,
+      .registry = loom_test_pass_registry(),
+      .environment = environment,
+      .predicate_provider = predicate_provider,
   };
   return loom_pass_verify_module(module, &options, &scratch_arena_);
 }
@@ -242,9 +242,9 @@ iree_status_t PassTestHarness::Compile(
     loom_pass_program_t* out_program, loom_pass_environment_t environment,
     loom_pass_predicate_provider_t predicate_provider) {
   loom_pass_program_compile_options_t options = {
-      /*.registry=*/loom_test_pass_registry(),
-      /*.environment=*/environment,
-      /*.predicate_provider=*/predicate_provider,
+      .registry = loom_test_pass_registry(),
+      .environment = environment,
+      .predicate_provider = predicate_provider,
   };
   return loom_pass_program_compile_pipeline(module, pipeline_op, &options,
                                             &block_pool_, out_program);
@@ -272,13 +272,13 @@ loom_pass_interpreter_options_t PassTestHarness::InterpreterOptions(
     loom_pass_report_t* report,
     loom_pass_predicate_provider_t predicate_provider) {
   return (loom_pass_interpreter_options_t){
-      /*.block_pool=*/&block_pool_,
-      /*.function_selector=*/{},
-      /*.predicate_provider=*/predicate_provider,
-      /*.diagnostic_emitter=*/diagnostic_emitter,
-      /*.environment=*/EnvironmentWithTrace(trace),
-      /*.function_versions=*/nullptr,
-      /*.report=*/report,
+      .block_pool = &block_pool_,
+      .function_selector = {},
+      .predicate_provider = predicate_provider,
+      .diagnostic_emitter = diagnostic_emitter,
+      .environment = EnvironmentWithTrace(trace),
+      .function_versions = nullptr,
+      .report = report,
   };
 }
 
@@ -287,11 +287,11 @@ loom_pass_tool_run_options_t PassTestHarness::ToolOptions(
     loom_pass_predicate_provider_t predicate_provider,
     loom_pass_environment_t environment) {
   return (loom_pass_tool_run_options_t){
-      /*.registry=*/loom_test_pass_registry(),
-      /*.environment=*/EnvironmentWithTrace(trace, environment),
-      /*.function_versions=*/nullptr,
-      /*.predicate_provider=*/predicate_provider,
-      /*.block_pool=*/&block_pool_,
+      .registry = loom_test_pass_registry(),
+      .environment = EnvironmentWithTrace(trace, environment),
+      .function_versions = nullptr,
+      .predicate_provider = predicate_provider,
+      .block_pool = &block_pool_,
   };
 }
 

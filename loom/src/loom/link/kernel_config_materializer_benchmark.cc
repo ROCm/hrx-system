@@ -110,8 +110,8 @@ class KernelConfigFixture {
 
   loom_link_plan_t* BuildPlan() const {
     const loom_link_plan_root_facet_t root = {
-        /*.symbol_ordinal=*/kernel_->ordinal,
-        /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
+        .symbol_ordinal = kernel_->ordinal,
+        .kind = LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
     };
     loom_link_plan_options_t options = {};
     options.mode = LOOM_LINK_PLAN_LINK;

@@ -140,8 +140,8 @@ class SymbolDCETest : public ::testing::Test {
 
   void VerifyOk(loom_module_t* module) {
     loom_verify_options_t options = {
-        /*.sink=*/{loom_diagnostic_stderr_sink, NULL},
-        /*.max_errors=*/20,
+        .sink = {loom_diagnostic_stderr_sink, NULL},
+        .max_errors = 20,
     };
     loom_verify_result_t result = {};
     IREE_EXPECT_OK(loom_verify_module(module, &options, &result));
@@ -173,7 +173,7 @@ class SymbolDCETest : public ::testing::Test {
 
   loom_module_t* ReadModule(const std::vector<uint8_t>& bytes) {
     loom_bytecode_read_options_t options = {
-        /*.diagnostic_sink=*/{},
+        .diagnostic_sink = {},
     };
     loom_bytecode_read_result_t result = {0};
     loom_module_t* module = nullptr;

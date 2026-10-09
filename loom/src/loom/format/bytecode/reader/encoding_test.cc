@@ -26,7 +26,7 @@ static const loom_encoding_family_descriptor_t kEncodingDescriptor = {
     /*.parameter_descriptors=*/kEncodingParameters,
 };
 static const loom_encoding_vtable_t kEncodingVtable = {
-    /*.descriptor=*/&kEncodingDescriptor,
+    .descriptor = &kEncodingDescriptor,
 };
 
 static iree_status_t AcceptDiagnostic(void* user_data,
@@ -112,28 +112,28 @@ TEST_F(BytecodeEncodingTest, MaterializesCanonicalTable) {
       0x0E,  // Signed value 7.
   };
   const loom_bytecode_reader_section_t section = {
-      /*.kind=*/LOOM_BYTECODE_SECTION_ENCODINGS,
-      /*.flags=*/{},
-      /*.offset=*/0,
-      /*.length=*/sizeof(data),
-      /*.absolute_offset=*/41,
-      /*.bytes=*/iree_make_const_byte_span(data, sizeof(data)),
+      .kind = LOOM_BYTECODE_SECTION_ENCODINGS,
+      .flags = {},
+      .offset = 0,
+      .length = sizeof(data),
+      .absolute_offset = 41,
+      .bytes = iree_make_const_byte_span(data, sizeof(data)),
   };
   loom_bytecode_type_materializer_t types = {
-      /*.decoder=*/&decoder_,
-      /*.bytecode=*/{},
-      /*.context=*/&context_,
-      /*.module_view=*/&module_view_,
-      /*.scratch_arena=*/&scratch_arena_,
-      /*.output_module=*/module_,
+      .decoder = &decoder_,
+      .bytecode = {},
+      .context = &context_,
+      .module_view = &module_view_,
+      .scratch_arena = &scratch_arena_,
+      .output_module = module_,
   };
   loom_bytecode_encoding_materializer_t materializer = {
-      /*.decoder=*/&decoder_,
-      /*.context=*/&context_,
-      /*.module_view=*/&module_view_,
-      /*.scratch_arena=*/&scratch_arena_,
-      /*.output_module=*/module_,
-      /*.types=*/&types,
+      .decoder = &decoder_,
+      .context = &context_,
+      .module_view = &module_view_,
+      .scratch_arena = &scratch_arena_,
+      .output_module = module_,
+      .types = &types,
   };
 
   IREE_ASSERT_OK(

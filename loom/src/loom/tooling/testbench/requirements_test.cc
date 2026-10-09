@@ -81,14 +81,14 @@ static iree_status_t QueryEnabled(
       module, attrs, IREE_SV("enabled"), &present, &enabled));
   const bool enabled_predicate = present && enabled != 0;
   *out_result = (loom_testbench_requirement_provider_result_t){
-      /*.state=*/
-      enabled_predicate ? LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_SATISFIED
-                        : LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNSATISFIED,
-      /*.provider_code=*/
-      enabled_predicate ? iree_string_view_empty() : IREE_SV("fake_disabled"),
-      /*.display_message=*/
-      enabled_predicate ? iree_string_view_empty()
-                        : IREE_SV("fake requirement was disabled"),
+      .state = enabled_predicate
+                   ? LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_SATISFIED
+                   : LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNSATISFIED,
+      .provider_code = enabled_predicate ? iree_string_view_empty()
+                                         : IREE_SV("fake_disabled"),
+      .display_message = enabled_predicate
+                             ? iree_string_view_empty()
+                             : IREE_SV("fake requirement was disabled"),
   };
   return iree_ok_status();
 }

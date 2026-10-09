@@ -374,9 +374,9 @@ TEST_F(ModuleTypesTest, RepeatedChildrenReuseMappedTypeQueries) {
     target = target_nodes.back().get();
   }
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&source_value,
-      /*.target_values=*/&target_value,
-      /*.count=*/1,
+      .source_values = &source_value,
+      .target_values = &target_value,
+      .count = 1,
   };
   const loom_type_t mismatched_children[] = {
       target, loom_type_scalar(LOOM_SCALAR_TYPE_F32)};
@@ -433,9 +433,9 @@ TEST_F(ModuleTypesTest, RepeatedTypeAttributesReuseMappedQueries) {
   }
 
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&source_value,
-      /*.target_values=*/&target_value,
-      /*.count=*/1,
+      .source_values = &source_value,
+      .target_values = &target_value,
+      .count = 1,
   };
   EXPECT_TRUE(
       loom_type_equal_after_value_remap(module_, source, target, &remap));
@@ -524,9 +524,9 @@ TEST_F(ModuleTypesTest, NestedDictReusePreservesMappedTypeQueries) {
       &kRepeatedDictDescriptor, IREE_ARRAYSIZE(mismatched_parameters),
       mismatched_parameters);
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&source_value,
-      /*.target_values=*/&target_value,
-      /*.count=*/1,
+      .source_values = &source_value,
+      .target_values = &target_value,
+      .count = 1,
   };
 
   EXPECT_TRUE(
@@ -868,9 +868,9 @@ TEST_F(ModuleTypesTest, ValueRemapIndexesContiguousDefinitionSpans) {
   const loom_value_id_t external_source = values[4];
   const loom_value_id_t external_target = values[5];
   const loom_type_value_remap_t external_remap = {
-      /*.source_values=*/&external_source,
-      /*.target_values=*/&external_target,
-      /*.count=*/1,
+      .source_values = &external_source,
+      .target_values = &external_target,
+      .count = 1,
   };
   const loom_type_value_remap_t indexed_remap = {
       /*.source_values=*/source_values,

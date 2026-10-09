@@ -71,9 +71,9 @@ class ModuleEncodingTest : public ::testing::Test {
                     uint16_t* out_id) {
     int64_t strides[] = {stride, 1};
     const loom_named_attr_t parameters[] = {{
-        /*.name_id=*/strides_id_,
-        /*.reserved=*/{},
-        /*.value=*/loom_attr_i64_array(strides, IREE_ARRAYSIZE(strides)),
+        .name_id = strides_id_,
+        .reserved = {},
+        .value = loom_attr_i64_array(strides, IREE_ARRAYSIZE(strides)),
     }};
     const loom_encoding_t encoding = {
         /*.name_id=*/family_id_,
@@ -163,8 +163,8 @@ TEST_F(ModuleEncodingTest, FamilyAliasExpansionRetainsCanonicalParameters) {
   IREE_ASSERT_OK(
       loom_module_intern_string(module_, IREE_SV("encoding.i8"), &family_id));
   const loom_encoding_t encoding = {
-      /*.name_id=*/family_id,
-      /*.alias_id=*/alias_id_,
+      .name_id = family_id,
+      .alias_id = alias_id_,
   };
   uint16_t id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(module_, &encoding, &id));

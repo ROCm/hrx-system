@@ -212,8 +212,8 @@ TEST(DispatchConcurrencyTest, RejectsUnmodeledGfx125ModesWithoutPublishing) {
 
   descriptor.compute_pgm_rsrc3 =
       1u << IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC3_GFX125_NAMED_BARRIER_COUNT_SHIFT;
-  concurrency = {/*.scheduling_domain_count=*/91,
-                 /*.maximum_concurrent_workgroup_count_per_domain=*/92};
+  concurrency = {.scheduling_domain_count = 91,
+                 .maximum_concurrent_workgroup_count_per_domain = 92};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
                         iree_hal_amdgpu_calculate_dispatch_concurrency(
                             &inputs, Workgroup(32), &concurrency));
@@ -240,8 +240,8 @@ TEST(DispatchConcurrencyTest, RejectsUnmodeledSchedulingModes) {
                                  /*execution_units_per_resource=*/1);
   iree_hal_amdgpu_kernel_descriptor_t descriptor = {};
   iree_hal_queue_dispatch_concurrency_t concurrency = {
-      /*.scheduling_domain_count=*/91,
-      /*.maximum_concurrent_workgroup_count_per_domain=*/92,
+      .scheduling_domain_count = 91,
+      .maximum_concurrent_workgroup_count_per_domain = 92,
   };
 
   const auto gfx942_capabilities = Capabilities(

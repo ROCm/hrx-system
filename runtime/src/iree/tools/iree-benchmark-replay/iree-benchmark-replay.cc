@@ -354,8 +354,8 @@ void BenchmarkReplay(const iree_hal_replay_plan_t* replay_plan,
     IREE_TRACE_SCOPE_NAMED("BenchmarkIteration");
     IREE_TRACE_FRAME_MARK_NAMED("ReplayIteration");
     ReplayScopeTimingState scope_state = {
-        /*.selected_scope=*/selected_scope,
-        /*.match=*/{},
+        .selected_scope = selected_scope,
+        .match = {},
     };
     if (scoped_timing) {
       options.scope_event_callback.fn = ReplayScopeTimingCallback;

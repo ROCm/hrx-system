@@ -40,7 +40,7 @@ static const loom_encoding_family_descriptor_t kDescriptor = {
     /*.parameter_count=*/IREE_ARRAYSIZE(kParameters),
     /*.parameter_descriptors=*/kParameters,
 };
-static const loom_encoding_vtable_t kVtable = {/*.descriptor=*/&kDescriptor};
+static const loom_encoding_vtable_t kVtable = {.descriptor = &kDescriptor};
 
 static const loom_attr_descriptor_t kPayloadParameters[] = {
     {/*.name=*/LOOM_BSTRING_REF(7, "element"),
@@ -153,11 +153,11 @@ class CatalogTest : public ::testing::Test {
   uint16_t AddEncoding(loom_named_attr_slice_t parameters,
                        loom_string_id_t alias = LOOM_STRING_ID_INVALID) {
     const loom_encoding_t encoding = {
-        /*.name_id=*/Intern(IREE_SV("test.catalog")),
-        /*.alias_id=*/alias,
-        /*.attribute_count=*/static_cast<uint8_t>(parameters.count),
-        /*.family=*/{},
-        /*.attributes=*/parameters.entries,
+        .name_id = Intern(IREE_SV("test.catalog")),
+        .alias_id = alias,
+        .attribute_count = static_cast<uint8_t>(parameters.count),
+        .family = {},
+        .attributes = parameters.entries,
     };
     uint16_t id = 0;
     IREE_CHECK_OK(loom_module_add_encoding(module_, &encoding, &id));

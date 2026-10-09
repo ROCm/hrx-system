@@ -49,8 +49,7 @@ class CallableEffectsTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_module_intern_string(module_, name, &name_id));
     loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    *out_symbol = loom_symbol_ref_t{/*.module_id=*/0,
-                                    /*.symbol_id=*/symbol_id};
+    *out_symbol = loom_symbol_ref_t{.module_id = 0, .symbol_id = symbol_id};
   }
 
   void BuildDeclaration(iree_string_view_t name, uint8_t purity,

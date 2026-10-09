@@ -94,8 +94,8 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
     return (loom_symbol_ref_t){
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
   }
 
@@ -289,9 +289,9 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
     IREE_CHECK_OK(
         loom_builder_intern_string(&builder_, IREE_SV("imm32"), &imm32_id));
     loom_named_attr_t imm32_attr = {
-        /*.name_id=*/imm32_id,
-        /*.reserved=*/0,
-        /*.value=*/loom_attr_i64(value),
+        .name_id = imm32_id,
+        .reserved = 0,
+        .value = loom_attr_i64(value),
     };
     loom_op_t* const_op = nullptr;
     IREE_CHECK_OK(loom_low_build_resolved_descriptor_const(
@@ -357,8 +357,8 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
 
   void VerifyModuleOk() {
     loom_verify_options_t options = {
-        /*.sink=*/{loom_diagnostic_stderr_sink, NULL},
-        /*.max_errors=*/20,
+        .sink = {loom_diagnostic_stderr_sink, NULL},
+        .max_errors = 20,
     };
     loom_verify_result_t result = {};
     IREE_ASSERT_OK(loom_verify_module(module_, &options, &result));
@@ -397,29 +397,29 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
 
   loom_amdgpu_sanitizer_race_report_t MakeReport() {
     return {
-        /*.check_kind=*/BuildVgprU32(1),
-        /*.flags=*/BuildVgprU32(2),
-        /*.memory_space=*/BuildVgprU32(3),
-        /*.current_access_kind=*/BuildVgprU32(4),
-        /*.prior_access_kind=*/BuildVgprU32(5),
-        /*.access_size=*/BuildVgprU32(8),
-        /*.current_site_id=*/BuildVgprU64(0x1111222233334444ull),
-        /*.prior_site_id=*/BuildVgprU64(0x5555666677778888ull),
-        /*.memory_address=*/BuildVgprU64(0x1000200030004000ull),
-        /*.shadow_address=*/BuildVgprU64(0x5000600070008000ull),
-        /*.shadow_value=*/BuildVgprU64(0x9000A000B000C000ull),
-        /*.current_workgroup_id_x=*/BuildVgprU32(11),
-        /*.current_workgroup_id_y=*/BuildVgprU32(12),
-        /*.current_workgroup_id_z=*/BuildVgprU32(13),
-        /*.current_workitem_id_x=*/BuildVgprU32(21),
-        /*.current_workitem_id_y=*/BuildVgprU32(22),
-        /*.current_workitem_id_z=*/BuildVgprU32(23),
-        /*.prior_workgroup_id_x=*/BuildVgprU32(31),
-        /*.prior_workgroup_id_y=*/BuildVgprU32(32),
-        /*.prior_workgroup_id_z=*/BuildVgprU32(33),
-        /*.prior_workitem_id_x=*/BuildVgprU32(41),
-        /*.prior_workitem_id_y=*/BuildVgprU32(42),
-        /*.prior_workitem_id_z=*/BuildVgprU32(43),
+        .check_kind = BuildVgprU32(1),
+        .flags = BuildVgprU32(2),
+        .memory_space = BuildVgprU32(3),
+        .current_access_kind = BuildVgprU32(4),
+        .prior_access_kind = BuildVgprU32(5),
+        .access_size = BuildVgprU32(8),
+        .current_site_id = BuildVgprU64(0x1111222233334444ull),
+        .prior_site_id = BuildVgprU64(0x5555666677778888ull),
+        .memory_address = BuildVgprU64(0x1000200030004000ull),
+        .shadow_address = BuildVgprU64(0x5000600070008000ull),
+        .shadow_value = BuildVgprU64(0x9000A000B000C000ull),
+        .current_workgroup_id_x = BuildVgprU32(11),
+        .current_workgroup_id_y = BuildVgprU32(12),
+        .current_workgroup_id_z = BuildVgprU32(13),
+        .current_workitem_id_x = BuildVgprU32(21),
+        .current_workitem_id_y = BuildVgprU32(22),
+        .current_workitem_id_z = BuildVgprU32(23),
+        .prior_workgroup_id_x = BuildVgprU32(31),
+        .prior_workgroup_id_y = BuildVgprU32(32),
+        .prior_workgroup_id_z = BuildVgprU32(33),
+        .prior_workitem_id_x = BuildVgprU32(41),
+        .prior_workitem_id_y = BuildVgprU32(42),
+        .prior_workitem_id_z = BuildVgprU32(43),
     };
   }
 
@@ -576,9 +576,9 @@ TEST_F(AmdgpuSanitizerRaceReportTest, EmitsFatalRaceReportProducerCfg) {
       LOOM_LOCATION_UNKNOWN, &channel_values));
 
   const loom_amdgpu_feedback_packet_source_t source = {
-      /*.dispatch_ptr=*/config_values.notify_signal,
-      /*.workgroup_id_x=*/config_values.flags,
-      /*.workitem_id_x=*/BuildVgprU32(9),
+      .dispatch_ptr = config_values.notify_signal,
+      .workgroup_id_x = config_values.flags,
+      .workitem_id_x = BuildVgprU32(9),
   };
   const loom_amdgpu_sanitizer_race_report_t report = MakeReport();
   IREE_ASSERT_OK(loom_amdgpu_build_sanitizer_race_report_terminate(
@@ -671,9 +671,9 @@ TEST_F(AmdgpuSanitizerRaceReportTest, BranchesColdSitesToSharedReportIsland) {
   auto build_site_branch = [&](loom_block_t* site_block) {
     loom_builder_set_block(&builder_, site_block);
     const loom_amdgpu_feedback_packet_source_t source = {
-        /*.dispatch_ptr=*/BuildVgprU64(7),
-        /*.workgroup_id_x=*/BuildVgprU32(8),
-        /*.workitem_id_x=*/BuildVgprU32(9),
+        .dispatch_ptr = BuildVgprU64(7),
+        .workgroup_id_x = BuildVgprU32(8),
+        .workitem_id_x = BuildVgprU32(9),
     };
     const loom_amdgpu_sanitizer_race_report_t report = MakeReport();
     IREE_ASSERT_OK(loom_amdgpu_build_sanitizer_race_report_branch(

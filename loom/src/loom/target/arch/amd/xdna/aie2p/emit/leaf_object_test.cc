@@ -42,18 +42,18 @@ TEST(Aie2pLeafObjectTest, EmitsPreparedProgramRepeatedlyWithoutMutation) {
   ASSERT_EQ(movxm_format_info.bit_count, 48u);
 
   const loom_aie2p_planned_slot_t slot = {
-      /*.encoded_slot=*/{LOOM_AIE2P_SLOT_LNG, movxm_value},
-      /*.scheduled_packet_index=*/0,
-      /*.flags=*/LOOM_AIE2P_PLANNED_SLOT_FLAG_READ_ONLY_DATA_ADDRESS,
+      .encoded_slot = {LOOM_AIE2P_SLOT_LNG, movxm_value},
+      .scheduled_packet_index = 0,
+      .flags = LOOM_AIE2P_PLANNED_SLOT_FLAG_READ_ONLY_DATA_ADDRESS,
   };
   const loom_aie2p_planned_bundle_t bundle = {
-      /*.issue_cycle=*/0,
-      /*.block_index=*/0,
-      /*.logical_issue_cycle=*/0,
-      /*.byte_offset=*/0,
-      /*.slot_start=*/0,
-      /*.format=*/movxm_format,
-      /*.slot_count=*/1,
+      .issue_cycle = 0,
+      .block_index = 0,
+      .logical_issue_cycle = 0,
+      .byte_offset = 0,
+      .slot_start = 0,
+      .format = movxm_format,
+      .slot_count = 1,
   };
   const uint32_t block_byte_offset = 0;
   const loom_aie2p_leaf_resource_import_t resource_import = {
@@ -79,8 +79,8 @@ TEST(Aie2pLeafObjectTest, EmitsPreparedProgramRepeatedlyWithoutMutation) {
       /*.minimum_alignment=*/32,
   };
   const loom_aie2p_planned_read_only_data_fixup_t read_only_data_fixup = {
-      /*.bundle_index=*/0,
-      /*.read_only_data_ordinal=*/0,
+      .bundle_index = 0,
+      .read_only_data_ordinal = 0,
   };
   loom_aie2p_leaf_program_plan_t plan = {
       /*.function_name=*/IREE_SV("kernel"),

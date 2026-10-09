@@ -56,12 +56,12 @@ class BytecodeLocationTest : public ::testing::Test {
   loom_bytecode_reader_section_t MakeSection(const uint8_t* data,
                                              iree_host_size_t length) {
     return loom_bytecode_reader_section_t{
-        /*.kind=*/LOOM_BYTECODE_SECTION_LOCATIONS,
-        /*.flags=*/{},
-        /*.offset=*/0,
-        /*.length=*/length,
-        /*.absolute_offset=*/41,
-        /*.bytes=*/iree_make_const_byte_span(data, length),
+        .kind = LOOM_BYTECODE_SECTION_LOCATIONS,
+        .flags = {},
+        .offset = 0,
+        .length = length,
+        .absolute_offset = 41,
+        .bytes = iree_make_const_byte_span(data, length),
     };
   }
 
@@ -187,9 +187,9 @@ TEST_F(BytecodeLocationTest, MaterializesCanonicalTable) {
   EXPECT_EQ(module_view_.locations.count, 5u);
   EXPECT_EQ(module_->locations.count, 0u);
   loom_bytecode_location_materializer_t materializer = {
-      /*.decoder=*/&decoder_,
-      /*.module_view=*/&module_view_,
-      /*.output_module=*/module_,
+      .decoder = &decoder_,
+      .module_view = &module_view_,
+      .output_module = module_,
   };
 
   IREE_ASSERT_OK(
@@ -240,9 +240,9 @@ TEST_F(BytecodeLocationTest, MaterializationValidatesDeferredEntries) {
       &decoder_, &module_view_, &section));
   EXPECT_EQ(error_count_, 0u);
   loom_bytecode_location_materializer_t materializer = {
-      /*.decoder=*/&decoder_,
-      /*.module_view=*/&module_view_,
-      /*.output_module=*/module_,
+      .decoder = &decoder_,
+      .module_view = &module_view_,
+      .output_module = module_,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_DEFERRED,

@@ -574,9 +574,9 @@ class AtomicLiveTest : public ::testing::TestWithParam<AtomicCase> {
       return false;
     }
     const iree_hal_atomic_store_params_t params = {
-        /*.value=*/value,
-        /*.flags=*/flags,
-        /*.width=*/width,
+        .value = value,
+        .flags = flags,
+        .width = width,
     };
     if (!SubmitAtomicDispatchAndWait(
             &state.libhsa, &state.queues[0].ring,
@@ -609,10 +609,10 @@ class AtomicLiveTest : public ::testing::TestWithParam<AtomicCase> {
       return false;
     }
     const iree_hal_atomic_rmw_params_t params = {
-        /*.operand=*/operand,
-        /*.flags=*/flags,
-        /*.width=*/width,
-        /*.operation=*/operation,
+        .operand = operand,
+        .flags = flags,
+        .width = width,
+        .operation = operation,
     };
     if (!SubmitAtomicDispatchAndWait(
             &state.libhsa, &state.queues[0].ring,
@@ -647,11 +647,11 @@ class AtomicLiveTest : public ::testing::TestWithParam<AtomicCase> {
             ? 0x30u
             : 0x34u;
     const iree_hal_atomic_wait_params_t params = {
-        /*.value=*/value,
-        /*.mask=*/0xFFu,
-        /*.flags=*/flags,
-        /*.width=*/width,
-        /*.condition=*/condition,
+        .value = value,
+        .mask = 0xFFu,
+        .flags = flags,
+        .width = width,
+        .condition = condition,
     };
     if (!SubmitAtomicDispatchAndWait(
             &state.libhsa, &state.queues[0].ring,
@@ -680,11 +680,11 @@ class AtomicLiveTest : public ::testing::TestWithParam<AtomicCase> {
             ? IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE
             : IREE_HAL_ATOMIC_FLAG_NONE;
     const iree_hal_atomic_wait_params_t wait_params = {
-        /*.value=*/1,
-        /*.mask=*/width_mask,
-        /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE | cross_queue_flags,
-        /*.width=*/width,
-        /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+        .value = 1,
+        .mask = width_mask,
+        .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | cross_queue_flags,
+        .width = width,
+        .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
     };
     SubmitAtomicDispatch(
         &state.libhsa, &state.queues[0].ring, state.queues[0].completion_signal,
@@ -694,9 +694,9 @@ class AtomicLiveTest : public ::testing::TestWithParam<AtomicCase> {
               state.memory->kernargs[0], out_setup);
         });
     const iree_hal_atomic_store_params_t store_params = {
-        /*.value=*/1,
-        /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE | cross_queue_flags,
-        /*.width=*/width,
+        .value = 1,
+        .flags = IREE_HAL_ATOMIC_FLAG_RELEASE | cross_queue_flags,
+        .width = width,
     };
     SubmitAtomicDispatch(
         &state.libhsa, &state.queues[1].ring, state.queues[1].completion_signal,

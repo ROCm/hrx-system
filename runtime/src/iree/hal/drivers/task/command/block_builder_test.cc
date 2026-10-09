@@ -219,8 +219,8 @@ TEST_F(BlockBuilderTest, CommandOpSplitKeepsBindingIndicesBlockLocal) {
   executable.export_count = 1;
 
   iree_hal_dispatch_config_t config = {
-      /*.workgroup_size=*/{1, 1, 1},
-      /*.workgroup_count=*/{1, 1, 1},
+      .workgroup_size = {1, 1, 1},
+      .workgroup_count = {1, 1, 1},
   };
   for (int i = 0; i < 100; ++i) {
     iree_hal_cmd_fixup_t* fixups = NULL;

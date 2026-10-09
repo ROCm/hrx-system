@@ -47,8 +47,8 @@ static iree_status_t CountingAllocatorCtl(void* self,
 
 static iree_allocator_t CountingAllocator(CountingAllocatorState* state) {
   return (iree_allocator_t){
-      /*.self=*/state,
-      /*.ctl=*/CountingAllocatorCtl,
+      .self = state,
+      .ctl = CountingAllocatorCtl,
   };
 }
 
@@ -179,8 +179,8 @@ class TraceOutput {
     loom_pass_trace_initialize(&options, &trace);
     loom_pass_trace_bind_snapshot_projector(
         &trace, (loom_pass_trace_snapshot_projector_t){
-                    /*.project=*/project,
-                    /*.user_data=*/user_data,
+                    .project = project,
+                    .user_data = user_data,
                 });
   }
 
@@ -234,17 +234,17 @@ class PassTraceTest : public ::testing::Test {
   ProjectionState MakeProjectionState(CountingAllocatorState* allocator_state,
                                       int64_t counter_value = 2) {
     return (ProjectionState){
-        /*.context=*/&context_,
-        /*.block_pool=*/&block_pool_,
-        /*.allocator_state=*/allocator_state,
-        /*.counter_value=*/counter_value,
+        .context = &context_,
+        .block_pool = &block_pool_,
+        .allocator_state = allocator_state,
+        .counter_value = counter_value,
     };
   }
 
   static loom_pass_trace_event_t MakeAfterEvent(const loom_module_t* module) {
     static const loom_pass_program_instruction_t instruction = {
-        /*.kind=*/LOOM_PASS_PROGRAM_INSTRUCTION_INVOKE,
-        /*.anchor_kind=*/LOOM_PASS_MODULE,
+        .kind = LOOM_PASS_PROGRAM_INSTRUCTION_INVOKE,
+        .anchor_kind = LOOM_PASS_MODULE,
     };
     return (loom_pass_trace_event_t){
         /*.module=*/module,
@@ -322,9 +322,9 @@ TEST_F(PassTraceTest, RejectsInvalidConfigurationBeforeProjection) {
   ArtifactSinkState artifact_state;
   TraceOutput output;
   output.options.artifact_sink = {
-      /*.open=*/OpenArtifact,
-      /*.close=*/nullptr,
-      /*.user_data=*/&artifact_state,
+      .open = OpenArtifact,
+      .close = nullptr,
+      .user_data = &artifact_state,
   };
   output.options.dump_after_all = true;
   output.BindProjector(DeclineProjection, &invocation_count);
@@ -383,16 +383,17 @@ TEST_F(PassTraceTest, ClosesArtifactAndReleasesProjectionAfterWriteFailure) {
   CountingAllocatorState allocator_state;
   ProjectionState projection_state = MakeProjectionState(&allocator_state);
   ArtifactSinkState artifact_state = {
-      /*.stream=*/{
-          /*.write=*/FailArtifactWrite,
-          /*.user_data=*/nullptr,
-      },
+      .stream =
+          {
+              .write = FailArtifactWrite,
+              .user_data = nullptr,
+          },
   };
   TraceOutput output;
   output.options.artifact_sink = {
-      /*.open=*/OpenArtifact,
-      /*.close=*/CloseArtifact,
-      /*.user_data=*/&artifact_state,
+      .open = OpenArtifact,
+      .close = CloseArtifact,
+      .user_data = &artifact_state,
   };
   output.options.format = LOOM_PASS_TRACE_FORMAT_JSONL;
   output.options.dump_after_all = true;

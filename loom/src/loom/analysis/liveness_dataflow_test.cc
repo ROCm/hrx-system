@@ -148,16 +148,16 @@ TEST(LivenessDataflowTest, MatchesDenseFixedPointAcrossGeneratedCfgs) {
           predecessor_indices.size() - graph_blocks[target].predecessor_start;
     }
     loom_cfg_graph_t graph = {
-        /*.module=*/nullptr,
-        /*.region=*/nullptr,
-        /*.blocks=*/graph_blocks.data(),
-        /*.edges=*/nullptr,
-        /*.successor_indices=*/nullptr,
-        /*.successor_edge_indices=*/nullptr,
-        /*.predecessor_indices=*/predecessor_indices.data(),
-        /*.predecessor_edge_indices=*/nullptr,
-        /*.block_count=*/block_count,
-        /*.edge_count=*/0,
+        .module = nullptr,
+        .region = nullptr,
+        .blocks = graph_blocks.data(),
+        .edges = nullptr,
+        .successor_indices = nullptr,
+        .successor_edge_indices = nullptr,
+        .predecessor_indices = predecessor_indices.data(),
+        .predecessor_edge_indices = nullptr,
+        .block_count = block_count,
+        .edge_count = 0,
     };
 
     std::vector<loom_value_id_t> value_ids(value_count);

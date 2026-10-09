@@ -528,9 +528,9 @@ TEST(BufferTableTest, RetainedRangeAcquiresAndSnapshotsOpaquePayload) {
                               buffer->size, buffer, &payload)));
 
   EntryCallbackState callback_state = {
-      /*.expected_user_data=*/&payload,
-      /*.expected_offset=*/32,
-      /*.call_count=*/0,
+      .expected_user_data = &payload,
+      .expected_offset = 32,
+      .call_count = 0,
   };
   hrx_buffer_table_retained_ref_t retained = {};
   IREE_ASSERT_OK(BufferTableStatus(hrx_buffer_table_find_range_retain_if(
@@ -678,7 +678,7 @@ TEST(BufferTableTest, BulkLookupReportsRetainedPrefixOnCallbackFailure) {
   };
   hrx_buffer_table_retained_ref_t refs[IREE_ARRAYSIZE(requests)] = {};
   hrx_buffer_table_range_match_t matches[IREE_ARRAYSIZE(requests)] = {};
-  BulkCallbackState callback_state = {/*.call_count=*/0, /*.reject_call=*/2};
+  BulkCallbackState callback_state = {.call_count = 0, .reject_call = 2};
   size_t ref_count = 0;
   EXPECT_THAT(
       Status(BufferTableStatus(hrx_buffer_table_find_ranges_retain_if(

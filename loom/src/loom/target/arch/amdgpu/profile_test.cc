@@ -27,12 +27,12 @@ static const loom_amdgpu_target_info_t* LookupTarget(const char* name) {
 TEST(AmdgpuTargetProfileTest, PreservesStructuredTargetFacts) {
   const loom_amdgpu_target_info_t* target = LookupTarget("gfx942");
   const loom_amdgpu_target_identity_t identity = {
-      /*.target=*/target,
-      /*.amdhsa_features=*/
-      {
-          /*.sramecc=*/LOOM_AMDGPU_TARGET_FEATURE_ON,
-          /*.xnack=*/LOOM_AMDGPU_TARGET_FEATURE_OFF,
-      },
+      .target = target,
+      .amdhsa_features =
+          {
+              .sramecc = LOOM_AMDGPU_TARGET_FEATURE_ON,
+              .xnack = LOOM_AMDGPU_TARGET_FEATURE_OFF,
+          },
   };
 
   loom_amdgpu_target_profile_t profile = {};
@@ -212,7 +212,7 @@ TEST(AmdgpuTargetProfileTest, RejectsUnsupportedTargetFeatures) {
   const loom_amdgpu_target_info_t* gfx1151 = LookupTarget("gfx1151");
   loom_amdgpu_target_profile_t profile = {};
   const loom_amdgpu_target_identity_t default_identity = {
-      /*.target=*/gfx1151,
+      .target = gfx1151,
   };
   IREE_ASSERT_OK(
       loom_amdgpu_target_profile_initialize(&default_identity, &profile));
@@ -323,12 +323,12 @@ TEST(AmdgpuTargetProfileTest, SelectsEveryValidFeatureCombination) {
       for (iree_host_size_t xnack_ordinal = 0;
            xnack_ordinal < xnack_state_count; ++xnack_ordinal) {
         const loom_amdgpu_target_identity_t identity = {
-            /*.target=*/target,
-            /*.amdhsa_features=*/
-            {
-                /*.sramecc=*/sramecc_states[sramecc_ordinal],
-                /*.xnack=*/xnack_states[xnack_ordinal],
-            },
+            .target = target,
+            .amdhsa_features =
+                {
+                    .sramecc = sramecc_states[sramecc_ordinal],
+                    .xnack = xnack_states[xnack_ordinal],
+                },
         };
         char selector_storage[128];
         iree_string_view_t selector = iree_string_view_empty();

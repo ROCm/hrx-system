@@ -65,9 +65,9 @@ class LowAsmPrinterTest : public ::testing::Test {
     loom_low_descriptor_text_asm_environment_initialize(
         &low_descriptor_registry_, &environment);
     loom_text_parse_options_t options = {
-        /*.diagnostic_sink=*/{},
-        /*.max_errors=*/100,
-        /*.low_asm_environment=*/environment,
+        .diagnostic_sink = {},
+        .max_errors = 100,
+        .low_asm_environment = environment,
     };
     loom_module_t* module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(iree_make_cstring_view(source),
@@ -85,8 +85,8 @@ class LowAsmPrinterTest : public ::testing::Test {
     loom_low_descriptor_text_asm_environment_initialize(
         &low_descriptor_registry_, &environment);
     loom_text_print_options_t options = {
-        /*.flags=*/flags,
-        /*.low_asm_environment=*/environment,
+        .flags = flags,
+        .low_asm_environment = environment,
     };
     iree_string_builder_t builder;
     iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -111,8 +111,8 @@ class LowAsmPrinterTest : public ::testing::Test {
           &low_descriptor_registry_, &environment);
     }
     loom_text_print_options_t options = {
-        /*.flags=*/flags,
-        /*.low_asm_environment=*/environment,
+        .flags = flags,
+        .low_asm_environment = environment,
     };
     iree_string_builder_t builder;
     iree_string_builder_initialize(iree_allocator_system(), &builder);

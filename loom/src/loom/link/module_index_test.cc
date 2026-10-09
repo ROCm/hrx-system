@@ -95,8 +95,8 @@ class ModuleIndexTest : public ::testing::Test {
                        iree_string_view_t filename = IREE_SV("test.loom")) {
     loom_module_t* module = nullptr;
     loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 20,
     };
     IREE_EXPECT_OK(loom_text_parse(source, filename, &context_, &block_pool_,
                                    &parse_options, &module));

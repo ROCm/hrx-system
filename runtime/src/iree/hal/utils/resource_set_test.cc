@@ -61,7 +61,7 @@ static void iree_hal_test_resource_destroy(iree_hal_test_resource_t* resource) {
 }
 
 const iree_hal_test_resource_vtable_t iree_hal_test_resource_vtable = {
-    /*.destroy=*/iree_hal_test_resource_destroy,
+    .destroy = iree_hal_test_resource_destroy,
 };
 
 struct ResourceSetTest : public ::testing::Test {

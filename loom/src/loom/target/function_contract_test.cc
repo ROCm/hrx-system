@@ -247,9 +247,9 @@ low.kernel.def target<test.low.core>(@test_target) export("dispatch") linkage(de
       function_target_facts, LOOM_TARGET_FACT_FIELD_LINKAGE));
 
   const loom_target_workgroup_size_t required_workgroup_size = {
-      /*.x=*/64,
-      /*.y=*/2,
-      /*.z=*/1,
+      .x = 64,
+      .y = 2,
+      .z = 1,
   };
   const loom_target_facts_t* launch_facts = nullptr;
   IREE_ASSERT_OK(loom_target_function_contract_refine_hal_workgroup_size(

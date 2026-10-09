@@ -754,8 +754,8 @@ class AllocationBenchmark {
                                                &base_arena_, &schedule_));
       Require(schedule_.error_count == 0, "Scheduling failed");
       const loom_low_storage_lease_provider_t provider = {
-          /*.user_data=*/{},
-          /*.query=*/loom_low_storage_lease_query_descriptor_rows,
+          .user_data = {},
+          .query = loom_low_storage_lease_query_descriptor_rows,
       };
       IREE_CHECK_OK(loom_low_storage_lease_build(
           &schedule_, &provider, &base_arena_, &storage_leases_));

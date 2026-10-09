@@ -26,16 +26,16 @@ static const loom_target_fact_type_t kTestTargetFactType = {
 static void InitializeTestTargetFacts(iree_string_view_t name,
                                       loom_target_facts_t* out_facts) {
   *out_facts = {
-      /*.fact_type=*/&kTestTargetFactType,
-      /*.selector=*/0,
-      /*.explicit_fields=*/0,
-      /*.storage=*/
-      {
-          /*.snapshot=*/{/*.name=*/name},
-          /*.export_plan=*/{/*.name=*/name},
-          /*.config=*/{/*.name=*/name},
-          /*.bundle=*/{/*.name=*/name},
-      },
+      .fact_type = &kTestTargetFactType,
+      .selector = 0,
+      .explicit_fields = 0,
+      .storage =
+          {
+              .snapshot = {.name = name},
+              .export_plan = {.name = name},
+              .config = {.name = name},
+              .bundle = {.name = name},
+          },
   };
   loom_target_bundle_storage_rebind(&out_facts->storage);
 }

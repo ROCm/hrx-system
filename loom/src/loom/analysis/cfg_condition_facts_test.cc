@@ -61,7 +61,7 @@ class CfgConditionFactsTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
     IREE_ASSERT_OK(loom_test_func_build(
         &module_builder, 0, 0, 0, callee, nullptr, 0, nullptr, 0, nullptr, 0,
         nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op_));
@@ -206,12 +206,12 @@ class CfgConditionFactsTest : public ::testing::Test {
         loom_cfg_condition_relation_view_query_excluded_outcomes(
             table, view, &fact_table_,
             loom_condition_integer_operand_t{
-                /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-                /*.value_id=*/left,
+                .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                .value_id = left,
             },
             loom_condition_integer_operand_t{
-                /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-                /*.value_id=*/right,
+                .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                .value_id = right,
             });
     return iree_all_bits_set(actual_exclusions, required_exclusions);
   }
@@ -348,17 +348,17 @@ TEST_F(CfgConditionFactsTest,
       loom_cfg_condition_relation_table_block(&table, guarded_index);
   ASSERT_NE(guarded_facts, nullptr);
   const loom_condition_integer_operand_t value_operand = {
-      /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-      /*.value_id=*/value,
+      .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+      .value_id = value,
   };
   const loom_condition_integer_operand_t bound_value_operand = {
-      /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-      /*.value_id=*/exact_bound,
+      .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+      .value_id = exact_bound,
   };
   const loom_condition_integer_operand_t bound_constant_operand = {
-      /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
-      /*.value_id=*/{},
-      /*.constant=*/64,
+      .kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+      .value_id = {},
+      .constant = 64,
   };
   const loom_condition_relation_outcome_bits_t expected_forward =
       LOOM_CONDITION_RELATION_OUTCOME_BIT_EQUAL |
@@ -381,9 +381,9 @@ TEST_F(CfgConditionFactsTest,
   loom_condition_fact_scope_initialize_indexed(nullptr, &table, guarded_facts,
                                                &scope);
   loom_condition_integer_relation_t query = {
-      /*.relation=*/LOOM_SYMBOLIC_INTEGER_RELATION_LE,
-      /*.left=*/value_operand,
-      /*.right=*/bound_constant_operand,
+      .relation = LOOM_SYMBOLIC_INTEGER_RELATION_LE,
+      .left = value_operand,
+      .right = bound_constant_operand,
   };
   bool result = false;
   EXPECT_TRUE(loom_condition_fact_scope_proves_integer_relation(
@@ -428,24 +428,25 @@ TEST_F(CfgConditionFactsTest, DerivedAnchorVisitsRelationWithAuthoredOperands) {
     loom_value_id_t anchor;
     iree_host_size_t query_count;
   } mapping = {
-      /*.relation=*/relation_left,
-      /*.anchor=*/derived_anchor,
-      /*.query_count=*/0,
+      .relation = relation_left,
+      .anchor = derived_anchor,
+      .query_count = 0,
   };
   const loom_cfg_condition_relation_anchor_provider_t anchor_provider = {
-      /*.user_data=*/&mapping,
-      /*.query=*/
-      [](void* user_data, loom_value_id_t relation_value_id,
-         const loom_cfg_condition_relation_anchor_sink_t* sink) {
-        auto* mapping = static_cast<AnchorMapping*>(user_data);
-        ++mapping->query_count;
-        if (relation_value_id != mapping->relation) {
-          return iree_ok_status();
-        }
-        IREE_RETURN_IF_ERROR(sink->emit(sink->user_data, relation_value_id));
-        IREE_RETURN_IF_ERROR(sink->emit(sink->user_data, mapping->anchor));
-        return sink->emit(sink->user_data, mapping->anchor);
-      },
+      .user_data = &mapping,
+      .query =
+          [](void* user_data, loom_value_id_t relation_value_id,
+             const loom_cfg_condition_relation_anchor_sink_t* sink) {
+            auto* mapping = static_cast<AnchorMapping*>(user_data);
+            ++mapping->query_count;
+            if (relation_value_id != mapping->relation) {
+              return iree_ok_status();
+            }
+            IREE_RETURN_IF_ERROR(
+                sink->emit(sink->user_data, relation_value_id));
+            IREE_RETURN_IF_ERROR(sink->emit(sink->user_data, mapping->anchor));
+            return sink->emit(sink->user_data, mapping->anchor);
+          },
   };
   const loom_cfg_condition_relation_table_t table = ComputeRelationTable(
       &graph, &dominance, IdentityMode::kCfg, &anchor_provider);
@@ -705,8 +706,8 @@ TEST_F(CfgConditionFactsTest, FactorizesRepeatedPayloadValues) {
   }
   std::vector<loom_condition_integer_relation_t> incident_relations;
   const loom_condition_integer_operand_t anchor = {
-      /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-      /*.value_id=*/left_values[0],
+      .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+      .value_id = left_values[0],
   };
   EXPECT_TRUE(loom_cfg_condition_relation_view_for_each_while(
       &table, target_facts, &fact_table_, anchor,

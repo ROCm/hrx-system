@@ -210,10 +210,10 @@ TEST(ScheduleBlockTest, MergesRoundedClassPeaksWithoutDoubleCountingCliffs) {
                                              IREE_SV("second")};
   const loom_target_residency_cliff_range_t direct_ranges[] = {{0, 2}, {2, 0}};
   const loom_target_residency_model_t residency_model = {
-      /*.best_tier=*/4,
-      /*.direct_resources=*/
-      {direct_names, cliffs, IREE_ARRAYSIZE(cliffs), direct_ranges, 2},
-      /*.derived_resources=*/table};
+      .best_tier = 4,
+      .direct_resources = {direct_names, cliffs, IREE_ARRAYSIZE(cliffs),
+                           direct_ranges, 2},
+      .derived_resources = table};
   loom_low_schedule_options_t options = {};
   options.strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
   iree_arena_block_pool_t pool;

@@ -42,8 +42,8 @@ class QueueDispatchConcurrencyTest : public CtsTestBase<> {
 
 TEST_P(QueueDispatchConcurrencyTest, ReportsExactQueueResidency) {
   iree_hal_queue_dispatch_concurrency_params_t params = {
-      /*.workgroup_size=*/{1, 1, 1},
-      /*.dynamic_workgroup_local_memory=*/0,
+      .workgroup_size = {1, 1, 1},
+      .dynamic_workgroup_local_memory = 0,
   };
   iree_hal_queue_dispatch_concurrency_t concurrency;
   iree_status_t status = iree_hal_queue_query_dispatch_concurrency(

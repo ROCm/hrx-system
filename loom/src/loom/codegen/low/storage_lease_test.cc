@@ -172,8 +172,8 @@ iree_status_t EmptyLeaseQuery(void* user_data,
 
 TEST_F(LowStorageLeaseTest, BuildsSyntheticTargetLeaseRecords) {
   const loom_low_storage_lease_provider_t provider = {
-      /*.user_data=*/{},
-      /*.query=*/SyntheticLeaseQuery,
+      .user_data = {},
+      .query = SyntheticLeaseQuery,
   };
   loom_low_storage_lease_table_t table = {};
   IREE_ASSERT_OK(loom_low_storage_lease_build(&state_.schedule, &provider,
@@ -235,10 +235,10 @@ iree_status_t EmitProgressBound(loom_low_storage_progress_bound_emit_fn_t emit,
                                 uint16_t release_group_id,
                                 uint32_t remaining_count) {
   const loom_low_storage_progress_bound_event_t event = {
-      /*.kind=*/kind,
-      /*.release_class_id=*/kSyntheticReleaseStore,
-      /*.release_group_id=*/release_group_id,
-      /*.remaining_count=*/remaining_count,
+      .kind = kind,
+      .release_class_id = kSyntheticReleaseStore,
+      .release_group_id = release_group_id,
+      .remaining_count = remaining_count,
   };
   return emit(emit_user_data, &event);
 }
@@ -325,18 +325,18 @@ TEST_F(LowStorageLeaseTest,
   }
   loom_low_schedule_block_t blocks[2] = {
       {
-          /*.block=*/&state_.block,
-          /*.node_start=*/0,
-          /*.node_count=*/6,
-          /*.scheduled_node_start=*/0,
-          /*.scheduled_node_count=*/6,
+          .block = &state_.block,
+          .node_start = 0,
+          .node_count = 6,
+          .scheduled_node_start = 0,
+          .scheduled_node_count = 6,
       },
       {
-          /*.block=*/&second_block,
-          /*.node_start=*/6,
-          /*.node_count=*/2,
-          /*.scheduled_node_start=*/6,
-          /*.scheduled_node_count=*/2,
+          .block = &second_block,
+          .node_start = 6,
+          .node_count = 2,
+          .scheduled_node_start = 6,
+          .scheduled_node_count = 2,
       },
   };
   loom_low_schedule_table_t schedule = state_.schedule;
@@ -348,8 +348,8 @@ TEST_F(LowStorageLeaseTest,
   schedule.scheduled_node_count = IREE_ARRAYSIZE(scheduled_node_indices);
 
   const loom_low_storage_lease_provider_t provider = {
-      /*.user_data=*/{},
-      /*.query=*/SyntheticProgressQuery,
+      .user_data = {},
+      .query = SyntheticProgressQuery,
   };
   loom_low_storage_lease_table_t table = {};
   IREE_ASSERT_OK(
@@ -380,16 +380,16 @@ TEST_F(LowStorageLeaseTest,
 TEST_F(LowStorageLeaseTest, BuildsReleaseActionIndexByNode) {
   loom_low_storage_release_action_t actions[3] = {
       {
-          /*.insertion_packet_index=*/7,
-          /*.insertion_node_index=*/2,
+          .insertion_packet_index = 7,
+          .insertion_node_index = 2,
       },
       {
-          /*.insertion_packet_index=*/8,
-          /*.insertion_node_index=*/1,
+          .insertion_packet_index = 8,
+          .insertion_node_index = 1,
       },
       {
-          /*.insertion_packet_index=*/9,
-          /*.insertion_node_index=*/2,
+          .insertion_packet_index = 9,
+          .insertion_node_index = 2,
       },
   };
   uint32_t* first_action_indices = nullptr;
@@ -411,8 +411,8 @@ TEST_F(LowStorageLeaseTest, BuildsReleaseActionIndexByNode) {
 
 TEST_F(LowStorageLeaseTest, BuildsEmptyLeaseTable) {
   const loom_low_storage_lease_provider_t provider = {
-      /*.user_data=*/{},
-      /*.query=*/EmptyLeaseQuery,
+      .user_data = {},
+      .query = EmptyLeaseQuery,
   };
   loom_low_storage_lease_table_t table = {};
   IREE_ASSERT_OK(loom_low_storage_lease_build(&state_.schedule, &provider,

@@ -1283,10 +1283,10 @@ TEST_F(HipStreamValueApiTest, DirectBatchNodeSupportsTemplateAndExecUpdates) {
     operations[i].writeValue.flags = hipStreamWriteValueDefault;
   }
   hipBatchMemOpNodeParams params = {
-      /*.ctx=*/context,
-      /*.count=*/1,
-      /*.paramArray=*/operations,
-      /*.flags=*/0,
+      .ctx = context,
+      .count = 1,
+      .paramArray = operations,
+      .flags = 0,
   };
   hipGraphNode_t node = nullptr;
   ASSERT_EQ(hipSuccess, api_.graph_add_batch_mem_op_node(

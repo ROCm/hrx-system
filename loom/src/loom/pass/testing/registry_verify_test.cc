@@ -28,9 +28,9 @@ static const loom_pass_descriptor_t* LookupTestPass(iree_string_view_t name) {
 
 static const loom_pass_info_t* BrokenStatisticsPassInfo() {
   static const loom_pass_statistic_layout_t kLayout = {
-      /*.storage_size=*/sizeof(int64_t),
-      /*.fields=*/nullptr,
-      /*.field_count=*/1,
+      .storage_size = sizeof(int64_t),
+      .fields = nullptr,
+      .field_count = 1,
   };
   static const loom_pass_info_t kInfo = {
       /*.name=*/IREE_SVL("test.broken-statistics"),
@@ -233,19 +233,19 @@ TEST(PassRegistryCoreTest, RejectsInvalidDescriptorRepresentations) {
   const loom_pass_descriptor_t* null_descriptor_refs[] = {nullptr};
   const loom_pass_registry_t registries[] = {
       {
-          /*.descriptors=*/nullptr,
-          /*.descriptor_count=*/1,
-          /*.descriptor_refs=*/nullptr,
+          .descriptors = nullptr,
+          .descriptor_count = 1,
+          .descriptor_refs = nullptr,
       },
       {
-          /*.descriptors=*/descriptor,
-          /*.descriptor_count=*/1,
-          /*.descriptor_refs=*/descriptor_refs,
+          .descriptors = descriptor,
+          .descriptor_count = 1,
+          .descriptor_refs = descriptor_refs,
       },
       {
-          /*.descriptors=*/nullptr,
-          /*.descriptor_count=*/1,
-          /*.descriptor_refs=*/null_descriptor_refs,
+          .descriptors = nullptr,
+          .descriptor_count = 1,
+          .descriptor_refs = null_descriptor_refs,
       },
   };
 
@@ -295,8 +295,8 @@ TEST(PassRegistryCoreTest, RejectsMissingStatisticMetadata) {
   descriptor.key = IREE_SVL("test.broken-statistics");
   descriptor.info = BrokenStatisticsPassInfo;
   const loom_pass_registry_t registry = {
-      /*.descriptors=*/&descriptor,
-      /*.descriptor_count=*/1,
+      .descriptors = &descriptor,
+      .descriptor_count = 1,
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -309,8 +309,8 @@ TEST(PassRegistryCoreTest, RejectsDuplicateStatisticNames) {
   descriptor.key = IREE_SVL("test.duplicate-statistics");
   descriptor.info = DuplicateStatisticsPassInfo;
   const loom_pass_registry_t registry = {
-      /*.descriptors=*/&descriptor,
-      /*.descriptor_count=*/1,
+      .descriptors = &descriptor,
+      .descriptor_count = 1,
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -323,8 +323,8 @@ TEST(PassRegistryCoreTest, RejectsDuplicateStatisticOffsets) {
   descriptor.key = IREE_SVL("test.duplicate-statistic-offsets");
   descriptor.info = DuplicateStatisticOffsetsPassInfo;
   const loom_pass_registry_t registry = {
-      /*.descriptors=*/&descriptor,
-      /*.descriptor_count=*/1,
+      .descriptors = &descriptor,
+      .descriptor_count = 1,
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -337,8 +337,8 @@ TEST(PassRegistryCoreTest, RejectsUnalignedStatisticFields) {
   descriptor.key = IREE_SVL("test.unaligned-statistics");
   descriptor.info = UnalignedStatisticsPassInfo;
   const loom_pass_registry_t registry = {
-      /*.descriptors=*/&descriptor,
-      /*.descriptor_count=*/1,
+      .descriptors = &descriptor,
+      .descriptor_count = 1,
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -351,8 +351,8 @@ TEST(PassRegistryCoreTest, RejectsTooManyStatisticFields) {
   descriptor.key = IREE_SVL("test.too-many-statistics");
   descriptor.info = TooManyStatisticsPassInfo;
   const loom_pass_registry_t registry = {
-      /*.descriptors=*/&descriptor,
-      /*.descriptor_count=*/1,
+      .descriptors = &descriptor,
+      .descriptor_count = 1,
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -378,8 +378,8 @@ TEST(PassRegistryCoreTest, VerifiesRequirementMetadata) {
   descriptor.requirement_defs = requirements;
   descriptor.requirement_count = IREE_ARRAYSIZE(requirements);
   const loom_pass_registry_t registry = {
-      /*.descriptors=*/&descriptor,
-      /*.descriptor_count=*/1,
+      .descriptors = &descriptor,
+      .descriptor_count = 1,
   };
 
   IREE_ASSERT_OK(loom_pass_registry_verify(&registry));
@@ -398,8 +398,8 @@ TEST(PassRegistryCoreTest, RejectsRequirementWithoutCapabilityType) {
   descriptor.requirement_defs = requirements;
   descriptor.requirement_count = IREE_ARRAYSIZE(requirements);
   const loom_pass_registry_t registry = {
-      /*.descriptors=*/&descriptor,
-      /*.descriptor_count=*/1,
+      .descriptors = &descriptor,
+      .descriptor_count = 1,
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -425,8 +425,8 @@ TEST(PassRegistryCoreTest, RejectsUnsortedRequirementMetadata) {
   descriptor.requirement_defs = requirements;
   descriptor.requirement_count = IREE_ARRAYSIZE(requirements);
   const loom_pass_registry_t registry = {
-      /*.descriptors=*/&descriptor,
-      /*.descriptor_count=*/1,
+      .descriptors = &descriptor,
+      .descriptor_count = 1,
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

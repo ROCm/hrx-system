@@ -77,8 +77,8 @@ class LinkerTest : public ::testing::Test {
                        iree_string_view_t filename = IREE_SV("test.loom")) {
     loom_module_t* module = nullptr;
     loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &low_registry_, &parse_options.low_asm_environment);
@@ -95,8 +95,8 @@ class LinkerTest : public ::testing::Test {
                        iree_string_view_t filename = IREE_SV("test.loom")) {
     loom_module_t* module = nullptr;
     loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &low_registry_, &parse_options.low_asm_environment);
@@ -149,7 +149,7 @@ class LinkerTest : public ::testing::Test {
     std::vector<iree_string_view_t> roots(root_symbols);
     loom_link_options_t options = {
         /*.module_name=*/IREE_SV("linked"),
-        /*.root_symbols=*/{/*.count=*/roots.size(), /*.values=*/roots.data()},
+        /*.root_symbols=*/{.count = roots.size(), .values = roots.data()},
     };
     iree_status_t status = loom_link_materialized_modules(
         inputs.data(), inputs.size(), &options, &block_pool_,
@@ -170,8 +170,8 @@ class LinkerTest : public ::testing::Test {
 
   void Verify(const loom_module_t* module) {
     loom_verify_options_t options = {
-        /*.sink=*/{loom_diagnostic_stderr_sink, nullptr},
-        /*.max_errors=*/100,
+        .sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 100,
     };
     loom_verify_result_t result = {};
     IREE_ASSERT_OK(loom_verify_module(module, &options, &result));
@@ -1131,7 +1131,7 @@ TEST_F(LinkerTest, IncrementalLinkDoesNotReferenceReleasedSourceModules) {
 
   iree_string_view_t roots[] = {IREE_SV("@caller")};
   loom_linker_add_options_t add_options = {
-      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+      .root_symbols = {/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   {
     ModulePtr harness = ParseOwned(IREE_SV(R"(
@@ -1403,8 +1403,8 @@ func.def public @caller(%x: i32) -> (i32) {
 
   const iree_host_size_t source_symbols[] = {1};
   const loom_linker_source_symbol_binding_t source_bindings[] = {{
-      /*.source_ordinal=*/0,
-      /*.target=*/projected_target,
+      .source_ordinal = 0,
+      .target = projected_target,
   }};
   IREE_ASSERT_OK(loom_linker_add_module_symbols(
       linker, source,

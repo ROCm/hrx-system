@@ -267,19 +267,18 @@ static void iree_hal_test_opaque_slab_provider_query_properties(
 
 const iree_hal_slab_provider_vtable_t
     iree_hal_test_opaque_slab_provider_vtable = {
-        /*.destroy=*/iree_hal_test_opaque_slab_provider_destroy,
-        /*.acquire_slab=*/iree_hal_test_opaque_slab_provider_acquire_slab,
-        /*.release_slab=*/iree_hal_test_opaque_slab_provider_release_slab,
-        /*.wrap_buffer=*/iree_hal_test_opaque_slab_provider_wrap_buffer,
-        /*.validate_asan_options=*/
-        iree_hal_test_opaque_slab_provider_validate_asan_options,
-        /*.advise_asan_range=*/
-        iree_hal_test_opaque_slab_provider_advise_asan_range,
-        /*.prefault=*/iree_hal_test_opaque_slab_provider_prefault,
-        /*.trim=*/iree_hal_test_opaque_slab_provider_trim,
-        /*.query_stats=*/iree_hal_test_opaque_slab_provider_query_stats,
-        /*.query_properties=*/
-        iree_hal_test_opaque_slab_provider_query_properties,
+        .destroy = iree_hal_test_opaque_slab_provider_destroy,
+        .acquire_slab = iree_hal_test_opaque_slab_provider_acquire_slab,
+        .release_slab = iree_hal_test_opaque_slab_provider_release_slab,
+        .wrap_buffer = iree_hal_test_opaque_slab_provider_wrap_buffer,
+        .validate_asan_options =
+            iree_hal_test_opaque_slab_provider_validate_asan_options,
+        .advise_asan_range =
+            iree_hal_test_opaque_slab_provider_advise_asan_range,
+        .prefault = iree_hal_test_opaque_slab_provider_prefault,
+        .trim = iree_hal_test_opaque_slab_provider_trim,
+        .query_stats = iree_hal_test_opaque_slab_provider_query_stats,
+        .query_properties = iree_hal_test_opaque_slab_provider_query_properties,
 };
 
 static iree_hal_pool_reservation_request_t MakeReservationRequest(
@@ -319,8 +318,8 @@ static iree_status_t MaterializeOneReservation(
     const iree_hal_pool_reservation_t* reservation,
     iree_hal_pool_materialize_flags_t flags, iree_hal_buffer_t** out_buffer) {
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/reservation->byte_length,
+      .params = params,
+      .allocation_size = reservation->byte_length,
   };
   return iree_hal_pool_materialize_reservations(pool, 1, &request, reservation,
                                                 flags, out_buffer);

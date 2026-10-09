@@ -102,27 +102,27 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
           /*.sample_value_name=*/IREE_SVL("%acc"),
           /*.static_instruction_mix=*/
           {
-              /*.descriptor_count=*/2,
-              /*.unknown_count=*/{},
-              /*.scalar_alu_count=*/{},
-              /*.vector_alu_count=*/{},
-              /*.matrix_count=*/2,
-              /*.mfma_count=*/{},
-              /*.smfmac_count=*/{},
-              /*.wmma_count=*/2,
-              /*.swmmac_count=*/{},
+              .descriptor_count = 2,
+              .unknown_count = {},
+              .scalar_alu_count = {},
+              .vector_alu_count = {},
+              .matrix_count = 2,
+              .mfma_count = {},
+              .smfmac_count = {},
+              .wmma_count = 2,
+              .swmmac_count = {},
           },
           /*.dynamic_instruction_mix=*/
           {
-              /*.descriptor_count=*/4,
-              /*.unknown_count=*/{},
-              /*.scalar_alu_count=*/{},
-              /*.vector_alu_count=*/{},
-              /*.matrix_count=*/4,
-              /*.mfma_count=*/{},
-              /*.smfmac_count=*/{},
-              /*.wmma_count=*/4,
-              /*.swmmac_count=*/{},
+              .descriptor_count = 4,
+              .unknown_count = {},
+              .scalar_alu_count = {},
+              .vector_alu_count = {},
+              .matrix_count = 4,
+              .mfma_count = {},
+              .smfmac_count = {},
+              .wmma_count = 4,
+              .swmmac_count = {},
           },
           /*.result_value_count=*/1,
           /*.result_unit_count=*/8,
@@ -138,15 +138,15 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
           /*.reason_id=*/2,
           /*.summary=*/
           {
-              /*.action_count=*/3,
-              /*.explicit_action_count=*/0,
-              /*.planned_action_count=*/3,
-              /*.full_drain_count=*/1,
-              /*.partial_wait_count=*/2,
-              /*.drained_count=*/5,
-              /*.max_drained_count=*/4,
-              /*.max_outstanding_before=*/7,
-              /*.max_full_drain_outstanding_before=*/6,
+              .action_count = 3,
+              .explicit_action_count = 0,
+              .planned_action_count = 3,
+              .full_drain_count = 1,
+              .partial_wait_count = 2,
+              .drained_count = 5,
+              .max_drained_count = 4,
+              .max_outstanding_before = 7,
+              .max_full_drain_outstanding_before = 6,
           },
       };
   IREE_ASSERT_OK(loom_target_compile_report_record_wait_reason_summary_row(
@@ -157,7 +157,7 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -262,7 +262,7 @@ TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t summary_options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(loom_target_compile_report_format_json(
       &report, &summary_options, &stream));
@@ -279,7 +279,7 @@ TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t details_options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(loom_target_compile_report_format_json(
       &report, &details_options, &stream));
@@ -383,7 +383,7 @@ TEST(CompileReportFormatTest, FormatsAndMergesSourceBoundaryProjectionRows) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t summary_options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(loom_target_compile_report_format_json(
       &report, &summary_options, &stream));
@@ -403,7 +403,7 @@ TEST(CompileReportFormatTest, FormatsAndMergesSourceBoundaryProjectionRows) {
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t details_options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(loom_target_compile_report_format_json(
       &report, &details_options, &stream));
@@ -538,7 +538,7 @@ TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -684,7 +684,7 @@ TEST(CompileReportFormatTest, OwnsAndFormatsPipelinePlans) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -794,7 +794,7 @@ TEST(CompileReportFormatTest, FormatsJsonEscapedStrings) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -824,7 +824,7 @@ TEST(CompileReportFormatTest, JsonModeNoneWritesNothing) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_NONE,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_NONE,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));

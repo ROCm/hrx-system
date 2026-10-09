@@ -49,15 +49,14 @@ TEST(SessionBootstrapTest, CapturesLocalPeerInformationOnce) {
   axes[0].epoch = 42;
   std::array<uint8_t, 4> application_data = {1, 2, 3, 4};
   iree_net_bootstrap_peer_info_t local_peer = {
-      /*.capabilities=*/IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER,
-      /*.application_endpoint_count=*/2,
-      /*.axes=*/axes.data(),
-      /*.axis_count=*/static_cast<uint32_t>(axes.size()),
-      /*.application_data=*/
-      iree_make_const_byte_span(application_data.data(),
-                                application_data.size()),
-      /*.machine_index=*/3,
-      /*.session_epoch=*/7,
+      .capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER,
+      .application_endpoint_count = 2,
+      .axes = axes.data(),
+      .axis_count = static_cast<uint32_t>(axes.size()),
+      .application_data = iree_make_const_byte_span(application_data.data(),
+                                                    application_data.size()),
+      .machine_index = 3,
+      .session_epoch = 7,
   };
 
   iree_net_session_bootstrap_t bootstrap;
@@ -88,12 +87,12 @@ TEST(SessionBootstrapTest, CapturesLocalPeerInformationOnce) {
 
 TEST(SessionBootstrapTest, NegotiatesSymmetricCapabilities) {
   const iree_net_bootstrap_peer_info_t client_peer = {
-      /*.capabilities=*/IREE_NET_BOOTSTRAP_CAPABILITY_ALL_RECOGNIZED,
-      /*.application_endpoint_count=*/3,
+      .capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_ALL_RECOGNIZED,
+      .application_endpoint_count = 3,
   };
   const iree_net_bootstrap_peer_info_t server_peer = {
-      /*.capabilities=*/IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER,
-      /*.application_endpoint_count=*/3,
+      .capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER,
+      .application_endpoint_count = 3,
   };
 
   iree_net_session_bootstrap_t client;
@@ -164,12 +163,12 @@ TEST(SessionBootstrapTest, RejectsEndpointCountMismatch) {
 
 TEST(SessionBootstrapTest, RejectsMissingRequiredCapability) {
   const iree_net_bootstrap_peer_info_t local_peer = {
-      /*.capabilities=*/IREE_NET_BOOTSTRAP_CAPABILITY_ALL_RECOGNIZED,
-      /*.application_endpoint_count=*/1,
+      .capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_ALL_RECOGNIZED,
+      .application_endpoint_count = 1,
   };
   const iree_net_bootstrap_peer_info_t remote_peer = {
-      /*.capabilities=*/IREE_NET_BOOTSTRAP_CAPABILITY_RDMA,
-      /*.application_endpoint_count=*/1,
+      .capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_RDMA,
+      .application_endpoint_count = 1,
   };
   const std::vector<uint8_t> ack =
       SerializePeer(IREE_NET_BOOTSTRAP_TYPE_HELLO_ACK, remote_peer);

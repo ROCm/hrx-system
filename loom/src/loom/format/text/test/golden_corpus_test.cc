@@ -48,8 +48,8 @@ class GoldenCorpusTest : public ::testing::Test {
 
   loom_module_t* Parse(iree_string_view_t source, iree_string_view_t filename) {
     loom_text_parse_options_t options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, NULL},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, NULL},
+        .max_errors = 20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &low_registry_.registry, &options.low_asm_environment);

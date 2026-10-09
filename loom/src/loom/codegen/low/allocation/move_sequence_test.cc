@@ -30,28 +30,28 @@ const loom_low_descriptor_set_t* IndependentDescriptorSet() {
 const loom_low_descriptor_set_t* AliasDescriptorSet() {
   static const loom_low_reg_class_t kRegClasses[] = {
       {
-          /*.name_string_ref=*/{},
-          /*.target_bank_id=*/{},
-          /*.flags=*/{},
-          /*.alloc_unit_bits=*/32,
-          /*.allocatable_count=*/{},
-          /*.fixed_location_base=*/{},
-          /*.fixed_location_count=*/{},
-          /*.physical_register_candidate_start=*/{},
-          /*.candidate_lookup=*/{},
-          /*.alias_set_id=*/1,
+          .name_string_ref = {},
+          .target_bank_id = {},
+          .flags = {},
+          .alloc_unit_bits = 32,
+          .allocatable_count = {},
+          .fixed_location_base = {},
+          .fixed_location_count = {},
+          .physical_register_candidate_start = {},
+          .candidate_lookup = {},
+          .alias_set_id = 1,
       },
       {
-          /*.name_string_ref=*/{},
-          /*.target_bank_id=*/{},
-          /*.flags=*/{},
-          /*.alloc_unit_bits=*/64,
-          /*.allocatable_count=*/{},
-          /*.fixed_location_base=*/{},
-          /*.fixed_location_count=*/{},
-          /*.physical_register_candidate_start=*/{},
-          /*.candidate_lookup=*/{},
-          /*.alias_set_id=*/1,
+          .name_string_ref = {},
+          .target_bank_id = {},
+          .flags = {},
+          .alloc_unit_bits = 64,
+          .allocatable_count = {},
+          .fixed_location_base = {},
+          .fixed_location_count = {},
+          .physical_register_candidate_start = {},
+          .candidate_lookup = {},
+          .alias_set_id = 1,
       },
       {},
   };
@@ -80,14 +80,10 @@ const loom_low_descriptor_set_t* ExplicitDescriptorSet() {
   };
   static const uint16_t kAtomicUnits[] = {0, 1, 0, 2, 3, 4, 5};
   static const loom_low_physical_register_t kPhysicalRegisters[] = {
-      {/*.name_string_ref=*/{}, /*.atomic_unit_start=*/0,
-       /*.atomic_unit_count=*/2},
-      {/*.name_string_ref=*/{}, /*.atomic_unit_start=*/2,
-       /*.atomic_unit_count=*/1},
-      {/*.name_string_ref=*/{}, /*.atomic_unit_start=*/3,
-       /*.atomic_unit_count=*/2},
-      {/*.name_string_ref=*/{}, /*.atomic_unit_start=*/5,
-       /*.atomic_unit_count=*/2},
+      {.name_string_ref = {}, .atomic_unit_start = 0, .atomic_unit_count = 2},
+      {.name_string_ref = {}, .atomic_unit_start = 2, .atomic_unit_count = 1},
+      {.name_string_ref = {}, .atomic_unit_start = 3, .atomic_unit_count = 2},
+      {.name_string_ref = {}, .atomic_unit_start = 5, .atomic_unit_count = 2},
   };
   static const loom_low_descriptor_set_t kDescriptorSet = [] {
     loom_low_descriptor_set_t descriptor_set = {};
@@ -107,17 +103,17 @@ const loom_low_descriptor_set_t* ExplicitDescriptorSet() {
 loom_low_move_location_t Location(uint32_t ordinal,
                                   uint16_t register_class_id = 0) {
   return loom_low_move_location_t{
-      /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-      /*.descriptor_reg_class_id=*/register_class_id,
-      /*.location=*/ordinal,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .descriptor_reg_class_id = register_class_id,
+      .location = ordinal,
   };
 }
 
 loom_low_move_t Move(uint32_t destination, uint32_t source,
                      uint16_t register_class_id = 0) {
   return loom_low_move_t{
-      /*.destination=*/Location(destination, register_class_id),
-      /*.source=*/Location(source, register_class_id),
+      .destination = Location(destination, register_class_id),
+      .source = Location(source, register_class_id),
   };
 }
 
@@ -126,8 +122,8 @@ loom_low_move_t MoveBetween(uint32_t destination,
                             uint32_t source,
                             uint16_t source_register_class_id) {
   return loom_low_move_t{
-      /*.destination=*/Location(destination, destination_register_class_id),
-      /*.source=*/Location(source, source_register_class_id),
+      .destination = Location(destination, destination_register_class_id),
+      .source = Location(source, source_register_class_id),
   };
 }
 
@@ -453,13 +449,13 @@ TEST(LowMoveSequenceTest, TracksExplicitAtomicAliasesInLocationSet) {
   const loom_low_move_location_t temporary = Location(3);
   const loom_low_move_location_t alias_probe = Location(1, 1);
   TemporaryResolver resolver = {
-      /*.locations=*/&temporary,
-      /*.count=*/1,
-      /*.occupancy_probe=*/&alias_probe,
+      .locations = &temporary,
+      .count = 1,
+      .occupancy_probe = &alias_probe,
   };
   const loom_low_move_sequence_options_t options = {
-      /*.descriptor_set=*/ExplicitDescriptorSet(),
-      /*.resolve_temporary=*/{ResolveTemporary, &resolver},
+      .descriptor_set = ExplicitDescriptorSet(),
+      .resolve_temporary = {ResolveTemporary, &resolver},
   };
   loom_low_move_t output[3] = {};
   iree_host_size_t output_count = 0;

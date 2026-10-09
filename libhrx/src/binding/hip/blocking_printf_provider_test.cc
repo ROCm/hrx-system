@@ -77,8 +77,8 @@ static uint64_t MakeDescriptor(uint64_t flags, iree_host_size_t length) {
 TEST(BlockingPrintfProviderTest, PublishesTypedEventsAndDeviceFailures) {
   ProviderRecorder recorder;
   const iree_hal_device_event_sink_t event_sink = {
-      /*.fn=*/CaptureEvent,
-      /*.user_data=*/&recorder,
+      .fn = CaptureEvent,
+      .user_data = &recorder,
   };
   iree_hip_blocking_printf_provider_t provider;
   iree_hip_blocking_printf_provider_initialize(
@@ -93,9 +93,9 @@ TEST(BlockingPrintfProviderTest, PublishesTypedEventsAndDeviceFailures) {
       (const iree_hal_hostcall_provider_extension_t*)base_extension;
 
   const iree_hal_hostcall_provider_device_info_t device_info = {
-      /*.physical_device_ordinal=*/3,
-      /*.execution_unit_count=*/1,
-      /*.maximum_resident_subgroup_count=*/1,
+      .physical_device_ordinal = 3,
+      .execution_unit_count = 1,
+      .maximum_resident_subgroup_count = 1,
   };
   iree_hal_hostcall_provider_requirements_t requirements;
   IREE_ASSERT_OK(extension->provider.query_requirements(
@@ -113,13 +113,13 @@ TEST(BlockingPrintfProviderTest, PublishesTypedEventsAndDeviceFailures) {
   const uint64_t device_address = (uint64_t)(uintptr_t)storage.data();
   const uint64_t notification_token = UINT64_C(0x12345678);
   const iree_hal_hostcall_notification_t notification = {
-      /*.type=*/IREE_HAL_HOSTCALL_NOTIFICATION_TYPE_HSA_SIGNAL,
-      /*.reserved=*/0,
-      /*.token=*/notification_token,
+      .type = IREE_HAL_HOSTCALL_NOTIFICATION_TYPE_HSA_SIGNAL,
+      .reserved = 0,
+      .token = notification_token,
   };
   const iree_hal_hostcall_error_callback_t error_callback = {
-      /*.fn=*/CaptureError,
-      /*.user_data=*/&recorder,
+      .fn = CaptureError,
+      .user_data = &recorder,
   };
   void* context = nullptr;
   IREE_ASSERT_OK(extension->provider.initialize(

@@ -334,16 +334,16 @@ TEST_F(ValueReplacementTest,
   const loom_type_t source = Pair(source_register, source_register);
   const loom_type_t target = Pair(target_register, target_register);
   const loom_type_value_remap_t other_remap = {
-      /*.source_values=*/&other_id,
-      /*.target_values=*/&other_target_id,
-      /*.count=*/1,
+      .source_values = &other_id,
+      .target_values = &other_target_id,
+      .count = 1,
   };
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&old_id_,
-      /*.target_values=*/&new_id_,
-      /*.count=*/1,
-      /*.flags=*/0,
-      /*.next=*/&other_remap,
+      .source_values = &old_id_,
+      .target_values = &new_id_,
+      .count = 1,
+      .flags = 0,
+      .next = &other_remap,
   };
   ASSERT_TRUE(
       loom_type_equal_after_value_remap(module_, source, target, &remap));
@@ -371,11 +371,11 @@ TEST_F(ValueReplacementTest,
   }
 
   const loom_type_value_remap_t absent_remap = {
-      /*.source_values=*/&old_id_,
-      /*.target_values=*/&absent_target_id,
-      /*.count=*/1,
-      /*.flags=*/0,
-      /*.next=*/&other_remap,
+      .source_values = &old_id_,
+      .target_values = &absent_target_id,
+      .count = 1,
+      .flags = 0,
+      .next = &other_remap,
   };
   {
     ScopedLookup lookup(module_, &absent_remap);
@@ -404,9 +404,9 @@ TEST_F(ValueReplacementTest, LookupLeavesNeedNoTraversalState) {
   const loom_type_t source = loom_type_table_get(&module_->types, source_id);
   const loom_type_t target = loom_type_table_get(&module_->types, target_id);
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&old_id_,
-      /*.target_values=*/&new_id_,
-      /*.count=*/1,
+      .source_values = &old_id_,
+      .target_values = &new_id_,
+      .count = 1,
   };
   const iree_host_size_t type_count = module_->types.count;
   const iree_host_size_t retained_bytes = module_->arena.used_allocation_size;
@@ -432,9 +432,9 @@ TEST_F(ValueReplacementTest,
     target = Pair(target, target);
   }
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&old_id_,
-      /*.target_values=*/&new_id_,
-      /*.count=*/1,
+      .source_values = &old_id_,
+      .target_values = &new_id_,
+      .count = 1,
   };
   const iree_host_size_t type_count = module_->types.count;
   const iree_host_size_t interner_count = module_->type_intern.count;
@@ -674,9 +674,9 @@ TEST_F(ValueReplacementTest, EncodingOverflowDoesNotChangeTheCarrier) {
   ExpectDependencies(carrier, {old_encoding});
 
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&old_encoding,
-      /*.target_values=*/&new_encoding,
-      /*.count=*/1,
+      .source_values = &old_encoding,
+      .target_values = &new_encoding,
+      .count = 1,
   };
   ScopedLookup lookup(module_, &remap);
   bool equal = true;

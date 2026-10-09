@@ -287,10 +287,10 @@ static iree_status_t RecordingProfileSinkEndSession(
 }
 
 static const iree_hal_profile_sink_vtable_t kRecordingProfileSinkVTable = {
-    /*.destroy=*/RecordingProfileSinkDestroy,
-    /*.begin_session=*/RecordingProfileSinkBeginSession,
-    /*.write=*/RecordingProfileSinkWrite,
-    /*.end_session=*/RecordingProfileSinkEndSession,
+    .destroy = RecordingProfileSinkDestroy,
+    .begin_session = RecordingProfileSinkBeginSession,
+    .write = RecordingProfileSinkWrite,
+    .end_session = RecordingProfileSinkEndSession,
 };
 
 static void RecordingProfileSinkInitialize(RecordingProfileSink* sink) {

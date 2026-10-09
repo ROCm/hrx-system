@@ -37,16 +37,16 @@ static const loom_target_fact_type_t kTestTargetFactType = {
 
 static void InitializeTestTargetFacts(loom_target_facts_t* out_facts) {
   *out_facts = {
-      /*.fact_type=*/&kTestTargetFactType,
-      /*.selector=*/0,
-      /*.explicit_fields=*/0,
-      /*.storage=*/
-      {
-          /*.snapshot=*/{/*.name=*/IREE_SVL("test")},
-          /*.export_plan=*/{/*.name=*/IREE_SVL("test")},
-          /*.config=*/{/*.name=*/IREE_SVL("test")},
-          /*.bundle=*/{/*.name=*/IREE_SVL("test")},
-      },
+      .fact_type = &kTestTargetFactType,
+      .selector = 0,
+      .explicit_fields = 0,
+      .storage =
+          {
+              .snapshot = {/*.name=*/IREE_SVL("test")},
+              .export_plan = {/*.name=*/IREE_SVL("test")},
+              .config = {/*.name=*/IREE_SVL("test")},
+              .bundle = {/*.name=*/IREE_SVL("test")},
+          },
   };
   loom_target_bundle_storage_rebind(&out_facts->storage);
 }
@@ -87,7 +87,7 @@ class GreedyRewriteTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
     loom_op_t* func_op = NULL;
     IREE_ASSERT_OK(loom_test_func_build(&module_builder, 0, 0, 0, callee, NULL,
                                         0, NULL, 0, NULL, 0, NULL, 0,
@@ -315,7 +315,7 @@ TEST_F(GreedyRewriteTest, ExplicitTargetFactsSetAnalysisScope) {
   loom_greedy_rewrite_driver_initialize(module_, &arena, fact_table, &driver);
 
   const loom_greedy_rewrite_options_t options = {
-      /*.max_iterations=*/{},
+      .max_iterations = {},
   };
   IREE_ASSERT_OK(loom_greedy_rewrite_run_region(
       &driver, function_, loom_func_like_body(function_), function_.op,

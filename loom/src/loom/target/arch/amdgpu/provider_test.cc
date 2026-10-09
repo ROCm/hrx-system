@@ -49,8 +49,8 @@ static ModulePtr ParseModule(iree_string_view_t source,
                              loom_context_t* context,
                              iree_arena_block_pool_t* block_pool) {
   loom_text_parse_options_t parse_options = {
-      /*.diagnostic_sink=*/{},
-      /*.max_errors=*/20,
+      .diagnostic_sink = {},
+      .max_errors = 20,
   };
   loom_module_t* module = nullptr;
   IREE_CHECK_OK(loom_text_parse(source, source_name, context, block_pool,
@@ -93,7 +93,7 @@ static ModulePtr ReadModuleBytecode(const std::vector<uint8_t>& bytes,
                                     loom_context_t* context,
                                     iree_arena_block_pool_t* block_pool) {
   loom_bytecode_read_options_t options = {
-      /*.diagnostic_sink=*/{},
+      .diagnostic_sink = {},
   };
   loom_bytecode_read_result_t result = {};
   loom_module_t* module = nullptr;
@@ -104,8 +104,8 @@ static ModulePtr ReadModuleBytecode(const std::vector<uint8_t>& bytes,
   IREE_ASSERT(result.error_count == 0);
   IREE_ASSERT(module != nullptr);
   const loom_verify_options_t verify_options = {
-      /*.sink=*/{},
-      /*.max_errors=*/20,
+      .sink = {},
+      .max_errors = 20,
   };
   loom_verify_result_t verify_result = {};
   IREE_CHECK_OK(loom_verify_module(module, &verify_options, &verify_result));
@@ -281,15 +281,15 @@ class AmdgpuProviderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_module_add_symbol(module.get(), target_name_id,
                                          &target_symbol_id));
     const loom_symbol_ref_t target_ref = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/target_symbol_id,
+        .module_id = 0,
+        .symbol_id = target_symbol_id,
     };
     loom_builder_t builder;
     loom_builder_initialize(module.get(), &module->arena,
                             loom_module_block(module.get()), &builder);
     const loom_resolved_target_t resolved_target = {
-        /*.provider=*/&loom_amdgpu_target_provider,
-        /*.facts=*/facts,
+        .provider = &loom_amdgpu_target_provider,
+        .facts = facts,
     };
     IREE_CHECK_OK(loom_amdgpu_target_provider.materialize_definition(
         &builder, &resolved_target, target_ref, LOOM_LOCATION_UNKNOWN));
@@ -314,8 +314,8 @@ class AmdgpuProviderTest : public ::testing::Test {
     const uint16_t symbol_id = loom_module_find_symbol(module, name_id);
     IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
     return (loom_symbol_ref_t){
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
   }
 
@@ -390,17 +390,17 @@ class AmdgpuProviderTest : public ::testing::Test {
         /*.create=*/loom_template_selection_create,
     };
     static const loom_pass_registry_t kPassRegistry = {
-        /*.descriptors=*/&kPassDescriptor,
-        /*.descriptor_count=*/1,
+        .descriptors = &kPassDescriptor,
+        .descriptor_count = 1,
     };
     const loom_codegen_pass_environment_options_t environment_options = {
-        /*.descriptor_registry=*/nullptr,
-        /*.lower_policy_registry=*/nullptr,
-        /*.legality_provider_list=*/nullptr,
-        /*.legalizer_registry=*/nullptr,
-        /*.math_policy_registry=*/nullptr,
-        /*.compile_report=*/nullptr,
-        /*.target_environment=*/&target_environment_,
+        .descriptor_registry = nullptr,
+        .lower_policy_registry = nullptr,
+        .legality_provider_list = nullptr,
+        .legalizer_registry = nullptr,
+        .math_policy_registry = nullptr,
+        .compile_report = nullptr,
+        .target_environment = &target_environment_,
     };
     loom_codegen_pass_environment_storage_t environment_storage = {};
     const loom_pass_environment_t environment =
@@ -408,11 +408,11 @@ class AmdgpuProviderTest : public ::testing::Test {
             &environment_options, /*function_versions=*/nullptr,
             &environment_storage);
     const loom_pass_tool_run_options_t options = {
-        /*.registry=*/&kPassRegistry,
-        /*.environment=*/environment,
-        /*.function_versions=*/nullptr,
-        /*.predicate_provider=*/{},
-        /*.block_pool=*/&block_pool_,
+        .registry = &kPassRegistry,
+        .environment = environment,
+        .function_versions = nullptr,
+        .predicate_provider = {},
+        .block_pool = &block_pool_,
     };
     loom_pass_run_result_t result = {};
     IREE_RETURN_IF_ERROR(loom_pass_tool_run_flat_pipeline(
@@ -458,7 +458,7 @@ TEST_F(AmdgpuProviderTest, ContributesHalKernelAbiMaterialization) {
   IREE_ASSERT_OK(AllocateModule(IREE_SV("pipeline"), &module));
 
   PipelineBuildData build_data = {
-      /*.environment=*/&target_environment_,
+      .environment = &target_environment_,
   };
   loom_op_t* pipeline_op = nullptr;
   IREE_ASSERT_OK(loom_pass_ir_build_pipeline(
@@ -879,8 +879,8 @@ TEST_F(AmdgpuProviderTest, ExhaustsSupportedProfileRelations) {
                                                      &analysis_arena_, &facts));
     ASSERT_NE(facts, nullptr);
     profiles.push_back({
-        /*.target_info=*/target_info,
-        /*.facts=*/facts,
+        .target_info = target_info,
+        .facts = facts,
     });
   }
 

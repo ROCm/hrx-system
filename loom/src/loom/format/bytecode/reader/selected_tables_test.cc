@@ -36,7 +36,7 @@ static const loom_encoding_family_descriptor_t kEncodingDescriptor = {
     /*.parameter_descriptors=*/kEncodingParameters,
 };
 static const loom_encoding_vtable_t kEncodingVtable = {
-    /*.descriptor=*/&kEncodingDescriptor,
+    .descriptor = &kEncodingDescriptor,
 };
 
 static iree_status_t AcceptDiagnostic(void* user_data,
@@ -406,9 +406,9 @@ TEST_F(BytecodeSelectedTablesTest, ResolvesExternalSymbolsByDenseSourceIndex) {
   IREE_ASSERT_OK(
       loom_module_add_symbol(module_, target_name_id, &target_symbol_id));
   ExternalSymbolResolver resolver = {
-      /*.expected_source_ordinal=*/0,
-      /*.target_ref=*/{/*.module_id=*/0, /*.symbol_id=*/target_symbol_id},
-      /*.invocation_count=*/0,
+      .expected_source_ordinal = 0,
+      .target_ref = {.module_id = 0, .symbol_id = target_symbol_id},
+      .invocation_count = 0,
   };
   loom_bytecode_selected_table_materializer_t materializer;
   loom_bytecode_selected_table_materializer_initialize(

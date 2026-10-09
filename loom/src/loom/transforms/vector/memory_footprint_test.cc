@@ -45,8 +45,8 @@ class VectorMemoryFootprintPassTest : public ::testing::Test {
 
   loom_module_t* Parse(iree_string_view_t source) {
     const loom_text_parse_options_t options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 20,
     };
     IREE_EXPECT_OK(
         loom_text_parse(source, IREE_SV("memory_footprint_test.loom"),

@@ -73,15 +73,15 @@ static iree_status_t FakeMapSlab(
 
   const uint64_t allocation_handle = mapper->next_allocation_handle++;
   *out_allocation_handle =
-      hsa_amd_vmem_alloc_handle_t{/*.handle=*/allocation_handle};
+      hsa_amd_vmem_alloc_handle_t{.handle = allocation_handle};
   const uint64_t slab_index =
       (reinterpret_cast<uintptr_t>(target_ptr) - mapper->reservation_base) /
       slab_size;
   mapper->mapped_slabs.push_back(FakeMappedSlab{
-      /*.index=*/slab_index,
-      /*.base_address=*/reinterpret_cast<uintptr_t>(target_ptr),
-      /*.slab_size=*/slab_size,
-      /*.allocation_handle=*/allocation_handle,
+      .index = slab_index,
+      .base_address = reinterpret_cast<uintptr_t>(target_ptr),
+      .slab_size = slab_size,
+      .allocation_handle = allocation_handle,
   });
   return iree_ok_status();
 }
@@ -96,28 +96,28 @@ static void FakeUnmapSlab(iree_hal_amdgpu_shadow_map_t* map,
       (reinterpret_cast<uintptr_t>(target_ptr) - mapper->reservation_base) /
       slab_size;
   mapper->unmapped_slabs.push_back(FakeMappedSlab{
-      /*.index=*/slab_index,
-      /*.base_address=*/reinterpret_cast<uintptr_t>(target_ptr),
-      /*.slab_size=*/slab_size,
-      /*.allocation_handle=*/allocation_handle.handle,
+      .index = slab_index,
+      .base_address = reinterpret_cast<uintptr_t>(target_ptr),
+      .slab_size = slab_size,
+      .allocation_handle = allocation_handle.handle,
   });
 }
 
 static iree_hal_amdgpu_shadow_map_mapper_t FakeShadowMapMapper(
     FakeMapper* mapper) {
   return iree_hal_amdgpu_shadow_map_mapper_t{
-      /*.user_data=*/mapper,
-      /*.reserve=*/FakeReserve,
-      /*.release_reservation=*/FakeReleaseReservation,
-      /*.map_slab=*/FakeMapSlab,
-      /*.unmap_slab=*/FakeUnmapSlab,
+      .user_data = mapper,
+      .reserve = FakeReserve,
+      .release_reservation = FakeReleaseReservation,
+      .map_slab = FakeMapSlab,
+      .unmap_slab = FakeUnmapSlab,
   };
 }
 
 static hsa_amd_memory_access_desc_t FakeAccessDesc() {
   return hsa_amd_memory_access_desc_t{
-      /*.permissions=*/HSA_ACCESS_PERMISSION_RW,
-      /*.agent_handle=*/hsa_agent_t{/*.handle=*/1},
+      .permissions = HSA_ACCESS_PERMISSION_RW,
+      .agent_handle = hsa_agent_t{.handle = 1},
   };
 }
 
@@ -126,16 +126,16 @@ static iree_hal_amdgpu_shadow_map_params_t DefaultParams(
   const uint32_t shadow_scale_shift =
       IREE_HAL_AMDGPU_SHADOW_MAP_DEFAULT_SCALE_SHIFT;
   return iree_hal_amdgpu_shadow_map_params_t{
-      /*.host_allocator=*/iree_allocator_system(),
-      /*.shadow_scale_shift=*/shadow_scale_shift,
-      /*.application_window_base=*/0x200000ull,
-      /*.shadow_size=*/1024,
-      /*.slab_size=*/64,
-      /*.mapping_mode=*/IREE_HAL_AMDGPU_SHADOW_MAP_MAPPING_MODE_SPARSE,
-      /*.initial_slab_value=*/0,
-      /*.access_desc_count=*/1,
-      /*.access_descs=*/access_desc,
-      /*.mapper=*/FakeShadowMapMapper(mapper),
+      .host_allocator = iree_allocator_system(),
+      .shadow_scale_shift = shadow_scale_shift,
+      .application_window_base = 0x200000ull,
+      .shadow_size = 1024,
+      .slab_size = 64,
+      .mapping_mode = IREE_HAL_AMDGPU_SHADOW_MAP_MAPPING_MODE_SPARSE,
+      .initial_slab_value = 0,
+      .access_desc_count = 1,
+      .access_descs = access_desc,
+      .mapper = FakeShadowMapMapper(mapper),
   };
 }
 

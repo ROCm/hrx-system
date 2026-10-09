@@ -14,9 +14,9 @@ namespace {
 
 TEST(WasmDescriptorFieldsTest, OptionalOffsetDistinguishesZeroFromAbsence) {
   const loom_named_attr_t entries[] = {{
-      /*.name_id=*/0,
-      /*.reserved=*/0,
-      /*.value=*/loom_attr_i64(0),
+      .name_id = 0,
+      .reserved = 0,
+      .value = loom_attr_i64(0),
   }};
   const auto attributes = loom_make_named_attr_slice(entries, 1);
   int evaluations = 0;
@@ -35,8 +35,8 @@ TEST(WasmDescriptorFieldsTest, OptionalOffsetDistinguishesZeroFromAbsence) {
 TEST(WasmDescriptorFieldsTest, NamedPayloadsFollowDictionaryOrder) {
   // Canonical spelling order is hi64, lo64; wire order is lo64, hi64.
   const loom_named_attr_t entries[] = {
-      {/*.name_id=*/0, /*.reserved=*/0, /*.value=*/loom_attr_i64(0x1234)},
-      {/*.name_id=*/1, /*.reserved=*/0, /*.value=*/loom_attr_i64(0x5678)},
+      {.name_id = 0, .reserved = 0, .value = loom_attr_i64(0x1234)},
+      {.name_id = 1, .reserved = 0, .value = loom_attr_i64(0x5678)},
   };
   const auto attributes = loom_make_named_attr_slice(entries, 2);
   int evaluations = 0;

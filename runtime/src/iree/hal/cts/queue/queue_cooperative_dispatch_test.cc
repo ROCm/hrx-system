@@ -198,9 +198,9 @@ TEST_P(QueueCooperativeDispatchTest, ReportedMaximumGridSynchronizes) {
   ASSERT_LE(dynamic_workgroup_local_memory, UINT32_MAX);
 
   const iree_hal_queue_dispatch_concurrency_params_t params = {
-      /*.workgroup_size=*/{kWorkgroupSize, 1, 1},
-      /*.dynamic_workgroup_local_memory=*/
-      (uint32_t)dynamic_workgroup_local_memory,
+      .workgroup_size = {kWorkgroupSize, 1, 1},
+      .dynamic_workgroup_local_memory =
+          (uint32_t)dynamic_workgroup_local_memory,
   };
   iree_hal_queue_dispatch_concurrency_t concurrency;
   iree_status_t status = iree_hal_queue_query_dispatch_concurrency(
@@ -283,14 +283,14 @@ TEST_P(QueueCooperativeDispatchTest,
 
   SemaphoreList completions(device_, {0, 0}, {1, 1});
   const iree_hal_semaphore_list_t first_signal = {
-      /*.count=*/1,
-      /*.semaphores=*/completions.semaphores.data(),
-      /*.payload_values=*/completions.payload_values.data(),
+      .count = 1,
+      .semaphores = completions.semaphores.data(),
+      .payload_values = completions.payload_values.data(),
   };
   const iree_hal_semaphore_list_t second_signal = {
-      /*.count=*/1,
-      /*.semaphores=*/completions.semaphores.data() + 1,
-      /*.payload_values=*/completions.payload_values.data() + 1,
+      .count = 1,
+      .semaphores = completions.semaphores.data() + 1,
+      .payload_values = completions.payload_values.data() + 1,
   };
   // No dependency edge orders these submissions. Each execution of the same
   // command buffer must therefore carry its own grid synchronization state.

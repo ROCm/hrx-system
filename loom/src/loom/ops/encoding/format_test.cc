@@ -48,7 +48,7 @@ static const loom_encoding_family_descriptor_t kTestSchemaEncodingDescriptor = {
     /*.parameter_descriptors=*/kTestSchemaEncodingParameters,
 };
 static const loom_encoding_vtable_t kTestSchemaEncodingVtable = {
-    /*.descriptor=*/&kTestSchemaEncodingDescriptor,
+    .descriptor = &kTestSchemaEncodingDescriptor,
 };
 
 static const loom_attr_descriptor_t kQuantizationParameters[] = {{
@@ -63,7 +63,7 @@ static const loom_encoding_family_descriptor_t kQuantizationDescriptor = {
     /*.parameter_descriptors=*/kQuantizationParameters,
 };
 static const loom_encoding_vtable_t kQuantizationEncodingVtable = {
-    /*.descriptor=*/&kQuantizationDescriptor,
+    .descriptor = &kQuantizationDescriptor,
 };
 
 class EncodingFormatTest : public ::testing::Test {

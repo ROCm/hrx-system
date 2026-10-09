@@ -110,7 +110,7 @@ TEST(AmdgpuKernelEntryTest, EmptyEnvelopePreservesBodyStorage) {
       loom_amdgpu_kernel_entry_envelope_for_properties(&properties);
   const uint8_t body[] = {0x00, 0x00, 0xb0, 0xbf};
   const loom_amdgpu_hsaco_text_fixup_t body_fixup = {
-      /*.kind=*/LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,
+      .kind = LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,
   };
 
   TestArena arena;

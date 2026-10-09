@@ -100,10 +100,10 @@ TEST(HeapAllocatorTest, ProvidesCoherentUnifiedMemory) {
             expected_atomic_operations.system_scope_64);
 
   const iree_hal_buffer_params_t params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
   };
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(
@@ -168,8 +168,8 @@ static iree_status_t TrackingAllocatorCtl(void* self,
 
 static iree_allocator_t TrackingAllocator(TrackingAllocatorState* state) {
   return iree_allocator_t{
-      /*.self=*/state,
-      /*.ctl=*/TrackingAllocatorCtl,
+      .self = state,
+      .ctl = TrackingAllocatorCtl,
   };
 }
 
@@ -236,10 +236,10 @@ TEST(HeapAllocatorTest, FreesSplitStorageAsItsDataAllocatorReturnedIt) {
       host_state.live_allocations.size();
 
   const iree_hal_buffer_params_t params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
   };
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(

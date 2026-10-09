@@ -57,7 +57,7 @@ class DominanceTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
     loom_op_t* func_op = NULL;
     IREE_ASSERT_OK(loom_test_func_build(&module_builder, 0, 0, 0, callee, NULL,
                                         0, NULL, 0, NULL, 0, NULL, 0,
@@ -680,22 +680,22 @@ TEST_F(DominanceTest, WalkMaintainsDominatorScopesAcrossCfgAndNesting) {
     std::vector<loom_dominance_walk_scope_flags_t> flags;
   } state;
   loom_dominance_walk_callbacks_t callbacks = {
-      /*.user_data=*/&state,
-      /*.enter_scope=*/
-      [](void* user_data, loom_dominance_walk_scope_flags_t flags) {
-        auto* state = static_cast<ScopeState*>(user_data);
-        ++state->depth;
-        ++state->enter_count;
-        state->flags.push_back(flags);
-        return iree_ok_status();
-      },
-      /*.leave_scope=*/
-      [](void* user_data) {
-        auto* state = static_cast<ScopeState*>(user_data);
-        state->flags.pop_back();
-        --state->depth;
-        ++state->leave_count;
-      },
+      .user_data = &state,
+      .enter_scope =
+          [](void* user_data, loom_dominance_walk_scope_flags_t flags) {
+            auto* state = static_cast<ScopeState*>(user_data);
+            ++state->depth;
+            ++state->enter_count;
+            state->flags.push_back(flags);
+            return iree_ok_status();
+          },
+      .leave_scope =
+          [](void* user_data) {
+            auto* state = static_cast<ScopeState*>(user_data);
+            state->flags.pop_back();
+            --state->depth;
+            ++state->leave_count;
+          },
   };
   loom_dominance_walk_t* walk = nullptr;
   IREE_ASSERT_OK(loom_dominance_walk_create(module_, body_, callbacks,

@@ -79,11 +79,11 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   const loom_liveness_value_class_t value_class =
       RegisterValueClass(descriptor_set_id);
   const loom_liveness_interval_t interval = {
-      /*.value_id=*/value,
-      /*.start_point=*/0,
-      /*.end_point=*/8,
-      /*.value_class=*/value_class,
-      /*.unit_count=*/2,
+      .value_id = value,
+      .start_point = 0,
+      .end_point = 8,
+      .value_class = value_class,
+      .unit_count = 2,
   };
   loom_value_id_t value_ids[] = {value};
   loom_local_value_domain_t value_domain = {};
@@ -113,8 +113,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
 
   loom_low_placement_relation_range_t placement_ranges[] = {
       {
-          /*.start=*/0,
-          /*.count=*/0,
+          .start = 0,
+          .count = 0,
       },
   };
   loom_low_placement_table_t placement = {};
@@ -146,22 +146,22 @@ TEST_F(LowAllocationIntervalAssignmentTest,
 
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
-      /*.module=*/module,
-      /*.body=*/nullptr,
-      /*.function_op=*/&function_op,
-      /*.target=*/&target,
-      /*.liveness=*/&liveness,
-      /*.value_domain=*/&value_domain,
-      /*.schedule=*/nullptr,
-      /*.placement=*/&placement,
-      /*.preferences=*/nullptr,
-      /*.target_constraints=*/&target_constraints,
-      /*.entry_locations=*/nullptr,
-      /*.entry_location_count=*/0,
-      /*.storage_transport=*/nullptr,
-      /*.unit_liveness=*/&unit_liveness,
-      /*.storage_leases=*/&storage_leases,
-      /*.arena=*/&arena_,
+      .module = module,
+      .body = nullptr,
+      .function_op = &function_op,
+      .target = &target,
+      .liveness = &liveness,
+      .value_domain = &value_domain,
+      .schedule = nullptr,
+      .placement = &placement,
+      .preferences = nullptr,
+      .target_constraints = &target_constraints,
+      .entry_locations = nullptr,
+      .entry_location_count = 0,
+      .storage_transport = nullptr,
+      .unit_liveness = &unit_liveness,
+      .storage_leases = &storage_leases,
+      .arena = &arena_,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
   // The enclosing allocator may retain facts in the scratch arena's prefix.
@@ -217,25 +217,25 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       RegisterValueClass(descriptor_set_id);
   const loom_liveness_interval_t intervals[] = {
       {
-          /*.value_id=*/first_value,
-          /*.start_point=*/0,
-          /*.end_point=*/4,
-          /*.value_class=*/value_class,
-          /*.unit_count=*/1,
+          .value_id = first_value,
+          .start_point = 0,
+          .end_point = 4,
+          .value_class = value_class,
+          .unit_count = 1,
       },
       {
-          /*.value_id=*/second_value,
-          /*.start_point=*/0,
-          /*.end_point=*/4,
-          /*.value_class=*/value_class,
-          /*.unit_count=*/1,
+          .value_id = second_value,
+          .start_point = 0,
+          .end_point = 4,
+          .value_class = value_class,
+          .unit_count = 1,
       },
       {
-          /*.value_id=*/aggregate_value,
-          /*.start_point=*/5,
-          /*.end_point=*/8,
-          /*.value_class=*/value_class,
-          /*.unit_count=*/2,
+          .value_id = aggregate_value,
+          .start_point = 5,
+          .end_point = 8,
+          .value_class = value_class,
+          .unit_count = 2,
       },
   };
   loom_value_id_t value_ids[] = {first_value, second_value, aggregate_value};
@@ -282,34 +282,34 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
   loom_low_physical_register_t physical_registers[] = {
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/0,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 0,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/2,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 2,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/4,
-          /*.atomic_unit_count=*/4,
-          /*.reserved=*/0,
-          /*.view_lookup=*/
-          {/*.ordinal_start=*/0, /*.class_base=*/0,
-           /*.class_count=*/1},
+          .name_string_ref = 0,
+          .atomic_unit_start = 4,
+          .atomic_unit_count = 4,
+          .reserved = 0,
+          .view_lookup = {.ordinal_start = 0,
+                          .class_base = 0,
+                          .class_count = 1},
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/8,
-          /*.atomic_unit_count=*/4,
-          /*.reserved=*/0,
-          /*.view_lookup=*/
-          {/*.ordinal_start=*/1, /*.class_base=*/0,
-           /*.class_count=*/0},
+          .name_string_ref = 0,
+          .atomic_unit_start = 8,
+          .atomic_unit_count = 4,
+          .reserved = 0,
+          .view_lookup = {.ordinal_start = 1,
+                          .class_base = 0,
+                          .class_count = 0},
       },
   };
   reg_class.candidate_lookup.register_count = 2;
@@ -320,18 +320,18 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   const uint32_t view_ordinals[] = {0, 1};
   const loom_low_physical_register_view_t physical_register_views[] = {
       {
-          /*.physical_register_id=*/2,
-          /*.reg_class_id=*/0,
-          /*.unit_candidate_ordinal_start=*/0,
-          /*.unit_count=*/2,
-          /*.packing_rank=*/0,
+          .physical_register_id = 2,
+          .reg_class_id = 0,
+          .unit_candidate_ordinal_start = 0,
+          .unit_count = 2,
+          .packing_rank = 0,
       },
       {
-          /*.physical_register_id=*/3,
-          /*.reg_class_id=*/0,
-          /*.unit_candidate_ordinal_start=*/2,
-          /*.unit_count=*/2,
-          /*.packing_rank=*/0,
+          .physical_register_id = 3,
+          .reg_class_id = 0,
+          .unit_candidate_ordinal_start = 2,
+          .unit_count = 2,
+          .packing_rank = 0,
       },
   };
   const uint16_t physical_register_view_unit_candidate_ordinals[] = {1, 0, 0,
@@ -375,22 +375,22 @@ TEST_F(LowAllocationIntervalAssignmentTest,
 
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
-      /*.module=*/module,
-      /*.body=*/nullptr,
-      /*.function_op=*/&function_op,
-      /*.target=*/&target,
-      /*.liveness=*/&liveness,
-      /*.value_domain=*/&value_domain,
-      /*.schedule=*/nullptr,
-      /*.placement=*/&placement,
-      /*.preferences=*/nullptr,
-      /*.target_constraints=*/&target_constraints,
-      /*.entry_locations=*/nullptr,
-      /*.entry_location_count=*/0,
-      /*.storage_transport=*/nullptr,
-      /*.unit_liveness=*/&unit_liveness,
-      /*.storage_leases=*/&storage_leases,
-      /*.arena=*/&arena_,
+      .module = module,
+      .body = nullptr,
+      .function_op = &function_op,
+      .target = &target,
+      .liveness = &liveness,
+      .value_domain = &value_domain,
+      .schedule = nullptr,
+      .placement = &placement,
+      .preferences = nullptr,
+      .target_constraints = &target_constraints,
+      .entry_locations = nullptr,
+      .entry_location_count = 0,
+      .storage_transport = nullptr,
+      .unit_liveness = &unit_liveness,
+      .storage_leases = &storage_leases,
+      .arena = &arena_,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
@@ -440,18 +440,18 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       RegisterValueClass(descriptor_set_id);
   const loom_liveness_interval_t intervals[] = {
       {
-          /*.value_id=*/source_value,
-          /*.start_point=*/0,
-          /*.end_point=*/6,
-          /*.value_class=*/value_class,
-          /*.unit_count=*/1,
+          .value_id = source_value,
+          .start_point = 0,
+          .end_point = 6,
+          .value_class = value_class,
+          .unit_count = 1,
       },
       {
-          /*.value_id=*/result_value,
-          /*.start_point=*/2,
-          /*.end_point=*/6,
-          /*.value_class=*/value_class,
-          /*.unit_count=*/1,
+          .value_id = result_value,
+          .start_point = 2,
+          .end_point = 6,
+          .value_class = value_class,
+          .unit_count = 1,
       },
   };
   loom_value_id_t value_ids[] = {source_value, result_value};
@@ -486,22 +486,22 @@ TEST_F(LowAllocationIntervalAssignmentTest,
                    LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
   loom_low_placement_relation_range_t ranges_by_result[] = {
       {
-          /*.start=*/0,
-          /*.count=*/0,
+          .start = 0,
+          .count = 0,
       },
       {
-          /*.start=*/0,
-          /*.count=*/1,
+          .start = 0,
+          .count = 1,
       },
   };
   loom_low_placement_relation_range_t ranges_by_source[] = {
       {
-          /*.start=*/0,
-          /*.count=*/1,
+          .start = 0,
+          .count = 1,
       },
       {
-          /*.start=*/1,
-          /*.count=*/0,
+          .start = 1,
+          .count = 0,
       },
   };
   loom_low_placement_table_t placement = {};
@@ -540,16 +540,16 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       &arena_, &target_constraints));
   const loom_low_allocation_fixed_value_t fixed_values[] = {
       {
-          /*.value_id=*/source_value,
-          /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-          /*.location_base=*/3,
-          /*.location_count=*/1,
+          .value_id = source_value,
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_base = 3,
+          .location_count = 1,
       },
       {
-          /*.value_id=*/result_value,
-          /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-          /*.location_base=*/3,
-          /*.location_count=*/1,
+          .value_id = result_value,
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_base = 3,
+          .location_count = 1,
       },
   };
   loom_local_value_domain_t value_domain = {};
@@ -567,22 +567,22 @@ TEST_F(LowAllocationIntervalAssignmentTest,
 
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
-      /*.module=*/module,
-      /*.body=*/nullptr,
-      /*.function_op=*/&function_op,
-      /*.target=*/&target,
-      /*.liveness=*/&liveness,
-      /*.value_domain=*/&value_domain,
-      /*.schedule=*/nullptr,
-      /*.placement=*/&placement,
-      /*.preferences=*/nullptr,
-      /*.target_constraints=*/&target_constraints,
-      /*.entry_locations=*/nullptr,
-      /*.entry_location_count=*/0,
-      /*.storage_transport=*/nullptr,
-      /*.unit_liveness=*/&unit_liveness,
-      /*.storage_leases=*/&storage_leases,
-      /*.arena=*/&arena_,
+      .module = module,
+      .body = nullptr,
+      .function_op = &function_op,
+      .target = &target,
+      .liveness = &liveness,
+      .value_domain = &value_domain,
+      .schedule = nullptr,
+      .placement = &placement,
+      .preferences = nullptr,
+      .target_constraints = &target_constraints,
+      .entry_locations = nullptr,
+      .entry_location_count = 0,
+      .storage_transport = nullptr,
+      .unit_liveness = &unit_liveness,
+      .storage_leases = &storage_leases,
+      .arena = &arena_,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(

@@ -143,16 +143,16 @@ static void iree_hal_routing_test_pool_trim(
 }
 
 static const iree_hal_pool_vtable_t iree_hal_routing_test_pool_vtable = {
-    /*.destroy=*/iree_hal_routing_test_pool_destroy,
-    /*.acquire_reservations=*/iree_hal_routing_test_pool_acquire_reservations,
-    /*.release_reservations=*/iree_hal_routing_test_pool_release_reservations,
-    /*.materialize_reservations=*/
-    iree_hal_routing_test_pool_materialize_reservations,
-    /*.query_capabilities=*/iree_hal_routing_test_pool_query_capabilities,
-    /*.validate_asan=*/nullptr,
-    /*.query_stats=*/iree_hal_routing_test_pool_query_stats,
-    /*.trim=*/iree_hal_routing_test_pool_trim,
-    /*.advise_asan_reservations=*/nullptr,
+    .destroy = iree_hal_routing_test_pool_destroy,
+    .acquire_reservations = iree_hal_routing_test_pool_acquire_reservations,
+    .release_reservations = iree_hal_routing_test_pool_release_reservations,
+    .materialize_reservations =
+        iree_hal_routing_test_pool_materialize_reservations,
+    .query_capabilities = iree_hal_routing_test_pool_query_capabilities,
+    .validate_asan = nullptr,
+    .query_stats = iree_hal_routing_test_pool_query_stats,
+    .trim = iree_hal_routing_test_pool_trim,
+    .advise_asan_reservations = nullptr,
 };
 
 static iree_hal_routing_test_pool_t* CreateRoutingTestPool(

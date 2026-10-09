@@ -219,7 +219,7 @@ TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_text(&report, &options, &builder));
@@ -408,7 +408,7 @@ TEST(CompileReportFormatTest, FormatsWaitPlanningRows) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_text(&report, &options, &builder));

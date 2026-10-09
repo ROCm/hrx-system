@@ -89,8 +89,8 @@ class TemplateSelectionQueryTest : public ::testing::Test {
     IREE_CHECK_OK(loom_template_provider_catalog_build_local(
         &local_catalog, module, &fact_table));
     const loom_symbol_ref_t family = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/FindSymbol(module, family_name),
+        .module_id = 0,
+        .symbol_id = FindSymbol(module, family_name),
     };
     const loom_template_provider_slice_t providers =
         loom_template_provider_catalog_lookup(&local_catalog, family);
@@ -134,11 +134,11 @@ class TemplateSelectionQueryTest : public ::testing::Test {
     }
     loom_template_selection_query_result_t result = {};
     const loom_template_selection_query_options_t query_options = {
-        /*.mode=*/mode,
-        /*.catalog=*/&catalog,
-        /*.function_versions=*/nullptr,
-        /*.origin_count=*/origin_count,
-        /*.root_symbol_ids=*/{roots.begin(), roots.size()},
+        .mode = mode,
+        .catalog = &catalog,
+        .function_versions = nullptr,
+        .origin_count = origin_count,
+        .root_symbol_ids = {roots.begin(), roots.size()},
     };
     IREE_EXPECT_OK(loom_template_selection_query(
         module, &query_options, &block_pool_, &arena_, &result));
@@ -242,9 +242,8 @@ func.def public @entry(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) 
   const loom_template_provider_summary_t source_provider = ExternalizeProvider(
       source.get(), IREE_SV("source.family"), IREE_SV("source.provider"), 11);
   const loom_symbol_ref_t target_family = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/
-      FindSymbol(application.get(), IREE_SV("application.family")),
+      .module_id = 0,
+      .symbol_id = FindSymbol(application.get(), IREE_SV("application.family")),
   };
   loom_template_provider_summary_t external = {};
   IREE_ASSERT_OK(loom_template_provider_summary_bind_family(
@@ -414,8 +413,8 @@ func.def public @entry(%x: i32) -> (i32) {
       &catalog, module.get(), &fact_table));
   loom_template_selection_query_result_t final_result = {};
   const loom_template_selection_query_options_t query_options = {
-      /*.mode=*/LOOM_TEMPLATE_SELECTION_MODE_FINAL,
-      /*.catalog=*/&catalog,
+      .mode = LOOM_TEMPLATE_SELECTION_MODE_FINAL,
+      .catalog = &catalog,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,

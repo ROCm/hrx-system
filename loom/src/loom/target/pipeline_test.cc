@@ -280,7 +280,7 @@ class TargetPipelineTest : public ::testing::Test {
                                       loom_op_t* pipeline_op) {
     PipelineRunCounts counts = {};
     PipelineRunCountContext count_context = {
-        /*.module=*/module,
+        .module = module,
     };
     loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
     IREE_EXPECT_OK(loom_walk_region(
@@ -388,9 +388,9 @@ TEST_F(TargetPipelineTest, DiagnosticArtifactsPreserveRawSourceBoundary) {
 TEST_F(TargetPipelineTest, OperandFormDiagnosticsBuildsSourceToLowOption) {
   ModulePtr module = AllocateModule(IREE_SV("pipeline"));
   const loom_target_pipeline_options_t options = {
-      /*.source_to_low_max_errors=*/{},
-      /*.source_to_low_legality_diagnostic_flags=*/
-      LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_OPERAND_FORM,
+      .source_to_low_max_errors = {},
+      .source_to_low_legality_diagnostic_flags =
+          LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_OPERAND_FORM,
   };
 
   loom_op_t* pipeline_op = nullptr;
@@ -411,15 +411,15 @@ TEST_F(TargetPipelineTest, OperandFormDiagnosticsBuildsSourceToLowOption) {
 TEST_F(TargetPipelineTest, TrapReportingBuildsSourceToLowOption) {
   ModulePtr module = AllocateModule(IREE_SV("pipeline"));
   const loom_target_pipeline_options_t options = {
-      /*.source_to_low_max_errors=*/{},
-      /*.source_to_low_legality_diagnostic_flags=*/{},
-      /*.control_flow_lowering=*/{},
-      /*.sanitizer=*/
-      {
-          /*.checks=*/0,
-          /*.flags=*/0,
-          /*.reporting_mode=*/LOOM_SANITIZER_REPORTING_MODE_TRAP,
-      },
+      .source_to_low_max_errors = {},
+      .source_to_low_legality_diagnostic_flags = {},
+      .control_flow_lowering = {},
+      .sanitizer =
+          {
+              .checks = 0,
+              .flags = 0,
+              .reporting_mode = LOOM_SANITIZER_REPORTING_MODE_TRAP,
+          },
   };
 
   loom_op_t* pipeline_op = nullptr;
@@ -440,15 +440,15 @@ TEST_F(TargetPipelineTest, TrapReportingBuildsSourceToLowOption) {
 TEST_F(TargetPipelineTest, ReportOnlyBuildsSourceToLowOption) {
   ModulePtr module = AllocateModule(IREE_SV("pipeline"));
   const loom_target_pipeline_options_t options = {
-      /*.source_to_low_max_errors=*/{},
-      /*.source_to_low_legality_diagnostic_flags=*/{},
-      /*.control_flow_lowering=*/{},
-      /*.sanitizer=*/
-      {
-          /*.checks=*/0,
-          /*.flags=*/0,
-          /*.reporting_mode=*/LOOM_SANITIZER_REPORTING_MODE_REPORT_ONLY,
-      },
+      .source_to_low_max_errors = {},
+      .source_to_low_legality_diagnostic_flags = {},
+      .control_flow_lowering = {},
+      .sanitizer =
+          {
+              .checks = 0,
+              .flags = 0,
+              .reporting_mode = LOOM_SANITIZER_REPORTING_MODE_REPORT_ONLY,
+          },
   };
 
   loom_op_t* pipeline_op = nullptr;
@@ -468,14 +468,15 @@ TEST_F(TargetPipelineTest, ReportOnlyBuildsSourceToLowOption) {
 TEST_F(TargetPipelineTest, EnabledChecksBuildSanitizerPassSlots) {
   ModulePtr module = AllocateModule(IREE_SV("pipeline"));
   const loom_target_pipeline_options_t options = {
-      /*.source_to_low_max_errors=*/{},
-      /*.source_to_low_legality_diagnostic_flags=*/{},
-      /*.control_flow_lowering=*/{},
-      /*.sanitizer=*/
-      {
-          /*.checks=*/LOOM_SANITIZER_CHECK_ACCESS | LOOM_SANITIZER_CHECK_VALUE |
-              LOOM_SANITIZER_CHECK_OPERATION,
-      },
+      .source_to_low_max_errors = {},
+      .source_to_low_legality_diagnostic_flags = {},
+      .control_flow_lowering = {},
+      .sanitizer =
+          {
+              .checks = LOOM_SANITIZER_CHECK_ACCESS |
+                        LOOM_SANITIZER_CHECK_VALUE |
+                        LOOM_SANITIZER_CHECK_OPERATION,
+          },
   };
 
   loom_op_t* pipeline_op = nullptr;
@@ -505,13 +506,13 @@ TEST_F(TargetPipelineTest, EnabledChecksBuildSanitizerPassSlots) {
 TEST_F(TargetPipelineTest, RaceChecksBuildRaceObservationPassSlot) {
   ModulePtr module = AllocateModule(IREE_SV("pipeline"));
   const loom_target_pipeline_options_t options = {
-      /*.source_to_low_max_errors=*/{},
-      /*.source_to_low_legality_diagnostic_flags=*/{},
-      /*.control_flow_lowering=*/{},
-      /*.sanitizer=*/
-      {
-          /*.checks=*/LOOM_SANITIZER_CHECK_RACE,
-      },
+      .source_to_low_max_errors = {},
+      .source_to_low_legality_diagnostic_flags = {},
+      .control_flow_lowering = {},
+      .sanitizer =
+          {
+              .checks = LOOM_SANITIZER_CHECK_RACE,
+          },
   };
 
   loom_op_t* pipeline_op = nullptr;
@@ -533,13 +534,13 @@ TEST_F(TargetPipelineTest, RaceChecksBuildRaceObservationPassSlot) {
 TEST_F(TargetPipelineTest, UnknownCheckBitsFailValidation) {
   ModulePtr module = AllocateModule(IREE_SV("pipeline"));
   const loom_target_pipeline_options_t options = {
-      /*.source_to_low_max_errors=*/{},
-      /*.source_to_low_legality_diagnostic_flags=*/{},
-      /*.control_flow_lowering=*/{},
-      /*.sanitizer=*/
-      {
-          /*.checks=*/1ull << 63,
-      },
+      .source_to_low_max_errors = {},
+      .source_to_low_legality_diagnostic_flags = {},
+      .control_flow_lowering = {},
+      .sanitizer =
+          {
+              .checks = 1ull << 63,
+          },
   };
 
   loom_op_t* pipeline_op = nullptr;
@@ -554,15 +555,15 @@ TEST_F(TargetPipelineTest, UnknownCheckBitsFailValidation) {
 TEST_F(TargetPipelineTest, UnknownReportingModeFailsValidation) {
   ModulePtr module = AllocateModule(IREE_SV("pipeline"));
   const loom_target_pipeline_options_t options = {
-      /*.source_to_low_max_errors=*/{},
-      /*.source_to_low_legality_diagnostic_flags=*/{},
-      /*.control_flow_lowering=*/{},
-      /*.sanitizer=*/
-      {
-          /*.checks=*/0,
-          /*.flags=*/0,
-          /*.reporting_mode=*/(loom_sanitizer_reporting_mode_t)99,
-      },
+      .source_to_low_max_errors = {},
+      .source_to_low_legality_diagnostic_flags = {},
+      .control_flow_lowering = {},
+      .sanitizer =
+          {
+              .checks = 0,
+              .flags = 0,
+              .reporting_mode = (loom_sanitizer_reporting_mode_t)99,
+          },
   };
 
   loom_op_t* pipeline_op = nullptr;

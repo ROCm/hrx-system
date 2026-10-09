@@ -28,7 +28,7 @@ static const loom_encoding_family_descriptor_t kLayoutDescriptor = {
     /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
 };
 static const loom_encoding_vtable_t kLayoutVtable = {
-    /*.descriptor=*/&kLayoutDescriptor,
+    .descriptor = &kLayoutDescriptor,
 };
 
 class TypePropagationTest : public ::testing::Test {
@@ -75,7 +75,7 @@ class TypePropagationTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t symbol = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    loom_symbol_ref_t symbol = {.module_id = 0, .symbol_id = symbol_id};
     loom_op_t* func_op = NULL;
     IREE_ASSERT_OK(loom_test_func_build(&module_builder, 0, 0, 0, symbol, NULL,
                                         0, NULL, 0, NULL, 0, NULL, 0,

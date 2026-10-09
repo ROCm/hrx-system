@@ -195,12 +195,12 @@ TEST_F(ReplayDispatchTest, FamilyConstructorsReplayNativeOutput) {
       {0.0f, 0.0f, 0.0f, 0.0f},
   };
   const iree_hal_buffer_params_t buffer_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE |
-          IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
-          IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+               IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
+               IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
   iree_hal_buffer_ref_t binding_refs[3] = {};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(buffers_); ++i) {

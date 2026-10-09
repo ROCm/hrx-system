@@ -120,9 +120,9 @@ iree_status_t RejectSecondHostCallQueueHostCall(
   wait_semaphores[wait_semaphore_list.count] = queue->first_call_gate;
   wait_values[wait_semaphore_list.count] = queue->first_call_gate_value;
   const iree_hal_semaphore_list_t gated_waits = {
-      /*.count=*/wait_semaphore_list.count + 1,
-      /*.semaphores=*/wait_semaphores.data(),
-      /*.payload_values=*/wait_values.data(),
+      .count = wait_semaphore_list.count + 1,
+      .semaphores = wait_semaphores.data(),
+      .payload_values = wait_values.data(),
   };
   iree_status_t status = iree_hal_queue_host_call(
       queue->target, gated_waits, signal_semaphore_list, call, args, flags);
@@ -138,22 +138,22 @@ iree_status_t RejectSecondHostCallQueueFlush(iree_hal_queue_t* base_queue) {
 }
 
 const iree_hal_queue_vtable_t kRejectSecondHostCallQueueVtable = {
-    /*.destroy=*/DestroyRejectSecondHostCallQueue,
-    /*.barrier=*/RejectSecondHostCallQueueBarrier,
-    /*.execute=*/nullptr,
-    /*.host_call=*/RejectSecondHostCallQueueHostCall,
-    /*.query_dispatch_concurrency=*/nullptr,
-    /*.dispatch=*/nullptr,
-    /*.atomic_wait=*/nullptr,
-    /*.atomic_store=*/nullptr,
-    /*.atomic_rmw=*/nullptr,
-    /*.timestamp=*/nullptr,
-    /*.flush=*/RejectSecondHostCallQueueFlush,
-    /*.alloca=*/nullptr,
-    /*.dealloca=*/nullptr,
-    /*.transfer=*/nullptr,
-    /*.read=*/nullptr,
-    /*.write=*/nullptr,
+    .destroy = DestroyRejectSecondHostCallQueue,
+    .barrier = RejectSecondHostCallQueueBarrier,
+    .execute = nullptr,
+    .host_call = RejectSecondHostCallQueueHostCall,
+    .query_dispatch_concurrency = nullptr,
+    .dispatch = nullptr,
+    .atomic_wait = nullptr,
+    .atomic_store = nullptr,
+    .atomic_rmw = nullptr,
+    .timestamp = nullptr,
+    .flush = RejectSecondHostCallQueueFlush,
+    .alloca = nullptr,
+    .dealloca = nullptr,
+    .transfer = nullptr,
+    .read = nullptr,
+    .write = nullptr,
 };
 
 void InitializeRejectSecondHostCallQueue(iree_hal_queue_t* target,
@@ -182,14 +182,14 @@ void DestroyAtomicPreflightExecutable(iree_hal_executable_t* executable) {
 }
 
 const iree_hal_executable_vtable_t kAtomicPreflightExecutableVtable = {
-    /*.destroy=*/DestroyAtomicPreflightExecutable,
-    /*.function_count=*/nullptr,
-    /*.function_info=*/nullptr,
-    /*.function_parameters=*/nullptr,
-    /*.lookup_function_by_name=*/nullptr,
-    /*.try_lookup_global_by_name=*/nullptr,
-    /*.global_info=*/nullptr,
-    /*.global_buffer=*/nullptr,
+    .destroy = DestroyAtomicPreflightExecutable,
+    .function_count = nullptr,
+    .function_info = nullptr,
+    .function_parameters = nullptr,
+    .lookup_function_by_name = nullptr,
+    .try_lookup_global_by_name = nullptr,
+    .global_info = nullptr,
+    .global_buffer = nullptr,
 };
 
 // Queue wrapper that gives one cooperative workgroup concurrent residency and
@@ -259,8 +259,8 @@ iree_status_t AtomicPreflightQueueQueryDispatchConcurrency(
          sizeof(queue->queried_workgroup_size));
   queue->concurrency_query_count.fetch_add(1, std::memory_order_acq_rel);
   *out_concurrency = {
-      /*.scheduling_domain_count=*/1,
-      /*.maximum_concurrent_workgroup_count_per_domain=*/1,
+      .scheduling_domain_count = 1,
+      .maximum_concurrent_workgroup_count_per_domain = 1,
   };
   return iree_ok_status();
 }
@@ -293,23 +293,22 @@ iree_status_t AtomicPreflightQueueFlush(iree_hal_queue_t* base_queue) {
 }
 
 const iree_hal_queue_vtable_t kAtomicPreflightQueueVtable = {
-    /*.destroy=*/DestroyAtomicPreflightQueue,
-    /*.barrier=*/AtomicPreflightQueueBarrier,
-    /*.execute=*/nullptr,
-    /*.host_call=*/AtomicPreflightQueueHostCall,
-    /*.query_dispatch_concurrency=*/
-    AtomicPreflightQueueQueryDispatchConcurrency,
-    /*.dispatch=*/AtomicPreflightQueueDispatch,
-    /*.atomic_wait=*/nullptr,
-    /*.atomic_store=*/nullptr,
-    /*.atomic_rmw=*/nullptr,
-    /*.timestamp=*/nullptr,
-    /*.flush=*/AtomicPreflightQueueFlush,
-    /*.alloca=*/nullptr,
-    /*.dealloca=*/nullptr,
-    /*.transfer=*/nullptr,
-    /*.read=*/nullptr,
-    /*.write=*/nullptr,
+    .destroy = DestroyAtomicPreflightQueue,
+    .barrier = AtomicPreflightQueueBarrier,
+    .execute = nullptr,
+    .host_call = AtomicPreflightQueueHostCall,
+    .query_dispatch_concurrency = AtomicPreflightQueueQueryDispatchConcurrency,
+    .dispatch = AtomicPreflightQueueDispatch,
+    .atomic_wait = nullptr,
+    .atomic_store = nullptr,
+    .atomic_rmw = nullptr,
+    .timestamp = nullptr,
+    .flush = AtomicPreflightQueueFlush,
+    .alloca = nullptr,
+    .dealloca = nullptr,
+    .transfer = nullptr,
+    .read = nullptr,
+    .write = nullptr,
 };
 
 void InitializeAtomicPreflightQueue(iree_hal_queue_t* target,
@@ -432,11 +431,11 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
   });
 
   const iree_hal_buffer_params_t buffer_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT |
-          IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage = IREE_HAL_BUFFER_USAGE_DEFAULT |
+               IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       context_->device_allocator, buffer_params, sizeof(uint64_t), &buffer));
@@ -466,9 +465,9 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
       /*.reserved=*/{},
   };
   iree_hal_streaming_value_operation_t operation = {
-      /*.kind=*/IREE_HAL_STREAMING_VALUE_OPERATION_STORE,
-      /*.target_buffer=*/target.buffer,
-      /*.target_offset=*/target.offset,
+      .kind = IREE_HAL_STREAMING_VALUE_OPERATION_STORE,
+      .target_buffer = target.buffer,
+      .target_offset = target.offset,
   };
   operation.params.store = store_params;
   const hrx_buffer_t owner = target.owner;
@@ -845,14 +844,14 @@ TEST_F(GraphExecTest,
   symbol.export_ordinal = 0;
 
   const iree_hal_streaming_dispatch_params_t original_dispatch = {
-      /*.grid_dim=*/{1, 1, 1},
-      /*.block_dim=*/{1, 1, 1},
-      /*.shared_memory_bytes=*/0,
-      /*.buffer=*/nullptr,
-      /*.buffer_size=*/0,
-      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_COOPERATIVE,
-      /*.workitem_count=*/{},
-      /*.binding_function=*/nullptr,
+      .grid_dim = {1, 1, 1},
+      .block_dim = {1, 1, 1},
+      .shared_memory_bytes = 0,
+      .buffer = nullptr,
+      .buffer_size = 0,
+      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_COOPERATIVE,
+      .workitem_count = {},
+      .binding_function = nullptr,
   };
   iree_hal_streaming_dispatch_params_t updated_dispatch = original_dispatch;
   updated_dispatch.grid_dim[0] = 2;

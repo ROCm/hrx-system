@@ -90,8 +90,8 @@ class LinkDependencyAnalysisTest : public ::testing::Test {
                                    iree_string_view_t filename) {
     loom_module_t* module = nullptr;
     const loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 20,
     };
     IREE_CHECK_OK(loom_text_parse(source, filename, &context_, &block_pool_,
                                   &parse_options, &module));
@@ -120,9 +120,9 @@ class LinkDependencyAnalysisTest : public ::testing::Test {
     const iree_string_view_t source = FindSource(filename);
     ASSERT_FALSE(iree_string_view_is_empty(source));
     const loom_link_module_index_add_options_t options = {
-        /*.provider_name=*/
-        iree_make_string_view(provider_name.data(), provider_name.size()),
-        /*.role=*/role,
+        .provider_name =
+            iree_make_string_view(provider_name.data(), provider_name.size()),
+        .role = role,
     };
     IREE_ASSERT_OK(loom_link_module_index_add_text(
         index, source, iree_make_string_view(filename.data(), filename.size()),
@@ -139,9 +139,9 @@ class LinkDependencyAnalysisTest : public ::testing::Test {
         source, iree_make_string_view(filename.data(), filename.size())));
     const std::vector<uint8_t>& bytes = bytecode_buffers_.back();
     const loom_link_module_index_add_options_t options = {
-        /*.provider_name=*/
-        iree_make_string_view(provider_name.data(), provider_name.size()),
-        /*.role=*/role,
+        .provider_name =
+            iree_make_string_view(provider_name.data(), provider_name.size()),
+        .role = role,
     };
     IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
         index, iree_make_const_byte_span(bytes.data(), bytes.size()),
@@ -185,8 +185,8 @@ class LinkDependencyAnalysisTest : public ::testing::Test {
       const loom_link_module_index_t* index,
       const std::vector<iree_host_size_t>& direct_providers) {
     const loom_link_dependency_analysis_options_t options = {
-        /*.direct_provider_ordinals=*/direct_providers.data(),
-        /*.direct_provider_count=*/direct_providers.size(),
+        .direct_provider_ordinals = direct_providers.data(),
+        .direct_provider_count = direct_providers.size(),
     };
     loom_link_dependency_analysis_t analysis = {};
     IREE_CHECK_OK(loom_link_dependency_analyze(
@@ -464,8 +464,8 @@ TEST_F(LinkDependencyAnalysisTest, ValidatesDirectProviderSelection) {
   loom_link_dependency_analysis_t analysis = {};
 
   const loom_link_dependency_analysis_options_t missing_ordinals = {
-      /*.direct_provider_ordinals=*/nullptr,
-      /*.direct_provider_count=*/1,
+      .direct_provider_ordinals = nullptr,
+      .direct_provider_count = 1,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -476,8 +476,8 @@ TEST_F(LinkDependencyAnalysisTest, ValidatesDirectProviderSelection) {
   iree_arena_reset(&analysis_arena_);
   const iree_host_size_t input_provider = provider_ordinals[kInputProvider];
   const loom_link_dependency_analysis_options_t input_as_library = {
-      /*.direct_provider_ordinals=*/&input_provider,
-      /*.direct_provider_count=*/1,
+      .direct_provider_ordinals = &input_provider,
+      .direct_provider_count = 1,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -491,8 +491,8 @@ TEST_F(LinkDependencyAnalysisTest, ValidatesDirectProviderSelection) {
       provider_ordinals[kDirectProvider],
   };
   const loom_link_dependency_analysis_options_t duplicated = {
-      /*.direct_provider_ordinals=*/duplicate_provider.data(),
-      /*.direct_provider_count=*/duplicate_provider.size(),
+      .direct_provider_ordinals = duplicate_provider.data(),
+      .direct_provider_count = duplicate_provider.size(),
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -504,8 +504,8 @@ TEST_F(LinkDependencyAnalysisTest, ValidatesDirectProviderSelection) {
   const iree_host_size_t out_of_range_provider =
       loom_link_module_index_provider_count(index.get());
   const loom_link_dependency_analysis_options_t out_of_range = {
-      /*.direct_provider_ordinals=*/&out_of_range_provider,
-      /*.direct_provider_count=*/1,
+      .direct_provider_ordinals = &out_of_range_provider,
+      .direct_provider_count = 1,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,

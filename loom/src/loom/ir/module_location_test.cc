@@ -162,12 +162,12 @@ TEST_P(ModuleLocationTest, FieldSpansRemainAttachedToTheStableRow) {
     AppendLocation(2);
   }
   loom_location_field_span_t span = {
-      /*.kind=*/LOOM_LOCATION_FIELD_OPERAND,
-      /*.index=*/0,
-      /*.start_line=*/1,
-      /*.start_col=*/3,
-      /*.end_line=*/1,
-      /*.end_col=*/8,
+      .kind = LOOM_LOCATION_FIELD_OPERAND,
+      .index = 0,
+      .start_line = 1,
+      .start_col = 3,
+      .end_line = 1,
+      .end_col = 8,
   };
   IREE_ASSERT_OK(
       loom_module_attach_location_field_spans(module_, id, &span, 1));

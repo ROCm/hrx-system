@@ -100,12 +100,12 @@ TEST(TargetFactRelationTest, DistinctFactsRequireFamilyIdentityRelation) {
       /*.storage_size=*/sizeof(loom_target_facts_t),
   };
   const loom_target_facts_t lhs = {
-      /*.fact_type=*/&kFactType,
-      /*.selector=*/7,
+      .fact_type = &kFactType,
+      .selector = 7,
   };
   const loom_target_facts_t rhs = {
-      /*.fact_type=*/&kFactType,
-      /*.selector=*/7,
+      .fact_type = &kFactType,
+      .selector = 7,
   };
 
   EXPECT_TRUE(loom_target_facts_satisfy_identity_requirement(&lhs, &lhs));
@@ -149,11 +149,11 @@ TEST_F(TargetFactsTest, ProjectionBorrowsStringsWithoutRetainingSourceAccess) {
         /*.selector=*/selector,
         /*.strings=*/
         {
-            /*.context=*/first_strings,
-            /*.lookup=*/
-            [](const void* context, loom_string_id_t id) {
-              return static_cast<const iree_string_view_t*>(context)[id];
-            },
+            .context = first_strings,
+            .lookup =
+                [](const void* context, loom_string_id_t id) {
+                  return static_cast<const iree_string_view_t*>(context)[id];
+                },
         },
     };
     loom_target_facts_project_record(&record, bundle, &first);

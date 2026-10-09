@@ -97,8 +97,8 @@ class KernelClassMaterializerTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_template_provider_catalog_build_local(
         &providers, module, &symbol_facts));
     const loom_template_selection_query_options_t query_options = {
-        /*.mode=*/LOOM_TEMPLATE_SELECTION_MODE_FINAL,
-        /*.catalog=*/&providers,
+        .mode = LOOM_TEMPLATE_SELECTION_MODE_FINAL,
+        .catalog = &providers,
     };
     loom_template_selection_query_result_t query_result = {};
     IREE_ASSERT_OK(loom_template_selection_query(
@@ -125,10 +125,10 @@ class KernelClassMaterializerTest : public ::testing::Test {
     iree_io_stream_release(stream);
 
     const loom_bytecode_read_options_t read_options = {
-        /*.diagnostic_sink=*/
-        {
-            /*.fn=*/loom_diagnostic_stderr_sink,
-        },
+        .diagnostic_sink =
+            {
+                .fn = loom_diagnostic_stderr_sink,
+            },
     };
     loom_bytecode_read_result_t read_result = {};
     loom_module_t* round_tripped_module = nullptr;
@@ -267,8 +267,8 @@ kernel.def @classified() {
     site_facts.entries[value_base + 3] =
         loom_value_facts_exact_i64(static_cast<int64_t>(1000003 * i + 17));
     sites[i] = {
-        /*.facts=*/&site_facts,
-        /*.argument_values=*/&site_argument_values[value_base],
+        .facts = &site_facts,
+        .argument_values = &site_argument_values[value_base],
     };
   }
 
@@ -429,11 +429,11 @@ kernel.def @classified() {
       FindSymbol(source_module.get(), IREE_SV("external.family"));
   ASSERT_NE(family_symbol_id, LOOM_SYMBOL_ID_INVALID);
   const loom_predicate_t external_predicate = {
-      /*.kind=*/LOOM_PREDICATE_GE,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-      /*.reserved=*/{},
-      /*.args=*/{0, 128},
+      .kind = LOOM_PREDICATE_GE,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+      .reserved = {},
+      .args = {0, 128},
   };
   const loom_template_provider_contract_t external_contract = {
       /*.kind=*/LOOM_TEMPLATE_PROVIDER_KIND_DEF,
@@ -447,8 +447,8 @@ kernel.def @classified() {
       /*.predicates=*/&external_predicate,
   };
   const loom_symbol_ref_t family = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/family_symbol_id,
+      .module_id = 0,
+      .symbol_id = family_symbol_id,
   };
   loom_template_provider_summary_t external_provider = {};
   IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
@@ -497,8 +497,8 @@ kernel.def @classified() {
   site_facts.entries[0] = loom_value_facts_exact_i64(256);
   const loom_value_id_t site_argument_value = 0;
   const loom_kernel_class_site_t site = {
-      /*.facts=*/&site_facts,
-      /*.argument_values=*/&site_argument_value,
+      .facts = &site_facts,
+      .argument_values = &site_argument_value,
   };
   const loom_kernel_class_collection_options_t collection_options =
       loom_kernel_class_collection_options_default();
@@ -570,8 +570,8 @@ kernel.def @classified() {
   iree_arena_allocator_t query_arena;
   iree_arena_initialize(&block_pool_, &query_arena);
   const loom_symbol_ref_t class_family = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/FindSymbol(class_module, IREE_SV("external.family")),
+      .module_id = 0,
+      .symbol_id = FindSymbol(class_module, IREE_SV("external.family")),
   };
   loom_template_provider_summary_t rebound_external_provider = {};
   IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
@@ -585,10 +585,10 @@ kernel.def @classified() {
       &class_providers, class_module, &class_symbol_facts,
       &rebound_external_provider, /*external_provider_count=*/1));
   const loom_template_selection_query_options_t query_options = {
-      /*.mode=*/LOOM_TEMPLATE_SELECTION_MODE_FINAL,
-      /*.catalog=*/&class_providers,
-      /*.function_versions=*/nullptr,
-      /*.origin_count=*/8,
+      .mode = LOOM_TEMPLATE_SELECTION_MODE_FINAL,
+      .catalog = &class_providers,
+      .function_versions = nullptr,
+      .origin_count = 8,
   };
   loom_template_selection_query_result_t query_result = {};
   IREE_ASSERT_OK(loom_template_selection_query(

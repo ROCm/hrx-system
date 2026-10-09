@@ -26,8 +26,8 @@ static iree_status_t EmitJsonStatus(const loom_diagnostic_t* diagnostic,
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   loom_json_sink_options_t options = {
-      /*.stream=*/&stream,
-      /*.type_formatter=*/type_formatter,
+      .stream = &stream,
+      .type_formatter = type_formatter,
   };
   iree_status_t status = loom_diagnostic_json_sink(&options, diagnostic);
   out_json->clear();
@@ -308,11 +308,11 @@ TEST(JsonSink, SerializesSourceRangesAndHighlights) {
   const char source[] = "%x = test.constant 0 : i32";
   loom_highlight_range_t highlights[] = {
       {
-          /*.start=*/0,
-          /*.end=*/2,
-          /*.field_ref=*/
-          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0),
-          /*.param_index=*/0,
+          .start = 0,
+          .end = 2,
+          .field_ref =
+              loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0),
+          .param_index = 0,
       },
       {5, 18},
   };
@@ -400,8 +400,8 @@ TEST(JsonSink, SerializesClippedSourceExcerpt) {
       loom_param_string(IREE_SV("x")),
   };
   loom_highlight_range_t highlights[] = {{
-      /*.start=*/160,
-      /*.end=*/163,
+      .start = 160,
+      .end = 163,
   }};
   loom_diagnostic_t diagnostic = {};
   diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
@@ -600,8 +600,8 @@ TEST(JsonSink, MultipleDiagnostics) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   loom_json_sink_options_t options = {
-      /*.stream=*/&stream,
-      /*.type_formatter=*/{nullptr, nullptr},
+      .stream = &stream,
+      .type_formatter = {nullptr, nullptr},
   };
 
   loom_diagnostic_param_t params1[] = {

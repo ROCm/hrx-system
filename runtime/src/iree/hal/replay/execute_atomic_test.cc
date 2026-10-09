@@ -580,9 +580,9 @@ static std::vector<uint8_t> MakeFullFileAtomicReplayStorage(
       {});
 
   const iree_hal_replay_provisioned_queue_object_payload_t queue_payload = {
-      /*.family_ordinal=*/0,
-      /*.queue_ordinal=*/0,
-      /*.reserved0=*/0,
+      .family_ordinal = 0,
+      .queue_ordinal = 0,
+      .reserved0 = 0,
   };
   AppendSerializedReplayRecord(
       writer,
@@ -594,15 +594,15 @@ static std::vector<uint8_t> MakeFullFileAtomicReplayStorage(
       {iree_make_const_byte_span(&queue_payload, sizeof(queue_payload))});
 
   const iree_hal_replay_allocator_allocate_buffer_payload_t buffer_payload = {
-      /*.allocation_size=*/64,
-      /*.queue_family_affinity=*/iree_hal_make_queue_family_affinity(0),
-      /*.min_alignment=*/8,
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.reserved0=*/0,
-      /*.reserved1=*/0,
+      .allocation_size = 64,
+      .queue_family_affinity = iree_hal_make_queue_family_affinity(0),
+      .min_alignment = 8,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .reserved0 = 0,
+      .reserved1 = 0,
   };
   AppendSerializedReplayRecord(
       writer,
@@ -614,10 +614,10 @@ static std::vector<uint8_t> MakeFullFileAtomicReplayStorage(
       {iree_make_const_byte_span(&buffer_payload, sizeof(buffer_payload))});
 
   const iree_hal_replay_semaphore_object_payload_t semaphore_payload = {
-      /*.queue_family_affinity=*/iree_hal_make_queue_family_affinity(0),
-      /*.initial_value=*/0,
-      /*.flags=*/IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
-      /*.reserved0=*/0,
+      .queue_family_affinity = iree_hal_make_queue_family_affinity(0),
+      .initial_value = 0,
+      .flags = IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+      .reserved0 = 0,
   };
   AppendSerializedReplayRecord(
       writer,
@@ -631,11 +631,11 @@ static std::vector<uint8_t> MakeFullFileAtomicReplayStorage(
 
   const iree_hal_replay_queue_family_command_buffer_object_payload_t
       command_buffer_payload = {
-          /*.mode=*/IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-          /*.command_categories=*/IREE_HAL_COMMAND_CATEGORY_ATOMIC,
-          /*.queue_family_ordinal=*/0,
-          /*.reserved0=*/0,
-          /*.binding_capacity=*/1,
+          .mode = IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+          .command_categories = IREE_HAL_COMMAND_CATEGORY_ATOMIC,
+          .queue_family_ordinal = 0,
+          .reserved0 = 0,
+          .binding_capacity = 1,
       };
   AppendSerializedReplayRecord(
       writer,
@@ -660,8 +660,8 @@ static std::vector<uint8_t> MakeFullFileAtomicReplayStorage(
   }
 
   const iree_hal_replay_semaphore_timepoint_payload_t signal_timepoint = {
-      /*.semaphore_id=*/kSignalSemaphoreId,
-      /*.value=*/1,
+      .semaphore_id = kSignalSemaphoreId,
+      .value = 1,
   };
   const auto make_atomic_metadata =
       [&](iree_hal_replay_payload_type_t payload_type,
@@ -879,12 +879,12 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
     task_device_ = CreateTaskDevice();
 
     const iree_hal_buffer_params_t buffer_params = {
-        /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE |
-            IREE_HAL_BUFFER_USAGE_TRANSFER |
-            IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
-        /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-        /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+        .usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+                 IREE_HAL_BUFFER_USAGE_TRANSFER |
+                 IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
+        .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
     };
     IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
         iree_hal_device_allocator(task_device_), buffer_params, 64,
@@ -1010,21 +1010,21 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
   static iree_hal_replay_buffer_ref_payload_t DirectTarget(uint64_t offset,
                                                            uint64_t length) {
     return {
-        /*.buffer_id=*/kBufferId,
-        /*.offset=*/offset,
-        /*.length=*/length,
-        /*.buffer_slot=*/0,
-        /*.reserved0=*/0,
+        .buffer_id = kBufferId,
+        .offset = offset,
+        .length = length,
+        .buffer_slot = 0,
+        .reserved0 = 0,
     };
   }
 
   static iree_hal_replay_semaphore_timepoint_payload_t WaitTimepoint() {
-    return {/*.semaphore_id=*/kWaitSemaphoreId, /*.value=*/7};
+    return {.semaphore_id = kWaitSemaphoreId, .value = 7};
   }
 
   static iree_hal_replay_semaphore_timepoint_payload_t SignalTimepoint(
       uint64_t value) {
-    return {/*.semaphore_id=*/kSignalSemaphoreId, /*.value=*/value};
+    return {.semaphore_id = kSignalSemaphoreId, .value = value};
   }
 
   // Task-driver device owning the concrete test buffer and semaphores.
@@ -1626,15 +1626,15 @@ TEST(ReplayExecutorLifecycleTest,
   const iree_hal_semaphore_list_t signal_list = {
       IREE_ARRAYSIZE(signal_semaphores), signal_semaphores, signal_values};
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/
-      {
-          /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
-          /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-          /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-              IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
-          /*.queue_family_affinity=*/iree_hal_make_queue_family_affinity(0),
-      },
-      /*.allocation_size=*/16,
+      .params =
+          {
+              .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+              .access = IREE_HAL_MEMORY_ACCESS_ALL,
+              .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+                      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
+              .queue_family_affinity = iree_hal_make_queue_family_affinity(0),
+          },
+      .allocation_size = 16,
   };
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_queue_alloca(queue, iree_hal_semaphore_list_empty(),

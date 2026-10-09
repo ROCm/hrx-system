@@ -105,11 +105,11 @@ void InitializeAddressabilityTestState(
   loom_target_facts_builder_initialize(&loom_test_target_fact_type,
                                        target_bundle, &state->target_facts);
   const loom_low_resolved_target_t target = {
-      /*.target_facts=*/&state->target_facts,
-      /*.target_name=*/target_bundle->name,
-      /*.descriptor_set_key=*/target_bundle->config->contract_set_key,
-      /*.feature_bits=*/target_bundle->config->contract_feature_bits,
-      /*.descriptor_set=*/&state->descriptor_set,
+      .target_facts = &state->target_facts,
+      .target_name = target_bundle->name,
+      .descriptor_set_key = target_bundle->config->contract_set_key,
+      .feature_bits = target_bundle->config->contract_feature_bits,
+      .descriptor_set = &state->descriptor_set,
   };
 
   state->reg_classes[0].name_string_ref = ADDRESSABILITY_STRING_REF(reg_gpr);
@@ -170,11 +170,11 @@ void InitializeAddressabilityTestState(
   value_ordinals[0] = 1;
   value_ordinals[1] = 0;
   state->blocks[0] = (loom_low_schedule_block_t){
-      /*.block=*/&state->block,
-      /*.node_start=*/0,
-      /*.node_count=*/1,
-      /*.scheduled_node_start=*/0,
-      /*.scheduled_node_count=*/1,
+      .block = &state->block,
+      .node_start = 0,
+      .node_count = 1,
+      .scheduled_node_start = 0,
+      .scheduled_node_count = 1,
   };
   state->scheduled_node_indices[0] = 0;
   state->schedule.module = &state->module;
@@ -189,26 +189,26 @@ void InitializeAddressabilityTestState(
       IREE_ARRAYSIZE(state->scheduled_node_indices);
 
   state->assignments[0] = (loom_low_allocation_assignment_t){
-      /*.value_id=*/0,
-      /*.descriptor_reg_class_id=*/0,
-      /*.flags=*/{},
-      /*.start_point=*/{},
-      /*.end_point=*/{},
-      /*.unit_count=*/assigned_count,
-      /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-      /*.location_base=*/0,
-      /*.location_count=*/1,
+      .value_id = 0,
+      .descriptor_reg_class_id = 0,
+      .flags = {},
+      .start_point = {},
+      .end_point = {},
+      .unit_count = assigned_count,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = 0,
+      .location_count = 1,
   };
   state->assignments[1] = (loom_low_allocation_assignment_t){
-      /*.value_id=*/1,
-      /*.descriptor_reg_class_id=*/0,
-      /*.flags=*/{},
-      /*.start_point=*/{},
-      /*.end_point=*/{},
-      /*.unit_count=*/assigned_count,
-      /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-      /*.location_base=*/assigned_base,
-      /*.location_count=*/assigned_count,
+      .value_id = 1,
+      .descriptor_reg_class_id = 0,
+      .flags = {},
+      .start_point = {},
+      .end_point = {},
+      .unit_count = assigned_count,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = assigned_base,
+      .location_count = assigned_count,
   };
   state->assignment_indices_by_value_ordinal[0] = 0;
   state->assignment_indices_by_value_ordinal[1] = 1;
@@ -233,8 +233,8 @@ TEST(LowAddressabilityTest, AcceptsDirectAddressMap) {
 
   CapturedDiagnostic captured;
   const iree_diagnostic_emitter_t emitter = {
-      /*.fn=*/CaptureDiagnostic,
-      /*.user_data=*/&captured,
+      .fn = CaptureDiagnostic,
+      .user_data = &captured,
   };
   loom_low_addressability_validation_result_t result = {};
   IREE_ASSERT_OK(loom_low_addressability_validate_allocated_packets(
@@ -265,8 +265,8 @@ TEST(LowAddressabilityTest, ReportsLowSubsetUnaddressableAssignment) {
 
   CapturedDiagnostic captured;
   const iree_diagnostic_emitter_t emitter = {
-      /*.fn=*/CaptureDiagnostic,
-      /*.user_data=*/&captured,
+      .fn = CaptureDiagnostic,
+      .user_data = &captured,
   };
   loom_low_addressability_validation_result_t result = {};
   IREE_ASSERT_OK(loom_low_addressability_validate_allocated_packets(
@@ -301,8 +301,8 @@ TEST(LowAddressabilityTest, ReportsTargetStateAssignmentCrossingWindow) {
 
   CapturedDiagnostic captured;
   const iree_diagnostic_emitter_t emitter = {
-      /*.fn=*/CaptureDiagnostic,
-      /*.user_data=*/&captured,
+      .fn = CaptureDiagnostic,
+      .user_data = &captured,
   };
   loom_low_addressability_validation_result_t result = {};
   IREE_ASSERT_OK(loom_low_addressability_validate_allocated_packets(

@@ -1391,7 +1391,7 @@ TEST_F(TcpConnectionTest, SendReturnsDirectMessageFailureBeforePrefixWrite) {
   ASSERT_EQ(server_messages->error_code, IREE_STATUS_DATA_LOSS);
 
   PrefixWriter writer = {
-      /*.value=*/0x7A,
+      .value = 0x7A,
   };
   SendResult rejected_result;
   rejected_result.is_polling = &is_polling_;
@@ -1451,7 +1451,7 @@ TEST_F(TcpConnectionTest, SendReturnsDeferredMessageFailureBeforePrefixWrite) {
   EXPECT_EQ(queued_result.callback_count, 0);
 
   PrefixWriter writer = {
-      /*.value=*/0x7A,
+      .value = 0x7A,
   };
   SendResult rejected_result;
   rejected_result.is_polling = &is_polling_;

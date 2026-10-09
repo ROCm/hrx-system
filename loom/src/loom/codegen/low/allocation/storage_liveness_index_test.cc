@@ -47,9 +47,9 @@ class LowAllocationStorageLivenessIndexTest : public ::testing::Test {
       loom_low_allocation_location_kind_t location_kind =
           LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
     return loom_low_move_location_t{
-        /*.location_kind=*/static_cast<uint16_t>(location_kind),
-        /*.descriptor_reg_class_id=*/reg_class_id,
-        /*.location=*/location,
+        .location_kind = static_cast<uint16_t>(location_kind),
+        .descriptor_reg_class_id = reg_class_id,
+        .location = location,
     };
   }
 
@@ -297,23 +297,21 @@ TEST_F(LowAllocationStorageLivenessIndexTest,
   const uint16_t allocation_ordinals[] = {0, 1, 0};
   const uint16_t atomic_units[] = {0, 1, 0, 1};
   const loom_low_physical_register_t registers[] = {
-      {/*.name_string_ref=*/0, /*.atomic_unit_start=*/0,
-       /*.atomic_unit_count=*/1},
-      {/*.name_string_ref=*/0, /*.atomic_unit_start=*/1,
-       /*.atomic_unit_count=*/1},
-      {/*.name_string_ref=*/0,
-       /*.atomic_unit_start=*/2,
-       /*.atomic_unit_count=*/2,
-       /*.reserved=*/0,
-       /*.view_lookup=*/
-       {/*.ordinal_start=*/0, /*.class_base=*/0,
-        /*.class_count=*/1}},
+      {.name_string_ref = 0, .atomic_unit_start = 0, .atomic_unit_count = 1},
+      {.name_string_ref = 0, .atomic_unit_start = 1, .atomic_unit_count = 1},
+      {.name_string_ref = 0,
+       .atomic_unit_start = 2,
+       .atomic_unit_count = 2,
+       .reserved = 0,
+       .view_lookup = {.ordinal_start = 0, .class_base = 0, .class_count = 1}},
   };
   const uint32_t view_ordinals[] = {0};
   const uint16_t view_units[] = {0, 1};
   const loom_low_physical_register_view_t views[] = {
-      {/*.physical_register_id=*/2, /*.reg_class_id=*/0,
-       /*.unit_candidate_ordinal_start=*/0, /*.unit_count=*/2},
+      {.physical_register_id = 2,
+       .reg_class_id = 0,
+       .unit_candidate_ordinal_start = 0,
+       .unit_count = 2},
   };
   loom_low_descriptor_set_t descriptor_set = {};
   descriptor_set.reg_classes = reg_classes;

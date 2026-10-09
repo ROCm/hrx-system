@@ -47,8 +47,8 @@ loom_low_allocation_live_range_sweep_t LiveRangeSweep(
     (*segment_starts)[i] = assignments[i].liveness_segments.start;
   }
   return {
-      /*.point=*/point,
-      /*.segment_starts_by_assignment_index=*/segment_starts->data(),
+      .point = point,
+      .segment_starts_by_assignment_index = segment_starts->data(),
   };
 }
 
@@ -213,7 +213,7 @@ TEST(LowAllocationActiveUnitTest, OrdersOnlyDefiniteContinuousScalarConflicts) {
       Assignment(7, 1, 0, 10, 5, 1, 0), Assignment(8, 0, 0, 10, 7, 1, 0),
       Assignment(9, 0, 0, 10, 8, 1, 0),
   };
-  assignments[7].liveness_segments = {/*.start=*/0, /*.count=*/1};
+  assignments[7].liveness_segments = {.start = 0, .count = 1};
   assignments[8].location_kind = LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID;
 
   loom_low_allocation_active_unit_index_t index = {};
@@ -568,22 +568,22 @@ TEST(LowAllocationActiveUnitTest, IndexesExplicitRegisterAtomicUnits) {
   reg_classes[1].physical_register_candidate_start = 2;
   const loom_low_physical_register_t physical_registers[] = {
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/0,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 0,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/2,
-          /*.atomic_unit_count=*/1,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 2,
+          .atomic_unit_count = 1,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/3,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 3,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
   };
   reg_classes[0].candidate_lookup.register_count = 3;

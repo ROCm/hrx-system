@@ -414,7 +414,7 @@ TEST_P(LowLowerResultMappingTest, DefinitionConsumesPreparedBoundary) {
     // Number of result-carrier queries made by boundary planning.
     uint32_t query_count;
   } result_query_state = {
-      /*.exit_op=*/return_op,
+      .exit_op = return_op,
   };
   policy_.map_value = {
       +[](void* user_data, loom_low_lower_context_t* context,

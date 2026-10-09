@@ -77,20 +77,19 @@ static const loom_target_profile_type_t kTestProfileType = {
 static TestTargetProfile MakeTestProfile(uint32_t subgroup_size,
                                          bool subgroup_size_explicit = false) {
   return TestTargetProfile{
-      /*.base=*/
-      {
-          /*.type=*/&kTestProfileType,
-          /*.target_bundle=*/
-          loom_target_bundle_table_lookup(&loom_test_target_bundles,
-                                          LOOM_TEST_TARGET_KIND_LOW_CORE),
-      },
-      /*.subgroup_size=*/subgroup_size,
-      /*.subgroup_size_explicit=*/subgroup_size_explicit,
+      .base =
+          {
+              .type = &kTestProfileType,
+              .target_bundle = loom_target_bundle_table_lookup(
+                  &loom_test_target_bundles, LOOM_TEST_TARGET_KIND_LOW_CORE),
+          },
+      .subgroup_size = subgroup_size,
+      .subgroup_size_explicit = subgroup_size_explicit,
   };
 }
 
 static const loom_target_provider_t kTestProvider = {
-    /*.profile_type=*/&kTestProfileType,
+    .profile_type = &kTestProfileType,
 };
 
 static const loom_target_provider_t* const kTestProviders[] = {
@@ -171,7 +170,7 @@ class TargetCallgraphSpecializationTest : public ::testing::Test {
     IREE_ASSERT(name_id != LOOM_STRING_ID_INVALID);
     const loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
     IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
-    return loom_symbol_ref_t{/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    return loom_symbol_ref_t{.module_id = 0, .symbol_id = symbol_id};
   }
 
   loom_func_like_t Function(const loom_module_t* module,
@@ -262,8 +261,8 @@ class TargetCallgraphSpecializationTest : public ::testing::Test {
     pass.environment = &pass_environment;
     if (collector != nullptr) {
       pass.diagnostic_emitter = {
-          /*.fn=*/CollectDiagnostic,
-          /*.user_data=*/collector,
+          .fn = CollectDiagnostic,
+          .user_data = collector,
       };
     }
     IREE_CHECK_OK(loom_target_callgraph_specialization_run(&pass, module));

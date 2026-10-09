@@ -503,10 +503,10 @@ TEST_F(RemapTest, MapsSourceIndexedValuesWithoutPopulatingSparseStorage) {
   loom_value_id_t second_target = DefineValue(target_, index_type);
 
   const loom_ir_remap_options_t options = {
-      /*.allow_unmapped_values=*/{},
-      /*.remap_symbol=*/{},
-      /*.remap_same_module_symbols=*/{},
-      /*.value_map_kind=*/LOOM_IR_REMAP_VALUE_MAP_SOURCE_INDEXED,
+      .allow_unmapped_values = {},
+      .remap_symbol = {},
+      .remap_same_module_symbols = {},
+      .value_map_kind = LOOM_IR_REMAP_VALUE_MAP_SOURCE_INDEXED,
   };
   loom_ir_remap_t remap = InitializeRemap(&options);
   ASSERT_NE(remap.target_values_by_source, nullptr);
@@ -538,7 +538,7 @@ TEST_F(RemapTest, AllowsUnmappedValuesOnlyWithinSameModule) {
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_value_id_t source_value = DefineValue(source_, index_type);
   loom_ir_remap_options_t options = {
-      /*.allow_unmapped_values=*/true,
+      .allow_unmapped_values = true,
   };
 
   loom_ir_remap_t cross_module_remap = InitializeRemap(&options);
@@ -574,18 +574,18 @@ TEST_F(RemapTest, RemapsPredicateListsInsideDictAttributes) {
   IREE_ASSERT_OK(loom_module_intern_string(source_, IREE_SV("predicates"),
                                            &source_predicates_name));
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_MULTIPLE_OF,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/
-      {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST, LOOM_PRED_ARG_NONE},
-      /*.reserved=*/{},
-      /*.args=*/{(int64_t)source_value, 16, 0},
+      .kind = LOOM_PREDICATE_MULTIPLE_OF,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                   LOOM_PRED_ARG_NONE},
+      .reserved = {},
+      .args = {(int64_t)source_value, 16, 0},
   };
   loom_named_attr_t source_entries[] = {
       {
-          /*.name_id=*/source_predicates_name,
-          /*.reserved=*/0,
-          /*.value=*/loom_attr_predicate_list(&predicate, 1),
+          .name_id = source_predicates_name,
+          .reserved = 0,
+          .value = loom_attr_predicate_list(&predicate, 1),
       },
   };
   loom_attribute_t source_dict = {};
@@ -656,12 +656,12 @@ TEST_F(RemapTest, RemapsCompactParameterizedAttributeSlotsByDescriptor) {
 TEST_F(RemapTest, RejectsMalformedPredicateListsWithoutReadingPastPayload) {
   loom_ir_remap_t remap = InitializeRemap();
   loom_predicate_t malformed = {
-      /*.kind=*/LOOM_PREDICATE_EQ,
-      /*.arg_count=*/4,
-      /*.arg_tags=*/
-      {LOOM_PRED_ARG_CONST, LOOM_PRED_ARG_CONST, LOOM_PRED_ARG_CONST},
-      /*.reserved=*/{},
-      /*.args=*/{1, 1, 0},
+      .kind = LOOM_PREDICATE_EQ,
+      .arg_count = 4,
+      .arg_tags = {LOOM_PRED_ARG_CONST, LOOM_PRED_ARG_CONST,
+                   LOOM_PRED_ARG_CONST},
+      .reserved = {},
+      .args = {1, 1, 0},
   };
   loom_predicate_t* target_predicates = nullptr;
   IREE_EXPECT_STATUS_IS(
@@ -678,9 +678,9 @@ TEST_F(RemapTest, RemapsStaticEncodingDependenciesAcrossModules) {
       loom_module_intern_string(source_, IREE_SV("block"), &source_block_id));
   loom_named_attr_t source_attrs[] = {
       {
-          /*.name_id=*/source_block_id,
-          /*.reserved=*/0,
-          /*.value=*/loom_attr_i64(32),
+          .name_id = source_block_id,
+          .reserved = 0,
+          .value = loom_attr_i64(32),
       },
   };
   loom_encoding_t source_encoding = {
@@ -753,11 +753,11 @@ TEST_F(RemapTest, RemapsOverflowDimsAndEncodingBeforeInterning) {
   source_dims[1] = loom_dim_pack_static(4);
   source_dims[2] = loom_dim_pack_static(8);
   loom_type_t source_type = {
-      /*.header=*/
-      loom_type_make_header(LOOM_TYPE_TENSOR, LOOM_SCALAR_TYPE_F32, 3, 0),
-      /*.encoding_id=*/source_encoding_id,
-      /*.encoding_flags=*/0,
-      /*.dims=*/{(uint64_t)(uintptr_t)source_dims, 0},
+      .header =
+          loom_type_make_header(LOOM_TYPE_TENSOR, LOOM_SCALAR_TYPE_F32, 3, 0),
+      .encoding_id = source_encoding_id,
+      .encoding_flags = 0,
+      .dims = {(uint64_t)(uintptr_t)source_dims, 0},
   };
 
   loom_ir_remap_t remap = InitializeRemap();
@@ -799,9 +799,9 @@ TEST_F(RemapTest, RemapsSharedDeepStaticEncodingsWithoutRecursion) {
     uint8_t attribute_count = previous_encoding_id == 0 ? 0 : 2;
     loom_named_attr_t attrs[] = {
         {
-            /*.name_id=*/next_id,
-            /*.reserved=*/0,
-            /*.value=*/loom_attr_encoding(previous_encoding_id),
+            .name_id = next_id,
+            .reserved = 0,
+            .value = loom_attr_encoding(previous_encoding_id),
         },
         {other_id, 0, loom_attr_encoding(previous_encoding_id)},
     };
@@ -875,12 +875,12 @@ TEST_F(RemapTest, RemapsLocationsAcrossModules) {
   IREE_ASSERT_OK(
       loom_module_add_location(source_, file_entry, &file_location_id));
   loom_location_field_span_t field_span = {
-      /*.kind=*/LOOM_LOCATION_FIELD_OPERAND,
-      /*.index=*/0,
-      /*.start_line=*/2,
-      /*.start_col=*/3,
-      /*.end_line=*/2,
-      /*.end_col=*/7,
+      .kind = LOOM_LOCATION_FIELD_OPERAND,
+      .index = 0,
+      .start_line = 2,
+      .start_col = 3,
+      .end_line = 2,
+      .end_col = 7,
   };
   IREE_ASSERT_OK(loom_module_attach_location_field_spans(
       source_, file_location_id, &field_span, 1));
@@ -994,7 +994,7 @@ static iree_status_t RemapSymbolByName(void* user_data,
     IREE_RETURN_IF_ERROR(loom_module_add_symbol(target_module, target_name_id,
                                                 &target_symbol_id));
   }
-  *out_target_ref = {/*.module_id=*/0, /*.symbol_id=*/target_symbol_id};
+  *out_target_ref = {.module_id = 0, .symbol_id = target_symbol_id};
   return iree_ok_status();
 }
 
@@ -1013,19 +1013,19 @@ TEST_F(RemapTest, RemapsOrderedSymbolArraysAcrossModules) {
       loom_module_add_symbol(source_, beta_name_id, &beta_symbol_id));
 
   const loom_symbol_ref_t source_refs[] = {
-      {/*.module_id=*/0, /*.symbol_id=*/beta_symbol_id},
-      {/*.module_id=*/0, /*.symbol_id=*/alpha_symbol_id},
-      {/*.module_id=*/0, /*.symbol_id=*/beta_symbol_id},
+      {.module_id = 0, .symbol_id = beta_symbol_id},
+      {.module_id = 0, .symbol_id = alpha_symbol_id},
+      {.module_id = 0, .symbol_id = beta_symbol_id},
   };
   const loom_symbol_ref_t equal_refs[] = {
-      {/*.module_id=*/0, /*.symbol_id=*/beta_symbol_id},
-      {/*.module_id=*/0, /*.symbol_id=*/alpha_symbol_id},
-      {/*.module_id=*/0, /*.symbol_id=*/beta_symbol_id},
+      {.module_id = 0, .symbol_id = beta_symbol_id},
+      {.module_id = 0, .symbol_id = alpha_symbol_id},
+      {.module_id = 0, .symbol_id = beta_symbol_id},
   };
   const loom_symbol_ref_t reordered_refs[] = {
-      {/*.module_id=*/0, /*.symbol_id=*/alpha_symbol_id},
-      {/*.module_id=*/0, /*.symbol_id=*/beta_symbol_id},
-      {/*.module_id=*/0, /*.symbol_id=*/beta_symbol_id},
+      {.module_id = 0, .symbol_id = alpha_symbol_id},
+      {.module_id = 0, .symbol_id = beta_symbol_id},
+      {.module_id = 0, .symbol_id = beta_symbol_id},
   };
   loom_attribute_t source_attr =
       loom_attr_symbol_array(source_refs, IREE_ARRAYSIZE(source_refs));
@@ -1039,8 +1039,9 @@ TEST_F(RemapTest, RemapsOrderedSymbolArraysAcrossModules) {
   EXPECT_FALSE(loom_attribute_equal(&source_attr, &reordered_attr));
 
   loom_ir_remap_options_t options = {
-      /*.allow_unmapped_values=*/{}, /*.remap_symbol=*/
-      loom_ir_remap_symbol_callback_make(RemapSymbolByName, NULL),
+      .allow_unmapped_values = {},
+      .remap_symbol =
+          loom_ir_remap_symbol_callback_make(RemapSymbolByName, NULL),
   };
   loom_ir_remap_t remap = InitializeRemap(&options);
   loom_attribute_t target_attr = loom_attr_absent();
@@ -1101,8 +1102,9 @@ TEST_F(RemapTest, RemapsParameterizedAttributeArraysAcrossModules) {
       &source_array));
 
   loom_ir_remap_options_t remap_options = {
-      /*.allow_unmapped_values=*/{}, /*.remap_symbol=*/
-      loom_ir_remap_symbol_callback_make(RemapSymbolByName, NULL),
+      .allow_unmapped_values = {},
+      .remap_symbol =
+          loom_ir_remap_symbol_callback_make(RemapSymbolByName, NULL),
   };
   loom_ir_remap_t remap = InitializeRemap(&remap_options);
   IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, source_dim, target_dim));
@@ -1145,7 +1147,7 @@ static iree_status_t RemapSymbolToMissingTarget(
   (void)source_module;
   (void)target_module;
   (void)source_ref;
-  *out_target_ref = {/*.module_id=*/0, /*.symbol_id=*/42};
+  *out_target_ref = {.module_id = 0, .symbol_id = 42};
   return iree_ok_status();
 }
 
@@ -1207,8 +1209,8 @@ TEST_F(RemapTest, SameModuleSymbolsRemapOnlyWhenEnabled) {
   uint16_t source_symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(
       loom_module_add_symbol(source_, source_name_id, &source_symbol_id));
-  const loom_symbol_ref_t source_ref = {/*.module_id=*/0,
-                                        /*.symbol_id=*/source_symbol_id};
+  const loom_symbol_ref_t source_ref = {.module_id = 0,
+                                        .symbol_id = source_symbol_id};
 
   loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(
@@ -1216,18 +1218,18 @@ TEST_F(RemapTest, SameModuleSymbolsRemapOnlyWhenEnabled) {
   uint16_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(
       loom_module_add_symbol(source_, target_name_id, &target_symbol_id));
-  const loom_symbol_ref_t target_ref = {/*.module_id=*/0,
-                                        /*.symbol_id=*/target_symbol_id};
+  const loom_symbol_ref_t target_ref = {.module_id = 0,
+                                        .symbol_id = target_symbol_id};
 
   SameModuleSymbolRemap state = {
-      /*.source_ref=*/source_ref,
-      /*.target_ref=*/target_ref,
-      /*.invocation_count=*/0,
+      .source_ref = source_ref,
+      .target_ref = target_ref,
+      .invocation_count = 0,
   };
   loom_ir_remap_options_t options = {
-      /*.allow_unmapped_values=*/false,
-      /*.remap_symbol=*/
-      loom_ir_remap_symbol_callback_make(RemapSameModuleSymbol, &state),
+      .allow_unmapped_values = false,
+      .remap_symbol =
+          loom_ir_remap_symbol_callback_make(RemapSameModuleSymbol, &state),
   };
   loom_ir_remap_t identity_remap = {};
   IREE_ASSERT_OK(loom_ir_remap_initialize(source_, source_, &remap_arena_,
@@ -1261,19 +1263,19 @@ TEST_F(RemapTest, SymbolSetRemapCanonicalizesByTargetSymbolName) {
     IREE_ASSERT_OK(loom_module_intern_string(source_, names[i], &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(source_, name_id, &symbol_id));
-    refs[i] = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    refs[i] = {.module_id = 0, .symbol_id = symbol_id};
   }
 
   SymbolPairRemap state = {
-      /*.source_refs=*/{refs[0], refs[1]},
-      /*.target_refs=*/{refs[2], refs[3]},
-      /*.invocation_count=*/0,
+      .source_refs = {refs[0], refs[1]},
+      .target_refs = {refs[2], refs[3]},
+      .invocation_count = 0,
   };
   loom_ir_remap_options_t options = {
-      /*.allow_unmapped_values=*/false,
-      /*.remap_symbol=*/
-      loom_ir_remap_symbol_callback_make(RemapSymbolPair, &state),
-      /*.remap_same_module_symbols=*/true,
+      .allow_unmapped_values = false,
+      .remap_symbol =
+          loom_ir_remap_symbol_callback_make(RemapSymbolPair, &state),
+      .remap_same_module_symbols = true,
   };
   loom_ir_remap_t remap = {};
   IREE_ASSERT_OK(loom_ir_remap_initialize(source_, source_, &remap_arena_,
@@ -1303,8 +1305,8 @@ TEST_F(RemapTest, CrossModuleSymbolRefsRequirePolicy) {
   uint16_t source_symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(
       loom_module_add_symbol(source_, source_name_id, &source_symbol_id));
-  loom_symbol_ref_t source_ref = {/*.module_id=*/0,
-                                  /*.symbol_id=*/source_symbol_id};
+  loom_symbol_ref_t source_ref = {.module_id = 0,
+                                  .symbol_id = source_symbol_id};
 
   loom_ir_remap_t strict_remap = InitializeRemap();
   loom_attribute_t target_attr = {};
@@ -1314,8 +1316,9 @@ TEST_F(RemapTest, CrossModuleSymbolRefsRequirePolicy) {
                               &target_attr));
 
   loom_ir_remap_options_t options = {
-      /*.allow_unmapped_values=*/{}, /*.remap_symbol=*/
-      loom_ir_remap_symbol_callback_make(RemapSymbolByName, NULL),
+      .allow_unmapped_values = {},
+      .remap_symbol =
+          loom_ir_remap_symbol_callback_make(RemapSymbolByName, NULL),
   };
   loom_ir_remap_t policy_remap = InitializeRemap(&options);
   IREE_ASSERT_OK(loom_ir_remap_attribute(
@@ -1349,8 +1352,9 @@ TEST_F(RemapTest, RemapsSymbolsNestedInParameterizedTypes) {
       (loom_symbol_ref_t){0, source_symbol_id}, &source_type));
 
   loom_ir_remap_options_t options = {
-      /*.allow_unmapped_values=*/{}, /*.remap_symbol=*/
-      loom_ir_remap_symbol_callback_make(RemapSymbolByName, NULL),
+      .allow_unmapped_values = {},
+      .remap_symbol =
+          loom_ir_remap_symbol_callback_make(RemapSymbolByName, NULL),
   };
   loom_ir_remap_t remap = InitializeRemap(&options);
   loom_type_t target_type = {};
@@ -1426,12 +1430,13 @@ TEST_F(RemapTest, CrossModuleSymbolPolicyMustReturnTargetSymbol) {
   uint16_t source_symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(
       loom_module_add_symbol(source_, source_name_id, &source_symbol_id));
-  loom_symbol_ref_t source_ref = {/*.module_id=*/0,
-                                  /*.symbol_id=*/source_symbol_id};
+  loom_symbol_ref_t source_ref = {.module_id = 0,
+                                  .symbol_id = source_symbol_id};
 
   loom_ir_remap_options_t options = {
-      /*.allow_unmapped_values=*/{}, /*.remap_symbol=*/
-      loom_ir_remap_symbol_callback_make(RemapSymbolToMissingTarget, NULL),
+      .allow_unmapped_values = {},
+      .remap_symbol =
+          loom_ir_remap_symbol_callback_make(RemapSymbolToMissingTarget, NULL),
   };
   loom_ir_remap_t remap = InitializeRemap(&options);
   loom_attribute_t target_attr = {};

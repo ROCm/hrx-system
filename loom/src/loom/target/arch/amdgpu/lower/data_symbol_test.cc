@@ -63,8 +63,8 @@ class AmdgpuDataSymbolTest : public ::testing::Test {
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
     return (loom_symbol_ref_t){
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
   }
 
@@ -149,8 +149,8 @@ class AmdgpuDataSymbolTest : public ::testing::Test {
 TEST_F(AmdgpuDataSymbolTest, BuildsRel32AddressMaterializationSequence) {
   loom_symbol_ref_t site_table = AddSymbol(IREE_SV("loom_sanitizer_sites"));
   const loom_amdgpu_data_symbol_address_t target = {
-      /*.symbol=*/site_table,
-      /*.byte_offset=*/24,
+      .symbol = site_table,
+      .byte_offset = 24,
   };
 
   loom_value_id_t address = LOOM_VALUE_ID_INVALID;

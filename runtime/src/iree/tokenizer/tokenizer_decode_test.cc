@@ -1012,8 +1012,8 @@ TEST_F(TokenizerDecodeTest, NoDecoderFailsWithPrecondition) {
   iree_host_size_t text_length = 0;
   std::vector<int32_t> token_ids = {0, 1};
   iree_tokenizer_token_id_list_t id_list = {
-      /*.count=*/token_ids.size(),
-      /*.values=*/token_ids.data(),
+      .count = token_ids.size(),
+      .values = token_ids.data(),
   };
   iree_status_t status = iree_tokenizer_decode_state_feed(
       state.state(), id_list,

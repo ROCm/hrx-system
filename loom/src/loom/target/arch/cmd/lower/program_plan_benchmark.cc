@@ -79,8 +79,8 @@ class ProgramPlanFixture {
       std::abort();
     }
     const loom_link_plan_root_facet_t root_facet = {
-        /*.symbol_ordinal=*/root_symbol_->ordinal,
-        /*.kind=*/LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION,
+        .symbol_ordinal = root_symbol_->ordinal,
+        .kind = LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION,
     };
     loom_link_plan_options_t options = {};
     options.mode = LOOM_LINK_PLAN_LINK;
@@ -378,21 +378,21 @@ static void RunIndexedProgramPlanBenchmark(benchmark::State& state,
                              static_cast<iree_host_size_t>(state.range(0)));
   const iree_host_size_t root_symbol_ordinal = fixture.root_symbol_ordinal();
   const loom_link_plan_materialization_environment_t environment = {
-      /*.context=*/fixture.context(),
-      /*.block_pool=*/fixture.block_pool(),
-      /*.low_repr_environment=*/{},
-      /*.diagnostic_sink=*/nullptr,
-      /*.prepare_module=*/nullptr,
-      /*.user_data=*/nullptr,
-      /*.allocator=*/iree_allocator_system(),
+      .context = fixture.context(),
+      .block_pool = fixture.block_pool(),
+      .low_repr_environment = {},
+      .diagnostic_sink = nullptr,
+      .prepare_module = nullptr,
+      .user_data = nullptr,
+      .allocator = iree_allocator_system(),
   };
   loom_cmd_program_plan_index_options_t options;
   loom_cmd_program_plan_index_options_initialize(&options);
   KernelRequestCapture capture;
   if (request_mode == KernelRequestMode::kPublish) {
     options.kernel_request_sink = {
-        /*.publish=*/CaptureKernelRequest,
-        /*.user_data=*/&capture,
+        .publish = CaptureKernelRequest,
+        .user_data = &capture,
     };
   }
 

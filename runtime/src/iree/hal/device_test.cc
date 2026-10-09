@@ -65,10 +65,10 @@ static iree_status_t CountingProfileSinkEndSession(
 }
 
 static const iree_hal_profile_sink_vtable_t kCountingProfileSinkVTable = {
-    /*.destroy=*/CountingProfileSinkDestroy,
-    /*.begin_session=*/CountingProfileSinkBeginSession,
-    /*.write=*/CountingProfileSinkWrite,
-    /*.end_session=*/CountingProfileSinkEndSession,
+    .destroy = CountingProfileSinkDestroy,
+    .begin_session = CountingProfileSinkBeginSession,
+    .write = CountingProfileSinkWrite,
+    .end_session = CountingProfileSinkEndSession,
 };
 
 static void CountingProfileSinkInitialize(CountingProfileSink* sink) {

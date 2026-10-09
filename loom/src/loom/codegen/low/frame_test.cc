@@ -115,7 +115,7 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
 
 TEST_F(LowEmissionFrameTest, ResidencyQueryConsumesRetainedFunctionFacts) {
   ModulePtr module = ParseModule();
-  static const loom_target_residency_model_t model = {/*.best_tier=*/4};
+  static const loom_target_residency_model_t model = {.best_tier = 4};
   loom_target_facts_t target_facts = {};
   loom_target_facts_builder_initialize(&loom_test_target_fact_type,
                                        loom_test_target_bundles.values[1],
@@ -147,17 +147,17 @@ TEST_F(LowEmissionFrameTest, ResidencyQueryConsumesRetainedFunctionFacts) {
 TEST_F(LowEmissionFrameTest, StorageLeaseFrameRetainsValueProducers) {
   ModulePtr module = ParseModule();
   const loom_low_storage_lease_provider_t storage_lease_provider = {
-      /*.user_data=*/nullptr,
-      /*.query=*/
-      [](void* user_data, const loom_low_schedule_table_t* schedule,
-         const loom_low_schedule_node_t* node,
-         const loom_low_storage_lease_query_sink_t* sink) {
-        (void)user_data;
-        (void)schedule;
-        (void)node;
-        (void)sink;
-        return iree_ok_status();
-      },
+      .user_data = nullptr,
+      .query =
+          [](void* user_data, const loom_low_schedule_table_t* schedule,
+             const loom_low_schedule_node_t* node,
+             const loom_low_storage_lease_query_sink_t* sink) {
+            (void)user_data;
+            (void)schedule;
+            (void)node;
+            (void)sink;
+            return iree_ok_status();
+          },
   };
   loom_low_emission_frame_options_t options = {};
   options.descriptor_registry = &registry_.registry;
@@ -198,14 +198,14 @@ low.func.def target<test.low.core> @caller(%value: reg<test.pressure.alias32>) -
   ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
       descriptors, IREE_SV("test.pressure.alias64"), &boundary_class, nullptr));
   const loom_low_allocation_abi_location_t arguments[] = {{
-      /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-      /*.descriptor_reg_class_id=*/boundary_class,
-      /*.location_base=*/7,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .descriptor_reg_class_id = boundary_class,
+      .location_base = 7,
   }};
   const loom_low_allocation_abi_location_t results[] = {{
-      /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-      /*.descriptor_reg_class_id=*/boundary_class,
-      /*.location_base=*/6,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .descriptor_reg_class_id = boundary_class,
+      .location_base = 6,
   }};
   loom_low_call_contract_t contract = {};
   contract.arguments = arguments;
@@ -317,19 +317,19 @@ low.func.def target<test.low.core> @caller(%value: reg<test.pressure.alias32>) -
   const loom_low_descriptor_set_t* descriptor_set =
       loom_test_low_core_descriptor_set();
   const loom_low_call_clobber_t common_clobber = {
-      /*.register_class=*/TEST_LOW_CORE_REG_CLASS_ID_TEST_PRESSURE_ALIAS32,
-      /*.location=*/0,
-      /*.count=*/
-      descriptor_set
-          ->reg_classes[TEST_LOW_CORE_REG_CLASS_ID_TEST_PRESSURE_ALIAS32]
-          .allocatable_count,
+      .register_class = TEST_LOW_CORE_REG_CLASS_ID_TEST_PRESSURE_ALIAS32,
+      .location = 0,
+      .count =
+          descriptor_set
+              ->reg_classes[TEST_LOW_CORE_REG_CLASS_ID_TEST_PRESSURE_ALIAS32]
+              .allocatable_count,
   };
   struct CallContracts {
     loom_low_call_contract_t contract;
     loom_low_call_clobber_list_t common_clobbers;
   } call_contracts = {
-      /*.contract=*/{},
-      /*.common_clobbers=*/{&common_clobber, 1},
+      .contract = {},
+      .common_clobbers = {&common_clobber, 1},
   };
   loom_low_emission_frame_options_t options = {};
   options.descriptor_registry = &registry_.registry;
@@ -1313,10 +1313,10 @@ TEST_F(LowEmissionFrameTest, RejectsInvalidStructuralModelDescriptor) {
       loom_test_low_core_descriptor_set();
   const loom_low_schedule_structural_model_t models[] = {
       {
-          /*.op_kind=*/LOOM_OP_LOW_STORAGE_ADDRESS,
-          /*.result_reg_class_id=*/TEST_LOW_CORE_REG_CLASS_ID_TEST_PTR,
-          /*.schedule_descriptor_ordinal=*/
-          descriptor_set->descriptor_ordinal_count,
+          .op_kind = LOOM_OP_LOW_STORAGE_ADDRESS,
+          .result_reg_class_id = TEST_LOW_CORE_REG_CLASS_ID_TEST_PTR,
+          .schedule_descriptor_ordinal =
+              descriptor_set->descriptor_ordinal_count,
       },
   };
   loom_low_emission_frame_t frame = {};

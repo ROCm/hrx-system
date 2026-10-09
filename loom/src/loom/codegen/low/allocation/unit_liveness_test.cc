@@ -408,8 +408,8 @@ TEST_F(LowAllocationUnitLivenessTest,
   descriptors.reg_classes = &reg_class;
   descriptors.reg_class_count = 1;
   const loom_liveness_segment_t segments[] = {
-      {/*.start_point=*/2, /*.end_point=*/4},
-      {/*.start_point=*/8, /*.end_point=*/10},
+      {.start_point = 2, .end_point = 4},
+      {.start_point = 8, .end_point = 10},
   };
   const PhysicalClobber gap_events[] = {
       {0, 0, 6, false},
@@ -444,16 +444,16 @@ TEST_F(LowAllocationUnitLivenessTest,
       BuildClobberIndex(&descriptors, events.data(), events.size());
 
   const loom_liveness_segment_t skipped_segments[] = {
-      {/*.start_point=*/0, /*.end_point=*/1},
-      {/*.start_point=*/17, /*.end_point=*/18},
+      {.start_point = 0, .end_point = 1},
+      {.start_point = 17, .end_point = 18},
   };
   EXPECT_FALSE(HasClobberConflict(&descriptors, clobbers, 0, 0, 0, 18,
                                   skipped_segments,
                                   IREE_ARRAYSIZE(skipped_segments)));
 
   const loom_liveness_segment_t conflicting_segments[] = {
-      {/*.start_point=*/0, /*.end_point=*/1},
-      {/*.start_point=*/16, /*.end_point=*/17},
+      {.start_point = 0, .end_point = 1},
+      {.start_point = 16, .end_point = 17},
   };
   EXPECT_TRUE(HasClobberConflict(&descriptors, clobbers, 0, 0, 0, 17,
                                  conflicting_segments,
@@ -516,8 +516,8 @@ TEST_F(LowAllocationUnitLivenessTest,
   descriptors.reg_classes = &reg_class;
   descriptors.reg_class_count = 1;
   const loom_liveness_segment_t sparse_segments[] = {
-      {/*.start_point=*/1, /*.end_point=*/3},
-      {/*.start_point=*/5, /*.end_point=*/7},
+      {.start_point = 1, .end_point = 3},
+      {.start_point = 5, .end_point = 7},
   };
 
   // Each ternary digit selects no write, a forbidden write, or a permitted
@@ -805,25 +805,25 @@ TEST_F(LowAllocationUnitLivenessTest, ExtendsTiedResultSourceUnits) {
   };
   const loom_liveness_block_info_t blocks[] = {
       {
-          /*.block=*/block,
-          /*.start_point=*/0,
-          /*.end_point=*/0,
-          /*.live_in_values=*/nullptr,
-          /*.live_in_count=*/0,
-          /*.live_out_values=*/nullptr,
-          /*.live_out_count=*/0,
+          .block = block,
+          .start_point = 0,
+          .end_point = 0,
+          .live_in_values = nullptr,
+          .live_in_count = 0,
+          .live_out_values = nullptr,
+          .live_out_count = 0,
       },
   };
   loom_liveness_analysis_t liveness = Liveness(
       value_domain.value_ids, value_domain.value_count, value_interval_indices,
       intervals, IREE_ARRAYSIZE(intervals), blocks, IREE_ARRAYSIZE(blocks));
   const loom_liveness_segment_t segments[] = {
-      {/*.start_point=*/0, /*.end_point=*/1},
-      {/*.start_point=*/7, /*.end_point=*/8},
+      {.start_point = 0, .end_point = 1},
+      {.start_point = 7, .end_point = 8},
   };
   const loom_liveness_segment_range_t value_segment_ranges[] = {
-      {/*.start=*/0, /*.count=*/1},
-      {/*.start=*/1, /*.count=*/1},
+      {.start = 0, .count = 1},
+      {.start = 1, .count = 1},
   };
   liveness.segments = segments;
   liveness.segment_count = IREE_ARRAYSIZE(segments);
@@ -854,7 +854,7 @@ TEST_F(LowAllocationUnitLivenessTest, ExtendsTiedResultSourceUnits) {
           /*.result_unit_offset=*/0,
           /*.source_unit_offset=*/0,
           /*.unit_count=*/2,
-          {/*.location_mask=*/0},
+          {.location_mask = 0},
           /*.kind=*/LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE,
           /*.cause=*/LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT,
           /*.flags=*/LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD |
@@ -1278,13 +1278,13 @@ TEST_F(LowAllocationUnitLivenessTest,
   };
   const loom_liveness_block_info_t blocks[] = {
       {
-          /*.block=*/block,
-          /*.start_point=*/0,
-          /*.end_point=*/12,
-          /*.live_in_values=*/nullptr,
-          /*.live_in_count=*/0,
-          /*.live_out_values=*/nullptr,
-          /*.live_out_count=*/0,
+          .block = block,
+          .start_point = 0,
+          .end_point = 12,
+          .live_in_values = nullptr,
+          .live_in_count = 0,
+          .live_out_values = nullptr,
+          .live_out_count = 0,
       },
   };
   const loom_liveness_analysis_t liveness = Liveness(
@@ -1306,7 +1306,7 @@ TEST_F(LowAllocationUnitLivenessTest,
           /*.result_unit_offset=*/0,
           /*.source_unit_offset=*/0,
           /*.unit_count=*/2,
-          {/*.location_mask=*/0},
+          {.location_mask = 0},
           /*.kind=*/LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE,
           /*.cause=*/LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT,
           /*.flags=*/LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD |
@@ -1320,7 +1320,7 @@ TEST_F(LowAllocationUnitLivenessTest,
           /*.result_unit_offset=*/0,
           /*.source_unit_offset=*/0,
           /*.unit_count=*/2,
-          {/*.location_mask=*/0},
+          {.location_mask = 0},
           /*.kind=*/LOOM_LOW_PLACEMENT_RELATION_CONTIGUOUS_PART,
           /*.cause=*/LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT,
           /*.flags=*/LOOM_LOW_PLACEMENT_RELATION_FLAG_PREFERRED |
@@ -1334,7 +1334,7 @@ TEST_F(LowAllocationUnitLivenessTest,
           /*.result_unit_offset=*/2,
           /*.source_unit_offset=*/0,
           /*.unit_count=*/2,
-          {/*.location_mask=*/0},
+          {.location_mask = 0},
           /*.kind=*/LOOM_LOW_PLACEMENT_RELATION_CONTIGUOUS_PART,
           /*.cause=*/LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT,
           /*.flags=*/LOOM_LOW_PLACEMENT_RELATION_FLAG_PREFERRED |

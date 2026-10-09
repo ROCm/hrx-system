@@ -89,8 +89,8 @@ iree_status_t AmdgpuQueueExecutionResourceTest::ObserveExecutionUnitIds(
   const iree_hal_buffer_ref_t binding = iree_hal_make_buffer_ref(
       output_buffer, /*offset=*/0, iree_hal_buffer_byte_length(output_buffer));
   const iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/1,
-      /*.values=*/&binding,
+      .count = 1,
+      .values = &binding,
   };
   iree_hal_dispatch_config_t config =
       iree_hal_make_static_dispatch_config(workgroup_count, 1, 1);
@@ -183,8 +183,8 @@ TEST_P(AmdgpuQueueExecutionResourceTest,
           : kGfx942MaximumWorkgroupInvocations;
 
   const iree_hal_queue_dispatch_concurrency_params_t concurrency_params = {
-      /*.workgroup_size=*/{workgroup_size, 1, 1},
-      /*.dynamic_workgroup_local_memory=*/0,
+      .workgroup_size = {workgroup_size, 1, 1},
+      .dynamic_workgroup_local_memory = 0,
   };
   iree_hal_queue_dispatch_concurrency_t full_concurrency;
   iree_hal_queue_dispatch_concurrency_t first_concurrency;

@@ -13,9 +13,9 @@ namespace {
 
 TEST(EncodingTest, ParameterDescriptorBindingIsNonSemantic) {
   loom_named_attr_t bound_attr = {
-      /*.name_id=*/7,
-      /*.reserved=*/{},
-      /*.value=*/loom_attr_i64(32),
+      .name_id = 7,
+      .reserved = {},
+      .value = loom_attr_i64(32),
   };
   loom_named_attr_t unbound_attr = bound_attr;
 
@@ -42,27 +42,29 @@ TEST(EncodingTest, EqualIgnoresAliasAndComparesArrayContents) {
   int64_t block_a[] = {16, 32, 64};
   int64_t block_b[] = {16, 32, 64};
   loom_named_attr_t attrs_a[] = {{
-      /*.name_id=*/7,
-      /*.reserved=*/{},
-      /*.value=*/loom_attr_i64_array(block_a, IREE_ARRAYSIZE(block_a)),
+      .name_id = 7,
+      .reserved = {},
+      .value = loom_attr_i64_array(block_a, IREE_ARRAYSIZE(block_a)),
   }};
   loom_named_attr_t attrs_b[] = {{
-      /*.name_id=*/7,
-      /*.reserved=*/{},
-      /*.value=*/loom_attr_i64_array(block_b, IREE_ARRAYSIZE(block_b)),
+      .name_id = 7,
+      .reserved = {},
+      .value = loom_attr_i64_array(block_b, IREE_ARRAYSIZE(block_b)),
   }};
 
   loom_encoding_t q8_a = {
-      /*.name_id=*/42,
-      /*.alias_id=*/100,
-      /*.attribute_count=*/1,
-      /*.family=*/{},         /*.attributes=*/attrs_a,
+      .name_id = 42,
+      .alias_id = 100,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = attrs_a,
   };
   loom_encoding_t q8_b = {
-      /*.name_id=*/42,
-      /*.alias_id=*/200,
-      /*.attribute_count=*/1,
-      /*.family=*/{},         /*.attributes=*/attrs_b,
+      .name_id = 42,
+      .alias_id = 200,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = attrs_b,
   };
   q8_a.family.id = 1;
   q8_b.family.id = 2;
@@ -73,14 +75,14 @@ TEST(EncodingTest, EqualIgnoresAliasAndComparesArrayContents) {
 
 TEST(EncodingTest, NotEqualForDifferentParams) {
   loom_named_attr_t attrs_a[] = {{
-      /*.name_id=*/7,
-      /*.reserved=*/{},
-      /*.value=*/loom_attr_i64(32),
+      .name_id = 7,
+      .reserved = {},
+      .value = loom_attr_i64(32),
   }};
   loom_named_attr_t attrs_b[] = {{
-      /*.name_id=*/7,
-      /*.reserved=*/{},
-      /*.value=*/loom_attr_i64(64),
+      .name_id = 7,
+      .reserved = {},
+      .value = loom_attr_i64(64),
   }};
 
   loom_encoding_t q8_a = {

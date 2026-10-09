@@ -57,8 +57,8 @@ class LowLowerRuleValueTest : public ::testing::Test {
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
     const loom_symbol_ref_t symbol = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
     const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
     const loom_type_t bf16_vector_type = loom_type_shaped_1d(
@@ -208,19 +208,19 @@ TEST_F(LowLowerRuleValueTest, ResolvesVariadicResultElements) {
 TEST_F(LowLowerRuleValueTest, ResolvesValuesAcrossSourceGraphNodes) {
   const loom_low_lower_value_ref_t value_refs[] = {
       {
-          /*.kind=*/LOOM_LOW_LOWER_VALUE_REF_OPERAND,
-          /*.source_node_index=*/0,
-          /*.index=*/0,
+          .kind = LOOM_LOW_LOWER_VALUE_REF_OPERAND,
+          .source_node_index = 0,
+          .index = 0,
       },
       {
-          /*.kind=*/LOOM_LOW_LOWER_VALUE_REF_OPERAND,
-          /*.source_node_index=*/1,
-          /*.index=*/1,
+          .kind = LOOM_LOW_LOWER_VALUE_REF_OPERAND,
+          .source_node_index = 1,
+          .index = 1,
       },
       {
-          /*.kind=*/LOOM_LOW_LOWER_VALUE_REF_RESULT,
-          /*.source_node_index=*/1,
-          /*.index=*/0,
+          .kind = LOOM_LOW_LOWER_VALUE_REF_RESULT,
+          .source_node_index = 1,
+          .index = 0,
       },
   };
   loom_low_lower_rule_set_t rule_set = {};
@@ -278,9 +278,9 @@ TEST_F(LowLowerRuleValueTest,
   EXPECT_EQ(provenance_origin.source_value_id, arguments_[3]);
 
   const loom_low_lower_value_ref_t value_ref = {
-      /*.kind=*/LOOM_LOW_LOWER_VALUE_REF_EXACT_LANE_ORIGIN_OPERAND,
-      /*.source_node_index=*/0,
-      /*.index=*/0,
+      .kind = LOOM_LOW_LOWER_VALUE_REF_EXACT_LANE_ORIGIN_OPERAND,
+      .source_node_index = 0,
+      .index = 0,
   };
   loom_low_lower_rule_set_t rule_set = {};
   rule_set.value_refs = &value_ref;
@@ -305,9 +305,9 @@ TEST_F(LowLowerRuleValueTest, ResolvesUniformElementOrigins) {
        {LOOM_LOW_LOWER_VALUE_REF_UNIFORM_ELEMENT_ORIGIN_OPERAND,
         LOOM_LOW_LOWER_VALUE_REF_EXACT_UNIFORM_ELEMENT_ORIGIN_OPERAND}) {
     const loom_low_lower_value_ref_t value_ref = {
-        /*.kind=*/static_cast<uint8_t>(kind),
-        /*.source_node_index=*/0,
-        /*.index=*/0,
+        .kind = static_cast<uint8_t>(kind),
+        .source_node_index = 0,
+        .index = 0,
     };
     loom_low_lower_rule_set_t rule_set = {};
     rule_set.value_refs = &value_ref;

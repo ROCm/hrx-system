@@ -97,10 +97,10 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
                                              /*code_byte_count=*/64,
                                              /*code_storage_byte_count=*/80);
   const loom_target_compile_report_emission_breakdown_t emission_breakdown = {
-      /*.body_instruction_count=*/6,
-      /*.entry_instruction_count=*/2,
-      /*.coissued_instruction_count=*/1,
-      /*.coissued_component_count=*/2,
+      .body_instruction_count = 6,
+      .entry_instruction_count = 2,
+      .coissued_instruction_count = 1,
+      .coissued_component_count = 2,
   };
   loom_target_compile_report_record_emission_breakdown(&report,
                                                        &emission_breakdown);
@@ -167,7 +167,7 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_text(&report, &options, &builder));
@@ -298,7 +298,7 @@ TEST(CompileReportFormatTest, EmitsOnlyValidResidencyEvidence) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -563,7 +563,7 @@ TEST(CompileReportFormatTest, KeepsResidencyTransitionsOnTheirOwnEntries) {
     loom_output_stream_t stream;
     loom_output_stream_for_builder(&builder, &stream);
     const loom_target_compile_report_format_options_t options = {
-        /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+        .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
     };
     IREE_ASSERT_OK(
         loom_target_compile_report_format_json(&report, &options, &stream));
@@ -621,10 +621,10 @@ TEST(CompileReportFormatTest, FormatsEntryReportsAndTargetCapabilities) {
                                              /*code_byte_count=*/64,
                                              /*code_storage_byte_count=*/80);
   const loom_target_compile_report_emission_breakdown_t emission_breakdown = {
-      /*.body_instruction_count=*/6,
-      /*.entry_instruction_count=*/2,
-      /*.coissued_instruction_count=*/1,
-      /*.coissued_component_count=*/2,
+      .body_instruction_count = 6,
+      .entry_instruction_count = 2,
+      .coissued_instruction_count = 1,
+      .coissued_component_count = 2,
   };
   loom_target_compile_report_record_emission_breakdown(&entry,
                                                        &emission_breakdown);
@@ -660,7 +660,7 @@ TEST(CompileReportFormatTest, FormatsEntryReportsAndTargetCapabilities) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -757,7 +757,7 @@ TEST(CompileReportFormatTest, FormatsTargetInsertedPacketEconomics) {
   EXPECT_EQ(report.target_insertion_rows.count, 2u);
 
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -858,7 +858,7 @@ TEST(CompileReportFormatTest, SummarizesTargetInsertionsWithoutDetailRows) {
   EXPECT_EQ(report.target_insertion_rows.count, 0u);
 
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);

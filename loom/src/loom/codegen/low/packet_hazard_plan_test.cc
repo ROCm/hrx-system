@@ -142,17 +142,17 @@ void EmitHazardEvent(loom_low_packet_hazard_plan_emit_fn_t emit,
           ? IREE_SV("synthetic.padding")
           : iree_string_view_empty();
   const loom_low_packet_hazard_plan_event_t event = {
-      /*.kind=*/kind,
-      /*.action_id=*/action_id,
-      /*.action_name=*/action_name,
-      /*.reason_id=*/reason_id,
-      /*.reason_name=*/reason_name,
-      /*.producer_node_index=*/producer_node_index,
-      /*.progress_class_id=*/progress_class_id,
-      /*.progress_class_name=*/progress_class_name,
-      /*.required_progress=*/required_progress,
-      /*.observed_progress=*/observed_progress,
-      /*.residual_progress=*/residual_progress,
+      .kind = kind,
+      .action_id = action_id,
+      .action_name = action_name,
+      .reason_id = reason_id,
+      .reason_name = reason_name,
+      .producer_node_index = producer_node_index,
+      .progress_class_id = progress_class_id,
+      .progress_class_name = progress_class_name,
+      .required_progress = required_progress,
+      .observed_progress = observed_progress,
+      .residual_progress = residual_progress,
   };
   emit(emit_user_data, &event);
 }
@@ -165,9 +165,9 @@ iree_string_view_t SyntheticProgressClassName(uint16_t progress_class_id) {
 void EmitProgressEvent(loom_low_packet_progress_emit_fn_t emit,
                        void* emit_user_data, uint32_t units) {
   const loom_low_packet_progress_event_t event = {
-      /*.progress_class_id=*/kSyntheticProgressPipe,
-      /*.action=*/LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE,
-      /*.units=*/units,
+      .progress_class_id = kSyntheticProgressPipe,
+      .action = LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE,
+      .units = units,
   };
   emit(emit_user_data, &event);
 }
@@ -259,10 +259,10 @@ void SyntheticResidualHazardQuery(
 
 TEST_F(LowPacketHazardPlanTest, RecordsResidualActionsWithPacketIdentity) {
   const loom_low_packet_progress_provider_t progress_provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/1,
-      /*.query=*/SyntheticProgressQuery,
-      /*.class_name=*/SyntheticProgressClassName,
+      .user_data = {},
+      .event_count = 1,
+      .query = SyntheticProgressQuery,
+      .class_name = SyntheticProgressClassName,
   };
   loom_low_packet_progress_table_t progress = {};
   IREE_ASSERT_OK(
@@ -270,9 +270,9 @@ TEST_F(LowPacketHazardPlanTest, RecordsResidualActionsWithPacketIdentity) {
                                      &progress_provider, &arena_, &progress));
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/1,
-      /*.query=*/SyntheticResidualHazardQuery,
+      .user_data = {},
+      .event_count = 1,
+      .query = SyntheticResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
@@ -309,10 +309,10 @@ TEST_F(LowPacketHazardPlanTest, RecordsResidualActionsWithPacketIdentity) {
 TEST_F(LowPacketHazardPlanTest,
        EmitsAllocatorStorageReleaseActionsWithObservedProgress) {
   const loom_low_packet_progress_provider_t progress_provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/1,
-      /*.query=*/SyntheticProgressQuery,
-      /*.class_name=*/SyntheticProgressClassName,
+      .user_data = {},
+      .event_count = 1,
+      .query = SyntheticProgressQuery,
+      .class_name = SyntheticProgressClassName,
   };
   loom_low_packet_progress_table_t progress = {};
   IREE_ASSERT_OK(
@@ -367,9 +367,9 @@ TEST_F(LowPacketHazardPlanTest,
                            IREE_ARRAYSIZE(storage_release_actions));
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/0,
-      /*.query=*/EmptyResidualHazardQuery,
+      .user_data = {},
+      .event_count = 0,
+      .query = EmptyResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
@@ -397,10 +397,10 @@ TEST_F(LowPacketHazardPlanTest,
 
 TEST_F(LowPacketHazardPlanTest, SatisfiedStorageReleaseRetainsNoPlanStorage) {
   const loom_low_packet_progress_provider_t progress_provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/1,
-      /*.query=*/SyntheticProgressQuery,
-      /*.class_name=*/SyntheticProgressClassName,
+      .user_data = {},
+      .event_count = 1,
+      .query = SyntheticProgressQuery,
+      .class_name = SyntheticProgressClassName,
   };
   loom_low_packet_progress_table_t progress = {};
   IREE_ASSERT_OK(
@@ -455,9 +455,9 @@ TEST_F(LowPacketHazardPlanTest, SatisfiedStorageReleaseRetainsNoPlanStorage) {
                            IREE_ARRAYSIZE(storage_release_actions));
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/0,
-      /*.query=*/EmptyResidualHazardQuery,
+      .user_data = {},
+      .event_count = 0,
+      .query = EmptyResidualHazardQuery,
   };
   const iree_host_size_t retained_used_bytes_before =
       arena_.used_allocation_size;
@@ -477,10 +477,10 @@ TEST_F(LowPacketHazardPlanTest, SatisfiedStorageReleaseRetainsNoPlanStorage) {
 TEST_F(LowPacketHazardPlanTest,
        PreservesStorageReleaseRowsWhenRangeIndexAmortizes) {
   const loom_low_packet_progress_provider_t progress_provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/1,
-      /*.query=*/SyntheticProgressQuery,
-      /*.class_name=*/SyntheticProgressClassName,
+      .user_data = {},
+      .event_count = 1,
+      .query = SyntheticProgressQuery,
+      .class_name = SyntheticProgressClassName,
   };
   loom_low_packet_progress_table_t progress = {};
   IREE_ASSERT_OK(
@@ -536,9 +536,9 @@ TEST_F(LowPacketHazardPlanTest,
                            IREE_ARRAYSIZE(storage_release_actions));
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/0,
-      /*.query=*/EmptyResidualHazardQuery,
+      .user_data = {},
+      .event_count = 0,
+      .query = EmptyResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
@@ -649,10 +649,10 @@ void SyntheticAggregateResidualHazardQuery(
 TEST_F(LowPacketHazardPlanTest,
        RecordsAggregateResidualActionsWithoutProducerIdentity) {
   const loom_low_packet_progress_provider_t progress_provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/1,
-      /*.query=*/SyntheticProgressQuery,
-      /*.class_name=*/SyntheticProgressClassName,
+      .user_data = {},
+      .event_count = 1,
+      .query = SyntheticProgressQuery,
+      .class_name = SyntheticProgressClassName,
   };
   loom_low_packet_progress_table_t progress = {};
   IREE_ASSERT_OK(
@@ -660,9 +660,9 @@ TEST_F(LowPacketHazardPlanTest,
                                      &progress_provider, &arena_, &progress));
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/1,
-      /*.query=*/SyntheticAggregateResidualHazardQuery,
+      .user_data = {},
+      .event_count = 1,
+      .query = SyntheticAggregateResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
@@ -726,9 +726,9 @@ void SyntheticScheduleOnlyDiagnosticQuery(
 
 TEST_F(LowPacketHazardPlanTest, SupportsScheduleOnlyDiagnostics) {
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/3,
-      /*.query=*/SyntheticScheduleOnlyDiagnosticQuery,
+      .user_data = {},
+      .event_count = 3,
+      .query = SyntheticScheduleOnlyDiagnosticQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
@@ -759,9 +759,9 @@ TEST_F(LowPacketHazardPlanTest, SupportsScheduleOnlyDiagnostics) {
 TEST_F(LowPacketHazardPlanTest, QueriesProviderExactlyOncePerPacket) {
   HazardQueryAudit audit;
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      /*.user_data=*/&audit,
-      /*.event_count=*/0,
-      /*.query=*/AuditEmptyResidualHazardQuery,
+      .user_data = &audit,
+      .event_count = 0,
+      .query = AuditEmptyResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
@@ -795,9 +795,9 @@ void LoopCarriedProducerHazardQuery(
 
 TEST_F(LowPacketHazardPlanTest, RecordsLoopCarriedProducerAfterInsertion) {
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      /*.user_data=*/{},
-      /*.event_count=*/1,
-      /*.query=*/LoopCarriedProducerHazardQuery,
+      .user_data = {},
+      .event_count = 1,
+      .query = LoopCarriedProducerHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
   IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(

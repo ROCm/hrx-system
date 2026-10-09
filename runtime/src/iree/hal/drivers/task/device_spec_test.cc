@@ -16,13 +16,13 @@ namespace {
 
 TEST(CpuDeviceSpecTest, RoundTripsSyntheticCrossArchitectureFacts) {
   iree_hal_cpu_device_spec_t source = {
-      /*.cpu_data=*/
-      {
-          /*.architecture=*/IREE_CPU_ARCHITECTURE_ARM_64,
-          /*.fields=*/
-          {IREE_CPU_DATA0_ARM_64_DOTPROD | IREE_CPU_DATA0_ARM_64_I8MM},
-      },
-      /*.flags=*/IREE_HAL_CPU_DEVICE_SPEC_FLAG_NONE,
+      .cpu_data =
+          {
+              .architecture = IREE_CPU_ARCHITECTURE_ARM_64,
+              .fields = {IREE_CPU_DATA0_ARM_64_DOTPROD |
+                         IREE_CPU_DATA0_ARM_64_I8MM},
+          },
+      .flags = IREE_HAL_CPU_DEVICE_SPEC_FLAG_NONE,
   };
   std::vector<uint8_t> payload(iree_hal_cpu_device_spec_payload_size());
   IREE_ASSERT_OK(iree_hal_cpu_device_spec_encode(
@@ -39,12 +39,12 @@ TEST(CpuDeviceSpecTest, RoundTripsSyntheticCrossArchitectureFacts) {
 
 TEST(CpuDeviceSpecTest, RejectsInvalidEnvelopeAndArchitecture) {
   iree_hal_cpu_device_spec_t source = {
-      /*.cpu_data=*/
-      {
-          /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-          /*.fields=*/{},
-      },
-      /*.flags=*/IREE_HAL_CPU_DEVICE_SPEC_FLAG_NONE,
+      .cpu_data =
+          {
+              .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+              .fields = {},
+          },
+      .flags = IREE_HAL_CPU_DEVICE_SPEC_FLAG_NONE,
   };
   std::vector<uint8_t> payload(iree_hal_cpu_device_spec_payload_size());
   IREE_ASSERT_OK(iree_hal_cpu_device_spec_encode(

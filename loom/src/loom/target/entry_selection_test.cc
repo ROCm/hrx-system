@@ -132,7 +132,7 @@ class TargetEntrySelectionTest : public ::testing::Test {
     loom_target_entry_diagnostic_emitter_initialize(
         module, &options, LOOM_EMITTER_VERIFIER, &diagnostic_emitter);
     const loom_target_entry_predicate_t predicate = {
-        /*.fn=*/AcceptEntry,
+        .fn = AcceptEntry,
     };
     bool selected = false;
     loom_target_entry_t entry = {};
@@ -213,16 +213,17 @@ TEST_F(TargetEntrySelectionTest, ForwardingPreservesRawEmissionIdentity) {
     loom_diagnostic_emission_t emission;
   } capture = {};
   const iree_diagnostic_emitter_t downstream = {
-      /*.fn=*/[](void* user_data, const loom_diagnostic_emission_t* emission) {
-        auto* capture = static_cast<ForwardingCapture*>(user_data);
-        capture->called = true;
-        capture->emission = *emission;
-        return iree_ok_status();
-      },
-      /*.user_data=*/&capture,
+      .fn =
+          [](void* user_data, const loom_diagnostic_emission_t* emission) {
+            auto* capture = static_cast<ForwardingCapture*>(user_data);
+            capture->called = true;
+            capture->emission = *emission;
+            return iree_ok_status();
+          },
+      .user_data = &capture,
   };
   loom_target_entry_diagnostic_emitter_t emitter = {
-      /*.forwarding_emitter=*/downstream,
+      .forwarding_emitter = downstream,
   };
 
   const loom_diagnostic_param_t params[] = {

@@ -92,8 +92,8 @@ class AmdgpuSanitizerAccessTest : public ::testing::Test {
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
     return (loom_symbol_ref_t){
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
   }
 
@@ -233,8 +233,8 @@ class AmdgpuSanitizerAccessTest : public ::testing::Test {
 
   void VerifyModuleOk() {
     loom_verify_options_t options = {
-        /*.sink=*/{loom_diagnostic_stderr_sink, NULL},
-        /*.max_errors=*/20,
+        .sink = {loom_diagnostic_stderr_sink, NULL},
+        .max_errors = 20,
     };
     loom_verify_result_t result = {};
     IREE_ASSERT_OK(loom_verify_module(module_, &options, &result));
@@ -259,8 +259,8 @@ class AmdgpuSanitizerAccessTest : public ::testing::Test {
     return loom_amdgpu_build_data_symbol_address(
         &builder_, descriptor_set_,
         (loom_amdgpu_data_symbol_address_t){
-            /*.symbol=*/asan_config_symbol,
-            /*.byte_offset=*/0,
+            .symbol = asan_config_symbol,
+            .byte_offset = 0,
         },
         LOOM_LOCATION_UNKNOWN, out_fault_address);
   }
@@ -402,18 +402,18 @@ TEST_F(AmdgpuSanitizerAccessTest, FeedsMaskedFailuresToSharedReportIsland) {
       &builder_, descriptor_set_, workgroup_id, /*expected_unit_count=*/1,
       LOOM_LOCATION_UNKNOWN, &report_workgroup_id));
   const loom_amdgpu_feedback_packet_source_t source = {
-      /*.dispatch_ptr=*/report_address,
-      /*.workgroup_id_x=*/report_workgroup_id,
-      /*.workitem_id_x=*/report_workgroup_id,
+      .dispatch_ptr = report_address,
+      .workgroup_id_x = report_workgroup_id,
+      .workitem_id_x = report_workgroup_id,
   };
   const loom_amdgpu_sanitizer_access_report_t report = {
-      /*.access_kind=*/LOOM_AMDGPU_ASAN_ACCESS_KIND_READ,
-      /*.flags=*/LOOM_AMDGPU_ASAN_REPORT_FLAG_NONE,
-      /*.fault_address=*/report_address,
-      /*.access_size=*/report_address,
-      /*.site_id=*/report_address,
-      /*.shadow_address=*/check.shadow_address,
-      /*.shadow_value=*/check.shadow_value,
+      .access_kind = LOOM_AMDGPU_ASAN_ACCESS_KIND_READ,
+      .flags = LOOM_AMDGPU_ASAN_REPORT_FLAG_NONE,
+      .fault_address = report_address,
+      .access_size = report_address,
+      .site_id = report_address,
+      .shadow_address = check.shadow_address,
+      .shadow_value = check.shadow_value,
   };
 
   loom_amdgpu_sanitizer_access_report_island_t island = {};

@@ -297,11 +297,11 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
   ByteSequencePtr compile_report_contents =
       CopyByteSequence(compile_report_json);
   const loomc_artifact_t compile_report_artifact = {
-      /*.kind=*/LOOMC_ARTIFACT_KIND_REPORT,
-      /*.format=*/
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON),
-      /*.identifier=*/loomc_make_cstring_view("compile_report"),
-      /*.contents=*/compile_report_contents.get(),
+      .kind = LOOMC_ARTIFACT_KIND_REPORT,
+      .format =
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON),
+      .identifier = loomc_make_cstring_view("compile_report"),
+      .contents = compile_report_contents.get(),
   };
 
   loom_testbench_benchmark_plan_t benchmark_plan = {};
@@ -570,12 +570,12 @@ TEST(BenchmarkReportTest, WritesExactWorkloadAndResolvedLaunchConfig) {
 
   iree_benchmark_loom_workload_value_t workload_values[] = {
       {
-          /*.type=*/LOOM_SCALAR_TYPE_INDEX,
-          /*.value=*/4096,
+          .type = LOOM_SCALAR_TYPE_INDEX,
+          .value = 4096,
       },
       {
-          /*.type=*/LOOM_SCALAR_TYPE_I32,
-          /*.value=*/513,
+          .type = LOOM_SCALAR_TYPE_I32,
+          .value = 513,
       },
   };
   iree_benchmark_loom_launch_record_t launch_record = {
@@ -586,14 +586,14 @@ TEST(BenchmarkReportTest, WritesExactWorkloadAndResolvedLaunchConfig) {
       /*.workload_value_count=*/IREE_ARRAYSIZE(workload_values),
       /*.launch_config=*/
       {
-          /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-          /*.structure_size=*/sizeof(loomc_launch_config_t),
-          /*.next=*/nullptr,
-          /*.workgroup_count=*/{65, 2, 1},
-          /*.workgroup_size=*/{64, 1, 1},
-          /*.workgroup_cluster_size=*/{2, 1, 1},
-          /*.subgroup_size=*/32,
-          /*.workgroup_storage_bytes=*/0,
+          .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+          .structure_size = sizeof(loomc_launch_config_t),
+          .next = nullptr,
+          .workgroup_count = {65, 2, 1},
+          .workgroup_size = {64, 1, 1},
+          .workgroup_cluster_size = {2, 1, 1},
+          .subgroup_size = 32,
+          .workgroup_storage_bytes = 0,
       },
   };
   iree_benchmark_loom_launch_evidence_t launch_evidence = {
@@ -866,18 +866,18 @@ TEST(BenchmarkReportTest, WritesArtifactManifestSidecarPath) {
   ByteSequencePtr manifest_contents =
       CopyByteSequence(iree_make_cstring_view(kManifestJson));
   const loomc_artifact_t manifest_artifact = {
-      /*.kind=*/LOOMC_ARTIFACT_KIND_REPORT,
-      /*.format=*/
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_ARTIFACT_MANIFEST_JSON),
-      /*.identifier=*/loomc_make_cstring_view("artifact_manifest"),
-      /*.contents=*/manifest_contents.get(),
+      .kind = LOOMC_ARTIFACT_KIND_REPORT,
+      .format =
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_ARTIFACT_MANIFEST_JSON),
+      .identifier = loomc_make_cstring_view("artifact_manifest"),
+      .contents = manifest_contents.get(),
   };
   ByteSequencePtr executable_contents = CopyByteSequence(IREE_SV("exe"));
   const loomc_artifact_t executable_artifact = {
-      /*.kind=*/LOOMC_ARTIFACT_KIND_EXECUTABLE,
-      /*.format=*/loomc_make_cstring_view("test-executable"),
-      /*.identifier=*/loomc_make_cstring_view("module.bin"),
-      /*.contents=*/executable_contents.get(),
+      .kind = LOOMC_ARTIFACT_KIND_EXECUTABLE,
+      .format = loomc_make_cstring_view("test-executable"),
+      .identifier = loomc_make_cstring_view("module.bin"),
+      .contents = executable_contents.get(),
   };
 
   iree_benchmark_loom_hal_actual_provider_t provider = {};

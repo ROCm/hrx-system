@@ -166,8 +166,8 @@ class KernelConfigMaterializerTest : public ::testing::Test {
   PlanPtr BuildConfigPlan(loom_link_module_index_t* index,
                           iree_host_size_t kernel_symbol_ordinal) {
     const loom_link_plan_root_facet_t root = {
-        /*.symbol_ordinal=*/kernel_symbol_ordinal,
-        /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
+        .symbol_ordinal = kernel_symbol_ordinal,
+        .kind = LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
     };
     loom_link_plan_options_t options = {};
     options.mode = LOOM_LINK_PLAN_LINK;
@@ -561,12 +561,12 @@ kernel.def @dispatch_columns(%count: index) {
 
     const loom_link_plan_root_facet_t roots[] = {
         {
-            /*.symbol_ordinal=*/rows->ordinal,
-            /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
+            .symbol_ordinal = rows->ordinal,
+            .kind = LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
         },
         {
-            /*.symbol_ordinal=*/columns->ordinal,
-            /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
+            .symbol_ordinal = columns->ordinal,
+            .kind = LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
         },
     };
     loom_link_plan_options_t plan_options = {};

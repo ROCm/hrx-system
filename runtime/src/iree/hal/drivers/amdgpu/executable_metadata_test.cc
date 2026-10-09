@@ -16,9 +16,9 @@ using iree::testing::status::StatusIs;
 
 TEST(ExecutableMetadataTest, AllocatesHotAndColdTables) {
   iree_hal_amdgpu_executable_metadata_counts_t counts = {
-      /*.export_count=*/2,
-      /*.parameter_count=*/3,
-      /*.layout_blob_byte_length=*/128,
+      .export_count = 2,
+      .parameter_count = 3,
+      .layout_blob_byte_length = 128,
   };
 
   iree_hal_amdgpu_executable_metadata_t* metadata = nullptr;
@@ -46,9 +46,9 @@ TEST(ExecutableMetadataTest, AppendsAndResolvesLayout) {
   IREE_ASSERT_OK(iree_hal_amdgpu_kernarg_layout_storage_size(
       /*binding_count=*/1, /*constant_span_count=*/1, &layout_byte_length));
   iree_hal_amdgpu_executable_metadata_counts_t counts = {
-      /*.export_count=*/1,
-      /*.parameter_count=*/{},
-      /*.layout_blob_byte_length=*/layout_byte_length,
+      .export_count = 1,
+      .parameter_count = {},
+      .layout_blob_byte_length = layout_byte_length,
   };
   iree_hal_amdgpu_executable_metadata_t* metadata = nullptr;
   IREE_ASSERT_OK(iree_hal_amdgpu_executable_metadata_allocate(
@@ -63,13 +63,13 @@ TEST(ExecutableMetadataTest, AppendsAndResolvesLayout) {
   EXPECT_EQ(layout_storage.data_length, layout_byte_length);
 
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {/*.target_qword_index=*/0},
+      {.target_qword_index = 0},
   };
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          /*.target_byte_offset=*/8,
-          /*.source_byte_offset=*/0,
-          /*.byte_length=*/4,
+          .target_byte_offset = 8,
+          .source_byte_offset = 0,
+          .byte_length = 4,
       },
   };
   iree_hal_amdgpu_kernarg_layout_params_t params = {
@@ -102,9 +102,9 @@ TEST(ExecutableMetadataTest, AppendsAndResolvesLayout) {
 
 TEST(ExecutableMetadataTest, RejectsLayoutBlobOverflow) {
   iree_hal_amdgpu_executable_metadata_counts_t counts = {
-      /*.export_count=*/1,
-      /*.parameter_count=*/{},
-      /*.layout_blob_byte_length=*/8,
+      .export_count = 1,
+      .parameter_count = {},
+      .layout_blob_byte_length = 8,
   };
   iree_hal_amdgpu_executable_metadata_t* metadata = nullptr;
   IREE_ASSERT_OK(iree_hal_amdgpu_executable_metadata_allocate(
@@ -125,9 +125,9 @@ TEST(ExecutableMetadataTest, RejectsLayoutBlobOverflow) {
 
 TEST(ExecutableMetadataTest, RejectsInvalidLayoutReference) {
   iree_hal_amdgpu_executable_metadata_counts_t counts = {
-      /*.export_count=*/1,
-      /*.parameter_count=*/{},
-      /*.layout_blob_byte_length=*/16,
+      .export_count = 1,
+      .parameter_count = {},
+      .layout_blob_byte_length = 16,
   };
   iree_hal_amdgpu_executable_metadata_t* metadata = nullptr;
   IREE_ASSERT_OK(iree_hal_amdgpu_executable_metadata_allocate(

@@ -323,19 +323,19 @@ TEST(AmdgpuDescriptorTest, EncodesNamedSetupAndCodePropertyFields) {
   metadata.vgpr_count = 9;
 
   const loom_amdgpu_kernel_descriptor_options_t options = {
-      /*.flags=*/LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_DISPATCH_PTR |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_QUEUE_PTR |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_DISPATCH_ID |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_Y |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_Z |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_INFO |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_X |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Y |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Z |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_USES_DYNAMIC_STACK,
-      /*.minimum_user_sgpr_count=*/9,
+      .flags = LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_DISPATCH_PTR |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_QUEUE_PTR |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_DISPATCH_ID |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_Y |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_Z |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_INFO |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_X |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Y |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Z |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_USES_DYNAMIC_STACK,
+      .minimum_user_sgpr_count = 9,
   };
 
   std::array<uint8_t, 65> bytes;
@@ -397,9 +397,9 @@ TEST(AmdgpuDescriptorTest, EncodesDispatchAndKernargUserSgprs) {
   metadata.sgpr_count = 4;
 
   const loom_amdgpu_kernel_descriptor_options_t options = {
-      /*.flags=*/LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_DISPATCH_PTR |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
-      /*.minimum_user_sgpr_count=*/4,
+      .flags = LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_DISPATCH_PTR |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+      .minimum_user_sgpr_count = 4,
   };
 
   std::array<uint8_t, 65> bytes;
@@ -421,13 +421,13 @@ TEST(AmdgpuDescriptorTest, EncodesResourceAndAbiFields) {
   metadata.vgpr_count = 9;
 
   const loom_amdgpu_kernel_descriptor_options_t options = {
-      /*.flags=*/LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_X |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Y |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Z |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_USES_DYNAMIC_STACK,
-      /*.minimum_user_sgpr_count=*/2,
+      .flags = LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_X |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Y |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Z |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_USES_DYNAMIC_STACK,
+      .minimum_user_sgpr_count = 2,
   };
 
   std::array<uint8_t, 65> bytes;
@@ -455,13 +455,13 @@ TEST(AmdgpuDescriptorTest, EncodesGfx942ResourceAndAbiFields) {
   metadata.vgpr_count = 9;
 
   const loom_amdgpu_kernel_descriptor_options_t options = {
-      /*.flags=*/LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_X |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Y |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Z |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_USES_DYNAMIC_STACK,
-      /*.minimum_user_sgpr_count=*/2,
+      .flags = LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_X |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Y |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Z |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_USES_DYNAMIC_STACK,
+      .minimum_user_sgpr_count = 2,
   };
 
   std::array<uint8_t, 65> bytes;
@@ -488,8 +488,8 @@ TEST(AmdgpuDescriptorTest, EncodesGfx942SmallWorkgroupIdBoundary) {
   metadata.vgpr_count = 3;
 
   const loom_amdgpu_kernel_descriptor_options_t options = {
-      /*.flags=*/LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X,
+      .flags = LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X,
   };
 
   std::array<uint8_t, 65> bytes;
@@ -512,8 +512,8 @@ TEST(AmdgpuDescriptorTest, EncodesGfx950ResourceAndAbiFields) {
   metadata.vgpr_count = 9;
 
   const loom_amdgpu_kernel_descriptor_options_t options = {
-      /*.flags=*/LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X,
+      .flags = LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X,
   };
 
   std::array<uint8_t, 65> bytes;
@@ -535,8 +535,8 @@ TEST(AmdgpuDescriptorTest, EncodesGfx1200ResourceAndAbiFields) {
   metadata.vgpr_count = 9;
 
   const loom_amdgpu_kernel_descriptor_options_t options = {
-      /*.flags=*/LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X,
+      .flags = LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X,
   };
 
   std::array<uint8_t, 65> bytes;
@@ -558,8 +558,8 @@ TEST(AmdgpuDescriptorTest, EncodesGfx1250ResourceAndAbiFields) {
   metadata.vgpr_count = 9;
 
   const loom_amdgpu_kernel_descriptor_options_t options = {
-      /*.flags=*/LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X,
+      .flags = LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
+               LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X,
   };
 
   std::array<uint8_t, 65> bytes;
@@ -577,8 +577,8 @@ TEST(AmdgpuDescriptorTest, EncodesGfx1250ResourceAndAbiFields) {
 TEST(AmdgpuDescriptorTest, EncodesGfx1250SixBitUserSgprCount) {
   loom_amdgpu_metadata_kernel_t metadata = MinimalMetadataKernel();
   const loom_amdgpu_kernel_descriptor_options_t options = {
-      /*.flags=*/{},
-      /*.minimum_user_sgpr_count=*/40,
+      .flags = {},
+      .minimum_user_sgpr_count = 40,
   };
 
   std::array<uint8_t, 65> bytes;
@@ -627,7 +627,7 @@ TEST(AmdgpuDescriptorTest, RejectsWave64MetadataOnGfx1250) {
 TEST(AmdgpuDescriptorTest, RejectsMetadataOwnedWavefrontOption) {
   loom_amdgpu_metadata_kernel_t metadata = MinimalMetadataKernel();
   const loom_amdgpu_kernel_descriptor_options_t options = {
-      /*.flags=*/LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_WAVEFRONT_SIZE32,
+      .flags = LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_WAVEFRONT_SIZE32,
   };
   std::array<uint8_t, 64> bytes;
   IREE_EXPECT_STATUS_IS(
@@ -641,7 +641,7 @@ TEST(AmdgpuDescriptorTest, RejectsSparseWorkitemIdFlags) {
   loom_amdgpu_metadata_kernel_t metadata = MinimalMetadataKernel();
   std::array<uint8_t, 64> bytes;
   loom_amdgpu_kernel_descriptor_options_t options = {
-      /*.flags=*/LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Y,
+      .flags = LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Y,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -695,8 +695,8 @@ TEST(AmdgpuDescriptorTest, SupportsEnabledProcessorVariants) {
 TEST(AmdgpuDescriptorTest, RejectsTooFewUserSgprs) {
   loom_amdgpu_metadata_kernel_t metadata = MinimalMetadataKernel();
   const loom_amdgpu_kernel_descriptor_options_t options = {
-      /*.flags=*/LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
-      /*.minimum_user_sgpr_count=*/1,
+      .flags = LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+      .minimum_user_sgpr_count = 1,
   };
   std::array<uint8_t, 64> bytes;
   IREE_EXPECT_STATUS_IS(
@@ -732,8 +732,8 @@ TEST(AmdgpuDescriptorTest,
       loom_amdgpu_metadata_kernel_t metadata = MinimalMetadataKernel();
       metadata.wavefront_size = processor->properties.wavefront.default_size;
       const loom_amdgpu_kernel_descriptor_options_t options = {
-          /*.flags=*/flag,
-          /*.minimum_user_sgpr_count=*/16,
+          .flags = flag,
+          .minimum_user_sgpr_count = 16,
       };
       std::array<uint8_t, 64> bytes;
       IREE_EXPECT_STATUS_IS(

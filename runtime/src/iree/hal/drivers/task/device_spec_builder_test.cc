@@ -69,11 +69,11 @@ static iree_status_t test_executable_loader_load(
 
 static const iree_hal_executable_loader_vtable_t test_executable_loader_vtable =
     {
-        /*.destroy=*/test_executable_loader_destroy,
-        /*.query_target_support=*/test_executable_loader_query_target_support,
-        /*.query_spec=*/test_executable_loader_query_spec,
-        /*.claims_executable=*/test_executable_loader_claims_executable,
-        /*.load=*/test_executable_loader_load,
+        .destroy = test_executable_loader_destroy,
+        .query_target_support = test_executable_loader_query_target_support,
+        .query_spec = test_executable_loader_query_spec,
+        .claims_executable = test_executable_loader_claims_executable,
+        .load = test_executable_loader_load,
 };
 
 TEST(TaskDeviceSpecBuilderTest, CapturesCommonTaskFacts) {
@@ -91,19 +91,19 @@ TEST(TaskDeviceSpecBuilderTest, CapturesCommonTaskFacts) {
       /*.default_queue_worker_count=*/8,
       /*.atomic_capabilities=*/
       {
-          /*.operations=*/
-          {
-              /*.device_scope_32=*/IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
-          },
-          /*.wait_conditions=*/{},
+          .operations =
+              {
+                  .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+              },
+          .wait_conditions = {},
       },
       /*.zero_compute_atomic_capabilities=*/
       {
-          /*.operations=*/
-          {
-              /*.device_scope_32=*/IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
-          },
-          /*.wait_conditions=*/{},
+          .operations =
+              {
+                  .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+              },
+          .wait_conditions = {},
       },
       /*.loader_count=*/1,
       /*.loaders=*/&loader_ptr,
