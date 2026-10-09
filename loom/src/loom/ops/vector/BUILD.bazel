@@ -8,7 +8,7 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_test",
     "loom_generated_cc_library",
-    "loom_generated_file",
+    "loom_generated_file_family",
 )
 
 package(
@@ -17,11 +17,17 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-loom_generated_file(
+loom_generated_file_family(
     name = "scalarization_rows_gen",
     generator = "//loom/py/loom/gen/ops:c_vector_scalarization",
-    output = "scalarization_rows.inl",
-    output_flag = "--rows",
+    output_flags = [
+        "--cast-legalizer-rows",
+        "--rows",
+    ],
+    outputs = [
+        "cast_legalizer_rows.inl",
+        "scalarization_rows.inl",
+    ],
 )
 
 loom_generated_cc_library(
@@ -95,6 +101,7 @@ loom_generated_cc_library(
     ],
     generator = "//loom/py/loom/gen/ops:c_tables_vector_generator",
     textual_hdrs = [
+        ":cast_legalizer_rows.inl",
         "ops.inc",
         ":scalarization_rows.inl",
     ],

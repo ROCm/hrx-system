@@ -1,0 +1,122 @@
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @float_width_casts(%half: vector<1xf16>, %single: vector<1xf32>) -> (vector<1xf32>, vector<1xf16>) {
+  %extended = vector.extf %half : vector<1xf16> to vector<1xf32>
+  %truncated = vector.fptrunc %single : vector<1xf32> to vector<1xf16>
+  func.return %extended, %truncated : vector<1xf32>, vector<1xf16>
+}
+
+func.def target(@test_target) @integer_width_casts(%byte: vector<1xi8>, %word: vector<1xi32>) -> (vector<1xi32>, vector<1xi32>, vector<1xi8>) {
+  %signed = vector.extsi %byte : vector<1xi8> to vector<1xi32>
+  %unsigned = vector.extui %byte : vector<1xi8> to vector<1xi32>
+  %truncated = vector.trunci %word : vector<1xi32> to vector<1xi8>
+  func.return %signed, %unsigned, %truncated : vector<1xi32>, vector<1xi32>, vector<1xi8>
+}
+
+func.def target(@test_target) @integer_float_casts(%integer: vector<1xi32>, %single: vector<1xf32>) -> (vector<1xf32>, vector<1xf32>, vector<1xi32>, vector<1xi32>) {
+  %signed_float = vector.sitofp %integer : vector<1xi32> to vector<1xf32>
+  %unsigned_float = vector.uitofp %integer : vector<1xi32> to vector<1xf32>
+  %signed_integer = vector.fptosi %single : vector<1xf32> to vector<1xi32>
+  %unsigned_integer = vector.fptoui %single : vector<1xf32> to vector<1xi32>
+  func.return %signed_float, %unsigned_float, %signed_integer, %unsigned_integer : vector<1xf32>, vector<1xf32>, vector<1xi32>, vector<1xi32>
+}
+
+func.def target(@test_target) @representation_casts(%integer: vector<1xi32>) -> (vector<1xf32>, vector<1xindex>) {
+  %single = vector.bitcast %integer : vector<1xi32> to vector<1xf32>
+  %address = vector.index_cast %integer : vector<1xi32> to vector<1xindex>
+  func.return %single, %address : vector<1xf32>, vector<1xindex>
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @float_width_casts(%half: vector<1xf16>, %single: vector<1xf32>) -> (vector<1xf32>, vector<1xf16>) {
+  %33 = vector.extract %half[0] : vector<1xf16> -> f16
+  %34 = scalar.extf %33 : f16 to f32
+  %extended = vector.splat %34 : vector<1xf32>
+  %29 = vector.extract %single[0] : vector<1xf32> -> f32
+  %30 = scalar.fptrunc %29 : f32 to f16
+  %truncated = vector.splat %30 : vector<1xf16>
+  func.return %extended, %truncated : vector<1xf32>, vector<1xf16>
+}
+
+func.def target(@test_target) @integer_width_casts(%byte: vector<1xi8>, %word: vector<1xi32>) -> (vector<1xi32>, vector<1xi32>, vector<1xi8>) {
+  %45 = vector.extract %byte[0] : vector<1xi8> -> i8
+  %49 = scalar.extui %45 : i8 to i32
+  %50 = scalar.constant 24 : i32
+  %51 = scalar.shli %49, %50 : i32
+  %52 = scalar.shrsi %51, %50 : i32
+  %signed = vector.splat %52 : vector<1xi32>
+  %41 = vector.extract %byte[0] : vector<1xi8> -> i8
+  %42 = scalar.extui %41 : i8 to i32
+  %unsigned = vector.splat %42 : vector<1xi32>
+  %37 = vector.extract %word[0] : vector<1xi32> -> i32
+  %38 = scalar.trunci %37 : i32 to i8
+  %truncated = vector.splat %38 : vector<1xi8>
+  func.return %signed, %unsigned, %truncated : vector<1xi32>, vector<1xi32>, vector<1xi8>
+}
+
+func.def target(@test_target) @integer_float_casts(%integer: vector<1xi32>, %single: vector<1xf32>) -> (vector<1xf32>, vector<1xf32>, vector<1xi32>, vector<1xi32>) {
+  %65 = vector.extract %integer[0] : vector<1xi32> -> i32
+  %66 = scalar.sitofp %65 : i32 to f32
+  %signed_float = vector.splat %66 : vector<1xf32>
+  %61 = vector.extract %integer[0] : vector<1xi32> -> i32
+  %62 = scalar.uitofp %61 : i32 to f32
+  %unsigned_float = vector.splat %62 : vector<1xf32>
+  %57 = vector.extract %single[0] : vector<1xf32> -> f32
+  %58 = scalar.fptosi %57 : f32 to i32
+  %signed_integer = vector.splat %58 : vector<1xi32>
+  %53 = vector.extract %single[0] : vector<1xf32> -> f32
+  %54 = scalar.fptoui %53 : f32 to i32
+  %unsigned_integer = vector.splat %54 : vector<1xi32>
+  func.return %signed_float, %unsigned_float, %signed_integer, %unsigned_integer : vector<1xf32>, vector<1xf32>, vector<1xi32>, vector<1xi32>
+}
+
+func.def target(@test_target) @representation_casts(%integer: vector<1xi32>) -> (vector<1xf32>, vector<1xindex>) {
+  %73 = vector.extract %integer[0] : vector<1xi32> -> i32
+  %74 = scalar.bitcast %73 : i32 to f32
+  %single = vector.splat %74 : vector<1xf32>
+  %69 = vector.extract %integer[0] : vector<1xi32> -> i32
+  %70 = index.cast %69 : i32 to index
+  %address = vector.splat %70 : vector<1xindex>
+  func.return %single, %address : vector<1xf32>, vector<1xindex>
+}
+
+// ====
+
+// Conversion staging must keep vector operations legalizable instead of
+// leaving an intermediate cast behind when its consumer is scalarized.
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @integer_to_narrow_float(%halfword: vector<1xi16>) -> (vector<1xbf16>) {
+  %bfloat = vector.sitofp %halfword : vector<1xi16> to vector<1xbf16>
+  func.return %bfloat : vector<1xbf16>
+}
+
+func.def target(@test_target) @narrow_float_to_integer(%half: vector<1xf16>) -> (vector<1xi32>) {
+  %word = vector.fptosi %half : vector<1xf16> to vector<1xi32>
+  func.return %word : vector<1xi32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @integer_to_narrow_float(%halfword: vector<1xi16>) -> (vector<1xbf16>) {
+  %8 = vector.extract %halfword[0] : vector<1xi16> -> i16
+  %9 = scalar.sitofp %8 : i16 to f32
+  %10 = scalar.fptrunc %9 : f32 to bf16
+  %bfloat = vector.splat %10 : vector<1xbf16>
+  func.return %bfloat : vector<1xbf16>
+}
+
+func.def target(@test_target) @narrow_float_to_integer(%half: vector<1xf16>) -> (vector<1xi32>) {
+  %15 = vector.extract %half[0] : vector<1xf16> -> f16
+  %16 = scalar.extf %15 : f16 to f32
+  %17 = scalar.fptosi %16 : f32 to i32
+  %word = vector.splat %17 : vector<1xi32>
+  func.return %word : vector<1xi32>
+}

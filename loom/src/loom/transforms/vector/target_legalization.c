@@ -868,6 +868,18 @@ static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
         .first_operand_element_types = LOOM_SCALAR_TYPE_SET_I1,
         .legalize = loom_vector_legalize_predicate_extension,
     },
+// Every cast has a generated or explicit lane program. Keep this family tied
+// to the dialect definition so adding a cast cannot silently omit its target
+// reference fallback. Target-native contracts and the predicate-extension
+// specializations above retain precedence over these rejected-contract rows.
+#define LOOM_VECTOR_CAST_LEGALIZER_ROW(op_kind)                             \
+  {                                                                         \
+      .root_kind = (op_kind),                                               \
+      .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION, \
+      .legalize = loom_vector_legalize_descriptor,                          \
+  },
+#include "loom/ops/vector/cast_legalizer_rows.inl"
+#undef LOOM_VECTOR_CAST_LEGALIZER_ROW
     {
         .root_kind = LOOM_OP_SCF_SELECT,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,

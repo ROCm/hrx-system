@@ -1170,7 +1170,10 @@ def _vector_integer_conversion_recipe_rules() -> tuple[RecipeRule, ...]:
     widening_pairs = (
         (_VEC_I8_PACKED, _VEC_I16_PACKED_STORAGE),
         (_VEC_I8_PACKED, _VEC_I32_STATIC),
+        (_VEC_I8_PACKED, _VEC_I64_STATIC),
         (_VEC_I16_PACKED_STORAGE, _VEC_I32_STATIC),
+        (_VEC_I16_PACKED_STORAGE, _VEC_I64_STATIC),
+        (_VEC_I32_STATIC, _VEC_I64_STATIC),
     )
     narrowing_pairs = (
         (_VEC_I16_PACKED_STORAGE, _VEC_I8_PACKED),
