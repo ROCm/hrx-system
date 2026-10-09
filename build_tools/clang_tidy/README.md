@@ -335,6 +335,12 @@ the check reports both names without choosing new behavior. It never inserts
 placeholder members. Sparse C++20 designated initialization already preserves
 the language's omitted-member initialization rules.
 
+Members promoted from a standard anonymous union are named directly by the
+enclosing aggregate's designated initializer. The check resolves the union
+member activated by the positional spelling before comparing the label, so a
+matching label is fixable and a label naming a different union member remains a
+semantic mismatch.
+
 The same check folds a narrow aggregate setup form into the declaration:
 
 ```c++

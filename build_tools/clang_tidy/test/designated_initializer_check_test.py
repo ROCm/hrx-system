@@ -67,9 +67,10 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn(".inner = {", fixed_source)
         self.assertIn(".x = 3,", fixed_source)
         self.assertIn("Choice labeled_union = {.integer = 9};", fixed_source)
-        self.assertIn(".ordinal = CONFIG_VALUE(20),", fixed_source)
-        self.assertIn(".flags = CONFIG_VALUE(21),", fixed_source)
-        self.assertIn("Config macro_config = MAKE_CONFIG(19);", fixed_source)
+        self.assertIn("WithAnonymous anonymous_label = {.integer = 12", fixed_source)
+        self.assertIn(".ordinal = CONFIG_VALUE(22),", fixed_source)
+        self.assertIn(".flags = CONFIG_VALUE(23),", fixed_source)
+        self.assertIn("Config macro_config = MAKE_CONFIG(21);", fixed_source)
         self.assertIn("Numbers configured = {.first = 20, .second = 21};", fixed_source)
         self.assertIn("Config sparse = {.flags = 22};", fixed_source)
         self.assertIn(
@@ -82,11 +83,11 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn("Config stale_label = {/*.name=*/10};", fixed_source)
         self.assertIn("Choice stale_union_label = {/*.real=*/11};", fixed_source)
         self.assertIn(
-            "WithAnonymous anonymous_label = {/*.integer=*/12, /*.tail=*/13};",
+            "WithAnonymous stale_anonymous_label = {/*.real=*/14",
             fixed_source,
         )
-        self.assertIn("DerivedConfig base_label = {/*.base=*/{14}", fixed_source)
-        self.assertIn("OuterConfig brace_elided = {/*.inner=*/16", fixed_source)
+        self.assertIn("DerivedConfig base_label = {/*.base=*/{16}", fixed_source)
+        self.assertIn("OuterConfig brace_elided = {/*.inner=*/18", fixed_source)
         self.assertIn("Config { /*.ordinal=*/ value }", fixed_source)
         self.assertIn("reordered.second = 23;", fixed_source)
         self.assertIn("self_referencing.first = 25;", fixed_source)

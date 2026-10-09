@@ -111,18 +111,18 @@ Choice labeled_union = {/*.integer=*/9};
 Config stale_label = {/*.name=*/10};
 Choice stale_union_label = {/*.real=*/11};
 
-// Anonymous aggregate selection cannot be represented by the local fixer.
 WithAnonymous anonymous_label = {/*.integer=*/12, /*.tail=*/13};
+WithAnonymous stale_anonymous_label = {/*.real=*/14, /*.tail=*/15};
 
-DerivedConfig base_label = {/*.base=*/{14}, /*.member=*/15};
-OuterConfig brace_elided = {/*.inner=*/16, 17, 18};
+DerivedConfig base_label = {/*.base=*/{16}, /*.member=*/17};
+OuterConfig brace_elided = {/*.inner=*/18, 19, 20};
 
-Config macro_config = MAKE_CONFIG(19);
+Config macro_config = MAKE_CONFIG(21);
 
 Config macro_value_config = {
-    /*.ordinal=*/CONFIG_VALUE(20),
+    /*.ordinal=*/CONFIG_VALUE(22),
     /*.name=*/"macro-value",
-    /*.flags=*/CONFIG_VALUE(21),
+    /*.flags=*/CONFIG_VALUE(23),
 };
 
 void Observe(const Numbers&);

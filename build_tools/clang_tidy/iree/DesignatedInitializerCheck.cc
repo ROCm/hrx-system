@@ -154,6 +154,18 @@ std::vector<const FieldDecl*> InitializableFields(const RecordDecl* Record) {
   return Fields;
 }
 
+const InitListExpr* SourceInitializerList(const Expr* Initializer) {
+  const auto* List = dyn_cast_or_null<InitListExpr>(
+      Initializer ? Initializer->IgnoreParenImpCasts() : nullptr);
+  if (!List) {
+    return nullptr;
+  }
+  if (const InitListExpr* Syntactic = List->getSyntacticForm()) {
+    return Syntactic;
+  }
+  return List->isSyntacticForm() ? List : nullptr;
+}
+
 const FieldDecl* InitializedField(const InitListExpr* Initializer,
                                   unsigned InitializerIndex) {
   const InitListExpr* SemanticInitializer = Initializer->getSemanticForm();
@@ -177,6 +189,23 @@ const FieldDecl* InitializedField(const InitListExpr* Initializer,
   return InitializerIndex < Fields.size() ? Fields[InitializerIndex] : nullptr;
 }
 
+const FieldDecl* DirectlyDesignatableField(const FieldDecl* Field,
+                                           const Expr* Initializer) {
+  if (!Field || !Field->isAnonymousStructOrUnion()) {
+    return Field;
+  }
+  const RecordDecl* AnonymousRecord = DefinedRecord(Field->getType());
+  if (!AnonymousRecord || !AnonymousRecord->isUnion()) {
+    return Field;
+  }
+  if (const InitListExpr* NestedInitializer =
+          SourceInitializerList(Initializer)) {
+    return InitializedField(NestedInitializer, 0);
+  }
+  std::vector<const FieldDecl*> Fields = InitializableFields(AnonymousRecord);
+  return Fields.empty() ? nullptr : Fields.front();
+}
+
 bool CanUseDirectDesignator(const FieldDecl* Field, const Expr* Initializer,
                             ASTContext& Context) {
   if (!Field || Field->getName().empty() || Field->isAnonymousStructOrUnion()) {
@@ -195,18 +224,6 @@ bool CanUseDirectDesignator(const FieldDecl* Field, const Expr* Initializer,
   }
   const auto* FieldRecord = FieldType->getAsCXXRecordDecl();
   return !FieldRecord || !FieldRecord->isAggregate();
-}
-
-const InitListExpr* SourceInitializerList(const Expr* Initializer) {
-  const auto* List = dyn_cast_or_null<InitListExpr>(
-      Initializer ? Initializer->IgnoreParenImpCasts() : nullptr);
-  if (!List) {
-    return nullptr;
-  }
-  if (const InitListExpr* Syntactic = List->getSyntacticForm()) {
-    return Syntactic;
-  }
-  return List->isSyntacticForm() ? List : nullptr;
 }
 
 const Expr* SpelledExpression(const Stmt* Statement) {
@@ -524,7 +541,8 @@ void CheckCommentLabels(DesignatedInitializerCheck& Check,
       CanFixInitializer = false;
       continue;
     }
-    const FieldDecl* Field = InitializedField(SourceInitializer, I);
+    const FieldDecl* Field = DirectlyDesignatableField(
+        InitializedField(SourceInitializer, I), Value);
     if (!Field || !CanUseDirectDesignator(Field, Value, Context)) {
       CanFixInitializer = false;
       LabeledInitializers.push_back(LabeledInitializer{
