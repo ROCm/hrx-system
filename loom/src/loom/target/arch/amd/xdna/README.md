@@ -3,8 +3,10 @@
 Loom compiles tile programs and their array transport into a native `.xdna`
 executable. The product contains AIE2P instructions, initialized data, array
 configuration, explicit storage and binding requirements, and native invocation
-ranges. It executes through [libamdf](../../../../../../../libamdf/docs/xdna.md);
-compilation does not invoke the AIE SDK, LLVM, Python, or an external linker.
+ranges. The [XDNA HAL](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/README.md)
+loads and executes it through
+[libamdf](../../../../../../../libamdf/docs/xdna.md); compilation does not invoke
+the AIE SDK, LLVM, Python, or an external linker.
 
 This directory owns device facts and AIE2P target mechanics. The shared Loom
 compiler owns IR analysis, canonicalization, scheduling, register allocation,
@@ -20,7 +22,7 @@ worker coordinates and memory pools select placement before native emission.
 | Write a streamed program or author AIE2P Low | [Source lowering examples](aie2p/test/source_low/) and [Low descriptor fixtures](aie2p/test/descriptors/) |
 | Embed the compiler | [Public XDNA C binding](../../../../../../binding/c/include/loomc/target/amd/xdna.h) |
 | Understand the executable contract | [Native image format and lifecycle](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/image/README.md) |
-| Load and execute a compiled image | [Experimental native runner](../../../../../../../experimental/xdna/README.md) |
+| Load and execute a compiled image | [XDNA HAL and normal Loom test workflow](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/README.md) |
 | Compare compiler work across targets | [Shared benchmark workloads](../../../../../../binding/c/benchmark/kernels/README.md) |
 
 ## Target identity
@@ -171,9 +173,9 @@ buffer addresses to explicitly declared fields.
 
 Invocation zero establishes the program's state. The image format can represent
 a continuation (`0 -> 1 -> 1`) for a caller with an established native
-state-retention contract. The finite execution adapter uses the complete
-establishing range for every independent submission (`0 -> 0`), because retaining
-a time-sliced context does not preserve application tile state. Program shards
+state-retention contract. The finite XDNA HAL path uses the complete establishing
+range for every independent submission (`0 -> 0`), because retaining a
+time-sliced context does not preserve application tile state. Program shards
 and role changes within an invocation are compiled device behavior, not a
 mandatory host dispatch per tile function.
 
@@ -201,8 +203,12 @@ unsupported cases instead of silently changing floating-point behavior.
 
 Compiler transformations and diagnostics are exercised through `.loom-test`
 fixtures. C tests cover API and representation contracts. The
-[native consumer CTS](../../../../../../../experimental/xdna/cts) verifies real loading,
-binding, repeated execution, numerical outputs, and resource lifetimes through
-libamdf on matching hardware. The [BF16 FFN benchmark](../../../../../../binding/c/benchmark/kernels/ffn/gate_up_quadratic_bf16_xdna.loom)
+[native HAL CTS](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/cts/)
+verifies loading, binding, repeated execution, numerical outputs, and resource
+lifetimes through libamdf on matching hardware. The
+[normal Loom HAL scenario](../../../../tooling/target/amd/xdna/test/hal_execution.loom)
+adds device-driven target selection, compilation, staging, dispatch, readback,
+and comparison with an independent VM oracle. The
+[BF16 FFN benchmark](../../../../../../binding/c/benchmark/kernels/ffn/gate_up_quadratic_bf16_xdna.loom)
 provides a small High-to-image workload comparable to the AMDGPU implementation;
 its benchmark measures compilation, not device throughput.

@@ -10,9 +10,9 @@ ELFs and applies their declared storage and binding contracts.
 Enable the native provider, HAL registration, and Loom XDNA emitter:
 
 ```sh
-iree-bazel-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_XDNA=ON \
+python dev.py bazel configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_XDNA=ON \
   -DLOOM_TARGET_XDNA=ON -DLOOM_EMIT_XDNA=ON -DLOOM_TARGET_VM=ON
-iree-bazel-run //loom/src/loom/tools/iree-test-loom -- \
+python dev.py bazel run //loom/src/loom/tools/iree-test-loom -- \
   loom/src/loom/tooling/target/amd/xdna/test/hal_execution.loom --device=xdna
 ```
 
@@ -114,7 +114,7 @@ unsupported statuses. The direct path has no dependency on those mechanisms.
 Native correctness suites declare an XDNA hardware requirement:
 
 ```sh
-iree-bazel-test --config=asan \
+python dev.py bazel test --config=asan \
   //runtime/src/iree/hal/drivers/amd/xdna/cts:native_test \
   //loom/src/loom/tooling/target/amd/xdna:hal_execution_test
 ```
