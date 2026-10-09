@@ -67,7 +67,8 @@ class GpuCommandTest : public GpuDeviceFixture {
                        AMDF_QUEUE_PRODUCER_MODE_SINGLE,
                    const amdf_gpu_queue_scratch_t& scratch = {},
                    amdf_user_queue_capabilities_t required_capabilities =
-                       AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER);
+                       AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
+                   uint64_t ring_byte_length = 0);
   void CreateQueue(GpuCommandQueue** out_queue);
   void CreateQueue(const amdf_queue_family_info_t& family,
                    GpuCommandQueue** out_queue);

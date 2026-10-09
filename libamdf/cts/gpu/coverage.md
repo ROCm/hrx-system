@@ -11,6 +11,7 @@ identity, independent observation and checked retirement.
 
 | Behavior | Case sources | What the oracle observes |
 | --- | --- | --- |
+| USER ring capacity and reuse | [requested capacities](user_queue_test.cc) | PM4/SDMA default and explicit 4/16/64 KiB capacities, confirmed copies throughout each half-ring, three complete wraps, unchanged source and command backing, destination/completion guards, and consumption before reuse. Requires the selected family's USER service and capacity range. |
 | PM4 memory operations | [write](pm4/write_test.cc), [copy](pm4/copy_test.cc), [atomic store](pm4/atomic_store_test.cc) | Changed data, selected widths and extents, surrounding bytes, producer/consumer ordering and CPU handoffs. Atomic-store coverage is distinct from read-modify-write operations. |
 | PM4 memory dependencies | [wait](pm4/wait_test.cc) | All six conditional comparisons across 32/64-bit operands and full/partial masks, already-satisfied and consumer-before-producer publication, and always-pass below/equal/above operands. Complete backing checks precede native retirement; masked relational values separate ordering from ignored bits. |
 | PM4 command-processor DMA | [DMA](pm4/dma_test.cc) | Incrementing byte copies, dependent two-copy chains and immediate DWORD fills consumed by DMA copies. RAW_WAIT compositions cover byte, DWORD/QWORD, 32-byte alignment, page and driver-chunk extents; fills cover zero/all-one, single-bit and byte-distinct patterns. Changed epochs check complete payload/control backing and immutable commands before native retirement. |
@@ -113,6 +114,7 @@ Ordinary GPU corpora have the following process-lifetime test targets. Appending
 
 | Corpus | Bazel target |
 | --- | --- |
+| GPU services and USER ring capacity | `//libamdf/cts/gpu:gpu_extension_dynamic` |
 | PM4 | `//libamdf/cts/gpu/pm4:pm4_dynamic` |
 | SDMA | `//libamdf/cts/gpu/sdma:sdma_dynamic` |
 | AQL | `//libamdf/cts/gpu/aql:aql_dynamic` |

@@ -98,6 +98,16 @@ TEST(KfdTargetUserQueueTest, ExposesBothComputeLanguagesOnRdna) {
     EXPECT_NE(plans.values[1].family.roles & AMDF_QUEUE_ROLE_TRANSFER, 0u);
     EXPECT_EQ(plans.values[2].family.command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
+    for (uint32_t i = 0; i < plans.count; ++i) {
+      const auto& plan = plans.values[i];
+      EXPECT_EQ(plan.family.minimum_ring_byte_length, 4096u);
+      EXPECT_EQ(plan.family.maximum_ring_byte_length, UINT64_C(1) << 31);
+      EXPECT_EQ(plan.family.ring_byte_length_alignment, 4096u);
+      EXPECT_EQ(plan.ring.primary_byte_length, 4096u);
+      EXPECT_EQ(plan.ring.storage.byte_length, 4096u);
+      EXPECT_EQ(plan.control.read_index_mask,
+                i == 0 ? UINT64_C(1023) : UINT64_MAX);
+    }
   }
 }
 
@@ -218,6 +228,11 @@ TEST(KfdTargetUserQueueTest, SdmaFormatsFollowExactIndependentEngineIp) {
               user_gcr ? AMDF_CACHE_TRANSITION_KINDS_GLOBAL : 0);
     EXPECT_EQ(plan.control.index_bit_count, 64u);
     EXPECT_EQ(plan.control.read_index_mask, UINT64_MAX);
+    EXPECT_EQ(plan.family.minimum_ring_byte_length, 4096u);
+    EXPECT_EQ(plan.family.maximum_ring_byte_length, UINT64_C(1) << 31);
+    EXPECT_EQ(plan.family.ring_byte_length_alignment, 4096u);
+    EXPECT_EQ(plan.ring.primary_byte_length, 4096u);
+    EXPECT_EQ(plan.ring.storage.byte_length, 4096u);
     EXPECT_EQ(plan.compute.context_storage.byte_length, 0u);
     EXPECT_EQ(plan.compute.end_of_pipe_storage.byte_length, 0u);
   }

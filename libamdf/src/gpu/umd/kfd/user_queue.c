@@ -304,6 +304,12 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
         out_plan->ring.primary_byte_length = create_info->ring_byte_length;
         out_plan->ring.storage.byte_length = create_info->ring_byte_length;
       }
+      // PM4 reports a ring-relative DWORD read index. The other formats keep
+      // their monotonic native counters independently of the chosen capacity.
+      if (family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4) {
+        out_plan->control.read_index_mask =
+            out_plan->ring.primary_byte_length / sizeof(uint32_t) - 1;
+      }
       return true;
     }
   }

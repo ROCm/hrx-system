@@ -31,10 +31,14 @@ iree_cc_library(
     gpu_extension_cases
   SRCS
     "gpu_extension_test.cc"
+    "user_queue_test.cc"
   DEPS
     ::gpu_device_fixture
     amdf::headers
     iree::third_party::google_test
+    libamdf::cts::gpu::pm4::encoding::commands
+    libamdf::cts::gpu::sdma::encoding::commands
+    libamdf::cts::gpu::util::command_fixture
     libamdf::cts::util::device_cache
     libamdf::cts::util::provider_headers
   TESTONLY

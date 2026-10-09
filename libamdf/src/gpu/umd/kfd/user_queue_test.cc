@@ -47,13 +47,13 @@ struct FakeNativeState {
       amdf_gpu_kfd_buffer_result_t* out_result) {
     auto* self = static_cast<FakeNativeState*>(user_data);
     ++self->buffer_create_count;
+    FakeBuffer& buffer = self->buffers[self->buffer_create_count - 1];
+    buffer.create_info = *create_info;
     if (self->FailCreationOperation()) {
       return self->creation_failure;
     }
-    FakeBuffer& buffer = self->buffers[self->buffer_create_count - 1];
     buffer.storage.resize((create_info->byte_length + sizeof(uint64_t) - 1) /
                           sizeof(uint64_t));
-    buffer.create_info = *create_info;
     buffer.device_address =
         UINT64_C(0x10000000) +
         (self->buffer_create_count - 1) * UINT64_C(0x01000000);
@@ -353,7 +353,7 @@ class KfdUserQueueTest : public ::testing::Test {
         const uint64_t read_index_mask =
             native_state_.observed_create.queue_type ==
                     KFD_IOC_QUEUE_TYPE_COMPUTE
-                ? 1023
+                ? native_state_.observed_create.ring_size / sizeof(uint32_t) - 1
                 : UINT64_MAX;
         amdf_atomic_uint64_store_release(read_index,
                                          published_index & read_index_mask);
@@ -875,7 +875,7 @@ TEST_F(KfdUserQueueTest, RejectsUnsupportedQueueWithoutPublishingOutputs) {
                 &device_, &create_info, &queue, &result)),
             AMDF_STATUS_CODE_UNSUPPORTED);
   create_info = MakeCreateInfo();
-  create_info.ring_byte_length = 8192;
+  create_info.ring_byte_length = UINT64_C(1) << 32;
   EXPECT_EQ(amdf_status_code(amdf_gpu_umd_user_queue_create(
                 &device_, &create_info, &queue, &result)),
             AMDF_STATUS_CODE_UNSUPPORTED);
@@ -922,20 +922,91 @@ TEST_F(KfdUserQueueTest, SamplesProgressAndLatchesTerminalFailures) {
                              static_cast<uint32_t>(queue_error)));
 }
 
-TEST_F(KfdUserQueueTest, ExpandsPm4ProgressAcrossUnobservedRingWraps) {
-  CreateQueue();
-  MapQueue();
+class KfdSizedUserQueueTest : public KfdUserQueueTest,
+                              public ::testing::WithParamInterface<uint64_t> {};
+
+TEST_P(KfdSizedUserQueueTest, CarriesCapacityThroughNativeCreationAndMapping) {
+  for (auto command_type :
+       {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA,
+        AMDF_QUEUE_COMMAND_TYPE_GPU_AQL}) {
+    SCOPED_TRACE(command_type);
+    native_state_.Reset();
+    auto create_info = MakeCreateInfo(command_type);
+    create_info.ring_byte_length = GetParam();
+    const uint64_t capacity = GetParam() == 0 ? 4096 : GetParam();
+    ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
+                                             &queue_result_),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(native_state_.buffers[0].byte_length, capacity);
+    EXPECT_EQ(native_state_.observed_create.ring_size, capacity);
+    EXPECT_EQ(native_state_.observed_create.ring_base_address,
+              native_state_.buffers[0].device_address);
+    EXPECT_EQ(queue_result_.ring_byte_length, capacity);
+    if (command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+      EXPECT_EQ(native_state_.observed_aql_descriptor.packet_count,
+                capacity / 64);
+    }
+    ASSERT_NO_FATAL_FAILURE(MapQueue());
+    EXPECT_EQ(
+        mapping_result_.ring_address,
+        reinterpret_cast<uint64_t>(native_state_.buffers[0].storage.data()));
+    ASSERT_EQ(amdf_gpu_umd_user_queue_mapping_destroy(mapping_),
+              AMDF_STATUS_OK);
+    mapping_ = nullptr;
+    ASSERT_EQ(amdf_gpu_umd_user_queue_destroy(queue_), AMDF_STATUS_OK);
+    queue_ = nullptr;
+    EXPECT_EQ(native_state_.queue_destroy_count, 1);
+    EXPECT_EQ(native_state_.LiveBufferCount(), 0u);
+  }
+}
+
+TEST_F(KfdUserQueueTest, MaximumRingRequestReachesAllocationWithoutNarrowing) {
+  for (auto command_type :
+       {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA,
+        AMDF_QUEUE_COMMAND_TYPE_GPU_AQL}) {
+    SCOPED_TRACE(command_type);
+    native_state_.Reset();
+    native_state_.failed_creation_operation = 1;
+    auto create_info = MakeCreateInfo(command_type);
+    create_info.ring_byte_length = UINT64_C(1) << 31;
+    auto* const sentinel =
+        reinterpret_cast<amdf_gpu_umd_user_queue_t*>(uintptr_t{1});
+    auto* queue = sentinel;
+    amdf_gpu_umd_user_queue_result_t result;
+    std::memset(&result, 0xA5, sizeof(result));
+    const auto original = result;
+    EXPECT_EQ(
+        amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue, &result),
+        native_state_.creation_failure);
+    EXPECT_EQ(native_state_.buffers[0].create_info.byte_length,
+              create_info.ring_byte_length);
+    EXPECT_EQ(native_state_.buffer_create_count, 1);
+    EXPECT_EQ(native_state_.queue_create_count, 0);
+    EXPECT_EQ(native_state_.LiveBufferCount(), 0u);
+    EXPECT_EQ(queue, sentinel);
+    EXPECT_EQ(std::memcmp(&result, &original, sizeof(result)), 0);
+  }
+}
+
+TEST_P(KfdSizedUserQueueTest, ExpandsPm4ProgressAcrossUnobservedRingWraps) {
+  auto create_info = MakeCreateInfo();
+  create_info.ring_byte_length = GetParam();
+  ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
+                                           &queue_result_),
+            AMDF_STATUS_OK);
+  ASSERT_NO_FATAL_FAILURE(MapQueue());
+  const uint64_t capacity = queue_result_.ring_byte_length / sizeof(uint32_t);
   const amdf_wait_deadline_t deadline = {0, 0};
   // Native RPTR is ring-relative even if no status query observed earlier
   // laps. The caller's publication window always leaves at least one slot.
-  for (uint64_t published : {UINT64_C(1208), UINT64_C(1048576) + 1208}) {
+  for (uint64_t published : {capacity + 184, capacity * 1024 + 184}) {
     SCOPED_TRACE(published);
     amdf_atomic_uint64_store_release(WriteIndex(), published);
-    for (uint64_t pending :
-         {UINT64_C(1023), UINT64_C(184), UINT64_C(8), UINT64_C(0)}) {
+    for (uint64_t pending : {capacity - 1, capacity / 2, UINT64_C(184),
+                             UINT64_C(8), UINT64_C(0)}) {
       SCOPED_TRACE(pending);
       const uint64_t consumed = published - pending;
-      amdf_atomic_uint64_store_release(ReadIndex(), consumed & 1023);
+      amdf_atomic_uint64_store_release(ReadIndex(), consumed & (capacity - 1));
       amdf_user_queue_status_t status = {};
       ASSERT_EQ(amdf_gpu_umd_user_queue_query_status(queue_, &status),
                 AMDF_STATUS_OK);
@@ -962,18 +1033,29 @@ TEST_F(KfdUserQueueTest, ExpandsPm4ProgressAcrossUnobservedRingWraps) {
   EXPECT_EQ(native_state_.LiveBufferCount(), 0u);
 }
 
-TEST_F(KfdUserQueueTest, PreservesSdmaMonotonicProgressBeyondRingCapacity) {
-  CreateQueue(AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
-  MapQueue();
-  amdf_atomic_uint64_store_release(WriteIndex(), 12328);
-  amdf_atomic_uint64_store_release(ReadIndex(), 8240);
+TEST_P(KfdSizedUserQueueTest,
+       PreservesSdmaMonotonicProgressBeyondRingCapacity) {
+  auto create_info = MakeCreateInfo(AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
+  create_info.ring_byte_length = GetParam();
+  ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
+                                           &queue_result_),
+            AMDF_STATUS_OK);
+  ASSERT_NO_FATAL_FAILURE(MapQueue());
+  const uint64_t capacity = queue_result_.ring_byte_length;
+  amdf_atomic_uint64_store_release(WriteIndex(), 3 * capacity + 40);
+  amdf_atomic_uint64_store_release(ReadIndex(), 2 * capacity + 48);
   amdf_user_queue_status_t status = {};
   ASSERT_EQ(amdf_gpu_umd_user_queue_query_status(queue_, &status),
             AMDF_STATUS_OK);
-  EXPECT_EQ(status.producer_index, 12328u);
-  EXPECT_EQ(status.consumed_index, 8240u);
+  EXPECT_EQ(status.producer_index, 3 * capacity + 40);
+  EXPECT_EQ(status.consumed_index, 2 * capacity + 48);
   EXPECT_EQ(status.terminal_status, AMDF_STATUS_OK);
 }
+
+INSTANTIATE_TEST_SUITE_P(Capacities, KfdSizedUserQueueTest,
+                         ::testing::Values(UINT64_C(0), UINT64_C(4096),
+                                           UINT64_C(8192), UINT64_C(16384),
+                                           UINT64_C(65536)));
 
 TEST_F(KfdUserQueueTest, ClassifiesDeviceFailure) {
   CreateQueue();

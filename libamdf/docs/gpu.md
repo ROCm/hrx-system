@@ -55,6 +55,14 @@ addresses. These addresses remain stable for the mapping lifetime. Queue
 creation belongs to device or execution-stream preparation; dispatch publication
 reuses its established storage.
 
+`ring_byte_length` is zero for the provider default or an explicit power of
+two within the family's range and alignment. KFD PM4, SDMA and AQL queues
+default to 4 KiB and admit requests through 2 GiB. That upper bound describes
+representable geometry; allocation and native queue creation can still fail.
+The returned queue and mapping information carry the actual capacity. A larger
+ring permits more commands to be prepared before publication, while command
+consumption and final payload use retain their separate reuse boundaries.
+
 ### Device-produced SDMA
 
 An SDMA family with `AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER` can establish

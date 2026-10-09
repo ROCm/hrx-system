@@ -28,6 +28,29 @@ amdf_cc_library(
     ],
 )
 
+amdf_cts_test_suite(
+    name = "gpu_extension",
+    srcs = [
+        "gpu_extension_test.cc",
+        "user_queue_test.cc",
+    ],
+    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gpu_device_fixture",
+        "//libamdf/cts/gpu/pm4/encoding:commands",
+        "//libamdf/cts/gpu/sdma/encoding:commands",
+        "//libamdf/cts/gpu/util:command_fixture",
+        "//libamdf/cts/util:device_cache",
+        "//libamdf/cts/util:provider_headers",
+        "//third_party:google_test",
+    ],
+)
+
 [amdf_cts_test_suite(
     name = name,
     srcs = [name + "_test.cc"],
@@ -44,7 +67,6 @@ amdf_cc_library(
         "//third_party:google_test",
     ],
 ) for name in [
-    "gpu_extension",
     "kernel_queue",
     "memory_interop",
 ]]

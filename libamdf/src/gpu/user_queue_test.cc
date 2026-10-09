@@ -310,16 +310,49 @@ TEST_F(GpuUserQueueTest, RejectsInvalidScratchWithoutPublishingOutput) {
   EXPECT_EQ(queue_, nullptr);
 }
 
-TEST_F(GpuUserQueueTest, RejectsNonPowerOfTwoRingWithoutPublishingOutput) {
+TEST_F(GpuUserQueueTest, RejectsInvalidRingCapacityWithoutNativeConstruction) {
   amdf_gpu_user_queue_create_info_t create_info = MakeCreateInfo();
-  create_info.ring_byte_length = 12288;
   auto* const sentinel = reinterpret_cast<amdf_user_queue_t*>(uintptr_t{1});
-  queue_ = sentinel;
-  EXPECT_EQ(amdf_status_code(amdf_gpu_user_queue_create(&consumer_.base,
-                                                        &create_info, &queue_)),
-            AMDF_STATUS_CODE_OUT_OF_RANGE);
-  EXPECT_EQ(queue_, sentinel);
-  queue_ = nullptr;
+  for (uint64_t capacity : {UINT64_C(2048), UINT64_C(12288), UINT64_C(131072),
+                            UINT64_C(1) << 32, UINT64_MAX}) {
+    SCOPED_TRACE(capacity);
+    create_info.ring_byte_length = capacity;
+    auto* queue = sentinel;
+    EXPECT_EQ(amdf_status_code(amdf_gpu_user_queue_create(
+                  &consumer_.base, &create_info, &queue)),
+              AMDF_STATUS_CODE_OUT_OF_RANGE);
+    EXPECT_EQ(queue, sentinel);
+    EXPECT_EQ(consumer_state_.observed_create.ring_byte_length, 0u);
+    EXPECT_EQ(amdf_child_tracker_count(&consumer_.base.children), 0u);
+  }
+}
+
+TEST_F(GpuUserQueueTest, PreservesRequestedRingCapacity) {
+  for (uint64_t capacity : {UINT64_C(4096), UINT64_C(16384), UINT64_C(65536)}) {
+    SCOPED_TRACE(capacity);
+    auto create_info = MakeCreateInfo();
+    create_info.ring_byte_length = capacity;
+    ASSERT_EQ(
+        amdf_gpu_user_queue_create(&consumer_.base, &create_info, &queue_),
+        AMDF_STATUS_OK);
+    EXPECT_EQ(consumer_state_.observed_create.ring_byte_length, capacity);
+    amdf_user_queue_info_t info = {};
+    info.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO;
+    info.structure_size = sizeof(info);
+    ASSERT_EQ(amdf_user_queue_query_info(queue_, &info), AMDF_STATUS_OK);
+    EXPECT_EQ(info.ring_byte_length, capacity);
+    ASSERT_EQ(amdf_user_queue_map(queue_, nullptr, &mapping_), AMDF_STATUS_OK);
+    amdf_user_queue_mapping_info_t mapping_info = {};
+    mapping_info.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_MAPPING_INFO;
+    mapping_info.structure_size = sizeof(mapping_info);
+    ASSERT_EQ(amdf_user_queue_mapping_query_info(mapping_, &mapping_info),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(mapping_info.ring_byte_length, capacity);
+    ASSERT_EQ(amdf_user_queue_mapping_destroy(mapping_), AMDF_STATUS_OK);
+    mapping_ = nullptr;
+    ASSERT_EQ(amdf_user_queue_destroy(queue_), AMDF_STATUS_OK);
+    queue_ = nullptr;
+  }
 }
 
 TEST_F(GpuUserQueueTest, ValidatesTheSelectedScratchAccess) {
