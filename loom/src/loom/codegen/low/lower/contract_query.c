@@ -260,6 +260,9 @@ static iree_status_t loom_low_lower_query_target_contract_index(
   uint16_t failed_binding_index = UINT16_MAX;
   uint16_t failed_case_index = UINT16_MAX;
   uint16_t failed_rule_set_index = UINT16_MAX;
+  bool has_unsupported_marker = false;
+  uint16_t unsupported_binding_index = UINT16_MAX;
+  uint16_t unsupported_case_index = UINT16_MAX;
   loom_low_lower_contract_case_iteration_mode_t iteration_mode =
       LOOM_LOW_LOWER_CONTRACT_CASE_ITERATION_CANDIDATES;
   while (true) {
@@ -268,6 +271,9 @@ static iree_status_t loom_low_lower_query_target_contract_index(
     failed_binding_index = UINT16_MAX;
     failed_case_index = UINT16_MAX;
     failed_rule_set_index = UINT16_MAX;
+    has_unsupported_marker = false;
+    unsupported_binding_index = UINT16_MAX;
+    unsupported_case_index = UINT16_MAX;
     loom_low_lower_contract_case_iterator_t iterator;
     const bool used_candidates =
         loom_low_lower_contract_case_iterator_initialize(
@@ -280,6 +286,14 @@ static iree_status_t loom_low_lower_query_target_contract_index(
       const loom_target_contract_binding_t* binding =
           &index->bindings[contract_case->binding_index];
       if (!loom_target_contract_fragment_queries_target(binding->fragment)) {
+        continue;
+      }
+      if (contract_case->system == LOOM_TARGET_CONTRACT_SYSTEM_UNSUPPORTED) {
+        if (!has_unsupported_marker) {
+          has_unsupported_marker = true;
+          unsupported_binding_index = contract_case->binding_index;
+          unsupported_case_index = case_index;
+        }
         continue;
       }
       if (contract_case->system ==
@@ -380,6 +394,12 @@ static iree_status_t loom_low_lower_query_target_contract_index(
   }
 
   if (failed_rule_set == NULL) {
+    if (has_unsupported_marker) {
+      *out_result = loom_target_contract_query_result_empty();
+      out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED;
+      out_result->binding_index = unsupported_binding_index;
+      out_result->case_index = unsupported_case_index;
+    }
     return iree_ok_status();
   }
 

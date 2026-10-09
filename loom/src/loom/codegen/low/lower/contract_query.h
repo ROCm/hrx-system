@@ -54,8 +54,8 @@ typedef struct loom_low_lower_contract_query_options_t {
 
 // Returns true and assigns the generated lower-rule row referenced by a
 // composed target-contract case. The row may be an emission program or a
-// contract-only guard recipe. Target-owned systems without lower-rule rows
-// return false so callers can leave them unhandled.
+// contract-only guard recipe. Target-owned systems without lower-rule rows,
+// including explicit unsupported-family markers, return false.
 static inline bool loom_low_lower_contract_case_lower_rule_index(
     const loom_target_contract_index_t* index,
     const loom_target_contract_case_t* contract_case,
@@ -74,6 +74,7 @@ static inline bool loom_low_lower_contract_case_lower_rule_index(
     case LOOM_TARGET_CONTRACT_SYSTEM_RECIPE_RULE:
       *out_rule_index = contract_case->row_index;
       return *out_rule_index != LOOM_TARGET_CONTRACT_ROW_NONE;
+    case LOOM_TARGET_CONTRACT_SYSTEM_UNSUPPORTED:
     case LOOM_TARGET_CONTRACT_SYSTEM_DESCRIPTOR_MATRIX:
     default:
       return false;
@@ -95,10 +96,11 @@ iree_status_t loom_low_lower_query_descriptor_matrix_contract(
 // Queries source-to-target-low rule tables for one source op.
 //
 // A LEGAL result means one opt-in rule matched the selected target contract. An
-// UNSUPPORTED result means at least one opt-in rule set covered the source op
-// kind but all candidates rejected it. UNHANDLED means no opt-in rule set had
-// an opinion. Non-OK status is reserved for malformed tables or allocation
-// failures while preparing rare rejection payloads.
+// UNSUPPORTED result means an explicit unsupported-family marker was present
+// or at least one opt-in rule set covered the source op kind but all candidates
+// rejected it. UNHANDLED means no opt-in rule set had an opinion. Non-OK status
+// is reserved for malformed tables or allocation failures while preparing rare
+// rejection payloads.
 iree_status_t loom_low_lower_query_target_contract(
     const loom_target_contract_query_environment_t* environment,
     const loom_low_lower_contract_query_options_t* options,

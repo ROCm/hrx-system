@@ -38,6 +38,30 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "predicate_representation",
+    srcs = ["predicate_representation.c"],
+    hdrs = ["predicate_representation.h"],
+    deps = [
+        ":vector_carrier",
+        "//loom/src/loom/codegen/low/lower:representation_observer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/vector",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "predicate_representation_test",
+    srcs = ["predicate_representation_test.cc"],
+    deps = [
+        ":predicate_representation",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "lower",
     srcs = [
         "registry.c",
@@ -50,6 +74,7 @@ loom_cc_library(
     textual_hdrs = ["//loom/src/loom/target/emit/wasm/contracts:tables.inl"],
     visibility = ["//loom/src/loom/target/arch/wasm:__pkg__"],
     deps = [
+        ":predicate_representation",
         ":vector_carrier",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ir",

@@ -61,7 +61,7 @@ def generate_contract_index(
         if lower_rules is not None:
             rule_set_index = len(rules)
             rules.append(f"&{generated_symbol_name(table)}")
-        elif any(case.system != ContractSystem.DESCRIPTOR_MATRIX for case in compiled.cases):
+        elif any(case.system not in (ContractSystem.DESCRIPTOR_MATRIX, ContractSystem.UNSUPPORTED) for case in compiled.cases):
             raise ValueError(f"fragment '{table.name}' requires a lower-rule pool")
         fragment_symbol = f"loom_{c_identifier(table.name).lower()}_contract_fragment"
         bindings.append(f"{{&{fragment_symbol}, {rule_set_index}}}")

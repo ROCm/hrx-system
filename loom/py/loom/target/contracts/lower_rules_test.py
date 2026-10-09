@@ -63,6 +63,7 @@ from loom.target.contracts import (
     SourceOpProject,
     SourceValueKind,
     TypePattern,
+    UnsupportedRule,
     ValueAliasRule,
     ValueElideRule,
     ValueMaterializer,
@@ -1656,6 +1657,20 @@ def test_compile_lower_rule_set_compiles_recipe_cases() -> None:
     assert compiled.rules[0].alias_ref_count == 0
     assert compiled.rules[0].elide_ref_count == 0
     assert compiled.spans[0].source_op is vector.vector_addi
+
+
+def test_compile_lower_rule_set_omits_explicit_unsupported_cases() -> None:
+    table = ContractFragment(
+        name="test.unsupported",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[UnsupportedRule(source_op=vector.vector_fptrunc)],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    assert compiled.authored_case_indices == ()
+    assert compiled.rules == ()
+    assert compiled.spans == ()
 
 
 def test_compile_lower_rule_set_offsets_variadic_operand_elements() -> None:

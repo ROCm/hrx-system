@@ -24,6 +24,7 @@ from loom.target.contracts import (
     EmitDescriptorOp,
     Guard,
     RecipeRule,
+    UnsupportedRule,
     ValueAliasRule,
     ValueElideRule,
     ValueRef,
@@ -312,6 +313,27 @@ def test_compile_contract_fragment_records_recipe_cases() -> None:
     assert addi_span.case_count == 1
     assert compiled.cases[0].system == ContractSystem.RECIPE_RULE
     assert compiled.cases[0].row_index == 11
+
+
+def test_compile_contract_fragment_records_explicit_unsupported_cases() -> None:
+    table = ContractFragment(
+        name="test-low.unsupported",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[UnsupportedRule(source_op=vector.vector_fptrunc)],
+    )
+
+    compiled = compile_contract_fragment(
+        table,
+        dialect_ops={"vector": ALL_VECTOR_OPS},
+        descriptor_rule_rows={},
+        lower_rule_indices={},
+    )
+
+    assert compiled.op_spans[0].op_name == "vector.fptrunc"
+    assert compiled.op_spans[0].case_count == 1
+    assert compiled.cases == (
+        CompiledCase(ContractSystem.UNSUPPORTED, CONTRACT_ROW_NONE),
+    )
 
 
 def test_compile_contract_fragment_records_descriptor_matrix_cases() -> None:

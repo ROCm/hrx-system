@@ -56,13 +56,16 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @construct_shaped_elem
   %word2 = i16x8.replace_lane %52, %word1, 1
   %word4 = i8x16.shuffle %word2, %word2, 0, 1, 16, 17, 2, 3, 18, 19, 0, 0, 0, 0, 0, 0, 0, 0
   %words = i8x16.shuffle %word4, %word4, 0, 1, 16, 17, 2, 3, 18, 19, 4, 5, 20, 21, 6, 7, 22, 23
-  %56 = i32x4.splat %predicate0
-  %predicate2 = i32x4.replace_lane %56, %predicate1, 1
+  %56 = i32.const 0
+  %57 = i32.sub %56, %predicate0
+  %58 = i32x4.splat %57
+  %59 = i32.sub %56, %predicate1
+  %predicate2 = i32x4.replace_lane %58, %59, 1
   %predicates = i8x16.shuffle %predicate2, %predicate2, 0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23
-  %59 = f32x4.splat %float0
-  %float2 = f32x4.replace_lane %59, %float1, 1
+  %62 = f32x4.splat %float0
+  %float2 = f32x4.replace_lane %62, %float1, 1
   %floats = i8x16.shuffle %float2, %float2, 0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23
-  %62 = f64x2.splat %double0
-  %doubles = f64x2.replace_lane %62, %double1, 1
+  %65 = f64x2.splat %double0
+  %doubles = f64x2.replace_lane %65, %double1, 1
   return %bytes, %words, %predicates, %floats, %doubles
 }

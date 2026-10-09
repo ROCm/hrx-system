@@ -99,21 +99,77 @@ def test_narrow_lanes_use_unsigned_extract_encodings_and_exact_lane_domains():
             assert not immediate.flags
 
 
-def test_integer_equality_descriptors_cover_every_simd_lane_width():
+def test_simd_compare_descriptors_cover_the_native_instruction_matrix():
     descriptors = {
         descriptor.key: descriptor
         for descriptor in WASM_CORE_SIMD128_DESCRIPTOR_SET.descriptors
     }
-    for shape, opcode in (
-        ("i8x16", 0xFD23),
-        ("i16x8", 0xFD2D),
-        ("i32x4", 0xFD37),
-        ("i64x2", 0xFDD6),
-    ):
-        descriptor = descriptors[f"wasm.{shape}.eq"]
-        assert descriptor.encoding_id == opcode
+    expected = {
+        **{
+            f"wasm.{shape}.{operation}": (0xFD << 8) | (base + index)
+            for shape, base in (("i8x16", 0x23), ("i16x8", 0x2D), ("i32x4", 0x37))
+            for index, operation in enumerate(
+                (
+                    "eq",
+                    "ne",
+                    "lt_s",
+                    "lt_u",
+                    "gt_s",
+                    "gt_u",
+                    "le_s",
+                    "le_u",
+                    "ge_s",
+                    "ge_u",
+                )
+            )
+        },
+        **{
+            f"wasm.i64x2.{operation}": (0xFD << 8) | opcode
+            for operation, opcode in (
+                ("eq", 0xD6),
+                ("ne", 0xD7),
+                ("lt_s", 0xD8),
+                ("gt_s", 0xD9),
+                ("le_s", 0xDA),
+                ("ge_s", 0xDB),
+            )
+        },
+        **{
+            f"wasm.{shape}.{operation}": (0xFD << 8) | (base + index)
+            for shape, base in (("f32x4", 0x41), ("f64x2", 0x47))
+            for index, operation in enumerate(("eq", "ne", "lt", "gt", "le", "ge"))
+        },
+    }
+    actual = {
+        key: descriptor.encoding_id
+        for key, descriptor in descriptors.items()
+        if key.startswith(
+            (
+                "wasm.i8x16.",
+                "wasm.i16x8.",
+                "wasm.i32x4.",
+                "wasm.i64x2.",
+                "wasm.f32x4.",
+                "wasm.f64x2.",
+            )
+        )
+        and descriptor.semantic_tag.startswith("vector.cmp.")
+    }
+    assert actual == expected
+    for key in expected:
+        descriptor = descriptors[key]
         assert not descriptor.immediates
         assert len(descriptor.operands) == 3
+
+
+def test_v128_not_uses_the_simd128_logical_opcode():
+    descriptor = next(
+        descriptor
+        for descriptor in WASM_CORE_SIMD128_DESCRIPTOR_SET.descriptors
+        if descriptor.key == "wasm.v128.not"
+    )
+    assert descriptor.encoding_id == 0xFD4D
+    assert [operand.field_name for operand in descriptor.operands] == ["dst", "input"]
 
 
 def test_integer_arithmetic_descriptors_match_the_simd128_instruction_matrix():

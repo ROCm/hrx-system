@@ -44,6 +44,41 @@ endif()
 if(LOOM_TARGET_ARCH_WASM AND LOOM_EMIT_WASM)
 loom_cc_library(
   NAME
+    predicate_representation
+  HDRS
+    "predicate_representation.h"
+  SRCS
+    "predicate_representation.c"
+  DEPS
+    ::vector_carrier
+    iree::base
+    loom::codegen::low::lower::representation_observer
+    loom::ir
+    loom::ops::vector
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_WASM AND LOOM_EMIT_WASM)
+loom_cc_test(
+  NAME
+    predicate_representation_test
+  SRCS
+    "predicate_representation_test.cc"
+  DEPS
+    ::predicate_representation
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+  LABELS
+    "iree-build-requirement=loom.target.arch.wasm"
+    "iree-build-requirement=loom.emit.wasm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_WASM AND LOOM_EMIT_WASM)
+loom_cc_library(
+  NAME
     lower
   HDRS
     "lower.h"
@@ -54,6 +89,7 @@ loom_cc_library(
     "registry.c"
     "vector_structural.c"
   DEPS
+    ::predicate_representation
     ::vector_carrier
     iree::base
     loom::codegen::low::lower

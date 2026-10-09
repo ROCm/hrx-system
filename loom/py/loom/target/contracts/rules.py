@@ -598,6 +598,20 @@ class RecipeRule:
 
 
 @dataclass(frozen=True, slots=True)
+class UnsupportedRule:
+    """Contract case explicitly rejecting unmatched forms of an operation."""
+
+    source_op: Op
+
+    @property
+    def system(self) -> ContractSystem:
+        return ContractSystem.UNSUPPORTED
+
+    def validate(self, descriptor_set: DescriptorSet) -> None:
+        del descriptor_set
+
+
+@dataclass(frozen=True, slots=True)
 class DescriptorMatrixRule:
     """Contract case handled by the shared descriptor-matrix system."""
 
@@ -631,6 +645,7 @@ type ContractCase = (
     | OrdinalValueAliasRule
     | ValueElideRule
     | RecipeRule
+    | UnsupportedRule
     | DescriptorMatrixRule
 )
 

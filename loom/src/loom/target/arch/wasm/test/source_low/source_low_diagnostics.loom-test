@@ -101,6 +101,24 @@ CHECK: COMPILE-REPORT: target_legalization[0] function=unsupported_reduction_car
 
 // ====
 
+// RUN: with-checks compile-report target-legalize{mode=eager}
+
+wasm.target<simd128> @target
+
+// Wasm explicitly rejects the complete unmatched vector-cast family so the
+// ordinary policy can select its shared lane-wise reference implementation.
+func.def target(@target) @reference_vector_cast(%input: vector<4xf32>) {
+  %rounded = vector.fptrunc %input : vector<4xf32> to vector<4xbf16>
+  test.use %rounded : vector<4xbf16>
+  func.return
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1 *
+CHECK: COMPILE-REPORT: target_legalization[0] function=reference_vector_cast source_op=vector.fptrunc * action=rewritten outcome=reference-fallback contract=unsupported legalizer=vector strategy=reference * scalarized=true *
+
+// ====
+
 wasm.target<simd128> @target
 
 func.def target(@target) @rejects_wasm32_address_overflow(%input: buffer, %i: index) -> (vector<4xi32>) {

@@ -20,6 +20,7 @@ class ContractSystem(Enum):
     ENVIRONMENT = "environment"
     DESCRIPTOR_MATRIX = "descriptor_matrix"
     RECIPE_RULE = "recipe_rule"
+    UNSUPPORTED = "unsupported"
 
 
 @unique

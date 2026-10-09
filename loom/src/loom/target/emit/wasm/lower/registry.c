@@ -10,6 +10,7 @@
 #include "loom/target/emit/wasm/contracts/core_simd128_lower_rules.h"
 #include "loom/target/emit/wasm/error_catalog.h"
 #include "loom/target/emit/wasm/lower/lower.h"
+#include "loom/target/emit/wasm/lower/predicate_representation.h"
 #include "loom/target/emit/wasm/lower/vector_carrier.h"
 #include "loom/target/emit/wasm/lower/vector_structural.h"
 
@@ -135,6 +136,54 @@ static iree_status_t loom_wasm_map_type(void* user_data,
   return iree_ok_status();
 }
 
+static iree_status_t loom_wasm_map_value(void* user_data,
+                                         loom_low_lower_context_t* context,
+                                         const loom_op_t* source_op,
+                                         loom_value_id_t source_value_id,
+                                         loom_type_t source_type,
+                                         loom_type_t* out_low_type) {
+  if (!loom_wasm_predicate_type(source_type, NULL)) {
+    return loom_wasm_map_type(user_data, context, source_op, source_type,
+                              out_low_type);
+  }
+  loom_low_representation_id_t representation = LOOM_LOW_REPRESENTATION_ID_NONE;
+  loom_low_lower_representation_lookup_if_ready(context, source_value_id,
+                                                &representation);
+  const loom_wasm_vector_carrier_t carrier =
+      loom_wasm_predicate_carrier(source_type, representation);
+  if (carrier.packet_count != 0) {
+    return loom_wasm_make_v128_register_type(context, carrier.packet_count,
+                                             out_low_type);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_wasm_map_contract_value(
+    void* user_data,
+    const loom_target_contract_query_environment_t* environment,
+    const loom_op_t* source_op, loom_value_id_t source_value_id,
+    loom_low_lower_rule_mapped_value_t* out_mapped_value) {
+  (void)user_data;
+  (void)source_op;
+  *out_mapped_value = loom_low_lower_rule_mapped_value_none();
+  const loom_type_t source_type =
+      loom_module_value_type(environment->module, source_value_id);
+  if (!loom_wasm_predicate_type(source_type, NULL)) {
+    return iree_ok_status();
+  }
+  loom_low_representation_id_t representation = LOOM_LOW_REPRESENTATION_ID_NONE;
+  IREE_RETURN_IF_ERROR(loom_low_lower_representation_query_lookup(
+      environment, source_value_id, &representation));
+  const loom_wasm_vector_carrier_t carrier =
+      loom_wasm_predicate_carrier(source_type, representation);
+  if (carrier.packet_count != 0) {
+    *out_mapped_value = loom_low_lower_rule_mapped_value_register(
+        WASM_CORE_SIMD128_REG_CLASS_ID_V128, representation,
+        carrier.packet_count);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_wasm_map_argument(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_function_op, uint16_t source_argument_index,
@@ -212,7 +261,7 @@ static const loom_target_vector_packet_lane_limit_t
     kWasmVectorPacketStructuralLaneLimits[] = {
         {
             .element_type = LOOM_SCALAR_TYPE_I1,
-            .maximum_lane_count = 4u,
+            .maximum_lane_count = 16u,
         },
 };
 static_assert(IREE_ARRAYSIZE(kWasmVectorPacketLaneCounts) <=
@@ -237,6 +286,9 @@ static const loom_low_lower_policy_t kWasmLowLowerPolicy = {
     .error_catalog = &loom_wasm_error_catalog,
     .vector_packet_policy = &kWasmVectorPacketPolicy,
     .map_type = {.fn = loom_wasm_map_type, .user_data = NULL},
+    .map_value = {.fn = loom_wasm_map_value, .user_data = NULL},
+    .map_contract_value = {.fn = loom_wasm_map_contract_value,
+                           .user_data = NULL},
     .map_argument = {.fn = loom_wasm_map_argument, .user_data = NULL},
     .source_type_supported = {.fn = loom_wasm_source_type_supported,
                               .user_data = NULL},
@@ -250,6 +302,7 @@ static const loom_low_lower_policy_t kWasmLowLowerPolicy = {
             .fn = loom_wasm_source_function_vector_carrier_supported,
             .user_data = NULL,
         },
+    .source_plan_observer = &loom_wasm_predicate_representation_observer,
     .contract = LOOM_WASM_CONTRACT,
     .query_op_contract =
         {

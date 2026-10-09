@@ -53,6 +53,7 @@ from loom.target.contracts import (
     SourceMemoryProject,
     SourceMemoryRootKind,
     TypePattern,
+    UnsupportedRule,
     ValueAliasRule,
     ValueProject,
     ValueRef,
@@ -68,6 +69,7 @@ from loom.target.contracts.templates import (
     reduction_descriptor_rules,
 )
 from loom.target.emit.wasm.float_narrowing import float_narrowing_rules
+from loom.target.emit.wasm.predicate import predicate_rules
 from loom.target.emit.wasm.vector_integer_arithmetic import (
     integer_arithmetic_rules,
 )
@@ -95,14 +97,14 @@ _F64 = Scalar("f64")
 _INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
 _V16I8 = Vector("i8", lanes=16)
-_V4I1 = Vector("i1", lanes=4)
 _V4I32 = Vector("i32", lanes=4)
 _V4F32 = Vector("f32", lanes=4)
 _V2I64 = Vector("i64", lanes=2)
 _V2F64 = Vector("f64", lanes=2)
 
-# A numeric SIMD value is one bit-preserving v128 carrier. SIMD predicates
-# use a distinct four-lane mask representation and are not numeric payloads.
+# A numeric SIMD value is one bit-preserving v128 carrier. SIMD predicates use
+# a separately selected all-zero/all-one lane representation and are not
+# numeric payloads.
 _NUMERIC_V128_TYPES = (
     _V16_BYTE_STORAGE,
     _V8_WORD_STORAGE,
@@ -791,71 +793,6 @@ def _splat_rule(
     )
 
 
-def _predicate_mask_emits(value: ValueRef) -> tuple[EmitDescriptorOp, ...]:
-    zero = ValueRef.temporary("predicate_zero")
-    mask = ValueRef.temporary("predicate_mask")
-    return (
-        EmitDescriptorOp(
-            descriptor=_descriptor("wasm.i32.const"),
-            results={"dst": zero},
-            result_types={"dst": _I32},
-            immediates={"i32_value": 0},
-            form=DescriptorEmitForm.CONST,
-        ),
-        EmitDescriptorOp(
-            descriptor=_descriptor("wasm.i32.sub"),
-            operands={"lhs": zero, "rhs": value},
-            results={"dst": mask},
-            result_types={"dst": _I32},
-        ),
-    )
-
-
-def _predicate_splat_rule() -> DescriptorRule:
-    descriptor = _descriptor("wasm.i32x4.splat")
-    return DescriptorRule(
-        source_op=vector.vector_splat,
-        descriptor=descriptor,
-        guards=(
-            _value_type("scalar", _I1),
-            _value_type("result", _V4I1),
-        ),
-        emit=(
-            *_predicate_mask_emits(ValueRef.operand("scalar")),
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                operands={"value": ValueRef.temporary("predicate_mask")},
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
-def _select_rule(value_type: TypePattern) -> DescriptorRule:
-    descriptor = _descriptor("wasm.v128.bitselect")
-    return DescriptorRule(
-        source_op=vector.vector_select,
-        descriptor=descriptor,
-        guards=(
-            _value_type("condition", _V4I1),
-            _value_type("true_value", value_type),
-            _value_type("false_value", value_type),
-            _value_type("result", value_type),
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                operands={
-                    "true_value": ValueRef.operand("true_value"),
-                    "false_value": ValueRef.operand("false_value"),
-                    "condition": ValueRef.operand("condition"),
-                },
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
 def _whole_value_select_rule(
     value_type: TypePattern, descriptor_key: str
 ) -> DescriptorRule:
@@ -878,38 +815,6 @@ def _whole_value_select_rule(
                     "true_value": ValueRef.operand("true_value"),
                     "false_value": ValueRef.operand("false_value"),
                     "condition": ValueRef.operand("condition"),
-                },
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
-def _compare_rule(
-    source_op: Op,
-    predicate: str,
-    operand_type: TypePattern,
-    descriptor_key: str,
-    *,
-    guards: tuple[Guard, ...] = (),
-) -> DescriptorRule:
-    descriptor = _descriptor(descriptor_key)
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=descriptor,
-        guards=(
-            Guard.enum_attr_equals("predicate", predicate),
-            _value_type("lhs", operand_type),
-            _value_type("rhs", operand_type),
-            _value_type("result", _V4I1),
-            *guards,
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                operands={
-                    "lhs": ValueRef.operand("lhs"),
-                    "rhs": ValueRef.operand("rhs"),
                 },
                 results={"dst": ValueRef.result("result")},
             ),
@@ -1059,17 +964,11 @@ def _dynamic_insert_rule(
 ) -> DescriptorRule:
     # Replicate each lane ordinal across its physical bytes. Equality with the
     # broadcast index selects every bit of that lane without scalar expansion.
-    # Predicate lanes occupy four bytes, independent of their source bitwidth.
     if physical_lane_count is None:
         physical_lane_count = _maximum_vector_lane_count(dest_type)
     bytes_per_lane = 16 // physical_lane_count
     ordinals = bytes(byte // bytes_per_lane for byte in range(16))
     descriptor = _descriptor("wasm.v128.bitselect")
-    value = ValueRef.operand("value")
-    prefix = ()
-    if value_type == _I1:
-        prefix = _predicate_mask_emits(value)
-        value = ValueRef.temporary("predicate_mask")
     return DescriptorRule(
         source_op=vector.vector_insert,
         descriptor=descriptor,
@@ -1081,7 +980,6 @@ def _dynamic_insert_rule(
             Guard.i64_array_count("static_indices", 1),
         ),
         emit=(
-            *prefix,
             EmitDescriptorOp(
                 descriptor=_descriptor("wasm.v128.const"),
                 results={"dst": ValueRef.temporary("lane_ordinals")},
@@ -1111,7 +1009,7 @@ def _dynamic_insert_rule(
             ),
             EmitDescriptorOp(
                 descriptor=_descriptor(splat_descriptor_key),
-                operands={"value": value},
+                operands={"value": ValueRef.operand("value")},
                 results={"dst": ValueRef.temporary("replacement")},
                 result_types={"dst": _V16I8},
                 form=DescriptorEmitForm.OP,
@@ -1136,39 +1034,6 @@ def _maximum_vector_lane_count(type_pattern: TypePattern) -> int:
     if isinstance(type_pattern.maximum_lanes, int):
         return type_pattern.maximum_lanes
     raise ValueError(f"vector type has no fixed maximum lane count: {type_pattern!r}")
-
-
-def _predicate_insert_rule() -> DescriptorRule:
-    descriptor = _descriptor("wasm.i32x4.replace_lane")
-    return DescriptorRule(
-        source_op=vector.vector_insert,
-        descriptor=descriptor,
-        guards=(
-            _value_type("value", _I1),
-            _value_type("dest", _V4I1),
-            _value_type("result", _V4I1),
-            Guard.operand_segment_count("indices", 0),
-            Guard.i64_array_count("static_indices", 1),
-            Guard.i64_array_element_range("static_indices", 0, 0, 3),
-        ),
-        emit=(
-            *_predicate_mask_emits(ValueRef.operand("value")),
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                operands={
-                    "dest": ValueRef.operand("dest"),
-                    "value": ValueRef.temporary("predicate_mask"),
-                },
-                results={"dst": ValueRef.result("result")},
-                immediates={
-                    "lane": AttrProject.i64_array_element(
-                        "static_indices",
-                        element=0,
-                    )
-                },
-            ),
-        ),
-    )
 
 
 _SHUFFLE_BYTE_NAMES = tuple(f"lane{i}" for i in range(16))
@@ -1700,6 +1565,10 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
             for _, source_type, _, _, _ in _PARTIAL_INTEGER_LANE_TYPES
             for _, result_type, _, _, _ in _PARTIAL_INTEGER_LANE_TYPES
         ),
+        # Wasm has native aliases for the bitcast carrier shapes above. Every
+        # other cast, and every unmatched bitcast shape, deliberately enters
+        # the shared lane-wise reference legalization family.
+        *(UnsupportedRule(source_op=source_op) for source_op in vector.VECTOR_CAST_OPS),
         _conversion_alias_rule(scalar_conversion.scalar_trunci, _I32, _I8),
         _conversion_alias_rule(scalar_conversion.scalar_trunci, _I32, _I16),
         _conversion_alias_rule(scalar_conversion.scalar_extui, _I1, _I32),
@@ -1724,12 +1593,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         _const_i64_rule(scalar_conversion.scalar_constant, _I64),
         _const_float_rule(_F32, "wasm.f32.const"),
         _const_float_rule(_F64, "wasm.f64.const"),
-        # Logical 0/1 facts become full-width 0/-1 predicate masks.
-        _const_v128_rule(
-            _V4I1,
-            ValueProject.exact_i64_negate("result"),
-            Guard.value_exact_i64("result"),
-        ),
+        *predicate_rules(_descriptor, _value_type),
         _const_v128_rule(
             _V2I64, ValueProject.exact_i64("result"), Guard.value_exact_i64("result")
         ),
@@ -1794,12 +1658,10 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 (_F64, "f64"),
                 (_INDEX, "i32"),
                 (_OFFSET, "i32"),
-                (_V4I1, "v128"),
                 *((value_type, "v128") for value_type in _NUMERIC_V128_TYPES),
                 (Buffer(), "i32"),
             )
         ),
-        _predicate_splat_rule(),
         *(
             _splat_rule(scalar_type, vector_type, f"wasm.{shape_name}.splat")
             for scalar_type, vector_type, shape_name, _ in _V128_LANE_TYPES
@@ -1814,9 +1676,6 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 _,
             ) in _PARTIAL_INTEGER_LANE_TYPES
         ),
-        _select_rule(_V4I1),
-        _select_rule(_V4I32),
-        _select_rule(_V4F32),
         *varying_shift_rules(_descriptor, _value_type),
         *(
             _binary_rule(source_op, value_type, f"wasm.v128.{operation}")
@@ -1826,7 +1685,6 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 (vector.vector_xori, "xor"),
             )
             for value_type in (
-                _V4I1,
                 Vector("i8", lanes=16),
                 Vector("i16", lanes=8),
                 _V4I32,
@@ -1841,49 +1699,6 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 (vector.vector_xori, "xor"),
             )
             for _, vector_type, _, _, _ in _PARTIAL_INTEGER_LANE_TYPES
-        ),
-        _compare_rule(vector.vector_cmpi, "eq", _V4I32, "wasm.i32x4.eq"),
-        _compare_rule(vector.vector_cmpi, "ne", _V4I32, "wasm.i32x4.ne"),
-        _compare_rule(vector.vector_cmpi, "slt", _V4I32, "wasm.i32x4.lt_s"),
-        _compare_rule(vector.vector_cmpi, "sle", _V4I32, "wasm.i32x4.le_s"),
-        _compare_rule(vector.vector_cmpi, "sgt", _V4I32, "wasm.i32x4.gt_s"),
-        _compare_rule(vector.vector_cmpi, "sge", _V4I32, "wasm.i32x4.ge_s"),
-        _compare_rule(vector.vector_cmpi, "ult", _V4I32, "wasm.i32x4.lt_u"),
-        _compare_rule(vector.vector_cmpi, "ule", _V4I32, "wasm.i32x4.le_u"),
-        _compare_rule(vector.vector_cmpi, "ugt", _V4I32, "wasm.i32x4.gt_u"),
-        _compare_rule(vector.vector_cmpi, "uge", _V4I32, "wasm.i32x4.ge_u"),
-        *(
-            _compare_rule(
-                vector.vector_cmpf,
-                predicate,
-                _V4F32,
-                f"wasm.f32x4.{operation}",
-            )
-            for predicate, operation in (
-                ("oeq", "eq"),
-                ("ogt", "gt"),
-                ("oge", "ge"),
-                ("olt", "lt"),
-                ("ole", "le"),
-                ("une", "ne"),
-            )
-        ),
-        *(
-            _compare_rule(
-                vector.vector_cmpf,
-                predicate,
-                _V4F32,
-                f"wasm.f32x4.{operation}",
-                guards=(Guard.instance_flags_has_all("fastmath", "nnan"),),
-            )
-            for predicate, operation in (
-                ("one", "ne"),
-                ("ueq", "eq"),
-                ("ugt", "gt"),
-                ("uge", "ge"),
-                ("ult", "lt"),
-                ("ule", "le"),
-            )
         ),
         *(
             _binary_rule(source_op, _V4F32, f"wasm.f32x4.{operation}")
@@ -2014,7 +1829,6 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 (index.index_rem, "wasm.i32.rem_u"),
             )
         ),
-        _extract_rule(_V4I1, _I1, "wasm.i32x4.extract_lane"),
         *(
             _extract_rule(
                 vector_type, scalar_type, f"wasm.{shape_name}.extract_lane{suffix}"
@@ -2033,7 +1847,6 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 _,
             ) in _PARTIAL_INTEGER_LANE_TYPES
         ),
-        _predicate_insert_rule(),
         *(
             _insert_rule(scalar_type, vector_type, f"wasm.{shape_name}.replace_lane")
             for scalar_type, vector_type, shape_name, _ in _V128_LANE_TYPES
@@ -2048,7 +1861,6 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 _,
             ) in _PARTIAL_INTEGER_LANE_TYPES
         ),
-        _dynamic_insert_rule(_I1, _V4I1, "wasm.i32x4.splat"),
         *(
             _dynamic_insert_rule(scalar_type, vector_type, f"wasm.{shape_name}.splat")
             for scalar_type, vector_type, shape_name, _ in _V128_LANE_TYPES
@@ -2069,7 +1881,6 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
             ) in _PARTIAL_INTEGER_LANE_TYPES
         ),
         *(_shuffle_rule(value_type) for value_type in _NUMERIC_V128_TYPES),
-        _shuffle_rule(_V4I1),
         *(
             _memory_rule(
                 load_op if operation is SourceMemoryOperation.LOAD else store_op,

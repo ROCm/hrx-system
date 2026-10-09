@@ -21,6 +21,7 @@ from loom.target.contracts.rules import (
     DescriptorRule,
     OrdinalValueAliasRule,
     RecipeRule,
+    UnsupportedRule,
     ValueAliasRule,
     ValueElideRule,
     contract_case_priority,
@@ -267,6 +268,11 @@ def _compile_case(
         return CompiledCase(
             system=ContractSystem.RECIPE_RULE,
             row_index=lower_rule_index,
+            priority=priority,
+        )
+    if isinstance(contract_case, UnsupportedRule):
+        return CompiledCase(
+            system=ContractSystem.UNSUPPORTED,
             priority=priority,
         )
     if isinstance(contract_case, DescriptorMatrixRule):
