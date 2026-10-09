@@ -86,6 +86,17 @@ Invocation completion joins worker completion before releasing the owned
 resources. Instruction-image replacement requires a further target realization;
 channel storage and ownership are independent of instruction residency.
 
+An independently establishing native pipeline owns route selection on every
+stream switch traversed by its complete composed plan. Admission retains the
+desired master, slave and packet-filter banks; initialization writes those
+complete banks, including disabled entries, before starting workers. This
+replaces routes left by a prior program without clearing unrelated tiles or
+reserved register ranges. The caller still drains prior work before replacement;
+configuration is not cancellation or a drain mechanism. Externally prefixed
+routes are not an undeclared input to this native materialization. Authored
+physical configurations and logical-array programs retain their explicit
+composition boundaries.
+
 Hardware FIFO credits describe a completed prefix, not an arbitrary count of
 finished records. If a strand reserves A then B and publishes B first, that
 publication exposes no credit; publishing A exposes both. Read retirement uses

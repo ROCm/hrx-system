@@ -1,0 +1,344 @@
+// RUN: emit source-low output=low
+
+// Single-slot channels have no rotating cursor state. Wait reborrows the
+// admitted mutable record without advancing or consuming another credit.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
+
+pipeline.def<kernel> public retain target(@device) @single_slot_records() run() {
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %origin = index.constant 0 : offset
+  %payload_bytes = index.constant 4 : offset
+  %capacity = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(4) %payload_bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x1xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %begin = index.constant 0 : index
+    %record_count = index.constant 3 : index
+    %step = index.constant 1 : index
+    %increment = scalar.constant 7 : i32
+    scf.for %record = [%begin to %record_count step %step] {
+      %write, %destination = channel.reserve %records : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+      %value = index.cast %record : index to i32
+      view.store %value, %destination[0] : i32, view<1xi32>
+      channel.publish %write : write<tile<1xi32>>
+      %read, %initial_payload = channel.acquire<mutable> %records : channel<tile<1xi32>> -> (read<tile<1xi32>, mutable>, view<1xi32>)
+      %payload = channel.wait %read : read<tile<1xi32>, mutable> -> view<1xi32>
+      %loaded = view.load %payload[0] : view<1xi32> -> i32
+      %result = scalar.addi %loaded, %increment : i32
+      view.store %result, %payload[0] : i32, view<1xi32>
+      channel.release %read : read<tile<1xi32>, mutable>
+    }
+  }
+}
+
+// ----
+low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_0() asm {
+  %begin = mov.short 0
+  %record_count = mov.short 3
+  %step = mov.short 1
+  %increment = mov.short 7
+  low.br ^_bb1(%begin: reg<aie2p.er>)
+^_bb1(%value: reg<aie2p.er>):
+  %80 = lt %value, %record_count
+  low.cond_br %80, ^_bb2, ^_bb3 : reg<aie2p.er>
+^_bb2:
+  %47 = mov.i32 -1
+  acq %47, 48
+  %destination = mov.local-address 458752
+  st %value, %destination, 0
+  %51 = mov.i32 1
+  rel %51, 49
+  acq %47, 49
+  %loaded = lda %destination, 0
+  %result = add.rr %loaded, %increment
+  st %result, %destination, 0
+  rel %51, 48
+  %84 = add.rr %value, %step
+  low.br ^_bb1(%84: reg<aie2p.er>)
+^_bb3:
+  %44 = mov.i32 1
+  rel %44, 50
+  low.br ^_bb4
+^_bb4:
+  %45 = mov.ss
+  low.br ^_bb4
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_6) @__aie2p_worker_helper_7() asm {
+  %60 = constant 3350528 : reg<aie2p.config.scalar : i64>
+  %61 = constant 3 : reg<aie2p.config.scalar : i64>
+  %62 = constant 2 : reg<aie2p.config.scalar : i64>
+  write.mask32 %60, %61, %62
+  %63 = constant 0 : reg<aie2p.config.scalar : i64>
+  program.load %63, %61, @__pipeline_worker_0
+  %64 = constant 4 : reg<aie2p.config.scalar : i64>
+  data.reserve %63, %61, %63, %64
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_6) @__aie2p_worker_helper_8() asm {
+  %65 = constant 3272704 : reg<aie2p.config.scalar : i64>
+  %66 = constant 1 : reg<aie2p.config.scalar : i64>
+  write32 %65, %66
+  %67 = constant 3272720 : reg<aie2p.config.scalar : i64>
+  %68 = constant 0 : reg<aie2p.config.scalar : i64>
+  write32 %67, %68
+  %69 = constant 3272736 : reg<aie2p.config.scalar : i64>
+  write32 %69, %68
+  %70 = constant 3350528 : reg<aie2p.config.scalar : i64>
+  %71 = constant 2 : reg<aie2p.config.scalar : i64>
+  write.mask32 %70, %71, %68
+  write.mask32 %70, %66, %66
+  %72 = constant 63 : reg<aie2p.config.scalar : i64>
+  wait.mask32 %69, %72, %66
+  %73 = constant 3 : reg<aie2p.config.scalar : i64>
+  write.mask32 %70, %73, %71
+  return
+}
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_6) abi(array_program) @single_slot_records() asm {
+  %74 = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %74, @__aie2p_worker_helper_7, @__aie2p_worker_helper_8
+  return
+}
+
+// ====
+
+// A rotating endpoint between two single-slot endpoints owns the only cursor
+// pair. Wait retains the held read while both rotating directions advance.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+pipeline.def<kernel> public retain target(@device) @mixed_endpoint_records() run() {
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %origin = index.constant 0 : offset
+  %single_slot_bytes = index.constant 4 : offset
+  %ring_bytes = index.constant 8 : offset
+  %single_capacity = index.constant 1 : index
+  %ring_capacity = index.constant 2 : index
+  %held_storage = buffer.alloca<workgroup> pool(%memory) align(4) %single_slot_bytes : buffer
+  %ring_storage = buffer.alloca<workgroup> pool(%memory) align(4) %ring_bytes : buffer
+  %result_storage = buffer.alloca<workgroup> pool(%memory) align(4) %single_slot_bytes : buffer
+  %held_slots = buffer.view %held_storage[%origin] : buffer -> view<1x1xi32>
+  %ring_slots = buffer.view %ring_storage[%origin] : buffer -> view<2x1xi32>
+  %result_slots = buffer.view %result_storage[%origin] : buffer -> view<1x1xi32>
+  %held = channel.bind<fifo> %held_slots, %single_capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %records = channel.bind<fifo> %ring_slots, %ring_capacity : view<2x1xi32>, index -> channel<tile<1xi32>>
+  %results = channel.bind<fifo> %result_slots, %single_capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %held_write, %held_destination = channel.reserve %held : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    %initial_bias = scalar.constant 11 : i32
+    view.store %initial_bias, %held_destination[0] : i32, view<1xi32>
+    channel.publish %held_write : write<tile<1xi32>>
+    %held_read, %initial_held_payload = channel.acquire<mutable> %held : channel<tile<1xi32>> -> (read<tile<1xi32>, mutable>, view<1xi32>)
+    %begin = index.constant 0 : index
+    %record_count = index.constant 3 : index
+    %step = index.constant 1 : index
+    scf.for %record = [%begin to %record_count step %step] {
+      %record_write, %record_destination = channel.reserve %records : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+      %value = index.cast %record : index to i32
+      view.store %value, %record_destination[0] : i32, view<1xi32>
+      channel.publish %record_write : write<tile<1xi32>>
+      %record_read, %initial_record_payload = channel.acquire %records : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+      %result_write, %result_destination = channel.reserve %results : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+      %record_payload = channel.wait %record_read : read<tile<1xi32>> -> view<1xi32>
+      %held_payload = channel.wait %held_read : read<tile<1xi32>, mutable> -> view<1xi32>
+      %record_value = view.load %record_payload[0] : view<1xi32> -> i32
+      %held_value = view.load %held_payload[0] : view<1xi32> -> i32
+      %result = scalar.addi %record_value, %held_value : i32
+      view.store %result, %result_destination[0] : i32, view<1xi32>
+      channel.publish %result_write : write<tile<1xi32>>
+      channel.release %record_read : read<tile<1xi32>>
+      %result_read, %result_payload = channel.acquire %results : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+      %next_bias = view.load %result_payload[0] : view<1xi32> -> i32
+      view.store %next_bias, %held_payload[0] : i32, view<1xi32>
+      channel.release %result_read : read<tile<1xi32>>
+    }
+    channel.release %held_read : read<tile<1xi32>, mutable>
+  }
+}
+
+// ----
+low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_0() asm {
+  %157 = mov.short 0
+  %87 = mov.i32 -1
+  acq %87, 48
+  %held_destination = mov.local-address 458752
+  %initial_bias = mov.short 11
+  st %initial_bias, %held_destination, 0
+  %91 = mov.i32 1
+  rel %91, 49
+  acq %87, 49
+  %record_count = mov.short 3
+  %step = mov.short 1
+  low.br ^_bb1(%157: reg<aie2p.er>, %157: reg<aie2p.er>, %157: reg<aie2p.er>)
+^_bb1(%value: reg<aie2p.er>, %record_read: reg<aie2p.er>, %record_write: reg<aie2p.er>):
+  %163 = lt %value, %record_count
+  low.cond_br %163, ^_bb2, ^_bb3 : reg<aie2p.er>
+^_bb2:
+  acq %87, 50
+  %164 = mov.short 4
+  %165 = mov.short 8
+  %166 = add.rr %record_write, %164
+  %167 = eq %166, %165
+  %168 = copy %167 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %169 = sel.nez %157, %166, %168
+  %record_payload = mov.local-address 458756
+  %171 = mov.address-index %record_write
+  st.i32.index %value, %record_payload, %171
+  rel %91, 51
+  acq %87, 51
+  %172 = add.rr %record_read, %164
+  %173 = eq %172, %165
+  %174 = copy %173 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %175 = sel.nez %157, %172, %174
+  acq %87, 52
+  %result_destination = mov.local-address 458764
+  %177 = mov.address-index %record_read
+  %record_value = lda.i32.index %record_payload, %177
+  %held_value = lda %held_destination, 0
+  %result = add.rr %record_value, %held_value
+  st %result, %result_destination, 0
+  rel %91, 53
+  rel %91, 50
+  acq %87, 53
+  %next_bias = lda %result_destination, 0
+  st %next_bias, %held_destination, 0
+  rel %91, 52
+  %182 = add.rr %value, %step
+  low.br ^_bb1(%182: reg<aie2p.er>, %175: reg<aie2p.er>, %169: reg<aie2p.er>)
+^_bb3:
+  rel %91, 48
+  rel %91, 54
+  low.br ^_bb4
+^_bb4:
+  %83 = mov.ss
+  low.br ^_bb4
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_16) @__aie2p_worker_helper_17() asm {
+  %135 = constant 3350528 : reg<aie2p.config.scalar : i64>
+  %136 = constant 3 : reg<aie2p.config.scalar : i64>
+  %137 = constant 2 : reg<aie2p.config.scalar : i64>
+  write.mask32 %135, %136, %137
+  %138 = constant 0 : reg<aie2p.config.scalar : i64>
+  program.load %138, %136, @__pipeline_worker_0
+  %139 = constant 16 : reg<aie2p.config.scalar : i64>
+  data.reserve %138, %136, %138, %139
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_16) @__aie2p_worker_helper_18() asm {
+  %140 = constant 3272704 : reg<aie2p.config.scalar : i64>
+  %141 = constant 1 : reg<aie2p.config.scalar : i64>
+  write32 %140, %141
+  %142 = constant 3272720 : reg<aie2p.config.scalar : i64>
+  %143 = constant 0 : reg<aie2p.config.scalar : i64>
+  write32 %142, %143
+  %144 = constant 3272736 : reg<aie2p.config.scalar : i64>
+  %145 = constant 2 : reg<aie2p.config.scalar : i64>
+  write32 %144, %145
+  %146 = constant 3272752 : reg<aie2p.config.scalar : i64>
+  write32 %146, %143
+  %147 = constant 3272768 : reg<aie2p.config.scalar : i64>
+  write32 %147, %141
+  %148 = constant 3272784 : reg<aie2p.config.scalar : i64>
+  write32 %148, %143
+  %149 = constant 3272800 : reg<aie2p.config.scalar : i64>
+  write32 %149, %143
+  %150 = constant 3350528 : reg<aie2p.config.scalar : i64>
+  write.mask32 %150, %145, %143
+  write.mask32 %150, %141, %141
+  %151 = constant 63 : reg<aie2p.config.scalar : i64>
+  wait.mask32 %149, %151, %141
+  %152 = constant 3 : reg<aie2p.config.scalar : i64>
+  write.mask32 %150, %152, %145
+  return
+}
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_16) abi(array_program) @mixed_endpoint_records() asm {
+  %153 = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %153, @__aie2p_worker_helper_17, @__aie2p_worker_helper_18
+  return
+}
+
+// ====
+// RUN: emit aie2p-xdna input=source-low
+
+// Each phase fully initializes, publishes, reads, updates, and releases its
+// own record before the next phase begins. Repetition needs the channel
+// identities again, not nine simultaneously live payload addresses.
+// The two pools keep every semaphore pair within the sixteen-lock limit.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
+
+func.def inline @advance_record_phase(%records: channel<tile<1xi32>>, %seed: i32) -> (i32) {
+  %write, %destination = channel.reserve %records : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  view.store %seed, %destination[0] : i32, view<1xi32>
+  channel.publish %write : write<tile<1xi32>>
+  %read, %payload = channel.acquire<mutable> %records : channel<tile<1xi32>> -> (read<tile<1xi32>, mutable>, view<1xi32>)
+  %value = view.load %payload[0] : view<1xi32> -> i32
+  %increment = scalar.constant 1 : i32
+  %result = scalar.addi %value, %increment : i32
+  view.store %result, %payload[0] : i32, view<1xi32>
+  channel.release %read : read<tile<1xi32>, mutable>
+  func.return %result : i32
+}
+
+pipeline.def<kernel> public retain target(@device) @sequential_endpoint_phases() run() {
+  %local_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %north_memory = pipeline.memory<workgroup>[0, 4] : pool
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 4 : offset
+  %capacity = index.constant 1 : index
+  %first_storage = buffer.alloca<workgroup> pool(%local_memory) align(4) %record_bytes : buffer
+  %second_storage = buffer.alloca<workgroup> pool(%local_memory) align(4) %record_bytes : buffer
+  %third_storage = buffer.alloca<workgroup> pool(%local_memory) align(4) %record_bytes : buffer
+  %fourth_storage = buffer.alloca<workgroup> pool(%local_memory) align(4) %record_bytes : buffer
+  %fifth_storage = buffer.alloca<workgroup> pool(%local_memory) align(4) %record_bytes : buffer
+  %sixth_storage = buffer.alloca<workgroup> pool(%north_memory) align(4) %record_bytes : buffer
+  %seventh_storage = buffer.alloca<workgroup> pool(%north_memory) align(4) %record_bytes : buffer
+  %eighth_storage = buffer.alloca<workgroup> pool(%north_memory) align(4) %record_bytes : buffer
+  %ninth_storage = buffer.alloca<workgroup> pool(%north_memory) align(4) %record_bytes : buffer
+  %first_slots = buffer.view %first_storage[%origin] : buffer -> view<1x1xi32>
+  %second_slots = buffer.view %second_storage[%origin] : buffer -> view<1x1xi32>
+  %third_slots = buffer.view %third_storage[%origin] : buffer -> view<1x1xi32>
+  %fourth_slots = buffer.view %fourth_storage[%origin] : buffer -> view<1x1xi32>
+  %fifth_slots = buffer.view %fifth_storage[%origin] : buffer -> view<1x1xi32>
+  %sixth_slots = buffer.view %sixth_storage[%origin] : buffer -> view<1x1xi32>
+  %seventh_slots = buffer.view %seventh_storage[%origin] : buffer -> view<1x1xi32>
+  %eighth_slots = buffer.view %eighth_storage[%origin] : buffer -> view<1x1xi32>
+  %ninth_slots = buffer.view %ninth_storage[%origin] : buffer -> view<1x1xi32>
+  %first_records = channel.bind<fifo> %first_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %second_records = channel.bind<fifo> %second_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %third_records = channel.bind<fifo> %third_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %fourth_records = channel.bind<fifo> %fourth_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %fifth_records = channel.bind<fifo> %fifth_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %sixth_records = channel.bind<fifo> %sixth_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %seventh_records = channel.bind<fifo> %seventh_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %eighth_records = channel.bind<fifo> %eighth_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %ninth_records = channel.bind<fifo> %ninth_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %begin = index.constant 0 : index
+    %record_count = index.constant 3 : index
+    %step = index.constant 1 : index
+    scf.for %record = [%begin to %record_count step %step] {
+      %seed = index.cast %record : index to i32
+      %first = func.call @advance_record_phase(%first_records, %seed) : (channel<tile<1xi32>>, i32) -> (i32)
+      %second = func.call @advance_record_phase(%second_records, %first) : (channel<tile<1xi32>>, i32) -> (i32)
+      %third = func.call @advance_record_phase(%third_records, %second) : (channel<tile<1xi32>>, i32) -> (i32)
+      %fourth = func.call @advance_record_phase(%fourth_records, %third) : (channel<tile<1xi32>>, i32) -> (i32)
+      %fifth = func.call @advance_record_phase(%fifth_records, %fourth) : (channel<tile<1xi32>>, i32) -> (i32)
+      %sixth = func.call @advance_record_phase(%sixth_records, %fifth) : (channel<tile<1xi32>>, i32) -> (i32)
+      %seventh = func.call @advance_record_phase(%seventh_records, %sixth) : (channel<tile<1xi32>>, i32) -> (i32)
+      %eighth = func.call @advance_record_phase(%eighth_records, %seventh) : (channel<tile<1xi32>>, i32) -> (i32)
+      %ninth = func.call @advance_record_phase(%ninth_records, %eighth) : (channel<tile<1xi32>>, i32) -> (i32)
+    }
+  }
+}
+
+// ----
+partition: 1 columns, 6 rows
+entries: 1
+entry 0: 0 bindings, 0 dynamic relocations
+  invocation 0: bytes=1488 next=1
+  invocation 1: bytes=588 next=1

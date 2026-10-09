@@ -529,3 +529,196 @@ low.func.def schedule(locked) target<amd.xdna.aie2p.core> @packed_extract_extend
 }
 
 // ----
+
+// ====
+
+// Six record fields and their maximum remain live while binary32
+// multiplication computes a nonzero row's scale. Shared constants use ordinary
+// rematerialization under scalar pressure. A private zero feeding a fixed-r27
+// select must wait for arithmetic to release ordinary storage; exposing the
+// fixed copy alone does not make that setup actionable while it incurs debt.
+// RUN: emit aie2p-leaf @retained_scale_select report=emission
+
+low.func.def target<amd.xdna.aie2p.core> @retained_scale_select(%record_input: reg<aie2p.ep>, %record_output: reg<aie2p.ep>) asm {
+  %retained0, %read1 = lda.i32.post %record_input, 4
+  %retained1, %read2 = lda.i32.post %read1, 4
+  %retained2, %read3 = lda.i32.post %read2, 4
+  %retained3, %read4 = lda.i32.post %read3, 4
+  %retained4, %read5 = lda.i32.post %read4, 4
+  %retained5, %read6 = lda.i32.post %read5, 4
+  %maximum_f32_bits, %read7 = lda.i32.post %read6, 4
+  %zero = mov.short 0
+  %unit_bit = mov.short 1
+  %inverse_code_limit = mov.i32 1006699012
+  %sign_mask = mov.i32 -2147483648
+  %halfword_right_shift = mov.short -16
+  %halfword_left_shift = mov.short 16
+  %product_alignment_shift = mov.short 8
+  %infinity = mov.i32 2139095040
+  low.br ^scale
+^scale:
+  %magnitude_mask = mov.i32 2147483647
+  %fraction_width = mov.short 23
+  %negative_fraction_width = mov.short -23
+  %implicit_bit = mov.i32 8388608
+  %left_magnitude = and %maximum_f32_bits, %magnitude_mask
+  %right_magnitude = and %inverse_code_limit, %magnitude_mask
+  %operand_signs = xor %maximum_f32_bits, %inverse_code_limit
+  %product_sign = and %operand_signs, %sign_mask
+  %left_exponent = lshl %left_magnitude, %negative_fraction_width
+  %left_exponent_bits = lshl %left_exponent, %fraction_width
+  %left_fraction = sub %left_magnitude, %left_exponent_bits
+  %left_leading_zeros = clz %left_fraction
+  %left_normalization = add %left_leading_zeros, -8
+  %left_exponent_condition = copy %left_exponent : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %left_shift = sel.eqz %left_normalization, %zero, %left_exponent_condition
+  %left_shifted_fraction = lshl %left_fraction, %left_shift
+  %left_significand = or %left_shifted_fraction, %implicit_bit
+  %left_negative_normalization = sub %zero, %left_normalization
+  %left_subnormal_exponent = add %left_negative_normalization, 1
+  %left_adjusted_condition = copy %left_exponent : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %left_adjusted_exponent = sel.eqz %left_subnormal_exponent, %left_exponent, %left_adjusted_condition
+  %right_exponent = lshl %right_magnitude, %negative_fraction_width
+  %right_exponent_bits = lshl %right_exponent, %fraction_width
+  %right_fraction = sub %right_magnitude, %right_exponent_bits
+  %right_leading_zeros = clz %right_fraction
+  %right_normalization = add %right_leading_zeros, -8
+  %right_exponent_condition = copy %right_exponent : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %right_shift = sel.eqz %right_normalization, %zero, %right_exponent_condition
+  %right_shifted_fraction = lshl %right_fraction, %right_shift
+  %right_significand = or %right_shifted_fraction, %implicit_bit
+  %right_negative_normalization = sub %zero, %right_normalization
+  %right_subnormal_exponent = add %right_negative_normalization, 1
+  %right_adjusted_condition = copy %right_exponent : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %right_adjusted_exponent = sel.eqz %right_subnormal_exponent, %right_exponent, %right_adjusted_condition
+  %halfword_mask = mov.i32 65535
+  %product_cross_word_shift = mov.short -24
+  %left_lower = and %left_significand, %halfword_mask
+  %left_upper = lshl %left_significand, %halfword_right_shift
+  %right_lower = and %right_significand, %halfword_mask
+  %right_upper = lshl %right_significand, %halfword_right_shift
+  %lower_product = mul %left_lower, %right_lower
+  %cross_product_left = mul %left_lower, %right_upper
+  %cross_product_right = mul %left_upper, %right_lower
+  %cross_product = add.rr %cross_product_left, %cross_product_right
+  %shifted_cross_product = lshl %cross_product, %halfword_left_shift
+  %lower_sum = add.rr %lower_product, %shifted_cross_product
+  %lower_carry = ltu %lower_sum, %lower_product
+  %upper_product = mul %left_upper, %right_upper
+  %cross_upper = lshl %cross_product, %halfword_right_shift
+  %upper_partial = add.rr %upper_product, %cross_upper
+  %upper_sum = add.rr %upper_partial, %lower_carry
+  %upper_shifted = lshl %upper_sum, %product_alignment_shift
+  %lower_high_bits = lshl %lower_sum, %product_cross_word_shift
+  %product_upper = or %upper_shifted, %lower_high_bits
+  %product_lower = lshl %lower_sum, %product_alignment_shift
+  %negative_exponent_bias = mov.short -127
+  %top_bit_shift = mov.short -31
+  %exponent_sum = add.rr %left_adjusted_exponent, %right_adjusted_exponent
+  %unbiased_exponent = add.rr %exponent_sum, %negative_exponent_bias
+  %product_implicit_bit = and %product_upper, %implicit_bit
+  %product_normalization = nez %product_implicit_bit
+  %product_exponent = add.rr %unbiased_exponent, %product_normalization
+  %upper_doubled = lshl %product_upper, %unit_bit
+  %lower_top_bit = lshl %product_lower, %top_bit_shift
+  %normalized_upper = or %upper_doubled, %lower_top_bit
+  %normalized_lower = lshl %product_lower, %unit_bit
+  %upper_normalization_condition = copy %product_implicit_bit : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %upper_word = sel.nez %product_upper, %normalized_upper, %upper_normalization_condition
+  %lower_normalization_condition = copy %product_implicit_bit : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %lower_word = sel.nez %product_lower, %normalized_lower, %lower_normalization_condition
+  %word_shift_mask = mov.short 31
+  %negative_product_exponent = sub %zero, %product_exponent
+  %subnormal_shift = add %negative_product_exponent, 1
+  %wrapped_shift = and %subnormal_shift, %word_shift_mask
+  %negative_shift = sub %zero, %wrapped_shift
+  %complementary_shift = and %negative_shift, %word_shift_mask
+  %shifted_lower = lshl %lower_word, %negative_shift
+  %upper_remainder = lshl %upper_word, %complementary_shift
+  %lower_remainder = lshl %lower_word, %complementary_shift
+  %lower_sticky = nez %lower_remainder
+  %shifted_upper = lshl %upper_word, %negative_shift
+  %joined_lower = or %shifted_lower, %upper_remainder
+  %sticky_lower = or %joined_lower, %lower_sticky
+  %nonzero_shift_condition = copy %wrapped_shift : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %shifted_remainder = sel.nez %upper_remainder, %zero, %nonzero_shift_condition
+  %whole_lower_remainder = or %lower_word, %shifted_remainder
+  %whole_lower_sticky = nez %whole_lower_remainder
+  %sticky_upper = or %shifted_upper, %whole_lower_sticky
+  %whole_product = or %upper_word, %lower_word
+  %whole_product_sticky = nez %whole_product
+  %beyond_first_word = add %subnormal_shift, -32
+  %inside_first_word = lt %beyond_first_word, %zero
+  %beyond_second_word = add %subnormal_shift, -64
+  %inside_second_word = lt %beyond_second_word, %zero
+  %second_word_condition = copy %inside_second_word : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %wide_shift_lower = sel.nez %sticky_upper, %whole_product_sticky, %second_word_condition
+  %first_word_lower_condition = copy %inside_first_word : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %subnormal_lower = sel.nez %sticky_lower, %wide_shift_lower, %first_word_lower_condition
+  %first_word_upper_condition = copy %inside_first_word : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %subnormal_upper = sel.nez %shifted_upper, %zero, %first_word_upper_condition
+  %fraction_mask = add %implicit_bit, -1
+  %normal_fraction = and %upper_word, %fraction_mask
+  %normal_exponent = lshl %product_exponent, %fraction_width
+  %normal_upper = or %normal_fraction, %normal_exponent
+  %is_subnormal = ge %zero, %product_exponent
+  %upper_selection_condition = copy %is_subnormal : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %rounded_upper_source = sel.nez %subnormal_upper, %normal_upper, %upper_selection_condition
+  %lower_selection_condition = copy %is_subnormal : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %rounded_lower_source = sel.nez %subnormal_lower, %lower_word, %lower_selection_condition
+  %above_midpoint = ltu %sign_mask, %rounded_lower_source
+  %at_midpoint = eq %rounded_lower_source, %sign_mask
+  %low_significand_bit = and %rounded_upper_source, %unit_bit
+  %odd_midpoint = and %at_midpoint, %low_significand_bit
+  %round_increment = or %above_midpoint, %odd_midpoint
+  %signed_significand = or %rounded_upper_source, %product_sign
+  %rounded_product = add.rr %signed_significand, %round_increment
+  %negative_exponent_limit = mov.short -255
+  %quiet_nan_bit = mov.i32 4194304
+  %signed_infinity = or %infinity, %product_sign
+  %exponent_overflow = add.rr %product_exponent, %negative_exponent_limit
+  %overflow = ge %exponent_overflow, %zero
+  %overflow_condition = copy %overflow : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %finite_or_overflow = sel.nez %signed_infinity, %rounded_product, %overflow_condition
+  %left_is_zero = eqz %left_magnitude
+  %right_is_zero = eqz %right_magnitude
+  %either_is_zero = or %left_is_zero, %right_is_zero
+  %zero_product_condition = copy %either_is_zero : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %finite_or_zero = sel.nez %product_sign, %finite_or_overflow, %zero_product_condition
+  %canonical_nan = or %infinity, %quiet_nan_bit
+  %left_is_infinite = eq %left_magnitude, %infinity
+  %right_is_infinite = eq %right_magnitude, %infinity
+  %right_zero_condition = copy %right_is_zero : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %left_infinite_result = sel.nez %canonical_nan, %signed_infinity, %right_zero_condition
+  %left_zero_condition = copy %left_is_zero : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %right_infinite_result = sel.nez %canonical_nan, %signed_infinity, %left_zero_condition
+  %right_infinite_condition = copy %right_is_infinite : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %right_special_result = sel.nez %right_infinite_result, %finite_or_zero, %right_infinite_condition
+  %left_infinite_condition = copy %left_is_infinite : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %infinite_result = sel.nez %left_infinite_result, %right_special_result, %left_infinite_condition
+  %left_is_nan = ltu %infinity, %left_magnitude
+  %right_is_nan = ltu %infinity, %right_magnitude
+  %left_nan = or %maximum_f32_bits, %quiet_nan_bit
+  %right_nan = or %inverse_code_limit, %quiet_nan_bit
+  %right_nan_condition = copy %right_is_nan : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %right_nan_result = sel.nez %right_nan, %infinite_result, %right_nan_condition
+  %left_nan_condition = copy %left_is_nan : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %scale_f32 = sel.nez %left_nan, %right_nan_result, %left_nan_condition
+  low.br ^finish
+^finish:
+  %write1 = st.i32.post %retained0, %record_output, 4
+  %write2 = st.i32.post %retained1, %write1, 4
+  %write3 = st.i32.post %retained2, %write2, 4
+  %write4 = st.i32.post %retained3, %write3, 4
+  %write5 = st.i32.post %retained4, %write4, 4
+  %write6 = st.i32.post %retained5, %write5, 4
+  %write7 = st.i32.post %maximum_f32_bits, %write6, 4
+  %write8 = st.i32.post %scale_f32, %write7, 4
+  return
+}
+
+// ----
+issue cycles: 165
+code bytes: 752
+coissued bundles: 39
+coissued components: 78

@@ -1645,8 +1645,14 @@ bool loom_low_schedule_pressure_candidate_unlocks_packing_continuation(
           operand_ordinals[operand_index];
       const loom_low_schedule_value_record_t* value =
           &state->values[value_ordinal];
+      // Reading shared or forwarded storage does not retire it. Completion
+      // priority belongs to the final local consumer, not to every operation
+      // that reads the same constrained register bank.
       if (state->value_producer_nodes[value_ordinal] == candidate_node ||
-          !iree_any_bit_set(value->flags, LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE)) {
+          !iree_any_bit_set(value->flags, LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE) ||
+          iree_any_bit_set(value->flags,
+                           LOOM_LOW_SCHEDULE_VALUE_FLAG_FORWARDED) ||
+          pressure_state->remaining_consumer_counts[value_ordinal] != 1) {
         continue;
       }
       const uint16_t member_end =

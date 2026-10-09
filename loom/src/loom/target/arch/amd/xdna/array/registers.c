@@ -92,31 +92,19 @@ iree_status_t loom_xdna_register_field_info(
   return iree_ok_status();
 }
 
-iree_status_t loom_xdna_register_field_dimension(
-    loom_xdna_register_field_id_t field_id, iree_host_size_t ordinal,
-    loom_xdna_register_dimension_info_t* out_info) {
-  IREE_ASSERT_ARGUMENT(out_info);
-  *out_info = (loom_xdna_register_dimension_info_t){0};
-  const loom_xdna_register_field_t* field = NULL;
-  const loom_xdna_register_pattern_t* pattern = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_xdna_register_field_resolve(field_id, &field, &pattern));
-  (void)field;
-  if (ordinal >= pattern->dimension_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "XDNA register field %u has no dimension ordinal %" PRIhsz, field_id,
-        ordinal);
-  }
+loom_xdna_register_dimension_info_t loom_xdna_register_field_dimension(
+    loom_xdna_register_field_id_t field_id, iree_host_size_t ordinal) {
+  const loom_xdna_register_field_t* field = &kLoomXdnaRegisterFields[field_id];
+  const loom_xdna_register_pattern_t* pattern =
+      &kLoomXdnaRegisterPatterns[field->pattern_id];
   const loom_xdna_register_dimension_t* dimension =
       &pattern->dimensions[ordinal];
-  *out_info = (loom_xdna_register_dimension_info_t){
+  return (loom_xdna_register_dimension_info_t){
       .name = iree_make_cstring_view(kLoomXdnaRegisterStrings +
                                      dimension->name_offset),
       .count = dimension->count,
       .stride = dimension->stride,
   };
-  return iree_ok_status();
 }
 
 iree_status_t loom_xdna_register_field_encode(

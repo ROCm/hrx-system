@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "executes recurrent routes and projected channel lifetimes through the HAL",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/channel_lifetimes.loom",
+          "--device=xdna"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"case_count\":1",
+          "\"scenario_count\":1",
+          "\"sample_count\":1",
+          "\"failed_sample_count\":0",
+          "\"trial_count\":3",
+          "\"failed_trial_count\":0",
+          "\"case\":\"recurrent_route_replacement\"",
+          "\"scenario\":\"held_bias_interleaved_rings\"",
+          "\"failure_count\":0"
+        ]
+      }
+    }
+  ]
+}
