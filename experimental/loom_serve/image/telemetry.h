@@ -7,6 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_IMAGE_TELEMETRY_H_
 #define EXPERIMENTAL_LOOM_SERVE_IMAGE_TELEMETRY_H_
 
+#include "experimental/loom_serve/image/generator.h"
 #include "experimental/loom_serve/telemetry/stream.h"
 
 #ifdef __cplusplus
@@ -45,9 +46,14 @@ typedef struct loom_serve_image_totals_t {
 
 extern const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_STARTED;
 extern const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_SUBMITTED;
+// Successful device completion and pin release, before CPU output encoding.
+extern const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_GENERATED;
 extern const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_SHUTDOWN;
 
 // Owner-only publication; payloads own their bytes and format only on readers.
+void loom_serve_image_record_prepared(
+    loom_serve_telemetry_stream_t* stream, uint64_t request,
+    const loom_serve_image_prepared_t* prepared);
 void loom_serve_image_record_work(loom_serve_telemetry_stream_t* stream,
                                   uint64_t request,
                                   const loom_serve_image_work_t* work);

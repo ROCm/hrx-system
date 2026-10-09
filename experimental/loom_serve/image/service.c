@@ -26,6 +26,8 @@ typedef struct image_job_t {
   loom_serve_image_request_t request;
   // Request work returned by CPU tasks through their existing release handoff.
   loom_serve_image_work_t work;
+  // Copied source selection, observed only after CPU preparation releases it.
+  loom_serve_image_prepared_t prepared;
 } image_job_t;
 
 typedef struct image_pending_t {
@@ -274,7 +276,7 @@ static iree_status_t image_cpu_run(iree_task_process_t* process,
   if (service->cpu.phase == IMAGE_PHASE_PREPARING) {
     const iree_time_t begin = iree_time_now();
     const iree_status_t status = service->generator.prepare(
-        service->generator.self, &service->job.request);
+        service->generator.self, &service->job.request, &service->job.prepared);
     service->job.work.prepare_ns = iree_time_now() - begin;
     return status;
   }
@@ -503,8 +505,11 @@ static void image_collect(loom_serve_image_service_t* service, bool* progress) {
     service->telemetry.totals.generated_pixels +=
         (uint64_t)service->options.width * service->options.height;
     service->cpu.rgb = service->generator.complete(service->generator.self);
+    image_event(service, &LOOM_SERVE_IMAGE_GENERATED, service->active);
     image_schedule_cpu(service, IMAGE_PHASE_ENCODING);
   } else if (service->phase == IMAGE_PHASE_PREPARING) {
+    loom_serve_image_record_prepared(service->telemetry.stream, service->active,
+                                     &service->job.prepared);
     service->phase = IMAGE_PHASE_WAITING;
     service->phase_start = iree_time_now();
   } else {

@@ -704,10 +704,18 @@ loom_serve_memory_statistics_t loom_serve_image_model_weight_statistics(
 
 iree_status_t loom_serve_image_model_prepare_request(
     loom_serve_image_model_t* model, iree_string_view_t prompt, uint64_t seed,
-    float strength) {
-  return image_prepare_request(model, prompt, seed, strength,
-                               &model->invocation.stage,
-                               &model->invocation.payload);
+    float strength, loom_serve_image_prepared_t* out_prepared) {
+  *out_prepared = (loom_serve_image_prepared_t){0};
+  IREE_RETURN_IF_ERROR(image_prepare_request(model, prompt, seed, strength,
+                                             &model->invocation.stage,
+                                             &model->invocation.payload));
+  *out_prepared = (loom_serve_image_prepared_t){
+      .stage = model->invocation.stage,
+      .tag = loom_serve_preparation_stage(model->preparation,
+                                          model->invocation.stage)
+                 ->tag,
+      .input_bytes = iree_vm_buffer_length(model->invocation.payload)};
+  return iree_ok_status();
 }
 
 void loom_serve_image_model_discard_prepared_request(
@@ -751,13 +759,13 @@ iree_const_byte_span_t loom_serve_image_model_complete(
                                    model->output.data_length);
 }
 
-iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
-                                              iree_string_view_t prompt,
-                                              uint64_t seed, float strength,
-                                              iree_const_byte_span_t* out_rgb) {
+iree_status_t loom_serve_image_model_generate(
+    loom_serve_image_model_t* model, iree_string_view_t prompt, uint64_t seed,
+    float strength, loom_serve_image_prepared_t* out_prepared,
+    iree_const_byte_span_t* out_rgb) {
   *out_rgb = iree_const_byte_span_empty();
-  IREE_RETURN_IF_ERROR(
-      loom_serve_image_model_prepare_request(model, prompt, seed, strength));
+  IREE_RETURN_IF_ERROR(loom_serve_image_model_prepare_request(
+      model, prompt, seed, strength, out_prepared));
   iree_status_t status = loom_serve_residency_acquire(model->residency);
   if (!iree_status_is_ok(status)) {
     loom_serve_image_model_discard_prepared_request(model);
@@ -781,10 +789,11 @@ static iree_status_t image_generator_admit(
 }
 
 static iree_status_t image_generator_prepare(
-    void* self, const loom_serve_image_request_t* request) {
+    void* self, const loom_serve_image_request_t* request,
+    loom_serve_image_prepared_t* out_prepared) {
   return loom_serve_image_model_prepare_request(
       self, iree_string_builder_view(&request->prompt), request->seed,
-      request->strength);
+      request->strength, out_prepared);
 }
 
 static iree_status_t image_generator_submit(

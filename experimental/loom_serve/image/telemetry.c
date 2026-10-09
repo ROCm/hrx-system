@@ -9,6 +9,18 @@
 #include <inttypes.h>
 #include <string.h>
 
+static iree_status_t image_prepared_format(
+    const loom_serve_telemetry_record_t* record,
+    iree_string_builder_t* output) {
+  loom_serve_image_prepared_t prepared;
+  static_assert(sizeof(prepared) <= sizeof(record->data), "record capacity");
+  memcpy(&prepared, record->data.words, sizeof(prepared));
+  return iree_string_builder_append_format(
+      output,
+      ",\"stage\":%" PRIu64 ",\"tag\":%" PRId64 ",\"input_bytes\":%" PRIu64,
+      prepared.stage, prepared.tag, prepared.input_bytes);
+}
+
 static iree_status_t image_work_format(const loom_serve_image_work_t* work,
                                        iree_string_builder_t* output) {
   return iree_string_builder_append_format(
@@ -46,12 +58,26 @@ const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_STARTED = {"image_started",
                                                                NULL};
 const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_SUBMITTED = {
     "image_submitted", NULL};
+const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_GENERATED = {
+    "image_generated", NULL};
 const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_SHUTDOWN = {
     "image_shutdown", NULL};
+static const loom_serve_telemetry_event_t image_prepared_event = {
+    "image_prepared", image_prepared_format};
 static const loom_serve_telemetry_event_t image_request_event = {
     "image_request_stats", image_request_format};
 static const loom_serve_telemetry_event_t image_totals_event = {
     "image_work", image_totals_format};
+
+void loom_serve_image_record_prepared(
+    loom_serve_telemetry_stream_t* stream, uint64_t request,
+    const loom_serve_image_prepared_t* prepared) {
+  loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
+                                          .request = request,
+                                          .event = &image_prepared_event};
+  memcpy(record.data.words, prepared, sizeof(*prepared));
+  loom_serve_telemetry_stream_append(stream, &record);
+}
 
 void loom_serve_image_record_work(loom_serve_telemetry_stream_t* stream,
                                   uint64_t request,

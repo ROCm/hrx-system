@@ -70,6 +70,7 @@ loom_cc_library(
     srcs = ["telemetry.c"],
     hdrs = ["telemetry.h"],
     deps = [
+        ":generator",
         "//experimental/loom_serve/telemetry:record",
         "//experimental/loom_serve/telemetry:stream",
         "//runtime/src/iree/base",

@@ -175,14 +175,21 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
 };
 
 TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
-  IREE_ASSERT_OK(
-      loom_serve_image_model_prepare_request(model_, IREE_SV("x"), 0, 1.0f));
+  loom_serve_image_prepared_t prepared;
+  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(model_, IREE_SV("x"), 0,
+                                                        1.0f, &prepared));
+  EXPECT_EQ(prepared.stage, 0u);
+  EXPECT_EQ(prepared.tag, 32);
+  EXPECT_EQ(prepared.input_bytes, 16u);
   loom_serve_image_model_discard_prepared_request(model_);
   // Verify source arithmetic independently of the image encoder.
   for (uint64_t seed : {0u, 1u}) {
     iree_const_byte_span_t rgb;
     IREE_ASSERT_OK(loom_serve_image_model_generate(model_, IREE_SV("aba"), seed,
-                                                   1.0f, &rgb));
+                                                   1.0f, &prepared, &rgb));
+    EXPECT_EQ(prepared.stage, 0u);
+    EXPECT_EQ(prepared.tag, 32);
+    EXPECT_EQ(prepared.input_bytes, 16u);
     const auto expected = Pixels(3, seed);
     ASSERT_EQ(rgb.data_length, sizeof(expected));
     for (size_t i = 0; i < expected.size(); ++i) {
@@ -318,6 +325,19 @@ TEST_P(SourceImageServiceTest, IndependentLogReadersCannotBlockColdImageWork) {
   EXPECT_NE(events.find(R"("generated_images":40,"generated_pixels":1400)"),
             std::string::npos);
   EXPECT_NE(events.find(R"("event":"image_request_stats")"), std::string::npos);
+  EXPECT_NE(events.find(R"("event":"image_prepared")"), std::string::npos);
+  EXPECT_NE(events.find(R"("stage":0,"tag":32,"input_bytes":16)"),
+            std::string::npos);
+  EXPECT_NE(events.find(R"("event":"image_generated")"), std::string::npos);
+  for (const std::string event : {"image_prepared", "image_generated"}) {
+    const std::string key = "\"event\":\"" + event + "\"";
+    size_t count = 0;
+    for (size_t offset = events.find(key); offset != std::string::npos;
+         offset = events.find(key, offset + key.size())) {
+      ++count;
+    }
+    EXPECT_EQ(count, 40u) << event;
+  }
   EXPECT_EQ(events.find("aba"), std::string::npos);
   const std::string resumed = poll(slow);
   EXPECT_NE(resumed.find(R"({"event":"gap","from":1,)"), std::string::npos);

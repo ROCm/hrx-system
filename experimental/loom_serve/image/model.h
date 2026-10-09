@@ -96,9 +96,10 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
 // Retains the resulting payload until successful completion or destruction.
 // INVALID_ARGUMENT rejects the request with no retained payload. No prepared
 // request may already be outstanding; prepare is serialized with submission.
+// Returns copied invocation facts on success and zeros them on rejection.
 iree_status_t loom_serve_image_model_prepare_request(
     loom_serve_image_model_t* model, iree_string_view_t prompt, uint64_t seed,
-    float strength);
+    float strength, loom_serve_image_prepared_t* out_prepared);
 
 // Releases a successfully prepared request that has not been submitted. This
 // does not release residency pins or retire device work. The model is reusable.
@@ -126,10 +127,12 @@ iree_const_byte_span_t loom_serve_image_model_complete(
 // the model reusable; execution failure is terminal. Prompt is borrowed only
 // for this call. Success returns little-endian F32 CHW RGB, borrowed until the
 // next generate call or destruction. Failure leaves *out_rgb empty.
-iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
-                                              iree_string_view_t prompt,
-                                              uint64_t seed, float strength,
-                                              iree_const_byte_span_t* out_rgb);
+// out_prepared retains source-selected facts if preparation succeeded, even
+// when subsequent admission or device work fails.
+iree_status_t loom_serve_image_model_generate(
+    loom_serve_image_model_t* model, iree_string_view_t prompt, uint64_t seed,
+    float strength, loom_serve_image_prepared_t* out_prepared,
+    iree_const_byte_span_t* out_rgb);
 
 #ifdef __cplusplus
 }  // extern "C"

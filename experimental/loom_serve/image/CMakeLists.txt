@@ -81,6 +81,7 @@ loom_cc_library(
   SRCS
     "telemetry.c"
   DEPS
+    ::generator
     iree::base
     iree::experimental::loom_serve::telemetry::record
     iree::experimental::loom_serve::telemetry::stream

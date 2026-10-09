@@ -96,9 +96,11 @@ static iree_status_t image_run(iree_allocator_t allocator) {
     status = loom_serve_image_model_create(device, &options, &model, allocator);
   }
   iree_const_byte_span_t rgb = iree_const_byte_span_empty();
+  loom_serve_image_prepared_t prepared;
   if (iree_status_is_ok(status)) {
     status = loom_serve_image_model_generate(
-        model, iree_make_cstring_view(FLAG_prompt), seed, FLAG_strength, &rgb);
+        model, iree_make_cstring_view(FLAG_prompt), seed, FLAG_strength,
+        &prepared, &rgb);
   }
   if (iree_status_is_ok(status)) {
     status = image_write_image(rgb, allocator);

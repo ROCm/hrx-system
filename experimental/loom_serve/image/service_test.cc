@@ -85,8 +85,10 @@ struct ImageGate {
     return iree_ok_status();
   }
   static iree_status_t Prepare(void* self,
-                               const loom_serve_image_request_t* request) {
+                               const loom_serve_image_request_t* request,
+                               loom_serve_image_prepared_t* out_prepared) {
     static_cast<ImageGate*>(self)->admission_available = request->seed == 0;
+    *out_prepared = {.stage = 0, .tag = 17, .input_bytes = 16};
     return iree_ok_status();
   }
   static void DiscardPreparedRequest(void* self) {
@@ -422,11 +424,34 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
   IREE_ASSERT_OK(
       loom_serve_http_server_create(&transport_options, &server, allocator));
   iree_status_t status = iree_ok_status();
+  auto generated_events = [&](size_t index) {
+    // With periodic records disabled, this bounded request history fits even
+    // if the test thread is descheduled. Readers still use the live protocol.
+    const auto* stream = services[index].telemetry.stream;
+    const uint64_t head = loom_serve_telemetry_stream_head(stream);
+    uint64_t cursor = 0;
+    size_t count = 0;
+    while (cursor < head) {
+      loom_serve_telemetry_record_t record;
+      const auto result =
+          loom_serve_telemetry_stream_read(stream, &cursor, &record);
+      EXPECT_EQ(result, LOOM_SERVE_TELEMETRY_READ_RECORD);
+      if (result != LOOM_SERVE_TELEMETRY_READ_RECORD) {
+        break;
+      }
+      count += std::string(record.event->name) == "image_generated";
+    }
+    return count;
+  };
+  size_t completed_events[2] = {};
   std::thread router([&] {
     status = loom_serve_http_router_run(loom_serve_host_executor(host), server,
                                         2, services, 8, allocator);
-    for (auto* image : images) {
-      loom_serve_image_service_destroy(image);
+    for (size_t i = 0; i < 2; ++i) {
+      completed_events[i] = generated_events(i);
+      // Router return joins callbacks; service destruction releases queued
+      // claims. The peer can observe EOF only after this outer-owner cleanup.
+      loom_serve_image_service_destroy(images[i]);
     }
   });
   auto send_request = [&](const std::string& model, uint64_t seed = 0) {
@@ -485,6 +510,7 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
     EXPECT_EQ(kill(getpid(), SIGTERM), 0);
     EXPECT_TRUE(receive(first).empty());
   }
+  EXPECT_EQ(generated_events(0), 0u);
   IREE_EXPECT_OK(iree_hal_semaphore_signal(predecessor, 1, nullptr));
   if (mode != AdmissionMode::kShutdown) {
     EXPECT_NE(receive(first).find("\"b64_json\":\"iVBOR"), std::string::npos);
@@ -505,6 +531,8 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
   EXPECT_EQ(gates[0].completed, 1u);
   EXPECT_EQ(gates[1].completed, mode == AdmissionMode::kShutdown ? 0u : 1u);
   EXPECT_EQ(gates[1].discarded, mode == AdmissionMode::kResponse ? 0u : 1u);
+  EXPECT_EQ(completed_events[0], 1u);
+  EXPECT_EQ(completed_events[1], mode == AdmissionMode::kShutdown ? 0u : 1u);
   IREE_EXPECT_OK(loom_serve_http_server_destroy(server));
   IREE_EXPECT_OK(loom_serve_execution_drain(execution));
   loom_serve_execution_release(execution);

@@ -16,6 +16,17 @@
 extern "C" {
 #endif
 
+// Copied source-selected invocation facts, valid after successful preparation.
+// No pointer into the source VM or its request payload escapes in this value.
+typedef struct loom_serve_image_prepared_t {
+  // Retained command index selected by the source program.
+  uint64_t stage;
+  // Source-declared stage tag; its units and interpretation are model-defined.
+  int64_t tag;
+  // Bytes of opaque prepared input consumed by this invocation.
+  uint64_t input_bytes;
+} loom_serve_image_prepared_t;
+
 // Finite-image invocation with explicit CPU and device phases. The scheduler
 // owns admission, submission and successful completion; prepare runs as a CPU
 // task with exclusive model access. None of these functions waits for device
@@ -27,9 +38,11 @@ typedef struct loom_serve_image_generator_t {
   void* self;
   // CPU source preparation, with no shared admission-policy mutation. Returns
   // INVALID_ARGUMENT for rejected input with no retained payload; other errors
-  // are terminal. Success retains a payload until discard or completion.
+  // are terminal. Success retains a payload until discard or completion and
+  // returns copied invocation facts through out_prepared.
   iree_status_t (*prepare)(void* self,
-                           const loom_serve_image_request_t* request);
+                           const loom_serve_image_request_t* request,
+                           loom_serve_image_prepared_t* out_prepared);
   // Releases prepared CPU payload and withdraws any unsubmitted admission
   // interest. Runs on the owner, never concurrently with other services.
   void (*discard_prepared_request)(void* self);

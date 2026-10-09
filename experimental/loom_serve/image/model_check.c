@@ -71,8 +71,9 @@ int main(int argc, char** argv) {
   for (iree_host_size_t i = 0; i < case_count && iree_status_is_ok(status);
        ++i) {
     iree_const_byte_span_t rgb = iree_const_byte_span_empty();
+    loom_serve_image_prepared_t prepared;
     iree_status_t rejected = loom_serve_image_model_generate(
-        model, IREE_SV("rejected"), 0, NAN, &rgb);
+        model, IREE_SV("rejected"), 0, NAN, &prepared, &rgb);
     if (iree_status_code(rejected) != IREE_STATUS_INVALID_ARGUMENT ||
         rgb.data_length) {
       status = iree_status_join(
@@ -88,12 +89,15 @@ int main(int argc, char** argv) {
           FLAG_adapter[0] && i < IREE_ARRAYSIZE(cases) ? 0.0f : 1.0f;
       status = loom_serve_image_model_generate(
           model, iree_make_cstring_view(prompts[prompt]), prompt ? 42 : 0,
-          strength, &rgb);
+          strength, &prepared, &rgb);
     }
     char name[32];
     snprintf(name, sizeof(name), "image-%zu.f32", i);
     char* path = NULL;
     if (iree_status_is_ok(status)) {
+      printf("{\"event\":\"image_prepared\",\"stage\":%" PRIu64
+             ",\"tag\":%" PRId64 ",\"input_bytes\":%" PRIu64 "}\n",
+             prepared.stage, prepared.tag, prepared.input_bytes);
       status =
           iree_file_path_join(iree_make_cstring_view(FLAG_output),
                               iree_make_cstring_view(name), allocator, &path);
