@@ -496,6 +496,7 @@ static iree_status_t loom_low_lower_source_query_map_value(
     if (loom_type_kind(low_type) != LOOM_TYPE_NONE) {
       *out_mapped_value = loom_low_lower_rule_mapped_value_register(
           loom_low_register_type_class_id(low_type),
+          LOOM_LOW_REPRESENTATION_ID_NONE,
           loom_low_register_type_unit_count(low_type));
     }
     return iree_ok_status();
@@ -516,6 +517,7 @@ static iree_status_t loom_low_lower_source_query_map_value(
   if (loom_type_kind(low_type) != LOOM_TYPE_NONE) {
     *out_mapped_value = loom_low_lower_rule_mapped_value_register(
         loom_low_register_type_class_id(low_type),
+        LOOM_LOW_REPRESENTATION_ID_NONE,
         loom_low_register_type_unit_count(low_type));
   }
   return iree_ok_status();

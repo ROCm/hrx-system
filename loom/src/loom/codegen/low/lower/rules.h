@@ -836,6 +836,10 @@ typedef enum loom_low_lower_guard_kind_e {
   // Source flags permit subnormal flushing or retained facts prove that the
   // selected value cannot be subnormal.
   LOOM_LOW_LOWER_GUARD_VALUE_NOT_SUBNORMAL_OR_INSTANCE_FLAGS_HAS_ALL = 41,
+  // Source value must use the physical representation ID in payload.u64.
+  // Contract-only queries accept an unselected representation so legality
+  // remains independent of function-local representation planning.
+  LOOM_LOW_LOWER_GUARD_LOW_VALUE_REPRESENTATION = 42,
   // Maximum guard kind value plus one.
   LOOM_LOW_LOWER_GUARD_COUNT_,
 } loom_low_lower_guard_kind_t;

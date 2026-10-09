@@ -30,6 +30,7 @@
 #include "loom/codegen/low/lower/report.h"
 #include "loom/codegen/low/lower/visibility.h"
 #include "loom/codegen/low/memory_access.h"
+#include "loom/codegen/low/representation_plan.h"
 #include "loom/error/emitter.h"
 #include "loom/error/error_defs.h"
 #include "loom/ir/ir.h"
@@ -60,6 +61,9 @@ typedef struct loom_low_lower_rule_mapped_value_t {
   // Descriptor-set register-class ID, or LOOM_LOW_REG_CLASS_NONE for
   // non-register values.
   uint16_t descriptor_register_class_id;
+  // Function-local physical representation selected for the source value, or
+  // LOOM_LOW_REPRESENTATION_ID_NONE when no selection is available.
+  loom_low_representation_id_t representation_id;
   // Number of target-low allocation units occupied by the mapped register.
   uint32_t register_unit_count;
 } loom_low_lower_rule_mapped_value_t;
@@ -70,17 +74,21 @@ loom_low_lower_rule_mapped_value_none(void) {
   return (loom_low_lower_rule_mapped_value_t){
       /*.is_register=*/false,
       /*.descriptor_register_class_id=*/LOOM_LOW_REG_CLASS_NONE,
+      /*.representation_id=*/LOOM_LOW_REPRESENTATION_ID_NONE,
       /*.register_unit_count=*/0,
   };
 }
 
 // Creates a mapped register value addressed by descriptor-set register class.
 static inline loom_low_lower_rule_mapped_value_t
-loom_low_lower_rule_mapped_value_register(uint16_t descriptor_register_class_id,
-                                          uint32_t register_unit_count) {
+loom_low_lower_rule_mapped_value_register(
+    uint16_t descriptor_register_class_id,
+    loom_low_representation_id_t representation_id,
+    uint32_t register_unit_count) {
   return (loom_low_lower_rule_mapped_value_t){
       /*.is_register=*/true,
       /*.descriptor_register_class_id=*/descriptor_register_class_id,
+      /*.representation_id=*/representation_id,
       /*.register_unit_count=*/register_unit_count,
   };
 }

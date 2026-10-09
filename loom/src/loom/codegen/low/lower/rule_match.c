@@ -16,6 +16,7 @@
 #include "loom/codegen/low/lower/rule_descriptor.h"
 #include "loom/codegen/low/lower/rule_source_memory.h"
 #include "loom/codegen/low/lower/rule_value.h"
+#include "loom/codegen/low/representation_plan.h"
 #include "loom/ir/context.h"
 #include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
@@ -1048,6 +1049,26 @@ static iree_status_t loom_low_lower_rule_guard_matches(
           match_context, mapped_value, guard->selector.value.parameter_index,
           out_matches);
     }
+    case LOOM_LOW_LOWER_GUARD_LOW_VALUE_REPRESENTATION: {
+      loom_low_lower_rule_mapped_value_t mapped_value =
+          loom_low_lower_rule_mapped_value_none();
+      IREE_RETURN_IF_ERROR(loom_low_lower_rule_mapped_value(
+          match_context, rule_set, source_op,
+          guard->selector.value.value_ref_index, &mapped_value));
+      if (!mapped_value.is_register) {
+        return iree_ok_status();
+      }
+      if (mapped_value.representation_id == LOOM_LOW_REPRESENTATION_ID_NONE &&
+          iree_any_bit_set(match_context->flags,
+                           LOOM_LOW_LOWER_RULE_MATCH_FLAG_CONTRACT_ONLY)) {
+        *out_matches = true;
+        return iree_ok_status();
+      }
+      *out_matches =
+          mapped_value.representation_id ==
+          loom_low_lower_rule_set_guard_payload(rule_set, guard)->u64;
+      return iree_ok_status();
+    }
     case LOOM_LOW_LOWER_GUARD_LOW_VALUE_REGISTER_UNIT_COUNT: {
       loom_low_lower_rule_mapped_value_t mapped_value =
           loom_low_lower_rule_mapped_value_none();
@@ -1665,8 +1686,20 @@ static iree_status_t loom_low_lower_rule_match_map_value_from_lowering(
   *out_mapped_value = (loom_low_lower_rule_mapped_value_t){
       .is_register = true,
       .descriptor_register_class_id = loom_low_register_type_class_id(low_type),
+      .representation_id = LOOM_LOW_REPRESENTATION_ID_NONE,
       .register_unit_count = loom_low_register_type_unit_count(low_type),
   };
+  loom_low_representation_plan_t* representation_plan =
+      context->lowering->source_plan.representation_plan;
+  if (representation_plan != NULL && representation_plan->solved) {
+    const loom_value_ordinal_t value_ordinal =
+        loom_local_value_domain_try_ordinal(
+            loom_low_lower_context_value_domain(context), source_value_id);
+    if (value_ordinal != LOOM_VALUE_ORDINAL_INVALID) {
+      loom_low_representation_plan_lookup(representation_plan, value_ordinal,
+                                          &out_mapped_value->representation_id);
+    }
+  }
   return iree_ok_status();
 }
 

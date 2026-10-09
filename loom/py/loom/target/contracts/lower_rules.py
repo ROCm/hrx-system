@@ -1144,6 +1144,31 @@ class _LowerRuleSetCompiler:
             )
             return
 
+        if guard.kind == GuardKind.LOW_VALUE_REPRESENTATION:
+            if guard.count is None or guard.count < 0 or guard.count >= 0xFFFF:
+                raise ValueError(
+                    f"{source_op.name}: representation guard needs an ID in [0, 65534]"
+                )
+            self._guards.append(
+                LowerGuard(
+                    kind=guard.kind,
+                    value_ref_index=value_ref_index,
+                    diagnostic_index=self._append_diagnostic_ref(
+                        source_op,
+                        _guard_diagnostic(
+                            guard,
+                            _named_constraint_diagnostic(
+                                "field",
+                                guard.field,
+                                f"low_representation.{guard.count}",
+                            ),
+                        ),
+                    ),
+                    u64=guard.count,
+                )
+            )
+            return
+
         if guard.kind == GuardKind.LOW_VALUE_REGISTER_UNIT_COUNT:
             if guard.count is None or guard.count <= 0:
                 raise ValueError(

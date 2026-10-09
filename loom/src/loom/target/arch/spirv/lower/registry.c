@@ -276,8 +276,8 @@ static iree_status_t loom_spirv_map_contract_value(
   IREE_RETURN_IF_ERROR(loom_spirv_resolve_workgroup_contract_view_reg_class(
       environment, source_value_id, &is_workgroup, &register_class_id));
   if (is_workgroup && register_class_id != LOOM_LOW_REG_CLASS_NONE) {
-    *out_mapped_value =
-        loom_low_lower_rule_mapped_value_register(register_class_id, 1);
+    *out_mapped_value = loom_low_lower_rule_mapped_value_register(
+        register_class_id, LOOM_LOW_REPRESENTATION_ID_NONE, 1);
   }
   return iree_ok_status();
 }

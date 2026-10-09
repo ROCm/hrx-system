@@ -138,6 +138,43 @@ def test_compile_lower_rule_set_compiles_enum_set_guard() -> None:
     assert compiled.guards[0].u64 == (1 << 0) | (1 << 9)
 
 
+def test_compile_lower_rule_set_compiles_low_value_representation_guard() -> None:
+    table = ContractFragment(
+        name="test.low-value-representation",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            RecipeRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                guards=(Guard.low_value_representation("result", 17),),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    assert len(compiled.guards) == 1
+    guard = compiled.guards[0]
+    assert guard.kind is GuardKind.LOW_VALUE_REPRESENTATION
+    assert guard.u64 == 17
+    value_ref = compiled.value_refs[guard.value_ref_index]
+    assert value_ref.kind is SourceValueKind.RESULT
+    assert value_ref.index == 0
+
+
+def test_low_value_representation_guard_rejects_none_sentinel() -> None:
+    with pytest.raises(ValueError, match="representation in \\[0, 65534\\]"):
+        ContractFragment(
+            name="test.invalid-low-value-representation",
+            descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+            cases=[
+                RecipeRule(
+                    source_op=scalar_arithmetic.scalar_addi,
+                    guards=(Guard.low_value_representation("result", 0xFFFF),),
+                )
+            ],
+        )
+
+
 def _add_f32_flags_descriptor_set():
     descriptor = replace(
         TEST_LOW_ADD_F32_DESCRIPTOR,
