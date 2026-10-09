@@ -16,6 +16,7 @@ xdna_cc_benchmark(
         "//libamdf/cts/util:linked_provider.cc",
     ],
     deps = [
+        "//experimental/xdna:direct_binding",
         "//libamdf:amdf",
         "//libamdf:headers",
         "//libamdf/cts/util:device_cache",

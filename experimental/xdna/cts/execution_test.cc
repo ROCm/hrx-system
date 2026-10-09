@@ -63,7 +63,7 @@ TEST_F(XdnaConcurrentQueuesTest, RotatesProgramsAndBindingsAcrossPendingRuns) {
   storage.device_address += storage.memory_byte_offset;
   IREE_ASSERT_OK(iree_hal_amd_xdna_executable_storage_load(
       consumer_.image, consumer_.entry_ordinal, 1, &storage));
-  IREE_ASSERT_OK(iree_hal_amd_xdna_executable_storage_bind(
+  IREE_ASSERT_OK(iree_xdna_executable_storage_bind(
       consumer_.image, consumer_.entry_ordinal, 1, &storage,
       consumer_bindings.size(), consumer_bindings.data()));
   amdf_xdna_kernel_command_t consumer_command = {};

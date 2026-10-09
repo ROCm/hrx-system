@@ -4,12 +4,38 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load(":build_defs.bzl", "xdna_cc_binary", "xdna_execution_test_suite")
+load(":build_defs.bzl", "xdna_cc_binary", "xdna_cc_library", "xdna_cc_test", "xdna_execution_test_suite")
 
 package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+xdna_cc_library(
+    name = "direct_binding",
+    srcs = ["direct_binding.c"],
+    hdrs = ["direct_binding.h"],
+    visibility = ["//experimental/xdna:__subpackages__"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/xdna:executable_storage",
+    ],
+)
+
+xdna_cc_test(
+    name = "direct_binding_test",
+    srcs = ["direct_binding_test.cc"],
+    deps = [
+        ":direct_binding",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/xdna:executable_storage",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testing:image_fixture",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 xdna_execution_test_suite(
@@ -33,6 +59,7 @@ xdna_cc_binary(
     }),
     visibility = ["//experimental/xdna/cts:__pkg__"],
     deps = [
+        ":direct_binding",
         "//libamdf:amdf_static",
         "//libamdf:headers",
         "//runtime/src/iree/base",
