@@ -211,11 +211,16 @@ bool CanUseDirectDesignator(const FieldDecl* Field, const Expr* Initializer,
   if (!Field || Field->getName().empty() || Field->isAnonymousStructOrUnion()) {
     return false;
   }
+  QualType FieldType = Field->getType();
   const Expr* SourceExpression = Initializer->IgnoreParenImpCasts();
   if (isa<InitListExpr>(SourceExpression)) {
-    return true;
+    // Braces around the anonymous aggregate containing a promoted scalar
+    // member become braces around the scalar itself after direct designation.
+    // Besides triggering -Wbraced-scalar-init, removing those braces would
+    // change list-initialization and narrowing semantics. Leave the source for
+    // an evidence-backed repair instead.
+    return FieldType->isArrayType() || DefinedRecord(FieldType);
   }
-  QualType FieldType = Field->getType();
   if (Context.hasSameUnqualifiedType(FieldType, SourceExpression->getType())) {
     return true;
   }

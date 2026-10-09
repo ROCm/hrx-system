@@ -28,7 +28,12 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
                 checks="-*,iree-cpp-designated-initializer",
                 source=source,
                 companion_files=[header],
-                compiler_args=["-std=c++20", "-pedantic-errors", "-Werror"],
+                compiler_args=[
+                    "-std=c++20",
+                    "-pedantic-errors",
+                    "-Wbraced-scalar-init",
+                    "-Werror",
+                ],
                 clang_tidy_args=["--header-filter=.*"],
             )
         )
@@ -84,6 +89,10 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn("Choice stale_union_label = {/*.real=*/11};", fixed_source)
         self.assertIn(
             "WithAnonymous stale_anonymous_label = {/*.real=*/14",
+            fixed_source,
+        )
+        self.assertIn(
+            "WithAnonymous braced_anonymous_label = {/*.integer=*/{101}};",
             fixed_source,
         )
         self.assertIn("DerivedConfig base_label = {/*.base=*/{16}", fixed_source)

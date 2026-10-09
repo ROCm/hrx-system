@@ -113,6 +113,7 @@ Choice stale_union_label = {/*.real=*/11};
 
 WithAnonymous anonymous_label = {/*.integer=*/12, /*.tail=*/13};
 WithAnonymous stale_anonymous_label = {/*.real=*/14, /*.tail=*/15};
+WithAnonymous braced_anonymous_label = {/*.integer=*/{101}};
 
 DerivedConfig base_label = {/*.base=*/{16}, /*.member=*/17};
 OuterConfig brace_elided = {/*.inner=*/18, 19, 20};
