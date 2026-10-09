@@ -230,6 +230,9 @@ int main(int argc, char** argv) {
                                        allocator);
         break;
     }
+    status = iree_status_annotate_f(
+        status, "creating model '%.*s' from '%.*s'", (int)entry->name.size,
+        entry->name.data, (int)entry->source.size, entry->source.data);
   }
   if (iree_status_is_ok(status)) {
     loom_serve_http_server_options_t options =

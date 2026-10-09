@@ -163,6 +163,14 @@ catalog; it cannot satisfy those paths through the original repository cwd.
 This checks source-package closure without adding a package format or changing
 the server's cwd-relative deployment semantics.
 
+Before serving requests, the workload removes each model's `control.loom` in
+turn, placing that deployment last in the catalog, and separately removes a
+sibling numerical provider. Startup must exit normally with failure, identify
+the deployment and missing file, and never announce readiness. The late control
+failure exercises partial residency teardown after the other three models have
+been constructed. Restoring the files then permits the complete workload below;
+no alternate source directory or precompiled artifact can satisfy a missing leaf.
+
 Twenty concurrent client operations share two resident text rows and a
 128-position logical pool. Variable-length conversations run alongside image,
 embedding, decision and tokenizer requests; partial-prefix forks and rewind

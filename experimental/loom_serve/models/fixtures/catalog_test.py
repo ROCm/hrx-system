@@ -561,6 +561,55 @@ def copy_package(source, directory, kind):
     return package.relative_to(directory)
 
 
+def check_startup_failures(server, directory, catalog):
+    """Reject an incomplete package after constructing the other deployments."""
+    models = catalog["models"]
+    cases = [(model, Path(model["source"]) / "control.loom") for model in models]
+    cases.append((models[-1], Path("providers/text/advance.loom")))
+    for model, missing in cases:
+        source = directory / missing
+        saved = source.with_suffix(".saved")
+        broken = {"models": [entry for entry in models if entry is not model] + [model]}
+        name = f"missing-{model['kind']}-{missing.stem}"
+        catalog_path = directory / "configuration" / f"{name}.json"
+        catalog_path.write_text(json.dumps(broken))
+        log_path = catalog_path.with_suffix(".log")
+        source.rename(saved)
+        try:
+            with child_server(
+                [
+                    str(server),
+                    f"--models={catalog_path.relative_to(directory)}",
+                    "--port=0",
+                    "--workers=1",
+                    "--pool_backing=fixed",
+                ],
+                log_path,
+                cwd=directory,
+            ) as (process, address):
+                assert address is None, log_path.read_text()
+                assert process.wait() == 1, log_path.read_text()
+            diagnostic = log_path.read_text()
+            assert "NOT_FOUND" in diagnostic and missing.name in diagnostic, diagnostic
+            assert f"creating model '{model['name']}'" in diagnostic, diagnostic
+            assert (
+                "Sanitizer" not in diagnostic and "runtime error:" not in diagnostic
+            ), diagnostic
+        finally:
+            saved.rename(source)
+        print(
+            json.dumps(
+                {
+                    "event": "catalog_startup_rejected",
+                    "model": model["name"],
+                    "missing": str(missing),
+                    "earlier_models": len(models) - 1,
+                }
+            ),
+            flush=True,
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", type=Path, required=True)
@@ -604,6 +653,7 @@ def main():
         catalog_path = directory / "configuration" / "models.json"
         catalog_path.parent.mkdir()
         catalog_path.write_text(json.dumps(catalog))
+        check_startup_failures(server, directory, catalog)
         for workers in (1, 4):
             with running_server(server, directory, catalog_path, workers) as (
                 client,
