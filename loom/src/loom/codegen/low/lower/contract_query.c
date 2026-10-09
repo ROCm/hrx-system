@@ -268,6 +268,11 @@ static iree_status_t loom_low_lower_query_target_contract_index(
     failed_binding_index = UINT16_MAX;
     failed_case_index = UINT16_MAX;
     failed_rule_set_index = UINT16_MAX;
+    loom_target_contract_query_result_t unavailable_result =
+        loom_target_contract_query_result_empty();
+    loom_low_lower_rule_selection_t unavailable_selection = {
+        .rule_index = UINT16_MAX,
+    };
     loom_low_lower_contract_case_iterator_t iterator;
     const bool used_candidates =
         loom_low_lower_contract_case_iterator_initialize(
@@ -315,6 +320,17 @@ static iree_status_t loom_low_lower_query_target_contract_index(
               &case_match_context, rule_set, source_op, rule_index, 1,
               &selection));
       if (selection.rule != NULL) {
+        const bool has_unavailable_selection =
+            unavailable_result.outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL;
+        if (has_unavailable_selection &&
+            !loom_low_lower_rule_selections_have_same_source_graph(
+                &unavailable_selection, &selection)) {
+          continue;
+        }
+        if (has_unavailable_selection &&
+            selection.primary_descriptor_unavailable) {
+          continue;
+        }
         if (options->accept_rule.fn != NULL) {
           bool accepted = false;
           IREE_RETURN_IF_ERROR(options->accept_rule.fn(
@@ -322,12 +338,6 @@ static iree_status_t loom_low_lower_query_target_contract_index(
           if (!accepted) {
             continue;
           }
-        }
-        if (iteration_mode == LOOM_LOW_LOWER_CONTRACT_CASE_ITERATION_ALL &&
-            options->accept_rule.fn == NULL) {
-          IREE_ASSERT_UNREACHABLE(
-              "generated contract candidate index omitted a matching rule");
-          IREE_BUILTIN_UNREACHABLE();
         }
         const loom_low_lower_descriptor_ref_t descriptor_ref =
             loom_low_lower_rule_primary_descriptor_ref(rule_set,
@@ -341,7 +351,7 @@ static iree_status_t loom_low_lower_query_target_contract_index(
               selected_descriptor != NULL,
               "generated target-low contract selected a missing descriptor");
         }
-        *out_result = (loom_target_contract_query_result_t){
+        const loom_target_contract_query_result_t legal_result = {
             .outcome = LOOM_TARGET_CONTRACT_QUERY_LEGAL,
             .binding_index = contract_case->binding_index,
             .case_index = case_index,
@@ -356,6 +366,21 @@ static iree_status_t loom_low_lower_query_target_contract_index(
             .missing_fact_bits = 0,
             .rejection = NULL,
         };
+        if (selection.primary_descriptor_unavailable) {
+          if (unavailable_result.outcome ==
+              LOOM_TARGET_CONTRACT_QUERY_UNHANDLED) {
+            unavailable_result = legal_result;
+            unavailable_selection = selection;
+          }
+          continue;
+        }
+        if (iteration_mode == LOOM_LOW_LOWER_CONTRACT_CASE_ITERATION_ALL &&
+            options->accept_rule.fn == NULL) {
+          IREE_ASSERT_UNREACHABLE(
+              "generated contract candidate index omitted a matching rule");
+          IREE_BUILTIN_UNREACHABLE();
+        }
+        *out_result = legal_result;
         if (out_selection != NULL) {
           *out_selection = selection;
         }
@@ -369,6 +394,13 @@ static iree_status_t loom_low_lower_query_target_contract_index(
         failed_case_index = case_index;
         failed_rule_set_index = binding->rule_set_index;
       }
+    }
+    if (unavailable_result.outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL) {
+      *out_result = unavailable_result;
+      if (out_selection != NULL) {
+        *out_selection = unavailable_selection;
+      }
+      return iree_ok_status();
     }
     if (!used_candidates ||
         iteration_mode == LOOM_LOW_LOWER_CONTRACT_CASE_ITERATION_ALL) {

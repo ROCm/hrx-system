@@ -186,6 +186,9 @@ bool loom_low_lower_rule_resolve_source_value_from_nodes(
           value_ref_index);
       return true;
     case LOOM_LOW_LOWER_VALUE_REF_EXACT_LANE_ORIGIN_OPERAND: {
+      if (fact_table == NULL) {
+        return false;
+      }
       const loom_op_t* referenced_op =
           loom_low_lower_rule_source_op(rule_set, source_op, source_nodes,
                                         source_node_count, value_ref_index);
@@ -218,6 +221,9 @@ bool loom_low_lower_rule_resolve_source_value_from_nodes(
     }
     case LOOM_LOW_LOWER_VALUE_REF_EXACT_UNIFORM_ELEMENT_ORIGIN_OPERAND:
     case LOOM_LOW_LOWER_VALUE_REF_UNIFORM_ELEMENT_ORIGIN_OPERAND: {
+      if (fact_table == NULL) {
+        return false;
+      }
       const loom_op_t* referenced_op =
           loom_low_lower_rule_source_op(rule_set, source_op, source_nodes,
                                         source_node_count, value_ref_index);

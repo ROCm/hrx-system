@@ -1215,10 +1215,16 @@ def _validate_c_table_shape(
                 raise ValueError(f"{node_subject} parent value-ref selects source node {parent_ref.source_node_index}, expected {source_node.parent_node_index}")
             if node_ref.source_node_index != source_node_index:
                 raise ValueError(f"{node_subject} local value-ref selects source node {node_ref.source_node_index}, expected {source_node_index}")
-            if source_node.relation is SourceNodeRelation.ADJACENT_UNIQUE_USER:
+            if source_node.relation in (
+                SourceNodeRelation.ADJACENT_UNIQUE_USER,
+                SourceNodeRelation.EXCLUSIVE_USER,
+            ):
                 parent_kind = SourceValueKind.RESULT
                 node_kind = SourceValueKind.OPERAND
-            elif source_node.relation is SourceNodeRelation.ADJACENT_DEFINITION:
+            elif source_node.relation in (
+                SourceNodeRelation.ADJACENT_DEFINITION,
+                SourceNodeRelation.EXCLUSIVE_DEFINITION,
+            ):
                 parent_kind = SourceValueKind.OPERAND
                 node_kind = SourceValueKind.RESULT
             else:

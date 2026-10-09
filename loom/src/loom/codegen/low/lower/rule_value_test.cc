@@ -323,6 +323,29 @@ TEST_F(LowLowerRuleValueTest, ResolvesUniformElementOrigins) {
   }
 }
 
+TEST_F(LowLowerRuleValueTest, FactDerivedSourceRefsRequireFacts) {
+  for (auto kind :
+       {LOOM_LOW_LOWER_VALUE_REF_EXACT_LANE_ORIGIN_OPERAND,
+        LOOM_LOW_LOWER_VALUE_REF_EXACT_UNIFORM_ELEMENT_ORIGIN_OPERAND,
+        LOOM_LOW_LOWER_VALUE_REF_UNIFORM_ELEMENT_ORIGIN_OPERAND}) {
+    const loom_low_lower_value_ref_t value_ref = {
+        /*.kind=*/static_cast<uint8_t>(kind),
+        /*.source_node_index=*/0,
+        /*.index=*/0,
+    };
+    loom_low_lower_rule_set_t rule_set = {};
+    rule_set.value_refs = &value_ref;
+    rule_set.value_ref_count = 1;
+    loom_value_id_t resolved = LOOM_VALUE_ID_INVALID;
+    EXPECT_FALSE(loom_low_lower_rule_resolve_source_value_from_nodes(
+        module_, /*fact_table=*/nullptr,
+        (loom_target_contract_vector_lane_projection_t){0}, &rule_set,
+        vector_consumer_op_, /*source_nodes=*/nullptr,
+        /*source_node_count=*/1, /*value_ref_index=*/0, &resolved));
+    EXPECT_EQ(resolved, LOOM_VALUE_ID_INVALID);
+  }
+}
+
 TEST_F(LowLowerRuleValueTest, ProjectsExactScalarFacts) {
   const loom_value_id_t integer_value =
       loom_scalar_constant_result(integer_constant_op_);

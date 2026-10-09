@@ -169,6 +169,9 @@ typedef struct loom_low_lower_rule_selection_t {
   uint16_t rule_index;
   // True when the selected rule consumes the canonical source-memory plan.
   bool uses_source_memory_access;
+  // True when the selected rule's primary descriptor requires target features
+  // absent from the current contract.
+  bool primary_descriptor_unavailable;
   // Number of populated source_nodes entries for the selected rule.
   uint8_t source_node_count;
 } loom_low_lower_rule_selection_t;
@@ -179,6 +182,13 @@ typedef struct loom_low_lower_rule_selection_t {
 bool loom_low_lower_rule_failure_is_better(
     loom_low_lower_rule_failure_t candidate,
     loom_low_lower_rule_failure_t incumbent);
+
+// Returns true when two matched rules cover the same resolved source graph.
+// Rules with different graph coverage are independent lowering choices even
+// when they share a root source op.
+bool loom_low_lower_rule_selections_have_same_source_graph(
+    const loom_low_lower_rule_selection_t* lhs,
+    const loom_low_lower_rule_selection_t* rhs);
 
 // Initializes a rule match context backed by a mutable lowering context.
 // |source_memory_state| retains the canonical source-memory plan across every

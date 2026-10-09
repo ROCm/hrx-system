@@ -224,6 +224,10 @@ enum loom_low_lower_source_node_relation_e {
   LOOM_LOW_LOWER_SOURCE_NODE_ADJACENT_UNIQUE_USER = 0,
   // The node is the adjacent sole-use definition of a parent operand.
   LOOM_LOW_LOWER_SOURCE_NODE_ADJACENT_DEFINITION = 1,
+  // The node is the same-block sole ordinary user of a parent result.
+  LOOM_LOW_LOWER_SOURCE_NODE_EXCLUSIVE_USER = 2,
+  // The node is a same-block sole-use definition of a parent operand.
+  LOOM_LOW_LOWER_SOURCE_NODE_EXCLUSIVE_DEFINITION = 3,
 };
 
 typedef struct loom_low_lower_source_node_t {
@@ -1100,6 +1104,10 @@ typedef uint8_t loom_low_lower_rule_flags_t;
 #define LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS \
   ((loom_low_lower_rule_flags_t)1u << 1)
 
+// Source graph may span intervening operations and requires indexed ownership.
+#define LOOM_LOW_LOWER_RULE_FLAG_NONLOCAL_SOURCE_GRAPH \
+  ((loom_low_lower_rule_flags_t)1u << 2)
+
 // Rule row has no structured report key.
 #define LOOM_LOW_LOWER_RULE_REPORT_KEY_NONE ((uint16_t)0)
 
@@ -1179,6 +1187,9 @@ typedef uint16_t loom_low_lower_rule_set_flags_t;
 // still owned by target-local family analysis.
 #define LOOM_LOW_LOWER_RULE_SET_FLAG_TARGET_CONTRACT_QUERY \
   ((loom_low_lower_rule_set_flags_t)1u << 0)
+// Rule set contains source graphs that may span intervening operations.
+#define LOOM_LOW_LOWER_RULE_SET_FLAG_NONLOCAL_SOURCE_GRAPHS \
+  ((loom_low_lower_rule_set_flags_t)1u << 1)
 
 typedef struct loom_low_lower_rule_set_t {
   // Rule-set behavior flags.
