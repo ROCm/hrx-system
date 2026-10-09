@@ -376,13 +376,16 @@ TEST_P(SourceEmbeddingServiceTest,
                 .find("HTTP/1.1 400"),
             0u);
   const std::string diagnostics = Read(Send("", "/logz", "GET"));
-  EXPECT_NE(diagnostics.find(R"("scope":"server","counters_available":false)"),
+  EXPECT_NE(diagnostics.find(R"("scope":"server","counters_available":true)"),
             std::string::npos);
   EXPECT_NE(diagnostics.find(R"("event":"error","sequence":1)"),
             std::string::npos);
   EXPECT_NE(diagnostics.find(R"("event":"error","sequence":2)"),
             std::string::npos);
-  EXPECT_EQ(diagnostics.find(R"("event":"counters")"), std::string::npos);
+  EXPECT_NE(
+      diagnostics.find(
+          R"("values":{"requests":0,"completed":0,"rejected":0,"cancelled":0,"failed":0,"input_tokens":0,"output_tokens":0,"batches":0})"),
+      std::string::npos);
   EXPECT_EQ(Read(Send("", "/logz", "GET", "X-Loom-Cursor: " + slow + "\r\n"))
                 .find("HTTP/1.1 409"),
             0u);
@@ -421,6 +424,7 @@ TEST_P(SourceEmbeddingServiceTest,
   const std::string totals =
       R"("requests":40,"completed":40,"rejected":0,"cancelled":0,"failed":0,"input_tokens":160,"output_tokens":0,"batches":40)";
   EXPECT_NE(latest.find(totals), std::string::npos);
+  EXPECT_NE(Read(Send("", "/logz", "GET")).find(totals), std::string::npos);
   const std::string resumed = poll(slow);
   EXPECT_NE(resumed.find(R"({"event":"gap","from":1,"to":33})"),
             std::string::npos);

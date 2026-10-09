@@ -106,6 +106,36 @@ def stalled_observer(client, rounds):
             assert expected["vectors"]["input_tokens"] == sum(
                 iteration + 6 for iteration in range(rounds)
             )
+            total = {
+                key: sum(counts[key] for counts in expected.values())
+                for key in expected["pixels"]
+            }
+            for _ in range(2):
+                batch = fast.poll()
+                assert batch.records[0]["counters_available"]
+                assert (
+                    next(
+                        record["values"]
+                        for record in batch.records
+                        if record["event"] == "counters"
+                    )
+                    == total
+                )
+                metrics = client.request("/metrics")
+                assert "loom_serve_server_counters_available 1\n" in metrics
+                for key, value in total.items():
+                    assert f"loom_serve_server_{key}_total {value}\n" in metrics
+                for model, counts in expected.items():
+                    for key, value in counts.items():
+                        prefix = f'loom_serve_model_{key}_total{{model="{model}",kind="'
+                        assert any(
+                            line.startswith(prefix) and line.endswith(f"}} {value}")
+                            for line in metrics.splitlines()
+                        )
+                # Router-owned utilities do not become model-protocol work.
+                assert client.request(
+                    "/tokenize", {"model": "vectors", "content": "ab"}
+                ) == {"tokens": [0, 1]}
             sink.expected = expected
             released.set()
             observer.result()

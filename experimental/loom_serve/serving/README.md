@@ -288,6 +288,18 @@ session IDs or checkpoint paths. Metric names and phase vocabulary are
 experimental. A scrape neither activates cold weights nor waits for a model;
 it has the same admission and shutdown availability as the other probes.
 
+The same endpoint also exposes cumulative `loom_serve_model_*_total` counters
+with `model` and `kind` labels, plus `loom_serve_server_*_total` for the whole
+fixed catalog. Fields are `requests`, `completed`, `rejected`, `cancelled`,
+`failed`, `input_tokens`, `output_tokens` and `batches`, with the `/logz` semantics
+below. Values retain unsigned integer precision. Server totals are sums of
+the always-counted service owners, not replayed event history. They include
+model-specific controls such as checkpoints but exclude router-owned tokenizer
+utilities, health/observation requests and unknown-route rejections.
+`loom_serve_server_counters_available` is one only when every service publishes
+counters; otherwise server totals are omitted instead of reporting a partial
+sum. Weight deactivation does not reset a service's lifetime counters.
+
 `GET /readyz` and `/healthz` return `{"status":"ready"}` after model
 construction and router registration. Readiness means the server can route
 requests; cold weights, capacity waiters and a full model queue do not make the
@@ -313,7 +325,7 @@ with completed jobs; only the serialized service owner publishes. Cold startup
 compiler/residency diagnostics and terminal CLI failures are separate from
 these serving-work streams.
 
-`GET /logz` returns a bounded JSONL poll of server diagnostics. `X-Loom-Model`
+`GET /logz` returns server diagnostics and current catalog-wide work counters. `X-Loom-Model`
 instead selects a deployment's stream:
 
 ~~~sh
@@ -326,9 +338,10 @@ this response does not include the original start of the stream. Retained
 events include `sequence`, monotonic `time_ns` and a request lifetime ID (zero
 for model-wide events). A `gap` line reports the half-open missed interval
 `[from,to)` for this reader. The `counters` line is a fresh cumulative snapshot,
-not reconstructed from whatever events remain. The server diagnostic stream
-reports `counters_available:false`: it does not infer model completion from
-request handoff or expose invented zero totals. The final `cursor.value` is
+not reconstructed from whatever events remain. Server totals use the same
+fixed-catalog owner sum as `/metrics`; a service without counters makes the
+server report `counters_available:false`, not invented zero or partial totals.
+The final `cursor.value` is
 passed verbatim as `X-Loom-Cursor` on the next poll. Each poll considers at most
 64 records; polling neither clears records nor adds events to the stream.
 

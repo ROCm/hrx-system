@@ -6,6 +6,8 @@
 
 #include "experimental/loom_serve/http/router.h"
 
+#include <inttypes.h>
+
 #include "experimental/loom_serve/http/logs.h"
 #include "experimental/loom_serve/http/tokenization.h"
 #include "iree/base/internal/json.h"
@@ -404,6 +406,109 @@ static iree_status_t router_metric_sample(
   return iree_string_builder_append_format(output, "} %.9g\n", value);
 }
 
+typedef struct router_counter_field_t {
+  // Suffix shared by model and server Prometheus metric names.
+  const char* name;
+  // Counter units and ownership semantics.
+  const char* description;
+  // Byte offset of a uint64_t in loom_serve_telemetry_counters_t.
+  iree_host_size_t offset;
+} router_counter_field_t;
+
+static const router_counter_field_t router_counter_fields[] = {
+    {"requests", "Requests reaching a model protocol, including rejections.",
+     offsetof(loom_serve_telemetry_counters_t, requests)},
+    {"completed", "Successful responses copied into the HTTP carrier.",
+     offsetof(loom_serve_telemetry_counters_t, completed)},
+    {"rejected", "Protocol, source validation or capacity rejections.",
+     offsetof(loom_serve_telemetry_counters_t, rejected)},
+    {"cancelled", "Requests abandoned by peers or orderly shutdown.",
+     offsetof(loom_serve_telemetry_counters_t, cancelled)},
+    {"failed", "Requests terminated by transport or execution failures.",
+     offsetof(loom_serve_telemetry_counters_t, failed)},
+    {"input_tokens",
+     "Tokens in completed model work, including abandoned work.",
+     offsetof(loom_serve_telemetry_counters_t, input_tokens)},
+    {"output_tokens", "Selected model output tokens, including EOS.",
+     offsetof(loom_serve_telemetry_counters_t, output_tokens)},
+    {"batches", "Completed model invocations or cohorts, not HTTP requests.",
+     offsetof(loom_serve_telemetry_counters_t, batches)},
+};
+
+static uint64_t router_counter_value(
+    const loom_serve_telemetry_counters_t* counters,
+    const router_counter_field_t* field) {
+  return *(const uint64_t*)((const uint8_t*)counters + field->offset);
+}
+
+// Every catalog entry and its cumulative counters live through router return.
+// Owner serialization makes this a coherent sum, independent of ring retention.
+static bool router_counters(const router_t* router,
+                            loom_serve_telemetry_counters_t* total) {
+  *total = (loom_serve_telemetry_counters_t){0};
+  for (iree_host_size_t i = 0; i < router->service_count; ++i) {
+    const loom_serve_telemetry_counters_t* counters =
+        router->services[i].telemetry.counters;
+    if (!counters) {
+      return false;
+    }
+    for (iree_host_size_t j = 0; j < IREE_ARRAYSIZE(router_counter_fields);
+         ++j) {
+      const router_counter_field_t* field = &router_counter_fields[j];
+      *(uint64_t*)((uint8_t*)total + field->offset) +=
+          router_counter_value(counters, field);
+    }
+  }
+  return true;
+}
+
+static iree_status_t router_metric_counters(router_t* router) {
+  iree_string_builder_t* output = &router->output;
+  loom_serve_telemetry_counters_t total;
+  const bool available = router_counters(router, &total);
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      output,
+      "# HELP loom_serve_server_counters_available Every model publishes work "
+      "counters.\n"
+      "# TYPE loom_serve_server_counters_available gauge\n"
+      "loom_serve_server_counters_available %d\n",
+      available));
+  for (iree_host_size_t j = 0; j < IREE_ARRAYSIZE(router_counter_fields); ++j) {
+    const router_counter_field_t* field = &router_counter_fields[j];
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output,
+        "# HELP loom_serve_model_%s_total %s\n"
+        "# TYPE loom_serve_model_%s_total counter\n",
+        field->name, field->description, field->name));
+    for (iree_host_size_t i = 0; i < router->service_count; ++i) {
+      const loom_serve_http_service_t* service = &router->services[i];
+      if (!service->telemetry.counters) {
+        continue;
+      }
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          output, "loom_serve_model_%s_total{model=", field->name));
+      IREE_RETURN_IF_ERROR(router_metric_label(output, service->name));
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_cstring(output, ",kind="));
+      IREE_RETURN_IF_ERROR(
+          router_metric_label(output, iree_make_cstring_view(service->kind)));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          output, "} %" PRIu64 "\n",
+          router_counter_value(service->telemetry.counters, field)));
+    }
+    if (available) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          output,
+          "# HELP loom_serve_server_%s_total %s\n"
+          "# TYPE loom_serve_server_%s_total counter\n"
+          "loom_serve_server_%s_total %" PRIu64 "\n",
+          field->name, field->description, field->name, field->name,
+          router_counter_value(&total, field)));
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t router_metrics(router_t* router) {
   for (iree_host_size_t i = 0; i < router->service_count; ++i) {
     router->snapshots[i] =
@@ -478,6 +583,9 @@ static iree_status_t router_metrics(router_t* router) {
                                   &router->services[i], NULL,
                                   router->snapshots[i].oldest_active_age / 1e9);
   }
+  if (iree_status_is_ok(status)) {
+    status = router_metric_counters(router);
+  }
   return status;
 }
 
@@ -487,6 +595,7 @@ static iree_status_t router_logs(router_t* router,
   const loom_serve_telemetry_stream_t* stream =
       loom_serve_http_server_diagnostics(router->server);
   const loom_serve_telemetry_counters_t* counters = NULL;
+  loom_serve_telemetry_counters_t total;
   iree_string_view_t name;
   if (loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Model"),
                                             &name)) {
@@ -508,6 +617,8 @@ static iree_status_t router_logs(router_t* router,
     }
     stream = service->telemetry.stream;
     counters = service->telemetry.counters;
+  } else if (router_counters(router, &total)) {
+    counters = &total;
   }
   iree_string_view_t cursor;
   loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Cursor"),

@@ -96,8 +96,9 @@ typedef struct loom_serve_http_service_t {
   struct {
     // Bounded immutable-record history; NULL when this service has no stream.
     const loom_serve_telemetry_stream_t* stream;
-    // Cumulative state copied only on serialized owner turns, never replayed
-    // from history. Non-NULL whenever stream is present.
+    // Cumulative work owned by this named service, copied only on serialized
+    // owner turns, never replayed from history. Non-NULL whenever stream is
+    // present; counters may also be published without an event stream.
     const loom_serve_telemetry_counters_t* counters;
   } telemetry;
 } loom_serve_http_service_t;
@@ -107,9 +108,12 @@ typedef struct loom_serve_http_service_t {
 // service. GET /v1/models lists deployment names and namespaced capabilities;
 // GET /v1/status adds copied scheduler ownership. /healthz and /readyz are
 // model-free: constructors have completed, not necessarily weight activation.
-// GET /metrics exposes the same copied ownership as Prometheus text gauges,
-// capturing each service once without model invocation or device queries.
-// GET /logz polls the server's bounded diagnostic stream. X-Loom-Model instead
+// GET /metrics exposes the same copied ownership as Prometheus text gauges
+// and cumulative model-protocol counters without invoking models/devices.
+// Server counters sum the fixed catalog's live-through-return owners, excluding
+// router-handled utilities, observation and rejected routes. If a service has
+// no counters, whole-server totals are unavailable rather than partial.
+// GET /logz polls server diagnostics and current totals. X-Loom-Model instead
 // selects a model service's stream; X-Loom-Cursor resumes that reader's
 // previous poll. Each response copies records and reports gaps/current counters
 // without retaining slots or slowing publication. See logs.h for cursor rules.

@@ -60,6 +60,8 @@ struct ModelService {
   iree_status_t result = iree_ok_status();
   // Accepted claims published to the outer test without exposing the FIFO.
   uint64_t accepted = 0;
+  // Optional immutable historical work, published before owner startup.
+  const loom_serve_telemetry_counters_t* counters = nullptr;
 
   static void SetObserver(void* self, loom_serve_http_observer_t observer) {
     auto* service = static_cast<ModelService*>(self);
@@ -194,7 +196,8 @@ struct ModelService {
             .kind = "fixture",
             .endpoint = "/v1/test",
             .snapshot = Snapshot,
-            .capacity_domain = capacity_domain};
+            .capacity_domain = capacity_domain,
+            .telemetry = {.counters = counters}};
   }
 };
 
@@ -363,7 +366,29 @@ loom_serve_model_oldest_active_age_seconds{model="b",kind="fixture"} 0
 loom_serve_model_oldest_active_age_seconds{model="held",kind="fixture"} 2.25
 loom_serve_model_oldest_active_age_seconds{model="other",kind="fixture"} 0
 loom_serve_model_oldest_active_age_seconds{model="quoted\"\\name",kind="fixture"} 0
+# HELP loom_serve_server_counters_available Every model publishes work counters.
+# TYPE loom_serve_server_counters_available gauge
+loom_serve_server_counters_available 0
+# HELP loom_serve_model_requests_total Requests reaching a model protocol, including rejections.
+# TYPE loom_serve_model_requests_total counter
+# HELP loom_serve_model_completed_total Successful responses copied into the HTTP carrier.
+# TYPE loom_serve_model_completed_total counter
+# HELP loom_serve_model_rejected_total Protocol, source validation or capacity rejections.
+# TYPE loom_serve_model_rejected_total counter
+# HELP loom_serve_model_cancelled_total Requests abandoned by peers or orderly shutdown.
+# TYPE loom_serve_model_cancelled_total counter
+# HELP loom_serve_model_failed_total Requests terminated by transport or execution failures.
+# TYPE loom_serve_model_failed_total counter
+# HELP loom_serve_model_input_tokens_total Tokens in completed model work, including abandoned work.
+# TYPE loom_serve_model_input_tokens_total counter
+# HELP loom_serve_model_output_tokens_total Selected model output tokens, including EOS.
+# TYPE loom_serve_model_output_tokens_total counter
+# HELP loom_serve_model_batches_total Completed model invocations or cohorts, not HTTP requests.
+# TYPE loom_serve_model_batches_total counter
 )");
+  const auto log = Read(Send("GET", "/logz"));
+  EXPECT_NE(log.find("\"counters_available\":false"), std::string::npos);
+  EXPECT_EQ(log.find("\"event\":\"counters\""), std::string::npos);
   // Scraping changes no model ownership and does not wait on the held work.
   EXPECT_NE(
       Read(Send("GET", "/v1/status"))
@@ -646,6 +671,54 @@ TEST_P(HttpRouterTest, ContinuouslyReadyOwnerYieldsToSharedCpuWork) {
   EXPECT_GT(held_.ready_units, 0u);
 }
 
+class HttpRouterCountersTest : public HttpRouterTest {
+ protected:
+  void SetUp() override {
+    size_t index = 0;
+    for (auto* service : {&a_, &b_, &held_, &other_, &escaped_}) {
+      const uint64_t value = index + 1;
+      counters_[index] = {.requests = value,
+                          .completed = value,
+                          .input_tokens = (uint64_t{1} << 53) + value,
+                          .output_tokens = 7 * value,
+                          .batches = value};
+      service->counters = &counters_[index++];
+    }
+    HttpRouterTest::SetUp();
+  }
+  // Distinct service owners, unchanged by cold observation/utility requests.
+  loom_serve_telemetry_counters_t counters_[5] = {};
+};
+
+TEST_P(HttpRouterCountersTest, ServerTotalsPreserveIntegerPrecisionAndScope) {
+  for (int i = 0; i < 2; ++i) {
+    const auto metrics = Read(Send("GET", "/metrics"));
+    EXPECT_NE(metrics.find("loom_serve_model_input_tokens_total{model=\"a\","
+                           "kind=\"fixture\"} 9007199254740993\n"),
+              std::string::npos);
+    EXPECT_NE(metrics.find("loom_serve_server_requests_total 15\n"),
+              std::string::npos);
+    EXPECT_NE(metrics.find(
+                  "loom_serve_server_input_tokens_total 45035996273704975\n"),
+              std::string::npos);
+    const auto log = Read(Send("GET", "/logz"));
+    EXPECT_NE(log.find("\"counters_available\":true"), std::string::npos);
+    EXPECT_NE(
+        log.find("\"values\":{\"requests\":15,\"completed\":15,\"rejected\":0,"
+                 "\"cancelled\":0,\"failed\":0,\"input_tokens\":"
+                 "45035996273704975,\"output_tokens\":105,\"batches\":15}"),
+        std::string::npos);
+    EXPECT_NE(Read(Send("POST", "/tokenize", R"({"model":"a","content":"ab"})"))
+                  .find("\"tokens\":[0,1]"),
+              std::string::npos);
+    EXPECT_NE(Read(Send("POST", "/v1/test", R"({"model":"missing"})"))
+                  .find("404 Not Found"),
+              std::string::npos);
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterTest, ::testing::Values(1, 4));
+INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterCountersTest,
+                         ::testing::Values(1, 4));
 
 }  // namespace
