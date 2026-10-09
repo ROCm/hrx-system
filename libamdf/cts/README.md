@@ -137,6 +137,17 @@ to the result. The [GPU qualification method](gpu/qualification.md) explains
 native identity, source/artifact records and independent output observation.
 A frozen run's coverage does not follow subsequent source changes.
 
+Runners can set `AMDF_CTS_GPU_NATIVE_IDENTITY` to `linux_device:MAJOR:MINOR`
+or `windows_adapter:LUID:PHYSICAL_INDEX` (hexadecimal LUID, decimal indices).
+The CTS resolves this public native identity to its opaque primary endpoint
+before activating a GPU. An explicit `--amdf_gpu_endpoint_id` must agree with
+that allocation. Malformed or conflicting selections, and identities absent
+from discovery, fail the run.
+ROCr/HIP device ordinals do not select libamdf endpoints. CI correlates its
+visible ROCr GPU with KFD and DRM metadata and forwards the native identity
+to both Bazel and CMake test processes. Vulkan CI forwards its independently
+verified render identity through the same CTS selection.
+
 XDNA hardware jobs require successful activation and the allocated execution
 path with a compatible image. Missing hardware, activation failure or a missing
 required image fails that job. Registration, import and placement cases use

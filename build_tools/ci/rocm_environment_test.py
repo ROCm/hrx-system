@@ -8,14 +8,108 @@ from __future__ import annotations
 
 import os
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from build_tools.ci import rocm_environment
+
+
+class NativeGpuSelectionTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.topology = self.root / "topology"
+        self.drm = self.root / "drm"
+        self.devices = self.root / "dri"
+        for directory in (self.topology, self.drm, self.devices):
+            directory.mkdir()
+        # Native ROCr output identifies hardware, not its enumeration ordinal.
+        self.output = (
+            "Agent 1\n  Uuid:                    CPU-XX\n"
+            "  Device Type:             CPU\n  BDFID:                   0\n"
+            "Agent 2\n  Uuid:                    GPU-af47ea8fb2cb9b42\n"
+            "  Device Type:             GPU\n  BDFID:                   17920\n"
+        )
+        self.add_node("7", 144, 17920, 0xAF47EA8FB2CB9B42)
+        self.add_node("2", 168, 42496, 0x0123456789ABCDEF)
+        node = self.drm / "renderD144"
+        node.mkdir()
+        (node / "dev").write_text("226:144\n")
+        self.metadata = SimpleNamespace(
+            st_mode=stat.S_IFCHR | 0o660, st_rdev=os.makedev(226, 144)
+        )
+
+    def add_node(self, name, minor, location, unique):
+        node = self.topology / name
+        node.mkdir()
+        (node / "gpu_id").write_text(str(int(name) + 100))
+        (node / "properties").write_text(
+            f"location_id {location}\nunique_id {unique}\ndrm_render_minor {minor}\n"
+        )
+
+    def select(self):
+        # Only the native character-device stat is substituted; discovery and
+        # correlation read the external ROCr/sysfs records through real files.
+        with mock.patch.object(Path, "stat", return_value=self.metadata):
+            return rocm_environment.select_native_gpu(
+                self.output, self.topology, self.drm, self.devices
+            )
+
+    def test_correlates_uuid_and_pci_to_render_identity(self):
+        self.assertEqual(self.select(), "linux_device:226:144")
+
+    def test_uuid_disambiguates_same_bdf_in_another_domain(self):
+        self.add_node("9", 176, 17920, 0x1122334455667788)
+        self.assertEqual(self.select(), "linux_device:226:144")
+
+    def test_bdf_must_still_match_the_uuid(self):
+        self.output = self.output.replace("17920", "42496")
+        with self.assertRaisesRegex(RuntimeError, "matches 0 KFD nodes"):
+            self.select()
+
+    def test_single_bdf_can_identify_an_agent_without_a_uuid(self):
+        self.output = self.output.replace("GPU-af47ea8fb2cb9b42", "GPU-XX")
+        self.assertEqual(self.select(), "linux_device:226:144")
+
+    def test_ambiguous_bdf_without_uuid_is_rejected(self):
+        self.output = self.output.replace("GPU-af47ea8fb2cb9b42", "GPU-XX")
+        self.add_node("9", 176, 17920, 0x1122334455667788)
+        with self.assertRaisesRegex(RuntimeError, "matches 2 KFD nodes"):
+            self.select()
+
+    def test_malformed_uuid_does_not_discard_identity(self):
+        self.output = self.output.replace("GPU-af47ea8fb2cb9b42", "GPU-invalid")
+        with self.assertRaisesRegex(RuntimeError, "Unrecognized ROCr GPU UUID"):
+            self.select()
+
+    def test_missing_or_multiple_visible_gpus_require_an_allocation(self):
+        for output in ("", self.output + self.output):
+            with self.subTest(output=output):
+                self.output = output
+                with self.assertRaisesRegex(RuntimeError, "requires one visible"):
+                    self.select()
+
+    def test_render_node_device_number_must_match(self):
+        self.metadata.st_rdev = os.makedev(226, 168)
+        with self.assertRaisesRegex(RuntimeError, "does not match"):
+            self.select()
+
+    def test_regular_file_cannot_substitute_for_render_node(self):
+        self.metadata.st_mode = stat.S_IFREG | 0o660
+        with self.assertRaisesRegex(RuntimeError, "does not match"):
+            self.select()
+
+    def test_drm_and_kfd_minor_must_match(self):
+        (self.drm / "renderD144" / "dev").write_text("226:168\n")
+        with self.assertRaisesRegex(RuntimeError, "does not match"):
+            self.select()
 
 
 class RocmSupervisorTest(unittest.TestCase):

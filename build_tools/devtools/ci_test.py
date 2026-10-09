@@ -684,7 +684,7 @@ class CiTest(unittest.TestCase):
                 )
             )
 
-    def test_amdgpu_bazel_tests_preserve_device_visibility(self):
+    def test_amdgpu_commands_preserve_device_visibility(self):
         args = ci.parse_arguments(
             [
                 "iree-bazel-amdgpu",
@@ -698,9 +698,11 @@ class CiTest(unittest.TestCase):
             "HIP_VISIBLE_DEVICES": "0",
             "CUDA_VISIBLE_DEVICES": "1",
             "GPU_DEVICE_ORDINAL": "2",
+            "AMDF_CTS_GPU_NATIVE_IDENTITY": "linux_device:226:144",
         }
         with mock.patch.dict(ci.os.environ, device_visibility, clear=True):
             steps = ci.steps_from_args(args)
+            cmake_steps = ci.steps_from_args(ci.parse_arguments(["iree-cmake-amdgpu"]))
 
         amdgpu_test = next(step for step in steps if step.name == "Test IREE / AMDGPU")
         for name in ci.AMDGPU_DEVICE_VISIBILITY_ENV_VARS:
@@ -708,6 +710,13 @@ class CiTest(unittest.TestCase):
                 f"--test_env={name}={device_visibility[name]}",
                 amdgpu_test.argv,
             )
+        cmake_tests = [
+            step for step in cmake_steps if step.name.startswith("Test IREE CMake")
+        ]
+        self.assertEqual(len(cmake_tests), 2)
+        for step in cmake_tests:
+            for item in device_visibility.items():
+                self.assertIn(item, step.env)
 
     def test_amdgpu_bazel_device_toolchain_uses_fetched_rocm_root(self):
         args = ci.parse_arguments(["iree-bazel-amdgpu"])
@@ -1077,21 +1086,27 @@ class CiTest(unittest.TestCase):
                     )
 
     def test_vulkan_commands_preserve_explicit_mesa_device_selection(self):
-        with mock.patch.dict(os.environ, {"DRI_PRIME": "1!"}):
+        selection = {
+            "DRI_PRIME": "1!",
+            "AMDF_CTS_GPU_NATIVE_IDENTITY": "linux_device:226:144",
+        }
+        with mock.patch.dict(os.environ, selection):
             bazel_steps = ci.steps_from_args(ci.parse_arguments(["iree-bazel-vulkan"]))
             cmake_steps = ci.steps_from_args(ci.parse_arguments(["iree-cmake-vulkan"]))
 
         bazel_test_step = next(
             step for step in bazel_steps if step.name == "Test IREE / Vulkan"
         )
-        self.assertIn("--test_env=DRI_PRIME=1!", bazel_test_step.argv)
+        for name, value in selection.items():
+            self.assertIn(f"--test_env={name}={value}", bazel_test_step.argv)
 
         cmake_test_steps = [
             step for step in cmake_steps if step.name.startswith("Test IREE CMake")
         ]
         self.assertGreater(len(cmake_test_steps), 0)
         for step in cmake_test_steps:
-            self.assertIn(("DRI_PRIME", "1!"), step.env)
+            for item in selection.items():
+                self.assertIn(item, step.env)
 
     def test_bazel_gpu_command_surface_omits_nonexecuting_lanes(self):
         for command in (

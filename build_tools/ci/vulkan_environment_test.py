@@ -175,7 +175,10 @@ class VulkanEnvironmentTest(unittest.TestCase):
             vulkan_environment.check_environment(self.sysfs, self.dri)
         self.assertEqual(run.call_count, 2)
         self.assertEqual(
-            environment_file.read_text(), f"DRI_PRIME={discrete.dri_prime}\n"
+            environment_file.read_text(),
+            f"DRI_PRIME={discrete.dri_prime}\n"
+            f"AMDF_CTS_GPU_NATIVE_IDENTITY=linux_device:"
+            f"{os.major(discrete.device_number)}:{os.minor(discrete.device_number)}\n",
         )
 
     def test_discrete_gpu_preferred_unless_integrated_gpu_is_allocated(self):
@@ -198,7 +201,10 @@ class VulkanEnvironmentTest(unittest.TestCase):
         with mock.patch.object(subprocess, "run", side_effect=run_vulkaninfo):
             vulkan_environment.check_environment(self.sysfs, self.dri)
         self.assertEqual(
-            environment_file.read_text(), f"DRI_PRIME={discrete.dri_prime}\n"
+            environment_file.read_text(),
+            f"DRI_PRIME={discrete.dri_prime}\n"
+            f"AMDF_CTS_GPU_NATIVE_IDENTITY=linux_device:"
+            f"{os.major(discrete.device_number)}:{os.minor(discrete.device_number)}\n",
         )
 
         environment_file.write_text("")
@@ -206,7 +212,10 @@ class VulkanEnvironmentTest(unittest.TestCase):
         with mock.patch.object(subprocess, "run", side_effect=run_vulkaninfo) as run:
             vulkan_environment.check_environment(self.sysfs, self.dri)
         self.assertEqual(
-            environment_file.read_text(), f"DRI_PRIME={integrated.dri_prime}\n"
+            environment_file.read_text(),
+            f"DRI_PRIME={integrated.dri_prime}\n"
+            f"AMDF_CTS_GPU_NATIVE_IDENTITY=linux_device:"
+            f"{os.major(integrated.device_number)}:{os.minor(integrated.device_number)}\n",
         )
         self.assertEqual(run.call_count, 1)
 
@@ -284,7 +293,9 @@ class VulkanEnvironmentTest(unittest.TestCase):
             vulkan_environment.check_environment(self.sysfs, self.dri)
         self.assertEqual(
             environment_file.read_text(),
-            "OTHER=preserved\nDRI_PRIME=pci-0000_01_00_0!\n",
+            "OTHER=preserved\nDRI_PRIME=pci-0000_01_00_0!\n"
+            f"AMDF_CTS_GPU_NATIVE_IDENTITY=linux_device:"
+            f"{os.major(device.device_number)}:{os.minor(device.device_number)}\n",
         )
 
     def test_native_failure_does_not_publish_selection(self):

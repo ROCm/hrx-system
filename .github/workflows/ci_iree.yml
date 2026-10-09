@@ -315,7 +315,7 @@ jobs:
       - name: Report ROCm environment
         if: matrix.kind == 'amdgpu'
         timeout-minutes: 1
-        run: bash .github/scripts/check_rocm_environment.sh
+        run: bash .github/scripts/check_rocm_environment.sh --export-libamdf-gpu-selection
 
       - name: Check native accelerator access
         if: matrix.kind == 'amd_client'
@@ -845,7 +845,7 @@ jobs:
       - name: Report ROCm environment
         if: matrix.kind == 'amdgpu'
         timeout-minutes: 1
-        run: bash .github/scripts/check_rocm_environment.sh
+        run: bash .github/scripts/check_rocm_environment.sh --export-libamdf-gpu-selection
 
       - name: Run IREE CMake CI
         id: iree_cmake_ci

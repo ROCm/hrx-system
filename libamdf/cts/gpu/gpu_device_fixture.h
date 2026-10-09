@@ -170,8 +170,7 @@ class GpuDeviceFixture : public ::testing::Test {
       if (summary.engine_kind != AMDF_ENGINE_KIND_GPU) {
         continue;
       }
-      if (requested_endpoint.has_value() &&
-          !amdf_endpoint_id_is_equal(&summary.id, &*requested_endpoint)) {
+      if (!GetCtsDeviceCache().IsGpuEndpointSelected(summary.id)) {
         continue;
       }
       requested_endpoint_present = true;

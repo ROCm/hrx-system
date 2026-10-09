@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -31,6 +32,83 @@ bool ParseEndpointId(const char* value, amdf_endpoint_id_t* out_id) {
     }
   }
   *out_id = id;
+  return true;
+}
+
+template <typename First, typename Second>
+bool ParseNativeIdentityPair(std::string_view text, int first_base,
+                             First* first, Second* second) {
+  const char* begin = text.data();
+  const char* end = begin + text.size();
+  const auto first_result = std::from_chars(begin, end, *first, first_base);
+  if (first_result.ec != std::errc{} || first_result.ptr == end ||
+      *first_result.ptr != ':') {
+    return false;
+  }
+  const auto second_result =
+      std::from_chars(first_result.ptr + 1, end, *second);
+  return second_result.ec == std::errc{} && second_result.ptr == end;
+}
+
+// Uses the native identity syntax recorded in CTS results, independently of
+// endpoint-ID encodings and foreign runtimes' device ordinals.
+bool ParseNativeIdentity(const char* value,
+                         amdf_endpoint_native_identity_t* out_identity) {
+  const std::string_view text(value);
+  amdf_endpoint_native_identity_t identity = {};
+  if (text.starts_with("linux_device:")) {
+    identity.type = AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE;
+    if (!ParseNativeIdentityPair(text.substr(13), 10,
+                                 &identity.value.linux_device.major,
+                                 &identity.value.linux_device.minor)) {
+      return false;
+    }
+  } else if (text.starts_with("windows_adapter:")) {
+    identity.type = AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER;
+    if (!ParseNativeIdentityPair(
+            text.substr(16), 16, &identity.value.windows_adapter.luid,
+            &identity.value.windows_adapter.physical_adapter_index)) {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  *out_identity = identity;
+  return true;
+}
+
+bool ResolveRunnerGpuSelection() {
+  const char* value = std::getenv("AMDF_CTS_GPU_NATIVE_IDENTITY");
+  if (value == nullptr) {
+    return true;
+  }
+  amdf_endpoint_native_identity_t identity = {};
+  if (!ParseNativeIdentity(value, &identity)) {
+    std::fprintf(stderr, "invalid AMDF_CTS_GPU_NATIVE_IDENTITY: %s\n", value);
+    return false;
+  }
+  const amdf_status_t status = GetCtsDeviceCache().ResolveGpuEndpoint(identity);
+  if (!amdf_status_is_ok(status)) {
+    std::fprintf(stderr, "cannot select runner GPU %s: domain=%u code=%u\n",
+                 value, amdf_status_domain(status), amdf_status_code(status));
+    return false;
+  }
+  return true;
+}
+
+bool ValidatePeerSelection() {
+  const auto& primary = GetCtsDeviceCache().gpu_endpoint_id();
+  const auto& peer = GetCtsDeviceCache().gpu_peer_endpoint_id();
+  if (peer.has_value() && !primary.has_value()) {
+    std::fprintf(
+        stderr,
+        "--amdf_gpu_peer_endpoint_id requires a primary GPU selection\n");
+    return false;
+  }
+  if (peer.has_value() && amdf_endpoint_id_is_equal(&*primary, &*peer)) {
+    std::fprintf(stderr, "primary and peer GPU endpoint IDs must differ\n");
+    return false;
+  }
   return true;
 }
 
@@ -139,23 +217,13 @@ int main(int argument_count, char** argument_values) {
     argument_values[--argument_count] = nullptr;
     --i;
   }
-  const auto& primary = GetCtsDeviceCache().gpu_endpoint_id();
-  const auto& peer = GetCtsDeviceCache().gpu_peer_endpoint_id();
-  if (peer.has_value() && !primary.has_value()) {
-    std::fprintf(
-        stderr,
-        "--amdf_gpu_peer_endpoint_id requires --amdf_gpu_endpoint_id\n");
-    return EXIT_FAILURE;
-  }
-  if (peer.has_value() && amdf_endpoint_id_is_equal(&*primary, &*peer)) {
-    std::fprintf(stderr, "primary and peer GPU endpoint IDs must differ\n");
-    return EXIT_FAILURE;
-  }
   if (!amdf_cts_provider_initialize(&argument_count, &argument_values)) {
     return EXIT_FAILURE;
   }
   testing::InitGoogleTest(&argument_count, argument_values);
-  const int result = RUN_ALL_TESTS();
+  const int result = ResolveRunnerGpuSelection() && ValidatePeerSelection()
+                         ? RUN_ALL_TESTS()
+                         : EXIT_FAILURE;
   const bool required_tests_passed = CheckRequiredTests(required_tests);
   const amdf_status_t cleanup_status = GetCtsDeviceCache().Deinitialize();
   if (!amdf_status_is_ok(cleanup_status)) {
