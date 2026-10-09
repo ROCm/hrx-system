@@ -1,3 +1,7 @@
+global.rodata.def @asan_lookup_words = align(8) bytes("070000000a0000000d00000010000000")
+
+global.rodata.def @asan_fallback_words = align(8) bytes("1300000016000000190000001c0000001f000000220000002500000028000000")
+
 kernel.def @asan_global_store_valid() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -7,6 +11,43 @@ kernel.def @asan_global_store_valid() {
   %value = scalar.constant 7 : i32
   %global = buffer.assume.memory_space<global> %output : buffer
   %output_view = buffer.view %global[%base] : buffer -> view<1xi32>
+  view.store %value, %output_view[%output_index] : i32, view<1xi32>
+  kernel.return
+}
+
+kernel.def @asan_rodata_load_valid() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%position: index, %output: buffer) {
+  %base = index.constant 0 : offset
+  %output_index = index.constant 0 : index
+  %bounded_position = index.assume %position [range(%position, 0, 3)] : index
+  %table = global.load @asan_lookup_words : buffer
+  %table_view = buffer.view %table[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = view.load %table_view[%bounded_position] : view<4xi32> -> i32
+  view.store %value, %output_view[%output_index] : i32, view<1xi32>
+  kernel.return
+}
+
+// A runtime root selection keeps the intentionally invalid access
+// source-verifiable and exercises the same immutable-object redzone on every
+// AMDGPU target family.
+kernel.def @asan_rodata_load_redzone() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%select_table: i1, %output: buffer) {
+  %base = index.constant 0 : offset
+  %redzone_offset = index.constant 16 : offset
+  %output_index = index.constant 0 : index
+  %table = global.load @asan_lookup_words : buffer
+  %constant_table = buffer.assume.memory_space<constant> %table : buffer
+  %fallback = global.load @asan_fallback_words : buffer
+  %constant_fallback = buffer.assume.memory_space<constant> %fallback : buffer
+  %selected = scf.select %select_table, %constant_table, %constant_fallback : buffer
+  %table_redzone = buffer.view %selected[%redzone_offset] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = view.load %table_redzone[%output_index] : view<1xi32> -> i32
   view.store %value, %output_view[%output_index] : i32, view<1xi32>
   kernel.return
 }
@@ -80,6 +121,25 @@ check.case @asan_global_store_redzone_case {
   %expected = check.generate.fill value(0) : tensor<1xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
   check.expect.event<device> {asan = {access = "write", access_length = 4}, count = 1, severity = "error", type = "asan_report"}
+  check.return
+}
+
+check.case @asan_rodata_load_valid_case {
+  %position = check.literal value(3) : index
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @asan_rodata_load_valid(%position, %output) : (index, tensor<1xi32>)
+  %expected = check.generate.fill value(16) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.case @asan_rodata_load_redzone_case {
+  %select_table = check.literal value(true) : i1
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @asan_rodata_load_redzone(%select_table, %output) : (i1, tensor<1xi32>)
+  %expected = check.generate.fill value(0) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.expect.event<device> {asan = {access = "read", access_length = 4}, count = 1, severity = "error", type = "asan_report"}
   check.return
 }
 

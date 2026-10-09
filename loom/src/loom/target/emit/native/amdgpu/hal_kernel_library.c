@@ -1009,6 +1009,11 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
           .kernel_count = entries.count,
           .data_symbols = code_object_data_symbols,
           .data_symbol_count = code_object_data_symbol_count,
+          .data_layout =
+              iree_any_bit_set(runtime_globals,
+                               LOOM_AMDGPU_RUNTIME_GLOBAL_ASAN_CONFIG)
+                  ? LOOM_AMDGPU_HSACO_DATA_LAYOUT_ASAN_GLOBALS_V0
+                  : LOOM_AMDGPU_HSACO_DATA_LAYOUT_PACKED,
       };
       status =
           loom_amdgpu_hsaco_plan_build(&hsaco_input, &hsaco_plan, table_arena);

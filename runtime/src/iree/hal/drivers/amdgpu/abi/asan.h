@@ -15,6 +15,17 @@
 // Name of the executable global containing |iree_hal_amdgpu_asan_config_t|.
 #define IREE_HAL_AMDGPU_ASAN_CONFIG_GLOBAL_NAME "iree_asan_config"
 
+// Marks Loom-native code objects whose dynamic object symbols describe exact
+// logical object ranges separated by shadow-granule redzones.
+#define IREE_HAL_AMDGPU_ASAN_GLOBAL_LAYOUT_V0_MARKER_NAME \
+  "iree_asan_global_layout_v0"
+
+// Byte length of the global layout v0 marker object.
+#define IREE_HAL_AMDGPU_ASAN_GLOBAL_LAYOUT_V0_MARKER_BYTE_LENGTH 1u
+
+// Log2 application bytes represented by one shadow byte in global layout v0.
+#define IREE_HAL_AMDGPU_ASAN_GLOBAL_LAYOUT_V0_SHADOW_SCALE_SHIFT 3u
+
 // ABI version for |iree_hal_amdgpu_asan_config_t|.
 #define IREE_HAL_AMDGPU_ASAN_CONFIG_ABI_VERSION_0 0u
 

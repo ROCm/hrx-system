@@ -119,6 +119,7 @@ iree_amdgpu_hal_cts_testdata(
     name = "asan_executable_enabled_testdata_amdgpu",
     srcs = [
         "testdata/asan_executable_test.c",
+        "testdata/asan_global_layout_test.c",
     ],
     backend_name = "amdgpu_asan",
     identifier = "iree_cts_asan_executable_enabled_testdata_amdgpu",
@@ -205,6 +206,7 @@ iree_runtime_cc_library(
     srcs = ["asan_executable_test.cc"],
     deps = [
         "//runtime/src/iree/hal/cts/sanitizer:sanitizer_test_util",
+        "//runtime/src/iree/hal/drivers/amdgpu:buffer",
         "//runtime/src/iree/hal/drivers/amdgpu:headers",
         "//runtime/src/iree/hal/drivers/amdgpu/abi",
     ],

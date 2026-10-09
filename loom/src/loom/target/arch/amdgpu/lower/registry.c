@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "loom/ops/buffer/ops.h"
+#include "loom/ops/global/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/sanitizer/ops.h"
@@ -1131,6 +1132,8 @@ static const loom_amdgpu_lower_dispatch_table_t
             LOOM_AMDGPU_DISPATCH_TABLE(kAmdgpuSanitizerDispatchRows),
         [LOOM_DIALECT_BUFFER] =
             LOOM_AMDGPU_DISPATCH_TABLE(kAmdgpuBufferDispatchRows),
+        [LOOM_DIALECT_GLOBAL] =
+            LOOM_AMDGPU_DISPATCH_TABLE(kAmdgpuGlobalDispatchRows),
         [LOOM_DIALECT_VIEW] =
             LOOM_AMDGPU_DISPATCH_TABLE(kAmdgpuViewDispatchRows),
         [LOOM_DIALECT_VECTOR] =

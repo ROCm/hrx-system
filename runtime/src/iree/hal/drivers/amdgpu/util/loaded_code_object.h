@@ -24,6 +24,14 @@ typedef struct iree_hal_amdgpu_loaded_code_object_range_t {
   uint64_t byte_length;
 } iree_hal_amdgpu_loaded_code_object_range_t;
 
+// Loader placement for one HSA loaded code object on one device agent.
+typedef struct iree_hal_amdgpu_loaded_code_object_load_info_t {
+  // Host/device allocation range owned by the HSA loader.
+  iree_hal_amdgpu_loaded_code_object_range_t range;
+  // Signed relocation applied to ELF virtual addresses in the code object.
+  int64_t load_delta;
+} iree_hal_amdgpu_loaded_code_object_load_info_t;
+
 // Translates a device address in an HSA loaded code object to its stable host
 // mapping.
 //
@@ -47,11 +55,23 @@ iree_status_t iree_hal_amdgpu_loaded_code_object_query_range(
     hsa_loaded_code_object_t loaded_code_object,
     iree_hal_amdgpu_loaded_code_object_range_t* out_range);
 
+// Queries the loader allocation and relocation for |loaded_code_object|.
+iree_status_t iree_hal_amdgpu_loaded_code_object_query_load_info(
+    const iree_hal_amdgpu_libhsa_t* libhsa,
+    hsa_loaded_code_object_t loaded_code_object,
+    iree_hal_amdgpu_loaded_code_object_load_info_t* out_load_info);
+
 // Finds and queries the loaded code-object range for |device_agent|.
 iree_status_t iree_hal_amdgpu_loaded_code_object_query_agent_range(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_executable_t executable,
     hsa_agent_t device_agent,
     iree_hal_amdgpu_loaded_code_object_range_t* out_range);
+
+// Finds and queries loader placement for |device_agent|.
+iree_status_t iree_hal_amdgpu_loaded_code_object_query_agent_load_info(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_executable_t executable,
+    hsa_agent_t device_agent,
+    iree_hal_amdgpu_loaded_code_object_load_info_t* out_load_info);
 
 #ifdef __cplusplus
 }  // extern "C"

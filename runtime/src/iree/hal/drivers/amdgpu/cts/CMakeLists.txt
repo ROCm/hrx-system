@@ -169,6 +169,7 @@ iree_amdgpu_hal_cts_testdata(
     "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/device/bitcode_hdrs.stamp"
   SRCS
     "testdata/asan_executable_test.c"
+    "testdata/asan_global_layout_test.c"
   TESTONLY
 )
 endif()
@@ -288,6 +289,7 @@ iree_cc_library(
   DEPS
     iree::hal::cts::sanitizer::sanitizer_test_util
     iree::hal::drivers::amdgpu::abi
+    iree::hal::drivers::amdgpu::buffer
     iree::hal::drivers::amdgpu::headers
   TESTONLY
   ALWAYSLINK

@@ -602,6 +602,105 @@ TEST(AmdgpuHsacoTest, WritesAlignedReadOnlyDataSymbols) {
   EXPECT_EQ(LoadLeU64(bytes, symbol + 16), data_symbol.byte_length);
 }
 
+TEST(AmdgpuHsacoTest, SeparatesAsanDataSymbolsWithShadowGranules) {
+  const uint8_t s_endpgm[] = {0x00, 0x00, 0x81, 0xbf};
+  const uint8_t first_contents[] = {0x11, 0x22, 0x33};
+  const uint8_t writable_contents[] = {0x44, 0x55, 0x66, 0x77, 0x88};
+  const uint8_t aligned_contents[] = {0x90, 0x91, 0x92, 0x93,
+                                      0x94, 0x95, 0x96, 0x97};
+  const loom_amdgpu_hsaco_kernel_t kernel = {
+      /*.metadata=*/MinimalKernel(IREE_SV("loom_kernel"),
+                                  IREE_SV("loom_kernel.kd")),
+      /*.descriptor_options=*/{},
+      /*.text=*/iree_make_const_byte_span(s_endpgm, sizeof(s_endpgm)),
+  };
+  const loom_amdgpu_hsaco_data_symbol_t data_symbols[] = {
+      {
+          /*.name=*/IREE_SV("first_rodata"),
+          /*.initial_contents=*/
+          iree_make_const_byte_span(first_contents, sizeof(first_contents)),
+          /*.byte_length=*/sizeof(first_contents),
+          /*.alignment=*/1,
+      },
+      {
+          /*.name=*/IREE_SV("writable_data"),
+          /*.initial_contents=*/
+          iree_make_const_byte_span(writable_contents,
+                                    sizeof(writable_contents)),
+          /*.byte_length=*/sizeof(writable_contents),
+          /*.alignment=*/1,
+          /*.flags=*/LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE,
+      },
+      {
+          /*.name=*/IREE_SV("aligned_rodata"),
+          /*.initial_contents=*/
+          iree_make_const_byte_span(aligned_contents, sizeof(aligned_contents)),
+          /*.byte_length=*/sizeof(aligned_contents),
+          /*.alignment=*/32,
+      },
+  };
+  const loom_amdgpu_hsaco_input_t file = {
+      /*.target_identity=*/TargetIdentity("gfx1100"),
+      /*.kernels=*/&kernel,
+      /*.kernel_count=*/1,
+      /*.data_symbols=*/data_symbols,
+      /*.data_symbol_count=*/IREE_ARRAYSIZE(data_symbols),
+      /*.data_layout=*/LOOM_AMDGPU_HSACO_DATA_LAYOUT_ASAN_GLOBALS_V0,
+  };
+
+  StreamPtr stream = CreateStream();
+  TestArena arena;
+  IREE_ASSERT_OK(WriteHsaco(&file, stream.get(), arena.arena()));
+  const std::string bytes = StreamBytes(stream.get());
+
+  const std::vector<Section> sections = ReadSections(bytes);
+  const Section& dynsym = FindSection(sections, ".dynsym");
+  const Section& dynstr = FindSection(sections, ".dynstr");
+  const Section& rodata = FindSection(sections, ".rodata");
+  const Section& data = FindSection(sections, ".data");
+  ASSERT_EQ(rodata.size, 112u);
+  ASSERT_EQ(data.size, 16u);
+  EXPECT_EQ(bytes.substr((size_t)rodata.offset + 64u, sizeof(first_contents)),
+            std::string((const char*)first_contents, sizeof(first_contents)));
+  EXPECT_EQ(
+      bytes.substr((size_t)rodata.offset + 96u, sizeof(aligned_contents)),
+      std::string((const char*)aligned_contents, sizeof(aligned_contents)));
+  EXPECT_EQ(
+      bytes.substr((size_t)data.offset, sizeof(writable_contents)),
+      std::string((const char*)writable_contents, sizeof(writable_contents)));
+  for (size_t i = 72u; i < 80u; ++i) {
+    EXPECT_EQ(bytes[(size_t)rodata.offset + i], '\0');
+  }
+  for (size_t i = 104u; i < 112u; ++i) {
+    EXPECT_EQ(bytes[(size_t)rodata.offset + i], '\0');
+  }
+  for (size_t i = 8u; i < 16u; ++i) {
+    EXPECT_EQ(bytes[(size_t)data.offset + i], '\0');
+  }
+
+  const std::string dynstr_contents =
+      bytes.substr((size_t)dynstr.offset, (size_t)dynstr.size);
+  ASSERT_EQ(dynsym.size, 6u * 24u);
+  const size_t first_symbol = (size_t)dynsym.offset + 3u * 24u;
+  const size_t writable_symbol = first_symbol + 24u;
+  const size_t aligned_symbol = writable_symbol + 24u;
+  EXPECT_EQ(
+      ReadNullTerminatedString(dynstr_contents, LoadLeU32(bytes, first_symbol)),
+      "first_rodata");
+  EXPECT_EQ(LoadLeU64(bytes, first_symbol + 8), rodata.address + 64u);
+  EXPECT_EQ(LoadLeU64(bytes, first_symbol + 16), sizeof(first_contents));
+  EXPECT_EQ(ReadNullTerminatedString(dynstr_contents,
+                                     LoadLeU32(bytes, writable_symbol)),
+            "writable_data");
+  EXPECT_EQ(LoadLeU64(bytes, writable_symbol + 8), data.address);
+  EXPECT_EQ(LoadLeU64(bytes, writable_symbol + 16), sizeof(writable_contents));
+  EXPECT_EQ(ReadNullTerminatedString(dynstr_contents,
+                                     LoadLeU32(bytes, aligned_symbol)),
+            "aligned_rodata");
+  EXPECT_EQ(LoadLeU64(bytes, aligned_symbol + 8), rodata.address + 96u);
+  EXPECT_EQ(LoadLeU64(bytes, aligned_symbol + 16), sizeof(aligned_contents));
+}
+
 TEST(AmdgpuHsacoTest, PatchesDataSymbolRel32TextFixups) {
   std::vector<uint8_t> text_bytes(48, 0xcc);
   const loom_amdgpu_hsaco_text_fixup_t text_fixups[] = {

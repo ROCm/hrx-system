@@ -615,6 +615,7 @@ loom_cc_library(
     ::text_fixup
     iree::base
     iree::base::internal::arena
+    loom::target::arch::amdgpu::abi::asan
     loom::target::arch::amdgpu::amdhsa_target_id
     loom::target::arch::amdgpu::target_identity
     loom::target::arch::amdgpu::target_info

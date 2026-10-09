@@ -514,6 +514,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu:amdhsa_target_id",
         "//loom/src/loom/target/arch/amdgpu:target_identity",
         "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/abi:asan",
         "//loom/src/loom/target/emit/native:elf",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

@@ -61,6 +61,15 @@ typedef struct loom_amdgpu_hsaco_data_symbol_t {
   loom_amdgpu_hsaco_data_symbol_flags_t flags;
 } loom_amdgpu_hsaco_data_symbol_t;
 
+// Data-object placement contract used by the code-object loader.
+typedef uint32_t loom_amdgpu_hsaco_data_layout_t;
+enum loom_amdgpu_hsaco_data_layout_e {
+  // Packs objects according to their authored alignment requirements.
+  LOOM_AMDGPU_HSACO_DATA_LAYOUT_PACKED = 0u,
+  // Aligns objects to the ASAN v0 shadow granule and appends one redzone.
+  LOOM_AMDGPU_HSACO_DATA_LAYOUT_ASAN_GLOBALS_V0 = 1u,
+};
+
 // Complete AMDGPU HSA code object description.
 typedef struct loom_amdgpu_hsaco_input_t {
   // Resolved compiler target and normalized AMDHSA feature states.
@@ -73,6 +82,8 @@ typedef struct loom_amdgpu_hsaco_input_t {
   const loom_amdgpu_hsaco_data_symbol_t* data_symbols;
   // Number of entries in |data_symbols|.
   iree_host_size_t data_symbol_count;
+  // Placement contract applied to all data symbols in the code object.
+  loom_amdgpu_hsaco_data_layout_t data_layout;
 } loom_amdgpu_hsaco_input_t;
 
 // Builds a trusted final code-object |out_plan| from |input|.

@@ -177,10 +177,15 @@ iree_cc_library(
   HDRS
     "hsaco_metadata.h"
   SRCS
+    "hsaco_data_layout.c"
+    "hsaco_data_layout.h"
+    "hsaco_elf.c"
+    "hsaco_elf.h"
     "hsaco_metadata.c"
   DEPS
     iree::base
     iree::hal
+    iree::hal::drivers::amdgpu::abi
   PUBLIC
 )
 endif()
@@ -194,6 +199,7 @@ iree_cc_test(
   DEPS
     ::hsaco_metadata
     iree::base
+    iree::hal::drivers::amdgpu::abi
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
