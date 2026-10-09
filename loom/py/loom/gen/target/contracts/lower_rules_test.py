@@ -40,6 +40,7 @@ from loom.gen.target.contracts.lower_rules import (
     _intern_diagnostic_params,
     _intern_optional_rows,
     _intern_rows,
+    _primary_descriptor_feature_classes,
     _validate_c_table_shape,
     generate_lower_rule_set,
     generate_lower_rule_set_from_compiled,
@@ -328,6 +329,7 @@ def test_rule_row_overlays_action_range_starts() -> None:
             primary_emit_ordinal=1,
         ),
         {},
+        primary_descriptor_feature_class=3,
     )
     alias_fields = rule_row(
         LowerRule(
@@ -351,11 +353,85 @@ def test_rule_row_overlays_action_range_starts() -> None:
     )
 
     assert ".action.emit_start = 2" in emit_fields
-    assert ".metadata.emit.primary_emit_ordinal = 1" in emit_fields
+    assert (".metadata.emit.primary_emit = LOOM_LOW_LOWER_RULE_PRIMARY_EMIT(1, 3)") in emit_fields
     assert ".action.alias_ref_start = 4" in alias_fields
     assert ".metadata.value.alias_ref_count = 1" in alias_fields
     assert ".action.elide_ref_start = 5" in elide_fields
     assert ".metadata.value.elide_ref_count = 1" in elide_fields
+
+
+def test_rule_row_retains_wide_primary_emit_ordinal() -> None:
+    fields = rule_row(
+        LowerRule(
+            source_op=scalar_arithmetic.scalar_addi,
+            temporary_count=0,
+            guard_start=0,
+            guard_count=0,
+            emit_start=0,
+            emit_count=256,
+            primary_emit_ordinal=255,
+        ),
+        {},
+        primary_descriptor_feature_class=1,
+    )
+
+    assert ".flags = LOOM_LOW_LOWER_RULE_FLAG_WIDE_PRIMARY_EMIT" in fields
+    assert ".metadata.emit.primary_emit = 255" in fields
+
+
+def test_primary_descriptor_feature_classes_intern_masks() -> None:
+    feature_one = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        feature_mask_words=(1,),
+    )
+    feature_four = replace(
+        TEST_LOW_MUL_I32_DESCRIPTOR,
+        feature_mask_words=(4,),
+    )
+    extended_feature = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        feature_mask_words=(0, 1),
+    )
+    table = _compiled_lower_rule_set(
+        rules=tuple(
+            LowerRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                temporary_count=0,
+                guard_start=0,
+                guard_count=0,
+                emit_start=index,
+                emit_count=1,
+                primary_emit_ordinal=0,
+            )
+            for index in range(5)
+        ),
+        emits=tuple(
+            LowerEmit(kind=LowerEmitKind.DESCRIPTOR_OP, descriptor=descriptor)
+            for descriptor in (
+                feature_one,
+                feature_four,
+                feature_one,
+                extended_feature,
+                TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
+            )
+        ),
+    )
+
+    masks, classes = _primary_descriptor_feature_classes(table)
+
+    assert masks == (1, 4)
+    assert classes == (1, 2, 1, 0xFF, 0)
+
+    generated = generate_lower_rule_set_from_compiled(
+        _c_shape_contract(),
+        compiled=table,
+    )
+    assert "static const uint64_t" in generated.source
+    assert "UINT64_C(0x1)" in generated.source
+    assert "UINT64_C(0x4)" in generated.source
+    assert ".primary_descriptor_feature_mask_count = IREE_ARRAYSIZE(" in generated.source
+    assert ".primary_descriptor_feature_masks = " in generated.source
+    assert "LOOM_LOW_LOWER_RULE_PRIMARY_EMIT(0, 255)" in generated.source
 
 
 def test_validate_c_table_shape_accepts_structural_emit_without_primary() -> None:

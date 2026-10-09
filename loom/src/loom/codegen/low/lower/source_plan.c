@@ -1423,6 +1423,10 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
   loom_low_lower_rule_match_context_t match_context;
   loom_low_lower_rule_match_context_initialize_from_lowering(
       context, /*view_regions=*/NULL, source_memory_state, &match_context);
+  // The lowering policy owns this rule-set list and its paired descriptor set.
+  // Generated primary feature classes can therefore bypass descriptor lookup.
+  match_context.flags |=
+      LOOM_LOW_LOWER_RULE_MATCH_FLAG_PRIMARY_DESCRIPTORS_BOUND;
   match_context.consumption_query = consumption_query;
   bool view_regions_resolved = false;
   const loom_low_lower_rule_set_t* initial_failed_rule_set =

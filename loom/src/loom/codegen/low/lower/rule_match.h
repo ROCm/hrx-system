@@ -87,6 +87,11 @@ typedef uint16_t loom_low_lower_rule_match_flags_t;
 #define LOOM_LOW_LOWER_RULE_MATCH_FLAG_CONTRACT_ONLY \
   ((loom_low_lower_rule_match_flags_t)1u << 0)
 
+// Primary descriptor refs come from the policy paired with descriptor_set.
+// Selection may consume generated feature classes without resolving presence.
+#define LOOM_LOW_LOWER_RULE_MATCH_FLAG_PRIMARY_DESCRIPTORS_BOUND \
+  ((loom_low_lower_rule_match_flags_t)1u << 1)
+
 struct loom_low_lower_rule_match_context_t {
   // Source module being matched.
   const loom_module_t* module;

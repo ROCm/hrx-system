@@ -83,6 +83,40 @@ def _intern_rows[RowT: Hashable](
     return tuple(unique_rows), tuple(row_refs)
 
 
+def _primary_descriptor_feature_classes(
+    table: CompiledLowerRuleSet,
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Interns primary descriptor feature masks and returns rule classes."""
+
+    masks: list[int] = []
+    mask_classes: dict[int, int] = {}
+    rule_classes: list[int] = []
+    for rule in table.rules:
+        if rule.primary_emit_ordinal == LOWER_RULE_PRIMARY_EMIT_NONE or rule.primary_emit_ordinal >= _U8_MAX:
+            rule_classes.append(_U8_MAX)
+            continue
+        emit = table.emits[rule.emit_start + rule.primary_emit_ordinal]
+        descriptor = emit.descriptor
+        feature_mask_words = descriptor.feature_mask_words if descriptor is not None else ()
+        if any(feature_mask_words[1:]):
+            rule_classes.append(_U8_MAX)
+            continue
+        mask = feature_mask_words[0] if feature_mask_words else 0
+        if mask == 0:
+            rule_classes.append(0)
+            continue
+        feature_class = mask_classes.get(mask)
+        if feature_class is None:
+            if len(masks) == _U8_MAX - 1:
+                rule_classes.append(_U8_MAX)
+                continue
+            masks.append(mask)
+            feature_class = len(masks)
+            mask_classes[mask] = feature_class
+        rule_classes.append(feature_class)
+    return tuple(masks), tuple(rule_classes)
+
+
 def _intern_optional_rows[RowT: Hashable](
     rows: Sequence[RowT | None],
 ) -> tuple[tuple[RowT, ...], tuple[int, ...]]:
@@ -267,6 +301,7 @@ def _generate_source(
     ) = _intern_optional_rows(tuple(row.address_materializer for row in table.source_memories))
     source_memory_diagnostics, source_memory_diagnostic_indices = _intern_rows(tuple(lower_rule_rows.source_memory_diagnostic_indices(row) for row in table.source_memories))
     _validate_c_table_shape(table, source_contract, descriptor_ref_keys)
+    primary_descriptor_feature_masks, primary_descriptor_feature_classes = _primary_descriptor_feature_classes(table)
     descriptor_refs = {key: index for index, key in enumerate(descriptor_ref_keys)}
     report_key_ordinals = {key: index + 1 for index, key in enumerate(report_keys)}
     string_pool = _build_string_pool(
@@ -589,11 +624,30 @@ def _generate_source(
     )
 
     rules_name = f"k{c_table_prefix}Rules"
+    primary_descriptor_feature_masks_name = f"k{c_table_prefix}PrimaryDescriptorFeatureMasks"
+    lines.extend(
+        lower_rule_rows.emit_optional_value_array(
+            primary_descriptor_feature_masks_name,
+            "uint64_t",
+            [f"UINT64_C(0x{mask:x})" for mask in primary_descriptor_feature_masks],
+        )
+    )
     lines.extend(
         lower_rule_rows.emit_optional_array(
             rules_name,
             "loom_low_lower_rule_t",
-            [lower_rule_rows.rule_row(row, report_key_ordinals) for row in table.rules],
+            [
+                lower_rule_rows.rule_row(
+                    row,
+                    report_key_ordinals,
+                    primary_descriptor_feature_class=feature_class,
+                )
+                for row, feature_class in zip(
+                    table.rules,
+                    primary_descriptor_feature_classes,
+                    strict=True,
+                )
+            ],
         )
     )
 
@@ -616,6 +670,8 @@ def _generate_source(
             string_data_name=string_data_name,
             spans_name=spans_name,
             rules_name=rules_name,
+            primary_descriptor_feature_masks=primary_descriptor_feature_masks,
+            primary_descriptor_feature_masks_name=(primary_descriptor_feature_masks_name),
             report_keys=report_keys,
             report_keys_name=report_keys_name,
             type_patterns_name=type_patterns_name,

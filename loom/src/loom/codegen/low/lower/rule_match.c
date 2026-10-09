@@ -154,6 +154,22 @@ static bool loom_low_lower_rule_descriptor_features_available(
   return true;
 }
 
+static bool loom_low_lower_rule_primary_feature_class_available(
+    const loom_low_lower_rule_match_context_t* match_context,
+    const loom_low_lower_rule_set_t* rule_set, uint8_t feature_class) {
+  if (feature_class == 0) {
+    return true;
+  }
+  IREE_ASSERT_NE(feature_class,
+                 LOOM_LOW_LOWER_RULE_PRIMARY_FEATURE_CLASS_DYNAMIC);
+  const uint16_t feature_mask_index = (uint16_t)(feature_class - 1u);
+  IREE_ASSERT_LT(feature_mask_index,
+                 rule_set->primary_descriptor_feature_mask_count);
+  const uint64_t required_features =
+      rule_set->primary_descriptor_feature_masks[feature_mask_index];
+  return (required_features & ~match_context->feature_bits) == 0;
+}
+
 static iree_status_t loom_low_lower_rule_descriptor_available(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set,
@@ -1692,19 +1708,35 @@ iree_status_t loom_low_lower_rule_set_select_rule_range_with_match_context(
         &source_memory_compatible, &uses_source_memory_access, source_nodes,
         &source_node_count));
     bool primary_descriptor_unavailable = false;
-    if (rule_matches) {
-      const loom_low_lower_descriptor_ref_t primary_descriptor_ref =
-          loom_low_lower_rule_primary_descriptor_ref(rule_set, rule);
-      if (primary_descriptor_ref != LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
-        const loom_low_descriptor_t* primary_descriptor = NULL;
-        IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
-            match_context, rule_set, primary_descriptor_ref,
-            &primary_descriptor));
-        rule_matches = primary_descriptor != NULL;
-        primary_descriptor_unavailable =
-            primary_descriptor != NULL &&
-            !loom_low_lower_rule_descriptor_features_available(
-                match_context, primary_descriptor);
+    if (rule_matches && rule->emit_count != 0) {
+      const uint16_t primary_emit_ordinal =
+          loom_low_lower_rule_primary_emit_ordinal(rule);
+      if (primary_emit_ordinal != LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE) {
+        const uint8_t feature_class =
+            loom_low_lower_rule_primary_feature_class(rule);
+        if (iree_all_bits_set(
+                match_context->flags,
+                LOOM_LOW_LOWER_RULE_MATCH_FLAG_PRIMARY_DESCRIPTORS_BOUND) &&
+            feature_class !=
+                LOOM_LOW_LOWER_RULE_PRIMARY_FEATURE_CLASS_DYNAMIC) {
+          primary_descriptor_unavailable =
+              !loom_low_lower_rule_primary_feature_class_available(
+                  match_context, rule_set, feature_class);
+        } else {
+          const loom_low_lower_descriptor_ref_t primary_descriptor_ref =
+              loom_low_lower_rule_primary_descriptor_ref(rule_set, rule);
+          if (primary_descriptor_ref != LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
+            const loom_low_descriptor_t* primary_descriptor = NULL;
+            IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
+                match_context, rule_set, primary_descriptor_ref,
+                &primary_descriptor));
+            rule_matches = primary_descriptor != NULL;
+            primary_descriptor_unavailable =
+                primary_descriptor != NULL &&
+                !loom_low_lower_rule_descriptor_features_available(
+                    match_context, primary_descriptor);
+          }
+        }
       }
     }
     if (rule_matches && primary_descriptor_unavailable) {
@@ -2138,14 +2170,17 @@ const loom_low_lower_diagnostic_t* loom_low_lower_rule_set_failure_diagnostic(
 loom_low_lower_descriptor_ref_t loom_low_lower_rule_primary_descriptor_ref(
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_rule_t* rule) {
-  if (rule->emit_count == 0 || rule->metadata.emit.primary_emit_ordinal ==
-                                   LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE) {
+  if (rule->emit_count == 0) {
     return LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE;
   }
-  IREE_ASSERT_LT(rule->metadata.emit.primary_emit_ordinal, rule->emit_count);
+  const uint16_t primary_emit_ordinal =
+      loom_low_lower_rule_primary_emit_ordinal(rule);
+  if (primary_emit_ordinal == LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE) {
+    return LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE;
+  }
+  IREE_ASSERT_LT(primary_emit_ordinal, rule->emit_count);
   const uint16_t emit_ref_index =
-      (uint16_t)(rule->action.emit_start +
-                 rule->metadata.emit.primary_emit_ordinal);
+      (uint16_t)(rule->action.emit_start + primary_emit_ordinal);
   return loom_low_lower_rule_set_emit_at(rule_set, emit_ref_index)
       ->descriptor_ref;
 }
