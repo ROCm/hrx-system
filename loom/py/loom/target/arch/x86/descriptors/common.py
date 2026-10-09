@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TypeVar
 
 from loom.target.arch.x86.packed_dot_data import (
     CONTRACT_FLAG_SATURATING,
@@ -48,8 +47,6 @@ from loom.target.low_descriptors import (
     Resource,
     ScheduleClass,
 )
-
-_T = TypeVar("_T", RegClass, Resource, ScheduleClass, EnumDomain)
 
 _REG_GPR32 = "x86.gpr32"
 _REG_GPR64 = "x86.gpr64"
@@ -105,6 +102,21 @@ _ZMM_ALT = (RegClassAlt(_REG_ZMM),)
 _K_ALT = (RegClassAlt(_REG_K),)
 
 _X86_VEX_ADDRESSABLE_REGISTER_COUNT = 16
+
+
+def _merge_named_items[ItemT: (RegClass, Resource, ScheduleClass, EnumDomain)](
+    item_groups: tuple[tuple[ItemT, ...], ...],
+) -> tuple[ItemT, ...]:
+    """Merges descriptor support tables by stable item name."""
+    merged_items: list[ItemT] = []
+    seen_names: set[str] = set()
+    for items in item_groups:
+        for item in items:
+            if item.name in seen_names:
+                continue
+            merged_items.append(item)
+            seen_names.add(item.name)
+    return tuple(merged_items)
 
 
 def _low_subset_operand(operand: Operand, addressable_unit_count: int) -> Operand:

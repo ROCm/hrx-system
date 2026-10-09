@@ -29,7 +29,7 @@ typedef uint64_t loom_x86_feature_bits_t;
 #define LOOM_X86_FEATURE_AVX_VNNI_INT16 (UINT64_C(1) << 4)
 // Target supports AVX10.2 extended VNNI dot products.
 #define LOOM_X86_FEATURE_AVX10_2 (UINT64_C(1) << 5)
-// Target supports AVX-512 BF16 dot products.
+// Target supports AVX-512 BF16 conversions and dot products.
 #define LOOM_X86_FEATURE_AVX512_BF16 (UINT64_C(1) << 6)
 // Target supports AVX-512 FP16 arithmetic and conversions.
 #define LOOM_X86_FEATURE_AVX512_FP16 (UINT64_C(1) << 7)

@@ -262,7 +262,13 @@ class VectorMachineInstruction:
         ):
             raise ValueError("EVEX recipe modifier requires EVEX encodings")
 
-    def bind(self, descriptor: Descriptor, prefix: VectorEncodingPrefix) -> Descriptor:
+    def bind(
+        self,
+        descriptor: Descriptor,
+        prefix: VectorEncodingPrefix,
+        *,
+        vector_bit_width: int | None = None,
+    ) -> Descriptor:
         """Validates and binds native facts to one concrete descriptor row."""
         if descriptor.mnemonic != self.descriptor_mnemonic:
             raise ValueError(
@@ -274,7 +280,23 @@ class VectorMachineInstruction:
         immediate_shapes = vector_descriptor_immediate_shapes(descriptor)
         if immediate_shapes != self.immediates:
             raise ValueError(f"{descriptor.key}: native immediate shape mismatch")
-        vector_bit_width = vector_descriptor_bit_width(descriptor)
+        descriptor_bit_width = vector_descriptor_bit_width(descriptor)
+        if vector_bit_width is None:
+            vector_bit_width = descriptor_bit_width
+        elif (
+            descriptor_bit_width is not None
+            and descriptor_bit_width != vector_bit_width
+        ):
+            behavior = VectorEncodingBehavior((self.encoding_format_id >> 12) & 7)
+            if behavior not in _MEMORY_BEHAVIORS:
+                raise ValueError(
+                    f"{descriptor.key}: explicit vector width requires memory encoding"
+                )
+            if descriptor_bit_width > vector_bit_width:
+                raise ValueError(
+                    f"{descriptor.key}: {descriptor_bit_width}-bit register exceeds "
+                    f"{vector_bit_width}-bit encoding width"
+                )
         variants = tuple(
             item
             for item in self.encodings

@@ -226,6 +226,7 @@ def _overlay_descriptor_set(
     family: str,
     vector_bit_widths: Sequence[int],
     allocatable_count: int,
+    qualify_asm_mnemonics: bool = False,
 ) -> DescriptorSet:
     return _descriptor_set(
         key=key,
@@ -237,6 +238,7 @@ def _overlay_descriptor_set(
         descriptor_data=_packed_dot_descriptor_data((family,), vector_bit_widths),
         vector_bit_widths=vector_bit_widths,
         allocatable_count=allocatable_count,
+        qualify_asm_mnemonics=qualify_asm_mnemonics,
     )
 
 
@@ -252,7 +254,7 @@ X86_AVX512_VNNI_DESCRIPTOR_SET = _overlay_descriptor_set(
     allocatable_count=32,
 )
 
-X86_AVX512_BF16_DESCRIPTOR_SET = _overlay_descriptor_set(
+X86_AVX512_BF16_DOT_DESCRIPTOR_SET = _overlay_descriptor_set(
     key="x86.avx512_bf16.core",
     feature_key="x86.avx512_bf16.v1",
     stem="avx512_bf16",
@@ -262,6 +264,7 @@ X86_AVX512_BF16_DESCRIPTOR_SET = _overlay_descriptor_set(
     family=FAMILY_AVX512_BF16,
     vector_bit_widths=(128, 256, 512),
     allocatable_count=32,
+    qualify_asm_mnemonics=True,
 )
 
 X86_AVX_VNNI_DESCRIPTOR_SET = _overlay_descriptor_set(
@@ -310,15 +313,6 @@ X86_AVX10_2_DESCRIPTOR_SET = _overlay_descriptor_set(
     family=FAMILY_AVX10_2,
     vector_bit_widths=(128, 256, 512),
     allocatable_count=32,
-)
-
-X86_PACKED_DOT_FEATURE_DESCRIPTOR_SETS = (
-    X86_AVX512_VNNI_DESCRIPTOR_SET,
-    X86_AVX512_BF16_DESCRIPTOR_SET,
-    X86_AVX_VNNI_DESCRIPTOR_SET,
-    X86_AVX_VNNI_INT8_DESCRIPTOR_SET,
-    X86_AVX_VNNI_INT16_DESCRIPTOR_SET,
-    X86_AVX10_2_DESCRIPTOR_SET,
 )
 
 X86_PACKED_DOT_DESCRIPTOR_SET = _descriptor_set(
