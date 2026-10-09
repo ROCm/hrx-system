@@ -24,12 +24,22 @@ extern "C" {
 
 #define LOOM_AMDGPU_ASAN_CONFIG_GLOBAL_NAME "iree_asan_config"
 
+// Marks Loom-native code objects whose dynamic object symbols describe the
+// ASAN global layout v0 contract. Each object has its exact logical size,
+// begins on a shadow granule, and is followed by a poisoned shadow granule.
+#define LOOM_AMDGPU_ASAN_GLOBAL_LAYOUT_V0_MARKER_NAME \
+  "iree_asan_global_layout_v0"
+
 // ABI version for AMDGPU ASAN feedback report payloads.
 #define LOOM_AMDGPU_ASAN_REPORT_ABI_VERSION 0u
 
 // Log2 application bytes represented by one shadow byte in the current Loom
 // AMDGPU access-check lowering.
 #define LOOM_AMDGPU_ASAN_SHADOW_SCALE_SHIFT 3u
+
+// Application bytes represented by one shadow byte in global layout v0.
+#define LOOM_AMDGPU_ASAN_GLOBAL_LAYOUT_V0_GRANULE_SIZE \
+  (1u << LOOM_AMDGPU_ASAN_SHADOW_SCALE_SHIFT)
 
 // Bitset of loom_amdgpu_asan_config_flag_bits_e values.
 typedef uint32_t loom_amdgpu_asan_config_flags_t;

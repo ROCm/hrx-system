@@ -39,13 +39,15 @@ typedef uint32_t loom_amdgpu_runtime_global_flags_t;
 
 enum {
   // Maximum number of symbols produced by the current runtime-global bitset.
-  LOOM_AMDGPU_RUNTIME_GLOBAL_SYMBOL_CAPACITY = 3u,
+  LOOM_AMDGPU_RUNTIME_GLOBAL_SYMBOL_CAPACITY = 4u,
   // Writable configuration globals use pointer-granularity alignment.
   LOOM_AMDGPU_RUNTIME_GLOBAL_CONFIG_ALIGNMENT = 8u,
   // Byte length of the AMDGPU HAL feedback-channel configuration global.
   LOOM_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG_BYTE_LENGTH = 64u,
   // Byte length of the AMDGPU HAL ASAN configuration global.
   LOOM_AMDGPU_RUNTIME_GLOBAL_ASAN_CONFIG_BYTE_LENGTH = 96u,
+  // Byte length of the ASAN global-layout marker object.
+  LOOM_AMDGPU_RUNTIME_GLOBAL_ASAN_LAYOUT_MARKER_BYTE_LENGTH = 1u,
   // Byte length of the AMDGPU HAL TSAN configuration global.
   LOOM_AMDGPU_RUNTIME_GLOBAL_TSAN_CONFIG_BYTE_LENGTH = 96u,
 };
@@ -54,6 +56,8 @@ enum {
   IREE_SVL(LOOM_AMDGPU_FEEDBACK_CONFIG_GLOBAL_NAME)
 #define LOOM_AMDGPU_RUNTIME_GLOBAL_ASAN_CONFIG_NAME \
   IREE_SVL(LOOM_AMDGPU_ASAN_CONFIG_GLOBAL_NAME)
+#define LOOM_AMDGPU_RUNTIME_GLOBAL_ASAN_LAYOUT_MARKER_NAME \
+  IREE_SVL(LOOM_AMDGPU_ASAN_GLOBAL_LAYOUT_V0_MARKER_NAME)
 #define LOOM_AMDGPU_RUNTIME_GLOBAL_TSAN_CONFIG_NAME \
   IREE_SVL(LOOM_AMDGPU_TSAN_CONFIG_GLOBAL_NAME)
 
