@@ -203,6 +203,9 @@ class GpuFileGatherTest : public GpuFileIoFixture {
     ASSERT_NO_FATAL_FAILURE(CreateRegisteredPages(
         expected_payload.size() * sizeof(uint32_t), kGuard, &payload));
     ASSERT_NO_FATAL_FAILURE(CreateRing(payload, path));
+    if (IsSkipped()) {
+      return;
+    }
     ASSERT_NO_FATAL_FAILURE(CreateGuardedMemory(expected_state, &state));
     ASSERT_NO_FATAL_FAILURE(CreateGuardedMemory(expected_records, &records));
     ASSERT_NO_FATAL_FAILURE(CreateGuardedMemory(expected_requests, &requests));

@@ -673,10 +673,19 @@ class GpuFileLatencyTest : public GpuFileIoFixture,
         2 * profile.depth * stride + page_byte_length_, kGuard, &payload));
     ASSERT_NO_FATAL_FAILURE(
         CreateRing(payload, FileIoPath::kHostRelay, idle_milliseconds));
+    if (IsSkipped()) {
+      return;
+    }
     Ring* poll_ring = ring_;
     ASSERT_NO_FATAL_FAILURE(CreateRing(payload, FileIoPath::kHostWait));
+    if (IsSkipped()) {
+      return;
+    }
     Ring* wait_ring = ring_;
     ASSERT_NO_FATAL_FAILURE(CreateRing(payload, FileIoPath::kHostPoll));
+    if (IsSkipped()) {
+      return;
+    }
     Ring* host_poll_ring = ring_;
     ASSERT_NO_FATAL_FAILURE(CreateMemory(
         AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &state));
@@ -1207,10 +1216,19 @@ class GpuFileDemandTest : public GpuFileLatencyTest {
         2 * profile.credits * stride + page_byte_length_, kGuard, &payload));
     ASSERT_NO_FATAL_FAILURE(
         CreateRing(payload, FileIoPath::kHostRelay, 1, 512));
+    if (IsSkipped()) {
+      return;
+    }
     Ring* poll_ring = ring_;
     ASSERT_NO_FATAL_FAILURE(CreateRing(payload, FileIoPath::kHostWait, 1, 512));
+    if (IsSkipped()) {
+      return;
+    }
     Ring* wait_ring = ring_;
     ASSERT_NO_FATAL_FAILURE(CreateRing(payload, FileIoPath::kHostPoll, 1, 512));
+    if (IsSkipped()) {
+      return;
+    }
     Ring* host_poll_ring = ring_;
     const amdf_memory_access_t access =
         AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
