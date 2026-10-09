@@ -852,8 +852,13 @@ void DesignatedInitializerCheck::check(
   }
   if (const auto* Constructor =
           Result.Nodes.getNodeAs<CXXConstructExpr>("constructor")) {
-    CheckArgumentLabels(*this, Constructor, *Result.Context,
-                        *Result.SourceManager);
+    // Implicit copy construction of an aggregate member has no source-spelled
+    // argument delimiters. Its argument may still be preceded by the enclosing
+    // aggregate's field label, which the InitListExpr matcher owns.
+    if (Constructor->getParenOrBraceRange().isValid()) {
+      CheckArgumentLabels(*this, Constructor, *Result.Context,
+                          *Result.SourceManager);
+    }
   }
   if (const auto* Compound = Result.Nodes.getNodeAs<CompoundStmt>("compound")) {
     CheckSetupBlocks(*this, Compound, *Result.Context, *Result.SourceManager);

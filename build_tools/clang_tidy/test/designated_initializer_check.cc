@@ -51,6 +51,15 @@ struct NontrivialAggregate {
   NontrivialMember member;
 };
 
+struct CopyableMember {
+  CopyableMember() = default;
+  CopyableMember(const CopyableMember&) = default;
+};
+
+struct CopyableAggregate {
+  CopyableMember member;
+};
+
 struct WithAnonymous {
   union {
     int integer;
@@ -135,6 +144,9 @@ Config macro_argument_config = FORWARD_CONFIG(Config{
     /*.name=*/"macro-argument",
     /*.flags=*/25,
 });
+
+CopyableMember copyable_source;
+CopyableAggregate copyable_config = {/*.member=*/copyable_source};
 
 void ConsumeConfig(int ordinal, const char* name);
 

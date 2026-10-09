@@ -86,6 +86,10 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn('.name = "macro-argument",', fixed_source)
         self.assertIn(".flags = 25,", fixed_source)
         self.assertIn(
+            "CopyableAggregate copyable_config = {.member = copyable_source};",
+            fixed_source,
+        )
+        self.assertIn(
             'FORWARD_CONFIG(ConsumeConfig(/*ordinal=*/26, /*name=*/"call"));',
             fixed_source,
         )
