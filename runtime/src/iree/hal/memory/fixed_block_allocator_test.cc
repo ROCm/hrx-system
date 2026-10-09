@@ -592,10 +592,11 @@ TEST(FixedBlockAllocator, BlockFlagsAccessor) {
 //===----------------------------------------------------------------------===//
 
 TEST(FixedBlockAllocator, PartialWordBlockCount) {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 64;
-  options.block_count = 100;  // 1 full word (64) + 36 in second word.
-  options.frontier_capacity = 1;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 64,
+      .block_count = 100,  // 1 full word (64) + 36 in second word.
+      .frontier_capacity = 1,
+  };
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(

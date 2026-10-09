@@ -14,11 +14,12 @@
 namespace {
 
 static iree_hal_memory_tlsf_options_t BenchOptions() {
-  iree_hal_memory_tlsf_options_t options = {};
-  options.range_length = 256 * 1024 * 1024;  // 256 MB
-  options.alignment = 16;
-  options.initial_block_capacity = 4096;
-  options.frontier_capacity = 8;
+  iree_hal_memory_tlsf_options_t options = {
+      .range_length = 256 * 1024 * 1024,  // 256 MB
+      .alignment = 16,
+      .initial_block_capacity = 4096,
+      .frontier_capacity = 8,
+  };
   return options;
 }
 

@@ -12,9 +12,10 @@
 namespace {
 
 static iree_hal_memory_arena_options_t BenchOptions() {
-  iree_hal_memory_arena_options_t options = {};
-  options.capacity = 64 * 1024 * 1024;  // 64 MB
-  options.frontier_capacity = 4;
+  iree_hal_memory_arena_options_t options = {
+      .capacity = 64 * 1024 * 1024,  // 64 MB
+      .frontier_capacity = 4,
+  };
   return options;
 }
 

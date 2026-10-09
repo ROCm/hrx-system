@@ -468,9 +468,10 @@ TEST(Arena, AllAcquisitionsSeePreviousFrontier) {
 //===----------------------------------------------------------------------===//
 
 TEST(Arena, TaintOnFrontierOverflow) {
-  iree_hal_memory_arena_options_t options = {};
-  options.capacity = 4096;
-  options.frontier_capacity = 1;  // Only 1 entry; merging 2 axes overflows.
+  iree_hal_memory_arena_options_t options = {
+      .capacity = 4096,
+      .frontier_capacity = 1,  // Only 1 entry; merging 2 axes overflows.
+  };
 
   iree_hal_memory_arena_t* arena = NULL;
   IREE_ASSERT_OK(

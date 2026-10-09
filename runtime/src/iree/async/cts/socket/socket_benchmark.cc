@@ -568,10 +568,11 @@ static void BM_ThroughputZC(::benchmark::State& state,
 
   if (mode == ZeroCopyMode::kFixed) {
     // Setup registered buffers for Fixed mode.
-    iree_async_slab_options_t slab_options = {};
-    slab_options.buffer_size = buffer_size;
-    // Use 16 buffers (power-of-2 for io_uring).
-    slab_options.buffer_count = 16;
+    iree_async_slab_options_t slab_options = {
+        .buffer_size = buffer_size,
+        // Use 16 buffers (power-of-2 for io_uring).
+        .buffer_count = 16,
+    };
 
     iree_status_t status =
         iree_async_slab_create(slab_options, iree_allocator_system(), &slab);

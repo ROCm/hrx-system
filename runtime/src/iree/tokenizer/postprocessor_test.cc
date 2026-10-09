@@ -270,10 +270,11 @@ TEST(Postprocessor, AddPrefixSpaceStored) {
 
 TEST(Postprocessor, ValidateMaxPiecesExceeded) {
   // Build a template that exceeds MAX_PIECES (7).
-  iree_tokenizer_postprocessor_template_t too_many = {};
-  too_many.prefix_count = 4;
-  too_many.infix_count = 2;
-  too_many.suffix_count = 2;  // Total = 8 > 7.
+  iree_tokenizer_postprocessor_template_t too_many = {
+      .prefix_count = 4,
+      .infix_count = 2,
+      .suffix_count = 2,  // Total = 8 > 7.
+  };
 
   iree_tokenizer_postprocessor_t pp;
   iree_status_t status = iree_tokenizer_postprocessor_initialize(
@@ -285,10 +286,11 @@ TEST(Postprocessor, ValidatePairMaxPiecesExceeded) {
   iree_tokenizer_postprocessor_template_t single = {.prefix_count = 1,
                                                     .suffix_count = 1};
 
-  iree_tokenizer_postprocessor_template_t pair_too_many = {};
-  pair_too_many.prefix_count = 3;
-  pair_too_many.infix_count = 3;
-  pair_too_many.suffix_count = 3;  // Total = 9 > 7.
+  iree_tokenizer_postprocessor_template_t pair_too_many = {
+      .prefix_count = 3,
+      .infix_count = 3,
+      .suffix_count = 3,  // Total = 9 > 7.
+  };
 
   iree_tokenizer_postprocessor_t pp;
   iree_status_t status = iree_tokenizer_postprocessor_initialize(

@@ -172,15 +172,18 @@ TEST_F(FunctionTest, ReadOnlyDataUsesGenericObjectFixup) {
 }
 
 TEST_F(FunctionTest, RestoreStackAndRegistersAfterResultTransport) {
-  loom_x86_encoding_operands_t left = {};
-  left.result = 3;  // RBX.
-  left.immediate = 42;
-  loom_x86_encoding_operands_t right = {};
-  right.result = 12;  // R12.
-  right.immediate = 43;
-  loom_x86_encoding_operands_t result = {};
-  result.result = 0;     // RAX.
-  result.inputs[0] = 3;  // RBX.
+  loom_x86_encoding_operands_t left = {
+      .immediate = 42,
+      .result = 3,  // RBX.
+  };
+  loom_x86_encoding_operands_t right = {
+      .immediate = 43,
+      .result = 12,  // R12.
+  };
+  loom_x86_encoding_operands_t result = {
+      .result = 0,    // RAX.
+      .inputs = {3},  // RBX.
+  };
   loom_x86_instruction_t instructions[] = {
       Instruction(LOOM_X86_ENCODING_FORM_CONSTANT,
                   0xb8 | LOOM_X86_ENCODING_REX_W, left),
@@ -229,14 +232,16 @@ TEST_F(FunctionTest, RestoreStackAndRegistersAfterResultTransport) {
 }
 
 TEST_F(FunctionTest, BranchesSkipEntryTransportAndPreservation) {
-  loom_x86_encoding_operands_t entry = {};
-  entry.result = 3;     // RBX.
-  entry.inputs[0] = 2;  // RDX.
+  loom_x86_encoding_operands_t entry = {
+      .result = 3,    // RBX.
+      .inputs = {2},  // RDX.
+  };
   loom_x86_encoding_operands_t condition = {};
   condition.inputs[0] = 7;  // EDI.
-  loom_x86_encoding_operands_t value = {};
-  value.result = 3;  // RBX.
-  value.immediate = 42;
+  loom_x86_encoding_operands_t value = {
+      .immediate = 42,
+      .result = 3,  // RBX.
+  };
   loom_x86_instruction_t instructions[] = {
       Instruction(LOOM_X86_ENCODING_FORM_MOVE, 0x8b | LOOM_X86_ENCODING_REX_W,
                   entry),
