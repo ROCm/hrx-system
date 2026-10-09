@@ -142,15 +142,6 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   IREE_ASSERT_OK(loom_serve_http_server_create(&transport_options, &server,
                                                iree_allocator_system()));
 
-  int logs[2];
-  ASSERT_EQ(pipe(logs), 0);
-  const int saved_stderr = dup(STDERR_FILENO);
-  ASSERT_GE(saved_stderr, 0);
-  ASSERT_EQ(dup2(logs[1], STDERR_FILENO), STDERR_FILENO);
-  ASSERT_EQ(close(logs[1]), 0);
-  FILE* reader = fdopen(logs[0], "r");
-  ASSERT_NE(reader, nullptr);
-
   const loom_serve_image_generator_t generator = {
       &gate,
       ImageGate::Prepare,
@@ -166,23 +157,40 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
       .pending_capacity = 1,
       .heartbeat_interval = 1000000,
   };
+  loom_serve_image_service_t* image = nullptr;
+  IREE_ASSERT_OK(loom_serve_image_service_create(
+      host, generator, &options, &image, iree_allocator_system()));
+  const auto interface = loom_serve_image_service_interface(image);
   iree_status_t service_status = iree_ok_status();
   std::thread service([&] {
-    service_status = loom_serve_image_service_run(
-        host, generator, server, &options, iree_allocator_system());
+    service_status = loom_serve_http_router_run(
+        loom_serve_host_executor(host), server, 1, &interface,
+        options.pending_capacity, iree_allocator_system());
   });
+  uint64_t cursor = 0;
   auto wait_event = [&](const char* event, const char* field) {
-    char line[2048];
-    while (fgets(line, sizeof(line), reader)) {
-      const std::string record(line);
-      if (record.find(event) != std::string::npos &&
-          record.find(field) != std::string::npos) {
-        return record;
+    for (;;) {
+      loom_serve_telemetry_record_t value;
+      if (loom_serve_telemetry_stream_read(interface.telemetry.stream, &cursor,
+                                           &value) ==
+          LOOM_SERVE_TELEMETRY_READ_RECORD) {
+        iree_string_builder_t output;
+        iree_string_builder_initialize(iree_allocator_system(), &output);
+        IREE_EXPECT_OK(
+            loom_serve_telemetry_record_format(cursor - 1, &value, &output));
+        const auto view = iree_string_builder_view(&output);
+        const std::string record(view.data, view.size);
+        iree_string_builder_deinitialize(&output);
+        if (record.find(event) != std::string::npos &&
+            record.find(field) != std::string::npos) {
+          return record;
+        }
+      } else {
+        std::this_thread::yield();
       }
     }
-    return std::string();
   };
-  EXPECT_FALSE(wait_event("\"event\":\"image_ready\"", "").empty());
+  EXPECT_FALSE(wait_event("\"event\":\"stream_begin\"", "").empty());
   const auto* address = loom_serve_http_server_address(server);
   auto read_response = [](int socket) {
     std::string response;
@@ -226,8 +234,8 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   EXPECT_EQ(send(client, request.data(), request.size(), MSG_NOSIGNAL),
             static_cast<ssize_t>(request.size()));
   const std::string active =
-      wait_event("\"event\":\"image_heartbeat\"", "\"phase\":\"generating\"");
-  EXPECT_NE(active.find("\"active_request\":2"), std::string::npos);
+      wait_event("\"event\":\"snapshot\"", "\"phase\":\"generating\"");
+  EXPECT_NE(active.find("\"request\":2"), std::string::npos);
   EXPECT_NE(active.find("\"completed\":0"), std::string::npos);
 
   for (const std::string target :
@@ -280,9 +288,8 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   if (completion_mode == CompletionMode::kShutdown) {
     EXPECT_EQ(kill(getpid(), SIGTERM), 0);
     const std::string draining =
-        wait_event("\"event\":\"image_heartbeat\"", "\"stopping\":true");
-    EXPECT_NE(draining.find("\"active_request\":2"), std::string::npos);
-    EXPECT_NE(draining.find("\"completed\":0"), std::string::npos);
+        wait_event("\"event\":\"image_shutdown\"", "\"request\":2");
+    EXPECT_FALSE(draining.empty());
   }
   if (completion_mode == CompletionMode::kDeviceFailure) {
     iree_hal_semaphore_fail(
@@ -297,10 +304,18 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
     EXPECT_EQ(kill(getpid(), SIGTERM), 0);
   }
   const bool failed = completion_mode == CompletionMode::kDeviceFailure;
-  EXPECT_FALSE(wait_event("\"event\":\"image_stopped\"",
-                          failed ? "\"completed\":0" : "\"completed\":1")
-                   .empty());
   service.join();
+  const auto counters = *interface.telemetry.counters;
+  EXPECT_EQ(counters.requests, 2u);
+  EXPECT_EQ(counters.rejected, 1u);
+  EXPECT_EQ(counters.completed,
+            completion_mode == CompletionMode::kResponse ? 1u : 0u);
+  EXPECT_EQ(counters.cancelled,
+            completion_mode == CompletionMode::kShutdown ? 1u : 0u);
+  EXPECT_EQ(counters.failed, failed ? 1u : 0u);
+  EXPECT_EQ(counters.batches, failed ? 0u : 1u);
+  EXPECT_EQ(counters.input_tokens + counters.output_tokens, 0u);
+  loom_serve_image_service_destroy(image);
   if (failed) {
     EXPECT_EQ(iree_status_code(service_status), IREE_STATUS_ABORTED);
     iree_status_free(service_status);
@@ -311,9 +326,6 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   EXPECT_EQ(gate.discarded, 1u);
   EXPECT_EQ(close(client), 0);
   IREE_EXPECT_OK(loom_serve_http_server_destroy(server));
-  EXPECT_EQ(dup2(saved_stderr, STDERR_FILENO), STDERR_FILENO);
-  EXPECT_EQ(close(saved_stderr), 0);
-  EXPECT_EQ(fclose(reader), 0);
   iree_status_t drain_status = loom_serve_execution_drain(gate.execution);
   if (failed) {
     EXPECT_EQ(iree_status_code(drain_status), IREE_STATUS_ABORTED);

@@ -136,21 +136,7 @@ static void finite_request_end(loom_serve_finite_service_t* service,
                                uint64_t input_tokens,
                                loom_serve_telemetry_outcome_t outcome,
                                iree_status_t status) {
-  loom_serve_telemetry_counters_t* counters = &service->telemetry.counters;
-  switch (outcome) {
-    case LOOM_SERVE_TELEMETRY_COMPLETED:
-      ++counters->completed;
-      break;
-    case LOOM_SERVE_TELEMETRY_REJECTED:
-      ++counters->rejected;
-      break;
-    case LOOM_SERVE_TELEMETRY_CANCELLED:
-      ++counters->cancelled;
-      break;
-    case LOOM_SERVE_TELEMETRY_FAILED:
-      ++counters->failed;
-      break;
-  }
+  loom_serve_telemetry_count_outcome(&service->telemetry.counters, outcome);
   const iree_time_t now = iree_time_now();
   loom_serve_telemetry_record_t record = {
       .time_ns = now,

@@ -75,6 +75,20 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    telemetry
+  HDRS
+    "telemetry.h"
+  SRCS
+    "telemetry.c"
+  DEPS
+    iree::base
+    iree::experimental::loom_serve::telemetry::record
+    iree::experimental::loom_serve::telemetry::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     service
   HDRS
     "service.h"
@@ -84,6 +98,7 @@ loom_cc_library(
     ::generator
     ::output
     ::request
+    ::telemetry
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -95,6 +110,8 @@ loom_cc_library(
     iree::experimental::loom_serve::http::timer
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::telemetry::record
+    iree::experimental::loom_serve::telemetry::stream
     iree::task
     loom::util::json
     loom::util::stream
@@ -117,6 +134,8 @@ loom_cc_test(
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::telemetry::record
+    iree::experimental::loom_serve::telemetry::stream
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main

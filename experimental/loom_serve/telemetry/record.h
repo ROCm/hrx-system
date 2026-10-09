@@ -62,6 +62,11 @@ typedef enum loom_serve_telemetry_outcome_e {
   LOOM_SERVE_TELEMETRY_FAILED,
 } loom_serve_telemetry_outcome_t;
 
+// Counts one owner's terminal request outcome independently of event retention.
+void loom_serve_telemetry_count_outcome(
+    loom_serve_telemetry_counters_t* counters,
+    loom_serve_telemetry_outcome_t outcome);
+
 // Owned, bounded diagnostic bytes. No pointer into a request/status escapes.
 typedef struct loom_serve_telemetry_diagnostic_t {
   // Captured IREE status code; zero when the outcome has no failure status.

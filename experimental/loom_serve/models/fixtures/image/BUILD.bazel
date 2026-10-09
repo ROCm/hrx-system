@@ -49,6 +49,7 @@ loom_cc_test(
         "//experimental/loom_serve/image:output",
         "//experimental/loom_serve/image:request",
         "//experimental/loom_serve/image:service",
+        "//experimental/loom_serve/models/fixtures:stalled_stderr",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:host",

@@ -53,12 +53,6 @@ struct loom_serve_image_model_t {
     iree_vm_buffer_t* payload;
     // Retained command selected by source preparation.
     uint32_t stage;
-    // CPU preparation start, in nanoseconds.
-    iree_time_t begin;
-    // CPU preparation completion, in nanoseconds.
-    iree_time_t prepared;
-    // Host submission completion, not device completion, in nanoseconds.
-    iree_time_t submitted;
   } invocation;
   // Cold live-source compiler and its task pool.
   loom_serve_jit_t* jit;
@@ -711,19 +705,9 @@ loom_serve_memory_statistics_t loom_serve_image_model_weight_statistics(
 iree_status_t loom_serve_image_model_prepare_request(
     loom_serve_image_model_t* model, iree_string_view_t prompt, uint64_t seed,
     float strength) {
-  model->invocation.begin = iree_time_now();
-  fprintf(stderr, "{\"event\":\"image_preparing\"}\n");
-  IREE_RETURN_IF_ERROR(image_prepare_request(model, prompt, seed, strength,
-                                             &model->invocation.stage,
-                                             &model->invocation.payload));
-  model->invocation.prepared = iree_time_now();
-  fprintf(stderr,
-          "{\"event\":\"image_prepared\",\"prepare_ns\":%" PRId64
-          ",\"stage\":%u,\"input_bytes\":%zu}\n",
-          model->invocation.prepared - model->invocation.begin,
-          model->invocation.stage,
-          iree_vm_buffer_length(model->invocation.payload));
-  return iree_ok_status();
+  return image_prepare_request(model, prompt, seed, strength,
+                               &model->invocation.stage,
+                               &model->invocation.payload);
 }
 
 void loom_serve_image_model_discard_prepared_request(
@@ -752,12 +736,8 @@ iree_status_t loom_serve_image_model_submit(
   if (iree_status_is_ok(status)) {
     status = image_submit(model, model->invocation.stage);
   }
-  model->invocation.submitted = iree_time_now();
   if (iree_status_is_ok(status)) {
     *out_frontier = loom_serve_execution_frontier(execution);
-    fprintf(stderr,
-            "{\"event\":\"image_submitted\",\"submit_ns\":%" PRId64 "}\n",
-            model->invocation.submitted - model->invocation.prepared);
   }
   return status;
 }
@@ -767,23 +747,6 @@ iree_const_byte_span_t loom_serve_image_model_complete(
   iree_vm_buffer_release(model->invocation.payload);
   model->invocation.payload = NULL;
   loom_serve_residency_release(model->residency);
-  const loom_serve_device_memory_statistics_t memory =
-      loom_serve_device_memory_statistics(model->owner);
-  fprintf(stderr,
-          "{\"event\":\"image_execution\",\"prepare_ns\":%" PRId64
-          ",\"submit_ns\":%" PRId64 ",\"completion_wait_ns\":%" PRId64
-          ",\"device_memory\":{\"retained_committed_bytes\":%" PRIu64
-          ",\"workspace_committed_bytes\":%" PRIu64
-          ",\"workspace_live_bytes\":%" PRIu64
-          ",\"workspace_slab_count\":%u,\"workspace_reuse_count\":%" PRIu64
-          "}}\n",
-          model->invocation.prepared - model->invocation.begin,
-          model->invocation.submitted - model->invocation.prepared,
-          iree_time_now() - model->invocation.submitted,
-          memory.retained.committed_bytes,
-          (uint64_t)memory.workspace.bytes_committed,
-          (uint64_t)memory.workspace.bytes_reserved,
-          memory.workspace.slab_count, memory.workspace.reuse_count);
   return iree_make_const_byte_span(model->output.data,
                                    model->output.data_length);
 }

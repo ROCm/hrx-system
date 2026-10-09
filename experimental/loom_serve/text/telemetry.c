@@ -233,30 +233,12 @@ void loom_serve_text_telemetry_fail(loom_serve_text_telemetry_t* telemetry,
   loom_serve_telemetry_stream_append(telemetry->stream, &record);
 }
 
-static void text_count_outcome(loom_serve_telemetry_counters_t* counters,
-                               loom_serve_telemetry_outcome_t outcome) {
-  switch (outcome) {
-    case LOOM_SERVE_TELEMETRY_COMPLETED:
-      ++counters->completed;
-      break;
-    case LOOM_SERVE_TELEMETRY_REJECTED:
-      ++counters->rejected;
-      break;
-    case LOOM_SERVE_TELEMETRY_CANCELLED:
-      ++counters->cancelled;
-      break;
-    case LOOM_SERVE_TELEMETRY_FAILED:
-      ++counters->failed;
-      break;
-  }
-}
-
 void loom_serve_text_telemetry_end(loom_serve_text_telemetry_t* telemetry,
                                    loom_serve_text_receipt_t receipt,
                                    loom_serve_telemetry_outcome_t outcome,
                                    uint64_t input_tokens,
                                    iree_status_t borrowed_status) {
-  text_count_outcome(&telemetry->counters, outcome);
+  loom_serve_telemetry_count_outcome(&telemetry->counters, outcome);
   loom_serve_telemetry_record_t record = {
       .time_ns = iree_time_now(),
       .request = receipt.serial,
@@ -272,8 +254,8 @@ void loom_serve_text_telemetry_end(loom_serve_text_telemetry_t* telemetry,
 void loom_serve_text_telemetry_request_end(
     loom_serve_text_telemetry_t* telemetry, loom_serve_text_session_t* session,
     loom_serve_telemetry_outcome_t outcome) {
-  text_count_outcome(&session->request.counters, outcome);
-  text_count_outcome(&session->telemetry.counters, outcome);
+  loom_serve_telemetry_count_outcome(&session->request.counters, outcome);
+  loom_serve_telemetry_count_outcome(&session->telemetry.counters, outcome);
   const loom_serve_text_receipt_t receipt = {
       session->serial,
       session->request.start_time - session->request.queue_duration};

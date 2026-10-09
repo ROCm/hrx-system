@@ -11,6 +11,25 @@
 
 #include "loom/util/json.h"
 
+void loom_serve_telemetry_count_outcome(
+    loom_serve_telemetry_counters_t* counters,
+    loom_serve_telemetry_outcome_t outcome) {
+  switch (outcome) {
+    case LOOM_SERVE_TELEMETRY_COMPLETED:
+      ++counters->completed;
+      break;
+    case LOOM_SERVE_TELEMETRY_REJECTED:
+      ++counters->rejected;
+      break;
+    case LOOM_SERVE_TELEMETRY_CANCELLED:
+      ++counters->cancelled;
+      break;
+    case LOOM_SERVE_TELEMETRY_FAILED:
+      ++counters->failed;
+      break;
+  }
+}
+
 static iree_status_t record_quote(iree_string_builder_t* output,
                                   iree_string_view_t value) {
   loom_output_stream_t stream;

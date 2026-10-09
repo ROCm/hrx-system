@@ -27,7 +27,8 @@ typedef struct loom_serve_image_service_options_t {
   bool adapter_enabled;
   // Positive bound on requests queued behind the single active image.
   iree_host_size_t pending_capacity;
-  // Periodic JSONL reporting interval in nanoseconds; zero disables it.
+  // Periodic telemetry snapshot interval; zero disables periodic records,
+  // not counters or lifecycle records. Consumers pull JSONL through /logz.
   iree_duration_t heartbeat_interval;
 } loom_serve_image_service_options_t;
 
@@ -64,7 +65,7 @@ void loom_serve_image_service_destroy(loom_serve_image_service_t* service);
 // output or workspace. Return joins the shared tasks and asynchronous waits and
 // relinquishes all connection views before either borrowed owner can be
 // destroyed. Only this outer application call joins; scheduler workers never
-// wait. JSONL events omit prompts.
+// wait. Bounded observation records omit prompts and never wait on log sinks.
 iree_status_t loom_serve_image_service_run(
     loom_serve_host_t* host, loom_serve_image_generator_t generator,
     loom_serve_http_server_t* server,

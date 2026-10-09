@@ -17,6 +17,7 @@
 
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/output.h"
+#include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
 #include "iree/async/proactor.h"
 #include "iree/base/internal/base64.h"
 #include "iree/base/tooling/flags.h"
@@ -89,7 +90,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
   }
 
   int Send(const std::string& method, const std::string& target,
-           const std::string& body = "") {
+           const std::string& body = "", const std::string& headers = "") {
     const int client = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     EXPECT_GE(client, 0);
     const auto* address = loom_serve_http_server_address(server_);
@@ -101,7 +102,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
         method + " " + target +
         " HTTP/1.1\r\nHost: local\r\n"
         "Content-Type: application/json\r\nContent-Length: " +
-        std::to_string(body.size()) + "\r\n\r\n" + body;
+        std::to_string(body.size()) + "\r\n" + headers + "\r\n" + body;
     size_t offset = 0;
     while (offset < request.size()) {
       const ssize_t sent = send(client, request.data() + offset,
@@ -135,6 +136,24 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
       pixels[2 * kPixels + i] = i & 1 ? 1.0f : -1.0f;
     }
     return pixels;
+  }
+
+  std::string EncodedPixels(size_t tokens, uint64_t seed) {
+    const auto pixels = Pixels(tokens, seed);
+    iree_byte_span_t png;
+    IREE_EXPECT_OK(loom_serve_image_encode_rgb_f32_png(
+        kWidth, kHeight,
+        iree_make_const_byte_span(pixels.data(), sizeof(pixels)), &png,
+        allocator_));
+    std::string encoded(iree_base64_encoded_size(png.data_length), '\0');
+    size_t length = 0;
+    IREE_EXPECT_OK(iree_base64_encode(
+        iree_make_const_byte_span(png.data, png.data_length),
+        iree_make_mutable_string_view(encoded.data(), encoded.size()),
+        &length));
+    encoded.resize(length);
+    iree_allocator_free(allocator_, png.data);
+    return encoded;
   }
 
   // Allocator for model, transport and expected encoded output.
@@ -214,20 +233,8 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
   }
   for (size_t i = 0; i < clients.size(); ++i) {
     SCOPED_TRACE(i);
-    const auto pixels = Pixels(std::string(prompts[i]).size(), i);
-    iree_byte_span_t png;
-    IREE_ASSERT_OK(loom_serve_image_encode_rgb_f32_png(
-        kWidth, kHeight,
-        iree_make_const_byte_span(pixels.data(), sizeof(pixels)), &png,
-        allocator_));
-    std::string encoded(iree_base64_encoded_size(png.data_length), '\0');
-    size_t length = 0;
-    IREE_ASSERT_OK(iree_base64_encode(
-        iree_make_const_byte_span(png.data, png.data_length),
-        iree_make_mutable_string_view(encoded.data(), encoded.size()),
-        &length));
-    encoded.resize(length);
-    iree_allocator_free(allocator_, png.data);
+    const std::string encoded =
+        EncodedPixels(std::string(prompts[i]).size(), i);
     const std::string response = Read(clients[i]);
     EXPECT_EQ(response.find("HTTP/1.1 200"), 0u);
     EXPECT_NE(response.find("\"b64_json\":\"" + encoded + "\""),
@@ -235,6 +242,91 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
   }
   EXPECT_NE(Read(Send("GET", "/healthz")).find("\"status\":\"ready\""),
             std::string::npos);
+}
+
+TEST_P(SourceImageServiceTest, IndependentLogReadersCannotBlockColdImageWork) {
+  loom_serve::testing::StalledStderr stalled;
+  ASSERT_NO_FATAL_FAILURE(stalled.Begin());
+  Start();
+  auto poll = [&](const std::string& cursor) {
+    return Read(
+        Send("GET", "/logz", "",
+             "X-Loom-Model: fixture-image\r\n" +
+                 (cursor.empty() ? std::string()
+                                 : "X-Loom-Cursor: " + cursor + "\r\n")));
+  };
+  auto cursor_of = [](const std::string& response) {
+    const std::string marker = R"({"event":"cursor","value":")";
+    const size_t start = response.find(marker);
+    EXPECT_NE(start, std::string::npos) << response;
+    if (start == std::string::npos) {
+      return std::string();
+    }
+    const size_t first = start + marker.size();
+    return response.substr(first, response.find('"', first) - first);
+  };
+  const std::string initial = poll("");
+  ASSERT_NE(initial.find(R"("event":"stream_begin","sequence":0)"),
+            std::string::npos);
+  const std::string slow = cursor_of(initial);
+  std::string fast = slow;
+  std::string latest;
+  std::string events;
+  auto drain = [&] {
+    for (;;) {
+      latest = poll(fast);
+      EXPECT_EQ(latest.find(R"("event":"gap")"), std::string::npos);
+      events += latest;
+      const std::string next = cursor_of(latest);
+      if (next == fast) {
+        break;
+      }
+      fast = next;
+    }
+  };
+  for (size_t wave = 0; wave < 10; ++wave) {
+    std::vector<int> clients;
+    for (size_t i = 0; i < 4; ++i) {
+      const std::string prompt = i & 1 ? "aba" : "ab";
+      clients.push_back(Send("POST", "/v1/images/generations",
+                             "{\"model\":\"fixture-image\",\"prompt\":\"" +
+                                 prompt + "\",\"seed\":" + std::to_string(i) +
+                                 "}"));
+    }
+    for (size_t i = 0; i < clients.size(); ++i) {
+      const std::string response = Read(clients[i]);
+      EXPECT_EQ(response.find("HTTP/1.1 200"), 0u);
+      EXPECT_NE(response.find("\"b64_json\":\"" +
+                              EncodedPixels(i & 1 ? 3 : 2, i) + "\""),
+                std::string::npos);
+    }
+    drain();
+  }
+  EXPECT_EQ(Read(Send("POST", "/v1/images/generations",
+                      R"({"model":"fixture-image","prompt":"aba","n":2})"))
+                .find("HTTP/1.1 400"),
+            0u);
+  EXPECT_EQ(Read(Send("POST", "/v1/images/generations",
+                      "{\"model\":\"fixture-image\",\"prompt\":\"" +
+                          std::string(33, 'a') + "\"}"))
+                .find("HTTP/1.1 400"),
+            0u);
+  drain();
+  const std::string totals =
+      R"("requests":42,"completed":40,"rejected":2,"cancelled":0,"failed":0,"input_tokens":0,"output_tokens":0,"batches":40)";
+  EXPECT_NE(latest.find(totals), std::string::npos);
+  EXPECT_NE(events.find(R"("generated_images":40,"generated_pixels":1400)"),
+            std::string::npos);
+  EXPECT_NE(events.find(R"("event":"image_request_stats")"), std::string::npos);
+  EXPECT_EQ(events.find("aba"), std::string::npos);
+  const std::string resumed = poll(slow);
+  EXPECT_NE(resumed.find(R"({"event":"gap","from":1,)"), std::string::npos);
+  EXPECT_NE(resumed.find(totals), std::string::npos);
+  EXPECT_NE(poll("").find(R"("partial":true)"), std::string::npos);
+  EXPECT_EQ(cursor_of(poll(fast)), fast);
+  EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+  service_.join();
+  IREE_EXPECT_OK(status_);
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, SourceImageServiceTest,

@@ -33,6 +33,18 @@ IREE_FLAG(int32_t, request_body_bytes, 65536,
 IREE_FLAG(int32_t, heartbeat_ms, 1000,
           "Periodic image-state report interval; zero disables heartbeats.");
 
+// One cold CLI locator, separate from model telemetry and serving workers.
+static iree_status_t image_ready(loom_serve_http_server_t* server) {
+  char storage[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
+  iree_string_view_t address;
+  IREE_RETURN_IF_ERROR(
+      iree_async_address_format(loom_serve_http_server_address(server),
+                                sizeof(storage), storage, &address));
+  fprintf(stderr, "{\"event\":\"ready\",\"address\":\"%.*s\",\"models\":1}\n",
+          (int)address.size, address.data);
+  return iree_ok_status();
+}
+
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
   if (!FLAG_model[0] || !FLAG_checkpoint[0] || FLAG_port < 0 ||
@@ -76,6 +88,9 @@ int main(int argc, char** argv) {
     options.request_limits.body_byte_capacity =
         (iree_host_size_t)FLAG_request_body_bytes;
     status = loom_serve_http_server_create(&options, &server, allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = image_ready(server);
   }
   if (iree_status_is_ok(status)) {
     const loom_serve_image_generator_t generator =
