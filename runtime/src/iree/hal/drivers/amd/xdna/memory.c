@@ -331,31 +331,33 @@ typedef struct iree_hal_amd_xdna_allocator_t {
   iree_hal_memory_type_t memory_type;
 } iree_hal_amd_xdna_allocator_t;
 
-static void iree_hal_amd_xdna_allocator_destroy(iree_hal_allocator_t* base) {
+static void iree_hal_amd_xdna_allocator_destroy(
+    iree_hal_allocator_t* IREE_RESTRICT base) {
   iree_hal_amd_xdna_allocator_t* allocator =
       (iree_hal_amd_xdna_allocator_t*)base;
   iree_allocator_free(allocator->host_allocator, allocator);
 }
 
 static iree_allocator_t iree_hal_amd_xdna_allocator_host_allocator(
-    const iree_hal_allocator_t* base) {
+    const iree_hal_allocator_t* IREE_RESTRICT base) {
   return ((const iree_hal_amd_xdna_allocator_t*)base)->host_allocator;
 }
 
 static iree_status_t iree_hal_amd_xdna_allocator_trim(
-    iree_hal_allocator_t* base) {
+    iree_hal_allocator_t* IREE_RESTRICT base) {
   return iree_ok_status();
 }
 
 static void iree_hal_amd_xdna_allocator_query_statistics(
-    iree_hal_allocator_t* base,
-    iree_hal_allocator_statistics_t* out_statistics) {
+    iree_hal_allocator_t* IREE_RESTRICT base,
+    iree_hal_allocator_statistics_t* IREE_RESTRICT out_statistics) {
   *out_statistics = (iree_hal_allocator_statistics_t){0};
 }
 
 static iree_status_t iree_hal_amd_xdna_allocator_query_memory_heaps(
-    iree_hal_allocator_t* base, iree_host_size_t capacity,
-    iree_hal_allocator_memory_heap_t* heaps, iree_host_size_t* out_count) {
+    iree_hal_allocator_t* IREE_RESTRICT base, iree_host_size_t capacity,
+    iree_hal_allocator_memory_heap_t* IREE_RESTRICT heaps,
+    iree_host_size_t* IREE_RESTRICT out_count) {
   iree_hal_amd_xdna_allocator_t* allocator =
       (iree_hal_amd_xdna_allocator_t*)base;
   if (out_count) {
@@ -382,8 +384,9 @@ static iree_status_t iree_hal_amd_xdna_allocator_query_memory_heaps(
 
 static iree_hal_buffer_compatibility_t
 iree_hal_amd_xdna_allocator_query_buffer_compatibility(
-    iree_hal_allocator_t* base, iree_hal_buffer_params_t* params,
-    iree_device_size_t* allocation_size) {
+    iree_hal_allocator_t* IREE_RESTRICT base,
+    iree_hal_buffer_params_t* IREE_RESTRICT params,
+    iree_device_size_t* IREE_RESTRICT allocation_size) {
   iree_hal_amd_xdna_allocator_t* allocator =
       (iree_hal_amd_xdna_allocator_t*)base;
   if (!iree_all_bits_set(allocator->memory_type,
@@ -403,8 +406,10 @@ iree_hal_amd_xdna_allocator_query_buffer_compatibility(
 }
 
 static iree_status_t iree_hal_amd_xdna_allocator_allocate_buffer(
-    iree_hal_allocator_t* base, const iree_hal_buffer_params_t* params,
-    iree_device_size_t allocation_size, iree_hal_buffer_t** out_buffer) {
+    iree_hal_allocator_t* IREE_RESTRICT base,
+    const iree_hal_buffer_params_t* IREE_RESTRICT params,
+    iree_device_size_t allocation_size,
+    iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
   iree_hal_amd_xdna_allocator_t* allocator =
       (iree_hal_amd_xdna_allocator_t*)base;
   iree_hal_buffer_params_t actual_params = *params;
@@ -455,21 +460,23 @@ static iree_status_t iree_hal_amd_xdna_allocator_allocate_buffer(
 }
 
 static void iree_hal_amd_xdna_allocator_deallocate_buffer(
-    iree_hal_allocator_t* allocator, iree_hal_buffer_t* buffer) {
+    iree_hal_allocator_t* IREE_RESTRICT allocator,
+    iree_hal_buffer_t* IREE_RESTRICT buffer) {
   iree_hal_buffer_destroy(buffer);
 }
 
 static iree_status_t iree_hal_amd_xdna_allocator_import_buffer(
-    iree_hal_allocator_t* allocator, const iree_hal_buffer_params_t* params,
-    iree_hal_external_buffer_t* external_buffer,
+    iree_hal_allocator_t* IREE_RESTRICT allocator,
+    const iree_hal_buffer_params_t* IREE_RESTRICT params,
+    iree_hal_external_buffer_t* IREE_RESTRICT external_buffer,
     iree_hal_buffer_release_callback_t release_callback,
-    iree_hal_buffer_t** out_buffer) {
+    iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
   return iree_make_status(IREE_STATUS_UNAVAILABLE,
                           "XDNA buffer import requires a prepared native view");
 }
 
 static bool iree_hal_amd_xdna_allocator_supports_virtual_memory(
-    iree_hal_allocator_t* allocator) {
+    iree_hal_allocator_t* IREE_RESTRICT allocator) {
   return false;
 }
 
