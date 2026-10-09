@@ -341,7 +341,7 @@ func.def public target(@required) @constrained() {
           .values = &initial_request,
           .count = 1,
       },
-      /*.bindings=*/{}, /*.diagnostic_emitter=*/{}, &result.function_versions,
+      /*bindings=*/{}, /*diagnostic_emitter=*/{}, &result.function_versions,
       &result.error_count));
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_EQ(result.function_versions.list.count, 1u);
@@ -380,7 +380,7 @@ func.def public target(@required) @constrained() {
           .values = continued_requests,
           .count = IREE_ARRAYSIZE(continued_requests),
       },
-      /*.bindings=*/{}, /*.diagnostic_emitter=*/{}, &result.function_versions,
+      /*bindings=*/{}, /*diagnostic_emitter=*/{}, &result.function_versions,
       &result.error_count));
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_EQ(result.function_versions.list.count, 2u);
@@ -421,7 +421,7 @@ func.def public target(@required) @constrained() {
           .values = &incompatible_request,
           .count = 1,
       },
-      /*.bindings=*/{},
+      /*bindings=*/{},
       {
           .fn = CollectDiagnostic,
           .user_data = &diagnostic_collector,
@@ -819,7 +819,7 @@ func.def public @entry() {
                                 .values = &request,
                                 .count = 1,
                             },
-                            /*.bindings=*/{},
+                            /*bindings=*/{},
                             /*diagnostic_emitter=*/{},
                             &result.function_versions, &result.error_count));
   EXPECT_EQ(result.function_versions.list.count, 0u);
@@ -1059,7 +1059,7 @@ func.def public @entry() {
                                 .values = &missing_request,
                                 .count = 1,
                             },
-                            /*.bindings=*/{},
+                            /*bindings=*/{},
                             /*diagnostic_emitter=*/{},
                             &result.function_versions, &result.error_count));
 
@@ -1080,7 +1080,7 @@ func.def public @entry() {
                                 .values = duplicate_requests,
                                 .count = IREE_ARRAYSIZE(duplicate_requests),
                             },
-                            /*.bindings=*/{},
+                            /*bindings=*/{},
                             /*diagnostic_emitter=*/{},
                             &result.function_versions, &result.error_count));
 }

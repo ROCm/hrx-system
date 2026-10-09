@@ -282,8 +282,8 @@ class TargetFunctionVersionProjectionTest : public ::testing::Test {
                                                        .values = requests,
                                                        .count = request_count,
                                                    },
-                                                   /*.bindings=*/{},
-                                                   /*.diagnostic_emitter=*/{},
+                                                   /*bindings=*/{},
+                                                   /*diagnostic_emitter=*/{},
                                                    &result.function_versions,
                                                    &result.error_count));
     IREE_ASSERT_EQ(result.error_count, 0u);
