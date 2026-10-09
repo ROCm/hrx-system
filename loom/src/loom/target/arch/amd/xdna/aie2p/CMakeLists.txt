@@ -898,6 +898,7 @@ loom_check_test_suite(
     "test/source_low/memory_subview.loom-test"
     "test/source_low/memory_tiled_channel.loom-test"
     "test/source_low/memory_vector64.loom-test"
+    "test/source_low/memory_view_transport.loom-test"
     "test/source_low/memory_wide_carriers.loom-test"
     "test/source_low/memory_wide_offsets.loom-test"
     "test/source_low/nested_view_selection.loom-test"

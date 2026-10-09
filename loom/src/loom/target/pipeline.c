@@ -333,10 +333,15 @@ loom_target_pipeline_build_source_normalization_before_authoring_expansion(
 }
 
 static iree_status_t
-loom_target_pipeline_build_math_legalization_after_authoring_expansion(
+loom_target_pipeline_build_source_preparation_before_legalize(
     loom_builder_t* builder, void* user_data) {
   (void)user_data;
-  return loom_target_pipeline_build_run(builder, IREE_SV("legalize-math"));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_run(builder, IREE_SV("legalize-math")));
+  // Materialize selected and carried view origins before native memory
+  // legalization queries their address expressions.
+  return loom_target_pipeline_build_run(builder,
+                                        IREE_SV("decompose-view-transports"));
 }
 
 static iree_status_t
@@ -344,8 +349,6 @@ loom_target_pipeline_build_source_safe_normalization_after_legalize(
     loom_builder_t* builder, void* user_data) {
   const loom_target_pipeline_build_context_t* context =
       (const loom_target_pipeline_build_context_t*)user_data;
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
-      builder, IREE_SV("decompose-view-transports")));
   if (loom_target_pipeline_sanitizer_enabled(context)) {
     IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
         builder, IREE_SV("vector-memory-to-scalar")));
@@ -664,8 +667,8 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
       &execution_changed));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
       builder, IREE_SV("source"),
-      loom_target_pipeline_build_math_legalization_after_authoring_expansion,
-      user_data, &for_op));
+      loom_target_pipeline_build_source_preparation_before_legalize, user_data,
+      &for_op));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_target_legalize(builder, IREE_SV("eager")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(

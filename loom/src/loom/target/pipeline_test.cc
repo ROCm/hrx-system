@@ -41,6 +41,10 @@ typedef struct PipelineRunCounts {
   int last_source_combination_ordinal = 0;
   // First target legalization pass that selects physical representations.
   int first_target_legalization_ordinal = 0;
+  // Number of common-buffer view-transport decomposition pass runs.
+  int view_transport_decomposition = 0;
+  // Lexical pass position of common-buffer view-origin materialization.
+  int view_transport_decomposition_ordinal = 0;
   // Number of sanitizer-driven vector-memory scalarization pass runs.
   int vector_memory_to_scalar = 0;
   // Lexical pass-run ordinal of vector-memory scalarization.
@@ -191,6 +195,11 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
       counts->first_target_legalization_ordinal =
           count_context->current_run_ordinal;
     }
+  } else if (iree_string_view_equal(key,
+                                    IREE_SV("decompose-view-transports"))) {
+    ++counts->view_transport_decomposition;
+    counts->view_transport_decomposition_ordinal =
+        count_context->current_run_ordinal;
   } else if (iree_string_view_equal(key, IREE_SV("vector-memory-to-scalar"))) {
     ++counts->vector_memory_to_scalar;
     counts->vector_memory_to_scalar_ordinal =
@@ -335,6 +344,11 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_LT(counts.pipeline_preparation_ordinal,
             counts.worker_outlining_ordinal);
   EXPECT_LT(counts.worker_outlining_ordinal,
+            counts.first_target_legalization_ordinal);
+  EXPECT_EQ(counts.view_transport_decomposition, 1);
+  EXPECT_LT(counts.worker_outlining_ordinal,
+            counts.view_transport_decomposition_ordinal);
+  EXPECT_LT(counts.view_transport_decomposition_ordinal,
             counts.first_target_legalization_ordinal);
   EXPECT_EQ(counts.source_loop_unrolling, 1);
   EXPECT_EQ(counts.vector_bank_sroa, 1);

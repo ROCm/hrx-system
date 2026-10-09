@@ -289,7 +289,7 @@ func.def target(@offset32) @carried_offset32_wrap() -> (i64, i64, i64, i64) {
   %terminal_lo = scalar.constant 0 : i64
   %terminal_hi = scalar.constant 9223372036854775807 : i64
   %prefix_lo = scalar.constant 0 : i64
-  %prefix_hi = scalar.constant 9223372036854775807 : i64
+  %prefix_hi = scalar.constant 9223372036854775776 : i64
   %more = index.cmp slt, %iteration, %end : index
   cfg.cond_br %more, ^body, ^exit
 ^body:
