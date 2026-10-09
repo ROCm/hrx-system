@@ -33,6 +33,7 @@ def _loom_cc_benchmark_impl(
         copts = copts,
         conlyopts = conlyopts,
         cxxopts = cxxopts,
+        features = kwargs.pop("features", None),
     )
     iree_cc_benchmark(
         name = name,
@@ -40,6 +41,7 @@ def _loom_cc_benchmark_impl(
         copts = compiler_options.copts,
         conlyopts = compiler_options.conlyopts,
         cxxopts = compiler_options.cxxopts,
+        features = compiler_options.features,
         deps = loom_cc_attrs.with_loom_deps(deps + [_GOOGLE_BENCHMARK_DEP]),
         **kwargs
     )

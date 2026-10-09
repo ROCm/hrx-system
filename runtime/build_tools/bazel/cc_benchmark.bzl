@@ -30,6 +30,7 @@ def _iree_runtime_cc_benchmark_impl(
         copts = copts,
         conlyopts = conlyopts,
         cxxopts = cxxopts,
+        features = kwargs.pop("features", None),
     )
     iree_cc_benchmark(
         name = name,
@@ -37,6 +38,7 @@ def _iree_runtime_cc_benchmark_impl(
         copts = compiler_options.copts,
         conlyopts = compiler_options.conlyopts,
         cxxopts = compiler_options.cxxopts,
+        features = compiler_options.features,
         deps = runtime_cc_attrs.with_runtime_deps(deps + [_GOOGLE_BENCHMARK_DEP]),
         **kwargs
     )

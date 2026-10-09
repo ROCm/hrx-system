@@ -18,10 +18,12 @@ def _pop_hrx_compiler_options(kwargs):
         copts = kwargs.pop("copts", None),
         conlyopts = kwargs.pop("conlyopts", None),
         cxxopts = kwargs.pop("cxxopts", None),
+        features = kwargs.pop("features", None),
     )
     kwargs["copts"] = compiler_options.copts
     kwargs["conlyopts"] = compiler_options.conlyopts
     kwargs["cxxopts"] = compiler_options.cxxopts
+    kwargs["features"] = compiler_options.features
 
 def hrx_cc_library(name, deps = None, **kwargs):
     _pop_hrx_compiler_options(kwargs)
@@ -92,6 +94,7 @@ def hrx_cc_shared_library(
         copts = copts,
         conlyopts = kwargs.pop("conlyopts", None),
         cxxopts = kwargs.pop("cxxopts", None),
+        features = kwargs.pop("features", None),
     )
     iree_cc_binary(
         name = name,
@@ -100,6 +103,7 @@ def hrx_cc_shared_library(
         copts = compiler_options.copts,
         conlyopts = compiler_options.conlyopts,
         cxxopts = compiler_options.cxxopts,
+        features = compiler_options.features,
         linkshared = True,
         **kwargs
     )
