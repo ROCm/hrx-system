@@ -138,6 +138,20 @@ loom_test(
 )
 
 loom_test(
+    name = "immutable_storage",
+    srcs = [
+        "//loom/src/loom/test/corpus/source_low:immutable_storage.loom",
+        "//loom/src/loom/test/corpus/source_low:immutable_storage_checks.loom",
+    ],
+    benchmark_smoke = False,
+    compile_targets = [
+        "//loom/target/amdgpu:" + target
+        for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+    ],
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+)
+
+loom_test(
     name = "atomic_observations_test",
     srcs = [
         "atomic_observations.loom",

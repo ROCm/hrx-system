@@ -4,13 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_SUPPORTED_TARGETS")
 load(
     "//loom/build_tools/bazel:defs.bzl",
     "loom_corpus_build",
     "loom_legacy_case_test",
     "loom_scenario_test",
-    "loom_test",
 )
 load(
     "//loom/src/loom/test/corpus:catalog.bzl",
@@ -21,20 +19,6 @@ load(
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_HARDWARE_PROFILE")
 
 package(default_visibility = ["//visibility:public"])
-
-loom_test(
-    name = "immutable_storage",
-    srcs = [
-        "//loom/src/loom/test/corpus/source_low:immutable_storage.loom",
-        "//loom/src/loom/test/corpus/source_low:immutable_storage_checks.loom",
-    ],
-    benchmark_smoke = False,
-    compile_targets = [
-        "//loom/target/amdgpu:" + target
-        for target in LOOM_AMDGPU_SUPPORTED_TARGETS
-    ],
-    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
-)
 
 _NO_DEVICE_SUBJECTS = []
 
