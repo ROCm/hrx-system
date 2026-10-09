@@ -2124,6 +2124,7 @@ CLANG_TIDY_REPLACEMENT_PATH_FIELD_RE = re.compile(
     r"^(\s*(?:-\s*)?(?:MainSourceFile|FilePath|BuildDirectory):\s*)'(.*)'(\s*)$"
 )
 BAZEL_EXECROOT_MARKER = "/execroot/_main/"
+BAZEL_REMOTE_WORKSPACE_PREFIX = "/workspace/"
 
 
 def clang_tidy_worktree_replacement_path(value: str) -> str:
@@ -2131,6 +2132,9 @@ def clang_tidy_worktree_replacement_path(value: str) -> str:
         return value
     if BAZEL_EXECROOT_MARKER in value:
         relative_path = value.split(BAZEL_EXECROOT_MARKER, 1)[1]
+        return str(REPO_ROOT / relative_path)
+    if value.startswith(BAZEL_REMOTE_WORKSPACE_PREFIX):
+        relative_path = value.removeprefix(BAZEL_REMOTE_WORKSPACE_PREFIX)
         return str(REPO_ROOT / relative_path)
     path = Path(value)
     if not path.is_absolute():

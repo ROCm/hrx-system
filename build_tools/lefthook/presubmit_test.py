@@ -46,6 +46,42 @@ def input_scope(
 
 
 class PresubmitTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._repository_directory = tempfile.TemporaryDirectory()
+        repository_root = Path(cls._repository_directory.name)
+        fixture_paths = {
+            *(project.script for project in presubmit.PROJECTS),
+            *presubmit.SEMGREP_CONFIGS,
+            *presubmit.SEMGREP_POLICY_PATHS,
+            *presubmit.SEMGREP_TEST_PATHS,
+            "build_tools/bazel/test/BUILD.bazel",
+            "build_tools/bazel/test/cc_benchmark_smoke_test_fixture.c",
+            "build_tools/clang_tidy/iree/IreeTidyModule.cc",
+            "runtime/src/iree/base/BUILD.bazel",
+            "runtime/src/iree/base/status.c",
+        }
+        for relative_path in fixture_paths:
+            path = repository_root / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+        subprocess.run(
+            ["git", "init", "--quiet"],
+            cwd=repository_root,
+            check=True,
+        )
+        cls._repository_root_patch = mock.patch.object(
+            presubmit, "REPO_ROOT", repository_root
+        )
+        cls._repository_root_patch.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._repository_root_patch.stop()
+        cls._repository_directory.cleanup()
+        super().tearDownClass()
+
     def test_run_command_streams_success_output(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
@@ -802,6 +838,28 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn(f"  - FilePath: '{expected_path}'", normalized)
         self.assertIn(f"BuildDirectory: '{presubmit.REPO_ROOT}'", normalized)
         self.assertNotIn("/execroot/_main/", normalized)
+
+    def test_clang_tidy_remote_replacements_are_rebased_to_worktree_paths(self):
+        remote_path = "/workspace/runtime/src/iree/base/status.c"
+        text = (
+            "---\n"
+            f"MainSourceFile: '{remote_path}'\n"
+            f"FilePath: '{remote_path}'\n"
+            "Replacements:\n"
+            f"  - FilePath: '{remote_path}'\n"
+            "    Offset: 1\n"
+            "BuildDirectory: '/workspace'\n"
+            "...\n"
+        )
+
+        normalized = presubmit.normalize_clang_tidy_replacements_yaml(text)
+
+        expected_path = str(presubmit.REPO_ROOT / "runtime/src/iree/base/status.c")
+        self.assertIn(f"MainSourceFile: '{expected_path}'", normalized)
+        self.assertIn(f"FilePath: '{expected_path}'", normalized)
+        self.assertIn(f"  - FilePath: '{expected_path}'", normalized)
+        self.assertIn(f"BuildDirectory: '{presubmit.REPO_ROOT}'", normalized)
+        self.assertNotIn(f"'{remote_path}'", normalized)
 
     def test_clang_tidy_fix_paths_filter_to_selected_translation_units(self):
         fix_paths = [
