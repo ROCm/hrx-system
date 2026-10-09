@@ -292,12 +292,24 @@ correctness or measured device throughput.
 
 ## The caller owns the invocation lifetime
 
-Native execution currently uses the
-[libamdf adapter](https://github.com/ROCm/hrx-system/tree/main/experimental/xdna).
-The caller loads the ELF, queries the selected entry's backing and binding
-requirements, supplies its three buffers, and prepares the entry's establishing
-command. libamdf submits the prepared instruction range. It does not interpret
-channels, invent a work schedule, or patch each pipeline record.
+The normal `iree-test-loom` path can compile and execute buffer-bound XDNA
+pipelines through the
+[XDNA HAL](https://github.com/ROCm/hrx-system/tree/main/runtime/src/iree/hal/drivers/amd/xdna):
+
+```shell
+iree-test-loom checked-pipeline.loom --device=xdna
+```
+
+The HAL selects the exact compiler profile from immutable device facts, loads
+the emitted ELF, stages the scenario buffers, submits the entry, and preserves
+their lifetimes through completion and readback. The current image ABI accepts
+buffer launch bindings. Leading specialization values must already be bound
+into compiler SSA before image emission; runtime scalar bindings and invocation
+results require a future image ABI.
+
+The HAL queries each entry's backing and binding requirements and prepares its
+establishing command. libamdf submits the prepared instruction range. It does
+not interpret channels, invent a work schedule, or patch each pipeline record.
 
 The establishing command loads/configures the workers once for that invocation.
 All record processing and input/output handoffs occur inside it. The emitted
@@ -313,7 +325,7 @@ contract from retaining it between submissions.
 
 This is the boundary a complete pipeline launcher must own: materialize
 transient allocations, bind the caller's I/O, submit work, and track completion.
-For this native cut the adapter makes those steps explicit. General
+The XDNA HAL implements those steps for finite buffer-bound pipelines. General
 heterogeneous launch lowering, GPU participation/progress, and code-image
 replacement each need a consuming realization before they become executable
 capabilities of the source model.
