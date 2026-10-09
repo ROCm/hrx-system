@@ -21,7 +21,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.models.qwen import benchmark_service, check_service
+from experimental.loom_serve.models.qwen import benchmark_service
+from experimental.loom_serve.testing.http import running_server
 
 TOOLS = [
     {
@@ -173,10 +174,10 @@ def main():
     ]
 
     def progress(event):
-        if event and event.get("event") in ("ready", "heartbeat"):
+        if event and event["event"] in ("snapshot", "text_work", "text_memory"):
             print(json.dumps(event), flush=True)
 
-    with check_service.running_server(
+    with running_server(
         command, arguments.output / "server.jsonl", on_event=progress
     ) as (_, address):
         if address is None:

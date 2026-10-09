@@ -17,10 +17,12 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from experimental.loom_serve.models.qwen.benchmark_service import request
-from experimental.loom_serve.models.qwen.check_service import (
+from experimental.loom_serve.testing.http import (
     Events,
     control,
     running_server,
+    wait_counters,
+    wait_status,
 )
 
 
@@ -104,7 +106,7 @@ def tool_rewind(address):
     )
 
 
-def queued_pin(address, events, base):
+def queued_pin(address, base):
     history = base + [
         {
             "role": "user",
@@ -115,7 +117,8 @@ def queued_pin(address, events, base):
         active = clients.submit(
             request, address, "pin-anchor", history, 256, checkpoint="base"
         )
-        events.wait("admit", "pin-anchor")
+        wait_status(address, active_requests=1, queued_requests=0)
+        cancelled_before = wait_counters(address, lambda _: True)["cancelled"]
         queued = http.client.HTTPConnection(address.hostname, address.port)
         try:
             body = {
@@ -135,7 +138,7 @@ def queued_pin(address, events, base):
                     "X-Loom-Checkpoint": "base",
                 },
             )
-            events.wait("enqueue", "pin-queued")
+            wait_status(address, active_requests=1, queued_requests=1)
             parked = control(address, "POST", "/v1/checkpoints/base/suspend", 200)
             if not parked["host_snapshot_bytes"]:
                 raise RuntimeError("queued endpoint did not retain a cold image")
@@ -145,7 +148,9 @@ def queued_pin(address, events, base):
             )
         finally:
             queued.close()
-        events.wait("cancel_queued", "pin-queued")
+        wait_counters(
+            address, lambda counts: counts["cancelled"] == cancelled_before + 1
+        )
         result = active.result()
     print(
         json.dumps(
@@ -184,7 +189,7 @@ def cold_endpoint(address, events, messages, base, receipt):
     competing = [dict(message) for message in messages]
     competing[0]["content"] = competing[0]["content"].replace("MAPLE", "CEDAR")
     selected = request(address, "cold-selected", competing, 12)
-    frontier = events.wait("complete", "cold-selected")["position"]
+    frontier = events.wait("request_stats", "cold-selected")["position"]
     history = base + [
         {"role": "user", "content": "Reply with only the project codeword."}
     ]
@@ -357,7 +362,7 @@ def physical_completion(command, messages, output, parameter_bytes):
             ):
                 raise RuntimeError("physical pressure discarded the selected frontier")
             same_output(result, request(address, "", history, 16))
-        heartbeats = [e for e in events.values if e["event"] == "heartbeat"]
+        heartbeats = [e for e in events.values if e["event"] == "text_memory"]
         if not heartbeats or any(
             e["elastic_parameters"]["released_bytes"] for e in heartbeats
         ):
@@ -535,7 +540,7 @@ def main():
                 != receipt["position"]
             ):
                 raise RuntimeError("fork replayed instead of sharing its endpoint")
-        queued_pin(address, events, base)
+        queued_pin(address, base)
         cold_results = cold_endpoint(address, events, messages, base, receipt)
         released = control(address, "DELETE", "/v1/checkpoints/base", 200)
         if released["pinned"] or released["host_snapshot_bytes"]:
@@ -563,10 +568,15 @@ def main():
 
     fixed_suspension(command, arguments.output / "fixed.log")
     events = events.values
+    names = {
+        event["session"]: event["name"]
+        for event in events
+        if event["event"] == "session_begin"
+    }
     admits = [
         event
         for event in events
-        if event["event"] == "admit" and event["session"].startswith("fork-")
+        if event["event"] == "admit" and names[event["session"]].startswith("fork-")
     ]
     if len(admits) != 2 or sum(event["reservation_tokens"] for event in admits) <= 1024:
         raise RuntimeError(
@@ -581,12 +591,12 @@ def main():
     first_complete = min(
         i
         for i, event in enumerate(events)
-        if event["event"] == "complete" and event["request"] in serials
+        if event["event"] == "request_stats" and event["request"] in serials
     )
     if last_admit >= first_complete:
         raise RuntimeError("shared branches never held completion credit concurrently")
     for event in events:
-        if event["event"] == "heartbeat":
+        if event["event"] == "text_memory":
             pool = event["pool"]
             if pool["reserved_tokens"] + pool["resident_tokens"] > 1024:
                 raise RuntimeError(f"shared admission overcommitted: {event}")
@@ -594,11 +604,11 @@ def main():
             event["pool_reserved_tokens"] + event["pool_resident_tokens"] > 1024
         ):
             raise RuntimeError(f"shared admission overcommitted: {event}")
-    heartbeats = [event for event in events if event["event"] == "heartbeat"]
+    heartbeats = [event for event in events if event["event"] == "text_memory"]
     if not any(event["checkpoint_host_bytes"] for event in heartbeats):
         raise RuntimeError("cold payload was not visible in heartbeat accounting")
-    if heartbeats[-1]["checkpoint_host_bytes"]:
-        raise RuntimeError("endpoint release leaked host accounting")
+    # The release response above checks current zero host bytes. A retained
+    # periodic sample may predate that release and is not a final-state oracle.
     parameter_bytes = max(
         event["elastic_parameters"]["committed_bytes"] for event in heartbeats
     )

@@ -8,7 +8,7 @@
 
 The caller supplies a built server and qualified GPU environment. Sequential
 dense output is the oracle for the same requests under concurrent pooled load.
-Events establish readiness; an outer runner owns any hang deadline.
+HTTP owner state establishes readiness; an outer runner owns hang detection.
 """
 
 import argparse
@@ -20,7 +20,13 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.models.qwen import benchmark_service, check_service
+from experimental.loom_serve.models.qwen import benchmark_service
+from experimental.loom_serve.testing.http import (
+    Events,
+    running_server,
+    wait_counters,
+    wait_status,
+)
 
 
 def payload(messages, maximum):
@@ -106,11 +112,7 @@ def cohort(address, events, pooled):
         anchor = clients.submit(
             benchmark_service.request, address, "row-0", *requests[0]
         )
-        admitted = events.wait("admit", "row-0")
-        if admitted["reservation_tokens"] * 2 <= 320:
-            raise RuntimeError(
-                "anchor does not establish the constrained-capacity witness"
-            )
+        wait_status(address, active_requests=1, queued_requests=0)
         # This identical request cannot fit beside the anchor. Its confirmed
         # queued claim is then cancelled without ever taking a recurrent row.
         cancelled = http.client.HTTPConnection(address.hostname, address.port)
@@ -121,14 +123,19 @@ def cohort(address, events, pooled):
                 payload(*requests[0]),
                 {"Content-Type": "application/json", "X-Loom-Session": "cancelled"},
             )
-            events.wait("enqueue", "cancelled")
+            wait_status(address, active_requests=1, queued_requests=1)
             reject(address, "cancelled", *requests[0], 409, "active or queued")
             cancelled.sock.setsockopt(
                 socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
             )
         finally:
             cancelled.close()
-        events.wait("cancel_queued", "cancelled")
+        wait_counters(address, lambda counts: counts["cancelled"] == 1)
+        admitted = events.wait("admit", "row-0")
+        if admitted["reservation_tokens"] * 2 <= 320:
+            raise RuntimeError(
+                "anchor does not establish the constrained-capacity witness"
+            )
         futures = [anchor] + [
             clients.submit(
                 benchmark_service.request, address, f"row-{index}", prompt, maximum
@@ -138,10 +145,11 @@ def cohort(address, events, pooled):
         return [future.result() for future in futures]
 
 
-def cancel_active(address, events):
+def cancel_active(address):
     # Cancel only after the GPU has produced actual content. Header readiness
     # alone would permit cancellation before any row backing was committed.
     name = "active-cancel"
+    cancelled_before = wait_counters(address, lambda _: True)["cancelled"]
     body = payload(messages(), 192).encode()
     peer = socket.create_connection((address.hostname, address.port))
     reader = peer.makefile("rb")
@@ -168,7 +176,8 @@ def cancel_active(address, events):
     finally:
         reader.close()
         peer.close()
-    events.wait("cancel", name)
+    wait_counters(address, lambda counts: counts["cancelled"] == cancelled_before + 1)
+    wait_status(address, active_requests=0, queued_requests=0)
     result = benchmark_service.request(
         address,
         name,
@@ -208,10 +217,10 @@ def main():
     ]
     reference = None
     for capacity in (0, 320):
-        events = check_service.Events()
+        events = Events()
         log_path = arguments.output / f"pool-{capacity}.log"
         continuation_epochs = arguments.continuation_epochs if capacity else 1
-        with check_service.running_server(
+        with running_server(
             command
             + [
                 f"--pool_capacity={capacity}",
@@ -224,7 +233,7 @@ def main():
                 raise RuntimeError(f"server did not become ready: {log_path}")
             address = urlsplit(f"http://{endpoint}")
             results = cohort(address, events, capacity != 0)
-            results.append(cancel_active(address, events))
+            results.append(cancel_active(address))
             results.extend(retained(address, capacity != 0))
         (arguments.output / f"pool-{capacity}.json").write_text(
             json.dumps(results, indent=2) + "\n"
@@ -257,11 +266,16 @@ def main():
                 )
             ):
                 raise RuntimeError("admission changed its prepared input identity")
-        heartbeats = [e for e in events.values if e.get("event") == "heartbeat"]
+        heartbeats = [e for e in events.values if e["event"] == "text_memory"]
+        shared = {
+            e["time_ns"]: e
+            for e in events.values
+            if e["event"] == "shared_device_memory"
+        }
         if not heartbeats:
             raise RuntimeError("workload did not observe memory heartbeats")
         for event in heartbeats:
-            memory = event["device_memory"]
+            memory = shared[event["time_ns"]]
             retained_bytes = (
                 event["elastic_state"]["committed_bytes"]
                 + event["elastic_parameters"]["committed_bytes"]
@@ -271,17 +285,15 @@ def main():
             if memory["workspace_live_bytes"] > memory["workspace_committed_bytes"]:
                 raise RuntimeError("live workspace exceeds reported shared backing")
         if not any(
-            e["device_memory"]["workspace_committed_bytes"]
-            and e["device_memory"]["workspace_reuse_count"]
-            for e in heartbeats
+            e["workspace_committed_bytes"] and e["workspace_reuse_count"]
+            for e in shared.values()
         ):
             raise RuntimeError("workload did not observe shared workspace reuse")
         if capacity:
             if arguments.continuation_epochs == 2 and not any(
-                row["verification_epochs"] == 2
+                event["verification_epochs"] == 2
                 for event in events.values
-                if event.get("event") == "epoch"
-                for row in event["rows"]
+                if event["event"] == "span"
             ):
                 raise RuntimeError("workload did not exercise device continuation")
             admissions = [e for e in events.values if e.get("event") == "admit"]
@@ -290,9 +302,18 @@ def main():
                 for e in admissions
             ):
                 raise RuntimeError("completion reservations exceeded physical capacity")
-            if any(e.get("session") == "cancelled" for e in admissions):
+            if any(
+                e["event"] == "session_begin" and e["name"] == "cancelled"
+                for e in events.values
+            ):
                 raise RuntimeError("cancelled queued request acquired a model row")
-            if not any(e.get("event") == "evict" for e in events.values):
+            if not any(
+                e["event"] == "session_end"
+                and e["counters"]["completed"]
+                and not e["counters"]["cancelled"]
+                and e["resident_tokens"]
+                for e in events.values
+            ):
                 raise RuntimeError("workload did not exercise idle cache eviction")
             trims = [e for e in events.values if e.get("event") == "state_trim"]
             if not any(e["released_bytes"] for e in trims):
@@ -302,7 +323,7 @@ def main():
                 for e in heartbeats
             ):
                 raise RuntimeError("pool accounting exceeded the configured budget")
-            if not any(e["queued_requests"] for e in heartbeats):
+            if not any(e["queued"] for e in events.values if e["event"] == "snapshot"):
                 raise RuntimeError("workload did not observe queued admission")
         print(
             json.dumps({"event": "pass", "pool_capacity": capacity, "requests": 10}),

@@ -12,114 +12,14 @@ shutdown are explicit; an outer test runner owns any hang deadline.
 """
 
 import argparse
-import contextlib
-import http.client
 import json
-import signal
-import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from experimental.loom_serve.models.qwen import benchmark_service
-
-
-def control(address, method, path, expected, *, session=None, body=None, headers=None):
-    connection = http.client.HTTPConnection(address.hostname, address.port)
-    fields = dict(headers or {})
-    if session is not None:
-        fields["X-Loom-Session"] = session
-    try:
-        connection.request(method, path, body=body, headers=fields)
-        response = connection.getresponse()
-        payload = response.read()
-        if response.status != expected:
-            raise RuntimeError(f"{method} {path}: {response.status}, {payload!r}")
-        return json.loads(payload)
-    finally:
-        connection.close()
-
-
-class Events:
-    """Completed service events establish readiness without timed sleeps."""
-
-    def __init__(self):
-        self.condition = threading.Condition()
-        self.values = []
-        self.closed = False
-
-    def record(self, event):
-        with self.condition:
-            if event is None:
-                self.closed = True
-            else:
-                self.values.append(event)
-            self.condition.notify_all()
-
-    def wait(self, kind, session, *, model=None):
-        def match():
-            return next(
-                (
-                    event
-                    for event in self.values
-                    if event.get("event") == kind
-                    and event.get("session") == session
-                    and (model is None or event.get("model") == model)
-                ),
-                None,
-            )
-
-        with self.condition:
-            self.condition.wait_for(lambda: match() or self.closed)
-            event = match()
-            if event is None:
-                raise RuntimeError(f"server closed before {kind}: {session}")
-            return event
-
-
-@contextlib.contextmanager
-def running_server(command, log_path, on_event=None):
-    with log_path.open("x") as log, ThreadPoolExecutor(max_workers=1) as readers:
-        process = subprocess.Popen(
-            command, stdout=log, stderr=subprocess.PIPE, text=True, bufsize=1
-        )
-        address = None
-        drain = None
-
-        def record(line):
-            log.write(line)
-            log.flush()
-            if on_event and line.startswith("{"):
-                on_event(json.loads(line))
-
-        def consume():
-            try:
-                for line in process.stderr:
-                    record(line)
-            finally:
-                if on_event:
-                    on_event(None)
-
-        try:
-            for line in process.stderr:
-                record(line)
-                if line.startswith('{"event":"ready"'):
-                    address = json.loads(line)["address"]
-                    drain = readers.submit(consume)
-                    break
-            yield process, address
-        finally:
-            if process.poll() is None:
-                process.send_signal(signal.SIGTERM)
-            returncode = process.wait()
-            if drain:
-                drain.result()
-            process.stderr.close()
-            if address is not None and returncode:
-                raise RuntimeError(
-                    f"server retirement failed: {returncode}; {log_path}"
-                )
+from experimental.loom_serve.testing.http import running_server
 
 
 def main():

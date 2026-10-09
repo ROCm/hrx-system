@@ -280,14 +280,10 @@ py_binary(
     name = "check_service",
     testonly = True,
     srcs = ["check_service.py"],
-    deps = [":benchmark_service_lib"],
-)
-
-py_library(
-    name = "check_service_lib",
-    testonly = True,
-    srcs = ["check_service.py"],
-    deps = [":benchmark_service_lib"],
+    deps = [
+        ":benchmark_service_lib",
+        "//experimental/loom_serve/testing:http",
+    ],
 )
 
 py_binary(
@@ -296,7 +292,7 @@ py_binary(
     srcs = ["check_capacity.py"],
     deps = [
         ":benchmark_service_lib",
-        ":check_service_lib",
+        "//experimental/loom_serve/testing:http",
     ],
 )
 
@@ -306,7 +302,7 @@ py_binary(
     srcs = ["check_router.py"],
     deps = [
         ":benchmark_service_lib",
-        ":check_service_lib",
+        "//experimental/loom_serve/testing:http",
     ],
 )
 
@@ -316,7 +312,7 @@ py_binary(
     srcs = ["check_checkpoints.py"],
     deps = [
         ":benchmark_service_lib",
-        ":check_service_lib",
+        "//experimental/loom_serve/testing:http",
     ],
 )
 
@@ -342,7 +338,7 @@ py_binary(
     srcs = ["check_tools.py"],
     deps = [
         ":benchmark_service_lib",
-        ":check_service_lib",
+        "//experimental/loom_serve/testing:http",
     ],
 )
 

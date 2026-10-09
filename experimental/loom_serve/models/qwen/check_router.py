@@ -22,10 +22,12 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from experimental.loom_serve.models.qwen.benchmark_service import request
-from experimental.loom_serve.models.qwen.check_service import (
+from experimental.loom_serve.testing.http import (
     Events,
     control,
     running_server,
+    wait_counters,
+    wait_status,
 )
 
 
@@ -63,7 +65,9 @@ def run(command, log, concurrent):
                 a = clients.submit(
                     request, address, "shared", messages["scout"], 128, model="scout"
                 )
-                events.wait("admit", "shared", model="scout")
+                wait_status(
+                    address, model="scout", active_requests=1, queued_requests=0
+                )
                 b = clients.submit(
                     request,
                     address,
@@ -72,7 +76,9 @@ def run(command, log, concurrent):
                     96,
                     model="researcher",
                 )
-                events.wait("enqueue", "shared", model="researcher")
+                wait_status(
+                    address, model="researcher", active_requests=0, queued_requests=1
+                )
                 cancelled = http.client.HTTPConnection(address.hostname, address.port)
                 try:
                     cancelled.request(
@@ -92,13 +98,20 @@ def run(command, log, concurrent):
                             "X-Loom-Session": "cancelled",
                         },
                     )
-                    events.wait("enqueue", "cancelled", model="researcher")
+                    wait_status(
+                        address,
+                        model="researcher",
+                        active_requests=0,
+                        queued_requests=2,
+                    )
                     cancelled.sock.setsockopt(
                         socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
                     )
                 finally:
                     cancelled.close()
-                events.wait("cancel_queued", "cancelled", model="researcher")
+                wait_counters(
+                    address, lambda counts: counts["cancelled"] == 1, model="researcher"
+                )
                 control(address, "GET", "/healthz", 200)
                 results["scout"] = [a.result()]
                 results["researcher"] = [b.result()]
@@ -151,22 +164,25 @@ def run(command, log, concurrent):
     # A must relinquish its pin before the queued B can admit; no new request
     # is sent to B to wake it. Completed A state survives B's weight activation.
     if concurrent:
-        admitted = {
-            event["model"]: event
-            for event in events.values
-            if event.get("event") == "admit" and event.get("cache") == "replay"
-        }
-        if admitted["researcher"]["queue_ms"] <= 0:
+        admitted = {}
+        for event in events.values:
+            if event["event"] == "admit":
+                admitted.setdefault(event["model"], event)
+        if admitted["researcher"]["queue_ns"] <= 0:
             raise RuntimeError("second model did not wait on shared pressure")
-        handoff = events.values.index(admitted["researcher"])
+        handoff = admitted["researcher"]["time_ns"]
         produced = sum(
             event["selected_tokens_including_eos"]
-            for event in events.values[:handoff]
-            if event.get("model") == "scout" and event.get("event") == "epoch"
+            for event in events.values
+            if event["model"] == "scout"
+            and event["event"] == "epoch"
+            and event["time_ns"] < handoff
         )
         if produced != results["scout"][0]["usage"]["completion_tokens"]:
             raise RuntimeError("cap did not force a model handoff")
-    heartbeats = [event for event in events.values if event.get("event") == "heartbeat"]
+    heartbeats = [
+        event for event in events.values if event["event"] == "shared_device_memory"
+    ]
     if not all(
         any(event["model"] == name for event in heartbeats)
         for name in ("scout", "researcher")
@@ -223,10 +239,8 @@ def main():
             for field in ("text", "tool_calls", "usage", "finish_reason"):
                 if expected[field] != actual[field]:
                     raise RuntimeError(f"{name}: concurrent {field} differs")
-    peak = max(
-        event["device_memory"]["retained_committed_bytes"] for event in heartbeats
-    )
-    reuse = max(event["device_memory"]["workspace_reuse_count"] for event in heartbeats)
+    peak = max(event["retained_committed_bytes"] for event in heartbeats)
+    reuse = max(event["workspace_reuse_count"] for event in heartbeats)
     if peak > arguments.memory_bytes or reuse == 0:
         raise RuntimeError(f"shared pool contract failed: {peak=}, {reuse=}")
     print(
