@@ -1,0 +1,25 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+package(default_visibility = ["//visibility:private"])
+
+# Model checks and source-only fixtures share this child-process/HTTP boundary.
+py_library(
+    name = "http",
+    testonly = True,
+    srcs = ["http.py"],
+    visibility = ["//visibility:public"],
+    deps = ["//experimental/loom_serve/http:logs_client"],
+)
+
+py_test(
+    name = "http_test",
+    size = "small",
+    srcs = ["http_test.py"],
+    deps = [":http"],
+)

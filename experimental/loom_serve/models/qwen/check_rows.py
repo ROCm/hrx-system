@@ -20,7 +20,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.models.qwen import benchmark_service, check_service
+from experimental.loom_serve.models.qwen import benchmark_service
+from experimental.loom_serve.testing.http import Events, running_server
 
 
 def request(address, index, barrier=None, *, long_prompt=False):
@@ -75,7 +76,7 @@ def main():
     # cover the long prompt too, so admission does not serialize this witness.
     pooled_capacity = 256 * arguments.rows + (1024 if arguments.rows > 1 else 0)
     for capacity in (0, pooled_capacity):
-        events = []
+        observations = Events()
         log_path = arguments.output / f"pool-{capacity}.log"
         shapes = (
             [f"--epoch=64:{arguments.rows}", f"--epoch=128:{arguments.rows}"]
@@ -83,7 +84,7 @@ def main():
             else []
         )
         continuation_epochs = arguments.continuation_epochs if capacity else 1
-        with check_service.running_server(
+        with running_server(
             command
             + shapes
             + [
@@ -91,7 +92,7 @@ def main():
                 f"--continuation_epochs={continuation_epochs}",
             ],
             log_path,
-            events.append,
+            observations.record,
         ) as (_, endpoint):
             if endpoint is None:
                 raise RuntimeError(f"server did not become ready: {log_path}")
@@ -131,21 +132,30 @@ def main():
             reference = outputs
         elif outputs != reference:
             raise RuntimeError("concurrent pooled output differs from dense control")
-        epochs = [event for event in events if event and event.get("event") == "epoch"]
+        # This coverage proof requires complete history. A slow observer fails
+        # explicitly on a gap; HTTP output remains the independent oracle.
+        events = observations.values
+        epochs = [event for event in events if event["event"] == "epoch"]
+        spans = [event for event in events if event["event"] == "span"]
+        verifiers = {
+            epoch["epoch"]: sum(
+                span["verification_epochs"] != 0
+                for span in spans
+                if span["epoch"] == epoch["epoch"]
+            )
+            for epoch in epochs
+        }
         if capacity:
             if arguments.continuation_epochs == 2 and not any(
-                row["verification_epochs"] == 2
-                for epoch in epochs
-                for row in epoch["rows"]
+                span["verification_epochs"] == 2 for span in spans
             ):
                 raise RuntimeError("workload did not execute device-fed continuation")
             if arguments.continuation_epochs == 2:
                 if not any(
-                    row["kind"] == "prefill"
-                    and row["known_tokens"]
-                    and row["verification_epochs"]
-                    for epoch in epochs
-                    for row in epoch["rows"]
+                    span["kind"] == "prefill"
+                    and span["known_tokens"]
+                    and span["verification_epochs"]
+                    for span in spans
                 ):
                     raise RuntimeError(
                         "workload did not promote a prompt tail on device"
@@ -154,12 +164,12 @@ def main():
                     epoch["continued_prefill_tokens"] for epoch in epochs
                 ):
                     raise RuntimeError("continuation did not carry ready prompt work")
-            visited = {row["row"] for epoch in epochs for row in epoch["rows"]}
+            visited = {span["row"] for span in spans}
             if visited != set(range(arguments.rows)):
                 raise RuntimeError(f"resident rows not exercised: {visited}")
             if max(epoch["spans"] for epoch in epochs) != arguments.rows:
                 raise RuntimeError("workload did not advance a full resident cohort")
-            if not any(epoch["mtp"]["rows"] == arguments.rows for epoch in epochs):
+            if arguments.rows not in verifiers.values():
                 raise RuntimeError("workload did not verify a full resident cohort")
             if arguments.rows > 1 and not any(
                 epoch["prefill_tokens"] and epoch["decode_tokens"] for epoch in epochs
@@ -179,7 +189,7 @@ def main():
                         "workload did not exercise the largest token shape"
                     )
             for event in events:
-                if event and event.get("event") == "heartbeat":
+                if event["event"] == "text_memory":
                     pool = event["pool"]
                     if pool["reserved_tokens"] + pool["resident_tokens"] > capacity:
                         raise RuntimeError("pool accounting exceeded its budget")
@@ -193,7 +203,7 @@ def main():
                     "device_epochs": sum(epoch["traversals"] for epoch in epochs),
                     "continuation_epochs": continuation_epochs,
                     "maximum_spans": max(epoch["spans"] for epoch in epochs),
-                    "maximum_verifiers": max(epoch["mtp"]["rows"] for epoch in epochs),
+                    "maximum_verifiers": max(verifiers.values()),
                     "shapes": sorted(
                         {
                             (epoch["token_capacity"], epoch["span_capacity"])

@@ -332,7 +332,7 @@ py_binary(
     srcs = ["check_rows.py"],
     deps = [
         ":benchmark_service_lib",
-        ":check_service_lib",
+        "//experimental/loom_serve/testing:http",
     ],
 )
 

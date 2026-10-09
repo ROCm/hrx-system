@@ -17,18 +17,18 @@ import contextlib
 import http.client
 import io
 import json
-import signal
 import socket
 import struct
-import subprocess
 import tempfile
 import threading
 import zlib
-from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from experimental.loom_serve.http.logs import LogClient
+from experimental.loom_serve.testing.http import Events, wait_counters, wait_status
+from experimental.loom_serve.testing.http import running_server as child_server
 from experimental.loom_serve.tools.observe import EventLog, record_streams
 
 
@@ -338,7 +338,9 @@ class Client:
 
 @contextlib.contextmanager
 def running_server(server, catalog, workers):
-    child = subprocess.Popen(
+    events = Events()
+    log_path = catalog.parent / f"server-{workers}.log"
+    with child_server(
         [
             str(server),
             f"--models={catalog}",
@@ -347,47 +349,49 @@ def running_server(server, catalog, workers):
             "--pool_backing=fixed",
             "--heartbeat_ms=0",
         ],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    tail = deque(maxlen=128)
-    addresses = []
-    ready = threading.Event()
-
-    def drain():
+        log_path,
+        events.record,
+    ) as (_, address):
         try:
-            for line in child.stderr:
-                tail.append(line.rstrip())
-                if line.startswith('{"event":"ready",'):
-                    addresses.append(json.loads(line)["address"])
-                    ready.set()
-        finally:
-            ready.set()
-
-    reader = threading.Thread(target=drain)
-    reader.start()
-    try:
-        ready.wait()
-        assert addresses, list(tail)
-        yield Client(addresses[0])
-    except BaseException:
-        print("\n".join(tail), flush=True)
-        raise
-    finally:
-        if child.poll() is None:
-            child.send_signal(signal.SIGTERM)
-        result = child.wait()
-        reader.join()
-        child.stderr.close()
-        assert result == 0, (result, list(tail))
+            assert address is not None, log_path.read_text()
+            yield Client(address), events
+        except BaseException:
+            print(log_path.read_text(), flush=True)
+            raise
 
 
-def run_round(client, iteration):
+def run_round(client, iteration, observations):
     root = [{"role": "user", "content": "abxa"}]
     seed = client.text("root", root, 2)
     assert seed["text"] == "bx"
+    if iteration == 0:
+        # Actual HTTP completion is the readiness contract. The independent
+        # reader then checks native coverage without fabricating old schemas.
+        completed = observations.wait("request_stats", "root", model="fixture-text")
+        address = urlsplit("http://" + client.address)
+        wait_status(
+            address,
+            model="fixture-text",
+            active_requests=0,
+            queued_requests=0,
+            phase="idle",
+        )
+        counts = wait_counters(
+            address, lambda counts: counts["completed"] == 1, model="fixture-text"
+        )
+        assert counts["requests"] == counts["completed"] == 1
+        assert completed["counters"]["completed"] == 1
+        assert (
+            completed["counters"]["output_tokens"] == seed["usage"]["completion_tokens"]
+        )
+        history = observations.values
+        admitted = next(event for event in history if event["event"] == "admit")
+        spans = [event for event in history if event["event"] == "span"]
+        epochs = [event for event in history if event["event"] == "epoch"]
+        assert admitted["request"] == completed["request"]
+        assert spans and epochs
+        assert all(span["request"] == completed["request"] for span in spans)
+        assert {span["epoch"] for span in spans} == {epoch["epoch"] for epoch in epochs}
     pin = client.checkpoint("base", "POST", "root", status=201)
     assert pin["position"] == 5, pin
     history = root + [{"role": "assistant", "content": seed["text"]}]
@@ -566,7 +570,10 @@ def main():
         catalog_path = directory / "models.json"
         catalog_path.write_text(json.dumps(catalog))
         for workers in (1, 4):
-            with running_server(arguments.server, catalog_path, workers) as client:
+            with running_server(arguments.server, catalog_path, workers) as (
+                client,
+                observations,
+            ):
                 assert client.request("/readyz") == {"status": "ready"}
                 discovered = client.request("/v1/models")
                 assert [item["id"] for item in discovered["data"]] == [
@@ -582,7 +589,7 @@ def main():
                                 {
                                     "event": "catalog_churn",
                                     "workers": workers,
-                                    **run_round(client, iteration),
+                                    **run_round(client, iteration, observations),
                                 }
                             ),
                             flush=True,

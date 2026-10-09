@@ -47,6 +47,7 @@ py_test(
     }),
     deps = [
         "//experimental/loom_serve/http:logs_client",
+        "//experimental/loom_serve/testing:http",
         "//experimental/loom_serve/tools:observe_lib",
     ],
 )
