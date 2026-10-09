@@ -112,6 +112,63 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn("return {/*.value=*/1};", fixed_companions[header.name])
         self.assertNotIn("designated_initializer_check.h:", output)
 
+    def test_setup_block_folding_can_be_disabled(self):
+        source = clang_tidy_test.source_path(
+            __file__, "designated_initializer_check.cc"
+        )
+        output, fixed_source, _ = clang_tidy_test.run_clang_tidy_fix_and_compile(
+            clang_tidy=_ARGS.clang_tidy,
+            clangxx=_ARGS.clangxx,
+            plugin=_ARGS.plugin,
+            checks="-*,iree-cpp-designated-initializer",
+            source=source,
+            companion_files=[
+                clang_tidy_test.source_path(__file__, "designated_initializer_check.h")
+            ],
+            compiler_args=["-std=c++20", "-pedantic-errors", "-Werror"],
+            clang_tidy_args=[
+                '--config={"CheckOptions": {'
+                '"iree-cpp-designated-initializer.EnableSetupBlockFolding": '
+                '"false"}}'
+            ],
+        )
+
+        self.assertIn(
+            "replace comment field label with a C++20 designated initializer",
+            output,
+        )
+        self.assertNotIn("aggregate setup", output)
+        self.assertIn("Numbers configured = {};", fixed_source)
+        self.assertIn("configured.first = 20;", fixed_source)
+
+    def test_comment_label_conversion_can_be_disabled(self):
+        source = clang_tidy_test.source_path(
+            __file__, "designated_initializer_check.cc"
+        )
+        output, fixed_source, _ = clang_tidy_test.run_clang_tidy_fix_and_compile(
+            clang_tidy=_ARGS.clang_tidy,
+            clangxx=_ARGS.clangxx,
+            plugin=_ARGS.plugin,
+            checks="-*,iree-cpp-designated-initializer",
+            source=source,
+            companion_files=[
+                clang_tidy_test.source_path(__file__, "designated_initializer_check.h")
+            ],
+            compiler_args=["-std=c++20", "-pedantic-errors", "-Werror"],
+            clang_tidy_args=[
+                '--config={"CheckOptions": {'
+                '"iree-cpp-designated-initializer.EnableCommentLabelConversion": '
+                '"false"}}'
+            ],
+        )
+
+        self.assertNotIn("comment field label", output)
+        self.assertNotIn("comment label names", output)
+        self.assertIn("fold aggregate setup", output)
+        self.assertIn("Config labeled_config = {", fixed_source)
+        self.assertIn("/*.ordinal=*/1,", fixed_source)
+        self.assertIn("Numbers configured = {.first = 20, .second = 21};", fixed_source)
+
     def test_check_is_inactive_before_cxx20(self):
         output = clang_tidy_test.run_clang_tidy(
             clang_tidy=_ARGS.clang_tidy,

@@ -357,6 +357,11 @@ members, nontrivial initialization or assignment, narrowing conversions,
 self-reference, macros, reordered assignments, and setup split by later member
 assignments. Value evaluation order is preserved.
 
+`EnableCommentLabelConversion` and `EnableSetupBlockFolding` both default to
+`true`. Disable one while applying the other migration so token-local label
+changes and structural setup changes remain separate reviews. Normal policy
+enforcement leaves both paths enabled.
+
 When assignment is semantically required, keep the setup block and place
 `NOLINT(iree-cpp-designated-initializer)` on the empty initializer with a comment
 that names the initialization-versus-assignment distinction. The diagnostic

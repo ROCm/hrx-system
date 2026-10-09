@@ -20,6 +20,14 @@ class DesignatedInitializerCheck final : public ClangTidyCheck {
 
   void registerMatchers(ast_matchers::MatchFinder* Finder) override;
   void check(const ast_matchers::MatchFinder::MatchResult& Result) override;
+  void storeOptions(ClangTidyOptions::OptionMap& Options) override;
+
+ private:
+  // Whether to diagnose and convert comment field labels.
+  const bool enable_comment_label_conversion_;
+
+  // Whether to diagnose and fold empty-initializer setup blocks.
+  const bool enable_setup_block_folding_;
 };
 
 }  // namespace clang::tidy::iree

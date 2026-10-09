@@ -738,7 +738,11 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
 
 DesignatedInitializerCheck::DesignatedInitializerCheck(
     StringRef Name, ClangTidyContext* Context)
-    : ClangTidyCheck(Name, Context) {}
+    : ClangTidyCheck(Name, Context),
+      enable_comment_label_conversion_(
+          Options.get("EnableCommentLabelConversion", true)),
+      enable_setup_block_folding_(
+          Options.get("EnableSetupBlockFolding", true)) {}
 
 void DesignatedInitializerCheck::registerMatchers(
     ast_matchers::MatchFinder* Finder) {
@@ -746,14 +750,17 @@ void DesignatedInitializerCheck::registerMatchers(
     return;
   }
   using namespace ast_matchers;
-  Finder->addMatcher(initListExpr(isExpansionInMainFile()).bind("init_list"),
-                     this);
-  Finder->addMatcher(
-      compoundStmt(
-          isExpansionInMainFile(),
-          has(declStmt(hasSingleDecl(varDecl(hasInitializer(initListExpr()))))))
-          .bind("compound"),
-      this);
+  if (enable_comment_label_conversion_) {
+    Finder->addMatcher(initListExpr(isExpansionInMainFile()).bind("init_list"),
+                       this);
+  }
+  if (enable_setup_block_folding_) {
+    Finder->addMatcher(compoundStmt(isExpansionInMainFile(),
+                                    has(declStmt(hasSingleDecl(varDecl(
+                                        hasInitializer(initListExpr()))))))
+                           .bind("compound"),
+                       this);
+  }
 }
 
 void DesignatedInitializerCheck::check(
@@ -766,6 +773,14 @@ void DesignatedInitializerCheck::check(
   if (const auto* Compound = Result.Nodes.getNodeAs<CompoundStmt>("compound")) {
     CheckSetupBlocks(*this, Compound, *Result.Context, *Result.SourceManager);
   }
+}
+
+void DesignatedInitializerCheck::storeOptions(
+    ClangTidyOptions::OptionMap& Options) {
+  this->Options.store(Options, "EnableCommentLabelConversion",
+                      enable_comment_label_conversion_);
+  this->Options.store(Options, "EnableSetupBlockFolding",
+                      enable_setup_block_folding_);
 }
 
 }  // namespace clang::tidy::iree
