@@ -165,14 +165,14 @@ TEST(LowAllocationStorageTest, EvaluatesConcretePlacementRelations) {
       /*location_count=*/2);
 
   loom_low_placement_relation_t relation = {
-      /*.op=*/nullptr,
-      /*.result_ordinal=*/0,
-      /*.source_ordinal=*/1,
-      /*.result_unit_offset=*/0,
-      /*.source_unit_offset=*/0,
-      /*.unit_count=*/1,
-      {.location_mask = 1},
-      /*.kind=*/LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION,
+      .op = nullptr,
+      .result_ordinal = 0,
+      .source_ordinal = 1,
+      .result_unit_offset = 0,
+      .source_unit_offset = 0,
+      .unit_count = 1,
+      .location_mask = 1,
+      .kind = LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION,
   };
   EXPECT_TRUE(loom_low_allocation_storage_placement_relation_satisfied(
       &descriptor_set, &relation, &result, &source));
@@ -649,14 +649,14 @@ TEST(LowAllocationStorageTest, MatchesExplicitRegisterCandidateOrdinals) {
           descriptor_set, partner_reg_class_id, 0),
       /*location_count=*/1);
   const loom_low_placement_relation_t relation = {
-      /*.op=*/nullptr,
-      /*.result_ordinal=*/0,
-      /*.source_ordinal=*/1,
-      /*.result_unit_offset=*/0,
-      /*.source_unit_offset=*/0,
-      /*.unit_count=*/1,
-      {.location_mask = 0},
-      /*.kind=*/LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL,
+      .op = nullptr,
+      .result_ordinal = 0,
+      .source_ordinal = 1,
+      .result_unit_offset = 0,
+      .source_unit_offset = 0,
+      .unit_count = 1,
+      .location_mask = 0,
+      .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL,
   };
 
   EXPECT_TRUE(loom_low_allocation_storage_placement_relation_satisfied(
