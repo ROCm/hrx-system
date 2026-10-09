@@ -102,9 +102,10 @@ errors have separate cases for each placement.
 iree-bazel-test --config=asan //libamdf/cts/gpu/linux/io_uring:file_staged
 ```
 
-Host registration, LOCAL placement and the direct-I/O filesystem contract are
-independent capabilities. Their absence produces explicit skips. A qualification
-invocation can require an exact case with `--amdf_require_test`, for example
+Host registration, SQPOLL permission, LOCAL placement and the direct-I/O
+filesystem contract are independent capabilities. Their absence produces
+explicit skips before GPU submission. A qualification invocation can require
+an exact case with `--amdf_require_test`, for example
 `FileToSdma/FileStagedOwnershipTest.CopyReleasesSourceAndEveryReaderReleasesDestination/DirectLocal64KiBS1D2R2`.
 A generic GPU resource tag does not establish disk-backed scratch. Direct cases
 require `O_DIRECT` and `STATX_DIOALIGN`; tmpfs is not substituted for disk-backed

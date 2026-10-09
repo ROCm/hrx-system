@@ -90,6 +90,9 @@ class GpuFileIoTest : public GpuFileIoFixture {
     ASSERT_NO_FATAL_FAILURE(
         CreateRegisteredPages(7 * page_byte_length_, kGuard, &payload));
     ASSERT_NO_FATAL_FAILURE(CreateRing(payload, path, 1, submission_entries));
+    if (IsSkipped()) {
+      return;
+    }
     const size_t record_word_count =
         2 * kRecordGuardWords + protocol::kSummaryWordCount +
         round_count * (protocol::kRecordHeaderWordCount + word_count);

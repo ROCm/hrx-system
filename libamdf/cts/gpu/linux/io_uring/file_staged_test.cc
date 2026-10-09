@@ -256,6 +256,9 @@ void GpuFileStagedTest::Run(const StagedCase& test_case) {
     return;
   }
   ASSERT_NO_FATAL_FAILURE(CreateRing(source));
+  if (IsSkipped()) {
+    return;
+  }
 
   GpuUserQueue* file_queue = nullptr;
   GpuUserQueue* upload_queue = nullptr;

@@ -131,8 +131,12 @@ The build uses pinned Linux protocol headers, not the build host's header
 version. Runtime admission independently probes a fixed, disabled caller-owned
 ring. An absent syscall, unsupported base ring flags, or a policy denial skips
 the case before workload I/O; allocation and other resource failures remain
-failures. The probe submits no work and creates no polling thread. Once admitted,
-each workload's actual ring setup, registration, and enablement must succeed.
+failures. The probe submits no work and creates no polling thread. Each
+workload's actual setup also checks policy admission for its selected path:
+SQPOLL permission is independent of ordinary ring creation. A denial skips that
+path before GPU submission, while host-submission cases retain their own
+admission. Other setup errors, registration failures, and enablement failures
+remain test failures.
 Direct-storage cases additionally query the filesystem's `STATX_DIOALIGN`
 contract; an unavailable query or absent alignment contract skips those cases
 without substituting buffered I/O. No runtime decision compares kernel release
