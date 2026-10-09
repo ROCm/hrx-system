@@ -10,6 +10,7 @@
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/semaphore.h"
 #include "iree/hal/drivers/amd/status.h"
+#include "iree/hal/drivers/amd/xdna/barrier.h"
 #include "iree/hal/drivers/amd/xdna/executable.h"
 #include "iree/hal/drivers/amd/xdna/queue_frontier.h"
 #include "iree/hal/drivers/amd/xdna/queue_operation.h"
@@ -1588,7 +1589,7 @@ static iree_status_t iree_hal_amd_xdna_queue_barrier(
     iree_hal_semaphore_list_t signals,
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_queue_barrier_flags_t flags) {
-  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_operation_validate_barriers(barriers));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_queue_barriers_validate(barriers));
   iree_hal_amd_xdna_operation_t* operation = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_operation_create(
       (iree_hal_amd_xdna_queue_t*)base, waits, signals,
@@ -1604,7 +1605,7 @@ static iree_status_t iree_hal_amd_xdna_queue_dispatch(
     const iree_hal_buffer_ref_list_t bindings,
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_dispatch_flags_t flags) {
-  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_operation_validate_barriers(barriers));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_queue_barriers_validate(barriers));
   const iree_hal_dispatch_flags_t supported_flags =
       IREE_HAL_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION |
       IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES;

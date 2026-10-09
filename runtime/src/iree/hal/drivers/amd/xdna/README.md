@@ -77,11 +77,15 @@ unresolved waits register their ordinary semaphore timepoints immediately. The
 public queue call always captures its arguments before either direct or queued
 publication takes ownership.
 
-Direct fill, update, copy, upload, download, and barriers are supported. Transfers
-use mapped native storage with the required cache operations. Allocated buffers
-report the provider's actual coherence properties. Loom correctness scenarios
-keep canonical host data in coherent heap storage and stage device copies;
-buffer offsets and aliases survive upload and readback.
+Direct fill, update, copy, upload, download, and queue barriers are supported.
+Execution/access dependencies and global system visibility need no additional
+XDNA command. Ranged memory effects return `UNIMPLEMENTED` because this queue
+family has no native range-maintenance action and cannot promote a prepared
+range without weakening its contract. Transfers use mapped native storage with
+the required cache operations. Allocated buffers report the provider's actual
+coherence properties. Loom correctness scenarios keep canonical host data in
+coherent heap storage and stage device copies; buffer offsets and aliases
+survive upload and readback.
 
 Queue notifications are wake hints. One cold-registered persistent proactor
 source consumes each event, refreshes the native queue's checked retirement and

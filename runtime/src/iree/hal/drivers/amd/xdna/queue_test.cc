@@ -635,7 +635,8 @@ class QueueHarness {
 
   void SubmitWithWaits(iree_hal_semaphore_list_t waits,
                        iree_hal_semaphore_t* completion,
-                       uint64_t completion_value) {
+                       uint64_t completion_value,
+                       const iree_hal_queue_barriers_t* barriers = nullptr) {
     if (completion == done) {
       completion_timepoint.callback =
           +[](void* user_data, iree_async_semaphore_timepoint_t* timepoint,
@@ -661,7 +662,7 @@ class QueueHarness {
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
         queue, waits, {1, &completion, &completion_value}, executable, function,
         iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding},
-        /*barriers=*/NULL, 0));
+        barriers, IREE_HAL_DISPATCH_FLAG_NONE));
     iree_hal_executable_release(executable);
     iree_hal_buffer_release(buffer);
     EXPECT_EQ(native.live_memories, previous_live_memories + 3);
@@ -967,6 +968,102 @@ TEST(XdnaQueueTest, DeviceCreatesOwnedDeviceCompatibleSemaphores) {
   EXPECT_EQ(iree_hal_device_query_semaphore_compatibility(harness.device,
                                                           harness.done),
             IREE_HAL_SEMAPHORE_COMPATIBILITY_ALL);
+}
+
+TEST(XdnaQueueTest, QueueBarrierPreservesGlobalBoundaryOrdering) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  iree_hal_semaphore_t* ready = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &ready));
+
+  const iree_hal_barrier_t global = {
+      /*.source_stage_mask=*/IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      /*.target_stage_mask=*/IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      /*.flags=*/IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+          IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+      /*.effects=*/
+      {IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM |
+       IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM},
+  };
+  const iree_hal_barrier_list_t global_list = {1, &global};
+  const iree_hal_queue_barriers_t barriers = {&global_list, &global_list};
+  uint64_t value = 1;
+  IREE_ASSERT_OK(iree_hal_queue_barrier(harness.queue, {1, &ready, &value},
+                                        {1, &harness.done, &value}, &barriers,
+                                        IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
+
+  uint64_t completed_value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &completed_value));
+  EXPECT_EQ(completed_value, 0u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(ready, value, nullptr));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(harness.done, value));
+  EXPECT_EQ(harness.native.submission_count, 0u);
+
+  iree_hal_semaphore_release(ready);
+}
+
+TEST(XdnaQueueTest, QueueBarrierRejectsRangedQueueOperation) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  iree_hal_buffer_t* buffer = nullptr;
+  ASSERT_NO_FATAL_FAILURE(harness.MakeBuffer(&buffer));
+
+  const iree_hal_memory_transition_recipe_info_t operation = {
+      /*.kind=*/IREE_HAL_MEMORY_TRANSITION_KIND_RANGE,
+      /*.executor=*/IREE_HAL_MEMORY_TRANSITION_EXECUTOR_QUEUE,
+      /*.operation=*/IREE_HAL_MEMORY_TRANSITION_OPERATION_RELEASE_TO_SYSTEM,
+      /*.range_granularity=*/64,
+  };
+  const iree_hal_memory_transition_recipe_t recipe = {
+      /*.effects=*/{IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM},
+      /*.operation_count=*/1,
+      /*.operations=*/&operation,
+  };
+  const iree_hal_buffer_barrier_t range = {
+      /*.source_scope=*/IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      /*.target_scope=*/IREE_HAL_ACCESS_SCOPE_MEMORY_READ,
+      /*.buffer_ref=*/iree_hal_make_buffer_ref(buffer, 0, 64),
+      /*.recipe=*/&recipe,
+  };
+  const iree_hal_barrier_t barrier = {
+      /*.source_stage_mask=*/IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      /*.target_stage_mask=*/IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      /*.flags=*/IREE_HAL_BARRIER_FLAG_NONE,
+      /*.effects=*/recipe.effects,
+      /*.memory_barrier_count=*/0,
+      /*.memory_barriers=*/nullptr,
+      /*.buffer_barrier_count=*/1,
+      /*.buffer_barriers=*/&range,
+  };
+  const iree_hal_barrier_list_t list = {1, &barrier};
+  const iree_hal_queue_barriers_t barriers = {&list, nullptr};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_queue_barrier(harness.queue, {}, {}, &barriers,
+                             IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
+  EXPECT_EQ(harness.native.submission_count, 0u);
+
+  iree_hal_buffer_release(buffer);
+}
+
+TEST(XdnaQueueTest, DispatchAcceptsGlobalVisibilityBoundary) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+
+  const iree_hal_barrier_t global = {
+      /*.source_stage_mask=*/IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      /*.target_stage_mask=*/IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      /*.flags=*/IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+      /*.effects=*/{IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM},
+  };
+  const iree_hal_barrier_list_t global_list = {1, &global};
+  const iree_hal_queue_barriers_t barriers = {nullptr, &global_list};
+  ASSERT_NO_FATAL_FAILURE(
+      harness.SubmitWithWaits({}, harness.done, 1, &barriers));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
+  EXPECT_EQ(harness.native.submission_count, 1u);
 }
 
 TEST(XdnaQueueTest, DispatchValidatesImageBindingContractAtCapture) {

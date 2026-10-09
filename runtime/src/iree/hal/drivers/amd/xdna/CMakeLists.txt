@@ -12,6 +12,38 @@ iree_add_all_subdirs()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    barrier
+  HDRS
+    "barrier.h"
+  SRCS
+    "barrier.c"
+  DEPS
+    iree::base
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    barrier_test
+  SRCS
+    "barrier_test.cc"
+  DEPS
+    ::barrier
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     context
   HDRS
     "context.h"
@@ -349,6 +381,7 @@ iree_cc_library(
     "queue.c"
     "queue_operation.c"
   DEPS
+    ::barrier
     ::context
     ::executable
     ::queue_frontier
