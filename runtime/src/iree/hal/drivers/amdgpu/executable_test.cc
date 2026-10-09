@@ -105,8 +105,8 @@ TEST_F(ExecutableTest, PublishesAndEnforcesResourceLimits) {
   iree_hal_buffer_ref_t binding = iree_hal_make_buffer_ref(
       output_buffer, /*offset=*/0, iree_hal_buffer_byte_length(output_buffer));
   const iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/1,
-      /*.values=*/&binding,
+      .count = 1,
+      .values = &binding,
   };
   iree_hal_dispatch_config_t config =
       iree_hal_make_static_dispatch_config(1, 1, 1);

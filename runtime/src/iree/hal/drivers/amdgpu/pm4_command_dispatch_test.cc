@@ -135,8 +135,8 @@ class PM4CommandDispatchTest : public ::testing::Test {
     iree_hal_buffer_ref_t output_ref = iree_hal_make_buffer_ref(
         output_buffer, /*offset=*/0, kOutputByteLength);
     const iree_hal_buffer_ref_list_t bindings = {
-        /*.count=*/1,
-        /*.values=*/&output_ref,
+        .count = 1,
+        .values = &output_ref,
     };
     iree_hal_dispatch_config_t config = {};
     config.workgroup_count_ref = parameter_ref;
@@ -158,9 +158,9 @@ class PM4CommandDispatchTest : public ::testing::Test {
     iree_hal_semaphore_t* signal_ptr = signal.get();
     uint64_t signal_value = 1;
     const iree_hal_semaphore_list_t signal_list = {
-        /*.count=*/1,
-        /*.semaphores=*/&signal_ptr,
-        /*.payload_values=*/&signal_value,
+        .count = 1,
+        .semaphores = &signal_ptr,
+        .payload_values = &signal_value,
     };
     IREE_RETURN_IF_ERROR(iree_hal_queue_execute(
         test_device_.queue(), iree_hal_semaphore_list_empty(), signal_list,
@@ -391,13 +391,13 @@ TEST_F(PM4CommandDispatchTest, DynamicBindingFixupSupportsReusableExecution) {
                 fixup_plan->entries[0].target_offset);
 
   iree_hal_buffer_binding_t parameter_binding = {
-      /*.buffer=*/parameter_buffer,
-      /*.offset=*/0,
-      /*.length=*/kParameterBufferByteLength,
+      .buffer = parameter_buffer,
+      .offset = 0,
+      .length = kParameterBufferByteLength,
   };
   const iree_hal_buffer_binding_table_t binding_table = {
-      /*.count=*/1,
-      /*.bindings=*/&parameter_binding,
+      .count = 1,
+      .bindings = &parameter_binding,
   };
   IREE_ASSERT_OK(Execute(command_buffer, binding_table));
   ExpectOutput(output_buffer, /*dispatched_workgroup_count=*/4);
@@ -429,8 +429,8 @@ TEST_F(PM4CommandDispatchTest, DynamicParametersObservePriorDispatch) {
   iree_hal_buffer_ref_t parameter_ref = iree_hal_make_buffer_ref(
       parameter_buffer, kParameterOffset, kParameterByteLength);
   const iree_hal_buffer_ref_list_t producer_bindings = {
-      /*.count=*/1,
-      /*.values=*/&parameter_ref,
+      .count = 1,
+      .values = &parameter_ref,
   };
   IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
       command_buffer, parameter_producer_executable,
@@ -439,30 +439,30 @@ TEST_F(PM4CommandDispatchTest, DynamicParametersObservePriorDispatch) {
       iree_const_byte_span_empty(), producer_bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   const iree_hal_memory_barrier_t memory_barrier = {
-      /*.source_scope=*/IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
-          IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE,
-      /*.target_scope=*/IREE_HAL_ACCESS_SCOPE_INDIRECT_COMMAND_READ |
-          IREE_HAL_ACCESS_SCOPE_MEMORY_READ,
+      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                      IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_INDIRECT_COMMAND_READ |
+                      IREE_HAL_ACCESS_SCOPE_MEMORY_READ,
   };
   const iree_hal_barrier_t execution_barrier = {
-      /*.source_stage_mask=*/IREE_HAL_EXECUTION_STAGE_DISPATCH |
-          IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-      /*.target_stage_mask=*/IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS |
-          IREE_HAL_EXECUTION_STAGE_DISPATCH,
-      /*.flags=*/IREE_HAL_BARRIER_FLAG_NONE,
-      /*.effects=*/{},
-      /*.memory_barrier_count=*/1,
-      /*.memory_barriers=*/&memory_barrier,
-      /*.buffer_barrier_count=*/0,
-      /*.buffer_barriers=*/NULL,
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH |
+                           IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS |
+                           IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .flags = IREE_HAL_BARRIER_FLAG_NONE,
+      .effects = {},
+      .memory_barrier_count = 1,
+      .memory_barriers = &memory_barrier,
+      .buffer_barrier_count = 0,
+      .buffer_barriers = NULL,
   };
   IREE_ASSERT_OK(
       iree_hal_command_buffer_barrier(command_buffer, &execution_barrier));
   iree_hal_buffer_ref_t output_ref =
       iree_hal_make_buffer_ref(output_buffer, /*offset=*/0, kOutputByteLength);
   const iree_hal_buffer_ref_list_t consumer_bindings = {
-      /*.count=*/1,
-      /*.values=*/&output_ref,
+      .count = 1,
+      .values = &output_ref,
   };
   iree_hal_dispatch_config_t indirect_config = {};
   indirect_config.workgroup_count_ref = parameter_ref;
@@ -554,13 +554,13 @@ TEST_F(PM4CommandDispatchTest,
   EXPECT_EQ(0u, reinterpret_cast<uintptr_t>(&packet[1]) % alignof(uint64_t));
 
   iree_hal_buffer_binding_t parameter_binding = {
-      /*.buffer=*/parameter_buffer,
-      /*.offset=*/0,
-      /*.length=*/kParameterBufferByteLength,
+      .buffer = parameter_buffer,
+      .offset = 0,
+      .length = kParameterBufferByteLength,
   };
   const iree_hal_buffer_binding_table_t binding_table = {
-      /*.count=*/1,
-      /*.bindings=*/&parameter_binding,
+      .count = 1,
+      .bindings = &parameter_binding,
   };
   IREE_ASSERT_OK(Execute(command_buffer, binding_table));
   IREE_ASSERT_OK(iree_hal_device_profiling_flush(test_device_.base_device()));
@@ -627,8 +627,8 @@ TEST_F(PM4CommandDispatchTest, RejectsImplicitBlockCountKernargs) {
   iree_hal_buffer_ref_t output_ref =
       iree_hal_make_buffer_ref(output_buffer, /*offset=*/0, sizeof(uint64_t));
   const iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/1,
-      /*.values=*/&output_ref,
+      .count = 1,
+      .values = &output_ref,
   };
   iree_status_t status = iree_hal_command_buffer_dispatch(
       command_buffer, executable, iree_hal_executable_function_from_index(0),
