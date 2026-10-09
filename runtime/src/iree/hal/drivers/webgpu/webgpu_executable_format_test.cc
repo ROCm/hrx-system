@@ -17,19 +17,17 @@
 
 namespace {
 
-enum : iree_host_size_t {
-  kHeaderMagicOffset = 0,
-  kHeaderVersionOffset = 4,
-  kHeaderExportCountOffset = 8,
-  kExportWgslSourceOffsetOffset = 0,
-  kExportWgslSourceLengthOffset = 4,
-  kExportEntryPointOffsetOffset = 8,
-  kExportEntryPointLengthOffset = 12,
-  kExportWorkgroupSizeXOffset = 16,
-  kExportWorkgroupSizeYOffset = 20,
-  kExportWorkgroupSizeZOffset = 24,
-  kExportBindingCountOffset = 28,
-};
+constexpr iree_host_size_t kHeaderMagicOffset = 0;
+constexpr iree_host_size_t kHeaderVersionOffset = 4;
+constexpr iree_host_size_t kHeaderExportCountOffset = 8;
+constexpr iree_host_size_t kExportWgslSourceOffsetOffset = 0;
+constexpr iree_host_size_t kExportWgslSourceLengthOffset = 4;
+constexpr iree_host_size_t kExportEntryPointOffsetOffset = 8;
+constexpr iree_host_size_t kExportEntryPointLengthOffset = 12;
+constexpr iree_host_size_t kExportWorkgroupSizeXOffset = 16;
+constexpr iree_host_size_t kExportWorkgroupSizeYOffset = 20;
+constexpr iree_host_size_t kExportWorkgroupSizeZOffset = 24;
+constexpr iree_host_size_t kExportBindingCountOffset = 28;
 
 struct TestExport {
   // WGSL source stored in the bundle payload.
