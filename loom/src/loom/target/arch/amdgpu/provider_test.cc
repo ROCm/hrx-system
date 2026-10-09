@@ -384,10 +384,10 @@ class AmdgpuProviderTest : public ::testing::Test {
 
   iree_status_t RunTemplateSelection(loom_module_t* module) {
     static const loom_pass_descriptor_t kPassDescriptor = {
-        /*.key=*/IREE_SVL("select-templates"),
-        /*.info=*/loom_template_selection_pass_info,
-        /*.module_run=*/{loom_template_selection_run},
-        /*.create=*/loom_template_selection_create,
+        .key = IREE_SVL("select-templates"),
+        .info = loom_template_selection_pass_info,
+        .module_run = loom_template_selection_run,
+        .create = loom_template_selection_create,
     };
     static const loom_pass_registry_t kPassRegistry = {
         .descriptors = &kPassDescriptor,
