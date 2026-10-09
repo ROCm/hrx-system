@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_XDNA_EXECUTABLE_H_
 #define IREE_HAL_DRIVERS_AMD_XDNA_EXECUTABLE_H_
 
+#include "iree/hal/drivers/amd/xdna/command_arena.h"
 #include "iree/hal/drivers/amd/xdna/executable_storage.h"
 #include "iree/hal/drivers/amd/xdna/memory.h"
 
@@ -27,6 +28,7 @@ typedef struct iree_hal_amd_xdna_invocation_t iree_hal_amd_xdna_invocation_t;
 // lifetime.
 iree_status_t iree_hal_amd_xdna_executable_create(
     const iree_hal_queue_family_t* family, iree_hal_amd_xdna_context_t* context,
+    iree_hal_amd_xdna_command_arena_t* command_arena,
     const iree_hal_executable_load_params_t* params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
 

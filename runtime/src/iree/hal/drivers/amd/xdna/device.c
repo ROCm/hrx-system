@@ -8,6 +8,7 @@
 
 #include "iree/async/notification.h"
 #include "iree/async/util/proactor_pool.h"
+#include "iree/hal/drivers/amd/xdna/command_arena.h"
 #include "iree/hal/drivers/amd/xdna/executable.h"
 #include "iree/hal/drivers/amd/xdna/memory_backend.h"
 #include "iree/hal/drivers/amd/xdna/queue.h"
@@ -22,6 +23,8 @@ typedef struct iree_hal_amd_xdna_device_t {
   iree_allocator_t host_allocator;
   // Native owner, transferred only after complete construction.
   iree_hal_amd_xdna_context_t* context;
+  // Context-private instruction storage shared by every executable.
+  iree_hal_amd_xdna_command_arena_t* command_arena;
   // Retained shared proactor runner entry.
   iree_async_proactor_pool_entry_t* proactor_entry;
   // Cached immutable device facts.
@@ -132,6 +135,7 @@ static void iree_hal_amd_xdna_device_finalize(void* user_data) {
   device->queue = NULL;
   iree_hal_queue_release(queue);
   iree_hal_allocator_release(device->allocator);
+  iree_hal_amd_xdna_command_arena_destroy(device->command_arena);
   iree_hal_memory_maintenance_release(device->memory.maintenance);
   iree_async_notification_release(device->memory.notification);
   iree_hal_device_spec_release(device->spec);
@@ -192,6 +196,10 @@ iree_status_t iree_hal_amd_xdna_device_create(
                                            host_allocator, &device->allocator);
   }
   if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_xdna_command_arena_create(context, host_allocator,
+                                                    &device->command_arena);
+  }
+  if (iree_status_is_ok(status)) {
     iree_hal_queue_family_initialize(
         (iree_hal_device_t*)device, 0,
         &iree_hal_device_spec_queues(device->spec)->families[0],
@@ -214,6 +222,7 @@ iree_status_t iree_hal_amd_xdna_device_create(
     *out_device = (iree_hal_device_t*)device;
   } else {
     iree_hal_queue_release(device->queue);
+    iree_hal_amd_xdna_command_arena_destroy(device->command_arena);
     iree_hal_allocator_release(device->allocator);
     iree_hal_memory_maintenance_release(device->memory.maintenance);
     iree_async_notification_release(device->memory.notification);
@@ -300,7 +309,8 @@ static iree_status_t iree_hal_amd_xdna_device_load_executable(
     iree_hal_executable_t** out_executable) {
   iree_hal_amd_xdna_device_t* device = (iree_hal_amd_xdna_device_t*)base;
   return iree_hal_amd_xdna_executable_create(
-      family, device->context, params, device->host_allocator, out_executable);
+      family, device->context, device->command_arena, params,
+      device->host_allocator, out_executable);
 }
 
 static iree_status_t iree_hal_amd_xdna_device_create_semaphore(

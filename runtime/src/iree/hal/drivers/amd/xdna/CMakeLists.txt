@@ -81,6 +81,23 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    command_arena
+  HDRS
+    "command_arena.h"
+  SRCS
+    "command_arena.c"
+  DEPS
+    ::memory
+    iree::base
+    iree::base::threading
+    iree::hal::memory::tlsf
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     slab_provider
   HDRS
     "slab_provider.h"
@@ -408,6 +425,7 @@ iree_cc_library(
   SRCS
     "executable.c"
   DEPS
+    ::command_arena
     ::context
     ::executable_storage
     ::memory
@@ -466,6 +484,7 @@ iree_cc_library(
   SRCS
     "device.c"
   DEPS
+    ::command_arena
     ::context
     ::executable
     ::memory

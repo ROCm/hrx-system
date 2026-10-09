@@ -189,9 +189,18 @@ struct NativeProvider {
       amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
       amdf_memory_t** out_memory) {
     auto* self = reinterpret_cast<NativeProvider*>(scope);
+    const bool is_command_memory =
+        info->access_count == 1 &&
+        iree_any_bit_set(info->accesses[0].requirements.address_kinds,
+                         UINT64_C(1) << AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE);
+    if (is_command_memory && self->enforce_single_command_memory &&
+        self->command_memory_create_count != 0) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+    }
     auto* memory = new Memory{self, std::vector<uint8_t>(info->byte_length),
                               self->next_address};
     self->next_address += iree_host_align(info->byte_length, 32768);
+    self->command_memory_create_count += is_command_memory ? 1 : 0;
     ++self->live_memories;
     ++self->memory_create_count;
     *out_memory = reinterpret_cast<amdf_memory_t*>(memory);
@@ -499,6 +508,10 @@ struct NativeProvider {
   std::atomic<bool> submission_released{false};
   // Total native backing creations, including destroyed allocations.
   size_t memory_create_count = 0;
+  // Context-private instruction allocations accepted by the provider.
+  size_t command_memory_create_count = 0;
+  // True when the context accepts only one complete instruction aperture.
+  bool enforce_single_command_memory = true;
   // Common native services consumed by the real HAL.
   amdf_api_t api = {};
   // Native XDNA services consumed by the real HAL.
@@ -588,6 +601,12 @@ class QueueHarness {
     context->data_source.access.requirements.address_kinds =
         UINT64_C(1) << AMDF_MEMORY_ADDRESS_XDNA_DMA;
     context->command_source = context->data_source;
+    context->command_source.profile.allocation.maximum_byte_length =
+        8 * 1024 * 1024;
+    if (native.enforce_single_command_memory) {
+      context->command_source.profile.allocation.byte_length_granularity =
+          8 * 1024 * 1024;
+    }
     context->command_source.address_kind = AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE;
     context->command_source.access.requirements.access =
         AMDF_MEMORY_ACCESS_READ;
@@ -665,7 +684,7 @@ class QueueHarness {
         barriers, IREE_HAL_DISPATCH_FLAG_NONE));
     iree_hal_executable_release(executable);
     iree_hal_buffer_release(buffer);
-    EXPECT_EQ(native.live_memories, previous_live_memories + 3);
+    EXPECT_EQ(native.live_memories, previous_live_memories + 2);
   }
 
   void LoadExecutable(
@@ -2019,11 +2038,16 @@ TEST(XdnaQueueTest, PublicationClaimContentionUsesQueuedPublication) {
 TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {
   QueueHarness harness;
   harness.native.pending_capacity = 2;
+  // Place the instruction aperture at the target floor but below the image's
+  // stronger alignment so this exercises arena-internal alignment padding.
+  harness.native.next_address = 0x1008000;
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  iree::hal::amd::xdna::testing::ImageFixture fixture;
+  fixture.allocations[0].alignment = 65536;
   iree_hal_executable_t* executable = nullptr;
   iree_hal_executable_function_t function;
-  ASSERT_NO_FATAL_FAILURE(harness.LoadExecutable(
-      iree::hal::amd::xdna::testing::ImageFixture(), &executable, &function));
+  ASSERT_NO_FATAL_FAILURE(
+      harness.LoadExecutable(fixture, &executable, &function));
   std::array<iree_hal_buffer_t*, 2> buffers = {};
   std::array<iree_hal_semaphore_t*, 2> completions = {};
   for (size_t i = 0; i < buffers.size(); ++i) {
@@ -2032,7 +2056,7 @@ TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {
         harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
         IREE_HAL_SEMAPHORE_FLAG_NONE, &completions[i]));
   }
-  // Two initial executable allocations and two caller buffers.
+  // One instruction aperture, one static DMA catalog, and two caller buffers.
   EXPECT_EQ(harness.native.memory_create_count, 4u);
   for (uint64_t iteration = 1; iteration <= 4; ++iteration) {
     harness.native.hold_retirement = true;
@@ -2049,17 +2073,22 @@ TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {
     ASSERT_EQ(harness.native.pending_commands.size(), 2u);
     const auto& first = harness.native.pending_commands[0];
     const auto& second = harness.native.pending_commands[1];
-    EXPECT_NE(first.memory, second.memory);
+    EXPECT_EQ(first.memory, second.memory);
+    EXPECT_NE(first.offset, second.offset);
+    EXPECT_EQ((first.memory->address + first.offset) % 65536, 0u);
+    EXPECT_EQ((second.memory->address + second.offset) % 65536, 0u);
     EXPECT_FALSE(std::equal(first.bytes.begin() + 8, first.bytes.end(),
                             second.bytes.begin() + 8));
-    // The static DMA catalog is shared, so only one command allocation grows.
-    EXPECT_EQ(harness.native.memory_create_count, 5u);
+    // Both commands are ranges in the persistent instruction aperture.
+    EXPECT_EQ(harness.native.memory_create_count, 4u);
     if (iteration > 1) {
       ASSERT_EQ(harness.native.flushes.size(), 2u);
-      for (const auto& flush : harness.native.flushes) {
-        EXPECT_EQ(flush.offset, 8u);
-        EXPECT_EQ(flush.length, 8u);
-      }
+      EXPECT_EQ(harness.native.flushes[0].memory, first.memory);
+      EXPECT_EQ(harness.native.flushes[0].offset, first.offset + 8);
+      EXPECT_EQ(harness.native.flushes[0].length, 8u);
+      EXPECT_EQ(harness.native.flushes[1].memory, second.memory);
+      EXPECT_EQ(harness.native.flushes[1].offset, second.offset + 8);
+      EXPECT_EQ(harness.native.flushes[1].length, 8u);
     }
     harness.native.hold_retirement = false;
     harness.native.Wake();
@@ -2080,7 +2109,33 @@ TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {
     iree_hal_buffer_release(buffer);
   }
   iree_hal_executable_release(executable);
-  EXPECT_EQ(harness.native.live_memories, 0u);
+  EXPECT_EQ(harness.native.live_memories, 1u);
+}
+
+TEST(XdnaQueueTest, GrowableCommandArenaReusesPersistentSlabs) {
+  QueueHarness harness;
+  harness.native.enforce_single_command_memory = false;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  iree::hal::amd::xdna::testing::ImageFixture fixture;
+  fixture.allocations[0].byte_length = 5 * 1024 * 1024;
+
+  std::array<iree_hal_executable_t*, 2> executables = {};
+  iree_hal_executable_function_t function;
+  for (auto& executable : executables) {
+    ASSERT_NO_FATAL_FAILURE(
+        harness.LoadExecutable(fixture, &executable, &function));
+  }
+  EXPECT_EQ(harness.native.command_memory_create_count, 2u);
+
+  iree_hal_executable_release(executables[0]);
+  executables[0] = nullptr;
+  iree_hal_executable_t* replacement = nullptr;
+  ASSERT_NO_FATAL_FAILURE(
+      harness.LoadExecutable(fixture, &replacement, &function));
+  EXPECT_EQ(harness.native.command_memory_create_count, 2u);
+
+  iree_hal_executable_release(replacement);
+  iree_hal_executable_release(executables[1]);
 }
 
 TEST(XdnaQueueTest, PartialRetirementReturnsCapacityWithOpaquePoints) {
@@ -2105,7 +2160,7 @@ TEST(XdnaQueueTest, PartialRetirementReturnsCapacityWithOpaquePoints) {
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(3));
-  EXPECT_EQ(harness.native.live_memories, 6u);
+  EXPECT_EQ(harness.native.live_memories, 5u);
   EXPECT_EQ(harness.native.pending_commands.size(), 2u);
   for (auto* completion : following) {
     uint64_t value = 0;
@@ -2119,7 +2174,7 @@ TEST(XdnaQueueTest, PartialRetirementReturnsCapacityWithOpaquePoints) {
         harness.PollUntilDone(IREE_STATUS_OK, following[i]));
     iree_hal_semaphore_release(following[i]);
   }
-  EXPECT_EQ(harness.native.live_memories, 0u);
+  EXPECT_EQ(harness.native.live_memories, 1u);
 }
 
 TEST(XdnaQueueTest, PrivateAddressesPropagateThroughImmutableClosure) {
@@ -2174,7 +2229,7 @@ TEST(XdnaQueueTest, PrivateAddressesPropagateThroughImmutableClosure) {
         /*barriers=*/NULL, 0));
   }
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(2));
-  EXPECT_EQ(harness.native.memory_create_count, 9u);
+  EXPECT_EQ(harness.native.memory_create_count, 8u);
   ASSERT_EQ(harness.native.pending_commands.size(), 2u);
   const auto& first = harness.native.pending_commands[0].bytes;
   const auto& second = harness.native.pending_commands[1].bytes;
@@ -2187,7 +2242,7 @@ TEST(XdnaQueueTest, PrivateAddressesPropagateThroughImmutableClosure) {
   }
   iree_hal_buffer_release(buffer);
   iree_hal_executable_release(executable);
-  EXPECT_EQ(harness.native.live_memories, 0u);
+  EXPECT_EQ(harness.native.live_memories, 1u);
 }
 
 TEST(XdnaQueueTest, HostProducerProgressesWithFullNativeQueue) {
@@ -2617,8 +2672,8 @@ TEST(XdnaQueueTest, RejectedSubmissionReleasesCapture) {
   ASSERT_NO_FATAL_FAILURE(harness.Submit());
   ASSERT_NO_FATAL_FAILURE(
       harness.PollUntilDone(IREE_STATUS_RESOURCE_EXHAUSTED));
-  EXPECT_EQ(harness.live_memories_at_completion, 0u);
-  EXPECT_EQ(harness.native.live_memories, 0u);
+  EXPECT_EQ(harness.live_memories_at_completion, 1u);
+  EXPECT_EQ(harness.native.live_memories, 1u);
   EXPECT_EQ(harness.native.notification_count, 0u);
 }
 
@@ -2628,8 +2683,8 @@ TEST(XdnaQueueTest, RetiredFailureReleasesCaptureBeforePublishingFailure) {
   harness.native.outcome = Outcome::kRetiredFailure;
   ASSERT_NO_FATAL_FAILURE(harness.Submit());
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_DATA_LOSS));
-  EXPECT_EQ(harness.live_memories_at_completion, 0u);
-  EXPECT_EQ(harness.native.live_memories, 0u);
+  EXPECT_EQ(harness.live_memories_at_completion, 1u);
+  EXPECT_EQ(harness.native.live_memories, 1u);
   EXPECT_EQ(harness.native.refresh_count, 1u);
 }
 
@@ -2639,8 +2694,8 @@ TEST(XdnaQueueTest, EarlyWakeRearmsUntilCheckedRetirement) {
   harness.native.outcome = Outcome::kEarlyWake;
   ASSERT_NO_FATAL_FAILURE(harness.Submit());
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
-  EXPECT_EQ(harness.live_memories_at_completion, 0u);
-  EXPECT_EQ(harness.native.live_memories, 0u);
+  EXPECT_EQ(harness.live_memories_at_completion, 1u);
+  EXPECT_EQ(harness.native.live_memories, 1u);
   EXPECT_EQ(harness.native.notification_count, 2u);
   EXPECT_EQ(harness.native.refresh_count, 2u);
 }
@@ -2660,7 +2715,7 @@ TEST(XdnaQueueTest, PublishesRetirementBeforeFollowingNativeSubmit) {
       harness.PollUntilDone(IREE_STATUS_OK, following_completion));
   EXPECT_EQ(harness.native.submission_count, 2u);
   EXPECT_EQ(harness.live_memories_at_completion, 3u);
-  EXPECT_EQ(harness.native.live_memories, 0u);
+  EXPECT_EQ(harness.native.live_memories, 1u);
   iree_hal_semaphore_release(following_completion);
 }
 
@@ -2689,7 +2744,7 @@ TEST(XdnaQueueTest, FinalPublicationAllowsImmediateDeviceRelease) {
       &release_timepoint));
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDeviceDestroyed());
   EXPECT_EQ(harness.completion_status, IREE_STATUS_OK);
-  EXPECT_EQ(harness.live_memories_at_completion, 0u);
+  EXPECT_EQ(harness.live_memories_at_completion, 1u);
   EXPECT_EQ(harness.native.live_memories, 0u);
   EXPECT_EQ(harness.native.queue_destroy_count, 1u);
   EXPECT_EQ(harness.native.context_destroy_count, 1u);
@@ -2750,7 +2805,7 @@ static void RunObserverFailurePreservesEveryPendingInvocationChild() {
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_INTERNAL));
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_INTERNAL, second));
-  EXPECT_EQ(harness.native.live_memories, 6u);
+  EXPECT_EQ(harness.native.live_memories, 5u);
   harness.ReleaseDevice();
   iree_hal_semaphore_release(second);
   EXPECT_EQ(harness.native.queue_destroy_count, 0u);

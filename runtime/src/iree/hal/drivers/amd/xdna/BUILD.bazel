@@ -63,6 +63,18 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "command_arena",
+    srcs = ["command_arena.c"],
+    hdrs = ["command_arena.h"],
+    deps = [
+        ":memory",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal/memory:tlsf",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "slab_provider",
     srcs = ["slab_provider.c"],
     hdrs = ["slab_provider.h"],
@@ -307,6 +319,7 @@ iree_runtime_cc_library(
     srcs = ["executable.c"],
     hdrs = ["executable.h"],
     deps = [
+        ":command_arena",
         ":context",
         ":executable_storage",
         ":memory",
@@ -350,6 +363,7 @@ iree_runtime_cc_library(
     srcs = ["device.c"],
     hdrs = ["device.h"],
     deps = [
+        ":command_arena",
         ":context",
         ":executable",
         ":memory",

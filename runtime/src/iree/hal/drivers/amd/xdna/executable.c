@@ -24,6 +24,15 @@ typedef struct iree_hal_amd_xdna_allocation_plan_t {
   } patches;
 } iree_hal_amd_xdna_allocation_plan_t;
 
+// Cold ownership behind one executable storage row. Command rows own a range
+// in the device arena; DMA rows own an independent native allocation.
+typedef struct iree_hal_amd_xdna_owned_allocation_t {
+  // Independent native allocation used only for a DMA-domain row.
+  iree_hal_amd_xdna_memory_t memory;
+  // Device command-arena range used only for a command-domain row.
+  iree_hal_amd_xdna_command_allocation_t command;
+} iree_hal_amd_xdna_owned_allocation_t;
+
 struct iree_hal_amd_xdna_invocation_t {
   // Borrowed function, kept alive by the submitting operation's executable.
   iree_hal_amd_xdna_function_t* function;
@@ -31,8 +40,8 @@ struct iree_hal_amd_xdna_invocation_t {
   iree_hal_amd_xdna_invocation_t* next;
   // Available storage protected by the function's pool mutex.
   iree_hal_amd_xdna_invocation_t* next_available;
-  // Native allocations owned by this invocation; shared entries remain empty.
-  iree_hal_amd_xdna_memory_t* allocations;
+  // Backing ownership for each row; shared entries remain empty.
+  iree_hal_amd_xdna_owned_allocation_t* allocations;
   // Complete views, including borrowed immutable backing from the prototype.
   iree_hal_amd_xdna_executable_storage_t* storage;
   // Independent invocation establishing tile state on every submission.
@@ -44,6 +53,8 @@ struct iree_hal_amd_xdna_function_t {
   iree_hal_amd_xdna_context_t* context;
   // Host owner for cold invocation growth.
   iree_allocator_t host_allocator;
+  // Borrowed device-owned instruction arena.
+  iree_hal_amd_xdna_command_arena_t* command_arena;
   // Borrowed admitted image owning immutable metadata.
   iree_hal_amd_xdna_image_t* image;
   // Dense image entry ordinal.
@@ -130,8 +141,12 @@ static void iree_hal_amd_xdna_invocation_destroy(
     iree_hal_amd_xdna_invocation_t* invocation) {
   iree_hal_amd_xdna_function_t* function = invocation->function;
   for (uint32_t i = 0; i < function->record.allocation_use_count; ++i) {
+    iree_hal_amd_xdna_owned_allocation_t* allocation =
+        &invocation->allocations[i];
+    iree_hal_amd_xdna_command_arena_release(function->command_arena,
+                                            &allocation->command);
     iree_hal_amd_xdna_memory_deinitialize(function->context,
-                                          &invocation->allocations[i]);
+                                          &allocation->memory);
   }
   iree_allocator_free(function->host_allocator, invocation);
 }
@@ -168,9 +183,10 @@ static iree_status_t iree_hal_amd_xdna_invocation_create(
   iree_host_size_t size = 0, allocations_offset = 0, storage_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amd_xdna_invocation_t), &size,
-      IREE_STRUCT_FIELD_ALIGNED(count, iree_hal_amd_xdna_memory_t,
-                                iree_alignof(iree_hal_amd_xdna_memory_t),
-                                &allocations_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          count, iree_hal_amd_xdna_owned_allocation_t,
+          iree_alignof(iree_hal_amd_xdna_owned_allocation_t),
+          &allocations_offset),
       IREE_STRUCT_FIELD_ALIGNED(
           count, iree_hal_amd_xdna_executable_storage_t,
           iree_alignof(iree_hal_amd_xdna_executable_storage_t),
@@ -180,7 +196,8 @@ static iree_status_t iree_hal_amd_xdna_invocation_create(
                                              (void**)&invocation));
   invocation->function = function;
   invocation->allocations =
-      (iree_hal_amd_xdna_memory_t*)((uint8_t*)invocation + allocations_offset);
+      (iree_hal_amd_xdna_owned_allocation_t*)((uint8_t*)invocation +
+                                              allocations_offset);
   invocation->storage =
       (iree_hal_amd_xdna_executable_storage_t*)((uint8_t*)invocation +
                                                 storage_offset);
@@ -193,23 +210,36 @@ static iree_status_t iree_hal_amd_xdna_invocation_create(
           IREE_HAL_AMD_XDNA_EXECUTABLE_STORAGE_FLAG_SHARED;
       continue;
     }
-    const iree_hal_amd_xdna_memory_source_t* source =
-        plan->record.domain == IREE_XDNA_ELF_ALLOCATION_DOMAIN_COMMAND
-            ? &function->context->command_source
-            : &function->context->data_source;
-    // Image alignment constrains the native address domain. Physical allocation
-    // alignment is a distinct provider construction contract.
-    status = iree_hal_amd_xdna_memory_allocate(
-        function->context, source, plan->record.byte_length,
-        source->profile.allocation.minimum_alignment,
-        &invocation->allocations[i]);
-    if (iree_status_is_ok(status)) {
-      const iree_hal_amd_xdna_memory_t* memory = &invocation->allocations[i];
-      invocation->storage[i] = (iree_hal_amd_xdna_executable_storage_t){
-          .mapping = memory->contents,
-          .memory = memory->handle,
-          .device_address = memory->device_address,
-      };
+    iree_hal_amd_xdna_owned_allocation_t* allocation =
+        &invocation->allocations[i];
+    if (plan->record.domain == IREE_XDNA_ELF_ALLOCATION_DOMAIN_COMMAND) {
+      status = iree_hal_amd_xdna_command_arena_allocate(
+          function->command_arena, plan->record.byte_length,
+          plan->record.alignment, &allocation->command);
+      if (iree_status_is_ok(status)) {
+        invocation->storage[i] = (iree_hal_amd_xdna_executable_storage_t){
+            .mapping = allocation->command.contents,
+            .memory = allocation->command.memory,
+            .memory_byte_offset = allocation->command.memory_byte_offset,
+            .device_address = allocation->command.device_address,
+        };
+      }
+    } else {
+      const iree_hal_amd_xdna_memory_source_t* source =
+          &function->context->data_source;
+      // Image alignment constrains the native address domain. Physical
+      // allocation alignment is a distinct provider construction contract.
+      status = iree_hal_amd_xdna_memory_allocate(
+          function->context, source, plan->record.byte_length,
+          source->profile.allocation.minimum_alignment, &allocation->memory);
+      if (iree_status_is_ok(status)) {
+        const iree_hal_amd_xdna_memory_t* memory = &allocation->memory;
+        invocation->storage[i] = (iree_hal_amd_xdna_executable_storage_t){
+            .mapping = memory->contents,
+            .memory = memory->handle,
+            .device_address = memory->device_address,
+        };
+      }
     }
   }
   if (iree_status_is_ok(status)) {
@@ -217,12 +247,17 @@ static iree_status_t iree_hal_amd_xdna_invocation_create(
         function->image, function->ordinal, count, invocation->storage);
   }
   for (uint32_t i = 0; i < count && iree_status_is_ok(status); ++i) {
-    const iree_hal_amd_xdna_memory_t* memory = &invocation->allocations[i];
-    if (memory->handle) {
+    const iree_hal_amd_xdna_owned_allocation_t* allocation =
+        &invocation->allocations[i];
+    amdf_host_mapping_t* mapping = allocation->command.mapping
+                                       ? allocation->command.mapping
+                                       : allocation->memory.mapping;
+    if (mapping) {
       status = IREE_HAL_AMD_STATUS_FROM_AMDF(
           function->context->api->host_mapping_cache_control(
-              memory->mapping, AMDF_HOST_CACHE_OPERATION_FLUSH, 0,
-              memory->contents.data_length),
+              mapping, AMDF_HOST_CACHE_OPERATION_FLUSH,
+              invocation->storage[i].memory_byte_offset,
+              invocation->storage[i].mapping.data_length),
           "host_mapping_cache_control(load)");
     }
   }
@@ -241,12 +276,14 @@ static iree_status_t iree_hal_amd_xdna_invocation_create(
 
 static iree_status_t iree_hal_amd_xdna_function_initialize(
     iree_hal_amd_xdna_executable_t* executable,
-    iree_hal_amd_xdna_context_t* context, uint32_t ordinal) {
+    iree_hal_amd_xdna_context_t* context,
+    iree_hal_amd_xdna_command_arena_t* command_arena, uint32_t ordinal) {
   const iree_hal_amd_xdna_image_tables_t* tables =
       iree_hal_amd_xdna_image_tables(executable->image);
   iree_hal_amd_xdna_function_t* function = &executable->functions[ordinal];
   function->context = context;
   function->host_allocator = executable->host_allocator;
+  function->command_arena = command_arena;
   function->image = executable->image;
   function->ordinal = ordinal;
   function->record = iree_hal_amd_xdna_image_tables_entry(tables, ordinal);
@@ -308,6 +345,7 @@ static iree_status_t iree_hal_amd_xdna_function_initialize(
 
 iree_status_t iree_hal_amd_xdna_executable_create(
     const iree_hal_queue_family_t* family, iree_hal_amd_xdna_context_t* context,
+    iree_hal_amd_xdna_command_arena_t* command_arena,
     const iree_hal_executable_load_params_t* params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   *out_executable = NULL;
@@ -355,7 +393,8 @@ iree_status_t iree_hal_amd_xdna_executable_create(
   }
   for (uint32_t i = 0;
        i < executable->function_count && iree_status_is_ok(status); ++i) {
-    status = iree_hal_amd_xdna_function_initialize(executable, context, i);
+    status = iree_hal_amd_xdna_function_initialize(executable, context,
+                                                   command_arena, i);
   }
   if (iree_status_is_ok(status)) {
     *out_executable = &executable->base;
@@ -554,10 +593,15 @@ iree_status_t iree_hal_amd_xdna_function_prepare(
        ++i) {
     const iree_hal_amd_xdna_allocation_plan_t* plan = &function->plans[i];
     if (plan->patches.end) {
+      const iree_hal_amd_xdna_owned_allocation_t* allocation =
+          &invocation->allocations[i];
+      amdf_host_mapping_t* mapping = allocation->command.mapping
+                                         ? allocation->command.mapping
+                                         : allocation->memory.mapping;
       status = IREE_HAL_AMD_STATUS_FROM_AMDF(
           function->context->api->host_mapping_cache_control(
-              invocation->allocations[i].mapping,
-              AMDF_HOST_CACHE_OPERATION_FLUSH, plan->patches.begin,
+              mapping, AMDF_HOST_CACHE_OPERATION_FLUSH,
+              invocation->storage[i].memory_byte_offset + plan->patches.begin,
               plan->patches.end - plan->patches.begin),
           "host_mapping_cache_control(bind)");
     }
