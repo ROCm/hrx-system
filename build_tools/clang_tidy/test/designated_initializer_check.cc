@@ -76,6 +76,8 @@ struct NarrowConfig {
 
 #define CONFIG_VALUE(value) value
 
+#define FORWARD_CONFIG(...) __VA_ARGS__
+
 #define EMPTY_BRACES \
   {                  \
   }
@@ -127,6 +129,12 @@ Config macro_value_config = {
     /*.name=*/"macro-value",
     /*.flags=*/CONFIG_VALUE(23),
 };
+
+Config macro_argument_config = FORWARD_CONFIG(Config{
+    /*.ordinal=*/24,
+    /*.name=*/"macro-argument",
+    /*.flags=*/25,
+});
 
 void Observe(const Numbers&);
 int Next();

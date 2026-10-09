@@ -74,9 +74,15 @@ bool IsIdentifier(StringRef Text) {
 }
 
 std::optional<FieldLabel> FindFieldLabel(const Expr* Initializer,
-                                         const SourceManager& SourceManager) {
-  SourceLocation Begin =
-      SourceManager.getExpansionLoc(Initializer->getBeginLoc());
+                                         const SourceManager& SourceManager,
+                                         const LangOptions& LangOptions) {
+  CharSourceRange FileRange = Lexer::makeFileCharRange(
+      CharSourceRange::getTokenRange(Initializer->getSourceRange()),
+      SourceManager, LangOptions);
+  if (FileRange.isInvalid()) {
+    return std::nullopt;
+  }
+  SourceLocation Begin = FileRange.getBegin();
   if (!IsMainFileLocation(Begin, SourceManager)) {
     return std::nullopt;
   }
@@ -121,6 +127,20 @@ std::optional<FieldLabel> FindFieldLabel(const Expr* Initializer,
       CharSourceRange::getCharRange(LabelBegin, LabelEnd),
       Name.str(),
   };
+}
+
+bool IsMainFileInitializerBrace(SourceLocation Location,
+                                const SourceManager& SourceManager) {
+  if (Location.isInvalid()) {
+    return false;
+  }
+  if (Location.isMacroID()) {
+    if (!SourceManager.isMacroArgExpansion(Location)) {
+      return false;
+    }
+    Location = SourceManager.getSpellingLoc(Location);
+  }
+  return IsMainFileLocation(Location, SourceManager);
 }
 
 const RecordDecl* DefinedRecord(QualType Type) {
@@ -532,7 +552,8 @@ void CheckCommentLabels(DesignatedInitializerCheck& Check,
     SourceInitializer = Initializer;
   }
   if (!SourceInitializer->isExplicit() ||
-      !IsMainFileLocation(SourceInitializer->getLBraceLoc(), SourceManager)) {
+      !IsMainFileInitializerBrace(SourceInitializer->getLBraceLoc(),
+                                  SourceManager)) {
     return;
   }
   std::vector<LabeledInitializer> LabeledInitializers;
@@ -547,7 +568,8 @@ void CheckCommentLabels(DesignatedInitializerCheck& Check,
       CanFixInitializer = false;
       continue;
     }
-    std::optional<FieldLabel> Label = FindFieldLabel(Value, SourceManager);
+    std::optional<FieldLabel> Label =
+        FindFieldLabel(Value, SourceManager, Context.getLangOpts());
     if (!Label) {
       CanFixInitializer = false;
       continue;
