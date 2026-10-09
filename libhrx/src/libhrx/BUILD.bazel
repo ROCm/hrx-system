@@ -84,6 +84,7 @@ HRX_DEPS = [
     "//runtime/src/iree/task:api",
 ] + iree_select({
     "//runtime/config/hal:driver_amdgpu": [
+        "//runtime/src/iree/hal/drivers/amdgpu",
         "//runtime/src/iree/hal/drivers/amdgpu/registration",
         "//runtime/src/iree/hal/drivers/amdgpu/target:selection",
     ],

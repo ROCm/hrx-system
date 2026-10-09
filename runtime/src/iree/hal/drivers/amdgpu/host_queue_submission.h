@@ -69,8 +69,13 @@ typedef struct iree_hal_amdgpu_host_queue_kernel_submission_t {
   struct {
     // First kernarg block reserved for this submission, or NULL when unused.
     iree_hal_amdgpu_kernarg_block_t* blocks;
+    // Queue kernarg ring that |blocks| was reserved from, or NULL when unused.
+    const iree_hal_amdgpu_kernarg_ring_t* ring;
     // Kernarg ring write position to reclaim after this submission completes.
     uint64_t write_position;
+    // Idle-submission host kernarg ring write position to reclaim after this
+    // submission completes.
+    uint64_t host_write_position;
   } kernargs;
   // First AQL packet id reserved for this submission.
   uint64_t first_packet_id;
@@ -211,7 +216,7 @@ static inline void iree_hal_amdgpu_host_queue_publish_submission_kernargs(
     const iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_host_queue_kernel_submission_t* submission) {
   if (submission->kernargs.blocks) {
-    iree_hal_amdgpu_kernarg_ring_publish_host_writes(&queue->kernarg_ring);
+    iree_hal_amdgpu_kernarg_ring_publish_host_writes(submission->kernargs.ring);
   }
 }
 

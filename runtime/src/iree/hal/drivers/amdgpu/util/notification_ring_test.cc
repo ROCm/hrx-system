@@ -730,14 +730,16 @@ TEST_F(NotificationRingTest, KernargPositionReporting) {
 TEST_F(NotificationRingTest, QueueOwnedReclaimPositionReporting) {
   IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
 
-  // Epoch 1: no user-visible signals, but both queue-owned rings must retire.
+  // Epoch 1: no user-visible signals, but all queue-owned rings must retire.
   ReclaimEntryForNextEpoch(ring.get(), /*kernarg_write_position=*/64,
-                           /*queue_upload_write_position=*/256);
+                           /*queue_upload_write_position=*/256)
+      ->host_kernarg_write_position = 320;
   EXPECT_EQ(iree_hal_amdgpu_notification_ring_advance_epoch(ring.get()), 1u);
 
-  // Epoch 2: later kernargs but an earlier upload watermark.
+  // Epoch 2: later kernargs but earlier upload and host kernarg watermarks.
   ReclaimEntryForNextEpoch(ring.get(), /*kernarg_write_position=*/192,
-                           /*queue_upload_write_position=*/128);
+                           /*queue_upload_write_position=*/128)
+      ->host_kernarg_write_position = 0;
   EXPECT_EQ(iree_hal_amdgpu_notification_ring_advance_epoch(ring.get()), 2u);
 
   SimulateCompletions(ring.get(), 2);
@@ -747,7 +749,29 @@ TEST_F(NotificationRingTest, QueueOwnedReclaimPositionReporting) {
           ring.get(), EmptyFrontier(), nullptr, nullptr, &reclaim_positions),
       0u);
   EXPECT_EQ(reclaim_positions.kernarg_write_position, 192u);
+  EXPECT_EQ(reclaim_positions.host_kernarg_write_position, 320u);
   EXPECT_EQ(reclaim_positions.queue_upload_write_position, 256u);
+}
+
+TEST_F(NotificationRingTest, IsIdleTracksDeviceCompletion) {
+  IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
+  EXPECT_TRUE(iree_hal_amdgpu_notification_ring_is_idle(ring.get()));
+
+  ReclaimEntryForNextEpoch(ring.get());
+  EXPECT_EQ(iree_hal_amdgpu_notification_ring_advance_epoch(ring.get()), 1u);
+  ReclaimEntryForNextEpoch(ring.get());
+  EXPECT_EQ(iree_hal_amdgpu_notification_ring_advance_epoch(ring.get()), 2u);
+  EXPECT_FALSE(iree_hal_amdgpu_notification_ring_is_idle(ring.get()));
+
+  // Idleness follows the epoch signal, not the host drain.
+  SimulateCompletions(ring.get(), 1);
+  EXPECT_FALSE(iree_hal_amdgpu_notification_ring_is_idle(ring.get()));
+  SimulateCompletions(ring.get(), 2);
+  EXPECT_TRUE(iree_hal_amdgpu_notification_ring_is_idle(ring.get()));
+
+  iree_hal_amdgpu_reclaim_positions_t reclaim_positions = {0};
+  iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
+      ring.get(), EmptyFrontier(), nullptr, nullptr, &reclaim_positions);
 }
 
 TEST_F(NotificationRingTest, KernargPositionReportingForZeroSignalEpochs) {
@@ -898,6 +922,7 @@ TEST_F(NotificationRingTest, FailAllRetireCallbackRunsBeforeSemaphoreFailure) {
   IREE_ASSERT_OK(iree_hal_amdgpu_reclaim_entry_prepare(
       reclaim_entry, &block_pool, /*count=*/2, &resources));
   reclaim_entry->kernarg_write_position = 64;
+  reclaim_entry->host_kernarg_write_position = 128;
   reclaim_entry->queue_upload_write_position = 256;
   iree_async_semaphore_retain(semaphore);
   resources[0] = reinterpret_cast<iree_hal_resource_t*>(semaphore);
@@ -932,6 +957,7 @@ TEST_F(NotificationRingTest, FailAllRetireCallbackRunsBeforeSemaphoreFailure) {
   EXPECT_EQ(callback_state.epoch, epoch);
   EXPECT_EQ(callback_state.flags, IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_FAILED);
   EXPECT_EQ(reclaim_positions.kernarg_write_position, 64u);
+  EXPECT_EQ(reclaim_positions.host_kernarg_write_position, 128u);
   EXPECT_EQ(reclaim_positions.queue_upload_write_position, 256u);
   EXPECT_EQ(operation_resource.destroy_count, 1);
 

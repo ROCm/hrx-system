@@ -58,6 +58,13 @@ IREE_FLAG(string, amdgpu_queue_placement, "any",
           "Device queue placement: 'any' (currently host), 'host', or "
           "'device' (reserved and currently unsupported).");
 
+IREE_FLAG(string, amdgpu_kernarg_placement, "auto",
+          "Dispatch kernel argument placement: 'auto' (device-local except "
+          "for a lone dispatch submitted to an idle queue, on devices that "
+          "can publish host writes into device memory), 'host', or 'device' "
+          "(device-local for every submission; device creation fails if "
+          "unsupported).");
+
 IREE_FLAG(string, amdgpu_command_buffer_mode, "aql",
           "Command-buffer execution mode: 'aql', 'pm4', or 'auto'.");
 IREE_FLAG(
@@ -279,6 +286,21 @@ static iree_status_t iree_hal_amdgpu_driver_factory_try_create(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unrecognized queue placement: '%s'",
                             FLAG_amdgpu_queue_placement);
+  }
+
+  if (strcmp(FLAG_amdgpu_kernarg_placement, "auto") == 0) {
+    device_options->host_queues.kernarg_placement =
+        IREE_HAL_AMDGPU_KERNARG_PLACEMENT_AUTO;
+  } else if (strcmp(FLAG_amdgpu_kernarg_placement, "host") == 0) {
+    device_options->host_queues.kernarg_placement =
+        IREE_HAL_AMDGPU_KERNARG_PLACEMENT_HOST;
+  } else if (strcmp(FLAG_amdgpu_kernarg_placement, "device") == 0) {
+    device_options->host_queues.kernarg_placement =
+        IREE_HAL_AMDGPU_KERNARG_PLACEMENT_DEVICE;
+  } else {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unrecognized kernarg placement: '%s'",
+                            FLAG_amdgpu_kernarg_placement);
   }
 
   if (strcmp(FLAG_amdgpu_command_buffer_mode, "aql") == 0) {

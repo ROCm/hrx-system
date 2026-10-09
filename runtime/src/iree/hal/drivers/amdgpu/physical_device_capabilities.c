@@ -654,6 +654,11 @@ static bool iree_hal_amdgpu_gfxip_is_gfx94x(
   return version.major == 9 && version.minor >= 4 && version.stepping <= 2;
 }
 
+static bool iree_hal_amdgpu_gfxip_is_gfx120x(
+    iree_hal_amdgpu_gfxip_version_t version) {
+  return version.major == 12 && version.minor == 0;
+}
+
 static bool iree_hal_amdgpu_gfxip_is_gfx125x(
     iree_hal_amdgpu_gfxip_version_t version) {
   return version.major == 12 && version.minor >= 5;
@@ -661,10 +666,12 @@ static bool iree_hal_amdgpu_gfxip_is_gfx125x(
 
 bool iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(
     iree_hal_amdgpu_gfxip_version_t version) {
-  // Matches the device-kernarg family gate in CLR's setKernelArgImpl. Other
-  // families stay on host kernarg memory until they have a validated device-
-  // local publication path.
+  // Matches the device-kernarg family gate in CLR's setKernelArgImpl, plus
+  // RDNA4 (gfx120x): its HDP 7.0 block takes the same HDP_MEM_FLUSH_CNTL write
+  // to publish host stores into CPU-visible VRAM. Other families stay on host
+  // kernarg memory until they have a validated device-local publication path.
   return iree_hal_amdgpu_gfxip_is_gfx94x(version) ||
+         iree_hal_amdgpu_gfxip_is_gfx120x(version) ||
          iree_hal_amdgpu_gfxip_is_gfx125x(version);
 }
 

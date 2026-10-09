@@ -163,6 +163,36 @@ TEST(AmdgpuDriverOptionsTest, RejectsInvalidQueuePlacementBeforeLoadingHsa) {
                         CreateDriverWithDefaultDeviceOptions(&options));
 }
 
+TEST(AmdgpuDriverOptionsTest, AcceptsKernargPlacementsBeforeLoadingHsa) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  EXPECT_EQ(options.host_queues.kernarg_placement,
+            IREE_HAL_AMDGPU_KERNARG_PLACEMENT_AUTO);
+  IREE_EXPECT_OK(
+      iree_hal_amdgpu_logical_device_options_verify_supported_features(
+          &options));
+  options.host_queues.kernarg_placement =
+      IREE_HAL_AMDGPU_KERNARG_PLACEMENT_HOST;
+  IREE_EXPECT_OK(
+      iree_hal_amdgpu_logical_device_options_verify_supported_features(
+          &options));
+  options.host_queues.kernarg_placement =
+      IREE_HAL_AMDGPU_KERNARG_PLACEMENT_DEVICE;
+  IREE_EXPECT_OK(
+      iree_hal_amdgpu_logical_device_options_verify_supported_features(
+          &options));
+}
+
+TEST(AmdgpuDriverOptionsTest, RejectsInvalidKernargPlacementBeforeLoadingHsa) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.host_queues.kernarg_placement =
+      (iree_hal_amdgpu_kernarg_placement_t)99;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        CreateDriverWithDefaultDeviceOptions(&options));
+}
+
 TEST(AmdgpuDriverOptionsTest, AcceptsCommandBufferModesBeforeLoadingHsa) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);

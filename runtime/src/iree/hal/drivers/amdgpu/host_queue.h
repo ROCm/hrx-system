@@ -257,6 +257,10 @@ typedef struct iree_hal_amdgpu_host_queue_params_t {
     // HSA memory policy used to allocate the queue kernarg ring during
     // initialization.
     iree_hal_amdgpu_kernarg_ring_memory_t kernarg;
+    // HSA memory policy for the idle-submission host kernarg ring. Only set
+    // (non-zero memory pool) when |kernarg| requires host-write publication;
+    // must not itself require publication. See |host_kernarg_ring|.
+    iree_hal_amdgpu_kernarg_ring_memory_t host_kernarg;
     // HSA executable memory pool used for optional PM4 IB slots.
     hsa_amd_memory_pool_t pm4_ib_pool;
     // Arena block pool used for deferred operations and notification storage.
@@ -358,8 +362,24 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // Initialized from hardware_queue at init time.
   iree_hal_amdgpu_aql_ring_t aql_ring;
 
-  // Per-queue kernarg bump allocator backed by HSA kernarg-init memory.
+  // Per-queue kernarg bump allocator backed by the physical device's selected
+  // kernarg memory: HSA kernarg-init memory, or CPU-visible device memory
+  // published with an HDP flush.
   iree_hal_amdgpu_kernarg_ring_t kernarg_ring;
+
+  // Host kernarg-init ring used instead of |kernarg_ring| for single-packet
+  // submissions made while the queue has no work in flight. Initialized
+  // (non-NULL base) only when |kernarg_ring| requires host-write publication.
+  //
+  // Device-local kernargs pay for themselves when their one HDP flush per
+  // submission is shared: by the dispatches of a multi-packet submission
+  // (command buffers, batched streams), or by overlapping earlier work from
+  // this queue. A lone dispatch submitted to an idle queue has neither, and on
+  // an idle device that flush is slow (several microseconds on gfx1201, paid
+  // by the host read-back and again by the device before the dispatch
+  // starts). Such submissions therefore take host kernargs and skip the
+  // flush. Both rings are always correct; the choice is a latency policy only.
+  iree_hal_amdgpu_kernarg_ring_t host_kernarg_ring;
 
   // Per-queue upload ring for device-visible control records.
   // Submission paths reserve from this only when they have queue-ordered

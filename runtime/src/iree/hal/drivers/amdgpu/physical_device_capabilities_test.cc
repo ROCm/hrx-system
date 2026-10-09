@@ -595,8 +595,12 @@ TEST_F(PhysicalDeviceCapabilitiesTest, GfxIpGatesHdpPublication) {
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(10, 3, 0)));
   EXPECT_FALSE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(11, 0, 0)));
-  EXPECT_FALSE(
+  EXPECT_TRUE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(12, 0, 0)));
+  EXPECT_TRUE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(12, 0, 1)));
+  EXPECT_FALSE(
+      iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(12, 1, 0)));
   EXPECT_TRUE(
       iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(GfxIp(12, 5, 0)));
 }

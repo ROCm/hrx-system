@@ -197,9 +197,13 @@ static bool IsaProvidesPm4Timestamps(
 // observes which branch a capture took: the capture dispatch reserves one block
 // for the target pointer while the PM4 packet encodes that pointer into the
 // queue's IB slot and reserves none. The committed AQL packet cannot serve: the
-// command processor overwrites its header once it consumes the packet.
+// command processor overwrites its header once it consumes the packet. Both
+// queue kernarg rings count: an idle queue hands out host kernarg blocks when
+// its main ring lives in device memory.
 static uint64_t ConsumedKernargBlocks(iree_hal_amdgpu_host_queue_t* queue) {
   return (uint64_t)iree_atomic_load(&queue->kernarg_ring.write_position,
+                                    iree_memory_order_acquire) +
+         (uint64_t)iree_atomic_load(&queue->host_kernarg_ring.write_position,
                                     iree_memory_order_acquire);
 }
 

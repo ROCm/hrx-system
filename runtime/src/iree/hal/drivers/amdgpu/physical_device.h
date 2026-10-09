@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "iree/hal/drivers/amdgpu/api.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/device/atomic_pm4.h"
 #include "iree/hal/drivers/amdgpu/device/blit_pm4.h"
@@ -147,6 +148,8 @@ typedef struct iree_hal_amdgpu_physical_device_options_t {
   uint32_t host_queue_notification_capacity;
   // Per-host-queue kernarg ring capacity in 64-byte blocks.
   uint32_t host_queue_kernarg_capacity;
+  // Memory placement of queue-written dispatch kernel arguments.
+  iree_hal_amdgpu_kernarg_placement_t host_queue_kernarg_placement;
   // Per-host-queue device-visible control upload ring capacity in bytes. Zero
   // disables the optional upload ring.
   uint32_t host_queue_upload_capacity;
@@ -332,6 +335,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   uint32_t host_queue_notification_capacity;
   // Per-host-queue kernarg ring capacity in 64-byte blocks.
   uint32_t host_queue_kernarg_capacity;
+  // Memory placement of queue-written dispatch kernel arguments.
+  iree_hal_amdgpu_kernarg_placement_t host_queue_kernarg_placement;
   // Per-host-queue device-visible control upload ring capacity in bytes. Zero
   // disables the optional upload ring.
   uint32_t host_queue_upload_capacity;

@@ -56,6 +56,7 @@ iree_status_t iree_hal_amdgpu_reclaim_entry_prepare(
   entry->queue_device_event_count = 0;
   entry->resource_set = NULL;
   entry->kernarg_write_position = 0;
+  entry->host_kernarg_write_position = 0;
   entry->queue_upload_write_position = 0;
   entry->count = 0;
   entry->signal_semaphore_count = 0;
@@ -124,6 +125,7 @@ void iree_hal_amdgpu_reclaim_entry_release(
   entry->queue_device_event_count = 0;
   entry->resource_set = NULL;
   entry->kernarg_write_position = 0;
+  entry->host_kernarg_write_position = 0;
   entry->queue_upload_write_position = 0;
   entry->count = 0;
   entry->signal_semaphore_count = 0;
@@ -629,6 +631,7 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
   // publishing user-visible completion. Signal semaphore references remain in
   // each entry until after publication so notification pointers stay live.
   uint64_t highest_kernarg_position = 0;
+  uint64_t highest_host_kernarg_position = 0;
   uint64_t highest_queue_upload_position = 0;
   for (uint64_t epoch = previous_drained; epoch < current_epoch; ++epoch) {
     uint32_t reclaim_index = (uint32_t)(epoch & (ring->capacity - 1));
@@ -636,6 +639,11 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
         &ring->reclaim_entries[reclaim_index];
     if (reclaim_entry->kernarg_write_position > highest_kernarg_position) {
       highest_kernarg_position = reclaim_entry->kernarg_write_position;
+    }
+    if (reclaim_entry->host_kernarg_write_position >
+        highest_host_kernarg_position) {
+      highest_host_kernarg_position =
+          reclaim_entry->host_kernarg_write_position;
     }
     if (reclaim_entry->queue_upload_write_position >
         highest_queue_upload_position) {
@@ -726,6 +734,8 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
                                                    iree_memory_order_release);
 
   out_reclaim_positions->kernarg_write_position = highest_kernarg_position;
+  out_reclaim_positions->host_kernarg_write_position =
+      highest_host_kernarg_position;
   out_reclaim_positions->queue_upload_write_position =
       highest_queue_upload_position;
   return drained_count;
@@ -780,6 +790,7 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
   // making queue failure visible. Failed signal semaphore references remain
   // retained until their failure has been published.
   uint64_t highest_kernarg_position = 0;
+  uint64_t highest_host_kernarg_position = 0;
   uint64_t highest_queue_upload_position = 0;
   for (uint64_t epoch = last_drained; epoch < last_published; ++epoch) {
     uint32_t reclaim_index = (uint32_t)(epoch & (ring->capacity - 1));
@@ -787,6 +798,11 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
         &ring->reclaim_entries[reclaim_index];
     if (reclaim_entry->kernarg_write_position > highest_kernarg_position) {
       highest_kernarg_position = reclaim_entry->kernarg_write_position;
+    }
+    if (reclaim_entry->host_kernarg_write_position >
+        highest_host_kernarg_position) {
+      highest_host_kernarg_position =
+          reclaim_entry->host_kernarg_write_position;
     }
     if (reclaim_entry->queue_upload_write_position >
         highest_queue_upload_position) {
@@ -838,6 +854,8 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
                                                    iree_memory_order_release);
 
   out_reclaim_positions->kernarg_write_position = highest_kernarg_position;
+  out_reclaim_positions->host_kernarg_write_position =
+      highest_host_kernarg_position;
   out_reclaim_positions->queue_upload_write_position =
       highest_queue_upload_position;
   return failed_count;

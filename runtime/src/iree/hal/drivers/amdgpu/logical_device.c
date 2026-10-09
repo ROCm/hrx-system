@@ -165,6 +165,8 @@ IREE_API_EXPORT void iree_hal_amdgpu_logical_device_options_initialize(
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_NOTIFICATION_CAPACITY;
   out_options->host_queues.kernarg_capacity =
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_KERNARG_CAPACITY;
+  out_options->host_queues.kernarg_placement =
+      IREE_HAL_AMDGPU_KERNARG_PLACEMENT_AUTO;
   out_options->host_queues.upload_capacity =
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_UPLOAD_CAPACITY;
   iree_hal_amdgpu_staging_pool_options_t file_staging_options;
@@ -272,6 +274,16 @@ iree_status_t iree_hal_amdgpu_logical_device_options_verify_supported_features(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "invalid AMDGPU queue placement value %u",
                               (uint32_t)options->queue_placement);
+  }
+  switch (options->host_queues.kernarg_placement) {
+    case IREE_HAL_AMDGPU_KERNARG_PLACEMENT_AUTO:
+    case IREE_HAL_AMDGPU_KERNARG_PLACEMENT_HOST:
+    case IREE_HAL_AMDGPU_KERNARG_PLACEMENT_DEVICE:
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid AMDGPU kernarg placement value %u",
+                              (uint32_t)options->host_queues.kernarg_placement);
   }
   switch (options->command_buffer_mode) {
     case IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_AQL:
@@ -1683,6 +1695,8 @@ static void iree_hal_amdgpu_logical_device_translate_physical_options(
       options->host_queues.notification_capacity;
   out_options->host_queue_kernarg_capacity =
       options->host_queues.kernarg_capacity;
+  out_options->host_queue_kernarg_placement =
+      options->host_queues.kernarg_placement;
   out_options->host_queue_upload_capacity =
       options->host_queues.upload_capacity;
   out_options->file_staging.slot_size = options->file_staging.slot_size;

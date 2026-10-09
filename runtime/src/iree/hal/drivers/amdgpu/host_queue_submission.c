@@ -167,8 +167,10 @@ static void iree_hal_amdgpu_host_queue_emit_reclaim_noop_packets(
     iree_hal_amdgpu_host_queue_t* queue,
     iree_hal_amdgpu_reclaim_entry_t* reclaim_entry, uint64_t first_packet_id,
     uint32_t packet_count, uint64_t kernarg_write_position,
+    uint64_t host_kernarg_write_position,
     uint64_t queue_upload_write_position) {
   reclaim_entry->kernarg_write_position = kernarg_write_position;
+  reclaim_entry->host_kernarg_write_position = host_kernarg_write_position;
   reclaim_entry->queue_upload_write_position = queue_upload_write_position;
   reclaim_entry->count = 0;
   const uint64_t epoch = iree_hal_amdgpu_notification_ring_advance_epoch(
@@ -505,6 +507,28 @@ iree_hal_amdgpu_host_queue_write_pm4_binding_fixup_barrier_packet_body(
       iree_hsa_signal_null(), out_setup);
 }
 
+// Selects the queue kernarg ring for a submission of |payload_packet_count|
+// payload packets reserving |kernarg_block_count| blocks. See host_queue.h
+// |host_kernarg_ring| for the policy: a single-packet submission to an idle
+// queue takes host kernargs when the host ring has room, and every other
+// submission uses the queue's selected kernarg ring. Caller must hold
+// submission_mutex.
+static iree_hal_amdgpu_kernarg_ring_t*
+iree_hal_amdgpu_host_queue_select_kernarg_ring(
+    iree_hal_amdgpu_host_queue_t* queue, uint32_t payload_packet_count,
+    uint32_t kernarg_block_count) {
+  if (kernarg_block_count == 0 || payload_packet_count != 1 ||
+      !queue->host_kernarg_ring.base) {
+    return &queue->kernarg_ring;
+  }
+  if (!iree_hal_amdgpu_notification_ring_is_idle(&queue->notification_ring) ||
+      !iree_hal_amdgpu_kernarg_ring_can_allocate(&queue->host_kernarg_ring,
+                                                 kernarg_block_count)) {
+    return &queue->kernarg_ring;
+  }
+  return &queue->host_kernarg_ring;
+}
+
 iree_status_t iree_hal_amdgpu_host_queue_try_begin_kernel_submission(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_wait_resolution_t* resolution,
@@ -569,9 +593,11 @@ iree_status_t iree_hal_amdgpu_host_queue_try_begin_kernel_submission(
           frontier_snapshot_count)) {
     return iree_ok_status();
   }
-  if (kernarg_block_count > 0 &&
-      !iree_hal_amdgpu_kernarg_ring_can_allocate(&queue->kernarg_ring,
-                                                 kernarg_block_count)) {
+  iree_hal_amdgpu_kernarg_ring_t* kernarg_ring =
+      iree_hal_amdgpu_host_queue_select_kernarg_ring(
+          queue, payload_packet_count, kernarg_block_count);
+  if (kernarg_block_count > 0 && !iree_hal_amdgpu_kernarg_ring_can_allocate(
+                                     kernarg_ring, kernarg_block_count)) {
     return iree_ok_status();
   }
 
@@ -591,10 +617,17 @@ iree_status_t iree_hal_amdgpu_host_queue_try_begin_kernel_submission(
   if (iree_status_is_ok(status)) {
     out_submission->packet_count = (uint32_t)packet_count;
     out_submission->first_packet_id = first_packet_id;
+    out_submission->kernargs.write_position = (uint64_t)iree_atomic_load(
+        &queue->kernarg_ring.write_position, iree_memory_order_relaxed);
+    out_submission->kernargs.host_write_position = (uint64_t)iree_atomic_load(
+        &queue->host_kernarg_ring.write_position, iree_memory_order_relaxed);
     if (kernarg_block_count > 0) {
+      out_submission->kernargs.ring = kernarg_ring;
       out_submission->kernargs.blocks = iree_hal_amdgpu_kernarg_ring_allocate(
-          &queue->kernarg_ring, kernarg_block_count,
-          &out_submission->kernargs.write_position);
+          kernarg_ring, kernarg_block_count,
+          kernarg_ring == &queue->host_kernarg_ring
+              ? &out_submission->kernargs.host_write_position
+              : &out_submission->kernargs.write_position);
       if (IREE_UNLIKELY(!out_submission->kernargs.blocks)) {
         iree_hal_amdgpu_host_queue_emit_noop_packets(
             queue, out_submission->first_packet_id,
@@ -606,9 +639,6 @@ iree_status_t iree_hal_amdgpu_host_queue_try_begin_kernel_submission(
                                   "reservation; queue sizing invariant was "
                                   "violated");
       }
-    } else {
-      out_submission->kernargs.write_position = (uint64_t)iree_atomic_load(
-          &queue->kernarg_ring.write_position, iree_memory_order_relaxed);
     }
   } else {
     iree_hal_amdgpu_host_queue_emit_noop_packets(queue, first_packet_id,
@@ -732,6 +762,7 @@ void iree_hal_amdgpu_host_queue_fail_kernel_submission(
   iree_hal_amdgpu_host_queue_emit_reclaim_noop_packets(
       queue, submission->reclaim_entry, submission->first_packet_id,
       submission->packet_count, submission->kernargs.write_position,
+      submission->kernargs.host_write_position,
       submission->queue_upload.write_position);
   memset(submission, 0, sizeof(*submission));
 }
@@ -1081,6 +1112,8 @@ uint64_t iree_hal_amdgpu_host_queue_finish_kernel_submission(
   }
   submission->reclaim_entry->kernarg_write_position =
       submission->kernargs.write_position;
+  submission->reclaim_entry->host_kernarg_write_position =
+      submission->kernargs.host_write_position;
   submission->reclaim_entry->queue_upload_write_position =
       submission->queue_upload.write_position;
   submission->reclaim_entry->signal_semaphore_count =
@@ -1848,6 +1881,8 @@ uint64_t iree_hal_amdgpu_host_queue_finish_barrier_submission(
   }
   reclaim_entry->kernarg_write_position = (uint64_t)iree_atomic_load(
       &queue->kernarg_ring.write_position, iree_memory_order_relaxed);
+  reclaim_entry->host_kernarg_write_position = (uint64_t)iree_atomic_load(
+      &queue->host_kernarg_ring.write_position, iree_memory_order_relaxed);
   reclaim_entry->signal_semaphore_count = (uint16_t)signal_semaphore_list.count;
   reclaim_entry->count = submission->reclaim_resource_count;
 

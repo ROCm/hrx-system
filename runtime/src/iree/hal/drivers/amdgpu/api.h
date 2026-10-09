@@ -37,6 +37,25 @@ typedef enum iree_hal_amdgpu_queue_placement_e {
   IREE_HAL_AMDGPU_QUEUE_PLACEMENT_DEVICE,
 } iree_hal_amdgpu_queue_placement_t;
 
+// Selects where host queues place the kernel arguments they write for each
+// dispatch.
+typedef enum iree_hal_amdgpu_kernarg_placement_e {
+  // Device-local kernargs except for a lone dispatch submitted to an idle
+  // queue. On devices whose HSA runtime exposes CPU-visible device memory with
+  // HDP flush publication, each queue keeps a device-local kernarg ring and a
+  // host kernarg ring: a single-packet submission made while the queue has no
+  // work in flight uses the host ring and skips the HDP flush, and every other
+  // submission uses the device-local ring. Other devices use host kernargs
+  // only.
+  IREE_HAL_AMDGPU_KERNARG_PLACEMENT_AUTO = 0,
+  // Host kernarg-init memory for every submission.
+  IREE_HAL_AMDGPU_KERNARG_PLACEMENT_HOST = 1,
+  // CPU-visible device memory published with an HDP flush for every
+  // submission. Device creation fails if the device cannot publish host
+  // writes into device memory.
+  IREE_HAL_AMDGPU_KERNARG_PLACEMENT_DEVICE = 2,
+} iree_hal_amdgpu_kernarg_placement_t;
+
 // Selects the command-buffer encoding and execution path.
 typedef enum iree_hal_amdgpu_command_buffer_mode_e {
   // Records and replays command buffers as AMDGPU AQL command-buffer programs.
@@ -252,6 +271,8 @@ typedef struct iree_hal_amdgpu_logical_device_options_t {
     // gap at wrap. Submission admission checks kernarg and AQL capacity
     // together before publishing packets.
     uint32_t kernarg_capacity;
+    // Memory placement of queue-written dispatch kernel arguments.
+    iree_hal_amdgpu_kernarg_placement_t kernarg_placement;
     // Device-visible control upload ring capacity in bytes for each host queue.
     // Zero disables the optional upload ring in AQL mode. PM4 and automatic
     // modes resolve zero to the capacity required for PM4 command buffers.

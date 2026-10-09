@@ -338,6 +338,14 @@ static void iree_hal_amdgpu_host_queue_reclaim_queue_owned_positions(
     iree_hal_amdgpu_kernarg_ring_reclaim(
         &queue->kernarg_ring, reclaim_positions.kernarg_write_position);
   }
+  if (reclaim_positions.host_kernarg_write_position > 0) {
+    IREE_ASSERT(queue->host_kernarg_ring.base,
+                "host kernarg blocks retired without an initialized host "
+                "kernarg ring");
+    iree_hal_amdgpu_kernarg_ring_reclaim(
+        &queue->host_kernarg_ring,
+        reclaim_positions.host_kernarg_write_position);
+  }
   if (reclaim_positions.queue_upload_write_position > 0) {
     IREE_ASSERT(queue->queue_upload_ring.base,
                 "queue upload bytes retired without an initialized upload "
@@ -1045,6 +1053,27 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
         params->capacity.kernarg_block_count, &out_queue->kernarg_ring);
   }
 
+  // Initialize the idle-submission host kernarg ring when the selected ring
+  // needs host-write publication (see |host_kernarg_ring|).
+  if (iree_status_is_ok(status) &&
+      params->memory.host_kernarg.memory_pool.handle) {
+    if (IREE_UNLIKELY(
+            !iree_hal_amdgpu_kernarg_ring_requires_host_write_publication(
+                &out_queue->kernarg_ring) ||
+            params->memory.host_kernarg.publication.mode !=
+                IREE_HAL_AMDGPU_KERNARG_RING_PUBLICATION_MODE_NONE)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "host kernarg ring memory is only valid alongside a kernarg ring "
+          "that requires host-write publication and must not itself require "
+          "publication");
+    } else {
+      status = iree_hal_amdgpu_kernarg_ring_initialize(
+          params->hardware.libhsa, &params->memory.host_kernarg,
+          params->capacity.kernarg_block_count, &out_queue->host_kernarg_ring);
+    }
+  }
+
   // Initialize the optional queue-control upload ring from the same
   // host-visible memory policy as queue-owned kernargs. A zero capacity keeps
   // future device-side fixup storage opt-in and avoids charging every queue for
@@ -1280,6 +1309,10 @@ void iree_hal_amdgpu_host_queue_finish_deinitialize(
 
   iree_hal_amdgpu_kernarg_ring_deinitialize(queue->libhsa,
                                             &queue->kernarg_ring);
+  if (queue->host_kernarg_ring.base) {
+    iree_hal_amdgpu_kernarg_ring_deinitialize(queue->libhsa,
+                                              &queue->host_kernarg_ring);
+  }
 
   if (queue->pm4_ib_slots) {
     iree_hal_amdgpu_hsa_cleanup_assert_success(

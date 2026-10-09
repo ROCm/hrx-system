@@ -21,6 +21,7 @@
 #include "iree/task/api.h"
 
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
+#include "iree/hal/drivers/amdgpu/api.h"
 #include "iree/hal/drivers/amdgpu/registration/driver_module.h"
 #endif
 
@@ -719,19 +720,62 @@ static void hrx_debug_print_iree_status(const char* label,
 }
 
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
+// Parses HRX_KERNARG_PLACEMENT ('auto', 'host', or 'device'). Unset or empty
+// leaves |*out_is_set| false.
+static iree_status_t hrx_amdgpu_kernarg_placement_from_environment(
+    bool* out_is_set, iree_hal_amdgpu_kernarg_placement_t* out_placement) {
+  *out_is_set = false;
+  *out_placement = IREE_HAL_AMDGPU_KERNARG_PLACEMENT_AUTO;
+  const char* value = getenv("HRX_KERNARG_PLACEMENT");
+  if (!value || !value[0]) {
+    return iree_ok_status();
+  }
+  if (strcmp(value, "auto") == 0) {
+    *out_placement = IREE_HAL_AMDGPU_KERNARG_PLACEMENT_AUTO;
+  } else if (strcmp(value, "host") == 0) {
+    *out_placement = IREE_HAL_AMDGPU_KERNARG_PLACEMENT_HOST;
+  } else if (strcmp(value, "device") == 0) {
+    *out_placement = IREE_HAL_AMDGPU_KERNARG_PLACEMENT_DEVICE;
+  } else {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unsupported HRX_KERNARG_PLACEMENT '%s' (expected 'auto', 'host', or "
+        "'device')",
+        value);
+  }
+  *out_is_set = true;
+  return iree_ok_status();
+}
+
 static hrx_status_t hrx_create_iree_amdgpu_driver(
     iree_allocator_t alloc, iree_hal_driver_t** out_driver) {
   *out_driver = NULL;
-  iree_hal_driver_registry_t* registry = NULL;
-  iree_status_t status = iree_hal_driver_registry_allocate(alloc, &registry);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_driver_module_register(registry);
+  bool has_kernarg_placement = false;
+  iree_hal_amdgpu_kernarg_placement_t kernarg_placement =
+      IREE_HAL_AMDGPU_KERNARG_PLACEMENT_AUTO;
+  iree_status_t status = hrx_amdgpu_kernarg_placement_from_environment(
+      &has_kernarg_placement, &kernarg_placement);
+  if (iree_status_is_ok(status) && has_kernarg_placement) {
+    // An explicit placement creates the driver with default options plus that
+    // placement; the registry path below reads process flags instead.
+    iree_hal_amdgpu_driver_options_t options;
+    iree_hal_amdgpu_driver_options_initialize(&options);
+    options.default_device_options.host_queues.kernarg_placement =
+        kernarg_placement;
+    status = iree_hal_amdgpu_driver_create(iree_make_cstring_view("amdgpu"),
+                                           &options, alloc, out_driver);
+  } else if (iree_status_is_ok(status)) {
+    iree_hal_driver_registry_t* registry = NULL;
+    status = iree_hal_driver_registry_allocate(alloc, &registry);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdgpu_driver_module_register(registry);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_driver_registry_try_create(
+          registry, iree_make_cstring_view("amdgpu"), alloc, out_driver);
+    }
+    iree_hal_driver_registry_free(registry);
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_driver_registry_try_create(
-        registry, iree_make_cstring_view("amdgpu"), alloc, out_driver);
-  }
-  iree_hal_driver_registry_free(registry);
   hrx_debug_print_iree_status("amdgpu driver create", status);
   if (!iree_status_is_ok(status)) {
     return hrx_status_from_iree(status);

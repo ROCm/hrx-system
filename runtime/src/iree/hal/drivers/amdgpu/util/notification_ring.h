@@ -167,6 +167,9 @@ typedef struct iree_hal_amdgpu_reclaim_action_t {
 typedef struct iree_hal_amdgpu_reclaim_positions_t {
   // Highest kernarg ring write position retired by the completed epochs.
   uint64_t kernarg_write_position;
+  // Highest idle-submission host kernarg ring write position retired by the
+  // completed epochs.
+  uint64_t host_kernarg_write_position;
   // Highest queue upload ring write position retired by the completed epochs.
   uint64_t queue_upload_write_position;
 } iree_hal_amdgpu_reclaim_positions_t;
@@ -217,6 +220,10 @@ struct iree_hal_amdgpu_reclaim_entry_t {
   // report the highest position across retired epochs so the caller can reclaim
   // kernarg blocks. 0 means no kernarg was allocated.
   uint64_t kernarg_write_position;
+  // Idle-submission host kernarg ring write position at the time of this
+  // submission, with the same drain/fail_all semantics as
+  // |kernarg_write_position|. 0 means the ring was never allocated from.
+  uint64_t host_kernarg_write_position;
   // Queue upload ring write position at the time of this submission.
   // Drain/fail_all report the highest position across retired epochs so the
   // caller can reclaim upload bytes. 0 means no upload bytes were allocated.
@@ -354,6 +361,20 @@ void iree_hal_amdgpu_notification_ring_deinitialize(
 // Returns the epoch signal for use as completion_signal on AQL packets.
 hsa_signal_t iree_hal_amdgpu_notification_ring_epoch_signal(
     const iree_hal_amdgpu_notification_ring_t* ring);
+
+// Returns true if every epoch assigned so far has completed on the device, so
+// the queue has no work in flight. This reads the epoch signal directly and
+// does not wait for the host drain. The answer is a snapshot that may become
+// stale immediately; callers may only use it to choose between equally correct
+// strategies.
+static inline bool iree_hal_amdgpu_notification_ring_is_idle(
+    const iree_hal_amdgpu_notification_ring_t* ring) {
+  const hsa_signal_value_t signal_value = iree_hsa_signal_load_relaxed(
+      IREE_LIBHSA(ring->libhsa), ring->epoch.signal);
+  const uint64_t completed_epoch =
+      (uint64_t)(IREE_HAL_AMDGPU_EPOCH_INITIAL_VALUE - signal_value);
+  return completed_epoch >= ring->epoch.next_submission;
+}
 
 // Advances the submission epoch counter and returns the assigned one-based
 // frontier epoch. Called by the submission path after all AQL packets for a
