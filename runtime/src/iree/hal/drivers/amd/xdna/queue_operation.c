@@ -6,16 +6,8 @@
 
 #include "iree/hal/drivers/amd/xdna/queue_operation.h"
 
+#include "iree/hal/drivers/amd/xdna/barrier.h"
 #include "iree/hal/drivers/amd/xdna/transient_buffer.h"
-
-iree_status_t iree_hal_amd_xdna_operation_validate_barriers(
-    const iree_hal_queue_barriers_t* barriers) {
-  if (barriers) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "XDNA explicit queue barriers are unsupported");
-  }
-  return iree_ok_status();
-}
 
 static void iree_hal_amd_xdna_transfer_buffers(
     const iree_hal_amd_xdna_transfer_t* transfer,
@@ -793,7 +785,7 @@ iree_status_t iree_hal_amd_xdna_queue_transfer(
     iree_hal_semaphore_list_t signals, iree_host_size_t count,
     const iree_hal_transfer_operation_t* operations,
     const iree_hal_queue_barriers_t* barriers) {
-  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_operation_validate_barriers(barriers));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_queue_barriers_validate(barriers));
   iree_hal_amd_xdna_operation_t* operation = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_operation_create(
       (iree_hal_amd_xdna_queue_t*)base, waits, signals,

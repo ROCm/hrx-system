@@ -14,6 +14,28 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "barrier",
+    srcs = ["barrier.c"],
+    hdrs = ["barrier.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "barrier_test",
+    srcs = ["barrier_test.cc"],
+    deps = [
+        ":barrier",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "context",
     srcs = ["context.c"],
     hdrs = ["context.h"],
@@ -263,6 +285,7 @@ iree_runtime_cc_library(
         "queue_operation.h",
     ],
     deps = [
+        ":barrier",
         ":context",
         ":executable",
         ":queue_frontier",

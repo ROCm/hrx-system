@@ -203,10 +203,6 @@ iree_status_t iree_hal_amd_xdna_operation_create(
     iree_hal_semaphore_list_t signals, iree_hal_amd_xdna_operation_kind_t kind,
     iree_hal_amd_xdna_operation_t** out_operation);
 
-// Verifies that the queue can execute the requested visibility boundaries.
-iree_status_t iree_hal_amd_xdna_operation_validate_barriers(
-    const iree_hal_queue_barriers_t* barriers);
-
 // Releases a captured operation that has not been submitted.
 void iree_hal_amd_xdna_operation_discard(
     iree_hal_amd_xdna_operation_t* operation);
