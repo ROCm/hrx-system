@@ -75,6 +75,8 @@ py_test(
 cc_binary(
     name = "IREEClangTidyPlugin.so",
     srcs = [
+        "iree/DesignatedInitializerCheck.cc",
+        "iree/DesignatedInitializerCheck.h",
         "iree/ExtentChecks.cc",
         "iree/ExtentChecks.h",
         "iree/IreeTidyModule.cc",
@@ -108,6 +110,31 @@ cc_binary(
 clang_tidy_test_plugin(
     name = "test_plugin",
     testonly = True,
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+py_test(
+    name = "designated_initializer_check_test",
+    srcs = [
+        "test/clang_tidy_test.py",
+        "test/designated_initializer_check_test.py",
+    ],
+    args = [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--clangxx=$(location @iree_clang_tidy_llvm//:clang++)",
+        "--plugin=$(location :test_plugin)",
+    ],
+    data = [
+        "test/designated_initializer_check.c",
+        "test/designated_initializer_check.cc",
+        "test/designated_initializer_check.h",
+        ":test_plugin",
+        "@iree_clang_tidy_llvm//:clang++",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+    imports = ["test"],
+    main = "test/designated_initializer_check_test.py",
     tags = ["manual"],
     target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
 )
@@ -329,6 +356,7 @@ test_suite(
     tags = ["manual"],
     tests = [
         ":aggregate_recursion_summaries_test",
+        ":designated_initializer_check_test",
         ":extent_checks_test",
         ":lifecycle_checks_test",
         ":plugin_smoke_test",

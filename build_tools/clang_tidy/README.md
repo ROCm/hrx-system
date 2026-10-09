@@ -307,24 +307,22 @@ do not transfer ownership and are accepted.
 
 ### `iree-cpp-designated-initializer`
 
-`iree-cpp-designated-initializer` diagnoses designated initializers in C++
-language modes before C++20. Clang accepts them as an extension in those modes,
-but portable aggregate initializers use IREE's comment field-label convention:
+`iree-cpp-designated-initializer` makes field names part of the C++ syntax in
+first-party C++20 implementation files. A comment such as `/*.field=*/` looks
+named to a reader but remains positional to the compiler, so it can silently
+initialize a different member after a declaration changes. When the comment
+agrees with the field selected by positional initialization, the check replaces
+it with a real designator:
 
 ```c++
+// Before.
 iree_hal_buffer_params_t params = {
     /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
     /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
     /*.usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT,
 };
-```
 
-The check uses the translation unit's configured language standard. C++20 and
-later support designated initializers, including in MSVC; libamdf explicitly
-selects C++20 for its private C++ code. C designated initializers also remain
-valid and are not diagnosed:
-
-```c
+// After.
 iree_hal_buffer_params_t params = {
     .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
     .access = IREE_HAL_MEMORY_ACCESS_ALL,
@@ -332,31 +330,43 @@ iree_hal_buffer_params_t params = {
 };
 ```
 
-The simple `.field = value` C++ form is fixable with `clang-tidy --fix`. The
-fix replaces the designator with `/*.field=*/` and leaves the initializer value
-unchanged. When an initializer skips a field, the fix inserts an explicit
-zero-initialized placeholder so the positional initializer keeps the original
-designated-initializer semantics:
+When a comment names a different field than the positional initializer selects,
+the check reports both names without choosing new behavior. It never inserts
+placeholder members. Sparse C++20 designated initialization already preserves
+the language's omitted-member initialization rules.
+
+The same check folds a narrow aggregate setup form into the declaration:
 
 ```c++
 // Before.
+iree_example_t example = {};
+example.mode = IREE_EXAMPLE_MODE_DEFAULT;
+example.name = IREE_SVL("example");
+
+// After.
 iree_example_t example = {
     .mode = IREE_EXAMPLE_MODE_DEFAULT,
     .name = IREE_SVL("example"),
 };
-
-// After, assuming `flags` is declared between `mode` and `name`.
-iree_example_t example = {
-    /*.mode=*/IREE_EXAMPLE_MODE_DEFAULT,
-    /*.flags=*/{},
-    /*.name=*/IREE_SVL("example"),
-};
 ```
 
-Macro expansions are diagnosed but not automatically fixed. For macro bodies,
-update the macro definition. For macro arguments, rewrite the argument at the
-callsite or use zero-initialization plus field assignment when the initializer
-is intentionally sparse.
+This structural fix is limited to trivial local aggregates followed immediately
+by direct member assignments in declaration order. The check rejects unions,
+base or anonymous aggregates, default member initializers, volatile or atomic
+members, nontrivial initialization or assignment, narrowing conversions,
+self-reference, macros, reordered assignments, and setup split by later member
+assignments. Value evaluation order is preserved.
+
+When assignment is semantically required, keep the setup block and place
+`NOLINT(iree-cpp-designated-initializer)` on the empty initializer with a comment
+that names the initialization-versus-assignment distinction. The diagnostic
+states the rejected proof obligation so suppressions remain reviewable.
+
+The policy applies only to spellings in the main C++20 implementation file.
+Included headers retain their current spelling so installed public headers can
+still be consumed as C++17. C translation units keep their native designated
+initializers. Macro definitions and expansions require a source-level review
+rather than an edit through expansion locations.
 
 ### `iree-extent-empty-initializer`
 

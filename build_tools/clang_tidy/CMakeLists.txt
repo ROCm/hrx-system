@@ -16,6 +16,7 @@ find_package(LLVM REQUIRED CONFIG)
 find_package(Clang REQUIRED CONFIG)
 
 add_library(IREEClangTidyPlugin MODULE
+  iree/DesignatedInitializerCheck.cc
   iree/ExtentChecks.cc
   iree/IreeTidyModule.cc
   iree/LifecycleChecks.cc
@@ -61,10 +62,28 @@ find_program(CLANG_TIDY_EXECUTABLE
     "${LLVM_TOOLS_BINARY_DIR}"
   REQUIRED
 )
+find_program(CLANGXX_EXECUTABLE
+  NAMES
+    clang++
+    clang++-${LLVM_VERSION_MAJOR}
+  HINTS
+    "${LLVM_TOOLS_BINARY_DIR}"
+  REQUIRED
+)
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 enable_testing()
+add_test(
+  NAME iree-clang-tidy-designated-initializer-check
+  COMMAND
+    Python3::Interpreter
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/designated_initializer_check_test.py"
+    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
+    "--clangxx=${CLANGXX_EXECUTABLE}"
+    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+)
+
 add_test(
   NAME iree-clang-tidy-extent-checks
   COMMAND

@@ -5,7 +5,9 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 ---
-Checks: '-*,iree-*,-iree-unbounded-recursion,readability-braces-around-statements'
+# Focused tests enable the designated-initializer policy while implementation
+# sources are migrated to satisfy it.
+Checks: '-*,iree-*,-iree-cpp-designated-initializer,-iree-unbounded-recursion,readability-braces-around-statements'
 HeaderFilterRegex: '.*'
 ExcludeHeaderFilterRegex: '(^|/)(external|third_party)/'
 ...
