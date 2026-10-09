@@ -226,7 +226,7 @@ class ExecutionResourceTest : public ::testing::Test {
 TEST_F(ExecutionResourceTest, CreatesCopyableResourcesFromExactSets) {
   hipDevResource full_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
-      &device_, variable_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
+      &device_, variable_queue_family(), {.count = 0, .ordinals = nullptr},
       hipDevSmResourceGroupDefault, &full_resource));
   EXPECT_EQ(full_resource.type, hipDevResourceTypeSm);
   EXPECT_EQ(full_resource.sm.smCount, 14u);
@@ -249,8 +249,8 @@ TEST_F(ExecutionResourceTest, CreatesCopyableResourcesFromExactSets) {
   hipDevResource partition_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
       &device_, variable_queue_family(),
-      {/*.count=*/IREE_ARRAYSIZE(partition_ordinals),
-       /*.ordinals=*/partition_ordinals},
+      {.count = IREE_ARRAYSIZE(partition_ordinals),
+       .ordinals = partition_ordinals},
       hipDevSmResourceGroupBackfill, &partition_resource));
   EXPECT_EQ(partition_resource.sm.smCount, 10u);
   EXPECT_EQ(partition_resource.sm.minSmPartitionSize, 10u);
@@ -319,7 +319,7 @@ TEST_F(ExecutionResourceTest, RejectsInexactCuMasksWithoutPublishing) {
   IREE_EXPECT_STATUS_IS(
       StatusCode::kInvalidArgument,
       iree_hip_execution_resource_write_sm_cu_mask(
-          uniform_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
+          uniform_queue_family(), {.count = 0, .ordinals = nullptr},
           /*mask_word_count=*/0, &untouched_mask));
   EXPECT_EQ(untouched_mask, 0xA5A5A5A5u);
 }
@@ -328,18 +328,18 @@ TEST_F(ExecutionResourceTest, RejectsStaleAndTamperedCopies) {
   hipDevResource unchanged_resource;
   std::memset(&unchanged_resource, 0xA5, sizeof(unchanged_resource));
   const hipDevResource expected_unchanged_resource = unchanged_resource;
-  IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
-                        iree_hip_execution_resource_create_sm(
-                            &device_, variable_queue_family(),
-                            {/*.count=*/0, /*.ordinals=*/nullptr}, /*flags=*/2,
-                            &unchanged_resource));
+  IREE_EXPECT_STATUS_IS(
+      StatusCode::kInvalidArgument,
+      iree_hip_execution_resource_create_sm(&device_, variable_queue_family(),
+                                            {.count = 0, .ordinals = nullptr},
+                                            /*flags=*/2, &unchanged_resource));
   EXPECT_EQ(std::memcmp(&unchanged_resource, &expected_unchanged_resource,
                         sizeof(unchanged_resource)),
             0);
 
   hipDevResource stale_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
-      &device_, variable_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
+      &device_, variable_queue_family(), {.count = 0, .ordinals = nullptr},
       hipDevSmResourceGroupDefault, &stale_resource));
 
   iree_hal_streaming_execution_resource_table_deinitialize(
@@ -357,7 +357,7 @@ TEST_F(ExecutionResourceTest, RejectsStaleAndTamperedCopies) {
 
   hipDevResource tampered_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
-      &device_, variable_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
+      &device_, variable_queue_family(), {.count = 0, .ordinals = nullptr},
       hipDevSmResourceGroupDefault, &tampered_resource));
   ++tampered_resource.sm.smCount;
   EXPECT_EQ(iree_hip_execution_resource_resolve_sm_for_device(
@@ -380,7 +380,7 @@ TEST_F(ExecutionResourceTest, RejectsStaleAndTamperedCopies) {
 TEST_F(ExecutionResourceTest, SplitsUniformResourcesIntoExactDisjointSets) {
   hipDevResource full_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
-      &device_, uniform_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
+      &device_, uniform_queue_family(), {.count = 0, .ordinals = nullptr},
       hipDevSmResourceGroupDefault, &full_resource));
 
   hipDevResource untouched_remainder = {};
@@ -461,7 +461,7 @@ TEST_F(ExecutionResourceTest, SplitsUniformResourcesIntoExactDisjointSets) {
 TEST_F(ExecutionResourceTest, SplitsStructuredUnevenExactSets) {
   hipDevResource full_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
-      &device_, uniform_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
+      &device_, uniform_queue_family(), {.count = 0, .ordinals = nullptr},
       hipDevSmResourceGroupDefault, &full_resource));
 
   hipDevSmResourceGroupParams group_parameters[2] = {};
@@ -515,7 +515,7 @@ TEST_F(ExecutionResourceTest, SplitsStructuredUnevenExactSets) {
 TEST_F(ExecutionResourceTest, BackfillsAutomaticallySizedStructuredGroup) {
   hipDevResource full_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
-      &device_, uniform_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
+      &device_, uniform_queue_family(), {.count = 0, .ordinals = nullptr},
       hipDevSmResourceGroupDefault, &full_resource));
 
   hipDevSmResourceGroupParams group_parameters[2] = {};
@@ -538,7 +538,7 @@ TEST_F(ExecutionResourceTest, BackfillsAutomaticallySizedStructuredGroup) {
 TEST_F(ExecutionResourceTest, DiscoversStructuredGroupsInOrder) {
   hipDevResource full_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
-      &device_, uniform_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
+      &device_, uniform_queue_family(), {.count = 0, .ordinals = nullptr},
       hipDevSmResourceGroupDefault, &full_resource));
 
   hipDevSmResourceGroupParams group_parameters[2] = {};
@@ -558,7 +558,7 @@ TEST_F(ExecutionResourceTest, DiscoversStructuredGroupsInOrder) {
 TEST_F(ExecutionResourceTest, DryRunPublishesStructuredRemainder) {
   hipDevResource full_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
-      &device_, uniform_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
+      &device_, uniform_queue_family(), {.count = 0, .ordinals = nullptr},
       hipDevSmResourceGroupDefault, &full_resource));
 
   hipDevSmResourceGroupParams group_parameter = {.smCount = 4};
@@ -582,7 +582,7 @@ TEST_F(ExecutionResourceTest,
        RejectsUnprovenStructuredCoschedulingWithoutPublishing) {
   hipDevResource full_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
-      &device_, uniform_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
+      &device_, uniform_queue_family(), {.count = 0, .ordinals = nullptr},
       hipDevSmResourceGroupDefault, &full_resource));
 
   hipDevSmResourceGroupParams group_parameter = {.smCount = 4,
@@ -608,8 +608,7 @@ TEST_F(ExecutionResourceTest,
   hipDevResource input_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
       &device_, uniform_queue_family(),
-      {/*.count=*/IREE_ARRAYSIZE(input_ordinals),
-       /*.ordinals=*/input_ordinals},
+      {.count = IREE_ARRAYSIZE(input_ordinals), .ordinals = input_ordinals},
       hipDevSmResourceGroupDefault, &input_resource));
 
   hipDevSmResourceGroupParams group_parameters[2] = {};
@@ -642,8 +641,7 @@ TEST_F(ExecutionResourceTest, PreservesConstraintGroupsInRemainder) {
   hipDevResource input_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
       &device_, uniform_queue_family(),
-      {/*.count=*/IREE_ARRAYSIZE(input_ordinals),
-       /*.ordinals=*/input_ordinals},
+      {.count = IREE_ARRAYSIZE(input_ordinals), .ordinals = input_ordinals},
       hipDevSmResourceGroupDefault, &input_resource));
 
   hipDevResource untouched_remainder = {};
@@ -687,11 +685,11 @@ TEST_F(ExecutionResourceTest, PreservesConstraintGroupsInRemainder) {
 TEST_F(ExecutionResourceTest, RejectsUnsupportedSplitWithoutPublishing) {
   hipDevResource uniform_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
-      &device_, uniform_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
+      &device_, uniform_queue_family(), {.count = 0, .ordinals = nullptr},
       hipDevSmResourceGroupDefault, &uniform_resource));
   hipDevResource variable_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
-      &device_, variable_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
+      &device_, variable_queue_family(), {.count = 0, .ordinals = nullptr},
       hipDevSmResourceGroupDefault, &variable_resource));
 
   auto expect_failure_without_publication = [&](const hipDevResource* input,

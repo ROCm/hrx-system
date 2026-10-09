@@ -279,8 +279,8 @@ class TargetFunctionVersionProjectionTest : public ::testing::Test {
     SpecializationResult result(&version_arena_);
     IREE_CHECK_OK(loom_target_specialize_functions(environment, module,
                                                    {
-                                                       /*.values=*/requests,
-                                                       /*.count=*/request_count,
+                                                       .values = requests,
+                                                       .count = request_count,
                                                    },
                                                    /*.bindings=*/{},
                                                    /*.diagnostic_emitter=*/{},

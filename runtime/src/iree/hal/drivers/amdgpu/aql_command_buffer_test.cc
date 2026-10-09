@@ -517,13 +517,12 @@ TEST_F(AqlCommandBufferTest, AtomicCommandsPreserveTargetsAndDependencies) {
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/8,
                                         /*length=*/8),
       (iree_hal_atomic_wait_params_t){
-          /*.value=*/42,
-          /*.mask=*/UINT64_MAX,
-          /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE,
-          /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
-          /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
-          /*.target_error_mode=*/
-          IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
+          .value = 42,
+          .mask = UINT64_MAX,
+          .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+          .width = IREE_HAL_ATOMIC_WIDTH_64,
+          .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+          .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
       }));
   IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
       command_buffer.get(), IREE_HAL_EXECUTION_STAGE_ATOMIC,
@@ -531,12 +530,11 @@ TEST_F(AqlCommandBufferTest, AtomicCommandsPreserveTargetsAndDependencies) {
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/16,
                                         /*length=*/4),
       (iree_hal_atomic_store_params_t){
-          /*.value=*/7,
-          /*.flags=*/
-          IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
-          /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-          /*.target_error_mode=*/
-          IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
+          .value = 7,
+          .flags =
+              IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          .width = IREE_HAL_ATOMIC_WIDTH_32,
+          .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
       }));
   IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
       command_buffer.get(), IREE_HAL_EXECUTION_STAGE_ATOMIC,
@@ -544,13 +542,12 @@ TEST_F(AqlCommandBufferTest, AtomicCommandsPreserveTargetsAndDependencies) {
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/24,
                                         /*length=*/8),
       (iree_hal_atomic_rmw_params_t){
-          /*.operand=*/3,
-          /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
-              IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
-          /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
-          /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
-          /*.target_error_mode=*/
-          IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
+          .operand = 3,
+          .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+                   IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          .width = IREE_HAL_ATOMIC_WIDTH_64,
+          .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+          .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
       }));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer.get()));
 

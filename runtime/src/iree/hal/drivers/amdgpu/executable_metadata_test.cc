@@ -147,7 +147,7 @@ TEST(ExecutableMetadataTest, RejectsInvalidLayoutReference) {
       metadata, /*layout_byte_length=*/16, &layout_ref, &layout_storage));
   EXPECT_THAT(
       Status(iree_hal_amdgpu_executable_metadata_resolve_layout(
-          metadata, iree_hal_amdgpu_kernarg_layout_ref_t{/*.byte_offset=*/1},
+          metadata, iree_hal_amdgpu_kernarg_layout_ref_t{.byte_offset = 1},
           &resolved_layout)),
       StatusIs(StatusCode::kInvalidArgument));
   EXPECT_EQ(resolved_layout, nullptr);

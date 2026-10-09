@@ -140,7 +140,7 @@ TEST_F(ExecutionResourceTableTest, InternsCanonicalResourceSets) {
   iree_hal_streaming_execution_resource_set_id_t full_set_id =
       IREE_HAL_STREAMING_EXECUTION_RESOURCE_SET_ID_INVALID;
   IREE_ASSERT_OK(iree_hal_streaming_execution_resource_table_intern(
-      &table_, queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
+      &table_, queue_family(), {.count = 0, .ordinals = nullptr},
       &full_set_id));
 
   const iree_hal_queue_execution_resource_ordinal_t full_ordinals[] = {0, 1, 2,
@@ -149,8 +149,7 @@ TEST_F(ExecutionResourceTableTest, InternsCanonicalResourceSets) {
       IREE_HAL_STREAMING_EXECUTION_RESOURCE_SET_ID_INVALID;
   IREE_ASSERT_OK(iree_hal_streaming_execution_resource_table_intern(
       &table_, queue_family(),
-      {/*.count=*/IREE_ARRAYSIZE(full_ordinals),
-       /*.ordinals=*/full_ordinals},
+      {.count = IREE_ARRAYSIZE(full_ordinals), .ordinals = full_ordinals},
       &explicit_full_set_id));
   EXPECT_EQ(explicit_full_set_id, full_set_id);
 
@@ -160,8 +159,8 @@ TEST_F(ExecutionResourceTableTest, InternsCanonicalResourceSets) {
       IREE_HAL_STREAMING_EXECUTION_RESOURCE_SET_ID_INVALID;
   IREE_ASSERT_OK(iree_hal_streaming_execution_resource_table_intern(
       &table_, queue_family(),
-      {/*.count=*/IREE_ARRAYSIZE(partition_ordinals),
-       /*.ordinals=*/partition_ordinals},
+      {.count = IREE_ARRAYSIZE(partition_ordinals),
+       .ordinals = partition_ordinals},
       &partition_set_id));
   EXPECT_NE(partition_set_id, full_set_id);
 
@@ -179,12 +178,12 @@ TEST_F(ExecutionResourceTableTest, InternsCanonicalResourceSets) {
 TEST_F(ExecutionResourceTableTest, RejectsSetsThatCannotNameAnExactQueue) {
   const iree_hal_queue_execution_resource_ordinal_t missing_group[] = {0, 1};
   iree_hal_streaming_execution_resource_set_id_t set_id = 42;
-  IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
-                        iree_hal_streaming_execution_resource_table_intern(
-                            &table_, queue_family(),
-                            {/*.count=*/IREE_ARRAYSIZE(missing_group),
-                             /*.ordinals=*/missing_group},
-                            &set_id));
+  IREE_EXPECT_STATUS_IS(
+      StatusCode::kInvalidArgument,
+      iree_hal_streaming_execution_resource_table_intern(
+          &table_, queue_family(),
+          {.count = IREE_ARRAYSIZE(missing_group), .ordinals = missing_group},
+          &set_id));
   EXPECT_EQ(set_id, 42u);
 
   const iree_hal_queue_execution_resource_ordinal_t unsorted[] = {2, 0};
@@ -192,8 +191,7 @@ TEST_F(ExecutionResourceTableTest, RejectsSetsThatCannotNameAnExactQueue) {
       StatusCode::kInvalidArgument,
       iree_hal_streaming_execution_resource_table_intern(
           &table_, queue_family(),
-          {/*.count=*/IREE_ARRAYSIZE(unsorted), /*.ordinals=*/unsorted},
-          &set_id));
+          {.count = IREE_ARRAYSIZE(unsorted), .ordinals = unsorted}, &set_id));
   EXPECT_EQ(set_id, 42u);
 
   iree_hal_device_spec_t* foreign_device_spec = CreateDeviceSpec();
@@ -203,7 +201,7 @@ TEST_F(ExecutionResourceTableTest, RejectsSetsThatCannotNameAnExactQueue) {
       StatusCode::kInvalidArgument,
       iree_hal_streaming_execution_resource_table_intern(
           &table_, iree_hal_device_queue_family(foreign_device, 0),
-          {/*.count=*/0, /*.ordinals=*/nullptr}, &set_id));
+          {.count = 0, .ordinals = nullptr}, &set_id));
   EXPECT_EQ(set_id, 42u);
   iree_hal_device_release(foreign_device);
 }

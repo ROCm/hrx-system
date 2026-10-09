@@ -514,7 +514,7 @@ class LoopBoundaryProjectionTest : public ::testing::Test {
     const loom_boundary_projection_rule_t* rules[] = {rule};
     IREE_ASSERT_OK(loom_boundary_projection_run(
         &pass_, module_, /*version_list=*/nullptr,
-        {/*.values=*/rules, /*.count=*/IREE_ARRAYSIZE(rules)},
+        {.values = rules, .count = IREE_ARRAYSIZE(rules)},
         /*plan_sink=*/nullptr, out_statistics));
   }
 
@@ -551,7 +551,8 @@ class LoopBoundaryProjectionTest : public ::testing::Test {
     loom_walk_result_t result = LOOM_WALK_CONTINUE;
     IREE_CHECK_OK(loom_walk_function(
         module_, function, LOOM_WALK_POST_ORDER,
-        {/*.fn=*/CollectLoopWithModule, /*.user_data=*/&collector}, &result));
+        {.fn = CollectLoopWithModule, .user_data = &collector}, &pass_arena_,
+        &result));
     return loops;
   }
 

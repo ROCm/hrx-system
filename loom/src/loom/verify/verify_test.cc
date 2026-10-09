@@ -925,8 +925,8 @@ TEST_F(VerifyTest, OpAfterTerminatorReportsTerminatorLocation) {
   loom_op_t* func_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(
       &builder_, 0, 0, 0,
-      (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id}, nullptr,
-      0, nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
+      (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id}, nullptr, 0,
+      nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
   loom_builder_set_block(&builder_,
                          loom_region_entry_block(loom_test_func_body(func_op)));
 

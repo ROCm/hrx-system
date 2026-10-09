@@ -707,12 +707,12 @@ TEST(StreamValueWaitLaneTest,
       wait_queue, iree_hal_semaphore_list_empty(), wait_signal_list,
       target_buffer, /*target_offset=*/0,
       (iree_hal_atomic_wait_params_t){
-          /*.value=*/1,
-          /*.mask=*/UINT32_MAX,
-          /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
-              IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
-          /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-          /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+          .value = 1,
+          .mask = UINT32_MAX,
+          .flags =
+              IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          .width = IREE_HAL_ATOMIC_WIDTH_32,
+          .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
       },
       /*barriers=*/NULL));
   wait_submission_accepted = true;

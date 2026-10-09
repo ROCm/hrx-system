@@ -368,8 +368,8 @@ low.func.def target<test.low.core>(@target) @kernel() {
       LookupFunctionOp(module.get(), IREE_SV("kernel")),
       /*function_target_facts=*/nullptr, &empty_registry,
       {
-          /*.fn=*/CaptureDiagnostic,
-          /*.user_data=*/&capture,
+          .fn = CaptureDiagnostic,
+          .user_data = &capture,
       },
       &target));
 
@@ -419,8 +419,8 @@ low.func.def target<test.low.alt>(@target) @kernel() {
       LookupFunctionOp(module.get(), IREE_SV("kernel")),
       /*function_target_facts=*/nullptr, &registry_,
       {
-          /*.fn=*/CaptureDiagnostic,
-          /*.user_data=*/&capture,
+          .fn = CaptureDiagnostic,
+          .user_data = &capture,
       },
       &target));
 

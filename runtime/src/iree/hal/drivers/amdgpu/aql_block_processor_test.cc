@@ -1519,12 +1519,11 @@ TEST_F(AqlBlockProcessorRecordedTest, RecordedAtomicsEmitKernelPackets) {
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/0,
                                         /*length=*/4),
       (iree_hal_atomic_wait_params_t){
-          /*.value=*/5,
-          /*.mask=*/0xFF,
-          /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE,
-          /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-          /*.condition=*/
-          IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
+          .value = 5,
+          .mask = 0xFF,
+          .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+          .width = IREE_HAL_ATOMIC_WIDTH_32,
+          .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
       }));
   IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
       command_buffer.get(), IREE_HAL_EXECUTION_STAGE_ATOMIC,
@@ -1532,10 +1531,10 @@ TEST_F(AqlBlockProcessorRecordedTest, RecordedAtomicsEmitKernelPackets) {
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/8,
                                         /*length=*/8),
       (iree_hal_atomic_store_params_t){
-          /*.value=*/9,
-          /*.flags=*/
-          IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
-          /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
+          .value = 9,
+          .flags =
+              IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          .width = IREE_HAL_ATOMIC_WIDTH_64,
       }));
   IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
       command_buffer.get(), IREE_HAL_EXECUTION_STAGE_ATOMIC,
@@ -1543,11 +1542,10 @@ TEST_F(AqlBlockProcessorRecordedTest, RecordedAtomicsEmitKernelPackets) {
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/16,
                                         /*length=*/4),
       (iree_hal_atomic_rmw_params_t){
-          /*.operand=*/11,
-          /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
-              IREE_HAL_ATOMIC_FLAG_RELEASE,
-          /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-          /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_XOR,
+          .operand = 11,
+          .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE,
+          .width = IREE_HAL_ATOMIC_WIDTH_32,
+          .operation = IREE_HAL_ATOMIC_RMW_OPERATION_XOR,
       }));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer.get()));
 
@@ -1659,10 +1657,10 @@ TEST_F(AqlBlockProcessorRecordedTest,
       IREE_HAL_EXECUTION_STAGE_HOST,
       iree_hal_make_buffer_ref(buffer.get(), /*offset=*/8, /*length=*/8),
       (iree_hal_atomic_store_params_t){
-          /*.value=*/17,
-          /*.flags=*/
-          IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
-          /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
+          .value = 17,
+          .flags =
+              IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          .width = IREE_HAL_ATOMIC_WIDTH_64,
       }));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer.get()));
 

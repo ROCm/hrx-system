@@ -745,13 +745,13 @@ class LowKernelEmitter {
     IREE_RETURN_IF_ERROR(loom_target_specialize_functions(
         &target_environment_, module_,
         {
-            /*.values=*/&specialization_request,
-            /*.count=*/1,
+            .values = &specialization_request,
+            .count = 1,
         },
         /*.bindings=*/{},
         {
-            /*.fn=*/PrintCompilerDiagnostic,
-            /*.user_data=*/nullptr,
+            .fn = PrintCompilerDiagnostic,
+            .user_data = nullptr,
         },
         &function_versions, &specialization_error_count));
     if (specialization_error_count != 0) {
@@ -789,8 +789,8 @@ class LowKernelEmitter {
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
         module_, low_function, descriptor_set, /*max_errors=*/20,
         iree_diagnostic_emitter_t{
-            /*.fn=*/PrintCompilerDiagnostic,
-            /*.user_data=*/nullptr,
+            .fn = PrintCompilerDiagnostic,
+            .user_data = nullptr,
         },
         &source_abi, arena));
     if (source_abi.error_count != 0) {
@@ -806,8 +806,8 @@ class LowKernelEmitter {
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
         module_, low_function, descriptor_set, /*max_errors=*/20,
         iree_diagnostic_emitter_t{
-            /*.fn=*/PrintCompilerDiagnostic,
-            /*.user_data=*/nullptr,
+            .fn = PrintCompilerDiagnostic,
+            .user_data = nullptr,
         },
         &abi_verify_result, arena));
     if (abi_verify_result.error_count != 0) {

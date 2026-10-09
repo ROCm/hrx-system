@@ -406,8 +406,8 @@ class AmdgpuSignalTest : public ::testing::Test {
     IREE_CHECK_OK(loom_amdgpu_build_data_symbol_address(
         &builder_, descriptor_set_,
         (loom_amdgpu_data_symbol_address_t){
-            /*.symbol=*/signal_symbol,
-            /*.byte_offset=*/0,
+            .symbol = signal_symbol,
+            .byte_offset = 0,
         },
         LOOM_LOCATION_UNKNOWN, &signal_address));
     return signal_address;

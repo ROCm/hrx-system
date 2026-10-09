@@ -106,9 +106,9 @@ void MockCarrier::Initialize() {
                               /*max_send_spans=*/8, iree_allocator_system(),
                               &base);
   IREE_ASSERT_OK(iree_net_carrier_set_handlers(
-      &base, {/*.on_receive=*/MockCarrier::HandleReceive,
-              /*.on_error=*/MockCarrier::HandleError,
-              /*.user_data=*/this}));
+      &base, {.on_receive = MockCarrier::HandleReceive,
+              .on_error = MockCarrier::HandleError,
+              .user_data = this}));
 }
 
 struct SendCompletion {

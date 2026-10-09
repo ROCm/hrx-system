@@ -247,13 +247,13 @@ class LoopbackCarrierTest : public ::testing::Test {
         client_proactor_, server_proactor_, options, iree_allocator_system(),
         &client_, &server_));
     IREE_ASSERT_OK(iree_net_carrier_set_handlers(
-        client_, {/*.on_receive=*/EndpointState::OnReceive,
-                  /*.on_error=*/EndpointState::OnError,
-                  /*.user_data=*/&client_endpoint_}));
+        client_, {.on_receive = EndpointState::OnReceive,
+                  .on_error = EndpointState::OnError,
+                  .user_data = &client_endpoint_}));
     IREE_ASSERT_OK(iree_net_carrier_set_handlers(
-        server_, {/*.on_receive=*/EndpointState::OnReceive,
-                  /*.on_error=*/EndpointState::OnError,
-                  /*.user_data=*/&server_endpoint_}));
+        server_, {.on_receive = EndpointState::OnReceive,
+                  .on_error = EndpointState::OnError,
+                  .user_data = &server_endpoint_}));
   }
 
   void ActivateBoth() {

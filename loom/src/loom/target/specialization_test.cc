@@ -210,8 +210,8 @@ class TargetSpecializationTest : public ::testing::Test {
     IREE_CHECK_OK(loom_target_specialize_functions(
         &environment_, module, requests, bindings,
         {
-            /*.fn=*/diagnostic_collector ? CollectDiagnostic : nullptr,
-            /*.user_data=*/diagnostic_collector,
+            .fn = diagnostic_collector ? CollectDiagnostic : nullptr,
+            .user_data = diagnostic_collector,
         },
         &result.function_versions, &result.error_count));
     return result;
@@ -338,8 +338,8 @@ func.def public target(@required) @constrained() {
   IREE_ASSERT_OK(loom_target_specialize_functions(
       &environment_, module.get(),
       {
-          /*.values=*/&initial_request,
-          /*.count=*/1,
+          .values = &initial_request,
+          .count = 1,
       },
       /*.bindings=*/{}, /*.diagnostic_emitter=*/{}, &result.function_versions,
       &result.error_count));
@@ -377,8 +377,8 @@ func.def public target(@required) @constrained() {
   IREE_ASSERT_OK(loom_target_specialize_functions(
       &environment_, module.get(),
       {
-          /*.values=*/continued_requests,
-          /*.count=*/IREE_ARRAYSIZE(continued_requests),
+          .values = continued_requests,
+          .count = IREE_ARRAYSIZE(continued_requests),
       },
       /*.bindings=*/{}, /*.diagnostic_emitter=*/{}, &result.function_versions,
       &result.error_count));
@@ -418,13 +418,13 @@ func.def public target(@required) @constrained() {
   IREE_ASSERT_OK(loom_target_specialize_functions(
       &environment_, module.get(),
       {
-          /*.values=*/&incompatible_request,
-          /*.count=*/1,
+          .values = &incompatible_request,
+          .count = 1,
       },
       /*.bindings=*/{},
       {
-          /*.fn=*/CollectDiagnostic,
-          /*.user_data=*/&diagnostic_collector,
+          .fn = CollectDiagnostic,
+          .user_data = &diagnostic_collector,
       },
       &result.function_versions, &result.error_count));
   EXPECT_EQ(result.error_count, 1u);
@@ -816,8 +816,8 @@ func.def public @entry() {
                         loom_target_specialize_functions(
                             &environment_, module.get(),
                             {
-                                /*.values=*/&request,
-                                /*.count=*/1,
+                                .values = &request,
+                                .count = 1,
                             },
                             /*.bindings=*/{},
                             /*diagnostic_emitter=*/{},
@@ -976,8 +976,8 @@ func.def public target(@device) @entry() {
                         loom_target_specialize_functions(
                             &environment_, module.get(), /*requests=*/{},
                             {
-                                /*.values=*/&missing_binding,
-                                /*.count=*/1,
+                                .values = &missing_binding,
+                                .count = 1,
                             },
                             /*diagnostic_emitter=*/{},
                             &result.function_versions, &result.error_count));
@@ -990,8 +990,8 @@ func.def public target(@device) @entry() {
                         loom_target_specialize_functions(
                             &environment_, module.get(), /*requests=*/{},
                             {
-                                /*.values=*/&concrete_binding,
-                                /*.count=*/1,
+                                .values = &concrete_binding,
+                                .count = 1,
                             },
                             /*diagnostic_emitter=*/{},
                             &result.function_versions, &result.error_count));
@@ -1010,8 +1010,8 @@ func.def public target(@device) @entry() {
                         loom_target_specialize_functions(
                             &environment_, module.get(), /*requests=*/{},
                             {
-                                /*.values=*/duplicate_bindings,
-                                /*.count=*/IREE_ARRAYSIZE(duplicate_bindings),
+                                .values = duplicate_bindings,
+                                .count = IREE_ARRAYSIZE(duplicate_bindings),
                             },
                             /*diagnostic_emitter=*/{},
                             &result.function_versions, &result.error_count));
@@ -1028,12 +1028,12 @@ func.def public target(@device) @entry() {
                         loom_target_specialize_functions(
                             &environment_, module.get(),
                             {
-                                /*.values=*/&request,
-                                /*.count=*/1,
+                                .values = &request,
+                                .count = 1,
                             },
                             {
-                                /*.values=*/&binding,
-                                /*.count=*/1,
+                                .values = &binding,
+                                .count = 1,
                             },
                             /*diagnostic_emitter=*/{},
                             &result.function_versions, &result.error_count));
@@ -1056,8 +1056,8 @@ func.def public @entry() {
                         loom_target_specialize_functions(
                             &environment_, module.get(),
                             {
-                                /*.values=*/&missing_request,
-                                /*.count=*/1,
+                                .values = &missing_request,
+                                .count = 1,
                             },
                             /*.bindings=*/{},
                             /*diagnostic_emitter=*/{},
@@ -1077,8 +1077,8 @@ func.def public @entry() {
                         loom_target_specialize_functions(
                             &environment_, module.get(),
                             {
-                                /*.values=*/duplicate_requests,
-                                /*.count=*/IREE_ARRAYSIZE(duplicate_requests),
+                                .values = duplicate_requests,
+                                .count = IREE_ARRAYSIZE(duplicate_requests),
                             },
                             /*.bindings=*/{},
                             /*diagnostic_emitter=*/{},

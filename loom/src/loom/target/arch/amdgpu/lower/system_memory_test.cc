@@ -295,8 +295,8 @@ class AmdgpuSystemMemoryTest : public ::testing::Test {
     IREE_CHECK_OK(loom_amdgpu_build_data_symbol_address(
         &builder_, descriptor_set_,
         (loom_amdgpu_data_symbol_address_t){
-            /*.symbol=*/symbol,
-            /*.byte_offset=*/0,
+            .symbol = symbol,
+            .byte_offset = 0,
         },
         LOOM_LOCATION_UNKNOWN, &address));
     return address;

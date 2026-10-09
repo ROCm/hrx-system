@@ -293,8 +293,8 @@ TEST_F(KernelRequestProducerTest,
       producer.get(), &environment, source_symbol_ordinal, sites,
       IREE_ARRAYSIZE(sites), &collection_options,
       (loom_kernel_request_sink_t){
-          /*.publish=*/CaptureRequest,
-          /*.user_data=*/&capture,
+          .publish = CaptureRequest,
+          .user_data = &capture,
       },
       &scratch_arena, &collection));
   ASSERT_EQ(collection.class_count, 2u);
@@ -356,8 +356,8 @@ TEST_F(KernelRequestProducerTest, StopsAfterSinkFailureBeforeMaterialization) {
                             producer.get(), &environment, source_symbol_ordinal,
                             sites, IREE_ARRAYSIZE(sites), &collection_options,
                             (loom_kernel_request_sink_t){
-                                /*.publish=*/RejectRequest,
-                                /*.user_data=*/&state,
+                                .publish = RejectRequest,
+                                .user_data = &state,
                             },
                             &scratch_arena, &collection));
   EXPECT_EQ(state.call_count, 1u);

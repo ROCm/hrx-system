@@ -15,7 +15,7 @@ namespace {
 TEST(QueueExecutionResourcesTest, MapsGfx942InterleavedPartitions) {
   iree_hal_amdgpu_queue_execution_resource_topology_t topology;
   IREE_ASSERT_OK(iree_hal_amdgpu_queue_execution_resource_topology_initialize(
-      {/*.major=*/9, /*.minor=*/4, /*.stepping=*/2},
+      {.major = 9, .minor = 4, .stepping = 2},
       /*execution_unit_count=*/40, /*partition_count=*/8, &topology));
 
   ASSERT_EQ(iree_hal_amdgpu_queue_execution_resource_group_count(&topology),
@@ -41,8 +41,8 @@ TEST(QueueExecutionResourcesTest, MapsGfx942InterleavedPartitions) {
   uint32_t mask[2] = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_queue_execution_resource_write_mask(
       &topology,
-      {/*.count=*/IREE_ARRAYSIZE(selected_resources),
-       /*.ordinals=*/selected_resources},
+      {.count = IREE_ARRAYSIZE(selected_resources),
+       .ordinals = selected_resources},
       /*out_mask_bit_count=*/64, mask));
   EXPECT_EQ(mask[0], UINT32_C(0x000000FF));
   EXPECT_EQ(mask[1], 0u);
@@ -51,7 +51,7 @@ TEST(QueueExecutionResourcesTest, MapsGfx942InterleavedPartitions) {
 TEST(QueueExecutionResourcesTest, MapsGfx11WgpResources) {
   iree_hal_amdgpu_queue_execution_resource_topology_t topology;
   IREE_ASSERT_OK(iree_hal_amdgpu_queue_execution_resource_topology_initialize(
-      {/*.major=*/11, /*.minor=*/0, /*.stepping=*/0},
+      {.major = 11, .minor = 0, .stepping = 0},
       /*execution_unit_count=*/40, /*partition_count=*/1, &topology));
 
   ASSERT_EQ(iree_hal_amdgpu_queue_execution_resource_count(&topology), 20u);
@@ -69,8 +69,8 @@ TEST(QueueExecutionResourcesTest, MapsGfx11WgpResources) {
   uint32_t selected_mask[2] = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_queue_execution_resource_write_mask(
       &topology,
-      {/*.count=*/IREE_ARRAYSIZE(selected_resources),
-       /*.ordinals=*/selected_resources},
+      {.count = IREE_ARRAYSIZE(selected_resources),
+       .ordinals = selected_resources},
       /*out_mask_bit_count=*/64, selected_mask));
   EXPECT_EQ(selected_mask[0], UINT32_C(0x00000003));
   EXPECT_EQ(selected_mask[1], UINT32_C(0x000000C0));

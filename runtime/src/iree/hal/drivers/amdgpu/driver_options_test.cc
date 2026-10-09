@@ -22,8 +22,8 @@ TEST(AmdgpuDriverOptionsTest, DriverParamsAreRejectedUntilDefined) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_amdgpu_driver_options_parse(&options, (iree_string_pair_list_t){
-                                                         /*.count=*/1,
-                                                         /*.pairs=*/&pair,
+                                                         .count = 1,
+                                                         .pairs = &pair,
                                                      }));
 }
 
@@ -35,8 +35,8 @@ TEST(AmdgpuDriverOptionsTest, LogicalDeviceParamsAreRejectedUntilDefined) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_amdgpu_logical_device_options_parse(
                             &options, (iree_string_pair_list_t){
-                                          /*.count=*/1,
-                                          /*.pairs=*/&pair,
+                                          .count = 1,
+                                          .pairs = &pair,
                                       }));
 }
 

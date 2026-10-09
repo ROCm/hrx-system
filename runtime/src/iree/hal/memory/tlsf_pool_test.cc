@@ -923,8 +923,8 @@ TEST(TLSFPool, TrimRetainsSlabWithTaintedDeathFrontier) {
   IREE_ASSERT_OK(CreateTLSFPool(options, slab_provider, notification,
                                 test_frontier_tracker(),
                                 (iree_hal_pool_epoch_query_t){
-                                    /*.fn=*/iree_hal_test_epoch_query,
-                                    /*.user_data=*/&query,
+                                    .fn = iree_hal_test_epoch_query,
+                                    .user_data = &query,
                                 },
                                 allocator, &pool));
 
@@ -1112,8 +1112,8 @@ TEST(TLSFPool, SplitRangesRetainReadinessUntilCompletion) {
   IREE_ASSERT_OK(CreateTLSFPool(options, slab_provider, notification,
                                 test_frontier_tracker(),
                                 iree_hal_pool_epoch_query_t{
-                                    /*.fn=*/iree_hal_test_epoch_query,
-                                    /*.user_data=*/&epoch_query,
+                                    .fn = iree_hal_test_epoch_query,
+                                    .user_data = &epoch_query,
                                 },
                                 allocator, &pool));
 

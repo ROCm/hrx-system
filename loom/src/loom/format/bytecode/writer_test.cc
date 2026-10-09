@@ -795,7 +795,7 @@ TEST_F(WriterTest, ExportOffsetsCrossWriterPageBoundary) {
     IREE_ASSERT_OK(loom_test_func_build(
         &builder, LOOM_TEST_FUNC_BUILD_FLAG_HAS_VISIBILITY,
         LOOM_TEST_VISIBILITY_PUBLIC, /*cc=*/0,
-        {/*.module_id=*/0, /*.symbol_id=*/symbol_id}, /*arg_types=*/nullptr,
+        {.module_id = 0, .symbol_id = symbol_id}, /*arg_types=*/nullptr,
         /*arg_count=*/0, /*result_types=*/nullptr, /*result_count=*/0,
         /*tied_results=*/nullptr, /*tied_result_count=*/0,
         /*predicates=*/nullptr, /*predicate_count=*/0, LOOM_LOCATION_NONE,
@@ -871,7 +871,7 @@ TEST_F(WriterTest, ImportAndExportOffsetsAddressMatchingEntries) {
       /*cc=*/0, /*purity=*/0, /*temperature=*/0, /*inline_policy=*/0,
       loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(),
-      {/*.module_id=*/0, /*.symbol_id=*/import_symbol_id},
+      {.module_id = 0, .symbol_id = import_symbol_id},
       /*arg_types=*/nullptr, /*arg_types_count=*/0, /*result_types=*/nullptr,
       /*result_count=*/0, /*tied_results=*/nullptr, /*tied_result_count=*/0,
       /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_NONE,
@@ -887,7 +887,7 @@ TEST_F(WriterTest, ImportAndExportOffsetsAddressMatchingEntries) {
   IREE_ASSERT_OK(loom_test_func_build(
       &builder, LOOM_TEST_FUNC_BUILD_FLAG_HAS_VISIBILITY,
       LOOM_TEST_VISIBILITY_PUBLIC, /*cc=*/0,
-      {/*.module_id=*/0, /*.symbol_id=*/export_symbol_id},
+      {.module_id = 0, .symbol_id = export_symbol_id},
       /*arg_types=*/nullptr, /*arg_count=*/0, /*result_types=*/nullptr,
       /*result_count=*/0, /*tied_results=*/nullptr, /*tied_result_count=*/0,
       /*predicates=*/nullptr, /*predicate_count=*/0, LOOM_LOCATION_NONE,
@@ -1440,7 +1440,7 @@ TEST_F(WriterTest, BodyPayloadIndexUsesSparsePoolSizedPages) {
       loom_op_t* function_op = nullptr;
       IREE_ASSERT_OK(loom_test_func_build(
           &module_builder, /*build_flags=*/0, /*visibility=*/0, /*cc=*/0,
-          {/*.module_id=*/0, /*.symbol_id=*/symbol_id}, /*arg_types=*/nullptr,
+          {.module_id = 0, .symbol_id = symbol_id}, /*arg_types=*/nullptr,
           /*arg_count=*/0, /*result_types=*/nullptr, /*result_count=*/0,
           /*tied_results=*/nullptr, /*tied_result_count=*/0,
           /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_NONE,
@@ -1458,7 +1458,7 @@ TEST_F(WriterTest, BodyPayloadIndexUsesSparsePoolSizedPages) {
       loom_op_t* declaration_op = nullptr;
       IREE_ASSERT_OK(loom_test_decl_build(
           &module_builder, /*build_flags=*/0, /*visibility=*/0, /*cc=*/0,
-          {/*.module_id=*/0, /*.symbol_id=*/symbol_id}, /*arg_types=*/nullptr,
+          {.module_id = 0, .symbol_id = symbol_id}, /*arg_types=*/nullptr,
           /*arg_types_count=*/0, /*result_types=*/nullptr, /*result_count=*/0,
           /*tied_results=*/nullptr, /*tied_result_count=*/0, LOOM_LOCATION_NONE,
           &declaration_op));
@@ -1877,7 +1877,7 @@ TEST_F(WriterTest, ValueNumberingFollowsPhysicalDefinitionOrder) {
     loom_op_t* func_op = nullptr;
     IREE_ASSERT_OK(loom_test_func_build(
         &module_builder, /*build_flags=*/0, /*visibility=*/0, /*cc=*/0,
-        {/*.module_id=*/0, /*.symbol_id=*/symbol_id}, /*arg_types=*/nullptr,
+        {.module_id = 0, .symbol_id = symbol_id}, /*arg_types=*/nullptr,
         /*arg_count=*/0, /*result_types=*/nullptr, /*result_count=*/0,
         /*arg_names=*/nullptr, /*arg_name_count=*/0, /*result_names=*/nullptr,
         /*result_name_count=*/0, LOOM_LOCATION_NONE, &func_op));
@@ -1957,9 +1957,8 @@ TEST_F(WriterTest, GlobalValueClosureRetainsFirstDiscoveryOrder) {
     loom_op_t* global_op = nullptr;
     IREE_ASSERT_OK(loom_global_constant_build(
         &builder, LOOM_GLOBAL_CONSTANT_BUILD_FLAG_HAS_PREDICATES,
-        {/*.module_id=*/0, /*.symbol_id=*/symbol_id}, index_type,
-        predicates.data(), predicates.size(), loom_attr_i64(0),
-        LOOM_LOCATION_NONE, &global_op));
+        {.module_id = 0, .symbol_id = symbol_id}, index_type, predicates.data(),
+        predicates.size(), loom_attr_i64(0), LOOM_LOCATION_NONE, &global_op));
 
     std::vector<uint8_t> bytes = WriteModule(module);
     size_t offset = SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_SYMBOLS);

@@ -1618,8 +1618,8 @@ class ReaderTest : public ::testing::Test {
         IREE_SV("test.loombc"), &context_, &block_pool_, metadata,
         /*module_ordinal=*/0,
         (loom_bytecode_symbol_ordinal_list_t){
-            /*.count=*/ordinals.size(),
-            /*.ordinals=*/ordinals.data(),
+            .count = ordinals.size(),
+            .ordinals = ordinals.data(),
         },
         &options, &result, out_module, iree_allocator_system()));
     IREE_CHECK_OK(

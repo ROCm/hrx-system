@@ -377,26 +377,26 @@ INSTANTIATE_TEST_SUITE_P(
     SelectedResources, Aie2pCompletionRouteTest,
     ::testing::Values(
         CompletionRouteCase{
-            /*.route=*/{/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
-                        /*destination_ordinal=*/2, /*packet_id=*/0,
-                        /*arbiter=*/0, /*master_select=*/0, /*rule_slot=*/0},
-            /*.master_value=*/0xC0000008,
-            /*.rule_address=*/0x0003F200,
-            /*.rule_value=*/0x001F0100},
+            .route = {/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
+                      /*destination_ordinal=*/2, /*packet_id=*/0,
+                      /*arbiter=*/0, /*master_select=*/0, /*rule_slot=*/0},
+            .master_value = 0xC0000008,
+            .rule_address = 0x0003F200,
+            .rule_value = 0x001F0100},
         CompletionRouteCase{
-            /*.route=*/{/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
-                        /*destination_ordinal=*/2, /*packet_id=*/12,
-                        /*arbiter=*/2, /*master_select=*/1, /*rule_slot=*/1},
-            /*.master_value=*/0xC0000012,
-            /*.rule_address=*/0x0003F204,
-            /*.rule_value=*/0x0C1F0112},
+            .route = {/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
+                      /*destination_ordinal=*/2, /*packet_id=*/12,
+                      /*arbiter=*/2, /*master_select=*/1, /*rule_slot=*/1},
+            .master_value = 0xC0000012,
+            .rule_address = 0x0003F204,
+            .rule_value = 0x0C1F0112},
         CompletionRouteCase{
-            /*.route=*/{/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
-                        /*destination_ordinal=*/2, /*packet_id=*/15,
-                        /*arbiter=*/5, /*master_select=*/3, /*rule_slot=*/3},
-            /*.master_value=*/0xC0000045,
-            /*.rule_address=*/0x0003F20C,
-            /*.rule_value=*/0x0F1F0135}));
+            .route = {/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
+                      /*destination_ordinal=*/2, /*packet_id=*/15,
+                      /*arbiter=*/5, /*master_select=*/3, /*rule_slot=*/3},
+            .master_value = 0xC0000045,
+            .rule_address = 0x0003F20C,
+            .rule_value = 0x0F1F0135}));
 
 }  // namespace
 }  // namespace loom

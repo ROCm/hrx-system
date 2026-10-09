@@ -846,8 +846,8 @@ TEST_F(FactTableTest, SmallStaticLanesPreserveCommonFloatPredicates) {
   IREE_ASSERT_OK(loom_value_facts_make_small_static_lanes(
       &table.context,
       (loom_value_fact_small_static_lanes_t){
-          /*.lanes=*/lanes,
-          /*.count=*/IREE_ARRAYSIZE(lanes),
+          .lanes = lanes,
+          .count = IREE_ARRAYSIZE(lanes),
       },
       &facts));
 
@@ -1036,7 +1036,7 @@ TEST_F(FactTableTest, VectorIntegerBoundsSummarizeExplicitLanes) {
       loom_value_facts_make(9, 15, 1),
   };
   IREE_ASSERT_OK(loom_value_facts_make_small_static_lanes(
-      &table.context, {/*.lanes=*/lanes, /*.count=*/IREE_ARRAYSIZE(lanes)},
+      &table.context, {.lanes = lanes, .count = IREE_ARRAYSIZE(lanes)},
       &facts));
   EXPECT_TRUE(loom_value_facts_query_vector_integer_bounds(
       &table.context, facts, std::numeric_limits<uint64_t>::max(), &lower,
@@ -1050,11 +1050,12 @@ TEST_F(FactTableTest, VectorIntegerBoundsSummarizeIotas) {
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
 
   loom_value_facts_t facts = loom_value_facts_unknown();
-  IREE_ASSERT_OK(loom_value_facts_make_vector_iota(
-      &table.context,
-      {/*.base=*/loom_value_facts_make(2, 4, 1),
-       /*.step=*/loom_value_facts_exact_i64(3), /*.bit_count=*/0},
-      &facts));
+  IREE_ASSERT_OK(
+      loom_value_facts_make_vector_iota(&table.context,
+                                        {.base = loom_value_facts_make(2, 4, 1),
+                                         .step = loom_value_facts_exact_i64(3),
+                                         .bit_count = 0},
+                                        &facts));
   int64_t lower = 0;
   int64_t upper = 0;
   EXPECT_TRUE(loom_value_facts_query_vector_integer_bounds(
@@ -1064,8 +1065,9 @@ TEST_F(FactTableTest, VectorIntegerBoundsSummarizeIotas) {
 
   IREE_ASSERT_OK(loom_value_facts_make_vector_iota(
       &table.context,
-      {/*.base=*/loom_value_facts_make(20, 22, 1),
-       /*.step=*/loom_value_facts_exact_i64(-4), /*.bit_count=*/0},
+      {.base = loom_value_facts_make(20, 22, 1),
+       .step = loom_value_facts_exact_i64(-4),
+       .bit_count = 0},
       &facts));
   EXPECT_TRUE(loom_value_facts_query_vector_integer_bounds(
       &table.context, facts, /*maximum_lane_count=*/4, &lower, &upper));
@@ -1081,8 +1083,9 @@ TEST_F(FactTableTest, VectorIntegerBoundsSummarizeIotas) {
 
   IREE_ASSERT_OK(loom_value_facts_make_vector_iota(
       &table.context,
-      {/*.base=*/loom_value_facts_exact_i64(INT64_MAX),
-       /*.step=*/loom_value_facts_exact_i64(1), /*.bit_count=*/0},
+      {.base = loom_value_facts_exact_i64(INT64_MAX),
+       .step = loom_value_facts_exact_i64(1),
+       .bit_count = 0},
       &facts));
   EXPECT_FALSE(loom_value_facts_query_vector_integer_bounds(
       &table.context, facts, /*maximum_lane_count=*/2, &lower, &upper));

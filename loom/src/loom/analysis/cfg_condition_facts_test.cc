@@ -468,8 +468,8 @@ TEST_F(CfgConditionFactsTest, DerivedAnchorVisitsRelationWithAuthoredOperands) {
   EXPECT_TRUE(loom_cfg_condition_relation_view_for_each_while(
       &table, guarded_facts, &fact_table_,
       loom_condition_integer_operand_t{
-          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-          /*.value_id=*/derived_anchor,
+          .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+          .value_id = derived_anchor,
       },
       collect, &relations));
   ASSERT_EQ(relations.size(), 1u);
@@ -481,8 +481,8 @@ TEST_F(CfgConditionFactsTest, DerivedAnchorVisitsRelationWithAuthoredOperands) {
   EXPECT_TRUE(loom_cfg_condition_relation_view_for_each_while(
       &table, guarded_facts, &fact_table_,
       loom_condition_integer_operand_t{
-          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-          /*.value_id=*/unrelated_anchor,
+          .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+          .value_id = unrelated_anchor,
       },
       collect, &relations));
   EXPECT_TRUE(relations.empty());
