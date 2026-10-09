@@ -90,13 +90,13 @@ check.benchmark<@sampled_choice> @sampled_choice_value7 {value = 7}
                                                  .user_data = &collector};
   iree_benchmark_loom_configuration_t configuration = {
       .tool_name = "iree-benchmark-loom-test"};
-  iree_benchmark_loom_file_run_options_t run_options = {};
-  run_options.configuration = &configuration;
-  run_options.benchmark_options = &benchmark_options;
-  run_options.input_path = input_path.path_view();
-  run_options.command_line_json = IREE_SV("[\"iree-benchmark-loom-test\"]");
-  run_options.event_sink = &event_sink;
-  run_options.host_allocator = iree_allocator_system();
+  iree_benchmark_loom_file_run_options_t run_options = {
+      .configuration = &configuration,
+      .benchmark_options = &benchmark_options,
+      .input_path = input_path.path_view(),
+      .command_line_json = IREE_SV("[\"iree-benchmark-loom-test\"]"),
+      .event_sink = &event_sink,
+      .host_allocator = iree_allocator_system()};
 
   iree_benchmark_loom_run_result_t run_result = {};
   IREE_ASSERT_OK(iree_benchmark_loom_run_file(&run_options, &run_result));
@@ -147,12 +147,12 @@ check.benchmark<@sampled_choice> @sampled_choice_value7 {value = 7}
 
   iree_benchmark_loom_configuration_t configuration = {
       .tool_name = "iree-benchmark-loom-test"};
-  iree_benchmark_loom_file_run_options_t run_options = {};
-  run_options.configuration = &configuration;
-  run_options.benchmark_options = &benchmark_options;
-  run_options.input_path = input_path.path_view();
-  run_options.command_line_json = IREE_SV("[\"iree-benchmark-loom-test\"]");
-  run_options.host_allocator = iree_allocator_system();
+  iree_benchmark_loom_file_run_options_t run_options = {
+      .configuration = &configuration,
+      .benchmark_options = &benchmark_options,
+      .input_path = input_path.path_view(),
+      .command_line_json = IREE_SV("[\"iree-benchmark-loom-test\"]"),
+      .host_allocator = iree_allocator_system()};
 
   iree_benchmark_loom_run_result_t run_result = {};
   IREE_ASSERT_OK(iree_benchmark_loom_run_file(&run_options, &run_result));

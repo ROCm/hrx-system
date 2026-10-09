@@ -1054,12 +1054,10 @@ TEST_F(CanonicalizerTest, DriverPreservesExplicitTargetFactsAcrossSideRegions) {
                                             &split_op));
   loom_func_like_t split_func = loom_func_like_cast(module_, split_op);
 
-  loom_target_snapshot_t snapshot = {};
-  snapshot.name = IREE_SVL("target-context-test");
-  loom_target_export_plan_t export_plan = {};
-  export_plan.name = IREE_SVL("target-context-test");
-  loom_target_config_t config = {};
-  config.name = IREE_SVL("target-context-test");
+  loom_target_snapshot_t snapshot = {.name = IREE_SVL("target-context-test")};
+  loom_target_export_plan_t export_plan = {.name =
+                                               IREE_SVL("target-context-test")};
+  loom_target_config_t config = {.name = IREE_SVL("target-context-test")};
   loom_target_bundle_t bundle = {
       .name = IREE_SVL("target-context-test"),
       .snapshot = &snapshot,

@@ -208,11 +208,11 @@ low.func.def target<test.low.core> @caller(%value: reg<test.pressure.alias32>) -
       .descriptor_reg_class_id = boundary_class,
       .location_base = 6,
   }};
-  loom_low_call_contract_t contract = {};
-  contract.arguments = arguments;
-  contract.argument_count = IREE_ARRAYSIZE(arguments);
-  contract.results = results;
-  contract.result_count = IREE_ARRAYSIZE(results);
+  loom_low_call_contract_t contract = {
+      .arguments = arguments,
+      .argument_count = IREE_ARRAYSIZE(arguments),
+      .results = results,
+      .result_count = IREE_ARRAYSIZE(results)};
   loom_low_emission_frame_options_t options = {
       .descriptor_registry = &registry_.registry,
       .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY};
@@ -267,14 +267,14 @@ low.func.def target<test.low.core> @pair(%first: reg<test.pressure.alias32>, %se
       {body->arg_ids[0], LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 6, 1},
       {body->arg_ids[1], LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 7, 1},
   };
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
-  options.allocation_fixed_values = fixed_values;
-  options.allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values);
-  options.allocation_exit_locations = results;
-  options.allocation_exit_location_count = IREE_ARRAYSIZE(results);
-  options.synchronous_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_STACK;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+      .allocation_fixed_values = fixed_values,
+      .allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values),
+      .allocation_exit_locations = results,
+      .allocation_exit_location_count = IREE_ARRAYSIZE(results),
+      .synchronous_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_STACK};
   loom_low_emission_frame_t frame = {};
   bool accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(module.get(), function, &options,
@@ -380,12 +380,12 @@ low.func.def target<test.low.core> @physical_reuse(%seed: reg<test.phys>) -> (re
       {loom_op_const_results(loom_block_op(body, 2))[0],
        LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 0, 1},
   };
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = strategy;
-  options.schedule_flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCY_INDEX;
-  options.allocation_fixed_values = fixed_values;
-  options.allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values);
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = strategy,
+      .schedule_flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCY_INDEX,
+      .allocation_fixed_values = fixed_values,
+      .allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values)};
   loom_low_emission_frame_t frame = {};
   bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(
@@ -539,9 +539,8 @@ low.func.def target<test.low.core> @bounded_pair(%address: reg<test.ptr>, %value
   loom_low_schedule_pair_affinity_t affinity = {.first_descriptor = constant,
                                                 .second_descriptor = constant,
                                                 .priority = 1};
-  loom_low_allocation_budget_t budget = {};
-  budget.register_class = IREE_SV("test.i32");
-  budget.max_units = 5;
+  loom_low_allocation_budget_t budget = {.register_class = IREE_SV("test.i32"),
+                                         .max_units = 5};
   loom_low_emission_frame_options_t options = {
       .descriptor_registry = &registry_.registry,
       .schedule_pair_affinities = {&affinity, 1},
@@ -567,9 +566,8 @@ low.func.def target<test.low.core> @spills(%first: reg<test.i32>, %second: reg<t
   return %first, %second, %third
 }
 )");
-  loom_low_allocation_budget_t budget = {};
-  budget.register_class = IREE_SV("test.i32");
-  budget.max_units = 1;
+  loom_low_allocation_budget_t budget = {.register_class = IREE_SV("test.i32"),
+                                         .max_units = 1};
   loom_low_emission_frame_options_t options = {
       .descriptor_registry = &registry_.registry,
       .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,

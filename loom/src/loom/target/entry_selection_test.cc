@@ -189,14 +189,14 @@ TEST_F(TargetEntrySelectionTest, EmissionAndRelatedOpsUseTheirOwnModules) {
   related[1].module = second.get();
   related[1].op = loom_module_block(second.get())->first_op;
   related[1].label = IREE_SV("other");
-  loom_diagnostic_emission_t emission = {};
-  emission.module = second.get();
-  emission.op = loom_module_block(second.get())->first_op;
-  emission.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
-  emission.params = params;
-  emission.param_count = IREE_ARRAYSIZE(params);
-  emission.related_ops = related;
-  emission.related_op_count = IREE_ARRAYSIZE(related);
+  loom_diagnostic_emission_t emission = {
+      .module = second.get(),
+      .op = loom_module_block(second.get())->first_op,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .related_ops = related,
+      .related_op_count = IREE_ARRAYSIZE(related)};
   IREE_ASSERT_OK(
       iree_diagnostic_emit(loom_target_entry_emitter(&emitter), &emission));
   EXPECT_EQ(emitter.error_count, 1u);

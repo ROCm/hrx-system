@@ -1941,13 +1941,13 @@ static const loom_attr_descriptor_t kPredTestAttrDesc[] = {
     },
 };
 static constexpr loom_op_vtable_t kPredTestVtable = [] {
-  loom_op_vtable_t vtable = {};
-  vtable.traits = LOOM_TRAIT_PURE;
-  vtable.attribute_count = 1;
-  vtable.attr_descriptors = kPredTestAttrDesc;
-  vtable.name = kPredTestName;
-  vtable.format_elements = kPredTestFormat;
-  vtable.format_element_count = IREE_ARRAYSIZE(kPredTestFormat);
+  loom_op_vtable_t vtable = {
+      .traits = LOOM_TRAIT_PURE,
+      .attribute_count = 1,
+      .attr_descriptors = kPredTestAttrDesc,
+      .name = kPredTestName,
+      .format_elements = kPredTestFormat,
+      .format_element_count = IREE_ARRAYSIZE(kPredTestFormat)};
   return vtable;
 }();
 

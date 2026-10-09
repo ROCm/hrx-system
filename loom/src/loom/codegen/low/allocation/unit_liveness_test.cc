@@ -466,27 +466,26 @@ TEST_F(LowAllocationUnitLivenessTest,
 }
 
 TEST_F(LowAllocationUnitLivenessTest, ChecksEveryExplicitRegisterAtomicUnit) {
-  loom_low_reg_class_t reg_class = {};
-  reg_class.flags =
-      LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS |
-      LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES;
-  reg_class.allocatable_count = 1;
-  reg_class.physical_atomic_unit_count = 2;
+  loom_low_reg_class_t reg_class = {
+      .flags = LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS |
+               LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES,
+      .allocatable_count = 1,
+      .physical_atomic_unit_count = 2};
   loom_low_physical_register_t physical_register = {.atomic_unit_count = 2};
   const uint16_t physical_register_candidate_ids[] = {0};
   const uint16_t physical_register_atomic_units[] = {2, 5};
-  loom_low_descriptor_set_t descriptors = {};
-  descriptors.reg_classes = &reg_class;
-  descriptors.reg_class_count = 1;
-  descriptors.physical_registers = &physical_register;
-  descriptors.physical_register_count = 1;
-  descriptors.physical_register_candidate_ids = physical_register_candidate_ids;
-  descriptors.physical_register_candidate_count =
-      IREE_ARRAYSIZE(physical_register_candidate_ids);
-  descriptors.physical_register_atomic_units = physical_register_atomic_units;
-  descriptors.physical_register_atomic_unit_count =
-      IREE_ARRAYSIZE(physical_register_atomic_units);
-  descriptors.physical_register_unit_count = 6;
+  loom_low_descriptor_set_t descriptors = {
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+      .physical_registers = &physical_register,
+      .physical_register_count = 1,
+      .physical_register_candidate_ids = physical_register_candidate_ids,
+      .physical_register_candidate_count =
+          IREE_ARRAYSIZE(physical_register_candidate_ids),
+      .physical_register_atomic_units = physical_register_atomic_units,
+      .physical_register_atomic_unit_count =
+          IREE_ARRAYSIZE(physical_register_atomic_units),
+      .physical_register_unit_count = 6};
   const PhysicalClobber events[] = {
       {0, 5, 4, false},
   };
@@ -897,16 +896,16 @@ TEST_F(LowAllocationUnitLivenessTest, QueriesComponentStoragePerUnit) {
   uint32_t starts[] = {0, 0};
   uint32_t ends[] = {8, 4};
   uint64_t incomplete_words[] = {0};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = values;
-  unit_liveness.start_points = starts;
-  unit_liveness.end_points = ends;
-  unit_liveness.point_count = IREE_ARRAYSIZE(ends);
-  unit_liveness.values_with_incomplete_storage_segments = {
-      IREE_ARRAYSIZE(value_ids), incomplete_words};
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = values,
+      .start_points = starts,
+      .end_points = ends,
+      .point_count = IREE_ARRAYSIZE(ends),
+      .values_with_incomplete_storage_segments = {IREE_ARRAYSIZE(value_ids),
+                                                  incomplete_words}};
   unit_liveness.storage_segments.entries = segments;
-  loom_low_placement_table_t placement = {};
-  placement.value_count = IREE_ARRAYSIZE(value_ids);
+  loom_low_placement_table_t placement = {.value_count =
+                                              IREE_ARRAYSIZE(value_ids)};
 
   EXPECT_TRUE(loom_low_allocation_unit_liveness_storage_component_live_at_point(
       &unit_liveness, &liveness, &placement, /*value_ordinal=*/0,
@@ -942,13 +941,13 @@ TEST_F(LowAllocationUnitLivenessTest, PropagatesTiedStorageAcrossOrdinalOrder) {
   uint32_t starts[] = {0, 20, 0, 2, 30, 35};
   uint32_t ends[] = {1, 31, 1, 11, 36, 40};
   uint64_t incomplete_words[] = {0};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = values;
-  unit_liveness.start_points = starts;
-  unit_liveness.end_points = ends;
-  unit_liveness.point_count = IREE_ARRAYSIZE(ends);
-  unit_liveness.values_with_incomplete_storage_segments = {
-      IREE_ARRAYSIZE(value_ids), incomplete_words};
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = values,
+      .start_points = starts,
+      .end_points = ends,
+      .point_count = IREE_ARRAYSIZE(ends),
+      .values_with_incomplete_storage_segments = {IREE_ARRAYSIZE(value_ids),
+                                                  incomplete_words}};
 
   loom_low_placement_relation_t relations[3] = {};
   relations[0].result_ordinal = 1;
@@ -968,14 +967,14 @@ TEST_F(LowAllocationUnitLivenessTest, PropagatesTiedStorageAcrossOrdinalOrder) {
       {0, 0}, {0, 1}, {1, 0}, {1, 0}, {1, 1}, {2, 1}};
   const loom_value_ordinal_t storage_order[] = {0, 2, 5, 4, 1, 3};
   const loom_value_ordinal_t tied_origins[] = {0, 3, 2, 3, 3, 3};
-  loom_low_placement_table_t placement = {};
-  placement.value_count = IREE_ARRAYSIZE(value_ids);
-  placement.relations = relations;
-  placement.relation_count = IREE_ARRAYSIZE(relations);
-  placement.ranges_by_result_ordinal = result_ranges;
-  placement.storage_value_order = storage_order;
-  placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
-  placement.tied_storage_origins_by_value_ordinal = tied_origins;
+  loom_low_placement_table_t placement = {
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .relations = relations,
+      .relation_count = IREE_ARRAYSIZE(relations),
+      .ranges_by_result_ordinal = result_ranges,
+      .storage_value_order = storage_order,
+      .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
+      .tied_storage_origins_by_value_ordinal = tied_origins};
 
   RetainAndPropagateStorage(&unit_liveness, &liveness, &placement);
   EXPECT_EQ(ends[3], 40u);
@@ -1032,13 +1031,13 @@ TEST_F(LowAllocationUnitLivenessTest,
   uint32_t starts[] = {10, 11, 2, 17};
   uint32_t ends[] = {17, 12, 14, 19};
   uint64_t incomplete_words[] = {0};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = values;
-  unit_liveness.start_points = starts;
-  unit_liveness.end_points = ends;
-  unit_liveness.point_count = IREE_ARRAYSIZE(ends);
-  unit_liveness.values_with_incomplete_storage_segments = {
-      IREE_ARRAYSIZE(value_ids), incomplete_words};
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = values,
+      .start_points = starts,
+      .end_points = ends,
+      .point_count = IREE_ARRAYSIZE(ends),
+      .values_with_incomplete_storage_segments = {IREE_ARRAYSIZE(value_ids),
+                                                  incomplete_words}};
   unit_liveness.storage_segments.entries = segments;
 
   loom_low_placement_relation_t relations[3] = {};
@@ -1055,14 +1054,14 @@ TEST_F(LowAllocationUnitLivenessTest,
       {0, 0}, {0, 1}, {1, 1}, {2, 1}};
   const loom_value_ordinal_t storage_order[] = {2, 3, 1, 0};
   const loom_value_ordinal_t tied_origins[] = {0, 0, 0, 0};
-  loom_low_placement_table_t placement = {};
-  placement.value_count = IREE_ARRAYSIZE(value_ids);
-  placement.relations = relations;
-  placement.relation_count = IREE_ARRAYSIZE(relations);
-  placement.ranges_by_result_ordinal = result_ranges;
-  placement.storage_value_order = storage_order;
-  placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
-  placement.tied_storage_origins_by_value_ordinal = tied_origins;
+  loom_low_placement_table_t placement = {
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .relations = relations,
+      .relation_count = IREE_ARRAYSIZE(relations),
+      .ranges_by_result_ordinal = result_ranges,
+      .storage_value_order = storage_order,
+      .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
+      .tied_storage_origins_by_value_ordinal = tied_origins};
 
   RetainAndPropagateStorage(&unit_liveness, &liveness, &placement);
   EXPECT_EQ(values[0].acquisition_start_point, 2u);
@@ -1158,13 +1157,13 @@ TEST_F(LowAllocationUnitLivenessTest,
   uint32_t starts[] = {0, 2, 6};
   uint32_t ends[] = {2, 7, 12};
   uint64_t incomplete_words[] = {0};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = values;
-  unit_liveness.start_points = starts;
-  unit_liveness.end_points = ends;
-  unit_liveness.point_count = IREE_ARRAYSIZE(ends);
-  unit_liveness.values_with_incomplete_storage_segments = {
-      IREE_ARRAYSIZE(value_ids), incomplete_words};
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = values,
+      .start_points = starts,
+      .end_points = ends,
+      .point_count = IREE_ARRAYSIZE(ends),
+      .values_with_incomplete_storage_segments = {IREE_ARRAYSIZE(value_ids),
+                                                  incomplete_words}};
   unit_liveness.storage_segments.entries = segments;
 
   loom_low_placement_relation_t relations[2] = {};
@@ -1183,14 +1182,14 @@ TEST_F(LowAllocationUnitLivenessTest,
       {0, 0}, {0, 1}, {1, 1}};
   const loom_value_ordinal_t storage_order[] = {2, 1, 0};
   const loom_value_ordinal_t tied_origins[] = {0, 0, 0};
-  loom_low_placement_table_t placement = {};
-  placement.value_count = IREE_ARRAYSIZE(value_ids);
-  placement.relations = relations;
-  placement.relation_count = IREE_ARRAYSIZE(relations);
-  placement.ranges_by_result_ordinal = result_ranges;
-  placement.storage_value_order = storage_order;
-  placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
-  placement.tied_storage_origins_by_value_ordinal = tied_origins;
+  loom_low_placement_table_t placement = {
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .relations = relations,
+      .relation_count = IREE_ARRAYSIZE(relations),
+      .ranges_by_result_ordinal = result_ranges,
+      .storage_value_order = storage_order,
+      .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
+      .tied_storage_origins_by_value_ordinal = tied_origins};
 
   RetainAndPropagateStorage(&unit_liveness, &liveness, &placement);
   const loom_liveness_segment_range_t source =
@@ -1396,12 +1395,12 @@ TEST_F(LowAllocationUnitLivenessTest, RetainsSparseTiedStorageReservations) {
     storage_segments[i] = segments[i];
   }
   storage_segments[0].end_point = 4;
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = values;
-  unit_liveness.start_points = starts;
-  unit_liveness.end_points = ends;
-  unit_liveness.point_count = IREE_ARRAYSIZE(starts);
-  unit_liveness.values_with_incomplete_storage_segments = {6, incomplete};
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = values,
+      .start_points = starts,
+      .end_points = ends,
+      .point_count = IREE_ARRAYSIZE(starts),
+      .values_with_incomplete_storage_segments = {6, incomplete}};
   unit_liveness.storage_segments.entries = storage_segments.data();
   loom_low_placement_relation_t relations[4] = {};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(relations); ++i) {

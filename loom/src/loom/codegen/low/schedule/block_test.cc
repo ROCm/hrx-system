@@ -185,21 +185,21 @@ TEST(ScheduleBlockTest, MergesRoundedClassPeaksWithoutDoubleCountingCliffs) {
   const loom_target_residency_derived_member_range_t ranges[] = {{0, 1},
                                                                  {1, 1}};
   const loom_target_residency_cliff_t cliffs[] = {{0, 9, 4, 3}, {0, 13, 3, 2}};
-  loom_target_residency_derived_resource_t resource = {};
-  resource.name = IREE_SV("shared_register_file");
-  resource.pool_units = 64;
-  resource.allocation_granularity = 1;
-  resource.member_count = 2;
-  resource.cliff_count = 2;
-  loom_target_residency_derived_resource_table_t table = {};
-  table.resources = &resource;
-  table.resource_count = 1;
-  table.members = members;
-  table.member_count = IREE_ARRAYSIZE(members);
-  table.cliffs = cliffs;
-  table.cliff_count = IREE_ARRAYSIZE(cliffs);
-  table.member_indices_by_direct_resource = member_indices;
-  table.member_ranges_by_direct_resource = ranges;
+  loom_target_residency_derived_resource_t resource = {
+      .name = IREE_SV("shared_register_file"),
+      .pool_units = 64,
+      .allocation_granularity = 1,
+      .member_count = 2,
+      .cliff_count = 2};
+  loom_target_residency_derived_resource_table_t table = {
+      .resources = &resource,
+      .resource_count = 1,
+      .members = members,
+      .member_count = IREE_ARRAYSIZE(members),
+      .cliffs = cliffs,
+      .cliff_count = IREE_ARRAYSIZE(cliffs),
+      .member_indices_by_direct_resource = member_indices,
+      .member_ranges_by_direct_resource = ranges};
   loom_low_descriptor_set_t descriptors = {.reg_class_count = 2};
   const uint64_t retained_peaks[] = {5, 2, 2, 5, 1, 1};
   loom_low_schedule_table_t previous = {.block_pressure_peaks = retained_peaks};

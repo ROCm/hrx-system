@@ -163,11 +163,11 @@ TEST_F(SourceLoweringStressTest, PreparationDiagnosticStopsBeforeAllocation) {
           loom_param_string(IREE_SV("generated")),
           loom_param_string(IREE_SV("packetization preparation")),
       };
-      loom_diagnostic_emission_t emission = {};
-      emission.op = function.op;
-      emission.error = LOOM_ERR_STRUCTURE_028;
-      emission.params = params;
-      emission.param_count = IREE_ARRAYSIZE(params);
+      loom_diagnostic_emission_t emission = {
+          .op = function.op,
+          .error = LOOM_ERR_STRUCTURE_028,
+          .params = params,
+          .param_count = IREE_ARRAYSIZE(params)};
       return iree_diagnostic_emit(pass->diagnostic_emitter, &emission);
     };
     replaced = true;

@@ -98,18 +98,17 @@ TEST(Aie2pArrayProgramTest, ResetsComputeDmaBeforePlannedQueueStarts) {
       .buffer_descriptor_count = 1,
       .credit_lock_index = 0,
   };
-  loom_aie2p_array_plan_t plan = {};
-  plan.family = loom_xdna_npu2_array_family();
-  plan.channels = &channel;
-  plan.channel_count = 1;
-  plan.worker_plans = &worker_plan;
-  plan.worker_plan_count = 1;
-  plan.channel_slots = &channel_slot;
-  plan.channel_slot_count = 1;
-  plan.locks = locks;
-  plan.lock_count = IREE_ARRAYSIZE(locks);
-  plan.dma_channels = &dma;
-  plan.dma_channel_count = 1;
+  loom_aie2p_array_plan_t plan = {.family = loom_xdna_npu2_array_family(),
+                                  .channels = &channel,
+                                  .channel_count = 1,
+                                  .worker_plans = &worker_plan,
+                                  .worker_plan_count = 1,
+                                  .channel_slots = &channel_slot,
+                                  .channel_slot_count = 1,
+                                  .locks = locks,
+                                  .lock_count = IREE_ARRAYSIZE(locks),
+                                  .dma_channels = &dma,
+                                  .dma_channel_count = 1};
 
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
@@ -224,18 +223,17 @@ TEST(Aie2pArrayProgramTest, KeepsDmaServiceCoreReset) {
       .buffer_descriptor_count = 1,
       .credit_lock_index = 0,
   };
-  loom_aie2p_array_plan_t plan = {};
-  plan.family = loom_xdna_npu2_array_family();
-  plan.channels = &channel;
-  plan.channel_count = 1;
-  plan.worker_plans = &worker_plan;
-  plan.worker_plan_count = 1;
-  plan.channel_slots = &channel_slot;
-  plan.channel_slot_count = 1;
-  plan.locks = locks;
-  plan.lock_count = IREE_ARRAYSIZE(locks);
-  plan.dma_channels = &dma;
-  plan.dma_channel_count = 1;
+  loom_aie2p_array_plan_t plan = {.family = loom_xdna_npu2_array_family(),
+                                  .channels = &channel,
+                                  .channel_count = 1,
+                                  .worker_plans = &worker_plan,
+                                  .worker_plan_count = 1,
+                                  .channel_slots = &channel_slot,
+                                  .channel_slot_count = 1,
+                                  .locks = locks,
+                                  .lock_count = IREE_ARRAYSIZE(locks),
+                                  .dma_channels = &dma,
+                                  .dma_channel_count = 1};
 
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);

@@ -123,10 +123,9 @@ check.benchmark<@sampled> @all_b
   event_collector_t collector = {};
   iree_benchmark_loom_event_sink_t event_sink = {.emit = collect_event,
                                                  .user_data = &collector};
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
-  run.source = IREE_SV("input.loom");
-  run.results_path = IREE_SV("-");
+  iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run"),
+                                            .source = IREE_SV("input.loom"),
+                                            .results_path = IREE_SV("-")};
 
   iree_host_size_t correctness_sample_count = 0;
   iree_host_size_t correctness_failed_sample_count = 0;

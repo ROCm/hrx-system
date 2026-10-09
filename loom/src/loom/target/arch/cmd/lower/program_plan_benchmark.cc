@@ -68,8 +68,8 @@ class ProgramPlanFixture {
     source_module_ = ParseAndVerify(BuildSource(launch_shape, launch_count));
     CheckStatus(loom_link_module_index_allocate(
         &context_, &block_pool_, iree_allocator_system(), &index_));
-    loom_link_module_index_add_options_t add_options = {};
-    add_options.provider_name = IREE_SV("command_plan_benchmark");
+    loom_link_module_index_add_options_t add_options = {
+        .provider_name = IREE_SV("command_plan_benchmark")};
     CheckStatus(loom_link_module_index_add_materialized(
         index_, source_module_, &add_options,
         /*out_provider_ordinal=*/nullptr));

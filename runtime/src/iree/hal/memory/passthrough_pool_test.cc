@@ -369,11 +369,11 @@ static iree_status_t MaterializeOneReservation(
 }
 
 static iree_hal_asan_pool_options_t ShadowOptions() {
-  iree_hal_asan_pool_options_t options = {};
-  options.mode = IREE_HAL_ASAN_POOL_MODE_SHADOW;
-  options.shadow_granule_size = 8;
-  options.redzone_size = 16;
-  options.backing_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT;
+  iree_hal_asan_pool_options_t options = {
+      .mode = IREE_HAL_ASAN_POOL_MODE_SHADOW,
+      .shadow_granule_size = 8,
+      .redzone_size = 16,
+      .backing_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT};
   return options;
 }
 
@@ -861,8 +861,7 @@ TEST_F(PassthroughPoolTest,
   // Even a sealed device group permits new queue identities. The allocation
   // precedes registration and must still accept the complete release history.
   IREE_ASYNC_FIXED_FRONTIER_TYPE(FullFrontier, UINT8_MAX);
-  FullFrontier frontier = {};
-  frontier.entry_count = UINT8_MAX;
+  FullFrontier frontier = {.entry_count = UINT8_MAX};
   for (uint32_t i = 0; i < frontier.entry_count; ++i) {
     frontier.entries[i] = {
         iree_async_axis_make_queue(1, 0, 0, static_cast<uint8_t>(i), 0), i + 1};

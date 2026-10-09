@@ -61,8 +61,7 @@ static const iree_hal_device_spec_t* FakeHalDeviceSpec(
 }
 
 static iree_hal_device_vtable_t MakeFakeHalDeviceVtable() {
-  iree_hal_device_vtable_t vtable = {};
-  vtable.device_spec = FakeHalDeviceSpec;
+  iree_hal_device_vtable_t vtable = {.device_spec = FakeHalDeviceSpec};
   return vtable;
 }
 

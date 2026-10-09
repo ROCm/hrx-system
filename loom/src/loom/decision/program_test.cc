@@ -167,10 +167,9 @@ TEST(DecisionProgramTest, PreservesSsaIdentityAcrossSignaturePositions) {
   // Values 1 and 2 are aliases of value 0; value 3 is independent.
   loom_value_id_t identities[] = {LOOM_VALUE_ID_INVALID, 0, 0,
                                   LOOM_VALUE_ID_INVALID};
-  loom_value_fact_table_t fact_table = {};
-  fact_table.entries = entries;
-  fact_table.count = IREE_ARRAYSIZE(entries);
-  fact_table.capacity = IREE_ARRAYSIZE(entries);
+  loom_value_fact_table_t fact_table = {.entries = entries,
+                                        .count = IREE_ARRAYSIZE(entries),
+                                        .capacity = IREE_ARRAYSIZE(entries)};
   fact_table.identities.entries = identities;
   fact_table.identities.capacity = IREE_ARRAYSIZE(identities);
   const loom_value_id_t arguments[][2] = {{0, 0}, {0, 1}, {1, 2}, {0, 3}};

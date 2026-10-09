@@ -81,8 +81,8 @@ class HalDispatchTest : public ::testing::Test {
     const std::vector<char> bytes((std::istreambuf_iterator<char>(input)),
                                   std::istreambuf_iterator<char>());
     ASSERT_FALSE(bytes.empty());
-    iree_hal_executable_target_selection_t selection = {};
-    selection.family = IREE_SV("cpu");
+    iree_hal_executable_target_selection_t selection = {.family =
+                                                            IREE_SV("cpu")};
     const auto target = iree_hal_device_spec_select_executable_target(
         iree_hal_device_spec(device_), &selection);
     ASSERT_EQ(target.outcome,

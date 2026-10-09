@@ -239,8 +239,7 @@ TEST(ResultTest, RejectsDiagnosticWithMissingRelatedLocations) {
                                       LOOMC_SOURCE_RETENTION_EXACT,
                                       loomc_allocator_system(), &result));
   ResultPtr result_owner(result);
-  loomc_diagnostic_t diagnostic = {};
-  diagnostic.related_location_count = 1;
+  loomc_diagnostic_t diagnostic = {.related_location_count = 1};
   LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
                          loomc_result_add_diagnostic(result, &diagnostic));
   EXPECT_EQ(loomc_result_diagnostic_count(result), 0u);
@@ -252,8 +251,7 @@ TEST(ResultTest, RejectsDiagnosticWithMissingParameters) {
                                       LOOMC_SOURCE_RETENTION_EXACT,
                                       loomc_allocator_system(), &result));
   ResultPtr result_owner(result);
-  loomc_diagnostic_t diagnostic = {};
-  diagnostic.parameter_count = 1;
+  loomc_diagnostic_t diagnostic = {.parameter_count = 1};
   LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
                          loomc_result_add_diagnostic(result, &diagnostic));
   EXPECT_EQ(loomc_result_diagnostic_count(result), 0u);

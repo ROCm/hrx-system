@@ -149,24 +149,24 @@ loom_low_schedule_table_t Schedule(
 }
 
 loom_low_storage_lease_record_t StorageLeaseRecord() {
-  loom_low_storage_lease_record_t record = {};
-  record.packet_index = 0;
-  record.node_index = 0;
-  record.block_index = 0;
-  record.scheduled_ordinal = 0;
-  record.kind = LOOM_LOW_STORAGE_LEASE_SOURCE_READ;
-  record.attachment = LOOM_LOW_STORAGE_LEASE_ATTACHMENT_OPERAND;
-  record.attachment_index = 0;
-  record.unit_offset = 1;
-  record.unit_count = 2;
-  record.release_scope = LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS;
-  record.release_class_id = 7;
-  record.release_class_name = IREE_SV("test.progress");
-  record.release_action_id = 9;
-  record.release_action_name = IREE_SV("test.release-storage");
-  record.release_reason_id = 11;
-  record.release_reason_name = IREE_SV("test.storage-hazard");
-  record.flags = LOOM_LOW_STORAGE_LEASE_FLAG_STARTS_AT_ISSUE;
+  loom_low_storage_lease_record_t record = {
+      .packet_index = 0,
+      .node_index = 0,
+      .block_index = 0,
+      .scheduled_ordinal = 0,
+      .kind = LOOM_LOW_STORAGE_LEASE_SOURCE_READ,
+      .attachment = LOOM_LOW_STORAGE_LEASE_ATTACHMENT_OPERAND,
+      .attachment_index = 0,
+      .unit_offset = 1,
+      .unit_count = 2,
+      .release_scope = LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS,
+      .release_class_id = 7,
+      .release_class_name = IREE_SV("test.progress"),
+      .release_action_id = 9,
+      .release_action_name = IREE_SV("test.release-storage"),
+      .release_reason_id = 11,
+      .release_reason_name = IREE_SV("test.storage-hazard"),
+      .flags = LOOM_LOW_STORAGE_LEASE_FLAG_STARTS_AT_ISSUE};
   return record;
 }
 
@@ -951,9 +951,9 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
   const loom_low_allocation_storage_identity_t storage_identity = {};
 
   uint32_t unit_end_points[] = {point.program_point + 1};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points)};
   unit_liveness.storage_segments.entries = liveness.segments;
   loom_low_allocation_storage_lease_state_t state = {};
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
@@ -1232,13 +1232,12 @@ TEST_F(LowAllocationStorageLeaseTest,
   const loom_low_descriptor_set_t descriptor_set =
       DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
   const loom_liveness_segment_t segments[] = {{0, 2}, {6, 10}, {1, 7}};
-  loom_liveness_analysis_t liveness = {};
-  liveness.segments = segments;
-  liveness.segment_count = IREE_ARRAYSIZE(segments);
+  loom_liveness_analysis_t liveness = {
+      .segments = segments, .segment_count = IREE_ARRAYSIZE(segments)};
   uint32_t unit_end_points[] = {10};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points)};
   unit_liveness.storage_segments.entries = segments;
 
   for (const auto kind : {LOOM_LOW_STORAGE_LEASE_SOURCE_READ,

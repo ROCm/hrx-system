@@ -138,14 +138,14 @@ TEST_F(ScheduleResourceCalendarTest,
   for (auto& schedule_class : classes) {
     schedule_class.flags = LOOM_LOW_SCHEDULE_CLASS_FLAG_DISJOINT_ISSUE_USES;
   }
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.schedule_classes = classes;
-  descriptor_set.schedule_class_count = IREE_ARRAYSIZE(classes);
-  descriptor_set.issue_uses = uses;
-  descriptor_set.issue_use_count = IREE_ARRAYSIZE(uses);
-  descriptor_set.resources = &resource;
-  descriptor_set.resource_count = 1;
-  descriptor_set.resource_calendar_slot_count = 4;
+  loom_low_descriptor_set_t descriptor_set = {
+      .schedule_classes = classes,
+      .schedule_class_count = IREE_ARRAYSIZE(classes),
+      .issue_uses = uses,
+      .issue_use_count = IREE_ARRAYSIZE(uses),
+      .resources = &resource,
+      .resource_count = 1,
+      .resource_calendar_slot_count = 4};
   IREE_ASSERT_OK(loom_low_schedule_resource_calendar_initialize(
       &descriptor_set, &arena_, &calendar_));
   Commit(&classes[0], 0);
@@ -252,15 +252,15 @@ TEST_F(ScheduleResourceCalendarTest, HistoryRetainsStageOccupancyAcrossWraps) {
     classes[i].issue_use_count = 1;
     classes[i].flags = LOOM_LOW_SCHEDULE_CLASS_FLAG_DISJOINT_ISSUE_USES;
   }
-  loom_low_descriptor_set_t descriptors = {};
-  descriptors.schedule_classes = classes;
-  descriptors.schedule_class_count = IREE_ARRAYSIZE(classes);
-  descriptors.issue_uses = uses;
-  descriptors.issue_use_count = IREE_ARRAYSIZE(uses);
-  descriptors.resources = resources;
-  descriptors.resource_count = IREE_ARRAYSIZE(resources);
-  descriptors.resource_calendar_slot_count = 8;
-  descriptors.resource_calendar_lookback_cycles = 3;
+  loom_low_descriptor_set_t descriptors = {
+      .schedule_classes = classes,
+      .schedule_class_count = IREE_ARRAYSIZE(classes),
+      .issue_uses = uses,
+      .issue_use_count = IREE_ARRAYSIZE(uses),
+      .resources = resources,
+      .resource_count = IREE_ARRAYSIZE(resources),
+      .resource_calendar_slot_count = 8,
+      .resource_calendar_lookback_cycles = 3};
   IREE_ASSERT_OK(loom_low_schedule_resource_calendar_initialize(
       &descriptors, &arena_, &calendar_));
   const auto* slots = calendar_.slots;
@@ -294,9 +294,9 @@ TEST_F(ScheduleResourceCalendarTest, ForwardIssueFloorDoesNotExcludeHistory) {
   const loom_low_issue_use_t use = {/*resource_id=*/0, /*cycles=*/1,
                                     /*units=*/1, /*stage=*/0,
                                     /*kind=*/LOOM_LOW_ISSUE_USE_KIND_REQUIRED};
-  loom_low_schedule_class_t schedule_class = {};
-  schedule_class.issue_use_count = 1;
-  schedule_class.flags = LOOM_LOW_SCHEDULE_CLASS_FLAG_DISJOINT_ISSUE_USES;
+  loom_low_schedule_class_t schedule_class = {
+      .issue_use_count = 1,
+      .flags = LOOM_LOW_SCHEDULE_CLASS_FLAG_DISJOINT_ISSUE_USES};
   loom_low_descriptor_set_t descriptors = {
       .schedule_classes = &schedule_class,
       .schedule_class_count = 1,

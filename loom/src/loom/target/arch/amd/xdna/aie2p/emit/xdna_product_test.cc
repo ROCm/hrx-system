@@ -510,9 +510,8 @@ TEST_F(XdnaProductTest, LoadsInitializedTileSectionsBeforeActivation) {
   records[2].value.register_mask_wait32 = {kCompletionAddress, 0x3F, 1};
   records[3].type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_WRITE32;
   records[3].value.register_write32 = {kActivationAddress, 0};
-  loom_aie2p_array_program_t array_program = {};
-  array_program.array_records = records;
-  array_program.array_record_count = IREE_ARRAYSIZE(records);
+  loom_aie2p_array_program_t array_program = {
+      .array_records = records, .array_record_count = IREE_ARRAYSIZE(records)};
 
   const loom_aie2p_xdna_entry_t entry = {
       .name = IREE_SV("entry"),

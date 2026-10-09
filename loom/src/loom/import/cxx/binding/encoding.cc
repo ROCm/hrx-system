@@ -141,8 +141,7 @@ EncodingIntrinsic EncodingIntrinsic::resolve(
           unit, owner,
           "physical storage result rank must match its layout rank");
     }
-    loom_encoding_t encoding = {};
-    encoding.alias_id = LOOM_STRING_ID_INVALID;
+    loom_encoding_t encoding = {.alias_id = LOOM_STRING_ID_INVALID};
     check(loom_module_intern_string(module, IREE_SV("encoding.storage"),
                                     &encoding.name_id));
     uint16_t encoding_id;

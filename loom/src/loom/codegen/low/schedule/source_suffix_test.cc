@@ -51,17 +51,16 @@ class ScheduleSourceSuffixTest : public ::testing::Test {
               int32_t minimum_issue_separation_cycles,
               loom_low_schedule_dependency_kind_t kind =
                   LOOM_LOW_SCHEDULE_DEPENDENCY_SSA) {
-    loom_low_schedule_dependency_t dependency = {};
-    dependency.producer_node = producer_node;
-    dependency.consumer_node = consumer_node;
-    dependency.minimum_issue_separation_cycles =
-        minimum_issue_separation_cycles;
-    dependency.producer_attachment_index = UINT16_MAX;
-    dependency.consumer_attachment_index = UINT16_MAX;
-    dependency.producer_event_id = UINT16_MAX;
-    dependency.consumer_event_id = UINT16_MAX;
-    dependency.value_operand_index = UINT16_MAX;
-    dependency.kind = kind;
+    loom_low_schedule_dependency_t dependency = {
+        .producer_node = producer_node,
+        .consumer_node = consumer_node,
+        .minimum_issue_separation_cycles = minimum_issue_separation_cycles,
+        .producer_attachment_index = UINT16_MAX,
+        .consumer_attachment_index = UINT16_MAX,
+        .producer_event_id = UINT16_MAX,
+        .consumer_event_id = UINT16_MAX,
+        .value_operand_index = UINT16_MAX,
+        .kind = kind};
     IREE_ASSERT_OK(loom_low_schedule_dependency_graph_append(
         &graph_, dependency, &arena_));
   }

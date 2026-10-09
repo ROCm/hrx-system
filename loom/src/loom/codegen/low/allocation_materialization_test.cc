@@ -174,13 +174,13 @@ low.func.def target<test.low.core>(@test_target) @stale_slice_plan(%wide: reg<te
           .reload_count = 1,
       },
   };
-  loom_low_allocation_table_t table = {};
-  table.module = module.get();
-  table.function_op = function_op;
-  table.assignments = assignments;
-  table.assignment_count = IREE_ARRAYSIZE(assignments);
-  table.spill_plans = spill_plans;
-  table.spill_plan_count = IREE_ARRAYSIZE(spill_plans);
+  loom_low_allocation_table_t table = {
+      .module = module.get(),
+      .function_op = function_op,
+      .assignments = assignments,
+      .assignment_count = IREE_ARRAYSIZE(assignments),
+      .spill_plans = spill_plans,
+      .spill_plan_count = IREE_ARRAYSIZE(spill_plans)};
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
   loom_low_allocation_materialization_result_t result = {};

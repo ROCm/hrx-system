@@ -307,11 +307,11 @@ TEST(IrpaBuilderIntegrationTest, BuildsEmbeddedArchiveAtReportedOffset) {
   iree_io_parameter_index_t* source_index = NULL;
   IREE_ASSERT_OK(
       iree_io_parameter_index_create(iree_allocator_system(), &source_index));
-  iree_io_parameter_index_entry_t source_entry = {};
-  source_entry.key = IREE_SV("embedded");
-  source_entry.metadata = iree_const_byte_span_empty();
-  source_entry.length = source_contents.size();
-  source_entry.type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE;
+  iree_io_parameter_index_entry_t source_entry = {
+      .key = IREE_SV("embedded"),
+      .metadata = iree_const_byte_span_empty(),
+      .length = source_contents.size(),
+      .type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE};
   source_entry.storage.file.handle = source_file_handle;
   source_entry.storage.file.offset = 0;
   source_entry.storage.file.minimum_alignment = 256;

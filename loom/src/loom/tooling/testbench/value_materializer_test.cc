@@ -219,11 +219,11 @@ TEST_F(ValueMaterializerTest, MaterializesNarrowScalarLiterals) {
     sources[i].literal.value = loom_attr_f64(literals[i].value);
   }
 
-  loom_testbench_case_plan_t case_plan = {};
-  case_plan.value_sources = sources;
-  case_plan.value_source_count = IREE_ARRAYSIZE(sources);
-  case_plan.cartesian_sample_count = 1;
-  case_plan.sample_count = 1;
+  loom_testbench_case_plan_t case_plan = {
+      .value_sources = sources,
+      .value_source_count = IREE_ARRAYSIZE(sources),
+      .cartesian_sample_count = 1,
+      .sample_count = 1};
 
   loom_testbench_value_table_t table = {};
   IREE_ASSERT_OK(loom_testbench_value_table_initialize_case(

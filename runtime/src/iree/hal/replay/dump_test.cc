@@ -447,18 +447,18 @@ static std::vector<uint8_t> MakeExecutableLoadReplayFileStorage() {
   function_metadata.workgroup_size[1] = 1;
   function_metadata.workgroup_size[2] = 1;
   function_metadata.name_length = sizeof(function_name) - 1;
-  iree_hal_replay_executable_load_payload_t payload = {};
-  payload.queue_family_ordinal = 0;
-  payload.target_physical_device_affinity = 1;
-  payload.executable_data_length = sizeof(executable_data);
-  payload.constant_count = IREE_ARRAYSIZE(constants);
-  payload.load_flags = IREE_HAL_EXECUTABLE_LOAD_FLAG_ENABLE_DEBUGGING;
-  payload.target_kind = IREE_HAL_EXECUTABLE_TARGET_KIND_VIRTUAL;
-  payload.target_family_length = sizeof(target_family) - 1;
-  payload.target_key_length = sizeof(target_key) - 1;
-  payload.executable_metadata_length = sizeof(metadata_header) +
-                                       sizeof(function_metadata) +
-                                       sizeof(function_name) - 1;
+  iree_hal_replay_executable_load_payload_t payload = {
+      .queue_family_ordinal = 0,
+      .target_physical_device_affinity = 1,
+      .executable_data_length = sizeof(executable_data),
+      .constant_count = IREE_ARRAYSIZE(constants),
+      .load_flags = IREE_HAL_EXECUTABLE_LOAD_FLAG_ENABLE_DEBUGGING,
+      .target_kind = IREE_HAL_EXECUTABLE_TARGET_KIND_VIRTUAL,
+      .target_family_length = sizeof(target_family) - 1,
+      .target_key_length = sizeof(target_key) - 1,
+      .executable_metadata_length = sizeof(metadata_header) +
+                                    sizeof(function_metadata) +
+                                    sizeof(function_name) - 1};
   iree_const_byte_span_t iovecs[] = {
       iree_make_const_byte_span(&payload, sizeof(payload)),
       iree_make_const_byte_span(target_family, sizeof(target_family) - 1),

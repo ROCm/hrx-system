@@ -176,25 +176,25 @@ loomc::testing::target::IreeHalKernelExecutionTarget MakeExecutionTarget(
       loomc_amdgpu_iree_hal_target_provider(),
   };
 
-  loomc::testing::target::IreeHalKernelExecutionTarget target = {};
-  target.label = "AMDGPU";
-  target.device_uri = IREE_SV("amdgpu");
-  target.target_profile_identifier = loomc_make_cstring_view("live-amdgpu");
-  target.source_identifier = loomc_make_cstring_view("live_amdgpu.loom");
-  target.source_text = loomc_make_cstring_view(source_text);
-  target.kernel_export_name = loomc_make_cstring_view(kernel_export_name);
-  target.target_pipeline_identifier =
-      loomc_make_cstring_view("live-amdgpu-prepared-low");
-  target.target_pipeline_kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW;
-  target.control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG;
-  target.source_to_low_max_errors = 20;
-  target.artifact_format =
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO);
-  target.artifact_identifier = loomc_make_cstring_view("live_amdgpu.hsaco");
-  target.target_providers = target_providers;
-  target.target_provider_count = 1;
-  target.create_target_environment = CreateAmdgpuTargetEnvironment;
-  target.validate_target_profile = ValidateAmdgpuProfile;
+  loomc::testing::target::IreeHalKernelExecutionTarget target = {
+      .label = "AMDGPU",
+      .device_uri = IREE_SV("amdgpu"),
+      .target_profile_identifier = loomc_make_cstring_view("live-amdgpu"),
+      .source_identifier = loomc_make_cstring_view("live_amdgpu.loom"),
+      .source_text = loomc_make_cstring_view(source_text),
+      .kernel_export_name = loomc_make_cstring_view(kernel_export_name),
+      .target_pipeline_identifier =
+          loomc_make_cstring_view("live-amdgpu-prepared-low"),
+      .target_pipeline_kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+      .source_to_low_max_errors = 20,
+      .artifact_format =
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
+      .artifact_identifier = loomc_make_cstring_view("live_amdgpu.hsaco"),
+      .target_providers = target_providers,
+      .target_provider_count = 1,
+      .create_target_environment = CreateAmdgpuTargetEnvironment,
+      .validate_target_profile = ValidateAmdgpuProfile};
   return target;
 }
 

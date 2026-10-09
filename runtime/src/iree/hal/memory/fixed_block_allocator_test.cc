@@ -155,10 +155,8 @@ TEST(FixedBlockAllocator, InvalidOptionsExceedsMaxBlocks) {
 }
 
 TEST(FixedBlockAllocator, InvalidOptionsOffsetRangeOverflow) {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = UINT64_MAX;
-  options.block_count = 2;
-  options.frontier_capacity = 1;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = UINT64_MAX, .block_count = 2, .frontier_capacity = 1};
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_memory_fixed_block_allocator_allocate(
@@ -166,10 +164,10 @@ TEST(FixedBlockAllocator, InvalidOptionsOffsetRangeOverflow) {
 }
 
 TEST(FixedBlockAllocator, MaxBlockCountAccepted) {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 64;
-  options.block_count = IREE_HAL_MEMORY_FIXED_BLOCK_ALLOCATOR_MAX_BLOCKS;
-  options.frontier_capacity = 1;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 64,
+      .block_count = IREE_HAL_MEMORY_FIXED_BLOCK_ALLOCATOR_MAX_BLOCKS,
+      .frontier_capacity = 1};
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
       options, iree_allocator_system(), &pool));

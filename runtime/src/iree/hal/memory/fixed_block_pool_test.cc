@@ -403,11 +403,11 @@ static iree_hal_fixed_block_pool_options_t DefaultOptions() {
 }
 
 static iree_hal_asan_pool_options_t ShadowOptions() {
-  iree_hal_asan_pool_options_t options = {};
-  options.mode = IREE_HAL_ASAN_POOL_MODE_SHADOW;
-  options.shadow_granule_size = 8;
-  options.redzone_size = 16;
-  options.backing_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT;
+  iree_hal_asan_pool_options_t options = {
+      .mode = IREE_HAL_ASAN_POOL_MODE_SHADOW,
+      .shadow_granule_size = 8,
+      .redzone_size = 16,
+      .backing_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT};
   return options;
 }
 

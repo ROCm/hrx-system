@@ -154,9 +154,8 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @kernel() asm {
   loom_target_function_version_t function_version = MakeFunctionVersion(
       module.get(), IREE_SV("kernel"), &generic_target_facts);
   loom_function_version_t* version_values[] = {&function_version.base};
-  loom_function_version_list_t function_versions = {};
-  function_versions.values = version_values;
-  function_versions.count = IREE_ARRAYSIZE(version_values);
+  loom_function_version_list_t function_versions = {
+      .values = version_values, .count = IREE_ARRAYSIZE(version_values)};
   loom_spirv_compile_options_t options = {.function_versions =
                                               &function_versions};
 

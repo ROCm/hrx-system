@@ -170,12 +170,11 @@ TEST_F(XdnaTest, RejectsMissingEnvironment) {
 }
 
 TEST_F(XdnaTest, PreservesTargetTypesInLowVerificationDiagnostics) {
-  loomc_context_target_options_t target_options = {};
-  target_options.type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS;
-  target_options.target_environment = environment_.get();
-  loomc_context_options_t context_options = {};
-  context_options.type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS;
-  context_options.next = &target_options;
+  loomc_context_target_options_t target_options = {
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+      .target_environment = environment_.get()};
+  loomc_context_options_t context_options = {
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS, .next = &target_options};
   loomc_context_t* raw_context = nullptr;
   LOOMC_ASSERT_OK(loomc_context_create(&context_options,
                                        loomc_allocator_system(), &raw_context));
@@ -207,12 +206,11 @@ low.func.def retain target<amd.xdna.aie2p.core> @invalid() asm {
   return
 }
 )";
-  loomc_source_options_t source_options = {};
-  source_options.type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS;
-  source_options.format = LOOMC_SOURCE_FORMAT_TEXT;
-  source_options.contents =
-      loomc_make_byte_span(source_text, sizeof(source_text) - 1);
-  source_options.storage = LOOMC_SOURCE_STORAGE_COPY;
+  loomc_source_options_t source_options = {
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .contents = loomc_make_byte_span(source_text, sizeof(source_text) - 1),
+      .storage = LOOMC_SOURCE_STORAGE_COPY};
   loomc_source_t* raw_source = nullptr;
   LOOMC_ASSERT_OK(loomc_source_create(&source_options, loomc_allocator_system(),
                                       &raw_source));
@@ -242,10 +240,9 @@ low.func.def retain target<amd.xdna.aie2p.core> @invalid() asm {
 
   // Reuse the rejected module: failure must not erase the offending operand or
   // mark it verified for a later direct emission request.
-  loomc_emit_options_t emit_options = {};
-  emit_options.type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS;
-  emit_options.artifact_format =
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_XDNA);
+  loomc_emit_options_t emit_options = {
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_XDNA)};
   LOOMC_ASSERT_OK(loomc_emit_module(environment_.get(), workspace.get(),
                                     module.get(), &emit_options,
                                     loomc_allocator_system(), &raw_result));
@@ -284,12 +281,11 @@ TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
       loomc_allocator_system(), &raw_profile));
   HandlePtr<loomc_target_profile_t, loomc_target_profile_release> profile(
       raw_profile);
-  loomc_context_target_options_t target_options = {};
-  target_options.type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS;
-  target_options.target_environment = environment_.get();
-  loomc_context_options_t context_options = {};
-  context_options.type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS;
-  context_options.next = &target_options;
+  loomc_context_target_options_t target_options = {
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+      .target_environment = environment_.get()};
+  loomc_context_options_t context_options = {
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS, .next = &target_options};
   loomc_context_t* raw_context = nullptr;
   LOOMC_ASSERT_OK(loomc_context_create(&context_options,
                                        loomc_allocator_system(), &raw_context));
@@ -313,12 +309,12 @@ TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
   ResultPtr result(raw_result);
   ASSERT_TRUE(Succeeded(result.get()));
 
-  loomc_source_options_t source_options = {};
-  source_options.type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS;
-  source_options.format = LOOMC_SOURCE_FORMAT_TEXT;
-  source_options.identifier = loomc_make_cstring_view("xdna.loom");
-  source_options.contents = loomc_make_byte_span(kSource, sizeof(kSource) - 1);
-  source_options.storage = LOOMC_SOURCE_STORAGE_COPY;
+  loomc_source_options_t source_options = {
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("xdna.loom"),
+      .contents = loomc_make_byte_span(kSource, sizeof(kSource) - 1),
+      .storage = LOOMC_SOURCE_STORAGE_COPY};
   loomc_source_t* raw_source = nullptr;
   LOOMC_ASSERT_OK(loomc_source_create(&source_options, loomc_allocator_system(),
                                       &raw_source));
@@ -338,15 +334,13 @@ TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
     const loomc_target_specialization_t specializations[] = {
         {loomc_make_cstring_view("first"), profile.get()},
         {loomc_make_cstring_view("second"), profile.get()}};
-    loomc_target_specialization_options_t specialization_options = {};
-    specialization_options.type =
-        LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS;
-    specialization_options.specializations = specializations;
-    specialization_options.specialization_count =
-        IREE_ARRAYSIZE(specializations);
-    loomc_compile_options_t compile_options = {};
-    compile_options.type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS;
-    compile_options.next = &specialization_options;
+    loomc_target_specialization_options_t specialization_options = {
+        .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+        .specializations = specializations,
+        .specialization_count = IREE_ARRAYSIZE(specializations)};
+    loomc_compile_options_t compile_options = {
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+        .next = &specialization_options};
     LOOMC_ASSERT_OK(loomc_compile_module(
         compiler.get(), workspace.get(), program.get(), module.get(),
         &compile_options, loomc_allocator_system(), &raw_result));
@@ -365,9 +359,9 @@ TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
     report_options.structure_size = sizeof(report_options);
     report_options.mode = LOOMC_COMPILE_REPORT_MODE_DETAILS;
     if (invocation == 0) {
-      loomc_artifact_manifest_options_t manifest_options = {};
-      manifest_options.type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS;
-      manifest_options.mode = LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY;
+      loomc_artifact_manifest_options_t manifest_options = {
+          .type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
+          .mode = LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY};
       emit_options.next = &manifest_options;
       LOOMC_ASSERT_OK(loomc_emit_module(environment_.get(), workspace.get(),
                                         module.get(), &emit_options,

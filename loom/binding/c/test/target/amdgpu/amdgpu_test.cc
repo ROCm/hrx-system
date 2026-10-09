@@ -1842,8 +1842,7 @@ config.def @unused = 9 : index
 )");
   ModulePtr config =
       DeserializeModule(context.get(), workspace.get(), config_source.get());
-  loomc_compile_options_t compile_options = {};
-  compile_options.config_module = config.get();
+  loomc_compile_options_t compile_options = {.config_module = config.get()};
   loomc_result_t* raw_compile_result = nullptr;
   LOOMC_ASSERT_OK(loomc_compile_module(
       compiler.get(), workspace.get(), pass_program.get(), module.get(),

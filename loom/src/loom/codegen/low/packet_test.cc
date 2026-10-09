@@ -122,9 +122,8 @@ TEST(LowPacketTest, MapsBlocksAndHazardGapsToPacketIndices) {
   loom_low_schedule_block_t blocks[1] = {};
   blocks[0].block = &block;
   blocks[0].scheduled_node_start = 10;
-  loom_low_schedule_table_t schedule = {};
-  schedule.blocks = blocks;
-  schedule.block_count = IREE_ARRAYSIZE(blocks);
+  loom_low_schedule_table_t schedule = {.blocks = blocks,
+                                        .block_count = IREE_ARRAYSIZE(blocks)};
 
   EXPECT_EQ(loom_low_packet_block_index(&schedule, &block), 0u);
   loom_block_t other_block = {};
@@ -173,11 +172,11 @@ TEST(LowDescriptorTest, IndexesPacketOperandRoles) {
   descriptor.constraint_start = 0;
   descriptor.constraint_count = IREE_ARRAYSIZE(constraints);
 
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.operands = operands;
-  descriptor_set.operand_count = IREE_ARRAYSIZE(operands);
-  descriptor_set.constraints = constraints;
-  descriptor_set.constraint_count = IREE_ARRAYSIZE(constraints);
+  loom_low_descriptor_set_t descriptor_set = {
+      .operands = operands,
+      .operand_count = IREE_ARRAYSIZE(operands),
+      .constraints = constraints,
+      .constraint_count = IREE_ARRAYSIZE(constraints)};
 
   EXPECT_FALSE(loom_low_descriptor_operand_maps_to_packet_operand(
       &descriptor_set, &descriptor, 0));

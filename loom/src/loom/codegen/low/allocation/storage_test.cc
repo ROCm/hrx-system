@@ -496,13 +496,12 @@ TEST(LowAllocationStorageTest, ResolvesCompletePhysicalCandidateRangeFamily) {
     allocation_ordinals[i] = kCandidateCount - i - 1;
     atomic_units[i] = i;
   }
-  loom_low_reg_class_t reg_class = {};
-  reg_class.flags =
-      LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
-      LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS |
-      LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES;
-  reg_class.allocatable_count = kCandidateCount;
-  reg_class.physical_atomic_unit_count = 1;
+  loom_low_reg_class_t reg_class = {
+      .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+               LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS |
+               LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES,
+      .allocatable_count = kCandidateCount,
+      .physical_atomic_unit_count = 1};
   loom_low_descriptor_set_t descriptor_set = {
       .reg_classes = &reg_class,
       .reg_class_count = 1,

@@ -892,9 +892,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   loom_function_version_t* version_values[] = {
       &function_version.base,
   };
-  loom_function_version_list_t function_versions = {};
-  function_versions.values = version_values;
-  function_versions.count = IREE_ARRAYSIZE(version_values);
+  loom_function_version_list_t function_versions = {
+      .values = version_values, .count = IREE_ARRAYSIZE(version_values)};
 
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());

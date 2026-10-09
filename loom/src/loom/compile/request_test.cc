@@ -254,9 +254,9 @@ func.def public @excluded(%value: i32) -> (i32) {
 }
 )");
   const iree_string_view_t roots[] = {IREE_SV("kept"), IREE_SV("also_kept")};
-  loom_compile_request_options_t options = {};
-  options.roots = {IREE_ARRAYSIZE(roots), roots};
-  options.format = IREE_SV("DiagnosticFormat123");
+  loom_compile_request_options_t options = {
+      .roots = {IREE_ARRAYSIZE(roots), roots},
+      .format = IREE_SV("DiagnosticFormat123")};
   const loom_compile_request_t request = Resolve(module.get(), options);
 
   module = Materialize(std::move(module), request);
@@ -282,9 +282,9 @@ func.def public @excluded(%value: i32) -> (i32) {
 }
 )");
   const iree_string_view_t roots[] = {IREE_SV("selected")};
-  loom_compile_request_options_t options = {};
-  options.roots = {IREE_ARRAYSIZE(roots), roots};
-  options.format = IREE_SV("DiagnosticFormat123");
+  loom_compile_request_options_t options = {
+      .roots = {IREE_ARRAYSIZE(roots), roots},
+      .format = IREE_SV("DiagnosticFormat123")};
   const loom_compile_request_t request = Resolve(source.get(), options);
 
   loom_source_table_projection_t sources = {};
@@ -353,10 +353,10 @@ func.def public @second() {
       IREE_SV("first"),
       IREE_SV("@second"),
   };
-  loom_compile_request_options_t options = {};
-  options.roots = {IREE_ARRAYSIZE(roots), roots};
-  options.format = IREE_SV("DiagnosticFormat123");
-  options.target_profile = &kTargetProfile;
+  loom_compile_request_options_t options = {
+      .roots = {IREE_ARRAYSIZE(roots), roots},
+      .format = IREE_SV("DiagnosticFormat123"),
+      .target_profile = &kTargetProfile};
   const loom_compile_request_t request = Resolve(module.get(), options);
 
   loom_target_specialization_request_list_t specializations = {};
@@ -427,9 +427,9 @@ func.def @helper() {
 }
 )");
   const iree_string_view_t excluded_roots[] = {IREE_SV("@excluded")};
-  loom_compile_request_options_t options = {};
-  options.format = IREE_SV("DiagnosticFormat123");
-  options.excluded_roots = {IREE_ARRAYSIZE(excluded_roots), excluded_roots};
+  loom_compile_request_options_t options = {
+      .format = IREE_SV("DiagnosticFormat123"),
+      .excluded_roots = {IREE_ARRAYSIZE(excluded_roots), excluded_roots}};
   const loom_compile_request_t request = Resolve(module.get(), options);
 
   EXPECT_EQ(request.selection.kind, LOOM_COMPILE_ENTRY_KIND_MODULE);
@@ -509,10 +509,10 @@ func.def public @other() {
 )");
   const iree_string_view_t roots[] = {IREE_SV("entry")};
   const iree_string_view_t excluded_roots[] = {IREE_SV("other")};
-  loom_compile_request_options_t options = {};
-  options.roots = {IREE_ARRAYSIZE(roots), roots};
-  options.format = IREE_SV("DiagnosticFormat123");
-  options.excluded_roots = {IREE_ARRAYSIZE(excluded_roots), excluded_roots};
+  loom_compile_request_options_t options = {
+      .roots = {IREE_ARRAYSIZE(roots), roots},
+      .format = IREE_SV("DiagnosticFormat123"),
+      .excluded_roots = {IREE_ARRAYSIZE(excluded_roots), excluded_roots}};
   loom_compile_request_t request = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -527,9 +527,9 @@ func.def public @entry() {
 }
 )");
   const iree_string_view_t excluded_roots[] = {IREE_SV("missing")};
-  loom_compile_request_options_t options = {};
-  options.format = IREE_SV("DiagnosticFormat123");
-  options.excluded_roots = {IREE_ARRAYSIZE(excluded_roots), excluded_roots};
+  loom_compile_request_options_t options = {
+      .format = IREE_SV("DiagnosticFormat123"),
+      .excluded_roots = {IREE_ARRAYSIZE(excluded_roots), excluded_roots}};
   loom_compile_request_t request = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_NOT_FOUND,
@@ -547,9 +547,9 @@ func.def @private_helper() {
 }
 )");
   const iree_string_view_t excluded_roots[] = {IREE_SV("private_helper")};
-  loom_compile_request_options_t options = {};
-  options.format = IREE_SV("DiagnosticFormat123");
-  options.excluded_roots = {IREE_ARRAYSIZE(excluded_roots), excluded_roots};
+  loom_compile_request_options_t options = {
+      .format = IREE_SV("DiagnosticFormat123"),
+      .excluded_roots = {IREE_ARRAYSIZE(excluded_roots), excluded_roots}};
   loom_compile_request_t request = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -567,9 +567,9 @@ func.def public @entry() {
       IREE_SV("entry"),
       IREE_SV("@entry"),
   };
-  loom_compile_request_options_t options = {};
-  options.format = IREE_SV("DiagnosticFormat123");
-  options.excluded_roots = {IREE_ARRAYSIZE(repeated_roots), repeated_roots};
+  loom_compile_request_options_t options = {
+      .format = IREE_SV("DiagnosticFormat123"),
+      .excluded_roots = {IREE_ARRAYSIZE(repeated_roots), repeated_roots}};
   loom_compile_request_t request = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -612,9 +612,9 @@ func.def public @second() {
       IREE_SV("first"),
       IREE_SV("@second"),
   };
-  loom_compile_request_options_t options = {};
-  options.roots = {IREE_ARRAYSIZE(roots), roots};
-  options.format = IREE_SV("DiagnosticFormat123");
+  loom_compile_request_options_t options = {
+      .roots = {IREE_ARRAYSIZE(roots), roots},
+      .format = IREE_SV("DiagnosticFormat123")};
 
   const loom_compile_request_t request = Resolve(module.get(), options);
 

@@ -260,8 +260,8 @@ TEST(ModuleTest, ParseDiagnosticRetainsRemappedIdentityAndText) {
   auto context = CreateContext();
   auto workspace = CreateWorkspace();
   auto source = CreateTextSource("physical.loom", "?");
-  loomc_module_deserialize_options_t options = {};
-  options.identifier = loomc_make_cstring_view("virtual/main.loom");
+  loomc_module_deserialize_options_t options = {
+      .identifier = loomc_make_cstring_view("virtual/main.loom")};
   loomc_module_t* module = nullptr;
   loomc_result_t* result = nullptr;
   LOOMC_ASSERT_OK(loomc_module_deserialize_text_from_source(
@@ -291,8 +291,8 @@ TEST(ModuleTest, ParseDiagnosticCanRetainLocationWithoutText) {
   auto context = CreateContext(LOOMC_SOURCE_RETENTION_METADATA_ONLY);
   auto workspace = CreateWorkspace();
   auto source = CreateTextSource("physical.loom", "?");
-  loomc_module_deserialize_options_t options = {};
-  options.identifier = loomc_make_cstring_view("virtual/main.loom");
+  loomc_module_deserialize_options_t options = {
+      .identifier = loomc_make_cstring_view("virtual/main.loom")};
   loomc_module_t* module = nullptr;
   loomc_result_t* result = nullptr;
   LOOMC_ASSERT_OK(loomc_module_deserialize_text_from_source(
@@ -327,8 +327,8 @@ TEST(ModuleTest, BytecodeReaderDiagnosticRetainsContainerAndOffsets) {
     auto source = CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "invalid.loombc",
                                bytes.c_str());
     const auto* original_source = source.get();
-    loomc_module_deserialize_options_t options = {};
-    options.identifier = loomc_make_cstring_view(identifier);
+    loomc_module_deserialize_options_t options = {
+        .identifier = loomc_make_cstring_view(identifier)};
     loomc_module_t* module = nullptr;
     loomc_result_t* result = nullptr;
     LOOMC_ASSERT_OK(loomc_module_deserialize_bytecode_from_source(

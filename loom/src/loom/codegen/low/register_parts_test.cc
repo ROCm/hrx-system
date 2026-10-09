@@ -84,13 +84,13 @@ TEST_F(RegisterPartsTest, DeferredRequirementsKeepTheirOriginalFacts) {
   constexpr uint32_t count = 256;
   Acquire(count);
   for (uint32_t i = 0; i < count; ++i) {
-    loom_low_register_part_requirement_t requirement = {};
-    requirement.op_name = IREE_SV("packet");
-    requirement.field_name = IREE_SV("source");
-    requirement.field_ref =
-        loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, i);
-    requirement.value = i;
-    requirement.mask = 3;
+    loom_low_register_part_requirement_t requirement = {
+        .op_name = IREE_SV("packet"),
+        .field_name = IREE_SV("source"),
+        .field_ref =
+            loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, i),
+        .value = i,
+        .mask = 3};
     IREE_ASSERT_OK(loom_low_register_parts_require(&parts_, &requirement));
   }
   for (uint32_t i = 0; i < count; ++i) {

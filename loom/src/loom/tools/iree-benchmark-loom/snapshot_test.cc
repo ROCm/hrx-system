@@ -92,25 +92,22 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
   iree_benchmark_loom_event_sink_t event_sink = {};
   iree_benchmark_loom_snapshot_event_sink_initialize(&snapshot, &event_sink);
 
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
-  run.source = IREE_SV("input.loom");
-  run.results_path = IREE_SV("-");
-  run.file_output_dir = IREE_SV("/tmp/loom");
-  iree_benchmark_loom_candidate_identity_t candidate0 = {};
-  candidate0.candidate_id = IREE_SV("c0");
-  candidate0.candidate_index = 0;
-  iree_benchmark_loom_candidate_identity_t candidate1 = {};
-  candidate1.candidate_id = IREE_SV("c1");
-  candidate1.candidate_index = 1;
+  iree_benchmark_loom_run_identity_t run = {
+      .run_id = IREE_SV("run"),
+      .source = IREE_SV("input.loom"),
+      .results_path = IREE_SV("-"),
+      .file_output_dir = IREE_SV("/tmp/loom")};
+  iree_benchmark_loom_candidate_identity_t candidate0 = {
+      .candidate_id = IREE_SV("c0"), .candidate_index = 0};
+  iree_benchmark_loom_candidate_identity_t candidate1 = {
+      .candidate_id = IREE_SV("c1"), .candidate_index = 1};
   loom_module_t module = {};
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("kernel_latency");
-  loom_testbench_case_plan_t case_plan = {};
-  case_plan.name = IREE_SV("kernel_case");
-  iree_benchmark_loom_benchmark_policy_t policy = {};
-  policy.measure_kind = IREE_BENCHMARK_LOOM_MEASURE_CASE_END_TO_END;
-  policy.measure = IREE_SV("case_end_to_end");
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("kernel_latency")};
+  loom_testbench_case_plan_t case_plan = {.name = IREE_SV("kernel_case")};
+  iree_benchmark_loom_benchmark_policy_t policy = {
+      .measure_kind = IREE_BENCHMARK_LOOM_MEASURE_CASE_END_TO_END,
+      .measure = IREE_SV("case_end_to_end")};
   iree_benchmark_loom_benchmark_result_t result = {};
   result.executed = true;
   result.passed = true;
@@ -280,19 +277,17 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedProfileSummary) {
   iree_benchmark_loom_event_sink_t event_sink = {};
   iree_benchmark_loom_snapshot_event_sink_initialize(&snapshot, &event_sink);
 
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
-  run.source = IREE_SV("input.loom");
-  run.results_path = IREE_SV("-");
-  iree_benchmark_loom_candidate_identity_t candidate = {};
-  candidate.candidate_id = IREE_SV("c0");
+  iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run"),
+                                            .source = IREE_SV("input.loom"),
+                                            .results_path = IREE_SV("-")};
+  iree_benchmark_loom_candidate_identity_t candidate = {.candidate_id =
+                                                            IREE_SV("c0")};
   loom_module_t module = {};
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("kernel_latency");
-  loom_testbench_case_plan_t case_plan = {};
-  case_plan.name = IREE_SV("kernel_case");
-  iree_benchmark_loom_benchmark_policy_t policy = {};
-  policy.measure = IREE_SV("dispatch_complete");
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("kernel_latency")};
+  loom_testbench_case_plan_t case_plan = {.name = IREE_SV("kernel_case")};
+  iree_benchmark_loom_benchmark_policy_t policy = {
+      .measure = IREE_SV("dispatch_complete")};
   iree_benchmark_loom_benchmark_result_t result = {.executed = true,
                                                    .passed = true,
                                                    .samples_per_iteration = 1,
@@ -361,19 +356,17 @@ TEST(BenchmarkSnapshotSinkTest, IncludesHalTimingCountsAndWarnings) {
   iree_benchmark_loom_event_sink_t event_sink = {};
   iree_benchmark_loom_snapshot_event_sink_initialize(&snapshot, &event_sink);
 
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
-  run.source = IREE_SV("input.loom");
-  run.results_path = IREE_SV("-");
-  iree_benchmark_loom_candidate_identity_t candidate = {};
-  candidate.candidate_id = IREE_SV("c0");
+  iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run"),
+                                            .source = IREE_SV("input.loom"),
+                                            .results_path = IREE_SV("-")};
+  iree_benchmark_loom_candidate_identity_t candidate = {.candidate_id =
+                                                            IREE_SV("c0")};
   loom_module_t module = {};
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("kernel_latency");
-  loom_testbench_case_plan_t case_plan = {};
-  case_plan.name = IREE_SV("kernel_case");
-  iree_benchmark_loom_benchmark_policy_t policy = {};
-  policy.measure = IREE_SV("dispatch_complete");
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("kernel_latency")};
+  loom_testbench_case_plan_t case_plan = {.name = IREE_SV("kernel_case")};
+  iree_benchmark_loom_benchmark_policy_t policy = {
+      .measure = IREE_SV("dispatch_complete")};
   policy.hal_options.timing.stable_p90_to_p50_delta_ppm = 100000;
   iree_benchmark_loom_benchmark_result_t result = {.executed = true,
                                                    .passed = true,
@@ -499,19 +492,17 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedCompileReport) {
       .contents = compile_report_contents.get(),
   };
 
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
-  run.source = IREE_SV("input.loom");
-  run.results_path = IREE_SV("-");
-  iree_benchmark_loom_candidate_identity_t candidate = {};
-  candidate.candidate_id = IREE_SV("c0");
+  iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run"),
+                                            .source = IREE_SV("input.loom"),
+                                            .results_path = IREE_SV("-")};
+  iree_benchmark_loom_candidate_identity_t candidate = {.candidate_id =
+                                                            IREE_SV("c0")};
   loom_module_t module = {};
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("kernel_latency");
-  loom_testbench_case_plan_t case_plan = {};
-  case_plan.name = IREE_SV("kernel_case");
-  iree_benchmark_loom_benchmark_policy_t policy = {};
-  policy.measure = IREE_SV("case_end_to_end");
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("kernel_latency")};
+  loom_testbench_case_plan_t case_plan = {.name = IREE_SV("kernel_case")};
+  iree_benchmark_loom_benchmark_policy_t policy = {
+      .measure = IREE_SV("case_end_to_end")};
   iree_benchmark_loom_benchmark_result_t result = {};
   result.executed = true;
   result.passed = true;
@@ -586,19 +577,17 @@ TEST(BenchmarkSnapshotSinkTest, IncludesFailurePayloadsOnFailure) {
   iree_benchmark_loom_event_sink_t event_sink = {};
   iree_benchmark_loom_snapshot_event_sink_initialize(&snapshot, &event_sink);
 
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
-  run.source = IREE_SV("input.loom");
-  run.results_path = IREE_SV("-");
-  iree_benchmark_loom_candidate_identity_t candidate = {};
-  candidate.candidate_id = IREE_SV("c0");
+  iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run"),
+                                            .source = IREE_SV("input.loom"),
+                                            .results_path = IREE_SV("-")};
+  iree_benchmark_loom_candidate_identity_t candidate = {.candidate_id =
+                                                            IREE_SV("c0")};
   loom_module_t module = {};
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("kernel_latency");
-  loom_testbench_case_plan_t case_plan = {};
-  case_plan.name = IREE_SV("kernel_case");
-  iree_benchmark_loom_benchmark_policy_t policy = {};
-  policy.measure = IREE_SV("dispatch_complete");
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("kernel_latency")};
+  loom_testbench_case_plan_t case_plan = {.name = IREE_SV("kernel_case")};
+  iree_benchmark_loom_benchmark_policy_t policy = {
+      .measure = IREE_SV("dispatch_complete")};
   iree_benchmark_loom_hal_actual_provider_t provider = {};
   provider.execution.invocation_options.function_name =
       IREE_SV("rejected_kernel");
@@ -673,11 +662,11 @@ TEST(BenchmarkSnapshotSinkTest, DryRunReportsPlannedWorkAliases) {
   iree_benchmark_loom_event_sink_t event_sink = {};
   iree_benchmark_loom_snapshot_event_sink_initialize(&snapshot, &event_sink);
 
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
-  run.source = IREE_SV("input.loom");
-  run.results_path = IREE_SV("-");
-  run.file_output_dir = IREE_SV("/tmp/loom");
+  iree_benchmark_loom_run_identity_t run = {
+      .run_id = IREE_SV("run"),
+      .source = IREE_SV("input.loom"),
+      .results_path = IREE_SV("-"),
+      .file_output_dir = IREE_SV("/tmp/loom")};
   iree_benchmark_loom_selected_benchmark_t selections[2] = {};
   selections[0].identity.candidate_id = IREE_SV("c0");
   selections[0].identity.candidate_index = 0;
@@ -688,8 +677,7 @@ TEST(BenchmarkSnapshotSinkTest, DryRunReportsPlannedWorkAliases) {
   benchmark_plans[0].sample_count = 1;
   benchmark_plans[1].name = IREE_SV("kernel_latency_alias");
   benchmark_plans[1].sample_count = 1;
-  loom_testbench_case_plan_t case_plan = {};
-  case_plan.name = IREE_SV("kernel_case");
+  loom_testbench_case_plan_t case_plan = {.name = IREE_SV("kernel_case")};
   selections[0].benchmark_plan = &benchmark_plans[0];
   selections[0].case_plan = &case_plan;
   selections[0].policy.measure = IREE_SV("dispatch_complete");
@@ -718,13 +706,13 @@ TEST(BenchmarkSnapshotSinkTest, DryRunReportsPlannedWorkAliases) {
       .end_benchmark_sample = 1,
       .has_case_sample_ordinal = true,
       .case_sample_ordinal = 0};
-  iree_benchmark_loom_work_plan_t work_plan = {};
-  work_plan.selected_benchmarks = selections;
-  work_plan.selected_benchmark_count = IREE_ARRAYSIZE(selections);
-  work_plan.logical_samples = logical_samples;
-  work_plan.logical_sample_count = IREE_ARRAYSIZE(logical_samples);
-  work_plan.work_items = &work_item;
-  work_plan.work_item_count = 1;
+  iree_benchmark_loom_work_plan_t work_plan = {
+      .selected_benchmarks = selections,
+      .selected_benchmark_count = IREE_ARRAYSIZE(selections),
+      .logical_samples = logical_samples,
+      .logical_sample_count = IREE_ARRAYSIZE(logical_samples),
+      .work_items = &work_item,
+      .work_item_count = 1};
   loom_module_t module = {};
   iree_benchmark_loom_artifact_bundle_t bundle = {};
 
@@ -811,16 +799,14 @@ TEST(BenchmarkSnapshotSinkTest, DryRunReportsScenarioTrialCoordinates) {
   iree_benchmark_loom_event_sink_t event_sink = {};
   iree_benchmark_loom_snapshot_event_sink_initialize(&snapshot, &event_sink);
 
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
-  run.source = IREE_SV("input.loom");
-  run.results_path = IREE_SV("-");
-  run.file_output_dir = IREE_SV("/tmp/loom");
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("scenario_throughput");
-  benchmark_plan.sample_count = 8;
-  loom_testbench_scenario_plan_t scenario_plan = {};
-  scenario_plan.name = IREE_SV("scenario");
+  iree_benchmark_loom_run_identity_t run = {
+      .run_id = IREE_SV("run"),
+      .source = IREE_SV("input.loom"),
+      .results_path = IREE_SV("-"),
+      .file_output_dir = IREE_SV("/tmp/loom")};
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("scenario_throughput"), .sample_count = 8};
+  loom_testbench_scenario_plan_t scenario_plan = {.name = IREE_SV("scenario")};
   iree_benchmark_loom_selected_benchmark_t selection = {};
   selection.identity.candidate_id = IREE_SV("c0");
   selection.benchmark_plan = &benchmark_plan;
@@ -832,13 +818,13 @@ TEST(BenchmarkSnapshotSinkTest, DryRunReportsScenarioTrialCoordinates) {
       .end_benchmark_sample = 8,
       .scenario_coordinate = coordinate,
       .work_item_index = 4};
-  iree_benchmark_loom_work_item_t work_item = {};
-  work_item.kind = IREE_BENCHMARK_LOOM_WORK_ITEM_SCENARIO_TRIAL;
-  work_item.work_item_index = 4;
-  work_item.hal_compile_item_index = IREE_BENCHMARK_LOOM_INDEX_INVALID;
-  work_item.begin_benchmark_sample = 7;
-  work_item.end_benchmark_sample = 8;
-  work_item.scenario_coordinate = coordinate;
+  iree_benchmark_loom_work_item_t work_item = {
+      .kind = IREE_BENCHMARK_LOOM_WORK_ITEM_SCENARIO_TRIAL,
+      .work_item_index = 4,
+      .hal_compile_item_index = IREE_BENCHMARK_LOOM_INDEX_INVALID,
+      .begin_benchmark_sample = 7,
+      .end_benchmark_sample = 8,
+      .scenario_coordinate = coordinate};
   iree_benchmark_loom_work_plan_t work_plan = {
       .selected_benchmarks = &selection,
       .selected_benchmark_count = 1,
@@ -891,17 +877,15 @@ TEST(BenchmarkSnapshotSinkTest, ReportsExecutedScenarioTrialCoordinates) {
   iree_benchmark_loom_event_sink_t event_sink = {};
   iree_benchmark_loom_snapshot_event_sink_initialize(&snapshot, &event_sink);
 
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
+  iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run")};
   loom_module_t module = {};
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("scenario_throughput");
-  loom_testbench_scenario_plan_t scenario_plan = {};
-  scenario_plan.name = IREE_SV("scenario");
-  iree_benchmark_loom_candidate_identity_t candidate = {};
-  candidate.candidate_id = IREE_SV("c0");
-  iree_benchmark_loom_benchmark_policy_t policy = {};
-  policy.measure = IREE_SV("dispatch_complete");
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("scenario_throughput")};
+  loom_testbench_scenario_plan_t scenario_plan = {.name = IREE_SV("scenario")};
+  iree_benchmark_loom_candidate_identity_t candidate = {.candidate_id =
+                                                            IREE_SV("c0")};
+  iree_benchmark_loom_benchmark_policy_t policy = {
+      .measure = IREE_SV("dispatch_complete")};
   iree_benchmark_loom_benchmark_result_t result = {
       .executed = true,
       .passed = true,

@@ -67,8 +67,7 @@ TEST(LinuxGpuMemoryProfileTest, InstanceLifetimeExposesOwnedSystemMemory) {
                 AMDF_EXTERNAL_MEMORY_SUPPORT_FLAG_SOURCE_OFFSET |
                 AMDF_EXTERNAL_MEMORY_SUPPORT_FLAG_CROSS_PROCESS);
 
-  amdf_memory_native_profile_t unavailable = {};
-  unavailable.ordinal = UINT32_MAX;
+  amdf_memory_native_profile_t unavailable = {.ordinal = UINT32_MAX};
   EXPECT_EQ(amdf_status_code(amdf_gpu_umd_device_query_memory_profile(
                 &device, 1, &unavailable)),
             AMDF_STATUS_CODE_OUT_OF_RANGE);

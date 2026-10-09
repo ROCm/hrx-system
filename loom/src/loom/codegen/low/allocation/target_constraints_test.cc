@@ -80,9 +80,8 @@ class LowAllocationTargetConstraintsTest : public ::testing::Test {
 };
 
 TEST_F(LowAllocationTargetConstraintsTest, ClampsBudgetToDescriptorCapacity) {
-  loom_low_allocation_budget_t budget = {};
-  budget.register_class = IREE_SV("test.phys");
-  budget.max_units = 64;
+  loom_low_allocation_budget_t budget = {.register_class = IREE_SV("test.phys"),
+                                         .max_units = 64};
 
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
@@ -101,9 +100,8 @@ TEST_F(LowAllocationTargetConstraintsTest, ClampsBudgetToDescriptorCapacity) {
 }
 
 TEST_F(LowAllocationTargetConstraintsTest, AppliesBudgetToUnboundedClass) {
-  loom_low_allocation_budget_t budget = {};
-  budget.register_class = IREE_SV("test.i32");
-  budget.max_units = 7;
+  loom_low_allocation_budget_t budget = {.register_class = IREE_SV("test.i32"),
+                                         .max_units = 7};
 
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
@@ -171,9 +169,8 @@ TEST_F(LowAllocationTargetConstraintsTest, ReferenceSpillingIsTargetDeclared) {
 
 TEST_F(LowAllocationTargetConstraintsTest,
        ValidatesAllocatableAndFixedLocationWindowsSeparately) {
-  loom_low_allocation_budget_t budget = {};
-  budget.register_class = IREE_SV("test.phys");
-  budget.max_units = 16;
+  loom_low_allocation_budget_t budget = {.register_class = IREE_SV("test.phys"),
+                                         .max_units = 16};
 
   DiagnosticCapture capture = {};
   const iree_diagnostic_emitter_t emitter = {
@@ -306,11 +303,11 @@ TEST_F(LowAllocationTargetConstraintsTest,
 
 TEST_F(LowAllocationTargetConstraintsTest,
        SearchLimitIncludesAssignmentsAndReservedRanges) {
-  loom_low_allocation_reserved_range_t reserved_range = {};
-  reserved_range.register_class = IREE_SV("test.phys");
-  reserved_range.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  reserved_range.location_base = 10;
-  reserved_range.location_count = 2;
+  loom_low_allocation_reserved_range_t reserved_range = {
+      .register_class = IREE_SV("test.phys"),
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = 10,
+      .location_count = 2};
 
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
@@ -388,11 +385,11 @@ TEST_F(LowAllocationTargetConstraintsTest,
 
 TEST_F(LowAllocationTargetConstraintsTest,
        ReservedRangesConflictAcrossAliasedClasses) {
-  loom_low_allocation_reserved_range_t reserved_range = {};
-  reserved_range.register_class = IREE_SV("test.pressure.alias32");
-  reserved_range.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  reserved_range.location_base = 2;
-  reserved_range.location_count = 2;
+  loom_low_allocation_reserved_range_t reserved_range = {
+      .register_class = IREE_SV("test.pressure.alias32"),
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = 2,
+      .location_count = 2};
 
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
@@ -410,13 +407,13 @@ TEST_F(LowAllocationTargetConstraintsTest,
           LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER),
       4u);
 
-  loom_low_allocation_assignment_t candidate = {};
-  candidate.value_id = LOOM_VALUE_ID_INVALID;
-  candidate.descriptor_reg_class_id =
-      RegisterClassId(IREE_SV("test.pressure.alias64"));
-  candidate.unit_count = 1;
-  candidate.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  candidate.location_count = 1;
+  loom_low_allocation_assignment_t candidate = {
+      .value_id = LOOM_VALUE_ID_INVALID,
+      .descriptor_reg_class_id =
+          RegisterClassId(IREE_SV("test.pressure.alias64")),
+      .unit_count = 1,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_count = 1};
   ASSERT_TRUE(
       loom_low_allocation_target_constraints_can_order_reserved_candidate(
           &constraints, &candidate));
@@ -450,12 +447,12 @@ TEST_F(LowAllocationTargetConstraintsTest,
   ASSERT_EQ(constraints.error_count, 0u);
   ASSERT_EQ(constraints.reserved_range_count, IREE_ARRAYSIZE(reserved_ranges));
 
-  loom_low_allocation_assignment_t candidate = {};
-  candidate.value_id = LOOM_VALUE_ID_INVALID;
-  candidate.descriptor_reg_class_id = RegisterClassId(IREE_SV("test.i32"));
-  candidate.unit_count = 1;
-  candidate.location_kind = LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID;
-  candidate.location_count = 1;
+  loom_low_allocation_assignment_t candidate = {
+      .value_id = LOOM_VALUE_ID_INVALID,
+      .descriptor_reg_class_id = RegisterClassId(IREE_SV("test.i32")),
+      .unit_count = 1,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID,
+      .location_count = 1};
   ASSERT_TRUE(
       loom_low_allocation_target_constraints_can_order_reserved_candidate(
           &constraints, &candidate));

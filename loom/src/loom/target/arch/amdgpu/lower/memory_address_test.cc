@@ -16,12 +16,12 @@ namespace {
 // Constructs a canonical or realization term with retained byte-range facts.
 loom_low_source_memory_dynamic_term_t Term(loom_value_id_t index, int64_t low,
                                            int64_t high) {
-  loom_low_source_memory_dynamic_term_t term = {};
-  term.index = index;
-  term.axis = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE;
-  term.byte_stride = 1;
-  term.byte_facts = loom_value_facts_make(low, high, 1);
-  term.byte_shift = 0;
+  loom_low_source_memory_dynamic_term_t term = {
+      .index = index,
+      .axis = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE,
+      .byte_stride = 1,
+      .byte_facts = loom_value_facts_make(low, high, 1),
+      .byte_shift = 0};
   return term;
 }
 

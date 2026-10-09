@@ -393,11 +393,11 @@ TEST_F(BytecodeSelectedTablesTest, ResolvesExternalSymbolsByDenseSourceIndex) {
   symbols[0].name = strings[1];
   symbols[0].name_string_index = 1;
   uint32_t symbol_ordinal_by_string_index[] = {UINT32_MAX, 0};
-  loom_bytecode_module_metadata_t metadata = {};
-  metadata.strings = {IREE_ARRAYSIZE(strings), strings};
-  metadata.symbol_count = IREE_ARRAYSIZE(symbols);
-  metadata.symbols = symbols;
-  metadata.symbol_ordinal_by_string_index = symbol_ordinal_by_string_index;
+  loom_bytecode_module_metadata_t metadata = {
+      .strings = {IREE_ARRAYSIZE(strings), strings},
+      .symbol_count = IREE_ARRAYSIZE(symbols),
+      .symbols = symbols,
+      .symbol_ordinal_by_string_index = symbol_ordinal_by_string_index};
 
   loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("projected"),

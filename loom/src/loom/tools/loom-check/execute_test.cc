@@ -387,8 +387,7 @@ class ExecuteTest : public ::testing::Test {
     if (iree_status_is_ok(status)) {
       loom_check_result_initialize(iree_allocator_system(), out_result);
       result_initialized = true;
-      loom_input_request_t input_request = {};
-      input_request.path = IREE_SV("test.loom-test");
+      loom_input_request_t input_request = {.path = IREE_SV("test.loom-test")};
       status = loom_check_execute_case(
           &file.cases[0], 0, &report, iree_make_cstring_view("test.loom-test"),
           &input_request, environment, &context_, &block_pool_,
@@ -762,11 +761,11 @@ TEST_F(ExecuteTest, HeaderDiagnosticCannotMatchOrEditTheMainSource) {
   IREE_ASSERT_OK(loom_check_file_report_initialize(&file, &arena, &report));
   loom_check_result_t result;
   loom_check_result_initialize(iree_allocator_system(), &result);
-  loom_check_diagnostic_collector_t collector = {};
-  collector.arena = &arena;
-  collector.host_allocator = iree_allocator_system();
-  collector.filename = IREE_SV("test.loom-test");
-  collector.result = &result;
+  loom_check_diagnostic_collector_t collector = {
+      .arena = &arena,
+      .host_allocator = iree_allocator_system(),
+      .filename = IREE_SV("test.loom-test"),
+      .result = &result};
   loom_diagnostic_param_t parameter =
       loom_param_string(IREE_SV("invalid input"));
   loom_diagnostic_t diagnostic = {

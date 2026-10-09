@@ -129,12 +129,12 @@ TEST_F(LinuxXdnaBufferMappingTest,
 }
 
 TEST(LinuxXdnaBufferTest, CreateFailureLeavesOutputUnchanged) {
-  amdf_linux_xdna_buffer_t buffer = {};
-  buffer.handle = 0x10;
-  buffer.type = AMDXDNA_BO_DEV;
-  buffer.byte_length = 0x2000;
-  buffer.device_address = UINT64_C(0x12340000);
-  buffer.host_pointer = reinterpret_cast<void*>(uintptr_t{0x56780000});
+  amdf_linux_xdna_buffer_t buffer = {
+      .handle = 0x10,
+      .type = AMDXDNA_BO_DEV,
+      .byte_length = 0x2000,
+      .device_address = UINT64_C(0x12340000),
+      .host_pointer = reinterpret_cast<void*>(uintptr_t{0x56780000})};
   buffer.mapping.base = reinterpret_cast<void*>(uintptr_t{0x9ABC0000});
   buffer.mapping.byte_length = 0x3000;
 
@@ -152,12 +152,12 @@ TEST(LinuxXdnaBufferTest, CreateFailureLeavesOutputUnchanged) {
 }
 
 TEST(LinuxXdnaBufferTest, ImportFailureLeavesOutputUnchanged) {
-  amdf_linux_xdna_buffer_t buffer = {};
-  buffer.handle = 0x10;
-  buffer.type = AMDXDNA_BO_DEV;
-  buffer.byte_length = 0x2000;
-  buffer.device_address = UINT64_C(0x12340000);
-  buffer.host_pointer = reinterpret_cast<void*>(uintptr_t{0x56780000});
+  amdf_linux_xdna_buffer_t buffer = {
+      .handle = 0x10,
+      .type = AMDXDNA_BO_DEV,
+      .byte_length = 0x2000,
+      .device_address = UINT64_C(0x12340000),
+      .host_pointer = reinterpret_cast<void*>(uintptr_t{0x56780000})};
   buffer.mapping.base = reinterpret_cast<void*>(uintptr_t{0x9ABC0000});
   buffer.mapping.byte_length = 0x3000;
 
@@ -175,12 +175,12 @@ TEST(LinuxXdnaBufferTest, ImportFailureLeavesOutputUnchanged) {
 }
 
 TEST(LinuxXdnaBufferTest, RegistrationFailureLeavesOutputUnchanged) {
-  amdf_linux_xdna_buffer_t buffer = {};
-  buffer.handle = 0x10;
-  buffer.type = AMDXDNA_BO_DEV;
-  buffer.byte_length = 0x2000;
-  buffer.device_address = UINT64_C(0x12340000);
-  buffer.host_pointer = reinterpret_cast<void*>(uintptr_t{0x56780000});
+  amdf_linux_xdna_buffer_t buffer = {
+      .handle = 0x10,
+      .type = AMDXDNA_BO_DEV,
+      .byte_length = 0x2000,
+      .device_address = UINT64_C(0x12340000),
+      .host_pointer = reinterpret_cast<void*>(uintptr_t{0x56780000})};
   buffer.mapping.base = reinterpret_cast<void*>(uintptr_t{0x9ABC0000});
   buffer.mapping.byte_length = 0x3000;
 

@@ -35,17 +35,16 @@ class ScheduleDependencyIndexTest : public ::testing::Test {
               uint32_t producer_node, uint32_t consumer_node,
               loom_low_schedule_dependency_kind_t kind, uint16_t operand_index,
               int32_t minimum_issue_separation_cycles = 0) {
-    loom_low_schedule_dependency_t dependency = {};
-    dependency.producer_node = producer_node;
-    dependency.consumer_node = consumer_node;
-    dependency.minimum_issue_separation_cycles =
-        minimum_issue_separation_cycles;
-    dependency.producer_attachment_index = UINT16_MAX;
-    dependency.consumer_attachment_index = UINT16_MAX;
-    dependency.producer_event_id = UINT16_MAX;
-    dependency.consumer_event_id = UINT16_MAX;
-    dependency.value_operand_index = operand_index;
-    dependency.kind = kind;
+    loom_low_schedule_dependency_t dependency = {
+        .producer_node = producer_node,
+        .consumer_node = consumer_node,
+        .minimum_issue_separation_cycles = minimum_issue_separation_cycles,
+        .producer_attachment_index = UINT16_MAX,
+        .consumer_attachment_index = UINT16_MAX,
+        .producer_event_id = UINT16_MAX,
+        .consumer_event_id = UINT16_MAX,
+        .value_operand_index = operand_index,
+        .kind = kind};
     IREE_ASSERT_OK(
         loom_low_schedule_dependency_graph_append(graph, dependency, &arena_));
   }

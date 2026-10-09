@@ -211,11 +211,11 @@ low.func.def target<test.low.core> @swap(%lhs: reg<test.phys>, %rhs: reg<test.ph
       {loom_block_arg_id(exit, 0),
        LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 0, 2},
   };
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
-  options.allocation_fixed_values = fixed_values;
-  options.allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values);
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+      .allocation_fixed_values = fixed_values,
+      .allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values)};
   loom_low_emission_frame_t frame = {};
   bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(

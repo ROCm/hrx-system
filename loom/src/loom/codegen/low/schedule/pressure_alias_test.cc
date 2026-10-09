@@ -65,8 +65,7 @@ class PressureAliasTest : public ::testing::Test {
       rows[i].unit_count = values[i].unit_count;
       rows[i].kind = LOOM_LOW_STORAGE_RELATION_CONTIGUOUS_PART;
     }
-    loom_local_value_domain_t domain = {};
-    domain.value_count = IREE_ARRAYSIZE(values);
+    loom_local_value_domain_t domain = {.value_count = IREE_ARRAYSIZE(values)};
     loom_low_schedule_build_state_t state = {};
     state.values = values;
     state.value_producer_nodes = value_producer_nodes;

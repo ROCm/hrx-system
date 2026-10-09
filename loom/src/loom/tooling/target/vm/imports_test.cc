@@ -358,10 +358,10 @@ class VMSourceCaptureTest : public VMImportsTest {
     IREE_ASSERT_OK(loom_op_registry_register_all_dialects(&context));
     IREE_ASSERT_OK(loom_context_finalize(&context));
     const auto* data = loom_location_capture_test_data_create();
-    loom_input_request_t request = {};
-    request.source = iree_make_string_view(
-        reinterpret_cast<const char*>(data[0].data), data[0].size);
-    request.path = IREE_SV("admitted.loom");
+    loom_input_request_t request = {
+        .source = iree_make_string_view(
+            reinterpret_cast<const char*>(data[0].data), data[0].size),
+        .path = IREE_SV("admitted.loom")};
     loom_input_module_t input;
     IREE_ASSERT_OK(loom_input_module_load(&loom_input_text_provider, &request,
                                           &context, &pool,

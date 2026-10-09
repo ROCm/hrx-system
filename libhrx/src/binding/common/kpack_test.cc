@@ -2319,10 +2319,9 @@ static_assert(sizeof(HipFatHeader) == 24, "wrapper must be 24 bytes");
 // validation and key projection that production uses.
 static iree_hal_executable_target_t MakeAmdgpuDeviceTarget(
     iree_string_view_t target_key) {
-  iree_hal_executable_target_t target = {};
-  target.family = IREE_SV("amdgpu");
-  target.target_key = target_key;
-  target.physical_device_affinity = 1;
+  iree_hal_executable_target_t target = {.family = IREE_SV("amdgpu"),
+                                         .target_key = target_key,
+                                         .physical_device_affinity = 1};
   return target;
 }
 

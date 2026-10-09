@@ -107,14 +107,14 @@ TEST_F(FunctionTest, DirtyUpperVectorStateCleansBeforeEligibleCall) {
   };
   iree_host_size_t block_starts[] = {0, IREE_ARRAYSIZE(instructions)};
   const uint32_t cleanup_indices[] = {0};
-  loom_x86_function_t function = {};
-  function.instructions = instructions;
-  function.instruction_count = IREE_ARRAYSIZE(instructions);
-  function.block_starts = block_starts;
-  function.block_count = 1;
-  function.may_dirty_upper_vector_state = true;
-  function.upper_vector_call_cleanup_indices = cleanup_indices;
-  function.upper_vector_call_cleanup_count = IREE_ARRAYSIZE(cleanup_indices);
+  loom_x86_function_t function = {
+      .instructions = instructions,
+      .instruction_count = IREE_ARRAYSIZE(instructions),
+      .block_starts = block_starts,
+      .block_count = 1,
+      .may_dirty_upper_vector_state = true,
+      .upper_vector_call_cleanup_indices = cleanup_indices,
+      .upper_vector_call_cleanup_count = IREE_ARRAYSIZE(cleanup_indices)};
 
   IREE_ASSERT_OK(loom_x86_function_write(&function, nullptr, 0, nullptr,
                                          stream_, &arena_));
@@ -355,12 +355,12 @@ TEST_F(FunctionTest, SymbolFixupsKeepSectionOffsetsAndTheirOwnNamespace) {
       Instruction(LOOM_X86_ENCODING_FORM_CALL, 0, {}, 0),
   };
   iree_host_size_t block_starts[] = {0, IREE_ARRAYSIZE(instructions)};
-  loom_x86_function_t function = {};
-  function.instructions = instructions;
-  function.instruction_count = IREE_ARRAYSIZE(instructions);
-  function.symbol_fixup_count = 2;
-  function.block_starts = block_starts;
-  function.block_count = 1;
+  loom_x86_function_t function = {
+      .instructions = instructions,
+      .instruction_count = IREE_ARRAYSIZE(instructions),
+      .symbol_fixup_count = 2,
+      .block_starts = block_starts,
+      .block_count = 1};
   function.stack.allocation_size = 8;
   function.stack.alignment = 16;
   const uint32_t symbol_indices[] = {4, 1, 3};

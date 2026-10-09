@@ -34,9 +34,9 @@ class LocationCaptureTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     const auto* data = loom_location_capture_test_data_create();
     std::string text(reinterpret_cast<const char*>(data[0].data), data[0].size);
-    loom_input_request_t request = {};
-    request.source = iree_make_string_view(text.data(), text.size());
-    request.path = IREE_SV("source.loom");
+    loom_input_request_t request = {
+        .source = iree_make_string_view(text.data(), text.size()),
+        .path = IREE_SV("source.loom")};
     IREE_ASSERT_OK(loom_input_module_load(&loom_input_text_provider, &request,
                                           &context_, &pool_,
                                           iree_allocator_system(), &input_));

@@ -39,10 +39,10 @@ ResultPtr Capture(
 }
 
 SourcePtr CreateSource(const char* identifier, const char* contents) {
-  loomc_source_options_t options = {};
-  options.identifier = loomc_make_cstring_view(identifier);
-  options.contents = loomc_make_byte_span(contents, strlen(contents));
-  options.storage = LOOMC_SOURCE_STORAGE_COPY;
+  loomc_source_options_t options = {
+      .identifier = loomc_make_cstring_view(identifier),
+      .contents = loomc_make_byte_span(contents, strlen(contents)),
+      .storage = LOOMC_SOURCE_STORAGE_COPY};
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(
       loomc_source_create(&options, loomc_allocator_system(), &source));
@@ -51,13 +51,13 @@ SourcePtr CreateSource(const char* identifier, const char* contents) {
 
 TEST(DiagnosticTest, OwnsRecordedIdentityWithoutText) {
   std::string filename = "virtual/kernel.cxx";
-  loom_source_range_t range = {};
-  range.provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE;
-  range.filename = iree_make_string_view(filename.data(), filename.size());
-  range.start_line = 7;
-  range.start_column = 12;
-  range.end_line = 7;
-  range.end_column = 25;
+  loom_source_range_t range = {
+      .provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE,
+      .filename = iree_make_string_view(filename.data(), filename.size()),
+      .start_line = 7,
+      .start_column = 12,
+      .end_line = 7,
+      .end_column = 25};
   auto result = Capture(range);
   filename.assign("released");
   ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
@@ -132,17 +132,17 @@ TEST(DiagnosticTest, RetainsMatchingSourceOwner) {
 TEST(DiagnosticTest, MetadataRetentionOwnsIdentityAndCoordinatesOnly) {
   auto source = CreateSource("source.loom", "original");
   const auto contents = loomc_source_contents(source.get());
-  loom_source_range_t range = {};
-  range.provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE;
-  range.filename = IREE_SV("source.loom");
-  range.source = iree_make_string_view(
-      reinterpret_cast<const char*>(contents.data), contents.data_length);
-  range.start = 2;
-  range.end = 6;
-  range.start_line = 4;
-  range.start_column = 3;
-  range.end_line = 4;
-  range.end_column = 7;
+  loom_source_range_t range = {
+      .provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
+      .filename = IREE_SV("source.loom"),
+      .source = iree_make_string_view(
+          reinterpret_cast<const char*>(contents.data), contents.data_length),
+      .start = 2,
+      .end = 6,
+      .start_line = 4,
+      .start_column = 3,
+      .end_line = 4,
+      .end_column = 7};
   auto result =
       Capture(range, source.get(), LOOMC_SOURCE_RETENTION_METADATA_ONLY);
   source.reset();

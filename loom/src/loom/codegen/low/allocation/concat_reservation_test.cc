@@ -57,25 +57,25 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
   intervals[2].start_point = 4;
   intervals[2].end_point = 10;
   const uint32_t interval_indices[] = {0, 1, 2, 3};
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = intervals;
-  liveness.interval_count = IREE_ARRAYSIZE(intervals);
-  liveness.value_ids = value_ids;
-  liveness.value_count = IREE_ARRAYSIZE(value_ids);
-  liveness.value_interval_indices = interval_indices;
+  loom_liveness_analysis_t liveness = {
+      .intervals = intervals,
+      .interval_count = IREE_ARRAYSIZE(intervals),
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .value_interval_indices = interval_indices};
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {
       {0, 2}, {2, 3}, {4, 4}, {8, 5}};
   uint32_t unit_start_points[] = {2, 2, 3, 3, 2, 2, 3, 3, 5, 5};
   uint32_t unit_end_points[] = {4, 4, 4, 4, 10, 10, 10, 10, 14, 14};
   uint64_t incomplete_storage_words[] = {0};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = unit_values;
-  unit_liveness.start_points = unit_start_points;
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
-  unit_liveness.values_with_incomplete_storage_segments = {
-      liveness.value_count, incomplete_storage_words};
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = unit_values,
+      .start_points = unit_start_points,
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+      .values_with_incomplete_storage_segments = {liveness.value_count,
+                                                  incomplete_storage_words}};
 
   loom_low_placement_relation_t relations[2] = {};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(relations); ++i) {
@@ -104,11 +104,10 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
   operands[0].addressable_unit_count = 16;
   placement.operand_constraints_by_interval = operands;
 
-  loom_low_reg_class_t reg_class = {};
-  reg_class.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
-  reg_class.alloc_unit_bits = 32;
-  reg_class.allocatable_count = 16;
-  reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
+  loom_low_reg_class_t reg_class = {.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
+                                    .alloc_unit_bits = 32,
+                                    .allocatable_count = 16,
+                                    .spill_class_id = LOOM_LOW_REG_CLASS_NONE};
   loom_low_descriptor_set_t descriptors = {
       .stable_id = 17, .reg_classes = &reg_class, .reg_class_count = 1};
   loom_low_resolved_target_t target = {.descriptor_set = &descriptors};

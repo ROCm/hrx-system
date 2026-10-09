@@ -84,17 +84,17 @@ static const loom_native_transition_owner_factor_t
 };
 
 static loom_native_transition_facts_t MakeNativeTransitionFacts() {
-  loom_native_transition_facts_t facts = {};
-  facts.source_role = LOOM_CONTRACT_OPERAND_ROLE_RESULT;
-  facts.destination_role = LOOM_CONTRACT_OPERAND_ROLE_RHS;
-  facts.destination_position_count = 512;
-  facts.participant_change_count = 256;
-  facts.local_position_change_count = 480;
-  facts.destination_positions_per_source_minimum = 2;
-  facts.destination_positions_per_source_maximum = 2;
-  facts.source_owner_factors = kNativeTransitionOwnerFactors;
-  facts.source_owner_factor_count =
-      IREE_ARRAYSIZE(kNativeTransitionOwnerFactors);
+  loom_native_transition_facts_t facts = {
+      .source_role = LOOM_CONTRACT_OPERAND_ROLE_RESULT,
+      .destination_role = LOOM_CONTRACT_OPERAND_ROLE_RHS,
+      .destination_position_count = 512,
+      .participant_change_count = 256,
+      .local_position_change_count = 480,
+      .destination_positions_per_source_minimum = 2,
+      .destination_positions_per_source_maximum = 2,
+      .source_owner_factors = kNativeTransitionOwnerFactors,
+      .source_owner_factor_count =
+          IREE_ARRAYSIZE(kNativeTransitionOwnerFactors)};
   return facts;
 }
 
@@ -146,20 +146,19 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   report.source_low_selected_op_count = 4;
   report.source_low_emitted_op_count = 5;
 
-  loom_target_compile_report_source_low_row_t selection = {};
-  selection.function_name = IREE_SVL("branchy");
-  selection.source_op_name = IREE_SVL("scalar.addi");
-  selection.source_op_kind = 42;
-  selection.selection_kind =
-      LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_SELECTION_RULE;
-  selection.plan_key = IREE_SVL("test.scalar_addi.strategy.native");
-  selection.native_contraction_facts = &kNativeContractionFacts;
-  selection.native_transition_facts = &kNativeTransitionFacts;
-  selection.native_transition_source_type = LOOM_SCALAR_TYPE_F32;
-  selection.native_transition_destination_type = LOOM_SCALAR_TYPE_F16;
-  selection.descriptor_key = IREE_SVL("test.add.i32");
-  selection.descriptor_semantic_tag = IREE_SVL("integer.add.i32");
-  selection.emitted_low_op_count = 1;
+  loom_target_compile_report_source_low_row_t selection = {
+      .function_name = IREE_SVL("branchy"),
+      .source_op_name = IREE_SVL("scalar.addi"),
+      .source_op_kind = 42,
+      .selection_kind = LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_SELECTION_RULE,
+      .plan_key = IREE_SVL("test.scalar_addi.strategy.native"),
+      .native_contraction_facts = &kNativeContractionFacts,
+      .native_transition_facts = &kNativeTransitionFacts,
+      .native_transition_source_type = LOOM_SCALAR_TYPE_F32,
+      .native_transition_destination_type = LOOM_SCALAR_TYPE_F16,
+      .descriptor_key = IREE_SVL("test.add.i32"),
+      .descriptor_semantic_tag = IREE_SVL("integer.add.i32"),
+      .emitted_low_op_count = 1};
   IREE_ASSERT_OK(
       loom_target_compile_report_record_source_low_row(&report, &selection));
 
@@ -528,17 +527,17 @@ TEST(CompileReportFormatTest, KeepsUnmodeledBankCoverageWithoutAModel) {
   loom_target_compile_report_t entry_report = {};
   loom_target_compile_report_initialize(&entry_report, iree_allocator_system());
   entry_report.function_name = IREE_SVL("kernel");
-  loom_target_compile_report_source_low_memory_row_t memory = {};
-  memory.function_name = entry_report.function_name;
-  memory.source_op_name = IREE_SVL("vector.load");
-  memory.source_root_name = IREE_SVL("scratch");
-  memory.source_root_argument_index = UINT16_MAX;
-  memory.memory_space = IREE_SVL("workgroup");
-  memory.operation_kind = IREE_SVL("load");
-  memory.packet_key = IREE_SVL("test.lds.load.i32");
-  memory.element_byte_count = 4;
-  memory.vector_lane_count = 1;
-  memory.issued_read_byte_count = 4;
+  loom_target_compile_report_source_low_memory_row_t memory = {
+      .function_name = entry_report.function_name,
+      .source_op_name = IREE_SVL("vector.load"),
+      .source_root_name = IREE_SVL("scratch"),
+      .source_root_argument_index = UINT16_MAX,
+      .memory_space = IREE_SVL("workgroup"),
+      .operation_kind = IREE_SVL("load"),
+      .packet_key = IREE_SVL("test.lds.load.i32"),
+      .element_byte_count = 4,
+      .vector_lane_count = 1,
+      .issued_read_byte_count = 4};
   memory.bank_service.proof = IREE_SVL("unmodeled");
   memory.bank_service.unknown_reason = IREE_SVL("target-model-unavailable");
   memory.bank_service.wave_size = 32;
@@ -583,50 +582,48 @@ TEST(CompileReportFormatTest, FormatsMathAndTargetLegalization) {
       LOOM_TARGET_COMPILE_REPORT_DETAIL_MATH_LEGALIZATION_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_LEGALIZATION_ROWS;
 
-  loom_target_compile_report_math_row_t math = {};
-  math.function_name = IREE_SVL("branchy");
-  math.source_op_name = IREE_SVL("scalar.roundf");
-  math.source_op_kind = 44;
-  math.target_bundle_name = IREE_SVL("test_target");
-  math.target_config_name = IREE_SVL("test_o0");
-  math.policy_name = IREE_SVL("amdgpu-math");
-  math.constraint_key = IREE_SVL("math.recipe.round_away");
-  math.math_op = LOOM_TARGET_MATH_OP_ROUNDF;
-  math.lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR;
-  math.element_type = LOOM_SCALAR_TYPE_F32;
-  math.action = LOOM_TARGET_COMPILE_REPORT_MATH_ACTION_REWRITTEN;
-  math.recipe = LOOM_TARGET_MATH_RECIPE_ROUND_AWAY;
-  math.created_op_count = 10;
-  math.erased_op_count = 1;
+  loom_target_compile_report_math_row_t math = {
+      .function_name = IREE_SVL("branchy"),
+      .source_op_name = IREE_SVL("scalar.roundf"),
+      .source_op_kind = 44,
+      .target_bundle_name = IREE_SVL("test_target"),
+      .target_config_name = IREE_SVL("test_o0"),
+      .policy_name = IREE_SVL("amdgpu-math"),
+      .constraint_key = IREE_SVL("math.recipe.round_away"),
+      .math_op = LOOM_TARGET_MATH_OP_ROUNDF,
+      .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+      .element_type = LOOM_SCALAR_TYPE_F32,
+      .action = LOOM_TARGET_COMPILE_REPORT_MATH_ACTION_REWRITTEN,
+      .recipe = LOOM_TARGET_MATH_RECIPE_ROUND_AWAY,
+      .created_op_count = 10,
+      .erased_op_count = 1};
   IREE_ASSERT_OK(loom_target_compile_report_record_math_row(&report, &math));
 
-  loom_target_compile_report_legalization_row_t legalization = {};
-  legalization.function_name = IREE_SVL("branchy");
-  legalization.source_op_name = IREE_SVL("vector.reduce.axes");
-  legalization.source_op_kind = 73;
-  legalization.target_bundle_name = IREE_SVL("test_target");
-  legalization.target_config_name = IREE_SVL("test_o0");
-  legalization.legalizer_name = IREE_SVL("vector");
-  legalization.legalizer_strategy =
-      LOOM_TARGET_COMPILE_REPORT_LEGALIZER_STRATEGY_REFERENCE;
-  legalization.mode = LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_MODE_FINAL;
-  legalization.policy =
-      LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_POLICY_REFERENCE_ONLY;
-  legalization.action =
-      LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_REWRITTEN;
-  legalization.scalarized = true;
-  legalization.legalization_outcome =
-      LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_OUTCOME_REFERENCE_FALLBACK;
-  legalization.contract_outcome =
-      LOOM_TARGET_COMPILE_REPORT_CONTRACT_OUTCOME_UNSUPPORTED;
-  legalization.descriptor_key = IREE_SVL("test.legalized.descriptor");
-  legalization.source_rejection_bits = 0x1;
-  legalization.source_rejection_detail = kTestSourceRejectionDetail;
-  legalization.target_rejection_bits = 0x2;
-  legalization.missing_feature_bits = 0x4;
-  legalization.missing_fact_bits = 0x8;
-  legalization.created_op_count = 6;
-  legalization.erased_op_count = 1;
+  loom_target_compile_report_legalization_row_t legalization = {
+      .function_name = IREE_SVL("branchy"),
+      .source_op_name = IREE_SVL("vector.reduce.axes"),
+      .source_op_kind = 73,
+      .target_bundle_name = IREE_SVL("test_target"),
+      .target_config_name = IREE_SVL("test_o0"),
+      .legalizer_name = IREE_SVL("vector"),
+      .legalizer_strategy =
+          LOOM_TARGET_COMPILE_REPORT_LEGALIZER_STRATEGY_REFERENCE,
+      .mode = LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_MODE_FINAL,
+      .policy = LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_POLICY_REFERENCE_ONLY,
+      .action = LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_REWRITTEN,
+      .scalarized = true,
+      .legalization_outcome =
+          LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_OUTCOME_REFERENCE_FALLBACK,
+      .contract_outcome =
+          LOOM_TARGET_COMPILE_REPORT_CONTRACT_OUTCOME_UNSUPPORTED,
+      .descriptor_key = IREE_SVL("test.legalized.descriptor"),
+      .source_rejection_bits = 0x1,
+      .source_rejection_detail = kTestSourceRejectionDetail,
+      .target_rejection_bits = 0x2,
+      .missing_feature_bits = 0x4,
+      .missing_fact_bits = 0x8,
+      .created_op_count = 6,
+      .erased_op_count = 1};
   IREE_ASSERT_OK(loom_target_compile_report_record_legalization_row(
       &report, &legalization));
 

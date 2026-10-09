@@ -556,8 +556,7 @@ TEST_F(RemapTest, AllowsUnmappedValuesOnlyWithinSameModule) {
 
 TEST_F(RemapTest, RejectsUnknownTypeKind) {
   loom_ir_remap_t remap = InitializeRemap();
-  loom_type_t malformed = {};
-  malformed.header = UINT32_MAX;
+  loom_type_t malformed = {.header = UINT32_MAX};
   loom_type_t target_type = {};
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

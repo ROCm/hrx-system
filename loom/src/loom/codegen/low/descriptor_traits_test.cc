@@ -134,9 +134,9 @@ TEST(LowDescriptorTraitsTest, OpaqueEffectsSubsumePreciseMemoryTraits) {
 
 TEST(LowDescriptorTraitsTest, SideEffectingTerminatorFlagsCompose) {
   const loom_low_descriptor_set_t descriptor_set = {};
-  loom_low_descriptor_t descriptor = {};
-  descriptor.flags = LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
-                     LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR;
+  loom_low_descriptor_t descriptor = {
+      .flags = LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
+               LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR};
 
   const loom_trait_flags_t traits =
       loom_low_descriptor_effective_traits(&descriptor_set, &descriptor);
@@ -148,9 +148,9 @@ TEST(LowDescriptorTraitsTest, SideEffectingTerminatorFlagsCompose) {
 
 TEST(LowDescriptorTraitsTest, UniqueIdentityIsNotPureAndCannotBeCse) {
   const loom_low_descriptor_set_t descriptor_set = {};
-  loom_low_descriptor_t descriptor = {};
-  descriptor.flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE |
-                     LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY;
+  loom_low_descriptor_t descriptor = {
+      .flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE |
+               LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY};
 
   const loom_trait_flags_t traits =
       loom_low_descriptor_effective_traits(&descriptor_set, &descriptor);
@@ -161,10 +161,9 @@ TEST(LowDescriptorTraitsTest, UniqueIdentityIsNotPureAndCannotBeCse) {
 }
 
 TEST(LowDescriptorTraitsTest, ImplicitStateResultIsNonDeterministic) {
-  loom_low_operand_t operand = {};
-  operand.role = LOOM_LOW_OPERAND_ROLE_RESULT;
-  operand.flags =
-      LOOM_LOW_OPERAND_FLAG_IMPLICIT | LOOM_LOW_OPERAND_FLAG_STATE_WRITE;
+  loom_low_operand_t operand = {.role = LOOM_LOW_OPERAND_ROLE_RESULT,
+                                .flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT |
+                                         LOOM_LOW_OPERAND_FLAG_STATE_WRITE};
   loom_low_descriptor_set_t descriptor_set = {.operands = &operand,
                                               .operand_count = 1};
   loom_low_descriptor_t descriptor = {.operand_count = 1, .result_count = 1};
@@ -179,12 +178,10 @@ TEST(LowDescriptorTraitsTest, ImplicitStateResultIsNonDeterministic) {
 TEST(LowDescriptorTraitsTest, RematerializationIsPerResult) {
   loom_low_operand_t operands[2] = {};
   operands[0].flags = LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE;
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.operands = operands;
-  descriptor_set.operand_count = IREE_ARRAYSIZE(operands);
-  loom_low_descriptor_t descriptor = {};
-  descriptor.operand_count = IREE_ARRAYSIZE(operands);
-  descriptor.result_count = IREE_ARRAYSIZE(operands);
+  loom_low_descriptor_set_t descriptor_set = {
+      .operands = operands, .operand_count = IREE_ARRAYSIZE(operands)};
+  loom_low_descriptor_t descriptor = {.operand_count = IREE_ARRAYSIZE(operands),
+                                      .result_count = IREE_ARRAYSIZE(operands)};
 
   EXPECT_TRUE(loom_low_descriptor_result_can_rematerialize(&descriptor_set,
                                                            &descriptor, 0));

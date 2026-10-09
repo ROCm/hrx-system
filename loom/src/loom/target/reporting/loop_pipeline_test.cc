@@ -66,12 +66,12 @@ TEST(LoopPipelineReportTest, EntryMergeOwnsScheduleRows) {
        .iteration_lookahead = 0,
        .partition = LOOM_SOURCE_LOOP_PIPELINE_PARTITION_NONE},
   };
-  loom_source_loop_pipeline_t pipeline = {};
-  pipeline.depth = 3;
-  pipeline.values_per_record = 2;
-  pipeline.read_count = 2;
-  pipeline.operations = operations;
-  pipeline.operation_count = IREE_ARRAYSIZE(operations);
+  loom_source_loop_pipeline_t pipeline = {
+      .depth = 3,
+      .values_per_record = 2,
+      .read_count = 2,
+      .operations = operations,
+      .operation_count = IREE_ARRAYSIZE(operations)};
   loom_target_function_version_t version = {};
   version.base.type = &loom_target_function_version_type;
   version.base.function = loom_func_like_cast(module, function);

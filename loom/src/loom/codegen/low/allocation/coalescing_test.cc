@@ -108,12 +108,12 @@ TEST_F(LowAllocationCoalescingTest, ConcatMayPrecedeItsSourceAssignments) {
   };
   intervals[2].unit_count = 2;
   const uint32_t interval_indices[] = {0, 1, 2};
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = intervals;
-  liveness.interval_count = IREE_ARRAYSIZE(intervals);
-  liveness.value_ids = value_ids;
-  liveness.value_count = IREE_ARRAYSIZE(value_ids);
-  liveness.value_interval_indices = interval_indices;
+  loom_liveness_analysis_t liveness = {
+      .intervals = intervals,
+      .interval_count = IREE_ARRAYSIZE(intervals),
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .value_interval_indices = interval_indices};
 
   loom_low_placement_relation_t relations[2] = {};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(relations); ++i) {
@@ -149,11 +149,10 @@ TEST_F(LowAllocationCoalescingTest, ConcatMayPrecedeItsSourceAssignments) {
   assignment_map.assignments = &first_assignment;
   assignment_map.assignment_indices_by_value_ordinal = assignment_indices;
 
-  loom_low_reg_class_t reg_class = {};
-  reg_class.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
-  reg_class.alloc_unit_bits = 32;
-  reg_class.allocatable_count = 8;
-  reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
+  loom_low_reg_class_t reg_class = {.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
+                                    .alloc_unit_bits = 32,
+                                    .allocatable_count = 8,
+                                    .spill_class_id = LOOM_LOW_REG_CLASS_NONE};
   loom_low_descriptor_set_t descriptor_set = {
       .stable_id = 17, .reg_classes = &reg_class, .reg_class_count = 1};
   loom_low_resolved_target_t target = {};
@@ -213,12 +212,12 @@ TEST_F(LowAllocationCoalescingTest,
       Interval(value_ids[1], /*start=*/2, /*end=*/14, value_class),
   };
   const uint32_t interval_indices[] = {0, 1};
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = intervals;
-  liveness.interval_count = IREE_ARRAYSIZE(intervals);
-  liveness.value_ids = value_ids;
-  liveness.value_count = IREE_ARRAYSIZE(value_ids);
-  liveness.value_interval_indices = interval_indices;
+  loom_liveness_analysis_t liveness = {
+      .intervals = intervals,
+      .interval_count = IREE_ARRAYSIZE(intervals),
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .value_interval_indices = interval_indices};
 
   loom_low_placement_relation_t relation = {};
   relation.result_ordinal = 1;

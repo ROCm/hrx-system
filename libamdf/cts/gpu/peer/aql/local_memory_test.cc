@@ -202,8 +202,8 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
                    (system ? AMDF_MEMORY_FLAG_HOST_COHERENT : UINT64_C(0)),
           .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU};
     }
-    amdf_memory_profile_t selected = {};
-    selected.ordinal = AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
+    amdf_memory_profile_t selected = {.ordinal =
+                                          AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN};
     for (uint32_t ordinal = 0; ordinal < scope_info.memory_profile_count;
          ++ordinal) {
       amdf_memory_profile_t profile = {};

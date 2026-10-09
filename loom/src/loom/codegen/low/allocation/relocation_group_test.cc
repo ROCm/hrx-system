@@ -22,9 +22,9 @@ TEST(LowAllocationRelocationGroupTest, RetainsCoalescedTransportClosure) {
   reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
   reg_classes[1].alias_set_id = 2;
   reg_classes[1].flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
-  loom_low_descriptor_set_t descriptors = {};
-  descriptors.reg_classes = reg_classes;
-  descriptors.reg_class_count = IREE_ARRAYSIZE(reg_classes);
+  loom_low_descriptor_set_t descriptors = {
+      .reg_classes = reg_classes,
+      .reg_class_count = IREE_ARRAYSIZE(reg_classes)};
 
   // Reversed assignment order exercises the value-to-assignment join. Values
   // 0..6 share coalesced subranges; 7 is an edge destination, 8 is a real copy,
@@ -43,13 +43,13 @@ TEST(LowAllocationRelocationGroupTest, RetainsCoalescedTransportClosure) {
     assignment.location_base = bases[i];
     assignment.location_count = counts[i];
   }
-  loom_liveness_analysis_t liveness = {};
-  liveness.value_count = IREE_ARRAYSIZE(assignments);
-  loom_low_allocation_assignment_map_t map = {};
-  map.liveness = &liveness;
-  map.assignments = assignments;
-  map.assignment_count = IREE_ARRAYSIZE(assignments);
-  map.assignment_indices_by_value_ordinal = indices;
+  loom_liveness_analysis_t liveness = {.value_count =
+                                           IREE_ARRAYSIZE(assignments)};
+  loom_low_allocation_assignment_map_t map = {
+      .liveness = &liveness,
+      .assignments = assignments,
+      .assignment_count = IREE_ARRAYSIZE(assignments),
+      .assignment_indices_by_value_ordinal = indices};
 
   const auto relation = [](uint32_t result, uint32_t source,
                            uint32_t result_offset, uint32_t source_offset,
@@ -83,10 +83,10 @@ TEST(LowAllocationRelocationGroupTest, RetainsCoalescedTransportClosure) {
       relation(8, 4, 0, 0, 1, LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY),
       relation(9, 0, 0, 0, 4, LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY),
   };
-  loom_low_placement_table_t placement = {};
-  placement.value_count = IREE_ARRAYSIZE(assignments);
-  placement.relations = relations;
-  placement.relation_count = IREE_ARRAYSIZE(relations);
+  loom_low_placement_table_t placement = {
+      .value_count = IREE_ARRAYSIZE(assignments),
+      .relations = relations,
+      .relation_count = IREE_ARRAYSIZE(relations)};
   loom_low_allocation_relocation_groups_t groups = {};
   IREE_ASSERT_OK(loom_low_allocation_relocation_groups_initialize(
       &descriptors, &placement, &map, &arena, &groups));

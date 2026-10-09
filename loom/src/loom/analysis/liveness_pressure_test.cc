@@ -70,10 +70,10 @@ class LivenessPressureTest : public ::testing::Test {
   }
 
   static loom_liveness_value_class_t ScalarClass(loom_scalar_type_t type) {
-    loom_liveness_value_class_t result = {};
-    result.type_kind = LOOM_TYPE_SCALAR;
-    result.element_type = type;
-    result.register_class_id = LOOM_LOW_REGISTER_CLASS_ID_INVALID;
+    loom_liveness_value_class_t result = {
+        .type_kind = LOOM_TYPE_SCALAR,
+        .element_type = type,
+        .register_class_id = LOOM_LOW_REGISTER_CLASS_ID_INVALID};
     return result;
   }
 

@@ -246,10 +246,9 @@ kernel.def target(@target) @configured() {
   LOOMC_ASSERT_OK(loomc_compiler_create(
       context.get(), nullptr, loomc_allocator_system(), &raw_compiler));
   HandlePtr<loomc_compiler_t, loomc_compiler_release> compiler(raw_compiler);
-  loomc_target_pipeline_options_t pipeline_options = {};
-  pipeline_options.kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW;
-  pipeline_options.control_flow_lowering =
-      LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG;
+  loomc_target_pipeline_options_t pipeline_options = {
+      .kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG};
   loomc_pass_program_t* raw_pass_program = nullptr;
   loomc_result_t* raw_result = nullptr;
   LOOMC_ASSERT_OK(loomc_pass_program_create_from_target_pipeline(
@@ -259,8 +258,7 @@ kernel.def target(@target) @configured() {
   ResultPtr result(raw_result);
   ExpectSucceededResult(result.get());
   result.reset();
-  loomc_compile_options_t compile_options = {};
-  compile_options.config_module = config.get();
+  loomc_compile_options_t compile_options = {.config_module = config.get()};
   LOOMC_ASSERT_OK(loomc_compile_module(
       compiler.get(), workspace.get(), pass_program.get(), module.get(),
       &compile_options, loomc_allocator_system(), &raw_result));
@@ -285,11 +283,11 @@ kernel.def target(@target) @configured() {
       report_options.type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS;
       report_options.structure_size = sizeof(report_options);
       report_options.mode = mode;
-      loomc_emit_options_t emit_options = {};
-      emit_options.next = &report_options;
-      emit_options.artifact_format =
-          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV);
-      emit_options.artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY;
+      loomc_emit_options_t emit_options = {
+          .next = &report_options,
+          .artifact_format =
+              loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
+          .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY};
       LOOMC_ASSERT_OK(loomc_emit_module(
           target_environment.get(), workspace.get(), clone.get(), &emit_options,
           loomc_allocator_system(), &raw_result));

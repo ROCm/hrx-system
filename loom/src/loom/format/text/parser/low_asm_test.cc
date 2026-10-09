@@ -277,13 +277,13 @@ TEST_F(LowAsmParserTest, EmbeddedAssemblyOwnsIrAndPreservesModule) {
   loom_text_parse_options_t options = {.diagnostic_sink = capture_.sink()};
   loom_low_descriptor_text_asm_environment_initialize(
       &low_descriptor_registry_, &options.low_asm_environment);
-  loom_source_range_t range = {};
-  range.filename = IREE_SV("caller.cpp");
-  range.source = iree_make_string_view(source.data(), source.size());
-  range.start = source.find('(') + 1;
-  range.end = source.rfind(")\"");
-  range.start_line = 2;
-  range.start_column = 4;
+  loom_source_range_t range = {
+      .filename = IREE_SV("caller.cpp"),
+      .source = iree_make_string_view(source.data(), source.size()),
+      .start = source.find('(') + 1,
+      .end = source.rfind(")\""),
+      .start_line = 2,
+      .start_column = 4};
   loom_op_t* function = nullptr;
   IREE_ASSERT_OK(loom_text_parse_low_assembly(
       range, IREE_SV("test.low.core"), symbol, module, &options, &function));
@@ -328,13 +328,13 @@ TEST_F(LowAsmParserTest, EmbeddedAssemblyEofIsInsideOriginalSource) {
   loom_text_parse_options_t options = {.diagnostic_sink = capture_.sink()};
   loom_low_descriptor_text_asm_environment_initialize(
       &low_descriptor_registry_, &options.low_asm_environment);
-  loom_source_range_t range = {};
-  range.filename = IREE_SV("caller.cpp");
-  range.source = iree_make_string_view(source.data(), source.size());
-  range.start = source.find('(') + 1;
-  range.end = source.rfind(")\"");
-  range.start_line = 2;
-  range.start_column = 4;
+  loom_source_range_t range = {
+      .filename = IREE_SV("caller.cpp"),
+      .source = iree_make_string_view(source.data(), source.size()),
+      .start = source.find('(') + 1,
+      .end = source.rfind(")\""),
+      .start_line = 2,
+      .start_column = 4};
   loom_op_t* function = nullptr;
   IREE_ASSERT_OK(loom_text_parse_low_assembly(
       range, IREE_SV("test.low.core"), symbol, module, &options, &function));

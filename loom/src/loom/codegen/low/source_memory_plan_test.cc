@@ -90,8 +90,8 @@ TEST(SourceMemoryAccessPlanTest, IncludesPhysicalRootByteOffset) {
 }
 
 TEST(SourceMemoryAccessPlanTest, RejectsPhysicalRootByteOffsetOverflow) {
-  loom_low_source_memory_access_plan_t plan = {};
-  plan.static_byte_offset = INT64_MAX - 4;
+  loom_low_source_memory_access_plan_t plan = {.static_byte_offset =
+                                                   INT64_MAX - 4};
   EXPECT_FALSE(
       loom_low_source_memory_access_plan_include_root_byte_offset(&plan, 8));
   EXPECT_EQ(plan.static_byte_offset, INT64_MAX - 4);

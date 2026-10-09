@@ -138,9 +138,8 @@ TEST(AqlBlockProcessorTimestampTest,
      CommandBufferTimestampInitializesRecordAndPackets) {
   DirectDispatchBlock block = MakeDirectDispatchBlock();
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {};
-  ring.base = packets;
-  ring.mask = IREE_ARRAYSIZE(packets) - 1u;
+  iree_hal_amdgpu_aql_ring_t ring = {.base = packets,
+                                     .mask = IREE_ARRAYSIZE(packets) - 1u};
   iree_hal_amdgpu_pm4_ib_slot_t pm4_ib_slots[8] = {};
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
@@ -198,9 +197,8 @@ TEST(AqlBlockProcessorTimestampTest,
      RejectsMissingCommandBufferTimestampStrategy) {
   DirectDispatchBlock block = MakeDirectDispatchBlock();
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {};
-  ring.base = packets;
-  ring.mask = IREE_ARRAYSIZE(packets) - 1u;
+  iree_hal_amdgpu_aql_ring_t ring = {.base = packets,
+                                     .mask = IREE_ARRAYSIZE(packets) - 1u};
   iree_hal_amdgpu_pm4_ib_slot_t pm4_ib_slots[8] = {};
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
@@ -226,9 +224,8 @@ TEST(AqlBlockProcessorTimestampTest,
      DispatchTimestampPatchesCompletionSignalAndHarvestSource) {
   DirectDispatchBlock block = MakeDirectDispatchBlock();
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {};
-  ring.base = packets;
-  ring.mask = IREE_ARRAYSIZE(packets) - 1u;
+  iree_hal_amdgpu_aql_ring_t ring = {.base = packets,
+                                     .mask = IREE_ARRAYSIZE(packets) - 1u};
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[2] = {};
@@ -374,9 +371,8 @@ TEST(AqlBlockProcessorTimestampTest,
 TEST(AqlBlockProcessorTimestampTest, RejectsPartialCommandBufferTimestampPlan) {
   DirectDispatchBlock block = MakeDirectDispatchBlock();
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {};
-  ring.base = packets;
-  ring.mask = IREE_ARRAYSIZE(packets) - 1u;
+  iree_hal_amdgpu_aql_ring_t ring = {.base = packets,
+                                     .mask = IREE_ARRAYSIZE(packets) - 1u};
   iree_hal_amdgpu_pm4_ib_slot_t pm4_ib_slots[8] = {};
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
@@ -398,9 +394,8 @@ TEST(AqlBlockProcessorTimestampTest, RejectsPartialCommandBufferTimestampPlan) {
 TEST(AqlBlockProcessorTimestampTest, RejectsOutOfRangeDispatchPacketOrdinal) {
   DirectDispatchBlock block = MakeDirectDispatchBlock();
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {};
-  ring.base = packets;
-  ring.mask = IREE_ARRAYSIZE(packets) - 1u;
+  iree_hal_amdgpu_aql_ring_t ring = {.base = packets,
+                                     .mask = IREE_ARRAYSIZE(packets) - 1u};
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[2] = {};

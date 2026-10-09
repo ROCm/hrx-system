@@ -79,14 +79,11 @@ TEST(XdnaDeviceProfileTest, IdentityDoesNotPromiseExecution) {
 TEST(XdnaDeviceProfileTest, UnknownIdentityLeavesOutputsUnchanged) {
   for (uint32_t device_id : {0x17F0u, 0x17F1u}) {
     const auto endpoint = MakeXdnaEndpointInfo(device_id, 0x12u);
-    amdf_xdna_endpoint_info_t identity = {};
-    identity.architecture = UINT32_MAX;
+    amdf_xdna_endpoint_info_t identity = {.architecture = UINT32_MAX};
     EXPECT_FALSE(amdf_xdna_query_endpoint_info(&endpoint, &identity));
     EXPECT_EQ(identity.architecture, UINT32_MAX);
-    amdf_xdna_device_info_t info = {};
-    info.reset_epoch = UINT64_MAX;
-    amdf_xdna_device_profile_t profile = {};
-    profile.execution_capabilities = UINT64_MAX;
+    amdf_xdna_device_info_t info = {.reset_epoch = UINT64_MAX};
+    amdf_xdna_device_profile_t profile = {.execution_capabilities = UINT64_MAX};
     EXPECT_FALSE(
         amdf_xdna_device_profile_initialize(&endpoint, &info, &profile));
     EXPECT_EQ(info.reset_epoch, UINT64_MAX);

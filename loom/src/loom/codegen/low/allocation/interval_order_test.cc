@@ -193,10 +193,10 @@ TEST_F(LowAllocationIntervalOrderTest,
   };
   const uint32_t acquisition_starts[] = {3, 3, 3, 3};
   const loom_value_ordinal_t storage_order[] = {3, 2, 1, 0};
-  loom_low_placement_table_t placement = {};
-  placement.value_count = IREE_ARRAYSIZE(intervals);
-  placement.storage_value_order = storage_order;
-  placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
+  loom_low_placement_table_t placement = {
+      .value_count = IREE_ARRAYSIZE(intervals),
+      .storage_value_order = storage_order,
+      .storage_value_order_count = IREE_ARRAYSIZE(storage_order)};
   // Optional-only topology has no tied-origin array; every value owns itself.
   loom_low_allocation_interval_order_t order = {};
   IREE_ASSERT_OK(BuildOrder(intervals, IREE_ARRAYSIZE(intervals),
@@ -220,11 +220,11 @@ TEST_F(LowAllocationIntervalOrderTest,
   const uint32_t acquisition_starts[] = {2, 2, 2, 2};
   const loom_value_ordinal_t storage_order[] = {1, 3, 2, 0};
   const loom_value_ordinal_t tied_origins[] = {0, 0, 0, 3};
-  loom_low_placement_table_t placement = {};
-  placement.value_count = IREE_ARRAYSIZE(intervals);
-  placement.storage_value_order = storage_order;
-  placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
-  placement.tied_storage_origins_by_value_ordinal = tied_origins;
+  loom_low_placement_table_t placement = {
+      .value_count = IREE_ARRAYSIZE(intervals),
+      .storage_value_order = storage_order,
+      .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
+      .tied_storage_origins_by_value_ordinal = tied_origins};
   loom_low_allocation_interval_order_t order = {};
   IREE_ASSERT_OK(BuildOrder(intervals, IREE_ARRAYSIZE(intervals),
                             acquisition_starts, placement, &order));

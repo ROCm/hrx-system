@@ -58,26 +58,26 @@ static loom_target_compile_report_source_low_memory_row_t MakeMemoryRow(
     uint32_t issued_read_byte_count, uint32_t issued_write_byte_count,
     uint32_t dynamic_stride_bytes, uint32_t vector_lane_stride_bytes,
     loom_target_compile_report_memory_interval_t source_interval) {
-  loom_target_compile_report_source_low_memory_row_t row = {};
-  row.function_name = IREE_SVL("kernel");
-  row.source_op_name = source_op_name;
-  row.source_op_kind = source_op_kind;
-  row.source_root_name = IREE_SVL("scratch");
-  row.source_root_argument_index = 1;
-  row.memory_space = IREE_SVL("workgroup");
-  row.operation_kind = operation_kind;
-  row.packet_key = packet_key;
-  row.address_form = IREE_SVL("default");
-  row.dynamic_term_kind = IREE_SVL("vaddr");
-  row.static_offset_bytes = static_offset_bytes;
-  row.element_byte_count = 4;
-  row.vector_lane_count = vector_lane_count;
-  row.issued_read_byte_count = issued_read_byte_count;
-  row.issued_write_byte_count = issued_write_byte_count;
-  row.dynamic_stride_bytes = dynamic_stride_bytes;
-  row.vector_lane_stride_bytes = vector_lane_stride_bytes;
-  row.source_interval = source_interval;
-  row.execution_count_plus_one = 2;
+  loom_target_compile_report_source_low_memory_row_t row = {
+      .function_name = IREE_SVL("kernel"),
+      .source_op_name = source_op_name,
+      .source_op_kind = source_op_kind,
+      .source_root_name = IREE_SVL("scratch"),
+      .source_root_argument_index = 1,
+      .memory_space = IREE_SVL("workgroup"),
+      .operation_kind = operation_kind,
+      .packet_key = packet_key,
+      .address_form = IREE_SVL("default"),
+      .dynamic_term_kind = IREE_SVL("vaddr"),
+      .static_offset_bytes = static_offset_bytes,
+      .element_byte_count = 4,
+      .vector_lane_count = vector_lane_count,
+      .issued_read_byte_count = issued_read_byte_count,
+      .issued_write_byte_count = issued_write_byte_count,
+      .dynamic_stride_bytes = dynamic_stride_bytes,
+      .vector_lane_stride_bytes = vector_lane_stride_bytes,
+      .source_interval = source_interval,
+      .execution_count_plus_one = 2};
   return row;
 }
 
@@ -814,32 +814,32 @@ TEST(CompileReportFormatTest, FormatsSourceLowMemoryIntervals) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
 
-  loom_target_compile_report_source_low_memory_row_t row = {};
-  row.function_name = IREE_SVL("kernel");
-  row.source_op_name = IREE_SVL("vector.load");
-  row.source_op_kind = 43;
-  row.source_root_name = IREE_SVL("input");
-  row.source_root_argument_index = 0;
-  row.memory_space = IREE_SVL("global");
-  row.operation_kind = IREE_SVL("load");
-  row.packet_key = IREE_SVL("test.load.v2");
-  row.address_form = IREE_SVL("global_saddr");
-  row.dynamic_term_kind = IREE_SVL("vaddr");
-  row.element_byte_count = 4;
-  row.vector_lane_count = 2;
-  row.issued_read_byte_count = 8;
-  row.dynamic_stride_bytes = 16;
-  row.vector_lane_stride_bytes = 4;
-  row.source_interval = {
-      .flags = LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
-               LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE |
-               LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH,
-      .begin_min_bytes = 4,
-      .begin_max_bytes = 12,
-      .end_min_bytes = 12,
-      .end_max_bytes = 20,
-      .exact_length_bytes = 8,
-  };
+  loom_target_compile_report_source_low_memory_row_t row = {
+      .function_name = IREE_SVL("kernel"),
+      .source_op_name = IREE_SVL("vector.load"),
+      .source_op_kind = 43,
+      .source_root_name = IREE_SVL("input"),
+      .source_root_argument_index = 0,
+      .memory_space = IREE_SVL("global"),
+      .operation_kind = IREE_SVL("load"),
+      .packet_key = IREE_SVL("test.load.v2"),
+      .address_form = IREE_SVL("global_saddr"),
+      .dynamic_term_kind = IREE_SVL("vaddr"),
+      .element_byte_count = 4,
+      .vector_lane_count = 2,
+      .issued_read_byte_count = 8,
+      .dynamic_stride_bytes = 16,
+      .vector_lane_stride_bytes = 4,
+      .source_interval = {
+          .flags = LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
+                   LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE |
+                   LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH,
+          .begin_min_bytes = 4,
+          .begin_max_bytes = 12,
+          .end_min_bytes = 12,
+          .end_max_bytes = 20,
+          .exact_length_bytes = 8,
+      }};
   IREE_ASSERT_OK(
       loom_target_compile_report_record_source_low_memory_row(&report, &row));
 

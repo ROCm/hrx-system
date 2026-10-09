@@ -131,20 +131,20 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   workload.flat_workgroup_cluster_size = 2;
   loom_target_compile_report_record_workload(&report, &workload);
 
-  loom_target_compile_report_target_resources_t resources = {};
-  resources.scalar_register_class = IREE_SVL("amdgpu.sgpr");
-  resources.scalar_register_count = 38;
-  resources.scalar_pressure_peak_live_units = 32;
-  resources.scalar_register_overhead_units = 6;
-  resources.vector_register_class = IREE_SVL("amdgpu.vgpr");
-  resources.vector_register_count = 160;
-  resources.vector_pressure_peak_live_units = 136;
-  resources.vector_register_overhead_units = 24;
-  resources.subgroup_size = 64;
-  resources.max_subgroups_per_simd = 16;
-  resources.resident_subgroups_per_simd = 3;
-  resources.occupancy_percent = 18;
-  resources.limiting_resource = IREE_SVL("amdgpu.vgpr");
+  loom_target_compile_report_target_resources_t resources = {
+      .scalar_register_class = IREE_SVL("amdgpu.sgpr"),
+      .scalar_register_count = 38,
+      .scalar_pressure_peak_live_units = 32,
+      .scalar_register_overhead_units = 6,
+      .vector_register_class = IREE_SVL("amdgpu.vgpr"),
+      .vector_register_count = 160,
+      .vector_pressure_peak_live_units = 136,
+      .vector_register_overhead_units = 24,
+      .subgroup_size = 64,
+      .max_subgroups_per_simd = 16,
+      .resident_subgroups_per_simd = 3,
+      .occupancy_percent = 18,
+      .limiting_resource = IREE_SVL("amdgpu.vgpr")};
   resources.residency_summary.flags =
       LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_VALID |
       LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_NEXT_BETTER_TIER |
@@ -444,14 +444,14 @@ TEST(CompileReportFormatTest,
       LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_INCOMPLETE_RESOURCE_COUNTS |
       LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_UNKNOWN_WORKGROUP_SIZE;
   loom_target_compile_report_record_target_resources(&report, &resources);
-  loom_target_residency_constraint_t resource = {};
-  resource.name = IREE_SVL("amdgpu.vgpr_agpr");
-  resource.kind = LOOM_TARGET_RESIDENCY_CONSTRAINT_POOLED_RESOURCE;
-  resource.unit = IREE_SVL("registers");
-  resource.allocation_scope = IREE_SVL("subgroup");
-  resource.pool_scope = IREE_SVL("SIMD");
-  resource.pool_units = 512;
-  resource.allocation_granularity = 8;
+  loom_target_residency_constraint_t resource = {
+      .name = IREE_SVL("amdgpu.vgpr_agpr"),
+      .kind = LOOM_TARGET_RESIDENCY_CONSTRAINT_POOLED_RESOURCE,
+      .unit = IREE_SVL("registers"),
+      .allocation_scope = IREE_SVL("subgroup"),
+      .pool_scope = IREE_SVL("SIMD"),
+      .pool_units = 512,
+      .allocation_granularity = 8};
   const loom_target_residency_constraint_list_t constraints = {&resource, 1};
   IREE_ASSERT_OK(loom_target_compile_report_record_residency_constraints(
       &report, &constraints));

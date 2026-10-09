@@ -31,13 +31,13 @@ TEST(CompileReportLowMixTest, CountsExecutionBarriersFromInstructionClasses) {
   }
   descriptor_views[1].instruction_class_flags |=
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_EXECUTION_BARRIER;
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.descriptors = descriptors;
-  descriptor_set.descriptor_views = descriptor_views;
-  descriptor_set.descriptor_count = IREE_ARRAYSIZE(descriptors);
-  descriptor_set.descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors);
-  descriptor_set.effects = &effect;
-  descriptor_set.effect_count = 1;
+  loom_low_descriptor_set_t descriptor_set = {
+      .descriptors = descriptors,
+      .descriptor_views = descriptor_views,
+      .descriptor_count = IREE_ARRAYSIZE(descriptors),
+      .descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors),
+      .effects = &effect,
+      .effect_count = 1};
   loom_low_schedule_table_t schedule = {};
   loom_low_allocation_table_t allocation = {};
   loom_target_compile_report_static_instruction_mix_t mix = {};
@@ -79,13 +79,13 @@ TEST(CompileReportLowMixTest, CountsOnlyMemoryAttachedReadWriteEffects) {
     descriptors[i].effect_start = i;
     descriptors[i].effect_count = 1;
   }
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.descriptors = descriptors;
-  descriptor_set.descriptor_views = descriptor_views;
-  descriptor_set.descriptor_count = IREE_ARRAYSIZE(descriptors);
-  descriptor_set.descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors);
-  descriptor_set.effects = effects;
-  descriptor_set.effect_count = IREE_ARRAYSIZE(effects);
+  loom_low_descriptor_set_t descriptor_set = {
+      .descriptors = descriptors,
+      .descriptor_views = descriptor_views,
+      .descriptor_count = IREE_ARRAYSIZE(descriptors),
+      .descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors),
+      .effects = effects,
+      .effect_count = IREE_ARRAYSIZE(effects)};
   loom_low_schedule_table_t schedule = {};
   loom_low_allocation_table_t allocation = {};
   loom_target_compile_report_static_instruction_mix_t mix = {};
@@ -212,22 +212,23 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           .spill_slot_space = LOOM_LOW_SPILL_SLOT_SPACE_STACK,
       },
   };
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.stable_id = 1;
-  descriptor_set.string_pool = {
-      .data = kDescriptorStringPool,
-      .data_length = sizeof(kDescriptorStringPool) - 1,
-  };
-  descriptor_set.descriptors = descriptors;
-  descriptor_set.descriptor_views = descriptor_views;
-  descriptor_set.descriptor_count = IREE_ARRAYSIZE(descriptors);
-  descriptor_set.descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors);
-  descriptor_set.effects = effects;
-  descriptor_set.effect_count = IREE_ARRAYSIZE(effects);
-  descriptor_set.reg_classes = reg_classes;
-  descriptor_set.reg_class_count = IREE_ARRAYSIZE(reg_classes);
-  descriptor_set.schedule_classes = schedule_classes;
-  descriptor_set.schedule_class_count = IREE_ARRAYSIZE(schedule_classes);
+  loom_low_descriptor_set_t descriptor_set = {
+      .stable_id = 1,
+      .string_pool =
+          {
+              .data = kDescriptorStringPool,
+              .data_length = sizeof(kDescriptorStringPool) - 1,
+          },
+      .descriptors = descriptors,
+      .descriptor_views = descriptor_views,
+      .descriptor_count = IREE_ARRAYSIZE(descriptors),
+      .descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors),
+      .effects = effects,
+      .effect_count = IREE_ARRAYSIZE(effects),
+      .reg_classes = reg_classes,
+      .reg_class_count = IREE_ARRAYSIZE(reg_classes),
+      .schedule_classes = schedule_classes,
+      .schedule_class_count = IREE_ARRAYSIZE(schedule_classes)};
   descriptor_views[0].schedule_class_id = 0;
   descriptor_views[1].schedule_class_id = 1;
   descriptor_views[2].schedule_class_id = 1;

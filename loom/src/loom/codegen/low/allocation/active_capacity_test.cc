@@ -117,9 +117,8 @@ class LowAllocationActiveCapacityTest : public ::testing::Test {
     placement.ranges_by_result_ordinal = result_ranges.data();
     placement.ranges_by_source_ordinal = source_ranges.data();
     placement.relation_indices_by_source_ordinal = source_indices.data();
-    loom_low_descriptor_set_t descriptor_set = {};
-    descriptor_set.reg_classes = classes_;
-    descriptor_set.reg_class_count = IREE_ARRAYSIZE(classes_);
+    loom_low_descriptor_set_t descriptor_set = {
+        .reg_classes = classes_, .reg_class_count = IREE_ARRAYSIZE(classes_)};
     loom_low_allocation_active_capacity_t capacity = {};
     IREE_ASSERT_OK(loom_low_allocation_active_capacity_calculate(
         &descriptor_set, &liveness, &unit_liveness, &placement, &pool_,

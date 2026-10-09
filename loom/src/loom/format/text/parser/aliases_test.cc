@@ -30,8 +30,7 @@ class AliasesTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("aliases"), &pool_,
                                         nullptr, iree_allocator_system(),
                                         &module_));
-    loom_encoding_t encoding = {};
-    encoding.alias_id = LOOM_STRING_ID_INVALID;
+    loom_encoding_t encoding = {.alias_id = LOOM_STRING_ID_INVALID};
     IREE_ASSERT_OK(loom_module_intern_string(
         module_, IREE_SV("encoding.layout.dense"), &encoding.name_id));
     IREE_ASSERT_OK(loom_module_add_encoding(module_, &encoding, &encoding_id_));

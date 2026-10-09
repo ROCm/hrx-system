@@ -70,9 +70,8 @@ TEST(PipelineResourcesTest, CapacityIncludesFixedAndCompiledReservations) {
     IREE_ASSERT_OK(loom_source_storage_packing_create({}, service, 1, &arena,
                                                       &pool.packing));
   }
-  loom_pipeline_resources_t resources = {};
-  resources.pools = pools;
-  resources.pool_count = IREE_ARRAYSIZE(pools);
+  loom_pipeline_resources_t resources = {.pools = pools,
+                                         .pool_count = IREE_ARRAYSIZE(pools)};
   uint64_t offset = UINT64_MAX;
   IREE_ASSERT_OK(loom_source_storage_packing_append(pools[1].packing, 1, 448,
                                                     16, &offset));

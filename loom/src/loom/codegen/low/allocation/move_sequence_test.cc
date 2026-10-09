@@ -19,9 +19,9 @@ namespace {
 const loom_low_descriptor_set_t* IndependentDescriptorSet() {
   static const loom_low_reg_class_t kRegClasses[3] = {};
   static const loom_low_descriptor_set_t kDescriptorSet = [] {
-    loom_low_descriptor_set_t descriptor_set = {};
-    descriptor_set.reg_classes = kRegClasses;
-    descriptor_set.reg_class_count = IREE_ARRAYSIZE(kRegClasses);
+    loom_low_descriptor_set_t descriptor_set = {
+        .reg_classes = kRegClasses,
+        .reg_class_count = IREE_ARRAYSIZE(kRegClasses)};
     return descriptor_set;
   }();
   return &kDescriptorSet;
@@ -86,15 +86,14 @@ const loom_low_descriptor_set_t* ExplicitDescriptorSet() {
       {.name_string_ref = {}, .atomic_unit_start = 5, .atomic_unit_count = 2},
   };
   static const loom_low_descriptor_set_t kDescriptorSet = [] {
-    loom_low_descriptor_set_t descriptor_set = {};
-    descriptor_set.reg_classes = kRegClasses;
-    descriptor_set.reg_class_count = IREE_ARRAYSIZE(kRegClasses);
-    descriptor_set.physical_registers = kPhysicalRegisters;
-    descriptor_set.physical_register_count = IREE_ARRAYSIZE(kPhysicalRegisters);
-    descriptor_set.physical_register_atomic_units = kAtomicUnits;
-    descriptor_set.physical_register_atomic_unit_count =
-        IREE_ARRAYSIZE(kAtomicUnits);
-    descriptor_set.physical_register_unit_count = 6;
+    loom_low_descriptor_set_t descriptor_set = {
+        .reg_classes = kRegClasses,
+        .reg_class_count = IREE_ARRAYSIZE(kRegClasses),
+        .physical_registers = kPhysicalRegisters,
+        .physical_register_count = IREE_ARRAYSIZE(kPhysicalRegisters),
+        .physical_register_atomic_units = kAtomicUnits,
+        .physical_register_atomic_unit_count = IREE_ARRAYSIZE(kAtomicUnits),
+        .physical_register_unit_count = 6};
     return descriptor_set;
   }();
   return &kDescriptorSet;

@@ -143,8 +143,8 @@ TEST(AtomicTest, StoreX32NormalizesModeAndClearsPadding) {
   uint16_t setup = 0xBEEFu;
   packet.header = 0xFFFFu;
   packet.setup = 0xA5A5u;
-  iree_hal_amdgpu_device_atomic_store_kernargs_t kernargs = {};
-  kernargs.reserved = UINT32_MAX;
+  iree_hal_amdgpu_device_atomic_store_kernargs_t kernargs = {.reserved =
+                                                                 UINT32_MAX};
   const iree_hal_atomic_store_params_t params = {
       .value = 0x89ABCDEFu,
       .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,

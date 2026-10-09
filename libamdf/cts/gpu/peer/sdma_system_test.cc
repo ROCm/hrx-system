@@ -103,8 +103,8 @@ class PeerSdmaSystemTest : public GpuPeerDeviceFixture {
     info.structure_size = sizeof(info);
     ASSERT_EQ(api_->memory_scope_query_info(system_scope_, &info),
               AMDF_STATUS_OK);
-    amdf_memory_profile_t selected = {};
-    selected.ordinal = AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
+    amdf_memory_profile_t selected = {.ordinal =
+                                          AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN};
     for (uint32_t ordinal = 0; ordinal < info.memory_profile_count; ++ordinal) {
       amdf_memory_profile_t profile = {};
       profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;

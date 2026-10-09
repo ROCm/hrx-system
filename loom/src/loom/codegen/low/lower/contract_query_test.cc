@@ -286,12 +286,12 @@ TEST_F(LowContractQuerySourceMemoryTest,
       .param_count = 8,
       .flags = LOOM_LOW_LOWER_DIAGNOSTIC_FLAG_IMPLICIT_TARGET_CONTEXT,
   };
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.string_pool = kRuleStringPool;
-  rule_set.diagnostic_params = diagnostic_params;
-  rule_set.diagnostic_param_count = IREE_ARRAYSIZE(diagnostic_params);
-  rule_set.diagnostic_param_refs = diagnostic_param_refs;
-  rule_set.diagnostic_param_ref_count = IREE_ARRAYSIZE(diagnostic_param_refs);
+  loom_low_lower_rule_set_t rule_set = {
+      .string_pool = kRuleStringPool,
+      .diagnostic_params = diagnostic_params,
+      .diagnostic_param_count = IREE_ARRAYSIZE(diagnostic_params),
+      .diagnostic_param_refs = diagnostic_param_refs,
+      .diagnostic_param_ref_count = IREE_ARRAYSIZE(diagnostic_param_refs)};
   loom_low_lower_rule_match_context_t match_context = {
       .module = module_, .function = function_, .bundle = &kTargetBundle};
   loom_diagnostic_param_t params[8] = {};
@@ -386,17 +386,17 @@ TEST(LowContractQueryTest, IndexedMissReplaysCompleteOrderForBestRejection) {
   const loom_low_lower_diagnostic_t diagnostic = {
       .error_ref = LOOM_ERR_TARGET_003_REF,
   };
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.rules = rules;
-  rule_set.rule_count = IREE_ARRAYSIZE(rules);
-  rule_set.guard_payloads = &guard_payload;
-  rule_set.guard_payload_count = 1;
-  rule_set.guards = guards;
-  rule_set.guard_count = IREE_ARRAYSIZE(guards);
-  rule_set.guard_refs = guard_refs;
-  rule_set.guard_ref_count = IREE_ARRAYSIZE(guard_refs);
-  rule_set.diagnostics = &diagnostic;
-  rule_set.diagnostic_count = 1;
+  loom_low_lower_rule_set_t rule_set = {
+      .rules = rules,
+      .rule_count = IREE_ARRAYSIZE(rules),
+      .guard_payloads = &guard_payload,
+      .guard_payload_count = 1,
+      .guards = guards,
+      .guard_count = IREE_ARRAYSIZE(guards),
+      .guard_refs = guard_refs,
+      .guard_ref_count = IREE_ARRAYSIZE(guard_refs),
+      .diagnostics = &diagnostic,
+      .diagnostic_count = 1};
   const loom_low_lower_rule_set_t* rule_sets[] = {&rule_set};
 
   const loom_target_contract_descriptor_rule_t descriptor_rules[] = {{0}, {1}};
@@ -726,9 +726,9 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
   const loom_low_lower_diagnostic_param_ref_t diagnostic_param_refs[] = {
       0, 1, 2, 3, 4, 5, 6, 7};
   const loom_low_lower_guard_ref_t guard_refs[] = {0};
-  loom_low_lower_diagnostic_t diagnostic = {};
-  diagnostic.error_ref = LOOM_ERR_TARGET_003_REF;
-  diagnostic.param_count = IREE_ARRAYSIZE(diagnostic_params);
+  loom_low_lower_diagnostic_t diagnostic = {
+      .error_ref = LOOM_ERR_TARGET_003_REF,
+      .param_count = IREE_ARRAYSIZE(diagnostic_params)};
   loom_low_lower_rule_t rule = {.guard_count = 1};
   loom_low_lower_rule_set_t rule_set = {};
   rule_set.string_pool = kRuleStringPool;
@@ -848,20 +848,20 @@ TEST_F(LowContractQuerySourceMemoryTest,
   source_memory.dynamic_term_count = 1;
   source_memory.dynamic_index_source =
       LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE;
-  loom_low_lower_source_memory_shape_t source_memory_shape = {};
-  source_memory_shape.vector_lane_byte_stride = 4;
-  source_memory_shape.static_byte_offset_minimum = INT64_MIN;
-  source_memory_shape.static_byte_offset_maximum = INT64_MAX;
-  source_memory_shape.dynamic_byte_stride = 4;
+  loom_low_lower_source_memory_shape_t source_memory_shape = {
+      .vector_lane_byte_stride = 4,
+      .static_byte_offset_minimum = INT64_MIN,
+      .static_byte_offset_maximum = INT64_MAX,
+      .dynamic_byte_stride = 4};
   loom_low_lower_source_memory_diagnostics_t source_memory_diagnostics = {};
   for (uint16_t& diagnostic_index :
        source_memory_diagnostics.rejection_diagnostic_indices) {
     diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
   }
-  loom_low_lower_emit_t emit = {};
-  emit.kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP;
-  emit.descriptor_ref = LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE;
-  emit.source_memory_ordinal = 1;
+  loom_low_lower_emit_t emit = {
+      .kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP,
+      .descriptor_ref = LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE,
+      .source_memory_ordinal = 1};
   const loom_low_lower_emit_ref_t emit_ref = 0;
   loom_low_lower_rule_t rule = {.emit_count = 1};
 

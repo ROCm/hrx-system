@@ -64,13 +64,13 @@ TEST(InputModuleTest, AllowsLogicalLocationsMatchingRemappedMainSource) {
   IREE_ASSERT_OK(loom_context_finalize(&context));
 
   const iree_string_view_t prefix_maps[] = {IREE_SV("/workspace/=")};
-  loom_input_request_t request = {};
-  request.source = IREE_SV(R"(
+  loom_input_request_t request = {
+      .source = IREE_SV(R"(
 func.def @entry() {
   func.return loc("logical/source.loom":2:3)
 } loc("logical/source.loom":1:1 to 3:2)
-)");
-  request.path = IREE_SV("/workspace/logical/source.loom");
+)"),
+      .path = IREE_SV("/workspace/logical/source.loom")};
   request.source_path_options.prefix_maps = {IREE_ARRAYSIZE(prefix_maps),
                                              prefix_maps};
   loom_input_module_t input = {};

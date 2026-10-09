@@ -103,8 +103,7 @@ TEST_F(VMReflectionTest, InsufficientStorageLeavesDescriptionUntouched) {
   std::memset(storage_bytes, 0xA5, required_size - 1);
   const std::vector<uint8_t> original_storage(
       storage_bytes, storage_bytes + required_size - 1);
-  iree_vm_export_description_t description = {};
-  description.name = IREE_SV("untouched");
+  iree_vm_export_description_t description = {.name = IREE_SV("untouched")};
   iree_host_size_t repeated_required_size = 0;
   IREE_ASSERT_OK(iree_vm_export_query_description(
       export_value, MakeStorageSpan(storage, required_size - 1),

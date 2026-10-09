@@ -124,8 +124,8 @@ TEST(StreamQueueCapabilitiesTest, RejectsMissingFamilySpecification) {
 }
 
 TEST(StreamValueTimelineTest, OverflowDoesNotReserveDuplicateValue) {
-  iree_hal_streaming_stream_t stream = {};
-  stream.pending_value = IREE_HAL_SEMAPHORE_MAX_VALUE;
+  iree_hal_streaming_stream_t stream = {.pending_value =
+                                            IREE_HAL_SEMAPHORE_MAX_VALUE};
   uint64_t wait_value = 17;
   uint64_t signal_value = 23;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
