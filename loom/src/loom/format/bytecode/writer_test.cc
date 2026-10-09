@@ -1374,14 +1374,14 @@ TEST_F(WriterTest, ProjectsModuleSymbolsIntoPresentationOrder) {
   loom_op_t* second_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(
       &builder, 0, /*visibility=*/0, /*cc=*/0,
-      loom_symbol_ref_t{/*.module_id=*/0, second_symbol_id},
+      loom_symbol_ref_t{.module_id = 0, .symbol_id = second_symbol_id},
       /*arg_types=*/nullptr, 0, /*result_types=*/nullptr, 0,
       /*arg_names=*/nullptr, 0, /*result_names=*/nullptr, 0,
       LOOM_LOCATION_UNKNOWN, &second_op));
   loom_op_t* first_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(
       &builder, 0, /*visibility=*/0, /*cc=*/0,
-      loom_symbol_ref_t{/*.module_id=*/0, first_symbol_id},
+      loom_symbol_ref_t{.module_id = 0, .symbol_id = first_symbol_id},
       /*arg_types=*/nullptr, 0, /*result_types=*/nullptr, 0,
       /*arg_names=*/nullptr, 0, /*result_names=*/nullptr, 0,
       LOOM_LOCATION_UNKNOWN, &first_op));
