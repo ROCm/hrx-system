@@ -175,10 +175,8 @@ static uint32_t loom_amdgpu_memory_packet_addr_operand_unit_count(
   for (uint16_t descriptor_operand_index = descriptor->result_count;
        descriptor_operand_index < descriptor->operand_count;
        ++descriptor_operand_index) {
-    const uint32_t operand_row =
-        descriptor->operand_start + descriptor_operand_index;
-    IREE_ASSERT_LT(operand_row, descriptor_set->operand_count);
-    const loom_low_operand_t* operand = &descriptor_set->operands[operand_row];
+    const loom_low_operand_t* operand = loom_low_descriptor_operand(
+        descriptor_set, descriptor, descriptor_operand_index);
     if (loom_amdgpu_memory_packet_operand_matches_field(descriptor_set, operand,
                                                         IREE_SV("addr"))) {
       return operand->unit_count;

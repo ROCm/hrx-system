@@ -695,13 +695,10 @@ static iree_status_t loom_low_lower_descriptor_matrix_packet_operands(
   const loom_low_descriptor_t* descriptor = plan->descriptor.descriptor;
 
   iree_host_size_t operand_count = 0;
-  IREE_ASSERT((uint64_t)descriptor->operand_start +
-                  (uint64_t)descriptor->operand_count <=
-              descriptor_set->operand_count);
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
-    const uint32_t row = descriptor->operand_start + i;
-    const loom_low_operand_t* operand = &descriptor_set->operands[row];
+    const loom_low_operand_t* operand =
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (loom_low_operand_role_is_packet_operand(operand->role)) {
       ++operand_count;
     }
@@ -716,7 +713,7 @@ static iree_status_t loom_low_lower_descriptor_matrix_packet_operands(
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (!loom_low_operand_role_is_packet_operand(operand->role)) {
       continue;
     }
@@ -772,9 +769,8 @@ static iree_status_t loom_low_lower_descriptor_matrix_tied_results(
           "descriptor-matrix selected tied result constraint is invalid");
       IREE_BUILTIN_UNREACHABLE();
     }
-    const loom_low_operand_t* tied_operand =
-        &descriptor_set->operands[descriptor->operand_start +
-                                  constraint->rhs_operand_index];
+    const loom_low_operand_t* tied_operand = loom_low_descriptor_operand(
+        descriptor_set, descriptor, constraint->rhs_operand_index);
     IREE_ASSERT_NE(tied_operand->source_value_index, LOOM_LOW_ID_NONE);
     tied_results[tied_result_index++] = (loom_tied_result_t){
         .result_index = constraint->lhs_operand_index,
@@ -800,9 +796,8 @@ static bool loom_low_lower_descriptor_matrix_destructive_operand_was_copied(
     }
     IREE_ASSERT(previous->rhs_operand_index != LOOM_LOW_ID_NONE);
     IREE_ASSERT(previous->rhs_operand_index < descriptor->operand_count);
-    const loom_low_operand_t* previous_operand =
-        &descriptor_set->operands[descriptor->operand_start +
-                                  previous->rhs_operand_index];
+    const loom_low_operand_t* previous_operand = loom_low_descriptor_operand(
+        descriptor_set, descriptor, previous->rhs_operand_index);
     if (previous_operand->source_value_index == packet_operand_index) {
       return true;
     }
@@ -828,9 +823,8 @@ static iree_status_t loom_low_lower_descriptor_matrix_copy_destructive_operands(
     IREE_ASSERT(constraint->lhs_operand_index < descriptor->result_count);
     IREE_ASSERT(constraint->rhs_operand_index != LOOM_LOW_ID_NONE);
     IREE_ASSERT(constraint->rhs_operand_index < descriptor->operand_count);
-    const loom_low_operand_t* destructive_operand =
-        &descriptor_set->operands[descriptor->operand_start +
-                                  constraint->rhs_operand_index];
+    const loom_low_operand_t* destructive_operand = loom_low_descriptor_operand(
+        descriptor_set, descriptor, constraint->rhs_operand_index);
     const uint16_t packet_operand_index =
         destructive_operand->source_value_index;
     IREE_ASSERT_NE(packet_operand_index, LOOM_LOW_ID_NONE);

@@ -94,6 +94,9 @@ void InitializeAddressabilityTestState(
       IREE_ARRAYSIZE(state->reg_class_alts);
   state->descriptor_set.operands = state->operands;
   state->descriptor_set.operand_count = IREE_ARRAYSIZE(state->operands);
+  static const uint16_t operand_indices[] = {0, 1};
+  state->descriptor_set.operand_indices = operand_indices;
+  state->descriptor_set.operand_index_count = IREE_ARRAYSIZE(operand_indices);
   state->descriptor_set.descriptors = state->descriptors;
   state->descriptor_set.descriptor_views = state->descriptor_views;
   state->descriptor_set.descriptor_count = IREE_ARRAYSIZE(state->descriptors);

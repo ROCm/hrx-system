@@ -771,10 +771,9 @@ static iree_status_t loom_low_placement_collect_op_relations(
     }
   }
   const loom_low_descriptor_t* descriptor = packet.descriptor;
-  const loom_low_operand_t* descriptor_operands =
-      &state->descriptor_set->operands[descriptor->operand_start];
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const loom_low_operand_t* operand = &descriptor_operands[i];
+    const loom_low_operand_t* operand =
+        loom_low_descriptor_operand(state->descriptor_set, descriptor, i);
     if (operand->source_value_index == LOOM_LOW_ID_NONE) {
       continue;
     }
@@ -799,10 +798,12 @@ static iree_status_t loom_low_placement_collect_op_relations(
     }
     const loom_value_id_t result_value_id =
         loom_low_placement_descriptor_operand_value_id(
-            op, &descriptor_operands[constraint->lhs_operand_index]);
+            op, loom_low_descriptor_operand(state->descriptor_set, descriptor,
+                                            constraint->lhs_operand_index));
     const loom_value_id_t source_value_id =
         loom_low_placement_descriptor_operand_value_id(
-            op, &descriptor_operands[constraint->rhs_operand_index]);
+            op, loom_low_descriptor_operand(state->descriptor_set, descriptor,
+                                            constraint->rhs_operand_index));
     if (result_value_id == source_value_id) {
       continue;
     }

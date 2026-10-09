@@ -205,12 +205,12 @@ class AmdgpuFeedbackTest : public ::testing::Test {
     for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
          ++i) {
       const uint32_t operand_row = descriptor->operand_start + i;
-      EXPECT_LT(operand_row, descriptor_set_->operand_count);
-      if (operand_row >= descriptor_set_->operand_count) {
+      EXPECT_LT(operand_row, descriptor_set_->operand_index_count);
+      if (operand_row >= descriptor_set_->operand_index_count) {
         return count;
       }
       const loom_low_operand_t* operand =
-          &descriptor_set_->operands[operand_row];
+          loom_low_descriptor_operand(descriptor_set_, descriptor, i);
       if (loom_low_operand_role_is_packet_operand(operand->role)) {
         ++count;
       }

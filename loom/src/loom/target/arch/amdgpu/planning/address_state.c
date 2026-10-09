@@ -42,7 +42,7 @@ loom_amdgpu_address_state_requirement_for_packet(
       allocation->target.descriptor_set;
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + (uint32_t)i];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (operand->address_state_slot == 0) {
       continue;
     }

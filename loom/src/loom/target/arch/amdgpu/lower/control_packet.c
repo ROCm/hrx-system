@@ -40,10 +40,8 @@ static iree_status_t loom_amdgpu_control_packet_descriptor_operand_type(
     loom_type_t* out_type) {
   *out_type = loom_type_none();
   IREE_ASSERT_LT(descriptor_operand_index, descriptor->operand_count);
-  const uint32_t operand_index =
-      (uint32_t)descriptor->operand_start + descriptor_operand_index;
-  IREE_ASSERT_LT(operand_index, descriptor_set->operand_count);
-  const loom_low_operand_t* operand = &descriptor_set->operands[operand_index];
+  const loom_low_operand_t* operand = loom_low_descriptor_operand(
+      descriptor_set, descriptor, descriptor_operand_index);
   for (uint16_t i = 0; i < operand->reg_class_alt_count; ++i) {
     const uint32_t alt_index = operand->reg_class_alt_start + i;
     IREE_ASSERT_LT(alt_index, descriptor_set->reg_class_alt_count);

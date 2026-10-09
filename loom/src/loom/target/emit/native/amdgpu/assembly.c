@@ -230,9 +230,8 @@ static iree_status_t loom_amdgpu_append_descriptor_assignment(
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  const loom_low_operand_t* operand =
-      &descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
+  const loom_low_operand_t* operand = loom_low_descriptor_operand(
+      descriptor_set, descriptor, descriptor_operand_index);
   const loom_low_allocation_assignment_t* assignment =
       loom_low_packet_descriptor_operand_assignment(
           context->allocation, context->packet, descriptor_operand_index);
@@ -263,9 +262,8 @@ static iree_status_t loom_amdgpu_append_descriptor_register_part_assignment(
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
   IREE_ASSERT_LT(descriptor_operand_index, descriptor->operand_count);
-  const loom_low_operand_t* operand =
-      &descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
+  const loom_low_operand_t* operand = loom_low_descriptor_operand(
+      descriptor_set, descriptor, descriptor_operand_index);
   const loom_low_allocation_assignment_t* assignment =
       loom_low_packet_descriptor_operand_assignment(
           context->allocation, context->packet, descriptor_operand_index);
@@ -301,11 +299,10 @@ static iree_status_t loom_amdgpu_append_descriptor_operand(
   uint16_t current_packet_operand_index = 0;
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  const loom_low_operand_t* operands =
-      &descriptor_set->operands[descriptor->operand_start];
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
-    const loom_low_operand_t* operand = &operands[i];
+    const loom_low_operand_t* operand =
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT) ||
         !loom_low_operand_role_is_packet_operand(operand->role)) {
       continue;
@@ -980,9 +977,9 @@ static iree_status_t loom_amdgpu_append_descriptor_value_list(
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
-  if (descriptor->operand_start > descriptor_set->operand_count ||
+  if (descriptor->operand_start > descriptor_set->operand_index_count ||
       descriptor->operand_count >
-          descriptor_set->operand_count - descriptor->operand_start) {
+          descriptor_set->operand_index_count - descriptor->operand_start) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AMDGPU descriptor operand range is out of range");
   }
@@ -1006,11 +1003,10 @@ static iree_status_t loom_amdgpu_append_descriptor_value_list(
     needs_comma = true;
   }
 
-  const loom_low_operand_t* operands =
-      &descriptor_set->operands[descriptor->operand_start];
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
-    const loom_low_operand_t* operand = &operands[i];
+    const loom_low_operand_t* operand =
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (operand->role == LOOM_LOW_OPERAND_ROLE_IMPLICIT) {
       continue;
     }
@@ -1143,9 +1139,8 @@ static iree_status_t loom_amdgpu_append_asm_form_value(
   }
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  const loom_low_operand_t* descriptor_operand =
-      &descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
+  const loom_low_operand_t* descriptor_operand = loom_low_descriptor_operand(
+      descriptor_set, descriptor, descriptor_operand_index);
   const uint16_t operand_index = descriptor_operand->source_value_index;
   if (operand_index >= op->operand_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1170,9 +1165,8 @@ static iree_status_t loom_amdgpu_append_asm_form_values(
     const uint16_t descriptor_operand_index =
         descriptor_set->asm_operand_indices[asm_operand_index];
     IREE_ASSERT_LT(descriptor_operand_index, descriptor->operand_count);
-    const loom_low_operand_t* descriptor_operand =
-        &descriptor_set
-             ->operands[descriptor->operand_start + descriptor_operand_index];
+    const loom_low_operand_t* descriptor_operand = loom_low_descriptor_operand(
+        descriptor_set, descriptor, descriptor_operand_index);
     if (iree_any_bit_set(descriptor_operand->flags,
                          LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
       continue;
@@ -1585,12 +1579,11 @@ static iree_host_size_t loom_amdgpu_explicit_packet_operand_count(
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  const loom_low_operand_t* operands =
-      &descriptor_set->operands[descriptor->operand_start];
   iree_host_size_t explicit_operand_count = 0;
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
-    const loom_low_operand_t* operand = &operands[i];
+    const loom_low_operand_t* operand =
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT) ||
         !loom_low_operand_role_is_packet_operand(operand->role)) {
       continue;
@@ -1639,15 +1632,17 @@ static bool loom_amdgpu_descriptor_uses_global_scalar_base_format(
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  const loom_low_operand_t* operands =
-      &descriptor_set->operands[descriptor->operand_start];
   // A partial load's implicit tied source carries the preserved register part;
   // the following operand, not that source, determines the address format.
   const uint16_t address_operand_index =
       descriptor->result_count +
-      iree_any_bit_set(operands[descriptor->result_count].flags,
+      iree_any_bit_set(loom_low_descriptor_operand(descriptor_set, descriptor,
+                                                   descriptor->result_count)
+                           ->flags,
                        LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION);
-  return operands[address_operand_index].unit_count == 1;
+  return loom_low_descriptor_operand(descriptor_set, descriptor,
+                                     address_operand_index)
+             ->unit_count == 1;
 }
 
 static iree_status_t loom_amdgpu_append_global_load_packet(
@@ -2672,8 +2667,8 @@ static iree_status_t loom_amdgpu_append_matrix_packet(
         constraint->lhs_operand_index == 0 &&
         constraint->rhs_operand_index != LOOM_LOW_ID_NONE) {
       const loom_low_operand_t* accumulator_operand =
-          &descriptor_set->operands[descriptor->operand_start +
-                                    constraint->rhs_operand_index];
+          loom_low_descriptor_operand(descriptor_set, descriptor,
+                                      constraint->rhs_operand_index);
       accumulator_operand_index = accumulator_operand->source_value_index;
       IREE_ASSERT_LT(accumulator_operand_index, op->operand_count);
       break;
@@ -2933,12 +2928,11 @@ static iree_status_t loom_amdgpu_append_source_immediate_asm_form_packet(
         LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_IMMEDIATE, immediate_index));
   }
 
-  const loom_low_operand_t* operands =
-      &descriptor_set->operands[descriptor->operand_start];
   for (uint16_t descriptor_operand_index = descriptor->result_count;
        descriptor_operand_index < descriptor->operand_count;
        ++descriptor_operand_index) {
-    const loom_low_operand_t* operand = &operands[descriptor_operand_index];
+    const loom_low_operand_t* operand = loom_low_descriptor_operand(
+        descriptor_set, descriptor, descriptor_operand_index);
     if (iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT) ||
         !loom_low_operand_role_is_packet_operand(operand->role)) {
       continue;
@@ -3010,7 +3004,9 @@ static iree_status_t loom_amdgpu_append_source_immediate_asm_form_packet(
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_string(context->builder, base_mnemonic));
   bool in_list = false;
-  if (!iree_any_bit_set(operands[0].flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
+  if (!iree_any_bit_set(
+          loom_low_descriptor_operand(descriptor_set, descriptor, 0)->flags,
+          LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_append_asm_form_separator(context, &in_list));
     IREE_RETURN_IF_ERROR(loom_amdgpu_append_result(context, 0));

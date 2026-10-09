@@ -82,6 +82,9 @@ TEST(LowPlacementTest, DefiningTransferPrecedesEarlierCollectedUses) {
   descriptor_set.reg_class_alt_count = IREE_ARRAYSIZE(alternatives);
   descriptor_set.operands = operands;
   descriptor_set.operand_count = IREE_ARRAYSIZE(operands);
+  const uint16_t operand_indices[] = {0, 1};
+  descriptor_set.operand_indices = operand_indices;
+  descriptor_set.operand_index_count = IREE_ARRAYSIZE(operand_indices);
   descriptor_set.descriptors = &descriptor;
   descriptor_set.descriptor_count = 1;
   descriptor_set.descriptor_ordinal_count = 1;
@@ -288,6 +291,9 @@ TEST(LowPlacementTest, RetainsOperandConstraintsAcrossExactTiesOnly) {
   descriptor_set.reg_class_alt_count = IREE_ARRAYSIZE(alternatives);
   descriptor_set.operands = operands;
   descriptor_set.operand_count = IREE_ARRAYSIZE(operands);
+  const uint16_t operand_indices[] = {0, 1, 2};
+  descriptor_set.operand_indices = operand_indices;
+  descriptor_set.operand_index_count = IREE_ARRAYSIZE(operand_indices);
   descriptor_set.descriptors = descriptors;
   descriptor_set.descriptor_count = IREE_ARRAYSIZE(descriptors);
   descriptor_set.descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors);
@@ -541,6 +547,9 @@ class LowPlacementStorageTest : public ::testing::Test {
     descriptor_set_.reg_class_alt_count = 1;
     descriptor_set_.operands = operands_;
     descriptor_set_.operand_count = IREE_ARRAYSIZE(operands_);
+    static const uint16_t operand_indices[] = {0, 1};
+    descriptor_set_.operand_indices = operand_indices;
+    descriptor_set_.operand_index_count = IREE_ARRAYSIZE(operand_indices);
     descriptor_set_.descriptors = &descriptor_;
     descriptor_set_.descriptor_count = 1;
     descriptor_set_.descriptor_ordinal_count = 1;

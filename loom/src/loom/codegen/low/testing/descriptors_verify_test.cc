@@ -78,6 +78,8 @@ struct TestTables {
   loom_low_asm_result_value_type_t asm_result_value_types[2];
   loom_low_asm_immediate_t asm_immediates[1];
   loom_low_operand_t operands[4];
+  // Descriptor-local references into the operand row pool.
+  uint16_t operand_indices[4];
   loom_low_immediate_t immediates[1];
   loom_low_immediate_encoding_slice_t immediate_encoding_slices[2];
   loom_low_enum_domain_t enum_domains[1];
@@ -257,6 +259,11 @@ void InitializeTestTables(TestTables* tables) {
   tables->set.asm_immediates = tables->asm_immediates;
   tables->set.operands = tables->operands;
   tables->set.operand_count = IREE_ARRAYSIZE(tables->operands);
+  for (uint16_t i = 0; i < IREE_ARRAYSIZE(tables->operand_indices); ++i) {
+    tables->operand_indices[i] = i;
+  }
+  tables->set.operand_indices = tables->operand_indices;
+  tables->set.operand_index_count = IREE_ARRAYSIZE(tables->operand_indices);
   tables->set.immediates = tables->immediates;
   tables->set.immediate_count = IREE_ARRAYSIZE(tables->immediates);
   tables->set.immediate_encoding_slices = tables->immediate_encoding_slices;
@@ -754,6 +761,34 @@ TEST(LowDescriptorsTest, RejectsMalformedSpans) {
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsOperandIndexOutsideRowPool) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operand_indices[1] = tables.set.operand_count;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, VerifiesReorderedAndSharedOperandRows) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[1] = tables.operands[3];
+  tables.operand_indices[1] = 0;
+  tables.operand_indices[3] = 1;
+  tables.set.operand_count = 3;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+  EXPECT_EQ(loom_low_descriptor_operand(&tables.set, &tables.descriptors[0], 0),
+            &tables.operands[0]);
+  EXPECT_EQ(loom_low_descriptor_operand(&tables.set, &tables.descriptors[1], 0),
+            &tables.operands[0]);
+  EXPECT_EQ(loom_low_descriptor_operand(&tables.set, &tables.descriptors[1], 1),
+            &tables.operands[2]);
+  EXPECT_EQ(loom_low_descriptor_operand(&tables.set, &tables.descriptors[1], 2),
+            &tables.operands[1]);
 }
 
 TEST(LowDescriptorsTest, RejectsAsmFormCountOutsideCanonicalOrdinalRange) {

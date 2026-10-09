@@ -331,6 +331,9 @@ TEST_F(LowAllocationUnitLivenessTest, RetainsImplicitReadsWithoutClobbering) {
   descriptors.reg_class_alt_count = 2;
   descriptors.operands = operands;
   descriptors.operand_count = 3;
+  const uint16_t operand_indices[] = {0, 1, 2};
+  descriptors.operand_indices = operand_indices;
+  descriptors.operand_index_count = IREE_ARRAYSIZE(operand_indices);
   descriptors.descriptors = &descriptor;
   descriptors.descriptor_count = 1;
   descriptors.descriptor_ordinal_count = 1;
@@ -603,6 +606,9 @@ TEST_P(LowAllocationDefinitionLivenessTest, DistinguishesWritesFromTransport) {
   descriptors.reg_class_alt_count = 1;
   descriptors.operands = &operand;
   descriptors.operand_count = 1;
+  const uint16_t operand_indices[] = {0};
+  descriptors.operand_indices = operand_indices;
+  descriptors.operand_index_count = IREE_ARRAYSIZE(operand_indices);
   descriptors.descriptors = &descriptor;
   descriptors.descriptor_count = 1;
   descriptors.descriptor_ordinal_count = 1;

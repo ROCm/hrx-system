@@ -61,10 +61,10 @@ void ExpectOperandAddressMap(const loom_low_descriptor_set_t* descriptor_set,
   const loom_low_descriptor_t& descriptor =
       descriptor_set->descriptors[descriptor_ordinal];
   ASSERT_LE((uint64_t)descriptor.operand_start + descriptor.operand_count,
-            descriptor_set->operand_count);
+            descriptor_set->operand_index_count);
   for (uint16_t i = 0; i < descriptor.operand_count; ++i) {
     const loom_low_operand_t& operand =
-        descriptor_set->operands[descriptor.operand_start + i];
+        *loom_low_descriptor_operand(descriptor_set, &descriptor, i);
     if (!iree_string_view_equal(
             loom_low_descriptor_set_string(descriptor_set,
                                            operand.field_name_string_ref),

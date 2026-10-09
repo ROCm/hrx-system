@@ -1499,7 +1499,9 @@ def compile_descriptor_set(
     feature_mask_group_starts: dict[tuple[int, ...], int] = {}
     encoding_field_value_group_starts: dict[tuple[EncodingFieldValue, ...], int] = {}
     compiled_operand_rows: list[_CompiledOperandRow] = []
-    operand_group_starts: dict[tuple[_CompiledOperandRow, ...], int] = {}
+    operand_row_indices: dict[_CompiledOperandRow, int] = {}
+    operand_indices: list[int] = []
+    operand_group_starts: dict[tuple[int, ...], int] = {}
     compiled_immediate_rows: list[_CompiledImmediateRow] = []
     immediate_group_starts: dict[tuple[_CompiledImmediateRow, ...], int] = {}
     immediate_encoding_slices: list[ImmediateEncodingSlice] = []
@@ -1670,7 +1672,7 @@ def compile_descriptor_set(
 
     for descriptor in selected_descriptors:
         rematerializable_result_set = set(rematerializable_results_by_descriptor[descriptor.key])
-        descriptor_operand_rows: list[_CompiledOperandRow] = []
+        descriptor_operand_indices: list[int] = []
         for operand_index, (operand, source_value_index) in enumerate(
             zip(
                 descriptor.operands,
@@ -1696,17 +1698,21 @@ def compile_descriptor_set(
                 reg_class_alts,
                 reg_alt_group_starts,
             )
-            descriptor_operand_rows.append(
-                _CompiledOperandRow(
-                    operand=operand,
-                    source_value_index=source_value_index,
-                    reg_class_alt_start=reg_class_alt_start,
-                    rematerializable=(operand_index in rematerializable_result_set),
-                )
+            operand_row = _CompiledOperandRow(
+                operand=operand,
+                source_value_index=source_value_index,
+                reg_class_alt_start=reg_class_alt_start,
+                rematerializable=(operand_index in rematerializable_result_set),
             )
+            row_index = operand_row_indices.get(operand_row)
+            if row_index is None:
+                row_index = len(compiled_operand_rows)
+                operand_row_indices[operand_row] = row_index
+                compiled_operand_rows.append(operand_row)
+            descriptor_operand_indices.append(row_index)
         operand_start, _ = append_interned_sequence(
-            descriptor_operand_rows,
-            compiled_operand_rows,
+            descriptor_operand_indices,
+            operand_indices,
             operand_group_starts,
         )
 
@@ -1816,6 +1822,7 @@ def compile_descriptor_set(
     compact_start_tables = (
         ("descriptor", selected_descriptors),
         ("operand", operands),
+        ("operand index", operand_indices),
         ("immediate", immediates),
         ("effect", effects),
         ("constraint", constraints),
@@ -1878,6 +1885,7 @@ def compile_descriptor_set(
         enum_domain_ids=enum_domain_ids,
         string_pool=string_pool,
         reg_class_alts=reg_class_alts,
+        operand_indices=operand_indices,
         operands=operands,
         operand_source_value_indices=operand_source_value_indices,
         operand_alt_starts=operand_alt_starts,

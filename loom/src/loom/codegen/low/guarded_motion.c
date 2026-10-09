@@ -21,7 +21,7 @@ static bool loom_low_guarded_motion_narrows_mask(
   const loom_low_descriptor_t* descriptor = node->descriptor;
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
-        &descriptors->operands[descriptor->operand_start + i];
+        loom_low_descriptor_operand(descriptors, descriptor, i);
     if (iree_any_bit_set(operand->flags,
                          LOOM_LOW_OPERAND_FLAG_NARROWS_EXECUTION_MASK)) {
       return true;
@@ -39,7 +39,7 @@ static bool loom_low_guarded_motion_can_cross_mask(
   }
   for (uint16_t i = 0; i < candidate->operand_count; ++i) {
     const loom_low_operand_t* read =
-        &descriptors->operands[candidate->operand_start + i];
+        loom_low_descriptor_operand(descriptors, candidate, i);
     if (!iree_any_bit_set(read->flags, LOOM_LOW_OPERAND_FLAG_STATE_READ)) {
       continue;
     }
@@ -47,7 +47,7 @@ static bool loom_low_guarded_motion_can_cross_mask(
         descriptors->reg_class_alts[read->reg_class_alt_start].reg_class_id;
     for (uint16_t j = 0; j < boundary->operand_count; ++j) {
       const loom_low_operand_t* write =
-          &descriptors->operands[boundary->operand_start + j];
+          loom_low_descriptor_operand(descriptors, boundary, j);
       if (!iree_any_bit_set(write->flags, LOOM_LOW_OPERAND_FLAG_STATE_WRITE)) {
         continue;
       }

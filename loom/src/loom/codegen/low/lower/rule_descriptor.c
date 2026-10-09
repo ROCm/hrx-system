@@ -90,9 +90,7 @@ const loom_low_operand_t* loom_low_lower_rule_descriptor_result_operand(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t result_index) {
   IREE_ASSERT_LT(result_index, descriptor->result_count);
-  IREE_ASSERT((uint64_t)descriptor->operand_start + result_index <
-              descriptor_set->operand_count);
-  return &descriptor_set->operands[descriptor->operand_start + result_index];
+  return loom_low_descriptor_operand(descriptor_set, descriptor, result_index);
 }
 
 iree_status_t loom_low_lower_rule_descriptor_result_type(
@@ -120,11 +118,9 @@ iree_status_t loom_low_lower_rule_descriptor_result_type(
 const loom_low_operand_t* loom_low_lower_rule_descriptor_packet_operand(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t operand_index) {
-  const uint32_t operand_end =
-      descriptor->operand_start + descriptor->operand_count;
-  IREE_ASSERT_LE(operand_end, descriptor_set->operand_count);
-  for (uint32_t i = descriptor->operand_start; i < operand_end; ++i) {
-    const loom_low_operand_t* operand = &descriptor_set->operands[i];
+  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
+    const loom_low_operand_t* operand =
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (loom_low_operand_role_is_packet_operand(operand->role) &&
         operand->source_value_index == operand_index) {
       return operand;

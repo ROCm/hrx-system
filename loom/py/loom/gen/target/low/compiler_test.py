@@ -459,7 +459,8 @@ def test_compiler_interns_exact_descriptor_and_asm_spans() -> None:
     assert const_row["constraint_start"] == const_copy_row["constraint_start"]
     assert const_row["feature_mask_word_start"] == const_copy_row["feature_mask_word_start"]
     assert const_row["encoding_field_value_start"] == const_copy_row["encoding_field_value_start"]
-    assert len(compiled.operands) == 5
+    assert len(compiled.operands) == 4
+    assert compiled.operand_indices == [0, 1, 2, 3, 0]
     assert len(compiled.immediates) == 1
     assert len(compiled.constraints) == 1
     assert compiled.feature_mask_words == [0x5]
@@ -476,6 +477,22 @@ def test_compiler_interns_exact_descriptor_and_asm_spans() -> None:
     assert len(compiled.asm_table_storage.layouts) == 2
     assert compiled.asm_table_storage.operand_indices == [0, 1, 2]
     assert len(compiled.asm_table_storage.immediates) == 1
+
+
+def test_shared_operand_rows_keep_descriptor_local_source_positions() -> None:
+    base = TEST_LOW_ADD_I32_DESCRIPTOR
+    reversed_sources = replace(
+        base,
+        key="test.reversed.i32",
+        mnemonic="test.reversed.i32",
+        operands=(base.operands[0], base.operands[2], base.operands[1]),
+    )
+    compiled = compiler.compile_descriptor_set(replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(base, reversed_sources)))
+
+    assert compiled.operand_indices == [0, 1, 2, 0, 3, 4]
+    assert compiled.operands[1] == compiled.operands[4]
+    assert compiled.operands[2] == compiled.operands[3]
+    assert compiled.operand_source_value_indices == [0, 0, 1, 0, 1]
 
 
 @pytest.mark.parametrize(

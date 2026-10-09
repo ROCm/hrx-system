@@ -126,10 +126,10 @@ bool loom_low_physical_issue_group_fits(
           &descriptor_set->descriptors[instructions[j].descriptor_ordinal];
       for (uint16_t p = 0; p < producer->operand_count; ++p) {
         const loom_low_operand_t* lhs =
-            &descriptor_set->operands[producer->operand_start + p];
+            loom_low_descriptor_operand(descriptor_set, producer, p);
         for (uint16_t c = 0; c < consumer->operand_count; ++c) {
           const loom_low_operand_t* rhs =
-              &descriptor_set->operands[consumer->operand_start + c];
+              loom_low_descriptor_operand(descriptor_set, consumer, c);
           if (!loom_low_physical_events_require_separation(
                   descriptor_set, lhs->read_event_id, rhs->write_event_id) &&
               !loom_low_physical_events_require_separation(
@@ -161,7 +161,7 @@ uint32_t loom_low_physical_issue_register_ready_cycle(
         &descriptor_set->descriptors[instructions[i].descriptor_ordinal];
     for (uint16_t j = 0; j < descriptor->operand_count; ++j) {
       const loom_low_operand_t* operand =
-          &descriptor_set->operands[descriptor->operand_start + j];
+          loom_low_descriptor_operand(descriptor_set, descriptor, j);
       const uint16_t physical_register = instructions[i].physical_registers[j];
       cycle = iree_max(cycle, loom_low_schedule_event_frontier_query(
                                   &issue->events, physical_register,
@@ -215,7 +215,7 @@ iree_status_t loom_low_physical_issue_commit(
     for (uint16_t j = 0;
          j < descriptor->operand_count && iree_status_is_ok(status); ++j) {
       const loom_low_operand_t* operand =
-          &descriptor_set->operands[descriptor->operand_start + j];
+          loom_low_descriptor_operand(descriptor_set, descriptor, j);
       const uint16_t physical_register = instructions[i].physical_registers[j];
       status = loom_low_schedule_event_frontier_commit(
           &issue->events, physical_register, operand->read_event_id,

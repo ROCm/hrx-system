@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 55u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 56u
 
 // Sentinel for absent target-family or descriptor-set stable IDs.
 #define LOOM_LOW_STABLE_ID_NONE UINT64_C(0)
@@ -1162,7 +1162,7 @@ typedef struct loom_low_descriptor_t {
   uint16_t feature_mask_word_start;
   // First target-owned fixed encoding field value for this descriptor.
   uint16_t encoding_field_value_start;
-  // First operand/result row for this descriptor.
+  // First index in the set's operand_indices for this descriptor.
   uint16_t operand_start;
   // First immediate row for this descriptor.
   uint16_t immediate_start;
@@ -1533,12 +1533,16 @@ typedef struct loom_low_descriptor_set_t {
   const loom_low_native_asm_value_t* native_asm_values;
   // Number of native assembly value rows owned by this set.
   uint32_t native_asm_value_count;
-  // Dense operand/result rows referenced by descriptors.
+  // Shared operand/result rows referenced by operand_indices.
   const loom_low_operand_t* operands;
   // Number of operand/result rows owned by this set.
   uint32_t operand_count;
   // Maximum operand count of one native descriptor, including implicit state.
   uint16_t maximum_descriptor_operand_count;
+  // Descriptor-local sequences of indices into operands, including results.
+  const uint16_t* operand_indices;
+  // Number of indices owned by this set's shared storage provider.
+  uint32_t operand_index_count;
   // Dense immediate rows referenced by descriptors.
   const loom_low_immediate_t* immediates;
   // Number of immediate rows owned by this set.
@@ -1681,6 +1685,18 @@ typedef struct loom_low_descriptor_set_t {
   // Number of fixed encoding field values owned by this set.
   uint32_t encoding_field_value_count;
 } loom_low_descriptor_set_t;
+
+// Returns a verified descriptor's operand by descriptor-local index. Rows are
+// immutable and shared; the local index, not the row address, identifies a use.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_operand_t*
+loom_low_descriptor_operand(const loom_low_descriptor_set_t* descriptor_set,
+                            const loom_low_descriptor_t* descriptor,
+                            uint16_t operand_index) {
+  const uint16_t row_index =
+      descriptor_set
+          ->operand_indices[descriptor->operand_start + operand_index];
+  return &descriptor_set->operands[row_index];
+}
 
 // Returns the operand alternative for |reg_class_id|, or NULL when the
 // operand does not accept that register class.

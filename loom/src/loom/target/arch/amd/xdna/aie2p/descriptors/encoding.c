@@ -83,7 +83,7 @@ loom_aie2p_encoded_slot_t loom_aie2p_descriptor_encode(
 
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (operand->encoding_field_id == 0) {
       continue;
     }

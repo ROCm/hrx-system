@@ -80,9 +80,8 @@ static iree_status_t loom_low_requirements_verify_operand_reg_classes(
     const loom_low_descriptor_t* descriptor,
     iree_string_view_t descriptor_key) {
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const uint32_t operand_index = descriptor->operand_start + i;
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[operand_index];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (operand->reg_class_alt_count == 0) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,

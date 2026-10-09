@@ -10,10 +10,8 @@ static bool loom_low_descriptor_defines_implicit_state_result(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const uint32_t operand_index = descriptor->operand_start + i;
-    IREE_ASSERT(operand_index < descriptor_set->operand_count);
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[operand_index];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (operand->role == LOOM_LOW_OPERAND_ROLE_RESULT &&
         iree_all_bits_set(operand->flags,
                           LOOM_LOW_OPERAND_FLAG_IMPLICIT |
@@ -114,8 +112,8 @@ bool loom_low_descriptor_result_can_rematerialize(
   if (result_index >= descriptor->result_count) {
     return false;
   }
-  const uint32_t operand_index = descriptor->operand_start + result_index;
-  IREE_ASSERT(operand_index < descriptor_set->operand_count);
-  return iree_any_bit_set(descriptor_set->operands[operand_index].flags,
-                          LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE);
+  return iree_any_bit_set(
+      loom_low_descriptor_operand(descriptor_set, descriptor, result_index)
+          ->flags,
+      LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE);
 }

@@ -160,6 +160,9 @@ void InitializeRequirementTables(RequirementTables* tables) {
   tables->set.descriptor_ref_count = IREE_ARRAYSIZE(tables->descriptor_refs);
   tables->set.operands = tables->operands;
   tables->set.operand_count = IREE_ARRAYSIZE(tables->operands);
+  static const uint16_t operand_indices[] = {0, 1, 2};
+  tables->set.operand_indices = operand_indices;
+  tables->set.operand_index_count = IREE_ARRAYSIZE(operand_indices);
   tables->set.reg_classes = tables->reg_classes;
   tables->set.reg_class_count = IREE_ARRAYSIZE(tables->reg_classes);
   tables->set.reg_class_alts = tables->reg_class_alts;

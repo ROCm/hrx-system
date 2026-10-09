@@ -42,9 +42,8 @@ static uint32_t loom_low_schedule_candidate_early_added_units(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_node_t* node, uint16_t result_index,
     uint32_t unit_count) {
-  const loom_low_operand_t* result_operand =
-      &state->target.descriptor_set
-           ->operands[node->descriptor->operand_start + result_index];
+  const loom_low_operand_t* result_operand = loom_low_descriptor_operand(
+      state->target.descriptor_set, node->descriptor, result_index);
   if (!iree_any_bit_set(result_operand->flags,
                         LOOM_LOW_OPERAND_FLAG_EARLY_CLOBBER)) {
     return 0;

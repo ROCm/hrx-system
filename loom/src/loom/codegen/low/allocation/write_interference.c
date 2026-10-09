@@ -340,7 +340,7 @@ iree_status_t loom_low_allocation_write_interference_note_operand(
     return iree_ok_status();
   }
   const loom_low_operand_t* operand =
-      &descriptors->operands[descriptor->operand_start + operand_index];
+      loom_low_descriptor_operand(descriptors, descriptor, operand_index);
   const loom_low_instruction_class_flags_t classes =
       loom_low_descriptor_set_descriptor_view(descriptors, descriptor)
           ->instruction_class_flags;

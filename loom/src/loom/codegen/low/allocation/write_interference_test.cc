@@ -132,6 +132,9 @@ class WriteInterferenceTest : public ::testing::Test {
     descriptor_set_.reg_class_alt_count = 1;
     descriptor_set_.operands = operands_;
     descriptor_set_.operand_count = IREE_ARRAYSIZE(operands_);
+    static const uint16_t operand_indices[] = {0, 1, 2, 3};
+    descriptor_set_.operand_indices = operand_indices;
+    descriptor_set_.operand_index_count = IREE_ARRAYSIZE(operand_indices);
     descriptor_set_.descriptors = descriptors_;
     descriptor_set_.descriptor_views = views_;
     descriptor_set_.descriptor_count = IREE_ARRAYSIZE(descriptors_);

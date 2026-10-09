@@ -615,6 +615,12 @@ def emit_source_for_views(
             for reg_class_id, register_part_id, flags, unit_alignment_log2, late_read_subgroup_size in compiled.reg_class_alts
         ],
     )
+    c_arrays.append_value_array(
+        lines,
+        "uint16_t",
+        f"k{spec.c_table_prefix}OperandIndices",
+        [str(index) for index in compiled.operand_indices],
+    )
     _emit_array(
         lines,
         "loom_low_operand_t",
@@ -1131,6 +1137,7 @@ def emit_source_for_views(
         )
 
     table_count_fields = {
+        "operand_indices": "operand_index_count",
         "operands": "operand_count",
         "immediates": "immediate_count",
         "immediate_encoding_slices": "immediate_encoding_slice_count",
@@ -1243,6 +1250,7 @@ def emit_source_for_views(
             view_lines.append(f"    .schedule_alternatives = {schedule_alternative_table_symbol},")
             view_lines.append(f"    .schedule_alternative_count = {len(view.schedule_alternative_rows)},")
 
+        append_optional_table("operand_indices", "OperandIndices", compiled.operand_indices, view_lines)
         append_optional_table("operands", "Operands", compiled.operands, view_lines)
         append_optional_table("immediates", "Immediates", compiled.immediates, view_lines)
         append_optional_table(

@@ -772,7 +772,7 @@ loom_low_allocation_unit_liveness_mark_early_clobber_operand_reads(
       continue;
     }
     const loom_low_operand_t* descriptor_operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     const uint16_t operand_index = descriptor_operand->source_value_index;
     if (operand_index >= op->operand_count) {
       return iree_make_status(
@@ -866,7 +866,7 @@ static iree_status_t loom_low_allocation_unit_liveness_note_instruction_effects(
   const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     IREE_RETURN_IF_ERROR(loom_low_allocation_write_interference_note_operand(
         unit_liveness->write_interference, value_domain, descriptor_set,
         descriptor, op, i, clobber_point, arena));

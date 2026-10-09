@@ -413,10 +413,9 @@ static iree_status_t loom_aie2p_configuration_phase_emit(
                  AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_SHIM_DESCRIPTOR)) {
           continue;
         }
-        const loom_low_operand_t* operand =
-            &schedule.target.descriptor_set
-                 ->operands[node->descriptor->operand_start +
-                            iree_min(j, node->descriptor->operand_count - 1)];
+        const loom_low_operand_t* operand = loom_low_descriptor_operand(
+            schedule.target.descriptor_set, node->descriptor,
+            iree_min(j, node->descriptor->operand_count - 1));
         IREE_RETURN_IF_ERROR(loom_aie2p_configuration_check_scalar(
             emitter, op,
             loom_low_descriptor_set_string(schedule.target.descriptor_set,

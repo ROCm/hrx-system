@@ -225,7 +225,7 @@ static bool loom_low_emission_frame_input_has_retained_read(
     for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
          ++i) {
       const loom_low_operand_t* operand =
-          &descriptors->operands[descriptor->operand_start + i];
+          loom_low_descriptor_operand(descriptors, descriptor, i);
       if ((operand->source_value_index == loom_use_operand_index(*use) ||
            (iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_VARIADIC) &&
             loom_use_operand_index(*use) >= operand->source_value_index)) &&

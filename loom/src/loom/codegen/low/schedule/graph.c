@@ -347,9 +347,8 @@ static const uint16_t* loom_low_schedule_index_descriptor_operands(
   for (uint16_t descriptor_operand_index = descriptor->result_count;
        descriptor_operand_index < fixed_descriptor_operand_end;
        ++descriptor_operand_index) {
-    const loom_low_operand_t* operand =
-        &state->target.descriptor_set
-             ->operands[descriptor->operand_start + descriptor_operand_index];
+    const loom_low_operand_t* operand = loom_low_descriptor_operand(
+        state->target.descriptor_set, descriptor, descriptor_operand_index);
     if (!loom_low_operand_role_is_packet_operand(operand->role)) {
       continue;
     }
@@ -394,9 +393,8 @@ loom_low_schedule_value_write_endpoint(
     if (result_index >= node->descriptor->result_count) {
       return loom_low_schedule_dependency_endpoint_none();
     }
-    const loom_low_operand_t* result =
-        &state->target.descriptor_set
-             ->operands[node->descriptor->operand_start + result_index];
+    const loom_low_operand_t* result = loom_low_descriptor_operand(
+        state->target.descriptor_set, node->descriptor, result_index);
     return loom_low_schedule_dependency_operand_endpoint(
         result_index, result->write_event_id);
   }
@@ -412,9 +410,8 @@ loom_low_schedule_descriptor_operand_read_endpoint(
   if (descriptor == NULL) {
     return loom_low_schedule_dependency_endpoint_none();
   }
-  const loom_low_operand_t* operand =
-      &state->target.descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
+  const loom_low_operand_t* operand = loom_low_descriptor_operand(
+      state->target.descriptor_set, descriptor, descriptor_operand_index);
   return loom_low_schedule_dependency_operand_endpoint(descriptor_operand_index,
                                                        operand->read_event_id);
 }
@@ -902,8 +899,8 @@ static iree_status_t loom_low_schedule_note_tied_storage_writes(
         tied.result_index < node->descriptor->result_count) {
       write_mask = loom_low_schedule_descriptor_operand_storage_mask(
           state,
-          &state->target.descriptor_set
-               ->operands[node->descriptor->operand_start + tied.result_index],
+          loom_low_descriptor_operand(state->target.descriptor_set,
+                                      node->descriptor, tied.result_index),
           result_ordinals[tied.result_index]);
     }
     IREE_RETURN_IF_ERROR(loom_low_schedule_add_storage_write_dependencies(
@@ -966,10 +963,9 @@ static iree_status_t loom_low_schedule_note_storage_reads(
     IREE_ASSERT_EQ(value_ordinal, relation->source_ordinal);
     const loom_low_operand_t* descriptor_operand = NULL;
     if (descriptor != NULL) {
-      descriptor_operand =
-          &state->target.descriptor_set
-               ->operands[descriptor->operand_start +
-                          descriptor_operand_indices[operand_index]];
+      descriptor_operand = loom_low_descriptor_operand(
+          state->target.descriptor_set, descriptor,
+          descriptor_operand_indices[operand_index]);
     }
     const loom_low_register_part_mask_t read_mask =
         loom_low_schedule_operand_storage_read_mask(
@@ -992,10 +988,9 @@ static iree_status_t loom_low_schedule_note_storage_reads(
     const loom_value_ordinal_t value_ordinal = operand_ordinals[operand_index];
     const loom_low_operand_t* descriptor_operand = NULL;
     if (descriptor != NULL) {
-      descriptor_operand =
-          &state->target.descriptor_set
-               ->operands[descriptor->operand_start +
-                          descriptor_operand_indices[operand_index]];
+      descriptor_operand = loom_low_descriptor_operand(
+          state->target.descriptor_set, descriptor,
+          descriptor_operand_indices[operand_index]);
     }
     const loom_low_register_part_mask_t read_mask =
         loom_low_schedule_operand_storage_read_mask(
@@ -1189,8 +1184,8 @@ static iree_status_t loom_low_schedule_note_descriptor_state_accesses(
   const bool has_ordered_effect = loom_low_schedule_node_has_ordered_effect(
       descriptor_set, &state->nodes[node_index]);
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const uint32_t operand_row = descriptor->operand_start + i;
-    const loom_low_operand_t* operand = &descriptor_set->operands[operand_row];
+    const loom_low_operand_t* operand =
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     const uint16_t state_flags =
         operand->flags &
         (LOOM_LOW_OPERAND_FLAG_STATE_READ | LOOM_LOW_OPERAND_FLAG_STATE_WRITE);
@@ -1221,8 +1216,8 @@ static iree_status_t loom_low_schedule_note_descriptor_state_accesses(
     }
   }
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const uint32_t operand_row = descriptor->operand_start + i;
-    const loom_low_operand_t* operand = &descriptor_set->operands[operand_row];
+    const loom_low_operand_t* operand =
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     const uint16_t state_flags =
         operand->flags &
         (LOOM_LOW_OPERAND_FLAG_STATE_READ | LOOM_LOW_OPERAND_FLAG_STATE_WRITE);
@@ -1349,8 +1344,8 @@ static void loom_low_schedule_index_state_value_clobbers(
     }
     for (uint16_t operand_index = 0; operand_index < descriptor->operand_count;
          ++operand_index) {
-      const loom_low_operand_t* operand =
-          &descriptor_set->operands[descriptor->operand_start + operand_index];
+      const loom_low_operand_t* operand = loom_low_descriptor_operand(
+          descriptor_set, descriptor, operand_index);
       const loom_low_operand_flags_t state_flags =
           operand->flags & (LOOM_LOW_OPERAND_FLAG_STATE_READ |
                             LOOM_LOW_OPERAND_FLAG_STATE_WRITE);
@@ -1658,10 +1653,9 @@ iree_status_t loom_low_schedule_build_dependencies(
         }
         bool reads_descriptor_state = false;
         if (descriptor != NULL) {
-          const loom_low_operand_t* operand =
-              &state->target.descriptor_set
-                   ->operands[descriptor->operand_start +
-                              descriptor_operand_indices[operand_index]];
+          const loom_low_operand_t* operand = loom_low_descriptor_operand(
+              state->target.descriptor_set, descriptor,
+              descriptor_operand_indices[operand_index]);
           reads_descriptor_state = iree_any_bit_set(
               operand->flags, LOOM_LOW_OPERAND_FLAG_STATE_READ);
           if (iree_any_bit_set(node->flags,

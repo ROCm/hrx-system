@@ -81,9 +81,8 @@ static bool loom_amdgpu_selected_result_is_vgpr(
 
   const loom_low_descriptor_t* descriptor = query_result->selected_descriptor;
   IREE_ASSERT_EQ(descriptor->result_count, 1);
-  IREE_ASSERT_LT(descriptor->operand_start, descriptor_set->operand_count);
   const loom_low_operand_t* result_operand =
-      &descriptor_set->operands[descriptor->operand_start];
+      loom_low_descriptor_operand(descriptor_set, descriptor, 0);
   IREE_ASSERT_EQ(result_operand->reg_class_alt_count, 1);
   IREE_ASSERT_LT(result_operand->reg_class_alt_start,
                  descriptor_set->reg_class_alt_count);

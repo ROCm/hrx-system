@@ -101,7 +101,7 @@ void ExpectOperandRegisterAlts(const loom_low_descriptor_set_t* descriptor_set,
       &descriptor_set->descriptors[descriptor_ref];
   ASSERT_LT(operand_index, descriptor->operand_count);
   const loom_low_operand_t* operand =
-      &descriptor_set->operands[descriptor->operand_start + operand_index];
+      loom_low_descriptor_operand(descriptor_set, descriptor, operand_index);
   EXPECT_EQ(operand->role, expected_role);
   EXPECT_EQ(operand->unit_count, expected_unit_count);
   EXPECT_EQ(operand->address_map_kind, LOOM_LOW_OPERAND_ADDRESS_MAP_DIRECT);

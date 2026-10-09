@@ -89,9 +89,8 @@ static iree_status_t loom_low_addressability_validate_operand(
   const loom_low_descriptor_set_t* descriptor_set =
       schedule->target.descriptor_set;
   const loom_low_descriptor_t* descriptor = packet->descriptor;
-  const uint32_t operand_row =
-      descriptor->operand_start + descriptor_operand_index;
-  const loom_low_operand_t* operand = &descriptor_set->operands[operand_row];
+  const loom_low_operand_t* operand = loom_low_descriptor_operand(
+      descriptor_set, descriptor, descriptor_operand_index);
   if (!loom_low_operand_requires_low_window_assignment(operand)) {
     return iree_ok_status();
   }

@@ -1147,11 +1147,11 @@ bool loom_amdgpu_low_value_defines_register_low16(
     return false;
   }
   const uint32_t operand_index = descriptor->operand_start + result_index;
-  if (operand_index >= descriptor_set->operand_count) {
+  if (operand_index >= descriptor_set->operand_index_count) {
     return false;
   }
   const loom_low_operand_t* result_operand =
-      &descriptor_set->operands[operand_index];
+      loom_low_descriptor_operand(descriptor_set, descriptor, result_index);
   const loom_low_reg_class_alt_t* alternative = loom_low_operand_reg_class_alt(
       descriptor_set, result_operand, reg_class_id);
   if (alternative == NULL ||

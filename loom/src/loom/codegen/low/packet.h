@@ -176,9 +176,8 @@ loom_low_packet_descriptor_operand_assignment(
   const loom_low_descriptor_t* descriptor = packet->descriptor;
   const loom_low_descriptor_set_t* descriptor_set =
       allocation->target.descriptor_set;
-  const loom_low_operand_t* descriptor_operand =
-      &descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
+  const loom_low_operand_t* descriptor_operand = loom_low_descriptor_operand(
+      descriptor_set, descriptor, descriptor_operand_index);
   const loom_low_allocation_assignment_t* assignment =
       descriptor_operand_index < descriptor->result_count
           ? loom_low_packet_result_assignment(

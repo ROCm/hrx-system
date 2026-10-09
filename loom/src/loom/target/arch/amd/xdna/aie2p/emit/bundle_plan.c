@@ -654,7 +654,7 @@ static iree_status_t loom_aie2p_bundle_plan_encode_packet(
           : NULL;
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (operand->encoding_field_id == 0) {
       operand_assignments[i] = NULL;
       continue;
@@ -778,7 +778,7 @@ loom_aie2p_bundle_plan_encode_structural_descriptor(
       &descriptor_set->descriptors[descriptor_ordinal];
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     IREE_ASSERT(operand->encoding_field_id == 0 &&
                 "structural descriptor operands must not encode bits");
   }
@@ -990,7 +990,7 @@ static void loom_aie2p_bundle_plan_instruction(
   };
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (operand->read_event_id == LOOM_LOW_TIMING_EVENT_NONE &&
         operand->write_event_id == LOOM_LOW_TIMING_EVENT_NONE) {
       registers[i] = 0;
@@ -1068,7 +1068,7 @@ static void loom_aie2p_bundle_plan_record_writes(
         &descriptor_set->descriptors[instruction->descriptor_ordinal];
     for (uint16_t j = 0; j < descriptor->operand_count; ++j) {
       const loom_low_operand_t* operand =
-          &descriptor_set->operands[descriptor->operand_start + j];
+          loom_low_descriptor_operand(descriptor_set, descriptor, j);
       if (operand->write_event_id == LOOM_LOW_TIMING_EVENT_NONE) {
         continue;
       }

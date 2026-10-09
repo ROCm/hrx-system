@@ -34,7 +34,7 @@ iree_status_t EncodeDescriptor(
   iree_host_size_t encoded_operand_count = 0;
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     encoded_operand_count += operand->encoding_field_id != 0;
   }
   if (register_names.size() != encoded_operand_count) {
@@ -49,7 +49,7 @@ iree_status_t EncodeDescriptor(
   iree_host_size_t encoded_operand_index = 0;
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (operand->encoding_field_id == 0) {
       continue;
     }
@@ -750,14 +750,17 @@ TEST(DescriptorEncodingTest, MoveLookupMatchesEveryPhysicalRegisterPair) {
          destination < descriptor_set->physical_register_count; ++destination) {
       uint32_t expected = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
       for (uint32_t ordinal : move_descriptors) {
-        const auto* operands =
-            descriptor_set->operands +
-            descriptor_set->descriptors[ordinal].operand_start;
+        const auto* descriptor = &descriptor_set->descriptors[ordinal];
+        const auto* destination_operand =
+            loom_low_descriptor_operand(descriptor_set, descriptor, 0);
+        const auto* source_operand =
+            loom_low_descriptor_operand(descriptor_set, descriptor, 1);
         const uint16_t destination_class =
-            descriptor_set->reg_class_alts[operands[0].reg_class_alt_start]
+            descriptor_set
+                ->reg_class_alts[destination_operand->reg_class_alt_start]
                 .reg_class_id;
         const uint16_t source_class =
-            descriptor_set->reg_class_alts[operands[1].reg_class_alt_start]
+            descriptor_set->reg_class_alts[source_operand->reg_class_alt_start]
                 .reg_class_id;
         if (loom_low_descriptor_set_find_physical_register_candidate(
                 descriptor_set, source_class, source, nullptr) &&

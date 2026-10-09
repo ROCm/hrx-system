@@ -213,7 +213,7 @@ iree_status_t loom_amdgpu_mask_write_wait_collect(
     for (uint16_t i = packet->descriptor->result_count;
          i < packet->descriptor->operand_count; ++i) {
       const loom_low_operand_t* operand =
-          &descriptor_set->operands[packet->descriptor->operand_start + i];
+          loom_low_descriptor_operand(descriptor_set, packet->descriptor, i);
       uint16_t register_class = LOOM_LOW_REG_CLASS_NONE;
       if (loom_low_descriptor_operand_maps_to_packet_operand(
               descriptor_set, packet->descriptor, i)) {

@@ -394,9 +394,8 @@ static uint16_t loom_amdgpu_packet_descriptor_operand_vgpr_low_register(
     const loom_low_packet_view_t* packet, uint16_t descriptor_operand_index) {
   const loom_low_descriptor_set_t* descriptor_set =
       state->inputs.schedule->target.descriptor_set;
-  const loom_low_operand_t* operand =
-      &descriptor_set->operands[packet->descriptor->operand_start +
-                                descriptor_operand_index];
+  const loom_low_operand_t* operand = loom_low_descriptor_operand(
+      descriptor_set, packet->descriptor, descriptor_operand_index);
   const loom_low_allocation_assignment_t* assignment =
       loom_low_packet_descriptor_operand_assignment(
           state->inputs.allocation, packet, descriptor_operand_index);
@@ -475,11 +474,10 @@ static bool loom_amdgpu_descriptor_operand_field_already_encoded(
     const loom_low_operand_t* operand) {
   const loom_low_descriptor_set_t* descriptor_set =
       state->inputs.schedule->target.descriptor_set;
-  const loom_low_operand_t* operands =
-      &descriptor_set->operands[packet->descriptor->operand_start];
   for (uint16_t previous_index = 0; previous_index < operand_index;
        ++previous_index) {
-    const loom_low_operand_t* previous = &operands[previous_index];
+    const loom_low_operand_t* previous = loom_low_descriptor_operand(
+        descriptor_set, packet->descriptor, previous_index);
     if (previous->encoding_field_id != operand->encoding_field_id) {
       continue;
     }
@@ -1381,7 +1379,7 @@ static iree_status_t loom_amdgpu_encode_generic_descriptor_packet(
 
   for (uint16_t i = 0; i < packet->descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[packet->descriptor->operand_start + i];
+        loom_low_descriptor_operand(descriptor_set, packet->descriptor, i);
     if (operand->encoding_field_id == 0) {
       continue;
     }

@@ -89,7 +89,7 @@ static loom_low_cse_packet_identity_t loom_low_cse_observe_packet(
   const loom_low_descriptor_t* descriptor = packet->descriptor;
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (iree_any_bit_set(operand->flags,
                          LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE)) {
       continue;

@@ -370,11 +370,12 @@ TEST(SpirvRegistersTest, StorageBufferAddressArithmeticUsesBdaRegisters) {
       LookupRegisterClass(descriptor_set, IREE_SV("spirv.offset64"));
   ASSERT_NE(offset_class, nullptr);
   ASSERT_EQ(offset_add->operand_count, 3);
-  const loom_low_operand_t* operands =
-      &descriptor_set->operands[offset_add->operand_start];
-  EXPECT_EQ(OperandRegisterClass(descriptor_set, operands[0]), offset_class);
-  EXPECT_EQ(OperandRegisterClass(descriptor_set, operands[1]), offset_class);
-  EXPECT_EQ(OperandRegisterClass(descriptor_set, operands[2]), offset_class);
+  for (uint16_t i = 0; i < offset_add->operand_count; ++i) {
+    EXPECT_EQ(OperandRegisterClass(
+                  descriptor_set,
+                  *loom_low_descriptor_operand(descriptor_set, offset_add, i)),
+              offset_class);
+  }
 
   const loom_low_descriptor_t* ptr_access_chain = LookupDescriptor(
       descriptor_set,
@@ -384,14 +385,24 @@ TEST(SpirvRegistersTest, StorageBufferAddressArithmeticUsesBdaRegisters) {
       LookupRegisterClass(descriptor_set, IREE_SV("spirv.ptr.storage_buffer"));
   ASSERT_NE(storage_buffer_ptr_class, nullptr);
   ASSERT_EQ(ptr_access_chain->operand_count, 3);
-  operands = &descriptor_set->operands[ptr_access_chain->operand_start];
-  EXPECT_EQ(OperandRegisterClass(descriptor_set, operands[0]),
+  EXPECT_EQ(OperandRegisterClass(descriptor_set,
+                                 *loom_low_descriptor_operand(
+                                     descriptor_set, ptr_access_chain, 0)),
             storage_buffer_ptr_class);
-  EXPECT_EQ(OperandRegisterClass(descriptor_set, operands[1]),
+  EXPECT_EQ(OperandRegisterClass(descriptor_set,
+                                 *loom_low_descriptor_operand(
+                                     descriptor_set, ptr_access_chain, 1)),
             storage_buffer_ptr_class);
-  EXPECT_EQ(OperandRegisterClass(descriptor_set, operands[2]), offset_class);
-  EXPECT_EQ(operands[1].role, LOOM_LOW_OPERAND_ROLE_RESOURCE);
-  EXPECT_EQ(operands[2].role, LOOM_LOW_OPERAND_ROLE_OPERAND);
+  EXPECT_EQ(OperandRegisterClass(descriptor_set,
+                                 *loom_low_descriptor_operand(
+                                     descriptor_set, ptr_access_chain, 2)),
+            offset_class);
+  EXPECT_EQ(
+      loom_low_descriptor_operand(descriptor_set, ptr_access_chain, 1)->role,
+      LOOM_LOW_OPERAND_ROLE_RESOURCE);
+  EXPECT_EQ(
+      loom_low_descriptor_operand(descriptor_set, ptr_access_chain, 2)->role,
+      LOOM_LOW_OPERAND_ROLE_OPERAND);
 }
 
 TEST(SpirvRegistersTest, WorkgroupAccessChainUsesTypedArrayBase) {
@@ -414,15 +425,22 @@ TEST(SpirvRegistersTest, WorkgroupAccessChainUsesTypedArrayBase) {
   ASSERT_NE(id_class, nullptr);
 
   ASSERT_EQ(access_chain->operand_count, 3);
-  const loom_low_operand_t* operands =
-      &descriptor_set->operands[access_chain->operand_start];
-  EXPECT_EQ(OperandRegisterClass(descriptor_set, operands[0]),
+  EXPECT_EQ(OperandRegisterClass(
+                descriptor_set,
+                *loom_low_descriptor_operand(descriptor_set, access_chain, 0)),
             workgroup_scalar_class);
-  EXPECT_EQ(OperandRegisterClass(descriptor_set, operands[1]),
+  EXPECT_EQ(OperandRegisterClass(
+                descriptor_set,
+                *loom_low_descriptor_operand(descriptor_set, access_chain, 1)),
             workgroup_array_class);
-  EXPECT_EQ(OperandRegisterClass(descriptor_set, operands[2]), id_class);
-  EXPECT_EQ(operands[1].role, LOOM_LOW_OPERAND_ROLE_RESOURCE);
-  EXPECT_EQ(operands[2].role, LOOM_LOW_OPERAND_ROLE_OPERAND);
+  EXPECT_EQ(OperandRegisterClass(
+                descriptor_set,
+                *loom_low_descriptor_operand(descriptor_set, access_chain, 2)),
+            id_class);
+  EXPECT_EQ(loom_low_descriptor_operand(descriptor_set, access_chain, 1)->role,
+            LOOM_LOW_OPERAND_ROLE_RESOURCE);
+  EXPECT_EQ(loom_low_descriptor_operand(descriptor_set, access_chain, 2)->role,
+            LOOM_LOW_OPERAND_ROLE_OPERAND);
 }
 
 }  // namespace

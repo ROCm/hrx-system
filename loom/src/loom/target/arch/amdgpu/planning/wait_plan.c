@@ -1056,7 +1056,7 @@ static void loom_amdgpu_wait_plan_classify_preserved_source(
   const loom_low_descriptor_set_t* descriptors =
       builder->schedule->target.descriptor_set;
   const loom_low_operand_t* result =
-      &descriptors->operands[node->descriptor->operand_start];
+      loom_low_descriptor_operand(descriptors, node->descriptor, 0);
   if (!iree_any_bit_set(result->flags,
                         LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION)) {
     return;
@@ -1200,11 +1200,10 @@ static iree_status_t loom_amdgpu_wait_plan_build_dependency_links(
     if (node->descriptor != NULL) {
       const loom_low_descriptor_set_t* descriptor_set =
           schedule->target.descriptor_set;
-      const loom_low_operand_t* descriptor_operands =
-          &descriptor_set->operands[node->descriptor->operand_start];
       for (uint16_t i = node->descriptor->result_count;
            i < node->descriptor->operand_count; ++i) {
-        const loom_low_operand_t* descriptor_operand = &descriptor_operands[i];
+        const loom_low_operand_t* descriptor_operand =
+            loom_low_descriptor_operand(descriptor_set, node->descriptor, i);
         if (!loom_low_operand_role_is_packet_operand(
                 descriptor_operand->role) ||
             iree_any_bit_set(descriptor_operand->flags,
@@ -2342,9 +2341,8 @@ static uint32_t loom_amdgpu_wait_plan_result_storage_continuation_producer_node(
     return LOOM_LOW_SCHEDULE_NODE_NONE;
   }
   IREE_ASSERT_LT(result_index, node->descriptor->result_count);
-  const loom_low_operand_t* result_operand =
-      &builder->schedule->target.descriptor_set
-           ->operands[node->descriptor->operand_start + result_index];
+  const loom_low_operand_t* result_operand = loom_low_descriptor_operand(
+      builder->schedule->target.descriptor_set, node->descriptor, result_index);
   if (!iree_any_bit_set(result_operand->flags,
                         LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION)) {
     return LOOM_LOW_SCHEDULE_NODE_NONE;

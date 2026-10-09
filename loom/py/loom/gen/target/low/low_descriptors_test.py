@@ -435,14 +435,8 @@ def test_compiler_descriptor_rows_span_source_tables() -> None:
         compiled.descriptor_rows,
         strict=True,
     ):
-        assert (
-            _compiled_slice(
-                compiled.operands,
-                row["operand_start"],
-                row["operand_count"],
-            )
-            == descriptor.operands
-        )
+        operand_indices = _compiled_slice(compiled.operand_indices, row["operand_start"], row["operand_count"])
+        assert tuple(compiled.operands[index] for index in operand_indices) == descriptor.operands
         assert (
             _compiled_slice(
                 compiled.immediates,

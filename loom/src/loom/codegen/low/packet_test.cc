@@ -179,6 +179,9 @@ TEST(LowDescriptorTest, IndexesPacketOperandRoles) {
   loom_low_descriptor_set_t descriptor_set = {};
   descriptor_set.operands = operands;
   descriptor_set.operand_count = IREE_ARRAYSIZE(operands);
+  const uint16_t operand_indices[] = {0, 1, 2, 3, 4, 5};
+  descriptor_set.operand_indices = operand_indices;
+  descriptor_set.operand_index_count = IREE_ARRAYSIZE(operand_indices);
   descriptor_set.constraints = constraints;
   descriptor_set.constraint_count = IREE_ARRAYSIZE(constraints);
 

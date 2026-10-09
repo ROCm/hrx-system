@@ -168,8 +168,8 @@ static const loom_low_operand_t* loom_low_descriptor_text_asm_result_operand(
   const uint16_t descriptor_operand_index =
       descriptor_set->asm_operand_indices[asm_operand_index];
   *out_descriptor_operand_index = descriptor_operand_index;
-  return &descriptor_set
-              ->operands[descriptor->operand_start + descriptor_operand_index];
+  return loom_low_descriptor_operand(descriptor_set, descriptor,
+                                     descriptor_operand_index);
 }
 
 static bool loom_low_descriptor_text_asm_find_packet_operand_index(

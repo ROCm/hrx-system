@@ -397,8 +397,6 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_packet(
     const loom_low_schedule_node_t* node, loom_vm_program_build_t* module_plan,
     iree_io_stream_t* stream) {
   const loom_low_descriptor_t* descriptor = node->descriptor;
-  const loom_low_operand_t* operands =
-      frame->target.descriptor_set->operands + descriptor->operand_start;
   const loom_value_ordinal_t* results =
       loom_low_schedule_node_const_result_ordinals(node);
   const loom_value_ordinal_t* inputs =
@@ -407,7 +405,8 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_packet(
       (uint8_t)descriptor->encoding_id,
   };
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const loom_low_operand_t* operand = &operands[i];
+    const loom_low_operand_t* operand = loom_low_descriptor_operand(
+        frame->target.descriptor_set, descriptor, i);
     const loom_value_ordinal_t ordinal =
         (operand->role == LOOM_LOW_OPERAND_ROLE_RESULT
              ? results

@@ -271,7 +271,7 @@ static bool loom_low_descriptor_packet_operand_indices_for_select(
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
     const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
     if (!loom_low_operand_role_is_packet_operand(operand->role) ||
         iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
       continue;
@@ -422,9 +422,8 @@ static iree_string_view_t loom_low_descriptor_operand_name(
       descriptor_operand_index >= descriptor->operand_count) {
     return IREE_SV("<none>");
   }
-  const loom_low_operand_t* operand =
-      &descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
+  const loom_low_operand_t* operand = loom_low_descriptor_operand(
+      descriptor_set, descriptor, descriptor_operand_index);
   return loom_low_descriptor_set_string(descriptor_set,
                                         operand->field_name_string_ref);
 }
@@ -583,9 +582,8 @@ static iree_status_t loom_low_descriptor_build_tied_results(
     if (constraint->kind != LOOM_LOW_CONSTRAINT_KIND_TIED) {
       continue;
     }
-    const loom_low_operand_t* tied_operand =
-        &descriptor_set->operands[descriptor->operand_start +
-                                  constraint->rhs_operand_index];
+    const loom_low_operand_t* tied_operand = loom_low_descriptor_operand(
+        descriptor_set, descriptor, constraint->rhs_operand_index);
     tied_results[tied_result_index++] = (loom_tied_result_t){
         .result_index = constraint->lhs_operand_index,
         .operand_index = tied_operand->source_value_index,
@@ -721,9 +719,8 @@ static iree_status_t loom_low_select_operand_form_can_rewrite_destructive(
     if (constraint->kind != LOOM_LOW_CONSTRAINT_KIND_DESTRUCTIVE) {
       continue;
     }
-    const loom_low_operand_t* tied_operand =
-        &descriptor_set->operands[replacement_descriptor->operand_start +
-                                  constraint->rhs_operand_index];
+    const loom_low_operand_t* tied_operand = loom_low_descriptor_operand(
+        descriptor_set, replacement_descriptor, constraint->rhs_operand_index);
     const uint16_t tied_packet_operand_index = tied_operand->source_value_index;
     IREE_ASSERT(tied_packet_operand_index < operand_count);
     const uint16_t source_packet_operand_index =

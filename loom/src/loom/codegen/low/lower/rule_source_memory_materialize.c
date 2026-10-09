@@ -170,9 +170,8 @@ loom_low_lower_rule_source_memory_materializer_tied_results(
         break;
       case LOOM_LOW_CONSTRAINT_KIND_DESTRUCTIVE: {
         IREE_ASSERT_NE(constraint->rhs_operand_index, LOOM_LOW_ID_NONE);
-        const loom_low_operand_t* packet_operand =
-            &descriptor_set->operands[descriptor_row->operand_start +
-                                      constraint->rhs_operand_index];
+        const loom_low_operand_t* packet_operand = loom_low_descriptor_operand(
+            descriptor_set, descriptor_row, constraint->rhs_operand_index);
         IREE_ASSERT_TRUE(
             loom_low_operand_role_is_packet_operand(packet_operand->role));
         const uint16_t packet_operand_index =
@@ -205,12 +204,10 @@ loom_low_lower_rule_source_memory_materializer_tied_results(
       continue;
     }
     IREE_ASSERT_NE(constraint->rhs_operand_index, LOOM_LOW_ID_NONE);
-    const loom_low_operand_t* result_operand =
-        &descriptor_set->operands[descriptor_row->operand_start +
-                                  constraint->lhs_operand_index];
-    const loom_low_operand_t* packet_operand =
-        &descriptor_set->operands[descriptor_row->operand_start +
-                                  constraint->rhs_operand_index];
+    const loom_low_operand_t* result_operand = loom_low_descriptor_operand(
+        descriptor_set, descriptor_row, constraint->lhs_operand_index);
+    const loom_low_operand_t* packet_operand = loom_low_descriptor_operand(
+        descriptor_set, descriptor_row, constraint->rhs_operand_index);
     IREE_ASSERT_EQ(result_operand->role, LOOM_LOW_OPERAND_ROLE_RESULT);
     IREE_ASSERT_TRUE(
         loom_low_operand_role_is_packet_operand(packet_operand->role));

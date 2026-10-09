@@ -171,6 +171,9 @@ TEST(LowDescriptorTraitsTest, ImplicitStateResultIsNonDeterministic) {
   loom_low_descriptor_set_t descriptor_set = {};
   descriptor_set.operands = &operand;
   descriptor_set.operand_count = 1;
+  const uint16_t operand_indices[] = {0};
+  descriptor_set.operand_indices = operand_indices;
+  descriptor_set.operand_index_count = IREE_ARRAYSIZE(operand_indices);
   loom_low_descriptor_t descriptor = {};
   descriptor.operand_count = 1;
   descriptor.result_count = 1;
@@ -188,6 +191,9 @@ TEST(LowDescriptorTraitsTest, RematerializationIsPerResult) {
   loom_low_descriptor_set_t descriptor_set = {};
   descriptor_set.operands = operands;
   descriptor_set.operand_count = IREE_ARRAYSIZE(operands);
+  const uint16_t operand_indices[] = {0, 1};
+  descriptor_set.operand_indices = operand_indices;
+  descriptor_set.operand_index_count = IREE_ARRAYSIZE(operand_indices);
   loom_low_descriptor_t descriptor = {};
   descriptor.operand_count = IREE_ARRAYSIZE(operands);
   descriptor.result_count = IREE_ARRAYSIZE(operands);
