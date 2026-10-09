@@ -36,6 +36,7 @@ iree_cc_library(
     "copy_dispatch_test.cc"
     "device_sdma_test.cc"
     "memory_pair_test.cc"
+    "pm4_sdma_finite_test.cc"
     "pm4_sdma_streaming_test.cc"
     "pm4_sdma_test.cc"
   DEPS

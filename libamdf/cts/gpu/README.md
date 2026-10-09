@@ -149,6 +149,24 @@ host-independent batch advancement with shared or separate transfer queues.
 Queue count alone establishes neither physical engine assignment nor overlap
 between transfer and compute.
 
+The [finite-stream cases](recipes/pm4_sdma_finite_test.cc) record all commands
+for 64 graphs before publishing any queue. They reuse 1/2/4/8 input and output
+slots while retaining a distinct source and readback record for each graph.
+Separate upload/download queues, a shared queue alternating uploads and
+downloads, and a shared queue grouping them by available credits all use the
+same dataflow and full cache barriers. Per-slot compute completion protects
+input reuse; download completion protects output reuse. Shared ordering puts
+every required upload before the download that waits for its computation.
+
+The host snapshots every output after the final download, then independently
+joins producers and native consumption before resetting storage. Five streams
+per credit count cross every active command ring's wrap boundary. Complete
+backing and command-history checks include inactive payload slots and the
+idle second SDMA queue in shared layouts. These cases require host USER
+publication and 64 KiB command rings; they perform no mid-stream host refill
+or payload service. Their results establish correctness, not a performance
+ordering between transfer layouts.
+
 The [bounded streaming cases](recipes/pm4_sdma_streaming_test.cc) reuse
 1/2/4/8 payload slots across a longer sequence of graphs. They require mapped
 USER publication on one PM4 queue and two independent SDMA queues. The CPU
