@@ -719,11 +719,12 @@ TEST_F(VulkanCommandBufferTest,
     ASSERT_NE(command_buffer, nullptr);
 
     const iree_hal_atomic_rmw_params_t params = {
-        /*.operand=*/7,
-        /*.flags=*/test_case.flags,
-        /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-        /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
-        /*.reserved=*/0,
+        .operand = 7,
+        .flags = test_case.flags,
+        .width = IREE_HAL_ATOMIC_WIDTH_32,
+        .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+        .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_DEFAULT,
+        .reserved = 0,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer.get()));
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
