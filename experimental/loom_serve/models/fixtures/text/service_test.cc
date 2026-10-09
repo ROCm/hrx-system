@@ -18,6 +18,7 @@
 #include <thread>
 #include <vector>
 
+#include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -273,6 +274,109 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
   // Consumed after joining the application thread.
   iree_status_t status_ = iree_ok_status();
 };
+
+TEST_P(SourceTextServiceTest, TelemetryWrapDoesNotBlockTextOrChangeCounters) {
+  Start();
+  auto poll = [&](const std::string& cursor) {
+    return Read(Send("",
+                     "X-Loom-Model: fixture-text\r\n" +
+                         (cursor.empty() ? std::string()
+                                         : "X-Loom-Cursor: " + cursor + "\r\n"),
+                     "/logz", "GET"));
+  };
+  auto cursor_of = [](const std::string& response) {
+    const std::string marker = R"({"event":"cursor","value":")";
+    const size_t start = response.find(marker);
+    EXPECT_NE(start, std::string::npos) << response;
+    if (start == std::string::npos) {
+      return std::string();
+    }
+    const size_t first = start + marker.size();
+    return response.substr(first, response.find('"', first) - first);
+  };
+  const std::string initial = poll("");
+  ASSERT_EQ(initial.find("HTTP/1.1 200"), 0u);
+  EXPECT_NE(initial.find(R"("event":"stream_begin","sequence":0)"),
+            std::string::npos);
+  const std::string slow = cursor_of(initial);
+  std::string fast = slow;
+  std::string events;
+  auto drain = [&] {
+    for (;;) {
+      const std::string response = poll(fast);
+      EXPECT_EQ(response.find(R"("event":"gap")"), std::string::npos);
+      events += response;
+      const std::string next = cursor_of(response);
+      if (next == fast) {
+        return response;
+      }
+      fast = next;
+    }
+  };
+  loom_serve::testing::StalledStderr stalled;
+  ASSERT_NO_FATAL_FAILURE(stalled.Begin());
+  uint64_t input_tokens = 0;
+  for (size_t wave = 0; wave < 10; ++wave) {
+    std::vector<int> clients;
+    std::vector<std::string> prompts;
+    for (size_t row = 0; row < 4; ++row) {
+      prompts.push_back("abxa" + std::string((wave * 4 + row) % 3, 'b'));
+      clients.push_back(
+          Send(Request(Message("user", prompts.back()), 2),
+               "X-Loom-Session: row" + std::to_string(row) + "\r\n"));
+      input_tokens += prompts.back().size() + 1;
+    }
+    for (size_t row = 0; row < clients.size(); ++row) {
+      EXPECT_EQ(Content(Read(clients[row])), Oracle::Complete(prompts[row], 2));
+    }
+    drain();
+  }
+  // Retained continuation counts only appended work, not the shared prefix.
+  const std::string first = Content(Read(
+      Send(Request(Message("user", "abxa"), 2), "X-Loom-Session: root\r\n")));
+  EXPECT_EQ(first, Oracle::Complete("abxa", 2));
+  const std::string continued = Read(
+      Send(Request(Message("user", "abxa") + "," + Message("assistant", first) +
+                       "," + Message("user", "b"),
+                   2),
+           "X-Loom-Session: root\r\n"));
+  EXPECT_EQ(Content(continued), Oracle::Complete("abxa" + first + "#b", 2));
+  EXPECT_NE(continued.find(R"("cached_tokens":5)"), std::string::npos);
+  input_tokens += 5 + 4;
+  EXPECT_EQ(Read(Send("", "X-Loom-Session: root\r\n", "/v1/checkpoints/pin"))
+                .find("HTTP/1.1 201"),
+            0u);
+  EXPECT_EQ(
+      Read(Send("", "", "/v1/checkpoints/pin", "DELETE")).find("HTTP/1.1 200"),
+      0u);
+  EXPECT_EQ(
+      Read(Send(Request(Message("user", "a")), "X-Loom-Session: bad space\r\n"))
+          .find("HTTP/1.1 400"),
+      0u);
+  const std::string latest = drain();
+  const std::string totals =
+      R"("requests":45,"completed":44,"rejected":1,"cancelled":0,"failed":0,"input_tokens":)" +
+      std::to_string(input_tokens) + R"(,"output_tokens":84,)";
+  EXPECT_NE(latest.find(totals), std::string::npos) << latest;
+  for (const char* event :
+       {"prepared", "admit", "epoch", "span", "request_stats", "session_begin",
+        "session_end", "checkpoint_pin", "checkpoint_release"}) {
+    EXPECT_NE(events.find(std::string("\"event\":\"") + event + "\""),
+              std::string::npos)
+        << event;
+  }
+  // No prompt text enters observation records. Slow and new readers resume
+  // independently after overwrite while current totals remain exact.
+  EXPECT_EQ(events.find("abxa"), std::string::npos);
+  const std::string resumed = poll(slow);
+  EXPECT_NE(resumed.find(R"({"event":"gap","from":1,)"), std::string::npos);
+  EXPECT_NE(resumed.find(totals), std::string::npos);
+  EXPECT_NE(poll("").find(R"("partial":true)"), std::string::npos);
+  EXPECT_EQ(cursor_of(poll(fast)), fast);
+  EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+  service_.join();
+  IREE_EXPECT_OK(status_);
+}
 
 TEST_P(SourceTextServiceTest, ChunkingRowsAndForksMatchDenseOracle) {
   const std::string prompt = "abxabbaaxbabx";
@@ -583,6 +687,12 @@ TEST_P(SourceTextServiceTest,
   EXPECT_FALSE(interface.is_active(interface.self));
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 256u);
   interface.set_observer(interface.self, {});
+  const auto counters = *interface.telemetry.counters;
+  EXPECT_EQ(counters.requests, 1u);
+  EXPECT_EQ(counters.cancelled, 1u);
+  EXPECT_EQ(counters.completed + counters.rejected + counters.failed, 0u);
+  EXPECT_EQ(counters.input_tokens + counters.output_tokens + counters.batches,
+            0u);
   service.reset();
   Start();
   EXPECT_EQ(Content(Read(Send(Request(Message("user", "abx")),

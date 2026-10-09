@@ -126,13 +126,30 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "telemetry",
+    srcs = ["telemetry.c"],
+    hdrs = ["telemetry.h"],
+    deps = [
+        ":model",
+        ":schedule",
+        ":session",
+        "//experimental/loom_serve/telemetry:record",
+        "//experimental/loom_serve/telemetry:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "heartbeat",
     srcs = ["heartbeat.c"],
     hdrs = ["heartbeat.h"],
     deps = [
         "//experimental/loom_serve/http:timer",
         "//experimental/loom_serve/runtime:device",
+        "//experimental/loom_serve/runtime:weights",
         "//experimental/loom_serve/storage:memory",
+        "//experimental/loom_serve/telemetry:record",
+        "//experimental/loom_serve/telemetry:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
     ],
@@ -144,6 +161,8 @@ loom_cc_test(
     deps = [
         ":heartbeat",
         "//experimental/loom_serve/http:timer",
+        "//experimental/loom_serve/telemetry:record",
+        "//experimental/loom_serve/telemetry:stream",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
@@ -165,6 +184,7 @@ loom_cc_library(
         ":chat",
         ":model",
         "//experimental/loom_serve/http:server",
+        "//experimental/loom_serve/telemetry:record",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
@@ -186,6 +206,7 @@ loom_cc_library(
         ":model",
         ":schedule",
         ":session",
+        ":telemetry",
         "//experimental/loom_serve/http:request",
         "//experimental/loom_serve/http:router",
         "//experimental/loom_serve/http:server",
@@ -194,6 +215,8 @@ loom_cc_library(
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:host",
         "//experimental/loom_serve/scheduling:packing",
+        "//experimental/loom_serve/telemetry:record",
+        "//experimental/loom_serve/telemetry:stream",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/async",

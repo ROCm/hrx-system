@@ -54,6 +54,7 @@ loom_cc_test(
     iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::models::fixtures::stalled_stderr
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host

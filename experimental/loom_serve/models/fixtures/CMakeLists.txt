@@ -9,4 +9,15 @@
 
 iree_add_all_subdirs()
 
+loom_cc_library(
+  NAME
+    stalled_stderr
+  HDRS
+    "stalled_stderr.h"
+  DEPS
+    iree::testing::gtest
+  TESTONLY
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

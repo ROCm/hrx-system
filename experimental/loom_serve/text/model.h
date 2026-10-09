@@ -9,6 +9,7 @@
 
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/execution.h"
+#include "experimental/loom_serve/runtime/weights.h"
 #include "experimental/loom_serve/scheduling/packing.h"
 #include "experimental/loom_serve/storage/memory.h"
 #include "experimental/loom_serve/text/chat.h"
@@ -280,6 +281,10 @@ loom_serve_residency_t* loom_serve_text_model_residency(
 
 // Parameter-only virtual/physical statistics, excluding mutable state.
 loom_serve_memory_statistics_t loom_serve_text_model_weight_statistics(
+    const loom_serve_text_model_t* model);
+
+// Accepted parameter streaming/preparation work, including reactivation.
+loom_serve_weight_activity_t loom_serve_text_model_weight_activity(
     const loom_serve_text_model_t* model);
 
 // Queries return borrowed state owned by model. The row index is below the

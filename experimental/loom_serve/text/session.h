@@ -8,6 +8,7 @@
 #define EXPERIMENTAL_LOOM_SERVE_TEXT_SESSION_H_
 
 #include "experimental/loom_serve/http/server.h"
+#include "experimental/loom_serve/telemetry/record.h"
 #include "experimental/loom_serve/text/chat.h"
 #include "experimental/loom_serve/text/model.h"
 #include "iree/tokenizer/tokenizer.h"
@@ -34,6 +35,17 @@ typedef struct loom_serve_text_session_t {
   char name[65];
   // Last admitted request serial, also the idle-row LRU ordering key.
   uint64_t serial;
+  // Owner-only lifetime accounting, independent of row reuse and log retention.
+  struct {
+    // ID assigned by the first admitted request; zero before first admission.
+    uint64_t id;
+    // Cumulative work across retained continuations.
+    loom_serve_telemetry_counters_t counters;
+    // Last completed endpoint, retained even when replacement resets the row.
+    iree_host_size_t position;
+    // Row-owned positions at that endpoint, including any shared prefix.
+    iree_host_size_t resident_tokens;
+  } telemetry;
   // Canonical completed client history validating the retained raw state.
   loom_serve_text_chat_completion_t completion;
   // Preallocated streaming decoder storage reused between requests.
@@ -64,7 +76,8 @@ typedef struct loom_serve_text_session_t {
     iree_host_size_t output_count;
     // Ordinary response bytes already incorporated in copied SSE output.
     iree_host_size_t emitted_length;
-    // Terminal wire reason, or "error" for failed output translation.
+    // Terminal wire literal: stop, length, tool_calls, or error. NULL until
+    // translation establishes a terminal response.
     const char* finish_reason;
     // Application admission time; network framing is not included.
     iree_time_t start_time;
@@ -74,10 +87,11 @@ typedef struct loom_serve_text_session_t {
     iree_host_size_t reserved_tokens;
     // First selected token time, including a possible immediate EOS.
     iree_time_t first_token_time;
-    // Completed epochs that consumed prompt input for this request.
-    uint64_t prefill_steps;
-    // Completed epochs that consumed a pending generated token.
-    uint64_t decode_steps;
+    // Owner-only completed work, independent of client output translation.
+    loom_serve_telemetry_counters_t counters;
+    // CPU output failure copied before consuming its status; owner publishes
+    // only after the CPU job releases the session.
+    loom_serve_telemetry_diagnostic_t diagnostic;
   } request;
 } loom_serve_text_session_t;
 

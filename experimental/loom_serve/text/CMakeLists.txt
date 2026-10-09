@@ -134,6 +134,23 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    telemetry
+  HDRS
+    "telemetry.h"
+  SRCS
+    "telemetry.c"
+  DEPS
+    ::model
+    ::schedule
+    ::session
+    iree::base
+    iree::experimental::loom_serve::telemetry::record
+    iree::experimental::loom_serve::telemetry::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     heartbeat
   HDRS
     "heartbeat.h"
@@ -144,7 +161,10 @@ loom_cc_library(
     iree::base::threading
     iree::experimental::loom_serve::http::timer
     iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::weights
     iree::experimental::loom_serve::storage::memory
+    iree::experimental::loom_serve::telemetry::record
+    iree::experimental::loom_serve::telemetry::stream
   PUBLIC
 )
 
@@ -160,6 +180,8 @@ loom_cc_test(
     iree::base
     iree::base::threading
     iree::experimental::loom_serve::http::timer
+    iree::experimental::loom_serve::telemetry::record
+    iree::experimental::loom_serve::telemetry::stream
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -177,6 +199,7 @@ loom_cc_library(
     ::model
     iree::base
     iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::telemetry::record
     iree::tokenizer
     loom::util::json
     loom::util::stream
@@ -198,6 +221,7 @@ loom_cc_library(
     ::model
     ::schedule
     ::session
+    ::telemetry
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -210,6 +234,8 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::scheduling::packing
+    iree::experimental::loom_serve::telemetry::record
+    iree::experimental::loom_serve::telemetry::stream
     iree::task
     iree::tokenizer
     iree::vm

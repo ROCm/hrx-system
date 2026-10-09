@@ -859,6 +859,11 @@ loom_serve_memory_statistics_t loom_serve_text_model_weight_statistics(
   return loom_serve_weights_statistics(model->weights);
 }
 
+loom_serve_weight_activity_t loom_serve_text_model_weight_activity(
+    const loom_serve_text_model_t* model) {
+  return loom_serve_weights_activity(model->weights);
+}
+
 loom_serve_residency_t* loom_serve_text_model_residency(
     const loom_serve_text_model_t* model) {
   return model->residency;

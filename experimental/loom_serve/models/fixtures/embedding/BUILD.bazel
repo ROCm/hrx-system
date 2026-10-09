@@ -53,6 +53,7 @@ loom_cc_test(
         "//experimental/loom_serve/finite:service",
         "//experimental/loom_serve/http:router",
         "//experimental/loom_serve/http:server",
+        "//experimental/loom_serve/models/fixtures:stalled_stderr",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:host",

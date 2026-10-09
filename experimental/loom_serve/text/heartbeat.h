@@ -9,6 +9,8 @@
 
 #include "experimental/loom_serve/http/timer.h"
 #include "experimental/loom_serve/runtime/device.h"
+#include "experimental/loom_serve/runtime/weights.h"
+#include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/base/threading/mutex.h"
 
 #ifdef __cplusplus
@@ -47,6 +49,8 @@ typedef struct loom_serve_text_heartbeat_snapshot_t {
   loom_serve_memory_statistics_t state_memory;
   // Prepared parameters, independently reclaimable from retained state.
   loom_serve_memory_statistics_t weight_memory;
+  // Cumulative parameter read/preparation submissions, not device timings.
+  loom_serve_weight_activity_t weight_activity;
   // Shared owner accounting, including other models and pooled command scratch.
   loom_serve_device_memory_statistics_t device_memory;
   // Active requests still consuming prompt input.
@@ -65,8 +69,6 @@ typedef struct loom_serve_text_heartbeat_snapshot_t {
   uint64_t prefill_tokens;
   // Pending generated tokens consumed by completed epochs.
   uint64_t decode_tokens;
-  // Selected output tokens published to response processing, including EOS.
-  uint64_t output_tokens;
   // Sum of completed model epoch wall times, excluding host text processing.
   iree_duration_t model_duration;
   // Completed speculative work, separate from committed output progress.
@@ -87,17 +89,10 @@ typedef struct loom_serve_text_heartbeat_t {
   iree_slim_mutex_t mutex;
   // Periodic readiness and callback lifetime, independent of model counters.
   loom_serve_http_timer_t timer;
-  // Borrowed prequoted deployment name, stable through deinitialization.
-  iree_string_view_t name_json;
-  // Previous report, accessed only by serialized service turns.
-  struct {
-    // Report timestamp in monotonic nanoseconds.
-    iree_time_t time;
-    // Consumed prompt-token counter at the previous report.
-    uint64_t prefill;
-    // Published output-token counter at the previous report.
-    uint64_t output;
-  } previous;
+  // Borrowed owner-only stream, alive through deinitialization.
+  loom_serve_telemetry_stream_t* stream;
+  // Borrowed owner counters independent of reporting interval and readers.
+  const loom_serve_telemetry_counters_t* counters;
   // Application-owned counters copied under mutex before reporting.
   loom_serve_text_heartbeat_snapshot_t snapshot;
 } loom_serve_text_heartbeat_t;
@@ -113,13 +108,14 @@ void loom_serve_text_heartbeat_initialize(
 loom_serve_text_heartbeat_snapshot_t loom_serve_text_heartbeat_read(
     loom_serve_text_heartbeat_t* heartbeat);
 
-// Configures borrowed I/O and name storage before the first advance. Zero
-// interval disables reporting. The owner installs the timer observer before
-// advancing, then clears it only after all accepted work has been consumed.
-void loom_serve_text_heartbeat_configure(loom_serve_text_heartbeat_t* heartbeat,
-                                         iree_async_proactor_t* proactor,
-                                         iree_string_view_t name_json,
-                                         iree_duration_t interval);
+// Configures borrowed I/O and observation storage before the first advance.
+// Zero interval disables reporting. The owner installs the timer observer
+// before advancing, then clears it only after all accepted work has been
+// consumed.
+void loom_serve_text_heartbeat_configure(
+    loom_serve_text_heartbeat_t* heartbeat, iree_async_proactor_t* proactor,
+    loom_serve_telemetry_stream_t* stream,
+    const loom_serve_telemetry_counters_t* counters, iree_duration_t interval);
 
 // Whether a callback or unconsumed outcome still borrows this reporter.
 // Reporting alone is not model activity that can free admission capacity.

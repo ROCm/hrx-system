@@ -14,6 +14,22 @@
 extern "C" {
 #endif
 
+typedef enum loom_serve_text_schedule_mode_e {
+  // One shared weight traversal for all admitted prompt and decode spans.
+  LOOM_SERVE_TEXT_SCHEDULE_PACKED = 0,
+  // Same ready-span partition, executed with ordinary isolated model stages.
+  LOOM_SERVE_TEXT_SCHEDULE_ISOLATED,
+  // Isolated prefill math even for decode, for a same-math packed control.
+  LOOM_SERVE_TEXT_SCHEDULE_MATCHED,
+} loom_serve_text_schedule_mode_t;
+
+typedef enum loom_serve_text_packing_mode_e {
+  // Fill one epoch with all ready prompt and decode spans.
+  LOOM_SERVE_TEXT_PACKING_MIXED = 0,
+  // Pack only the first ready row's phase, using the same rotating priority.
+  LOOM_SERVE_TEXT_PACKING_SEPARATE,
+} loom_serve_text_packing_mode_t;
+
 // Fourteen token classes through 262144 and five span classes through 16.
 enum { LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY = 70 };
 

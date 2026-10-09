@@ -6,8 +6,184 @@
 
 #include "experimental/loom_serve/text/heartbeat.h"
 
-#include <stdio.h>
+#include <inttypes.h>
 #include <string.h>
+
+// Related records share a timestamp but remain independently readable after
+// overwrite. Shared device memory is labeled separately from model ownership.
+typedef struct text_activity_record_t {
+  // Host monotonic start of the current phase.
+  uint64_t phase_start;
+  // Host monotonic time of the last completed epoch.
+  uint64_t last_completion;
+  // Oldest queued arrival, or zero when the queue is empty.
+  uint64_t oldest_queued_arrival;
+  // Oldest active arrival, or zero when no row is active.
+  uint64_t oldest_active_arrival;
+  // Rows consuming prompt input.
+  uint64_t prefill_rows;
+  // Rows generating tokens.
+  uint64_t decode_rows;
+  // Rows waiting for peer output credit.
+  uint64_t backpressured_rows;
+  // Span count of the last issued epoch.
+  uint64_t epoch_spans;
+  // Token count of the last issued epoch.
+  uint64_t epoch_tokens;
+} text_activity_record_t;
+
+typedef struct text_work_record_t {
+  // Issued epochs including device continuations.
+  uint64_t issued_epochs;
+  // Successfully completed epochs.
+  uint64_t completed_epochs;
+  // Target weight traversals including isolated spans.
+  uint64_t traversals;
+  // Consumed prompt tokens excluding retained history.
+  uint64_t prefill_tokens;
+  // Consumed pending and accepted draft tokens.
+  uint64_t decode_tokens;
+  // Cumulative host submission-to-readiness nanoseconds.
+  uint64_t model_ns;
+  // Draft candidates from completed verification.
+  uint64_t proposed_tokens;
+  // Accepted draft inputs excluding pending anchors.
+  uint64_t accepted_inputs;
+} text_work_record_t;
+
+typedef struct text_memory_record_t {
+  // Addressable logical token positions.
+  uint64_t capacity;
+  // Completion credit disjoint from resident positions.
+  uint64_t reserved;
+  // Unique resident token positions.
+  uint64_t resident;
+  // Explicitly suspended endpoint payload.
+  uint64_t checkpoint_host_bytes;
+  // Model mutable-state backing excluding weights/workspace.
+  loom_serve_memory_statistics_t state;
+  // Independently reclaimable model parameter backing.
+  loom_serve_memory_statistics_t weights;
+} text_memory_record_t;
+
+typedef struct text_shared_memory_record_t {
+  // Entire shared device owner's retained backing, not this model's charge.
+  uint64_t retained_committed_bytes;
+  // Physical workspace backing, including reusable idle ranges.
+  uint64_t workspace_committed_bytes;
+  // Workspace backing charged to live reservations.
+  uint64_t workspace_live_bytes;
+  // Shared workspace slab count.
+  uint64_t workspace_slab_count;
+  // Cumulative successful workspace reuse across all device users.
+  uint64_t workspace_reuse_count;
+} text_shared_memory_record_t;
+
+static iree_status_t text_shared_memory_format(
+    const loom_serve_telemetry_record_t* record,
+    iree_string_builder_t* output) {
+  text_shared_memory_record_t value;
+  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
+  memcpy(&value, record->data.words, sizeof(value));
+  return iree_string_builder_append_format(
+      output,
+      ",\"shared\":true,\"retained_committed_bytes\":%" PRIu64
+      ",\"workspace_committed_bytes\":%" PRIu64
+      ",\"workspace_live_bytes\":%" PRIu64 ",\"workspace_slab_count\":%" PRIu64
+      ",\"workspace_reuse_count\":%" PRIu64,
+      value.retained_committed_bytes, value.workspace_committed_bytes,
+      value.workspace_live_bytes, value.workspace_slab_count,
+      value.workspace_reuse_count);
+}
+
+static const loom_serve_telemetry_event_t text_shared_memory_event = {
+    "shared_device_memory", text_shared_memory_format};
+
+static iree_status_t text_activity_format(
+    const loom_serve_telemetry_record_t* record,
+    iree_string_builder_t* output) {
+  text_activity_record_t value;
+  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
+  memcpy(&value, record->data.words, sizeof(value));
+  return iree_string_builder_append_format(
+      output,
+      ",\"phase_start_ns\":%" PRIu64 ",\"last_completion_ns\":%" PRIu64
+      ",\"oldest_queued_arrival_ns\":%" PRIu64
+      ",\"oldest_active_arrival_ns\":%" PRIu64 ",\"prefill_rows\":%" PRIu64
+      ",\"decode_rows\":%" PRIu64 ",\"backpressured_rows\":%" PRIu64
+      ",\"epoch_spans\":%" PRIu64 ",\"epoch_tokens\":%" PRIu64,
+      value.phase_start, value.last_completion, value.oldest_queued_arrival,
+      value.oldest_active_arrival, value.prefill_rows, value.decode_rows,
+      value.backpressured_rows, value.epoch_spans, value.epoch_tokens);
+}
+
+static iree_status_t text_work_format(
+    const loom_serve_telemetry_record_t* record,
+    iree_string_builder_t* output) {
+  text_work_record_t value;
+  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
+  memcpy(&value, record->data.words, sizeof(value));
+  return iree_string_builder_append_format(
+      output,
+      ",\"issued_epochs\":%" PRIu64 ",\"completed_epochs\":%" PRIu64
+      ",\"traversals\":%" PRIu64 ",\"prefill_tokens\":%" PRIu64
+      ",\"decode_tokens\":%" PRIu64 ",\"model_ns\":%" PRIu64
+      ",\"mtp\":{\"proposed_tokens\":%" PRIu64
+      ",\"accepted_draft_inputs\":%" PRIu64 "}",
+      value.issued_epochs, value.completed_epochs, value.traversals,
+      value.prefill_tokens, value.decode_tokens, value.model_ns,
+      value.proposed_tokens, value.accepted_inputs);
+}
+
+static iree_status_t text_memory_format(
+    const loom_serve_telemetry_record_t* record,
+    iree_string_builder_t* output) {
+  text_memory_record_t value;
+  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
+  memcpy(&value, record->data.words, sizeof(value));
+  return iree_string_builder_append_format(
+      output,
+      ",\"pool\":{\"capacity_tokens\":%" PRIu64 ",\"reserved_tokens\":%" PRIu64
+      ",\"resident_tokens\":%" PRIu64 "},\"checkpoint_host_bytes\":%" PRIu64
+      ",\"elastic_state\":{\"reserved_bytes\":%" PRIu64
+      ",\"committed_bytes\":%" PRIu64 ",\"peak_bytes\":%" PRIu64
+      ",\"released_bytes\":%" PRIu64
+      "}"
+      ",\"elastic_parameters\":{\"reserved_bytes\":%" PRIu64
+      ",\"committed_bytes\":%" PRIu64 ",\"peak_bytes\":%" PRIu64
+      ",\"released_bytes\":%" PRIu64 "}",
+      value.capacity, value.reserved, value.resident,
+      value.checkpoint_host_bytes, value.state.reserved_bytes,
+      value.state.committed_bytes, value.state.peak_bytes,
+      value.state.released_bytes, value.weights.reserved_bytes,
+      value.weights.committed_bytes, value.weights.peak_bytes,
+      value.weights.released_bytes);
+}
+
+static const loom_serve_telemetry_event_t text_activity_event = {
+    "text_activity", text_activity_format};
+static const loom_serve_telemetry_event_t text_work_event = {"text_work",
+                                                             text_work_format};
+static const loom_serve_telemetry_event_t text_memory_event = {
+    "text_memory", text_memory_format};
+
+static iree_status_t text_weights_format(
+    const loom_serve_telemetry_record_t* record,
+    iree_string_builder_t* output) {
+  loom_serve_weight_activity_t value;
+  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
+  memcpy(&value, record->data.words, sizeof(value));
+  return iree_string_builder_append_format(
+      output,
+      ",\"activations\":%" PRIu64 ",\"deactivations\":%" PRIu64
+      ",\"read_bytes\":%" PRIu64 ",\"prepared_bytes\":%" PRIu64
+      ",\"groups\":%" PRIu64,
+      value.activations, value.deactivations, value.read_bytes,
+      value.prepared_bytes, value.groups);
+}
+
+static const loom_serve_telemetry_event_t text_weights_event = {
+    "weight_activity", text_weights_format};
 
 loom_serve_text_heartbeat_snapshot_t loom_serve_text_heartbeat_read(
     loom_serve_text_heartbeat_t* heartbeat) {
@@ -20,71 +196,71 @@ loom_serve_text_heartbeat_snapshot_t loom_serve_text_heartbeat_read(
 static void text_heartbeat_report(loom_serve_text_heartbeat_t* heartbeat) {
   const loom_serve_text_heartbeat_snapshot_t state =
       loom_serve_text_heartbeat_read(heartbeat);
-  const iree_time_t now = iree_time_now();
-  const double seconds = (now - heartbeat->previous.time) / 1e9;
-  fprintf(
-      stderr,
-      "{\"model\":%.*s,\"event\":\"heartbeat\",\"phase\":\"%s\",\"phase_ms\":"
-      "%.3f,"
-      "\"since_completion_ms\":%.3f,\"active_rows\":%zu,"
-      "\"oldest_queued_age_seconds\":%.9f,"
-      "\"oldest_active_age_seconds\":%.9f,"
-      "\"queued_requests\":%zu,\"pool\":{\"capacity_tokens\":%zu,"
-      "\"reserved_tokens\":%zu,\"resident_tokens\":%zu},"
-      "\"checkpoint_host_bytes\":%zu,"
-      "\"elastic_state\":{\"reserved_bytes\":%" PRIu64
-      ",\"committed_bytes\":%" PRIu64 ",\"peak_bytes\":%" PRIu64
-      ",\"released_bytes\":%" PRIu64
-      "},"
-      "\"elastic_parameters\":{\"reserved_bytes\":%" PRIu64
-      ",\"committed_bytes\":%" PRIu64 ",\"peak_bytes\":%" PRIu64
-      ",\"released_bytes\":%" PRIu64
-      "},"
-      "\"device_memory\":{\"retained_committed_bytes\":%" PRIu64
-      ",\"workspace_committed_bytes\":%" PRIu64
-      ",\"workspace_live_bytes\":%" PRIu64
-      ",\"workspace_slab_count\":%u,\"workspace_reuse_count\":%" PRIu64
-      "},"
-      "\"prefill_rows\":%zu,\"decode_rows\":%zu,"
-      "\"backpressured_rows\":%zu,\"issued_epochs\":%" PRIu64
-      ",\"completed_epochs\":%" PRIu64 ",\"traversals\":%" PRIu64
-      ",\"prefill_tokens\":%" PRIu64 ",\"decode_tokens\":%" PRIu64
-      ",\"output_tokens_including_eos\":%" PRIu64
-      ",\"model_ms\":%.3f,\"epoch_spans\":%zu,\"epoch_tokens\":%zu,"
-      "\"mtp\":{\"proposed_tokens\":%" PRIu64
-      ",\"accepted_draft_inputs\":%" PRIu64
-      "},"
-      "\"interval_prefill_tokens_per_second\":%.3f,"
-      "\"interval_output_tokens_per_second\":%.3f}\n",
-      (int)heartbeat->name_json.size, heartbeat->name_json.data, state.phase,
-      (now - state.phase_start) / 1e6, (now - state.last_completion) / 1e6,
-      state.active_rows,
-      state.queued_requests ? (now - state.oldest_queued_arrival) / 1e9 : 0.0,
-      state.active_rows ? (now - state.oldest_active_arrival) / 1e9 : 0.0,
-      state.queued_requests, state.pool.capacity, state.pool.reserved,
-      state.pool.resident, state.checkpoint_host_bytes,
-      state.state_memory.reserved_bytes, state.state_memory.committed_bytes,
-      state.state_memory.peak_bytes, state.state_memory.released_bytes,
-      state.weight_memory.reserved_bytes, state.weight_memory.committed_bytes,
-      state.weight_memory.peak_bytes, state.weight_memory.released_bytes,
-      state.device_memory.retained.committed_bytes,
-      (uint64_t)state.device_memory.workspace.bytes_committed,
-      (uint64_t)state.device_memory.workspace.bytes_reserved,
-      state.device_memory.workspace.slab_count,
-      state.device_memory.workspace.reuse_count, state.prefill_rows,
-      state.decode_rows, state.backpressured_rows, state.issued_epochs,
-      state.completed_epochs, state.traversals, state.prefill_tokens,
-      state.decode_tokens, state.output_tokens, state.model_duration / 1e6,
-      state.epoch_spans, state.epoch_tokens, state.mtp.proposed_tokens,
-      state.mtp.accepted_inputs,
-      seconds > 0
-          ? (state.prefill_tokens - heartbeat->previous.prefill) / seconds
-          : 0,
-      seconds > 0 ? (state.output_tokens - heartbeat->previous.output) / seconds
-                  : 0);
-  heartbeat->previous.time = now;
-  heartbeat->previous.prefill = state.prefill_tokens;
-  heartbeat->previous.output = state.output_tokens;
+  loom_serve_telemetry_record_t record = {
+      .time_ns = iree_time_now(),
+      .event = &LOOM_SERVE_TELEMETRY_SNAPSHOT,
+      .data.snapshot = {.counters = *heartbeat->counters,
+                        .queued = state.queued_requests,
+                        .active = state.active_rows}};
+  memcpy(record.data.snapshot.phase, state.phase,
+         iree_min(strlen(state.phase), sizeof(record.data.snapshot.phase) - 1));
+  loom_serve_telemetry_stream_append(heartbeat->stream, &record);
+  const text_activity_record_t activity = {
+      .phase_start = state.phase_start,
+      .last_completion = state.last_completion,
+      .oldest_queued_arrival =
+          state.queued_requests ? state.oldest_queued_arrival : 0,
+      .oldest_active_arrival =
+          state.active_rows ? state.oldest_active_arrival : 0,
+      .prefill_rows = state.prefill_rows,
+      .decode_rows = state.decode_rows,
+      .backpressured_rows = state.backpressured_rows,
+      .epoch_spans = state.epoch_spans,
+      .epoch_tokens = state.epoch_tokens};
+  memset(&record.data, 0, sizeof(record.data));
+  record.event = &text_activity_event;
+  memcpy(record.data.words, &activity, sizeof(activity));
+  loom_serve_telemetry_stream_append(heartbeat->stream, &record);
+  const text_work_record_t work = {
+      .issued_epochs = state.issued_epochs,
+      .completed_epochs = state.completed_epochs,
+      .traversals = state.traversals,
+      .prefill_tokens = state.prefill_tokens,
+      .decode_tokens = state.decode_tokens,
+      .model_ns = state.model_duration,
+      .proposed_tokens = state.mtp.proposed_tokens,
+      .accepted_inputs = state.mtp.accepted_inputs};
+  memset(&record.data, 0, sizeof(record.data));
+  record.event = &text_work_event;
+  memcpy(record.data.words, &work, sizeof(work));
+  loom_serve_telemetry_stream_append(heartbeat->stream, &record);
+  const text_memory_record_t memory = {
+      .capacity = state.pool.capacity,
+      .reserved = state.pool.reserved,
+      .resident = state.pool.resident,
+      .checkpoint_host_bytes = state.checkpoint_host_bytes,
+      .state = state.state_memory,
+      .weights = state.weight_memory};
+  memset(&record.data, 0, sizeof(record.data));
+  record.event = &text_memory_event;
+  memcpy(record.data.words, &memory, sizeof(memory));
+  loom_serve_telemetry_stream_append(heartbeat->stream, &record);
+  memset(&record.data, 0, sizeof(record.data));
+  record.event = &text_weights_event;
+  memcpy(record.data.words, &state.weight_activity,
+         sizeof(state.weight_activity));
+  loom_serve_telemetry_stream_append(heartbeat->stream, &record);
+  const text_shared_memory_record_t shared_memory = {
+      .retained_committed_bytes = state.device_memory.retained.committed_bytes,
+      .workspace_committed_bytes =
+          state.device_memory.workspace.bytes_committed,
+      .workspace_live_bytes = state.device_memory.workspace.bytes_reserved,
+      .workspace_slab_count = state.device_memory.workspace.slab_count,
+      .workspace_reuse_count = state.device_memory.workspace.reuse_count};
+  memset(&record.data, 0, sizeof(record.data));
+  record.event = &text_shared_memory_event;
+  memcpy(record.data.words, &shared_memory, sizeof(shared_memory));
+  loom_serve_telemetry_stream_append(heartbeat->stream, &record);
 }
 
 void loom_serve_text_heartbeat_initialize(
@@ -95,14 +271,14 @@ void loom_serve_text_heartbeat_initialize(
   heartbeat->snapshot.phase = "starting";
   heartbeat->snapshot.phase_start = iree_time_now();
   heartbeat->snapshot.last_completion = heartbeat->snapshot.phase_start;
-  heartbeat->previous.time = heartbeat->snapshot.phase_start;
 }
 
-void loom_serve_text_heartbeat_configure(loom_serve_text_heartbeat_t* heartbeat,
-                                         iree_async_proactor_t* proactor,
-                                         iree_string_view_t name_json,
-                                         iree_duration_t interval) {
-  heartbeat->name_json = name_json;
+void loom_serve_text_heartbeat_configure(
+    loom_serve_text_heartbeat_t* heartbeat, iree_async_proactor_t* proactor,
+    loom_serve_telemetry_stream_t* stream,
+    const loom_serve_telemetry_counters_t* counters, iree_duration_t interval) {
+  heartbeat->stream = stream;
+  heartbeat->counters = counters;
   loom_serve_http_timer_configure(&heartbeat->timer, proactor, interval);
 }
 
@@ -125,7 +301,7 @@ iree_status_t loom_serve_text_heartbeat_advance(
 void loom_serve_text_heartbeat_deinitialize(
     loom_serve_text_heartbeat_t* heartbeat) {
   loom_serve_http_timer_deinitialize(&heartbeat->timer);
-  if (heartbeat->timer.interval) {
+  if (heartbeat->stream) {
     text_heartbeat_report(heartbeat);
   }
   iree_slim_mutex_deinitialize(&heartbeat->mutex);
