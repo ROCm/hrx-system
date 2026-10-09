@@ -88,6 +88,41 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    memory_transition
+  HDRS
+    "memory_transition.h"
+  SRCS
+    "memory_transition.c"
+  DEPS
+    amdf::headers
+    iree::base
+    iree::base::internal
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    memory_transition_test
+  SRCS
+    "memory_transition_test.cc"
+  DEPS
+    ::memory_transition
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     memory_backend
   HDRS
     "memory_backend.h"
@@ -95,6 +130,7 @@ iree_cc_library(
     "memory_backend.c"
   DEPS
     ::context
+    ::memory_transition
     ::slab_provider
     amdf::headers
     iree::base

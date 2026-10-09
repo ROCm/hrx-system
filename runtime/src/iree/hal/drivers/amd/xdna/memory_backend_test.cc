@@ -138,6 +138,9 @@ struct FakeNative {
       out_info->release.kind = AMDF_CACHE_TRANSITION_KIND_RANGE;
       out_info->release.executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT;
       out_info->release.host_operation = AMDF_HOST_CACHE_OPERATION_FLUSH;
+      out_info->release.host_instruction =
+          AMDF_HOST_CACHE_INSTRUCTION_X86_CLFLUSH;
+      out_info->release.host_fence_after = AMDF_HOST_CACHE_FENCE_X86_MFENCE;
       out_info->release.range_granularity =
           UINT64_C(64) << query->consumer.value.device.access_ordinal;
     } else if (query->consumer.kind == AMDF_MEMORY_SITE_KIND_HOST) {
@@ -147,6 +150,9 @@ struct FakeNative {
       out_info->acquire.kind = AMDF_CACHE_TRANSITION_KIND_RANGE;
       out_info->acquire.executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT;
       out_info->acquire.host_operation = AMDF_HOST_CACHE_OPERATION_INVALIDATE;
+      out_info->acquire.host_instruction =
+          AMDF_HOST_CACHE_INSTRUCTION_X86_CLFLUSH;
+      out_info->acquire.host_fence_after = AMDF_HOST_CACHE_FENCE_X86_MFENCE;
       out_info->acquire.range_granularity =
           UINT64_C(64) << query->producer.value.device.access_ordinal;
     } else {
@@ -255,6 +261,18 @@ class MemoryBackendTest : public ::testing::Test {
                                      out_pool);
   }
 
+  iree_hal_memory_scope_t ResolveScope(
+      iree_hal_memory_site_kind_t kind,
+      const iree_hal_queue_family_t* family = nullptr) {
+    iree_hal_memory_site_t site = {};
+    site.kind = kind;
+    site.family = family;
+    iree_hal_memory_scope_t scope;
+    IREE_CHECK_OK(
+        iree_hal_device_group_resolve_memory_scope(group_, site, &scope));
+    return scope;
+  }
+
   // Host allocator shared by all test owners.
   iree_allocator_t allocator_;
   // Fake libamdf scope and its query observations.
@@ -310,19 +328,78 @@ TEST_F(MemoryBackendTest, PublishesCanonicalPerDeviceBindings) {
     EXPECT_EQ(slot.type, IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA);
   }
 
+  const iree_hal_memory_transition_table_t table =
+      iree_hal_pool_transition_table(pool);
+  const iree_hal_memory_scope_t host = ResolveScope(IREE_HAL_MEMORY_SITE_HOST);
+  const iree_hal_memory_scope_t queue_a =
+      ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
+  const iree_hal_memory_scope_t queue_b =
+      ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[1]);
+  const iree_hal_memory_scope_t program_a =
+      ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]);
+  iree_hal_memory_transition_pair_t host_to_a;
+  IREE_ASSERT_OK(iree_hal_memory_transition_prepare_pair(
+      table, host, queue_a, IREE_HAL_MEMORY_TRANSITION_RELEASE, &host_to_a));
+  const iree_hal_memory_transition_t publication =
+      iree_hal_memory_transition_query(table, host_to_a);
+  EXPECT_EQ(publication.release.bits,
+            IREE_HAL_MEMORY_EFFECT_HOST_FLUSH |
+                IREE_HAL_MEMORY_EFFECT_RESOURCE_OPERANDS);
+  EXPECT_EQ(publication.acquire.bits, 0u);
+  const iree_hal_memory_transition_recipe_t* publication_recipe =
+      iree_hal_memory_transition_recipe(table, host_to_a,
+                                        IREE_HAL_MEMORY_TRANSITION_RELEASE);
+  ASSERT_NE(publication_recipe, nullptr);
+  ASSERT_EQ(publication_recipe->operation_count, 1u);
+  EXPECT_EQ(publication_recipe->operations[0].range_granularity, 64u);
+  EXPECT_EQ(publication_recipe->operations[0].host.instruction,
+            IREE_HAL_HOST_CACHE_INSTRUCTION_X86_CLFLUSH);
+  EXPECT_EQ(publication_recipe->operations[0].host.fence_after,
+            IREE_HAL_HOST_CACHE_FENCE_X86_MFENCE);
+
+  iree_hal_memory_transition_pair_t b_to_host;
+  IREE_ASSERT_OK(iree_hal_memory_transition_prepare_pair(
+      table, queue_b, host, IREE_HAL_MEMORY_TRANSITION_ACQUIRE, &b_to_host));
+  const iree_hal_memory_transition_t observation =
+      iree_hal_memory_transition_query(table, b_to_host);
+  EXPECT_EQ(observation.release.bits, 0u);
+  EXPECT_EQ(observation.acquire.bits,
+            IREE_HAL_MEMORY_EFFECT_HOST_INVALIDATE |
+                IREE_HAL_MEMORY_EFFECT_RESOURCE_OPERANDS);
+  const iree_hal_memory_transition_t unqualified_program =
+      iree_hal_pool_query_transition(pool, host, program_a);
+  EXPECT_FALSE(
+      iree_hal_memory_effects_is_supported(unqualified_program.release));
+  EXPECT_FALSE(
+      iree_hal_memory_effects_is_supported(unqualified_program.acquire));
+
   EXPECT_EQ(native_.scope_query_count, 1);
   EXPECT_EQ(native_.profile_query_count, 1);
   EXPECT_EQ(native_.pair_query_count, 8);
   iree_hal_pool_release(pool);
 }
 
-TEST_F(MemoryBackendTest, RejectsUnrepresentableDeviceTransition) {
+TEST_F(MemoryBackendTest, PublishesQueueGlobalDeviceTransition) {
   native_.require_device_transition = true;
   iree_hal_pool_t* pool = nullptr;
-  iree_status_t status = CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool);
-  EXPECT_THAT(status, StatusIs(iree::StatusCode::kUnavailable));
-  iree_status_free(status);
-  EXPECT_EQ(pool, nullptr);
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
+  const iree_hal_memory_transition_table_t table =
+      iree_hal_pool_transition_table(pool);
+  const iree_hal_memory_scope_t queue_a =
+      ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
+  const iree_hal_memory_scope_t queue_b =
+      ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[1]);
+  iree_hal_memory_transition_pair_t pair;
+  IREE_ASSERT_OK(iree_hal_memory_transition_prepare_pair(
+      table, queue_a, queue_b, IREE_HAL_MEMORY_TRANSITION_RELEASE, &pair));
+  const iree_hal_memory_transition_t transition =
+      iree_hal_memory_transition_query(table, pair);
+  EXPECT_EQ(transition.release.bits, IREE_HAL_MEMORY_EFFECT_RELEASE_TO_SYSTEM);
+  EXPECT_EQ(transition.acquire.bits, 0u);
+  EXPECT_EQ(iree_hal_memory_transition_recipe(
+                table, pair, IREE_HAL_MEMORY_TRANSITION_RELEASE),
+            nullptr);
+  iree_hal_pool_release(pool);
 }
 
 TEST_F(MemoryBackendTest, RejectsProfileWithoutPrivateReadWriteMapping) {

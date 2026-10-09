@@ -19,8 +19,10 @@ extern "C" {
 // Cold construction factories qualify complete XDNA-family sets against these
 // owners without creating queues, contexts, or allocation payload.
 typedef struct iree_hal_amd_xdna_memory_backend_t {
-  // Generic AMDF schema and shared construction factory.
+  // Generic AMDF schema and published construction factories.
   iree_hal_memory_backend_t base;
+  // Core libamdf storage factory.
+  const iree_hal_slab_pool_factory_t* factories[1];
   // Existing HAL owner used for materialized buffer placement.
   iree_hal_device_t* device;
   // Device-owned native allocation and address namespace.
@@ -33,8 +35,9 @@ typedef struct iree_hal_amd_xdna_memory_backend_t {
   iree_hal_pool_epoch_query_t epoch_query;
 } iree_hal_amd_xdna_memory_backend_t;
 
-// Publishes the shared factory after the caller supplies existing native and
-// progress services. This creates no native object, payload, or policy owner.
+// Publishes the core libamdf factory after the caller supplies existing native
+// and progress services. This creates no native object, payload, or policy
+// owner.
 void iree_hal_amd_xdna_memory_backend_initialize(
     iree_hal_device_t* device, iree_hal_amd_xdna_context_t* context,
     iree_async_notification_t* notification,
