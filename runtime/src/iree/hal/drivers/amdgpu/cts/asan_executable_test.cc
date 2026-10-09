@@ -183,8 +183,37 @@ TEST_P(AsanExecutableTest, RevokesAndRepublishesGlobalLayout) {
   EXPECT_EQ(shadow_bytes[1], kAddressableShadowValue);
   EXPECT_EQ(shadow_bytes[2], kHeapRedzoneShadowValue);
 
+  Ref<iree_hal_executable_t> concurrent_executable;
+  IREE_ASSERT_OK(LoadExecutable("asan_global_layout_test.bin",
+                                concurrent_executable.out()));
+  uint64_t concurrent_address = 0;
+  IREE_ASSERT_OK(QueryExecutableGlobalDeviceAddress(
+      concurrent_executable, object_name, kObjectLength, &concurrent_address));
+  IREE_ASSERT_OK(ReadAsanShadowBytes(logical_device, concurrent_address,
+                                     kObjectAndRedzoneLength, &shadow_bytes));
+  ASSERT_EQ(shadow_bytes.size(), 3u);
+  EXPECT_EQ(shadow_bytes[0], kAddressableShadowValue);
+  EXPECT_EQ(shadow_bytes[1], kAddressableShadowValue);
+  EXPECT_EQ(shadow_bytes[2], kHeapRedzoneShadowValue);
+
   first_executable.reset();
-  IREE_ASSERT_OK(ReadAsanShadowBytes(logical_device, first_address,
+  IREE_ASSERT_OK(ReadAsanShadowBytes(logical_device, concurrent_address,
+                                     kObjectAndRedzoneLength, &shadow_bytes));
+  ASSERT_EQ(shadow_bytes.size(), 3u);
+  EXPECT_EQ(shadow_bytes[0], kAddressableShadowValue);
+  EXPECT_EQ(shadow_bytes[1], kAddressableShadowValue);
+  EXPECT_EQ(shadow_bytes[2], kHeapRedzoneShadowValue);
+  if (first_address != concurrent_address) {
+    IREE_ASSERT_OK(ReadAsanShadowBytes(logical_device, first_address,
+                                       kObjectAndRedzoneLength, &shadow_bytes));
+    ASSERT_EQ(shadow_bytes.size(), 3u);
+    EXPECT_EQ(shadow_bytes[0], kHeapRedzoneShadowValue);
+    EXPECT_EQ(shadow_bytes[1], kHeapRedzoneShadowValue);
+    EXPECT_EQ(shadow_bytes[2], kHeapRedzoneShadowValue);
+  }
+
+  concurrent_executable.reset();
+  IREE_ASSERT_OK(ReadAsanShadowBytes(logical_device, concurrent_address,
                                      kObjectAndRedzoneLength, &shadow_bytes));
   ASSERT_EQ(shadow_bytes.size(), 3u);
   EXPECT_EQ(shadow_bytes[0], kHeapRedzoneShadowValue);
