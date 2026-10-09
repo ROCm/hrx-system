@@ -50,6 +50,35 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
+loom_cc_library(
+  NAME
+    weights
+  HDRS
+    "weights.h"
+  SRCS
+    "weights.c"
+  DEPS
+    ::record
+    ::stream
+    iree::base
+    iree::experimental::loom_serve::runtime::weights
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    weights_test
+  SRCS
+    "weights_test.cc"
+  DEPS
+    ::record
+    ::stream
+    ::weights
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_test(
   NAME
     stream_test

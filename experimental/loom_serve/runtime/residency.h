@@ -123,6 +123,11 @@ iree_status_t loom_serve_residency_deactivate(
 loom_serve_memory_statistics_t loom_serve_residency_statistics(
     const loom_serve_residency_t* residency);
 
+// Copies cumulative submission counters across every registered weight plan.
+// Called on the shared activation owner; no plan is activated or retained.
+loom_serve_weight_activity_t loom_serve_residency_activity(
+    const loom_serve_residency_t* residency);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

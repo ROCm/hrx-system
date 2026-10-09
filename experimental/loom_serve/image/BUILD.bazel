@@ -94,6 +94,7 @@ loom_cc_library(
         "//experimental/loom_serve/runtime:host",
         "//experimental/loom_serve/telemetry:record",
         "//experimental/loom_serve/telemetry:stream",
+        "//experimental/loom_serve/telemetry:weights",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/async",

@@ -12,6 +12,7 @@
 #include "experimental/loom_serve/http/timer.h"
 #include "experimental/loom_serve/image/output.h"
 #include "experimental/loom_serve/image/telemetry.h"
+#include "experimental/loom_serve/telemetry/weights.h"
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/internal/base64.h"
 #include "iree/base/threading/mutex.h"
@@ -136,6 +137,16 @@ static void image_event(loom_serve_image_service_t* service,
   loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
 }
 
+static void image_record_weights(loom_serve_image_service_t* service,
+                                 iree_time_t time_ns) {
+  if (service->generator.weight_activity) {
+    const loom_serve_weight_activity_t activity =
+        service->generator.weight_activity(service->generator.self);
+    loom_serve_telemetry_record_weights(service->telemetry.stream, time_ns,
+                                        &activity);
+  }
+}
+
 // Copies a borrowed status before it propagates or is consumed at a boundary.
 static void image_diagnose(loom_serve_image_service_t* service,
                            uint64_t request, iree_status_t failure) {
@@ -163,6 +174,7 @@ static void image_request_end(loom_serve_image_service_t* service,
   loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
   loom_serve_image_record_totals(service->telemetry.stream,
                                  &service->telemetry.totals);
+  image_record_weights(service, record.time_ns);
 }
 
 static iree_status_t image_quote(iree_string_builder_t* output,
@@ -638,6 +650,7 @@ static void image_heartbeat(loom_serve_image_service_t* service) {
   loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
   loom_serve_image_record_totals(service->telemetry.stream,
                                  &service->telemetry.totals);
+  image_record_weights(service, record.time_ns);
 }
 
 static void image_stop(loom_serve_image_service_t* service) {

@@ -702,6 +702,11 @@ loom_serve_memory_statistics_t loom_serve_image_model_weight_statistics(
   return loom_serve_residency_statistics(model->residency);
 }
 
+loom_serve_weight_activity_t loom_serve_image_model_weight_activity(
+    const loom_serve_image_model_t* model) {
+  return loom_serve_residency_activity(model->residency);
+}
+
 iree_status_t loom_serve_image_model_prepare_request(
     loom_serve_image_model_t* model, iree_string_view_t prompt, uint64_t seed,
     float strength, loom_serve_image_prepared_t* out_prepared) {
@@ -810,6 +815,11 @@ static iree_const_byte_span_t image_generator_complete(void* self) {
   return loom_serve_image_model_complete(self);
 }
 
+static loom_serve_weight_activity_t image_generator_weight_activity(
+    void* self) {
+  return loom_serve_image_model_weight_activity(self);
+}
+
 loom_serve_image_generator_t loom_serve_image_model_generator(
     loom_serve_image_model_t* model) {
   return (loom_serve_image_generator_t){
@@ -819,6 +829,7 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
       .try_admit = image_generator_admit,
       .submit = image_generator_submit,
       .complete = image_generator_complete,
+      .weight_activity = image_generator_weight_activity,
       .tokenizer = model->tokenizer,
       .capacity_domain = loom_serve_residency_cache(model->residency)};
 }

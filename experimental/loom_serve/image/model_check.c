@@ -98,6 +98,13 @@ int main(int argc, char** argv) {
       printf("{\"event\":\"image_prepared\",\"stage\":%" PRIu64
              ",\"tag\":%" PRId64 ",\"input_bytes\":%" PRIu64 "}\n",
              prepared.stage, prepared.tag, prepared.input_bytes);
+      const loom_serve_weight_activity_t activity =
+          loom_serve_image_model_weight_activity(model);
+      printf("{\"event\":\"weight_activity\",\"activations\":%" PRIu64
+             ",\"deactivations\":%" PRIu64 ",\"read_bytes\":%" PRIu64
+             ",\"prepared_bytes\":%" PRIu64 ",\"groups\":%" PRIu64 "}\n",
+             activity.activations, activity.deactivations, activity.read_bytes,
+             activity.prepared_bytes, activity.groups);
       status =
           iree_file_path_join(iree_make_cstring_view(FLAG_output),
                               iree_make_cstring_view(name), allocator, &path);

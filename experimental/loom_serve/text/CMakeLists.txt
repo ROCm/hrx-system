@@ -165,6 +165,7 @@ loom_cc_library(
     iree::experimental::loom_serve::storage::memory
     iree::experimental::loom_serve::telemetry::record
     iree::experimental::loom_serve::telemetry::stream
+    iree::experimental::loom_serve::telemetry::weights
   PUBLIC
 )
 

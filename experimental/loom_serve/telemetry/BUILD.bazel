@@ -46,6 +46,31 @@ loom_cc_test(
     ],
 )
 
+loom_cc_library(
+    name = "weights",
+    srcs = ["weights.c"],
+    hdrs = ["weights.h"],
+    deps = [
+        ":record",
+        ":stream",
+        "//experimental/loom_serve/runtime:weights",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "weights_test",
+    srcs = ["weights_test.cc"],
+    deps = [
+        ":record",
+        ":stream",
+        ":weights",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "stream_test",
     srcs = ["stream_test.cc"],

@@ -56,6 +56,10 @@ typedef struct loom_serve_image_generator_t {
   // Consumes successful completion and releases model pins. Borrowed F32 CHW
   // RGB in [-1,1] remains live until the next invocation or model destruction.
   iree_const_byte_span_t (*complete)(void* self);
+  // Optional owner-side cumulative parameter activity. This query reads only
+  // activation-owner data, even while CPU preparation borrows the invocation.
+  // NULL means the generator does not expose weight activity, not zero work.
+  loom_serve_weight_activity_t (*weight_activity)(void* self);
   // Optional immutable input tokenizer, live through the model lifetime. Raw
   // HTTP utilities borrow it independently of the serialized invocation.
   const iree_tokenizer_t* tokenizer;

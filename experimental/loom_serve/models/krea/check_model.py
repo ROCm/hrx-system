@@ -94,8 +94,13 @@ def main():
     assert residency["entries"] == sum(
         stage["entries"] for stage in residency["stages"]
     )
-    assert retained.count("Streaming ") == (4 if args.adapter else 3)
+    activity = [event for event in events if event["event"] == "weight_activity"]
+    assert activity and activity[0]["activations"] == (4 if args.adapter else 3)
+    assert activity[0]["deactivations"] == 0
+    assert activity[0]["read_bytes"] > 0 and activity[0]["groups"] > 0
     rounds = 2 if args.adapter else 1
+    assert len(activity) == 3 * rounds
+    assert all(event == activity[0] for event in activity)
     assert retained.count("strength must be finite") == 3 * rounds
     assert [event["stage"] for event in prepared] == [1, 0, 1] * rounds
     assert [event["input_bytes"] for event in prepared] == [

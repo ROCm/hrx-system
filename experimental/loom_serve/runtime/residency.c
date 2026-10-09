@@ -70,6 +70,21 @@ loom_serve_memory_statistics_t loom_serve_residency_statistics(
   return total;
 }
 
+loom_serve_weight_activity_t loom_serve_residency_activity(
+    const loom_serve_residency_t* residency) {
+  loom_serve_weight_activity_t total = {0};
+  for (iree_host_size_t i = 0; i < residency->weight_count; ++i) {
+    const loom_serve_weight_activity_t domain =
+        loom_serve_weights_activity(residency->weights[i]);
+    total.activations += domain.activations;
+    total.deactivations += domain.deactivations;
+    total.read_bytes += domain.read_bytes;
+    total.prepared_bytes += domain.prepared_bytes;
+    total.groups += domain.groups;
+  }
+  return total;
+}
+
 static void residency_unlink(loom_serve_residency_t* residency) {
   loom_serve_residency_cache_t* cache = residency->cache;
   if (residency->previous) {

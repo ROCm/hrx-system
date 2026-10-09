@@ -655,18 +655,32 @@ TEST_P(WeightsTest, CheckpointGroupsAdmitAtomicallyAndRetentionPinsNest) {
         CreateRoots(0, 1, &root, i ? adapter_path_.path() : path_.path()));
   }
   IREE_ASSERT_OK(Register(1, 1, 2));
+  auto check_activity = [&](uint64_t activations, uint64_t deactivations) {
+    const auto total = loom_serve_residency_activity(residencies_[1]);
+    const auto base = loom_serve_weights_activity(plans_[1]);
+    const auto adapter = loom_serve_weights_activity(plans_[2]);
+    EXPECT_EQ(total.activations, activations);
+    EXPECT_EQ(total.deactivations, deactivations);
+    EXPECT_EQ(total.read_bytes, base.read_bytes + adapter.read_bytes);
+    EXPECT_EQ(total.prepared_bytes,
+              base.prepared_bytes + adapter.prepared_bytes);
+    EXPECT_EQ(total.groups, base.groups + adapter.groups);
+  };
+  check_activity(0, 0);
   IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
   ASSERT_NO_FATAL_FAILURE(RunPinned(0, 90));
   bool admitted = false;
   IREE_ASSERT_OK(loom_serve_residency_try_acquire(residencies_[1], &admitted));
   if (!GetParam()) {
     ASSERT_TRUE(admitted);
+    check_activity(2, 0);
     ASSERT_NO_FATAL_FAILURE(Run(1, 290));
     loom_serve_residency_release(residencies_[1]);
     loom_serve_residency_release(residencies_[0]);
     return;
   }
   EXPECT_FALSE(admitted);
+  check_activity(0, 0);
   EXPECT_EQ(loom_serve_weights_statistics(plans_[1]).peak_bytes, 0u);
   EXPECT_EQ(loom_serve_weights_statistics(plans_[2]).peak_bytes, 0u);
   // Failed admission neither consumes its own pin nor releases retention.
@@ -675,12 +689,14 @@ TEST_P(WeightsTest, CheckpointGroupsAdmitAtomicallyAndRetentionPinsNest) {
   loom_serve_residency_release(residencies_[0]);
   IREE_ASSERT_OK(loom_serve_residency_try_acquire(residencies_[1], &admitted));
   ASSERT_TRUE(admitted);
+  check_activity(2, 0);
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
   ASSERT_NO_FATAL_FAILURE(Run(1, 290));
   loom_serve_residency_release(residencies_[1]);
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(
       loom_serve_device_residency_cache(device_owner_), 0));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
+  check_activity(2, 2);
 }
 
 TEST_P(WeightsTest, PressureAdmissionDrainsNewPinsButNotAcceptedConsumers) {

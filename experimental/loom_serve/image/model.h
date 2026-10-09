@@ -81,6 +81,9 @@ loom_serve_residency_t* loom_serve_image_model_residency(
     const loom_serve_image_model_t* model);
 loom_serve_memory_statistics_t loom_serve_image_model_weight_statistics(
     const loom_serve_image_model_t* model);
+// Copies cumulative submission activity across the model's parameter domains.
+loom_serve_weight_activity_t loom_serve_image_model_weight_activity(
+    const loom_serve_image_model_t* model);
 
 // Borrows the source-declared public identifier for this residency.
 iree_string_view_t loom_serve_image_model_name(

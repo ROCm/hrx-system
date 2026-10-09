@@ -113,6 +113,7 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::telemetry::record
     iree::experimental::loom_serve::telemetry::stream
+    iree::experimental::loom_serve::telemetry::weights
     iree::task
     loom::util::json
     loom::util::stream

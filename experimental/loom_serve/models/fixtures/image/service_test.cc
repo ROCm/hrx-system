@@ -329,6 +329,11 @@ TEST_P(SourceImageServiceTest, IndependentLogReadersCannotBlockColdImageWork) {
   EXPECT_NE(events.find(R"("stage":0,"tag":32,"input_bytes":16)"),
             std::string::npos);
   EXPECT_NE(events.find(R"("event":"image_generated")"), std::string::npos);
+  EXPECT_NE(events.find(R"("event":"weight_activity")"), std::string::npos);
+  EXPECT_NE(
+      events.find(
+          R"("activations":0,"deactivations":0,"read_bytes":0,"prepared_bytes":0,"groups":0)"),
+      std::string::npos);
   for (const std::string event : {"image_prepared", "image_generated"}) {
     const std::string key = "\"event\":\"" + event + "\"";
     size_t count = 0;

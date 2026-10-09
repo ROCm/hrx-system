@@ -9,6 +9,8 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "experimental/loom_serve/telemetry/weights.h"
+
 // Related records share a timestamp but remain independently readable after
 // overwrite. Shared device memory is labeled separately from model ownership.
 typedef struct text_activity_record_t {
@@ -167,24 +169,6 @@ static const loom_serve_telemetry_event_t text_work_event = {"text_work",
 static const loom_serve_telemetry_event_t text_memory_event = {
     "text_memory", text_memory_format};
 
-static iree_status_t text_weights_format(
-    const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  loom_serve_weight_activity_t value;
-  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
-  memcpy(&value, record->data.words, sizeof(value));
-  return iree_string_builder_append_format(
-      output,
-      ",\"activations\":%" PRIu64 ",\"deactivations\":%" PRIu64
-      ",\"read_bytes\":%" PRIu64 ",\"prepared_bytes\":%" PRIu64
-      ",\"groups\":%" PRIu64,
-      value.activations, value.deactivations, value.read_bytes,
-      value.prepared_bytes, value.groups);
-}
-
-static const loom_serve_telemetry_event_t text_weights_event = {
-    "weight_activity", text_weights_format};
-
 loom_serve_text_heartbeat_snapshot_t loom_serve_text_heartbeat_read(
     loom_serve_text_heartbeat_t* heartbeat) {
   iree_slim_mutex_lock(&heartbeat->mutex);
@@ -245,11 +229,8 @@ static void text_heartbeat_report(loom_serve_text_heartbeat_t* heartbeat) {
   record.event = &text_memory_event;
   memcpy(record.data.words, &memory, sizeof(memory));
   loom_serve_telemetry_stream_append(heartbeat->stream, &record);
-  memset(&record.data, 0, sizeof(record.data));
-  record.event = &text_weights_event;
-  memcpy(record.data.words, &state.weight_activity,
-         sizeof(state.weight_activity));
-  loom_serve_telemetry_stream_append(heartbeat->stream, &record);
+  loom_serve_telemetry_record_weights(heartbeat->stream, record.time_ns,
+                                      &state.weight_activity);
   const text_shared_memory_record_t shared_memory = {
       .retained_committed_bytes = state.device_memory.retained.committed_bytes,
       .workspace_committed_bytes =
