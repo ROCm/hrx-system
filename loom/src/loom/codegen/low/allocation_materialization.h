@@ -86,7 +86,9 @@ typedef struct loom_low_allocation_materialization_options_t {
   bool has_supported_storage_spaces;
   // Storage spaces this materialization may create for spill slots.
   loom_low_storage_space_set_t supported_storage_spaces;
-  // True when successful spill insertion should emit BACKEND/009 feedback.
+  // True when an explicit diagnostic mode requests BACKEND/009 feedback for
+  // successful spill insertion. Compile reports use
+  // |record_materialized_spills| instead.
   bool emit_spill_diagnostics;
   // True when materialized spill records should be retained in |out_result|.
   bool record_materialized_spills;

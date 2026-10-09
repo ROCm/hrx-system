@@ -28,6 +28,13 @@ static const loom_low_descriptor_set_provider_t kDescriptorSetProviders[] = {
     loom_test_low_core_descriptor_set,
 };
 
+static iree_status_t CountDiagnostic(
+    void* user_data, const loom_diagnostic_emission_t* emission) {
+  (void)emission;
+  ++*static_cast<iree_host_size_t*>(user_data);
+  return iree_ok_status();
+}
+
 class LowAllocationMaterializationTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -104,7 +111,8 @@ class LowAllocationMaterializationTest : public ::testing::Test {
   loom_low_descriptor_registry_t descriptor_registry_ = {};
 };
 
-TEST_F(LowAllocationMaterializationTest, RecomputesTrafficAfterSliceRewrite) {
+TEST_F(LowAllocationMaterializationTest,
+       RecordsRecomputedTrafficWithoutImplicitDiagnostics) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @test_target
 
@@ -177,12 +185,18 @@ low.func.def target<test.low.core>(@test_target) @stale_slice_plan(%wide: reg<te
   iree_arena_initialize(&block_pool_, &arena);
   loom_low_allocation_materialization_result_t result = {};
   loom_low_allocation_materialization_options_t options = {};
+  iree_host_size_t diagnostic_count = 0;
   options.has_supported_storage_spaces = true;
   options.supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_PRIVATE;
   options.record_materialized_spills = true;
+  options.emitter = {
+      /*.fn=*/CountDiagnostic,
+      /*.user_data=*/&diagnostic_count,
+  };
   IREE_ASSERT_OK(loom_low_allocation_materialize_spills(&table, &options,
                                                         &arena, &result));
 
+  EXPECT_EQ(diagnostic_count, 0u);
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_EQ(result.storage_count, 2u);
   EXPECT_EQ(result.storage_bytes, 20u);
