@@ -35,6 +35,30 @@ rules:
         - /libhrx/**/*test.cc
         - /libhrx/**/*_test.h
 
+  - id: iree.cpp.no-designated-initializer-suppression
+    languages:
+      - generic
+    severity: ERROR
+    message: >-
+      C++ implementation sources must satisfy the designated-initializer
+      policy without suppressing iree-cpp-designated-initializer.
+    pattern-regex: >-
+      NOLINT(?:BEGIN|END|NEXTLINE)?\s*\([^)]*\biree-cpp-designated-initializer\b[^)]*\)
+    paths:
+      include:
+        - /runtime/**/*.cc
+        - /runtime/**/*.cpp
+        - /runtime/**/*.cxx
+        - /loom/**/*.cc
+        - /loom/**/*.cpp
+        - /loom/**/*.cxx
+        - /libamdf/**/*.cc
+        - /libamdf/**/*.cpp
+        - /libamdf/**/*.cxx
+        - /libhrx/**/*.cc
+        - /libhrx/**/*.cpp
+        - /libhrx/**/*.cxx
+
   - id: iree.loom.target-diagnostics-are-target-generic
     languages:
       - python
