@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -454,6 +455,116 @@ TEST_P(SourceTextServiceTest, ChunkingRowsAndForksMatchDenseOracle) {
         loom_serve_text_row_reset(loom_serve_text_model_row(model_, i)));
   }
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 256u);
+}
+
+TEST_P(SourceTextServiceTest, CancelledPreparationRetainsPartialOwnership) {
+  const auto before = loom_serve_device_memory_statistics(device_);
+  auto options = ModelOptions();
+  iree_notification_t notification;
+  iree_notification_initialize(&notification);
+  loom_serve_text_load_t* load = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_load_create(
+      device_, &options,
+      [](void* payload) {
+        iree_notification_post(static_cast<iree_notification_t*>(payload),
+                               IREE_ALL_WAITERS);
+      },
+      &notification, &load, allocator_));
+  bool complete = false;
+  IREE_ASSERT_OK(loom_serve_text_load_advance(load, 0, &complete));
+  ASSERT_FALSE(complete);
+  iree_status_t status = iree_ok_status();
+  while (!complete) {
+    const auto ticket = iree_notification_prepare_wait(&notification);
+    status = loom_serve_text_load_advance(
+        load, LOOM_SERVE_TEXT_LOAD_FLAG_CANCEL, &complete);
+    if (complete) {
+      iree_notification_cancel_wait(&notification);
+    } else {
+      IREE_ASSERT_OK(status);
+      iree_notification_commit_wait(&notification, ticket, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    }
+  }
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, status);
+  auto* partial = loom_serve_text_load_take_model(load);
+  ASSERT_NE(partial, nullptr);
+  loom_serve_text_load_destroy(load);
+  loom_serve_text_model_retire(partial, nullptr, nullptr);
+  ASSERT_TRUE(loom_serve_text_model_is_retired(partial));
+  IREE_ASSERT_OK(loom_serve_text_model_destroy_retired(partial));
+  iree_notification_deinitialize(&notification);
+  const auto after = loom_serve_device_memory_statistics(device_);
+  EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
+  EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
+}
+
+TEST_P(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
+  const auto package = iree::testing::MakeTempFilePath("failed_text_link");
+  ASSERT_TRUE(std::filesystem::create_directory(package));
+  for (const char* file :
+       {"prepare.loom", "advance.loom", "sources.txt", "weights.loom"}) {
+    ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/" + file,
+                                           package + "/" + file));
+  }
+  {
+    std::ifstream input(directory_ + "/control.loom");
+    std::string source((std::istreambuf_iterator<char>(input)), {});
+    const auto offset = source.find("import(\"runner\")");
+    ASSERT_NE(offset, std::string::npos);
+    source.replace(offset, std::string("import(\"runner\")").size(),
+                   "import(\"missing\")");
+    std::ofstream output(package + "/control.loom");
+    output << source;
+    ASSERT_TRUE(output.good());
+  }
+  const auto before = loom_serve_device_memory_statistics(device_);
+  auto options = ModelOptions();
+  options.source_directory = iree_make_cstring_view(package.c_str());
+  iree_notification_t notification;
+  iree_notification_initialize(&notification);
+  const auto wake = [](void* payload) {
+    iree_notification_post(static_cast<iree_notification_t*>(payload),
+                           IREE_ALL_WAITERS);
+  };
+  loom_serve_text_load_t* load = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_load_create(device_, &options, wake,
+                                             &notification, &load, allocator_));
+  bool complete = false;
+  iree_status_t status = iree_ok_status();
+  while (!complete) {
+    const auto ticket = iree_notification_prepare_wait(&notification);
+    status = loom_serve_text_load_advance(load, 0, &complete);
+    if (complete) {
+      iree_notification_cancel_wait(&notification);
+    } else {
+      IREE_ASSERT_OK(status);
+      iree_notification_commit_wait(&notification, ticket, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    }
+  }
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND, status);
+  auto* partial = loom_serve_text_load_take_model(load);
+  loom_serve_text_load_destroy(load);
+  loom_serve_text_model_retire(partial, wake, &notification);
+  EXPECT_TRUE(iree_notification_await(
+      &notification,
+      [](void* payload) {
+        return loom_serve_text_model_is_retired(
+            static_cast<loom_serve_text_model_t*>(payload));
+      },
+      partial, iree_infinite_timeout()));
+  IREE_ASSERT_OK(loom_serve_text_model_destroy_retired(partial));
+  iree_notification_deinitialize(&notification);
+  const auto after = loom_serve_device_memory_statistics(device_);
+  EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
+  EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
+  auto* row = loom_serve_text_model_row(model_, 0);
+  const int32_t token = Oracle::Id('a');
+  IREE_ASSERT_OK(loom_serve_text_row_prefill(row, 1, &token));
+  Oracle reference;
+  reference.Consume("a");
+  EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
 }
 
 TEST_P(SourceTextServiceTest, RetirementOwnsAcceptedCheckpointCapture) {

@@ -25,10 +25,12 @@
 #include "experimental/loom_serve/text/source.h"
 #include "experimental/loom_serve/text/state.h"
 #include "experimental/loom_serve/text/storage.h"
+#include "iree/async/operations/semaphore.h"
 #include "iree/base/internal/path.h"
 #include "iree/tooling/device_util.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
+#include "loomc/iree.h"
 
 enum {
   TEXT_ROW_CAPACITY = LOOM_SERVE_TEXT_ROW_CAPACITY,
@@ -262,8 +264,7 @@ static iree_status_t text_check_layouts(loom_serve_text_model_t* runner) {
 
 // Weight placement and preparation are cold model-wide work. Session rows
 // never own weights and every compiled shape retains views of this residency.
-static iree_status_t text_prepare_weights(loom_serve_text_model_t* model,
-                                          iree_string_view_t source_directory) {
+static iree_status_t text_bind_weights(loom_serve_text_model_t* model) {
   iree_host_size_t root_count = 0;
   for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
     root_count += model->stages[i].program.parameter_roots.count;
@@ -284,26 +285,11 @@ static iree_status_t text_prepare_weights(loom_serve_text_model_t* model,
       };
     }
   }
-  char* policy_path = NULL;
-  const loom_serve_preparation_parameter_t* checkpoint =
-      &loom_serve_preparation_stage(model->source.preparation, 0)
-           ->parameters[0];
-  iree_status_t status = iree_file_path_join(
-      source_directory, checkpoint->policy, model->allocator, &policy_path);
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_weights_create(
-        model->device, model->transfer, model->dispatch,
-        loom_serve_device_memory_pool(model->device_owner),
-        model->source.shared_stage_count, root_count, roots, &model->weights,
-        model->allocator);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_weights_prepare(
-        model->weights, loom_serve_device_host(model->device_owner), model->jit,
-        model->command_mode, checkpoint->path,
-        iree_make_cstring_view(policy_path));
-  }
-  iree_allocator_free(model->allocator, policy_path);
+  iree_status_t status = loom_serve_weights_create(
+      model->device, model->transfer, model->dispatch,
+      loom_serve_device_memory_pool(model->device_owner),
+      model->source.shared_stage_count, root_count, roots, &model->weights,
+      model->allocator);
   iree_allocator_free(model->allocator, roots);
   return status;
 }
@@ -448,16 +434,70 @@ static iree_status_t text_create_program(loom_serve_text_model_t* runner) {
                                          IREE_SV("epoch"), &runner->epoch_step);
 }
 
-static iree_status_t text_initialize(loom_serve_text_model_t* model,
-                                     const loom_serve_text_options_t* options) {
-  bool retain_profile_metadata = false;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_profiling_from_flags_requires_retained_command_buffer_metadata(
-          &retain_profile_metadata));
-  model->command_mode =
-      retain_profile_metadata
-          ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA
-          : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
+typedef enum text_load_phase_e {
+  TEXT_LOAD_PREPARE,
+  TEXT_LOAD_STAGES,
+  TEXT_LOAD_WEIGHTS,
+  TEXT_LOAD_LINK,
+  TEXT_LOAD_READY,
+  TEXT_LOAD_COMPLETE,
+} text_load_phase_t;
+
+struct loom_serve_text_load_t {
+  // Private bootstrap task; final release publishes completion to the owner.
+  loomc_task_t task;
+  // Allocation policy for this operation, independent of its model.
+  iree_allocator_t allocator;
+  // Partial model, transferred on every terminal outcome including failure.
+  loom_serve_text_model_t* model;
+  // Borrowed source paths and shapes, retained through terminal advance.
+  loom_serve_text_options_t options;
+  // Serialized owner-only phase; callbacks publish results, never transition.
+  text_load_phase_t phase;
+  // Next native stage; the previous slot receives the compilation result.
+  iree_host_size_t index;
+  // Owned parameter policy path retained through asynchronous preparation.
+  char* policy_path;
+  // Once cancelled, subsequent advance calls cannot restart preparation.
+  bool cancelled;
+  // Private task result transferred only by the task's final release.
+  iree_status_t task_status;
+  // Joins worker/proactor final publication with the owner's next advance.
+  struct {
+    // Protects completion publication and its final notification access.
+    iree_slim_mutex_t mutex;
+    // Accepted work retains this load until its final callback.
+    bool pending;
+    // Owned callback outcome, consumed by advance.
+    iree_status_t status;
+    // Nonblocking serialized-owner notification.
+    loom_serve_text_load_wake_fn_t wake;
+    // Borrowed notification payload retained through terminal advance.
+    void* user_data;
+  } event;
+  // Initialization upload readiness; failure still requires model retirement.
+  struct {
+    // Intrusive proactor operation retained through its final callback.
+    iree_async_semaphore_wait_operation_t operation;
+    // Borrowed semaphores owned by the partial model's execution domain.
+    iree_async_semaphore_t* semaphores[2];
+    // Captured initialization dependency frontier.
+    loom_serve_execution_frontier_t frontier;
+  } readiness;
+};
+
+static void text_load_complete(void* user_data, iree_status_t status) {
+  loom_serve_text_load_t* load = user_data;
+  iree_slim_mutex_lock(&load->event.mutex);
+  load->event.status = status;
+  load->event.pending = false;
+  load->event.wake(load->event.user_data);
+  iree_slim_mutex_unlock(&load->event.mutex);
+}
+
+static iree_status_t text_load_prepare(loom_serve_text_load_t* load) {
+  loom_serve_text_model_t* model = load->model;
+  const loom_serve_text_options_t* options = &load->options;
   model->shape_count = options->epoch_count;
   model->context_capacity = options->context_capacity;
   if (model->shape_count) {
@@ -475,59 +515,82 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
       model->allocator, stage_count, sizeof(*model->stages),
       (void**)&model->stages));
   model->stage_count = stage_count;
-  model->device = loom_serve_device_handle(model->device_owner);
-  model->group = loom_serve_device_group(model->device_owner);
-  model->dispatch = loom_serve_device_dispatch_queue(model->device_owner);
-  model->transfer = loom_serve_device_transfer_queue(model->device_owner);
-  IREE_RETURN_IF_ERROR(loom_serve_device_create_execution(model->device_owner,
-                                                          &model->execution));
-  IREE_RETURN_IF_ERROR(loom_serve_jit_create(
+  return loom_serve_jit_create(
       model->device, model->dispatch,
       loom_serve_device_host(model->device_owner), options->source_directory,
       &options->kernel_sanitizer, &model->source.compilation, model->allocator,
-      &model->jit));
+      &model->jit);
+}
+
+static void text_load_execute(loomc_task_t* task,
+                              loomc_host_size_t worker_ordinal) {
+  (void)worker_ordinal;
+  loom_serve_text_load_t* load = (loom_serve_text_load_t*)task;
+  load->task_status = text_load_prepare(load);
+}
+
+static void text_load_release(loomc_task_t* task) {
+  loom_serve_text_load_t* load = (loom_serve_text_load_t*)task;
+  text_load_complete(load, load->task_status);
+}
+
+static const loomc_task_vtable_t text_load_vtable = {
+    .execute = text_load_execute,
+    .destroy = text_load_release,
+};
+
+static void text_load_compiled(void* user_data, iree_status_t status,
+                               loom_serve_jit_stage_t* compiled) {
+  loom_serve_text_load_t* load = user_data;
+  load->model->stages[load->index - 1].compiled = compiled;
+  text_load_complete(load, status);
+}
+
+static void text_load_ready(void* user_data, iree_async_operation_t* operation,
+                            iree_status_t status,
+                            iree_async_completion_flags_t flags) {
+  (void)operation;
+  (void)flags;
+  text_load_complete(user_data, status);
+}
+
+static iree_status_t text_load_bind(loom_serve_text_model_t* model) {
   iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < stage_count && iree_status_is_ok(status);
-       ++i) {
+  for (iree_host_size_t i = 0;
+       i < model->stage_count && iree_status_is_ok(status); ++i) {
     text_stage_t* stage = &model->stages[i];
-    const loom_serve_preparation_stage_t* declaration =
-        loom_serve_preparation_stage(model->source.preparation, i);
-    status = loom_serve_jit_compile(model->jit, declaration->root,
-                                    &declaration->config, &stage->compiled);
-    if (iree_status_is_ok(status)) {
-      stage->program = *loom_serve_jit_stage_program(stage->compiled);
-    }
-    if (iree_status_is_ok(status) &&
-        stage->program.requirements.fixed_buffer_count) {
-      status = iree_allocator_malloc_array(
-          model->allocator, stage->program.requirements.fixed_buffer_count,
-          sizeof(*stage->fixed_buffers), (void**)&stage->fixed_buffers);
+    stage->program = *loom_serve_jit_stage_program(stage->compiled);
+    const uint32_t count = stage->program.requirements.fixed_buffer_count;
+    if (count) {
+      status = iree_allocator_malloc_array(model->allocator, count,
+                                           sizeof(*stage->fixed_buffers),
+                                           (void**)&stage->fixed_buffers);
       if (iree_status_is_ok(status)) {
-        stage->fixed_buffer_count =
-            stage->program.requirements.fixed_buffer_count;
+        stage->fixed_buffer_count = count;
       }
     }
   }
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(text_check_layouts(model));
-  IREE_RETURN_IF_ERROR(text_prepare_weights(model, options->source_directory));
+  IREE_RETURN_IF_ERROR(loom_serve_device_create_execution(model->device_owner,
+                                                          &model->execution));
+  return text_bind_weights(model);
+}
+
+static iree_status_t text_load_link(loom_serve_text_load_t* load) {
+  loom_serve_text_model_t* model = load->model;
+  iree_status_t status = iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_serve_residency_create(
       loom_serve_device_residency_cache(model->device_owner), model->execution,
       1, &model->weights, &model->residency, model->allocator));
-  for (iree_host_size_t i = 0; i < stage_count && iree_status_is_ok(status);
-       ++i) {
+  for (iree_host_size_t i = 0;
+       i < model->stage_count && iree_status_is_ok(status); ++i) {
     text_stage_t* stage = &model->stages[i];
     status = loom_serve_jit_stage_record(
         stage->compiled, iree_hal_queue_family(model->dispatch),
         model->command_mode, stage->fixed_buffers, &stage->command);
   }
   IREE_RETURN_IF_ERROR(status);
-  uint64_t workspace_length = 0;
-  for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
-    workspace_length = iree_max(
-        workspace_length,
-        model->stages[i].program.requirements.transient.required_byte_length);
-  }
   IREE_RETURN_IF_ERROR(loom_serve_text_state_allocate(
       &model->state, model->device_owner, model->execution));
   IREE_RETURN_IF_ERROR(
@@ -542,22 +605,33 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
         model->allocator, model->state.checkpoints.capacity,
         sizeof(*model->checkpoints), (void**)&model->checkpoints));
   }
-  fprintf(stderr,
-          "Residency: %zu rows, %.3f GiB retained arena, %.3f GiB maximum "
-          "private workspace, %zu-token context, %zu-token prefill capacity.\n",
-          model->row_count,
-          iree_hal_buffer_byte_length(model->state.row_arena) / 1073741824.0,
-          workspace_length / 1073741824.0, model->context_capacity,
-          model->source.prefill_capacity);
   IREE_RETURN_IF_ERROR(text_create_program(model));
-  loom_serve_text_storage_release_payloads(&model->state.storage);
-  return iree_ok_status();
+  iree_async_proactor_t* proactor = NULL;
+  IREE_RETURN_IF_ERROR(iree_async_proactor_pool_get(
+      loom_serve_host_proactor_pool(
+          loom_serve_device_host(model->device_owner)),
+      0, &proactor));
+  load->readiness.frontier = loom_serve_execution_frontier(model->execution);
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    load->readiness.semaphores[i] =
+        (iree_async_semaphore_t*)load->readiness.frontier.semaphores[i];
+  }
+  iree_async_semaphore_wait_operation_t* wait = &load->readiness.operation;
+  iree_async_operation_initialize(
+      &wait->base, IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT,
+      IREE_ASYNC_OPERATION_FLAG_NONE, text_load_ready, load);
+  wait->semaphores = load->readiness.semaphores;
+  wait->values = load->readiness.frontier.values;
+  wait->count = 2;
+  wait->mode = IREE_ASYNC_WAIT_MODE_ALL;
+  return iree_async_proactor_submit_one(proactor, &wait->base);
 }
 
-iree_status_t loom_serve_text_model_create(
+iree_status_t loom_serve_text_load_create(
     loom_serve_device_t* device, const loom_serve_text_options_t* options,
-    loom_serve_text_model_t** out_model, iree_allocator_t host_allocator) {
-  *out_model = NULL;
+    loom_serve_text_load_wake_fn_t wake, void* user_data,
+    loom_serve_text_load_t** out_load, iree_allocator_t host_allocator) {
+  *out_load = NULL;
   if (options->row_count < 1 || options->row_count > TEXT_ROW_CAPACITY) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "text row count must be in [1, 16]");
@@ -584,23 +658,191 @@ iree_status_t loom_serve_text_model_create(
                               "epoch %zu has invalid token/span capacities", i);
     }
   }
-  loom_serve_text_model_t* model = NULL;
+  bool retain_profile_metadata = false;
   IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, sizeof(*model), (void**)&model));
-  model->allocator = host_allocator;
-  model->device_owner = device;
-  model->row_count = options->row_count;
-  loom_serve_text_state_initialize(options, &model->state, host_allocator);
-  iree_status_t status = text_initialize(model, options);
-  loom_output_stream_t output;
-  loom_output_stream_for_file(stderr, &output);
-  status = iree_status_join(status, loom_serve_compilation_write(
-                                        &model->source.compilation, &output));
+      iree_hal_profiling_from_flags_requires_retained_command_buffer_metadata(
+          &retain_profile_metadata));
+  loom_serve_text_load_t* load = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, sizeof(*load), (void**)&load));
+  load->allocator = host_allocator;
+  load->options = *options;
+  load->event.wake = wake;
+  load->event.user_data = user_data;
+  iree_slim_mutex_initialize(&load->event.mutex);
+  loomc_task_initialize(&text_load_vtable, &load->task);
+  iree_status_t status = iree_allocator_malloc(
+      host_allocator, sizeof(*load->model), (void**)&load->model);
   if (iree_status_is_ok(status)) {
-    *out_model = model;
+    loom_serve_text_model_t* model = load->model;
+    model->allocator = host_allocator;
+    model->device_owner = device;
+    model->device = loom_serve_device_handle(device);
+    model->group = loom_serve_device_group(device);
+    model->dispatch = loom_serve_device_dispatch_queue(device);
+    model->transfer = loom_serve_device_transfer_queue(device);
+    model->row_count = options->row_count;
+    model->command_mode =
+        retain_profile_metadata
+            ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA
+            : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
+    loom_serve_text_state_initialize(options, &model->state, host_allocator);
+    *out_load = load;
   } else {
-    status = iree_status_join(status, loom_serve_text_model_destroy(model));
+    iree_slim_mutex_deinitialize(&load->event.mutex);
+    iree_allocator_free(host_allocator, load);
   }
+  return status;
+}
+
+iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
+                                           loom_serve_text_load_flags_t flags,
+                                           bool* out_complete) {
+  *out_complete = false;
+  load->cancelled |= iree_any_bit_set(flags, LOOM_SERVE_TEXT_LOAD_FLAG_CANCEL);
+  iree_slim_mutex_lock(&load->event.mutex);
+  if (load->event.pending) {
+    iree_slim_mutex_unlock(&load->event.mutex);
+    return iree_ok_status();
+  }
+  iree_status_t status = load->event.status;
+  load->event.status = iree_ok_status();
+  iree_slim_mutex_unlock(&load->event.mutex);
+  if (iree_status_is_ok(status) && load->cancelled) {
+    status = iree_make_status(IREE_STATUS_CANCELLED, "model load cancelled");
+  }
+  loom_serve_text_model_t* model = load->model;
+  loom_serve_host_t* host = loom_serve_device_host(model->device_owner);
+  bool submitted = false;
+  while (iree_status_is_ok(status) && !submitted &&
+         load->phase != TEXT_LOAD_COMPLETE) {
+    // Every phase either advances inline or lends this operation to one task.
+    iree_slim_mutex_lock(&load->event.mutex);
+    load->event.pending = true;
+    iree_slim_mutex_unlock(&load->event.mutex);
+    switch (load->phase) {
+      case TEXT_LOAD_PREPARE:
+        load->phase = TEXT_LOAD_STAGES;
+        status = iree_status_from_loomc(loomc_task_sink_submit(
+            loom_serve_host_compiler_sink(host), &load->task));
+        submitted = iree_status_is_ok(status);
+        break;
+      case TEXT_LOAD_STAGES:
+        if (load->index < model->stage_count) {
+          const loom_serve_preparation_stage_t* declaration =
+              loom_serve_preparation_stage(model->source.preparation,
+                                           load->index++);
+          status = loom_serve_jit_compile_async(model->jit, declaration->root,
+                                                &declaration->config,
+                                                text_load_compiled, load);
+          submitted = iree_status_is_ok(status);
+        } else {
+          status = text_load_bind(model);
+          load->phase = TEXT_LOAD_WEIGHTS;
+        }
+        break;
+      case TEXT_LOAD_WEIGHTS: {
+        const loom_serve_preparation_parameter_t* checkpoint =
+            &loom_serve_preparation_stage(model->source.preparation, 0)
+                 ->parameters[0];
+        status = iree_file_path_join(load->options.source_directory,
+                                     checkpoint->policy, load->allocator,
+                                     &load->policy_path);
+        if (iree_status_is_ok(status)) {
+          status = loom_serve_weights_prepare_async(
+              model->weights, host, model->jit, model->command_mode,
+              checkpoint->path, iree_make_cstring_view(load->policy_path),
+              text_load_complete, load);
+          submitted = iree_status_is_ok(status);
+        }
+        load->phase = TEXT_LOAD_LINK;
+        break;
+      }
+      case TEXT_LOAD_LINK:
+        status = text_load_link(load);
+        submitted = iree_status_is_ok(status);
+        load->phase = TEXT_LOAD_READY;
+        break;
+      case TEXT_LOAD_READY:
+        loom_serve_text_storage_release_payloads(&model->state.storage);
+        load->phase = TEXT_LOAD_COMPLETE;
+        break;
+      case TEXT_LOAD_COMPLETE:
+        break;
+    }
+  }
+  if (!submitted) {
+    // Rejected work owes no callback; terminal publication is already joined.
+    iree_slim_mutex_lock(&load->event.mutex);
+    load->event.pending = false;
+    iree_slim_mutex_unlock(&load->event.mutex);
+    load->phase = TEXT_LOAD_COMPLETE;
+  }
+  *out_complete = load->phase == TEXT_LOAD_COMPLETE;
+  return status;
+}
+
+const loom_serve_compilation_report_t* loom_serve_text_load_report(
+    const loom_serve_text_load_t* load) {
+  return &load->model->source.compilation;
+}
+
+loom_serve_text_model_t* loom_serve_text_load_take_model(
+    loom_serve_text_load_t* load) {
+  loom_serve_text_model_t* model = load->model;
+  load->model = NULL;
+  return model;
+}
+
+void loom_serve_text_load_destroy(loom_serve_text_load_t* load) {
+  if (!load) {
+    return;
+  }
+  IREE_ASSERT(!load->model);
+  iree_allocator_free(load->allocator, load->policy_path);
+  iree_slim_mutex_deinitialize(&load->event.mutex);
+  iree_allocator_free(load->allocator, load);
+}
+
+static void text_load_notify(void* user_data) {
+  iree_notification_post((iree_notification_t*)user_data, IREE_ALL_WAITERS);
+}
+
+iree_status_t loom_serve_text_model_create(
+    loom_serve_device_t* device, const loom_serve_text_options_t* options,
+    loom_serve_text_model_t** out_model, iree_allocator_t host_allocator) {
+  *out_model = NULL;
+  iree_notification_t notification;
+  iree_notification_initialize(&notification);
+  loom_serve_text_load_t* load = NULL;
+  iree_status_t status = loom_serve_text_load_create(
+      device, options, text_load_notify, &notification, &load, host_allocator);
+  bool complete = false;
+  while (iree_status_is_ok(status) && !complete) {
+    const uint32_t ticket = iree_notification_prepare_wait(&notification);
+    status = loom_serve_text_load_advance(load, 0, &complete);
+    if (complete) {
+      iree_notification_cancel_wait(&notification);
+    } else {
+      iree_notification_commit_wait(&notification, ticket, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    }
+  }
+  if (load) {
+    loom_output_stream_t output;
+    loom_output_stream_for_file(stderr, &output);
+    status = iree_status_join(
+        status, loom_serve_compilation_write(loom_serve_text_load_report(load),
+                                             &output));
+    loom_serve_text_model_t* model = loom_serve_text_load_take_model(load);
+    loom_serve_text_load_destroy(load);
+    if (iree_status_is_ok(status)) {
+      *out_model = model;
+    } else {
+      status = iree_status_join(status, loom_serve_text_model_destroy(model));
+    }
+  }
+  iree_notification_deinitialize(&notification);
   return status;
 }
 

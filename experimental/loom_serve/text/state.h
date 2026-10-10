@@ -180,6 +180,11 @@ struct loom_serve_text_state_t {
 void loom_serve_text_state_initialize(const loom_serve_text_options_t* options,
                                       loom_serve_text_state_t* out_state,
                                       iree_allocator_t allocator);
+
+// Allocates source-described storage and submits initialization on execution's
+// work timeline without waiting. The owner retains source payloads through
+// successful readiness of its captured execution frontier, or actual consumer
+// retirement on failure. Later model work depends on this initialization.
 iree_status_t loom_serve_text_state_allocate(loom_serve_text_state_t* state,
                                              loom_serve_device_t* device,
                                              loom_serve_execution_t* execution);

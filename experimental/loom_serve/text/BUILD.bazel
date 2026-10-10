@@ -79,6 +79,8 @@ loom_cc_library(
         "//experimental/loom_serve/storage:snapshot",
         "//loom/binding/c:loomc",
         "//loom/src/loom/util:stream",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/hal",

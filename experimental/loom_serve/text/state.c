@@ -244,9 +244,6 @@ iree_status_t loom_serve_text_state_allocate(
     uint64_t completion = 0;
     status = loom_serve_execution_transfer(state->execution, transfer_count,
                                            transfers, &completion);
-    if (iree_status_is_ok(status)) {
-      status = loom_serve_execution_wait(state->execution, completion);
-    }
   }
   return status;
 }

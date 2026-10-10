@@ -7,6 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_MODEL_H_
 #define IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_MODEL_H_
 
+#include "experimental/loom_serve/runtime/compilation.h"
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/execution.h"
 #include "experimental/loom_serve/runtime/weights.h"
@@ -245,8 +246,49 @@ iree_status_t loom_serve_text_model_complete_trim(
 iree_status_t loom_serve_text_model_trim(
     loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result);
 
-// Cold setup compiles stages, records commands and indexes parameters without
-// loading weight payloads. The shared device owner outlives the model and
+// Owner-driven preparation on shared CPU/JIT workers and proactor waits.
+typedef struct loom_serve_text_load_t loom_serve_text_load_t;
+
+// Nonblocking notification only: schedules the serialized owner without
+// reentering the load. Payload and borrowed options outlive terminal advance.
+typedef void (*loom_serve_text_load_wake_fn_t)(void* user_data);
+
+// Allocates an unstarted operation without source I/O, device reservation or
+// task submission. Option views remain borrowed until terminal advance.
+iree_status_t loom_serve_text_load_create(
+    loom_serve_device_t* device, const loom_serve_text_options_t* options,
+    loom_serve_text_load_wake_fn_t wake, void* user_data,
+    loom_serve_text_load_t** out_load, iree_allocator_t host_allocator);
+
+enum loom_serve_text_load_flag_bits_e {
+  // Irreversible cancellation stops new phases after accepted work returns.
+  LOOM_SERVE_TEXT_LOAD_FLAG_CANCEL = 1u << 0,
+};
+typedef uint32_t loom_serve_text_load_flags_t;
+
+// Serialized owner turn. Never joins CPU or device work. Terminal advance
+// joins every load callback, but a failed initialization can still own queue
+// consumers. Success means initialization readiness and a fully linked model.
+iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
+                                           loom_serve_text_load_flags_t flags,
+                                           bool* out_complete);
+
+// Terminal-only evidence, borrowed until take_model or destruction.
+const loom_serve_compilation_report_t* loom_serve_text_load_report(
+    const loom_serve_text_load_t* load);
+
+// Transfers partial or complete model ownership on EVERY terminal outcome.
+// Failure/cancellation still requires model_retire and destroy_retired; neither
+// a failed readiness wait nor a cancelled load proves consumer retirement.
+loom_serve_text_model_t* loom_serve_text_load_take_model(
+    loom_serve_text_load_t* load);
+
+// Releases terminal operation metadata after take_model, without any wait.
+void loom_serve_text_load_destroy(loom_serve_text_load_t* load);
+
+// Cold outer-thread wrapper drives the same asynchronous preparation. Compiles
+// stages, records commands and indexes parameters without loading weight
+// payloads. The shared device owner outlives the model and
 // serializes model calls; its pool supplies elastic backing or explicit fixed
 // allocations. Pooled state grows on row/page activation. Options strings are
 // borrowed only for this call. Failure releases partial ownership.

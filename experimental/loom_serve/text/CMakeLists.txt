@@ -58,6 +58,8 @@ loom_cc_library(
   DEPS
     ::chat
     ::storage
+    iree::async
+    iree::async::util::proactor_pool
     iree::base
     iree::base::internal::path
     iree::experimental::loom_serve::runtime::command
