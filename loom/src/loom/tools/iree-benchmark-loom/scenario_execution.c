@@ -93,7 +93,7 @@ static iree_status_t iree_benchmark_loom_scenario_ensure_profile(
   execution->materializer_options =
       options->case_execution_options->materializer;
   execution->materializer_options.target_pool =
-      options->hal_context->execution.runtime.staging_pool;
+      options->hal_context->execution.runtime.host_pool;
   execution->materializer_options.staging_pool =
       options->hal_context->execution.runtime.staging_pool;
   execution->materializer_options.transfer_queue =

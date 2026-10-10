@@ -415,8 +415,7 @@ static iree_status_t iree_test_loom_configure_hal_actual_sequence(
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_context_ensure_runtime(hal_context));
 
-  execution_options->materializer.target_pool =
-      hal_context->runtime.staging_pool;
+  execution_options->materializer.target_pool = hal_context->runtime.host_pool;
   execution_options->materializer.staging_pool =
       hal_context->runtime.staging_pool;
   execution_options->materializer.transfer_queue =
@@ -1288,7 +1287,7 @@ int iree_test_loom_main(int argc, char** argv,
       status = loom_run_hal_testbench_context_ensure_runtime(&hal_context);
       if (iree_status_is_ok(status)) {
         execution_options.materializer.target_pool =
-            hal_context.runtime.staging_pool;
+            hal_context.runtime.host_pool;
         execution_options.materializer.staging_pool =
             hal_context.runtime.staging_pool;
         execution_options.materializer.transfer_queue =

@@ -10,6 +10,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/numa.h"
 #include "iree/hal/api.h"
+#include "iree/hal/memory/heap_pool.h"
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/tooling/device_util.h"
 
@@ -61,6 +62,13 @@ static void loom_run_hal_runtime_add_family_access(
 
 static iree_status_t loom_run_hal_runtime_create_pools(
     loom_run_hal_runtime_t* runtime, iree_allocator_t host_allocator) {
+  const iree_hal_pool_host_access_t host_access = {
+      .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+      .modes = IREE_HAL_MAPPING_MODE_SCOPED | IREE_HAL_MAPPING_MODE_PERSISTENT,
+  };
+  IREE_RETURN_IF_ERROR(iree_hal_heap_pool_create(
+      host_access, host_allocator, host_allocator, &runtime->host_pool));
+
   iree_hal_pool_family_access_t family_accesses[2] = {0};
   iree_host_size_t family_access_count = 0;
   loom_run_hal_runtime_add_family_access(
@@ -216,6 +224,7 @@ void loom_run_hal_runtime_deinitialize(loom_run_hal_runtime_t* runtime) {
   }
   runtime->dispatch_queue = NULL;
   runtime->transfer_queue = NULL;
+  iree_hal_pool_release(runtime->host_pool);
   iree_hal_pool_release(runtime->staging_pool);
   iree_hal_pool_release(runtime->device_pool);
   iree_hal_device_group_release(runtime->device_group);

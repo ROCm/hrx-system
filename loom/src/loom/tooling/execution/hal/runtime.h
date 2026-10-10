@@ -30,7 +30,10 @@ typedef struct loom_run_hal_runtime_t {
   iree_hal_device_group_t* device_group;
   // Reusable queue-allocation pool spanning dispatch and transfer access.
   iree_hal_pool_t* device_pool;
-  // Host-mappable pool for upload, readback, and tooling values.
+  // Coherent host storage for logical values shared with reference executors.
+  // Device execution stages these values without changing their host ownership.
+  iree_hal_pool_t* host_pool;
+  // Device-visible, host-mappable pool for upload and readback.
   iree_hal_pool_t* staging_pool;
 } loom_run_hal_runtime_t;
 

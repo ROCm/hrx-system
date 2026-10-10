@@ -37,7 +37,7 @@ static iree_status_t iree_benchmark_loom_initialize_sequence_compile_context(
 
   if (iree_status_is_ok(status)) {
     context->execution_options.materializer.target_pool =
-        options->hal_context->execution.runtime.staging_pool;
+        options->hal_context->execution.runtime.host_pool;
     context->execution_options.materializer.staging_pool =
         options->hal_context->execution.runtime.staging_pool;
     context->execution_options.materializer.transfer_queue =
@@ -131,7 +131,7 @@ static iree_status_t iree_benchmark_loom_initialize_single_compile_context(
         iree_string_view_empty(), &context->hal_provider);
     context->hal_provider_initialized = true;
     context->execution_options.materializer.target_pool =
-        options->hal_context->execution.runtime.staging_pool;
+        options->hal_context->execution.runtime.host_pool;
     context->execution_options.materializer.staging_pool =
         options->hal_context->execution.runtime.staging_pool;
     context->execution_options.materializer.transfer_queue =
