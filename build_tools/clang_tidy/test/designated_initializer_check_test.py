@@ -60,6 +60,8 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertNotIn("aggregate setup cannot be folded", output)
         self.assertNotIn("NOLINT", fixed_source)
         self.assertIn(".ordinal = 1,", fixed_source)
+        self.assertIn(".flags = 29,};", fixed_source)
+        self.assertNotIn(".flags = 29};", fixed_source)
         self.assertIn(
             'return Config{.ordinal = 8, .name = "literal", .flags = 9};',
             fixed_source,

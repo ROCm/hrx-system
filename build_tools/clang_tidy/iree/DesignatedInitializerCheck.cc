@@ -86,6 +86,50 @@ struct LabeledInitializer {
   Issue issue;
 };
 
+// An invalid insertion location means the initializer already has the desired
+// spelling or fits on one line. A missing result means its source could not be
+// analyzed safely and prevents all comment-label fixes for that initializer.
+std::optional<SourceLocation> TrailingCommaInsertion(
+    const InitListExpr* Initializer, const SourceManager& SourceManager,
+    const LangOptions& LangOptions) {
+  if (Initializer->getNumInits() == 0) {
+    return SourceLocation();
+  }
+  CharSourceRange InitializerRange = Lexer::makeFileCharRange(
+      CharSourceRange::getTokenRange(Initializer->getSourceRange()),
+      SourceManager, LangOptions);
+  CharSourceRange LastValueRange = Lexer::makeFileCharRange(
+      CharSourceRange::getTokenRange(
+          Initializer->getInit(Initializer->getNumInits() - 1)
+              ->getSourceRange()),
+      SourceManager, LangOptions);
+  if (InitializerRange.isInvalid() || LastValueRange.isInvalid()) {
+    return std::nullopt;
+  }
+  bool Invalid = false;
+  StringRef InitializerText = Lexer::getSourceText(
+      InitializerRange, SourceManager, LangOptions, &Invalid);
+  if (Invalid) {
+    return std::nullopt;
+  }
+  if (!InitializerText.contains('\n')) {
+    return SourceLocation();
+  }
+  SourceLocation LastToken = LastValueRange.getEnd().getLocWithOffset(-1);
+  std::optional<Token> Next = Lexer::findNextToken(
+      LastToken, SourceManager, LangOptions, /*IncludeComments=*/false);
+  if (!Next) {
+    return std::nullopt;
+  }
+  if (Next->is(tok::comma)) {
+    return SourceLocation();
+  }
+  if (!Next->is(tok::r_brace)) {
+    return std::nullopt;
+  }
+  return LastValueRange.getEnd();
+}
+
 bool IsMainFileLocation(SourceLocation Location,
                         const SourceManager& SourceManager) {
   if (Location.isInvalid() || Location.isMacroID()) {
@@ -660,7 +704,11 @@ void CheckCommentLabels(DesignatedInitializerCheck& Check,
         LabeledInitializer::Issue::kNone,
     });
   }
-  for (const LabeledInitializer& Labeled : LabeledInitializers) {
+  std::optional<SourceLocation> CommaInsertion = TrailingCommaInsertion(
+      SourceInitializer, SourceManager, Context.getLangOpts());
+  CanFixInitializer &= CommaInsertion.has_value();
+  for (size_t I = 0; I < LabeledInitializers.size(); ++I) {
+    const LabeledInitializer& Labeled = LabeledInitializers[I];
     if (Labeled.issue == LabeledInitializer::Issue::kUnrepresentable) {
       Check.diag(Labeled.label.location,
                  "comment field label cannot be represented as a C++20 "
@@ -675,11 +723,14 @@ void CheckCommentLabels(DesignatedInitializerCheck& Check,
                  "comment field label cannot be converted until every "
                  "initializer element is representable as a designator");
     } else {
-      Check.diag(Labeled.label.location,
-                 "replace comment field label with a C++20 designated "
-                 "initializer")
-          << FixItHint::CreateReplacement(Labeled.label.range,
-                                          "." + Labeled.label.name + " = ");
+      DiagnosticBuilder Diagnostic = Check.diag(
+          Labeled.label.location,
+          "replace comment field label with a C++20 designated initializer");
+      Diagnostic << FixItHint::CreateReplacement(
+          Labeled.label.range, "." + Labeled.label.name + " = ");
+      if (I + 1 == LabeledInitializers.size() && CommaInsertion->isValid()) {
+        Diagnostic << FixItHint::CreateInsertion(*CommaInsertion, ",");
+      }
     }
   }
 }

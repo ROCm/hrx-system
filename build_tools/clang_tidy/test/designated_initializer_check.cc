@@ -103,6 +103,11 @@ Config labeled_config = {
     /*.flags=*/2,
 };
 
+Config multiline_without_trailing_comma = {
+    /*.ordinal=*/28,
+    /*.name=*/"no-trailing-comma",
+    /*.flags=*/29};
+
 OuterConfig nested_config = {
     /*.inner=*/{
         /*.x=*/3,
