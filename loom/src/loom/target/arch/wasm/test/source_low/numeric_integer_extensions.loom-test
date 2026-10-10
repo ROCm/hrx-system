@@ -1,0 +1,133 @@
+// RUN: emit source-low target=wasm:simd128 output=low
+
+func.def @extend_byte_lanes(%input_buffer: buffer) -> (vector<8xi16>, vector<8xi16>, vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>) {
+  %base = index.constant 0 : offset
+  %byte8_view = buffer.view %input_buffer[%base] : buffer -> view<8xi8>
+  %byte4_view = buffer.view %input_buffer[%base] : buffer -> view<4xi8>
+  %byte2_view = buffer.view %input_buffer[%base] : buffer -> view<2xi8>
+  %byte8 = vector.load %byte8_view[0] : view<8xi8> -> vector<8xi8>
+  %byte4 = vector.load %byte4_view[0] : view<4xi8> -> vector<4xi8>
+  %byte2 = vector.load %byte2_view[0] : view<2xi8> -> vector<2xi8>
+  %signed16 = vector.extsi %byte8 : vector<8xi8> to vector<8xi16>
+  %unsigned16 = vector.extui %byte8 : vector<8xi8> to vector<8xi16>
+  %signed32 = vector.extsi %byte4 : vector<4xi8> to vector<4xi32>
+  %unsigned32 = vector.extui %byte4 : vector<4xi8> to vector<4xi32>
+  %signed64 = vector.extsi %byte2 : vector<2xi8> to vector<2xi64>
+  %unsigned64 = vector.extui %byte2 : vector<2xi8> to vector<2xi64>
+  func.return %signed16, %unsigned16, %signed32, %unsigned32, %signed64, %unsigned64 : vector<8xi16>, vector<8xi16>, vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @extend_byte_lanes(%input_buffer: reg<wasm.i32>) -> (reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>) asm {
+  %58 = i32.load8_u %input_buffer
+  %59 = i32.load8_u %input_buffer {offset = 1}
+  %60 = i32.load8_u %input_buffer {offset = 2}
+  %61 = i32.load8_u %input_buffer {offset = 3}
+  %62 = i32.load8_u %input_buffer {offset = 4}
+  %63 = i32.load8_u %input_buffer {offset = 5}
+  %64 = i32.load8_u %input_buffer {offset = 6}
+  %65 = i32.load8_u %input_buffer {offset = 7}
+  %66 = i8x16.splat %58
+  %67 = i8x16.replace_lane %66, %59, 1
+  %68 = i8x16.replace_lane %67, %60, 2
+  %69 = i8x16.replace_lane %68, %61, 3
+  %70 = i8x16.replace_lane %69, %62, 4
+  %71 = i8x16.replace_lane %70, %63, 5
+  %72 = i8x16.replace_lane %71, %64, 6
+  %byte8 = i8x16.replace_lane %72, %65, 7
+  %signed16 = i16x8.extend_low_i8x16_s %byte8
+  %unsigned16 = i16x8.extend_low_i8x16_u %byte8
+  %88 = i16x8.extend_low_i8x16_s %69
+  %signed32 = i32x4.extend_low_i16x8_s %88
+  %90 = i16x8.extend_low_i8x16_u %69
+  %unsigned32 = i32x4.extend_low_i16x8_u %90
+  %92 = i16x8.extend_low_i8x16_s %67
+  %93 = i32x4.extend_low_i16x8_s %92
+  %signed64 = i64x2.extend_low_i32x4_s %93
+  %95 = i16x8.extend_low_i8x16_u %67
+  %96 = i32x4.extend_low_i16x8_u %95
+  %unsigned64 = i64x2.extend_low_i32x4_u %96
+  return %signed16, %unsigned16, %signed32, %unsigned32, %signed64, %unsigned64
+}
+
+// ====
+
+func.def @extend_word_lanes(%word_buffer: buffer, %dword_buffer: buffer) -> (vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>) {
+  %base = index.constant 0 : offset
+  %word4_view = buffer.view %word_buffer[%base] : buffer -> view<4xi16>
+  %word2_view = buffer.view %word_buffer[%base] : buffer -> view<2xi16>
+  %dword2_view = buffer.view %dword_buffer[%base] : buffer -> view<2xi32>
+  %word4 = vector.load %word4_view[0] : view<4xi16> -> vector<4xi16>
+  %word2 = vector.load %word2_view[0] : view<2xi16> -> vector<2xi16>
+  %dword2 = vector.load %dword2_view[0] : view<2xi32> -> vector<2xi32>
+  %signed32 = vector.extsi %word4 : vector<4xi16> to vector<4xi32>
+  %unsigned32 = vector.extui %word4 : vector<4xi16> to vector<4xi32>
+  %signed64_from16 = vector.extsi %word2 : vector<2xi16> to vector<2xi64>
+  %unsigned64_from16 = vector.extui %word2 : vector<2xi16> to vector<2xi64>
+  %signed64_from32 = vector.extsi %dword2 : vector<2xi32> to vector<2xi64>
+  %unsigned64_from32 = vector.extui %dword2 : vector<2xi32> to vector<2xi64>
+  func.return %signed32, %unsigned32, %signed64_from16, %unsigned64_from16, %signed64_from32, %unsigned64_from32 : vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @extend_word_lanes(%word_buffer: reg<wasm.i32>, %dword_buffer: reg<wasm.i32>) -> (reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>) asm {
+  %48 = i32.load16_u %word_buffer
+  %49 = i32.load16_u %word_buffer {offset = 2}
+  %50 = i32.load16_u %word_buffer {offset = 4}
+  %51 = i32.load16_u %word_buffer {offset = 6}
+  %52 = i16x8.splat %48
+  %53 = i16x8.replace_lane %52, %49, 1
+  %54 = i16x8.replace_lane %53, %50, 2
+  %word4 = i16x8.replace_lane %54, %51, 3
+  %60 = i32.load %dword_buffer
+  %61 = i32.load %dword_buffer {offset = 4}
+  %62 = i32x4.splat %60
+  %dword2 = i32x4.replace_lane %62, %61, 1
+  %signed32 = i32x4.extend_low_i16x8_s %word4
+  %unsigned32 = i32x4.extend_low_i16x8_u %word4
+  %66 = i32x4.extend_low_i16x8_s %53
+  %signed64_from16 = i64x2.extend_low_i32x4_s %66
+  %68 = i32x4.extend_low_i16x8_u %53
+  %unsigned64_from16 = i64x2.extend_low_i32x4_u %68
+  %signed64_from32 = i64x2.extend_low_i32x4_s %dword2
+  %unsigned64_from32 = i64x2.extend_low_i32x4_u %dword2
+  return %signed32, %unsigned32, %signed64_from16, %unsigned64_from16, %signed64_from32, %unsigned64_from32
+}
+
+// ====
+
+func.def @packetized_byte_to_dword(%input_buffer: buffer) -> (vector<4xi32>, vector<4xi32>) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_buffer[%base] : buffer -> view<8xi8>
+  %input = vector.load %input_view[0] : view<8xi8> -> vector<8xi8>
+  %extended = vector.extui %input : vector<8xi8> to vector<8xi32>
+  %extended0 = vector.slice %extended[0] : vector<8xi32> -> vector<4xi32>
+  %extended1 = vector.slice %extended[4] : vector<8xi32> -> vector<4xi32>
+  func.return %extended0, %extended1 : vector<4xi32>, vector<4xi32>
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @packetized_byte_to_dword(%input_buffer: reg<wasm.i32>) -> (reg<wasm.v128>, reg<wasm.v128>) asm {
+  %34 = i32.load8_u %input_buffer
+  %35 = i32.load8_u %input_buffer {offset = 1}
+  %36 = i32.load8_u %input_buffer {offset = 2}
+  %37 = i32.load8_u %input_buffer {offset = 3}
+  %38 = i32.load8_u %input_buffer {offset = 4}
+  %39 = i32.load8_u %input_buffer {offset = 5}
+  %40 = i32.load8_u %input_buffer {offset = 6}
+  %41 = i32.load8_u %input_buffer {offset = 7}
+  %42 = i8x16.splat %34
+  %43 = i8x16.replace_lane %42, %35, 1
+  %44 = i8x16.replace_lane %43, %36, 2
+  %45 = i8x16.replace_lane %44, %37, 3
+  %46 = i8x16.replace_lane %45, %38, 4
+  %47 = i8x16.replace_lane %46, %39, 5
+  %48 = i8x16.replace_lane %47, %40, 6
+  %input = i8x16.replace_lane %48, %41, 7
+  %50 = i16x8.extend_low_i8x16_u %input
+  %51 = i32x4.extend_low_i16x8_u %50
+  %52 = i8x16.shuffle %input, %input, 4, 5, 6, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  %53 = i16x8.extend_low_i8x16_u %52
+  %54 = i32x4.extend_low_i16x8_u %53
+  return %51, %54
+}

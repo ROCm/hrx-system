@@ -281,12 +281,14 @@ static const loom_target_legalizer_rule_t kLoomWasmLegalizerRules[] = {
     },
     {
         .root_kind = LOOM_OP_VECTOR_LOAD,
-        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD |
+                                       LOOM_SCALAR_TYPE_SET_FLOAT_LE16,
         .legalize = loom_wasm_legalize_vector_load,
     },
     {
         .root_kind = LOOM_OP_VECTOR_STORE,
-        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD |
+                                       LOOM_SCALAR_TYPE_SET_FLOAT_LE16,
         .legalize = loom_wasm_legalize_vector_store,
     },
     {

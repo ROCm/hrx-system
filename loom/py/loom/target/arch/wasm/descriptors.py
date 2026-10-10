@@ -412,6 +412,19 @@ class WasmIntegerArithmeticInstruction:
     arity: int
 
 
+@dataclass(frozen=True)
+class WasmIntegerExtensionInstruction:
+    """One direct SIMD128 integer lane-extension instruction."""
+
+    result_shape: str
+    result_bit_count: int
+    source_shape: str
+    source_bit_count: int
+    half: str
+    signedness: str
+    subopcode: int
+
+
 # Direct SIMD128 cells. Source contracts consume this same table and add compact
 # recipes for the five absent cells: i8 multiplication and i64 extrema.
 WASM_INTEGER_ARITHMETIC_INSTRUCTIONS = (
@@ -446,6 +459,34 @@ WASM_INTEGER_ARITHMETIC_INSTRUCTIONS = (
     WasmIntegerArithmeticInstruction("i64x2", 64, "add", "add", 0xCE, 2),
     WasmIntegerArithmeticInstruction("i64x2", 64, "sub", "sub", 0xD1, 2),
     WasmIntegerArithmeticInstruction("i64x2", 64, "mul", "mul", 0xD5, 2),
+)
+
+# Integer lane extension is a complete 3 widths x 2 halves x 2 signedness
+# family. Source contracts consume the low-half cells directly and compose them
+# for extensions spanning more than one physical lane width.
+WASM_INTEGER_EXTENSION_INSTRUCTIONS = tuple(
+    WasmIntegerExtensionInstruction(
+        result_shape,
+        result_bit_count,
+        source_shape,
+        source_bit_count,
+        half,
+        signedness,
+        subopcode_base + half_offset + signedness_offset,
+    )
+    for (
+        result_shape,
+        result_bit_count,
+        source_shape,
+        source_bit_count,
+        subopcode_base,
+    ) in (
+        ("i16x8", 16, "i8x16", 8, 0x87),
+        ("i32x4", 32, "i16x8", 16, 0xA7),
+        ("i64x2", 64, "i32x4", 32, 0xC7),
+    )
+    for half, half_offset in (("low", 0), ("high", 1))
+    for signedness, signedness_offset in (("s", 0), ("u", 2))
 )
 
 _TARGET_BLOCK_IMMEDIATE = Immediate(
@@ -610,6 +651,35 @@ def _integer_simd_arithmetic_descriptor(
         schedule_class=(
             _SCHEDULE_SIMD_I64X2
             if instruction.element_bit_count == 64
+            else _SCHEDULE_SIMD_I32X4
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _integer_simd_extension_descriptor(
+    instruction: WasmIntegerExtensionInstruction,
+) -> Descriptor:
+    semantic_signedness = "signed" if instruction.signedness == "s" else "unsigned"
+    return Descriptor(
+        key=(
+            f"wasm.{instruction.result_shape}.extend_{instruction.half}_"
+            f"{instruction.source_shape}_{instruction.signedness}"
+        ),
+        mnemonic=(
+            f"{instruction.result_shape}.extend_{instruction.half}_"
+            f"{instruction.source_shape}_{instruction.signedness}"
+        ),
+        semantic_tag=(
+            f"vector.extend.{semantic_signedness}.{instruction.half}."
+            f"{instruction.source_shape}.{instruction.result_shape}"
+        ),
+        encoding_id=_simd_encoding_id(instruction.subopcode),
+        operands=(_v128_result(), _v128_operand("input")),
+        asm_forms=_asm(results=("dst",), operands=("input",)),
+        schedule_class=(
+            _SCHEDULE_SIMD_I64X2
+            if instruction.result_bit_count == 64
             else _SCHEDULE_SIMD_I32X4
         ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -1441,6 +1511,10 @@ WASM_CORE_SIMD128_DESCRIPTOR_SET = DescriptorSet(
         *(
             _integer_simd_arithmetic_descriptor(instruction)
             for instruction in WASM_INTEGER_ARITHMETIC_INSTRUCTIONS
+        ),
+        *(
+            _integer_simd_extension_descriptor(instruction)
+            for instruction in WASM_INTEGER_EXTENSION_INSTRUCTIONS
         ),
         *(
             Descriptor(

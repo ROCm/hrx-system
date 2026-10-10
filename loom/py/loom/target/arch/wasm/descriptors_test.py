@@ -9,6 +9,7 @@
 from loom.target.arch.wasm.descriptors import (
     WASM_CORE_SIMD128_DESCRIPTOR_SET,
     WASM_INTEGER_ARITHMETIC_INSTRUCTIONS,
+    WASM_INTEGER_EXTENSION_INSTRUCTIONS,
 )
 from loom.target.low_descriptors import ImmediateFlag, ImmediateKind
 
@@ -187,6 +188,43 @@ def test_integer_arithmetic_recipe_descriptors_match_simd128_encodings():
             "dst",
             "lhs",
             "rhs",
+        ]
+
+
+def test_integer_extension_descriptors_cover_the_complete_simd128_family():
+    expected = {
+        (result, source, half, signedness): subopcode
+        for result, source, base in (
+            ("i16x8", "i8x16", 0x87),
+            ("i32x4", "i16x8", 0xA7),
+            ("i64x2", "i32x4", 0xC7),
+        )
+        for half, half_offset in (("low", 0), ("high", 1))
+        for signedness, signedness_offset in (("s", 0), ("u", 2))
+        for subopcode in (base + half_offset + signedness_offset,)
+    }
+    actual = {
+        (
+            instruction.result_shape,
+            instruction.source_shape,
+            instruction.half,
+            instruction.signedness,
+        ): instruction.subopcode
+        for instruction in WASM_INTEGER_EXTENSION_INSTRUCTIONS
+    }
+    assert actual == expected
+
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in WASM_CORE_SIMD128_DESCRIPTOR_SET.descriptors
+    }
+    for (result, source, half, signedness), subopcode in expected.items():
+        descriptor = descriptors[f"wasm.{result}.extend_{half}_{source}_{signedness}"]
+        assert descriptor.encoding_id == 0xFD00 | subopcode
+        assert not descriptor.immediates
+        assert [operand.field_name for operand in descriptor.operands] == [
+            "dst",
+            "input",
         ]
 
 
