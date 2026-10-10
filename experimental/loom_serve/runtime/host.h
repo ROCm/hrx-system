@@ -8,6 +8,7 @@
 
 #include "iree/async/util/proactor_pool.h"
 #include "iree/task/executor.h"
+#include "loomc/task.h"
 #include "loomc/task_pool.h"
 
 #ifdef __cplusplus
@@ -38,6 +39,12 @@ void loom_serve_host_retain(loom_serve_host_t* host);
 // uses exactly this executor; it does not create another worker population.
 iree_task_executor_t* loom_serve_host_executor(const loom_serve_host_t* host);
 loomc_task_pool_t* loom_serve_host_task_pool(const loom_serve_host_t* host);
+
+// Shared compiler scheduling domain, borrowed through host release. Catalogs
+// retire their own jobs, not this queue; only outer host teardown drains it.
+// Worker ordinals match the shared task pool and executor.
+loomc_task_sink_t loom_serve_host_compiler_sink(const loom_serve_host_t* host);
+
 iree_async_proactor_pool_t* loom_serve_host_proactor_pool(
     const loom_serve_host_t* host);
 

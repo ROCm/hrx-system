@@ -116,8 +116,7 @@ static iree_status_t projection_initialize(projection_check_t* check,
   iree_hal_device_t* device = loom_serve_device_handle(check->owner);
   iree_hal_queue_t* dispatch = loom_serve_device_dispatch_queue(check->owner);
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
-      device, dispatch,
-      loom_serve_host_task_pool(loom_serve_device_host(check->owner)),
+      device, dispatch, loom_serve_device_host(check->owner),
       iree_make_cstring_view(FLAG_model), NULL, &check->compilation, allocator,
       &check->jit));
   char rows[32];

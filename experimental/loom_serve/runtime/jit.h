@@ -9,16 +9,16 @@
 
 #include "experimental/loom_serve/runtime/command.h"
 #include "experimental/loom_serve/runtime/compilation.h"
+#include "experimental/loom_serve/runtime/host.h"
 #include "loomc/config.h"
 #include "loomc/sanitizer.h"
-#include "loomc/task_pool.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Model-resident source catalog, compiler and live device profile, with a task
-// queue on the caller's executor and worker-local scratch. Compilation calls
+// Model-resident source catalog, compiler and live device profile, with a
+// shared host compiler sink and catalog-local worker scratch. Compilation calls
 // on a catalog are serialized by the caller; native requests run concurrently.
 // Execution of already prepared commands does not access this object.
 typedef struct loom_serve_jit_t loom_serve_jit_t;
@@ -26,18 +26,22 @@ typedef struct loom_serve_jit_stage_t loom_serve_jit_stage_t;
 
 // Loads source_directory/sources.txt: one relative Loom source path per line,
 // with blank lines and lines beginning with # ignored. All providers are
-// indexed once. The selected queue family, device and task executor are
-// retained until destruction. The pool handle is borrowed only during creation.
+// indexed once. The selected queue family and device are retained until
+// destruction. host supplies the shared compiler sink and worker ordinals;
+// it outlives this catalog and every compilation completion.
 // report receives copied evidence even on failure and outlives the catalog.
 // Only the serialized compilation owner accesses it between completions.
 iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
                                     iree_hal_queue_t* dispatch,
-                                    loomc_task_pool_t* task_pool,
+                                    loom_serve_host_t* host,
                                     iree_string_view_t source_directory,
                                     const loomc_sanitizer_options_t* sanitizer,
                                     loom_serve_compilation_report_t* report,
                                     iree_allocator_t host_allocator,
                                     loom_serve_jit_t** out_jit);
+// Releases a quiescent catalog without waiting for other catalogs or closing
+// the host compiler queue. No accepted compilation may remain before its
+// completion callback. Destruction from that callback is permitted.
 void loom_serve_jit_destroy(loom_serve_jit_t* jit);
 
 // Borrowed evidence accumulator for serialized VM/parameter preparation using
@@ -45,9 +49,9 @@ void loom_serve_jit_destroy(loom_serve_jit_t* jit);
 loom_serve_compilation_report_t* loom_serve_jit_report(loom_serve_jit_t* jit);
 
 // Receives the owned stage on success (NULL on failure) and owns status. Runs
-// on a shared task worker after every native request has retired. May schedule
-// more work, but never blocks or destroys the JIT/task queue from this
-// callback.
+// on a shared task worker after every native request and compiler access has
+// retired. May schedule more work or destroy its completed catalog, but never
+// blocks or releases the final host owner from this callback.
 typedef void (*loom_serve_jit_completion_fn_t)(void* user_data,
                                                iree_status_t status,
                                                loom_serve_jit_stage_t* stage);

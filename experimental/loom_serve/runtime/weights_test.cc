@@ -214,8 +214,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     directory_ =
         std::filesystem::path(FLAG_weight_sources).parent_path().string();
     IREE_ASSERT_OK(loom_serve_jit_create(
-        device_, dispatch_,
-        loom_serve_host_task_pool(loom_serve_device_host(device_owner_)),
+        device_, dispatch_, loom_serve_device_host(device_owner_),
         iree_make_cstring_view(directory_.c_str()), nullptr, &compilation_,
         allocator_, &jit_));
     WriteCheckpoint(path_.path(), 0);

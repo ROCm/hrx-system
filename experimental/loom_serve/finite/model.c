@@ -485,8 +485,7 @@ static iree_status_t finite_model_initialize(
   iree_hal_device_t* device = loom_serve_device_handle(model->owner);
   iree_hal_queue_t* dispatch = loom_serve_device_dispatch_queue(model->owner);
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
-      device, dispatch,
-      loom_serve_host_task_pool(loom_serve_device_host(model->owner)),
+      device, dispatch, loom_serve_device_host(model->owner),
       options->source_directory, NULL, &model->compilation, allocator,
       &model->jit));
   for (uint32_t i = 0; i < model->stages.count; ++i) {

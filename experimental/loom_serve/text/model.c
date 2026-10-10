@@ -678,9 +678,9 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
                                                           &model->execution));
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
       model->device, model->dispatch,
-      loom_serve_host_task_pool(loom_serve_device_host(model->device_owner)),
-      options->source_directory, &options->kernel_sanitizer,
-      &model->compilation, model->allocator, &model->jit));
+      loom_serve_device_host(model->device_owner), options->source_directory,
+      &options->kernel_sanitizer, &model->compilation, model->allocator,
+      &model->jit));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < stage_count && iree_status_is_ok(status);
        ++i) {

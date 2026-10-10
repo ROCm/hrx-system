@@ -16,7 +16,6 @@
 #include "loomc/target/cmd/program.h"
 #include "loomc/target/vm.h"
 #include "loomc/task_pool.h"
-#include "loomc/task_queue.h"
 
 typedef struct jit_compiler_t {
   // Target package retained by the context and prepared compiler.
@@ -50,8 +49,8 @@ struct loom_serve_jit_t {
   loomc_link_index_t* index;
   // Concurrent native compilation, independent of serving execution.
   struct {
-    // Catalog work queue retaining the application's shared worker executor.
-    loomc_task_queue_t* queue;
+    // Borrowed shared host compiler sink, never stopped by catalog teardown.
+    loomc_task_sink_t sink;
     // Mutable scratch indexed by the pool's mutually exclusive worker ordinal.
     loomc_workspace_t** workspaces;
     // Number of initialized workspace entries, including during setup failure.
@@ -174,11 +173,11 @@ static iree_status_t jit_index_sources(loom_serve_jit_t* jit,
 }
 
 static iree_status_t jit_initialize_compilation(loom_serve_jit_t* jit,
-                                                loomc_task_pool_t* pool) {
+                                                loom_serve_host_t* host) {
   const loomc_allocator_t allocator = loomc_allocator_from_iree(jit->allocator);
-  IREE_RETURN_IF_ERROR(iree_status_from_loomc(
-      loomc_task_queue_allocate(pool, allocator, &jit->compilation.queue)));
-  const iree_host_size_t worker_count = loomc_task_pool_worker_count(pool);
+  jit->compilation.sink = loom_serve_host_compiler_sink(host);
+  const iree_host_size_t worker_count =
+      loomc_task_pool_worker_count(loom_serve_host_task_pool(host));
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       jit->allocator, worker_count, sizeof(*jit->compilation.workspaces),
       (void**)&jit->compilation.workspaces));
@@ -198,7 +197,6 @@ void loom_serve_jit_destroy(loom_serve_jit_t* jit) {
   if (!jit) {
     return;
   }
-  loomc_task_queue_free(jit->compilation.queue);
   for (iree_host_size_t i = 0; i < jit->compilation.workspace_count; ++i) {
     loomc_workspace_release(jit->compilation.workspaces[i]);
   }
@@ -212,7 +210,7 @@ void loom_serve_jit_destroy(loom_serve_jit_t* jit) {
 
 iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
                                     iree_hal_queue_t* dispatch,
-                                    loomc_task_pool_t* task_pool,
+                                    loom_serve_host_t* host,
                                     iree_string_view_t source_directory,
                                     const loomc_sanitizer_options_t* sanitizer,
                                     loom_serve_compilation_report_t* report,
@@ -253,7 +251,7 @@ iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
     status = jit_index_sources(jit, source_directory);
   }
   if (iree_status_is_ok(status)) {
-    status = jit_initialize_compilation(jit, task_pool);
+    status = jit_initialize_compilation(jit, host);
   }
   if (iree_status_is_ok(status)) {
     *out_jit = jit;
@@ -612,8 +610,8 @@ static iree_status_t jit_submit_request(jit_job_t* job,
   task->job = job;
   task->request = request;
   iree_atomic_ref_count_inc(&job->ref_count);
-  iree_status_t status = iree_status_from_loomc(loomc_task_sink_submit(
-      loomc_task_queue_sink(job->jit->compilation.queue), &task->base));
+  iree_status_t status = iree_status_from_loomc(
+      loomc_task_sink_submit(job->jit->compilation.sink, &task->base));
   if (!iree_status_is_ok(status)) {
     loomc_task_destroy(&task->base);
   }
@@ -686,8 +684,8 @@ iree_status_t loom_serve_jit_compile_async(
   job->user_data = user_data;
   job->start = iree_time_now();
   job->requests.allocator = jit->allocator;
-  iree_status_t status = iree_status_from_loomc(loomc_task_sink_submit(
-      loomc_task_queue_sink(jit->compilation.queue), &job->base));
+  iree_status_t status = iree_status_from_loomc(
+      loomc_task_sink_submit(jit->compilation.sink, &job->base));
   if (!iree_status_is_ok(status)) {
     // Rejection retained ownership and never executed product construction.
     // No completion is owed and no child or product storage exists.

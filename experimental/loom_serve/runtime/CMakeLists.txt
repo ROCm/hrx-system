@@ -24,6 +24,7 @@ loom_cc_library(
     iree::task
     loom::binding::c::loomc
     loom::binding::c::task_pool
+    loom::binding::c::task_queue
   PUBLIC
 )
 
@@ -286,6 +287,7 @@ loom_cc_library(
   DEPS
     ::command
     ::compilation
+    ::host
     iree::base
     iree::base::internal::path
     iree::base::threading
@@ -297,7 +299,6 @@ loom_cc_library(
     loom::binding::c::target::cmd
     loom::binding::c::target::vm
     loom::binding::c::task_pool
-    loom::binding::c::task_queue
     loom::target::arch::cmd::program
   PUBLIC
 )

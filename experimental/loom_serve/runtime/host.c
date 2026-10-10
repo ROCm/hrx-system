@@ -10,6 +10,7 @@
 #include "iree/task/topology.h"
 #include "loomc/iree.h"
 #include "loomc/iree/task_pool.h"
+#include "loomc/task_queue.h"
 
 struct loom_serve_host_t {
   // Application and dependent device owners of the shared host resources.
@@ -20,6 +21,8 @@ struct loom_serve_host_t {
   iree_task_executor_t* executor;
   // Loom task adapter retaining the same executor, with no private workers.
   loomc_task_pool_t* task_pool;
+  // Compiler scheduling domain shared by every independently owned catalog.
+  loomc_task_queue_t* compiler_queue;
   // NUMA-local I/O services outliving every attached device.
   iree_async_proactor_pool_t* proactor_pool;
 };
@@ -83,6 +86,11 @@ iree_status_t loom_serve_host_create(iree_host_size_t worker_count,
         &host->task_pool));
   }
   if (iree_status_is_ok(status)) {
+    status = iree_status_from_loomc(loomc_task_queue_allocate(
+        host->task_pool, loomc_allocator_from_iree(allocator),
+        &host->compiler_queue));
+  }
+  if (iree_status_is_ok(status)) {
     iree_async_proactor_pool_options_t options =
         iree_async_proactor_pool_options_default();
 #if !IREE_PLATFORM_WASM
@@ -108,6 +116,7 @@ void loom_serve_host_release(loom_serve_host_t* host) {
     return;
   }
   iree_async_proactor_pool_release(host->proactor_pool);
+  loomc_task_queue_free(host->compiler_queue);
   loomc_task_pool_free(host->task_pool);
   iree_task_executor_release(host->executor);
   iree_allocator_free(host->allocator, host);
@@ -119,6 +128,10 @@ iree_task_executor_t* loom_serve_host_executor(const loom_serve_host_t* host) {
 
 loomc_task_pool_t* loom_serve_host_task_pool(const loom_serve_host_t* host) {
   return host->task_pool;
+}
+
+loomc_task_sink_t loom_serve_host_compiler_sink(const loom_serve_host_t* host) {
+  return loomc_task_queue_sink(host->compiler_queue);
 }
 
 iree_async_proactor_pool_t* loom_serve_host_proactor_pool(
