@@ -68,6 +68,7 @@ from loom.target.contracts.templates import (
     reduction_descriptor_rules,
 )
 from loom.target.emit.wasm.float_narrowing import float_narrowing_rules
+from loom.target.emit.wasm.vector_float_extension import float_extension_rules
 from loom.target.emit.wasm.vector_integer_arithmetic import (
     integer_arithmetic_rules,
 )
@@ -131,6 +132,26 @@ _PARTIAL_INTEGER_LANE_TYPES = (
     (_I16, _PARTIAL_I16, "i16x8", "_u", 8),
     (_I32, _PARTIAL_I32, "i32x4", "", 4),
     (_I64, _PARTIAL_I64, "i64x2", "", 2),
+)
+_PARTIAL_NARROW_FLOAT_LANE_TYPES = (
+    (
+        _BYTE_STORAGE,
+        Vector(("f8E4M3", "f8E5M2"), minimum_lanes=1, maximum_lanes=15),
+        "i8x16",
+        "_u",
+        16,
+    ),
+    (
+        _WORD_STORAGE,
+        Vector(("f16", "bf16"), minimum_lanes=1, maximum_lanes=7),
+        "i16x8",
+        "_u",
+        8,
+    ),
+)
+_PARTIAL_BIT_PRESERVING_LANE_TYPES = (
+    *_PARTIAL_INTEGER_LANE_TYPES,
+    *_PARTIAL_NARROW_FLOAT_LANE_TYPES,
 )
 
 _I64_ATTR_DIAGNOSTIC = GuardDiagnostic(
@@ -1698,8 +1719,8 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         ),
         *(
             _conversion_alias_rule(vector.vector_bitcast, source_type, result_type)
-            for _, source_type, _, _, _ in _PARTIAL_INTEGER_LANE_TYPES
-            for _, result_type, _, _, _ in _PARTIAL_INTEGER_LANE_TYPES
+            for _, source_type, _, _, _ in _PARTIAL_BIT_PRESERVING_LANE_TYPES
+            for _, result_type, _, _, _ in _PARTIAL_BIT_PRESERVING_LANE_TYPES
         ),
         _conversion_alias_rule(scalar_conversion.scalar_trunci, _I32, _I8),
         _conversion_alias_rule(scalar_conversion.scalar_trunci, _I32, _I16),
@@ -1784,6 +1805,17 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
             )
         ),
         *(
+            _const_vector_splat_rule(
+                vector_type,
+                "i32",
+                shape_name,
+                "i32_value",
+                ValueProject.float_bits("result"),
+                Guard.value_exact_float("result"),
+            )
+            for _, vector_type, shape_name, _, _ in _PARTIAL_NARROW_FLOAT_LANE_TYPES
+        ),
+        *(
             _whole_value_select_rule(value_type, f"wasm.{type_name}.select")
             for value_type, type_name in (
                 (_I1, "i32"),
@@ -1814,6 +1846,12 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 _,
                 _,
             ) in _PARTIAL_INTEGER_LANE_TYPES
+        ),
+        *(
+            _splat_rule(scalar_type, vector_type, f"wasm.{shape_name}.splat")
+            for scalar_type, vector_type, shape_name, _, _ in (
+                _PARTIAL_NARROW_FLOAT_LANE_TYPES
+            )
         ),
         _select_rule(_V4I1),
         _select_rule(_V4I32),
@@ -1909,6 +1947,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 (vector.vector_sqrtf, "sqrt"),
             )
         ),
+        *float_extension_rules(_descriptor, _value_type),
         *integer_arithmetic_rules(_descriptor, _value_type),
         *integer_extension_rules(_descriptor, _value_type),
         _const_i32_rule(index.index_constant, _INDEX),
@@ -2035,6 +2074,14 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 _,
             ) in _PARTIAL_INTEGER_LANE_TYPES
         ),
+        *(
+            _extract_rule(
+                vector_type, scalar_type, f"wasm.{shape_name}.extract_lane{suffix}"
+            )
+            for scalar_type, vector_type, shape_name, suffix, _ in (
+                _PARTIAL_NARROW_FLOAT_LANE_TYPES
+            )
+        ),
         _predicate_insert_rule(),
         *(
             _insert_rule(scalar_type, vector_type, f"wasm.{shape_name}.replace_lane")
@@ -2049,6 +2096,12 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 _,
                 _,
             ) in _PARTIAL_INTEGER_LANE_TYPES
+        ),
+        *(
+            _insert_rule(scalar_type, vector_type, f"wasm.{shape_name}.replace_lane")
+            for scalar_type, vector_type, shape_name, _, _ in (
+                _PARTIAL_NARROW_FLOAT_LANE_TYPES
+            )
         ),
         _dynamic_insert_rule(_I1, _V4I1, "wasm.i32x4.splat"),
         *(
@@ -2069,6 +2122,17 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 _,
                 physical_lane_count,
             ) in _PARTIAL_INTEGER_LANE_TYPES
+        ),
+        *(
+            _dynamic_insert_rule(
+                scalar_type,
+                vector_type,
+                f"wasm.{shape_name}.splat",
+                physical_lane_count=physical_lane_count,
+            )
+            for scalar_type, vector_type, shape_name, _, physical_lane_count in (
+                _PARTIAL_NARROW_FLOAT_LANE_TYPES
+            )
         ),
         *(_shuffle_rule(value_type) for value_type in _NUMERIC_V128_TYPES),
         _shuffle_rule(_V4I1),

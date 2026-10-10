@@ -322,6 +322,30 @@ def test_partial_integer_carriers_have_complete_structural_rules() -> None:
         assert counts == {shape: rules_per_shape for shape in expected}, source_op.name
 
 
+def test_partial_narrow_float_carriers_have_complete_structural_rules() -> None:
+    expected = {
+        ("f8E4M3", 1, 15),
+        ("f8E5M2", 1, 15),
+        ("f16", 1, 7),
+        ("bf16", 1, 7),
+    }
+    for source_op, field, rules_per_shape in (
+        (vector.vector_constant, "result", 1),
+        (vector.vector_splat, "result", 1),
+        (vector.vector_extract, "source", 1),
+        (vector.vector_insert, "dest", 2),
+    ):
+        counts = {}
+        for rule in WASM_CORE_SIMD128_CONTRACT_FRAGMENT.cases:
+            if not isinstance(rule, DescriptorRule) or rule.source_op is not source_op:
+                continue
+            for shape in _numeric_vector_ranges(rule, field):
+                if shape[0] not in ("f8E4M3", "f8E5M2", "f16", "bf16"):
+                    continue
+                counts[shape] = counts.get(shape, 0) + 1
+        assert counts == {shape: rules_per_shape for shape in expected}, source_op.name
+
+
 def test_partial_integer_carriers_have_complete_bitwise_rules() -> None:
     expected = {
         ("i8", 1, 15),
@@ -408,8 +432,8 @@ def test_dynamic_insert_masks_select_exactly_one_complete_physical_lane() -> Non
         if result_type.lanes is not None:
             physical_lane_count = result_type.lanes
         else:
-            element_bit_count = int(result_type.elements[0][1:])
-            physical_lane_count = 128 // element_bit_count
+            assert result_type.maximum_lanes is not None
+            physical_lane_count = result_type.maximum_lanes + 1
         lane_counts.add(physical_lane_count)
         if result_type.elements == ("i1",):
             assert [emit.descriptor.key for emit in rule.emit[:2]] == [
