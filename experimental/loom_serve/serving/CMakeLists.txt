@@ -81,7 +81,7 @@ loom_cc_binary(
     "server.c"
   DEPS
     ::configuration
-    ::finite_registration
+    ::model_registration
     ::registry
     ::router
     iree::async
@@ -89,8 +89,6 @@ loom_cc_binary(
     iree::base::tooling::flags
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::server
-    iree::experimental::loom_serve::image::model
-    iree::experimental::loom_serve::image::service
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
@@ -125,11 +123,11 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    finite_registration
+    model_registration
   HDRS
-    "finite_registration.h"
+    "model_registration.h"
   SRCS
-    "finite_registration.c"
+    "model_registration.c"
   DEPS
     ::configuration
     ::registry
@@ -139,6 +137,8 @@ loom_cc_library(
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::http::service
+    iree::experimental::loom_serve::image::model
+    iree::experimental::loom_serve::image::service
     iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::host

@@ -115,8 +115,10 @@ struct loom_serve_image_service_t {
   iree_time_t phase_start;
   // Single-owner observation, independent of CPU borrowers and log readers.
   struct {
-    // Owned bounded stream, live through producer retirement.
+    // Registration-borrowed or service-owned history through retirement.
     loom_serve_telemetry_stream_t* stream;
+    // Only standalone services destroy their history with the producer.
+    bool owns_stream;
     // Protocol outcomes and completed device work, never reconstructed from
     // logs.
     loom_serve_telemetry_counters_t counters;
@@ -791,13 +793,16 @@ void loom_serve_image_service_destroy(loom_serve_image_service_t* service) {
   if (service->telemetry.stream) {
     image_heartbeat(service);
   }
-  loom_serve_telemetry_stream_destroy(service->telemetry.stream);
+  if (service->telemetry.owns_stream) {
+    loom_serve_telemetry_stream_destroy(service->telemetry.stream);
+  }
   iree_allocator_free(allocator, service);
 }
 
 iree_status_t loom_serve_image_service_create(
     loom_serve_host_t* host, loom_serve_image_generator_t generator,
     const loom_serve_image_service_options_t* options,
+    loom_serve_telemetry_stream_t* stream,
     loom_serve_image_service_t** out_service, iree_allocator_t host_allocator) {
   *out_service = NULL;
   if (!generator.try_admit || !generator.prepare ||
@@ -817,6 +822,7 @@ iree_status_t loom_serve_image_service_create(
   service->allocator = host_allocator;
   service->generator = generator;
   service->options = *options;
+  service->telemetry.stream = stream;
   service->executor = loom_serve_host_executor(host);
   iree_slim_mutex_initialize(&service->events.mutex);
   loom_serve_http_timer_initialize(&service->timer);
@@ -825,12 +831,17 @@ iree_status_t loom_serve_image_service_create(
   iree_status_t status = iree_allocator_malloc_array(
       host_allocator, options->pending_capacity, sizeof(*service->pending),
       (void**)&service->pending);
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !stream) {
     status = loom_serve_telemetry_stream_create(128, &service->telemetry.stream,
                                                 host_allocator);
+    service->telemetry.owns_stream = iree_status_is_ok(status);
   }
   if (iree_status_is_ok(status)) {
-    image_event(service, &LOOM_SERVE_TELEMETRY_STREAM_BEGIN, 0);
+    if (stream) {
+      image_heartbeat(service);
+    } else {
+      image_event(service, &LOOM_SERVE_TELEMETRY_STREAM_BEGIN, 0);
+    }
     status = iree_async_proactor_pool_get(loom_serve_host_proactor_pool(host),
                                           0, &service->proactor);
   }

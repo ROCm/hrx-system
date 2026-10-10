@@ -591,7 +591,7 @@ def check_startup_failures(server, directory, catalog):
                 log_path,
                 cwd=directory,
             ) as (process, address):
-                if model["kind"] in ("embedding", "decision"):
+                if model["kind"] != "text":
                     assert address is not None, log_path.read_text()
                     client = Client(address)
                     while True:
@@ -614,7 +614,7 @@ def check_startup_failures(server, directory, catalog):
                     assert address is None, log_path.read_text()
                     assert process.wait() == 1, log_path.read_text()
             diagnostic = log_path.read_text()
-            if model["kind"] not in ("embedding", "decision"):
+            if model["kind"] == "text":
                 assert "NOT_FOUND" in diagnostic and missing.name in diagnostic, (
                     diagnostic
                 )

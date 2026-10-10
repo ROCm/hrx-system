@@ -8,6 +8,7 @@
 #define EXPERIMENTAL_LOOM_SERVE_IMAGE_MODEL_H_
 
 #include "experimental/loom_serve/image/generator.h"
+#include "experimental/loom_serve/runtime/compilation.h"
 #include "experimental/loom_serve/runtime/device.h"
 
 #ifdef __cplusplus
@@ -19,7 +20,7 @@ extern "C" {
 typedef struct loom_serve_image_model_t loom_serve_image_model_t;
 
 typedef struct loom_serve_image_model_options_t {
-  // Source catalog directory, borrowed only during creation.
+  // Source catalog directory, borrowed through load completion.
   iree_string_view_t source_directory;
   // Checkpoint asset directory, passed to the source bootstrap.
   iree_string_view_t checkpoint_directory;
@@ -32,6 +33,51 @@ typedef struct loom_serve_image_model_options_t {
   // Text capacity requested from the source; its meaning is model-defined.
   uint32_t text_tokens;
 } loom_serve_image_model_options_t;
+
+// Owner-driven preparation. Private CPU/JIT work runs on the shared host;
+// advance alone binds shared memory, residency and runtime capabilities.
+typedef struct loom_serve_image_load_t loom_serve_image_load_t;
+
+// Called after accepted preparation work retires. May only notify/schedule
+// the serialized owner; it must not call back into the load or block. Payload
+// and borrowed device/options remain live through the load's terminal advance.
+typedef void (*loom_serve_image_load_wake_fn_t)(void* user_data);
+
+// Allocates an unstarted operation without model storage reservation, source
+// I/O or work submission. Options' views are borrowed, not copied. A registered
+// but drained deployment can defer creating this operation altogether.
+iree_status_t loom_serve_image_load_create(
+    loom_serve_device_t* device,
+    const loom_serve_image_model_options_t* options,
+    loom_serve_image_load_wake_fn_t wake, void* user_data,
+    loom_serve_image_load_t** out_load, iree_allocator_t host_allocator);
+
+enum loom_serve_image_load_flag_bits_e {
+  // Stops subsequent phases, retiring any accepted CPU/JIT work before the
+  // terminal CANCELLED result. No callback tears down shared resources.
+  LOOM_SERVE_IMAGE_LOAD_FLAG_CANCEL = 1u << 0,
+};
+typedef uint32_t loom_serve_image_load_flags_t;
+
+// Serialized pool-owner turn. Never waits for tasks or device work. After a
+// nonterminal result, wake schedules another turn. A terminal result transfers
+// exclusive access to the owner, including on failure; no callbacks remain.
+// Call until *out_complete, then inspect evidence and take or destroy the load.
+iree_status_t loom_serve_image_load_advance(loom_serve_image_load_t* load,
+                                            loom_serve_image_load_flags_t flags,
+                                            bool* out_complete);
+
+// Terminal-only queries. Evidence is borrowed until take_model or destruction;
+// take_model transfers a successfully prepared, still-unactivated model.
+const loom_serve_compilation_report_t* loom_serve_image_load_report(
+    const loom_serve_image_load_t* load);
+loom_serve_image_model_t* loom_serve_image_load_take_model(
+    loom_serve_image_load_t* load);
+
+// Destroys a terminal operation and any untaken model. Preparation submits no
+// queue work, so partial-load cleanup requires no asynchronous retirement.
+// A platform release failure preserves the operation and remaining ownership.
+iree_status_t loom_serve_image_load_destroy(loom_serve_image_load_t* load);
 
 // Source ABI:
 // prepare.loom: prepare(i64 height, i64 width, i64 text_capacity,
@@ -54,19 +100,43 @@ typedef struct loom_serve_image_model_options_t {
 // its queue-ordered allocation is inserted by runner.execute_2. Private storage
 // belongs to the shared workspace pool, not this model's residency. This model
 // owns independent work and feedback timelines over the device queues.
-// Creation indexes parameters and records commands without reading weight
-// payloads. The device owner outlives the model and serializes all model calls.
-// Its physical pool backs parameter roots independently of cached commands.
-// First generation or explicit activation streams/prepares weights. Already
-// active generation does no JIT or parameter preparation. Failure releases
-// partial ownership and leaves *out_model NULL.
+// The cold constructor drives the asynchronous load and joins on its outer
+// application caller, never a shared worker. Live registration uses
+// load_advance. Creation indexes parameters and records commands without
+// reading weight payloads. The device owner outlives the model and serializes
+// all model calls. Its physical pool backs parameter roots independently of
+// cached commands. First generation or explicit activation streams/prepares
+// weights. Already active generation does no JIT or parameter preparation.
+// Failure releases partial ownership and leaves *out_model NULL.
 iree_status_t loom_serve_image_model_create(
     loom_serve_device_t* device,
     const loom_serve_image_model_options_t* options,
     loom_serve_image_model_t** out_model, iree_allocator_t host_allocator);
 
-// Drains accepted work before releasing buffers, programs and device services.
-// No generate call or borrowed RGB may remain active. NULL is accepted.
+// Begins irreversible removal after service CPU tasks, waits and external
+// tokenizer borrowers retire. No further invocation/admission is allowed.
+// Attaches nonblocking ownership wakes before releasing cached VM/command/root
+// consumers. Payloads, feedback and residency protection remain until actual
+// queue ownership retires, independently of success/failure readiness. The wake
+// only schedules the serialized owner; it must not reenter or destroy
+// resources.
+void loom_serve_image_model_retire(loom_serve_image_model_t* model,
+                                   void (*wake)(void* user_data),
+                                   void* user_data);
+
+// Query after retire. A true result authorizes destroy_retired; no device wait,
+// new submission or retry is needed. NULL is already retired.
+bool loom_serve_image_model_is_retired(loom_serve_image_model_t* model);
+
+// Final owner-side destruction after is_retired. Never waits for worker/device
+// work. On platform cleanup failure the model and remaining reservations stay
+// owned by the caller; otherwise the model is consumed. NULL is accepted.
+iree_status_t loom_serve_image_model_destroy_retired(
+    loom_serve_image_model_t* model);
+
+// Cold outer-owner teardown after service CPU tasks and waits retire. Begins
+// retirement and joins actual queue ownership before destroy_retired. Live
+// model removal uses the wake/query path instead of blocking a shared worker.
 iree_status_t loom_serve_image_model_destroy(loom_serve_image_model_t* model);
 
 // Reloads or releases every checkpoint domain while preserving compiled

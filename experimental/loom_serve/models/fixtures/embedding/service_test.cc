@@ -24,7 +24,7 @@
 #include "experimental/loom_serve/embedding/protocol.h"
 #include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
-#include "experimental/loom_serve/serving/finite_registration.h"
+#include "experimental/loom_serve/serving/model_registration.h"
 #include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
@@ -345,12 +345,12 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
       interface_.set_observer(interface_.self, {});
     }
     router_ = std::thread([this, capacity] {
-      const loom_serve_finite_registration_options_t options = {
+      const loom_serve_model_registration_options_t options = {
           .device = device_, .heartbeat_interval = 1000000};
       loom_serve_registry_t* registry = nullptr;
       IREE_ASSERT_OK(loom_serve_registry_create(
           service_ ? 1 : 0, &interface_, capacity,
-          loom_serve_finite_registration_factory(&options), &registry,
+          loom_serve_model_registration_factory(&options), &registry,
           allocator_));
       status_ = loom_serve_router_run(
           loom_serve_host_executor(host_), server_, registry,

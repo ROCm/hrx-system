@@ -58,10 +58,12 @@ loom_cc_test(
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::runtime::residency
+    iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::testing::temp_file
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/prepare.loom}}"
   LABELS

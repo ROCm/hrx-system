@@ -55,6 +55,7 @@ loom_cc_test(
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:host",
         "//experimental/loom_serve/runtime:residency",
+        "//experimental/loom_serve/serving:model_registration",
         "//experimental/loom_serve/serving:registry",
         "//experimental/loom_serve/serving:router",
         "//runtime/src/iree/async",
@@ -63,5 +64,6 @@ loom_cc_test(
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )

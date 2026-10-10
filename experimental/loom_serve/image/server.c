@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
         .heartbeat_interval = (iree_duration_t)FLAG_heartbeat_ms * 1000000,
     };
     loom_serve_image_service_t* service = NULL;
-    status = loom_serve_image_service_create(host, generator, &options,
+    status = loom_serve_image_service_create(host, generator, &options, NULL,
                                              &service, allocator);
     if (iree_status_is_ok(status)) {
       const loom_serve_http_service_t interface =

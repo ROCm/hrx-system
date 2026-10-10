@@ -60,7 +60,7 @@ loom_cc_test(
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::runtime::residency
-    iree::experimental::loom_serve::serving::finite_registration
+    iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::hal

@@ -166,7 +166,7 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   };
   loom_serve_image_service_t* image = nullptr;
   IREE_ASSERT_OK(loom_serve_image_service_create(
-      host, generator, &options, &image, iree_allocator_system()));
+      host, generator, &options, nullptr, &image, iree_allocator_system()));
   const auto interface = loom_serve_image_service_interface(image);
   iree_status_t service_status = iree_ok_status();
   std::thread service([&] {
@@ -424,8 +424,8 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
         .height = 1,
         .pending_capacity = 1,
         .heartbeat_interval = 0};
-    IREE_ASSERT_OK(loom_serve_image_service_create(host, generator, &options,
-                                                   &images[i], allocator));
+    IREE_ASSERT_OK(loom_serve_image_service_create(
+        host, generator, &options, nullptr, &images[i], allocator));
     services[i] = loom_serve_image_service_interface(images[i]);
   }
   auto transport_options = loom_serve_http_server_options_default();

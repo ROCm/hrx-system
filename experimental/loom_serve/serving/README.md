@@ -13,8 +13,8 @@ prepared parameter residencies; it does not deduplicate those weights.
 The application owns one [host](../runtime/host.h) with shared IREE task workers
 and asynchronous I/O services. Every catalog borrows the host's shared JIT task
 queue; adding or removing a model neither creates nor joins a compiler pool.
-Finite-vector registration drives asynchronous source/JIT preparation on that
-pool and binds shared memory only on the serving owner. Text/image startup
+Finite-vector and image registration drive asynchronous source/JIT preparation
+on that pool and bind shared memory only on the serving owner. Text startup
 constructors still join on the outer application thread. HTTP admission and
 model scheduling run as a cooperative task process:
 bounded serialized turns preserve shared memory-policy ownership, while CPU
@@ -46,13 +46,13 @@ The server can start without `--models`, or with an explicit `{"models":[]}`
 catalog. It still owns its configured device and shared task/I/O infrastructure;
 health, model discovery, status, metrics and diagnostic endpoints remain live.
 An empty server publishes empty model/status lists and zero model-work totals.
-Unknown-model inference and tokenization requests return HTTP 404. Embedding and
-decision packages can be registered and removed over HTTP; startup catalog
-entries use the same asynchronous path. Text/image packages are constructed
-before listeners start. Their constructors still contain outer-thread joins,
-so dynamic registration of those modalities returns 501 rather than running a
-blocking constructor on the shared workers. Their serving and reversible
-admission controls remain available.
+Unknown-model inference and tokenization requests return HTTP 404. Embedding,
+decision and image packages can be registered and removed over HTTP; startup
+catalog entries use the same asynchronous path. Text packages are constructed
+before listeners start. The text constructor still contains outer-thread joins,
+so dynamic text registration returns 501 rather than running a blocking
+constructor on the shared workers. Its serving and reversible admission controls
+remain available.
 
 The [weight-free three-model catalog](../models/fixtures/README.md) is a complete
 first-output recipe for image, embedding and decision packages. The example
@@ -164,9 +164,10 @@ curl --unix-socket /path/to/loom-serve.sock http://localhost/v1/models
 Optional `admission` is `"open"` by default or `"drained"`. The latter stores
 only registration metadata and a bounded observation ring: it does not create
 the model, read source/assets, reserve model storage or evict another model.
-Opening admission starts preparation. The same setting is accepted on finite
-startup catalog entries; initially drained text/image entries fail explicitly
-until their asynchronous constructors are implemented.
+Opening admission starts preparation. The same setting is accepted on
+finite-vector and image startup catalog entries. Initially drained text entries
+fail explicitly because the text loader has not yet been split into private
+task preparation and owner-side binding.
 
 ~~~sh
 curl http://127.0.0.1:8080/v1/models/register \

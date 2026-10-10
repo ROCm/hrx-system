@@ -80,13 +80,11 @@ loom_cc_binary(
     ]),
     deps = [
         ":configuration",
-        ":finite_registration",
+        ":model_registration",
         ":registry",
         ":router",
         "//experimental/loom_serve/http:listener",
         "//experimental/loom_serve/http:server",
-        "//experimental/loom_serve/image:model",
-        "//experimental/loom_serve/image:service",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:device_flags",
         "//experimental/loom_serve/runtime:host_flags",
@@ -120,9 +118,9 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "finite_registration",
-    srcs = ["finite_registration.c"],
-    hdrs = ["finite_registration.h"],
+    name = "model_registration",
+    srcs = ["model_registration.c"],
+    hdrs = ["model_registration.h"],
     deps = [
         ":configuration",
         ":registry",
@@ -131,6 +129,8 @@ loom_cc_library(
         "//experimental/loom_serve/finite:model",
         "//experimental/loom_serve/finite:service",
         "//experimental/loom_serve/http:service",
+        "//experimental/loom_serve/image:model",
+        "//experimental/loom_serve/image:service",
         "//experimental/loom_serve/runtime:compilation",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:host",

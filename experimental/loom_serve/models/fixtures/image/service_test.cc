@@ -10,6 +10,8 @@
 #include <unistd.h>
 
 #include <array>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -18,12 +20,14 @@
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/output.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
+#include "experimental/loom_serve/serving/model_registration.h"
 #include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/internal/base64.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/testing/temp_file.h"
 
 IREE_FLAG(string, model_source, "", "Deterministic image bootstrap source.");
 
@@ -43,16 +47,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
                                                   &group_, allocator_));
     device_ = loom_serve_device_group_at(group_, 0);
     const std::string source = FLAG_model_source;
-    const std::string directory = source.substr(0, source.find_last_of('/'));
-    const loom_serve_image_model_options_t model_options = {
-        .source_directory = iree_make_cstring_view(directory.c_str()),
-        .checkpoint_directory = iree_make_cstring_view(directory.c_str()),
-        .height = kHeight,
-        .width = kWidth,
-        .text_tokens = 32,
-    };
-    IREE_ASSERT_OK(loom_serve_image_model_create(device_, &model_options,
-                                                 &model_, allocator_));
+    directory_ = source.substr(0, source.find_last_of('/'));
     auto options = loom_serve_http_server_options_default();
     IREE_ASSERT_OK(loom_serve_http_server_create(
         loom_serve_host_proactor_pool(host_), &options, &server_, allocator_));
@@ -90,7 +85,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
       };
       loom_serve_image_service_t* service = nullptr;
       status_ = loom_serve_image_service_create(host_, generator, &options,
-                                                &service, allocator_);
+                                                nullptr, &service, allocator_);
       if (iree_status_is_ok(status_)) {
         const auto interface = loom_serve_image_service_interface(service);
         loom_serve_registry_t* registry = nullptr;
@@ -106,6 +101,61 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
       }
       loom_serve_image_service_destroy(service);
     });
+  }
+
+  void CreateStandaloneModel() {
+    const loom_serve_image_model_options_t options = {
+        .source_directory = iree_make_cstring_view(directory_.c_str()),
+        .checkpoint_directory = iree_make_cstring_view(directory_.c_str()),
+        .height = kHeight,
+        .width = kWidth,
+        .text_tokens = 32};
+    IREE_ASSERT_OK(
+        loom_serve_image_model_create(device_, &options, &model_, allocator_));
+  }
+
+  void StartManaged() {
+    service_ = std::thread([this] {
+      const loom_serve_model_registration_options_t options = {
+          .device = device_, .heartbeat_interval = 0};
+      loom_serve_registry_t* registry = nullptr;
+      IREE_ASSERT_OK(loom_serve_registry_create(
+          0, nullptr, 2, loom_serve_model_registration_factory(&options),
+          &registry, allocator_));
+      status_ = loom_serve_router_run(
+          loom_serve_host_executor(host_), server_, registry,
+          {.request_quota = 16, .holding_capacity = 8}, allocator_);
+      status_ =
+          iree_status_join(status_, loom_serve_registry_destroy(registry));
+    });
+  }
+
+  std::string Declaration(const std::string& name, const std::string& source,
+                          const char* admission = "open") {
+    return "{\"kind\":\"image\",\"name\":\"" + name + "\",\"source\":\"" +
+           source + "\",\"checkpoint\":\"" + directory_ +
+           "\",\"width\":7,\"height\":5,\"text_tokens\":32,\"admission\":\"" +
+           admission + "\"}";
+  }
+
+  std::string ModelStatus(const std::string& name) {
+    const auto listing = Read(Send("GET", "/v1/status"));
+    const size_t begin = listing.find("\"id\":\"" + name + "\"");
+    if (begin == std::string::npos) {
+      return {};
+    }
+    const size_t end = listing.find("{\"object\":\"model\"", begin);
+    return listing.substr(begin, end == std::string::npos ? end : end - begin);
+  }
+
+  std::string WaitModel(const std::string& name, const std::string& marker) {
+    for (;;) {
+      const auto state = ModelStatus(name);
+      if (marker.empty() ? state.empty()
+                         : state.find(marker) != std::string::npos) {
+        return state;
+      }
+    }
   }
 
   int Send(const std::string& method, const std::string& target,
@@ -183,6 +233,8 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
   loom_serve_device_group_t* group_ = nullptr;
   // Borrowed device record within the application group.
   loom_serve_device_t* device_ = nullptr;
+  // Source and tokenizer package borrowed by cold and HTTP registration.
+  std::string directory_;
   // Real source-JIT model with two kernels and reflected private workspace.
   loom_serve_image_model_t* model_ = nullptr;
   // Production loopback carrier and request claim owner.
@@ -196,6 +248,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
 };
 
 TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
+  ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
   loom_serve_image_prepared_t prepared;
   IREE_ASSERT_OK(loom_serve_image_model_prepare_request(model_, IREE_SV("x"), 0,
                                                         1.0f, &prepared));
@@ -273,6 +326,7 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
 }
 
 TEST_P(SourceImageServiceTest, IndependentLogReadersCannotBlockColdImageWork) {
+  ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
   loom_serve::testing::StalledStderr stalled;
   ASSERT_NO_FATAL_FAILURE(stalled.Begin());
   Start();
@@ -373,6 +427,133 @@ TEST_P(SourceImageServiceTest, IndependentLogReadersCannotBlockColdImageWork) {
   loom_serve_http_server_request_stop(server_);
   service_.join();
   IREE_EXPECT_OK(status_);
+}
+
+TEST_P(SourceImageServiceTest, DynamicImageAdmissionRetirementAndReuse) {
+  StartManaged();
+  EXPECT_NE(Read(Send("GET", "/v1/models")).find(R"("data":[])"),
+            std::string::npos);
+  loom_serve::testing::StalledStderr stalled;
+  ASSERT_NO_FATAL_FAILURE(stalled.Begin());
+  EXPECT_EQ(Read(Send("POST", "/v1/models/register",
+                      Declaration("pixels", directory_, "drained")))
+                .find("HTTP/1.1 202"),
+            0u);
+  const auto initial = ModelStatus("pixels");
+  EXPECT_NE(initial.find(R"("registration":"registered")"), std::string::npos);
+  EXPECT_NE(initial.find(R"("admission":"drained")"), std::string::npos);
+  const auto initial_log =
+      Read(Send("GET", "/logz", "", "X-Loom-Model: pixels\r\n"));
+  EXPECT_NE(initial_log.find(R"("event":"stream_begin","sequence":0)"),
+            std::string::npos);
+  const int held = Send("POST", "/v1/images/generations",
+                        R"({"model":"pixels","prompt":"aba","seed":1})");
+  const int tokens =
+      Send("POST", "/tokenize", R"({"model":"pixels","content":"aba"})");
+  WaitModel("pixels", R"("held_requests":2)");
+  EXPECT_EQ(Read(Send("POST", "/v1/models/undrain", R"({"model":"pixels"})"))
+                .find("HTTP/1.1 200"),
+            0u);
+  const auto response = Read(held);
+  EXPECT_EQ(response.find("HTTP/1.1 200"), 0u);
+  EXPECT_NE(response.find("\"b64_json\":\"" + EncodedPixels(3, 1) + "\""),
+            std::string::npos);
+  EXPECT_NE(Read(tokens).find(R"({"tokens":[0,1,0]})"), std::string::npos);
+  const auto ready = ModelStatus("pixels");
+  EXPECT_NE(ready.find(R"("registration":"ready")"), std::string::npos);
+  EXPECT_NE(ready.find(R"("kernels":2)"), std::string::npos);
+  const auto log = Read(Send("GET", "/logz", "", "X-Loom-Model: pixels\r\n"));
+  EXPECT_NE(log.find(R"("event":"stream_begin","sequence":0)"),
+            std::string::npos);
+  EXPECT_NE(log.find(R"("event":"image_generated")"), std::string::npos);
+
+  // The accepted registration belongs to the registry, not its admin peer.
+  const int detached =
+      Send("POST", "/v1/models/register", Declaration("peer", directory_));
+  char first_byte;
+  ASSERT_EQ(recv(detached, &first_byte, 1, MSG_PEEK), 1);
+  EXPECT_EQ(close(detached), 0);
+  const int peer = Send("POST", "/v1/images/generations",
+                        R"({"model":"peer","prompt":"ab","seed":0})");
+  EXPECT_EQ(Read(Send("POST", "/v1/models/drain", R"({"model":"pixels"})"))
+                .find("HTTP/1.1 200"),
+            0u);
+  const int removed = Send("POST", "/v1/images/generations",
+                           R"({"model":"pixels","prompt":"a"})");
+  WaitModel("pixels", R"("held_requests":1)");
+  EXPECT_EQ(Read(Send("POST", "/v1/models/unregister",
+                      R"({"model":"pixels","mode":"drain"})"))
+                .find("HTTP/1.1 202"),
+            0u);
+  EXPECT_EQ(Read(removed).find("HTTP/1.1 410"), 0u);
+  WaitModel("pixels", {});
+  EXPECT_NE(Read(peer).find("\"b64_json\":\"" + EncodedPixels(2, 0) + "\""),
+            std::string::npos);
+
+  // Reusing the route neither reuses its counters nor invalidates its peer.
+  EXPECT_EQ(Read(Send("POST", "/v1/models/register",
+                      Declaration("pixels", directory_)))
+                .find("HTTP/1.1 202"),
+            0u);
+  EXPECT_NE(Read(Send("POST", "/v1/images/generations",
+                      R"({"model":"pixels","prompt":"ab","seed":1})"))
+                .find("\"b64_json\":\"" + EncodedPixels(2, 1) + "\""),
+            std::string::npos);
+  const auto metrics = Read(Send("GET", "/metrics"));
+  EXPECT_NE(metrics.find("loom_serve_server_completed_total 3\n"),
+            std::string::npos);
+  EXPECT_NE(metrics.find("loom_serve_model_completed_total{model=\"pixels\","
+                         "kind=\"image\",incarnation=\"3\"} 1\n"),
+            std::string::npos);
+  EXPECT_EQ(Read(Send("POST", "/v1/models/unregister",
+                      R"({"model":"pixels","mode":"abort"})"))
+                .find("HTTP/1.1 202"),
+            0u);
+  WaitModel("pixels", {});
+}
+
+TEST_P(SourceImageServiceTest, FailedImageSourceLeavesPeerUsable) {
+  const auto package = iree::testing::MakeTempFilePath("failed_image_source");
+  ASSERT_TRUE(std::filesystem::create_directory(package));
+  for (const char* file :
+       {"config.loom", "control.loom", "prepare.loom", "sources.txt"}) {
+    ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/" + file,
+                                           package + "/" + file));
+  }
+  {
+    std::ofstream source(package + "/generate.loom");
+    source << "this is not a source program\n";
+    ASSERT_TRUE(source.good());
+  }
+  StartManaged();
+  loom_serve::testing::StalledStderr stalled;
+  ASSERT_NO_FATAL_FAILURE(stalled.Begin());
+  EXPECT_EQ(
+      Read(Send("POST", "/v1/models/register", Declaration("peer", directory_)))
+          .find("HTTP/1.1 202"),
+      0u);
+  EXPECT_EQ(Read(Send("POST", "/v1/models/register",
+                      Declaration("broken", package, "drained")))
+                .find("HTTP/1.1 202"),
+            0u);
+  const int held = Send("POST", "/v1/images/generations",
+                        R"({"model":"broken","prompt":"a"})");
+  WaitModel("broken", R"("held_requests":1)");
+  EXPECT_EQ(Read(Send("POST", "/v1/models/undrain", R"({"model":"broken"})"))
+                .find("HTTP/1.1 200"),
+            0u);
+  EXPECT_EQ(Read(held).find("HTTP/1.1 503"), 0u);
+  const auto failed = WaitModel("broken", R"("registration":"failed")");
+  EXPECT_NE(failed.find("generate.loom"), std::string::npos);
+  EXPECT_NE(failed.find(R"("diagnostics":[{)"), std::string::npos);
+  EXPECT_NE(Read(Send("POST", "/v1/images/generations",
+                      R"({"model":"peer","prompt":"aba","seed":1})"))
+                .find("\"b64_json\":\"" + EncodedPixels(3, 1) + "\""),
+            std::string::npos);
+  EXPECT_EQ(Read(Send("POST", "/v1/models/unregister", R"({"model":"broken"})"))
+                .find("HTTP/1.1 202"),
+            0u);
+  WaitModel("broken", {});
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, SourceImageServiceTest,

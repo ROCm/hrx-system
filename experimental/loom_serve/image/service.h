@@ -37,10 +37,12 @@ typedef struct loom_serve_image_service_t loom_serve_image_service_t;
 // Creates bounded image admission without accepting asynchronous work.
 // Model calls are serialized by the router; finite preparation and encoding
 // share the host executor. The generator and deployment name outlive this
-// object.
+// object. A supplied telemetry stream is borrowed through destruction and
+// preserves the registration's history; NULL creates a service-owned stream.
 iree_status_t loom_serve_image_service_create(
     loom_serve_host_t* host, loom_serve_image_generator_t generator,
     const loom_serve_image_service_options_t* options,
+    loom_serve_telemetry_stream_t* stream,
     loom_serve_image_service_t** out_service, iree_allocator_t host_allocator);
 
 // Borrows callbacks for the common HTTP owner. Prepared requests wait for
