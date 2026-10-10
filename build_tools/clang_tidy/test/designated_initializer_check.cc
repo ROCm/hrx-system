@@ -117,6 +117,11 @@ Config designated_string_with_trailing_comma = {
     .name = "already-correct:",
 };
 
+Config designated_with_trailing_comment = {
+    .ordinal = 33,
+    .flags = 34,  // Already terminated.
+};
+
 OuterConfig nested_config = {
     /*.inner=*/{
         /*.x=*/3,

@@ -106,33 +106,63 @@ std::optional<SourceLocation> TrailingCommaInsertion(
   if (InitializerRange.isInvalid() || LastValueRange.isInvalid()) {
     return std::nullopt;
   }
-  bool Invalid = false;
-  StringRef InitializerText = Lexer::getSourceText(
-      InitializerRange, SourceManager, LangOptions, &Invalid);
-  if (Invalid) {
+  std::pair<FileID, unsigned> InitializerBegin =
+      SourceManager.getDecomposedLoc(InitializerRange.getBegin());
+  std::pair<FileID, unsigned> InitializerEnd =
+      SourceManager.getDecomposedLoc(InitializerRange.getEnd());
+  std::pair<FileID, unsigned> LastValueEnd =
+      SourceManager.getDecomposedLoc(LastValueRange.getEnd());
+  if (InitializerBegin.first != InitializerEnd.first ||
+      InitializerBegin.first != LastValueEnd.first) {
     return std::nullopt;
   }
+
+  bool Invalid = false;
+  StringRef Buffer =
+      SourceManager.getBufferData(InitializerBegin.first, &Invalid);
+  if (Invalid || InitializerBegin.second > LastValueEnd.second ||
+      LastValueEnd.second > InitializerEnd.second ||
+      InitializerEnd.second > Buffer.size() || InitializerEnd.second == 0) {
+    return std::nullopt;
+  }
+  StringRef InitializerText =
+      Buffer.slice(InitializerBegin.second, InitializerEnd.second);
   if (!InitializerText.contains('\n')) {
     return SourceLocation();
   }
-  StringRef LastValueText = Lexer::getSourceText(LastValueRange, SourceManager,
-                                                 LangOptions, &Invalid);
-  if (Invalid) {
+
+  size_t ClosingBracePosition = InitializerEnd.second - 1;
+  if (Buffer[ClosingBracePosition] != '}') {
     return std::nullopt;
   }
-  if (LastValueText.rtrim().ends_with(",")) {
+  size_t Position = LastValueEnd.second;
+  if (Position > 0 && Buffer[Position - 1] == ',') {
     return SourceLocation();
   }
-  SourceLocation LastToken = LastValueRange.getEnd().getLocWithOffset(-1);
-  std::optional<Token> Next = Lexer::findNextToken(
-      LastToken, SourceManager, LangOptions, /*IncludeComments=*/false);
-  if (!Next) {
-    return std::nullopt;
-  }
-  if (Next->is(tok::comma)) {
-    return SourceLocation();
-  }
-  if (!Next->is(tok::r_brace)) {
+
+  while (Position < ClosingBracePosition) {
+    if (std::isspace(static_cast<unsigned char>(Buffer[Position]))) {
+      ++Position;
+      continue;
+    }
+    if (Buffer[Position] == ',') {
+      return SourceLocation();
+    }
+    if (Buffer.substr(Position, 2) == "//") {
+      Position = Buffer.find('\n', Position + 2);
+      if (Position == StringRef::npos || Position >= ClosingBracePosition) {
+        return std::nullopt;
+      }
+      continue;
+    }
+    if (Buffer.substr(Position, 2) == "/*") {
+      Position = Buffer.find("*/", Position + 2);
+      if (Position == StringRef::npos || Position + 2 > ClosingBracePosition) {
+        return std::nullopt;
+      }
+      Position += 2;
+      continue;
+    }
     return std::nullopt;
   }
   return LastValueRange.getEnd();

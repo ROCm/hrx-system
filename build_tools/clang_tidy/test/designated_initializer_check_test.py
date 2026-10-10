@@ -67,6 +67,8 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertNotIn(".flags = 31};", fixed_source)
         self.assertIn('.name = "already-correct:",', fixed_source)
         self.assertNotIn('.name = "already-correct:",,', fixed_source)
+        self.assertIn(".flags = 34,  // Already terminated.", fixed_source)
+        self.assertNotIn(".flags = 34,,", fixed_source)
         self.assertIn(
             'return Config{.ordinal = 8, .name = "literal", .flags = 9};',
             fixed_source,
