@@ -309,6 +309,7 @@ iree_runtime_cc_library(
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd:status",
     ],

@@ -548,6 +548,11 @@ struct NativeProvider {
 
 class QueueHarness {
  public:
+  enum class CapturedResourceState {
+    kRetained,
+    kReleased,
+  };
+
   ~QueueHarness() {
     ReleaseDevice();
     if (device_release_requested) {
@@ -635,11 +640,14 @@ class QueueHarness {
     IREE_ASSERT_OK(status);
   }
 
-  void Submit(iree_hal_semaphore_t* completion = nullptr) {
+  void Submit(
+      iree_hal_semaphore_t* completion = nullptr,
+      CapturedResourceState resource_state = CapturedResourceState::kRetained) {
     if (!completion) {
       completion = done;
     }
-    SubmitWithWaits({}, completion, /*completion_value=*/1);
+    SubmitWithWaits({}, completion, /*completion_value=*/1,
+                    /*barriers=*/nullptr, resource_state);
   }
 
   void SubmitAfter(iree_hal_semaphore_t* dependency, uint64_t dependency_value,
@@ -652,10 +660,11 @@ class QueueHarness {
                     completion_value);
   }
 
-  void SubmitWithWaits(iree_hal_semaphore_list_t waits,
-                       iree_hal_semaphore_t* completion,
-                       uint64_t completion_value,
-                       const iree_hal_queue_barriers_t* barriers = nullptr) {
+  void SubmitWithWaits(
+      iree_hal_semaphore_list_t waits, iree_hal_semaphore_t* completion,
+      uint64_t completion_value,
+      const iree_hal_queue_barriers_t* barriers = nullptr,
+      CapturedResourceState resource_state = CapturedResourceState::kRetained) {
     if (completion == done) {
       completion_timepoint.callback =
           +[](void* user_data, iree_async_semaphore_timepoint_t* timepoint,
@@ -684,7 +693,11 @@ class QueueHarness {
         barriers, IREE_HAL_DISPATCH_FLAG_NONE));
     iree_hal_executable_release(executable);
     iree_hal_buffer_release(buffer);
-    EXPECT_EQ(native.live_memories, previous_live_memories + 2);
+    const size_t expected_live_memories =
+        resource_state == CapturedResourceState::kRetained
+            ? previous_live_memories + 2
+            : previous_live_memories;
+    EXPECT_EQ(native.live_memories, expected_live_memories);
   }
 
   void LoadExecutable(
@@ -1535,7 +1548,7 @@ TEST(XdnaQueueTest, WarmQueueMemoryOperationsAllocateNoHostStorage) {
   EXPECT_EQ(allocation_counters.live_allocations.load(), 0);
 }
 
-TEST(XdnaQueueTest, ReadyDispatchPublishesBeforeProactorProgress) {
+TEST(XdnaQueueTest, ReadyDispatchCommitsBeforeProactorProgress) {
   QueueHarness harness;
   harness.native.hold_retirement = true;
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
@@ -1543,14 +1556,11 @@ TEST(XdnaQueueTest, ReadyDispatchPublishesBeforeProactorProgress) {
 
   ASSERT_NO_FATAL_FAILURE(harness.Submit());
   EXPECT_EQ(harness.native.submission_count, 1u);
-  EXPECT_EQ(harness.native.notification_count, 0u);
+  EXPECT_EQ(harness.native.notification_count, 1u);
   uint64_t value = 0;
   IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &value));
   EXPECT_EQ(value, 0u);
 
-  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
-                                          iree_infinite_timeout(), nullptr));
-  EXPECT_EQ(harness.native.notification_count, 1u);
   harness.native.hold_retirement = false;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
@@ -1597,8 +1607,6 @@ TEST(XdnaQueueTest, AcceptedSignalChainUsesNativeFifoBeforeRetirement) {
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
   ASSERT_NO_FATAL_FAILURE(harness.Submit(edge));
   EXPECT_EQ(harness.native.submission_count, 1u);
-  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
-                                          iree_infinite_timeout(), nullptr));
   ASSERT_NO_FATAL_FAILURE(harness.SubmitAfter(edge, 1));
   EXPECT_EQ(harness.native.submission_count, 2u);
 
@@ -1814,8 +1822,6 @@ TEST(XdnaQueueTest, ConsumerSubmittedBeforeProducerDefersUntilRetirement) {
   EXPECT_EQ(harness.native.submission_count, 0u);
 
   ASSERT_NO_FATAL_FAILURE(harness.Submit(edge));
-  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
-                                          iree_infinite_timeout(), nullptr));
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(1));
   EXPECT_EQ(harness.native.submission_count, 1u);
 
@@ -1847,8 +1853,6 @@ TEST(XdnaQueueTest, FullNativeCapacityUsesQueuedPublication) {
 
   ASSERT_NO_FATAL_FAILURE(harness.Submit());
   EXPECT_EQ(harness.native.submission_count, 1u);
-  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
-                                          iree_infinite_timeout(), nullptr));
   ASSERT_NO_FATAL_FAILURE(harness.Submit(following));
   EXPECT_EQ(harness.native.submission_count, 1u);
   IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
@@ -1869,7 +1873,8 @@ TEST(XdnaQueueTest, NativeBusyWithoutPendingWorkFailsQueueInvariant) {
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
   harness.native.ReturnBusyOnNextSubmission();
 
-  ASSERT_NO_FATAL_FAILURE(harness.Submit());
+  ASSERT_NO_FATAL_FAILURE(harness.Submit(
+      /*completion=*/nullptr, QueueHarness::CapturedResourceState::kReleased));
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_INTERNAL));
   EXPECT_EQ(harness.native.submission_attempt_count, 1u);
   EXPECT_EQ(harness.native.submission_count, 0u);
@@ -1901,8 +1906,6 @@ TEST(XdnaQueueTest, NativeBusyRetainsDirectPublicationUntilCheckedProgress) {
   ASSERT_NO_FATAL_FAILURE(harness.Submit());
   EXPECT_EQ(harness.native.submission_attempt_count, 2u);
   EXPECT_EQ(harness.native.submission_count, 1u);
-  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
-                                          iree_infinite_timeout(), nullptr));
   const size_t flush_count_after_busy = harness.native.FlushCount();
   uint64_t value = 0;
   IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &value));
@@ -2549,8 +2552,6 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
       harness.queue, {}, {1, &capacity_completions[1], &retry_value},
       executable, function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
       {1, &binding}, /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
-  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
-                                          iree_infinite_timeout(), nullptr));
   EXPECT_EQ(harness.native.submission_count, submission_count + 1);
   const size_t flush_count_after_busy = harness.native.FlushCount();
   harness.native.retirement_limit =

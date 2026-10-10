@@ -410,6 +410,7 @@ iree_cc_library(
     amdf::headers
     iree::async
     iree::base
+    iree::base::threading
     iree::hal
     iree::hal::drivers::amd::status
   PUBLIC

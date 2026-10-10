@@ -16,8 +16,9 @@ extern "C" {
 #endif
 
 // Creates one finite execution owner. Context and proactor are borrowed from
-// the device. The proactor owns causal admission and checked native completion;
-// private native-publication and host-transfer services isolate blocking work.
+// the device. Ready operations publish directly from their caller; the proactor
+// owns deferred causal admission and unattended checked native completion.
+// Private native-publication and host-transfer services isolate blocking work.
 // Unresolved consumers occupy no native execution slot.
 iree_status_t iree_hal_amd_xdna_queue_create(
     const iree_hal_queue_family_t* family, iree_hal_amd_xdna_context_t* context,

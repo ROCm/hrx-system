@@ -9,6 +9,7 @@
 #include "iree/async/event.h"
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/semaphore.h"
+#include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/drivers/amd/xdna/barrier.h"
 #include "iree/hal/drivers/amd/xdna/executable.h"
@@ -100,8 +101,10 @@ struct iree_hal_amd_xdna_queue_t {
   iree_hal_amd_xdna_ready_list_t dispatch_ready;
   // Deferred consumers waiting for the caller-owned direct publisher.
   iree_hal_amd_xdna_ready_list_t acceptance_waiters;
-  // Proactor-owned lookup of signals awaiting native acceptance.
+  // Serialized lookup of signals awaiting native acceptance.
   iree_hal_amd_xdna_queue_producer_index_t producer_index;
+  // Serializes queue causal state shared by callers and the proactor owner.
+  iree_slim_mutex_t state_mutex;
   // Dispatch currently inside native preparation/publication, or NULL.
   // Published atomically because a direct caller may own publication while
   // the proactor resolves a dependent operation.
@@ -823,6 +826,7 @@ static void iree_hal_amd_xdna_queue_wait_complete(
   iree_status_t wait_status = (iree_status_t)iree_atomic_exchange(
       &operation->wait_status, 0, iree_memory_order_acquire);
   status = iree_status_join(status, wait_status);
+  iree_slim_mutex_lock(&operation->queue->state_mutex);
   if (iree_status_is_ok(status)) {
     iree_hal_amd_xdna_wait_resolution_t resolution =
         IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_DEFER;
@@ -836,6 +840,7 @@ static void iree_hal_amd_xdna_queue_wait_complete(
     }
   }
   iree_hal_amd_xdna_queue_enqueue_ready(operation, status);
+  iree_slim_mutex_unlock(&operation->queue->state_mutex);
 }
 
 static void iree_hal_amd_xdna_queue_admit(
@@ -843,14 +848,16 @@ static void iree_hal_amd_xdna_queue_admit(
     iree_status_t status, iree_async_completion_flags_t flags) {
   iree_hal_amd_xdna_operation_t* operation = user_data;
   iree_hal_amd_xdna_queue_t* queue = operation->queue;
+  iree_slim_mutex_lock(&queue->state_mutex);
   iree_hal_amd_xdna_operation_admit(operation, status);
   // A direct caller may have briefly owned and then released publication while
   // this admission was pending. Retry older ready work even when this operation
   // itself registered a software wait.
   iree_hal_amd_xdna_queue_pump_dispatch(queue);
+  iree_slim_mutex_unlock(&queue->state_mutex);
 }
 
-// Commits one direct or deferred publication result on the proactor owner.
+// Commits one direct or deferred publication result under |state_mutex|.
 // |service| and |item| are NULL when the caller performed native publication.
 static void iree_hal_amd_xdna_queue_commit_publication(
     iree_hal_amd_xdna_queue_t* queue,
@@ -967,18 +974,10 @@ static void iree_hal_amd_xdna_publisher_complete(
   iree_hal_amd_xdna_queue_t* queue = (iree_hal_amd_xdna_queue_t*)user_data;
   iree_hal_amd_xdna_operation_t* operation =
       iree_hal_amd_xdna_operation_from_service_item(item);
+  iree_slim_mutex_lock(&queue->state_mutex);
   iree_hal_amd_xdna_queue_commit_publication(queue, service, item, operation,
                                              status);
-}
-
-static void iree_hal_amd_xdna_direct_publication_complete(
-    void* user_data, iree_async_operation_t* base_operation,
-    iree_status_t status, iree_async_completion_flags_t flags) {
-  (void)base_operation;
-  (void)flags;
-  iree_hal_amd_xdna_operation_t* operation = user_data;
-  iree_hal_amd_xdna_queue_commit_publication(operation->queue, /*service=*/NULL,
-                                             /*item=*/NULL, operation, status);
+  iree_slim_mutex_unlock(&queue->state_mutex);
 }
 
 static void iree_hal_amd_xdna_memory_wait_resolved(void* user_data,
@@ -1097,6 +1096,7 @@ static void iree_hal_amd_xdna_queue_native_ready(
   (void)event_source;
   iree_hal_amd_xdna_queue_t* queue = user_data;
   iree_status_t status = iree_async_event_consume(queue->event);
+  iree_slim_mutex_lock(&queue->state_mutex);
   queue->notification_pending = false;
   if (iree_status_is_ok(status) && iree_async_poll_has_error(events)) {
     status = iree_make_status(
@@ -1106,9 +1106,11 @@ static void iree_hal_amd_xdna_queue_native_ready(
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_xdna_queue_fail_pending(queue, status);
+    iree_slim_mutex_unlock(&queue->state_mutex);
     return;
   }
   if (!iree_status_is_ok(queue->failure_status) || !queue->pending.count) {
+    iree_slim_mutex_unlock(&queue->state_mutex);
     return;
   }
   amdf_kernel_queue_status_t checked = {
@@ -1179,6 +1181,7 @@ static void iree_hal_amd_xdna_queue_native_ready(
       queue->dispatch_ready.head &&
       queue->pending.count < queue->pending.capacity &&
       iree_status_is_ok(queue->failure_status);
+  iree_slim_mutex_unlock(&queue->state_mutex);
   while (retired_head) {
     iree_hal_amd_xdna_operation_t* operation = retired_head;
     retired_head = operation->next;
@@ -1188,7 +1191,9 @@ static void iree_hal_amd_xdna_queue_native_ready(
   if (pump_after_publication) {
     // The ready operation retains the device, so retirement publication cannot
     // destroy the queue before the newly available slot is handed off.
+    iree_slim_mutex_lock(&queue->state_mutex);
     iree_hal_amd_xdna_queue_pump_dispatch(queue);
+    iree_slim_mutex_unlock(&queue->state_mutex);
   }
 }
 
@@ -1513,11 +1518,15 @@ static bool iree_hal_amd_xdna_operation_try_direct_publish(
   }
 
   iree_hal_amd_xdna_queue_t* queue = operation->queue;
+  if (!iree_slim_mutex_try_lock(&queue->state_mutex)) {
+    return false;
+  }
   if (!iree_atomic_load(&queue->native_admission_open,
                         iree_memory_order_acquire) ||
       iree_atomic_load(&queue->native_publication_blocked,
                        iree_memory_order_acquire) ||
       !iree_hal_amd_xdna_queue_try_claim_publisher(queue)) {
+    iree_slim_mutex_unlock(&queue->state_mutex);
     return false;
   }
 
@@ -1529,6 +1538,7 @@ static bool iree_hal_amd_xdna_operation_try_direct_publish(
                        iree_memory_order_acquire) ||
       pending_count >= (int32_t)queue->pending.capacity) {
     iree_hal_amd_xdna_queue_release_publisher(queue);
+    iree_slim_mutex_unlock(&queue->state_mutex);
     return false;
   }
 
@@ -1536,6 +1546,7 @@ static bool iree_hal_amd_xdna_operation_try_direct_publish(
       IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_READY;
   iree_status_t wait_status = iree_hal_amd_xdna_operation_resolve_waits(
       operation, &resolution, /*out_deferred_wait_index=*/NULL);
+  const bool should_publish = iree_status_is_ok(wait_status);
   if (!iree_status_is_ok(wait_status)) {
     operation->status = wait_status;
     iree_atomic_store(&queue->publisher_operation, (intptr_t)operation,
@@ -1544,34 +1555,25 @@ static bool iree_hal_amd_xdna_operation_try_direct_publish(
     if (resolution != IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_READY ||
         !operation->frontier.exact) {
       iree_hal_amd_xdna_queue_release_publisher(queue);
+      iree_slim_mutex_unlock(&queue->state_mutex);
       return false;
     }
     iree_atomic_store(&queue->publisher_operation, (intptr_t)operation,
                       iree_memory_order_release);
+  }
+  iree_slim_mutex_unlock(&queue->state_mutex);
+
+  // Native publication may block, so it runs without excluding proactor state
+  // transitions. The publisher claim preserves physical acceptance order.
+  // Commit the result on this caller after reacquiring queue-state ownership;
+  // queued arrivals may have attached to the in-flight publisher meanwhile.
+  if (should_publish) {
     iree_hal_amd_xdna_publisher_execute(queue, &operation->service_item);
   }
-
-  iree_async_operation_initialize(
-      &operation->admission, IREE_ASYNC_OPERATION_TYPE_NOP,
-      IREE_ASYNC_OPERATION_FLAG_NONE,
-      iree_hal_amd_xdna_direct_publication_complete, operation);
-  iree_status_t status =
-      iree_async_proactor_submit_one(queue->proactor, &operation->admission);
-  if (iree_status_is_ok(status)) {
-    return true;
-  }
-
-  // The native command may already be accepted. Close admission, publish the
-  // failure, and retain the claim plus operation graph because no serialized
-  // owner can prove retirement or safely reclaim them.
-  iree_atomic_store(&queue->native_admission_open, 0,
-                    iree_memory_order_release);
-  status = iree_status_join(operation->status, status);
-  operation->status = iree_ok_status();
-  iree_hal_amd_xdna_queue_report(queue, iree_status_code(status),
-                                 iree_status_message(status));
-  iree_hal_semaphore_list_fail(operation->signals, iree_status_clone(status));
-  *out_submission_status = status;
+  iree_slim_mutex_lock(&queue->state_mutex);
+  iree_hal_amd_xdna_queue_commit_publication(
+      queue, /*service=*/NULL, /*item=*/NULL, operation, iree_ok_status());
+  iree_slim_mutex_unlock(&queue->state_mutex);
   return true;
 }
 
@@ -1735,6 +1737,7 @@ static void iree_hal_amd_xdna_queue_destroy(iree_hal_queue_t* base) {
   iree_async_event_release(queue->event);
   iree_allocator_free(queue->host_allocator, queue->pending.entries);
   iree_hal_amd_xdna_queue_storage_deinitialize(&queue->storage);
+  iree_slim_mutex_deinitialize(&queue->state_mutex);
   iree_allocator_free(queue->host_allocator, queue);
 }
 
@@ -1749,6 +1752,7 @@ iree_status_t iree_hal_amd_xdna_queue_create(
   memset(queue, 0, sizeof(*queue));
   iree_hal_amd_xdna_queue_storage_initialize(host_allocator, &queue->storage);
   iree_hal_amd_xdna_queue_producer_index_initialize(&queue->producer_index);
+  iree_slim_mutex_initialize(&queue->state_mutex);
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_initialize(family, &params, &iree_hal_amd_xdna_queue_vtable,
