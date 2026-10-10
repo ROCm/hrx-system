@@ -66,13 +66,10 @@ typedef struct projection_check_t {
 static iree_status_t projection_allocate(projection_check_t* check,
                                          iree_device_size_t length,
                                          iree_hal_buffer_t** out_buffer) {
-  iree_hal_buffer_params_t params = {0};
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-  params.min_alignment = 256;
-  return iree_hal_allocator_allocate_buffer(
-      iree_hal_device_allocator(loom_serve_device_handle(check->owner)), params,
-      length, out_buffer);
+  return iree_hal_pool_allocate_buffer(
+      loom_serve_device_storage_pool(check->owner),
+      iree_hal_make_pool_reservation_request(length, 256),
+      iree_infinite_timeout(), out_buffer);
 }
 
 static iree_status_t projection_initialize(projection_check_t* check,
@@ -153,8 +150,9 @@ static iree_status_t projection_initialize(projection_check_t* check,
         program, loom_cmd_program_parameter_root_at(program, 0),
         &check->weights[i]};
     status = loom_serve_weights_create(
-        device, loom_serve_device_transfer_queue(check->owner), dispatch, NULL,
-        0, 1, &root, &check->weight_plans[i], allocator);
+        device, loom_serve_device_transfer_queue(check->owner), dispatch,
+        loom_serve_device_storage_pool(check->owner), NULL, 0, 1, &root,
+        &check->weight_plans[i], allocator);
     if (iree_status_is_ok(status)) {
       status = loom_serve_weights_prepare(
           check->weight_plans[i], loom_serve_device_host(check->owner),

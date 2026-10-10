@@ -11,6 +11,8 @@ struct loom_serve_memory_pool_t {
   iree_allocator_t host_allocator;
   // Retained physical allocation domain.
   iree_hal_allocator_t* device_allocator;
+  // Borrowed native source outliving this pool and its publication bridge.
+  iree_hal_pool_t* storage_pool;
   // Queue families permitted to access all reservations.
   iree_hal_queue_family_affinity_t queue_affinity;
   // Common independent physical allocation size in bytes.
@@ -53,15 +55,16 @@ struct loom_serve_virtual_buffer_t {
   memory_slab_t slabs[];
 };
 
-static iree_hal_buffer_params_t memory_params(void) {
-  iree_hal_buffer_params_t params = {0};
+static iree_hal_physical_memory_params_t memory_params(void) {
+  iree_hal_physical_memory_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
   return params;
 }
 
 iree_status_t loom_serve_memory_pool_create(
-    iree_hal_device_t* device, iree_hal_queue_family_affinity_t queue_affinity,
+    iree_hal_device_t* device, iree_hal_pool_t* storage_pool,
+    iree_hal_queue_family_affinity_t queue_affinity,
     iree_device_size_t slab_size, uint64_t limit_bytes,
     loom_serve_memory_pool_t** out_pool, iree_allocator_t host_allocator) {
   *out_pool = NULL;
@@ -82,6 +85,7 @@ iree_status_t loom_serve_memory_pool_create(
       iree_allocator_malloc(host_allocator, sizeof(*pool), (void**)&pool));
   pool->host_allocator = host_allocator;
   pool->device_allocator = device_allocator;
+  pool->storage_pool = storage_pool;
   iree_hal_allocator_retain(device_allocator);
   pool->queue_affinity = queue_affinity;
   pool->slab_size = slab_size;
@@ -246,11 +250,11 @@ static iree_status_t memory_publish_legacy_amdgpu_mappings(
   if (!pool->legacy_amdgpu_mappings_pending) {
     return iree_ok_status();
   }
-  iree_hal_buffer_params_t params = memory_params();
-  params.queue_family_affinity = pool->queue_affinity;
   iree_hal_buffer_t* publication = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
-      pool->device_allocator, params, 64 * 1024 * 1024, &publication));
+  IREE_RETURN_IF_ERROR(iree_hal_pool_allocate_buffer(
+      pool->storage_pool,
+      iree_hal_make_pool_reservation_request(64 * 1024 * 1024, 0),
+      iree_infinite_timeout(), &publication));
   iree_hal_buffer_release(publication);
   pool->legacy_amdgpu_mappings_pending = false;
   return iree_ok_status();

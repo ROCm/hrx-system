@@ -55,6 +55,8 @@ struct loom_serve_weights_t {
   iree_allocator_t allocator;
   // Borrowed device enclosing the complete plan lifetime.
   iree_hal_device_t* device;
+  // Borrowed native pool for fixed roots; outlives all resolved storage.
+  iree_hal_pool_t* storage_pool;
   // Borrowed exact file transfer queue.
   iree_hal_queue_t* transfer;
   // Borrowed exact in-place preparation queue.
@@ -93,18 +95,6 @@ struct loom_serve_weights_t {
   // Activation was enqueued into the owning model's execution domain.
   bool active;
 };
-
-static iree_status_t weight_allocate(iree_hal_device_t* device,
-                                     iree_device_size_t length,
-                                     iree_device_size_t alignment,
-                                     iree_hal_buffer_t** out_buffer) {
-  iree_hal_buffer_params_t params = {0};
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-  params.min_alignment = alignment;
-  return iree_hal_allocator_allocate_buffer(iree_hal_device_allocator(device),
-                                            params, length, out_buffer);
-}
 
 static const weight_span_t* weight_find(iree_host_size_t count,
                                         const weight_span_t* spans,
@@ -176,9 +166,11 @@ static iree_status_t weight_resolve_root(loom_serve_weights_t* weights,
     *out_buffer = loom_serve_virtual_buffer_handle(storage->reservation);
     iree_hal_buffer_retain(*out_buffer);
   } else {
-    IREE_RETURN_IF_ERROR(weight_allocate(weights->device,
-                                         root.required_byte_length,
-                                         root.minimum_alignment, out_buffer));
+    IREE_RETURN_IF_ERROR(iree_hal_pool_allocate_buffer(
+        weights->storage_pool,
+        iree_hal_make_pool_reservation_request(root.required_byte_length,
+                                               root.minimum_alignment),
+        iree_infinite_timeout(), out_buffer));
   }
   const iree_host_size_t storage_index = weights->storage_count++;
   IREE_RETURN_IF_ERROR(
@@ -686,10 +678,10 @@ static iree_status_t weight_stream(loom_serve_weights_t* weights) {
 
 iree_status_t loom_serve_weights_create(
     iree_hal_device_t* device, iree_hal_queue_t* transfer,
-    iree_hal_queue_t* dispatch, loom_serve_memory_pool_t* pool,
-    iree_host_size_t shared_root_count, iree_host_size_t root_count,
-    const loom_serve_weight_root_t* roots, loom_serve_weights_t** out_weights,
-    iree_allocator_t host_allocator) {
+    iree_hal_queue_t* dispatch, iree_hal_pool_t* storage_pool,
+    loom_serve_memory_pool_t* pool, iree_host_size_t shared_root_count,
+    iree_host_size_t root_count, const loom_serve_weight_root_t* roots,
+    loom_serve_weights_t** out_weights, iree_allocator_t host_allocator) {
   *out_weights = NULL;
   loom_serve_weights_t* weights = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*weights),
@@ -698,6 +690,7 @@ iree_status_t loom_serve_weights_create(
   weights->device = device;
   weights->transfer = transfer;
   weights->dispatch = dispatch;
+  weights->storage_pool = storage_pool;
   weights->pool = pool;
   loom_serve_retirement_initialize(&weights->retirement);
   loom_serve_retirement_initialize(&weights->activation.retirement);

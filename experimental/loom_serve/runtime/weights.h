@@ -63,16 +63,18 @@ typedef struct loom_serve_weight_activity_t {
 // backing. NULL selects explicitly fixed storage (including device ASAN use);
 // deactivation is unavailable in that mode. Successful source preparation is
 // required before activation, and activation before any consumer executes.
+// storage_pool supplies fixed roots, is qualified for dispatch and transfer,
+// and outlives the plan and every resolved root.
 //
 // On failure both populated root slots and a non-NULL *out_weights remain
 // caller-owned for teardown. Release consumer commands and root slots before
 // destroying this plan.
 iree_status_t loom_serve_weights_create(
     iree_hal_device_t* device, iree_hal_queue_t* transfer,
-    iree_hal_queue_t* dispatch, loom_serve_memory_pool_t* pool,
-    iree_host_size_t shared_root_count, iree_host_size_t root_count,
-    const loom_serve_weight_root_t* roots, loom_serve_weights_t** out_weights,
-    iree_allocator_t host_allocator);
+    iree_hal_queue_t* dispatch, iree_hal_pool_t* storage_pool,
+    loom_serve_memory_pool_t* pool, iree_host_size_t shared_root_count,
+    iree_host_size_t root_count, const loom_serve_weight_root_t* roots,
+    loom_serve_weights_t** out_weights, iree_allocator_t host_allocator);
 
 // Receives the terminal source preparation status on a shared task worker.
 // All preparation tasks/compiler accesses have retired before this callback.

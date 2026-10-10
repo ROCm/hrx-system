@@ -514,6 +514,7 @@ static iree_status_t image_model_bind(loom_serve_image_model_t* model) {
         &model->weights.values[reflected.fixed_buffer_index]};
     status = loom_serve_weights_create(
         device, loom_serve_device_transfer_queue(model->owner), dispatch,
+        loom_serve_device_storage_pool(model->owner),
         loom_serve_device_memory_pool(model->owner), 0, 1, &root,
         &model->weights.plans[i], allocator);
   }
@@ -524,7 +525,6 @@ static iree_status_t image_model_link(
     loom_serve_image_model_t* model, iree_vm_module_t* module,
     iree_hal_command_buffer_mode_t command_mode) {
   const iree_allocator_t allocator = model->allocator;
-  iree_hal_device_t* device = loom_serve_device_handle(model->owner);
   iree_hal_queue_t* dispatch = loom_serve_device_dispatch_queue(model->owner);
   iree_status_t status = iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_serve_residency_create(
@@ -541,14 +541,10 @@ static iree_status_t image_model_link(
        i < IREE_ARRAYSIZE(model->bindings) && iree_status_is_ok(status); ++i) {
     const iree_device_size_t length =
         i == 0 ? model->input_capacity : model->output.data_length;
-    iree_hal_buffer_params_t params = {0};
-    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-    params.usage =
-        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-    params.min_alignment = 256;
-    status = iree_hal_allocator_allocate_buffer(
-        iree_hal_device_allocator(device), params, length,
-        &model->bindings[i].buffer);
+    status = iree_hal_pool_allocate_buffer(
+        loom_serve_device_storage_pool(model->owner),
+        iree_hal_make_pool_reservation_request(length, 256),
+        iree_infinite_timeout(), &model->bindings[i].buffer);
     if (iree_status_is_ok(status)) {
       status = loom_serve_retirement_track(
           &model->retirement, &model->bindings[i].buffer, allocator);

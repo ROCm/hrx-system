@@ -379,11 +379,10 @@ TEST_P(JitTest, SourceDefaultsAndOverridesShareVmAndGpuState) {
   EXPECT_EQ(compilation_.entries, 16u);
   EXPECT_EQ(compilation_.workers, GetParam());
   EXPECT_GT(compilation_.duration_ns, 0u);
-  iree_hal_buffer_params_t params = {};
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-      iree_hal_device_allocator(device_), params, sizeof(input_), &buffer_));
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      loom_serve_device_storage_pool(device_owner_),
+      iree_hal_make_pool_reservation_request(sizeof(input_), 0),
+      iree_infinite_timeout(), &buffer_));
   iree_hal_transfer_operation_t upload = {};
   upload.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
   upload.upload.source = input_.data();
@@ -494,11 +493,10 @@ TEST_P(JitTest, CompletedCatalogsRetireWithoutClosingSharedCompilerQueue) {
   IREE_ASSERT_OK(status);
   EXPECT_EQ(compilation_.entries, 8u);
   EXPECT_EQ(peer_report.entries, 8u);
-  iree_hal_buffer_params_t params = {};
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-      iree_hal_device_allocator(device_), params, sizeof(input_), &buffer_));
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      loom_serve_device_storage_pool(device_owner_),
+      iree_hal_make_pool_reservation_request(sizeof(input_), 0),
+      iree_infinite_timeout(), &buffer_));
   iree_hal_transfer_operation_t upload = {};
   upload.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
   upload.upload = {input_.data(), buffer_, 0, sizeof(input_)};
@@ -565,11 +563,10 @@ TEST_P(JitTest, UnequalPrivateWorkspacesPreservePoolPolicyAndOutput) {
   iree_vm_function_t selected_step;
   IREE_ASSERT_OK(iree_vm_process_lookup_function(
       process_, IREE_SV("model"), IREE_SV("selected_step"), &selected_step));
-  iree_hal_buffer_params_t params = {};
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-      iree_hal_device_allocator(device_), params, sizeof(input_), &buffer_));
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      loom_serve_device_storage_pool(device_owner_),
+      iree_hal_make_pool_reservation_request(sizeof(input_), 0),
+      iree_infinite_timeout(), &buffer_));
   iree_hal_transfer_operation_t upload = {};
   upload.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
   upload.upload = {input_.data(), buffer_, 0, sizeof(input_)};
@@ -621,12 +618,8 @@ TEST_P(JitTest, UnequalPrivateWorkspacesPreservePoolPolicyAndOutput) {
   // completed-frontier query must recover reuse without a device-wide chain.
   IREE_ASSERT_OK(
       loom_serve_device_create_execution(device_owner_, &held_.execution));
-  const iree_hal_pool_reservation_request_t request = {
-      .params = {.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
-                          IREE_HAL_BUFFER_USAGE_TRANSFER,
-                 .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-                 .min_alignment = 16},
-      .allocation_size = 4160};
+  const iree_hal_pool_reservation_request_t request = {.allocation_size = 4160,
+                                                       .min_alignment = 16};
   IREE_ASSERT_OK(
       loom_serve_execution_alloca(held_.execution, &request, &held_.buffer));
   ASSERT_NE(held_.buffer->memory.contract, nullptr);
@@ -693,12 +686,8 @@ TEST_P(JitTest, IndependentModelCompletesWhileSharedWorkspaceGrows) {
       loom_serve_device_create_execution(device_owner_, &held_.execution));
   IREE_ASSERT_OK(
       loom_serve_execution_reserve_workspace(held_.execution, 64, 16));
-  const iree_hal_pool_reservation_request_t request = {
-      .params = {.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
-                          IREE_HAL_BUFFER_USAGE_TRANSFER,
-                 .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-                 .min_alignment = 16},
-      .allocation_size = 64};
+  const iree_hal_pool_reservation_request_t request = {.allocation_size = 64,
+                                                       .min_alignment = 16};
   IREE_ASSERT_OK(
       loom_serve_execution_alloca(held_.execution, &request, &held_.buffer));
   iree_hal_transfer_operation_t upload = {};
@@ -740,11 +729,10 @@ TEST_P(JitTest, IndependentModelCompletesWhileSharedWorkspaceGrows) {
   iree_vm_function_t selected_step;
   IREE_ASSERT_OK(iree_vm_process_lookup_function(
       process_, IREE_SV("model"), IREE_SV("selected_step"), &selected_step));
-  iree_hal_buffer_params_t params = {};
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-      iree_hal_device_allocator(device_), params, sizeof(input_), &buffer_));
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      loom_serve_device_storage_pool(device_owner_),
+      iree_hal_make_pool_reservation_request(sizeof(input_), 0),
+      iree_infinite_timeout(), &buffer_));
   upload.upload.target_buffer = buffer_;
   IREE_ASSERT_OK(
       loom_serve_execution_transfer(execution_, 1, &upload, &completion));
@@ -803,12 +791,8 @@ TEST_P(JitTest, RetiredModelDoesNotJoinRawQueueAllocationCaptures) {
   uint64_t value = 1;
   IREE_ASSERT_OK(
       loom_serve_execution_barrier(held_.execution, {1, &held_.gate, &value}));
-  const iree_hal_pool_reservation_request_t request = {
-      .params = {.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
-                          IREE_HAL_BUFFER_USAGE_TRANSFER,
-                 .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-                 .min_alignment = 16},
-      .allocation_size = 64};
+  const iree_hal_pool_reservation_request_t request = {.allocation_size = 64,
+                                                       .min_alignment = 16};
   IREE_ASSERT_OK(
       loom_serve_execution_alloca(held_.execution, &request, &held_.buffer));
   IREE_ASSERT_OK(
@@ -849,11 +833,10 @@ TEST_P(JitTest, RetiredModelDoesNotJoinRawQueueAllocationCaptures) {
   IREE_ASSERT_OK(status);
   IREE_ASSERT_OK(Compile("5", 0));
   IREE_ASSERT_OK(PrepareVm());
-  iree_hal_buffer_params_t params = {};
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-      iree_hal_device_allocator(device_), params, sizeof(input_), &buffer_));
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      loom_serve_device_storage_pool(device_owner_),
+      iree_hal_make_pool_reservation_request(sizeof(input_), 0),
+      iree_infinite_timeout(), &buffer_));
   const iree_hal_transfer_operation_t upload = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
       .upload = {input_.data(), buffer_, 0, sizeof(input_)}};

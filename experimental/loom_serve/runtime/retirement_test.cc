@@ -135,11 +135,11 @@ TEST_P(RetirementTest, NestedQueueViewsOutliveFailedReadiness) {
   uint64_t value = 1;
   auto status = iree_hal_queue_transfer(
       loom_serve_device_transfer_queue(device), {1, &gate, &value},
-      {1, &uploaded, &value}, 1, operations);
+      {1, &uploaded, &value}, 1, operations, nullptr);
   if (iree_status_is_ok(status)) {
     status = iree_hal_queue_transfer(
         loom_serve_device_transfer_queue(device), {1, &uploaded, &value},
-        {1, &completion, &value}, 1, operations + 1);
+        {1, &completion, &value}, 1, operations + 1, nullptr);
   }
   iree_hal_buffer_release(child);
   IREE_ASSERT_OK(status);

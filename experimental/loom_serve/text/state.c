@@ -27,15 +27,13 @@ void loom_serve_text_state_initialize(const loom_serve_text_options_t* options,
 }
 
 static iree_status_t text_allocate_buffer(loom_serve_text_state_t* state,
+                                          iree_hal_pool_t* pool,
                                           iree_device_size_t length,
                                           iree_device_size_t minimum_alignment,
                                           iree_hal_buffer_t** out_buffer) {
-  iree_hal_buffer_params_t params = {0};
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-  params.min_alignment = minimum_alignment;
-  IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
-      iree_hal_device_allocator(state->device), params, length, out_buffer));
+  IREE_RETURN_IF_ERROR(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(length, minimum_alignment),
+      iree_infinite_timeout(), out_buffer));
   return loom_serve_retirement_track(&state->retirement, out_buffer,
                                      state->allocator);
 }
@@ -121,7 +119,9 @@ iree_status_t loom_serve_text_state_allocate(
           }
         }
       } else {
-        status = text_allocate_buffer(state, length, alignment, allocation);
+        status =
+            text_allocate_buffer(state, loom_serve_device_storage_pool(device),
+                                 length, alignment, allocation);
       }
     }
     if (iree_status_is_ok(status) && clear_length &&

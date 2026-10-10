@@ -65,6 +65,21 @@ class ControlTest
     IREE_ASSERT_OK(loom_serve_execution_create(dispatch, transfer, workspace_,
                                                allocator_, &execution_));
     const auto* family = iree_hal_queue_family(dispatch);
+    const auto* transfer_family = iree_hal_queue_family(transfer);
+    const iree_hal_pool_family_access_t families[] = {
+        {.family = family,
+         .usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+                  IREE_HAL_BUFFER_USAGE_TRANSFER |
+                  IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS},
+        {.family = transfer_family, .usage = IREE_HAL_BUFFER_USAGE_TRANSFER},
+    };
+    const iree_hal_pool_scope_t scope = {
+        .family_count = family == transfer_family ? 1u : 2u,
+        .families = families,
+    };
+    const iree_hal_slab_pool_options_t pool_options = {};
+    IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &pool_options,
+                                             allocator_, &storage_pool_));
     directory_ =
         std::filesystem::path(FLAG_control_sources).parent_path().string();
     IREE_ASSERT_OK(loom_serve_jit_create(
@@ -75,25 +90,17 @@ class ControlTest
     IREE_ASSERT_OK(Prepare(family, "device_continuation", &commands_[2]));
     for (auto& row : buffers_) {
       for (size_t i = 0; i < row.size(); ++i) {
-        iree_hal_buffer_params_t params = {};
-        params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-        params.usage =
-            IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-        IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-            iree_hal_device_allocator(device_), params, kLengths[i], &row[i]));
+        IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+            storage_pool_,
+            iree_hal_make_pool_reservation_request(kLengths[i], 0),
+            iree_infinite_timeout(), &row[i]));
       }
     }
     for (size_t i = 0; i < continuation_.buffers.size(); ++i) {
-      iree_hal_buffer_params_t params = {};
-      params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-      params.usage =
-          IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-      if (i == 2) {
-        params.usage |= IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS;
-      }
-      IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-          iree_hal_device_allocator(device_), params, kContinuationLengths[i],
-          &continuation_.buffers[i]));
+      IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+          storage_pool_,
+          iree_hal_make_pool_reservation_request(kContinuationLengths[i], 0),
+          iree_infinite_timeout(), &continuation_.buffers[i]));
     }
     IREE_ASSERT_OK(CreateModel());
   }
@@ -126,6 +133,7 @@ class ControlTest
     loom_serve_jit_destroy(jit_);
     loom_serve_execution_release(execution_);
     loom_serve_workspace_release(workspace_);
+    iree_hal_pool_release(storage_pool_);
     iree_hal_device_group_release(group_);
     iree_hal_device_release(device_);
     iree_async_frontier_tracker_release(frontier_tracker_);
@@ -317,6 +325,9 @@ class ControlTest
   iree_hal_device_t* device_ = nullptr;
   // Owned domain for the device's semaphores.
   iree_hal_device_group_t* group_ = nullptr;
+  // Retained roots, including indirect counts, qualified on both queue
+  // families.
+  iree_hal_pool_t* storage_pool_ = nullptr;
   // Shared command backing independent of model ordering.
   loom_serve_workspace_t* workspace_ = nullptr;
   // Owned model execution capability.

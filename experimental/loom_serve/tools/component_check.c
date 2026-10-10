@@ -223,7 +223,8 @@ static iree_status_t component_initialize(component_check_t* check,
           &check->weights[parameter_root.fixed_buffer_index]};
       status = loom_serve_weights_create(
           device, loom_serve_device_transfer_queue(check->owner), dispatch,
-          NULL, 0, 1, &root, &check->weight_plans[r], allocator);
+          loom_serve_device_storage_pool(check->owner), NULL, 0, 1, &root,
+          &check->weight_plans[r], allocator);
       if (iree_status_is_ok(status)) {
         status = loom_serve_weights_prepare(
             check->weight_plans[r], loom_serve_device_host(check->owner),
@@ -255,17 +256,14 @@ static iree_status_t component_initialize(component_check_t* check,
         i < check->file_count
             ? check->files[i]->const_buffer.data_length
             : program->requirements.transient.required_byte_length;
-    iree_hal_buffer_params_t params = {0};
-    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-    params.usage =
-        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-    params.min_alignment =
+    const iree_device_size_t alignment =
         i < check->file_count
             ? 256
             : program->requirements.transient.minimum_alignment;
-    status = iree_hal_allocator_allocate_buffer(
-        iree_hal_device_allocator(device), params, length,
-        &check->bindings[i].buffer);
+    status = iree_hal_pool_allocate_buffer(
+        loom_serve_device_storage_pool(check->owner),
+        iree_hal_make_pool_reservation_request(length, alignment),
+        iree_infinite_timeout(), &check->bindings[i].buffer);
     check->bindings[i].length = length;
     if (i < inputs.count) {
       check->uploads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;

@@ -19,6 +19,8 @@ struct loom_serve_device_t {
   iree_hal_queue_t* dispatch;
   // Exact transfer queue borrowed from the device.
   iree_hal_queue_t* transfer;
+  // Native retained storage qualified for both execution and transfer.
+  iree_hal_pool_t* storage_pool;
   // Shared private command backing, independent of model timelines.
   loom_serve_workspace_t* workspace;
   // Owned physical domain shared by all model reservations; NULL when fixed.
@@ -105,12 +107,32 @@ static iree_status_t loom_serve_device_initialize(
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "device needs dispatch and transfer queues");
   }
+  const iree_hal_queue_family_t* dispatch_family =
+      iree_hal_queue_family(device->dispatch);
+  const iree_hal_queue_family_t* transfer_family =
+      iree_hal_queue_family(device->transfer);
+  const iree_hal_pool_family_access_t families[] = {
+      {.family = dispatch_family,
+       .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER},
+      {.family = transfer_family, .usage = IREE_HAL_BUFFER_USAGE_TRANSFER},
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = dispatch_family == transfer_family ? 1 : 2,
+      .families = families,
+  };
+  const iree_hal_slab_pool_options_t storage_options = {
+      .trace_name = IREE_SVL("loom_serve_retained_storage"),
+  };
+  IREE_RETURN_IF_ERROR(
+      iree_hal_slab_pool_create(group->handle, scope, &storage_options,
+                                group->allocator, &device->storage_pool));
   IREE_RETURN_IF_ERROR(loom_serve_workspace_create(
       group->handle, device->dispatch, device->transfer, &device->workspace,
       group->allocator));
   if (options->backing == LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
     IREE_RETURN_IF_ERROR(loom_serve_memory_pool_create(
-        device->handle, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, options->slab_size,
+        device->handle, device->storage_pool,
+        IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, options->slab_size,
         options->memory_limit, &device->memory_pool, group->allocator));
   }
   return loom_serve_residency_cache_create(
@@ -187,6 +209,7 @@ iree_status_t loom_serve_device_group_destroy(
     loom_serve_residency_cache_destroy(device->residency_cache);
     loom_serve_memory_pool_destroy(device->memory_pool);
     loom_serve_workspace_release(device->workspace);
+    iree_hal_pool_release(device->storage_pool);
   }
   iree_hal_device_group_release(group->handle);
   for (iree_host_size_t i = 0; i < group->device_count; ++i) {
@@ -240,6 +263,11 @@ iree_status_t loom_serve_device_trim(loom_serve_device_t* device,
 
 iree_hal_device_t* loom_serve_device_handle(const loom_serve_device_t* device) {
   return device->handle;
+}
+
+iree_hal_pool_t* loom_serve_device_storage_pool(
+    const loom_serve_device_t* device) {
+  return device->storage_pool;
 }
 
 loom_serve_host_t* loom_serve_device_host(const loom_serve_device_t* device) {

@@ -287,13 +287,10 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
         iree_make_cstring_view(directory_.c_str()), nullptr, &compilation_,
         allocator_, &jit_));
     WriteCheckpoint(path_.path(), 0);
-    iree_hal_buffer_params_t params = {};
-    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-    params.usage =
-        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-    IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-        iree_hal_device_allocator(device_), params, sizeof(output_),
-        &output_buffer_));
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        loom_serve_device_storage_pool(device_owner_),
+        iree_hal_make_pool_reservation_request(sizeof(output_), 0),
+        iree_infinite_timeout(), &output_buffer_));
   }
 
   void TearDown() override {
@@ -355,8 +352,9 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     const std::string policy = directory_ + "/policy.loom";
     auto** plan = &plans_[plan_count_++];
     IREE_RETURN_IF_ERROR(loom_serve_weights_create(
-        device_, transfer_, dispatch_, pool_, shared_count, root_count, roots,
-        plan, allocator_));
+        device_, transfer_, dispatch_,
+        loom_serve_device_storage_pool(device_owner_), pool_, shared_count,
+        root_count, roots, plan, allocator_));
     const auto before = loom_serve_weights_statistics(*plan);
     Preparation preparation;
     preparation.weights = *plan;
@@ -947,11 +945,7 @@ TEST_P(WeightsTest,
   IREE_ASSERT_OK(
       loom_serve_execution_reserve_workspace(execution_, kSlabBytes, 256));
   const iree_hal_pool_reservation_request_t request = {
-      .params = {.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
-                          IREE_HAL_BUFFER_USAGE_TRANSFER,
-                 .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-                 .min_alignment = 256},
-      .allocation_size = kSlabBytes};
+      .allocation_size = kSlabBytes, .min_alignment = 256};
   IREE_ASSERT_OK(
       loom_serve_execution_alloca(execution_, &request, &workspace_));
   uint64_t completion = 0;

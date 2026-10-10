@@ -1246,12 +1246,8 @@ TEST_P(GroupEmbeddingServiceTest, EmbeddingsCompleteBeforeOtherDeviceRetires) {
             loom_serve_device_residency_cache(device_));
   IREE_ASSERT_OK(loom_serve_device_create_execution(first, &execution_));
   IREE_ASSERT_OK(loom_serve_execution_reserve_workspace(execution_, 64, 16));
-  const iree_hal_pool_reservation_request_t request = {
-      .params = {.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
-                          IREE_HAL_BUFFER_USAGE_TRANSFER,
-                 .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-                 .min_alignment = 16},
-      .allocation_size = 64};
+  const iree_hal_pool_reservation_request_t request = {.allocation_size = 64,
+                                                       .min_alignment = 16};
   IREE_ASSERT_OK(
       loom_serve_execution_alloca(execution_, &request, &workspace_));
   IREE_ASSERT_OK(iree_hal_semaphore_create(

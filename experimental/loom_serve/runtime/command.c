@@ -261,9 +261,13 @@ static iree_status_t loom_serve_command_record(
       }
       // Count publication targets command processing, not shader reads. The
       // predecessor stage also orders indirect reads before count reuse.
-      status = iree_hal_command_buffer_execution_barrier(
-          command_buffer, source_stages, target_stages,
-          IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &barrier, 0, NULL);
+      const iree_hal_barrier_t dependency = {
+          .source_stage_mask = source_stages,
+          .target_stage_mask = target_stages,
+          .memory_barrier_count = 1,
+          .memory_barriers = &barrier,
+      };
+      status = iree_hal_command_buffer_barrier(command_buffer, &dependency);
     }
     if (iree_status_is_ok(status)) {
       status =

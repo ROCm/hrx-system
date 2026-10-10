@@ -545,6 +545,7 @@ static iree_status_t finite_model_bind(loom_serve_finite_model_t* model) {
         &model->weights.values[reflected.fixed_buffer_index]};
     status = loom_serve_weights_create(
         device, loom_serve_device_transfer_queue(model->owner), dispatch,
+        loom_serve_device_storage_pool(model->owner),
         loom_serve_device_memory_pool(model->owner), 0, 1, &root,
         &model->weights.plans[i], allocator);
   }
@@ -1107,12 +1108,8 @@ iree_status_t loom_serve_finite_model_submit(
     const iree_host_size_t length =
         i ? model->invocation.output_length : input.data_length;
     const iree_hal_pool_reservation_request_t request = {
-        .params = {.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE,
-                   .access = IREE_HAL_MEMORY_ACCESS_ALL,
-                   .usage = IREE_HAL_BUFFER_USAGE_STORAGE |
-                            IREE_HAL_BUFFER_USAGE_TRANSFER,
-                   .min_alignment = 256},
         .allocation_size = length,
+        .min_alignment = 256,
     };
     status =
         loom_serve_execution_alloca(execution, &request, &model->buffers[i]);

@@ -287,6 +287,7 @@ static iree_status_t text_bind_weights(loom_serve_text_model_t* model) {
   }
   iree_status_t status = loom_serve_weights_create(
       model->device, model->transfer, model->dispatch,
+      loom_serve_device_storage_pool(model->device_owner),
       loom_serve_device_memory_pool(model->device_owner),
       model->source.shared_stage_count, root_count, roots, &model->weights,
       model->allocator);

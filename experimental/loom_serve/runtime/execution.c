@@ -232,7 +232,8 @@ iree_status_t loom_serve_execution_barrier(loom_serve_execution_t* execution,
           ? iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                              "execution timeline is exhausted")
           : iree_hal_queue_barrier(execution->dispatch_queue, dependencies,
-                                   signals, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+                                   signals, NULL,
+                                   IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
   if (iree_status_is_ok(status)) {
     execution->work.submitted_value = next_value;
   }
@@ -281,8 +282,9 @@ iree_status_t loom_serve_execution_transfer(
                                            &execution->work.submitted_value};
   const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
                                              &next_value};
-  iree_status_t status = iree_hal_queue_transfer(
-      execution->transfer_queue, waits, signals, operation_count, operations);
+  iree_status_t status =
+      iree_hal_queue_transfer(execution->transfer_queue, waits, signals,
+                              operation_count, operations, NULL);
   if (iree_status_is_ok(status)) {
     execution->work.submitted_value = next_value;
     *out_value = next_value;
@@ -309,8 +311,9 @@ iree_status_t loom_serve_execution_feedback(
                                            wait_semaphores, wait_values};
   const iree_hal_semaphore_list_t signals = {1, &execution->feedback.semaphore,
                                              &next_value};
-  iree_status_t status = iree_hal_queue_transfer(
-      execution->transfer_queue, waits, signals, operation_count, operations);
+  iree_status_t status =
+      iree_hal_queue_transfer(execution->transfer_queue, waits, signals,
+                              operation_count, operations, NULL);
   if (iree_status_is_ok(status)) {
     execution->feedback.submitted_value = next_value;
     *out_value = next_value;

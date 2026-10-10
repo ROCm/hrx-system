@@ -282,11 +282,7 @@ TEST_F(MemoryTest, DeviceTrimPreservesLiveWorkspaceAndMutableState) {
   IREE_ASSERT_OK(
       loom_serve_execution_reserve_workspace(execution, kSlabSize, 256));
   const iree_hal_pool_reservation_request_t request = {
-      .params = {.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
-                          IREE_HAL_BUFFER_USAGE_TRANSFER,
-                 .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-                 .min_alignment = 256},
-      .allocation_size = kSlabSize};
+      .allocation_size = kSlabSize, .min_alignment = 256};
   for (int iteration = 0; iteration < 2; ++iteration) {
     IREE_ASSERT_OK(
         loom_serve_execution_alloca(execution, &request, &workspace));

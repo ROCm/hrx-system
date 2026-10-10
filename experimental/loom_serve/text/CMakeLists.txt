@@ -104,6 +104,7 @@ loom_cc_test(
     iree::base
     iree::experimental::loom_serve::storage::snapshot
     iree::hal
+    iree::hal::memory::heap_pool
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm

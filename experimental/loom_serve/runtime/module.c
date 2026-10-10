@@ -99,12 +99,8 @@ static iree_status_t loom_serve_module_execute(
   iree_hal_buffer_t* workspace = NULL;
   if (iree_status_is_ok(status) && has_workspace) {
     const iree_hal_pool_reservation_request_t request = {
-        .params = {.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE,
-                   .access = IREE_HAL_MEMORY_ACCESS_ALL,
-                   .usage = IREE_HAL_BUFFER_USAGE_STORAGE |
-                            IREE_HAL_BUFFER_USAGE_TRANSFER,
-                   .min_alignment = stage->transient.minimum_alignment},
         .allocation_size = stage->transient.required_byte_length,
+        .min_alignment = stage->transient.minimum_alignment,
     };
     status =
         loom_serve_execution_alloca(module->execution, &request, &workspace);

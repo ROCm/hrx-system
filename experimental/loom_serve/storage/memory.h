@@ -35,9 +35,11 @@ typedef struct loom_serve_memory_statistics_t {
 // granularity; explicit sizes must be multiples of its minimum granularity.
 // limit_bytes bounds physical commitment, not virtual reservation. Zero means
 // no serving-imposed limit; allocation failure still propagates. Each buffer
-// borrows this pool, and must be destroyed before pool destruction.
+// borrows this pool, and must be destroyed before pool destruction. The native
+// storage_pool is borrowed for mapping publication and must outlive this pool.
 iree_status_t loom_serve_memory_pool_create(
-    iree_hal_device_t* device, iree_hal_queue_family_affinity_t queue_affinity,
+    iree_hal_device_t* device, iree_hal_pool_t* storage_pool,
+    iree_hal_queue_family_affinity_t queue_affinity,
     iree_device_size_t slab_size, uint64_t limit_bytes,
     loom_serve_memory_pool_t** out_pool, iree_allocator_t host_allocator);
 

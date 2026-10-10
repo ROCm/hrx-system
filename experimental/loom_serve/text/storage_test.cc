@@ -6,6 +6,7 @@
 
 #include "experimental/loom_serve/text/storage.h"
 
+#include "iree/hal/memory/heap_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/environment.h"
@@ -129,15 +130,16 @@ TEST_F(TextStorageTest, IndependentEndpointOmitsRowPrivateExecutionState) {
   iree_unaligned_store_le_u64(bytes[0].data + 6 * 24 + 8, 256);
   IREE_ASSERT_OK(loom_serve_text_storage_initialize(&types, results, 3, 17, 32,
                                                     &storage, allocator));
-  iree_hal_allocator_t* heap = nullptr;
-  IREE_ASSERT_OK(iree_hal_allocator_create_heap(IREE_SV("snapshot-plan"),
-                                                allocator, allocator, &heap));
-  iree_hal_buffer_t* arena = nullptr;
-  iree_hal_buffer_params_t params = {};
-  params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  iree_hal_pool_t* heap = nullptr;
+  const iree_hal_pool_host_access_t host_access = {
+      .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+      .modes = IREE_HAL_MAPPING_MODE_SCOPED};
   IREE_ASSERT_OK(
-      iree_hal_allocator_allocate_buffer(heap, params, 1 << 20, &arena));
+      iree_hal_heap_pool_create(host_access, allocator, allocator, &heap));
+  iree_hal_buffer_t* arena = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      heap, iree_hal_make_pool_reservation_request(1 << 20, 0),
+      iree_infinite_timeout(), &arena));
   iree_hal_buffer_t* views[5] = {};
   IREE_ASSERT_OK(iree_hal_buffer_subspan(arena, 72, 32, allocator, &views[1]));
   const uint32_t blocks[] = {7, 2};
@@ -157,7 +159,7 @@ TEST_F(TextStorageTest, IndependentEndpointOmitsRowPrivateExecutionState) {
   iree_allocator_free(allocator, ranges);
   iree_hal_buffer_release(views[1]);
   iree_hal_buffer_release(arena);
-  iree_hal_allocator_release(heap);
+  iree_hal_pool_release(heap);
 }
 
 TEST_F(TextStorageTest, RejectsPlanesOverlappingPrivateStorage) {
