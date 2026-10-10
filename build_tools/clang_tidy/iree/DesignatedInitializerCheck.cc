@@ -115,6 +115,14 @@ std::optional<SourceLocation> TrailingCommaInsertion(
   if (!InitializerText.contains('\n')) {
     return SourceLocation();
   }
+  StringRef LastValueText = Lexer::getSourceText(LastValueRange, SourceManager,
+                                                 LangOptions, &Invalid);
+  if (Invalid) {
+    return std::nullopt;
+  }
+  if (LastValueText.rtrim().ends_with(",")) {
+    return SourceLocation();
+  }
   SourceLocation LastToken = LastValueRange.getEnd().getLocWithOffset(-1);
   std::optional<Token> Next = Lexer::findNextToken(
       LastToken, SourceManager, LangOptions, /*IncludeComments=*/false);

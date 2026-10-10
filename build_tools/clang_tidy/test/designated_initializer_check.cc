@@ -112,6 +112,11 @@ Config designated_without_trailing_comma = {
     // Keep the input multiline before the checker adds its trailing comma.
     .flags = 31};
 
+Config designated_string_with_trailing_comma = {
+    .ordinal = 32,
+    .name = "already-correct:",
+};
+
 OuterConfig nested_config = {
     /*.inner=*/{
         /*.x=*/3,
