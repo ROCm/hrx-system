@@ -442,7 +442,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
   python build_tools/bazel/configure.py -DAMDF_BUILD=ON -DAMDF_FAMILY_CDNA=OFF
   python build_tools/bazel/configure.py -DLOOM_TARGET_SPIRV=OFF
   python build_tools/bazel/configure.py -DLOOM_TARGET_AMDGPU=ON -DLOOM_EXECUTE_IREE_HAL=ON -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
-  python build_tools/bazel/configure.py -DLOOM_EMIT_XDNA=ON
+  python build_tools/bazel/configure.py -DLOOM_TARGET_XDNA=ON
   python build_tools/bazel/configure.py -DLOOM_IMPORT_TILELANG=ON
 
 Portable -D project options are documented in BUILDING.md. Other Bazel-native
@@ -734,12 +734,14 @@ def bazelrc_line(command: str, option: str) -> str:
 
 def generate_config(args: argparse.Namespace) -> str:
     request = request_from_args(args)
-    if "xdna" in request.enabled_drivers and (
-        not request.amdf_build or "xdna" not in request.enabled_amdf_families
-    ):
-        raise SystemExit(
-            "IREE_HAL_DRIVER_XDNA requires AMDF_BUILD=ON and AMDF_FAMILY_XDNA=ON"
-        )
+    if "xdna" in request.enabled_drivers:
+        if request.amdf_build_source is not None and not request.amdf_build:
+            raise SystemExit("AMDF_BUILD=OFF conflicts with IREE_HAL_DRIVER_XDNA=ON")
+        request.amdf_build = True
+        if "xdna" not in request.enabled_amdf_families:
+            raise SystemExit(
+                "AMDF_FAMILY_XDNA=OFF conflicts with IREE_HAL_DRIVER_XDNA=ON"
+            )
     unsupported_enabled_drivers = request.enabled_drivers.difference(
         SUPPORTED_ENABLE_DRIVERS
     )

@@ -597,11 +597,9 @@ def xdna_steps(targets: tuple[str, ...], config: str | None) -> list[CiStep]:
     config_name = f" / {config.upper()}" if config is not None else ""
     # Native ELF consumers and the HAL share the XDNA provider.
     options = (
-        "--//libamdf/config:enabled=true",
         "--//libamdf/config:families=xdna",
         "--//runtime/config/hal:drivers=task,xdna",
         "--//loom/config/execute:enable=iree_hal",
-        "--//loom/config/emit:enable=xdna",
     )
     return [
         bazel_configure_step(
@@ -813,7 +811,6 @@ def cmake_repository_build_steps(command_name: str) -> list[CiStep]:
             amdgpu_target_selector=None,
             amdgpu_device_binary_mode="prebuilt",
             extra_options=(
-                "-DAMDF_BUILD=ON",
                 "-DIREE_ENABLE_VULKAN=ON",
                 "-DIREE_ENABLE_D3D12=ON",
             ),
@@ -844,12 +841,10 @@ def cmake_xdna_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
             enabled_loom_targets=("vm", "xdna"),
             sanitizer=sanitizer,
             extra_options=(
-                "-DAMDF_BUILD=ON",
                 "-DAMDF_FAMILY_RDNA=OFF",
                 "-DAMDF_FAMILY_CDNA=OFF",
                 "-DAMDF_FAMILY_XDNA=ON",
                 "-DLOOM_BUILD=ON",
-                "-DLOOM_EMIT_XDNA=ON",
             ),
         ),
         cmake_build_step(

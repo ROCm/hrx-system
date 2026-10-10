@@ -4,9 +4,12 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+if(NOT DEFINED AMDF_BUILD_DEFAULT)
+  set(AMDF_BUILD_DEFAULT OFF)
+endif()
 option(AMDF_BUILD
   "Build the portable AMD GPU and XDNA native device library."
-  OFF)
+  ${AMDF_BUILD_DEFAULT})
 
 option(AMDF_FAMILY_RDNA "Admit RDNA implementation packages." ON)
 option(AMDF_FAMILY_CDNA "Admit CDNA implementation packages." ON)

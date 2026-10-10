@@ -215,8 +215,8 @@ The build produces two link modes from one implementation:
 Windows GPU distributions install the private WKMI bridge beside `amdf.dll`.
 It is neither a public link input nor part of the libamdf ABI.
 
-`AMDF_BUILD` controls the CMake subtree and defaults to `OFF`, independently
-of HAL driver selection. The Bazel equivalent is
+`AMDF_BUILD` controls the CMake subtree and defaults to `OFF` unless the XDNA
+HAL driver requires it. The Bazel equivalent is
 `--//libamdf/config:enabled`. RDNA, CDNA, and XDNA package admission is selected
 with the `AMDF_FAMILY_*` CMake options or the
 `--//libamdf/config:families=...` Bazel setting. Bazel implementation packages
