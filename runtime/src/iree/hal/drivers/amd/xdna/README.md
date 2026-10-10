@@ -60,7 +60,8 @@ latency. The private publisher isolates that cost on every queued route.
 The shared proactor owns queued causal admission, deferred native acceptance
 commits, and unattended checked retirement. Exact blocking waits on a local
 submitted signal instead wait for its libamdf point and publish retirement on
-the calling thread. Accepted invocations occupy a bounded ring sized to the
+the calling thread, including before a standalone device has been assigned a
+topology frontier. Accepted invocations occupy a bounded ring sized to the
 native queue's prepared capacity. Each pending invocation owns exclusive
 mutable command and binding storage; checked retirement returns that storage
 for reuse. Immutable backing is shared when its static address references also

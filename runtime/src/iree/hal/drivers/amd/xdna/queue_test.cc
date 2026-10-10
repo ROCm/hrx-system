@@ -1652,10 +1652,9 @@ TEST(XdnaQueueTest, ReadyDispatchCommitsBeforeProactorProgress) {
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
 }
 
-TEST(XdnaQueueTest, ExactWaitRetiresBeforeProactorProgress) {
+TEST(XdnaQueueTest, ExactWaitWithoutTopologyRetiresBeforeProactorProgress) {
   QueueHarness harness;
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
-  ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
 
   ASSERT_NO_FATAL_FAILURE(harness.Submit());

@@ -200,13 +200,13 @@ static iree_status_t iree_hal_amd_xdna_semaphore_wait(
   iree_async_axis_t producer_axis = 0;
   uint64_t producer_epoch = 0;
   uint64_t producer_value = 0;
+  // The exact signal value names its pending operation even when the device has
+  // no assigned topology frontier. Frontier exactness remains a separate
+  // requirement for queue-side causal wait elision.
   if (semaphore->epoch_wait.fn &&
       iree_hal_submitted_signal_load(&semaphore->submitted_signal,
                                      &submitted_signal_flags, &producer_axis,
                                      &producer_epoch, &producer_value) &&
-      iree_all_bits_set(
-          submitted_signal_flags,
-          IREE_HAL_SUBMITTED_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT) &&
       producer_value == value) {
     iree_status_t status;
     if (semaphore->epoch_wait.fn(semaphore->epoch_wait.queue, producer_axis,

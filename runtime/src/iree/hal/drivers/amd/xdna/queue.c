@@ -529,9 +529,6 @@ static void iree_hal_amd_xdna_queue_pump_after_retirement(
 static void iree_hal_amd_xdna_queue_publish_signals(
     iree_hal_amd_xdna_queue_t* queue, iree_hal_amd_xdna_operation_t* operation,
     uint64_t epoch) {
-  if (!queue->tracker) {
-    return;
-  }
   iree_hal_device_t* queue_device =
       iree_hal_queue_family_device(queue->base.queue_family);
   const iree_async_frontier_t* frontier =
