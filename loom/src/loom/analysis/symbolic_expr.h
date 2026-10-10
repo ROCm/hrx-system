@@ -28,6 +28,8 @@
 // Memoized summaries also retain exact nonnegative quotient/remainder
 // projections for numeric equality and coordinate evaluation. The original
 // quotient or remainder remains the materialized SSA term.
+// Exact products similarly retain factor identities for numeric proofs without
+// replacing materialized terms or distributing affine sums.
 //
 // Storage is caller-owned. The context memoizes value-to-expression queries and
 // owns a reusable scratch term buffer so fixed-point analyses can query without
@@ -56,6 +58,7 @@ typedef struct loom_symbolic_expr_memo_entry_t loom_symbolic_expr_memo_entry_t;
 typedef struct loom_symbolic_expr_memo_chunk_t loom_symbolic_expr_memo_chunk_t;
 typedef struct loom_symbolic_congruence_t loom_symbolic_congruence_t;
 typedef struct loom_symbolic_projection_t loom_symbolic_projection_t;
+typedef struct loom_symbolic_product_t loom_symbolic_product_t;
 typedef struct loom_cfg_value_identity_table_t loom_cfg_value_identity_table_t;
 // A single coefficient times an SSA value.
 typedef struct loom_symbolic_term_t {
@@ -179,6 +182,17 @@ typedef struct loom_symbolic_expr_context_t {
     iree_host_size_t capacity;
   } projections;
 
+  // Exact products owned by this context. Only nonlinear multiplications
+  // allocate records; their memo slots retain indices into this array.
+  struct {
+    // Arena-owned records; growth preserves previously returned summaries.
+    loom_symbolic_product_t* values;
+    // Number of records populated in the current epoch.
+    iree_host_size_t count;
+    // Allocated record count, retained across context resets.
+    iree_host_size_t capacity;
+  } products;
+
   // Condition-refined fact memo entries indexed by storage ordinal.
   loom_symbolic_expr_condition_fact_memo_entry_t* condition_fact_memo_entries;
 
@@ -238,6 +252,12 @@ bool loom_symbolic_expr_context_try_lookup_summary(
 const loom_symbolic_projection_t* loom_symbolic_expr_lookup_projection(
     const loom_symbolic_expr_context_t* context,
     const loom_symbolic_expr_t* expression);
+
+// Returns the exact product retained for a canonical expression term, or NULL
+// when no product was computed in this epoch. Does not expand source IR or
+// allocate storage; constant scaling stays in the expression's coefficient.
+const loom_symbolic_product_t* loom_symbolic_expr_lookup_product(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id);
 
 // Constructs a facts-only expression. This is the conservative result for
 // unsupported nonlinear arithmetic when no precise SSA variable is available.

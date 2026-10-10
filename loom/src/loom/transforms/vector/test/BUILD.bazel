@@ -26,6 +26,7 @@ loom_check_test_suite(
         "memory_footprint_coordinates.loom-test",
         "memory_footprint_induction.loom-test",
         "memory_footprint_inverse_quotient.loom-test",
+        "memory_footprint_products.loom-test",
         "memory_footprint_quotient.loom-test",
         "memory_footprint_remainder.loom-test",
         "memory_to_scalar.loom-test",

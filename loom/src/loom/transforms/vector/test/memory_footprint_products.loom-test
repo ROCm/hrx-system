@@ -1,0 +1,168 @@
+// RUN: pass vector-memory-footprint
+
+// Runtime capacity and launch guard describe the same packets with different
+// multiplication groupings. Zero dimensions leave the guarded body inactive.
+func.def @reassociated_packets(%input: buffer, %packet_input: index, %blocks_input: index, %packets_input: index) {
+  %packet = index.assume %packet_input [range(%packet_input, 0, 63)] : index
+  %blocks = index.assume %blocks_input [range(%blocks_input, 0, 7)] : index
+  %packets = index.assume %packets_input [range(%packets_input, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %width = index.constant 16 : index
+  %block_elements = index.mul %packets, %width : index
+  %elements = index.mul %blocks, %block_elements : index
+  %packet_count = index.mul %blocks, %packets : index
+  %view = buffer.view %input[%base] : buffer -> view<[%elements]xi32>
+  %active = index.cmp ult, %packet, %packet_count : index
+  scf.if %active {
+    %position = index.mul %packet, %width : index
+    %value = vector.load %view[%position] : view<[%elements]xi32> -> vector<16xi32>
+    test.use %value : vector<16xi32>
+  }
+  func.return
+}
+
+// ----
+func.def @reassociated_packets(%input: buffer, %packet_input: index, %blocks_input: index, %packets_input: index) {
+  %packet = index.assume %packet_input [range(%packet_input, 0, 63)] : index
+  %blocks = index.assume %blocks_input [range(%blocks_input, 0, 7)] : index
+  %packets = index.assume %packets_input [range(%packets_input, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %width = index.constant 16 : index
+  %block_elements = index.mul %packets, %width : index
+  %elements = index.mul %blocks, %block_elements : index
+  %packet_count = index.mul %blocks, %packets : index
+  %view = buffer.view %input[%base] : buffer -> view<[%elements]xi32>
+  %active = index.cmp ult, %packet, %packet_count : index
+  scf.if %active {
+    %position = index.mul %packet, %width : index
+    %value = vector.load %view[%position] : view<[%elements]xi32> -> vector<16xi32>
+    test.use %value : vector<16xi32>
+  }
+  func.return
+}
+
+// ====
+// RUN: pass canonicalize,scf-to-cfg,vector-memory-footprint
+
+// Commuted factors retain the same relationship after structured control flow
+// becomes predecessor-edge facts.
+func.def @permuted_packets_after_cfg(%input: buffer, %packet_input: index, %blocks_input: index, %packets_input: index) {
+  %packet = index.assume %packet_input [range(%packet_input, 0, 63)] : index
+  %blocks = index.assume %blocks_input [range(%blocks_input, 0, 7)] : index
+  %packets = index.assume %packets_input [range(%packets_input, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %width = index.constant 16 : index
+  %block_elements = index.mul %width, %packets : index
+  %elements = index.mul %block_elements, %blocks : index
+  %packet_count = index.mul %blocks, %packets : index
+  %view = buffer.view %input[%base] : buffer -> view<[%elements]xi32>
+  %active = index.cmp ult, %packet, %packet_count : index
+  scf.if %active {
+    %position = index.mul %packet, %width : index
+    %value = vector.load %view[%position] : view<[%elements]xi32> -> vector<16xi32>
+    test.use %value : vector<16xi32>
+  }
+  func.return
+}
+
+// ----
+func.def @permuted_packets_after_cfg(%input: buffer, %packet_input: index, %blocks_input: index, %packets_input: index) {
+  %packet = index.assume %packet_input [range(%packet_input, 0, 63)] : index
+  %blocks = index.assume %blocks_input [range(%blocks_input, 0, 7)] : index
+  %packets = index.assume %packets_input [range(%packets_input, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %width = index.constant 16 : index
+  %block_elements = index.mul %width, %packets : index
+  %elements = index.mul %block_elements, %blocks : index
+  %packet_count = index.mul %blocks, %packets : index
+  %view = buffer.view %input[%base] : buffer -> view<[%elements]xi32>
+  %active = index.cmp ult, %packet, %packet_count : index
+  cfg.cond_br %active, ^_bb1, ^_bb2
+^_bb1:
+  %16 = index.assume %packet [lt(%packet, %packet_count)] : index
+  %position = index.mul %16, %width : index
+  %value = vector.load %view[%position] : view<[%elements]xi32> -> vector<16xi32>
+  test.use %value : vector<16xi32>
+  cfg.br ^_bb2
+^_bb2:
+  func.return
+}
+
+// ====
+// RUN: pass vector-memory-footprint
+
+// Equality includes the first packet beyond the allocation.
+func.def @inclusive_packet_tail(%input: buffer, %packet_input: index, %blocks_input: index, %packets_input: index) {
+  %packet = index.assume %packet_input [range(%packet_input, 0, 63)] : index
+  %blocks = index.assume %blocks_input [range(%blocks_input, 0, 7)] : index
+  %packets = index.assume %packets_input [range(%packets_input, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %width = index.constant 16 : index
+  %block_elements = index.mul %packets, %width : index
+  %elements = index.mul %blocks, %block_elements : index
+  %packet_count = index.mul %blocks, %packets : index
+  %view = buffer.view %input[%base] : buffer -> view<[%elements]xi32>
+  %active = index.cmp ule, %packet, %packet_count : index
+  scf.if %active {
+    %position = index.mul %packet, %width : index
+    // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="16"}
+    %value = vector.load %view[%position] : view<[%elements]xi32> -> vector<16xi32>
+    test.use %value : vector<16xi32>
+  }
+  func.return
+}
+
+// ====
+// RUN: pass canonicalize,scf-to-cfg,vector-memory-footprint
+
+// The allocation uses blocks squared, not blocks times packets. Equal ranges
+// do not establish equal runtime factors.
+func.def @different_packet_factor(%input: buffer, %packet_input: index, %blocks_input: index, %packets_input: index) {
+  %packet = index.assume %packet_input [range(%packet_input, 0, 63)] : index
+  %blocks = index.assume %blocks_input [range(%blocks_input, 0, 8)] : index
+  %packets = index.assume %packets_input [range(%packets_input, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %width = index.constant 16 : index
+  %block_elements = index.mul %blocks, %width : index
+  %elements = index.mul %blocks, %block_elements : index
+  %packet_count = index.mul %blocks, %packets : index
+  %view = buffer.view %input[%base] : buffer -> view<[%elements]xi32>
+  %active = index.cmp ult, %packet, %packet_count : index
+  scf.if %active {
+    %position = index.mul %packet, %width : index
+    // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="16"}
+    %value = vector.load %view[%position] : view<[%elements]xi32> -> vector<16xi32>
+    test.use %value : vector<16xi32>
+  }
+  func.return
+}
+
+// ====
+// RUN: pass scf-to-cfg,vector-memory-footprint
+
+// A packet guard is not valid on the other predecessor or after the merge.
+func.def @packet_guard_scope(%input: buffer, %packet_input: index, %blocks_input: index, %packets_input: index) {
+  %packet = index.assume %packet_input [range(%packet_input, 0, 63)] : index
+  %blocks = index.assume %blocks_input [range(%blocks_input, 0, 7)] : index
+  %packets = index.assume %packets_input [range(%packets_input, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %width = index.constant 16 : index
+  %block_elements = index.mul %packets, %width : index
+  %elements = index.mul %blocks, %block_elements : index
+  %packet_count = index.mul %blocks, %packets : index
+  %view = buffer.view %input[%base] : buffer -> view<[%elements]xi32>
+  %active = index.cmp ult, %packet, %packet_count : index
+  %position = index.mul %packet, %width : index
+  scf.if %active {
+    %value = vector.load %view[%position] : view<[%elements]xi32> -> vector<16xi32>
+    test.use %value : vector<16xi32>
+  } else {
+    // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="16"}
+    %value = vector.load %view[%position] : view<[%elements]xi32> -> vector<16xi32>
+    test.use %value : vector<16xi32>
+  }
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="16"}
+  %outside = vector.load %view[%position] : view<[%elements]xi32> -> vector<16xi32>
+  test.use %outside : vector<16xi32>
+  func.return
+}
