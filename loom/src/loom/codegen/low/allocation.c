@@ -84,7 +84,8 @@ loom_low_allocation_make_interval_assignment_context(
     loom_low_allocation_search_strategy_t search_strategy,
     iree_arena_allocator_t* arena,
     loom_low_allocation_target_constraints_t* target_constraints,
-    loom_low_allocation_storage_lease_state_t* storage_leases) {
+    loom_low_allocation_storage_lease_state_t* storage_leases,
+    const uint64_t* spill_traffic_exclusive_limit) {
   return (loom_low_allocation_interval_assignment_context_t){
       .module = state->module,
       .body = state->body,
@@ -105,6 +106,7 @@ loom_low_allocation_make_interval_assignment_context(
       .storage_leases = storage_leases,
       .arena = arena,
       .function_cfg_graph = &model->cfg_graph,
+      .spill_traffic_exclusive_limit = spill_traffic_exclusive_limit,
       .search_strategy = search_strategy,
   };
 }
@@ -170,12 +172,16 @@ static iree_status_t loom_low_allocation_repair_fragmentation(
             state, model,
             LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR,
             &scratch_arena, &scratch_target_constraints,
-            &scratch_storage_leases);
+            &scratch_storage_leases,
+            state->target_constraints.error_count == 0
+                ? &state->interval_assignment.spill_traffic_bytes
+                : NULL);
     status = loom_low_allocation_interval_assignment_build(
         &scratch_context, decision_arena, &scratch_result);
   }
   if (iree_status_is_ok(status)) {
     const bool use_repair =
+        !scratch_result.reached_spill_traffic_limit &&
         scratch_target_constraints.error_count == 0 &&
         (scratch_result.spill_count == 0 ||
          (state->target_constraints.error_count == 0 &&
@@ -687,7 +693,8 @@ iree_status_t loom_low_allocate_function(
         interval_assignment_context =
             loom_low_allocation_make_interval_assignment_context(
                 &state, model, LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FIRST_FIT,
-                arena, &state.target_constraints, &state.storage_leases);
+                arena, &state.target_constraints, &state.storage_leases,
+                /*spill_traffic_exclusive_limit=*/NULL);
     status = loom_low_allocation_interval_assignment_build(
         &interval_assignment_context, &decision_arena,
         &state.interval_assignment);

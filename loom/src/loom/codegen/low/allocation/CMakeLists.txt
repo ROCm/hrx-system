@@ -853,6 +853,7 @@ loom_cc_library(
     ::unit_liveness
     ::write_interference
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::analysis::consumption
     loom::analysis::liveness
@@ -877,6 +878,9 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir
+    loom::ops::test
+    loom::target::registers
+    loom::util::cfg_graph
 )
 
 loom_cc_test(

@@ -238,21 +238,18 @@ iree_status_t loom_low_allocation_spill_plan_traffic(
       module, cfg_graph, assignment, byte_size, out_traffic);
 }
 
-iree_status_t loom_low_allocation_spill_plan_record(
-    const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
+iree_status_t loom_low_allocation_spill_plan_append(
     const loom_low_allocation_assignment_t* assignment,
     uint32_t assignment_index, uint16_t alloc_unit_bits,
     loom_low_spill_slot_space_t spill_slot_space,
+    const loom_low_allocation_spill_plan_traffic_t* traffic,
     loom_low_allocation_spill_plan_t* spill_plans,
-    iree_host_size_t* inout_spill_plan_count, uint64_t* inout_traffic_bytes) {
+    iree_host_size_t* inout_spill_plan_count) {
   uint32_t byte_size = 0;
   uint32_t byte_alignment = 0;
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_layout(
       assignment, alloc_unit_bits, &byte_size, &byte_alignment));
 
-  loom_low_allocation_spill_plan_traffic_t traffic = {0};
-  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_traffic_for_layout(
-      module, cfg_graph, assignment, byte_size, &traffic));
   spill_plans[(*inout_spill_plan_count)++] = (loom_low_allocation_spill_plan_t){
       .value_id = assignment->value_id,
       .assignment_index = assignment_index,
@@ -260,12 +257,9 @@ iree_status_t loom_low_allocation_spill_plan_record(
       .slot_space = spill_slot_space,
       .byte_size = byte_size,
       .byte_alignment = byte_alignment,
-      .store_count = traffic.store_count,
-      .reload_count = traffic.reload_count,
+      .store_count = traffic->store_count,
+      .reload_count = traffic->reload_count,
   };
-  *inout_traffic_bytes = iree_math_saturating_add_u64(
-      *inout_traffic_bytes,
-      iree_math_saturating_add_u64(traffic.store_bytes, traffic.reload_bytes));
   return iree_ok_status();
 }
 

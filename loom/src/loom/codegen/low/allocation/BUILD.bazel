@@ -768,6 +768,7 @@ loom_cc_library(
         "//loom/src/loom/target:residency",
         "//loom/src/loom/util:cfg_graph",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -778,6 +779,9 @@ loom_cc_test(
     deps = [
         ":interval_assignment",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:cfg_graph",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

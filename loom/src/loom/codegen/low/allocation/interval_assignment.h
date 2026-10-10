@@ -80,6 +80,10 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   // Borrowed bitmap indexed by module value ID. Set values require register
   // storage throughout allocation.
   iree_bitmap_t required_register_values;
+  // Optional borrowed exclusive spill-traffic limit for this assignment
+  // attempt. Reaching the limit ends the attempt with a partial result that
+  // the comparison caller must discard. Null leaves the attempt unbounded.
+  const uint64_t* spill_traffic_exclusive_limit;
   // Concrete-location ordering for this whole-function assignment attempt.
   loom_low_allocation_search_strategy_t search_strategy;
 } loom_low_allocation_interval_assignment_context_t;
@@ -109,6 +113,9 @@ typedef struct loom_low_allocation_interval_assignment_result_t {
   iree_host_size_t remark_count;
   // Number of assignments whose location kind is SPILL_SLOT.
   iree_host_size_t spill_count;
+  // True when assignment stopped after reaching the comparison-only spill
+  // traffic limit. All assignment state is partial and must be discarded.
+  bool reached_spill_traffic_limit;
   // Interval ordering found a multi-unit interval in a contiguous register
   // class. Without one, fragmentation repair repeats the same placement.
   bool has_packable_aggregates;

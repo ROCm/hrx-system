@@ -13,6 +13,9 @@
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
+#include "loom/ops/test/ops.h"
+#include "loom/target/registers.h"
+#include "loom/util/cfg_graph.h"
 
 namespace loom {
 namespace {
@@ -25,6 +28,11 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
     iree_arena_initialize(&block_pool_, &arena_);
     iree_arena_initialize(&block_pool_, &decision_arena_);
     loom_context_initialize(iree_allocator_system(), &context_);
+    iree_host_size_t vtable_count = 0;
+    const loom_op_vtable_t* const* vtables =
+        loom_test_dialect_vtables(&vtable_count);
+    IREE_ASSERT_OK(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_TEST, vtables, (uint16_t)vtable_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
 
@@ -69,13 +77,25 @@ loom_liveness_value_class_t RegisterValueClass(uint64_t descriptor_set_id) {
 }
 
 TEST_F(LowAllocationIntervalAssignmentTest,
-       AssignsRegisterIntervalToFirstFreeLocation) {
+       AssignsOrTrafficBoundsSingleRegisterInterval) {
   loom_module_t* module = AllocateModule();
-  const loom_value_id_t value = DefineValue(module);
+  const uint64_t descriptor_set_id = 17;
+  loom_builder_t builder = {};
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
+  loom_op_t* producer_op = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder, loom_attr_i64(0),
+      loom_low_register_type(descriptor_set_id, /*register_class_id=*/0,
+                             /*unit_count=*/2),
+      LOOM_LOCATION_UNKNOWN, &producer_op));
+  const loom_value_id_t value = loom_test_constant_result(producer_op);
+  loom_op_t* use_op = nullptr;
+  IREE_ASSERT_OK(loom_test_use_build(&builder, &value, /*values_count=*/1,
+                                     LOOM_LOCATION_UNKNOWN, &use_op));
   loom_module_value_ordinal_scratch_acquire(module);
   loom_module_value_ordinal_scratch_set(module, value, /*ordinal=*/0);
 
-  const uint64_t descriptor_set_id = 17;
   const loom_liveness_value_class_t value_class =
       RegisterValueClass(descriptor_set_id);
   const loom_liveness_interval_t interval = {
@@ -98,6 +118,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   liveness.value_ids = value_ids;
   liveness.value_count = IREE_ARRAYSIZE(value_ids);
   liveness.value_interval_indices = interval_indices;
+  liveness.region = module->body;
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {{0, 0}};
   uint32_t unit_start_points[] = {0, 0};
@@ -143,11 +164,14 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       /*budget_count=*/0, /*reserved_ranges=*/nullptr,
       /*reserved_range_count=*/0, /*emitter=*/iree_diagnostic_emitter_t{},
       &arena_, &target_constraints));
+  loom_cfg_graph_t function_cfg_graph = {};
+  IREE_ASSERT_OK(
+      loom_cfg_graph_build(module, module->body, &arena_, &function_cfg_graph));
 
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
       /*.module=*/module,
-      /*.body=*/nullptr,
+      /*.body=*/module->body,
       /*.function_op=*/&function_op,
       /*.target=*/&target,
       /*.liveness=*/&liveness,
@@ -162,6 +186,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       /*.unit_liveness=*/&unit_liveness,
       /*.storage_leases=*/&storage_leases,
       /*.arena=*/&arena_,
+      /*.function_cfg_graph=*/&function_cfg_graph,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
   // The enclosing allocator may retain facts in the scratch arena's prefix.
@@ -195,6 +220,36 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   EXPECT_EQ(result.spill_plans, nullptr);
   EXPECT_EQ(result.remarks, nullptr);
   EXPECT_TRUE(result.has_packable_aggregates);
+
+  // A comparison attempt stops as soon as its first irreversible spill cannot
+  // improve the incumbent traffic. The same attempt completes when that spill
+  // remains below the exclusive bound.
+  reg_class.allocatable_count = 1;
+
+  uint64_t spill_traffic_exclusive_limit = 16;
+  loom_low_allocation_interval_assignment_context_t bounded_context = context;
+  bounded_context.spill_traffic_exclusive_limit =
+      &spill_traffic_exclusive_limit;
+  result = {};
+  IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
+      &bounded_context, &decision_arena_, &result));
+  EXPECT_TRUE(result.reached_spill_traffic_limit);
+  EXPECT_EQ(result.assignment_count, 1u);
+  EXPECT_EQ(result.spill_count, 1u);
+  EXPECT_EQ(result.spill_traffic_bytes, spill_traffic_exclusive_limit);
+  EXPECT_EQ(result.spill_plan_count, 0u);
+  EXPECT_EQ(result.remark_count, 0u);
+
+  ++spill_traffic_exclusive_limit;
+  result = {};
+  IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
+      &bounded_context, &decision_arena_, &result));
+  EXPECT_FALSE(result.reached_spill_traffic_limit);
+  EXPECT_EQ(result.assignment_count, 1u);
+  EXPECT_EQ(result.spill_count, 1u);
+  EXPECT_EQ(result.spill_traffic_bytes, 16u);
+  EXPECT_EQ(result.spill_plan_count, 1u);
+  EXPECT_EQ(result.remark_count, 1u);
 
   loom_local_value_domain_release(&value_domain);
   loom_module_free(module);
