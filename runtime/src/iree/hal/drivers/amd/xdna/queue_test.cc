@@ -135,8 +135,10 @@ struct NativeProvider {
     api.memory_scope_query_pair_info = MemoryScopeQueryPairInfo;
     api.device_destroy = DeviceDestroy;
     api.kernel_queue_query_info = QueueInfo;
+    api.kernel_queue_query_status = QueryStatus;
     api.kernel_queue_request_notification = Notify;
     api.kernel_queue_refresh_status = Refresh;
+    api.kernel_queue_wait = Wait;
     api.kernel_queue_destroy = QueueDestroy;
     xdna.kernel_queue_create = QueueCreate;
     xdna.kernel_queue_submit = Submit;
@@ -178,6 +180,28 @@ struct NativeProvider {
     busy_submission_attempt.store(
         submission_attempt_count.load(std::memory_order_acquire) + 1,
         std::memory_order_release);
+  }
+
+  void BlockWait() {
+    wait_entered.store(false, std::memory_order_relaxed);
+    wait_released.store(false, std::memory_order_relaxed);
+    block_wait.store(true, std::memory_order_release);
+  }
+
+  void AwaitBlockedWait() {
+    iree_notification_await(
+        &submission_notification,
+        +[](void* user_data) {
+          return static_cast<NativeProvider*>(user_data)->wait_entered.load(
+              std::memory_order_acquire);
+        },
+        this, iree_infinite_timeout());
+  }
+
+  void ReleaseWait() {
+    wait_released.store(true, std::memory_order_release);
+    block_wait.store(false, std::memory_order_release);
+    iree_notification_post(&submission_notification, IREE_ALL_WAITERS);
   }
 
   size_t FlushCount() {
@@ -330,6 +354,17 @@ struct NativeProvider {
     return AMDF_STATUS_OK;
   }
   static amdf_status_t AMDF_CALL
+  QueryStatus(amdf_kernel_queue_t* queue, amdf_kernel_queue_status_t* status) {
+    auto* self = reinterpret_cast<NativeProvider*>(queue);
+    status->retired_submission =
+        self->checked_retired_submission.load(std::memory_order_acquire);
+    status->state =
+        (amdf_queue_state_t)self->checked_state.load(std::memory_order_acquire);
+    status->terminal_status =
+        self->checked_terminal_status.load(std::memory_order_acquire);
+    return AMDF_STATUS_OK;
+  }
+  static amdf_status_t AMDF_CALL
   Submit(amdf_kernel_queue_t* queue,
          const amdf_xdna_kernel_queue_submission_info_t* info,
          uint64_t* out_submission) {
@@ -445,7 +480,44 @@ struct NativeProvider {
               }),
           self->pending_commands.end());
     }
+    self->checked_retired_submission.store(status->retired_submission,
+                                           std::memory_order_release);
+    self->checked_state.store(status->state, std::memory_order_release);
+    self->checked_terminal_status.store(status->terminal_status,
+                                        std::memory_order_release);
     return AMDF_STATUS_OK;
+  }
+  static amdf_status_t AMDF_CALL Wait(amdf_kernel_queue_t* queue,
+                                      uint64_t submission,
+                                      uint64_t timeout_nanoseconds,
+                                      uint64_t poll_duration_nanoseconds) {
+    auto* self = reinterpret_cast<NativeProvider*>(queue);
+    ++self->wait_count;
+    if (self->block_wait.load(std::memory_order_acquire)) {
+      self->wait_entered.store(true, std::memory_order_release);
+      iree_notification_post(&self->submission_notification, IREE_ALL_WAITERS);
+      iree_notification_await(
+          &self->submission_notification,
+          +[](void* user_data) {
+            return static_cast<NativeProvider*>(user_data)->wait_released.load(
+                std::memory_order_acquire);
+          },
+          self, iree_infinite_timeout());
+    }
+    amdf_kernel_queue_status_t checked = {};
+    checked.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
+    checked.structure_size = sizeof(checked);
+    const amdf_status_t status = Refresh(queue, &checked);
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    if (checked.retired_submission >= submission ||
+        !amdf_status_is_ok(checked.terminal_status)) {
+      return checked.terminal_status;
+    }
+    (void)timeout_nanoseconds;
+    (void)poll_duration_nanoseconds;
+    return amdf_make_api_status(AMDF_STATUS_CODE_DEADLINE_EXCEEDED);
   }
   static amdf_status_t AMDF_CALL QueueDestroy(amdf_kernel_queue_t* queue) {
     auto* self = reinterpret_cast<NativeProvider*>(queue);
@@ -506,6 +578,12 @@ struct NativeProvider {
   std::atomic<bool> submission_entered{false};
   // True when the publisher may leave the explicit gate.
   std::atomic<bool> submission_released{false};
+  // True when a checked wait must stop at the explicit gate.
+  std::atomic<bool> block_wait{false};
+  // True after a checked waiter has entered the explicit gate.
+  std::atomic<bool> wait_entered{false};
+  // True when the checked waiter may leave the explicit gate.
+  std::atomic<bool> wait_released{false};
   // Total native backing creations, including destroyed allocations.
   size_t memory_create_count = 0;
   // Context-private instruction allocations accepted by the provider.
@@ -538,6 +616,14 @@ struct NativeProvider {
   size_t notification_count = 0;
   // Number of checked native observation calls.
   size_t refresh_count = 0;
+  // Number of checked waits issued directly by a semaphore waiter.
+  size_t wait_count = 0;
+  // Greatest native point established by refresh or wait.
+  std::atomic<uint64_t> checked_retired_submission{0};
+  // Cached queue state established by refresh or wait.
+  std::atomic<uint32_t> checked_state{AMDF_QUEUE_STATE_ACTIVE};
+  // Cached terminal status established by refresh or wait.
+  std::atomic<uint64_t> checked_terminal_status{AMDF_STATUS_OK};
   // Number of native queue destruction attempts.
   size_t queue_destroy_count = 0;
   // Number of parent context destruction attempts.
@@ -1564,6 +1650,78 @@ TEST(XdnaQueueTest, ReadyDispatchCommitsBeforeProactorProgress) {
   harness.native.hold_retirement = false;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
+}
+
+TEST(XdnaQueueTest, ExactWaitRetiresBeforeProactorProgress) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+
+  ASSERT_NO_FATAL_FAILURE(harness.Submit());
+  EXPECT_EQ(harness.native.submission_count, 1u);
+  EXPECT_EQ(harness.native.notification_count, 1u);
+  EXPECT_EQ(harness.native.wait_count, 0u);
+  EXPECT_EQ(harness.native.refresh_count, 0u);
+
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      harness.done, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  EXPECT_EQ(harness.native.wait_count, 1u);
+  EXPECT_EQ(harness.native.refresh_count, 1u);
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &value));
+  EXPECT_EQ(value, 1u);
+  EXPECT_EQ(harness.native.live_memories, 1u);
+}
+
+TEST(XdnaQueueTest, ExactWaitOwnsRetirementBeforeNativeNotification) {
+  QueueHarness harness;
+  harness.native.hold_retirement = true;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+  harness.native.BlockWait();
+  ASSERT_NO_FATAL_FAILURE(harness.Submit());
+
+  std::atomic<iree_status_code_t> wait_status{IREE_STATUS_UNKNOWN};
+  std::thread waiter([&]() {
+    iree_status_t status = iree_hal_semaphore_wait(
+        harness.done, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+    wait_status.store(iree_status_code(status), std::memory_order_release);
+    iree_status_free(status);
+  });
+  struct WaitReleaseGuard {
+    NativeProvider* provider;
+    std::thread* waiter;
+    ~WaitReleaseGuard() {
+      if (provider) {
+        provider->ReleaseWait();
+      }
+      if (waiter->joinable()) {
+        waiter->join();
+      }
+    }
+  } wait_release_guard = {&harness.native, &waiter};
+  harness.native.AwaitBlockedWait();
+
+  harness.native.hold_retirement = false;
+  harness.native.Wake();
+  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
+                                          iree_infinite_timeout(), nullptr));
+  EXPECT_EQ(harness.native.refresh_count, 0u);
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &value));
+  EXPECT_EQ(value, 0u);
+
+  harness.native.ReleaseWait();
+  waiter.join();
+  wait_release_guard.provider = nullptr;
+  EXPECT_EQ(wait_status.load(std::memory_order_acquire), IREE_STATUS_OK);
+  EXPECT_EQ(harness.native.wait_count, 1u);
+  EXPECT_EQ(harness.native.refresh_count, 1u);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &value));
+  EXPECT_EQ(value, 1u);
+  EXPECT_EQ(harness.native.live_memories, 1u);
 }
 
 TEST(XdnaQueueTest, InexactReachedFrontierUsesQueuedPublication) {

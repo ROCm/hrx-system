@@ -320,6 +320,10 @@ static iree_status_t iree_hal_amd_xdna_device_create_semaphore(
   iree_hal_amd_xdna_device_t* device = (iree_hal_amd_xdna_device_t*)base;
   return iree_hal_amd_xdna_semaphore_create(
       base, iree_async_proactor_pool_entry_proactor(device->proactor_entry),
+      (iree_hal_amd_xdna_semaphore_epoch_wait_t){
+          .queue = device->queue,
+          .fn = iree_hal_amd_xdna_queue_try_wait_epoch,
+      },
       affinity, initial_value, flags, device->host_allocator, out_semaphore);
 }
 

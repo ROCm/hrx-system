@@ -46,9 +46,9 @@ class QueueFrontierTest : public ::testing::Test {
   iree_hal_semaphore_t* CreateSemaphore() {
     iree_hal_semaphore_t* semaphore = nullptr;
     IREE_EXPECT_OK(iree_hal_amd_xdna_semaphore_create(
-        device_, test_proactor(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
-        /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_NONE,
-        iree_allocator_system(), &semaphore));
+        device_, test_proactor(), /*epoch_wait=*/{},
+        IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, iree_allocator_system(), &semaphore));
     semaphores_.push_back(semaphore);
     return semaphore;
   }

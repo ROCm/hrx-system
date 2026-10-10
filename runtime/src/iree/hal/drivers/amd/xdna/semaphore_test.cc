@@ -84,8 +84,8 @@ class SemaphoreTest : public ::testing::Test {
       iree_hal_semaphore_flags_t flags, uint64_t initial_value,
       iree_hal_semaphore_t** out_semaphore) {
     return iree_hal_amd_xdna_semaphore_create(
-        device_, test_proactor(), queue_family_affinity, initial_value, flags,
-        iree_allocator_system(), out_semaphore);
+        device_, test_proactor(), /*epoch_wait=*/{}, queue_family_affinity,
+        initial_value, flags, iree_allocator_system(), out_semaphore);
   }
 
   iree_hal_device_t* device_ = nullptr;

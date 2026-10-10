@@ -17,7 +17,8 @@ extern "C" {
 
 // Creates one finite execution owner. Context and proactor are borrowed from
 // the device. Ready operations publish directly from their caller; the proactor
-// owns deferred causal admission and unattended checked native completion.
+// owns deferred causal admission and unattended checked native completion,
+// while exact local waits may publish checked retirement on their caller.
 // Private native-publication and host-transfer services isolate blocking work.
 // Unresolved consumers occupy no native execution slot.
 iree_status_t iree_hal_amd_xdna_queue_create(
@@ -30,6 +31,17 @@ iree_status_t iree_hal_amd_xdna_queue_create(
 iree_status_t iree_hal_amd_xdna_queue_assign_frontier(
     iree_hal_queue_t* queue, iree_async_frontier_tracker_t* tracker,
     iree_async_axis_t axis);
+
+// Attempts a checked wait for an exact epoch owned by |queue|. Returns true
+// after consuming the wait and setting |out_status|. Returns false without
+// modifying |out_status| when the epoch is not currently mapped to a pending
+// native submission or queue-state ownership is contended.
+bool iree_hal_amd_xdna_queue_try_wait_epoch(iree_hal_queue_t* queue,
+                                            iree_async_axis_t producer_axis,
+                                            uint64_t producer_epoch,
+                                            iree_timeout_t timeout,
+                                            iree_async_wait_flags_t flags,
+                                            iree_status_t* out_status);
 
 // Releases currently unused operation and payload capture blocks.
 void iree_hal_amd_xdna_queue_trim(iree_hal_queue_t* queue);

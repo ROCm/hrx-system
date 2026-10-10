@@ -23,13 +23,32 @@ extern "C" {
 // lower bound and disables device-side wait elision for the affected values.
 #define IREE_HAL_AMD_XDNA_FRONTIER_CAPACITY 64
 
+// Attempts checked host retirement of one exact producer queue epoch.
+// Returns true after consuming the wait and setting |out_status|. Returns false
+// without modifying |out_status| when ordinary semaphore waiting must be used.
+typedef bool (*iree_hal_amd_xdna_semaphore_wait_epoch_fn_t)(
+    iree_hal_queue_t* queue, iree_async_axis_t producer_axis,
+    uint64_t producer_epoch, iree_timeout_t timeout,
+    iree_async_wait_flags_t flags, iree_status_t* out_status);
+
+// Borrowed producer queue and its checked epoch-wait operation.
+typedef struct iree_hal_amd_xdna_semaphore_epoch_wait_t {
+  // Queue that may own submitted epochs published to the semaphore.
+  iree_hal_queue_t* queue;
+  // Checked wait operation implemented by the queue.
+  iree_hal_amd_xdna_semaphore_wait_epoch_fn_t fn;
+} iree_hal_amd_xdna_semaphore_epoch_wait_t;
+
 // Creates an XDNA HAL semaphore backed by an embedded async semaphore.
 //
 // |device| identifies the exact creating device and is borrowed for the
 // semaphore lifetime. |proactor| is likewise borrowed and must remain live
-// until the semaphore is destroyed.
+// until the semaphore is destroyed. |epoch_wait| borrows the device's
+// provisioned queue for the same lifetime and may be empty when no queue-local
+// checked wait is available.
 iree_status_t iree_hal_amd_xdna_semaphore_create(
     iree_hal_device_t* device, iree_async_proactor_t* proactor,
+    iree_hal_amd_xdna_semaphore_epoch_wait_t epoch_wait,
     iree_hal_queue_family_affinity_t queue_family_affinity,
     uint64_t initial_value, iree_hal_semaphore_flags_t flags,
     iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore);

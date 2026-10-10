@@ -49,33 +49,34 @@ shape and depth performs no host allocation or free.
 Each dispatch first attempts a nonwaiting claim on native publication. When the
 persistent observer is active, the pending ring has capacity, and every wait is
 proved by an exact accepted frontier, the calling thread prepares and submits
-the command directly. A placed proactor receipt commits the accepted point and
-transfers the claim to older deferred work before releasing it. Full capacity,
-unsatisfied waits, inexact causal state, and claim contention use the private
-publisher instead. libamdf reports its own full publication window as `BUSY`;
-the HAL retains the prepared invocation and retries only after checked native
-progress. The underlying OS submission can still wait for device wake or native
-credits, so a direct caller can pay that latency. The private publisher isolates
-that cost on every queued route.
+the command directly, then commits its accepted frontier and pending-ring entry
+before returning. Full capacity, unsatisfied waits, inexact causal state, and
+claim contention use the private publisher instead. libamdf reports its own
+full publication window as `BUSY`; the HAL retains the prepared invocation and
+retries only after checked native progress. The underlying OS submission can
+still wait for device wake or native credits, so a direct caller can pay that
+latency. The private publisher isolates that cost on every queued route.
 
-The shared proactor owns queued causal admission, native acceptance commits,
-and checked retirement. Accepted invocations occupy a bounded ring sized to the
-native queue's prepared capacity. Each pending invocation owns exclusive mutable
-command and binding storage; checked retirement returns that storage for reuse.
-Immutable backing is shared when its static address references also point to
-shared allocations. Binding updates publish only their patched ranges. Every
-dispatch executes invocation zero to establish the array state; time slicing
-does not promise resident tile state across submissions.
+The shared proactor owns queued causal admission, deferred native acceptance
+commits, and unattended checked retirement. Exact blocking waits on a local
+submitted signal instead wait for its libamdf point and publish retirement on
+the calling thread. Accepted invocations occupy a bounded ring sized to the
+native queue's prepared capacity. Each pending invocation owns exclusive
+mutable command and binding storage; checked retirement returns that storage
+for reuse. Immutable backing is shared when its static address references also
+point to shared allocations. Binding updates publish only their patched ranges.
+Every dispatch executes invocation zero to establish the array state; time
+slicing does not promise resident tile state across submissions.
 
 Eligible host operations run on an independent private worker and never advance
 the native queue's completion frontier. Neither mapped transfer work nor native
-submission can block the shared proactor. Both services return results through
-placed proactor operations, preserving one owner for causal state, completion
-publication, and terminal reclamation. A dependent dispatch whose producer is
-still entering the native queue retries after that producer's acceptance; other
-unresolved waits register their ordinary semaphore timepoints immediately. The
-public queue call always captures its arguments before either direct or queued
-publication takes ownership.
+submission can block the shared proactor. Private services return queued results
+through placed proactor operations; queue-local synchronization serializes them
+with caller-owned direct acceptance and retirement. A dependent dispatch whose
+producer is still entering the native queue retries after that producer's
+acceptance; other unresolved waits register their ordinary semaphore timepoints
+immediately. The public queue call always captures its arguments before either
+direct or queued publication takes ownership.
 
 Direct fill, update, copy, upload, download, and queue barriers are supported.
 Execution/access dependencies and global system visibility need no additional
@@ -90,11 +91,15 @@ survive upload and readback.
 Queue notifications are wake hints. One cold-registered persistent proactor
 source consumes each event, refreshes the native queue's checked retirement and
 terminal outcome, and requests a new one-shot native notification for the
-oldest remaining point. No per-completion wait operation or source registration
-is required. Ordinary retired work releases payload resources before signaling
-HAL semaphores. An operation-held device reference keeps the queue's capture
-pools alive through inline signal callbacks, then the arenas are returned before
-the final device release.
+oldest remaining point. No per-completion source registration is required. An
+exact host waiter marks its retirement claim before entering
+libamdf so a concurrent wake does not move the critical path onto the proactor.
+A completion-drain mutex preserves FIFO publication between those callers and
+unattended notification processing, and is never held across a native wait.
+Ordinary retired work releases payload resources before signaling HAL
+semaphores. An operation-held device reference keeps the queue's capture pools
+alive through inline signal callbacks, then the arenas are returned before the
+final device release.
 
 Final device release places shutdown on the proactor owner. It joins the two
 idle services, destroys the native queue, and begins terminal source

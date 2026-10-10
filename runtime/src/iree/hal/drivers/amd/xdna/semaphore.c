@@ -18,6 +18,9 @@ typedef struct iree_hal_amd_xdna_semaphore_t {
   // Exact creating device identity, borrowed for type discrimination.
   iree_hal_device_t* device;
 
+  // Borrowed queue-local checked epoch-wait operation.
+  iree_hal_amd_xdna_semaphore_epoch_wait_t epoch_wait;
+
   // Creation flags controlling synchronization behavior.
   iree_hal_semaphore_flags_t flags;
 
@@ -38,6 +41,7 @@ static iree_hal_amd_xdna_semaphore_t* iree_hal_amd_xdna_semaphore_cast(
 
 iree_status_t iree_hal_amd_xdna_semaphore_create(
     iree_hal_device_t* device, iree_async_proactor_t* proactor,
+    iree_hal_amd_xdna_semaphore_epoch_wait_t epoch_wait,
     iree_hal_queue_family_affinity_t queue_family_affinity,
     uint64_t initial_value, iree_hal_semaphore_flags_t flags,
     iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore) {
@@ -64,6 +68,7 @@ iree_status_t iree_hal_amd_xdna_semaphore_create(
         IREE_HAL_AMD_XDNA_FRONTIER_CAPACITY, &semaphore->async);
     semaphore->host_allocator = host_allocator;
     semaphore->device = device;
+    semaphore->epoch_wait = epoch_wait;
     semaphore->flags = flags;
     semaphore->queue_family_affinity = queue_family_affinity;
     memset(&semaphore->submitted_signal, 0,
@@ -177,6 +182,53 @@ static iree_status_t iree_hal_amd_xdna_semaphore_signal(
 static iree_status_t iree_hal_amd_xdna_semaphore_wait(
     iree_hal_semaphore_t* base_semaphore, uint64_t value,
     iree_timeout_t timeout, iree_async_wait_flags_t flags) {
+  iree_hal_amd_xdna_semaphore_t* semaphore =
+      iree_hal_amd_xdna_semaphore_cast(base_semaphore);
+
+  // Failure values sort above every valid timeline value, so failure must be
+  // tested before the ordinary reached-value fast path.
+  const uint64_t current = iree_async_semaphore_query(&semaphore->async);
+  if (current >= IREE_HAL_SEMAPHORE_FAILURE_VALUE) {
+    return iree_hal_semaphore_failure_as_status(current);
+  }
+  if (current >= value) {
+    return iree_ok_status();
+  }
+
+  iree_hal_submitted_signal_flags_t submitted_signal_flags =
+      IREE_HAL_SUBMITTED_SIGNAL_FLAG_NONE;
+  iree_async_axis_t producer_axis = 0;
+  uint64_t producer_epoch = 0;
+  uint64_t producer_value = 0;
+  if (semaphore->epoch_wait.fn &&
+      iree_hal_submitted_signal_load(&semaphore->submitted_signal,
+                                     &submitted_signal_flags, &producer_axis,
+                                     &producer_epoch, &producer_value) &&
+      iree_all_bits_set(
+          submitted_signal_flags,
+          IREE_HAL_SUBMITTED_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT) &&
+      producer_value == value) {
+    iree_status_t status;
+    if (semaphore->epoch_wait.fn(semaphore->epoch_wait.queue, producer_axis,
+                                 producer_epoch, timeout, flags, &status)) {
+      if (!iree_status_is_ok(status)) {
+        return status;
+      }
+      const uint64_t retired_value =
+          iree_async_semaphore_query(&semaphore->async);
+      if (retired_value >= IREE_HAL_SEMAPHORE_FAILURE_VALUE) {
+        return iree_hal_semaphore_failure_as_status(retired_value);
+      }
+      if (retired_value < value) {
+        return iree_make_status(IREE_STATUS_INTERNAL,
+                                "XDNA queue epoch retired without publishing "
+                                "semaphore value %" PRIu64,
+                                value);
+      }
+      return status;
+    }
+  }
+
   return iree_async_semaphore_multi_wait(
       IREE_ASYNC_WAIT_MODE_ALL, (iree_async_semaphore_t**)&base_semaphore,
       &value, 1, timeout, flags, iree_allocator_system());
