@@ -49,6 +49,14 @@ iree_status_t loom_amdgpu_emit_sgpr_byte_offset_term(
     const loom_low_source_memory_dynamic_term_t* term,
     loom_value_id_t* out_low_offset);
 
+// Emits an SGPR byte offset from one proven subgroup-uniform source memory
+// dynamic term. Canonical VGPR inputs are projected without changing their
+// source-value mappings.
+iree_status_t loom_amdgpu_emit_uniform_sgpr_byte_offset_term(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_source_memory_dynamic_term_t* term,
+    loom_value_id_t* out_low_offset);
+
 // Maps a source result to the low register type already selected by the active
 // lowering policy and verifies that it is a register payload.
 iree_status_t loom_amdgpu_low_result_type(loom_low_lower_context_t* context,
@@ -473,6 +481,12 @@ iree_status_t loom_amdgpu_emit_m0_u32(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_resolved_descriptor_t* consumer_descriptor,
     uint32_t value, loom_value_id_t* out_value_id);
+
+// Moves one SGPR value into M0 for special-register packet operands.
+iree_status_t loom_amdgpu_emit_m0_sgpr(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* consumer_descriptor,
+    loom_value_id_t value, loom_value_id_t* out_value_id);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -131,3 +131,55 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0
   s_waitcnt {vmcnt = 0}
   return
 }
+
+// ====
+
+// A subgroup-uniform LDS destination may combine scalar kernel state, a
+// canonical VGPR producer, and a static byte contribution before reaching M0.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @uniform_dynamic_destination() {
+  %unit = index.constant 1 : index
+  %width = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %bank0: index) {
+  %bank = index.assume %bank0 [range(%bank0, 0, 1)] : index
+  %lane = kernel.workitem.id<x> : index
+  %subgroup = kernel.subgroup.id : index
+  %source_offset = index.constant 0 : offset
+  %bank_stride = index.constant 1024 : offset
+  %subgroup_stride = index.constant 256 : offset
+  %dest_bias = index.constant 32 : offset
+  %storage_bytes = index.constant 2048 : offset
+  %bank_offset = index.scale %bank, %bank_stride : index, offset -> offset
+  %subgroup_offset = index.scale %subgroup, %subgroup_stride : index, offset -> offset
+  %dynamic_offset = index.add %bank_offset, %subgroup_offset : offset
+  %dest_offset = index.add %dynamic_offset, %dest_bias : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%source_offset] : buffer -> view<256x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<256x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %dest = buffer.view %scratch[%dest_offset] : buffer -> view<64x1x4xi8>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "bank0"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @uniform_dynamic_destination(%bank: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %26 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
+  %subgroup = v_lshrrev_b32_src0_inline %lane, 6
+  %28 = v_lshlrev_b32_src0_inline %lane, 2
+  %29 = s_lshl_b32_rhs_inline %bank, 10
+  %30 = v_readfirstlane_b32 %subgroup
+  %31 = s_lshl_b32_rhs_inline %30, 8
+  %32 = s_add_u32 %29, %31
+  %33 = s_add_u32_rhs_inline %32, 32
+  %34 = s_mov_b32_m0 %33
+  global_load_lds_dword_saddr %28, %global, %34
+  s_waitcnt {vmcnt = 0}
+  return
+}
