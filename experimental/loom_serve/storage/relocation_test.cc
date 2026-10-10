@@ -38,6 +38,7 @@ class RelocationTest : public ::testing::Test {
   void TearDown() override {
     IREE_ASSERT_OK(loom_serve_execution_drain(execution));
     iree_hal_buffer_release(view);
+    loom_serve_retirement_await(&retirement);
     loom_serve_retirement_deinitialize(&retirement);
     IREE_ASSERT_OK(loom_serve_virtual_buffer_destroy(buffer));
     loom_serve_execution_release(execution);

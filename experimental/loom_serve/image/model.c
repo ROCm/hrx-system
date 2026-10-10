@@ -125,6 +125,7 @@ iree_status_t loom_serve_image_model_destroy(loom_serve_image_model_t* model) {
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->bindings); ++i) {
     iree_hal_buffer_release(model->bindings[i].buffer);
   }
+  loom_serve_retirement_await(&model->retirement);
   loom_serve_retirement_deinitialize(&model->retirement);
   iree_vm_buffer_release(model->invocation.payload);
   loom_serve_residency_destroy(model->residency);

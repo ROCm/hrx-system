@@ -152,6 +152,7 @@ loom_cc_library(
     iree::base
     iree::base::internal
     iree::base::threading
+    iree::base::threading::thread
     iree::hal
     iree::hal::memory::slab_cache
     iree::hal::memory::tlsf_pool
@@ -166,10 +167,10 @@ loom_cc_library(
   SRCS
     "execution.c"
   DEPS
+    ::retirement
     ::workspace
     iree::base
     iree::base::threading
-    iree::base::threading::thread
     iree::hal
   PUBLIC
 )

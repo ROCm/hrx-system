@@ -25,6 +25,10 @@ typedef struct loom_serve_retirement_t {
   iree_notification_t notification;
   // Root views still retained by callers, commands, children or queues.
   iree_host_size_t count;
+  // Optional nonblocking owner wake, invoked under mutex at final retirement.
+  void (*wake)(void* user_data);
+  // Borrowed wake payload, protected through observer detachment.
+  void* user_data;
 } loom_serve_retirement_t;
 
 void loom_serve_retirement_initialize(loom_serve_retirement_t* retirement);
@@ -37,12 +41,23 @@ iree_status_t loom_serve_retirement_track(loom_serve_retirement_t* retirement,
                                           iree_hal_buffer_t** buffer,
                                           iree_allocator_t host_allocator);
 
+// Observes final view retirement without waiting. The callback only schedules
+// an owner turn; it must not reenter this object, destroy resources or block.
+// Set the observer before querying is_idle to avoid losing the final wake.
+// NULL detaches and joins a callback's final access to user_data. The owner
+// serializes tracking and terminal observation; callbacks may run concurrently.
+void loom_serve_retirement_set_observer(loom_serve_retirement_t* retirement,
+                                        void (*wake)(void* user_data),
+                                        void* user_data);
+bool loom_serve_retirement_is_idle(loom_serve_retirement_t* retirement);
+
 // Joins actual final ownership, independently of semaphore success or failure.
 // The caller first releases its tracked views and cached consumers. No new
 // views may be tracked concurrently with this wait. Queue callbacks may run.
 void loom_serve_retirement_await(loom_serve_retirement_t* retirement);
 
-// Joins remaining views and releases the notification primitives.
+// Releases the notification primitives after is_idle or await proved all views
+// retired. Never waits for views; the owner has stopped tracking new ones.
 void loom_serve_retirement_deinitialize(loom_serve_retirement_t* retirement);
 
 #ifdef __cplusplus

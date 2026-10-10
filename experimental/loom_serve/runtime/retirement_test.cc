@@ -6,6 +6,8 @@
 #include "experimental/loom_serve/runtime/retirement.h"
 
 #include <array>
+#include <condition_variable>
+#include <mutex>
 
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/storage/memory.h"
@@ -16,6 +18,13 @@ namespace {
 
 class RetirementTest : public ::testing::TestWithParam<bool> {
  protected:
+  static void Wake(void* user_data) {
+    auto* self = static_cast<RetirementTest*>(user_data);
+    std::lock_guard<std::mutex> lock(self->wake_mutex);
+    ++self->wake_count;
+    self->wake_condition.notify_one();
+  }
+
   void SetUp() override {
     loom_serve_retirement_initialize(&retirement);
     const loom_serve_device_options_t options = {
@@ -52,6 +61,7 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
       IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, 2, nullptr));
     }
     iree_hal_buffer_release(view);
+    loom_serve_retirement_await(&retirement);
     loom_serve_retirement_deinitialize(&retirement);
     iree_hal_semaphore_release(completion);
     iree_hal_semaphore_release(uploaded);
@@ -72,6 +82,12 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
   loom_serve_memory_statistics_t statistics = {};
   // Final ownership counter shared with queue completion callbacks.
   loom_serve_retirement_t retirement = {};
+  // Protects the nonblocking callback publication to the outer test owner.
+  std::mutex wake_mutex;
+  // Outer wait for the actual final buffer release, not semaphore readiness.
+  std::condition_variable wake_condition;
+  // Final retirement notifications; detachment prevents subsequent callbacks.
+  uint32_t wake_count = 0;
   // Host reference released after the queue has accepted its nested child.
   iree_hal_buffer_t* view = nullptr;
   // Unsignaled dependency holding accepted work without sleeps or GPU loops.
@@ -90,6 +106,8 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
 };
 
 TEST_P(RetirementTest, NestedQueueViewsOutliveFailedReadiness) {
+  loom_serve_retirement_set_observer(&retirement, Wake, this);
+  EXPECT_TRUE(loom_serve_retirement_is_idle(&retirement));
   auto* original = view;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -136,17 +154,36 @@ TEST_P(RetirementTest, NestedQueueViewsOutliveFailedReadiness) {
                                 IREE_ASYNC_WAIT_FLAG_NONE));
   }
   // Readiness may have failed, but the accepted transfer still owns the view.
-  iree_slim_mutex_lock(&retirement.mutex);
-  EXPECT_EQ(retirement.count, 1u);
-  iree_slim_mutex_unlock(&retirement.mutex);
+  EXPECT_FALSE(loom_serve_retirement_is_idle(&retirement));
+  {
+    std::lock_guard<std::mutex> lock(wake_mutex);
+    EXPECT_EQ(wake_count, 0u);
+  }
   EXPECT_EQ(statistics.committed_bytes, kSlabBytes);
   IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, 1, nullptr));
-  loom_serve_retirement_await(&retirement);
+  {
+    std::unique_lock<std::mutex> lock(wake_mutex);
+    wake_condition.wait(lock, [&] { return wake_count != 0; });
+    EXPECT_EQ(wake_count, 1u);
+  }
+  EXPECT_TRUE(loom_serve_retirement_is_idle(&retirement));
+  loom_serve_retirement_set_observer(&retirement, nullptr, nullptr);
   if (!GetParam()) {
     IREE_EXPECT_OK(iree_hal_semaphore_wait(
         completion, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
     EXPECT_EQ(payload.output, payload.input);
   }
+  // A later, caller-owned view remains tracked, but a detached observer never
+  // borrows the old owner payload again.
+  view = loom_serve_virtual_buffer_handle(reservation);
+  iree_hal_buffer_retain(view);
+  IREE_ASSERT_OK(
+      loom_serve_retirement_track(&retirement, &view, iree_allocator_system()));
+  EXPECT_FALSE(loom_serve_retirement_is_idle(&retirement));
+  iree_hal_buffer_release(view);
+  view = nullptr;
+  EXPECT_TRUE(loom_serve_retirement_is_idle(&retirement));
+  EXPECT_EQ(wake_count, 1u);
   // Neither successful nor failed readiness is used to authorize this unmap.
   IREE_ASSERT_OK(loom_serve_virtual_buffer_destroy(reservation));
   reservation = nullptr;

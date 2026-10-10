@@ -91,6 +91,8 @@ struct Compilation {
                              const iree_task_worker_context_t*,
                              iree_task_process_drain_result_t* result) {
     auto* self = static_cast<Compilation*>(process->user_data);
+    loom_serve_execution_release(self->retired_execution);
+    self->retired_execution = nullptr;
     auto status = loom_serve_jit_compile_async(self->jit, self->root,
                                                self->config, Complete, self);
     if (!iree_status_is_ok(status)) {
@@ -138,6 +140,8 @@ struct Compilation {
 
   // Catalog with no other compilation outstanding; owned when retiring it.
   loom_serve_jit_t* jit = nullptr;
+  // Optional retired model released by the shared worker before compilation.
+  loom_serve_execution_t* retired_execution = nullptr;
   // Exercises worker-side retirement at the actual final compilation callback.
   bool retire_catalog = false;
   // Borrowed source root retained through Await.
@@ -786,6 +790,102 @@ TEST_P(JitTest, IndependentModelCompletesWhileSharedWorkspaceGrows) {
   EXPECT_EQ(retired.reservation_count, 0u);
   EXPECT_EQ(retired.reserve_count, 2u);
   EXPECT_EQ(retired.release_count, 2u);
+}
+
+TEST_P(JitTest, RetiredModelDoesNotJoinRawQueueAllocationCaptures) {
+  IREE_ASSERT_OK(
+      loom_serve_device_create_execution(device_owner_, &held_.execution));
+  IREE_ASSERT_OK(
+      loom_serve_execution_reserve_workspace(held_.execution, 64, 16));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &held_.gate));
+  uint64_t value = 1;
+  IREE_ASSERT_OK(
+      loom_serve_execution_barrier(held_.execution, {1, &held_.gate, &value}));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = {.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+                          IREE_HAL_BUFFER_USAGE_TRANSFER,
+                 .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+                 .min_alignment = 16},
+      .allocation_size = 64};
+  IREE_ASSERT_OK(
+      loom_serve_execution_alloca(held_.execution, &request, &held_.buffer));
+  IREE_ASSERT_OK(
+      loom_serve_execution_dealloca(held_.execution, held_.buffer, &value));
+  iree_hal_buffer_release(held_.buffer);
+  held_.buffer = nullptr;
+  EXPECT_TRUE(loom_serve_execution_is_retired(held_.execution));
+
+  // Neither raw queue operation can run yet, but no model consumer remains.
+  // A hidden join in release blocks the shared worker and prevents this real
+  // source compilation from completing. The gate opens only after GPU output.
+  Compilation compilation;
+  compilation.jit = jit_;
+  compilation.root = IREE_SV("temporary_advance");
+  compilation.retired_execution = held_.execution;
+  held_.execution = nullptr;
+  const loomc_config_binding_t bindings[] = {
+      {loomc_make_cstring_view("increment.delta"),
+       loomc_make_cstring_view("7")},
+      {loomc_make_cstring_view("increment.temporary_bytes"),
+       loomc_make_cstring_view("4160")},
+  };
+  const loomc_config_options_t config = {
+      bindings,
+      IREE_ARRAYSIZE(bindings),
+      {},
+      LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED};
+  compilation.config = &config;
+  compilation.Start(
+      loom_serve_host_executor(loom_serve_device_host(device_owner_)));
+  loom_serve_jit_stage_t* stage = nullptr;
+  IREE_ASSERT_OK(compilation.Await(&stage));
+  auto status = loom_serve_jit_stage_record(
+      stage, iree_hal_queue_family(dispatch_),
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, &commands_[1]);
+  transients_[1] = loom_serve_jit_stage_program(stage)->requirements.transient;
+  loom_serve_jit_stage_destroy(stage);
+  IREE_ASSERT_OK(status);
+  IREE_ASSERT_OK(Compile("5", 0));
+  IREE_ASSERT_OK(PrepareVm());
+  iree_hal_buffer_params_t params = {};
+  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(device_), params, sizeof(input_), &buffer_));
+  const iree_hal_transfer_operation_t upload = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+      .upload = {input_.data(), buffer_, 0, sizeof(input_)}};
+  IREE_ASSERT_OK(loom_serve_execution_transfer(execution_, 1, &upload, &value));
+  iree_vm_function_t selected_step;
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process_, IREE_SV("model"), IREE_SV("selected_step"), &selected_step));
+  iree_vm_variant_t arguments[] = {
+      iree_vm_variant_from_i32(1),
+      iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffer_)};
+  iree_vm_variant_t results[1] = {};
+  status = iree_vm_invoke(invocation_, selected_step,
+                          iree_vm_variant_span_from_array(arguments),
+                          iree_vm_variant_span_from_array(results));
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+  IREE_ASSERT_OK(status);
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download = {buffer_, 0, output_.data(), sizeof(output_)}};
+  IREE_ASSERT_OK(
+      loom_serve_execution_feedback(execution_, 1, &download, &value));
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
+  for (int32_t output : output_) {
+    EXPECT_EQ(output, 107);
+  }
+  uint64_t observed = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(held_.gate, &observed));
+  EXPECT_EQ(observed, 0u);
+  IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, 0));
+  // Final application teardown owns the remaining raw captures. It opens the
+  // predecessor and joins them while keeping the shared pool/device alive.
 }
 
 INSTANTIATE_TEST_SUITE_P(SharedWorkers, JitTest, ::testing::Values(1, 4));

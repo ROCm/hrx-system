@@ -29,6 +29,8 @@ iree_status_t loom_serve_workspace_create(
     iree_hal_queue_t* transfer_queue, loom_serve_workspace_t** out_workspace,
     iree_allocator_t host_allocator);
 void loom_serve_workspace_retain(loom_serve_workspace_t* workspace);
+// Final outer application teardown, after model consumers have retired. Joins
+// any remaining queue allocation bookkeeping before releasing its source pools.
 void loom_serve_workspace_release(loom_serve_workspace_t* workspace);
 
 // Registers a reflected command requirement without waiting for device work or
@@ -45,6 +47,31 @@ iree_status_t loom_serve_workspace_reserve(loom_serve_workspace_t* workspace,
 // HAL's.
 iree_status_t loom_serve_workspace_acquire_pool(
     loom_serve_workspace_t* workspace, iree_hal_pool_t** out_pool);
+
+// Queue-owned allocation roots borrow their source pool. A scope records those
+// two references independently of a model's payloads and logical lifetime.
+// One execution owner serializes acquire/capture/retire; no queue work or
+// custom suballocation is performed by this bookkeeping.
+typedef struct loom_serve_workspace_scope_t loom_serve_workspace_scope_t;
+iree_status_t loom_serve_workspace_scope_create(
+    loom_serve_workspace_t* workspace,
+    loom_serve_workspace_scope_t** out_scope);
+
+// Makes room for one capture and returns a retained current pool. Queue alloca
+// follows. On queue rejection, the caller releases the pool; on acceptance,
+// capture transfers that pool reference and retains the returned allocation.
+iree_status_t loom_serve_workspace_scope_acquire(
+    loom_serve_workspace_scope_t* scope, iree_hal_pool_t** out_pool);
+void loom_serve_workspace_scope_capture(loom_serve_workspace_scope_t* scope,
+                                        iree_hal_pool_t* pool,
+                                        iree_hal_buffer_t* buffer);
+
+// Relinquishes execution ownership without allocating or waiting. The shared
+// workspace preserves raw root/pool references, never model pointers or
+// callbacks. Acquisition, trim and statistics collect raw captures from both
+// active and released scopes; final workspace teardown joins any remainder.
+// NULL is accepted.
+void loom_serve_workspace_scope_retire(loom_serve_workspace_scope_t* scope);
 
 // Combined retained backing and logical reservation counters across
 // generations. Backing includes idle cached slabs, but excludes detached native

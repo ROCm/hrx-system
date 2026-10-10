@@ -56,6 +56,7 @@ class SnapshotTest : public ::testing::Test {
     for (auto* root : roots) {
       iree_hal_buffer_release(root);
     }
+    loom_serve_retirement_await(&retirement);
     loom_serve_retirement_deinitialize(&retirement);
     for (auto* reservation : reservations) {
       IREE_EXPECT_OK(loom_serve_virtual_buffer_destroy(reservation));

@@ -6,8 +6,8 @@
 
 #include "experimental/loom_serve/runtime/execution.h"
 
+#include "experimental/loom_serve/runtime/retirement.h"
 #include "iree/base/threading/mutex.h"
-#include "iree/base/threading/thread.h"
 
 typedef struct loom_serve_execution_timeline_t {
   // Retained timeline identifying accepted operations on this branch.
@@ -15,13 +15,6 @@ typedef struct loom_serve_execution_timeline_t {
   // Last accepted submission, advanced only after successful queue submission.
   uint64_t submitted_value;
 } loom_serve_execution_timeline_t;
-
-typedef struct execution_root_t {
-  // Owned allocation wrapper until every caller and queue capture releases it.
-  iree_hal_buffer_t* buffer;
-  // Retained source pool borrowed by the wrapper, including during destruction.
-  iree_hal_pool_t* pool;
-} execution_root_t;
 
 struct loom_serve_execution_t {
   // Intrusive ownership shared by the host and native VM module.
@@ -42,59 +35,11 @@ struct loom_serve_execution_t {
   loom_serve_execution_timeline_t feedback;
   // Protects timeline reservation through queue acceptance, never device waits.
   iree_slim_mutex_t mutex;
-  // Private roots captured by this domain, independent of other model work.
-  struct {
-    // Owned roots awaiting the final caller/queue release, in capture order.
-    execution_root_t* values;
-    // Capacity of the reusable root ring.
-    iree_host_size_t capacity;
-    // First occupied ring slot.
-    iree_host_size_t head;
-    // Number of occupied ring slots.
-    iree_host_size_t count;
-  } roots;
+  // Raw allocation/pool captures, transferable to the shared workspace owner.
+  loom_serve_workspace_scope_t* scope;
+  // Model-visible views captured by execution and host payload transfers.
+  loom_serve_retirement_t consumers;
 };
-
-// The registry owns one reference; private roots are not published to models.
-// A unique root has no remaining caller or queue users, including failed work
-// whose semaphore was failed before its captured resources were released.
-// Reaping never waits on the submission path and reuses the host ring storage.
-static void execution_reap_workspace(loom_serve_execution_t* execution) {
-  while (execution->roots.count) {
-    execution_root_t* root = &execution->roots.values[execution->roots.head];
-    if (iree_atomic_ref_count_load(
-            &((iree_hal_resource_t*)root->buffer)->ref_count) != 1) {
-      break;
-    }
-    iree_hal_buffer_release(root->buffer);
-    iree_hal_pool_release(root->pool);
-    execution->roots.head =
-        (execution->roots.head + 1) % execution->roots.capacity;
-    --execution->roots.count;
-  }
-}
-
-static iree_status_t execution_reserve_workspace_root(
-    loom_serve_execution_t* execution) {
-  execution_reap_workspace(execution);
-  if (execution->roots.count < execution->roots.capacity) {
-    return iree_ok_status();
-  }
-  const iree_host_size_t capacity = iree_max(16, execution->roots.capacity * 2);
-  execution_root_t* roots = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      execution->host_allocator, capacity, sizeof(*roots), (void**)&roots));
-  for (iree_host_size_t i = 0; i < execution->roots.count; ++i) {
-    roots[i] =
-        execution->roots
-            .values[(execution->roots.head + i) % execution->roots.capacity];
-  }
-  iree_allocator_free(execution->host_allocator, execution->roots.values);
-  execution->roots.values = roots;
-  execution->roots.capacity = capacity;
-  execution->roots.head = 0;
-  return iree_ok_status();
-}
 
 void loom_serve_execution_retain(loom_serve_execution_t* execution) {
   iree_atomic_ref_count_inc(&execution->ref_count);
@@ -102,9 +47,9 @@ void loom_serve_execution_retain(loom_serve_execution_t* execution) {
 
 void loom_serve_execution_release(loom_serve_execution_t* execution) {
   if (execution && iree_atomic_ref_count_dec(&execution->ref_count) == 1) {
-    IREE_ASSERT_EQ(execution->roots.count, 0);
+    loom_serve_retirement_deinitialize(&execution->consumers);
+    loom_serve_workspace_scope_retire(execution->scope);
     loom_serve_workspace_release(execution->workspace);
-    iree_allocator_free(execution->host_allocator, execution->roots.values);
     iree_slim_mutex_deinitialize(&execution->mutex);
     iree_hal_semaphore_release(execution->feedback.semaphore);
     iree_hal_semaphore_release(execution->work.semaphore);
@@ -113,6 +58,16 @@ void loom_serve_execution_release(loom_serve_execution_t* execution) {
     iree_hal_device_release(execution->device);
     iree_allocator_free(execution->host_allocator, execution);
   }
+}
+
+void loom_serve_execution_set_retirement_observer(
+    loom_serve_execution_t* execution, void (*wake)(void* user_data),
+    void* user_data) {
+  loom_serve_retirement_set_observer(&execution->consumers, wake, user_data);
+}
+
+bool loom_serve_execution_is_retired(loom_serve_execution_t* execution) {
+  return loom_serve_retirement_is_idle(&execution->consumers);
 }
 
 iree_status_t loom_serve_execution_reserve_workspace(
@@ -128,10 +83,8 @@ iree_status_t loom_serve_execution_alloca(
   *out_buffer = NULL;
   iree_slim_mutex_lock(&execution->mutex);
   iree_hal_pool_t* pool = NULL;
-  iree_status_t status = execution_reserve_workspace_root(execution);
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_workspace_acquire_pool(execution->workspace, &pool);
-  }
+  iree_status_t status =
+      loom_serve_workspace_scope_acquire(execution->scope, &pool);
   if (iree_status_is_ok(status) &&
       execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
     status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -148,11 +101,15 @@ iree_status_t loom_serve_execution_alloca(
   }
   if (iree_status_is_ok(status)) {
     execution->work.submitted_value = next_value;
-    const iree_host_size_t tail =
-        (execution->roots.head + execution->roots.count++) %
-        execution->roots.capacity;
-    execution->roots.values[tail] = (execution_root_t){*out_buffer, pool};
-    iree_hal_buffer_retain(*out_buffer);
+    loom_serve_workspace_scope_capture(execution->scope, pool, *out_buffer);
+    status = loom_serve_retirement_track(&execution->consumers, out_buffer,
+                                         execution->host_allocator);
+    if (!iree_status_is_ok(status)) {
+      // Alloca was accepted even if its model-view allocation failed. The
+      // shared scope keeps its original root and pool through queue retirement.
+      iree_hal_buffer_release(*out_buffer);
+      *out_buffer = NULL;
+    }
   } else {
     iree_hal_pool_release(pool);
   }
@@ -174,8 +131,9 @@ iree_status_t loom_serve_execution_dealloca(loom_serve_execution_t* execution,
                                            &execution->work.submitted_value};
   const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
                                              &next_value};
+  iree_hal_buffer_t* root = iree_hal_buffer_allocated_buffer(buffer);
   iree_status_t status = iree_hal_queue_dealloca(execution->dispatch_queue,
-                                                 waits, signals, 1, &buffer);
+                                                 waits, signals, 1, &root);
   if (iree_status_is_ok(status)) {
     execution->work.submitted_value = next_value;
     *out_value = next_value;
@@ -201,6 +159,7 @@ iree_status_t loom_serve_execution_create(
                                              (void**)&execution));
   iree_atomic_ref_count_init(&execution->ref_count);
   iree_slim_mutex_initialize(&execution->mutex);
+  loom_serve_retirement_initialize(&execution->consumers);
   execution->host_allocator = host_allocator;
   execution->workspace = workspace;
   loom_serve_workspace_retain(workspace);
@@ -210,9 +169,13 @@ iree_status_t loom_serve_execution_create(
   iree_hal_queue_retain(dispatch_queue);
   execution->transfer_queue = transfer_queue;
   iree_hal_queue_retain(transfer_queue);
-  iree_status_t status = iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &execution->work.semaphore);
+  iree_status_t status =
+      loom_serve_workspace_scope_create(workspace, &execution->scope);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_create(
+        device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &execution->work.semaphore);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_create(
         device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
@@ -378,18 +341,8 @@ iree_status_t loom_serve_execution_drain(loom_serve_execution_t* execution) {
   iree_status_t status = loom_serve_execution_wait(execution, work_value);
   status = iree_status_join(
       status, loom_serve_execution_feedback_wait(execution, feedback_value));
-  // Host-owner drain only. No queue callback tears down shared state. A failed
-  // timeline can precede the queue's final resource release, so join private
-  // roots as well before the shared pool can be trimmed or destroyed.
-  for (;;) {
-    iree_slim_mutex_lock(&execution->mutex);
-    execution_reap_workspace(execution);
-    const bool retired = execution->roots.count == 0;
-    iree_slim_mutex_unlock(&execution->mutex);
-    if (retired) {
-      break;
-    }
-    iree_thread_yield();
-  }
+  // Consumer captures protect model payloads after early failed readiness.
+  // Raw allocation objects independently remain protected by the shared pool.
+  loom_serve_retirement_await(&execution->consumers);
   return status;
 }

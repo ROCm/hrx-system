@@ -31,10 +31,25 @@ iree_status_t loom_serve_execution_create(
 
 void loom_serve_execution_retain(loom_serve_execution_t* execution);
 
-// Releases ownership without an implicit host wait. The owner must drain both
-// branches and observe failures before final release or recycling borrowed
-// host I/O storage.
+// Releases ownership without an implicit host wait. The owner first retires
+// all model-visible consumers and observes their terminal outcome. Raw
+// allocation/deallocation bookkeeping can remain pending: it contains no model
+// payloads and stays owned by the shared workspace. External buffers and host
+// payloads require their own retirement when not covered by execution_alloca.
 void loom_serve_execution_release(loom_serve_execution_t* execution);
+
+// Terminal model-consumer observation, independent of semaphore readiness.
+// Stop submissions, attach the nonblocking wake, release caller-owned views,
+// and query is_retired. A callback only schedules the owner, never reenters
+// this object or tears down resources. Detaching joins its final payload
+// access. This covers roots returned by execution_alloca and their dependent
+// views; weights and other externally owned buffers have their own retirement
+// scopes. Raw alloca/dealloca bookkeeping may outlive the model at the shared
+// workspace.
+void loom_serve_execution_set_retirement_observer(
+    loom_serve_execution_t* execution, void (*wake)(void* user_data),
+    void* user_data);
+bool loom_serve_execution_is_retired(loom_serve_execution_t* execution);
 
 // Cold registration of a command's private workspace requirement. Grows the
 // shared pool's slab geometry without draining any domain or committing device
@@ -44,9 +59,11 @@ iree_status_t loom_serve_execution_reserve_workspace(
     iree_device_size_t alignment);
 
 // Enqueues a private workspace allocation on the work timeline. The caller
-// owns the returned root, orders its consumers through this execution domain,
-// enqueues dealloca, and releases the root before draining the domain. The pool
-// belongs to the shared workspace; this domain tracks final root ownership.
+// owns the returned tracked view, orders its consumers through this domain,
+// enqueues execution_dealloca, and releases the view before draining the
+// domain. The shared workspace separately retains the original root and source
+// pool. A failed view allocation after accepted alloca leaves no caller buffer,
+// but the accepted timeline and allocation bookkeeping remain protected.
 iree_status_t loom_serve_execution_alloca(
     loom_serve_execution_t* execution,
     const iree_hal_pool_reservation_request_t* request,
@@ -116,7 +133,8 @@ iree_status_t loom_serve_execution_feedback_wait(
 // never advances either frontier to an unsignaled value. A failed semaphore is
 // not proof of final queue resource retirement; terminal owners also join their
 // tracked buffer views before freeing borrowed payloads or virtual mappings.
-// Private workspace roots are joined here after all callers release them.
+// Model-visible workspace views are joined after all callers release them;
+// raw allocation bookkeeping transfers on release to the shared workspace.
 iree_status_t loom_serve_execution_drain(loom_serve_execution_t* execution);
 
 #ifdef __cplusplus

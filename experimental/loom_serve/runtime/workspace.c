@@ -8,6 +8,7 @@
 
 #include "iree/base/internal/math.h"
 #include "iree/base/threading/mutex.h"
+#include "iree/base/threading/thread.h"
 #include "iree/hal/memory/slab_cache.h"
 #include "iree/hal/memory/tlsf_pool.h"
 
@@ -23,6 +24,30 @@ typedef struct workspace_generation_t {
   // Older generation still accounted until its roots and queue captures retire.
   struct workspace_generation_t* next;
 } workspace_generation_t;
+
+typedef struct workspace_root_t {
+  // Owned allocation root until every caller and queue capture releases it.
+  iree_hal_buffer_t* buffer;
+  // Retained source pool borrowed by the root, including during destruction.
+  iree_hal_pool_t* pool;
+} workspace_root_t;
+
+struct loom_serve_workspace_scope_t {
+  // Borrowed shared owner, retained by the execution until scope retirement.
+  loom_serve_workspace_t* workspace;
+  // Owned raw allocation records; never contains model payloads or callbacks.
+  workspace_root_t* roots;
+  // Reusable ring capacity, grown before queue submission.
+  iree_host_size_t capacity;
+  // First occupied ring entry.
+  iree_host_size_t head;
+  // Occupied entries awaiting final caller/queue root release.
+  iree_host_size_t count;
+  // True after execution releases its ownership; collection then frees storage.
+  bool released;
+  // Shared-owner scope chain, including active and released execution domains.
+  struct loom_serve_workspace_scope_t* next;
+};
 
 struct loom_serve_workspace_t {
   // Ownership shared by the device and its independent execution domains.
@@ -45,7 +70,25 @@ struct loom_serve_workspace_t {
   workspace_generation_t* current;
   // Cumulative counters preserved when an idle old generation is destroyed.
   iree_hal_pool_stats_t retired;
+  // Raw allocation bookkeeping shared with active and released executions.
+  loom_serve_workspace_scope_t* scopes;
 };
+
+// The scope owns one reference. Uniqueness proves the queue's allocation and
+// deallocation records have retired, independently of semaphore readiness.
+static void workspace_scope_collect(loom_serve_workspace_scope_t* scope) {
+  while (scope->count) {
+    workspace_root_t* root = &scope->roots[scope->head];
+    if (iree_atomic_ref_count_load(
+            &((iree_hal_resource_t*)root->buffer)->ref_count) != 1) {
+      break;
+    }
+    iree_hal_buffer_release(root->buffer);
+    iree_hal_pool_release(root->pool);
+    scope->head = (scope->head + 1) % scope->capacity;
+    --scope->count;
+  }
+}
 
 static void workspace_add_counters(iree_hal_pool_stats_t* total,
                                    const iree_hal_pool_stats_t* source) {
@@ -72,8 +115,21 @@ static void workspace_generation_destroy(workspace_generation_t* generation,
 
 // Execution records retain the pool until the last root/queue user retires.
 // The owner's sole reference therefore proves an old generation can be freed,
-// independently of semaphore success or failure. Stable geometry has no walk.
+// independently of semaphore success or failure. Active scopes are collected
+// too: idle models must not require another submission to enable backing trim.
 static void workspace_collect(loom_serve_workspace_t* workspace) {
+  loom_serve_workspace_scope_t** scope_link = &workspace->scopes;
+  while (*scope_link) {
+    loom_serve_workspace_scope_t* scope = *scope_link;
+    workspace_scope_collect(scope);
+    if (scope->count || !scope->released) {
+      scope_link = &scope->next;
+    } else {
+      *scope_link = scope->next;
+      iree_allocator_free(workspace->allocator, scope->roots);
+      iree_allocator_free(workspace->allocator, scope);
+    }
+  }
   if (!workspace->current) {
     return;
   }
@@ -100,6 +156,13 @@ void loom_serve_workspace_retain(loom_serve_workspace_t* workspace) {
 void loom_serve_workspace_release(loom_serve_workspace_t* workspace) {
   if (!workspace || iree_atomic_ref_count_dec(&workspace->ref_count) != 1) {
     return;
+  }
+  // Only final application teardown joins raw queue ownership. Live model
+  // removal relinquishes its scope without waiting for queue bookkeeping.
+  workspace_collect(workspace);
+  while (workspace->scopes) {
+    iree_thread_yield();
+    workspace_collect(workspace);
   }
   workspace_generation_t* generation = workspace->current;
   while (generation) {
@@ -246,6 +309,7 @@ iree_status_t loom_serve_workspace_acquire_pool(
 iree_hal_pool_stats_t loom_serve_workspace_statistics(
     loom_serve_workspace_t* workspace) {
   iree_slim_mutex_lock(&workspace->mutex);
+  workspace_collect(workspace);
   iree_hal_pool_stats_t total = workspace->retired;
   for (workspace_generation_t* generation = workspace->current; generation;
        generation = generation->next) {
@@ -263,6 +327,73 @@ iree_hal_pool_stats_t loom_serve_workspace_statistics(
   }
   iree_slim_mutex_unlock(&workspace->mutex);
   return total;
+}
+
+iree_status_t loom_serve_workspace_scope_create(
+    loom_serve_workspace_t* workspace,
+    loom_serve_workspace_scope_t** out_scope) {
+  *out_scope = NULL;
+  loom_serve_workspace_scope_t* scope = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(workspace->allocator,
+                                             sizeof(*scope), (void**)&scope));
+  scope->workspace = workspace;
+  iree_slim_mutex_lock(&workspace->mutex);
+  scope->next = workspace->scopes;
+  workspace->scopes = scope;
+  iree_slim_mutex_unlock(&workspace->mutex);
+  *out_scope = scope;
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_workspace_scope_acquire(
+    loom_serve_workspace_scope_t* scope, iree_hal_pool_t** out_pool) {
+  *out_pool = NULL;
+  loom_serve_workspace_t* workspace = scope->workspace;
+  iree_slim_mutex_lock(&workspace->mutex);
+  workspace_scope_collect(scope);
+  iree_status_t status = iree_ok_status();
+  if (scope->count == scope->capacity) {
+    const iree_host_size_t capacity = iree_max(16, scope->capacity * 2);
+    workspace_root_t* roots = NULL;
+    status = iree_allocator_malloc_array(workspace->allocator, capacity,
+                                         sizeof(*roots), (void**)&roots);
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < scope->count; ++i) {
+        roots[i] = scope->roots[(scope->head + i) % scope->capacity];
+      }
+      iree_allocator_free(workspace->allocator, scope->roots);
+      scope->roots = roots;
+      scope->capacity = capacity;
+      scope->head = 0;
+    }
+  }
+  iree_slim_mutex_unlock(&workspace->mutex);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_workspace_acquire_pool(workspace, out_pool);
+  }
+  return status;
+}
+
+void loom_serve_workspace_scope_capture(loom_serve_workspace_scope_t* scope,
+                                        iree_hal_pool_t* pool,
+                                        iree_hal_buffer_t* buffer) {
+  iree_slim_mutex_lock(&scope->workspace->mutex);
+  const iree_host_size_t tail =
+      (scope->head + scope->count++) % scope->capacity;
+  scope->roots[tail] = (workspace_root_t){buffer, pool};
+  iree_hal_buffer_retain(buffer);
+  iree_slim_mutex_unlock(&scope->workspace->mutex);
+}
+
+void loom_serve_workspace_scope_retire(loom_serve_workspace_scope_t* scope) {
+  if (!scope) {
+    return;
+  }
+  loom_serve_workspace_t* workspace = scope->workspace;
+  iree_slim_mutex_lock(&workspace->mutex);
+  scope->released = true;
+  workspace_collect(workspace);
+  iree_slim_mutex_unlock(&workspace->mutex);
 }
 
 void loom_serve_workspace_trim(loom_serve_workspace_t* workspace) {

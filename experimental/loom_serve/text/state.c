@@ -288,6 +288,7 @@ iree_status_t loom_serve_text_state_deinitialize(
   }
   // Failed readiness does not retire borrowed payloads. Final queue ownership
   // of their device counterparts does, including nested row views.
+  loom_serve_retirement_await(&state->retirement);
   loom_serve_retirement_deinitialize(&state->retirement);
   loom_serve_text_storage_deinitialize(&state->storage);
   iree_allocator_free(state->allocator, state->rows);
