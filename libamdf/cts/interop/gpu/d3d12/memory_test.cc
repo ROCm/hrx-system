@@ -271,9 +271,11 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
               AMDF_STATUS_OK);
     const amdf_memory_device_access_t access = {
         device_,
-        {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
-                   AMDF_MEMORY_ACCESS_EXECUTE,
-         .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
+        {
+            .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
+                      AMDF_MEMORY_ACCESS_EXECUTE,
+            .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+        }};
     amdf_memory_create_info_t create = {};
     create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     create.structure_size = sizeof(create);

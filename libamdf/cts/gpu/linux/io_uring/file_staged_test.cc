@@ -178,9 +178,10 @@ void GpuFileStagedTest::Run(const StagedCase& test_case) {
   // cannot inherit an owned allocation's selected no-GCR backing policy.
   const auto host_site = source->HostSite();
   const auto sdma_site = source->DeviceSite(sdma_family_.ordinal);
-  amdf_memory_pair_info_t source_pair = {};
-  source_pair.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-  source_pair.structure_size = sizeof(source_pair);
+  amdf_memory_pair_info_t source_pair = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(source_pair),
+  };
   const amdf_status_t source_status =
       api_->memory_query_pair_info(&host_site, &sdma_site, &source_pair);
   if (amdf_status_domain(source_status) == AMDF_STATUS_DOMAIN_API &&
@@ -353,8 +354,9 @@ void GpuFileStagedTest::Run(const StagedCase& test_case) {
   }
   std::vector<uint32_t> expected_control(control->info.byte_length / 4,
                                          kControlGuard);
-  aql::Signal terminal = {};
-  terminal.kind = 1;
+  aql::Signal terminal = {
+      .kind = 1,
+  };
   std::memcpy(expected_control.data(), &terminal, sizeof(terminal));
   expected_control[kCompletionOffset / 4] = 0;
   expected_control[kFileStateOffset / 4] = 0;
@@ -609,17 +611,18 @@ void GpuFileStagedTest::Run(const StagedCase& test_case) {
         test_case.failure == FileFailure::kNone || job < kFailureJob;
     const bool partial =
         test_case.failure == FileFailure::kPartialEof && job == kFailureJob;
-    protocol::Result expected = {};
-    expected.block =
-        RequestHash(expected_requests[job], job + 1) & (kFileBlocks - 1);
-    expected.word_count = word_count;
-    expected.hash = RequestHash(expected_requests[job], job + 1);
-    expected.status = complete                                        ? 0
-                      : test_case.failure == FileFailure::kPartialEof ? -ENODATA
-                                                                      : -EBADF;
-    expected.bytes_read = complete  ? test_case.byte_length
-                          : partial ? test_case.byte_length / 2
-                                    : 0;
+    protocol::Result expected = {
+        .block =
+            RequestHash(expected_requests[job], job + 1) & (kFileBlocks - 1),
+        .word_count = word_count,
+        .hash = RequestHash(expected_requests[job], job + 1),
+        .status = complete                                        ? 0
+                  : test_case.failure == FileFailure::kPartialEof ? -ENODATA
+                                                                  : -EBADF,
+        .bytes_read = complete  ? test_case.byte_length
+                      : partial ? test_case.byte_length / 2
+                                : 0,
+    };
     const uint32_t minimum_requests = complete             ? 1
                                       : partial            ? 2
                                       : job == kFailureJob ? 1

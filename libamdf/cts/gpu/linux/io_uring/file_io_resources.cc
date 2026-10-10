@@ -78,8 +78,9 @@ void GpuFileIoResources::InitializeFileIo(const amdf_api_t* api,
                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT_NE(probe_pages, MAP_FAILED) << std::strerror(errno);
   caller_pages_.push_back({probe_pages, probe_byte_length});
-  io_uring_params probe = {};
-  probe.flags = kCallerRingSetupFlags;
+  io_uring_params probe = {
+      .flags = kCallerRingSetupFlags,
+  };
   probe.sq_off.user_addr = reinterpret_cast<uintptr_t>(probe_pages);
   probe.cq_off.user_addr = probe.sq_off.user_addr + page_byte_length_;
   const int probe_file =
@@ -131,16 +132,19 @@ void GpuFileIoResources::CreateRegisteredPages(size_t byte_length,
               initial_word);
   const amdf_memory_device_access_t access = {
       gpu_.device,
-      {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-       .flags =
-           AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS},
+      {
+          .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+          .flags =
+              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+      },
   };
-  amdf_memory_create_info_t creation = {};
-  creation.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-  creation.structure_size = sizeof(creation);
-  creation.access_count = 1;
-  creation.accesses = &access;
-  creation.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
+  amdf_memory_create_info_t creation = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(creation),
+      .access_count = 1,
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .accesses = &access,
+  };
   creation.memory_profile_ordinal = FindGpuMemoryProfileOrdinal(
       gpu_.api, gpu_.scope, gpu_.device,
       AMDF_MEMORY_PROFILE_ROLE_REGISTER | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
@@ -281,12 +285,18 @@ void GpuFileIoResources::CreateRing(GpuMemory* payload, FileIoPath path,
   const std::array<io_uring_restriction, 5> restrictions = {{
       {.opcode = IORING_RESTRICTION_SQE_OP, .sqe_op = IORING_OP_READ_FIXED},
       {.opcode = IORING_RESTRICTION_SQE_OP, .sqe_op = IORING_OP_WRITE_FIXED},
-      {.opcode = IORING_RESTRICTION_SQE_FLAGS_ALLOWED,
-       .sqe_flags = IOSQE_FIXED_FILE},
-      {.opcode = IORING_RESTRICTION_SQE_FLAGS_REQUIRED,
-       .sqe_flags = IOSQE_FIXED_FILE},
-      {.opcode = IORING_RESTRICTION_REGISTER_OP,
-       .register_op = IORING_REGISTER_ENABLE_RINGS},
+      {
+          .opcode = IORING_RESTRICTION_SQE_FLAGS_ALLOWED,
+          .sqe_flags = IOSQE_FIXED_FILE,
+      },
+      {
+          .opcode = IORING_RESTRICTION_SQE_FLAGS_REQUIRED,
+          .sqe_flags = IOSQE_FIXED_FILE,
+      },
+      {
+          .opcode = IORING_RESTRICTION_REGISTER_OP,
+          .register_op = IORING_REGISTER_ENABLE_RINGS,
+      },
   }};
   ASSERT_EQ(
       syscall(__NR_io_uring_register, ring_->file, IORING_REGISTER_RESTRICTIONS,

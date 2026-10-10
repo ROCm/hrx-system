@@ -630,10 +630,14 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
       /*consumers=*/nullptr, /*attributes=*/0, &completion_signal));
 
   memset(memory, 0, sizeof(*memory));
-  memory->store_kernargs[0] = {.target = &memory->outputs[0],
-                               .value = kAqlValueA};
-  memory->store_kernargs[1] = {.target = &memory->outputs[1],
-                               .value = kAqlValueB};
+  memory->store_kernargs[0] = {
+      .target = &memory->outputs[0],
+      .value = kAqlValueA,
+  };
+  memory->store_kernargs[1] = {
+      .target = &memory->outputs[1],
+      .value = kAqlValueB,
+  };
 
   const uint64_t aql_first_packet_id =
       iree_hal_amdgpu_aql_ring_reserve(&aql_ring, /*count=*/2);
@@ -672,10 +676,14 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
   uint32_t pm4_dwords[256] = {0};
   uint32_t pm4_dword_count = 0;
   memset(memory, 0, sizeof(*memory));
-  memory->store_kernargs[0] = {.target = &memory->outputs[0],
-                               .value = kPm4ValueA};
-  memory->store_kernargs[1] = {.target = &memory->outputs[1],
-                               .value = kPm4ValueB};
+  memory->store_kernargs[0] = {
+      .target = &memory->outputs[0],
+      .value = kPm4ValueA,
+  };
+  memory->store_kernargs[1] = {
+      .target = &memory->outputs[1],
+      .value = kPm4ValueB,
+  };
 
   IREE_ASSERT_OK(AppendPm4HostAcquire(agent_pm4_barrier_capabilities,
                                       pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
@@ -719,11 +727,15 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
 
   memset(memory, 0, sizeof(*memory));
   pm4_dword_count = 0;
-  memory->store_kernargs[0] = {.target = &memory->scratch[0],
-                               .value = kPm4BarrierValue};
-  memory->read_add_kernargs = {.source = &memory->scratch[0],
-                               .target = &memory->outputs[2],
-                               .value = kPm4BarrierAdd};
+  memory->store_kernargs[0] = {
+      .target = &memory->scratch[0],
+      .value = kPm4BarrierValue,
+  };
+  memory->read_add_kernargs = {
+      .source = &memory->scratch[0],
+      .target = &memory->outputs[2],
+      .value = kPm4BarrierAdd,
+  };
   IREE_ASSERT_OK(AppendPm4HostAcquire(agent_pm4_barrier_capabilities,
                                       pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
                                       &pm4_dword_count));
@@ -769,10 +781,14 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
   iree_hal_amdgpu_pm4_program_deinitialize(&pm4_program);
 
   memset(memory, 0, sizeof(*memory));
-  memory->store_kernargs[2] = {.target = &memory->outputs[3],
-                               .value = kPm4PatchWrongValue};
-  memory->store_kernargs[3] = {.target = &memory->outputs[2],
-                               .value = kPm4PatchValue};
+  memory->store_kernargs[2] = {
+      .target = &memory->outputs[3],
+      .value = kPm4PatchWrongValue,
+  };
+  memory->store_kernargs[3] = {
+      .target = &memory->outputs[2],
+      .value = kPm4PatchValue,
+  };
   pm4_dword_count = 0;
   IREE_ASSERT_OK(AppendPm4HostAcquire(agent_pm4_barrier_capabilities,
                                       pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
@@ -868,8 +884,10 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
 
   memset(memory, 0, sizeof(*memory));
   pm4_dword_count = 0;
-  memory->store_kernargs[4] = {.target = &memory->outputs[4],
-                               .value = kPm4LdsValue};
+  memory->store_kernargs[4] = {
+      .target = &memory->outputs[4],
+      .value = kPm4LdsValue,
+  };
   IREE_ASSERT_OK(AppendPm4HostAcquire(agent_pm4_barrier_capabilities,
                                       pm4_dwords, IREE_ARRAYSIZE(pm4_dwords),
                                       &pm4_dword_count));

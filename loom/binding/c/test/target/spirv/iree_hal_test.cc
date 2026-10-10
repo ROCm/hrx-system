@@ -96,9 +96,11 @@ void InitializeFakeDevice(const iree_hal_device_spec_t* device_spec,
 }
 
 iree_hal_vulkan_features_t RequiredVulkanFeatures() {
-  return {.general = IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
-                     IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64,
-          .atomics = 0};
+  return {
+      .general = IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
+                 IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64,
+      .atomics = 0,
+  };
 }
 
 iree_status_t CreateVulkanDeviceSpec(

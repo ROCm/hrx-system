@@ -59,9 +59,11 @@ class WindowsGpuXdnaMemoryTest
         UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU;
     accesses_[xdna_ordinal_] = {
         xdna_device,
-        {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-         .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
-         .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_XDNA_DMA}};
+        {
+            .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+            .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+            .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_XDNA_DMA,
+        }};
     ASSERT_NO_FATAL_FAILURE(FindFamily(
         endpoint_, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, &families_[gpu_ordinal_]));
     ASSERT_NO_FATAL_FAILURE(FindFamily(xdna_endpoint,

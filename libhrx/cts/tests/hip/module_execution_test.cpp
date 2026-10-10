@@ -805,9 +805,11 @@ TEST(HipModuleExecutionTest,
       {.name = "pre-and-post", .flags = 0},
       {.name = "post-only", .flags = hipCooperativeLaunchMultiDeviceNoPreSync},
       {.name = "pre-only", .flags = hipCooperativeLaunchMultiDeviceNoPostSync},
-      {.name = "neither",
-       .flags = hipCooperativeLaunchMultiDeviceNoPreSync |
-                hipCooperativeLaunchMultiDeviceNoPostSync},
+      {
+          .name = "neither",
+          .flags = hipCooperativeLaunchMultiDeviceNoPreSync |
+                   hipCooperativeLaunchMultiDeviceNoPostSync,
+      },
   }};
 
   for (size_t case_ordinal = 0; case_ordinal < synchronization_cases.size();

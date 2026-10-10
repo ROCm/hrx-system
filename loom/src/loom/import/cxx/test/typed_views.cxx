@@ -76,7 +76,9 @@ void typed_storage_rank3(
   loom::assume(tiles >= 1 && tiles <= 65535);
   auto layout = loom::encoding::layout::dense<3>();
   auto schema = loom::encoding::define<loom::encoding::f8e4m3fn{
-      .payload_elements = 16, .scale_group_elements = 16}>();
+      .payload_elements = 16,
+      .scale_group_elements = 16,
+  }>();
   auto storage = loom::encoding::define(layout, schema);
   auto source = loom::buffer::view<loomt::dynamic, loomt::dynamic, 16>(
       input, {rows, tiles}, storage);

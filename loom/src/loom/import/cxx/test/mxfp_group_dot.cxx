@@ -80,7 +80,8 @@ void mxfp8_group_bits(
     [[loom::noalias, loom::assume_aligned(64)]] const ScaleWord* scale,
     [[loom::noalias, loom::assume_aligned(64)]] Bits32* output) {
   auto schema = loom::encoding::define<loom::encoding::f8e4m3fn{
-      .payload_elements = 64}>();
+      .payload_elements = 64,
+  }>();
   auto weights =
       loom::vector::decode<BFloat64>(*payload, schema, Scales{*scale});
   *output = __builtin_bit_cast(Bits32, weights);

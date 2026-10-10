@@ -150,7 +150,10 @@ class WindowsGpuDeviceRollbackTest
   void SetUp() override {
     current_state = &state_;
     instance_.host_allocator = {
-        .user_data = &state_, .allocate = Allocate, .free = Free};
+        .user_data = &state_,
+        .allocate = Allocate,
+        .free = Free,
+    };
     instance_.kmt.query_adapter_info = FakeQueryAdapterInfo;
     instance_.kmt.create_device = FakeCreateDevice;
     instance_.kmt.destroy_device = FakeDestroyDevice;

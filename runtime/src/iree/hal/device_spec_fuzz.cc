@@ -180,12 +180,16 @@ static const std::vector<uint8_t>& iree_hal_device_spec_fuzz_seed(void) {
         {.minimum_selected_resource_count = 1},
     };
     const iree_hal_queue_execution_resource_spec_t execution_resources[] = {
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 0,
-         .execution_unit_count = 2},
-        {.group_ordinal = 1,
-         .first_execution_unit_ordinal = 2,
-         .execution_unit_count = 2},
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 0,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 1,
+            .first_execution_unit_ordinal = 2,
+            .execution_unit_count = 2,
+        },
     };
     queue_family.name = iree_make_cstring_view("dispatch-and-transfer");
     queue_family.provisioned_queue_count = 4;

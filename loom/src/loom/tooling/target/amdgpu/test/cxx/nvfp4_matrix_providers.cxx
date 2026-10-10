@@ -39,7 +39,8 @@ LOOM_FORCE_INLINE NvFp4Schema nvfp4_schema() {
       .payload_elements = 16,
       .payload_registers = 2,
       .scale_format = loom::encoding::numeric_format::f8e4m3fn,
-      .scale_group_elements = 16}>();
+      .scale_group_elements = 16,
+  }>();
 }
 
 LOOM_TEMPLATE_DEF(nvfp4_matrix_tile)
@@ -77,7 +78,8 @@ void nvfp4_matrix_tile_wave64(NvFp4Payload lhs_payload, NvFp4Scale lhs_scale,
       .payload_elements = 8,
       .payload_registers = 1,
       .scale_format = loom::encoding::numeric_format::f8e4m3fn,
-      .scale_group_elements = 8}>();
+      .scale_group_elements = 8,
+  }>();
   unsigned lane = loom::kernel::subgroup::lane_id();
   // Each 16-lane group supplies one packed 16-bit quarter of the logical
   // payload to the wave64 MFMA's four f16 values per lane.
