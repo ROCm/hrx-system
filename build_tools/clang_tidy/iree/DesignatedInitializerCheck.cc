@@ -88,7 +88,7 @@ struct LabeledInitializer {
 
 // An invalid insertion location means the initializer already has the desired
 // spelling or fits on one line. A missing result means its source could not be
-// analyzed safely and prevents all comment-label fixes for that initializer.
+// analyzed safely and prevents a fix for that initializer.
 std::optional<SourceLocation> TrailingCommaInsertion(
     const InitListExpr* Initializer, const SourceManager& SourceManager,
     const LangOptions& LangOptions) {
@@ -221,6 +221,41 @@ bool IsMainFileInitializerBrace(SourceLocation Location,
     Location = SourceManager.getSpellingLoc(Location);
   }
   return IsMainFileLocation(Location, SourceManager);
+}
+
+void CheckDesignatedTrailingComma(DesignatedInitializerCheck& Check,
+                                  const InitListExpr* Initializer,
+                                  ASTContext& Context,
+                                  const SourceManager& SourceManager) {
+  // Paired syntactic forms are not children of the semantic AST. If a matcher
+  // nevertheless reaches one, let the semantic form own the diagnostic.
+  if (Initializer->getSemanticForm()) {
+    return;
+  }
+  const InitListExpr* SourceInitializer = Initializer->getSyntacticForm();
+  if (!SourceInitializer) {
+    SourceInitializer = Initializer;
+  }
+  if (!SourceInitializer->isExplicit() ||
+      !IsMainFileInitializerBrace(SourceInitializer->getLBraceLoc(),
+                                  SourceManager)) {
+    return;
+  }
+  bool HasDesignator = false;
+  for (const Expr* Value : SourceInitializer->inits()) {
+    HasDesignator |= isa<DesignatedInitExpr>(Value);
+  }
+  if (!HasDesignator) {
+    return;
+  }
+  std::optional<SourceLocation> CommaInsertion = TrailingCommaInsertion(
+      SourceInitializer, SourceManager, Context.getLangOpts());
+  if (!CommaInsertion || !CommaInsertion->isValid()) {
+    return;
+  }
+  Check.diag(*CommaInsertion,
+             "add a trailing comma to multiline designated initializer")
+      << FixItHint::CreateInsertion(*CommaInsertion, ",");
 }
 
 const RecordDecl* DefinedRecord(QualType Type) {
@@ -973,9 +1008,9 @@ void DesignatedInitializerCheck::registerMatchers(
   Finder->addMatcher(
       compoundLiteralExpr(isExpansionInMainFile()).bind("compound_literal"),
       this);
+  Finder->addMatcher(initListExpr(isExpansionInMainFile()).bind("init_list"),
+                     this);
   if (enable_comment_label_conversion_) {
-    Finder->addMatcher(initListExpr(isExpansionInMainFile()).bind("init_list"),
-                       this);
     Finder->addMatcher(callExpr(isExpansionInMainFile()).bind("call"), this);
     Finder->addMatcher(
         cxxConstructExpr(isExpansionInMainFile()).bind("constructor"), this);
@@ -998,8 +1033,12 @@ void DesignatedInitializerCheck::check(
   }
   if (const auto* Initializer =
           Result.Nodes.getNodeAs<InitListExpr>("init_list")) {
-    CheckCommentLabels(*this, Initializer, *Result.Context,
-                       *Result.SourceManager);
+    CheckDesignatedTrailingComma(*this, Initializer, *Result.Context,
+                                 *Result.SourceManager);
+    if (enable_comment_label_conversion_) {
+      CheckCommentLabels(*this, Initializer, *Result.Context,
+                         *Result.SourceManager);
+    }
   }
   if (const auto* Call = Result.Nodes.getNodeAs<CallExpr>("call")) {
     CheckArgumentLabels(*this, Call, *Result.Context, *Result.SourceManager);

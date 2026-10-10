@@ -54,6 +54,7 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
                 "comment field label cannot be converted until every initializer "
                 "element is representable as a designator",
                 "fold aggregate setup into C++20 designated initialization",
+                "add a trailing comma to multiline designated initializer",
                 "[iree-cpp-designated-initializer]",
             ],
         )
@@ -62,6 +63,8 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn(".ordinal = 1,", fixed_source)
         self.assertIn(".flags = 29,};", fixed_source)
         self.assertNotIn(".flags = 29};", fixed_source)
+        self.assertIn(".flags = 31,};", fixed_source)
+        self.assertNotIn(".flags = 31};", fixed_source)
         self.assertIn(
             'return Config{.ordinal = 8, .name = "literal", .flags = 9};',
             fixed_source,
@@ -224,8 +227,10 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertNotIn("comment field label", output)
         self.assertNotIn("comment label names", output)
         self.assertIn("fold aggregate setup", output)
+        self.assertIn("add a trailing comma", output)
         self.assertIn("Config labeled_config = {", fixed_source)
         self.assertIn("/*.ordinal=*/1,", fixed_source)
+        self.assertIn(".flags = 31,};", fixed_source)
         self.assertIn(
             "Numbers configured = {.first = 20, .second = 21,};", fixed_source
         )

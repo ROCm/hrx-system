@@ -103,10 +103,14 @@ Config labeled_config = {
     /*.flags=*/2,
 };
 
-Config multiline_without_trailing_comma = {
-    /*.ordinal=*/28,
-    /*.name=*/"no-trailing-comma",
-    /*.flags=*/29};
+Config multiline_without_trailing_comma = {/*.ordinal=*/28,
+                                           /*.name=*/"no-trailing-comma",
+                                           /*.flags=*/29};
+
+Config designated_without_trailing_comma = {
+    .ordinal = 30,
+    // Keep the input multiline before the checker adds its trailing comma.
+    .flags = 31};
 
 OuterConfig nested_config = {
     /*.inner=*/{
