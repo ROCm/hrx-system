@@ -590,6 +590,18 @@ the deployment name; request/epoch counters remain local to each model.
 The router tests use actual TCP carriers and borrowed request ownership.
 Configuration tests exercise parsing and partial-initialization cleanup;
 source-policy tests check that deployment aliases preserve rendered prompts.
+
+`//experimental/loom_serve/models/fixtures:catalog_test` exercises the shared
+executable with source-JIT text, image, embedding and decision packages using
+independent arithmetic oracles, without downloading learned-model weights.
+Its dynamic witness starts empty, registers twelve initially drained models,
+opens admission, verifies concurrent output, replaces four deployments while
+peers progress and returns to empty with cumulative counters preserved. It also
+holds 256 incomplete HTTP connections while useful inference continues. Linux
+task snapshots assert fixed userspace thread identities and report the kernel's
+elastic io_uring workers separately. These are GPU-backed correctness and
+ownership checks, not throughput or model-quality measurements.
+
 The real-weight witness is `models/qwen:check_router`, supplied with the built
 shared server, source package, checkpoint, tokenizer and an empty output path.
 It compares sequential and overlapping final SSE, independent same-named

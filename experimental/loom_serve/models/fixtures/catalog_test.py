@@ -252,7 +252,7 @@ class Client:
                     if choice.get("finish_reason")
                 ]
                 assert len(usage) == len(finishes) == 1, events
-                assert all(event["model"] == "fixture-text" for event in events), events
+                assert all(event["model"] == value["model"] for event in events), events
                 return {
                     "text": "".join(
                         choice["delta"].get("content", "") for choice in choices
@@ -764,13 +764,30 @@ def check_empty_server(server, directory):
         print(json.dumps({"event": "empty_server_joined", "catalog": mode}), flush=True)
 
 
-def check_sporadic_connections(process, client):
-    tasks = Path(f"/proc/{process.pid}/task")
+def thread_snapshot(process):
+    # Linux exposes kernel-created io_uring workers in the process task list.
+    # PF_IO_WORKER (include/linux/sched.h) distinguishes their elastic lifetime
+    # from the userspace threads owned by serving and its native dependencies.
+    snapshot = {"userspace": {}, "kernel_io": {}, "retired_during_sample": []}
+    for entry in Path(f"/proc/{process.pid}/task").iterdir():
+        try:
+            state = (entry / "stat").read_text()
+        except FileNotFoundError:
+            # An I/O worker may retire between enumeration and the stat read.
+            # Retain that discontinuity; a lost required userspace identity
+            # still fails the caller's equality check.
+            snapshot["retired_during_sample"].append(entry.name)
+            continue
+        end = state.rindex(")")
+        flags = int(state[end + 2 :].split()[6])
+        kind = "kernel_io" if flags & 0x10 else "userspace"
+        snapshot[kind][entry.name] = state[state.index("(") + 1 : end]
+    return snapshot
 
-    def thread_ids():
-        return {entry.name for entry in tasks.iterdir()}
 
-    expected_threads = thread_ids()
+def check_sporadic_connections(process, client, model, workers):
+    expected_threads = thread_snapshot(process)
+
     address = urlsplit("http://" + client.address)
     peers = []
     try:
@@ -783,10 +800,14 @@ def check_sporadic_connections(process, client):
                 peer.sendall(b"GET /healthz HTTP/1.1\r\nHost: local\r\n")
             vectors = client.request(
                 "/v1/embeddings",
-                {"model": "vectors", "input": ["ab", "bbb"], "dimensions": 2},
+                {"model": model, "input": ["ab", "bbb"], "dimensions": 2},
             )
             assert [item["embedding"] for item in vectors["data"]] == [[3, 2], [6, 3]]
-            assert thread_ids() == expected_threads
+            current_threads = thread_snapshot(process)
+            assert current_threads["userspace"] == expected_threads["userspace"], (
+                expected_threads,
+                current_threads,
+            )
         # Complete the most recently connected peers first; incomplete earlier
         # requests cannot hold later clients or inference behind them.
         completed = 0
@@ -806,15 +827,20 @@ def check_sporadic_connections(process, client):
                     peer.close()
             assert client.request("/readyz") == {"status": "ready"}
         assert completed == 256
-        assert thread_ids() == expected_threads
+        current_threads = thread_snapshot(process)
+        assert current_threads["userspace"] == expected_threads["userspace"], (
+            expected_threads,
+            current_threads,
+        )
         print(
             json.dumps(
                 {
                     "event": "sporadic_connections_joined",
                     "connections": completed,
-                    "task_workers": 1,
-                    "server_threads": len(expected_threads),
-                    "added_threads": 0,
+                    "task_workers": workers,
+                    "userspace_threads": len(current_threads["userspace"]),
+                    "kernel_io_workers": len(current_threads["kernel_io"]),
+                    "added_userspace_threads": 0,
                 }
             ),
             flush=True,
@@ -822,6 +848,208 @@ def check_sporadic_connections(process, client):
     finally:
         for peer in peers:
             peer.close()
+
+
+def check_dynamic_catalog(server, directory, catalog, workers):
+    """Twelve real model owners share workers, clients and retirement accounting."""
+    declarations = [
+        {**model, "name": f"{model['kind']}-{index}", "admission": "drained"}
+        for index in range(3)
+        for model in catalog["models"]
+    ]
+    log_path = directory / f"dynamic-catalog-{workers}.log"
+    with child_server(
+        [
+            str(server),
+            "--listen=127.0.0.1:0",
+            f"--workers={workers}",
+            "--model_capacity=12",
+            "--connections=320",
+            "--pool_backing=fixed",
+            "--heartbeat_ms=0",
+        ],
+        log_path,
+        cwd=directory,
+    ) as (process, address):
+        assert address is not None, log_path.read_text()
+        client = Client(address)
+        initial_threads = thread_snapshot(process)
+        assert client.request("/v1/models")["data"] == []
+        for declaration in declarations:
+            client.request("/v1/models/register", declaration, status=202)
+        client.request(
+            "/v1/models/register",
+            {**declarations[0], "name": "beyond-capacity"},
+            status=429,
+        )
+        registered = client.request("/v1/status")["data"]
+        identities = {item["id"]: item["loom"]["incarnation"] for item in registered}
+        assert len(identities) == 12
+        assert all(
+            item["loom"]["registration"] == "registered"
+            and item["loom"]["status"]["admission"] == "drained"
+            for item in registered
+        ), registered
+        for declaration in declarations:
+            client.request("/v1/models/undrain", {"model": declaration["name"]})
+
+        def infer(declaration, iteration):
+            model = declaration["name"]
+            kind = declaration["kind"]
+            if kind == "text":
+                messages = [{"role": "user", "content": "abx" * (iteration + 1)}]
+                result = client.request(
+                    "/v1/chat/completions",
+                    {**Client.text_payload(messages, 6), "model": model},
+                    headers={"X-Loom-Session": "shared-name"},
+                )
+                assert (result["text"], result["finish"]) == complete(messages, 6)
+            elif kind == "image":
+                prompt = "ab" + "a" * (iteration % 2)
+                result = client.request(
+                    "/v1/images/generations",
+                    {
+                        "model": model,
+                        "prompt": prompt,
+                        "seed": iteration,
+                        "response_format": "b64_json",
+                    },
+                )
+                check_png(result["data"][0]["b64_json"], prompt, iteration)
+            elif kind == "embedding":
+                result = client.request(
+                    "/v1/embeddings",
+                    {"model": model, "input": ["ab", "bbb"], "dimensions": 2},
+                )
+                assert [row["embedding"] for row in result["data"]] == [[3, 2], [6, 3]]
+            elif kind == "decision":
+                result = client.request(
+                    "/v1/systemone",
+                    {
+                        "model": model,
+                        "state": "a",
+                        "questions": {
+                            "truth": {
+                                "type": "noul",
+                                "instructions": "???",
+                                "criteria": {"false": "", "true": "x"},
+                            }
+                        },
+                    },
+                )
+                assert result["answers"]["truth"] == {
+                    "type": "noul",
+                    "noul": 0.666666687,
+                }, result
+            else:
+                raise AssertionError(kind)
+
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            work = [
+                executor.submit(infer, declaration, 0) for declaration in declarations
+            ]
+            for future in work:
+                future.result()
+            client.idle()
+            loaded_threads = thread_snapshot(process)
+            assert loaded_threads["userspace"] == initial_threads["userspace"], (
+                initial_threads,
+                loaded_threads,
+            )
+            check_sporadic_connections(process, client, "embedding-0", workers)
+
+            # Keep independent model work live while the first copy of each
+            # modality retires. No client, public name or model kind owns peers.
+            work = [
+                executor.submit(infer, declaration, 1)
+                for declaration in declarations[4:]
+            ]
+            for declaration in declarations[:4]:
+                client.request(
+                    "/v1/models/unregister", {"model": declaration["name"]}, status=202
+                )
+            for future in work:
+                future.result()
+            peers = {declaration["name"] for declaration in declarations[4:]}
+            while True:
+                discovered = client.request("/v1/models")["data"]
+                assert all(
+                    item["loom"]["registration"] != "release_failed"
+                    for item in discovered
+                ), discovered
+                if {item["id"] for item in discovered} == peers:
+                    break
+            for declaration in declarations[:4]:
+                client.request(
+                    "/v1/models/register",
+                    {**declaration, "admission": "open"},
+                    status=202,
+                )
+            replaced = client.request("/v1/models")["data"]
+            for item in replaced:
+                if item["id"] not in peers:
+                    assert item["loom"]["incarnation"] != identities[item["id"]]
+            work = [
+                executor.submit(infer, declaration, 2)
+                for declaration in declarations[:4]
+            ]
+            for future in work:
+                future.result()
+        client.idle()
+        reader = LogClient("http://" + address, timeout=None)
+        before = next(
+            record["values"]
+            for record in reader.poll().records
+            if record["event"] == "counters"
+        )
+        # Twelve initial requests, eight peers, four replacements and two
+        # embedding probes while incomplete transport requests remain parked.
+        assert before["requests"] == before["completed"] == 26, before
+        for index, declaration in enumerate(declarations):
+            client.request(
+                "/v1/models/unregister",
+                {
+                    "model": declaration["name"],
+                    "mode": "drain" if index % 2 else "abort",
+                },
+                status=202,
+            )
+        while True:
+            discovered = client.request("/v1/models")["data"]
+            assert all(
+                item["loom"]["registration"] != "release_failed" for item in discovered
+            ), discovered
+            if not discovered:
+                break
+        after = next(
+            record["values"]
+            for record in reader.poll().records
+            if record["event"] == "counters"
+        )
+        assert before == after, (before, after)
+        final_threads = thread_snapshot(process)
+        assert final_threads["userspace"] == initial_threads["userspace"], (
+            initial_threads,
+            final_threads,
+        )
+        assert client.request("/healthz") == {"status": "ready"}
+        print(
+            json.dumps(
+                {
+                    "event": "dynamic_catalog_joined",
+                    "models": len(declarations),
+                    "workers": workers,
+                    "userspace_threads": len(final_threads["userspace"]),
+                    "kernel_io_workers": len(final_threads["kernel_io"]),
+                    "added_userspace_threads": 0,
+                    "completed_requests": after["completed"],
+                    "exact_outputs": True,
+                    "retired_counters_preserved": True,
+                    "thread_samples": [initial_threads, loaded_threads, final_threads],
+                }
+            ),
+            flush=True,
+        )
 
 
 def check_multiple_bindings(server, directory, catalog):
@@ -872,7 +1100,7 @@ def check_multiple_bindings(server, directory, catalog):
             model="vectors",
         )
         assert client.request("/v1/models") == expected_models
-        check_sporadic_connections(process, client)
+        check_sporadic_connections(process, client, "vectors", 1)
     assert not socket_path.exists()
     locators = [
         json.loads(line)
@@ -934,6 +1162,7 @@ def main():
         check_startup_failures(server, directory, catalog)
         check_multiple_bindings(server, directory, catalog_path)
         for workers in (1, 4):
+            check_dynamic_catalog(server, directory, catalog, workers)
             with running_server(server, directory, catalog_path, workers) as (
                 client,
                 observations,
