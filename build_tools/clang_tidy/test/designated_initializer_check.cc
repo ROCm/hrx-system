@@ -230,6 +230,10 @@ void PreserveUnsafeSetupBlocks(bool condition) {
   reordered.second = 23;
   reordered.first = 24;
 
+  Numbers reordered_effects = {};
+  reordered_effects.second = Next();
+  reordered_effects.first = Next();
+
   Numbers self_referencing = {};
   self_referencing.first = 25;
   self_referencing.second = self_referencing.first;
@@ -268,10 +272,6 @@ void PreserveUnsafeSetupBlocks(bool condition) {
   Numbers macro_initialized = EMPTY_BRACES;
   macro_initialized.first = 34;
 
-  // This setup intentionally remains assignment-based for an external API.
-  Numbers suppressed = {};  // NOLINT(iree-cpp-designated-initializer)
-  suppressed.first = 35;
-
   Numbers commented_initializer = {/* Preserve the explicit zero setup. */};
   commented_initializer.first = 36;
 
@@ -285,6 +285,7 @@ void PreserveUnsafeSetupBlocks(bool condition) {
   comment_between_assignments.second = 39;
 
   (void)reordered;
+  (void)reordered_effects;
   (void)self_referencing;
   (void)aliased;
   (void)conditional;
@@ -294,7 +295,6 @@ void PreserveUnsafeSetupBlocks(bool condition) {
   (void)nontrivial;
   (void)narrowing;
   (void)macro_initialized;
-  (void)suppressed;
   (void)commented_initializer;
   (void)comment_before_assignment;
   (void)comment_between_assignments;

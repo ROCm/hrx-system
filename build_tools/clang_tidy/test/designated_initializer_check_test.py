@@ -54,24 +54,11 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
                 "comment field label cannot be converted until every initializer "
                 "element is representable as a designator",
                 "fold aggregate setup into C++20 designated initialization",
-                "aggregate setup cannot be folded: member assignments are not in "
-                "declaration order",
-                "aggregate setup cannot be folded: an assignment value may change "
-                "initialization semantics (member 'value')",
-                "aggregate setup cannot be folded: member assignments are separated "
-                "by observation or control flow",
-                "aggregate setup cannot be folded: union member activation differs "
-                "between initialization and assignment",
-                "aggregate setup cannot be folded: the aggregate has a default "
-                "member initializer",
-                "aggregate setup cannot be folded: the aggregate has nontrivial "
-                "initialization or assignment",
-                "aggregate setup cannot be folded: the empty initializer is "
-                "produced by a macro",
                 "[iree-cpp-designated-initializer]",
-                "Suppressed 1 warnings (1 NOLINT)",
             ],
         )
+        self.assertNotIn("aggregate setup cannot be folded", output)
+        self.assertNotIn("NOLINT", fixed_source)
         self.assertIn(".ordinal = 1,", fixed_source)
         self.assertIn(
             'return Config{.ordinal = 8, .name = "literal", .flags = 9};',
@@ -148,19 +135,19 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn("DerivedConfig base_label = {/*.base=*/{16}", fixed_source)
         self.assertIn("OuterConfig brace_elided = {/*.inner=*/18", fixed_source)
         self.assertIn("Config { /*.ordinal=*/ value }", fixed_source)
-        self.assertIn("reordered.second = 23;", fixed_source)
-        self.assertIn("self_referencing.first = 25;", fixed_source)
+        self.assertIn("Numbers reordered = {.first = 24, .second = 23};", fixed_source)
+        self.assertIn("Numbers reordered_effects = {.second = Next()};", fixed_source)
+        self.assertIn("reordered_effects.first = Next();", fixed_source)
+        self.assertIn("Numbers self_referencing = {.first = 25};", fixed_source)
         self.assertIn("aliased.first = 26;", fixed_source)
-        self.assertIn("observed.first = 28;", fixed_source)
+        self.assertIn("Numbers observed = {.first = 28};", fixed_source)
         self.assertIn("conditional.first = 30;", fixed_source)
         self.assertIn("union_setup.integer = 31;", fixed_source)
         self.assertIn("defaulted.second = 32;", fixed_source)
         self.assertIn("switched_union_member.real = 32.0f;", fixed_source)
-        self.assertIn("not in declaration order (member 'real')", output)
         self.assertIn("nontrivial.member = 33;", fixed_source)
         self.assertIn("narrowing.value = -1;", fixed_source)
         self.assertIn("macro_initialized.first = 34;", fixed_source)
-        self.assertIn("suppressed.first = 35;", fixed_source)
         self.assertIn("/* Preserve the explicit zero setup. */", fixed_source)
         self.assertIn("commented_initializer.first = 36;", fixed_source)
         self.assertIn(
@@ -171,6 +158,9 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn(
             "// Preserve the explanation attached to the second assignment.",
             fixed_source,
+        )
+        self.assertIn(
+            "Numbers comment_between_assignments = {.first = 38};", fixed_source
         )
         self.assertIn("comment_between_assignments.second = 39;", fixed_source)
 

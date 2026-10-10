@@ -363,23 +363,24 @@ iree_example_t example = {
 ```
 
 This structural fix is limited to trivial local aggregates followed immediately
-by direct member assignments in declaration order. The check rejects unions,
-base subobjects, anonymous structs, default member initializers, volatile or
-atomic members, nontrivial initialization or assignment, narrowing
-conversions, self-reference, macros, reordered assignments, and setup split by
-later member assignments. A standard anonymous union may be omitted or name one
-promoted member directly; selecting multiple members remains assignment-based.
-Value evaluation order is preserved.
+by direct member assignments whose initialization semantics are equivalent. It
+folds the longest proven prefix, including a prefix followed by later state
+transitions. Side-effect-free member values may be reordered into declaration
+order; effectful values retain their evaluation order. A standard anonymous
+union may be omitted or name one promoted member directly.
+
+Unions, base subobjects, anonymous structs, default member initializers,
+volatile or atomic members, nontrivial initialization or assignment, narrowing
+conversions, self-reference, macro-produced braces, and intervening source text
+remain assignment-based when the proof does not hold. Those forms are not
+diagnosed: assignment is the required language mechanism for a state transition
+or for semantics that differ from initialization. The check reports only a
+construction spelling it can repair without changing behavior.
 
 `EnableCommentLabelConversion` and `EnableSetupBlockFolding` both default to
 `true`. Disable one while applying the other migration so token-local label
 changes and structural setup changes remain separate reviews. Normal policy
 enforcement leaves both paths enabled.
-
-When assignment is semantically required, keep the setup block and place
-`NOLINT(iree-cpp-designated-initializer)` on the empty initializer with a comment
-that names the initialization-versus-assignment distinction. The diagnostic
-states the rejected proof obligation so suppressions remain reviewable.
 
 The policy applies only to spellings in the main C++20 implementation file.
 Included headers retain their current spelling so installed public headers can

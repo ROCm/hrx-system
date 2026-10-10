@@ -6,6 +6,7 @@
 
 #include "iree/DesignatedInitializerCheck.h"
 
+#include <algorithm>
 #include <cctype>
 #include <optional>
 #include <string>
@@ -69,6 +70,8 @@ struct MemberAssignment {
   const FieldDecl* field;
   std::string value_text;
   CharSourceRange removal_range;
+  unsigned field_index;
+  bool has_side_effects;
 };
 
 struct LabeledInitializer {
@@ -378,21 +381,6 @@ bool ReferencesVariable(const Stmt* Statement, const VarDecl* Variable) {
   return false;
 }
 
-bool ContainsMemberAssignment(const Stmt* Statement, const VarDecl* Variable) {
-  if (!Statement) {
-    return false;
-  }
-  if (ParseMemberAssignment(Statement, Variable)) {
-    return true;
-  }
-  for (const Stmt* Child : Statement->children()) {
-    if (ContainsMemberAssignment(Child, Variable)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 std::optional<unsigned> FieldIndex(const RecordDecl* Record,
                                    const FieldDecl* Field) {
   unsigned Index = 0;
@@ -582,50 +570,33 @@ std::optional<CharSourceRange> WholeLineStatementRange(
       FileBegin.getLocWithOffset(static_cast<int>(RemovalEnd)));
 }
 
-std::optional<StringRef> SetupAggregateIssue(const VarDecl* Variable,
-                                             const RecordDecl* Record,
-                                             ASTContext& Context) {
+bool CanFoldSetupAggregate(const VarDecl* Variable, const RecordDecl* Record,
+                           ASTContext& Context) {
   if (!Variable->hasLocalStorage() || Variable->isStaticLocal()) {
-    return "the object does not have automatic storage";
+    return false;
   }
   if (Variable->getType().isVolatileQualified()) {
-    return "the object is volatile";
+    return false;
   }
   if (Record->isUnion()) {
-    return "union member activation differs between initialization and "
-           "assignment";
+    return false;
   }
   for (const FieldDecl* Field : Record->fields()) {
     if (Field->isAnonymousStructOrUnion()) {
       const RecordDecl* AnonymousRecord = DefinedRecord(Field->getType());
       if (!AnonymousRecord || !AnonymousRecord->isUnion()) {
-        return "the aggregate contains an anonymous struct";
+        return false;
       }
     }
     if (Field->hasInClassInitializer()) {
-      return "the aggregate has a default member initializer";
+      return false;
     }
   }
   if (!Variable->getType().isTrivialType(Context) ||
       !Variable->getType().isTriviallyCopyableType(Context)) {
-    return "the aggregate has nontrivial initialization or assignment";
+    return false;
   }
-  return std::nullopt;
-}
-
-void DiagnoseSetupIssue(DesignatedInitializerCheck& Check,
-                        const InitListExpr* Initializer, StringRef Issue) {
-  Check.diag(Initializer->getLBraceLoc(),
-             "aggregate setup cannot be folded: %0")
-      << Issue;
-}
-
-void DiagnoseSetupAssignmentIssue(DesignatedInitializerCheck& Check,
-                                  const InitListExpr* Initializer,
-                                  StringRef Issue, const FieldDecl* Field) {
-  Check.diag(Initializer->getLBraceLoc(),
-             "aggregate setup cannot be folded: %0 (member '%1')")
-      << Issue << Field->getName();
+  return true;
 }
 
 void CheckCommentLabels(DesignatedInitializerCheck& Check,
@@ -808,16 +779,11 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
         continue;
       }
       if (CxxRecord->getNumBases() != 0) {
-        DiagnoseSetupIssue(Check, Initializer,
-                           "base subobjects cannot be named by C++20 "
-                           "designators");
         continue;
       }
     }
     if (Initializer->getLBraceLoc().isMacroID() ||
         Initializer->getRBraceLoc().isMacroID()) {
-      DiagnoseSetupIssue(Check, Initializer,
-                         "the empty initializer is produced by a macro");
       continue;
     }
     SourceLocation InitializerInteriorBegin = Lexer::getLocForEndOfToken(
@@ -828,23 +794,13 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
         !ContainsOnlyWhitespaceOrSemicolon(InitializerInteriorBegin,
                                            Initializer->getRBraceLoc(),
                                            SourceManager)) {
-      DiagnoseSetupIssue(
-          Check, Initializer,
-          "the source spelling cannot be rewritten without moving "
-          "comments or macros");
       continue;
     }
-    if (std::optional<StringRef> Issue =
-            SetupAggregateIssue(Variable, Record, Context)) {
-      DiagnoseSetupIssue(Check, Initializer, *Issue);
+    if (!CanFoldSetupAggregate(Variable, Record, Context)) {
       continue;
     }
 
     std::vector<MemberAssignment> Assignments;
-    std::optional<StringRef> Rejection;
-    const FieldDecl* RejectedField = nullptr;
-    unsigned PreviousFieldIndex = 0;
-    bool HasPreviousField = false;
     SourceLocation PreviousStatementEnd = InitializerEnd;
     size_t NextStatement = I + 1;
     for (; NextStatement < Statements.size(); ++NextStatement) {
@@ -862,55 +818,67 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
       bool PreservesInterstatementText = ContainsOnlyWhitespaceOrSemicolon(
           PreviousStatementEnd, Statements[NextStatement]->getBeginLoc(),
           SourceManager);
-      if (!Index) {
-        Rejection =
-            "an assignment cannot be represented by a direct C++20 "
-            "designator";
-      } else if (HasPreviousField && *Index <= PreviousFieldIndex) {
-        Rejection = "member assignments are not in declaration order";
-      } else if (!CanMoveAssignmentValue(Parsed->value, Parsed->field, Variable,
-                                         Context)) {
-        Rejection = "an assignment value may change initialization semantics";
-      } else if (!ValueText || !RemovalRange || !PreservesInterstatementText) {
-        Rejection =
-            "the source spelling cannot be rewritten without moving "
-            "comments or macros";
-      }
-      if (Rejection) {
-        RejectedField = Parsed->field;
-        Assignments.clear();
+      if (!Index ||
+          !CanMoveAssignmentValue(Parsed->value, Parsed->field, Variable,
+                                  Context) ||
+          !ValueText || !RemovalRange || !PreservesInterstatementText) {
         break;
       }
       Assignments.push_back(MemberAssignment{
           Parsed->field,
           std::move(*ValueText),
           *RemovalRange,
+          *Index,
+          Parsed->value->HasSideEffects(Context),
       });
-      PreviousFieldIndex = *Index;
-      HasPreviousField = true;
       PreviousStatementEnd = RemovalRange->getEnd();
-    }
-    if (Rejection) {
-      DiagnoseSetupAssignmentIssue(Check, Initializer, *Rejection,
-                                   RejectedField);
-      continue;
     }
     if (Assignments.empty()) {
       continue;
     }
-    bool HasLaterAssignment = false;
-    for (size_t J = NextStatement; J < Statements.size(); ++J) {
-      if (ContainsMemberAssignment(Statements[J], Variable)) {
-        HasLaterAssignment = true;
-        break;
+
+    SourceLocation RemovalBegin = Assignments.front().removal_range.getBegin();
+    size_t FoldedAssignmentCount = Assignments.size();
+    bool IsDeclarationOrder = true;
+    bool HasDuplicateField = false;
+    for (size_t J = 1; J < Assignments.size(); ++J) {
+      if (Assignments[J].field_index <= Assignments[J - 1].field_index) {
+        IsDeclarationOrder = false;
+      }
+      for (size_t K = 0; K < J; ++K) {
+        HasDuplicateField |=
+            Assignments[J].field_index == Assignments[K].field_index;
       }
     }
-    if (HasLaterAssignment) {
-      DiagnoseSetupIssue(
-          Check, Initializer,
-          "member assignments are separated by observation or control flow");
+    if (!IsDeclarationOrder) {
+      bool HasSideEffects = false;
+      for (const MemberAssignment& Assignment : Assignments) {
+        HasSideEffects |= Assignment.has_side_effects;
+      }
+      if (!HasSideEffects && !HasDuplicateField) {
+        std::stable_sort(
+            Assignments.begin(), Assignments.end(),
+            [](const MemberAssignment& Lhs, const MemberAssignment& Rhs) {
+              return Lhs.field_index < Rhs.field_index;
+            });
+      } else {
+        FoldedAssignmentCount = 1;
+        while (FoldedAssignmentCount < Assignments.size() &&
+               Assignments[FoldedAssignmentCount - 1].field_index <
+                   Assignments[FoldedAssignmentCount].field_index) {
+          ++FoldedAssignmentCount;
+        }
+        Assignments.resize(FoldedAssignmentCount);
+      }
+    }
+
+    std::optional<CharSourceRange> LastRemovalRange =
+        WholeLineStatementRange(Statements[I + FoldedAssignmentCount],
+                                SourceManager, Context.getLangOpts());
+    if (!LastRemovalRange) {
       continue;
     }
+    SourceLocation RemovalEnd = LastRemovalRange->getEnd();
 
     std::string Replacement = "{";
     for (size_t J = 0; J < Assignments.size(); ++J) {
@@ -930,9 +898,8 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
     Diagnostic << FixItHint::CreateReplacement(
         CharSourceRange::getTokenRange(Initializer->getSourceRange()),
         Replacement);
-    Diagnostic << FixItHint::CreateRemoval(CharSourceRange::getCharRange(
-        Assignments.front().removal_range.getBegin(),
-        Assignments.back().removal_range.getEnd()));
+    Diagnostic << FixItHint::CreateRemoval(
+        CharSourceRange::getCharRange(RemovalBegin, RemovalEnd));
   }
 }
 
