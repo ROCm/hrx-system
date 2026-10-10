@@ -838,12 +838,34 @@ loom_serve_weight_activity_t loom_serve_weights_activity(
   return weights->activity;
 }
 
+void loom_serve_weights_set_retirement_observer(loom_serve_weights_t* weights,
+                                                void (*wake)(void* user_data),
+                                                void* user_data) {
+  if (weights) {
+    loom_serve_retirement_set_observer(&weights->retirement, wake, user_data);
+    loom_serve_retirement_set_observer(&weights->activation.retirement, wake,
+                                       user_data);
+  }
+}
+
+bool loom_serve_weights_is_retired(loom_serve_weights_t* weights) {
+  return !weights ||
+         (loom_serve_retirement_is_idle(&weights->retirement) &&
+          loom_serve_retirement_is_idle(&weights->activation.retirement));
+}
+
+void loom_serve_weights_await_retirement(loom_serve_weights_t* weights) {
+  if (weights) {
+    loom_serve_retirement_await(&weights->retirement);
+    loom_serve_retirement_await(&weights->activation.retirement);
+  }
+}
+
 iree_status_t loom_serve_weights_destroy(loom_serve_weights_t* weights) {
   if (!weights) {
     return iree_ok_status();
   }
-  loom_serve_retirement_await(&weights->retirement);
-  loom_serve_retirement_await(&weights->activation.retirement);
+  IREE_ASSERT(loom_serve_weights_is_retired(weights));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < weights->storage_count && iree_status_is_ok(status); ++i) {

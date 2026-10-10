@@ -71,6 +71,7 @@ loom_serve_finite_model_t* loom_serve_finite_load_take_model(
 
 // Destroys a terminal operation and any untaken model. Preparation submits no
 // queue work, so partial-load cleanup requires no asynchronous retirement.
+// A platform release failure preserves the operation and remaining ownership.
 iree_status_t loom_serve_finite_load_destroy(loom_serve_finite_load_t* load);
 
 // Source ABI (all metadata integers and F32 results are little-endian):
@@ -99,8 +100,30 @@ iree_status_t loom_serve_finite_model_create(
     const loom_serve_finite_model_options_t* options,
     loom_serve_finite_model_t** out_model, iree_allocator_t host_allocator);
 
-// Outer-owner teardown after service CPU tasks and waits retire. Joins actual
-// queue ownership even on failure before releasing payloads and parameter pins.
+// Begins irreversible removal after service CPU tasks, waits and external
+// tokenizer borrowers retire. No further invocation/admission is allowed.
+// Attaches nonblocking ownership wakes before releasing cached VM/command/root
+// consumers. Payloads, feedback and residency protection remain until actual
+// queue ownership retires, independently of success/failure readiness. The wake
+// only schedules the serialized owner; it must not reenter or destroy
+// resources.
+void loom_serve_finite_model_retire(loom_serve_finite_model_t* model,
+                                    void (*wake)(void* user_data),
+                                    void* user_data);
+
+// Query after retire. A true result authorizes destroy_retired; no device wait,
+// new submission or retry is needed. NULL is already retired.
+bool loom_serve_finite_model_is_retired(loom_serve_finite_model_t* model);
+
+// Final owner-side destruction after is_retired. Never waits for worker/device
+// work. On platform cleanup failure the model and remaining reservations stay
+// owned by the caller; otherwise the model is consumed. NULL is accepted.
+iree_status_t loom_serve_finite_model_destroy_retired(
+    loom_serve_finite_model_t* model);
+
+// Cold outer-owner teardown after service CPU tasks and waits retire. Begins
+// retirement and joins actual queue ownership before destroy_retired. Live
+// model removal uses the wake/query path instead of blocking a shared worker.
 iree_status_t loom_serve_finite_model_destroy(loom_serve_finite_model_t* model);
 
 uint64_t loom_serve_finite_model_batch_limit(

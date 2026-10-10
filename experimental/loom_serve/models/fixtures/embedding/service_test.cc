@@ -39,21 +39,33 @@ using loom_serve::testing::StalledStderr;
 
 // A serialized serving-owner process, sharing the exact host with compilation
 // and an optional already-admitted service cohort. Only the outer test waits.
-struct ModelLoad {
+struct ModelLifecycle {
   static void Wake(void* user_data) {
-    auto* self = static_cast<ModelLoad*>(user_data);
+    auto* self = static_cast<ModelLifecycle*>(user_data);
     iree_task_executor_schedule_process(self->executor, &self->process);
   }
 
   static iree_status_t Drain(iree_task_process_t* process,
                              const iree_task_worker_context_t*,
                              iree_task_process_drain_result_t* result) {
-    auto* self = static_cast<ModelLoad*>(process->user_data);
+    auto* self = static_cast<ModelLifecycle*>(process->user_data);
     std::unique_lock<std::mutex> lock(self->mutex, std::try_to_lock);
     if (!lock.owns_lock()) {
       return iree_ok_status();
     }
-    if (!self->complete) {
+    if (!self->complete && self->retiring) {
+      if (!self->retirement_started) {
+        self->retirement_started = true;
+        loom_serve_finite_model_retire(self->model, Wake, self);
+      }
+      self->complete = loom_serve_finite_model_is_retired(self->model);
+      if (self->complete) {
+        self->status = loom_serve_finite_model_destroy_retired(self->model);
+        if (iree_status_is_ok(self->status)) {
+          self->model = nullptr;
+        }
+      }
+    } else if (!self->complete) {
       self->status = iree_status_join(
           self->status,
           loom_serve_finite_load_advance(self->load, 0, &self->complete));
@@ -76,9 +88,11 @@ struct ModelLoad {
     }
     bool pending = false;
     if (self->service) {
+      const auto flags =
+          self->complete ? 0 : LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY;
       self->status = iree_status_join(
-          self->status,
-          self->service->advance(self->service->self, 0, &result->did_work));
+          self->status, self->service->advance(self->service->self, flags,
+                                               &result->did_work));
       pending = self->service->is_pending(self->service->self);
     }
     result->completed = self->complete && !pending;
@@ -86,7 +100,7 @@ struct ModelLoad {
   }
 
   static void Release(iree_task_process_t* process) {
-    auto* self = static_cast<ModelLoad*>(process->user_data);
+    auto* self = static_cast<ModelLifecycle*>(process->user_data);
     std::lock_guard<std::mutex> lock(self->mutex);
     self->released = true;
     self->condition.notify_one();
@@ -94,12 +108,21 @@ struct ModelLoad {
 
   iree_status_t Run(loom_serve_device_t* device,
                     const loom_serve_finite_model_options_t& options) {
+    IREE_RETURN_IF_ERROR(loom_serve_finite_load_create(
+        device, &options, Wake, this, &load, iree_allocator_system()));
+    return RunOwner(device);
+  }
+
+  iree_status_t Retire(loom_serve_device_t* device) {
+    retiring = true;
+    return RunOwner(device);
+  }
+
+  iree_status_t RunOwner(loom_serve_device_t* device) {
     executor = loom_serve_host_executor(loom_serve_device_host(device));
     iree_task_process_initialize(Drain, 0, 1, &process);
     process.user_data = this;
     process.release_fn = Release;
-    IREE_RETURN_IF_ERROR(loom_serve_finite_load_create(
-        device, &options, Wake, this, &load, iree_allocator_system()));
     if (service) {
       service->set_observer(service->self, {Wake, this});
     }
@@ -118,7 +141,7 @@ struct ModelLoad {
   loom_serve_http_service_t* service = nullptr;
   // Owned in-progress load, consumed at its terminal owner turn.
   loom_serve_finite_load_t* load = nullptr;
-  // Prepared model transferred to the outer fixture on success.
+  // Prepared model returned by loading, or owned model consumed by retirement.
   loom_serve_finite_model_t* model = nullptr;
   // Copied terminal evidence, surviving failed or cancelled preparation.
   loom_serve_compilation_report_t report = {};
@@ -130,7 +153,11 @@ struct ModelLoad {
   std::condition_variable condition;
   // Exercises cancellation after actual task acceptance, not a fake callback.
   bool cancel_after_start = false;
-  // Terminal preparation outcome has been consumed and load destroyed.
+  // This owner removes a model instead of preparing one.
+  bool retiring = false;
+  // Cached consumers were released once and ownership observation is armed.
+  bool retirement_started = false;
+  // Terminal preparation or retirement outcome has been consumed.
   bool complete = false;
   // Executor has made its final access to this process.
   bool released = false;
@@ -168,7 +195,7 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
         .source_directory = iree_make_cstring_view(directory.c_str()),
         .asset_directory = iree_make_cstring_view(directory.c_str()),
         .options = IREE_SV("{\"batch_units\":64}")};
-    ModelLoad load;
+    ModelLifecycle load;
     IREE_ASSERT_OK(load.Run(device_, model_options));
     model_ = load.model;
     EXPECT_EQ(loom_serve_finite_model_batch_limit(model_), 64u);
@@ -624,7 +651,7 @@ TEST_P(SourceEmbeddingServiceTest,
       .options = IREE_SV("{}")};
   const int resident = Send(R"({"model":"fixture","input":"a"})");
   Accept();
-  ModelLoad load;
+  ModelLifecycle load;
   load.service = &interface_;
   iree_status_t status;
   {
@@ -676,7 +703,7 @@ TEST_P(SourceEmbeddingServiceTest,
         .options = IREE_SV("{}")};
     const int resident = Send(R"({"model":"fixture","input":"a"})");
     Accept();
-    ModelLoad load;
+    ModelLifecycle load;
     load.service = &interface_;
     load.cancel_after_start = cancel;
     iree_status_t status;
@@ -807,6 +834,50 @@ TEST_P(SourceEmbeddingServiceTest,
             0u);
   EXPECT_EQ(loom_serve_residency_statistics(residency).committed_bytes,
             kSlabBytes);
+
+  const uint64_t reservation_bytes =
+      loom_serve_residency_statistics(residency).reserved_bytes;
+  const auto before_removal =
+      loom_serve_device_memory_statistics(device_).retained;
+  // Retire the active weighted model on the same serialized owner that must
+  // admit its peer. The one-slab budget cannot hold both sets of weights.
+  interface_.set_observer(interface_.self, {});
+  loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
+  std::swap(model_, retained_);
+  ASSERT_NO_FATAL_FAILURE(CreateService(0));
+  const int peer = Send(R"({"model":"fixture","input":"a"})");
+  Accept();
+  ModelLifecycle removal;
+  removal.model = std::exchange(retained_, nullptr);
+  removal.service = &interface_;
+  iree_status_t removal_status;
+  {
+    StalledStderr stalled;
+    ASSERT_NO_FATAL_FAILURE(stalled.Begin());
+    removal_status = removal.Retire(device_);
+  }
+  retained_ = removal.model;
+  IREE_ASSERT_OK(removal_status);
+  EXPECT_EQ(retained_, nullptr);
+  EXPECT_NE(Read(peer).find(R"("embedding":[2,2,2,2])"), std::string::npos);
+  const auto after_removal =
+      loom_serve_device_memory_statistics(device_).retained;
+  EXPECT_EQ(after_removal.reserved_bytes,
+            before_removal.reserved_bytes - reservation_bytes);
+  EXPECT_EQ(after_removal.committed_bytes, kSlabBytes);
+
+  // Final removal returns the shared model pool to empty without tearing down
+  // its device or host executor. Only private command cache backing may remain.
+  loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
+  ModelLifecycle final_removal;
+  final_removal.model = std::exchange(model_, nullptr);
+  removal_status = final_removal.Retire(device_);
+  model_ = final_removal.model;
+  IREE_ASSERT_OK(removal_status);
+  EXPECT_EQ(model_, nullptr);
+  const auto empty = loom_serve_device_memory_statistics(device_).retained;
+  EXPECT_EQ(empty.reserved_bytes, 0u);
+  EXPECT_EQ(empty.committed_bytes, 0u);
 }
 
 class GroupEmbeddingServiceTest : public SourceEmbeddingServiceTest {

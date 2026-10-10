@@ -460,6 +460,7 @@ int main(int argc, char** argv) {
   for (iree_host_size_t i = 0; i < check.weight_count; ++i) {
     iree_hal_buffer_release(check.weights[i]);
     if (check.weight_plans) {
+      loom_serve_weights_await_retirement(check.weight_plans[i]);
       status = iree_status_join(
           status, loom_serve_weights_destroy(check.weight_plans[i]));
     }

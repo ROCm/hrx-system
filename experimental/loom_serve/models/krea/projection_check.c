@@ -305,6 +305,7 @@ int main(int argc, char** argv) {
     iree_hal_command_buffer_release(check.commands[i]);
     loom_serve_jit_stage_destroy(check.stages[i]);
     iree_hal_buffer_release(check.weights[i]);
+    loom_serve_weights_await_retirement(check.weight_plans[i]);
     status = iree_status_join(
         status, loom_serve_weights_destroy(check.weight_plans[i]));
   }

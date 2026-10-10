@@ -839,6 +839,7 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   iree_allocator_free(model->allocator, model->checkpoints);
   loom_serve_residency_destroy(model->residency);
   loom_serve_execution_release(model->execution);
+  loom_serve_weights_await_retirement(model->weights);
   memory_status = iree_status_join(memory_status,
                                    loom_serve_weights_destroy(model->weights));
   // A failed platform unmap/free must not destroy the allocation domain still

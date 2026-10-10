@@ -132,6 +132,7 @@ iree_status_t loom_serve_image_model_destroy(loom_serve_image_model_t* model) {
   loom_serve_execution_release(model->execution);
   for (iree_host_size_t i = 0; model->weights.plans && i < model->weights.count;
        ++i) {
+    loom_serve_weights_await_retirement(model->weights.plans[i]);
     status = iree_status_join(
         status, loom_serve_weights_destroy(model->weights.plans[i]));
   }

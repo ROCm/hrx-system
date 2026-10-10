@@ -139,9 +139,24 @@ loom_serve_memory_statistics_t loom_serve_weights_statistics(
 loom_serve_weight_activity_t loom_serve_weights_activity(
     const loom_serve_weights_t* weights);
 
-// Consumer commands and root references must be released. Joins final queue
-// ownership of those roots before unmapping, even after readiness has failed.
-// A cleanup failure preserves outstanding ownership; NULL is accepted.
+// Observes final ownership of both parameter consumers and activation I/O.
+// The serialized owner stops new activation/submission, attaches the wake,
+// releases cached commands/root references, then queries is_retired. The wake
+// only schedules an owner turn; it may not reenter the plan or tear down state.
+// NULL detaches and joins the callback's final payload access. A NULL plan is
+// already retired and accepts observer/await operations as no-ops.
+void loom_serve_weights_set_retirement_observer(loom_serve_weights_t* weights,
+                                                void (*wake)(void* user_data),
+                                                void* user_data);
+bool loom_serve_weights_is_retired(loom_serve_weights_t* weights);
+
+// Cold outer-thread join of the ownership above, independent of readiness.
+// Live owners use the wake and query instead of waiting on a shared worker.
+void loom_serve_weights_await_retirement(loom_serve_weights_t* weights);
+
+// Nonblocking destruction after is_retired or await_retirement proved every
+// consumer and activation view retired. A platform cleanup failure preserves
+// the plan and outstanding reservations. NULL is accepted.
 iree_status_t loom_serve_weights_destroy(loom_serve_weights_t* weights);
 
 #ifdef __cplusplus

@@ -316,6 +316,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
       loom_serve_residency_destroy(residency);
     }
     for (auto* plan : plans_) {
+      loom_serve_weights_await_retirement(plan);
       IREE_EXPECT_OK(loom_serve_weights_destroy(plan));
     }
     IREE_EXPECT_OK(loom_serve_virtual_buffer_destroy(state_));
@@ -607,6 +608,7 @@ TEST_P(WeightsTest, LateMissingParameterRetiresEarlierAcceptedReads) {
   IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Load(0, 1));
   iree_hal_buffer_release(buffers_[0][0]);
   buffers_[0][0] = nullptr;
+  loom_serve_weights_await_retirement(plans_[0]);
   IREE_ASSERT_OK(loom_serve_weights_destroy(plans_[0]));
   plans_[0] = nullptr;
   if (GetParam()) {
@@ -635,6 +637,7 @@ TEST_P(WeightsTest, RejectedActivationRetainsProtectionUntilActualRetirement) {
   residencies_[0] = nullptr;
   iree_hal_buffer_release(buffers_[0][0]);
   buffers_[0][0] = nullptr;
+  loom_serve_weights_await_retirement(plans_[0]);
   IREE_ASSERT_OK(loom_serve_weights_destroy(plans_[0]));
   plans_[0] = nullptr;
   if (GetParam()) {

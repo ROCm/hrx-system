@@ -118,44 +118,98 @@ struct loom_serve_finite_model_t {
   iree_byte_span_t output;
 };
 
-// Consumes a model after execution retirement, or a load that never submitted
-// device work. Weight views lose every cached consumer before plan destruction.
+// Releases model-owned consumers, not borrowed upload/feedback payloads or the
+// storage protection those consumers still require. Partial loads use this same
+// sequence, with no submitted queue work to retire.
+static void finite_model_release_consumers(loom_serve_finite_model_t* model) {
+  loom_serve_program_destroy(model->control.program);
+  model->control.program = NULL;
+  for (uint32_t i = 0; i < model->stages.count; ++i) {
+    iree_hal_command_buffer_release(model->stages.values[i].command);
+    model->stages.values[i].command = NULL;
+  }
+  for (iree_host_size_t i = 0; i < model->weights.count; ++i) {
+    iree_hal_buffer_release(model->weights.values[i]);
+    model->weights.values[i] = NULL;
+  }
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->buffers); ++i) {
+    iree_hal_buffer_release(model->buffers[i]);
+    model->buffers[i] = NULL;
+  }
+}
+
+void loom_serve_finite_model_retire(loom_serve_finite_model_t* model,
+                                    void (*wake)(void* user_data),
+                                    void* user_data) {
+  loom_serve_execution_set_retirement_observer(model->execution, wake,
+                                               user_data);
+  for (iree_host_size_t i = 0; i < model->weights.count; ++i) {
+    loom_serve_weights_set_retirement_observer(model->weights.plans[i], wake,
+                                               user_data);
+  }
+  finite_model_release_consumers(model);
+}
+
+bool loom_serve_finite_model_is_retired(loom_serve_finite_model_t* model) {
+  if (!model) {
+    return true;
+  }
+  bool retired =
+      !model->execution || loom_serve_execution_is_retired(model->execution);
+  for (iree_host_size_t i = 0; model->weights.plans && i < model->weights.count;
+       ++i) {
+    retired &= loom_serve_weights_is_retired(model->weights.plans[i]);
+  }
+  return retired;
+}
+
+// Consumes a retired model or a load that never submitted device work. A failed
+// platform release preserves the model and remaining reservation handles.
 static iree_status_t finite_model_destroy_resources(
     loom_serve_finite_model_t* model) {
   if (!model) {
     return iree_ok_status();
   }
-  iree_status_t status = iree_ok_status();
-  loom_serve_program_destroy(model->control.program);
-  iree_vm_buffer_release(model->control.tags);
-  iree_vm_buffer_release(model->control.state);
-  for (uint32_t i = 0; i < model->stages.count; ++i) {
-    iree_hal_command_buffer_release(model->stages.values[i].command);
-    loom_serve_jit_stage_destroy(model->stages.values[i].compiled);
-  }
-  iree_allocator_free(model->allocator, model->stages.values);
-  loom_serve_preparation_destroy(model->preparation);
-  for (iree_host_size_t i = 0; i < model->weights.count; ++i) {
-    iree_hal_buffer_release(model->weights.values[i]);
-  }
-  iree_vm_buffer_release(model->invocation.plan);
-  iree_vm_buffer_release(model->invocation.payload);
-  iree_vm_environment_free(model->control.environment);
+  finite_model_release_consumers(model);
+  IREE_ASSERT(loom_serve_finite_model_is_retired(model));
   loom_serve_residency_destroy(model->residency);
-  loom_serve_execution_release(model->execution);
-  for (iree_host_size_t i = 0; model->weights.plans && i < model->weights.count;
+  model->residency = NULL;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       model->weights.plans && i < model->weights.count &&
+       iree_status_is_ok(status);
        ++i) {
-    status = iree_status_join(
-        status, loom_serve_weights_destroy(model->weights.plans[i]));
+    status = loom_serve_weights_destroy(model->weights.plans[i]);
+    if (iree_status_is_ok(status)) {
+      model->weights.plans[i] = NULL;
+    }
   }
-  iree_allocator_free(model->allocator, model->weights.values);
-  iree_allocator_free(model->allocator, model->weights.plans);
-  iree_allocator_free(model->allocator, (void*)model->name.data);
-  loom_serve_jit_destroy(model->jit);
-  iree_tokenizer_free(model->tokenizer);
-  iree_allocator_free(model->allocator, model->output.data);
-  iree_allocator_free(model->allocator, model);
+  if (iree_status_is_ok(status)) {
+    iree_vm_buffer_release(model->control.tags);
+    iree_vm_buffer_release(model->control.state);
+    for (uint32_t i = 0; i < model->stages.count; ++i) {
+      loom_serve_jit_stage_destroy(model->stages.values[i].compiled);
+    }
+    iree_allocator_free(model->allocator, model->stages.values);
+    loom_serve_preparation_destroy(model->preparation);
+    iree_vm_buffer_release(model->invocation.plan);
+    iree_vm_buffer_release(model->invocation.payload);
+    iree_vm_environment_free(model->control.environment);
+    loom_serve_execution_release(model->execution);
+    iree_allocator_free(model->allocator, model->weights.values);
+    iree_allocator_free(model->allocator, model->weights.plans);
+    iree_allocator_free(model->allocator, (void*)model->name.data);
+    loom_serve_jit_destroy(model->jit);
+    iree_tokenizer_free(model->tokenizer);
+    iree_allocator_free(model->allocator, model->output.data);
+    iree_allocator_free(model->allocator, model);
+  }
   return status;
+}
+
+iree_status_t loom_serve_finite_model_destroy_retired(
+    loom_serve_finite_model_t* model) {
+  return finite_model_destroy_resources(model);
 }
 
 iree_status_t loom_serve_finite_model_destroy(
@@ -163,10 +217,11 @@ iree_status_t loom_serve_finite_model_destroy(
   if (!model) {
     return iree_ok_status();
   }
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->buffers); ++i) {
-    iree_hal_buffer_release(model->buffers[i]);
-  }
+  loom_serve_finite_model_retire(model, NULL, NULL);
   iree_status_t status = loom_serve_execution_drain(model->execution);
+  for (iree_host_size_t i = 0; i < model->weights.count; ++i) {
+    loom_serve_weights_await_retirement(model->weights.plans[i]);
+  }
   return iree_status_join(status, finite_model_destroy_resources(model));
 }
 
@@ -774,11 +829,13 @@ iree_status_t loom_serve_finite_load_destroy(loom_serve_finite_load_t* load) {
   if (!load) {
     return iree_ok_status();
   }
-  iree_vm_module_release(load->module);
   iree_status_t status = finite_model_destroy_resources(load->model);
-  iree_allocator_free(load->allocator, load->policy_path);
-  iree_slim_mutex_deinitialize(&load->event.mutex);
-  iree_allocator_free(load->allocator, load);
+  if (iree_status_is_ok(status)) {
+    iree_vm_module_release(load->module);
+    iree_allocator_free(load->allocator, load->policy_path);
+    iree_slim_mutex_deinitialize(&load->event.mutex);
+    iree_allocator_free(load->allocator, load);
+  }
   return status;
 }
 
