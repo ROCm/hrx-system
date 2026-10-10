@@ -88,6 +88,27 @@ Input staging is allocated once for the largest configured cohorts and
 source-declared dense token views. It is shared by the serialized model
 invocation; rows retain only their pending prediction, not padded host inputs.
 
+### Native ownership boundaries
+
+The [service](service.c) owns HTTP claims, queued admission, session phases and
+one asynchronous completion handoff. Neither device readiness callbacks nor
+CPU release callbacks destroy model state; they wake this serialized owner.
+
+The [checkpoint registry](checkpoint_registry.h) owns named endpoint records,
+retained canonical transcripts and completed snapshot-byte accounting. The
+service publishes a name only after successful pin readiness and tracks queued
+borrowers before permitting deletion. Failed device readiness leaves native
+handles with model retirement, rather than releasing possibly active storage.
+
+The [epoch planner](epoch.h) receives snapshots of already-credited rows and a
+selected packing shape. It produces retained spans, output limits and an
+optional device-fed continuation without allocation, synchronization or HTTP
+access. Packed completion consumes the model program's authoritative progress;
+isolated controls publish only the span that actually completed. Telemetry
+observes that progress without deciding request advancement. This separation
+lets packing and continuation choices be tested directly while the source
+fixtures verify real HTTP output, retained history, cancellation and removal.
+
 ## Bootstrap and storage
 
 The cold entry in `prepare.loom` is:

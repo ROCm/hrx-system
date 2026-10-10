@@ -8,6 +8,8 @@
 #define EXPERIMENTAL_LOOM_SERVE_TEXT_TELEMETRY_H_
 
 #include "experimental/loom_serve/telemetry/stream.h"
+#include "experimental/loom_serve/text/epoch.h"
+#include "experimental/loom_serve/text/heartbeat.h"
 #include "experimental/loom_serve/text/session.h"
 
 #ifdef __cplusplus
@@ -71,6 +73,16 @@ void loom_serve_text_telemetry_request_end(
 // Publishes final session totals and clears only its telemetry lifetime.
 void loom_serve_text_telemetry_session_end(
     loom_serve_text_telemetry_t* telemetry, loom_serve_text_session_t* session);
+
+// Accounts completed model progress at every lifetime and publishes span/epoch
+// records plus the heartbeat's completed-work snapshot. Model results remain
+// immutable; request phase, output translation and retirement belong to the
+// service. The caller publishes each successfully completed cohort once.
+void loom_serve_text_telemetry_epoch(
+    loom_serve_text_telemetry_t* telemetry,
+    loom_serve_text_heartbeat_t* heartbeat,
+    const loom_serve_text_epoch_options_t* options,
+    const loom_serve_text_epoch_t* cohort, loom_serve_text_session_t* sessions);
 
 // Owned arguments published only by the serialized service owner. CPU jobs
 // return measurements through their existing completion handoff. No record

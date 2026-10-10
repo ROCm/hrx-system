@@ -72,6 +72,7 @@ loom_cc_test(
         "//experimental/loom_serve/serving:registry",
         "//experimental/loom_serve/serving:router",
         "//experimental/loom_serve/text:model",
+        "//experimental/loom_serve/text:schedule",
         "//experimental/loom_serve/text:service",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",

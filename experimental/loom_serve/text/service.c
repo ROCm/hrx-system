@@ -13,6 +13,7 @@
 #include "experimental/loom_serve/scheduling/packing.h"
 #include "experimental/loom_serve/text/chat.h"
 #include "experimental/loom_serve/text/checkpoint_registry.h"
+#include "experimental/loom_serve/text/epoch.h"
 #include "experimental/loom_serve/text/heartbeat.h"
 #include "experimental/loom_serve/text/schedule.h"
 #include "experimental/loom_serve/text/session.h"
@@ -69,24 +70,12 @@ struct loom_serve_text_service_t {
   loom_serve_packing_shape_t isolated_shape;
   // Number of allocated device/session rows.
   iree_host_size_t row_count;
-  // Active input tokens issued in one scheduling turn.
-  iree_host_size_t chunk_size;
-  // Compiled context capacity of each retained row.
-  iree_host_size_t context_capacity;
   // Output bound when the client omits one.
   iree_host_size_t default_max_tokens;
-  // Same ready partition can execute packed or through isolated controls.
-  loom_serve_text_schedule_mode_t schedule_mode;
-  // Admission ablation independent of the packed versus isolated math choice.
-  loom_serve_text_packing_mode_t packing_mode;
   // Fixed proposal depth: zero for target-only, three for whole verifiers.
   iree_host_size_t mtp_depth;
-  // Maximum epochs submitted before checking transport and new arrivals.
-  iree_host_size_t continuation_epochs;
-  // Borrowed model shapes, or the one isolated control shape.
-  const loom_serve_packing_shape_t* shapes;
-  // Number of candidate shapes evaluated against each ready cohort.
-  iree_host_size_t shape_count;
+  // Immutable model epoch geometry and execution choices.
+  loom_serve_text_epoch_options_t scheduling;
   // Rotating admission priority, independent of row or request identity.
   iree_host_size_t cursor;
   // Proactor-timed reporting of copied state, independent of model readiness.
@@ -119,38 +108,8 @@ struct loom_serve_text_service_t {
     // Reused only after its release callback publishes readiness.
     iree_task_process_t process;
   } cpu;
-  // Immutable cohort plan through asynchronous submission and publication.
-  struct {
-    // Number of planned spans; zero outside an epoch.
-    iree_host_size_t count;
-    // Selected command-program bucket.
-    iree_host_size_t shape_index;
-    // Current span in isolated/matched execution.
-    iree_host_size_t cursor;
-    // First issued epoch identity and host-observed start time.
-    struct {
-      // First issued epoch identity, including device-fed continuations.
-      uint64_t serial;
-      // Host observation timestamp in nanoseconds.
-      iree_time_t time;
-    } start;
-    // Number of proposed spans in the first epoch.
-    iree_host_size_t proposal_count;
-    // Number of queued target traversals for a packed cohort.
-    iree_host_size_t device_epochs;
-    // Known inputs scheduled in a device-fed continuation.
-    iree_host_size_t continued_prefill_count;
-    // Row association, live token counts and selection flags.
-    loom_serve_text_span_t spans[LOOM_SERVE_TEXT_ROW_CAPACITY];
-    // Per-span progress filled only after successful readiness.
-    loom_serve_text_result_t results[LOOM_SERVE_TEXT_ROW_CAPACITY];
-    // Stable pending tokens for later isolated span submissions.
-    int32_t decode_tokens[LOOM_SERVE_TEXT_ROW_CAPACITY];
-    // Pre-submission consumed positions for metrics.
-    iree_host_size_t positions[LOOM_SERVE_TEXT_ROW_CAPACITY];
-    // Request output credit, including any continuation.
-    uint32_t output_limits[LOOM_SERVE_TEXT_ROW_CAPACITY];
-  } epoch;
+  // Retained cohort inputs and feedback through response CPU release.
+  loom_serve_text_epoch_t epoch;
   // One bounded control claim, retained through any accepted model operation.
   struct {
     // Claimed HTTP ownership; NULL when no control request is queued.
@@ -704,16 +663,16 @@ static iree_status_t text_prepare_input(
   const iree_host_size_t prefix_count = retained ? 1 : 0;
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_prepare_input(
       chat->policy, input, LOOM_SERVE_TEXT_CHAT_INPUT_RENDERED, boundary,
-      service->context_capacity - prefix_count, session->tokens + prefix_count,
-      out_count, service->allocator));
+      service->scheduling.context_capacity - prefix_count,
+      session->tokens + prefix_count, out_count, service->allocator));
   *out_count += prefix_count;
   if (*out_count + chat->max_tokens - 1 >
-      service->context_capacity - *out_retained) {
+      service->scheduling.context_capacity - *out_retained) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "request input and output exceed remaining %zu-token context; compact "
         "history or lower max_tokens",
-        service->context_capacity);
+        service->scheduling.context_capacity);
   }
   return iree_ok_status();
 }
@@ -904,7 +863,7 @@ static iree_status_t text_prepare_admission(
                                           pending->name, pending->checkpoint,
                                           &input_count, &retained_count));
   const iree_host_size_t reservation = loom_serve_text_request_reservation(
-      service->context_capacity, retained_count + input_count,
+      service->scheduling.context_capacity, retained_count + input_count,
       pending->chat.max_tokens, service->mtp_depth,
       service->pool.geometry.block_size);
   if (service->pool.geometry.capacity &&
@@ -1295,7 +1254,7 @@ static iree_status_t text_prepare_ready(loom_serve_text_service_t* service,
     const bool verify =
         service->mtp_depth &&
         session->request.chat.max_tokens - session->request.output_count > 1 &&
-        service->context_capacity -
+        service->scheduling.context_capacity -
                 loom_serve_text_row_position(session->row) >=
             4;
     *out_ready = verify ? (loom_serve_ready_span_t){4, 4}
@@ -1326,308 +1285,66 @@ static void text_separate_ready(const loom_serve_text_service_t* service,
   }
 }
 
-// Pre-issues ready work from the admitted cohort. Known progress is exact;
-// speculative progress is resolved by the device before the second traversal.
-// Credit/cancellation remain bounded by the same host publication boundary.
-static void text_prepare_continuation(
-    loom_serve_text_service_t* service, iree_host_size_t count,
-    const loom_serve_text_span_t* spans, const uint32_t* output_limits,
-    loom_serve_text_span_t* next_spans, uint32_t* next_limits,
-    loom_serve_text_continuation_t* out_continuation) {
-  *out_continuation = (loom_serve_text_continuation_t){0};
-  if (service->continuation_epochs != 2) {
-    return;
-  }
-  loom_serve_ready_span_t ready[LOOM_SERVE_TEXT_ROW_CAPACITY] = {0};
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    const loom_serve_text_span_t* span = &spans[i];
-    const loom_serve_text_session_t* session =
-        &service->sessions[span->row_index];
-    const iree_host_size_t remaining_output =
-        session->request.chat.max_tokens - session->request.output_count;
-    const iree_host_size_t remaining_input =
-        session->request.phase == LOOM_SERVE_TEXT_REQUEST_PREFILL
-            ? session->request.input_count - session->request.input_offset -
-                  span->token_count
-            : 0;
-    if (remaining_input) {
-      ready[i] = (loom_serve_ready_span_t){remaining_input, 1};
-    } else {
-      const iree_host_size_t minimum_consumed =
-          output_limits[i] ? 1 : span->token_count;
-      if (remaining_output > 1 &&
-          service->context_capacity -
-                  loom_serve_text_row_position(session->row) >=
-              minimum_consumed + 4) {
-        ready[i] = (loom_serve_ready_span_t){4, 4};
-      }
-    }
-  }
-  // Rotate within the leased cohort instead of repeatedly giving its first
-  // long prompt all of the expansion slots.
-  iree_host_size_t cursor = count > 1 ? 1 : 0;
-  if (service->packing_mode == LOOM_SERVE_TEXT_PACKING_SEPARATE) {
-    for (iree_host_size_t i = 0; i < count; ++i) {
-      const iree_host_size_t first = (cursor + i) % count;
-      if (!ready[first].token_count) {
-        continue;
-      }
-      const iree_host_size_t minimum = ready[first].minimum_count;
-      for (iree_host_size_t j = 0; j < count; ++j) {
-        if (ready[j].minimum_count != minimum) {
-          ready[j] = (loom_serve_ready_span_t){0};
-        }
-      }
-      break;
-    }
-  }
-  loom_serve_packed_span_t scheduled[LOOM_SERVE_TEXT_ROW_CAPACITY];
-  loom_serve_packed_span_t scratch[LOOM_SERVE_TEXT_ROW_CAPACITY];
-  iree_host_size_t shape = 0;
-  const iree_host_size_t next_count = loom_serve_pack_shapes(
-      count, ready, service->shape_count, service->shapes, service->chunk_size,
-      &cursor, scheduled, scratch, &shape);
-  for (iree_host_size_t i = 0; i < next_count; ++i) {
-    const iree_host_size_t first = scheduled[i].row_index;
-    const iree_host_size_t row = spans[first].row_index;
-    const loom_serve_text_session_t* session = &service->sessions[row];
-    const bool speculative = ready[first].minimum_count == 4;
-    const bool select =
-        speculative || scheduled[i].token_count == ready[first].token_count;
-    next_spans[i] = (loom_serve_text_span_t){
-        .row_index = row,
-        .token_count = scheduled[i].token_count,
-        .token_ids = speculative
-                         ? NULL
-                         : session->tokens + session->request.input_offset +
-                               spans[first].token_count,
-        .flags = (select ? LOOM_SERVE_TEXT_SPAN_FLAG_SELECT : 0) |
-                 (speculative ? LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE : 0),
-    };
-    next_limits[i] = speculative
-                         ? (uint32_t)iree_min(output_limits[first] ? 8 : 5,
-                                              session->request.chat.max_tokens -
-                                                  session->request.output_count)
-                         : 0;
-  }
-  *out_continuation = (loom_serve_text_continuation_t){
-      .shape_index = shape,
-      .span_count = next_count,
-      .spans = next_spans,
-      .output_limits = next_limits,
-  };
-}
-
-static iree_status_t text_submit_isolated(loom_serve_text_service_t* service) {
-  const loom_serve_text_span_t* span =
-      &service->epoch.spans[service->epoch.cursor];
-  const loom_serve_text_session_t* session =
-      &service->sessions[span->row_index];
-  if (session->request.phase == LOOM_SERVE_TEXT_REQUEST_PREFILL ||
-      service->schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_MATCHED) {
-    return loom_serve_text_row_submit_prefill(session->row, span->token_count,
-                                              span->token_ids,
-                                              &service->completion.frontier);
-  }
-  return loom_serve_text_row_submit_decode(session->row,
-                                           &service->completion.frontier);
-}
-
 static iree_status_t text_submit_epoch(
     loom_serve_text_service_t* service, iree_host_size_t shape_index,
     iree_host_size_t count, const loom_serve_packed_span_t* scheduled) {
-  memset(&service->epoch, 0, sizeof(service->epoch));
-  service->epoch.count = count;
-  service->epoch.shape_index = shape_index;
-  loom_serve_text_span_t* spans = service->epoch.spans;
-  int32_t* decode_tokens = service->epoch.decode_tokens;
-  iree_host_size_t* positions = service->epoch.positions;
-  uint32_t* output_limits = service->epoch.output_limits;
-  iree_host_size_t proposal_count = 0;
-  iree_host_size_t input_count = 0;
+  loom_serve_text_epoch_row_t rows[LOOM_SERVE_TEXT_ROW_CAPACITY];
   for (iree_host_size_t i = 0; i < count; ++i) {
     const iree_host_size_t row = scheduled[i].row_index;
-    loom_serve_text_session_t* session = &service->sessions[row];
+    const loom_serve_text_session_t* session = &service->sessions[row];
     const bool prefill =
         session->request.phase == LOOM_SERVE_TEXT_REQUEST_PREFILL;
-    const bool select = !prefill || scheduled[i].token_count ==
-                                        session->request.input_count -
-                                            session->request.input_offset;
-    positions[i] = loom_serve_text_row_position(session->row);
-    if (!prefill) {
-      decode_tokens[i] = loom_serve_text_row_token(session->row);
-      if (scheduled[i].token_count == 4) {
-        ++proposal_count;
-        output_limits[i] = (uint32_t)iree_min(
-            4 * service->continuation_epochs,
-            session->request.chat.max_tokens - session->request.output_count);
-      }
-    }
-    spans[i] = (loom_serve_text_span_t){
-        .row_index = row,
-        .token_count = scheduled[i].token_count,
-        .token_ids = prefill ? session->tokens + session->request.input_offset
-                             : &decode_tokens[i],
-        .flags = (select ? LOOM_SERVE_TEXT_SPAN_FLAG_SELECT : 0) |
-                 (output_limits[i] ? LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE : 0),
+    rows[row] = (loom_serve_text_epoch_row_t){
+        .input_tokens =
+            prefill ? session->tokens + session->request.input_offset : NULL,
+        .input_count = prefill ? session->request.input_count -
+                                     session->request.input_offset
+                               : 0,
+        .output_count =
+            session->request.chat.max_tokens - session->request.output_count,
+        .position = loom_serve_text_row_position(session->row),
+        .token = prefill ? 0 : loom_serve_text_row_token(session->row),
     };
-    input_count += spans[i].token_count;
   }
-  loom_serve_text_span_t next_spans[LOOM_SERVE_TEXT_ROW_CAPACITY];
-  uint32_t next_limits[LOOM_SERVE_TEXT_ROW_CAPACITY];
-  loom_serve_text_continuation_t continuation;
-  text_prepare_continuation(service, count, spans, output_limits, next_spans,
-                            next_limits, &continuation);
-  if (!continuation.span_count) {
-    for (iree_host_size_t i = 0; i < count; ++i) {
-      output_limits[i] = iree_min(output_limits[i], 4u);
-    }
-  }
-  iree_host_size_t continued_prefill_count = 0;
-  for (iree_host_size_t i = 0; i < continuation.span_count; ++i) {
-    continued_prefill_count += next_limits[i] ? 0 : next_spans[i].token_count;
-  }
-  const bool packed = service->schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED;
-  const iree_host_size_t device_epochs = continuation.span_count ? 2 : 1;
-  const bool verifies = proposal_count || continuation.span_count;
+  loom_serve_text_epoch_continuation_t continuation;
+  loom_serve_text_epoch_prepare(&service->scheduling, rows, shape_index, count,
+                                scheduled, &service->epoch, &continuation);
   text_observe(service, "execute");
   const iree_time_t start = iree_time_now();
   iree_slim_mutex_lock(&service->heartbeat.mutex);
   loom_serve_text_heartbeat_snapshot_t* state = &service->heartbeat.snapshot;
   service->epoch.start.serial = state->issued_epochs + 1;
   service->epoch.start.time = start;
-  service->epoch.proposal_count = proposal_count;
-  service->epoch.device_epochs = device_epochs;
-  service->epoch.continued_prefill_count = continued_prefill_count;
-  state->issued_epochs += device_epochs;
+  state->issued_epochs += service->epoch.device_epochs;
   state->phase_start = start;
   state->epoch_spans = count;
-  state->epoch_tokens = input_count;
+  state->epoch_tokens = service->epoch.input_count;
   iree_slim_mutex_unlock(&service->heartbeat.mutex);
-  iree_status_t status = iree_ok_status();
-  if (packed) {
-    status = loom_serve_text_model_submit_epoch(
-        service->model, shape_index, count, spans,
-        verifies ? output_limits : NULL,
-        continuation.span_count ? &continuation : NULL,
-        &service->completion.frontier);
-  } else {
-    status = text_submit_isolated(service);
-  }
-  IREE_RETURN_IF_ERROR(status);
+  IREE_RETURN_IF_ERROR(loom_serve_text_epoch_submit(
+      service->model, service->scheduling.schedule_mode, &service->epoch,
+      &continuation, &service->completion.frontier));
   return text_await_work(service, TEXT_WORK_EPOCH);
 }
 
 static bool text_publish_epoch(loom_serve_text_service_t* service) {
-  const iree_host_size_t count = service->epoch.count;
-  const iree_host_size_t shape_index = service->epoch.shape_index;
-  const loom_serve_text_span_t* spans = service->epoch.spans;
-  loom_serve_text_result_t* results = service->epoch.results;
-  const iree_host_size_t* positions = service->epoch.positions;
-  const uint32_t* output_limits = service->epoch.output_limits;
-  const iree_time_t start = service->epoch.start.time;
-  const uint64_t epoch = service->epoch.start.serial;
-  const iree_host_size_t proposal_count = service->epoch.proposal_count;
-  const iree_host_size_t device_epochs = service->epoch.device_epochs;
-  const iree_host_size_t continued_prefill_count =
-      service->epoch.continued_prefill_count;
-  const bool packed = service->schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED;
-  const bool verifies = proposal_count || device_epochs == 2;
-  iree_host_size_t prefill_count = 0, decode_count = 0, output_count = 0;
-  iree_host_size_t verification_count = 0, accepted_drafts = 0;
-  loom_serve_text_heartbeat_snapshot_t* state = &service->heartbeat.snapshot;
-  const iree_time_t completed = iree_time_now();
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    loom_serve_text_session_t* session = &service->sessions[spans[i].row_index];
-    const bool prefill =
-        session->request.phase == LOOM_SERVE_TEXT_REQUEST_PREFILL;
-    const bool select =
-        iree_any_bit_set(spans[i].flags, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT);
-    if (!verifies) {
-      results[i].consumed_count = spans[i].token_count;
-      results[i].known_count = spans[i].token_count;
-      results[i].output_count = select ? 1 : 0;
-      if (select) {
-        results[i].tokens[0] = loom_serve_text_row_token(session->row);
-      }
-    }
-    prefill_count += prefill ? results[i].known_count : 0;
-    decode_count +=
-        results[i].consumed_count - (prefill ? results[i].known_count : 0);
-    output_count += results[i].output_count;
-    verification_count += results[i].verification_count;
-    accepted_drafts += results[i].consumed_count - results[i].known_count -
-                       results[i].verification_count;
-    session->request.counters.input_tokens += results[i].consumed_count;
-    session->request.counters.output_tokens += results[i].output_count;
-    ++session->request.counters.batches;
-    session->telemetry.counters.input_tokens += results[i].consumed_count;
-    session->telemetry.counters.output_tokens += results[i].output_count;
-    ++session->telemetry.counters.batches;
-    session->telemetry.position = loom_serve_text_row_position(session->row);
-    session->telemetry.resident_tokens =
-        loom_serve_text_row_pool_usage(session->row);
-    const loom_serve_text_span_record_t value = {
-        .epoch = epoch,
-        .session = session->telemetry.id,
-        .row = spans[i].row_index,
-        .position = positions[i],
-        .tokens = spans[i].token_count,
-        .consumed_tokens = results[i].consumed_count,
-        .output_tokens = results[i].output_count,
-        .output_limit = output_limits[i],
-        .known_tokens = results[i].known_count,
-        .verification_epochs = results[i].verification_count,
-        .prefill = prefill,
-        .select = select};
-    loom_serve_text_record(service->telemetry.stream, &LOOM_SERVE_TEXT_SPAN,
-                           session->serial, &value, sizeof(value));
-  }
-  iree_slim_mutex_lock(&service->heartbeat.mutex);
-  state->completed_epochs += device_epochs;
-  state->traversals += packed ? device_epochs : count;
-  state->prefill_tokens += prefill_count;
-  state->decode_tokens += decode_count;
-  state->model_duration += completed - start;
-  state->mtp.proposed_tokens += verification_count * 3;
-  state->mtp.accepted_inputs += accepted_drafts;
-  state->last_completion = completed;
-  iree_slim_mutex_unlock(&service->heartbeat.mutex);
-  service->telemetry.counters.input_tokens += prefill_count + decode_count;
-  service->telemetry.counters.output_tokens += output_count;
-  ++service->telemetry.counters.batches;
-  const loom_serve_text_epoch_record_t value = {
-      .epoch = epoch,
-      .spans = count,
-      .shape = shape_index,
-      .token_capacity = service->shapes[shape_index].token_capacity,
-      .span_capacity = service->shapes[shape_index].span_capacity,
-      .prefill_tokens = prefill_count,
-      .decode_tokens = decode_count,
-      .output_tokens = output_count,
-      .traversals = packed ? device_epochs : count,
-      .duration_ns = completed - start,
-      .device_epochs = device_epochs,
-      .continued_prefill_tokens = continued_prefill_count,
-      .verifications = verification_count,
-      .accepted_draft_inputs = accepted_drafts,
-      .schedule_mode = service->schedule_mode,
-      .packing_mode = service->packing_mode};
-  loom_serve_text_record(service->telemetry.stream, &LOOM_SERVE_TEXT_EPOCH, 0,
-                         &value, sizeof(value));
+  loom_serve_text_telemetry_epoch(&service->telemetry, &service->heartbeat,
+                                  &service->scheduling, &service->epoch,
+                                  service->sessions);
   text_observe(service, "output");
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    loom_serve_text_session_t* session = &service->sessions[spans[i].row_index];
-    const bool prefill =
-        session->request.phase == LOOM_SERVE_TEXT_REQUEST_PREFILL;
+  bool has_output = false;
+  for (iree_host_size_t i = 0; i < service->epoch.count; ++i) {
+    has_output |= service->epoch.results[i].output_count != 0;
+    loom_serve_text_session_t* session =
+        &service->sessions[service->epoch.spans[i].row_index];
+    const bool prefill = service->epoch.prefill[i];
     if (prefill) {
-      session->request.input_offset += results[i].known_count;
+      session->request.input_offset += service->epoch.results[i].known_count;
       if (session->request.input_offset == session->request.input_count) {
         session->request.phase = LOOM_SERVE_TEXT_REQUEST_DECODE;
       }
     }
   }
-  return output_count != 0;
+  return has_output;
 }
 
 static iree_status_t text_process_output(
@@ -1673,18 +1390,10 @@ static void text_complete_output(loom_serve_text_service_t* service) {
 
 static iree_status_t text_complete_epoch(
     loom_serve_text_service_t* service, loom_serve_http_service_flags_t flags) {
-  if (service->schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED) {
-    IREE_RETURN_IF_ERROR(loom_serve_text_model_complete_epoch(
-        service->model, service->epoch.results));
-  } else {
-    const iree_host_size_t row =
-        service->epoch.spans[service->epoch.cursor].row_index;
-    IREE_RETURN_IF_ERROR(
-        loom_serve_text_row_complete_step(service->sessions[row].row));
-    ++service->epoch.cursor;
-  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_epoch_complete(
+      service->model, service->scheduling.schedule_mode, &service->epoch));
   if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
-    if (service->schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED) {
+    if (service->scheduling.schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED) {
       // Only these isolated spans were submitted; the remainder never ran.
       service->epoch.count = service->epoch.cursor;
     }
@@ -1692,9 +1401,11 @@ static iree_status_t text_complete_epoch(
     service->epoch.count = 0;
     return iree_ok_status();
   }
-  if (service->schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED &&
+  if (service->scheduling.schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED &&
       service->epoch.cursor < service->epoch.count) {
-    IREE_RETURN_IF_ERROR(text_submit_isolated(service));
+    IREE_RETURN_IF_ERROR(loom_serve_text_epoch_submit(
+        service->model, service->scheduling.schedule_mode, &service->epoch,
+        NULL, &service->completion.frontier));
     return text_await_work(service, TEXT_WORK_EPOCH);
   }
   const bool has_output = text_publish_epoch(service);
@@ -1727,7 +1438,8 @@ static iree_status_t text_service_initialize(
     status = loom_serve_text_session_initialize(
         loom_serve_text_model_row(service->model, i),
         loom_serve_text_model_tokenizer(service->model),
-        service->context_capacity, &service->sessions[i], service->allocator);
+        service->scheduling.context_capacity, &service->sessions[i],
+        service->allocator);
   }
   return status;
 }
@@ -1811,20 +1523,21 @@ iree_status_t loom_serve_text_service_create(
       .isolated_shape = {loom_serve_text_model_prefill_capacity(model),
                          options->row_count},
       .row_count = options->row_count,
-      .chunk_size = options->chunk_size,
-      .context_capacity = loom_serve_text_model_context_capacity(model),
       .default_max_tokens = options->default_max_tokens,
       .pending = {.capacity = options->pending_capacity},
       .pool = {.geometry = loom_serve_text_model_pool_usage(model)},
-      .schedule_mode = options->schedule_mode,
-      .packing_mode = options->packing_mode,
       .mtp_depth = options->mtp_depth,
-      .continuation_epochs = options->continuation_epochs,
-      .shapes = loom_serve_text_model_shapes(model),
-      .shape_count = loom_serve_text_model_shape_count(model)};
-  if (!service->shape_count) {
-    service->shapes = &service->isolated_shape;
-    service->shape_count = 1;
+      .scheduling = {
+          .chunk_size = options->chunk_size,
+          .context_capacity = loom_serve_text_model_context_capacity(model),
+          .schedule_mode = options->schedule_mode,
+          .packing_mode = options->packing_mode,
+          .continuation_epochs = options->continuation_epochs,
+          .shapes = loom_serve_text_model_shapes(model),
+          .shape_count = loom_serve_text_model_shape_count(model)}};
+  if (!service->scheduling.shape_count) {
+    service->scheduling.shapes = &service->isolated_shape;
+    service->scheduling.shape_count = 1;
   }
   loom_serve_text_heartbeat_initialize(&service->heartbeat);
   iree_slim_mutex_initialize(&service->completion.mutex);
@@ -1968,15 +1681,16 @@ static iree_status_t text_advance_work(void* self,
     status = text_submit_trim(service);
   }
   if (iree_status_is_ok(status) && service->completion.work == TEXT_WORK_NONE) {
-    if (service->packing_mode == LOOM_SERVE_TEXT_PACKING_SEPARATE) {
+    if (service->scheduling.packing_mode == LOOM_SERVE_TEXT_PACKING_SEPARATE) {
       text_separate_ready(service, ready);
     }
     loom_serve_packed_span_t spans[LOOM_SERVE_TEXT_ROW_CAPACITY];
     loom_serve_packed_span_t scratch[LOOM_SERVE_TEXT_ROW_CAPACITY];
     iree_host_size_t shape_index = 0;
     const iree_host_size_t count = loom_serve_pack_shapes(
-        service->row_count, ready, service->shape_count, service->shapes,
-        service->chunk_size, &service->cursor, spans, scratch, &shape_index);
+        service->row_count, ready, service->scheduling.shape_count,
+        service->scheduling.shapes, service->scheduling.chunk_size,
+        &service->cursor, spans, scratch, &shape_index);
     if (count) {
       *out_progress = true;
       status = text_submit_epoch(service, shape_index, count, spans);

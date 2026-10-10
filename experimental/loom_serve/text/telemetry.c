@@ -300,3 +300,96 @@ void loom_serve_text_telemetry_session_end(
                          &value, sizeof(value));
   memset(&session->telemetry, 0, sizeof(session->telemetry));
 }
+
+void loom_serve_text_telemetry_epoch(
+    loom_serve_text_telemetry_t* telemetry,
+    loom_serve_text_heartbeat_t* heartbeat,
+    const loom_serve_text_epoch_options_t* options,
+    const loom_serve_text_epoch_t* cohort,
+    loom_serve_text_session_t* sessions) {
+  const iree_host_size_t count = cohort->count;
+  const iree_host_size_t shape_index = cohort->shape_index;
+  const loom_serve_text_span_t* spans = cohort->spans;
+  const loom_serve_text_result_t* results = cohort->results;
+  const iree_host_size_t* positions = cohort->positions;
+  const uint32_t* output_limits = cohort->output_limits;
+  const iree_time_t start = cohort->start.time;
+  const uint64_t epoch = cohort->start.serial;
+  const iree_host_size_t device_epochs = cohort->device_epochs;
+  const iree_host_size_t continued_prefill_count =
+      cohort->continued_prefill_count;
+  const bool packed = options->schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED;
+  iree_host_size_t prefill_count = 0, decode_count = 0, output_count = 0;
+  iree_host_size_t verification_count = 0, accepted_drafts = 0;
+  loom_serve_text_heartbeat_snapshot_t* state = &heartbeat->snapshot;
+  const iree_time_t completed = iree_time_now();
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    loom_serve_text_session_t* session = &sessions[spans[i].row_index];
+    const bool prefill = cohort->prefill[i];
+    const bool select =
+        iree_any_bit_set(spans[i].flags, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT);
+    prefill_count += prefill ? results[i].known_count : 0;
+    decode_count +=
+        results[i].consumed_count - (prefill ? results[i].known_count : 0);
+    output_count += results[i].output_count;
+    verification_count += results[i].verification_count;
+    accepted_drafts += results[i].consumed_count - results[i].known_count -
+                       results[i].verification_count;
+    session->request.counters.input_tokens += results[i].consumed_count;
+    session->request.counters.output_tokens += results[i].output_count;
+    ++session->request.counters.batches;
+    session->telemetry.counters.input_tokens += results[i].consumed_count;
+    session->telemetry.counters.output_tokens += results[i].output_count;
+    ++session->telemetry.counters.batches;
+    session->telemetry.position = loom_serve_text_row_position(session->row);
+    session->telemetry.resident_tokens =
+        loom_serve_text_row_pool_usage(session->row);
+    const loom_serve_text_span_record_t value = {
+        .epoch = epoch,
+        .session = session->telemetry.id,
+        .row = spans[i].row_index,
+        .position = positions[i],
+        .tokens = spans[i].token_count,
+        .consumed_tokens = results[i].consumed_count,
+        .output_tokens = results[i].output_count,
+        .output_limit = output_limits[i],
+        .known_tokens = results[i].known_count,
+        .verification_epochs = results[i].verification_count,
+        .prefill = prefill,
+        .select = select};
+    loom_serve_text_record(telemetry->stream, &LOOM_SERVE_TEXT_SPAN,
+                           session->serial, &value, sizeof(value));
+  }
+  iree_slim_mutex_lock(&heartbeat->mutex);
+  state->completed_epochs += device_epochs;
+  state->traversals += packed ? device_epochs : count;
+  state->prefill_tokens += prefill_count;
+  state->decode_tokens += decode_count;
+  state->model_duration += completed - start;
+  state->mtp.proposed_tokens += verification_count * 3;
+  state->mtp.accepted_inputs += accepted_drafts;
+  state->last_completion = completed;
+  iree_slim_mutex_unlock(&heartbeat->mutex);
+  telemetry->counters.input_tokens += prefill_count + decode_count;
+  telemetry->counters.output_tokens += output_count;
+  ++telemetry->counters.batches;
+  const loom_serve_text_epoch_record_t value = {
+      .epoch = epoch,
+      .spans = count,
+      .shape = shape_index,
+      .token_capacity = options->shapes[shape_index].token_capacity,
+      .span_capacity = options->shapes[shape_index].span_capacity,
+      .prefill_tokens = prefill_count,
+      .decode_tokens = decode_count,
+      .output_tokens = output_count,
+      .traversals = packed ? device_epochs : count,
+      .duration_ns = completed - start,
+      .device_epochs = device_epochs,
+      .continued_prefill_tokens = continued_prefill_count,
+      .verifications = verification_count,
+      .accepted_draft_inputs = accepted_drafts,
+      .schedule_mode = options->schedule_mode,
+      .packing_mode = options->packing_mode};
+  loom_serve_text_record(telemetry->stream, &LOOM_SERVE_TEXT_EPOCH, 0, &value,
+                         sizeof(value));
+}

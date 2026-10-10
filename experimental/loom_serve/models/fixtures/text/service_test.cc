@@ -176,10 +176,13 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     };
   }
 
-  void Start(iree_host_size_t chunk_size = 3) {
-    service_ = std::thread([this, chunk_size] {
+  void Start(
+      iree_host_size_t chunk_size = 3,
+      loom_serve_text_schedule_mode_t mode = LOOM_SERVE_TEXT_SCHEDULE_PACKED) {
+    service_ = std::thread([this, chunk_size, mode] {
       auto options = ServiceOptions();
       options.chunk_size = chunk_size;
+      options.schedule_mode = mode;
       loom_serve_text_service_t* service = nullptr;
       status_ = loom_serve_text_service_create(model_, &options, nullptr,
                                                &service, allocator_);
@@ -315,6 +318,28 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     }
     EXPECT_EQ(result.find_first_not_of("abx"), std::string::npos);
     return result;
+  }
+
+  void CheckScheduledResponses(loom_serve_text_schedule_mode_t mode) {
+    Start(3, mode);
+    const std::vector<std::string> prompts = {"abxa", "abxabba", "xab"};
+    std::vector<int> clients;
+    for (size_t i = 0; i < prompts.size(); ++i) {
+      clients.push_back(
+          Send(Request(Message("user", prompts[i]), 4),
+               "X-Loom-Session: row" + std::to_string(i) + "\r\n"));
+    }
+    for (size_t i = 0; i < clients.size(); ++i) {
+      const std::string first = Content(Read(clients[i]));
+      EXPECT_EQ(first, Oracle::Complete(prompts[i], 4));
+      const std::string next = Request(Message("user", prompts[i]) + "," +
+                                           Message("assistant", first) + "," +
+                                           Message("user", "bax"),
+                                       4);
+      EXPECT_EQ(Content(Read(Send(
+                    next, "X-Loom-Session: row" + std::to_string(i) + "\r\n"))),
+                Oracle::Complete(prompts[i] + first + "#bax", 4));
+    }
   }
 
   // Shared allocator for all production owners.
@@ -688,6 +713,14 @@ TEST_P(SourceTextServiceTest, ChunkingRowsAndForksMatchDenseOracle) {
         loom_serve_text_row_reset(loom_serve_text_model_row(model_, i)));
   }
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 256u);
+}
+
+TEST_P(SourceTextServiceTest, IsolatedEpochsPreserveRetainedHttpHistory) {
+  CheckScheduledResponses(LOOM_SERVE_TEXT_SCHEDULE_ISOLATED);
+}
+
+TEST_P(SourceTextServiceTest, MatchedEpochsPreserveRetainedHttpHistory) {
+  CheckScheduledResponses(LOOM_SERVE_TEXT_SCHEDULE_MATCHED);
 }
 
 TEST_P(SourceTextServiceTest, CancelledPreparationRetainsPartialOwnership) {

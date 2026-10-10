@@ -136,12 +136,15 @@ loom_cc_library(
     srcs = ["telemetry.c"],
     hdrs = ["telemetry.h"],
     deps = [
+        ":epoch",
+        ":heartbeat",
         ":model",
         ":schedule",
         ":session",
         "//experimental/loom_serve/telemetry:record",
         "//experimental/loom_serve/telemetry:stream",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
     ],
 )
 
@@ -218,6 +221,38 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "epoch",
+    srcs = ["epoch.c"],
+    hdrs = ["epoch.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    visibility = [":__pkg__"],
+    deps = [
+        ":model",
+        ":schedule",
+        "//experimental/loom_serve/runtime:execution",
+        "//experimental/loom_serve/scheduling:packing",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "epoch_test",
+    srcs = ["epoch_test.cc"],
+    deps = [
+        ":epoch",
+        ":model",
+        ":schedule",
+        "//experimental/loom_serve/scheduling:packing",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "service",
     srcs = ["service.c"],
     hdrs = ["service.h"],
@@ -228,6 +263,7 @@ loom_cc_library(
     deps = [
         ":chat",
         ":checkpoint_registry",
+        ":epoch",
         ":heartbeat",
         ":model",
         ":schedule",

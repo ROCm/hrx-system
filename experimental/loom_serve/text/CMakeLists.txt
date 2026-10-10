@@ -146,10 +146,13 @@ loom_cc_library(
   SRCS
     "telemetry.c"
   DEPS
+    ::epoch
+    ::heartbeat
     ::model
     ::schedule
     ::session
     iree::base
+    iree::base::threading
     iree::experimental::loom_serve::telemetry::record
     iree::experimental::loom_serve::telemetry::stream
   PUBLIC
@@ -235,6 +238,39 @@ endif()
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_library(
   NAME
+    epoch
+  HDRS
+    "epoch.h"
+  SRCS
+    "epoch.c"
+  DEPS
+    ::model
+    ::schedule
+    iree::base
+    iree::experimental::loom_serve::runtime::execution
+    iree::experimental::loom_serve::scheduling::packing
+  PUBLIC
+)
+endif()
+
+loom_cc_test(
+  NAME
+    epoch_test
+  SRCS
+    "epoch_test.cc"
+  DEPS
+    ::epoch
+    ::model
+    ::schedule
+    iree::base
+    iree::experimental::loom_serve::scheduling::packing
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_library(
+  NAME
     service
   HDRS
     "service.h"
@@ -243,6 +279,7 @@ loom_cc_library(
   DEPS
     ::chat
     ::checkpoint_registry
+    ::epoch
     ::heartbeat
     ::model
     ::schedule
