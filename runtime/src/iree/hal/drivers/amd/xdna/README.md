@@ -48,14 +48,16 @@ shape and depth performs no host allocation or free.
 
 Each dispatch first attempts a nonwaiting claim on native publication. When the
 persistent observer is active, the pending ring has capacity, and every wait is
-proved by an exact accepted frontier, the calling thread prepares and submits
-the command directly, then commits its accepted frontier and pending-ring entry
-before returning. Full capacity, unsatisfied waits, inexact causal state, and
-claim contention use the private publisher instead. libamdf reports its own
-full publication window as `BUSY`; the HAL retains the prepared invocation and
-retries only after checked native progress. The underlying OS submission can
-still wait for device wake or native credits, so a direct caller can pay that
-latency. The private publisher isolates that cost on every queued route.
+already reached or proved by the exact accepted frontier, the calling thread
+prepares and submits the command directly, then commits its accepted frontier
+and pending-ring entry before returning. Full capacity, unsatisfied waits, and
+claim contention use the private publisher instead. Inexact causal state
+disables future FIFO proofs but does not defer an operation whose waits are
+already reached. libamdf reports its own full publication window as `BUSY`; the
+HAL retains the prepared invocation and retries only after checked native
+progress. The underlying OS submission can still wait for device wake or native
+credits, so a direct caller can pay that latency. The private publisher isolates
+that cost on every queued route.
 
 The shared proactor owns queued causal admission, deferred native acceptance
 commits, and unattended checked retirement. Exact blocking waits on a local

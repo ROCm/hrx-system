@@ -1671,6 +1671,20 @@ TEST(XdnaQueueTest, ExactWaitWithoutTopologyRetiresBeforeProactorProgress) {
   IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &value));
   EXPECT_EQ(value, 1u);
   EXPECT_EQ(harness.native.live_memories, 1u);
+
+  // A topology-free queue cannot publish a complete global frontier. That
+  // loss of precision must not route a later dispatch with no waits through
+  // the proactor.
+  iree_hal_semaphore_t* second = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &second));
+  ASSERT_NO_FATAL_FAILURE(harness.Submit(second));
+  EXPECT_EQ(harness.native.submission_count, 2u);
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(second, 1, iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  EXPECT_EQ(harness.native.wait_count, 2u);
+  iree_hal_semaphore_release(second);
 }
 
 TEST(XdnaQueueTest, ExactWaitOwnsRetirementBeforeNativeNotification) {
@@ -1723,7 +1737,7 @@ TEST(XdnaQueueTest, ExactWaitOwnsRetirementBeforeNativeNotification) {
   EXPECT_EQ(harness.native.live_memories, 1u);
 }
 
-TEST(XdnaQueueTest, InexactReachedFrontierUsesQueuedPublication) {
+TEST(XdnaQueueTest, InexactReachedFrontierPublishesDirectly) {
   QueueHarness harness;
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
@@ -1738,9 +1752,23 @@ TEST(XdnaQueueTest, InexactReachedFrontierUsesQueuedPublication) {
       gate, 1, iree_async_single_frontier_as_const_frontier(&host_frontier)));
 
   ASSERT_NO_FATAL_FAILURE(harness.SubmitAfter(gate, 1));
-  EXPECT_EQ(harness.native.submission_count, 0u);
-  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
   EXPECT_EQ(harness.native.submission_count, 1u);
+  iree_hal_submitted_signal_flags_t signal_flags =
+      IREE_HAL_SUBMITTED_SIGNAL_FLAG_NONE;
+  iree_async_axis_t producer_axis = 0;
+  uint64_t producer_epoch = 0;
+  uint64_t producer_value = 0;
+  ASSERT_TRUE(iree_hal_submitted_signal_load(
+      iree_hal_amd_xdna_semaphore_submitted_signal(harness.done), &signal_flags,
+      &producer_axis, &producer_epoch, &producer_value));
+  (void)producer_axis;
+  EXPECT_EQ(producer_epoch, 1u);
+  EXPECT_EQ(producer_value, 1u);
+  EXPECT_FALSE(iree_all_bits_set(
+      signal_flags, IREE_HAL_SUBMITTED_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      harness.done, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  EXPECT_EQ(harness.native.wait_count, 1u);
   iree_hal_semaphore_release(gate);
 }
 
@@ -2105,12 +2133,14 @@ TEST(XdnaQueueTest, NativeBusyRetainsQueuedPublicationUntilCheckedProgress) {
   iree_async_single_frontier_t host_frontier;
   iree_async_single_frontier_initialize(
       &host_frontier, iree_async_axis_make_queue(1, 1, 0, 0, 0), 1);
-  IREE_ASSERT_OK(iree_hal_semaphore_signal(
-      gate, 1, iree_async_single_frontier_as_const_frontier(&host_frontier)));
 
   harness.native.ReturnBusyOnNextSubmission();
   harness.native.BlockSubmission();
   ASSERT_NO_FATAL_FAILURE(harness.SubmitAfter(gate, 1));
+  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
+                                          iree_infinite_timeout(), nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(
+      gate, 1, iree_async_single_frontier_as_const_frontier(&host_frontier)));
   IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
                                           iree_infinite_timeout(), nullptr));
   harness.native.AwaitBlockedSubmission();
