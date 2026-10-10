@@ -10,6 +10,36 @@
 iree_add_all_subdirs()
 
 if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
+iree_cc_library(
+  NAME
+    backends
+  SRCS
+    "backends.cc"
+  DEPS
+    iree::hal
+    iree::hal::cts::util::registry
+    iree::hal::drivers::amd::xdna::driver
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
+iree_runtime_hal_cts_test_suite(
+  BACKENDS
+    ::backends
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.xdna"
+    "iree-run-requirement=libamdf.resource.xdna"
+    "runtime-resource=amd-xdna"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
 iree_cc_test(
   NAME
     native_test

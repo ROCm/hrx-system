@@ -4,13 +4,32 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+load("//runtime/build_tools/bazel:hal_cts.bzl", "iree_runtime_hal_cts_test_suite")
 
 package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+iree_runtime_cc_library(
+    name = "backends",
+    testonly = True,
+    srcs = ["backends.cc"],
+    deps = [
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/drivers/amd/xdna:driver",
+    ],
+    alwayslink = True,
+)
+
+iree_runtime_hal_cts_test_suite(
+    backends = ":backends",
+    resource_group = "gpu-device",
 )
 
 iree_runtime_cc_test(
