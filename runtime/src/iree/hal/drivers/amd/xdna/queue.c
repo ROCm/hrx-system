@@ -48,6 +48,15 @@ typedef struct iree_hal_amd_xdna_retired_batch_t {
   iree_hal_amd_xdna_operation_t* tail;
 } iree_hal_amd_xdna_retired_batch_t;
 
+typedef uint32_t iree_hal_amd_xdna_direct_wait_flags_t;
+enum iree_hal_amd_xdna_direct_wait_flag_bits_e {
+  IREE_HAL_AMD_XDNA_DIRECT_WAIT_FLAG_NONE = 0u,
+  // One exact host waiter owns checked native retirement.
+  IREE_HAL_AMD_XDNA_DIRECT_WAIT_FLAG_ACTIVE = 1u << 0,
+  // The waiter's outstanding native completion hint was consumed.
+  IREE_HAL_AMD_XDNA_DIRECT_WAIT_FLAG_EVENT_OBSERVED = 1u << 1,
+};
+
 // Intrusive ready work; submissions with unsatisfied waits are not linked here.
 typedef struct iree_hal_amd_xdna_ready_list_t {
   // Oldest eligible operation, or NULL.
@@ -148,8 +157,8 @@ struct iree_hal_amd_xdna_queue_t {
   } pending;
   // True while libamdf owes a wake for the current oldest native point.
   bool notification_pending;
-  // True while one exact host waiter owns checked native retirement.
-  bool direct_wait_active;
+  // Direct-wait ownership and native-event handoff flags.
+  iree_atomic_int32_t direct_wait_flags;
   // Sticky native observation/execution failure, owned by this queue.
   iree_status_t failure_status;
   // Retained topology tracker; NULL before group assignment.
@@ -1197,20 +1206,30 @@ static void iree_hal_amd_xdna_queue_native_ready(
   iree_status_t status = iree_async_event_consume(queue->event);
   iree_hal_amd_xdna_retired_batch_t retired = {0};
   bool should_pump = false;
-  iree_slim_mutex_lock(&queue->completion_drain_mutex);
-  iree_slim_mutex_lock(&queue->state_mutex);
-  queue->notification_pending = false;
   if (iree_status_is_ok(status) && iree_async_poll_has_error(events)) {
     status = iree_make_status(
         IREE_STATUS_INTERNAL,
         "XDNA native completion source reported poll events 0x%08X",
         (unsigned)events);
   }
-  if (iree_status_is_ok(status) && queue->direct_wait_active) {
-    // The caller is already performing checked retirement. Consuming this
-    // hint prevents duplicate proactor work; the caller rearms any remaining
-    // prefix if its wait does not retire the queue target.
-  } else if (!iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status)) {
+    const iree_hal_amd_xdna_direct_wait_flags_t previous_flags =
+        (iree_hal_amd_xdna_direct_wait_flags_t)iree_atomic_fetch_or(
+            &queue->direct_wait_flags,
+            IREE_HAL_AMD_XDNA_DIRECT_WAIT_FLAG_EVENT_OBSERVED,
+            iree_memory_order_acq_rel);
+    if (iree_any_bit_set(previous_flags,
+                         IREE_HAL_AMD_XDNA_DIRECT_WAIT_FLAG_ACTIVE)) {
+      // The caller owns checked retirement. Record that this one-shot hint was
+      // consumed and return without contending on its publication locks.
+      return;
+    }
+  }
+
+  iree_slim_mutex_lock(&queue->completion_drain_mutex);
+  iree_slim_mutex_lock(&queue->state_mutex);
+  queue->notification_pending = false;
+  if (!iree_status_is_ok(status)) {
     iree_hal_amd_xdna_queue_fail_pending(queue, status);
   } else if (iree_status_is_ok(queue->failure_status) && queue->pending.count) {
     amdf_kernel_queue_status_t checked = {
@@ -1228,6 +1247,9 @@ static void iree_hal_amd_xdna_queue_native_ready(
           queue, &checked, &retired);
     }
   }
+  iree_atomic_store(&queue->direct_wait_flags,
+                    IREE_HAL_AMD_XDNA_DIRECT_WAIT_FLAG_NONE,
+                    iree_memory_order_release);
   iree_slim_mutex_unlock(&queue->state_mutex);
   iree_hal_amd_xdna_queue_complete_retired_batch(&retired);
   iree_slim_mutex_unlock(&queue->completion_drain_mutex);
@@ -1271,8 +1293,8 @@ bool iree_hal_amd_xdna_queue_try_wait_epoch(iree_hal_queue_t* base,
     return false;
   }
   uint64_t submission = 0;
-  if (iree_status_is_ok(queue->failure_status) && !queue->direct_wait_active &&
-      queue->pending.count && queue->axis == producer_axis) {
+  if (iree_status_is_ok(queue->failure_status) && queue->pending.count &&
+      queue->axis == producer_axis) {
     const uint64_t head_epoch =
         queue->pending.entries[queue->pending.head].epoch;
     if (producer_epoch >= head_epoch) {
@@ -1282,9 +1304,13 @@ bool iree_hal_amd_xdna_queue_try_wait_epoch(iree_hal_queue_t* base,
             (queue->pending.head + (uint32_t)offset) % queue->pending.capacity;
         const iree_hal_amd_xdna_pending_t* pending =
             &queue->pending.entries[index];
-        if (pending->epoch == producer_epoch) {
+        int32_t expected_flags = IREE_HAL_AMD_XDNA_DIRECT_WAIT_FLAG_NONE;
+        if (pending->epoch == producer_epoch &&
+            iree_atomic_compare_exchange_strong(
+                &queue->direct_wait_flags, &expected_flags,
+                IREE_HAL_AMD_XDNA_DIRECT_WAIT_FLAG_ACTIVE,
+                iree_memory_order_acq_rel, iree_memory_order_acquire)) {
           submission = pending->submission;
-          queue->direct_wait_active = true;
         }
       }
     }
@@ -1316,7 +1342,14 @@ bool iree_hal_amd_xdna_queue_try_wait_epoch(iree_hal_queue_t* base,
   bool should_pump = false;
   iree_slim_mutex_lock(&queue->completion_drain_mutex);
   iree_slim_mutex_lock(&queue->state_mutex);
-  queue->direct_wait_active = false;
+  const iree_hal_amd_xdna_direct_wait_flags_t direct_wait_flags =
+      (iree_hal_amd_xdna_direct_wait_flags_t)iree_atomic_exchange(
+          &queue->direct_wait_flags, IREE_HAL_AMD_XDNA_DIRECT_WAIT_FLAG_NONE,
+          iree_memory_order_acq_rel);
+  if (iree_any_bit_set(direct_wait_flags,
+                       IREE_HAL_AMD_XDNA_DIRECT_WAIT_FLAG_EVENT_OBSERVED)) {
+    queue->notification_pending = false;
+  }
   if (!iree_status_is_ok(query_status)) {
     iree_hal_amd_xdna_queue_fail_pending(queue,
                                          iree_status_clone(query_status));
@@ -1915,6 +1948,9 @@ iree_status_t iree_hal_amd_xdna_queue_create(
   iree_atomic_store(&queue->native_admission_open, 0,
                     iree_memory_order_relaxed);
   iree_atomic_store(&queue->native_publication_blocked, 0,
+                    iree_memory_order_relaxed);
+  iree_atomic_store(&queue->direct_wait_flags,
+                    IREE_HAL_AMD_XDNA_DIRECT_WAIT_FLAG_NONE,
                     iree_memory_order_relaxed);
   iree_atomic_store(&queue->pending.visible_count, 0,
                     iree_memory_order_relaxed);

@@ -94,8 +94,9 @@ source consumes each event, refreshes the native queue's checked retirement and
 terminal outcome, and requests a new one-shot native notification for the
 oldest remaining point. No per-completion source registration is required. An
 exact host waiter marks its retirement claim before entering
-libamdf so a concurrent wake does not move the critical path onto the proactor.
-A completion-drain mutex preserves FIFO publication between those callers and
+libamdf. A concurrent wake records its consumed one-shot hint atomically and
+returns without contending on the caller's publication locks. A
+completion-drain mutex preserves FIFO publication between direct callers and
 unattended notification processing, and is never held across a native wait.
 Ordinary retired work releases payload resources before signaling HAL
 semaphores. An operation-held device reference keeps the queue's capture pools
