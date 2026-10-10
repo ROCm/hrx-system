@@ -62,22 +62,22 @@ template <typename AtomicType, typename ValueType>
 static void TestStoreAndRmw(iree_hal_atomic_width_t width) {
   AtomicType target = IREE_ATOMIC_VAR_INIT(0);
 
-  iree_hal_atomic_store_params_t store_params = {};
-  store_params.value = 10;
-  store_params.flags = IREE_HAL_ATOMIC_FLAG_RELEASE;
-  store_params.width = width;
+  iree_hal_atomic_store_params_t store_params = {
+      .value = 10,
+      .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
+      .width = width,
+  };
   iree_hal_task_atomic_store(&target, store_params);
   EXPECT_EQ(iree_atomic_load(&target, iree_memory_order_acquire),
             static_cast<ValueType>(10));
 
-  iree_hal_atomic_rmw_params_t rmw_params = {};
-  rmw_params.flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
-                     IREE_HAL_ATOMIC_FLAG_RELEASE |
-                     IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE;
-  rmw_params.width = width;
-
-  rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD;
-  rmw_params.operand = 5;
+  iree_hal_atomic_rmw_params_t rmw_params = {
+      .operand = 5,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+      .width = width,
+      .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+  };
   iree_hal_task_atomic_rmw(&target, rmw_params);
   EXPECT_EQ(iree_atomic_load(&target, iree_memory_order_acquire),
             static_cast<ValueType>(15));
@@ -111,12 +111,13 @@ template <typename AtomicType, typename ValueType>
 static void TestWait(iree_hal_atomic_width_t width) {
   AtomicType target = IREE_ATOMIC_VAR_INIT(0x12);
 
-  iree_hal_atomic_wait_params_t wait_params = {};
-  wait_params.value = 0x2;
-  wait_params.mask = 0xF;
-  wait_params.flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE;
-  wait_params.width = width;
-  wait_params.condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL;
+  iree_hal_atomic_wait_params_t wait_params = {
+      .value = 0x2,
+      .mask = 0xF,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+      .width = width,
+      .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+  };
   iree_hal_task_atomic_wait(&target, wait_params);
 
   wait_params.value = 0x3;

@@ -279,8 +279,7 @@ class GpuFileGatherTest : public GpuFileIoFixture {
     }
     std::vector<uint32_t> completion_tickets(summary.completed, kAbsent);
     std::array<SourceOracle, protocol::kSlotCount> sources;
-    protocol::State predicted = {};
-    predicted.summary = summary;
+    protocol::State predicted = {.summary = summary};
     uint32_t unique_reads = 0;
     uint32_t peer_completed = 0;
     uint32_t held_peer_reloads = 0;
@@ -406,14 +405,16 @@ class GpuFileGatherTest : public GpuFileIoFixture {
           request.result > 0 && request.progress + transferred == block_bytes;
       const bool processed = request.completion < processing_end;
       auto& slot = predicted.slots[request.slot];
-      slot = {.phase = 7,
-              .consumer = request.consumer,
-              .cause = consumer.cause,
-              .key = key,
-              .references = 0,
-              .progress = request.progress,
-              .ticket = ticket,
-              .generation = consumer.generation};
+      slot = {
+          .phase = 7,
+          .consumer = request.consumer,
+          .cause = consumer.cause,
+          .key = key,
+          .references = 0,
+          .progress = request.progress,
+          .ticket = ticket,
+          .generation = consumer.generation,
+      };
       if (processed && request.result > 0) {
         slot.progress = complete ? 0 : request.progress + transferred;
       }

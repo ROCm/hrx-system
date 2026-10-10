@@ -285,9 +285,9 @@ class ConditionEdgeProjectionBenchmark {
 
   bool Prove() const {
     const loom_condition_integer_relation_t query = {
-        /*.relation=*/LOOM_SYMBOLIC_INTEGER_RELATION_LT,
-        /*.left=*/ValueOperand(loom_block_arg_id(target_block_, 0)),
-        /*.right=*/ValueOperand(loom_block_arg_id(target_block_, 1)),
+        .relation = LOOM_SYMBOLIC_INTEGER_RELATION_LT,
+        .left = ValueOperand(loom_block_arg_id(target_block_, 0)),
+        .right = ValueOperand(loom_block_arg_id(target_block_, 1)),
     };
     bool result = false;
     const bool proven = loom_condition_edge_projection_proves_integer_relation(
@@ -308,8 +308,8 @@ class ConditionEdgeProjectionBenchmark {
   static loom_condition_integer_operand_t ValueOperand(
       loom_value_id_t value_id) {
     return loom_condition_integer_operand_t{
-        /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-        /*.value_id=*/value_id,
+        .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+        .value_id = value_id,
     };
   }
 

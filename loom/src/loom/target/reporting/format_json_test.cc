@@ -69,13 +69,13 @@ static void ExpectArrayLength(iree_string_view_t array,
 TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
   loom_target_compile_report_pressure_row_t pressure_rows[] = {
       {
-          /*.function_name=*/IREE_SVL("summary_only"),
-          /*.register_class=*/IREE_SVL("test.i32"),
-          /*.type_kind=*/LOOM_TYPE_REGISTER,
-          /*.element_type=*/LOOM_SCALAR_TYPE_I32,
-          /*.peak_live_units=*/7,
-          /*.peak_live_values=*/4,
-          /*.peak_point=*/3,
+          .function_name = IREE_SVL("summary_only"),
+          .register_class = IREE_SVL("test.i32"),
+          .type_kind = LOOM_TYPE_REGISTER,
+          .element_type = LOOM_SCALAR_TYPE_I32,
+          .peak_live_units = 7,
+          .peak_live_values = 4,
+          .peak_point = 3,
       },
   };
   loom_target_compile_report_t report = {};
@@ -87,67 +87,67 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
       &report, &pressure_rows[0]));
   const loom_target_compile_report_schedule_band_summary_row_t
       schedule_band_summary = {
-          /*.flags=*/
-          LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX,
-          /*.function_name=*/IREE_SVL("summary_only"),
-          /*.block_name=*/IREE_SVL("^entry"),
-          /*.block_index=*/0,
-          /*.first_packet_index=*/5,
-          /*.band_count=*/2,
-          /*.node_count=*/3,
-          /*.max_band_node_count=*/2,
-          /*.origin_kind=*/LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_MATRIX,
-          /*.origin_operation_name=*/IREE_SVL("low.op<amdgpu.wmma>"),
-          /*.semantic_tag=*/IREE_SVL("matrix.wmma.f32"),
-          /*.sample_value_name=*/IREE_SVL("%acc"),
-          /*.static_instruction_mix=*/
-          {
-              /*.descriptor_count=*/2,
-              /*.unknown_count=*/{},
-              /*.scalar_alu_count=*/{},
-              /*.vector_alu_count=*/{},
-              /*.matrix_count=*/2,
-              /*.mfma_count=*/{},
-              /*.smfmac_count=*/{},
-              /*.wmma_count=*/2,
-              /*.swmmac_count=*/{},
-          },
-          /*.dynamic_instruction_mix=*/
-          {
-              /*.descriptor_count=*/4,
-              /*.unknown_count=*/{},
-              /*.scalar_alu_count=*/{},
-              /*.vector_alu_count=*/{},
-              /*.matrix_count=*/4,
-              /*.mfma_count=*/{},
-              /*.smfmac_count=*/{},
-              /*.wmma_count=*/4,
-              /*.swmmac_count=*/{},
-          },
-          /*.result_value_count=*/1,
-          /*.result_unit_count=*/8,
+          .flags =
+              LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX,
+          .function_name = IREE_SVL("summary_only"),
+          .block_name = IREE_SVL("^entry"),
+          .block_index = 0,
+          .first_packet_index = 5,
+          .band_count = 2,
+          .node_count = 3,
+          .max_band_node_count = 2,
+          .origin_kind = LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_MATRIX,
+          .origin_operation_name = IREE_SVL("low.op<amdgpu.wmma>"),
+          .semantic_tag = IREE_SVL("matrix.wmma.f32"),
+          .sample_value_name = IREE_SVL("%acc"),
+          .static_instruction_mix =
+              {
+                  .descriptor_count = 2,
+                  .unknown_count = {},
+                  .scalar_alu_count = {},
+                  .vector_alu_count = {},
+                  .matrix_count = 2,
+                  .mfma_count = {},
+                  .smfmac_count = {},
+                  .wmma_count = 2,
+                  .swmmac_count = {},
+              },
+          .dynamic_instruction_mix =
+              {
+                  .descriptor_count = 4,
+                  .unknown_count = {},
+                  .scalar_alu_count = {},
+                  .vector_alu_count = {},
+                  .matrix_count = 4,
+                  .mfma_count = {},
+                  .smfmac_count = {},
+                  .wmma_count = 4,
+                  .swmmac_count = {},
+              },
+          .result_value_count = 1,
+          .result_unit_count = 8,
       };
   IREE_ASSERT_OK(loom_target_compile_report_record_schedule_band_summary_row(
       &report, &schedule_band_summary));
   const loom_target_compile_report_wait_reason_summary_row_t
       wait_reason_summary = {
-          /*.function_name=*/IREE_SVL("summary_only"),
-          /*.counter_name=*/IREE_SVL("vmem_load"),
-          /*.reason_name=*/IREE_SVL("amdgpu.ssa_use"),
-          /*.counter_id=*/1,
-          /*.reason_id=*/2,
-          /*.summary=*/
-          {
-              /*.action_count=*/3,
-              /*.explicit_action_count=*/0,
-              /*.planned_action_count=*/3,
-              /*.full_drain_count=*/1,
-              /*.partial_wait_count=*/2,
-              /*.drained_count=*/5,
-              /*.max_drained_count=*/4,
-              /*.max_outstanding_before=*/7,
-              /*.max_full_drain_outstanding_before=*/6,
-          },
+          .function_name = IREE_SVL("summary_only"),
+          .counter_name = IREE_SVL("vmem_load"),
+          .reason_name = IREE_SVL("amdgpu.ssa_use"),
+          .counter_id = 1,
+          .reason_id = 2,
+          .summary =
+              {
+                  .action_count = 3,
+                  .explicit_action_count = 0,
+                  .planned_action_count = 3,
+                  .full_drain_count = 1,
+                  .partial_wait_count = 2,
+                  .drained_count = 5,
+                  .max_drained_count = 4,
+                  .max_outstanding_before = 7,
+                  .max_full_drain_outstanding_before = 6,
+              },
       };
   IREE_ASSERT_OK(loom_target_compile_report_record_wait_reason_summary_row(
       &report, &wait_reason_summary));
@@ -157,7 +157,7 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -236,24 +236,25 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
 TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
-  loom_target_compile_report_source_low_transform_row_t row = {};
-  row.function_name = IREE_SVL("kernel");
-  row.source_op_name = IREE_SVL("scf.for");
-  row.source_op_kind = 42;
-  row.transform_key = IREE_SVL("stage-loop-carried-fragments");
-  row.outcome = IREE_SVL("selected");
-  row.reason = IREE_SVL("staged_workgroup_memory");
-  row.candidate_value_count = 4;
-  row.selected_value_count = 4;
-  row.removed_loop_carried_value_count = 4;
-  row.removed_loop_carried_payload_register_count = 32;
-  row.block_count = 4;
-  row.row_count = 16;
-  row.column_count = 16;
-  row.workgroup_memory_byte_count = 4096;
-  row.inserted_load_op_count = 8;
-  row.inserted_store_op_count = 8;
-  row.inserted_barrier_op_count = 2;
+  loom_target_compile_report_source_low_transform_row_t row = {
+      .function_name = IREE_SVL("kernel"),
+      .source_op_name = IREE_SVL("scf.for"),
+      .source_op_kind = 42,
+      .transform_key = IREE_SVL("stage-loop-carried-fragments"),
+      .outcome = IREE_SVL("selected"),
+      .reason = IREE_SVL("staged_workgroup_memory"),
+      .candidate_value_count = 4,
+      .selected_value_count = 4,
+      .removed_loop_carried_value_count = 4,
+      .removed_loop_carried_payload_register_count = 32,
+      .block_count = 4,
+      .row_count = 16,
+      .column_count = 16,
+      .workgroup_memory_byte_count = 4096,
+      .inserted_load_op_count = 8,
+      .inserted_store_op_count = 8,
+      .inserted_barrier_op_count = 2,
+  };
   IREE_ASSERT_OK(loom_target_compile_report_record_source_low_transform_row(
       &report, &row));
 
@@ -262,7 +263,7 @@ TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t summary_options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(loom_target_compile_report_format_json(
       &report, &summary_options, &stream));
@@ -279,7 +280,7 @@ TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t details_options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(loom_target_compile_report_format_json(
       &report, &details_options, &stream));
@@ -319,21 +320,22 @@ TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
 TEST(CompileReportFormatTest, FormatsAndMergesSourceBoundaryProjectionRows) {
   loom_target_compile_report_t entry = {};
   loom_target_compile_report_initialize(&entry, iree_allocator_system());
-  loom_target_compile_report_source_boundary_projection_row_t selected = {};
-  selected.function_name = IREE_SVL("gdn");
-  selected.source_op_name = IREE_SVL("scf.for");
-  selected.source_op_kind = 42;
-  selected.projection_key = IREE_SVL("loop-vector-bank");
-  selected.boundary_key = IREE_SVL("loop_state");
-  selected.outcome = IREE_SVL("selected");
-  selected.reason = IREE_SVL("static_component_accesses");
-  selected.operation_ordinal = 3;
-  selected.source_value_ordinal = 1;
-  selected.source_type_kind = LOOM_TYPE_VECTOR;
-  selected.source_element_type = LOOM_SCALAR_TYPE_F32;
-  selected.source_rank = 2;
-  selected.projected_prefix_rank = 2;
-  selected.component_count = 16;
+  loom_target_compile_report_source_boundary_projection_row_t selected = {
+      .function_name = IREE_SVL("gdn"),
+      .source_op_name = IREE_SVL("scf.for"),
+      .source_op_kind = 42,
+      .projection_key = IREE_SVL("loop-vector-bank"),
+      .boundary_key = IREE_SVL("loop_state"),
+      .outcome = IREE_SVL("selected"),
+      .reason = IREE_SVL("static_component_accesses"),
+      .operation_ordinal = 3,
+      .source_value_ordinal = 1,
+      .source_type_kind = LOOM_TYPE_VECTOR,
+      .source_element_type = LOOM_SCALAR_TYPE_F32,
+      .source_rank = 2,
+      .projected_prefix_rank = 2,
+      .component_count = 16,
+  };
   selected.source_dimensions[0] = 4;
   selected.source_dimensions[1] = 4;
   IREE_ASSERT_OK(
@@ -383,7 +385,7 @@ TEST(CompileReportFormatTest, FormatsAndMergesSourceBoundaryProjectionRows) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t summary_options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(loom_target_compile_report_format_json(
       &report, &summary_options, &stream));
@@ -403,7 +405,7 @@ TEST(CompileReportFormatTest, FormatsAndMergesSourceBoundaryProjectionRows) {
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t details_options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(loom_target_compile_report_format_json(
       &report, &details_options, &stream));
@@ -538,7 +540,7 @@ TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -569,14 +571,15 @@ TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
 }
 
 TEST(CompileReportFormatTest, OwnsAndFormatsPipelinePlans) {
-  loom_target_compile_report_pipeline_worker_row_t worker = {};
-  worker.worker_index = 0;
-  worker.group_index = 2;
-  worker.lane = 1;
-  worker.flags = LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_RESIDENT |
-                 LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_FOLDED |
-                 LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_PLACED;
-  worker.entry_name = IREE_SVL("projection");
+  loom_target_compile_report_pipeline_worker_row_t worker = {
+      .worker_index = 0,
+      .group_index = 2,
+      .lane = 1,
+      .flags = LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_RESIDENT |
+               LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_FOLDED |
+               LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_PLACED,
+      .entry_name = IREE_SVL("projection"),
+  };
   worker.placement.rank = 2;
   worker.placement.x = 4;
   worker.placement.y = 3;
@@ -595,9 +598,10 @@ TEST(CompileReportFormatTest, OwnsAndFormatsPipelinePlans) {
   worker.maximum_bank_storage_byte_count = 352;
   worker.bank_storage_capacity_byte_count = 16384;
 
-  loom_target_compile_report_pipeline_channel_row_t channel = {};
-  channel.channel_index = 0;
-  channel.transport = IREE_SVL("external-dma");
+  loom_target_compile_report_pipeline_channel_row_t channel = {
+      .channel_index = 0,
+      .transport = IREE_SVL("external-dma"),
+  };
   channel.sender.owner =
       LOOM_TARGET_COMPILE_REPORT_PIPELINE_ENDPOINT_OWNER_BINDING;
   channel.sender.owner_index = 0;
@@ -684,7 +688,7 @@ TEST(CompileReportFormatTest, OwnsAndFormatsPipelinePlans) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -720,14 +724,15 @@ TEST(CompileReportFormatTest, OwnsAndFormatsPipelinePlans) {
 }
 
 TEST(CompileReportFormatTest, PhysicalInventoryOmitsUnavailableChannelFacts) {
-  loom_target_compile_report_pipeline_memory_row_t memory = {};
-  memory.placement = {2, 1, 1, 0};
-  memory.reserved_byte_count = 72;
-  memory.occupied_byte_count = 72;
-  memory.high_water_byte_count = 131104;
-  memory.capacity_byte_count = 524288;
-  memory.maximum_bank_storage_byte_count = 32;
-  memory.bank_storage_capacity_byte_count = 65536;
+  loom_target_compile_report_pipeline_memory_row_t memory = {
+      .placement = {2, 1, 1, 0},
+      .reserved_byte_count = 72,
+      .occupied_byte_count = 72,
+      .high_water_byte_count = 131104,
+      .capacity_byte_count = 524288,
+      .maximum_bank_storage_byte_count = 32,
+      .bank_storage_capacity_byte_count = 65536,
+  };
   loom_target_compile_report_pipeline_plan_t plan = {};
   plan.summary.root_name = IREE_SVL("resident");
   plan.summary.realization = IREE_SVL("resident-configuration");
@@ -756,8 +761,9 @@ TEST(CompileReportFormatTest, PhysicalInventoryOmitsUnavailableChannelFacts) {
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
-  loom_target_compile_report_format_options_t options = {};
-  options.mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS;
+  loom_target_compile_report_format_options_t options = {
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+  };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
   const iree_string_view_t root =
@@ -794,7 +800,7 @@ TEST(CompileReportFormatTest, FormatsJsonEscapedStrings) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -824,7 +830,7 @@ TEST(CompileReportFormatTest, JsonModeNoneWritesNothing) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_NONE,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_NONE,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));

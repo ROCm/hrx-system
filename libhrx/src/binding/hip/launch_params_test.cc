@@ -153,15 +153,13 @@ TEST(LaunchParamsTest, ParseLaunchAttributesRejectsInvalidLists) {
   EXPECT_EQ(hipErrorInvalidValue,
             iree_hip_parse_launch_attributes(nullptr, 0, nullptr));
 
-  hipLaunchAttribute attribute = {};
-  attribute.id = hipLaunchAttributeClusterDimension;
+  hipLaunchAttribute attribute = {.id = hipLaunchAttributeClusterDimension};
   EXPECT_EQ(hipErrorInvalidValue,
             iree_hip_parse_launch_attributes(&attribute, 1, &cooperative));
 }
 
 TEST(LaunchParamsTest, ParseLaunchAttributesValidatesPrefetchPayload) {
-  hipLaunchAttribute attribute = {};
-  attribute.id = hipLaunchAttributeExtDynDataPrefetch;
+  hipLaunchAttribute attribute = {.id = hipLaunchAttributeExtDynDataPrefetch};
 
   bool cooperative = false;
   EXPECT_EQ(hipErrorInvalidValue,

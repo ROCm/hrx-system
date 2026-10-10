@@ -105,16 +105,16 @@ class CommandProductFixture {
     const std::string source_text = BuildIndependentKernelSource(
         catalog_kernel_count_, launched_kernel_count_);
     const loomc_source_options_t source_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-        /*.structure_size=*/sizeof(source_options),
-        /*.next=*/nullptr,
-        /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-        /*.identifier=*/loomc_make_cstring_view("command_product.loom"),
-        /*.contents=*/
-        loomc_make_byte_span(source_text.data(), source_text.size()),
-        /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
-        /*.release=*/nullptr,
-        /*.release_user_data=*/nullptr,
+        .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+        .structure_size = sizeof(source_options),
+        .next = nullptr,
+        .format = LOOMC_SOURCE_FORMAT_TEXT,
+        .identifier = loomc_make_cstring_view("command_product.loom"),
+        .contents =
+            loomc_make_byte_span(source_text.data(), source_text.size()),
+        .storage = LOOMC_SOURCE_STORAGE_COPY,
+        .release = nullptr,
+        .release_user_data = nullptr,
     };
     loomc_source_t* text_source = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(
@@ -133,12 +133,12 @@ class CommandProductFixture {
         RequireSucceededResult(parse_result_ptr.get(), "catalog parsing"));
 
     const loomc_module_serialize_options_t serialize_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-        /*.structure_size=*/sizeof(serialize_options),
-        /*.next=*/nullptr,
-        /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
-        /*.identifier=*/loomc_make_cstring_view("command_product.loombc"),
-        /*.text_presentation=*/LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT,
+        .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+        .structure_size = sizeof(serialize_options),
+        .next = nullptr,
+        .format = LOOMC_SOURCE_FORMAT_BYTECODE,
+        .identifier = loomc_make_cstring_view("command_product.loombc"),
+        .text_presentation = LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT,
     };
     loomc_source_t* bytecode_source = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(
@@ -152,8 +152,8 @@ class CommandProductFixture {
         context_.get(), /*options=*/nullptr, loom_allocator(), &builder)));
     LinkIndexBuilderPtr builder_ptr(builder);
     const loomc_link_index_source_options_t index_source_options = {
-        /*.provider_name=*/loomc_make_cstring_view("command_product"),
-        /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = loomc_make_cstring_view("command_product"),
+        .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
     };
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_link_index_builder_add_source(
         builder_ptr.get(), bytecode_source_ptr.get(), &index_source_options,
@@ -176,10 +176,10 @@ class CommandProductFixture {
     }
     root_symbol_ordinal_ = root_symbol.ordinal;
     const loomc_request_root_t request_root = {
-        /*.module_ordinal=*/
-        static_cast<uint32_t>(root_symbol.provider_module_ordinal),
-        /*.symbol_ordinal=*/
-        static_cast<uint32_t>(root_symbol.module_symbol_ordinal),
+        .module_ordinal =
+            static_cast<uint32_t>(root_symbol.provider_module_ordinal),
+        .symbol_ordinal =
+            static_cast<uint32_t>(root_symbol.module_symbol_ordinal),
     };
     loomc_request_t* request = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_request_create(
@@ -206,8 +206,8 @@ class CommandProductFixture {
     const loomc_request_sink_t request_sink =
         request_publication == RequestPublication::kPublish
             ? loomc_request_sink_t{
-                  /*.publish=*/CaptureRequest,
-                  /*.user_data=*/capture,
+                  .publish = CaptureRequest,
+                  .user_data = capture,
               }
             : loomc_request_sink_t{};
     loomc_product_t* product = nullptr;
@@ -215,26 +215,26 @@ class CommandProductFixture {
     iree_status_t status = iree_ok_status();
     if (input == CommandProductInput::kFrozenIndex) {
       const loomc_cmd_program_product_options_t options = {
-          /*.type=*/LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
-          /*.structure_size=*/sizeof(options),
-          /*.next=*/nullptr,
-          /*.link_index=*/index_.get(),
-          /*.root_symbol_ordinals=*/&root_symbol_ordinal_,
-          /*.root_symbol_count=*/1,
-          /*.flags=*/0,
-          /*.config=*/{},
-          /*.request_sink=*/request_sink,
+          .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
+          .structure_size = sizeof(options),
+          .next = nullptr,
+          .link_index = index_.get(),
+          .root_symbol_ordinals = &root_symbol_ordinal_,
+          .root_symbol_count = 1,
+          .flags = 0,
+          .config = {},
+          .request_sink = request_sink,
       };
       status = to_iree_status(loomc_cmd_program_product_build(
           workspace_.get(), &options, loom_allocator(), &product, &result));
     } else {
       const loomc_cmd_program_request_options_t options = {
-          /*.type=*/LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_REQUEST_OPTIONS,
-          /*.structure_size=*/sizeof(options),
-          /*.next=*/nullptr,
-          /*.library_index=*/nullptr,
-          /*.config=*/{},
-          /*.request_sink=*/request_sink,
+          .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_REQUEST_OPTIONS,
+          .structure_size = sizeof(options),
+          .next = nullptr,
+          .library_index = nullptr,
+          .config = {},
+          .request_sink = request_sink,
       };
       status = to_iree_status(loomc_cmd_program_product_build_request(
           context_.get(), workspace_.get(), request_.get(), &options,

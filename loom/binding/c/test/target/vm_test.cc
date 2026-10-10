@@ -97,15 +97,15 @@ TEST(TargetVmTest, CompilesAndEmitsBytecodeModule) {
   TargetProfilePtr target_profile(raw_target_profile);
 
   loomc_context_target_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_environment=*/target_environment.get(),
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .target_environment = target_environment.get(),
   };
   loomc_context_options_t context_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-      /*.structure_size=*/sizeof(context_options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+      .structure_size = sizeof(context_options),
+      .next = &target_options,
   };
   loomc_context_t* raw_context = nullptr;
   LOOMC_ASSERT_OK(loomc_context_create(&context_options,
@@ -118,13 +118,13 @@ TEST(TargetVmTest, CompilesAndEmitsBytecodeModule) {
   WorkspacePtr workspace(raw_workspace);
 
   loomc_source_options_t source_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(source_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("identity.loom"),
-      /*.contents=*/loomc_make_byte_span(kSource, sizeof(kSource) - 1),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(source_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("identity.loom"),
+      .contents = loomc_make_byte_span(kSource, sizeof(kSource) - 1),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* raw_source = nullptr;
   LOOMC_ASSERT_OK(loomc_source_create(&source_options, loomc_allocator_system(),
@@ -154,20 +154,20 @@ TEST(TargetVmTest, CompilesAndEmitsBytecodeModule) {
       context.get(), nullptr, loomc_allocator_system(), &raw_compiler));
   CompilerPtr compiler(raw_compiler);
   const loomc_target_specialization_t specialization = {
-      /*.function_symbol=*/loomc_make_cstring_view("identity"),
-      /*.target_profile=*/target_profile.get(),
+      .function_symbol = loomc_make_cstring_view("identity"),
+      .target_profile = target_profile.get(),
   };
   const loomc_target_specialization_options_t target_compile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_compile_options),
-      /*.next=*/nullptr,
-      /*.specializations=*/&specialization,
-      /*.specialization_count=*/1,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_compile_options),
+      .next = nullptr,
+      .specializations = &specialization,
+      .specialization_count = 1,
   };
   const loomc_compile_options_t compile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(compile_options),
-      /*.next=*/&target_compile_options,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .next = &target_compile_options,
   };
   raw_result = nullptr;
   LOOMC_ASSERT_OK(loomc_compile_module(

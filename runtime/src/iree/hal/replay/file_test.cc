@@ -52,25 +52,27 @@ TEST(ReplayFileWriterTest, WritesReplayRecordsAndRanges) {
       iree_make_const_byte_span(&first_payload, sizeof(first_payload)),
       iree_make_const_byte_span(&second_payload, sizeof(second_payload)),
   };
-  iree_hal_replay_file_record_metadata_t metadata = {};
-  metadata.sequence_ordinal = 42;
-  metadata.thread_id = 7;
-  metadata.device_id = 1;
-  metadata.object_id = 2;
-  metadata.related_object_id = 3;
-  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
-  metadata.payload_type = 10;
-  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER;
-  metadata.operation_code = 11;
-  metadata.status_code = (uint32_t)IREE_STATUS_CANCELLED;
+  iree_hal_replay_file_record_metadata_t metadata = {
+      .sequence_ordinal = 42,
+      .thread_id = 7,
+      .device_id = 1,
+      .object_id = 2,
+      .related_object_id = 3,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .payload_type = 10,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER,
+      .operation_code = 11,
+      .status_code = (uint32_t)IREE_STATUS_CANCELLED,
+  };
   iree_hal_replay_file_range_t payload_range =
       iree_hal_replay_file_range_empty();
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
       writer, &metadata, 2, iovecs, &payload_range));
 
-  iree_hal_replay_file_record_metadata_t empty_metadata = {};
-  empty_metadata.sequence_ordinal = 43;
-  empty_metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_BLOB;
+  iree_hal_replay_file_record_metadata_t empty_metadata = {
+      .sequence_ordinal = 43,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_BLOB,
+  };
   iree_hal_replay_file_range_t empty_payload_range =
       iree_hal_replay_file_range_empty();
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
@@ -155,8 +157,9 @@ TEST(ReplayFileWriterTest, RejectsAppendAfterClose) {
   iree_io_file_handle_release(file_handle);
   IREE_ASSERT_OK(iree_hal_replay_file_writer_close(writer));
 
-  iree_hal_replay_file_record_metadata_t metadata = {};
-  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_SESSION;
+  iree_hal_replay_file_record_metadata_t metadata = {
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_SESSION,
+  };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         iree_hal_replay_file_writer_append_record(
                             writer, &metadata, 0, nullptr, nullptr));
@@ -177,8 +180,9 @@ TEST(ReplayFileWriterTest, RejectsInvalidMetadata) {
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
-  iree_hal_replay_file_record_metadata_t metadata = {};
-  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_NONE;
+  iree_hal_replay_file_record_metadata_t metadata = {
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_NONE,
+  };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_replay_file_writer_append_record(
                             writer, &metadata, 0, nullptr, nullptr));
@@ -376,10 +380,14 @@ TEST(ReplayFileRangeTest, RejectsDigestBytesWithoutDigestType) {
 TEST(ReplayFileReaderTest, QueueBarriersPreserveDefaultAndEmptyLists) {
   const iree_hal_replay_queue_barrier_payload_t operation = {};
   const iree_hal_replay_queue_barriers_footer_t footer = {
-      /*.payload_length=*/0, /*.before_count=*/UINT64_MAX, /*.after_count=*/0};
-  iree_hal_replay_file_record_header_t header = {};
-  header.header_length = sizeof(header);
-  header.payload_length = sizeof(operation) + sizeof(footer);
+      .payload_length = 0,
+      .before_count = UINT64_MAX,
+      .after_count = 0,
+  };
+  iree_hal_replay_file_record_header_t header = {
+      .payload_length = sizeof(operation) + sizeof(footer),
+      .header_length = sizeof(header),
+  };
   header.record_length = header.header_length + header.payload_length;
   header.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
   header.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER;
@@ -428,26 +436,27 @@ TEST(ReplayFileReaderTest, QueueBarriersPreserveDefaultAndEmptyLists) {
 TEST(ReplayFileReaderTest, RejectsRecipeEffectsWithoutOperations) {
   const iree_hal_replay_queue_barrier_payload_t operation = {};
   const iree_hal_replay_command_buffer_execution_barrier_payload_t barrier = {
-      /*.source_stage_mask=*/0,
-      /*.target_stage_mask=*/0,
-      /*.flags=*/0,
-      /*.memory_barrier_count=*/0,
-      /*.buffer_barrier_count=*/1,
+      .source_stage_mask = 0,
+      .target_stage_mask = 0,
+      .flags = 0,
+      .memory_barrier_count = 0,
+      .buffer_barrier_count = 1,
   };
   const iree_hal_replay_buffer_barrier_payload_t buffer = {};
   const iree_hal_replay_memory_transition_recipe_payload_t recipe = {
-      /*.effects=*/1,
-      /*.operation_count=*/0,
+      .effects = 1,
+      .operation_count = 0,
   };
   const iree_hal_replay_queue_barriers_footer_t footer = {
-      /*.payload_length=*/sizeof(barrier) + sizeof(buffer) + sizeof(recipe),
-      /*.before_count=*/1,
-      /*.after_count=*/0,
+      .payload_length = sizeof(barrier) + sizeof(buffer) + sizeof(recipe),
+      .before_count = 1,
+      .after_count = 0,
   };
-  iree_hal_replay_file_record_header_t header = {};
-  header.header_length = sizeof(header);
-  header.payload_length =
-      sizeof(operation) + footer.payload_length + sizeof(footer);
+  iree_hal_replay_file_record_header_t header = {
+      .payload_length =
+          sizeof(operation) + footer.payload_length + sizeof(footer),
+      .header_length = sizeof(header),
+  };
   header.record_length = header.header_length + header.payload_length;
   header.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
   header.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER;

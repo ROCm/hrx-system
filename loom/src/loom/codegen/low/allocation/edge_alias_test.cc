@@ -65,8 +65,9 @@ class LowAllocationEdgeAliasTest : public ::testing::Test {
 
   loom_liveness_interval_t Interval(loom_value_id_t value_id, uint32_t start,
                                     uint32_t end, uint32_t definition_point) {
-    loom_liveness_interval_t interval = {};
-    interval.value_id = value_id;
+    loom_liveness_interval_t interval = {
+        .value_id = value_id,
+    };
     interval.value_class.type_kind = LOOM_TYPE_REGISTER;
     interval.value_class.register_descriptor_set_stable_id = 1;
     interval.value_class.register_class_id = 0;
@@ -94,33 +95,36 @@ class LowAllocationEdgeAliasTest : public ::testing::Test {
       segments[i] = {intervals[i].start_point, intervals[i].end_point};
       segment_ranges[i] = {i, 1};
     }
-    loom_liveness_analysis_t liveness = {};
-    liveness.value_ids = value_ids;
-    liveness.value_count = N;
-    liveness.intervals = intervals;
-    liveness.interval_count = N;
-    liveness.value_interval_indices = interval_indices;
-    liveness.segments = segments;
-    liveness.segment_count = N;
-    liveness.value_segment_ranges = segment_ranges;
+    loom_liveness_analysis_t liveness = {
+        .intervals = intervals,
+        .interval_count = N,
+        .value_ids = value_ids,
+        .value_count = N,
+        .value_interval_indices = interval_indices,
+        .segments = segments,
+        .segment_count = N,
+        .value_segment_ranges = segment_ranges,
+    };
 
-    loom_low_placement_relation_t relation = {};
-    relation.op = branch;
-    relation.source_ordinal = 0;
-    relation.result_ordinal = 1;
+    loom_low_placement_relation_t relation = {
+        .op = branch,
+        .result_ordinal = 1,
+        .source_ordinal = 0,
+    };
     relation.unit_count = intervals[0].unit_count;
     relation.kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE;
     relation.cause = LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH;
     relation.flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
     result_ranges[1] = {0, 1};
-    loom_low_placement_table_t placement = {};
-    placement.module = module_;
-    placement.region = region_;
-    placement.value_ids = value_ids;
-    placement.value_count = N;
-    placement.relations = &relation;
-    placement.relation_count = 1;
-    placement.ranges_by_result_ordinal = result_ranges;
+    loom_low_placement_table_t placement = {
+        .module = module_,
+        .region = region_,
+        .value_ids = value_ids,
+        .value_count = N,
+        .relations = &relation,
+        .relation_count = 1,
+        .ranges_by_result_ordinal = result_ranges,
+    };
 
     loom_low_allocation_assignment_t counterpart = {};
     const auto& counterpart_interval = intervals[counterpart_ordinal];
@@ -133,10 +137,11 @@ class LowAllocationEdgeAliasTest : public ::testing::Test {
     counterpart.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
     counterpart.location_count = counterpart_interval.unit_count;
     loom_low_allocation_unit_liveness_t unit_liveness = {};
-    loom_low_allocation_edge_alias_context_t context = {};
-    context.placement = &placement;
-    context.liveness = &liveness;
-    context.unit_liveness = &unit_liveness;
+    loom_low_allocation_edge_alias_context_t context = {
+        .placement = &placement,
+        .liveness = &liveness,
+        .unit_liveness = &unit_liveness,
+    };
     bool allows_overlap = false;
     IREE_CHECK_OK(loom_low_allocation_edge_alias_allows_counterpart_overlap(
         &context, &intervals[candidate_ordinal], &relation, &counterpart,

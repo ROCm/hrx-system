@@ -263,10 +263,10 @@ class TiktokenTest : public ::testing::Test {
 
 TEST_F(TiktokenTest, ParseEmptyInput) {
   iree_tokenizer_tiktoken_config_t config = {
-      /*.pattern=*/{kTestPattern, strlen(kTestPattern)},
-      /*.special_token_count=*/0,
-      /*.special_token_strings=*/nullptr,
-      /*.special_token_ids=*/nullptr,
+      .pattern = {kTestPattern, strlen(kTestPattern)},
+      .special_token_count = 0,
+      .special_token_strings = nullptr,
+      .special_token_ids = nullptr,
   };
 
   iree_tokenizer_builder_t builder;
@@ -284,10 +284,10 @@ TEST_F(TiktokenTest, ParseInvalidBase64) {
   const char* data = "Z!== 0\n";
 
   iree_tokenizer_tiktoken_config_t config = {
-      /*.pattern=*/{kTestPattern, strlen(kTestPattern)},
-      /*.special_token_count=*/0,
-      /*.special_token_strings=*/nullptr,
-      /*.special_token_ids=*/nullptr,
+      .pattern = {kTestPattern, strlen(kTestPattern)},
+      .special_token_count = 0,
+      .special_token_strings = nullptr,
+      .special_token_ids = nullptr,
   };
 
   iree_tokenizer_builder_t builder;
@@ -305,10 +305,10 @@ TEST_F(TiktokenTest, ParseBackwardRanks) {
   const char* data = "Ag 2\nAA 0\n";
 
   iree_tokenizer_tiktoken_config_t config = {
-      /*.pattern=*/{kTestPattern, strlen(kTestPattern)},
-      /*.special_token_count=*/0,
-      /*.special_token_strings=*/nullptr,
-      /*.special_token_ids=*/nullptr,
+      .pattern = {kTestPattern, strlen(kTestPattern)},
+      .special_token_count = 0,
+      .special_token_strings = nullptr,
+      .special_token_ids = nullptr,
   };
 
   iree_tokenizer_builder_t builder;
@@ -325,10 +325,10 @@ TEST_F(TiktokenTest, ParseMissingRank) {
   const char* data = "AA\n";
 
   iree_tokenizer_tiktoken_config_t config = {
-      /*.pattern=*/{kTestPattern, strlen(kTestPattern)},
-      /*.special_token_count=*/0,
-      /*.special_token_strings=*/nullptr,
-      /*.special_token_ids=*/nullptr,
+      .pattern = {kTestPattern, strlen(kTestPattern)},
+      .special_token_count = 0,
+      .special_token_strings = nullptr,
+      .special_token_ids = nullptr,
   };
 
   iree_tokenizer_builder_t builder;
@@ -345,10 +345,10 @@ TEST_F(TiktokenTest, ParseEmptyPattern) {
   const char* data = "AA 0\n";
 
   iree_tokenizer_tiktoken_config_t config = {
-      /*.pattern=*/iree_string_view_empty(),
-      /*.special_token_count=*/0,
-      /*.special_token_strings=*/nullptr,
-      /*.special_token_ids=*/nullptr,
+      .pattern = iree_string_view_empty(),
+      .special_token_count = 0,
+      .special_token_strings = nullptr,
+      .special_token_ids = nullptr,
   };
 
   iree_tokenizer_builder_t builder;
@@ -369,10 +369,10 @@ TEST_F(TiktokenTest, ConstructFromMinimalData) {
   std::string data = GenerateMinimalTiktokenData();
 
   iree_tokenizer_tiktoken_config_t config = {
-      /*.pattern=*/{kTestPattern, strlen(kTestPattern)},
-      /*.special_token_count=*/0,
-      /*.special_token_strings=*/nullptr,
-      /*.special_token_ids=*/nullptr,
+      .pattern = {kTestPattern, strlen(kTestPattern)},
+      .special_token_count = 0,
+      .special_token_strings = nullptr,
+      .special_token_ids = nullptr,
   };
 
   iree_tokenizer_t* tokenizer = nullptr;
@@ -388,10 +388,10 @@ TEST_F(TiktokenTest, ConstructWithShuffledByteOrder) {
   std::string data = GenerateShuffledTiktokenData();
 
   iree_tokenizer_tiktoken_config_t config = {
-      /*.pattern=*/{kTestPattern, strlen(kTestPattern)},
-      /*.special_token_count=*/0,
-      /*.special_token_strings=*/nullptr,
-      /*.special_token_ids=*/nullptr,
+      .pattern = {kTestPattern, strlen(kTestPattern)},
+      .special_token_count = 0,
+      .special_token_strings = nullptr,
+      .special_token_ids = nullptr,
   };
 
   iree_tokenizer_t* tokenizer = nullptr;
@@ -412,10 +412,10 @@ TEST_F(TiktokenTest, ConstructWithSpecialTokens) {
   static const int32_t special_ids[] = {260};
 
   iree_tokenizer_tiktoken_config_t config = {
-      /*.pattern=*/{kTestPattern, strlen(kTestPattern)},
-      /*.special_token_count=*/1,
-      /*.special_token_strings=*/special_strings,
-      /*.special_token_ids=*/special_ids,
+      .pattern = {kTestPattern, strlen(kTestPattern)},
+      .special_token_count = 1,
+      .special_token_strings = special_strings,
+      .special_token_ids = special_ids,
   };
 
   iree_tokenizer_t* tokenizer = nullptr;
@@ -439,10 +439,10 @@ TEST_F(TiktokenTest, ConstructWithRankGap) {
   static const int32_t special_ids[] = {258};
 
   iree_tokenizer_tiktoken_config_t config = {
-      /*.pattern=*/{kTestPattern, strlen(kTestPattern)},
-      /*.special_token_count=*/1,
-      /*.special_token_strings=*/special_strings,
-      /*.special_token_ids=*/special_ids,
+      .pattern = {kTestPattern, strlen(kTestPattern)},
+      .special_token_count = 1,
+      .special_token_strings = special_strings,
+      .special_token_ids = special_ids,
   };
 
   iree_tokenizer_t* tokenizer = nullptr;
@@ -519,10 +519,10 @@ TEST_F(TiktokenTest, TrailingNewlineHandled) {
   ASSERT_EQ(data.back(), '\n');
 
   iree_tokenizer_tiktoken_config_t config = {
-      /*.pattern=*/{kTestPattern, strlen(kTestPattern)},
-      /*.special_token_count=*/0,
-      /*.special_token_strings=*/nullptr,
-      /*.special_token_ids=*/nullptr,
+      .pattern = {kTestPattern, strlen(kTestPattern)},
+      .special_token_count = 0,
+      .special_token_strings = nullptr,
+      .special_token_ids = nullptr,
   };
 
   iree_tokenizer_t* tokenizer = nullptr;
@@ -538,10 +538,10 @@ TEST_F(TiktokenTest, EmptyLinesSkipped) {
   data = "\n\n" + data;
 
   iree_tokenizer_tiktoken_config_t config = {
-      /*.pattern=*/{kTestPattern, strlen(kTestPattern)},
-      /*.special_token_count=*/0,
-      /*.special_token_strings=*/nullptr,
-      /*.special_token_ids=*/nullptr,
+      .pattern = {kTestPattern, strlen(kTestPattern)},
+      .special_token_count = 0,
+      .special_token_strings = nullptr,
+      .special_token_ids = nullptr,
   };
 
   iree_tokenizer_t* tokenizer = nullptr;

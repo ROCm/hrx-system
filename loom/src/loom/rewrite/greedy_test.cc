@@ -31,22 +31,22 @@ namespace loom {
 namespace {
 
 static const loom_target_fact_type_t kTestTargetFactType = {
-    /*.name=*/IREE_SVL("test"),
-    /*.storage_size=*/sizeof(loom_target_facts_t),
+    .name = IREE_SVL("test"),
+    .storage_size = sizeof(loom_target_facts_t),
 };
 
 static void InitializeTestTargetFacts(loom_target_facts_t* out_facts) {
   *out_facts = {
-      /*.fact_type=*/&kTestTargetFactType,
-      /*.selector=*/0,
-      /*.explicit_fields=*/0,
-      /*.storage=*/
-      {
-          /*.snapshot=*/{/*.name=*/IREE_SVL("test")},
-          /*.export_plan=*/{/*.name=*/IREE_SVL("test")},
-          /*.config=*/{/*.name=*/IREE_SVL("test")},
-          /*.bundle=*/{/*.name=*/IREE_SVL("test")},
-      },
+      .fact_type = &kTestTargetFactType,
+      .selector = 0,
+      .explicit_fields = 0,
+      .storage =
+          {
+              .snapshot = {.name = IREE_SVL("test")},
+              .export_plan = {.name = IREE_SVL("test")},
+              .config = {.name = IREE_SVL("test")},
+              .bundle = {.name = IREE_SVL("test")},
+          },
   };
   loom_target_bundle_storage_rebind(&out_facts->storage);
 }
@@ -87,7 +87,7 @@ class GreedyRewriteTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
     loom_op_t* func_op = NULL;
     IREE_ASSERT_OK(loom_test_func_build(&module_builder, 0, 0, 0, callee, NULL,
                                         0, NULL, 0, NULL, 0, NULL, 0,
@@ -186,9 +186,9 @@ static void initialize_pattern_registry(
     const loom_rewrite_pattern_t* patterns, uint16_t pattern_count,
     loom_rewrite_pattern_registry_storage_t* out_storage) {
   const loom_rewrite_pattern_provider_t provider = {
-      /*.name=*/IREE_SVL("test"),
-      /*.patterns=*/patterns,
-      /*.pattern_count=*/pattern_count,
+      .name = IREE_SVL("test"),
+      .patterns = patterns,
+      .pattern_count = pattern_count,
   };
   const loom_rewrite_pattern_provider_t* provider_values[] = {&provider};
   IREE_ASSERT_OK(loom_rewrite_pattern_registry_storage_initialize(
@@ -315,7 +315,7 @@ TEST_F(GreedyRewriteTest, ExplicitTargetFactsSetAnalysisScope) {
   loom_greedy_rewrite_driver_initialize(module_, &arena, fact_table, &driver);
 
   const loom_greedy_rewrite_options_t options = {
-      /*.max_iterations=*/{},
+      .max_iterations = {},
   };
   IREE_ASSERT_OK(loom_greedy_rewrite_run_region(
       &driver, function_, loom_func_like_body(function_), function_.op,
@@ -629,12 +629,14 @@ TEST_F(GreedyRewriteTest, CyclicFactsNarrowAfterSemanticUpdates) {
   // Structural snapshots belong to the rewriter and leave the caller-owned
   // table before their backing arenas are released or the table is reattached.
   std::vector<const loom_cfg_graph_t*> graphs;
-  loom_value_fact_cfg_graph_callback_t callback = {};
-  callback.user_data = &graphs;
-  callback.fn = [](void* user_data, const loom_cfg_graph_t* graph) {
-    static_cast<std::vector<const loom_cfg_graph_t*>*>(user_data)->push_back(
-        graph);
-    return iree_ok_status();
+  loom_value_fact_cfg_graph_callback_t callback = {
+      .user_data = &graphs,
+      .fn =
+          [](void* user_data, const loom_cfg_graph_t* graph) {
+            static_cast<std::vector<const loom_cfg_graph_t*>*>(user_data)
+                ->push_back(graph);
+            return iree_ok_status();
+          },
   };
   // Non-CFG region context must not be exposed as a structural snapshot.
   IREE_ASSERT_OK(loom_value_fact_table_set_region_temporal_scope(
@@ -645,9 +647,11 @@ TEST_F(GreedyRewriteTest, CyclicFactsNarrowAfterSemanticUpdates) {
   IREE_ASSERT_OK(loom_value_fact_table_enumerate_cfg_graphs(facts, callback));
   EXPECT_THAT(graphs, ::testing::ElementsAre(
                           loom_value_fact_table_lookup_cfg_graph(facts, body)));
-  loom_value_fact_cfg_graph_callback_t failing_callback = {};
-  failing_callback.fn = [](void*, const loom_cfg_graph_t*) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED);
+  loom_value_fact_cfg_graph_callback_t failing_callback = {
+      .fn =
+          [](void*, const loom_cfg_graph_t*) {
+            return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED);
+          },
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,

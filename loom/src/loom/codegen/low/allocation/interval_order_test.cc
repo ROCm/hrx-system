@@ -37,8 +37,9 @@ class LowAllocationIntervalOrderTest : public ::testing::Test {
                                                    uint32_t start_point,
                                                    uint32_t end_point,
                                                    uint32_t unit_count) {
-    loom_liveness_interval_t interval = {};
-    interval.value_id = value_id;
+    loom_liveness_interval_t interval = {
+        .value_id = value_id,
+    };
     interval.value_class.type_kind = LOOM_TYPE_REGISTER;
     interval.start_point = start_point;
     interval.end_point = end_point;
@@ -47,8 +48,9 @@ class LowAllocationIntervalOrderTest : public ::testing::Test {
   }
 
   static loom_liveness_interval_t ScalarInterval(loom_value_id_t value_id) {
-    loom_liveness_interval_t interval = {};
-    interval.value_id = value_id;
+    loom_liveness_interval_t interval = {
+        .value_id = value_id,
+    };
     interval.value_class.type_kind = LOOM_TYPE_SCALAR;
     interval.unit_count = 1;
     return interval;
@@ -86,14 +88,16 @@ class LowAllocationIntervalOrderTest : public ::testing::Test {
         unit_count += intervals[i].unit_count;
       }
     }
-    loom_liveness_analysis_t liveness = {};
-    liveness.intervals = intervals;
-    liveness.interval_count = count;
-    liveness.value_ids = value_ids.data();
-    liveness.value_count = count;
-    liveness.value_interval_indices = interval_indices.data();
-    loom_low_allocation_unit_liveness_t unit_liveness = {};
-    unit_liveness.values = values.data();
+    loom_liveness_analysis_t liveness = {
+        .intervals = intervals,
+        .interval_count = count,
+        .value_ids = value_ids.data(),
+        .value_count = count,
+        .value_interval_indices = interval_indices.data(),
+    };
+    loom_low_allocation_unit_liveness_t unit_liveness = {
+        .values = values.data(),
+    };
     unit_liveness.point_count = unit_count;
     return loom_low_allocation_interval_order_build(&descriptor_set_, &liveness,
                                                     &unit_liveness, &placement,
@@ -193,10 +197,11 @@ TEST_F(LowAllocationIntervalOrderTest,
   };
   const uint32_t acquisition_starts[] = {3, 3, 3, 3};
   const loom_value_ordinal_t storage_order[] = {3, 2, 1, 0};
-  loom_low_placement_table_t placement = {};
-  placement.value_count = IREE_ARRAYSIZE(intervals);
-  placement.storage_value_order = storage_order;
-  placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
+  loom_low_placement_table_t placement = {
+      .value_count = IREE_ARRAYSIZE(intervals),
+      .storage_value_order = storage_order,
+      .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
+  };
   // Optional-only topology has no tied-origin array; every value owns itself.
   loom_low_allocation_interval_order_t order = {};
   IREE_ASSERT_OK(BuildOrder(intervals, IREE_ARRAYSIZE(intervals),
@@ -220,11 +225,12 @@ TEST_F(LowAllocationIntervalOrderTest,
   const uint32_t acquisition_starts[] = {2, 2, 2, 2};
   const loom_value_ordinal_t storage_order[] = {1, 3, 2, 0};
   const loom_value_ordinal_t tied_origins[] = {0, 0, 0, 3};
-  loom_low_placement_table_t placement = {};
-  placement.value_count = IREE_ARRAYSIZE(intervals);
-  placement.storage_value_order = storage_order;
-  placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
-  placement.tied_storage_origins_by_value_ordinal = tied_origins;
+  loom_low_placement_table_t placement = {
+      .value_count = IREE_ARRAYSIZE(intervals),
+      .storage_value_order = storage_order,
+      .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
+      .tied_storage_origins_by_value_ordinal = tied_origins,
+  };
   loom_low_allocation_interval_order_t order = {};
   IREE_ASSERT_OK(BuildOrder(intervals, IREE_ARRAYSIZE(intervals),
                             acquisition_starts, placement, &order));
@@ -266,11 +272,12 @@ TEST_F(LowAllocationIntervalOrderTest,
   for (uint32_t i = 0; i < kIntervalCount; ++i) {
     storage_order[i] = kIntervalCount - i - 1;
   }
-  loom_low_placement_table_t placement = {};
-  placement.value_count = kIntervalCount;
-  placement.storage_value_order = storage_order;
-  placement.storage_value_order_count = kIntervalCount;
-  placement.tied_storage_origins_by_value_ordinal = tied_origins;
+  loom_low_placement_table_t placement = {
+      .value_count = kIntervalCount,
+      .storage_value_order = storage_order,
+      .storage_value_order_count = kIntervalCount,
+      .tied_storage_origins_by_value_ordinal = tied_origins,
+  };
   loom_low_allocation_interval_order_t order = {};
   IREE_ASSERT_OK(BuildOrder(intervals, kIntervalCount, acquisition_starts,
                             placement, &order));

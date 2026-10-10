@@ -57,13 +57,13 @@ static iree_status_t CreateEmbeddedSource(const EmbeddedSource& embedded,
                                           SourcePtr* out_source) {
   out_source->reset();
   const loomc_source_options_t source_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(source_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_UNKNOWN,
-      /*.identifier=*/embedded.identifier,
-      /*.contents=*/embedded.contents,
-      /*.storage=*/LOOMC_SOURCE_STORAGE_BORROWED,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(source_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_UNKNOWN,
+      .identifier = embedded.identifier,
+      .contents = embedded.contents,
+      .storage = LOOMC_SOURCE_STORAGE_BORROWED,
   };
   loomc_source_t* raw_source = nullptr;
   IREE_RETURN_IF_ERROR(to_iree_status(
@@ -90,10 +90,11 @@ class CxxSourceScenarioBase : public TargetCompileScenario {
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_environment_create_amdgpu(
         loom_allocator(), &raw_environment)));
     TargetEnvironmentPtr environment(raw_environment);
-    loomc_amdgpu_profile_options_t profile_options = {};
-    profile_options.type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS;
-    profile_options.structure_size = sizeof(profile_options);
-    profile_options.identifier = loomc_make_cstring_view(kernel_.target);
+    loomc_amdgpu_profile_options_t profile_options = {
+        .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
+        .structure_size = sizeof(profile_options),
+        .identifier = loomc_make_cstring_view(kernel_.target),
+    };
     profile_options.identity.target = profile_options.identifier;
     loomc_target_profile_t* raw_profile = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_profile_create_amdgpu(
@@ -140,12 +141,13 @@ class CxxSourceScenarioBase : public TargetCompileScenario {
   iree_status_t ImportSource(WorkspacePtr& workspace, ModulePtr* out_module) {
     out_module->reset();
     const loomc_string_view_t root = loomc_make_cstring_view(kernel_.root);
-    loomc_cxx_import_options_t options = {};
-    options.type = LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS;
-    options.structure_size = sizeof(options);
-    options.flags = LOOMC_CXX_IMPORT_FLAG_APPROXIMATE_FUNCTIONS;
-    options.roots = &root;
-    options.root_count = 1;
+    loomc_cxx_import_options_t options = {
+        .type = LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS,
+        .structure_size = sizeof(options),
+        .flags = LOOMC_CXX_IMPORT_FLAG_APPROXIMATE_FUNCTIONS,
+        .roots = &root,
+        .root_count = 1,
+    };
     if (!include_sources_.empty()) {
       options.source_provider = {ProvideSource, this};
     }
@@ -171,13 +173,13 @@ class CxxSourceScenarioBase : public TargetCompileScenario {
   iree_status_t EmitHsaco(WorkspacePtr& workspace, ModulePtr& module) {
     const loomc_string_view_t root = loomc_make_cstring_view(kernel_.root);
     const loomc_emit_options_t options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-        /*.structure_size=*/sizeof(options),
-        /*.next=*/nullptr,
-        /*.artifact_format=*/
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
-        /*.identifier=*/root,
-        /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+        .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+        .structure_size = sizeof(options),
+        .next = nullptr,
+        .artifact_format =
+            loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
+        .identifier = root,
+        .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
     };
     loomc_result_t* raw_result = nullptr;
     iree_status_t status = to_iree_status(
@@ -436,8 +438,8 @@ void RegisterCxxJitPhaseBenchmarks(const char* kernel_name,
   };
   for (const CxxJitPhaseRegistration& registration : kPhases) {
     const CxxJitPhaseSpec spec = {
-        /*.phase=*/registration.phase,
-        /*.kernel=*/kernel,
+        .phase = registration.phase,
+        .kernel = kernel,
     };
     const std::string name =
         std::string("CxxJitPhase/") + kernel_name + "/" + registration.name;

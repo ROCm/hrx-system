@@ -113,8 +113,9 @@ class GenDialectProfilesTest : public ::testing::Test {
     IREE_RETURN_IF_ERROR(loom_test_gen_module(&gen, &config, &context_,
                                               &block_pool_, out_module));
 
-    loom_verify_options_t options = {};
-    options.sink = {loom_diagnostic_stderr_sink, NULL};
+    loom_verify_options_t options = {
+        .sink = {loom_diagnostic_stderr_sink, NULL},
+    };
     loom_verify_result_t result = {};
     IREE_RETURN_IF_ERROR(loom_verify_module(*out_module, &options, &result));
     if (result.error_count > 0) {

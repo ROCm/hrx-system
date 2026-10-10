@@ -69,9 +69,9 @@ static iree_status_t test_byte_sequence_enumerate(
 }
 
 static const iree_byte_sequence_vtable_t test_byte_sequence_vtable = {
-    /*.destroy=*/test_byte_sequence_destroy,
-    /*.enumerate=*/test_byte_sequence_enumerate,
-    /*.try_get_contiguous_span=*/NULL,
+    .destroy = test_byte_sequence_destroy,
+    .enumerate = test_byte_sequence_enumerate,
+    .try_get_contiguous_span = NULL,
 };
 
 static void test_byte_sequence_initialize(

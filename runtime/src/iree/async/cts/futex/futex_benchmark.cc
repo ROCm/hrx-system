@@ -26,6 +26,10 @@
 
 namespace iree::async::cts {
 
+constexpr iree_async_futex_flags_t kPrivateU32FutexFlags =
+    static_cast<iree_async_futex_flags_t>(IREE_ASYNC_FUTEX_SIZE_U32) |
+    static_cast<iree_async_futex_flags_t>(IREE_ASYNC_FUTEX_FLAG_PRIVATE);
+
 //===----------------------------------------------------------------------===//
 // Futex operation helpers
 //===----------------------------------------------------------------------===//
@@ -41,8 +45,7 @@ static void InitFutexWaitOp(iree_async_futex_wait_operation_t* operation,
   operation->base.user_data = user_data;
   operation->futex_address = address;
   operation->expected_value = expected;
-  operation->futex_flags =
-      IREE_ASYNC_FUTEX_SIZE_U32 | IREE_ASYNC_FUTEX_FLAG_PRIVATE;
+  operation->futex_flags = kPrivateU32FutexFlags;
 }
 
 // Initializes a FUTEX_WAKE operation.
@@ -56,8 +59,7 @@ static void InitFutexWakeOp(iree_async_futex_wake_operation_t* operation,
   operation->base.user_data = user_data;
   operation->futex_address = address;
   operation->wake_count = count;
-  operation->futex_flags =
-      IREE_ASYNC_FUTEX_SIZE_U32 | IREE_ASYNC_FUTEX_FLAG_PRIVATE;
+  operation->futex_flags = kPrivateU32FutexFlags;
 }
 
 //===----------------------------------------------------------------------===//

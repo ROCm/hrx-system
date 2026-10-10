@@ -42,8 +42,9 @@ void ExpectVectorEncoding(uint16_t encoding_format_id, uint16_t encoding_id,
 }
 
 TEST(EncodingTest, VectorRegisterPrefixesAndBehaviors) {
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 1;
+  loom_x86_encoding_operands_t operands = {
+      .result = 1,
+  };
   operands.inputs[0] = 2;
   operands.inputs[1] = 3;
   // VEX.128 vpaddd xmm1,xmm2,xmm3.
@@ -89,8 +90,7 @@ TEST(EncodingTest, VectorRegisterPrefixesAndBehaviors) {
 }
 
 TEST(EncodingTest, AvxVnniInt8FamilyHasExactReferenceBytes) {
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 1;
+  loom_x86_encoding_operands_t operands = {.result = 1};
   operands.inputs[0] = 1;
   operands.inputs[1] = 2;
   operands.inputs[2] = 3;
@@ -122,8 +122,9 @@ TEST(EncodingTest, AvxVnniInt8FamilyHasExactReferenceBytes) {
 }
 
 TEST(EncodingTest, AvxNeConvertFamilyHasExactReferenceBytes) {
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 4;
+  loom_x86_encoding_operands_t operands = {
+      .result = 4,
+  };
   operands.inputs[0] = 8;
   operands.inputs[1] = 9;
   operands.immediate = 0x1234;
@@ -164,8 +165,9 @@ TEST(EncodingTest, AvxNeConvertFamilyHasExactReferenceBytes) {
 }
 
 TEST(EncodingTest, VectorMemoryDisplacementsAndCanonicalSib) {
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 1;
+  loom_x86_encoding_operands_t operands = {
+      .result = 1,
+  };
   operands.inputs[0] = 0;
   operands.immediate = 16;
   // VEX vmovdqu xmm1,[rax+16].
@@ -308,8 +310,7 @@ TEST(EncodingTest, EveryVectorRecipeHasExactReferenceBytes) {
 
 TEST(EncodingTest, RegisterDirectionAndWidth) {
   // ADD r9,r10 uses r/m as the result; IMUL r9,r10 uses reg as the result.
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 9;
+  loom_x86_encoding_operands_t operands = {.result = 9};
   operands.inputs[0] = 9;
   operands.inputs[1] = 10;
   ExpectEncoding(LOOM_X86_ENCODING_FORM_BINARY_RM_R,
@@ -324,8 +325,7 @@ TEST(EncodingTest, RegisterDirectionAndWidth) {
 
 TEST(EncodingTest, ByteRegisterPrefixAndFullWidthDefinition) {
   // MOVZX esi,sil requires a REX prefix even without extended registers.
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 6;
+  loom_x86_encoding_operands_t operands = {.result = 6};
   operands.inputs[0] = 6;
   ExpectEncoding(LOOM_X86_ENCODING_FORM_MOVE,
                  LOOM_X86_ENCODING_OPCODE_0F | 0xb6 | LOOM_X86_ENCODING_BYTE,
@@ -345,8 +345,9 @@ TEST(EncodingTest, ByteRegisterPrefixAndFullWidthDefinition) {
 }
 
 TEST(EncodingTest, AddressDisplacementAndSib) {
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 9;
+  loom_x86_encoding_operands_t operands = {
+      .result = 9,
+  };
   operands.inputs[0] = 13;
   // [r13] needs an explicit zero displacement, unlike [r12].
   ExpectEncoding(LOOM_X86_ENCODING_FORM_LOAD, 0x8b | LOOM_X86_ENCODING_REX_W,
@@ -364,9 +365,10 @@ TEST(EncodingTest, AddressDisplacementAndSib) {
 }
 
 TEST(EncodingTest, PcRelativeAddressUsesNoBaseRegisterOrSib) {
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 13;
-  operands.immediate = -4;
+  loom_x86_encoding_operands_t operands = {
+      .immediate = -4,
+      .result = 13,
+  };
   ExpectEncoding(LOOM_X86_ENCODING_FORM_ADDRESS_PC_RELATIVE,
                  0x8d | LOOM_X86_ENCODING_REX_W, operands,
                  {0x4c, 0x8d, 0x2d, 0xfc, 0xff, 0xff, 0xff}, 1u << 13);
@@ -396,8 +398,9 @@ TEST(EncodingTest, IndexedByteStoreAndNoBaseAddress) {
 }
 
 TEST(EncodingTest, PredicateSequenceAndImplicitWrites) {
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 7;
+  loom_x86_encoding_operands_t operands = {
+      .result = 7,
+  };
   operands.inputs[0] = 8;
   operands.inputs[1] = 9;
   // CMP r8,r9; SETB dil; MOVZX edi,dil defines a canonical full predicate.
@@ -413,9 +416,10 @@ TEST(EncodingTest, PredicateSequenceAndImplicitWrites) {
 }
 
 TEST(EncodingTest, ImmediateAndStackEncoding) {
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 8;
-  operands.immediate = INT64_C(0x123456789abcdef0);
+  loom_x86_encoding_operands_t operands = {
+      .immediate = INT64_C(0x123456789abcdef0),
+      .result = 8,
+  };
   ExpectEncoding(
       LOOM_X86_ENCODING_FORM_CONSTANT, 0xb8 | LOOM_X86_ENCODING_REX_W, operands,
       {0x49, 0xb8, 0xf0, 0xde, 0xbc, 0x9a, 0x78, 0x56, 0x34, 0x12}, 1u << 8);
@@ -427,8 +431,9 @@ TEST(EncodingTest, ImmediateAndStackEncoding) {
 }
 
 TEST(EncodingTest, ImmediateWidthsAndCountRegister) {
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 9;
+  loom_x86_encoding_operands_t operands = {
+      .result = 9,
+  };
   operands.inputs[0] = 9;
   operands.inputs[1] = 1;
   // Exact float narrowing uses signed add/sub immediates at GPR32 width.
@@ -457,8 +462,9 @@ TEST(EncodingTest, ImmediateWidthsAndCountRegister) {
 }
 
 TEST(EncodingTest, ConditionalSequences) {
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 8;
+  loom_x86_encoding_operands_t operands = {
+      .result = 8,
+  };
   operands.inputs[0] = 1;
   operands.inputs[1] = 9;
   operands.inputs[2] = 8;

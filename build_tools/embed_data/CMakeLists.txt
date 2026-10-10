@@ -6,7 +6,7 @@
 
 add_executable(iree-c-embed-data embed_data.cc)
 set_target_properties(iree-c-embed-data PROPERTIES
-  CXX_STANDARD 17
+  CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
   FOLDER "${HRX_IDE_FOLDER}/build_tools"
   RUNTIME_OUTPUT_DIRECTORY "${IREE_BINARY_DIR}/build_tools"

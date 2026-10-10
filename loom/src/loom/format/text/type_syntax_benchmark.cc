@@ -119,8 +119,7 @@ class TypeSyntaxBenchmark {
   }
 
   iree_status_t Parse(iree_string_view_t source, loom_module_t** out_module) {
-    loom_text_parse_options_t options = {};
-    options.max_errors = 1;
+    loom_text_parse_options_t options = {.max_errors = 1};
     return loom_text_parse(source, IREE_SV("type_syntax_benchmark.loom"),
                            &context_, &block_pool_, &options, out_module);
   }

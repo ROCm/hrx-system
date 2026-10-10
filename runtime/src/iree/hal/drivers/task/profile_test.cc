@@ -23,12 +23,13 @@ namespace {
 static constexpr iree_hal_queue_priority_t kQueuePriority =
     IREE_HAL_QUEUE_PRIORITY_NORMAL;
 static const iree_hal_queue_family_spec_t kQueueFamilySpec = [] {
-  iree_hal_queue_family_spec_t spec = {};
-  spec.name = IREE_SV("test");
-  spec.priority_count = 1;
-  spec.priorities = &kQueuePriority;
-  spec.physical_device_affinity = 1;
-  spec.role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH;
+  iree_hal_queue_family_spec_t spec = {
+      .name = IREE_SV("test"),
+      .priority_count = 1,
+      .priorities = &kQueuePriority,
+      .physical_device_affinity = 1,
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+  };
   return spec;
 }();
 
@@ -287,10 +288,10 @@ static iree_status_t RecordingProfileSinkEndSession(
 }
 
 static const iree_hal_profile_sink_vtable_t kRecordingProfileSinkVTable = {
-    /*.destroy=*/RecordingProfileSinkDestroy,
-    /*.begin_session=*/RecordingProfileSinkBeginSession,
-    /*.write=*/RecordingProfileSinkWrite,
-    /*.end_session=*/RecordingProfileSinkEndSession,
+    .destroy = RecordingProfileSinkDestroy,
+    .begin_session = RecordingProfileSinkBeginSession,
+    .write = RecordingProfileSinkWrite,
+    .end_session = RecordingProfileSinkEndSession,
 };
 
 static void RecordingProfileSinkInitialize(RecordingProfileSink* sink) {
@@ -413,11 +414,11 @@ static const iree_hal_task_executable_vtable_t kFakeTaskExecutableVTable = {
 class TaskProfileRecorderTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    iree_hal_device_queue_spec_t queues = {};
-    queues.family_count = 1;
-    queues.families = &kQueueFamilySpec;
-    iree_hal_device_spec_params_t spec_params = {};
-    spec_params.queues = &queues;
+    iree_hal_device_queue_spec_t queues = {
+        .family_count = 1,
+        .families = &kQueueFamilySpec,
+    };
+    iree_hal_device_spec_params_t spec_params = {.queues = &queues};
     iree_hal_device_spec_t* device_spec = nullptr;
     IREE_ASSERT_OK(iree_hal_device_spec_create(
         &spec_params, iree_allocator_system(), &device_spec));

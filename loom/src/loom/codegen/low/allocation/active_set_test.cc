@@ -20,23 +20,25 @@ loom_low_allocation_assignment_t Assignment(loom_value_id_t value_id,
                                             uint32_t end_point,
                                             uint32_t location_base,
                                             uint32_t unit_point_start) {
-  loom_low_allocation_assignment_t assignment = {};
-  assignment.value_id = value_id;
-  assignment.descriptor_reg_class_id = 0;
-  assignment.start_point = start_point;
-  assignment.end_point = end_point;
-  assignment.unit_count = 1;
-  assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  assignment.location_base = location_base;
-  assignment.location_count = 1;
-  assignment.unit_point_start = unit_point_start;
+  loom_low_allocation_assignment_t assignment = {
+      .value_id = value_id,
+      .descriptor_reg_class_id = 0,
+      .start_point = start_point,
+      .end_point = end_point,
+      .unit_count = 1,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = location_base,
+      .location_count = 1,
+      .unit_point_start = unit_point_start,
+  };
   return assignment;
 }
 
 loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
                                         iree_host_size_t reg_class_count) {
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.reg_classes = reg_classes;
+  loom_low_descriptor_set_t descriptor_set = {
+      .reg_classes = reg_classes,
+  };
   descriptor_set.reg_class_count = reg_class_count;
   return descriptor_set;
 }
@@ -52,9 +54,10 @@ TEST(LowAllocationActiveSetTest, ExpiresAndRemovesIndexedUnits) {
   const loom_low_descriptor_set_t descriptor_set =
       DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
   uint32_t unit_end_points[] = {10, 5, 9};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   const loom_low_allocation_assignment_t assignments[] = {
       Assignment(/*value_id=*/1, /*start_point=*/0, /*end_point=*/10,
                  /*location_base=*/4, /*unit_point_start=*/0),
@@ -202,9 +205,10 @@ TEST(LowAllocationActiveSetTest, ReusesStorageBeforeRemovedLifetimeExpires) {
                    /*location_base=*/0, /*unit_point_start=*/2),
     };
     uint32_t unit_end_points[] = {4, 6, 8, 5};
-    loom_low_allocation_unit_liveness_t unit_liveness = {};
-    unit_liveness.end_points = unit_end_points;
-    unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+    loom_low_allocation_unit_liveness_t unit_liveness = {
+        .end_points = unit_end_points,
+        .point_count = IREE_ARRAYSIZE(unit_end_points),
+    };
     loom_low_allocation_active_set_t active_set = {};
     IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
         &descriptor_set, IREE_ARRAYSIZE(assignments),
@@ -279,9 +283,10 @@ TEST(LowAllocationActiveSetTest, ConsumesSparseHistoryAcrossTheSweep) {
     };
     assignments[0].liveness_segments = {0, 64};
     uint32_t unit_end_points[] = {300, 0};
-    loom_low_allocation_unit_liveness_t unit_liveness = {};
-    unit_liveness.end_points = unit_end_points;
-    unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+    loom_low_allocation_unit_liveness_t unit_liveness = {
+        .end_points = unit_end_points,
+        .point_count = IREE_ARRAYSIZE(unit_end_points),
+    };
     unit_liveness.storage_segments.entries = segments.data();
 
     loom_low_allocation_active_set_t active_set = {};
@@ -375,10 +380,11 @@ TEST(LowAllocationActiveSetTest, ProjectsSparseScalarConflictsAcrossAliases) {
   uint32_t unit_start_points[] = {0, 0, 6, 0, 0, 0, 4};
   uint32_t unit_end_points[] = {12, 5, 12, 12, 12, 12, 6};
   const loom_liveness_segment_t segments[] = {{0, 3}, {8, 12}, {4, 6}, {9, 10}};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.start_points = unit_start_points;
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .start_points = unit_start_points,
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   unit_liveness.storage_segments.entries = segments;
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(

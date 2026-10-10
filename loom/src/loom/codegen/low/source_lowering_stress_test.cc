@@ -55,10 +55,10 @@ TEST_F(SourceLoweringStressTest, GeneratedSupportedSourceLowersAndPacketizes) {
   static constexpr uint64_t kSeedCountPerScale = 32;
   loom_low_source_workload_pipeline_counters_t aggregate = {};
   const loom_low_source_workload_pipeline_options_t pipeline_options = {
-      /*.pass_registry=*/loom_pass_builtin_registry(),
-      /*.descriptor_registry=*/&descriptor_registry_.registry,
-      /*.policy_registry=*/&policy_registry_,
-      /*.schedule_strategy=*/LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE,
+      .pass_registry = loom_pass_builtin_registry(),
+      .descriptor_registry = &descriptor_registry_.registry,
+      .policy_registry = &policy_registry_,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE,
   };
 
   for (uint32_t scale : kScales) {
@@ -129,10 +129,10 @@ TEST_F(SourceLoweringStressTest, CopiedDestructiveResultKeepsStorageIdentity) {
       &module_raw));
   ModulePtr module(module_raw);
   const loom_low_source_workload_pipeline_options_t pipeline_options = {
-      /*.pass_registry=*/loom_pass_builtin_registry(),
-      /*.descriptor_registry=*/&descriptor_registry_.registry,
-      /*.policy_registry=*/&policy_registry_,
-      /*.schedule_strategy=*/LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE,
+      .pass_registry = loom_pass_builtin_registry(),
+      .descriptor_registry = &descriptor_registry_.registry,
+      .policy_registry = &policy_registry_,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE,
   };
   loom_low_source_workload_pipeline_counters_t counters = {};
   bool pipeline_accepted = false;
@@ -163,11 +163,12 @@ TEST_F(SourceLoweringStressTest, PreparationDiagnosticStopsBeforeAllocation) {
           loom_param_string(IREE_SV("generated")),
           loom_param_string(IREE_SV("packetization preparation")),
       };
-      loom_diagnostic_emission_t emission = {};
-      emission.op = function.op;
-      emission.error = LOOM_ERR_STRUCTURE_028;
-      emission.params = params;
-      emission.param_count = IREE_ARRAYSIZE(params);
+      loom_diagnostic_emission_t emission = {
+          .op = function.op,
+          .error = LOOM_ERR_STRUCTURE_028,
+          .params = params,
+          .param_count = IREE_ARRAYSIZE(params),
+      };
       return iree_diagnostic_emit(pass->diagnostic_emitter, &emission);
     };
     replaced = true;

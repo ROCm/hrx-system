@@ -34,8 +34,8 @@ LOOMC_TARGET_WASM_COMPATIBLE_WITH = loom_config_compatible_with([
 loom_cc_library(
     name = "iree_hal_execution_test_util",
     testonly = True,
-    srcs = ["iree_hal_execution.cc"],
-    hdrs = ["iree_hal_execution.h"],
+    srcs = ["iree_hal_execution_test_util.cc"],
+    hdrs = ["iree_hal_execution_test_util.h"],
     includes = ["../.."],
     deps = [
         "//loom/binding/c:loomc",

@@ -41,28 +41,30 @@ struct AllocationState {
   uint32_t live_count = 0;
 
   amdf_allocator_t allocator() {
-    amdf_allocator_t value = {};
-    value.user_data = this;
-    value.allocate = [](void* user_data, uint64_t byte_length,
-                        uint64_t minimum_alignment) -> void* {
-      auto* state = static_cast<AllocationState*>(user_data);
-      if (state->allocation_count++ == state->failure_ordinal) {
-        return nullptr;
-      }
-      const amdf_allocator_t system = amdf_allocator_system();
-      void* pointer =
-          system.allocate(system.user_data, byte_length, minimum_alignment);
-      if (pointer != nullptr) {
-        ++state->live_count;
-      }
-      return pointer;
-    };
-    value.free = [](void* user_data, void* pointer) {
-      auto* state = static_cast<AllocationState*>(user_data);
-      EXPECT_GT(state->live_count, 0u);
-      --state->live_count;
-      const amdf_allocator_t system = amdf_allocator_system();
-      system.free(system.user_data, pointer);
+    amdf_allocator_t value = {
+        .user_data = this,
+        .allocate = [](void* user_data, uint64_t byte_length,
+                       uint64_t minimum_alignment) -> void* {
+          auto* state = static_cast<AllocationState*>(user_data);
+          if (state->allocation_count++ == state->failure_ordinal) {
+            return nullptr;
+          }
+          const amdf_allocator_t system = amdf_allocator_system();
+          void* pointer =
+              system.allocate(system.user_data, byte_length, minimum_alignment);
+          if (pointer != nullptr) {
+            ++state->live_count;
+          }
+          return pointer;
+        },
+        .free =
+            [](void* user_data, void* pointer) {
+              auto* state = static_cast<AllocationState*>(user_data);
+              EXPECT_GT(state->live_count, 0u);
+              --state->live_count;
+              const amdf_allocator_t system = amdf_allocator_system();
+              system.free(system.user_data, pointer);
+            },
     };
     return value;
   }
@@ -124,9 +126,10 @@ TEST_P(MemoryGroupTest, NativeGroupUsesOneOwnerWithoutExternalTransport) {
       [](const amdf_memory_site_query_t*, amdf_memory_site_description_t*) {
         return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
       };
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
+  amdf_memory_profile_t profile = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+      .structure_size = sizeof(profile),
+  };
   amdf_memory_access_capabilities_t capabilities[2] = {};
   for (auto& capability : capabilities) {
     capability.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
@@ -214,9 +217,10 @@ TEST_P(MemoryGroupTest, NativeGroupIntersectsTheSharedAddressEnvelope) {
     capability.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
     capability.structure_size = sizeof(capability);
   }
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
+  amdf_memory_profile_t profile = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+      .structure_size = sizeof(profile),
+  };
   ASSERT_EQ(amdf_memory_scope_query_device_profile(
                 &instance_.system_memory_scope, GetParam(), 2, accesses,
                 &profile, capabilities),
@@ -336,9 +340,10 @@ TEST_F(MemoryConstructionTest, LiveProfileConstrainsTheConstructedAccessSet) {
   // address envelope. Selection and publication must preserve both facts.
   devices[1].profile.import.maximum_byte_length = 8192;
   devices[1].profile.device_address.maximum_address = (UINT64_C(1) << 40) - 1;
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
+  amdf_memory_profile_t profile = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+      .structure_size = sizeof(profile),
+  };
   ASSERT_EQ(amdf_memory_scope_query_device_profile(
                 &instance_.system_memory_scope, 0, 2, accesses, &profile,
                 capabilities),
@@ -386,9 +391,10 @@ TEST_F(MemoryConstructionTest, LiveProfilePreservesBackingPayloadGeometry) {
   devices[0].profile.import.native_byte_length_granularity = 65536;
   devices[0].profile.import.maximum_byte_length = 8192;
   devices[1].profile.allocation.native_byte_length_prefix = 32768;
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
+  amdf_memory_profile_t profile = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+      .structure_size = sizeof(profile),
+  };
   amdf_memory_access_capabilities_t capabilities[2] = {};
   for (auto& capability : capabilities) {
     capability.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
@@ -410,8 +416,9 @@ TEST_F(MemoryConstructionTest, LiveProfilePreservesBackingPayloadGeometry) {
 TEST_F(MemoryConstructionTest, HostOnlyPairDoesNotQueryDeviceAtomicReach) {
   FakeDevice device;
   InitializeFakeDevice(1, &instance_, &device);
-  amdf_memory_host_description_t host = {};
-  host.cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK;
+  amdf_memory_host_description_t host = {
+      .cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK,
+  };
   host.flush.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
   host.invalidate.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
   device.profile.visibility.data = &host;
@@ -424,19 +431,21 @@ TEST_F(MemoryConstructionTest, HostOnlyPairDoesNotQueryDeviceAtomicReach) {
         ADD_FAILURE() << "A host-only pair must not describe a mapped device";
         return amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
       };
-  amdf_memory_profile_pair_query_t query = {};
-  query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
-  query.structure_size = sizeof(query);
-  query.access_count = 1;
-  query.accesses = &device.request;
-  query.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
+  amdf_memory_profile_pair_query_t query = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY,
+      .structure_size = sizeof(query),
+      .access_count = 1,
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .accesses = &device.request,
+  };
   query.producer.kind = AMDF_MEMORY_SITE_KIND_HOST;
   query.producer.value.host_access = AMDF_MEMORY_MAP_FLAG_WRITE;
   query.consumer.kind = AMDF_MEMORY_SITE_KIND_HOST;
   query.consumer.value.host_access = AMDF_MEMORY_MAP_FLAG_READ;
-  amdf_memory_pair_info_t pair = {};
-  pair.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-  pair.structure_size = sizeof(pair);
+  amdf_memory_pair_info_t pair = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(pair),
+  };
   ASSERT_EQ(amdf_memory_scope_query_pair_info(&instance_.system_memory_scope,
                                               &query, &pair),
             AMDF_STATUS_OK);
@@ -465,10 +474,11 @@ TEST_F(MemoryConstructionTest, LiveProfileFailurePublishesNoPartialOutputs) {
     capabilities[i].structure_size = sizeof(capabilities[i]);
     capabilities[i].device_address.maximum_address = 73 + i;
   }
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
-  profile.ordinal = 91;
+  amdf_memory_profile_t profile = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+      .structure_size = sizeof(profile),
+      .ordinal = 91,
+  };
   const amdf_memory_profile_t original_profile = profile;
   amdf_memory_access_capabilities_t original_capabilities[2];
   std::memcpy(original_capabilities, capabilities, sizeof(capabilities));
@@ -566,9 +576,10 @@ TEST_F(MemoryConstructionTest,
   for (uint32_t i = 0; i < accesses.size(); ++i) {
     devices[i].profile_status =
         amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
-    amdf_memory_access_info_t info = {};
-    info.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
-    info.structure_size = sizeof(info);
+    amdf_memory_access_info_t info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+        .structure_size = sizeof(info),
+    };
     ASSERT_EQ(amdf_memory_query_access_info(memory, i, &info), AMDF_STATUS_OK);
     EXPECT_EQ(info.ordinal, i);
     EXPECT_EQ(info.access, accesses[i].requirements.access);
@@ -584,9 +595,10 @@ TEST_F(MemoryConstructionTest,
   amdf_memory_site_t producer = MakeMemorySite(memory, 3);
   producer.value.device.access_ordinal = 1;
   amdf_memory_site_t consumer = MakeMemorySite(memory, 5);
-  amdf_memory_pair_info_t pair = {};
-  pair.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-  pair.structure_size = sizeof(pair);
+  amdf_memory_pair_info_t pair = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(pair),
+  };
   ASSERT_EQ(amdf_memory_query_pair_info(&producer, &consumer, &pair),
             AMDF_STATUS_OK);
   EXPECT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);
@@ -873,8 +885,9 @@ TEST_F(MemoryConstructionTest,
       }
       devices[0].profile.roles &= ~AMDF_MEMORY_PROFILE_ROLE_CREATE;
       ReleaseState release = {};
-      amdf_external_memory_t external = {};
-      external.type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD;
+      amdf_external_memory_t external = {
+          .type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD,
+      };
       external.payload.file_descriptor = 83;
       external.byte_length = 4096;
       external.physical_backing_id = devices[0].backing_id;
@@ -960,9 +973,10 @@ TEST_F(MemoryConstructionTest, FailedImportPreservesInputOnReleaseError) {
   device.import_failure_stage = ImportFailureStage::kAfterAttachment;
   device.destroy_status = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
   ReleaseState release = {};
-  amdf_external_memory_t external = {};
-  external.type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD;
-  external.byte_length = 4096;
+  amdf_external_memory_t external = {
+      .type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD,
+      .byte_length = 4096,
+  };
   external.payload.file_descriptor = 91;
   external.physical_backing_id = device.backing_id;
   external.release = RecordRelease;

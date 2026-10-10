@@ -103,8 +103,7 @@ TEST_F(VMReflectionTest, InsufficientStorageLeavesDescriptionUntouched) {
   std::memset(storage_bytes, 0xA5, required_size - 1);
   const std::vector<uint8_t> original_storage(
       storage_bytes, storage_bytes + required_size - 1);
-  iree_vm_export_description_t description = {};
-  description.name = IREE_SV("untouched");
+  iree_vm_export_description_t description = {.name = IREE_SV("untouched")};
   iree_host_size_t repeated_required_size = 0;
   IREE_ASSERT_OK(iree_vm_export_query_description(
       export_value, MakeStorageSpan(storage, required_size - 1),
@@ -206,8 +205,7 @@ TEST_F(VMReflectionTest, EnumeratesAndLooksUpTypedMetadata) {
   EXPECT_EQ(revision, 7u);
 
   bool found = true;
-  iree_vm_metadata_value_t value = {};
-  value.type = 99;
+  iree_vm_metadata_value_t value = {.type = 99};
   IREE_ASSERT_OK(iree_vm_module_try_lookup_metadata(module_, IREE_SV("missing"),
                                                     &found, &value));
   EXPECT_FALSE(found);

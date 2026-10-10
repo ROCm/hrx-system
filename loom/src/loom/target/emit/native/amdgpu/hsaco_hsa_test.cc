@@ -585,7 +585,7 @@ bool TryFindFirstGpuAgent(const HsaApi& api, hsa_agent_t* out_agent,
   IREE_ASSERT_ARGUMENT(out_agent);
   IREE_ASSERT_ARGUMENT(out_agent_name);
   IREE_ASSERT_ARGUMENT(out_skip_reason);
-  GpuAgentSearch search = {/*.api=*/&api};
+  GpuAgentSearch search = {.api = &api};
   hsa_status_t status =
       CallHsa(api.hsa_iterate_agents, FindFirstAgent, &search);
   if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
@@ -625,7 +625,7 @@ bool TryDiscoverCurrentAmdgpuTarget(const HsaApi& api,
     return false;
   }
 
-  AgentIsaSearch isa_search = {/*.api=*/&api};
+  AgentIsaSearch isa_search = {.api = &api};
   hsa_status_t status = CallHsa(api.hsa_agent_iterate_isas, agent,
                                 FindFirstAgentIsa, &isa_search);
   if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
@@ -673,14 +673,14 @@ bool TryDiscoverCurrentAmdgpuTarget(const HsaApi& api,
   }
 
   *out_target = {
-      /*.agent=*/agent,
-      /*.agent_name=*/std::move(agent_name),
-      /*.isa_name=*/std::move(isa_search.isa_name),
-      /*.identity=*/
-      {
-          /*.target=*/target,
-          /*.amdhsa_features=*/target_id.features,
-      },
+      .agent = agent,
+      .agent_name = std::move(agent_name),
+      .isa_name = std::move(isa_search.isa_name),
+      .identity =
+          {
+              .target = target,
+              .amdhsa_features = target_id.features,
+          },
   };
   return true;
 }
@@ -736,8 +736,8 @@ class LowKernelEmitter {
     }
 
     const loom_target_specialization_request_t specialization_request = {
-        /*.function_name=*/IREE_SV("loom_kernel"),
-        /*.target_profile=*/&target_profile->base,
+        .function_name = IREE_SV("loom_kernel"),
+        .target_profile = &target_profile->base,
     };
     loom_function_version_owner_t function_versions;
     loom_function_version_owner_initialize(arena, &function_versions);
@@ -745,13 +745,13 @@ class LowKernelEmitter {
     IREE_RETURN_IF_ERROR(loom_target_specialize_functions(
         &target_environment_, module_,
         {
-            /*.values=*/&specialization_request,
-            /*.count=*/1,
+            .values = &specialization_request,
+            .count = 1,
         },
-        /*.bindings=*/{},
+        /*bindings=*/{},
         {
-            /*.fn=*/PrintCompilerDiagnostic,
-            /*.user_data=*/nullptr,
+            .fn = PrintCompilerDiagnostic,
+            .user_data = nullptr,
         },
         &function_versions, &specialization_error_count));
     if (specialization_error_count != 0) {
@@ -789,8 +789,8 @@ class LowKernelEmitter {
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
         module_, low_function, descriptor_set, /*max_errors=*/20,
         iree_diagnostic_emitter_t{
-            /*.fn=*/PrintCompilerDiagnostic,
-            /*.user_data=*/nullptr,
+            .fn = PrintCompilerDiagnostic,
+            .user_data = nullptr,
         },
         &source_abi, arena));
     if (source_abi.error_count != 0) {
@@ -806,8 +806,8 @@ class LowKernelEmitter {
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
         module_, low_function, descriptor_set, /*max_errors=*/20,
         iree_diagnostic_emitter_t{
-            /*.fn=*/PrintCompilerDiagnostic,
-            /*.user_data=*/nullptr,
+            .fn = PrintCompilerDiagnostic,
+            .user_data = nullptr,
         },
         &abi_verify_result, arena));
     if (abi_verify_result.error_count != 0) {
@@ -816,16 +816,18 @@ class LowKernelEmitter {
           "AMDGPU HSA low kernel failed HAL ABI verification");
     }
 
-    loom_low_verify_options_t verify_options = {};
-    verify_options.descriptor_registry = &target_registry_.registry;
-    verify_options.function_versions = function_version_list;
-    verify_options.emitter = {
-        /*.fn=*/PrintCompilerDiagnostic,
-        /*.user_data=*/nullptr,
+    loom_low_verify_options_t verify_options = {
+        .descriptor_registry = &target_registry_.registry,
+        .function_versions = function_version_list,
+        .emitter =
+            {
+                .fn = PrintCompilerDiagnostic,
+                .user_data = nullptr,
+            },
+        .provider_list = loom_target_environment_low_verify_provider_list(
+            &target_environment_),
+        .max_errors = 20,
     };
-    verify_options.provider_list =
-        loom_target_environment_low_verify_provider_list(&target_environment_);
-    verify_options.max_errors = 20;
     loom_low_verify_result_t verify_result = {};
     loom_low_verify_scratch_t verify_scratch =
         loom_low_verify_scratch_for_module(module_);
@@ -838,16 +840,16 @@ class LowKernelEmitter {
 
     loom_low_storage_lease_provider_t storage_lease_provider = {};
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
-    loom_low_emission_frame_options_t frame_options = {};
-    frame_options.descriptor_registry = &target_registry_.registry;
-    frame_options.function_target_facts = function_target_facts;
-    frame_options.allocation_fixed_values = abi_verify_result.fixed_values;
-    frame_options.allocation_fixed_value_count =
-        abi_verify_result.fixed_value_count;
-    frame_options.allocation_flags =
-        LOOM_LOW_ALLOCATION_FLAG_RETAIN_COALESCED_INCOMING_INDEX |
-        LOOM_LOW_ALLOCATION_FLAG_RETAIN_STORAGE_RELEASE_ACTION_INDEX;
-    frame_options.storage_lease_provider = &storage_lease_provider;
+    loom_low_emission_frame_options_t frame_options = {
+        .descriptor_registry = &target_registry_.registry,
+        .function_target_facts = function_target_facts,
+        .allocation_flags =
+            LOOM_LOW_ALLOCATION_FLAG_RETAIN_COALESCED_INCOMING_INDEX |
+            LOOM_LOW_ALLOCATION_FLAG_RETAIN_STORAGE_RELEASE_ACTION_INDEX,
+        .allocation_fixed_values = abi_verify_result.fixed_values,
+        .allocation_fixed_value_count = abi_verify_result.fixed_value_count,
+        .storage_lease_provider = &storage_lease_provider,
+    };
     loom_low_emission_frame_t frame = {};
     bool frame_accepted = false;
     IREE_RETURN_IF_ERROR(loom_low_emission_frame_build(
@@ -863,9 +865,9 @@ class LowKernelEmitter {
         /*preflight=*/nullptr, /*target_listing=*/nullptr, /*report=*/nullptr,
         &kernel, arena));
     const loom_amdgpu_hsaco_input_t hsaco_input = {
-        /*.target_identity=*/target_profile->identity,
-        /*.kernels=*/&kernel,
-        /*.kernel_count=*/1,
+        .target_identity = target_profile->identity,
+        .kernels = &kernel,
+        .kernel_count = 1,
     };
     loom_amdgpu_hsaco_plan_t hsaco_plan = {};
     IREE_RETURN_IF_ERROR(
@@ -888,8 +890,8 @@ class LowKernelEmitter {
   iree_status_t ParseSource(const std::string& source) {
     ResetModule();
     loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &target_registry_.registry, &parse_options.low_asm_environment);
@@ -1024,23 +1026,23 @@ loom_amdgpu_metadata_kernel_t MinimalKernel(iree_string_view_t name,
                                             iree_string_view_t symbol,
                                             uint32_t wavefront_size) {
   return {
-      /*.name=*/name,
-      /*.descriptor_symbol=*/symbol,
-      /*.kernarg_segment_size=*/0,
-      /*.kernarg_segment_alignment=*/8,
-      /*.wavefront_size=*/wavefront_size,
-      /*.group_segment_fixed_size=*/0,
-      /*.private_segment_fixed_size=*/0,
-      /*.sgpr_count=*/4,
-      /*.vgpr_count=*/1,
-      /*.max_flat_workgroup_size=*/64,
-      /*.required_workgroup_size=*/{/*.x=*/64, /*.y=*/1, /*.z=*/1},
-      /*.has_required_workgroup_size=*/true,
-      /*.workgroup_cluster_size=*/{},
-      /*.has_workgroup_cluster_size=*/false,
-      /*.target_extensions=*/{},
-      /*.arguments=*/nullptr,
-      /*.argument_count=*/0,
+      .name = name,
+      .descriptor_symbol = symbol,
+      .kernarg_segment_size = 0,
+      .kernarg_segment_alignment = 8,
+      .wavefront_size = wavefront_size,
+      .group_segment_fixed_size = 0,
+      .private_segment_fixed_size = 0,
+      .sgpr_count = 4,
+      .vgpr_count = 1,
+      .max_flat_workgroup_size = 64,
+      .required_workgroup_size = {.x = 64, .y = 1, .z = 1},
+      .has_required_workgroup_size = true,
+      .workgroup_cluster_size = {},
+      .has_workgroup_cluster_size = false,
+      .target_extensions = {},
+      .arguments = nullptr,
+      .argument_count = 0,
   };
 }
 
@@ -1057,37 +1059,37 @@ iree_status_t EmitRuntimeGlobalKernelForAmdgpu(const AmdgpuHsaTarget& target,
 
   const uint8_t s_endpgm[] = {0x00, 0x00, 0x81, 0xbf};
   const loom_amdgpu_hsaco_kernel_t kernel = {
-      /*.metadata=*/MinimalKernel(IREE_SV("loom_kernel"),
-                                  IREE_SV("loom_kernel.kd"),
-                                  processor->properties.wavefront.default_size),
-      /*.descriptor_options=*/{},
-      /*.text=*/iree_make_const_byte_span(s_endpgm, sizeof(s_endpgm)),
+      .metadata =
+          MinimalKernel(IREE_SV("loom_kernel"), IREE_SV("loom_kernel.kd"),
+                        processor->properties.wavefront.default_size),
+      .descriptor_options = {},
+      .text = iree_make_const_byte_span(s_endpgm, sizeof(s_endpgm)),
   };
   const loom_amdgpu_hsaco_data_symbol_t data_symbols[] = {
       {
-          /*.name=*/IREE_SV(kAsanConfigGlobalName),
-          /*.initial_contents=*/{},
-          /*.byte_length=*/kAsanConfigByteLength,
-          /*.alignment=*/8,
-          /*.flags=*/LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE,
+          .name = IREE_SV(kAsanConfigGlobalName),
+          .initial_contents = {},
+          .byte_length = kAsanConfigByteLength,
+          .alignment = 8,
+          .flags = LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE,
       },
       {
-          /*.name=*/IREE_SV(kFeedbackConfigGlobalName),
-          /*.initial_contents=*/{},
-          /*.byte_length=*/kFeedbackConfigByteLength,
-          /*.alignment=*/8,
-          /*.flags=*/LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE,
+          .name = IREE_SV(kFeedbackConfigGlobalName),
+          .initial_contents = {},
+          .byte_length = kFeedbackConfigByteLength,
+          .alignment = 8,
+          .flags = LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE,
       },
   };
   loom_amdgpu_hsaco_kernel_t revisioned_kernel = kernel;
   revisioned_kernel.metadata.target_extensions =
       target_profile.identity.target->kernel_metadata_extensions;
   const loom_amdgpu_hsaco_input_t input = {
-      /*.target_identity=*/target_profile.identity,
-      /*.kernels=*/&revisioned_kernel,
-      /*.kernel_count=*/1,
-      /*.data_symbols=*/data_symbols,
-      /*.data_symbol_count=*/IREE_ARRAYSIZE(data_symbols),
+      .target_identity = target_profile.identity,
+      .kernels = &revisioned_kernel,
+      .kernel_count = 1,
+      .data_symbols = data_symbols,
+      .data_symbol_count = IREE_ARRAYSIZE(data_symbols),
   };
 
   StreamPtr stream = CreateStream();

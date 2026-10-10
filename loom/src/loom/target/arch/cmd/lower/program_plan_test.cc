@@ -60,13 +60,12 @@ static iree_status_t CaptureKernelRequest(
   IREE_RETURN_IF_ERROR(loom_kernel_request_materialize(
       request->kernel_request, capture->block_pool, iree_allocator_system(),
       &product));
-  capture->requests.push_back((CapturedKernelRequest){
-      /*.entry_requirement_index=*/request->entry_requirement_index,
-      /*.source_symbol_ordinal=*/
-      request->kernel_request->source_symbol_ordinal,
-      /*.class_ordinal=*/request->kernel_request->class_ordinal,
-      /*.member_count=*/request->kernel_request->member_count,
-      /*.product=*/product,
+  capture->requests.push_back(CapturedKernelRequest{
+      .entry_requirement_index = request->entry_requirement_index,
+      .source_symbol_ordinal = request->kernel_request->source_symbol_ordinal,
+      .class_ordinal = request->kernel_request->class_ordinal,
+      .member_count = request->kernel_request->member_count,
+      .product = product,
   });
   return iree_ok_status();
 }
@@ -121,17 +120,18 @@ class CmdProgramPlanTest : public ::testing::Test {
   }
 
   ModulePtr ParseAndVerify(const char* source) {
-    loom_text_parse_options_t parse_options = {};
-    parse_options.max_errors = 20;
+    loom_text_parse_options_t parse_options = {
+        .max_errors = 20,
+    };
     const loom_low_descriptor_set_provider_t descriptor_set_providers[] = {
         loom_cmd_core_descriptor_set,
     };
     const loom_low_descriptor_registry_t descriptor_registry = {
-        /*.descriptor_sets=*/{},
-        /*.descriptor_set_count=*/{},
-        /*.descriptor_set_providers=*/descriptor_set_providers,
-        /*.descriptor_set_provider_count=*/
-        IREE_ARRAYSIZE(descriptor_set_providers),
+        .descriptor_sets = {},
+        .descriptor_set_count = {},
+        .descriptor_set_providers = descriptor_set_providers,
+        .descriptor_set_provider_count =
+            IREE_ARRAYSIZE(descriptor_set_providers),
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &descriptor_registry, &parse_options.low_asm_environment);
@@ -151,8 +151,9 @@ class CmdProgramPlanTest : public ::testing::Test {
       return module_ptr;
     }
 
-    loom_verify_options_t verify_options = {};
-    verify_options.max_errors = 20;
+    loom_verify_options_t verify_options = {
+        .max_errors = 20,
+    };
     verify_options.sink = capture.sink();
     loom_verify_result_t result = {};
     IREE_CHECK_OK(loom_verify_module(module, &verify_options, &result));
@@ -195,7 +196,7 @@ class CmdProgramPlanTest : public ::testing::Test {
     IREE_ASSERT_NE(name_id, LOOM_STRING_ID_INVALID);
     const loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
     IREE_ASSERT_NE(symbol_id, LOOM_SYMBOL_ID_INVALID);
-    return (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    return loom_symbol_ref_t{.module_id = 0, .symbol_id = symbol_id};
   }
 
   // Shared arena block pool backing source and prepared modules.
@@ -220,29 +221,29 @@ command.program.def public @root() launch() {
   CleanupPatternVisitState visit_state = {};
   const CleanupPatternVisitData pattern_data = {&visit_state};
   const loom_rewrite_pattern_t pattern = {
-      /*.root_kind=*/LOOM_OP_INDEX_CONSTANT,
-      /*.match_and_rewrite=*/CountCleanupPatternVisits,
-      /*.user_data=*/&pattern_data,
+      .root_kind = LOOM_OP_INDEX_CONSTANT,
+      .match_and_rewrite = CountCleanupPatternVisits,
+      .user_data = &pattern_data,
   };
   const loom_rewrite_pattern_provider_t provider = {
-      /*.name=*/IREE_SVL("cmd-program-plan-test"),
-      /*.patterns=*/&pattern,
-      /*.pattern_count=*/1,
+      .name = IREE_SVL("cmd-program-plan-test"),
+      .patterns = &pattern,
+      .pattern_count = 1,
   };
   const loom_rewrite_pattern_provider_t* providers[] = {&provider};
   const loom_cleanup_pattern_provider_set_t provider_set = {
-      /*.region_initialization=*/{},
-      /*.universal_pre_fold=*/
-      loom_rewrite_pattern_provider_list_make(providers,
-                                              IREE_ARRAYSIZE(providers)),
-      /*.universal_post_type=*/{},
-      /*.source_combine=*/{},
+      .region_initialization = {},
+      .universal_pre_fold = loom_rewrite_pattern_provider_list_make(
+          providers, IREE_ARRAYSIZE(providers)),
+      .universal_post_type = {},
+      .source_combine = {},
   };
 
   const loom_symbol_ref_t root_ref =
       FindSymbolRef(source_module.get(), IREE_SV("root"));
-  loom_link_plan_materialization_t materialization = {};
-  materialization.module = source_module.release();
+  loom_link_plan_materialization_t materialization = {
+      .module = source_module.release(),
+  };
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
   IREE_ASSERT_OK(loom_cmd_program_plan_build_from_materialization(
@@ -280,8 +281,9 @@ command.program.def public @increment_twice() launch(%source: buffer, %scratch: 
       FindSymbolRef(source_module.get(), IREE_SV("increment_twice")),
       FindSymbolRef(source_module.get(), IREE_SV("increment_then_double")),
   };
-  loom_link_plan_materialization_t materialization = {};
-  materialization.module = source_module.release();
+  loom_link_plan_materialization_t materialization = {
+      .module = source_module.release(),
+  };
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
@@ -395,7 +397,7 @@ command.program.def public @selected_schedule() launch(%storage: buffer) {
   IREE_ASSERT_OK(loom_link_module_index_allocate(
       &context_, &block_pool_, iree_allocator_system(), &index));
   const loom_link_module_index_add_options_t add_options = {
-      /*.provider_name=*/IREE_SV("indexed_command_test"),
+      .provider_name = IREE_SV("indexed_command_test"),
   };
   iree_host_size_t provider_ordinal = 0;
   IREE_ASSERT_OK(loom_link_module_index_add_materialized(
@@ -417,13 +419,13 @@ command.program.def public @selected_schedule() launch(%storage: buffer) {
   DiagnosticEmissionCapture diagnostic_capture;
   bool valid = false;
   const loom_link_plan_materialization_environment_t environment = {
-      /*.context=*/&context_,
-      /*.block_pool=*/&block_pool_,
-      /*.low_repr_environment=*/{},
-      /*.diagnostic_sink=*/nullptr,
-      /*.prepare_module=*/nullptr,
-      /*.user_data=*/nullptr,
-      /*.allocator=*/iree_allocator_system(),
+      .context = &context_,
+      .block_pool = &block_pool_,
+      .low_repr_environment = {},
+      .diagnostic_sink = nullptr,
+      .prepare_module = nullptr,
+      .user_data = nullptr,
+      .allocator = iree_allocator_system(),
   };
   iree_status_t status = loom_cmd_program_plan_build_from_index(
       index, &root_symbol_ordinal, 1, /*options=*/nullptr,
@@ -491,8 +493,9 @@ command.program.def public @root() launch() {
   loom_link_module_index_t* index = nullptr;
   IREE_ASSERT_OK(loom_link_module_index_allocate(
       &context_, &block_pool_, iree_allocator_system(), &index));
-  loom_bytecode_index_options_t index_options = {};
-  index_options.diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr};
+  loom_bytecode_index_options_t index_options = {
+      .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+  };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index, iree_make_const_byte_span(bytecode.data(), bytecode.size()),
       IREE_SV("provider.loombc"), &index_options, /*options=*/nullptr,
@@ -526,13 +529,13 @@ command.program.def public @root() launch() {
               body_payload->length, UINT8_C(0xFF));
 
   const loom_link_plan_materialization_environment_t environment = {
-      /*.context=*/&context_,
-      /*.block_pool=*/&block_pool_,
-      /*.low_repr_environment=*/{},
-      /*.diagnostic_sink=*/nullptr,
-      /*.prepare_module=*/nullptr,
-      /*.user_data=*/nullptr,
-      /*.allocator=*/iree_allocator_system(),
+      .context = &context_,
+      .block_pool = &block_pool_,
+      .low_repr_environment = {},
+      .diagnostic_sink = nullptr,
+      .prepare_module = nullptr,
+      .user_data = nullptr,
+      .allocator = iree_allocator_system(),
   };
   iree_arena_allocator_t body_blind_arena;
   iree_arena_initialize(&block_pool_, &body_blind_arena);
@@ -551,13 +554,13 @@ command.program.def public @root() launch() {
   iree_arena_deinitialize(&body_blind_arena);
 
   KernelRequestCapture request_capture = {
-      /*.block_pool=*/&block_pool_,
+      .block_pool = &block_pool_,
   };
   loom_cmd_program_plan_index_options_t request_options;
   loom_cmd_program_plan_index_options_initialize(&request_options);
   request_options.kernel_request_sink = {
-      /*.publish=*/CaptureKernelRequest,
-      /*.user_data=*/&request_capture,
+      .publish = CaptureKernelRequest,
+      .user_data = &request_capture,
   };
   iree_arena_allocator_t request_arena;
   iree_arena_initialize(&block_pool_, &request_arena);
@@ -636,7 +639,7 @@ command.program.def public @root_b() launch(%storage: buffer) {
   IREE_ASSERT_OK(loom_link_module_index_allocate(
       &context_, &block_pool_, iree_allocator_system(), &index));
   const loom_link_module_index_add_options_t add_options = {
-      /*.provider_name=*/IREE_SV("indexed_kernel_request_test"),
+      .provider_name = IREE_SV("indexed_kernel_request_test"),
   };
   iree_host_size_t provider_ordinal = 0;
   IREE_ASSERT_OK(loom_link_module_index_add_materialized(
@@ -657,22 +660,22 @@ command.program.def public @root_b() launch(%storage: buffer) {
   };
 
   KernelRequestCapture request_capture = {
-      /*.block_pool=*/&block_pool_,
+      .block_pool = &block_pool_,
   };
   loom_cmd_program_plan_index_options_t plan_options;
   loom_cmd_program_plan_index_options_initialize(&plan_options);
   plan_options.kernel_request_sink = {
-      /*.publish=*/CaptureKernelRequest,
-      /*.user_data=*/&request_capture,
+      .publish = CaptureKernelRequest,
+      .user_data = &request_capture,
   };
   const loom_link_plan_materialization_environment_t environment = {
-      /*.context=*/&context_,
-      /*.block_pool=*/&block_pool_,
-      /*.low_repr_environment=*/{},
-      /*.diagnostic_sink=*/nullptr,
-      /*.prepare_module=*/nullptr,
-      /*.user_data=*/nullptr,
-      /*.allocator=*/iree_allocator_system(),
+      .context = &context_,
+      .block_pool = &block_pool_,
+      .low_repr_environment = {},
+      .diagnostic_sink = nullptr,
+      .prepare_module = nullptr,
+      .user_data = nullptr,
+      .allocator = iree_allocator_system(),
   };
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(&block_pool_, &scratch_arena);
@@ -689,8 +692,8 @@ command.program.def public @root_b() launch(%storage: buffer) {
 
   RejectKernelRequestState reject_state = {};
   plan_options.kernel_request_sink = {
-      /*.publish=*/RejectKernelRequest,
-      /*.user_data=*/&reject_state,
+      .publish = RejectKernelRequest,
+      .user_data = &reject_state,
   };
   iree_arena_allocator_t reject_scratch_arena;
   iree_arena_initialize(&block_pool_, &reject_scratch_arena);
@@ -778,8 +781,9 @@ command.program.def public @parameterized() launch(%parameters: buffer, %target:
   const loom_symbol_ref_t program_refs[] = {
       FindSymbolRef(source_module.get(), IREE_SV("parameterized")),
   };
-  loom_link_plan_materialization_t materialization = {};
-  materialization.module = source_module.release();
+  loom_link_plan_materialization_t materialization = {
+      .module = source_module.release(),
+  };
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
@@ -848,8 +852,9 @@ command.program.def public @bodyless() launch(%output: buffer) {
   const loom_symbol_ref_t program_refs[] = {
       FindSymbolRef(source_module.get(), IREE_SV("bodyless")),
   };
-  loom_link_plan_materialization_t materialization = {};
-  materialization.module = source_module.release();
+  loom_link_plan_materialization_t materialization = {
+      .module = source_module.release(),
+  };
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
@@ -967,8 +972,9 @@ command.program.def public @dynamic_root() launch() {
       FindSymbolRef(source_module.get(), IREE_SV("stable_root")),
       FindSymbolRef(source_module.get(), IREE_SV("dynamic_root")),
   };
-  loom_link_plan_materialization_t materialization = {};
-  materialization.module = source_module.release();
+  loom_link_plan_materialization_t materialization = {
+      .module = source_module.release(),
+  };
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
@@ -1049,15 +1055,17 @@ low.func.def target<cmd.core> abi(command_program) @moved_binding() {
 )");
   ASSERT_NE(module, nullptr);
 
-  loom_cmd_program_root_t root = {};
-  root.function_op = FindSymbol(module.get(), IREE_SV("moved_binding"));
+  loom_cmd_program_root_t root = {
+      .function_op = FindSymbol(module.get(), IREE_SV("moved_binding")),
+  };
   root.abi_layout.rebindable_binding_count = 1;
   root.transient.binding_index = UINT32_MAX;
   root.launch_counts.binding_index = UINT32_MAX;
-  loom_cmd_program_plan_t plan = {};
-  plan.root_module = module.get();
-  plan.roots = &root;
-  plan.root_count = 1;
+  loom_cmd_program_plan_t plan = {
+      .root_module = module.get(),
+      .roots = &root,
+      .root_count = 1,
+  };
 
   iree_byte_span_t data = iree_byte_span_empty();
   IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 0, &data,

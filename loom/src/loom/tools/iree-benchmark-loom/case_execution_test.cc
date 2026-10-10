@@ -71,8 +71,7 @@ class BenchmarkCaseExecutionTest : public ::testing::Test {
   }
 
   loom_testbench_module_plan_t PlanModule(const char* source) {
-    loom_text_parse_options_t parse_options = {};
-    parse_options.max_errors = 20;
+    loom_text_parse_options_t parse_options = {.max_errors = 20};
     loom_module_t* module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(
         iree_make_cstring_view(source), IREE_SV("case_execution_test.loom"),
@@ -122,13 +121,15 @@ check.benchmark<@sampled> @all_b
   execution_options.materializer.host_allocator = iree_allocator_system();
 
   event_collector_t collector = {};
-  iree_benchmark_loom_event_sink_t event_sink = {};
-  event_sink.emit = collect_event;
-  event_sink.user_data = &collector;
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
-  run.source = IREE_SV("input.loom");
-  run.results_path = IREE_SV("-");
+  iree_benchmark_loom_event_sink_t event_sink = {
+      .emit = collect_event,
+      .user_data = &collector,
+  };
+  iree_benchmark_loom_run_identity_t run = {
+      .run_id = IREE_SV("run"),
+      .source = IREE_SV("input.loom"),
+      .results_path = IREE_SV("-"),
+  };
 
   iree_host_size_t correctness_sample_count = 0;
   iree_host_size_t correctness_failed_sample_count = 0;

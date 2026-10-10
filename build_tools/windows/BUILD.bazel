@@ -6,9 +6,12 @@
 
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//build_tools/bazel:cc_opts.bzl", "cc_opts")
 load(":cc_toolchain.bzl", "windows_toolchains")
 
 package(default_visibility = ["//visibility:public"])
+
+_CXX_OPTIONS = cc_opts.iree_cxx_standard_options()
 
 # Compiler policy applies to Windows outputs, including native host generators.
 string_flag(
@@ -45,4 +48,6 @@ exports_files(["toolchain.bzl"])
 cc_test(
     name = "compiler_runtime_test",
     srcs = ["compiler_runtime_test.cc"],
+    cxxopts = _CXX_OPTIONS.cxxopts,
+    features = _CXX_OPTIONS.features,
 )

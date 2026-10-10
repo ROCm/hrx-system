@@ -78,10 +78,10 @@ TEST(NativeObjectElfTest, PlacesStorageAndTranslatesSymbolSemantics) {
   symbols[2].binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_WEAK;
   symbols[2].kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION;
   const loom_native_object_contribution_t object = {
-      /*.sections=*/sections,
-      /*.section_count=*/IREE_ARRAYSIZE(sections),
-      /*.symbols=*/symbols,
-      /*.symbol_count=*/IREE_ARRAYSIZE(symbols),
+      .sections = sections,
+      .section_count = IREE_ARRAYSIZE(sections),
+      .symbols = symbols,
+      .symbol_count = IREE_ARRAYSIZE(symbols),
   };
   const std::string bytes = WriteObject(object);
   auto u16 = [&](size_t offset) {

@@ -108,15 +108,15 @@ TargetEnvironmentPtr CreateAmdgpuTargetEnvironment() {
 
 ContextPtr CreateAmdgpuContext(loomc_target_environment_t* target_environment) {
   loomc_context_target_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_environment=*/target_environment,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .target_environment = target_environment,
   };
   loomc_context_options_t context_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-      /*.structure_size=*/sizeof(context_options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+      .structure_size = sizeof(context_options),
+      .next = &target_options,
   };
   loomc_context_t* context = nullptr;
   loomc_status_t status = loomc_context_create(
@@ -144,13 +144,13 @@ CompilerPtr CreateCompiler(loomc_context_t* context) {
 SourcePtr CreateSource(loomc_source_format_t format, const char* identifier,
                        const void* contents, size_t contents_length) {
   loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/format,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
-      /*.contents=*/loomc_make_byte_span(contents, contents_length),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = format,
+      .identifier = loomc_make_cstring_view(identifier),
+      .contents = loomc_make_byte_span(contents, contents_length),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status =
@@ -194,13 +194,13 @@ ModulePtr DeserializeModule(loomc_context_t* context,
 SourcePtr SerializeModule(const loomc_module_t* module,
                           loomc_source_format_t format) {
   loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/format,
-      /*.identifier=*/format == LOOMC_SOURCE_FORMAT_BYTECODE
-          ? loomc_make_cstring_view("compiled.loombc")
-          : loomc_make_cstring_view("compiled.loom"),
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = format,
+      .identifier = format == LOOMC_SOURCE_FORMAT_BYTECODE
+                        ? loomc_make_cstring_view("compiled.loombc")
+                        : loomc_make_cstring_view("compiled.loom"),
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status = loomc_module_serialize_to_source(
@@ -220,8 +220,8 @@ LinkIndexPtr CreateLinkIndex(loomc_context_t* context, loomc_source_t* source) {
       context, nullptr, loomc_allocator_system(), &raw_builder));
   LinkIndexBuilderPtr builder(raw_builder);
   const loomc_link_index_source_options_t source_options = {
-      /*.provider_name=*/loomc_make_cstring_view("sealed-replay"),
-      /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
+      .provider_name = loomc_make_cstring_view("sealed-replay"),
+      .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
   };
   LOOMC_EXPECT_OK(loomc_link_index_builder_add_source(
       builder.get(), source, &source_options, nullptr));
@@ -248,15 +248,15 @@ ModulePtr LinkModule(loomc_linker_t* linker, loomc_workspace_t* workspace,
                      const loomc_string_view_t* root_symbols = nullptr,
                      loomc_host_size_t root_symbol_count = 0) {
   const loomc_link_options_t link_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
-      /*.structure_size=*/sizeof(link_options),
-      /*.next=*/nullptr,
-      /*.link_index=*/index,
-      /*.module_name=*/loomc_make_cstring_view("sealed_replay"),
-      /*.mode=*/root_symbol_count == 0 ? LOOMC_LINK_MODE_MERGE
-                                       : LOOMC_LINK_MODE_LINK,
-      /*.root_symbols=*/root_symbols,
-      /*.root_symbol_count=*/root_symbol_count,
+      .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+      .structure_size = sizeof(link_options),
+      .next = nullptr,
+      .link_index = index,
+      .module_name = loomc_make_cstring_view("sealed_replay"),
+      .mode =
+          root_symbol_count == 0 ? LOOMC_LINK_MODE_MERGE : LOOMC_LINK_MODE_LINK,
+      .root_symbols = root_symbols,
+      .root_symbol_count = root_symbol_count,
   };
   loomc_module_t* raw_module = nullptr;
   loomc_result_t* raw_link_result = nullptr;
@@ -269,13 +269,13 @@ ModulePtr LinkModule(loomc_linker_t* linker, loomc_workspace_t* workspace,
 
 PassProgramPtr CreatePreparedLowPassProgram(loomc_context_t* context) {
   loomc_target_pipeline_options_t pipeline_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
-      /*.structure_size=*/sizeof(pipeline_options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("amdgpu-prepared-low-test"),
-      /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
-      /*.control_flow_lowering=*/LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
-      /*.source_to_low_max_errors=*/20,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+      .structure_size = sizeof(pipeline_options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("amdgpu-prepared-low-test"),
+      .kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+      .source_to_low_max_errors = 20,
   };
   loomc_pass_program_t* pass_program = nullptr;
   loomc_result_t* result = nullptr;
@@ -307,15 +307,15 @@ TargetProfilePtr CreateTargetProfile(
     loomc_target_environment_t* target_environment, const char* target,
     loomc_amdgpu_amdhsa_feature_states_t amdhsa_features = {}) {
   loomc_amdgpu_profile_options_t profile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(profile_options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view(target),
-      /*.identity=*/
-      {
-          /*.target=*/loomc_make_cstring_view(target),
-          /*.amdhsa_features=*/amdhsa_features,
-      },
+      .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
+      .structure_size = sizeof(profile_options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view(target),
+      .identity =
+          {
+              .target = loomc_make_cstring_view(target),
+              .amdhsa_features = amdhsa_features,
+          },
   };
   loomc_target_profile_t* profile = nullptr;
   loomc_status_t status = loomc_target_profile_create_amdgpu(
@@ -355,14 +355,14 @@ TEST(AmdgpuTargetTest, TargetProfilePreservesCanonicalTarget) {
   };
   for (const char* target_name : target_names) {
     loomc_amdgpu_profile_options_t options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
-        /*.structure_size=*/sizeof(options),
-        /*.next=*/nullptr,
-        /*.identifier=*/{},
-        /*.identity=*/
-        {
-            /*.target=*/loomc_make_cstring_view(target_name),
-        },
+        .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
+        .structure_size = sizeof(options),
+        .next = nullptr,
+        .identifier = {},
+        .identity =
+            {
+                .target = loomc_make_cstring_view(target_name),
+            },
     };
     loomc_target_profile_t* profile = nullptr;
     LOOMC_EXPECT_OK(
@@ -380,14 +380,14 @@ TEST(AmdgpuTargetTest, TargetProfilePreservesCanonicalTarget) {
 TEST(AmdgpuTargetTest, RejectsUnknownTarget) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   loomc_amdgpu_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/{},
-      /*.identity=*/
-      {
-          /*.target=*/loomc_make_cstring_view("gfx1250-a1"),
-      },
+      .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = {},
+      .identity =
+          {
+              .target = loomc_make_cstring_view("gfx1250-a1"),
+          },
   };
   loomc_target_profile_t* profile = nullptr;
   LOOMC_EXPECT_STATUS_IS(
@@ -400,19 +400,19 @@ TEST(AmdgpuTargetTest, RejectsUnknownTarget) {
 TEST(AmdgpuTargetTest, TargetProfilePreservesTargetIdFeatureStates) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   loomc_amdgpu_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("gfx942-features"),
-      /*.identity=*/
-      {
-          /*.target=*/loomc_make_cstring_view("gfx942"),
-          /*.amdhsa_features=*/
+      .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("gfx942-features"),
+      .identity =
           {
-              /*.sramecc=*/LOOMC_AMDGPU_TARGET_FEATURE_ON,
-              /*.xnack=*/LOOMC_AMDGPU_TARGET_FEATURE_OFF,
+              .target = loomc_make_cstring_view("gfx942"),
+              .amdhsa_features =
+                  {
+                      .sramecc = LOOMC_AMDGPU_TARGET_FEATURE_ON,
+                      .xnack = LOOMC_AMDGPU_TARGET_FEATURE_OFF,
+                  },
           },
-      },
   };
   loomc_target_profile_t* profile = nullptr;
   LOOMC_EXPECT_OK(loomc_target_profile_create_amdgpu(
@@ -452,18 +452,18 @@ TEST(AmdgpuTargetTest,
 TEST(AmdgpuTargetTest, TargetProfileRejectsUnsupportedFeatureSelection) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   loomc_amdgpu_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("gfx1151-sramecc"),
-      /*.identity=*/
-      {
-          /*.target=*/loomc_make_cstring_view("gfx1151"),
-          /*.amdhsa_features=*/
+      .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("gfx1151-sramecc"),
+      .identity =
           {
-              /*.sramecc=*/LOOMC_AMDGPU_TARGET_FEATURE_ON,
+              .target = loomc_make_cstring_view("gfx1151"),
+              .amdhsa_features =
+                  {
+                      .sramecc = LOOMC_AMDGPU_TARGET_FEATURE_ON,
+                  },
           },
-      },
   };
   loomc_target_profile_t* profile = nullptr;
   LOOMC_EXPECT_STATUS_IS(
@@ -519,34 +519,34 @@ ResultPtr EmitModule(loomc_target_environment_t* target_environment,
                      loomc_compile_report_mode_t compile_report_mode =
                          LOOMC_COMPILE_REPORT_MODE_NONE) {
   loomc_compile_report_options_t compile_report_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
-      /*.structure_size=*/sizeof(compile_report_options),
-      /*.next=*/nullptr,
-      /*.mode=*/compile_report_mode,
-      /*.format=*/LOOMC_COMPILE_REPORT_FORMAT_JSON,
-      /*.identifier=*/loomc_string_view_empty(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(compile_report_options),
+      .next = nullptr,
+      .mode = compile_report_mode,
+      .format = LOOMC_COMPILE_REPORT_FORMAT_JSON,
+      .identifier = loomc_string_view_empty(),
   };
   loomc_artifact_manifest_options_t artifact_manifest_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
-      /*.structure_size=*/sizeof(artifact_manifest_options),
-      /*.next=*/compile_report_mode != LOOMC_COMPILE_REPORT_MODE_NONE
-          ? &compile_report_options
-          : nullptr,
-      /*.mode=*/artifact_manifest_mode,
-      /*.identifier=*/loomc_string_view_empty(),
+      .type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
+      .structure_size = sizeof(artifact_manifest_options),
+      .next = compile_report_mode != LOOMC_COMPILE_REPORT_MODE_NONE
+                  ? &compile_report_options
+                  : nullptr,
+      .mode = artifact_manifest_mode,
+      .identifier = loomc_string_view_empty(),
   };
   loomc_emit_options_t emit_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(emit_options),
-      /*.next=*/artifact_manifest_mode != LOOMC_ARTIFACT_MANIFEST_MODE_NONE
-          ? static_cast<const void*>(&artifact_manifest_options)
-      : compile_report_mode != LOOMC_COMPILE_REPORT_MODE_NONE
-          ? static_cast<const void*>(&compile_report_options)
-          : nullptr,
-      /*.artifact_format=*/
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
-      /*.identifier=*/loomc_make_cstring_view("loom_kernel.hsaco"),
-      /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(emit_options),
+      .next = artifact_manifest_mode != LOOMC_ARTIFACT_MANIFEST_MODE_NONE
+                  ? static_cast<const void*>(&artifact_manifest_options)
+              : compile_report_mode != LOOMC_COMPILE_REPORT_MODE_NONE
+                  ? static_cast<const void*>(&compile_report_options)
+                  : nullptr,
+      .artifact_format =
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
+      .identifier = loomc_make_cstring_view("loom_kernel.hsaco"),
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status =
@@ -697,26 +697,24 @@ kernel.def target(@gfx11_wave64) @target_specialized_launch(%expert_count: index
     TargetProfilePtr profile =
         CreateTargetProfile(target_environment.get(), target_case.target);
     const loomc_target_specialization_t specialization = {
-        /*.function_symbol=*/
-        loomc_make_cstring_view("target_specialized_launch"),
-        /*.target_profile=*/profile.get(),
+        .function_symbol = loomc_make_cstring_view("target_specialized_launch"),
+        .target_profile = profile.get(),
     };
     const loomc_target_specialization_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.specializations=*/&specialization,
-        /*.specialization_count=*/1,
+        .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+        .structure_size = sizeof(target_options),
+        .next = nullptr,
+        .specializations = &specialization,
+        .specialization_count = 1,
     };
     const loomc_compile_options_t options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-        /*.structure_size=*/sizeof(options),
-        /*.next=*/&target_options,
-        /*.module_name=*/
-        loomc_make_cstring_view("target_specialized_launch"),
-        /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
-        /*.config_flags=*/0,
-        /*.config_module=*/nullptr,
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+        .structure_size = sizeof(options),
+        .next = &target_options,
+        .module_name = loomc_make_cstring_view("target_specialized_launch"),
+        .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
+        .config_flags = 0,
+        .config_module = nullptr,
     };
 
     loomc_result_t* result = nullptr;
@@ -744,8 +742,8 @@ kernel.def target(@gfx11_wave64) @target_specialized_launch(%expert_count: index
         &launch_function));
     const uint64_t workload_argument_bits[] = {128};
     loomc_launch_config_t launch_config = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-        /*.structure_size=*/sizeof(launch_config),
+        .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+        .structure_size = sizeof(launch_config),
     };
     LOOMC_EXPECT_OK(loomc_launch_config_program_invoke(
         launch_program_ptr.get(), launch_function, workload_argument_bits,
@@ -790,27 +788,27 @@ kernel.def target(@gfx1151) @complete_launch(%group_count: index) {
       CreateTargetProfile(target_environment.get(), "gfx1151");
   const loomc_string_view_t root = loomc_make_cstring_view("complete_launch");
   const loomc_emit_options_t emit_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(emit_options),
-      /*.next=*/nullptr,
-      /*.artifact_format=*/
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
-      /*.identifier=*/loomc_make_cstring_view("complete_launch.hsaco"),
-      /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY |
-          LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(emit_options),
+      .next = nullptr,
+      .artifact_format =
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
+      .identifier = loomc_make_cstring_view("complete_launch.hsaco"),
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY |
+                        LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING,
   };
   const loomc_compile_artifact_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.roots=*/&root,
-      /*.root_count=*/1,
-      /*.excluded_roots=*/nullptr,
-      /*.excluded_root_count=*/0,
-      /*.target_profile=*/profile.get(),
-      /*.config=*/nullptr,
-      /*.emit_options=*/&emit_options,
-      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .roots = &root,
+      .root_count = 1,
+      .excluded_roots = nullptr,
+      .excluded_root_count = 0,
+      .target_profile = profile.get(),
+      .config = nullptr,
+      .emit_options = &emit_options,
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
   };
 
   loomc_result_t* result = nullptr;
@@ -845,8 +843,8 @@ kernel.def target(@gfx1151) @complete_launch(%group_count: index) {
       &launch_function));
   const uint64_t workload_argument_bits[] = {17};
   loomc_launch_config_t launch_config = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-      /*.structure_size=*/sizeof(launch_config),
+      .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+      .structure_size = sizeof(launch_config),
   };
   LOOMC_ASSERT_OK(loomc_launch_config_program_invoke(
       launch_program_ptr.get(), launch_function, workload_argument_bits,
@@ -887,13 +885,13 @@ kernel.def target(@gfx1151) @decode(%row_count: i32, %scale: bf16) {
   ModulePtr module =
       DeserializeModule(context.get(), workspace.get(), source.get());
   const loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_make_cstring_view("multi_launch_config"),
-      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
-      /*.config_flags=*/0,
-      /*.config_module=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .module_name = loomc_make_cstring_view("multi_launch_config"),
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
+      .config_flags = 0,
+      .config_module = nullptr,
   };
   loomc_result_t* result = nullptr;
   LOOMC_EXPECT_OK(loomc_compile_module(
@@ -918,8 +916,8 @@ kernel.def target(@gfx1151) @decode(%row_count: i32, %scale: bf16) {
       &prefill_function));
   const uint64_t prefill_arguments[] = {128};
   loomc_launch_config_t prefill_config = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-      /*.structure_size=*/sizeof(prefill_config),
+      .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+      .structure_size = sizeof(prefill_config),
   };
   LOOMC_EXPECT_OK(loomc_launch_config_program_invoke(
       launch_program_ptr.get(), prefill_function, prefill_arguments,
@@ -936,8 +934,8 @@ kernel.def target(@gfx1151) @decode(%row_count: i32, %scale: bf16) {
       UINT64_C(0xDEADBEEF00004000),
   };
   loomc_launch_config_t decode_config = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-      /*.structure_size=*/sizeof(decode_config),
+      .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+      .structure_size = sizeof(decode_config),
   };
   LOOMC_EXPECT_OK(loomc_launch_config_program_invoke(
       launch_program_ptr.get(), decode_function, decode_arguments,
@@ -984,24 +982,24 @@ config.def @test.workgroup_size_x = 64 : index
   ModulePtr config_module =
       DeserializeModule(context.get(), workspace.get(), config_source.get());
   const loomc_target_specialization_t specialization = {
-      /*.function_symbol=*/loomc_make_cstring_view("configured_store"),
-      /*.target_profile=*/profile.get(),
+      .function_symbol = loomc_make_cstring_view("configured_store"),
+      .target_profile = profile.get(),
   };
   loomc_target_specialization_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.specializations=*/&specialization,
-      /*.specialization_count=*/1,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .specializations = &specialization,
+      .specialization_count = 1,
   };
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&target_options,
-      /*.module_name=*/loomc_make_cstring_view("configured_store"),
-      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
-      /*.config_flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-      /*.config_module=*/config_module.get(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &target_options,
+      .module_name = loomc_make_cstring_view("configured_store"),
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+      .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+      .config_module = config_module.get(),
   };
 
   loomc_result_t* result = nullptr;
@@ -1094,33 +1092,33 @@ command.program.def public target(@device) @dispatch() launch() {
   LinkIndexPtr index = CreateLinkIndex(context.get(), source.get());
 
   const loomc_target_binding_t target_binding = {
-      /*.target_symbol=*/loomc_make_cstring_view("device"),
-      /*.target_profile=*/profile.get(),
+      .target_symbol = loomc_make_cstring_view("device"),
+      .target_profile = profile.get(),
   };
   const loomc_target_specialization_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.specializations=*/nullptr,
-      /*.specialization_count=*/0,
-      /*.target_bindings=*/&target_binding,
-      /*.target_binding_count=*/1,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .specializations = nullptr,
+      .specialization_count = 0,
+      .target_bindings = &target_binding,
+      .target_binding_count = 1,
   };
   KernelRequestCapture request_capture;
   const loomc_cmd_program_product_options_t product_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
-      /*.structure_size=*/sizeof(product_options),
-      /*.next=*/&target_options,
-      /*.link_index=*/index.get(),
-      /*.root_symbol_ordinals=*/nullptr,
-      /*.root_symbol_count=*/0,
-      /*.flags=*/LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
-      /*.config=*/{},
-      /*.request_sink=*/
-      {
-          /*.publish=*/CaptureKernelRequest,
-          /*.user_data=*/&request_capture,
-      },
+      .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
+      .structure_size = sizeof(product_options),
+      .next = &target_options,
+      .link_index = index.get(),
+      .root_symbol_ordinals = nullptr,
+      .root_symbol_count = 0,
+      .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
+      .config = {},
+      .request_sink =
+          {
+              .publish = CaptureKernelRequest,
+              .user_data = &request_capture,
+          },
   };
   loomc_product_t* product = nullptr;
   loomc_result_t* product_result = nullptr;
@@ -1136,11 +1134,11 @@ command.program.def public target(@device) @dispatch() launch() {
   CompilerPtr compiler = CreateCompiler(context.get());
   PassProgramPtr pass_program = CreatePreparedLowPassProgram(context.get());
   const loomc_compile_options_t compile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(compile_options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_make_cstring_view("specialized_command_request"),
-      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .next = nullptr,
+      .module_name = loomc_make_cstring_view("specialized_command_request"),
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
   };
   loomc_product_t* kernel_product = nullptr;
   loomc_result_t* compile_result = nullptr;
@@ -1190,19 +1188,19 @@ command.program.def public @dispatch() launch() {
 
   KernelRequestCapture request_capture;
   const loomc_cmd_program_product_options_t product_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
-      /*.structure_size=*/sizeof(product_options),
-      /*.next=*/nullptr,
-      /*.link_index=*/index.get(),
-      /*.root_symbol_ordinals=*/nullptr,
-      /*.root_symbol_count=*/0,
-      /*.flags=*/LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
-      /*.config=*/{},
-      /*.request_sink=*/
-      {
-          /*.publish=*/CaptureKernelRequest,
-          /*.user_data=*/&request_capture,
-      },
+      .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
+      .structure_size = sizeof(product_options),
+      .next = nullptr,
+      .link_index = index.get(),
+      .root_symbol_ordinals = nullptr,
+      .root_symbol_count = 0,
+      .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
+      .config = {},
+      .request_sink =
+          {
+              .publish = CaptureKernelRequest,
+              .user_data = &request_capture,
+          },
   };
   loomc_product_t* product = nullptr;
   loomc_result_t* product_result = nullptr;
@@ -1264,23 +1262,22 @@ command.program.def public @dispatch() launch() {
     ModulePtr request_module = DeserializeModule(
         request_context.get(), request_workspace.get(), request_source);
     const loomc_target_specialization_t specialization = {
-        /*.function_symbol=*/
-        loomc_make_cstring_view("record_subgroup_size"),
-        /*.target_profile=*/target_case.profile,
+        .function_symbol = loomc_make_cstring_view("record_subgroup_size"),
+        .target_profile = target_case.profile,
     };
     const loomc_target_specialization_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.specializations=*/&specialization,
-        /*.specialization_count=*/1,
+        .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+        .structure_size = sizeof(target_options),
+        .next = nullptr,
+        .specializations = &specialization,
+        .specialization_count = 1,
     };
     const loomc_compile_options_t compile_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-        /*.structure_size=*/sizeof(compile_options),
-        /*.next=*/&target_options,
-        /*.module_name=*/loomc_make_cstring_view("command_request"),
-        /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+        .structure_size = sizeof(compile_options),
+        .next = &target_options,
+        .module_name = loomc_make_cstring_view("command_request"),
+        .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
     };
     loomc_result_t* compile_result = nullptr;
     LOOMC_ASSERT_OK(loomc_compile_module(
@@ -1357,27 +1354,27 @@ kernel.def @wave64_root() {
       DeserializeModule(context.get(), workspace.get(), source.get());
   const loomc_target_specialization_t specializations[] = {
       {
-          /*.function_symbol=*/loomc_make_cstring_view("wave32_root"),
-          /*.target_profile=*/wave32_profile.get(),
+          .function_symbol = loomc_make_cstring_view("wave32_root"),
+          .target_profile = wave32_profile.get(),
       },
       {
-          /*.function_symbol=*/loomc_make_cstring_view("wave64_root"),
-          /*.target_profile=*/wave64_profile.get(),
+          .function_symbol = loomc_make_cstring_view("wave64_root"),
+          .target_profile = wave64_profile.get(),
       },
   };
   const loomc_target_specialization_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.specializations=*/specializations,
-      /*.specialization_count=*/IREE_ARRAYSIZE(specializations),
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .specializations = specializations,
+      .specialization_count = IREE_ARRAYSIZE(specializations),
   };
   const loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&target_options,
-      /*.module_name=*/loomc_make_cstring_view("retained_helpers"),
-      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &target_options,
+      .module_name = loomc_make_cstring_view("retained_helpers"),
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
   };
 
   loomc_result_t* result = nullptr;
@@ -1462,8 +1459,8 @@ TEST(AmdgpuTargetTest, CompiledTargetsSurviveFreshContextLinkingAndEmission) {
   TargetProfilePtr wave64_profile =
       CreateTargetProfile(target_environment.get(), "gfx942",
                           {
-                              /*.sramecc=*/LOOMC_AMDGPU_TARGET_FEATURE_ON,
-                              /*.xnack=*/LOOMC_AMDGPU_TARGET_FEATURE_OFF,
+                              .sramecc = LOOMC_AMDGPU_TARGET_FEATURE_ON,
+                              .xnack = LOOMC_AMDGPU_TARGET_FEATURE_OFF,
                           });
   SourcePtr source = CreateTextSource("sealed_replay.loom", R"(
 amdgpu.target<gfx11-generic> @wave32_requirement {subgroup_size = 32}
@@ -1500,27 +1497,27 @@ kernel.def @wave64_root() {
       DeserializeModule(context.get(), workspace.get(), source.get());
   const loomc_target_specialization_t specializations[] = {
       {
-          /*.function_symbol=*/loomc_make_cstring_view("wave32_root"),
-          /*.target_profile=*/wave32_profile.get(),
+          .function_symbol = loomc_make_cstring_view("wave32_root"),
+          .target_profile = wave32_profile.get(),
       },
       {
-          /*.function_symbol=*/loomc_make_cstring_view("wave64_root"),
-          /*.target_profile=*/wave64_profile.get(),
+          .function_symbol = loomc_make_cstring_view("wave64_root"),
+          .target_profile = wave64_profile.get(),
       },
   };
   const loomc_target_specialization_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.specializations=*/specializations,
-      /*.specialization_count=*/IREE_ARRAYSIZE(specializations),
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .specializations = specializations,
+      .specialization_count = IREE_ARRAYSIZE(specializations),
   };
   const loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&target_options,
-      /*.module_name=*/loomc_make_cstring_view("sealed_replay"),
-      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &target_options,
+      .module_name = loomc_make_cstring_view("sealed_replay"),
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
   };
 
   loomc_result_t* result = nullptr;
@@ -1741,25 +1738,25 @@ func.def public @otherwise_compatible() {
       DeserializeModule(context.get(), workspace.get(), source.get());
   const loomc_target_specialization_t specializations[] = {
       {
-          /*.function_symbol=*/loomc_make_cstring_view("incompatible"),
-          /*.target_profile=*/profile.get(),
+          .function_symbol = loomc_make_cstring_view("incompatible"),
+          .target_profile = profile.get(),
       },
       {
-          /*.function_symbol=*/loomc_make_cstring_view("otherwise_compatible"),
-          /*.target_profile=*/profile.get(),
+          .function_symbol = loomc_make_cstring_view("otherwise_compatible"),
+          .target_profile = profile.get(),
       },
   };
   loomc_target_specialization_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.specializations=*/specializations,
-      /*.specialization_count=*/IREE_ARRAYSIZE(specializations),
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .specializations = specializations,
+      .specialization_count = IREE_ARRAYSIZE(specializations),
   };
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &target_options,
   };
 
   loomc_result_t* result = nullptr;
@@ -1845,8 +1842,7 @@ config.def @unused = 9 : index
 )");
   ModulePtr config =
       DeserializeModule(context.get(), workspace.get(), config_source.get());
-  loomc_compile_options_t compile_options = {};
-  compile_options.config_module = config.get();
+  loomc_compile_options_t compile_options = {.config_module = config.get()};
   loomc_result_t* raw_compile_result = nullptr;
   LOOMC_ASSERT_OK(loomc_compile_module(
       compiler.get(), workspace.get(), pass_program.get(), module.get(),

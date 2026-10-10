@@ -66,48 +66,48 @@ static iree_status_t CreateSpirvBenchmarkTarget(
 
   const loomc_spirv_limit_fact_t limit_facts[] = {
       {
-          /*.limit=*/LOOMC_SPIRV_LIMIT_MAX_WORKGROUP_SIZE_X,
-          /*.state=*/LOOMC_TARGET_FACT_STATE_TRUE,
-          /*.value=*/256,
-          /*.provenance=*/loomc_make_cstring_view("benchmark profile"),
+          .limit = LOOMC_SPIRV_LIMIT_MAX_WORKGROUP_SIZE_X,
+          .state = LOOMC_TARGET_FACT_STATE_TRUE,
+          .value = 256,
+          .provenance = loomc_make_cstring_view("benchmark profile"),
       },
       {
-          /*.limit=*/LOOMC_SPIRV_LIMIT_MAX_FLAT_WORKGROUP_SIZE,
-          /*.state=*/LOOMC_TARGET_FACT_STATE_TRUE,
-          /*.value=*/256,
-          /*.provenance=*/loomc_make_cstring_view("benchmark profile"),
+          .limit = LOOMC_SPIRV_LIMIT_MAX_FLAT_WORKGROUP_SIZE,
+          .state = LOOMC_TARGET_FACT_STATE_TRUE,
+          .value = 256,
+          .provenance = loomc_make_cstring_view("benchmark profile"),
       },
       {
-          /*.limit=*/LOOMC_SPIRV_LIMIT_SUBGROUP_SIZE,
-          /*.state=*/LOOMC_TARGET_FACT_STATE_TRUE,
-          /*.value=*/32,
-          /*.provenance=*/loomc_make_cstring_view("benchmark profile"),
+          .limit = LOOMC_SPIRV_LIMIT_SUBGROUP_SIZE,
+          .state = LOOMC_TARGET_FACT_STATE_TRUE,
+          .value = 32,
+          .provenance = loomc_make_cstring_view("benchmark profile"),
       },
   };
   const loomc_spirv_environment_fact_t environment_facts[] = {
       {
-          /*.environment=*/LOOMC_SPIRV_ENVIRONMENT_MAX_SPIRV_VERSION,
-          /*.state=*/LOOMC_TARGET_FACT_STATE_TRUE,
-          /*.value=*/LOOMC_SPIRV_VERSION_1_6,
-          /*.provenance=*/loomc_make_cstring_view("benchmark profile"),
+          .environment = LOOMC_SPIRV_ENVIRONMENT_MAX_SPIRV_VERSION,
+          .state = LOOMC_TARGET_FACT_STATE_TRUE,
+          .value = LOOMC_SPIRV_VERSION_1_6,
+          .provenance = loomc_make_cstring_view("benchmark profile"),
       },
   };
   const loomc_spirv_profile_options_t profile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(profile_options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("benchmark-vulkan13"),
-      /*.preset=*/LOOMC_SPIRV_PROFILE_PRESET_VULKAN_1_3_BDA,
-      /*.feature_facts=*/nullptr,
-      /*.feature_fact_count=*/0,
-      /*.limit_facts=*/limit_facts,
-      /*.limit_fact_count=*/IREE_ARRAYSIZE(limit_facts),
-      /*.environment_facts=*/environment_facts,
-      /*.environment_fact_count=*/IREE_ARRAYSIZE(environment_facts),
-      /*.cooperative_matrix_rows=*/nullptr,
-      /*.cooperative_matrix_row_count=*/0,
-      /*.cooperative_vector_rows=*/nullptr,
-      /*.cooperative_vector_row_count=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
+      .structure_size = sizeof(profile_options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("benchmark-vulkan13"),
+      .preset = LOOMC_SPIRV_PROFILE_PRESET_VULKAN_1_3_BDA,
+      .feature_facts = nullptr,
+      .feature_fact_count = 0,
+      .limit_facts = limit_facts,
+      .limit_fact_count = IREE_ARRAYSIZE(limit_facts),
+      .environment_facts = environment_facts,
+      .environment_fact_count = IREE_ARRAYSIZE(environment_facts),
+      .cooperative_matrix_rows = nullptr,
+      .cooperative_matrix_row_count = 0,
+      .cooperative_vector_rows = nullptr,
+      .cooperative_vector_row_count = 0,
   };
   loomc_target_profile_t* raw_profile = nullptr;
   loomc_result_t* raw_result = nullptr;
@@ -130,26 +130,25 @@ static iree_status_t EmitSpirvBenchmarkArtifact(
     loomc_string_view_t identifier, loomc_compile_report_mode_t report_mode,
     int64_t* out_artifact_byte_count) {
   const loomc_compile_report_options_t report_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
-      /*.structure_size=*/sizeof(report_options),
-      /*.next=*/nullptr,
-      /*.mode=*/report_mode,
-      /*.format=*/LOOMC_COMPILE_REPORT_FORMAT_JSON,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(report_options),
+      .next = nullptr,
+      .mode = report_mode,
+      .format = LOOMC_COMPILE_REPORT_FORMAT_JSON,
   };
   const loomc_spirv_emit_options_t spirv_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(spirv_options),
-      /*.next=*/report_mode != LOOMC_COMPILE_REPORT_MODE_NONE ? &report_options
-                                                              : nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS,
+      .structure_size = sizeof(spirv_options),
+      .next = report_mode != LOOMC_COMPILE_REPORT_MODE_NONE ? &report_options
+                                                            : nullptr,
   };
   const loomc_emit_options_t emit_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(emit_options),
-      /*.next=*/&spirv_options,
-      /*.artifact_format=*/
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
-      /*.identifier=*/identifier,
-      /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(emit_options),
+      .next = &spirv_options,
+      .artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
+      .identifier = identifier,
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
 
   loomc_result_t* raw_result = nullptr;
@@ -259,30 +258,30 @@ const EmbeddedSource kI32MemoryChainSource = FindEmbeddedSource(
   RegisterPipelineCompileBenchmarks(
       kSpirvWorkloadTarget, "ScfPipeline",
       {
-          /*.source=*/FindEmbeddedSource(
+          .source = FindEmbeddedSource(
               loomc_benchmark_synthetic_pipeline_smoke_create(),
               loomc_benchmark_synthetic_pipeline_smoke_size(),
               "segmented_read_ahead.loom"),
-          /*.function_symbol=*/"segmented_read_ahead",
-          /*.artifact_identifier=*/"pipeline_benchmark.spv",
+          .function_symbol = "segmented_read_ahead",
+          .artifact_identifier = "pipeline_benchmark.spv",
       });
   RegisterPipelineCompileBenchmarks(
       kSpirvWorkloadTarget, "ScfGuardedPipeline",
       {
-          /*.source=*/FindEmbeddedSource(
+          .source = FindEmbeddedSource(
               loomc_benchmark_synthetic_pipeline_smoke_create(),
               loomc_benchmark_synthetic_pipeline_smoke_size(),
               "segmented_guarded_read_ahead.loom"),
-          /*.function_symbol=*/"segmented_guarded_read_ahead",
-          /*.artifact_identifier=*/"guarded_pipeline_benchmark.spv",
+          .function_symbol = "segmented_guarded_read_ahead",
+          .artifact_identifier = "guarded_pipeline_benchmark.spv",
       });
   RegisterInputScalingCompileBenchmarks(
       kSpirvWorkloadTarget, "FfnGateUpQuadraticF32",
       {
-          /*.source=*/kFfnGateUpSource,
-          /*.function_symbol=*/"ffn_gate_up_quadratic_f32",
-          /*.artifact_identifier=*/"ffn_gate_up_benchmark.spv",
-          /*.input_size_config_symbol=*/"ffn_gate_up.input_size",
+          .source = kFfnGateUpSource,
+          .function_symbol = "ffn_gate_up_quadratic_f32",
+          .artifact_identifier = "ffn_gate_up_benchmark.spv",
+          .input_size_config_symbol = "ffn_gate_up.input_size",
       },
       {1024, 2048, 4096, 8192, 16384, 32768}, {1024, 4096, 16384});
   return true;

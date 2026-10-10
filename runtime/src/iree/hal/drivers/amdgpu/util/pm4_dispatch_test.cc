@@ -40,19 +40,20 @@ static iree_hal_amdgpu_kernel_descriptor_t MakeDescriptor(
         IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
         IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
     uint32_t user_data_dword_count = 2) {
-  iree_hal_amdgpu_kernel_descriptor_t descriptor = {};
-  descriptor.group_segment_fixed_size = 1024;
-  descriptor.kernarg_size = 64;
-  descriptor.kernel_code_entry_byte_offset = 0x140;
-  descriptor.compute_pgm_rsrc3 = 0x03020100u;
-  descriptor.compute_pgm_rsrc1 = 0x11112222u;
-  descriptor.compute_pgm_rsrc2 =
-      (user_data_dword_count
-       << IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT) |
-      IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X |
-      IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID_MASK |
-      (4u << IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE_SHIFT);
-  descriptor.kernel_code_properties = kernel_code_properties;
+  iree_hal_amdgpu_kernel_descriptor_t descriptor = {
+      .group_segment_fixed_size = 1024,
+      .kernarg_size = 64,
+      .kernel_code_entry_byte_offset = 0x140,
+      .compute_pgm_rsrc3 = 0x03020100u,
+      .compute_pgm_rsrc1 = 0x11112222u,
+      .compute_pgm_rsrc2 =
+          (user_data_dword_count
+           << IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT) |
+          IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X |
+          IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID_MASK |
+          (4u << IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE_SHIFT),
+      .kernel_code_properties = kernel_code_properties,
+  };
   return descriptor;
 }
 

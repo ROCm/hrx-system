@@ -143,16 +143,16 @@ static void iree_hal_routing_test_pool_trim(
 }
 
 static const iree_hal_pool_vtable_t iree_hal_routing_test_pool_vtable = {
-    /*.destroy=*/iree_hal_routing_test_pool_destroy,
-    /*.acquire_reservations=*/iree_hal_routing_test_pool_acquire_reservations,
-    /*.release_reservations=*/iree_hal_routing_test_pool_release_reservations,
-    /*.materialize_reservations=*/
-    iree_hal_routing_test_pool_materialize_reservations,
-    /*.query_capabilities=*/iree_hal_routing_test_pool_query_capabilities,
-    /*.validate_asan=*/nullptr,
-    /*.query_stats=*/iree_hal_routing_test_pool_query_stats,
-    /*.trim=*/iree_hal_routing_test_pool_trim,
-    /*.advise_asan_reservations=*/nullptr,
+    .destroy = iree_hal_routing_test_pool_destroy,
+    .acquire_reservations = iree_hal_routing_test_pool_acquire_reservations,
+    .release_reservations = iree_hal_routing_test_pool_release_reservations,
+    .materialize_reservations =
+        iree_hal_routing_test_pool_materialize_reservations,
+    .query_capabilities = iree_hal_routing_test_pool_query_capabilities,
+    .validate_asan = nullptr,
+    .query_stats = iree_hal_routing_test_pool_query_stats,
+    .trim = iree_hal_routing_test_pool_trim,
+    .advise_asan_reservations = nullptr,
 };
 
 static iree_hal_routing_test_pool_t* CreateRoutingTestPool(
@@ -190,10 +190,11 @@ class PoolFrontierWaitTest : public ::testing::Test {
         test_proactor(), IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification_));
     IREE_ASSERT_OK(iree_hal_cpu_slab_provider_create(
         /*min_alignment=*/0, iree_allocator_system(), &provider_));
-    iree_hal_fixed_block_pool_options_t options = {};
-    options.block_size = kByteLength;
-    options.blocks_per_slab = 1;
-    options.frontier_capacity = 2;
+    iree_hal_fixed_block_pool_options_t options = {
+        .block_size = kByteLength,
+        .blocks_per_slab = 1,
+        .frontier_capacity = 2,
+    };
     IREE_ASSERT_OK(iree_hal_memory_maintenance_thread_create(
         {}, iree_allocator_system(), &maintenance_));
     IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
@@ -584,11 +585,12 @@ TEST(PoolSetTest, RoutesUsingPreparedAccessAndAlignment) {
       iree_hal_pool_set_initialize(2, iree_allocator_system(), &pool_set));
   IREE_ASSERT_OK(iree_hal_pool_set_register(&pool_set, 0, &general->base));
   IREE_ASSERT_OK(iree_hal_pool_set_register(&pool_set, 1, &read_only->base));
-  iree_hal_buffer_params_t params = {};
-  params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
-  params.access = IREE_HAL_MEMORY_ACCESS_READ;
-  params.min_alignment = 16;
+  iree_hal_buffer_params_t params = {
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = IREE_HAL_MEMORY_ACCESS_READ,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+      .min_alignment = 16,
+  };
   EXPECT_EQ(iree_hal_pool_set_select(&pool_set, params, 128), &read_only->base);
   params.access = IREE_HAL_MEMORY_ACCESS_WRITE;
   EXPECT_EQ(iree_hal_pool_set_select(&pool_set, params, 128), &general->base);

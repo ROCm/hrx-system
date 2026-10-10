@@ -13,10 +13,11 @@
 namespace {
 
 static iree_hal_asan_pool_options_t ShadowOptions() {
-  iree_hal_asan_pool_options_t options = {};
-  options.mode = IREE_HAL_ASAN_POOL_MODE_SHADOW;
-  options.shadow_granule_size = 8;
-  options.redzone_size = 16;
+  iree_hal_asan_pool_options_t options = {
+      .mode = IREE_HAL_ASAN_POOL_MODE_SHADOW,
+      .shadow_granule_size = 8,
+      .redzone_size = 16,
+  };
   return options;
 }
 

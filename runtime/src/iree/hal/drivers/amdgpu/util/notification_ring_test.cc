@@ -63,7 +63,7 @@ static void DestroyReleaseOrderResource(iree_hal_resource_t* base_resource) {
 }
 
 static const iree_hal_resource_vtable_t kReleaseOrderResourceVTable = {
-    /*.destroy=*/DestroyReleaseOrderResource,
+    .destroy = DestroyReleaseOrderResource,
 };
 
 static void VerifySemaphoreNotVisibleBeforePreSignalAction(
@@ -783,15 +783,15 @@ TEST_F(NotificationRingTest, PreSignalActionRunsBeforeSemaphorePublication) {
   IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
   iree_async_semaphore_t* semaphore = CreateSemaphore();
   PreSignalActionState action_state = {
-      /*.semaphore=*/semaphore,
-      /*.callback_count=*/0,
+      .semaphore = semaphore,
+      .callback_count = 0,
   };
 
   iree_hal_amdgpu_reclaim_entry_t* reclaim_entry =
       ReclaimEntryForNextEpoch(ring.get());
   reclaim_entry->pre_signal_action = {
-      /*.fn=*/VerifySemaphoreNotVisibleBeforePreSignalAction,
-      /*.user_data=*/&action_state,
+      .fn = VerifySemaphoreNotVisibleBeforePreSignalAction,
+      .user_data = &action_state,
   };
   uint64_t epoch = iree_hal_amdgpu_notification_ring_advance_epoch(ring.get());
   PushNotification(ring.get(), epoch, semaphore, 1);
@@ -847,11 +847,11 @@ TEST_F(NotificationRingTest, RetireCallbackRunsBeforeSemaphorePublication) {
   IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
   iree_async_semaphore_t* semaphore = CreateSemaphore();
   RetireCallbackState callback_state = {
-      /*.semaphore=*/semaphore,
-      /*.entry=*/nullptr,
-      /*.epoch=*/0,
-      /*.flags=*/IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_NONE,
-      /*.callback_count=*/0,
+      .semaphore = semaphore,
+      .entry = nullptr,
+      .epoch = 0,
+      .flags = IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_NONE,
+      .callback_count = 0,
   };
 
   iree_hal_amdgpu_reclaim_entry_t* reclaim_entry =
@@ -881,15 +881,15 @@ TEST_F(NotificationRingTest, FailAllRetireCallbackRunsBeforeSemaphoreFailure) {
   IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
   iree_async_semaphore_t* semaphore = CreateSemaphore();
   PreSignalActionState action_state = {
-      /*.semaphore=*/semaphore,
-      /*.callback_count=*/0,
+      .semaphore = semaphore,
+      .callback_count = 0,
   };
   RetireCallbackState callback_state = {
-      /*.semaphore=*/semaphore,
-      /*.entry=*/nullptr,
-      /*.epoch=*/0,
-      /*.flags=*/IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_NONE,
-      /*.callback_count=*/0,
+      .semaphore = semaphore,
+      .entry = nullptr,
+      .epoch = 0,
+      .flags = IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_NONE,
+      .callback_count = 0,
   };
 
   iree_hal_amdgpu_reclaim_entry_t* reclaim_entry =
@@ -909,8 +909,8 @@ TEST_F(NotificationRingTest, FailAllRetireCallbackRunsBeforeSemaphoreFailure) {
   reclaim_entry->signal_semaphore_count = 1;
   reclaim_entry->count = 2;
   reclaim_entry->pre_signal_action = {
-      /*.fn=*/VerifySemaphoreNotVisibleBeforeFailedPreSignalAction,
-      /*.user_data=*/&action_state,
+      .fn = VerifySemaphoreNotVisibleBeforeFailedPreSignalAction,
+      .user_data = &action_state,
   };
   uint64_t epoch = iree_hal_amdgpu_notification_ring_advance_epoch(ring.get());
   PushNotification(ring.get(), epoch, semaphore, 1);

@@ -36,8 +36,8 @@ using ::loom::testing::ModulePtr;
 static constexpr iree_host_size_t kSpirvHeaderWordCount = 5;
 
 static const loom_target_fact_type_t kSpirvCompilerTestTargetFactType = {
-    /*.name=*/IREE_SVL("spirv-test"),
-    /*.storage_size=*/sizeof(loom_target_facts_t),
+    .name = IREE_SVL("spirv-test"),
+    .storage_size = sizeof(loom_target_facts_t),
 };
 
 static bool SpirvModuleHasCapability(const loom_spirv_module_binary_t& module,
@@ -89,8 +89,7 @@ class SpirvModuleCompilerTest : public ::testing::Test {
   }
 
   ModulePtr ParseModule(iree_string_view_t source) {
-    loom_text_parse_options_t options = {};
-    options.max_errors = 20;
+    loom_text_parse_options_t options = {.max_errors = 20};
     loom_low_descriptor_text_asm_environment_initialize(
         &low_registry_.registry, &options.low_asm_environment);
     loom_module_t* module = nullptr;
@@ -155,11 +154,13 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @kernel() asm {
   loom_target_function_version_t function_version = MakeFunctionVersion(
       module.get(), IREE_SV("kernel"), &generic_target_facts);
   loom_function_version_t* version_values[] = {&function_version.base};
-  loom_function_version_list_t function_versions = {};
-  function_versions.values = version_values;
-  function_versions.count = IREE_ARRAYSIZE(version_values);
-  loom_spirv_compile_options_t options = {};
-  options.function_versions = &function_versions;
+  loom_function_version_list_t function_versions = {
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
+  };
+  loom_spirv_compile_options_t options = {
+      .function_versions = &function_versions,
+  };
 
   loom_spirv_module_binary_t generic_module = {};
   bool generic_emitted = false;
@@ -220,17 +221,18 @@ low.kernel.def target<spirv.logical.core> workgroup_size(1, 1, 1) @loom_kernel()
       MakeFunctionVersion(module.get(), IREE_SV("loom_kernel"), &target_facts);
   loom_function_version_t* version_values[] = {&function_version.base};
   const loom_function_version_list_t function_versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
-  loom_target_emit_request_t request = {};
-  request.low_descriptor_registry = &low_registry_.registry;
-  request.module = module.get();
-  request.function_versions = &function_versions;
-  request.identifier = IREE_SV("module.spv");
-  request.scratch_arena = &arena_;
-  request.allocator = iree_allocator_system();
+  loom_target_emit_request_t request = {
+      .low_descriptor_registry = &low_registry_.registry,
+      .module = module.get(),
+      .function_versions = &function_versions,
+      .identifier = IREE_SV("module.spv"),
+      .scratch_arena = &arena_,
+      .allocator = iree_allocator_system(),
+  };
   loom_target_emit_artifact_t artifact = {};
   bool emitted = false;
   IREE_ASSERT_OK(loom_spirv_module_emitter.emit(&request, &emitted, &artifact));

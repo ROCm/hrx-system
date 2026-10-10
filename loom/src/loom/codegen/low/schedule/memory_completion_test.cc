@@ -32,12 +32,13 @@ class MemoryCompletionTest : public ::testing::Test {
   }
 
   static loom_low_memory_access_summary_t Access(uint32_t alias_root_id) {
-    loom_low_memory_access_summary_t access = {};
-    access.memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP;
-    access.alias_root_id = alias_root_id;
-    access.alias_group_id = LOOM_LOW_MEMORY_ALIAS_ID_NONE;
-    access.precision_flags = LOOM_LOW_MEMORY_ACCESS_PRECISION_SPACE |
-                             LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT;
+    loom_low_memory_access_summary_t access = {
+        .memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP,
+        .alias_root_id = alias_root_id,
+        .alias_group_id = LOOM_LOW_MEMORY_ALIAS_ID_NONE,
+        .precision_flags = LOOM_LOW_MEMORY_ACCESS_PRECISION_SPACE |
+                           LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT,
+    };
     return access;
   }
 

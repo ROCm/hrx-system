@@ -58,8 +58,8 @@ class AmdgpuSanitizerSiteTableTest : public ::testing::Test {
 
   ModulePtr Parse(iree_string_view_t source) {
     loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/{},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {},
+        .max_errors = 20,
     };
     loom_module_t* module = nullptr;
     IREE_CHECK_OK(loom_text_parse(source, IREE_SV("sanitizer_site_table.loom"),
@@ -77,13 +77,13 @@ class AmdgpuSanitizerSiteTableTest : public ::testing::Test {
             legality_providers, IREE_ARRAYSIZE(legality_providers));
 
     const loom_codegen_pass_environment_options_t environment_options = {
-        /*.descriptor_registry=*/&low_registry_.registry,
-        /*.lower_policy_registry=*/&policy_registry_,
-        /*.legality_provider_list=*/&legality_provider_list,
-        /*.legalizer_registry=*/nullptr,
-        /*.math_policy_registry=*/nullptr,
-        /*.compile_report=*/nullptr,
-        /*.target_environment=*/nullptr,
+        .descriptor_registry = &low_registry_.registry,
+        .lower_policy_registry = &policy_registry_,
+        .legality_provider_list = &legality_provider_list,
+        .legalizer_registry = nullptr,
+        .math_policy_registry = nullptr,
+        .compile_report = nullptr,
+        .target_environment = nullptr,
     };
     loom_codegen_pass_environment_storage_t environment_storage;
     loom_pass_environment_t environment =
@@ -91,11 +91,11 @@ class AmdgpuSanitizerSiteTableTest : public ::testing::Test {
             &environment_options, /*function_versions=*/nullptr,
             &environment_storage);
     loom_pass_tool_run_options_t run_options = {
-        /*.registry=*/loom_pass_builtin_registry(),
-        /*.environment=*/environment,
-        /*.function_versions=*/nullptr,
-        /*.predicate_provider=*/{},
-        /*.block_pool=*/&block_pool_,
+        .registry = loom_pass_builtin_registry(),
+        .environment = environment,
+        .function_versions = nullptr,
+        .predicate_provider = {},
+        .block_pool = &block_pool_,
     };
     loom_pass_run_result_t run_result = {};
     iree_status_t status = loom_pass_tool_run_flat_pipeline(

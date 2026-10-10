@@ -101,8 +101,9 @@ TEST(ErrorDefsTest, LookupComposedCatalogFallsBackAndShadows) {
   ASSERT_NE(expected, nullptr);
 
   uint16_t error_indices[] = {UINT16_MAX, UINT16_MAX};
-  loom_error_catalog_t catalog = {};
-  catalog.error_indices_by_code = error_indices;
+  loom_error_catalog_t catalog = {
+      .error_indices_by_code = error_indices,
+  };
   catalog.domain_spans[LOOM_ERROR_DOMAIN_TYPE].code_count =
       IREE_ARRAYSIZE(error_indices);
   catalog.fallback_catalog = &loom_error_catalog_core;

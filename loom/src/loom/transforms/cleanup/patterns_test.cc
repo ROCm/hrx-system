@@ -71,24 +71,24 @@ TEST(CleanupPatternsTest, KeepsPhaseRegistriesSeparate) {
       {source_combine_kind, IgnorePattern, nullptr},
   };
   const loom_rewrite_pattern_provider_t region_initialization_provider = {
-      /*.name=*/IREE_SVL("region-initialization"),
-      /*.patterns=*/region_initialization_patterns,
-      /*.pattern_count=*/IREE_ARRAYSIZE(region_initialization_patterns),
+      .name = IREE_SVL("region-initialization"),
+      .patterns = region_initialization_patterns,
+      .pattern_count = IREE_ARRAYSIZE(region_initialization_patterns),
   };
   const loom_rewrite_pattern_provider_t pre_fold_provider = {
-      /*.name=*/IREE_SVL("pre-fold"),
-      /*.patterns=*/pre_fold_patterns,
-      /*.pattern_count=*/IREE_ARRAYSIZE(pre_fold_patterns),
+      .name = IREE_SVL("pre-fold"),
+      .patterns = pre_fold_patterns,
+      .pattern_count = IREE_ARRAYSIZE(pre_fold_patterns),
   };
   const loom_rewrite_pattern_provider_t post_type_provider = {
-      /*.name=*/IREE_SVL("post-type"),
-      /*.patterns=*/post_type_patterns,
-      /*.pattern_count=*/IREE_ARRAYSIZE(post_type_patterns),
+      .name = IREE_SVL("post-type"),
+      .patterns = post_type_patterns,
+      .pattern_count = IREE_ARRAYSIZE(post_type_patterns),
   };
   const loom_rewrite_pattern_provider_t source_combine_provider = {
-      /*.name=*/IREE_SVL("source-combine"),
-      /*.patterns=*/source_combine_patterns,
-      /*.pattern_count=*/IREE_ARRAYSIZE(source_combine_patterns),
+      .name = IREE_SVL("source-combine"),
+      .patterns = source_combine_patterns,
+      .pattern_count = IREE_ARRAYSIZE(source_combine_patterns),
   };
   const loom_rewrite_pattern_provider_t* region_initialization_providers[] = {
       &region_initialization_provider,
@@ -103,20 +103,17 @@ TEST(CleanupPatternsTest, KeepsPhaseRegistriesSeparate) {
       &source_combine_provider,
   };
   const loom_cleanup_pattern_provider_set_t provider_set = {
-      /*.region_initialization=*/loom_rewrite_pattern_provider_list_make(
+      .region_initialization = loom_rewrite_pattern_provider_list_make(
           region_initialization_providers,
           IREE_ARRAYSIZE(region_initialization_providers)),
-      /*.universal_pre_fold=*/
-      loom_rewrite_pattern_provider_list_make(
+      .universal_pre_fold = loom_rewrite_pattern_provider_list_make(
           pre_fold_providers, IREE_ARRAYSIZE(pre_fold_providers)),
-      /*.universal_post_type=*/
-      loom_rewrite_pattern_provider_list_make(
+      .universal_post_type = loom_rewrite_pattern_provider_list_make(
           post_type_providers, IREE_ARRAYSIZE(post_type_providers)),
-      /*.source_combine=*/
-      loom_rewrite_pattern_provider_list_make(
+      .source_combine = loom_rewrite_pattern_provider_list_make(
           source_combine_providers, IREE_ARRAYSIZE(source_combine_providers)),
-      /*.special_value_policy=*/nullptr,
-      /*.fact_refinement_policy=*/nullptr,
+      .special_value_policy = nullptr,
+      .fact_refinement_policy = nullptr,
   };
 
   loom_cleanup_pattern_registry_storage_t storage = {};
@@ -207,9 +204,9 @@ TEST(CleanupPatternsTest, ResolvesCanonicalizerContextThroughCapability) {
   const loom_cleanup_pass_capability_t capability =
       loom_cleanup_pass_capability_make(
           /*pattern_registry=*/nullptr,
-          (loom_cleanup_canonicalizer_context_resolver_t){
-              /*.fn=*/ResolveCanonicalizerContext,
-              /*.user_data=*/&state,
+          loom_cleanup_canonicalizer_context_resolver_t{
+              .fn = ResolveCanonicalizerContext,
+              .user_data = &state,
           });
   const loom_pass_t pass = {};
   loom_cleanup_canonicalizer_context_t context = {};

@@ -71,16 +71,17 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
       /*hazard_gap_count=*/1, /*model_summary_count=*/1,
       /*pressure_summary_count=*/2, /*peak_live_units=*/96);
 
-  loom_target_compile_report_static_instruction_mix_t static_mix = {};
-  static_mix.descriptor_count = 9;
-  static_mix.scalar_alu_count = 2;
-  static_mix.vector_alu_count = 3;
-  static_mix.matrix_count = 2;
-  static_mix.wmma_count = 1;
-  static_mix.global_memory_count = 2;
-  static_mix.global_load_count = 1;
-  static_mix.buffer_load_count = 1;
-  static_mix.execution_barrier_count = 1;
+  loom_target_compile_report_static_instruction_mix_t static_mix = {
+      .descriptor_count = 9,
+      .scalar_alu_count = 2,
+      .vector_alu_count = 3,
+      .matrix_count = 2,
+      .wmma_count = 1,
+      .global_memory_count = 2,
+      .global_load_count = 1,
+      .buffer_load_count = 1,
+      .execution_barrier_count = 1,
+  };
   loom_target_compile_report_record_static_instruction_mix(&report,
                                                            &static_mix);
   loom_target_compile_report_static_instruction_mix_t dynamic_mix = static_mix;
@@ -97,25 +98,25 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
                                              /*code_byte_count=*/64,
                                              /*code_storage_byte_count=*/80);
   const loom_target_compile_report_emission_breakdown_t emission_breakdown = {
-      /*.body_instruction_count=*/6,
-      /*.entry_instruction_count=*/2,
-      /*.coissued_instruction_count=*/1,
-      /*.coissued_component_count=*/2,
+      .body_instruction_count = 6,
+      .entry_instruction_count = 2,
+      .coissued_instruction_count = 1,
+      .coissued_component_count = 2,
   };
   loom_target_compile_report_record_emission_breakdown(&report,
                                                        &emission_breakdown);
   loom_target_compile_report_record_memory(&report, /*private_memory_bytes=*/16,
                                            /*local_memory_bytes=*/32);
 
-  loom_target_compile_report_workload_t workload = {};
-  workload.flags =
-      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE |
-      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT |
-      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE |
-      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT |
-      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT |
-      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE |
-      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE;
+  loom_target_compile_report_workload_t workload = {
+      .flags = LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE |
+               LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT |
+               LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE |
+               LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT |
+               LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT |
+               LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_CLUSTER_SIZE |
+               LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_CLUSTER_SIZE,
+  };
   workload.workgroup_size.x = 64;
   workload.workgroup_size.y = 2;
   workload.workgroup_size.z = 1;
@@ -131,20 +132,21 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   workload.flat_workgroup_cluster_size = 2;
   loom_target_compile_report_record_workload(&report, &workload);
 
-  loom_target_compile_report_target_resources_t resources = {};
-  resources.scalar_register_class = IREE_SVL("amdgpu.sgpr");
-  resources.scalar_register_count = 38;
-  resources.scalar_pressure_peak_live_units = 32;
-  resources.scalar_register_overhead_units = 6;
-  resources.vector_register_class = IREE_SVL("amdgpu.vgpr");
-  resources.vector_register_count = 160;
-  resources.vector_pressure_peak_live_units = 136;
-  resources.vector_register_overhead_units = 24;
-  resources.subgroup_size = 64;
-  resources.max_subgroups_per_simd = 16;
-  resources.resident_subgroups_per_simd = 3;
-  resources.occupancy_percent = 18;
-  resources.limiting_resource = IREE_SVL("amdgpu.vgpr");
+  loom_target_compile_report_target_resources_t resources = {
+      .scalar_register_class = IREE_SVL("amdgpu.sgpr"),
+      .scalar_register_count = 38,
+      .scalar_pressure_peak_live_units = 32,
+      .scalar_register_overhead_units = 6,
+      .vector_register_class = IREE_SVL("amdgpu.vgpr"),
+      .vector_register_count = 160,
+      .vector_pressure_peak_live_units = 136,
+      .vector_register_overhead_units = 24,
+      .subgroup_size = 64,
+      .max_subgroups_per_simd = 16,
+      .resident_subgroups_per_simd = 3,
+      .occupancy_percent = 18,
+      .limiting_resource = IREE_SVL("amdgpu.vgpr"),
+  };
   resources.residency_summary.flags =
       LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_VALID |
       LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_HAS_NEXT_BETTER_TIER |
@@ -167,7 +169,7 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_text(&report, &options, &builder));
@@ -298,7 +300,7 @@ TEST(CompileReportFormatTest, EmitsOnlyValidResidencyEvidence) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -444,14 +446,15 @@ TEST(CompileReportFormatTest,
       LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_INCOMPLETE_RESOURCE_COUNTS |
       LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_UNKNOWN_WORKGROUP_SIZE;
   loom_target_compile_report_record_target_resources(&report, &resources);
-  loom_target_residency_constraint_t resource = {};
-  resource.name = IREE_SVL("amdgpu.vgpr_agpr");
-  resource.kind = LOOM_TARGET_RESIDENCY_CONSTRAINT_POOLED_RESOURCE;
-  resource.unit = IREE_SVL("registers");
-  resource.allocation_scope = IREE_SVL("subgroup");
-  resource.pool_scope = IREE_SVL("SIMD");
-  resource.pool_units = 512;
-  resource.allocation_granularity = 8;
+  loom_target_residency_constraint_t resource = {
+      .name = IREE_SVL("amdgpu.vgpr_agpr"),
+      .kind = LOOM_TARGET_RESIDENCY_CONSTRAINT_POOLED_RESOURCE,
+      .unit = IREE_SVL("registers"),
+      .allocation_scope = IREE_SVL("subgroup"),
+      .pool_scope = IREE_SVL("SIMD"),
+      .pool_units = 512,
+      .allocation_granularity = 8,
+  };
   const loom_target_residency_constraint_list_t constraints = {&resource, 1};
   IREE_ASSERT_OK(loom_target_compile_report_record_residency_constraints(
       &report, &constraints));
@@ -520,10 +523,11 @@ TEST(CompileReportFormatTest, KeepsResidencyTransitionsOnTheirOwnEntries) {
       loom_target_compile_report_initialize(&entry, iree_allocator_system());
       entry.function_name = iree_make_cstring_view(test_case.function_name);
       if (entry_index != missing_entry) {
-        loom_target_compile_report_target_resources_t resources = {};
-        resources.scalar_register_class = IREE_SVL("amdgpu.sgpr");
-        resources.scalar_register_count = 36;
-        resources.vector_register_class = IREE_SVL("amdgpu.vgpr");
+        loom_target_compile_report_target_resources_t resources = {
+            .scalar_register_class = IREE_SVL("amdgpu.sgpr"),
+            .scalar_register_count = 36,
+            .vector_register_class = IREE_SVL("amdgpu.vgpr"),
+        };
         resources.vector_register_count = test_case.vector_register_count;
         resources.subgroup_size = 64;
         resources.max_subgroups_per_simd = 16;
@@ -563,7 +567,7 @@ TEST(CompileReportFormatTest, KeepsResidencyTransitionsOnTheirOwnEntries) {
     loom_output_stream_t stream;
     loom_output_stream_for_builder(&builder, &stream);
     const loom_target_compile_report_format_options_t options = {
-        /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+        .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
     };
     IREE_ASSERT_OK(
         loom_target_compile_report_format_json(&report, &options, &stream));
@@ -621,21 +625,22 @@ TEST(CompileReportFormatTest, FormatsEntryReportsAndTargetCapabilities) {
                                              /*code_byte_count=*/64,
                                              /*code_storage_byte_count=*/80);
   const loom_target_compile_report_emission_breakdown_t emission_breakdown = {
-      /*.body_instruction_count=*/6,
-      /*.entry_instruction_count=*/2,
-      /*.coissued_instruction_count=*/1,
-      /*.coissued_component_count=*/2,
+      .body_instruction_count = 6,
+      .entry_instruction_count = 2,
+      .coissued_instruction_count = 1,
+      .coissued_component_count = 2,
   };
   loom_target_compile_report_record_emission_breakdown(&entry,
                                                        &emission_breakdown);
 
-  loom_target_compile_report_target_capability_row_t capability = {};
-  capability.function_name = entry.function_name;
-  capability.target_family_name = IREE_SVL("amdgpu");
-  capability.namespace_name = IREE_SVL("amdgpu");
-  capability.key = IREE_SVL("matrix_feature_profile");
-  capability.value_kind = LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_STRING;
-  capability.value_string = IREE_SVL("wmma-gfx11");
+  loom_target_compile_report_target_capability_row_t capability = {
+      .function_name = entry.function_name,
+      .target_family_name = IREE_SVL("amdgpu"),
+      .namespace_name = IREE_SVL("amdgpu"),
+      .key = IREE_SVL("matrix_feature_profile"),
+      .value_kind = LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_STRING,
+      .value_string = IREE_SVL("wmma-gfx11"),
+  };
   IREE_ASSERT_OK(loom_target_compile_report_record_target_capability_row(
       &entry, &capability));
   capability.namespace_name = IREE_SVL("target");
@@ -660,7 +665,7 @@ TEST(CompileReportFormatTest, FormatsEntryReportsAndTargetCapabilities) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -711,20 +716,19 @@ TEST(CompileReportFormatTest, FormatsTargetInsertedPacketEconomics) {
   entry.requested_detail_flags = report.requested_detail_flags;
   entry.function_name = IREE_SVL("extended_vgpr_loop");
   loom_target_compile_report_target_insertion_row_t insertion = {
-      /*.flags=*/
-      LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT,
-      /*.function_name=*/entry.function_name,
-      /*.insertion_kind=*/
-      LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_STATE,
-      /*.packet_key=*/IREE_SVL("amdgpu.s_set_vgpr_msb"),
-      /*.block_name=*/IREE_SVL("^loop_body"),
-      /*.block_index=*/1,
-      /*.node_index=*/7,
-      /*.scheduled_ordinal=*/3,
-      /*.boundary_operation_name=*/IREE_SVL("low.op"),
-      /*.boundary_descriptor_key=*/IREE_SVL("amdgpu.v_wmma_f32_16x16x32_bf16"),
-      /*.static_packet_count=*/1,
-      /*.dynamic_packet_count=*/4,
+      .flags =
+          LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT,
+      .function_name = entry.function_name,
+      .insertion_kind = LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_STATE,
+      .packet_key = IREE_SVL("amdgpu.s_set_vgpr_msb"),
+      .block_name = IREE_SVL("^loop_body"),
+      .block_index = 1,
+      .node_index = 7,
+      .scheduled_ordinal = 3,
+      .boundary_operation_name = IREE_SVL("low.op"),
+      .boundary_descriptor_key = IREE_SVL("amdgpu.v_wmma_f32_16x16x32_bf16"),
+      .static_packet_count = 1,
+      .dynamic_packet_count = 4,
   };
   IREE_ASSERT_OK(loom_target_compile_report_record_target_insertion_row(
       &entry, &insertion));
@@ -757,7 +761,7 @@ TEST(CompileReportFormatTest, FormatsTargetInsertedPacketEconomics) {
   EXPECT_EQ(report.target_insertion_rows.count, 2u);
 
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -830,20 +834,19 @@ TEST(CompileReportFormatTest, SummarizesTargetInsertionsWithoutDetailRows) {
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   const loom_target_compile_report_target_insertion_row_t insertion = {
-      /*.flags=*/
-      LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT,
-      /*.function_name=*/IREE_SVL("summary_only"),
-      /*.insertion_kind=*/
-      LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_STATE,
-      /*.packet_key=*/IREE_SVL("amdgpu.s_set_vgpr_msb"),
-      /*.block_name=*/IREE_SVL("^entry"),
-      /*.block_index=*/0,
-      /*.node_index=*/2,
-      /*.scheduled_ordinal=*/1,
-      /*.boundary_operation_name=*/IREE_SVL("low.op"),
-      /*.boundary_descriptor_key=*/IREE_SVL("amdgpu.v_wmma"),
-      /*.static_packet_count=*/1,
-      /*.dynamic_packet_count=*/8,
+      .flags =
+          LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT,
+      .function_name = IREE_SVL("summary_only"),
+      .insertion_kind = LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_STATE,
+      .packet_key = IREE_SVL("amdgpu.s_set_vgpr_msb"),
+      .block_name = IREE_SVL("^entry"),
+      .block_index = 0,
+      .node_index = 2,
+      .scheduled_ordinal = 1,
+      .boundary_operation_name = IREE_SVL("low.op"),
+      .boundary_descriptor_key = IREE_SVL("amdgpu.v_wmma"),
+      .static_packet_count = 1,
+      .dynamic_packet_count = 8,
   };
   IREE_ASSERT_OK(loom_target_compile_report_record_target_insertion_row(
       &report, &insertion));
@@ -858,7 +861,7 @@ TEST(CompileReportFormatTest, SummarizesTargetInsertionsWithoutDetailRows) {
   EXPECT_EQ(report.target_insertion_rows.count, 0u);
 
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);

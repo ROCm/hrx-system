@@ -70,8 +70,7 @@ class TransientBufferTest : public CtsTestBase<> {
     iree_hal_queue_pool_backend_t backend = {};
     IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
         device_, iree_hal_queue_family(transfer_queue_), &backend));
-    iree_hal_passthrough_pool_options_t options = {};
-    options.asan = backend.asan;
+    iree_hal_passthrough_pool_options_t options = {.asan = backend.asan};
     IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
         options, backend.slab_provider, backend.notification,
         backend.frontier_tracker, backend.maintenance, iree_allocator_system(),
@@ -102,8 +101,8 @@ class TransientBufferTest : public CtsTestBase<> {
     *out_buffer = nullptr;
     iree_hal_buffer_params_t params = MakeTransientBufferParams();
     const iree_hal_pool_reservation_request_t request = {
-        /*.params=*/params,
-        /*.allocation_size=*/size,
+        .params = params,
+        .allocation_size = size,
     };
     iree_hal_buffer_t* buffer = nullptr;
     iree_status_t status = iree_hal_queue_alloca(
@@ -344,16 +343,16 @@ TEST_P(TransientBufferTest, FillThenCopyInSingleCommandBuffer) {
 
     // Barrier: fill must complete before copy reads.
     const iree_hal_barrier_t execution_barrier = {
-        /*.source_stage_mask=*/IREE_HAL_EXECUTION_STAGE_TRANSFER |
-            IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-        /*.target_stage_mask=*/IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE |
-            IREE_HAL_EXECUTION_STAGE_TRANSFER,
-        /*.flags=*/IREE_HAL_BARRIER_FLAG_NONE,
-        /*.effects=*/{},
-        /*.memory_barrier_count=*/0,
-        /*.memory_barriers=*/nullptr,
-        /*.buffer_barrier_count=*/0,
-        /*.buffer_barriers=*/nullptr,
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER |
+                             IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE |
+                             IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .flags = IREE_HAL_BARRIER_FLAG_NONE,
+        .effects = {},
+        .memory_barrier_count = 0,
+        .memory_barriers = nullptr,
+        .buffer_barrier_count = 0,
+        .buffer_barriers = nullptr,
     };
     IREE_RETURN_IF_ERROR(
         iree_hal_command_buffer_barrier(cmd, &execution_barrier));
@@ -422,8 +421,8 @@ TEST_P(TransientBufferTest, FillTransientWithZeroAccessFlags) {
 
   iree_hal_buffer_t* raw = nullptr;
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/buffer_size,
+      .params = params,
+      .allocation_size = buffer_size,
   };
   IREE_ASSERT_OK(iree_hal_queue_alloca(transfer_queue_, empty_wait, signal,
                                        transient_pool_,

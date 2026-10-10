@@ -11,8 +11,9 @@
 namespace {
 
 TEST(PciTest, RecognizesAmdEndpointVendors) {
-  amdf_pci_info_t pci = {};
-  pci.vendor_id = 0x1002u;
+  amdf_pci_info_t pci = {
+      .vendor_id = 0x1002u,
+  };
   EXPECT_TRUE(amdf_pci_is_amd(&pci));
   pci.vendor_id = 0x1022u;
   EXPECT_TRUE(amdf_pci_is_amd(&pci));

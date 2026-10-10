@@ -62,11 +62,11 @@ class LivenessTest : public ::testing::Test {
         loom_test_low_core_descriptor_set,
     };
     loom_low_descriptor_registry_t descriptor_registry = {
-        /*.descriptor_sets=*/{},
-        /*.descriptor_set_count=*/{},
-        /*.descriptor_set_providers=*/descriptor_set_providers,
-        /*.descriptor_set_provider_count=*/
-        IREE_ARRAYSIZE(descriptor_set_providers),
+        .descriptor_sets = {},
+        .descriptor_set_count = {},
+        .descriptor_set_providers = descriptor_set_providers,
+        .descriptor_set_provider_count =
+            IREE_ARRAYSIZE(descriptor_set_providers),
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &descriptor_registry, &options.low_asm_environment);
@@ -268,13 +268,13 @@ func.def @ordered(%a: i32, %b: i32) -> (i32) {
       loom_block_const_op(entry, 2),
   };
   const loom_liveness_block_order_t block_order = {
-      /*.block=*/entry,
-      /*.ops=*/ordered_ops,
-      /*.op_count=*/IREE_ARRAYSIZE(ordered_ops),
+      .block = entry,
+      .ops = ordered_ops,
+      .op_count = IREE_ARRAYSIZE(ordered_ops),
   };
   const loom_liveness_order_t order = {
-      /*.blocks=*/&block_order,
-      /*.block_count=*/1,
+      .blocks = &block_order,
+      .block_count = 1,
   };
   loom_local_value_domain_t value_domain = {};
   IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
@@ -1152,9 +1152,9 @@ low.func.def target<test.low.core>(@test_target) @high_pressure(%a0: reg<test.i3
   EXPECT_EQ(pressure->peak_live_units, 6u);
 
   loom_liveness_pressure_budget_t budget = {
-      /*.value_class=*/pressure->value_class,
-      /*.max_live_units=*/4,
-      /*.max_live_values=*/4,
+      .value_class = pressure->value_class,
+      .max_live_units = 4,
+      .max_live_values = 4,
   };
   const loom_liveness_pressure_budget_violation_t* violations = nullptr;
   iree_host_size_t violation_count = 0;

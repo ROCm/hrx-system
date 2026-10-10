@@ -117,7 +117,7 @@ class LoopLikeReplacementTest : public ::testing::Test {
         loom_test_yield_build(&builder_, /*values=*/nullptr, /*values_count=*/0,
                               LOOM_LOCATION_UNKNOWN, &function_yield));
     const loom_verify_options_t options = {
-        /*.sink=*/{loom_diagnostic_stderr_sink, nullptr},
+        .sink = {loom_diagnostic_stderr_sink, nullptr},
     };
     loom_verify_result_t result = {};
     IREE_ASSERT_OK(loom_verify_module(module_, &options, &result));
@@ -153,9 +153,9 @@ TEST_F(LoopLikeReplacementTest,
   const loom_value_id_t source_initial[] = {first, counter};
   const loom_type_t source_types[] = {tile, index};
   const loom_tied_result_t source_ties[] = {{
-      /*.result_index=*/0,
-      /*.operand_index=*/3,
-      /*.has_type_change=*/false,
+      .result_index = 0,
+      .operand_index = 3,
+      .has_type_change = false,
   }};
   loom_op_t* source = nullptr;
   IREE_ASSERT_OK(loom_test_loop_build(
@@ -183,13 +183,13 @@ TEST_F(LoopLikeReplacementTest,
   const loom_type_t target_types[] = {tile, tile, index};
   const uint16_t source_offsets[] = {0, 2, 3};
   const loom_loop_like_replacement_state_t target_state = {
-      /*.initial_values=*/{target_initial,
-                           (uint16_t)IREE_ARRAYSIZE(target_initial)},
-      /*.header_types=*/nullptr,
-      /*.source_header_offsets=*/source_offsets,
-      /*.result_types=*/target_types,
-      /*.result_count=*/(uint16_t)IREE_ARRAYSIZE(target_types),
-      /*.source_result_offsets=*/source_offsets,
+      .initial_values = {target_initial,
+                         (uint16_t)IREE_ARRAYSIZE(target_initial)},
+      .header_types = nullptr,
+      .source_header_offsets = source_offsets,
+      .result_types = target_types,
+      .result_count = (uint16_t)IREE_ARRAYSIZE(target_types),
+      .source_result_offsets = source_offsets,
   };
   loom_loop_like_replacement_t replacement = {};
   IREE_ASSERT_OK(loom_loop_like_build_replacement(
@@ -252,12 +252,12 @@ TEST_F(LoopLikeReplacementTest, RebuildsStatelessCountedLoop) {
 
   loom_builder_set_before(&builder_, source);
   const loom_loop_like_replacement_state_t target_state = {
-      /*.initial_values=*/{nullptr, 0},
-      /*.header_types=*/nullptr,
-      /*.source_header_offsets=*/nullptr,
-      /*.result_types=*/nullptr,
-      /*.result_count=*/0,
-      /*.source_result_offsets=*/nullptr,
+      .initial_values = {nullptr, 0},
+      .header_types = nullptr,
+      .source_header_offsets = nullptr,
+      .result_types = nullptr,
+      .result_count = 0,
+      .source_result_offsets = nullptr,
   };
   loom_loop_like_replacement_t replacement = {};
   IREE_ASSERT_OK(loom_loop_like_build_replacement(
@@ -292,12 +292,12 @@ TEST_F(LoopLikeReplacementTest, RemovesSyntheticLoopState) {
   loom_builder_set_before(&builder_, source);
   const uint16_t source_offsets[] = {0, 0};
   const loom_loop_like_replacement_state_t target_state = {
-      /*.initial_values=*/{nullptr, 0},
-      /*.header_types=*/nullptr,
-      /*.source_header_offsets=*/source_offsets,
-      /*.result_types=*/nullptr,
-      /*.result_count=*/0,
-      /*.source_result_offsets=*/source_offsets,
+      .initial_values = {nullptr, 0},
+      .header_types = nullptr,
+      .source_header_offsets = source_offsets,
+      .result_types = nullptr,
+      .result_count = 0,
+      .source_result_offsets = source_offsets,
   };
   loom_loop_like_replacement_t replacement = {};
   IREE_ASSERT_OK(loom_loop_like_build_replacement(
@@ -346,13 +346,13 @@ TEST_F(LoopLikeReplacementTest, PreservesSegmentedScfForPolicies) {
   const loom_type_t target_types[] = {f32, f32};
   const uint16_t source_offsets[] = {0, 2};
   const loom_loop_like_replacement_state_t target_state = {
-      /*.initial_values=*/{target_initial,
-                           (uint16_t)IREE_ARRAYSIZE(target_initial)},
-      /*.header_types=*/nullptr,
-      /*.source_header_offsets=*/source_offsets,
-      /*.result_types=*/target_types,
-      /*.result_count=*/(uint16_t)IREE_ARRAYSIZE(target_types),
-      /*.source_result_offsets=*/source_offsets,
+      .initial_values = {target_initial,
+                         (uint16_t)IREE_ARRAYSIZE(target_initial)},
+      .header_types = nullptr,
+      .source_header_offsets = source_offsets,
+      .result_types = target_types,
+      .result_count = (uint16_t)IREE_ARRAYSIZE(target_types),
+      .source_result_offsets = source_offsets,
   };
   loom_loop_like_replacement_t replacement = {};
   IREE_ASSERT_OK(loom_loop_like_build_replacement(
@@ -460,13 +460,13 @@ TEST_F(LoopLikeReplacementTest,
   const uint16_t source_header_offsets[] = {0, 2, 3, 4};
   const uint16_t source_result_offsets[] = {0, 1, 3, 4};
   const loom_loop_like_replacement_state_t target_state = {
-      /*.initial_values=*/{target_initial,
-                           (uint16_t)IREE_ARRAYSIZE(target_initial)},
-      /*.header_types=*/target_header_types,
-      /*.source_header_offsets=*/source_header_offsets,
-      /*.result_types=*/target_result_types,
-      /*.result_count=*/(uint16_t)IREE_ARRAYSIZE(target_result_types),
-      /*.source_result_offsets=*/source_result_offsets,
+      .initial_values = {target_initial,
+                         (uint16_t)IREE_ARRAYSIZE(target_initial)},
+      .header_types = target_header_types,
+      .source_header_offsets = source_header_offsets,
+      .result_types = target_result_types,
+      .result_count = (uint16_t)IREE_ARRAYSIZE(target_result_types),
+      .source_result_offsets = source_result_offsets,
   };
   loom_loop_like_replacement_t replacement = {};
   IREE_ASSERT_OK(loom_loop_like_build_replacement(
@@ -566,7 +566,7 @@ TEST_F(LoopLikeReplacementTest, CountedFactsTrackBoundReplacementAndCloning) {
   EXPECT_EQ(domain->step, shorter_upper);
 
   loom_ir_remap_options_t options = {
-      /*.allow_unmapped_values=*/true,
+      .allow_unmapped_values = true,
   };
   loom_ir_remap_t remap;
   IREE_ASSERT_OK(loom_ir_remap_initialize(module_, module_, &scratch_arena_,

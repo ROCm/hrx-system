@@ -69,28 +69,27 @@ static iree_status_t ProjectTestProfileFacts(
 }
 
 static const loom_target_profile_type_t kTestProfileType = {
-    /*.name=*/IREE_SVL("callgraph-specialization-test"),
-    /*.fact_type=*/&loom_test_target_fact_type,
-    /*.project_facts=*/ProjectTestProfileFacts,
+    .name = IREE_SVL("callgraph-specialization-test"),
+    .fact_type = &loom_test_target_fact_type,
+    .project_facts = ProjectTestProfileFacts,
 };
 
 static TestTargetProfile MakeTestProfile(uint32_t subgroup_size,
                                          bool subgroup_size_explicit = false) {
   return TestTargetProfile{
-      /*.base=*/
-      {
-          /*.type=*/&kTestProfileType,
-          /*.target_bundle=*/
-          loom_target_bundle_table_lookup(&loom_test_target_bundles,
-                                          LOOM_TEST_TARGET_KIND_LOW_CORE),
-      },
-      /*.subgroup_size=*/subgroup_size,
-      /*.subgroup_size_explicit=*/subgroup_size_explicit,
+      .base =
+          {
+              .type = &kTestProfileType,
+              .target_bundle = loom_target_bundle_table_lookup(
+                  &loom_test_target_bundles, LOOM_TEST_TARGET_KIND_LOW_CORE),
+          },
+      .subgroup_size = subgroup_size,
+      .subgroup_size_explicit = subgroup_size_explicit,
   };
 }
 
 static const loom_target_provider_t kTestProvider = {
-    /*.profile_type=*/&kTestProfileType,
+    .profile_type = &kTestProfileType,
 };
 
 static const loom_target_provider_t* const kTestProviders[] = {
@@ -171,7 +170,7 @@ class TargetCallgraphSpecializationTest : public ::testing::Test {
     IREE_ASSERT(name_id != LOOM_STRING_ID_INVALID);
     const loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
     IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
-    return loom_symbol_ref_t{/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    return loom_symbol_ref_t{.module_id = 0, .symbol_id = symbol_id};
   }
 
   loom_func_like_t Function(const loom_module_t* module,
@@ -227,11 +226,11 @@ class TargetCallgraphSpecializationTest : public ::testing::Test {
     SpecializationResult result(&version_arena_);
     IREE_CHECK_OK(loom_target_specialize_functions(&environment_, module,
                                                    {
-                                                       /*.values=*/requests,
-                                                       /*.count=*/request_count,
+                                                       .values = requests,
+                                                       .count = request_count,
                                                    },
-                                                   /*.bindings=*/{},
-                                                   /*.diagnostic_emitter=*/{},
+                                                   /*bindings=*/{},
+                                                   /*diagnostic_emitter=*/{},
                                                    &result.function_versions,
                                                    &result.error_count));
     EXPECT_EQ(result.error_count, 0u);
@@ -253,17 +252,18 @@ class TargetCallgraphSpecializationTest : public ::testing::Test {
         loom_target_callgraph_specialization_pass_info();
     std::vector<uint8_t> statistic_storage(
         pass_info->statistic_layout->storage_size, 0);
-    loom_pass_t pass = {};
-    pass.info = pass_info;
-    pass.module_run = loom_target_callgraph_specialization_run;
-    pass.instance_arena = &pass_arena;
-    pass.arena = &pass_arena;
-    pass.statistic_storage = statistic_storage.data();
-    pass.environment = &pass_environment;
+    loom_pass_t pass = {
+        .info = pass_info,
+        .module_run = loom_target_callgraph_specialization_run,
+        .instance_arena = &pass_arena,
+        .arena = &pass_arena,
+        .statistic_storage = statistic_storage.data(),
+        .environment = &pass_environment,
+    };
     if (collector != nullptr) {
       pass.diagnostic_emitter = {
-          /*.fn=*/CollectDiagnostic,
-          /*.user_data=*/collector,
+          .fn = CollectDiagnostic,
+          .user_data = collector,
       };
     }
     IREE_CHECK_OK(loom_target_callgraph_specialization_run(&pass, module));
@@ -321,12 +321,9 @@ func.def public @wide() -> (index) {
   const TestTargetProfile wave32 = MakeTestProfile(32);
   const TestTargetProfile wave64 = MakeTestProfile(64);
   const loom_target_specialization_request_t requests[] = {
-      {/*.function_name=*/IREE_SV("left"),
-       /*.target_profile=*/&wave32.base},
-      {/*.function_name=*/IREE_SV("right"),
-       /*.target_profile=*/&wave32.base},
-      {/*.function_name=*/IREE_SV("wide"),
-       /*.target_profile=*/&wave64.base},
+      {.function_name = IREE_SV("left"), .target_profile = &wave32.base},
+      {.function_name = IREE_SV("right"), .target_profile = &wave32.base},
+      {.function_name = IREE_SV("wide"), .target_profile = &wave64.base},
   };
   SpecializationResult specialization =
       Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
@@ -452,10 +449,8 @@ func.def public @wave64_root() {
   const TestTargetProfile wave32 = MakeTestProfile(32);
   const TestTargetProfile wave64 = MakeTestProfile(64);
   const loom_target_specialization_request_t requests[] = {
-      {/*.function_name=*/IREE_SV("wave32_root"),
-       /*.target_profile=*/&wave32.base},
-      {/*.function_name=*/IREE_SV("wave64_root"),
-       /*.target_profile=*/&wave64.base},
+      {.function_name = IREE_SV("wave32_root"), .target_profile = &wave32.base},
+      {.function_name = IREE_SV("wave64_root"), .target_profile = &wave64.base},
   };
   SpecializationResult specialization =
       Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
@@ -496,10 +491,14 @@ func.def public @explicit_root() -> (index) {
   const TestTargetProfile default_wave32 = MakeTestProfile(32);
   const TestTargetProfile explicit_wave32 = MakeTestProfile(32, true);
   const loom_target_specialization_request_t requests[] = {
-      {/*.function_name=*/IREE_SV("default_root"),
-       /*.target_profile=*/&default_wave32.base},
-      {/*.function_name=*/IREE_SV("explicit_root"),
-       /*.target_profile=*/&explicit_wave32.base},
+      {
+          .function_name = IREE_SV("default_root"),
+          .target_profile = &default_wave32.base,
+      },
+      {
+          .function_name = IREE_SV("explicit_root"),
+          .target_profile = &explicit_wave32.base,
+      },
   };
   SpecializationResult specialization =
       Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
@@ -548,8 +547,8 @@ func.def public @root() {
 )");
   const TestTargetProfile wave32 = MakeTestProfile(32);
   const loom_target_specialization_request_t request = {
-      /*.function_name=*/IREE_SV("root"),
-      /*.target_profile=*/&wave32.base,
+      .function_name = IREE_SV("root"),
+      .target_profile = &wave32.base,
   };
   SpecializationResult specialization = Specialize(module.get(), &request, 1);
 
@@ -614,10 +613,11 @@ func.def public @host() {
   const TestTargetProfile host_profile = MakeTestProfile(64);
   const TestTargetProfile device_profile = MakeTestProfile(32);
   const loom_target_specialization_request_t requests[] = {
-      {/*.function_name=*/IREE_SV("host"),
-       /*.target_profile=*/&host_profile.base},
-      {/*.function_name=*/IREE_SV("device_program"),
-       /*.target_profile=*/&device_profile.base},
+      {.function_name = IREE_SV("host"), .target_profile = &host_profile.base},
+      {
+          .function_name = IREE_SV("device_program"),
+          .target_profile = &device_profile.base,
+      },
   };
   SpecializationResult specialization =
       Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
@@ -726,10 +726,8 @@ func.def public @wave64_root() {
   const TestTargetProfile wave32 = MakeTestProfile(32);
   const TestTargetProfile wave64 = MakeTestProfile(64);
   const loom_target_specialization_request_t requests[] = {
-      {/*.function_name=*/IREE_SV("wave32_root"),
-       /*.target_profile=*/&wave32.base},
-      {/*.function_name=*/IREE_SV("wave64_root"),
-       /*.target_profile=*/&wave64.base},
+      {.function_name = IREE_SV("wave32_root"), .target_profile = &wave32.base},
+      {.function_name = IREE_SV("wave64_root"), .target_profile = &wave64.base},
   };
   SpecializationResult specialization =
       Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
@@ -773,8 +771,8 @@ func.def public @wave32_root() {
 )");
   const TestTargetProfile wave32 = MakeTestProfile(32);
   const loom_target_specialization_request_t request = {
-      /*.function_name=*/IREE_SV("wave32_root"),
-      /*.target_profile=*/&wave32.base,
+      .function_name = IREE_SV("wave32_root"),
+      .target_profile = &wave32.base,
   };
   SpecializationResult specialization = Specialize(module.get(), &request, 1);
   const iree_host_size_t symbol_count = module->symbols.count;

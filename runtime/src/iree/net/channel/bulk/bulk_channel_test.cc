@@ -51,8 +51,8 @@ struct SendCompletion {
 
   iree_net_send_completion_callback_t callback() {
     return {
-        /*.fn=*/Callback,
-        /*.user_data=*/this,
+        .fn = Callback,
+        .user_data = this,
     };
   }
 };
@@ -61,8 +61,8 @@ class TestEndpoint {
  public:
   iree_net_message_endpoint_t endpoint() {
     return {
-        /*.self=*/this,
-        /*.vtable=*/&vtable_,
+        .self = this,
+        .vtable = &vtable_,
     };
   }
 
@@ -99,8 +99,8 @@ class TestEndpoint {
   std::vector<const uint8_t*> last_borrowed_span_pointers;
   std::vector<std::vector<uint8_t>> sent_messages;
   iree_net_carrier_send_budget_t budget = {
-      /*.bytes=*/12345,
-      /*.slots=*/7,
+      .bytes = 12345,
+      .slots = 7,
   };
 
  private:
@@ -175,11 +175,11 @@ class TestEndpoint {
 };
 
 const iree_net_message_endpoint_vtable_t TestEndpoint::vtable_ = {
-    /*.set_callbacks=*/TestEndpoint::SetCallbacks,
-    /*.activate=*/TestEndpoint::Activate,
-    /*.deactivate=*/TestEndpoint::Deactivate,
-    /*.send=*/TestEndpoint::Send,
-    /*.query_send_budget=*/TestEndpoint::QuerySendBudget,
+    .set_callbacks = TestEndpoint::SetCallbacks,
+    .activate = TestEndpoint::Activate,
+    .deactivate = TestEndpoint::Deactivate,
+    .send = TestEndpoint::Send,
+    .query_send_budget = TestEndpoint::QuerySendBudget,
 };
 
 struct CallbackState {
@@ -265,13 +265,13 @@ struct CallbackState {
 
   iree_net_bulk_channel_callbacks_t callbacks() {
     return {
-        /*.on_start=*/OnStart,
-        /*.on_data=*/OnData,
-        /*.on_complete=*/OnComplete,
-        /*.on_abort=*/OnAbort,
-        /*.on_credit=*/OnCredit,
-        /*.on_error=*/OnError,
-        /*.user_data=*/this,
+        .on_start = OnStart,
+        .on_data = OnData,
+        .on_complete = OnComplete,
+        .on_abort = OnAbort,
+        .on_credit = OnCredit,
+        .on_error = OnError,
+        .user_data = this,
     };
   }
 };
@@ -662,8 +662,8 @@ class ConcurrentEndpoint {
  public:
   iree_net_message_endpoint_t endpoint() {
     return {
-        /*.self=*/this,
-        /*.vtable=*/&vtable_,
+        .self = this,
+        .vtable = &vtable_,
     };
   }
 
@@ -732,11 +732,11 @@ class ConcurrentEndpoint {
 };
 
 const iree_net_message_endpoint_vtable_t ConcurrentEndpoint::vtable_ = {
-    /*.set_callbacks=*/ConcurrentEndpoint::SetCallbacks,
-    /*.activate=*/ConcurrentEndpoint::Activate,
-    /*.deactivate=*/ConcurrentEndpoint::Deactivate,
-    /*.send=*/ConcurrentEndpoint::Send,
-    /*.query_send_budget=*/ConcurrentEndpoint::QuerySendBudget,
+    .set_callbacks = ConcurrentEndpoint::SetCallbacks,
+    .activate = ConcurrentEndpoint::Activate,
+    .deactivate = ConcurrentEndpoint::Deactivate,
+    .send = ConcurrentEndpoint::Send,
+    .query_send_budget = ConcurrentEndpoint::QuerySendBudget,
 };
 
 struct ConcurrentCompletion {
@@ -762,8 +762,8 @@ struct ConcurrentCompletion {
 
   iree_net_send_completion_callback_t callback() {
     return {
-        /*.fn=*/Callback,
-        /*.user_data=*/this,
+        .fn = Callback,
+        .user_data = this,
     };
   }
 };
@@ -788,9 +788,9 @@ TEST(BulkChannelConcurrencyTest, PeerCreditCompletesExactConcurrentDataCount) {
   std::atomic<int> completion_resource_exhausted_count{0};
   std::atomic<int> completion_unexpected_count{0};
   ConcurrentCompletion completion = {
-      /*.success_count=*/&completion_success_count,
-      /*.resource_exhausted_count=*/&completion_resource_exhausted_count,
-      /*.unexpected_count=*/&completion_unexpected_count,
+      .success_count = &completion_success_count,
+      .resource_exhausted_count = &completion_resource_exhausted_count,
+      .unexpected_count = &completion_unexpected_count,
   };
   std::vector<std::thread> threads;
   for (int thread_index = 0; thread_index < 8; ++thread_index) {

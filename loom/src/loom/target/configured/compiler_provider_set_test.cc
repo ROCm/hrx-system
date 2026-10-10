@@ -80,16 +80,17 @@ TEST(ConfiguredCompilerProviderSetTest, NativeCpuSelectionUsesDeviceFacts) {
   IREE_ASSERT_OK(loom_target_environment_initialize(
       loom_configured_compiler_provider_set(), &environment));
   const loom_target_specification_t scalar_specification = {
-      /*.family=*/IREE_SVL("x86"),
-      /*.selector=*/IREE_SVL("scalar"),
+      .family = IREE_SVL("x86"),
+      .selector = IREE_SVL("scalar"),
   };
   const loom_target_profile_t* scalar_profile = nullptr;
   IREE_ASSERT_OK(loom_target_environment_select_profile(
       &environment, &scalar_specification, &scalar_profile));
 
   // No optional ISA features are promised by this execution device.
-  iree_cpu_data_t cpu_data = {};
-  cpu_data.architecture = IREE_CPU_ARCHITECTURE_X86_64;
+  iree_cpu_data_t cpu_data = {
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+  };
   loom_target_profile_selection_t selected = {};
   IREE_ASSERT_OK(loom_target_environment_select_cpu_profile(
       &environment, &cpu_data, nullptr, nullptr, &selected,

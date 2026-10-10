@@ -78,8 +78,8 @@ class LinkFuncContractProjectionTest : public ::testing::Test {
   loom_module_t* Parse(iree_string_view_t source, iree_string_view_t filename) {
     loom_module_t* module = nullptr;
     const loom_text_parse_options_t options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 20,
     };
     IREE_CHECK_OK(loom_text_parse(source, filename, &context_, &block_pool_,
                                   &options, &module));
@@ -113,8 +113,8 @@ class LinkFuncContractProjectionTest : public ::testing::Test {
     IndexPtr index(raw_index);
 
     const loom_link_module_index_add_options_t input_options = {
-        /*.provider_name=*/IREE_SV("input"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = IREE_SV("input"),
+        .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
     };
     IREE_CHECK_OK(loom_link_module_index_add_text(
         index.get(), input_source_, IREE_SV("input.loom"),
@@ -124,8 +124,8 @@ class LinkFuncContractProjectionTest : public ::testing::Test {
     loom_module_t* library = Parse(library_source_, IREE_SV("library.loom"));
     library_bytes_ = WriteModule(library);
     const loom_link_module_index_add_options_t library_options = {
-        /*.provider_name=*/IREE_SV("library"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+        .provider_name = IREE_SV("library"),
+        .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
     };
     IREE_CHECK_OK(loom_link_module_index_add_bytecode(
         index.get(),

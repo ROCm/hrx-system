@@ -12,10 +12,11 @@ namespace {
 
 amdf_endpoint_info_t MakeXdnaEndpointInfo(uint32_t device_id,
                                           uint32_t revision_id) {
-  amdf_endpoint_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
-  info.structure_size = sizeof(info);
-  info.engine_kind = AMDF_ENGINE_KIND_XDNA;
+  amdf_endpoint_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+      .structure_size = sizeof(info),
+      .engine_kind = AMDF_ENGINE_KIND_XDNA,
+  };
   info.pci.vendor_id = 0x1022u;
   info.pci.device_id = device_id;
   info.pci.revision_id = revision_id;
@@ -79,14 +80,11 @@ TEST(XdnaDeviceProfileTest, IdentityDoesNotPromiseExecution) {
 TEST(XdnaDeviceProfileTest, UnknownIdentityLeavesOutputsUnchanged) {
   for (uint32_t device_id : {0x17F0u, 0x17F1u}) {
     const auto endpoint = MakeXdnaEndpointInfo(device_id, 0x12u);
-    amdf_xdna_endpoint_info_t identity = {};
-    identity.architecture = UINT32_MAX;
+    amdf_xdna_endpoint_info_t identity = {.architecture = UINT32_MAX};
     EXPECT_FALSE(amdf_xdna_query_endpoint_info(&endpoint, &identity));
     EXPECT_EQ(identity.architecture, UINT32_MAX);
-    amdf_xdna_device_info_t info = {};
-    info.reset_epoch = UINT64_MAX;
-    amdf_xdna_device_profile_t profile = {};
-    profile.execution_capabilities = UINT64_MAX;
+    amdf_xdna_device_info_t info = {.reset_epoch = UINT64_MAX};
+    amdf_xdna_device_profile_t profile = {.execution_capabilities = UINT64_MAX};
     EXPECT_FALSE(
         amdf_xdna_device_profile_initialize(&endpoint, &info, &profile));
     EXPECT_EQ(info.reset_epoch, UINT64_MAX);

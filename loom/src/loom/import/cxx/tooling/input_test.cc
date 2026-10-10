@@ -138,10 +138,11 @@ TEST_F(InputTest, CapturedHeaderMacroSpellingOutlivesSourceOwners) {
   source.replace(source.find("source_capture.h"),
                  std::strlen("source_capture.h"), header_filename);
   IREE_ASSERT_OK(Write(header.path(), header_source));
-  loom_input_request_t request = {};
-  request.source = View(source);
-  request.path = IREE_SV("capture.cxx-test");
-  request.options = IREE_SV("root=captured_sum");
+  loom_input_request_t request = {
+      .source = View(source),
+      .path = IREE_SV("capture.cxx-test"),
+      .options = IREE_SV("root=captured_sum"),
+  };
   IREE_ASSERT_OK(Load(request));
   ASSERT_NE(input_.module, nullptr);
   source.assign(source.size(), '?');
@@ -198,10 +199,11 @@ TEST_F(InputTest, HeaderSnapshotsSurviveFrontendAndFilesystemChanges) {
   const std::string original_source = source;
   const std::string map = directory + "=/logical";
   const iree_string_view_t maps[] = {View(map)};
-  loom_input_request_t request = {};
-  request.source = View(source);
-  request.path = main.path_view();
-  request.options = IREE_SV("root=entry");
+  loom_input_request_t request = {
+      .source = View(source),
+      .path = main.path_view(),
+      .options = IREE_SV("root=entry"),
+  };
   request.source_path_options.prefix_maps = {IREE_ARRAYSIZE(maps), maps};
   IREE_ASSERT_OK(Load(request));
   ASSERT_NE(input_.module, nullptr);
@@ -248,17 +250,19 @@ TEST_F(InputTest, RemappingCannotMergeSourceIdentities) {
   const std::string header_map = header.path() + "=same";
   const iree_string_view_t maps[] = {IREE_SV("main.cxx-test=same"),
                                      View(header_map)};
-  loom_input_request_t request = {};
-  request.source = View(source);
-  request.path = IREE_SV("main.cxx-test");
+  loom_input_request_t request = {
+      .source = View(source),
+      .path = IREE_SV("main.cxx-test"),
+  };
   request.source_path_options.prefix_maps = {IREE_ARRAYSIZE(maps), maps};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Load(request));
   EXPECT_EQ(input_.module, nullptr);
 }
 
 TEST_F(InputTest, OptionsAndFailuresUseNativeAdmission) {
-  loom_input_request_t request = {};
-  request.path = IREE_SV("source.cxx-test");
+  loom_input_request_t request = {
+      .path = IREE_SV("source.cxx-test"),
+  };
   request.source = IREE_SV(
       "static_assert(sizeof(long) == 4); int entry() { return VALUE; }\n"
       "int unused() { return 9; }\n");
@@ -363,8 +367,7 @@ TEST_F(InputTest, UpdatePreservesInputAndIsIdempotent) {
       "constexpr int count = sizeof(R\"(a\n// kept in the string\nb)\");\n"
       "int entry() { return count; }\n";
   IREE_ASSERT_OK(Write(path.path(), source));
-  loom_check_process_options_t options = {};
-  options.mode = LOOM_CHECK_PROCESS_UPDATE;
+  loom_check_process_options_t options = {.mode = LOOM_CHECK_PROCESS_UPDATE};
   iree_host_size_t passed = 0, failed = 0, skipped = 0;
   IREE_ASSERT_OK(loom_check_read_and_process(
       path.path_view(), &options, &environment_, &context_, &pool_,

@@ -16,10 +16,7 @@ namespace {
 template <typename Record, typename Execute>
 uint64_t ExecuteBinary(Execute execute, uint64_t lhs, uint64_t rhs) {
   uint64_t values[] = {lhs, rhs};
-  Record record = {};
-  record.destination_v8 = 0;
-  record.left_v8 = 0;
-  record.right_v8 = 1;
+  Record record = {.destination_v8 = 0, .left_v8 = 0, .right_v8 = 1};
   execute(&record, values);
   return values[0];
 }
@@ -27,9 +24,7 @@ uint64_t ExecuteBinary(Execute execute, uint64_t lhs, uint64_t rhs) {
 template <typename Record, typename Execute>
 uint64_t ExecuteUnary(Execute execute, uint64_t source) {
   uint64_t values[] = {source};
-  Record record = {};
-  record.destination_v8 = 0;
-  record.source_v8 = 0;
+  Record record = {.destination_v8 = 0, .source_v8 = 0};
   execute(&record, values);
   return values[0];
 }
@@ -38,11 +33,12 @@ template <typename Record, typename Execute>
 uint64_t ExecuteMinMax(Execute execute, uint64_t lhs, uint64_t rhs,
                        uint8_t selector) {
   uint64_t values[] = {lhs, rhs};
-  Record record = {};
-  record.destination_v8 = 1;
-  record.left_v8 = 0;
-  record.right_v8 = 1;
-  record.selector_u8 = selector;
+  Record record = {
+      .destination_v8 = 1,
+      .left_v8 = 0,
+      .right_v8 = 1,
+      .selector_u8 = selector,
+  };
   execute(&record, values);
   return values[1];
 }
@@ -51,11 +47,12 @@ template <typename Record, typename Execute>
 uint64_t ExecuteCompare(Execute execute, uint64_t lhs, uint64_t rhs,
                         uint8_t predicate) {
   uint64_t values[] = {lhs, rhs};
-  Record record = {};
-  record.destination_v8 = 0;
-  record.left_v8 = 0;
-  record.right_v8 = 1;
-  record.predicate_u8 = predicate;
+  Record record = {
+      .destination_v8 = 0,
+      .left_v8 = 0,
+      .right_v8 = 1,
+      .predicate_u8 = predicate,
+  };
   execute(&record, values);
   return values[0];
 }
@@ -63,10 +60,11 @@ uint64_t ExecuteCompare(Execute execute, uint64_t lhs, uint64_t rhs,
 template <typename Record, typename Execute>
 uint64_t ExecuteClassify(Execute execute, uint64_t source, uint8_t selector) {
   uint64_t values[] = {source};
-  Record record = {};
-  record.destination_v8 = 0;
-  record.source_v8 = 0;
-  record.selector_u8 = selector;
+  Record record = {
+      .destination_v8 = 0,
+      .source_v8 = 0,
+      .selector_u8 = selector,
+  };
   execute(&record, values);
   return values[0];
 }
@@ -75,12 +73,13 @@ template <typename Record, typename Execute>
 uint64_t ExecuteClamp(Execute execute, uint64_t value, uint64_t lower,
                       uint64_t upper, uint8_t mode) {
   uint64_t values[] = {value, lower, upper};
-  Record record = {};
-  record.destination_v8 = 1;
-  record.value_v8 = 0;
-  record.lower_v8 = 1;
-  record.upper_v8 = 2;
-  record.mode_u8 = mode;
+  Record record = {
+      .destination_v8 = 1,
+      .value_v8 = 0,
+      .lower_v8 = 1,
+      .upper_v8 = 2,
+      .mode_u8 = mode,
+  };
   execute(&record, values);
   return values[1];
 }

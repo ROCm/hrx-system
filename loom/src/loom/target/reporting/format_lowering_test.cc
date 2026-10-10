@@ -22,16 +22,17 @@ static loom_native_contraction_role_facts_t MakeNativeContractionRoleFacts(
     loom_contract_operand_role_t role, uint16_t element_bit_count,
     uint16_t payload_element_count, uint32_t physical_position_count,
     uint16_t owner_multiplicity) {
-  loom_native_contraction_role_facts_t facts = {};
-  facts.role = role;
-  facts.evidence = LOOM_NATIVE_LAYOUT_EVIDENCE_EXACT;
-  facts.element_bit_count = element_bit_count;
-  facts.register_count = 8;
-  facts.payload_element_count = payload_element_count;
-  facts.physical_position_count = physical_position_count;
-  facts.logical_coordinate_count = 256;
-  facts.owner_multiplicity_minimum = owner_multiplicity;
-  facts.owner_multiplicity_maximum = owner_multiplicity;
+  loom_native_contraction_role_facts_t facts = {
+      .role = role,
+      .evidence = LOOM_NATIVE_LAYOUT_EVIDENCE_EXACT,
+      .element_bit_count = element_bit_count,
+      .register_count = 8,
+      .payload_element_count = payload_element_count,
+      .physical_position_count = physical_position_count,
+      .logical_coordinate_count = 256,
+      .owner_multiplicity_minimum = owner_multiplicity,
+      .owner_multiplicity_maximum = owner_multiplicity,
+  };
   return facts;
 }
 
@@ -58,12 +59,13 @@ static loom_native_transition_owner_factor_t MakeNativeTransitionOwnerFactor(
     loom_native_physical_dimension_t source_owner_dimension,
     uint32_t destination_divisor, uint32_t destination_modulus,
     uint32_t source_owner_multiplier) {
-  loom_native_transition_owner_factor_t factor = {};
-  factor.destination_dimension = destination_dimension;
-  factor.source_owner_dimension = source_owner_dimension;
-  factor.destination_divisor = destination_divisor;
-  factor.destination_modulus = destination_modulus;
-  factor.source_owner_multiplier = source_owner_multiplier;
+  loom_native_transition_owner_factor_t factor = {
+      .destination_dimension = destination_dimension,
+      .source_owner_dimension = source_owner_dimension,
+      .destination_divisor = destination_divisor,
+      .destination_modulus = destination_modulus,
+      .source_owner_multiplier = source_owner_multiplier,
+  };
   return factor;
 }
 
@@ -84,17 +86,18 @@ static const loom_native_transition_owner_factor_t
 };
 
 static loom_native_transition_facts_t MakeNativeTransitionFacts() {
-  loom_native_transition_facts_t facts = {};
-  facts.source_role = LOOM_CONTRACT_OPERAND_ROLE_RESULT;
-  facts.destination_role = LOOM_CONTRACT_OPERAND_ROLE_RHS;
-  facts.destination_position_count = 512;
-  facts.participant_change_count = 256;
-  facts.local_position_change_count = 480;
-  facts.destination_positions_per_source_minimum = 2;
-  facts.destination_positions_per_source_maximum = 2;
-  facts.source_owner_factors = kNativeTransitionOwnerFactors;
-  facts.source_owner_factor_count =
-      IREE_ARRAYSIZE(kNativeTransitionOwnerFactors);
+  loom_native_transition_facts_t facts = {
+      .source_role = LOOM_CONTRACT_OPERAND_ROLE_RESULT,
+      .destination_role = LOOM_CONTRACT_OPERAND_ROLE_RHS,
+      .destination_position_count = 512,
+      .participant_change_count = 256,
+      .local_position_change_count = 480,
+      .destination_positions_per_source_minimum = 2,
+      .destination_positions_per_source_maximum = 2,
+      .source_owner_factors = kNativeTransitionOwnerFactors,
+      .source_owner_factor_count =
+          IREE_ARRAYSIZE(kNativeTransitionOwnerFactors),
+  };
   return facts;
 }
 
@@ -146,47 +149,48 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   report.source_low_selected_op_count = 4;
   report.source_low_emitted_op_count = 5;
 
-  loom_target_compile_report_source_low_row_t selection = {};
-  selection.function_name = IREE_SVL("branchy");
-  selection.source_op_name = IREE_SVL("scalar.addi");
-  selection.source_op_kind = 42;
-  selection.selection_kind =
-      LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_SELECTION_RULE;
-  selection.plan_key = IREE_SVL("test.scalar_addi.strategy.native");
-  selection.native_contraction_facts = &kNativeContractionFacts;
-  selection.native_transition_facts = &kNativeTransitionFacts;
-  selection.native_transition_source_type = LOOM_SCALAR_TYPE_F32;
-  selection.native_transition_destination_type = LOOM_SCALAR_TYPE_F16;
-  selection.descriptor_key = IREE_SVL("test.add.i32");
-  selection.descriptor_semantic_tag = IREE_SVL("integer.add.i32");
-  selection.emitted_low_op_count = 1;
+  loom_target_compile_report_source_low_row_t selection = {
+      .function_name = IREE_SVL("branchy"),
+      .source_op_name = IREE_SVL("scalar.addi"),
+      .source_op_kind = 42,
+      .selection_kind = LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_SELECTION_RULE,
+      .plan_key = IREE_SVL("test.scalar_addi.strategy.native"),
+      .native_contraction_facts = &kNativeContractionFacts,
+      .native_transition_facts = &kNativeTransitionFacts,
+      .native_transition_source_type = LOOM_SCALAR_TYPE_F32,
+      .native_transition_destination_type = LOOM_SCALAR_TYPE_F16,
+      .descriptor_key = IREE_SVL("test.add.i32"),
+      .descriptor_semantic_tag = IREE_SVL("integer.add.i32"),
+      .emitted_low_op_count = 1,
+  };
   IREE_ASSERT_OK(
       loom_target_compile_report_record_source_low_row(&report, &selection));
 
-  loom_target_compile_report_source_low_memory_row_t memory = {};
-  memory.function_name = IREE_SVL("branchy");
-  memory.source_op_name = IREE_SVL("vector.load");
-  memory.source_op_kind = 43;
-  memory.source_root_name = IREE_SVL("lhs");
-  memory.source_root_argument_index = 0;
-  memory.memory_space = IREE_SVL("workgroup");
-  memory.operation_kind = IREE_SVL("load");
-  memory.packet_key = IREE_SVL("amdgpu.ds_read2_b32");
-  memory.strategy_key = IREE_SVL("ds_2addr_memory_report");
-  memory.address_form = IREE_SVL("ds_2addr");
-  memory.dynamic_term_kind = IREE_SVL("vaddr");
-  memory.fallback_reason = IREE_SVL("cross_wave_workgroup");
-  memory.element_byte_count = 4;
-  memory.vector_lane_count = 2;
-  memory.issued_read_byte_count = 8;
-  memory.dynamic_stride_bytes = 32;
-  memory.vector_lane_stride_bytes = 8;
-  memory.storage_element_format = IREE_SVL("f8e4m3fn");
-  memory.storage_scale_format = IREE_SVL("f32");
-  memory.storage_payload_packing = IREE_SVL("dense_lanes");
-  memory.storage_scale_topology = IREE_SVL("block_1d");
-  memory.storage_affine_policy = IREE_SVL("scale_only");
-  memory.storage_rounding_policy = IREE_SVL("finite_only");
+  loom_target_compile_report_source_low_memory_row_t memory = {
+      .function_name = IREE_SVL("branchy"),
+      .source_op_name = IREE_SVL("vector.load"),
+      .source_op_kind = 43,
+      .source_root_name = IREE_SVL("lhs"),
+      .source_root_argument_index = 0,
+      .memory_space = IREE_SVL("workgroup"),
+      .operation_kind = IREE_SVL("load"),
+      .packet_key = IREE_SVL("amdgpu.ds_read2_b32"),
+      .strategy_key = IREE_SVL("ds_2addr_memory_report"),
+      .address_form = IREE_SVL("ds_2addr"),
+      .dynamic_term_kind = IREE_SVL("vaddr"),
+      .fallback_reason = IREE_SVL("cross_wave_workgroup"),
+      .element_byte_count = 4,
+      .vector_lane_count = 2,
+      .issued_read_byte_count = 8,
+      .dynamic_stride_bytes = 32,
+      .vector_lane_stride_bytes = 8,
+      .storage_element_format = IREE_SVL("f8e4m3fn"),
+      .storage_scale_format = IREE_SVL("f32"),
+      .storage_payload_packing = IREE_SVL("dense_lanes"),
+      .storage_scale_topology = IREE_SVL("block_1d"),
+      .storage_affine_policy = IREE_SVL("scale_only"),
+      .storage_rounding_policy = IREE_SVL("finite_only"),
+  };
   memory.bank_service.proof = IREE_SVL("exact");
   memory.bank_service.classification = IREE_SVL("conflicted");
   memory.bank_service.model_key = IREE_SVL("test.ds_read_b128");
@@ -220,9 +224,9 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   memory.subgroup_access.active_lane_count = 32;
   memory.subgroup_access.lane_term_count = 1;
   memory.subgroup_access.lane_terms[0] = {
-      /*.divisor=*/1,
-      /*.modulus=*/0,
-      /*.byte_stride=*/64,
+      .divisor = 1,
+      .modulus = 0,
+      .byte_stride = 64,
   };
   memory.subgroup_access.per_lane_packet_byte_count = 8;
   memory.subgroup_access.linear_lane_byte_stride = 64;
@@ -240,7 +244,7 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_text(&report, &options, &builder));
@@ -435,12 +439,12 @@ TEST(CompileReportFormatTest,
     loom_target_compile_report_initialize(&entry, iree_allocator_system());
     entry.function_name =
         entry_index == 0 ? IREE_SV("first") : IREE_SV("second");
-    loom_target_compile_report_source_low_row_t selection = {};
-    selection.function_name = IREE_SVL("multiply");
-    selection.source_op_name = IREE_SVL("scalar.mulf");
-    selection.selection_kind =
-        LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_SELECTION_PLAN;
-    selection.plan_key = IREE_SVL("exact_binary32");
+    loom_target_compile_report_source_low_row_t selection = {
+        .function_name = IREE_SVL("multiply"),
+        .source_op_name = IREE_SVL("scalar.mulf"),
+        .selection_kind = LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_SELECTION_PLAN,
+        .plan_key = IREE_SVL("exact_binary32"),
+    };
     for (uint32_t operation_index = 0; operation_index < 100;
          ++operation_index) {
       selection.emitted_low_op_count =
@@ -467,7 +471,7 @@ TEST(CompileReportFormatTest,
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -491,10 +495,11 @@ TEST(CompileReportFormatTest, LegalizationPeaksDoNotRequireDetailedRows) {
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   for (uint64_t created_op_count : {40, 2}) {
-    loom_target_compile_report_math_row_t math = {};
-    math.action = LOOM_TARGET_COMPILE_REPORT_MATH_ACTION_REWRITTEN;
-    math.created_op_count = created_op_count;
-    math.erased_op_count = 1;
+    loom_target_compile_report_math_row_t math = {
+        .action = LOOM_TARGET_COMPILE_REPORT_MATH_ACTION_REWRITTEN,
+        .created_op_count = created_op_count,
+        .erased_op_count = 1,
+    };
     IREE_ASSERT_OK(loom_target_compile_report_record_math_row(&report, &math));
     loom_target_compile_report_record_legalization_summary(
         &report, LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_REWRITTEN,
@@ -508,7 +513,7 @@ TEST(CompileReportFormatTest, LegalizationPeaksDoNotRequireDetailedRows) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -528,17 +533,18 @@ TEST(CompileReportFormatTest, KeepsUnmodeledBankCoverageWithoutAModel) {
   loom_target_compile_report_t entry_report = {};
   loom_target_compile_report_initialize(&entry_report, iree_allocator_system());
   entry_report.function_name = IREE_SVL("kernel");
-  loom_target_compile_report_source_low_memory_row_t memory = {};
-  memory.function_name = entry_report.function_name;
-  memory.source_op_name = IREE_SVL("vector.load");
-  memory.source_root_name = IREE_SVL("scratch");
-  memory.source_root_argument_index = UINT16_MAX;
-  memory.memory_space = IREE_SVL("workgroup");
-  memory.operation_kind = IREE_SVL("load");
-  memory.packet_key = IREE_SVL("test.lds.load.i32");
-  memory.element_byte_count = 4;
-  memory.vector_lane_count = 1;
-  memory.issued_read_byte_count = 4;
+  loom_target_compile_report_source_low_memory_row_t memory = {
+      .function_name = entry_report.function_name,
+      .source_op_name = IREE_SVL("vector.load"),
+      .source_root_name = IREE_SVL("scratch"),
+      .source_root_argument_index = UINT16_MAX,
+      .memory_space = IREE_SVL("workgroup"),
+      .operation_kind = IREE_SVL("load"),
+      .packet_key = IREE_SVL("test.lds.load.i32"),
+      .element_byte_count = 4,
+      .vector_lane_count = 1,
+      .issued_read_byte_count = 4,
+  };
   memory.bank_service.proof = IREE_SVL("unmodeled");
   memory.bank_service.unknown_reason = IREE_SVL("target-model-unavailable");
   memory.bank_service.wave_size = 32;
@@ -555,7 +561,7 @@ TEST(CompileReportFormatTest, KeepsUnmodeledBankCoverageWithoutAModel) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -583,57 +589,57 @@ TEST(CompileReportFormatTest, FormatsMathAndTargetLegalization) {
       LOOM_TARGET_COMPILE_REPORT_DETAIL_MATH_LEGALIZATION_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_LEGALIZATION_ROWS;
 
-  loom_target_compile_report_math_row_t math = {};
-  math.function_name = IREE_SVL("branchy");
-  math.source_op_name = IREE_SVL("scalar.roundf");
-  math.source_op_kind = 44;
-  math.target_bundle_name = IREE_SVL("test_target");
-  math.target_config_name = IREE_SVL("test_o0");
-  math.policy_name = IREE_SVL("amdgpu-math");
-  math.constraint_key = IREE_SVL("math.recipe.round_away");
-  math.math_op = LOOM_TARGET_MATH_OP_ROUNDF;
-  math.lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR;
-  math.element_type = LOOM_SCALAR_TYPE_F32;
-  math.action = LOOM_TARGET_COMPILE_REPORT_MATH_ACTION_REWRITTEN;
-  math.recipe = LOOM_TARGET_MATH_RECIPE_ROUND_AWAY;
-  math.created_op_count = 10;
-  math.erased_op_count = 1;
+  loom_target_compile_report_math_row_t math = {
+      .function_name = IREE_SVL("branchy"),
+      .source_op_name = IREE_SVL("scalar.roundf"),
+      .source_op_kind = 44,
+      .target_bundle_name = IREE_SVL("test_target"),
+      .target_config_name = IREE_SVL("test_o0"),
+      .policy_name = IREE_SVL("amdgpu-math"),
+      .constraint_key = IREE_SVL("math.recipe.round_away"),
+      .math_op = LOOM_TARGET_MATH_OP_ROUNDF,
+      .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+      .element_type = LOOM_SCALAR_TYPE_F32,
+      .action = LOOM_TARGET_COMPILE_REPORT_MATH_ACTION_REWRITTEN,
+      .recipe = LOOM_TARGET_MATH_RECIPE_ROUND_AWAY,
+      .created_op_count = 10,
+      .erased_op_count = 1,
+  };
   IREE_ASSERT_OK(loom_target_compile_report_record_math_row(&report, &math));
 
-  loom_target_compile_report_legalization_row_t legalization = {};
-  legalization.function_name = IREE_SVL("branchy");
-  legalization.source_op_name = IREE_SVL("vector.reduce.axes");
-  legalization.source_op_kind = 73;
-  legalization.target_bundle_name = IREE_SVL("test_target");
-  legalization.target_config_name = IREE_SVL("test_o0");
-  legalization.legalizer_name = IREE_SVL("vector");
-  legalization.legalizer_strategy =
-      LOOM_TARGET_COMPILE_REPORT_LEGALIZER_STRATEGY_REFERENCE;
-  legalization.mode = LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_MODE_FINAL;
-  legalization.policy =
-      LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_POLICY_REFERENCE_ONLY;
-  legalization.action =
-      LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_REWRITTEN;
-  legalization.scalarized = true;
-  legalization.legalization_outcome =
-      LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_OUTCOME_REFERENCE_FALLBACK;
-  legalization.contract_outcome =
-      LOOM_TARGET_COMPILE_REPORT_CONTRACT_OUTCOME_UNSUPPORTED;
-  legalization.descriptor_key = IREE_SVL("test.legalized.descriptor");
-  legalization.source_rejection_bits = 0x1;
-  legalization.source_rejection_detail = kTestSourceRejectionDetail;
-  legalization.target_rejection_bits = 0x2;
-  legalization.missing_feature_bits = 0x4;
-  legalization.missing_fact_bits = 0x8;
-  legalization.created_op_count = 6;
-  legalization.erased_op_count = 1;
+  loom_target_compile_report_legalization_row_t legalization = {
+      .function_name = IREE_SVL("branchy"),
+      .source_op_name = IREE_SVL("vector.reduce.axes"),
+      .source_op_kind = 73,
+      .target_bundle_name = IREE_SVL("test_target"),
+      .target_config_name = IREE_SVL("test_o0"),
+      .legalizer_name = IREE_SVL("vector"),
+      .legalizer_strategy =
+          LOOM_TARGET_COMPILE_REPORT_LEGALIZER_STRATEGY_REFERENCE,
+      .mode = LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_MODE_FINAL,
+      .policy = LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_POLICY_REFERENCE_ONLY,
+      .action = LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_REWRITTEN,
+      .scalarized = true,
+      .legalization_outcome =
+          LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_OUTCOME_REFERENCE_FALLBACK,
+      .contract_outcome =
+          LOOM_TARGET_COMPILE_REPORT_CONTRACT_OUTCOME_UNSUPPORTED,
+      .descriptor_key = IREE_SVL("test.legalized.descriptor"),
+      .source_rejection_bits = 0x1,
+      .source_rejection_detail = kTestSourceRejectionDetail,
+      .target_rejection_bits = 0x2,
+      .missing_feature_bits = 0x4,
+      .missing_fact_bits = 0x8,
+      .created_op_count = 6,
+      .erased_op_count = 1,
+  };
   IREE_ASSERT_OK(loom_target_compile_report_record_legalization_row(
       &report, &legalization));
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_text(&report, &options, &builder));

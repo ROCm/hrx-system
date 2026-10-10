@@ -86,9 +86,10 @@ TEST_P(AqlTimestampTest, ConfirmedClockSamplesAreVisibleBeforeReuse) {
   // separately permits the clock-source COPY_DATA form.
   const amdf_memory_site_t output_device = output->DeviceSite(family_.ordinal);
   const amdf_memory_site_t output_host = output->HostSite();
-  amdf_memory_pair_info_t egress = {};
-  egress.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-  egress.structure_size = sizeof(egress);
+  amdf_memory_pair_info_t egress = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(egress),
+  };
   ASSERT_EQ(api_->memory_query_pair_info(&output_device, &output_host, &egress),
             AMDF_STATUS_OK);
   ASSERT_NE(egress.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);
@@ -182,9 +183,7 @@ TEST_P(AqlTimestampTest, ConfirmedClockSamplesAreVisibleBeforeReuse) {
     initial_output[kTimestampIndices[1]] = 0;
     std::memcpy(output->host.pointer, initial_output.data(),
                 sizeof(initial_output));
-    aql::Signal initial_signal = {};
-    initial_signal.kind = 1;
-    initial_signal.value = 1;
+    aql::Signal initial_signal = {.kind = 1, .value = 1};
     std::memcpy(completion->host.pointer, &initial_signal,
                 sizeof(initial_signal));
     initial_completion_guards.fill(0x68d329b7u + static_cast<uint32_t>(epoch));

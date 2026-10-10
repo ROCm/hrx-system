@@ -188,12 +188,12 @@ static iree_hal_vulkan_features_t NoFeatures() { return {}; }
 
 static iree_hal_vulkan_features_t GeneralFeatures(
     iree_hal_vulkan_general_features_t general) {
-  return {/*.general=*/general, /*.atomics=*/0};
+  return {.general = general, .atomics = 0};
 }
 
 static iree_hal_vulkan_features_t AtomicFeatures(
     iree_hal_vulkan_shader_atomic_features_t atomics) {
-  return {/*.general=*/0, /*.atomics=*/atomics};
+  return {.general = 0, .atomics = atomics};
 }
 
 static iree_hal_vulkan_external_device_params_t DefaultExternalParams() {

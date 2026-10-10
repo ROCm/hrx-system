@@ -707,15 +707,21 @@ TEST(WindowsXdnaMemoryPairTest, RejectsUnqualifiedFamiliesWithoutOutput) {
       .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
   };
   const amdf_queue_family_info_t families[] = {
-      {.command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
-       .format_version = AMDF_XDNA_QUEUE_FORMAT_VERSION_1,
-       .roles = AMDF_QUEUE_ROLE_COMPUTE},
-      {.command_type = AMDF_QUEUE_COMMAND_TYPE_XDNA,
-       .format_version = AMDF_XDNA_QUEUE_FORMAT_VERSION_1 + 1,
-       .roles = AMDF_QUEUE_ROLE_COMPUTE},
-      {.command_type = AMDF_QUEUE_COMMAND_TYPE_XDNA,
-       .format_version = AMDF_XDNA_QUEUE_FORMAT_VERSION_1,
-       .roles = AMDF_QUEUE_ROLE_TRANSFER},
+      {
+          .command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+          .format_version = AMDF_XDNA_QUEUE_FORMAT_VERSION_1,
+          .roles = AMDF_QUEUE_ROLE_COMPUTE,
+      },
+      {
+          .command_type = AMDF_QUEUE_COMMAND_TYPE_XDNA,
+          .format_version = AMDF_XDNA_QUEUE_FORMAT_VERSION_1 + 1,
+          .roles = AMDF_QUEUE_ROLE_COMPUTE,
+      },
+      {
+          .command_type = AMDF_QUEUE_COMMAND_TYPE_XDNA,
+          .format_version = AMDF_XDNA_QUEUE_FORMAT_VERSION_1,
+          .roles = AMDF_QUEUE_ROLE_TRANSFER,
+      },
   };
   for (const auto& family : families) {
     amdf_memory_site_query_t query = {

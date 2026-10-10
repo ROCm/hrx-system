@@ -312,6 +312,11 @@ def _filtered_copts(cxxflags):
             continue
         if flag.startswith("-I"):
             continue
+
+        # The consuming first-party target owns its language mode. llvm-config
+        # reports how LLVM itself was built, which may be an older standard.
+        if flag.startswith("-std="):
+            continue
         filtered.append(flag)
     return filtered
 

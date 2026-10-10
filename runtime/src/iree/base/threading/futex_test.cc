@@ -266,8 +266,8 @@ static const iree_test_role_t kSharedFutexRoles[] = {
     {"receiver", ReceiverRole, /*signals_ready=*/false},
 };
 static const iree_coordinated_test_config_t kSharedFutexConfig = {
-    /*.roles=*/kSharedFutexRoles,
-    /*.role_count=*/IREE_ARRAYSIZE(kSharedFutexRoles),
+    .roles = kSharedFutexRoles,
+    .role_count = IREE_ARRAYSIZE(kSharedFutexRoles),
 };
 IREE_COORDINATED_TEST_REGISTER(kSharedFutexConfig);
 

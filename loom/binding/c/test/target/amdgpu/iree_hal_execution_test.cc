@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "test/target/iree_hal_execution.h"
-
 #include <array>
 #include <cstdint>
 
@@ -15,6 +13,7 @@
 #include "loomc/loomc.h"
 #include "loomc/target/amdgpu.h"
 #include "loomc/target/amdgpu/iree_hal.h"
+#include "test/target/iree_hal_execution_test_util.h"
 #include "test/util.h"
 
 namespace {
@@ -177,25 +176,26 @@ loomc::testing::target::IreeHalKernelExecutionTarget MakeExecutionTarget(
       loomc_amdgpu_iree_hal_target_provider(),
   };
 
-  loomc::testing::target::IreeHalKernelExecutionTarget target = {};
-  target.label = "AMDGPU";
-  target.device_uri = IREE_SV("amdgpu");
-  target.target_profile_identifier = loomc_make_cstring_view("live-amdgpu");
-  target.source_identifier = loomc_make_cstring_view("live_amdgpu.loom");
-  target.source_text = loomc_make_cstring_view(source_text);
-  target.kernel_export_name = loomc_make_cstring_view(kernel_export_name);
-  target.target_pipeline_identifier =
-      loomc_make_cstring_view("live-amdgpu-prepared-low");
-  target.target_pipeline_kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW;
-  target.control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG;
-  target.source_to_low_max_errors = 20;
-  target.artifact_format =
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO);
-  target.artifact_identifier = loomc_make_cstring_view("live_amdgpu.hsaco");
-  target.target_providers = target_providers;
-  target.target_provider_count = 1;
-  target.create_target_environment = CreateAmdgpuTargetEnvironment;
-  target.validate_target_profile = ValidateAmdgpuProfile;
+  loomc::testing::target::IreeHalKernelExecutionTarget target = {
+      .label = "AMDGPU",
+      .device_uri = IREE_SV("amdgpu"),
+      .target_profile_identifier = loomc_make_cstring_view("live-amdgpu"),
+      .source_identifier = loomc_make_cstring_view("live_amdgpu.loom"),
+      .source_text = loomc_make_cstring_view(source_text),
+      .kernel_export_name = loomc_make_cstring_view(kernel_export_name),
+      .target_pipeline_identifier =
+          loomc_make_cstring_view("live-amdgpu-prepared-low"),
+      .target_pipeline_kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+      .source_to_low_max_errors = 20,
+      .artifact_format =
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
+      .artifact_identifier = loomc_make_cstring_view("live_amdgpu.hsaco"),
+      .target_providers = target_providers,
+      .target_provider_count = 1,
+      .create_target_environment = CreateAmdgpuTargetEnvironment,
+      .validate_target_profile = ValidateAmdgpuProfile,
+  };
   return target;
 }
 
@@ -277,9 +277,10 @@ void RunSparseByteOffsetExecution(
   if (!iree_hal_allocator_supports_virtual_memory(allocator)) {
     GTEST_SKIP() << "live allocator does not support sparse virtual memory";
   }
-  iree_hal_buffer_params_t params = {};
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  iree_hal_buffer_params_t params = {
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+  };
   iree_device_size_t page_size = 0;
   iree_device_size_t recommended_page_size = 0;
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_query_granularity(

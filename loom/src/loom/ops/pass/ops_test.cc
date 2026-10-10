@@ -47,8 +47,8 @@ class PassOpsTest : public ::testing::Test {
 
   loom_module_t* Parse(iree_string_view_t source) {
     loom_text_parse_options_t options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, NULL},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, NULL},
+        .max_errors = 20,
     };
     loom_module_t* module = NULL;
     IREE_EXPECT_OK(loom_text_parse(source, IREE_SV("passes.loom"), &context_,
@@ -70,8 +70,8 @@ class PassOpsTest : public ::testing::Test {
 
   void VerifyOk(loom_module_t* module) {
     loom_verify_options_t options = {
-        /*.sink=*/{loom_diagnostic_stderr_sink, NULL},
-        /*.max_errors=*/20,
+        .sink = {loom_diagnostic_stderr_sink, NULL},
+        .max_errors = 20,
     };
     loom_verify_result_t result = {};
     IREE_EXPECT_OK(loom_verify_module(module, &options, &result));
@@ -98,7 +98,7 @@ class PassOpsTest : public ::testing::Test {
 
   loom_module_t* ReadBytecode(const std::vector<uint8_t>& bytes) {
     loom_bytecode_read_options_t options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, NULL},
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, NULL},
     };
     loom_bytecode_read_result_t result = {};
     loom_module_t* module = NULL;

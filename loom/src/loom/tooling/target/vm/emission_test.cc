@@ -72,15 +72,15 @@ class VMEmissionTest : public ::testing::Test {
     registry_ = loom_target_environment_low_descriptor_registry(environment_);
 
     loomc_context_target_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.target_environment=*/target_environment_,
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+        .structure_size = sizeof(target_options),
+        .next = nullptr,
+        .target_environment = target_environment_,
     };
     loomc_context_options_t context_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-        /*.structure_size=*/sizeof(context_options),
-        /*.next=*/&target_options,
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+        .structure_size = sizeof(context_options),
+        .next = &target_options,
     };
     IREE_ASSERT_OK(iree_status_from_loomc(loomc_context_create(
         &context_options, compiler_allocator_, &context_)));
@@ -113,13 +113,13 @@ class VMEmissionTest : public ::testing::Test {
 
   void Prepare(iree_string_view_t source) {
     const loomc_source_options_t source_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-        /*.structure_size=*/sizeof(source_options),
-        /*.next=*/nullptr,
-        /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-        /*.identifier=*/loomc_make_cstring_view("emission.loom"),
-        /*.contents=*/loomc_make_byte_span(source.data, source.size),
-        /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+        .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+        .structure_size = sizeof(source_options),
+        .next = nullptr,
+        .format = LOOMC_SOURCE_FORMAT_TEXT,
+        .identifier = loomc_make_cstring_view("emission.loom"),
+        .contents = loomc_make_byte_span(source.data, source.size),
+        .storage = LOOMC_SOURCE_STORAGE_COPY,
     };
     loomc_source_t* compiler_source = nullptr;
     IREE_ASSERT_OK(iree_status_from_loomc(loomc_source_create(
@@ -134,11 +134,11 @@ class VMEmissionTest : public ::testing::Test {
     loomc_result_release(deserialize_result);
 
     const loomc_module_function_query_options_t query_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_FUNCTION_QUERY_OPTIONS,
-        /*.structure_size=*/sizeof(query_options),
-        /*.next=*/nullptr,
-        /*.function_symbol=*/loomc_string_view_empty(),
-        /*.kind=*/LOOMC_MODULE_FUNCTION_KIND_FUNCTION,
+        .type = LOOMC_STRUCTURE_TYPE_MODULE_FUNCTION_QUERY_OPTIONS,
+        .structure_size = sizeof(query_options),
+        .next = nullptr,
+        .function_symbol = loomc_string_view_empty(),
+        .kind = LOOMC_MODULE_FUNCTION_KIND_FUNCTION,
     };
     loomc_host_size_t function_count = 0;
     loomc_result_t* count_result = nullptr;
@@ -164,27 +164,27 @@ class VMEmissionTest : public ::testing::Test {
         continue;
       }
       specializations.push_back({
-          /*.function_symbol=*/function.symbol_name,
-          /*.target_profile=*/target_profile_,
+          .function_symbol = function.symbol_name,
+          .target_profile = target_profile_,
       });
     }
     const loomc_target_specialization_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.specializations=*/specializations.data(),
-        /*.specialization_count=*/specializations.size(),
-        /*.target_bindings=*/nullptr,
-        /*.target_binding_count=*/0,
+        .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+        .structure_size = sizeof(target_options),
+        .next = nullptr,
+        .specializations = specializations.data(),
+        .specialization_count = specializations.size(),
+        .target_bindings = nullptr,
+        .target_binding_count = 0,
     };
     const loomc_compile_options_t compile_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-        /*.structure_size=*/sizeof(compile_options),
-        /*.next=*/&target_options,
-        /*.module_name=*/loomc_string_view_empty(),
-        /*.artifact_flags=*/0,
-        /*.config_flags=*/0,
-        /*.config_module=*/nullptr,
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+        .structure_size = sizeof(compile_options),
+        .next = &target_options,
+        .module_name = loomc_string_view_empty(),
+        .artifact_flags = 0,
+        .config_flags = 0,
+        .config_module = nullptr,
     };
     loomc_result_t* compile_result = nullptr;
     IREE_ASSERT_OK(iree_status_from_loomc(loomc_compile_module(
@@ -222,12 +222,13 @@ class VMEmissionTest : public ::testing::Test {
       const auto checkpoint = iree_arena_checkpoint_save(&arena);
       allocations->attempts = 0;
       allocations->fail_at = fail_at;
-      loom_target_emit_request_t request = {};
-      request.target_environment = environment_;
-      request.low_descriptor_registry = &registry_.registry;
-      request.module = native_module_;
-      request.scratch_arena = &arena;
-      request.allocator = allocations->allocator();
+      loom_target_emit_request_t request = {
+          .target_environment = environment_,
+          .low_descriptor_registry = &registry_.registry,
+          .module = native_module_,
+          .scratch_arena = &arena,
+          .allocator = allocations->allocator(),
+      };
       status = loom_vm_module_emitter.emit(&request, out_emitted, out_artifact);
       EXPECT_EQ(arena.used_allocation_size, checkpoint.used_allocation_size);
       EXPECT_EQ(arena.total_allocation_size, checkpoint.total_allocation_size);

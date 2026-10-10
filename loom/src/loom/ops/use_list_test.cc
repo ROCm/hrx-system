@@ -287,9 +287,7 @@ TEST_F(UseListTest, ResultCompactionPreservesExplicitTieClassification) {
   }
   const loom_type_t types[] = {loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                ResourceType()};
-  loom_tied_result_t tie = {};
-  tie.result_index = 1;
-  tie.operand_index = 0;
+  loom_tied_result_t tie = {.result_index = 1, .operand_index = 0};
   loom_op_t* sink = nullptr;
   IREE_ASSERT_OK(loom_test_signature_sink_build(
       &builder_, &source, 1, types, 2, &tie, 1, LOOM_LOCATION_UNKNOWN, &sink));

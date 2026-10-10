@@ -22,80 +22,80 @@ static const iree_string_view_t kDirectResourceNames[] = {
 
 static const loom_target_residency_cliff_t kDirectResourceCliffs[] = {
     {
-        /*.resource_id=*/0,
-        /*.cliff_units=*/5,
-        /*.tier_before=*/4,
-        /*.tier_after=*/2,
+        .resource_id = 0,
+        .cliff_units = 5,
+        .tier_before = 4,
+        .tier_after = 2,
     },
     {
-        /*.resource_id=*/0,
-        /*.cliff_units=*/9,
-        /*.tier_before=*/2,
-        /*.tier_after=*/1,
+        .resource_id = 0,
+        .cliff_units = 9,
+        .tier_before = 2,
+        .tier_after = 1,
     },
     {
-        /*.resource_id=*/1,
-        /*.cliff_units=*/3,
-        /*.tier_before=*/4,
-        /*.tier_after=*/3,
+        .resource_id = 1,
+        .cliff_units = 3,
+        .tier_before = 4,
+        .tier_after = 3,
     },
     {
-        /*.resource_id=*/1,
-        /*.cliff_units=*/7,
-        /*.tier_before=*/3,
-        /*.tier_after=*/2,
+        .resource_id = 1,
+        .cliff_units = 7,
+        .tier_before = 3,
+        .tier_after = 2,
     },
     {
-        /*.resource_id=*/1,
-        /*.cliff_units=*/11,
-        /*.tier_before=*/2,
-        /*.tier_after=*/0,
+        .resource_id = 1,
+        .cliff_units = 11,
+        .tier_before = 2,
+        .tier_after = 0,
     },
 };
 
 static const loom_target_residency_cliff_range_t kDirectResourceCliffRanges[] =
     {
-        {/*.start=*/0, /*.count=*/2},
-        {/*.start=*/2, /*.count=*/3},
+        {.start = 0, .count = 2},
+        {.start = 2, .count = 3},
 };
 
 static const loom_target_residency_derived_member_t kDerivedMembers[] = {
     {
-        /*.resource_id=*/0,
-        /*.direct_resource_id=*/0,
-        /*.contribution_granularity=*/4,
+        .resource_id = 0,
+        .direct_resource_id = 0,
+        .contribution_granularity = 4,
     },
     {
-        /*.resource_id=*/0,
-        /*.direct_resource_id=*/1,
-        /*.contribution_granularity=*/2,
+        .resource_id = 0,
+        .direct_resource_id = 1,
+        .contribution_granularity = 2,
     },
 };
 
 static const loom_target_residency_cliff_t kDerivedResourceCliffs[] = {
     {
-        /*.resource_id=*/0,
-        /*.cliff_units=*/9,
-        /*.tier_before=*/4,
-        /*.tier_after=*/2,
+        .resource_id = 0,
+        .cliff_units = 9,
+        .tier_before = 4,
+        .tier_after = 2,
     },
     {
-        /*.resource_id=*/0,
-        /*.cliff_units=*/17,
-        /*.tier_before=*/2,
-        /*.tier_after=*/1,
+        .resource_id = 0,
+        .cliff_units = 17,
+        .tier_before = 2,
+        .tier_after = 1,
     },
 };
 
 static const loom_target_residency_derived_resource_t kDerivedResources[] = {
     {
-        /*.name=*/IREE_SVL("shared_register_file"),
-        /*.pool_units=*/64,
-        /*.allocation_granularity=*/1,
-        /*.member_start=*/0,
-        /*.member_count=*/2,
-        /*.cliff_start=*/0,
-        /*.cliff_count=*/2,
+        .name = IREE_SVL("shared_register_file"),
+        .pool_units = 64,
+        .allocation_granularity = 1,
+        .member_start = 0,
+        .member_count = 2,
+        .cliff_start = 0,
+        .cliff_count = 2,
     },
 };
 
@@ -103,33 +103,31 @@ static const uint16_t kMemberIndicesByDirectResource[] = {0, 1};
 
 static const loom_target_residency_derived_member_range_t
     kMemberRangesByDirectResource[] = {
-        {/*.start=*/0, /*.count=*/1},
-        {/*.start=*/1, /*.count=*/1},
+        {.start = 0, .count = 1},
+        {.start = 1, .count = 1},
 };
 
 static const loom_target_residency_model_t kModel = {
-    /*.best_tier=*/4,
-    /*.direct_resources=*/
-    {
-        /*.names=*/kDirectResourceNames,
-        /*.cliffs=*/kDirectResourceCliffs,
-        /*.cliff_count=*/IREE_ARRAYSIZE(kDirectResourceCliffs),
-        /*.cliff_ranges=*/kDirectResourceCliffRanges,
-        /*.resource_count=*/IREE_ARRAYSIZE(kDirectResourceNames),
-    },
-    /*.derived_resources=*/
-    {
-        /*.resources=*/kDerivedResources,
-        /*.resource_count=*/IREE_ARRAYSIZE(kDerivedResources),
-        /*.members=*/kDerivedMembers,
-        /*.member_count=*/IREE_ARRAYSIZE(kDerivedMembers),
-        /*.cliffs=*/kDerivedResourceCliffs,
-        /*.cliff_count=*/IREE_ARRAYSIZE(kDerivedResourceCliffs),
-        /*.member_indices_by_direct_resource=*/
-        kMemberIndicesByDirectResource,
-        /*.member_ranges_by_direct_resource=*/
-        kMemberRangesByDirectResource,
-    },
+    .best_tier = 4,
+    .direct_resources =
+        {
+            .names = kDirectResourceNames,
+            .cliffs = kDirectResourceCliffs,
+            .cliff_count = IREE_ARRAYSIZE(kDirectResourceCliffs),
+            .cliff_ranges = kDirectResourceCliffRanges,
+            .resource_count = IREE_ARRAYSIZE(kDirectResourceNames),
+        },
+    .derived_resources =
+        {
+            .resources = kDerivedResources,
+            .resource_count = IREE_ARRAYSIZE(kDerivedResources),
+            .members = kDerivedMembers,
+            .member_count = IREE_ARRAYSIZE(kDerivedMembers),
+            .cliffs = kDerivedResourceCliffs,
+            .cliff_count = IREE_ARRAYSIZE(kDerivedResourceCliffs),
+            .member_indices_by_direct_resource = kMemberIndicesByDirectResource,
+            .member_ranges_by_direct_resource = kMemberRangesByDirectResource,
+        },
 };
 
 class ResidencyTest : public ::testing::Test {
@@ -290,7 +288,7 @@ TEST_F(ResidencyTest, UnavailableModelIsExplicit) {
 
 TEST_F(ResidencyTest, AvailableCliffFreeModelKeepsBestTier) {
   const loom_target_residency_model_t empty_model = {
-      /*.best_tier=*/7,
+      .best_tier = 7,
   };
   loom_target_residency_query_t query;
   IREE_ASSERT_OK(

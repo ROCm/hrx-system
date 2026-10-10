@@ -218,8 +218,9 @@ static hsa_status_t HSA_API CaptureSystemEventHandler(
 // A libhsa whose only populated thunk is the system event registration this
 // driver calls; every other entry stays NULL.
 static iree_hal_amdgpu_libhsa_t MakeCapturingLibhsa() {
-  iree_hal_amdgpu_libhsa_t libhsa = {};
-  libhsa.hsa_amd_register_system_event_handler = CaptureSystemEventHandler;
+  iree_hal_amdgpu_libhsa_t libhsa = {
+      .hsa_amd_register_system_event_handler = CaptureSystemEventHandler,
+  };
   return libhsa;
 }
 
@@ -391,8 +392,7 @@ class SystemEventTest : public ::testing::Test {
 
   static hsa_status_t DispatchMemoryError(uint64_t agent_handle,
                                           uint64_t virtual_address) {
-    hsa_amd_event_t event = {};
-    event.event_type = HSA_AMD_GPU_MEMORY_ERROR_EVENT;
+    hsa_amd_event_t event = {.event_type = HSA_AMD_GPU_MEMORY_ERROR_EVENT};
     event.memory_error.agent = MakeAgent(agent_handle);
     event.memory_error.virtual_address = virtual_address;
     event.memory_error.error_reason_mask = 0;
@@ -400,15 +400,13 @@ class SystemEventTest : public ::testing::Test {
   }
 
   static hsa_status_t DispatchSystemShutdown() {
-    hsa_amd_event_t event = {};
-    event.event_type = HSA_AMD_SYSTEM_SHUTDOWN_EVENT;
+    hsa_amd_event_t event = {.event_type = HSA_AMD_SYSTEM_SHUTDOWN_EVENT};
     return g_captured_callback(&event, g_captured_data);
   }
 
   static hsa_status_t DispatchMemoryFault(uint64_t agent_handle,
                                           uint64_t virtual_address) {
-    hsa_amd_event_t event = {};
-    event.event_type = HSA_AMD_GPU_MEMORY_FAULT_EVENT;
+    hsa_amd_event_t event = {.event_type = HSA_AMD_GPU_MEMORY_FAULT_EVENT};
     event.memory_fault.agent = MakeAgent(agent_handle);
     event.memory_fault.virtual_address = virtual_address;
     event.memory_fault.fault_reason_mask = 0;
@@ -418,8 +416,7 @@ class SystemEventTest : public ::testing::Test {
   static hsa_status_t DispatchHardwareException(uint64_t agent_handle,
                                                 uint32_t reset_type,
                                                 uint32_t reset_cause) {
-    hsa_amd_event_t event = {};
-    event.event_type = HSA_AMD_GPU_HW_EXCEPTION_EVENT;
+    hsa_amd_event_t event = {.event_type = HSA_AMD_GPU_HW_EXCEPTION_EVENT};
     event.hw_exception.agent = MakeAgent(agent_handle);
     event.hw_exception.reset_type =
         static_cast<hsa_amd_hw_exception_reset_type_t>(reset_type);

@@ -64,9 +64,9 @@ TEST_F(BlockPoolTest, LifetimeEmpty) {
       &libhsa, gpu_agent, &memory_pool));
 
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -103,9 +103,9 @@ TEST_F(BlockPoolTest, LifetimeInitial) {
       &libhsa, gpu_agent, &memory_pool));
 
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/32,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 32,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -134,9 +134,9 @@ TEST_F(BlockPoolTest, BlockSizeCheck) {
 
   // Fail if block size is not a power-of-two.
   iree_hal_amdgpu_block_pool_options_t non_pot_options = {
-      /*.block_size=*/1 * 1024 + 1,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024 + 1,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   EXPECT_THAT(Status(iree_hal_amdgpu_block_pool_initialize(
                   &libhsa, non_pot_options, gpu_agent, memory_pool,
@@ -159,9 +159,9 @@ TEST_F(BlockPoolTest, AutoBlocksPerAllocation) {
       HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE, &alloc_rec_granule));
 
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/0,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 0,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -184,9 +184,9 @@ TEST_F(BlockPoolTest, ReleaseList) {
       &libhsa, gpu_agent, &memory_pool));
 
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -223,9 +223,9 @@ TEST_F(BlockPoolTest, Trimming) {
       &libhsa, gpu_agent, &memory_pool));
 
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/256 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 256 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -325,9 +325,9 @@ TEST_F(BlockPoolTest, ArenaLifetimeEmpty) {
   IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
       &libhsa, gpu_agent, &memory_pool));
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -351,9 +351,9 @@ TEST_F(BlockPoolTest, ArenaAllocation) {
   IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
       &libhsa, cpu_agent, &memory_pool));
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -410,9 +410,9 @@ TEST_F(BlockPoolTest, ArenaReset) {
   IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
       &libhsa, cpu_agent, &memory_pool));
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -461,9 +461,9 @@ TEST_F(BlockPoolTest, ArenaReleaseBlocks) {
   IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
       &libhsa, cpu_agent, &memory_pool));
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -524,9 +524,9 @@ TEST_F(BlockPoolTest, AllocatorLifetimeEmpty) {
   IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
       &libhsa, cpu_agent, &memory_pool));
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -551,9 +551,9 @@ TEST_F(BlockPoolTest, AllocatorPageSizeCheck) {
   IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
       &libhsa, cpu_agent, &memory_pool));
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -583,9 +583,9 @@ TEST_F(BlockPoolTest, AllocatorAllocate) {
   IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
       &libhsa, cpu_agent, &memory_pool));
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -634,9 +634,9 @@ TEST_F(BlockPoolTest, AllocatorAllocateFullBlocks) {
   IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
       &libhsa, cpu_agent, &memory_pool));
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -677,9 +677,9 @@ TEST_F(BlockPoolTest, AllocatorAllocateSpillBlock) {
   IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
       &libhsa, cpu_agent, &memory_pool));
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -728,9 +728,9 @@ TEST_F(BlockPoolTest, AllocatorAllocateFragmented) {
   IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
       &libhsa, cpu_agent, &memory_pool));
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(
@@ -773,9 +773,9 @@ TEST_F(BlockPoolTest, AllocatorAllocateEntireBlock) {
   IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
       &libhsa, cpu_agent, &memory_pool));
   iree_hal_amdgpu_block_pool_options_t options = {
-      /*.block_size=*/1 * 1024,
-      /*.min_blocks_per_allocation=*/1,
-      /*.initial_capacity=*/0,
+      .block_size = 1 * 1024,
+      .min_blocks_per_allocation = 1,
+      .initial_capacity = 0,
   };
   iree_hal_amdgpu_block_pool_t block_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_block_pool_initialize(

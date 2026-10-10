@@ -184,8 +184,8 @@ TEST(HipDeviceEventSinkTest,
 
   EventCapture capture;
   const hrx_device_event_sink_t sink = {
-      /*.fn=*/CaptureDeviceEvent,
-      /*.user_data=*/&capture,
+      .fn = CaptureDeviceEvent,
+      .user_data = &capture,
   };
   EXPECT_EQ(hipErrorSetOnActiveProcess, set_device_event_sink(sink));
   ASSERT_EQ(hipSuccess, deinit());

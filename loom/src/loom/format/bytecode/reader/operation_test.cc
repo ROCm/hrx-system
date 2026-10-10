@@ -55,12 +55,12 @@ class BytecodeOperationTest : public ::testing::Test {
   loom_bytecode_reader_section_t MakeSection(const uint8_t* data,
                                              iree_host_size_t length) {
     return loom_bytecode_reader_section_t{
-        /*.kind=*/LOOM_BYTECODE_SECTION_OPS,
-        /*.flags=*/{},
-        /*.offset=*/0,
-        /*.length=*/length,
-        /*.absolute_offset=*/41,
-        /*.bytes=*/iree_make_const_byte_span(data, length),
+        .kind = LOOM_BYTECODE_SECTION_OPS,
+        .flags = {},
+        .offset = 0,
+        .length = length,
+        .absolute_offset = 41,
+        .bytes = iree_make_const_byte_span(data, length),
     };
   }
 

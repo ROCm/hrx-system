@@ -28,13 +28,13 @@ static iree_net_bootstrap_peer_info_t ReconstructPeer(
     (*axes)[i] = iree_net_bootstrap_axis_list_get(&view.axes, i);
   }
   return {
-      /*.capabilities=*/view.capabilities,
-      /*.application_endpoint_count=*/view.application_endpoint_count,
-      /*.axes=*/axes->data(),
-      /*.axis_count=*/static_cast<uint32_t>(axes->size()),
-      /*.application_data=*/view.application_data,
-      /*.machine_index=*/view.machine_index,
-      /*.session_epoch=*/view.session_epoch,
+      .capabilities = view.capabilities,
+      .application_endpoint_count = view.application_endpoint_count,
+      .axes = axes->data(),
+      .axis_count = static_cast<uint32_t>(axes->size()),
+      .application_data = view.application_data,
+      .machine_index = view.machine_index,
+      .session_epoch = view.session_epoch,
   };
 }
 
@@ -118,15 +118,15 @@ static void CheckSynthesizedWire(const uint8_t* data, size_t size) {
       axes[i].epoch = ((uint64_t)ReadByte(data, size, 22 + i) << 32) | i;
     }
     const iree_net_bootstrap_peer_info_t peer = {
-        /*.capabilities=*/
-        (iree_net_bootstrap_capabilities_t)(ReadByte(data, size, 31) &
-                                            IREE_NET_BOOTSTRAP_CAPABILITY_ALL_RECOGNIZED),
-        /*.application_endpoint_count=*/ReadByte(data, size, 32),
-        /*.axes=*/axes.data(),
-        /*.axis_count=*/axis_count,
-        /*.application_data=*/iree_make_const_byte_span(data, size),
-        /*.machine_index=*/machine_index,
-        /*.session_epoch=*/session_epoch,
+        .capabilities =
+            (iree_net_bootstrap_capabilities_t)(ReadByte(data, size, 31) &
+                                                IREE_NET_BOOTSTRAP_CAPABILITY_ALL_RECOGNIZED),
+        .application_endpoint_count = ReadByte(data, size, 32),
+        .axes = axes.data(),
+        .axis_count = axis_count,
+        .application_data = iree_make_const_byte_span(data, size),
+        .machine_index = machine_index,
+        .session_epoch = session_epoch,
     };
     if (message.type == IREE_NET_BOOTSTRAP_TYPE_HELLO) {
       message.value.hello = peer;

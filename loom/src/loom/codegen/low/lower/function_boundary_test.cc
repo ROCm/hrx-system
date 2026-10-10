@@ -184,10 +184,10 @@ TEST_F(LowLowerFunctionBoundaryTest,
 
   ComputeFacts(source_function);
   mapping_context_.source_function = source_function;
-  loom_low_lower_abi_argument_t resource_argument = {};
-  resource_argument.resource_build_flags =
-      LOOM_LOW_RESOURCE_BUILD_FLAG_HAS_EXTENT;
-  resource_argument.resource_extent = 64;
+  loom_low_lower_abi_argument_t resource_argument = {
+      .resource_build_flags = LOOM_LOW_RESOURCE_BUILD_FLAG_HAS_EXTENT,
+      .resource_extent = 64,
+  };
   IREE_ASSERT_OK(loom_low_lower_query_argument(
       &mapping_context_, 0, source_arguments[0], &resource_argument));
   EXPECT_EQ(resource_argument.kind, LOOM_LOW_LOWER_ABI_ARGUMENT_RESOURCE);
@@ -414,7 +414,7 @@ TEST_P(LowLowerResultMappingTest, DefinitionConsumesPreparedBoundary) {
     // Number of result-carrier queries made by boundary planning.
     uint32_t query_count;
   } result_query_state = {
-      /*.exit_op=*/return_op,
+      .exit_op = return_op,
   };
   policy_.map_value = {
       +[](void* user_data, loom_low_lower_context_t* context,

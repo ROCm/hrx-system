@@ -162,10 +162,11 @@ class XdnaKernelQueueTest : public ::testing::Test {
       }
       queue = nullptr;
     }
-    amdf_xdna_kernel_queue_create_info_t create = {};
-    create.type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO;
-    create.structure_size = sizeof(create);
-    create.maximum_pending_submission_count = capacity;
+    amdf_xdna_kernel_queue_create_info_t create = {
+        .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO,
+        .structure_size = sizeof(create),
+        .maximum_pending_submission_count = capacity,
+    };
     return amdf_xdna_kernel_queue_create(
         reinterpret_cast<amdf_xdna_context_t*>(&context), &create, &queue);
   }
@@ -181,11 +182,12 @@ class XdnaKernelQueueTest : public ::testing::Test {
   }
 
   amdf_status_t SubmitCommand(uint64_t* out_submission) {
-    amdf_xdna_kernel_queue_submission_info_t submit = {};
-    submit.type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO;
-    submit.structure_size = sizeof(submit);
-    submit.command_count = 1;
-    submit.commands = &command;
+    amdf_xdna_kernel_queue_submission_info_t submit = {
+        .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
+        .structure_size = sizeof(submit),
+        .command_count = 1,
+        .commands = &command,
+    };
     return amdf_xdna_kernel_queue_submit(queue, &submit, out_submission);
   }
 
@@ -199,17 +201,19 @@ class XdnaKernelQueueTest : public ::testing::Test {
   }
 
   amdf_kernel_queue_status_t Query() {
-    amdf_kernel_queue_status_t status = {};
-    status.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
-    status.structure_size = sizeof(status);
+    amdf_kernel_queue_status_t status = {
+        .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
+        .structure_size = sizeof(status),
+    };
     EXPECT_EQ(amdf_kernel_queue_query_status(queue, &status), AMDF_STATUS_OK);
     return status;
   }
 
   amdf_kernel_queue_status_t Refresh() {
-    amdf_kernel_queue_status_t status = {};
-    status.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
-    status.structure_size = sizeof(status);
+    amdf_kernel_queue_status_t status = {
+        .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
+        .structure_size = sizeof(status),
+    };
     EXPECT_EQ(amdf_kernel_queue_refresh_status(queue, &status), AMDF_STATUS_OK);
     return status;
   }
@@ -234,9 +238,10 @@ class XdnaKernelQueueCapacityTest
 
 TEST_P(XdnaKernelQueueCapacityTest, HoldsAnEntirePendingWindow) {
   ASSERT_EQ(CreateQueue(GetParam()), AMDF_STATUS_OK);
-  amdf_kernel_queue_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO;
-  info.structure_size = sizeof(info);
+  amdf_kernel_queue_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(amdf_kernel_queue_query_info(queue, &info), AMDF_STATUS_OK);
   ASSERT_GT(info.maximum_pending_submission_count, 1u);
   if (GetParam() != 0) {
@@ -404,8 +409,7 @@ TEST_F(XdnaKernelQueueTest, RetirementDoesNotPreventPublicationIntoFreeSlots) {
   EXPECT_EQ(SubmitCommand(&rejected),
             amdf_make_api_status(AMDF_STATUS_CODE_BUSY));
   EXPECT_EQ(Query().retired_submission, 0u);
-  amdf_native_event_t event = {};
-  event.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+  amdf_native_event_t event = {.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD};
   event.payload.file_descriptor = 5;
   for (uint32_t i = 0; i < 2; ++i) {
     EXPECT_EQ(amdf_kernel_queue_request_notification(queue, first, &event),
@@ -486,13 +490,13 @@ TEST_F(XdnaKernelQueueTest, NotificationResolvesNativePointsWithoutRetirement) {
   native.submitted = 37;
   native.progress = 37;
   ASSERT_EQ(SubmitCommand(&submission), AMDF_STATUS_OK);
-  amdf_kernel_queue_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO;
-  info.structure_size = sizeof(info);
+  amdf_kernel_queue_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(amdf_kernel_queue_query_info(queue, &info), AMDF_STATUS_OK);
   ASSERT_NE(info.notification_types & AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD, 0u);
-  amdf_native_event_t event = {};
-  event.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+  amdf_native_event_t event = {.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD};
   event.payload.file_descriptor = 5;
   EXPECT_EQ(amdf_kernel_queue_request_notification(queue, submission, &event),
             AMDF_STATUS_OK);
@@ -518,8 +522,7 @@ TEST_F(XdnaKernelQueueTest, NotificationOfRecycledPointRequestsFreshHint) {
   ASSERT_EQ(SubmitCommand(&next), AMDF_STATUS_OK);
   ASSERT_EQ(Query().retired_submission, submission);
   ASSERT_EQ(native.slots[0].native_submission, next);
-  amdf_native_event_t event = {};
-  event.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+  amdf_native_event_t event = {.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD};
   event.payload.file_descriptor = 5;
   for (uint32_t i = 0; i < 2; ++i) {
     EXPECT_EQ(amdf_kernel_queue_request_notification(queue, submission, &event),
@@ -536,8 +539,7 @@ TEST_F(XdnaKernelQueueTest, NotificationErrorDoesNotRejectAcceptedWork) {
   auto& native = context.native.queue;
   native.notification_status =
       amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, ENOMEM);
-  amdf_native_event_t event = {};
-  event.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+  amdf_native_event_t event = {.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD};
   event.payload.file_descriptor = 5;
   EXPECT_EQ(amdf_kernel_queue_request_notification(queue, submission, &event),
             native.notification_status);
@@ -552,8 +554,9 @@ TEST_F(XdnaKernelQueueTest, NotificationErrorDoesNotRejectAcceptedWork) {
 
 TEST_F(XdnaKernelQueueTest, NotificationRejectsInvalidOrUnsupportedInputs) {
   ASSERT_NO_FATAL_FAILURE(Submit());
-  amdf_native_event_t event = {};
-  event.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+  amdf_native_event_t event = {
+      .type = AMDF_NATIVE_EVENT_TYPE_EVENTFD,
+  };
   event.payload.file_descriptor = 5;
   EXPECT_EQ(amdf_status_code(amdf_kernel_queue_request_notification(
                 nullptr, submission, &event)),
@@ -621,10 +624,11 @@ TEST_F(XdnaKernelQueueTest, RefreshErrorPreservesOutputAndKnownRetirement) {
   ASSERT_NO_FATAL_FAILURE(Submit());
   auto& native = context.native.queue;
   native.refresh_status = amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO);
-  amdf_kernel_queue_status_t output = {};
-  output.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
-  output.structure_size = sizeof(output);
-  output.retired_submission = UINT64_MAX;
+  amdf_kernel_queue_status_t output = {
+      .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
+      .structure_size = sizeof(output),
+      .retired_submission = UINT64_MAX,
+  };
   const auto original = output;
   EXPECT_EQ(amdf_kernel_queue_refresh_status(queue, &output),
             native.refresh_status);
@@ -664,9 +668,10 @@ TEST_F(XdnaKernelQueueTest, RefreshReportsExecutionFailureInSnapshot) {
 
 TEST_F(XdnaKernelQueueTest, RefreshValidatesOutputBeforeNativeObservation) {
   ASSERT_NO_FATAL_FAILURE(Submit());
-  amdf_kernel_queue_status_t output = {};
-  output.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO;
-  output.structure_size = sizeof(output);
+  amdf_kernel_queue_status_t output = {
+      .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
+      .structure_size = sizeof(output),
+  };
   EXPECT_EQ(amdf_status_code(amdf_kernel_queue_refresh_status(queue, &output)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
   output.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;

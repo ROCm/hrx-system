@@ -159,10 +159,12 @@ TEST_P(QueueTransferTest, TransferExecutesMixedBatch) {
   SemaphoreList empty_wait;
   SemaphoreList signal(device_, {0}, {1});
   {
-    iree_hal_barrier_t before = {};
-    before.flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
-    iree_hal_barrier_t after = {};
-    after.flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE;
+    iree_hal_barrier_t before = {
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    iree_hal_barrier_t after = {
+        .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+    };
     const iree_hal_barrier_list_t before_list = {1, &before};
     const iree_hal_barrier_list_t after_list = {1, &after};
     const iree_hal_queue_barriers_t barriers = {&before_list, &after_list};
@@ -192,11 +194,11 @@ TEST_P(QueueTransferTest, BufferViewStagingRoundTrip) {
   int32_t source_values[] = {1, 2, 3, 4};
 
   const iree_hal_buffer_params_t staging_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/
-      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      /*.queue_family_affinity=*/transfer_family_affinity,
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .queue_family_affinity = transfer_family_affinity,
   };
   Ref<iree_hal_buffer_view_t> staging_view;
   IREE_ASSERT_OK(iree_hal_buffer_view_generate(
@@ -205,10 +207,10 @@ TEST_P(QueueTransferTest, BufferViewStagingRoundTrip) {
       GenerateI32Contents, source_values, staging_view.out()));
 
   const iree_hal_buffer_params_t device_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-      /*.queue_family_affinity=*/transfer_family_affinity,
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .queue_family_affinity = transfer_family_affinity,
   };
   Ref<iree_hal_buffer_view_t> device_view;
   IREE_ASSERT_OK(iree_hal_buffer_view_create_uninitialized_like(
@@ -510,50 +512,138 @@ TEST_P(QueueTransferTest, FillSizeAlignmentAndPatternClasses) {
     uint32_t pattern = 0;
   };
   const FillCase cases[] = {
-      {/*.pattern_length=*/1, /*.target_offset=*/0,
-       /*.fill_length=*/4, /*.pattern=*/0x000000A5u},
-      {/*.pattern_length=*/1, /*.target_offset=*/0,
-       /*.fill_length=*/8, /*.pattern=*/0x0000005Bu},
-      {/*.pattern_length=*/1, /*.target_offset=*/3,
-       /*.fill_length=*/31, /*.pattern=*/0x0000005Au},
-      {/*.pattern_length=*/1, /*.target_offset=*/17,
-       /*.fill_length=*/32, /*.pattern=*/0x000000C3u},
-      {/*.pattern_length=*/1, /*.target_offset=*/1,
-       /*.fill_length=*/33, /*.pattern=*/0x0000003Cu},
-      {/*.pattern_length=*/1, /*.target_offset=*/16,
-       /*.fill_length=*/64, /*.pattern=*/0x000000D7u},
-      {/*.pattern_length=*/1, /*.target_offset=*/7,
-       /*.fill_length=*/1024, /*.pattern=*/0x00000019u},
-      {/*.pattern_length=*/1, /*.target_offset=*/31,
-       /*.fill_length=*/64 * 1024, /*.pattern=*/0x000000E1u},
-      {/*.pattern_length=*/2, /*.target_offset=*/0,
-       /*.fill_length=*/4, /*.pattern=*/0x0000BEEFu},
-      {/*.pattern_length=*/2, /*.target_offset=*/0,
-       /*.fill_length=*/8, /*.pattern=*/0x00001234u},
-      {/*.pattern_length=*/2, /*.target_offset=*/2,
-       /*.fill_length=*/30, /*.pattern=*/0x0000CAFEu},
-      {/*.pattern_length=*/2, /*.target_offset=*/6,
-       /*.fill_length=*/32, /*.pattern=*/0x00001234u},
-      {/*.pattern_length=*/2, /*.target_offset=*/18,
-       /*.fill_length=*/34, /*.pattern=*/0x0000A1B2u},
-      {/*.pattern_length=*/2, /*.target_offset=*/4,
-       /*.fill_length=*/1024, /*.pattern=*/0x00000F0Eu},
-      {/*.pattern_length=*/2, /*.target_offset=*/14,
-       /*.fill_length=*/64 * 1024, /*.pattern=*/0x000055AAu},
-      {/*.pattern_length=*/4, /*.target_offset=*/0,
-       /*.fill_length=*/4, /*.pattern=*/0xDEADCAFEu},
-      {/*.pattern_length=*/4, /*.target_offset=*/0,
-       /*.fill_length=*/8, /*.pattern=*/0xF00DCAFEu},
-      {/*.pattern_length=*/4, /*.target_offset=*/4,
-       /*.fill_length=*/28, /*.pattern=*/0xCAFEF00Du},
-      {/*.pattern_length=*/4, /*.target_offset=*/8,
-       /*.fill_length=*/32, /*.pattern=*/0x12345678u},
-      {/*.pattern_length=*/4, /*.target_offset=*/20,
-       /*.fill_length=*/36, /*.pattern=*/0xA5A55A5Au},
-      {/*.pattern_length=*/4, /*.target_offset=*/4,
-       /*.fill_length=*/1024, /*.pattern=*/0x0F1E2D3Cu},
-      {/*.pattern_length=*/4, /*.target_offset=*/12,
-       /*.fill_length=*/64 * 1024, /*.pattern=*/0x55AA33CCu},
+      {
+          .pattern_length = 1,
+          .target_offset = 0,
+          .fill_length = 4,
+          .pattern = 0x000000A5u,
+      },
+      {
+          .pattern_length = 1,
+          .target_offset = 0,
+          .fill_length = 8,
+          .pattern = 0x0000005Bu,
+      },
+      {
+          .pattern_length = 1,
+          .target_offset = 3,
+          .fill_length = 31,
+          .pattern = 0x0000005Au,
+      },
+      {
+          .pattern_length = 1,
+          .target_offset = 17,
+          .fill_length = 32,
+          .pattern = 0x000000C3u,
+      },
+      {
+          .pattern_length = 1,
+          .target_offset = 1,
+          .fill_length = 33,
+          .pattern = 0x0000003Cu,
+      },
+      {
+          .pattern_length = 1,
+          .target_offset = 16,
+          .fill_length = 64,
+          .pattern = 0x000000D7u,
+      },
+      {
+          .pattern_length = 1,
+          .target_offset = 7,
+          .fill_length = 1024,
+          .pattern = 0x00000019u,
+      },
+      {
+          .pattern_length = 1,
+          .target_offset = 31,
+          .fill_length = 64 * 1024,
+          .pattern = 0x000000E1u,
+      },
+      {
+          .pattern_length = 2,
+          .target_offset = 0,
+          .fill_length = 4,
+          .pattern = 0x0000BEEFu,
+      },
+      {
+          .pattern_length = 2,
+          .target_offset = 0,
+          .fill_length = 8,
+          .pattern = 0x00001234u,
+      },
+      {
+          .pattern_length = 2,
+          .target_offset = 2,
+          .fill_length = 30,
+          .pattern = 0x0000CAFEu,
+      },
+      {
+          .pattern_length = 2,
+          .target_offset = 6,
+          .fill_length = 32,
+          .pattern = 0x00001234u,
+      },
+      {
+          .pattern_length = 2,
+          .target_offset = 18,
+          .fill_length = 34,
+          .pattern = 0x0000A1B2u,
+      },
+      {
+          .pattern_length = 2,
+          .target_offset = 4,
+          .fill_length = 1024,
+          .pattern = 0x00000F0Eu,
+      },
+      {
+          .pattern_length = 2,
+          .target_offset = 14,
+          .fill_length = 64 * 1024,
+          .pattern = 0x000055AAu,
+      },
+      {
+          .pattern_length = 4,
+          .target_offset = 0,
+          .fill_length = 4,
+          .pattern = 0xDEADCAFEu,
+      },
+      {
+          .pattern_length = 4,
+          .target_offset = 0,
+          .fill_length = 8,
+          .pattern = 0xF00DCAFEu,
+      },
+      {
+          .pattern_length = 4,
+          .target_offset = 4,
+          .fill_length = 28,
+          .pattern = 0xCAFEF00Du,
+      },
+      {
+          .pattern_length = 4,
+          .target_offset = 8,
+          .fill_length = 32,
+          .pattern = 0x12345678u,
+      },
+      {
+          .pattern_length = 4,
+          .target_offset = 20,
+          .fill_length = 36,
+          .pattern = 0xA5A55A5Au,
+      },
+      {
+          .pattern_length = 4,
+          .target_offset = 4,
+          .fill_length = 1024,
+          .pattern = 0x0F1E2D3Cu,
+      },
+      {
+          .pattern_length = 4,
+          .target_offset = 12,
+          .fill_length = 64 * 1024,
+          .pattern = 0x55AA33CCu,
+      },
   };
 
   for (const FillCase& test_case : cases) {
@@ -711,12 +801,12 @@ TEST_P(QueueTransferTest, UpdateSizeAndAlignmentClasses) {
     iree_device_size_t update_length = 0;
   };
   const UpdateCase cases[] = {
-      {/*.source_offset=*/0, /*.target_offset=*/0, /*.update_length=*/4},
-      {/*.source_offset=*/3, /*.target_offset=*/0, /*.update_length=*/8},
-      {/*.source_offset=*/5, /*.target_offset=*/4, /*.update_length=*/8},
-      {/*.source_offset=*/1, /*.target_offset=*/1, /*.update_length=*/4},
-      {/*.source_offset=*/0, /*.target_offset=*/0, /*.update_length=*/16},
-      {/*.source_offset=*/7, /*.target_offset=*/9, /*.update_length=*/528},
+      {.source_offset = 0, .target_offset = 0, .update_length = 4},
+      {.source_offset = 3, .target_offset = 0, .update_length = 8},
+      {.source_offset = 5, .target_offset = 4, .update_length = 8},
+      {.source_offset = 1, .target_offset = 1, .update_length = 4},
+      {.source_offset = 0, .target_offset = 0, .update_length = 16},
+      {.source_offset = 7, .target_offset = 9, .update_length = 528},
   };
 
   for (const UpdateCase& test_case : cases) {
@@ -822,10 +912,10 @@ TEST_P(QueueTransferTest, CopySizeAndAlignmentClasses) {
     iree_device_size_t target_offset = 0;
   };
   const AlignmentCase alignment_cases[] = {
-      {/*.name=*/"aligned16", /*.source_offset=*/0, /*.target_offset=*/0},
-      {/*.name=*/"aligned8_not16", /*.source_offset=*/8, /*.target_offset=*/8},
-      {/*.name=*/"aligned4_not8", /*.source_offset=*/4, /*.target_offset=*/4},
-      {/*.name=*/"byte_misaligned", /*.source_offset=*/1, /*.target_offset=*/2},
+      {.name = "aligned16", .source_offset = 0, .target_offset = 0},
+      {.name = "aligned8_not16", .source_offset = 8, .target_offset = 8},
+      {.name = "aligned4_not8", .source_offset = 4, .target_offset = 4},
+      {.name = "byte_misaligned", .source_offset = 1, .target_offset = 2},
   };
   const iree_device_size_t common_sizes[] = {
       4, 8, 16, 31, 32, 33, 64, 128, 256, 1024, 4 * 1024, 16 * 1024, 64 * 1024,

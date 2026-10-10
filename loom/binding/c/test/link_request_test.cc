@@ -88,13 +88,13 @@ LinkerPtr CreateLinker(loomc_context_t* context) {
 SourcePtr CreateSource(loomc_source_format_t format, const char* identifier,
                        const void* contents, loomc_host_size_t length) {
   const loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/format,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
-      /*.contents=*/loomc_make_byte_span(contents, length),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = format,
+      .identifier = loomc_make_cstring_view(identifier),
+      .contents = loomc_make_byte_span(contents, length),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(
@@ -137,11 +137,11 @@ SourcePtr SerializeModuleToSource(const loomc_module_t* module,
                                   loomc_source_format_t format,
                                   const char* identifier) {
   const loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/format,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = format,
+      .identifier = loomc_make_cstring_view(identifier),
   };
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(loomc_module_serialize_to_source(
@@ -186,9 +186,9 @@ RequestPtr CreateRequest(
   std::vector<loom_symbol_id_t> wire_symbol_ordinals(module_symbol_ids.size(),
                                                      LOOM_SYMBOL_ID_INVALID);
   const loomc_module_symbol_projection_t projection = {
-      /*.module_symbol_ids=*/module_symbol_ids.data(),
-      /*.bytecode_symbol_ordinals=*/wire_symbol_ordinals.data(),
-      /*.count=*/wire_symbol_ordinals.size(),
+      .module_symbol_ids = module_symbol_ids.data(),
+      .bytecode_symbol_ordinals = wire_symbol_ordinals.data(),
+      .count = wire_symbol_ordinals.size(),
   };
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(loomc_module_serialize_internal_bytecode_to_source(
@@ -199,8 +199,8 @@ RequestPtr CreateRequest(
   roots.reserve(wire_symbol_ordinals.size());
   for (loom_symbol_id_t symbol_ordinal : wire_symbol_ordinals) {
     roots.push_back({
-        /*.module_ordinal=*/0,
-        /*.symbol_ordinal=*/symbol_ordinal,
+        .module_ordinal = 0,
+        .symbol_ordinal = symbol_ordinal,
     });
   }
   loomc_request_t* request = nullptr;
@@ -314,8 +314,8 @@ LinkIndexPtr CreateIndex(loomc_context_t* context, loomc_source_t* source,
       context, nullptr, loomc_allocator_system(), &builder));
   BuilderPtr builder_ptr(builder);
   const loomc_link_index_source_options_t source_options = {
-      /*.provider_name=*/loomc_string_view_empty(),
-      /*.role=*/role,
+      .provider_name = loomc_string_view_empty(),
+      .role = role,
   };
   LOOMC_EXPECT_OK(loomc_link_index_builder_add_source(
       builder_ptr.get(), source, &source_options, nullptr));
@@ -418,11 +418,11 @@ func.def public @entry(%x: i32) -> (i32) {
   ASSERT_NE(input_request, nullptr);
 
   loomc_link_request_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.library_index=*/nullptr,
-      /*.module_name=*/loomc_make_cstring_view("sealed"),
+      .type = LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .library_index = nullptr,
+      .module_name = loomc_make_cstring_view("sealed"),
   };
   ResultPtr result;
   RequestPtr output_request =
@@ -473,8 +473,8 @@ func.def public @unused_library(%x: i32) -> (i32) {
                                            LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
 
   const std::vector<loomc_request_binding_t> bindings = {
-      {/*.requirement_ordinal=*/3, /*.root_ordinal=*/2},
-      {/*.requirement_ordinal=*/9, /*.root_ordinal=*/0},
+      {.requirement_ordinal = 3, .root_ordinal = 2},
+      {.requirement_ordinal = 9, .root_ordinal = 0},
   };
   RequestPtr input_request =
       CreateRequestFromText(R"(
@@ -492,10 +492,10 @@ func.def public @caller(%x: i32) -> (i32) {
                             {"second", "caller", "caller"}, bindings);
 
   const loomc_link_request_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.library_index=*/library_index.get(),
+      .type = LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .library_index = library_index.get(),
   };
   ResultPtr result;
   RequestPtr output_request =
@@ -536,10 +536,10 @@ TEST_F(LinkRequestTest, OwnsProvidersNeededAfterCallerSpecialization) {
   ASSERT_NE(input_request, nullptr);
 
   const loomc_link_request_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.library_index=*/library_index.get(),
+      .type = LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .library_index = library_index.get(),
   };
   ResultPtr result;
   RequestPtr output_request =
@@ -582,11 +582,11 @@ func.def public @entry(%x: i32) -> (i32) {
 )",
                                                    {"entry"});
   const loomc_link_request_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.library_index=*/library_index.get(),
-      /*.module_name=*/loomc_make_cstring_view("deterministic"),
+      .type = LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .library_index = library_index.get(),
+      .module_name = loomc_make_cstring_view("deterministic"),
   };
 
   ResultPtr first_result;
@@ -634,10 +634,10 @@ func.def @entry(%x: i32) -> (i32) {
                                                    {"entry"});
 
   const loomc_link_request_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.library_index=*/library_index.get(),
+      .type = LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .library_index = library_index.get(),
   };
   ResultPtr result;
   RequestPtr output_request =
@@ -677,8 +677,8 @@ func.def public @second(%x: i32) -> (i32) {
       CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "request-archive.loombc",
                    archive.data(), archive.size()),
       {
-          {/*.module_ordinal=*/1, /*.symbol_ordinal=*/0},
-          {/*.module_ordinal=*/0, /*.symbol_ordinal=*/0},
+          {.module_ordinal = 1, .symbol_ordinal = 0},
+          {.module_ordinal = 0, .symbol_ordinal = 0},
       });
 
   ResultPtr result;
@@ -704,22 +704,22 @@ func.def public @entry() -> (index) {
 )",
                                                    {"entry"});
   const loomc_config_binding_t bindings[] = {{
-      /*.key=*/loomc_make_cstring_view("@model.hidden_size"),
-      /*.value=*/loomc_make_cstring_view("4096"),
+      .key = loomc_make_cstring_view("@model.hidden_size"),
+      .value = loomc_make_cstring_view("4096"),
   }};
   const loomc_link_request_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.library_index=*/nullptr,
-      /*.module_name=*/loomc_string_view_empty(),
-      /*.config=*/
-      {
-          /*.bindings=*/bindings,
-          /*.binding_count=*/1,
-          /*.json_object=*/loomc_string_view_empty(),
-          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-      },
+      .type = LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .library_index = nullptr,
+      .module_name = loomc_string_view_empty(),
+      .config =
+          {
+              .bindings = bindings,
+              .binding_count = 1,
+              .json_object = loomc_string_view_empty(),
+              .flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+          },
   };
 
   ResultPtr result;
@@ -738,7 +738,7 @@ TEST_F(LinkRequestTest, MalformedBytecodeProducesFailedResult) {
   RequestPtr input_request = CreateRawRequest(
       CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "malformed.loombc",
                    malformed_bytecode, sizeof(malformed_bytecode) - 1),
-      {{/*.module_ordinal=*/0, /*.symbol_ordinal=*/0}});
+      {{.module_ordinal = 0, .symbol_ordinal = 0}});
 
   ResultPtr result;
   RequestPtr output_request =
@@ -764,10 +764,10 @@ func.def public @entry(%x: i32) -> (i32) {
 )",
                                                    {"entry"});
   const loomc_link_request_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.library_index=*/input_index.get(),
+      .type = LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .library_index = input_index.get(),
   };
   loomc_request_t* output_request = reinterpret_cast<loomc_request_t*>(0x1);
   loomc_result_t* result = reinterpret_cast<loomc_result_t*>(0x1);

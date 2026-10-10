@@ -57,7 +57,7 @@ class DominanceTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
     loom_op_t* func_op = NULL;
     IREE_ASSERT_OK(loom_test_func_build(&module_builder, 0, 0, 0, callee, NULL,
                                         0, NULL, 0, NULL, 0, NULL, 0,
@@ -450,15 +450,11 @@ TEST_F(DominanceTest, ScopedCfgDiamondDominanceUsesPredecessorGraph) {
 
   loom_cfg_graph_t graph = {};
   IREE_ASSERT_OK(loom_cfg_graph_build(module_, body_, &dom_arena_, &graph));
-  loom_dominance_info_t borrowed = {};
-  borrowed.module = module_;
-  borrowed.arena = &dom_arena_;
+  loom_dominance_info_t borrowed = {.module = module_, .arena = &dom_arena_};
   IREE_ASSERT_OK(loom_dominance_info_add_cfg_graph(&borrowed, &graph, nullptr));
   loom_cfg_dominance_t tree = {};
   IREE_ASSERT_OK(loom_cfg_dominance_build(&graph, &dom_arena_, &tree));
-  loom_dominance_info_t retained = {};
-  retained.module = module_;
-  retained.arena = &dom_arena_;
+  loom_dominance_info_t retained = {.module = module_, .arena = &dom_arena_};
   IREE_ASSERT_OK(loom_dominance_info_add_cfg_graph(&retained, &graph, &tree));
   for (const loom_dominance_info_t* info : {&dom_info_, &borrowed, &retained}) {
     EXPECT_TRUE(loom_dominates_op(info, entry_value, then_value));
@@ -680,22 +676,22 @@ TEST_F(DominanceTest, WalkMaintainsDominatorScopesAcrossCfgAndNesting) {
     std::vector<loom_dominance_walk_scope_flags_t> flags;
   } state;
   loom_dominance_walk_callbacks_t callbacks = {
-      /*.user_data=*/&state,
-      /*.enter_scope=*/
-      [](void* user_data, loom_dominance_walk_scope_flags_t flags) {
-        auto* state = static_cast<ScopeState*>(user_data);
-        ++state->depth;
-        ++state->enter_count;
-        state->flags.push_back(flags);
-        return iree_ok_status();
-      },
-      /*.leave_scope=*/
-      [](void* user_data) {
-        auto* state = static_cast<ScopeState*>(user_data);
-        state->flags.pop_back();
-        --state->depth;
-        ++state->leave_count;
-      },
+      .user_data = &state,
+      .enter_scope =
+          [](void* user_data, loom_dominance_walk_scope_flags_t flags) {
+            auto* state = static_cast<ScopeState*>(user_data);
+            ++state->depth;
+            ++state->enter_count;
+            state->flags.push_back(flags);
+            return iree_ok_status();
+          },
+      .leave_scope =
+          [](void* user_data) {
+            auto* state = static_cast<ScopeState*>(user_data);
+            state->flags.pop_back();
+            --state->depth;
+            ++state->leave_count;
+          },
   };
   loom_dominance_walk_t* walk = nullptr;
   IREE_ASSERT_OK(loom_dominance_walk_create(module_, body_, callbacks,

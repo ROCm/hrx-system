@@ -31,11 +31,10 @@ TEST(RegistersTest, CarrierPropertiesAreIndependent) {
 TEST(RegistersTest, CarrierProjectionDiscardsSemanticValueType) {
   const loom_type_t value_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   const loom_register_type_data_t register_data = {
-      /*.carrier_payload0=*/42,
-      /*.carrier_payload1=*/
-      loom_low_register_type_pack_payload1(
+      .carrier_payload0 = 42,
+      .carrier_payload1 = loom_low_register_type_pack_payload1(
           /*register_class_id=*/3, /*unit_count=*/2),
-      /*.value_type=*/value_type,
+      .value_type = value_type,
   };
   const loom_type_t typed_type =
       loom_type_register_payload_with_value_type(&register_data);

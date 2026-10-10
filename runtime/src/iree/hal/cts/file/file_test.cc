@@ -265,9 +265,10 @@ class FileTest : public CtsTestBase<> {
                           iree_hal_buffer_t* target_buffer,
                           iree_device_size_t target_offset,
                           iree_device_size_t length) {
-    iree_hal_barrier_t action = {};
-    action.flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
-                   IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+    iree_hal_barrier_t action = {
+        .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE |
+                 IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
     const iree_hal_barrier_list_t list = {1, &action};
     const iree_hal_queue_barriers_t barriers = {&list, &list};
     SemaphoreList empty_wait;

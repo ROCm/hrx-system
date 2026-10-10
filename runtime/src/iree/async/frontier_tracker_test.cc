@@ -730,8 +730,9 @@ TEST(SemaphoreBridgingTest, FailureCallbackRegistersAxisAndRetiresBridge) {
     // Number of synchronous failure notifications received.
     int call_count;
   } callback_data = {fixture.tracker(), &semaphore_owner, 0};
-  iree_async_semaphore_timepoint_t timepoint = {};
-  timepoint.user_data = &callback_data;
+  iree_async_semaphore_timepoint_t timepoint = {
+      .user_data = &callback_data,
+  };
   timepoint.callback = [](void* user_data,
                           iree_async_semaphore_timepoint_t* timepoint,
                           iree_status_t status) {

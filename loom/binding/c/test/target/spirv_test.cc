@@ -91,15 +91,15 @@ TargetEnvironmentPtr CreateSpirvTargetEnvironment() {
 
 ContextPtr CreateSpirvContext(loomc_target_environment_t* target_environment) {
   loomc_context_target_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_environment=*/target_environment,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .target_environment = target_environment,
   };
   loomc_context_options_t context_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-      /*.structure_size=*/sizeof(context_options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+      .structure_size = sizeof(context_options),
+      .next = &target_options,
   };
   loomc_context_t* context = nullptr;
   loomc_status_t status = loomc_context_create(
@@ -110,13 +110,13 @@ ContextPtr CreateSpirvContext(loomc_target_environment_t* target_environment) {
 
 SourcePtr CreateTextSource(const char* identifier, const char* contents) {
   loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
-      /*.contents=*/loomc_make_byte_span(contents, strlen(contents)),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view(identifier),
+      .contents = loomc_make_byte_span(contents, strlen(contents)),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status =
@@ -143,12 +143,12 @@ SourcePtr SerializeModuleText(
     loomc_module_t* module, loomc_module_text_presentation_t text_presentation =
                                 LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT) {
   loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("roundtrip.loom"),
-      /*.text_presentation=*/text_presentation,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("roundtrip.loom"),
+      .text_presentation = text_presentation,
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status = loomc_module_serialize_to_source(
@@ -198,13 +198,13 @@ TEST(TargetSpirvTest, CreatesTargetPipelinePassProgram) {
   ContextPtr context = CreateSpirvContext(target_environment.get());
 
   loomc_target_pipeline_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("spirv-prepared-low"),
-      /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
-      /*.control_flow_lowering=*/LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
-      /*.source_to_low_max_errors=*/20,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("spirv-prepared-low"),
+      .kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+      .source_to_low_max_errors = 20,
   };
   loomc_pass_program_t* pass_program = nullptr;
   loomc_result_t* result = nullptr;
@@ -246,10 +246,10 @@ kernel.def target(@target) @configured() {
   LOOMC_ASSERT_OK(loomc_compiler_create(
       context.get(), nullptr, loomc_allocator_system(), &raw_compiler));
   HandlePtr<loomc_compiler_t, loomc_compiler_release> compiler(raw_compiler);
-  loomc_target_pipeline_options_t pipeline_options = {};
-  pipeline_options.kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW;
-  pipeline_options.control_flow_lowering =
-      LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG;
+  loomc_target_pipeline_options_t pipeline_options = {
+      .kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+  };
   loomc_pass_program_t* raw_pass_program = nullptr;
   loomc_result_t* raw_result = nullptr;
   LOOMC_ASSERT_OK(loomc_pass_program_create_from_target_pipeline(
@@ -259,8 +259,7 @@ kernel.def target(@target) @configured() {
   ResultPtr result(raw_result);
   ExpectSucceededResult(result.get());
   result.reset();
-  loomc_compile_options_t compile_options = {};
-  compile_options.config_module = config.get();
+  loomc_compile_options_t compile_options = {.config_module = config.get()};
   LOOMC_ASSERT_OK(loomc_compile_module(
       compiler.get(), workspace.get(), pass_program.get(), module.get(),
       &compile_options, loomc_allocator_system(), &raw_result));
@@ -281,15 +280,17 @@ kernel.def target(@target) @configured() {
   for (int invocation = 0; invocation < 2; ++invocation) {
     for (auto mode : {LOOMC_COMPILE_REPORT_MODE_SUMMARY,
                       LOOMC_COMPILE_REPORT_MODE_DETAILS}) {
-      loomc_compile_report_options_t report_options = {};
-      report_options.type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS;
-      report_options.structure_size = sizeof(report_options);
-      report_options.mode = mode;
-      loomc_emit_options_t emit_options = {};
-      emit_options.next = &report_options;
-      emit_options.artifact_format =
-          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV);
-      emit_options.artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY;
+      loomc_compile_report_options_t report_options = {
+          .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+          .structure_size = sizeof(report_options),
+          .mode = mode,
+      };
+      loomc_emit_options_t emit_options = {
+          .next = &report_options,
+          .artifact_format =
+              loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
+          .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+      };
       LOOMC_ASSERT_OK(loomc_emit_module(
           target_environment.get(), workspace.get(), clone.get(), &emit_options,
           loomc_allocator_system(), &raw_result));
@@ -338,34 +339,34 @@ TEST(TargetSpirvTest, EmitsSpirvBinaryArtifact) {
       context.get(), module_workspace.get(), serialized.get());
 
   loomc_spirv_emit_options_t spirv_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(spirv_options),
-      /*.next=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS,
+      .structure_size = sizeof(spirv_options),
+      .next = nullptr,
   };
   const loomc_option_entry_t emit_entries[] = {
       {
-          /*.key=*/loomc_make_cstring_view(LOOMC_EMIT_OPTION_KEY_IDENTIFIER),
-          /*.value=*/loomc_make_cstring_view("ignored.spv"),
+          .key = loomc_make_cstring_view(LOOMC_EMIT_OPTION_KEY_IDENTIFIER),
+          .value = loomc_make_cstring_view("ignored.spv"),
       },
       {
-          /*.key=*/loomc_make_cstring_view(LOOMC_EMIT_OPTION_KEY_IDENTIFIER),
-          /*.value=*/loomc_make_cstring_view("spirv_barriers.spv"),
+          .key = loomc_make_cstring_view(LOOMC_EMIT_OPTION_KEY_IDENTIFIER),
+          .value = loomc_make_cstring_view("spirv_barriers.spv"),
       },
   };
   loomc_option_dict_t option_dict = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_OPTION_DICT,
-      /*.structure_size=*/sizeof(option_dict),
-      /*.next=*/&spirv_options,
-      /*.entries=*/emit_entries,
-      /*.entry_count=*/2,
+      .type = LOOMC_STRUCTURE_TYPE_OPTION_DICT,
+      .structure_size = sizeof(option_dict),
+      .next = &spirv_options,
+      .entries = emit_entries,
+      .entry_count = 2,
   };
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&option_dict,
-      /*.artifact_format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
-      /*.identifier=*/loomc_make_cstring_view("typed.spv"),
-      /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &option_dict,
+      .artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
+      .identifier = loomc_make_cstring_view("typed.spv"),
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
 
   for (int i = 0; i < 2; ++i) {
@@ -397,25 +398,25 @@ TEST(TargetSpirvTest, EmitsArtifactManifestAndTargetReport) {
       CreateBarrierSpirvLowModule(context.get(), workspace.get());
 
   loomc_compile_report_options_t report_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
-      /*.structure_size=*/sizeof(report_options),
-      /*.next=*/nullptr,
-      /*.mode=*/LOOMC_COMPILE_REPORT_MODE_DETAILS,
-      /*.format=*/LOOMC_COMPILE_REPORT_FORMAT_JSON,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(report_options),
+      .next = nullptr,
+      .mode = LOOMC_COMPILE_REPORT_MODE_DETAILS,
+      .format = LOOMC_COMPILE_REPORT_FORMAT_JSON,
   };
   loomc_artifact_manifest_options_t manifest_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
-      /*.structure_size=*/sizeof(manifest_options),
-      /*.next=*/&report_options,
-      /*.mode=*/LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY,
+      .type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
+      .structure_size = sizeof(manifest_options),
+      .next = &report_options,
+      .mode = LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY,
   };
   loomc_emit_options_t emit_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(emit_options),
-      /*.next=*/&manifest_options,
-      /*.artifact_format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
-      /*.identifier=*/loomc_make_cstring_view("spirv_barriers.spv"),
-      /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(emit_options),
+      .next = &manifest_options,
+      .artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
+      .identifier = loomc_make_cstring_view("spirv_barriers.spv"),
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
   loomc_result_t* result_handle = nullptr;
   LOOMC_ASSERT_OK(loomc_emit_module(target_environment.get(), workspace.get(),
@@ -590,14 +591,14 @@ func.def @choose_buffer(%first: buffer, %second: buffer, %choose_first: i1) -> (
       context.get(), nullptr, loomc_allocator_system(), &raw_compiler));
   CompilerPtr compiler(raw_compiler);
   const loomc_target_pipeline_options_t pipeline_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
-      /*.structure_size=*/sizeof(pipeline_options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("spirv-source-low"),
-      /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
-      /*.control_flow_lowering=*/
-      LOOMC_TARGET_CONTROL_FLOW_LOWERING_STRUCTURED_LOW,
-      /*.source_to_low_max_errors=*/20,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+      .structure_size = sizeof(pipeline_options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("spirv-source-low"),
+      .kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
+      .control_flow_lowering =
+          LOOMC_TARGET_CONTROL_FLOW_LOWERING_STRUCTURED_LOW,
+      .source_to_low_max_errors = 20,
   };
   loomc_pass_program_t* raw_pass_program = nullptr;
   loomc_result_t* raw_pipeline_result = nullptr;
@@ -618,24 +619,24 @@ func.def @choose_buffer(%first: buffer, %second: buffer, %choose_first: i1) -> (
       loomc_make_cstring_view("choose_buffer"),
   };
   const loomc_emit_options_t emit_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(emit_options),
-      /*.next=*/nullptr,
-      /*.artifact_format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
-      /*.identifier=*/loomc_make_cstring_view("selected_buffer.spv"),
-      /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(emit_options),
+      .next = nullptr,
+      .artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
+      .identifier = loomc_make_cstring_view("selected_buffer.spv"),
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
   const loomc_compile_artifact_options_t compile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
-      /*.structure_size=*/sizeof(compile_options),
-      /*.next=*/nullptr,
-      /*.roots=*/roots,
-      /*.root_count=*/IREE_ARRAYSIZE(roots),
-      /*.excluded_roots=*/nullptr,
-      /*.excluded_root_count=*/0,
-      /*.target_profile=*/target_profile.get(),
-      /*.config=*/nullptr,
-      /*.emit_options=*/&emit_options,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .next = nullptr,
+      .roots = roots,
+      .root_count = IREE_ARRAYSIZE(roots),
+      .excluded_roots = nullptr,
+      .excluded_root_count = 0,
+      .target_profile = target_profile.get(),
+      .config = nullptr,
+      .emit_options = &emit_options,
   };
   loomc_result_t* raw_result = nullptr;
   LOOMC_ASSERT_OK(loomc_compile_artifact(
@@ -654,24 +655,24 @@ TEST(TargetSpirvTest, RejectsUnknownEmitDictOptionThroughResult) {
   ContextPtr context = CreateSpirvContext(target_environment.get());
   const loomc_option_entry_t emit_entries[] = {
       {
-          /*.key=*/loomc_make_cstring_view("emit.definitely_not_real"),
-          /*.value=*/loomc_make_cstring_view("1"),
+          .key = loomc_make_cstring_view("emit.definitely_not_real"),
+          .value = loomc_make_cstring_view("1"),
       },
   };
   loomc_option_dict_t option_dict = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_OPTION_DICT,
-      /*.structure_size=*/sizeof(option_dict),
-      /*.next=*/nullptr,
-      /*.entries=*/emit_entries,
-      /*.entry_count=*/1,
+      .type = LOOMC_STRUCTURE_TYPE_OPTION_DICT,
+      .structure_size = sizeof(option_dict),
+      .next = nullptr,
+      .entries = emit_entries,
+      .entry_count = 1,
   };
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&option_dict,
-      /*.artifact_format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
-      /*.identifier=*/loomc_make_cstring_view("spirv_barriers.spv"),
-      /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &option_dict,
+      .artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
+      .identifier = loomc_make_cstring_view("spirv_barriers.spv"),
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
 
   loomc_workspace_t* workspace = nullptr;

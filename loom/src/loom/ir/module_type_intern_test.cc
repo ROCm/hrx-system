@@ -294,9 +294,10 @@ TEST_F(TypeImportTest, TemporaryMemoDistinguishesNamesSharingOneChildArray) {
 
 TEST_F(TypeImportTest, SharedPayloadWithChangedOuterTypeGetsDistinctIdentity) {
   const loom_overflow_dim_t dimensions[] = {1, 2, 3};
-  loom_type_t type = {};
-  type.header = loom_type_make_header(LOOM_TYPE_TILE, LOOM_SCALAR_TYPE_F32, 3,
-                                      LOOM_TYPE_FLAG_ALL_STATIC);
+  loom_type_t type = {
+      .header = loom_type_make_header(LOOM_TYPE_TILE, LOOM_SCALAR_TYPE_F32, 3,
+                                      LOOM_TYPE_FLAG_ALL_STATIC),
+  };
   type.dims[0] = reinterpret_cast<uintptr_t>(dimensions);
   loom_type_id_t tile;
   IREE_ASSERT_OK(loom_module_intern_type_id(module_, type, &tile));

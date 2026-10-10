@@ -208,8 +208,11 @@ TEST(GpuMemoryPairTest, SystemStoresDoNotGrantOtherAccessOrQueueContracts) {
       .cache_operations = AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM |
                           AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM,
       .cache_transition_kinds = AMDF_CACHE_TRANSITION_KINDS_GLOBAL,
-      .atomic_capabilities = {.operations_32 = AMDF_ATOMIC_OPERATION_STORE,
-                              .operations_64 = AMDF_ATOMIC_OPERATION_STORE},
+      .atomic_capabilities =
+          {
+              .operations_32 = AMDF_ATOMIC_OPERATION_STORE,
+              .operations_64 = AMDF_ATOMIC_OPERATION_STORE,
+          },
   };
   amdf_memory_site_query_t query = {
       .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,

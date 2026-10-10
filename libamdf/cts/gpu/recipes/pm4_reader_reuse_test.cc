@@ -95,9 +95,10 @@ class Pm4ReaderReuseTest
     };
     const auto source = site(producer);
     const auto target = site(consumer);
-    amdf_memory_pair_info_t pair = {};
-    pair.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-    pair.structure_size = sizeof(pair);
+    amdf_memory_pair_info_t pair = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+        .structure_size = sizeof(pair),
+    };
     ASSERT_EQ(api_->memory_query_pair_info(&source, &target, &pair),
               AMDF_STATUS_OK);
     ASSERT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);
@@ -175,12 +176,13 @@ void Pm4ReaderReuseTest::Run() {
     const amdf_memory_device_access_t access = {
         device_,
         {.access = kReadWrite, .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
-    amdf_memory_create_info_t creation = {};
-    creation.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-    creation.structure_size = sizeof(creation);
-    creation.memory_profile_ordinal = FindGpuMemoryProfileOrdinal(
-        api_, local_scope_, device_, AMDF_MEMORY_PROFILE_ROLE_CREATE,
-        AMDF_MEMORY_FLAG_DEVICE_LOCAL, access.requirements);
+    amdf_memory_create_info_t creation = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+        .structure_size = sizeof(creation),
+        .memory_profile_ordinal = FindGpuMemoryProfileOrdinal(
+            api_, local_scope_, device_, AMDF_MEMORY_PROFILE_ROLE_CREATE,
+            AMDF_MEMORY_FLAG_DEVICE_LOCAL, access.requirements),
+    };
     ASSERT_NE(creation.memory_profile_ordinal,
               AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
     creation.required_flags = AMDF_MEMORY_FLAG_DEVICE_LOCAL;

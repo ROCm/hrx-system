@@ -19,11 +19,12 @@ class DestructiveReuseTest : public ::testing::Test {
       loom_value_ordinal_t result, loom_value_ordinal_t source,
       uint32_t result_offset, uint32_t count,
       loom_low_placement_cause_t cause) {
-    loom_low_placement_relation_t row = {};
-    row.result_ordinal = result;
-    row.source_ordinal = source;
-    row.result_unit_offset = result_offset;
-    row.unit_count = count;
+    loom_low_placement_relation_t row = {
+        .result_ordinal = result,
+        .source_ordinal = source,
+        .result_unit_offset = result_offset,
+        .unit_count = count,
+    };
     row.kind = cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT
                    ? LOOM_LOW_PLACEMENT_RELATION_CONTIGUOUS_PART
                    : LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE;
@@ -39,11 +40,12 @@ class DestructiveReuseTest : public ::testing::Test {
                                            uint32_t start_point,
                                            uint32_t end_point,
                                            uint32_t unit_count) {
-    loom_liveness_interval_t interval = {};
-    interval.value_id = value_id;
-    interval.start_point = start_point;
-    interval.end_point = end_point;
-    interval.unit_count = unit_count;
+    loom_liveness_interval_t interval = {
+        .value_id = value_id,
+        .start_point = start_point,
+        .end_point = end_point,
+        .unit_count = unit_count,
+    };
     return interval;
   }
 
@@ -71,28 +73,32 @@ class DestructiveReuseTest : public ::testing::Test {
                             6,           write_point - 1, write_point - 1,
                             low_end,     high_end};
     uint64_t incomplete_segment_words[] = {0};
-    loom_low_allocation_unit_liveness_t units = {};
-    units.values = unit_values;
-    units.start_points = unit_start_points;
-    units.end_points = unit_ends;
-    units.point_count = IREE_ARRAYSIZE(unit_ends);
-    units.values_with_incomplete_storage_segments = {
-        /*.bit_count=*/IREE_ARRAYSIZE(unit_values),
-        /*.words=*/incomplete_segment_words,
+    loom_low_allocation_unit_liveness_t units = {
+        .values = unit_values,
+        .start_points = unit_start_points,
+        .end_points = unit_ends,
+        .point_count = IREE_ARRAYSIZE(unit_ends),
+        .values_with_incomplete_storage_segments =
+            {
+                .bit_count = IREE_ARRAYSIZE(unit_values),
+                .words = incomplete_segment_words,
+            },
     };
 
     const loom_liveness_segment_t segments[] = {
-        {/*.start_point=*/0,
-         /*.end_point=*/low_live_at_write ? low_end : write_point},
-        {/*.start_point=*/write_point + 1, /*.end_point=*/low_end},
-        {/*.start_point=*/0, /*.end_point=*/high_end},
+        {
+            .start_point = 0,
+            .end_point = low_live_at_write ? low_end : write_point,
+        },
+        {.start_point = write_point + 1, .end_point = low_end},
+        {.start_point = 0, .end_point = high_end},
     };
     const loom_liveness_segment_range_t segment_ranges[] = {
         {},
         {},
         {},
-        {/*.start=*/0, /*.count=*/low_live_at_write ? 1u : 2u},
-        {/*.start=*/2, /*.count=*/1},
+        {.start = 0, .count = low_live_at_write ? 1u : 2u},
+        {.start = 2, .count = 1},
     };
     const loom_liveness_interval_t intervals[] = {
         Interval(/*value_id=*/0, /*start_point=*/0, /*end_point=*/write_point,
@@ -107,14 +113,15 @@ class DestructiveReuseTest : public ::testing::Test {
                  /*unit_count=*/1),
     };
     const uint32_t interval_indices[] = {0, 1, 2, 3, 4};
-    loom_liveness_analysis_t liveness = {};
-    liveness.intervals = intervals;
-    liveness.interval_count = IREE_ARRAYSIZE(intervals);
-    liveness.value_interval_indices = interval_indices;
-    liveness.segments = segments;
-    liveness.segment_count = IREE_ARRAYSIZE(segments);
-    liveness.value_segment_ranges = segment_ranges;
-    liveness.value_count = IREE_ARRAYSIZE(segment_ranges);
+    loom_liveness_analysis_t liveness = {
+        .intervals = intervals,
+        .interval_count = IREE_ARRAYSIZE(intervals),
+        .value_count = IREE_ARRAYSIZE(segment_ranges),
+        .value_interval_indices = interval_indices,
+        .segments = segments,
+        .segment_count = IREE_ARRAYSIZE(segments),
+        .value_segment_ranges = segment_ranges,
+    };
     units.storage_segments.entries = segments;
 
     relations_[0] = Relation(0, 2, 0, 2, LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT);
@@ -128,17 +135,18 @@ class DestructiveReuseTest : public ::testing::Test {
     const loom_value_ordinal_t storage_order[] = {1, 0, 2, 3, 4};
     const loom_value_ordinal_t tied_origins[] = {2, 2, 2, 3, 4};
     const uint32_t write_relations[] = {1};
-    loom_low_placement_table_t placement = {};
-    placement.relations = relations_;
-    placement.relation_count = IREE_ARRAYSIZE(relations_);
-    placement.value_count = IREE_ARRAYSIZE(ranges);
-    placement.ranges_by_result_ordinal = ranges;
-    placement.storage_value_order = storage_order;
-    placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
-    placement.tied_storage_origins_by_value_ordinal = tied_origins;
-    placement.storage = {write_relations, IREE_ARRAYSIZE(write_relations),
-                         LOOM_LOW_PLACEMENT_STORAGE_FLAG_OPTIONAL_ALIASES |
-                             LOOM_LOW_PLACEMENT_STORAGE_FLAG_IDENTITY_ALIASES};
+    loom_low_placement_table_t placement = {
+        .value_count = IREE_ARRAYSIZE(ranges),
+        .relations = relations_,
+        .relation_count = IREE_ARRAYSIZE(relations_),
+        .storage = {write_relations, IREE_ARRAYSIZE(write_relations),
+                    LOOM_LOW_PLACEMENT_STORAGE_FLAG_OPTIONAL_ALIASES |
+                        LOOM_LOW_PLACEMENT_STORAGE_FLAG_IDENTITY_ALIASES},
+        .ranges_by_result_ordinal = ranges,
+        .storage_value_order = storage_order,
+        .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
+        .tied_storage_origins_by_value_ordinal = tied_origins,
+    };
     IREE_ASSERT_OK(loom_low_allocation_unit_liveness_retain_tied_storage(
         &units, &liveness, &placement, &arena_, &decision_arena_));
     IREE_ASSERT_OK(loom_low_allocation_refine_destructive_reuse(
@@ -182,22 +190,24 @@ TEST_F(DestructiveReuseTest, PreservesRequiredTiedFamilyObservations) {
   uint32_t unit_start_points[] = {0, 0, 0, 6};
   uint32_t unit_ends[] = {4, 5, 4, 7};
   uint64_t incomplete_segment_words[] = {0};
-  loom_low_allocation_unit_liveness_t units = {};
-  units.values = unit_values;
-  units.start_points = unit_start_points;
-  units.end_points = unit_ends;
-  units.point_count = IREE_ARRAYSIZE(unit_ends);
-  units.values_with_incomplete_storage_segments = {
-      /*.bit_count=*/IREE_ARRAYSIZE(unit_values),
-      /*.words=*/incomplete_segment_words,
+  loom_low_allocation_unit_liveness_t units = {
+      .values = unit_values,
+      .start_points = unit_start_points,
+      .end_points = unit_ends,
+      .point_count = IREE_ARRAYSIZE(unit_ends),
+      .values_with_incomplete_storage_segments =
+          {
+              .bit_count = IREE_ARRAYSIZE(unit_values),
+              .words = incomplete_segment_words,
+          },
   };
 
   const loom_liveness_segment_t segments[] = {
-      {/*.start_point=*/0, /*.end_point=*/4},
-      {/*.start_point=*/6, /*.end_point=*/7},
+      {.start_point = 0, .end_point = 4},
+      {.start_point = 6, .end_point = 7},
   };
   const loom_liveness_segment_range_t segment_ranges[] = {
-      {}, {}, {/*.start=*/0, /*.count=*/1}, {/*.start=*/1, /*.count=*/1}};
+      {}, {}, {.start = 0, .count = 1}, {.start = 1, .count = 1}};
   const loom_liveness_interval_t intervals[] = {
       Interval(/*value_id=*/0, /*start_point=*/0, /*end_point=*/4,
                /*unit_count=*/1),
@@ -209,14 +219,15 @@ TEST_F(DestructiveReuseTest, PreservesRequiredTiedFamilyObservations) {
                /*unit_count=*/1),
   };
   const uint32_t interval_indices[] = {0, 1, 2, 3};
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = intervals;
-  liveness.interval_count = IREE_ARRAYSIZE(intervals);
-  liveness.value_interval_indices = interval_indices;
-  liveness.segments = segments;
-  liveness.segment_count = IREE_ARRAYSIZE(segments);
-  liveness.value_segment_ranges = segment_ranges;
-  liveness.value_count = IREE_ARRAYSIZE(segment_ranges);
+  loom_liveness_analysis_t liveness = {
+      .intervals = intervals,
+      .interval_count = IREE_ARRAYSIZE(intervals),
+      .value_count = IREE_ARRAYSIZE(segment_ranges),
+      .value_interval_indices = interval_indices,
+      .segments = segments,
+      .segment_count = IREE_ARRAYSIZE(segments),
+      .value_segment_ranges = segment_ranges,
+  };
   units.storage_segments.entries = segments;
 
   loom_low_placement_relation_t relations[] = {
@@ -231,17 +242,18 @@ TEST_F(DestructiveReuseTest, PreservesRequiredTiedFamilyObservations) {
   const loom_value_ordinal_t storage_order[] = {1, 3, 0, 2};
   const loom_value_ordinal_t tied_origins[] = {0, 0, 2, 2};
   const uint32_t write_relations[] = {1};
-  loom_low_placement_table_t placement = {};
-  placement.relations = relations;
-  placement.relation_count = IREE_ARRAYSIZE(relations);
-  placement.value_count = IREE_ARRAYSIZE(ranges);
-  placement.ranges_by_result_ordinal = ranges;
-  placement.storage_value_order = storage_order;
-  placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
-  placement.tied_storage_origins_by_value_ordinal = tied_origins;
-  placement.storage = {write_relations, IREE_ARRAYSIZE(write_relations),
-                       LOOM_LOW_PLACEMENT_STORAGE_FLAG_OPTIONAL_ALIASES |
-                           LOOM_LOW_PLACEMENT_STORAGE_FLAG_IDENTITY_ALIASES};
+  loom_low_placement_table_t placement = {
+      .value_count = IREE_ARRAYSIZE(ranges),
+      .relations = relations,
+      .relation_count = IREE_ARRAYSIZE(relations),
+      .storage = {write_relations, IREE_ARRAYSIZE(write_relations),
+                  LOOM_LOW_PLACEMENT_STORAGE_FLAG_OPTIONAL_ALIASES |
+                      LOOM_LOW_PLACEMENT_STORAGE_FLAG_IDENTITY_ALIASES},
+      .ranges_by_result_ordinal = ranges,
+      .storage_value_order = storage_order,
+      .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
+      .tied_storage_origins_by_value_ordinal = tied_origins,
+  };
 
   IREE_ASSERT_OK(loom_low_allocation_unit_liveness_retain_tied_storage(
       &units, &liveness, &placement, &arena_, &decision_arena_));
@@ -258,14 +270,16 @@ TEST_F(DestructiveReuseTest, PreservesMappedResultUnitAcrossSourceWrite) {
   uint32_t unit_start_points[] = {0, 0, 1, 2, 2, 4};
   uint32_t unit_ends[] = {2, 2, 4, 3, 3, 5};
   uint64_t incomplete_segment_words[] = {0};
-  loom_low_allocation_unit_liveness_t units = {};
-  units.values = unit_values;
-  units.start_points = unit_start_points;
-  units.end_points = unit_ends;
-  units.point_count = IREE_ARRAYSIZE(unit_ends);
-  units.values_with_incomplete_storage_segments = {
-      /*.bit_count=*/IREE_ARRAYSIZE(unit_values),
-      /*.words=*/incomplete_segment_words,
+  loom_low_allocation_unit_liveness_t units = {
+      .values = unit_values,
+      .start_points = unit_start_points,
+      .end_points = unit_ends,
+      .point_count = IREE_ARRAYSIZE(unit_ends),
+      .values_with_incomplete_storage_segments =
+          {
+              .bit_count = IREE_ARRAYSIZE(unit_values),
+              .words = incomplete_segment_words,
+          },
   };
 
   const loom_liveness_interval_t intervals[] = {
@@ -280,12 +294,13 @@ TEST_F(DestructiveReuseTest, PreservesMappedResultUnitAcrossSourceWrite) {
   };
   const uint32_t interval_indices[] = {0, 1, 2, 3};
   const loom_liveness_segment_range_t segment_ranges[] = {{}, {}, {}, {}};
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = intervals;
-  liveness.interval_count = IREE_ARRAYSIZE(intervals);
-  liveness.value_interval_indices = interval_indices;
-  liveness.value_segment_ranges = segment_ranges;
-  liveness.value_count = IREE_ARRAYSIZE(intervals);
+  loom_liveness_analysis_t liveness = {
+      .intervals = intervals,
+      .interval_count = IREE_ARRAYSIZE(intervals),
+      .value_count = IREE_ARRAYSIZE(intervals),
+      .value_interval_indices = interval_indices,
+      .value_segment_ranges = segment_ranges,
+  };
 
   loom_low_placement_relation_t relations[] = {
       Relation(1, 0, 0, 1, LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE),
@@ -300,17 +315,18 @@ TEST_F(DestructiveReuseTest, PreservesMappedResultUnitAcrossSourceWrite) {
   const loom_value_ordinal_t storage_order[] = {2, 3, 1, 0};
   const loom_value_ordinal_t tied_origins[] = {0, 1, 0, 1};
   const uint32_t write_relations[] = {1};
-  loom_low_placement_table_t placement = {};
-  placement.relations = relations;
-  placement.relation_count = IREE_ARRAYSIZE(relations);
-  placement.value_count = IREE_ARRAYSIZE(ranges);
-  placement.ranges_by_result_ordinal = ranges;
-  placement.storage_value_order = storage_order;
-  placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
-  placement.tied_storage_origins_by_value_ordinal = tied_origins;
-  placement.storage = {write_relations, IREE_ARRAYSIZE(write_relations),
-                       LOOM_LOW_PLACEMENT_STORAGE_FLAG_OPTIONAL_ALIASES |
-                           LOOM_LOW_PLACEMENT_STORAGE_FLAG_IDENTITY_ALIASES};
+  loom_low_placement_table_t placement = {
+      .value_count = IREE_ARRAYSIZE(ranges),
+      .relations = relations,
+      .relation_count = IREE_ARRAYSIZE(relations),
+      .storage = {write_relations, IREE_ARRAYSIZE(write_relations),
+                  LOOM_LOW_PLACEMENT_STORAGE_FLAG_OPTIONAL_ALIASES |
+                      LOOM_LOW_PLACEMENT_STORAGE_FLAG_IDENTITY_ALIASES},
+      .ranges_by_result_ordinal = ranges,
+      .storage_value_order = storage_order,
+      .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
+      .tied_storage_origins_by_value_ordinal = tied_origins,
+  };
 
   IREE_ASSERT_OK(loom_low_allocation_unit_liveness_retain_tied_storage(
       &units, &liveness, &placement, &arena_, &decision_arena_));

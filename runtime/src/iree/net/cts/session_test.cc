@@ -48,7 +48,7 @@ struct SessionAcceptState {
   }
 
   iree_net_listener_accept_callback_t callback() {
-    return {/*.fn=*/OnAccept, /*.user_data=*/this};
+    return {.fn = OnAccept, .user_data = this};
   }
 };
 
@@ -64,7 +64,7 @@ struct SessionStopState {
   }
 
   iree_net_listener_stopped_callback_t callback() {
-    return {/*.fn=*/OnStopped, /*.user_data=*/this};
+    return {.fn = OnStopped, .user_data = this};
   }
 };
 
@@ -153,12 +153,12 @@ struct SessionCallbackState {
 
   iree_net_session_callbacks_t callbacks() {
     return {
-        /*.on_ready=*/OnReady,
-        /*.on_control_data=*/OnControlData,
-        /*.on_goaway=*/OnGoaway,
-        /*.on_error=*/OnError,
-        /*.on_deactivated=*/OnDeactivated,
-        /*.user_data=*/this,
+        .on_ready = OnReady,
+        .on_control_data = OnControlData,
+        .on_goaway = OnGoaway,
+        .on_error = OnError,
+        .on_deactivated = OnDeactivated,
+        .user_data = this,
     };
   }
 };
@@ -181,7 +181,7 @@ struct SessionSendState {
   }
 
   iree_net_send_completion_callback_t callback() {
-    return {/*.fn=*/OnComplete, /*.user_data=*/this};
+    return {.fn = OnComplete, .user_data = this};
   }
 };
 
@@ -207,7 +207,7 @@ struct SessionEndpointReadyState {
   }
 
   iree_net_endpoint_ready_callback_t callback() {
-    return {/*.fn=*/OnReady, /*.user_data=*/this};
+    return {.fn = OnReady, .user_data = this};
   }
 };
 
@@ -293,9 +293,10 @@ static iree_status_t CreateSessionReceivePool(
     iree_async_proactor_t* proactor,
     SessionReceivePoolResources* out_resources) {
   *out_resources = SessionReceivePoolResources{};
-  iree_async_slab_options_t slab_options = {};
-  slab_options.buffer_size = 64 * 1024;
-  slab_options.buffer_count = 16;
+  iree_async_slab_options_t slab_options = {
+      .buffer_size = 64 * 1024,
+      .buffer_count = 16,
+  };
   iree_status_t status = iree_async_slab_create(
       slab_options, iree_allocator_system(), &out_resources->slab);
   if (iree_status_is_ok(status)) {
@@ -436,8 +437,8 @@ class SessionTest : public ::testing::Test {
                             iree_async_proactor_t* proactor,
                             SessionPollSide side) {
     bool completed = false;
-    iree_net_connection_deactivate(connection, {/*.fn=*/OnConnectionDeactivated,
-                                                /*.user_data=*/&completed});
+    iree_net_connection_deactivate(
+        connection, {.fn = OnConnectionDeactivated, .user_data = &completed});
     while (!completed) {
       Poll(proactor, side);
     }
@@ -659,14 +660,15 @@ TEST_F(SessionTest, CopiedControlSendDoesNotSerializeDeactivation) {
       iree_async_span_from_ptr(payload.data(), payload.size());
   std::atomic<int> send_completion_count{0};
   const iree_net_send_completion_callback_t send_callback = {
-      /*.fn=*/+[](void* user_data, iree_status_t status,
-                  iree_host_size_t bytes_transferred) {
-        (void)bytes_transferred;
-        auto* completion_count = static_cast<std::atomic<int>*>(user_data);
-        completion_count->fetch_add(1, std::memory_order_relaxed);
-        iree_status_free(status);
-      },
-      /*.user_data=*/&send_completion_count,
+      .fn =
+          +[](void* user_data, iree_status_t status,
+              iree_host_size_t bytes_transferred) {
+            (void)bytes_transferred;
+            auto* completion_count = static_cast<std::atomic<int>*>(user_data);
+            completion_count->fetch_add(1, std::memory_order_relaxed);
+            iree_status_free(status);
+          },
+      .user_data = &send_completion_count,
   };
   iree_status_code_t send_status_code = IREE_STATUS_UNKNOWN;
 

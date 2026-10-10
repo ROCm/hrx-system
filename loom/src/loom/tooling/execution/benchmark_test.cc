@@ -76,9 +76,9 @@ TEST(BenchmarkTest, RunBatchesHonorsWarmupAndMinimums) {
 
   loom_run_benchmark_result_t result = {};
   IREE_ASSERT_OK(loom_run_benchmark_run_batches(
-      (loom_run_benchmark_batch_callback_t){
-          /*.fn=*/FakeBatch,
-          /*.user_data=*/&context,
+      loom_run_benchmark_batch_callback_t{
+          .fn = FakeBatch,
+          .user_data = &context,
       },
       &options, iree_allocator_system(), &result));
 
@@ -101,9 +101,9 @@ TEST(BenchmarkTest, RunBatchesRejectsInvalidOptions) {
   loom_run_benchmark_result_t result = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_run_benchmark_run_batches(
-                            (loom_run_benchmark_batch_callback_t){
-                                /*.fn=*/FakeBatch,
-                                /*.user_data=*/&context,
+                            loom_run_benchmark_batch_callback_t{
+                                .fn = FakeBatch,
+                                .user_data = &context,
                             },
                             &options, iree_allocator_system(), &result));
 }

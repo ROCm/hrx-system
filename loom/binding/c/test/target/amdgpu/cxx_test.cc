@@ -33,12 +33,12 @@ ContextPtr CreateContext() {
   LOOMC_EXPECT_OK(loomc_target_environment_create_amdgpu(
       loomc_allocator_system(), &environment));
   EnvironmentPtr owner(environment);
-  loomc_context_target_options_t target_options = {};
-  target_options.type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS;
-  target_options.structure_size = sizeof(target_options);
-  target_options.target_environment = environment;
-  loomc_context_options_t options = {};
-  options.next = &target_options;
+  loomc_context_target_options_t target_options = {
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .target_environment = environment,
+  };
+  loomc_context_options_t options = {.next = &target_options};
   loomc_context_t* context = nullptr;
   LOOMC_EXPECT_OK(
       loomc_context_create(&options, loomc_allocator_system(), &context));
@@ -80,21 +80,22 @@ ResultPtr CompileDivisionForGfx1151(loomc_target_environment_t* environment,
   LOOMC_EXPECT_OK(
       loomc_compiler_create(context, nullptr, allocator, &compiler));
   CompilerPtr compiler_owner(compiler);
-  loomc_amdgpu_profile_options_t profile_options = {};
-  profile_options.type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS;
-  profile_options.structure_size = sizeof(profile_options);
+  loomc_amdgpu_profile_options_t profile_options = {
+      .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
+      .structure_size = sizeof(profile_options),
+  };
   profile_options.identity.target = loomc_make_cstring_view("gfx1151");
   loomc_target_profile_t* profile = nullptr;
   LOOMC_EXPECT_OK(loomc_target_profile_create_amdgpu(
       environment, &profile_options, allocator, &profile));
   ProfilePtr profile_owner(profile);
-  loomc_target_pipeline_options_t pipeline_options = {};
-  pipeline_options.type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS;
-  pipeline_options.structure_size = sizeof(pipeline_options);
-  pipeline_options.kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW;
-  pipeline_options.control_flow_lowering =
-      LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG;
-  pipeline_options.source_to_low_max_errors = 20;
+  loomc_target_pipeline_options_t pipeline_options = {
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+      .structure_size = sizeof(pipeline_options),
+      .kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+      .source_to_low_max_errors = 20,
+  };
   loomc_pass_program_t* program = nullptr;
   loomc_result_t* prepared = nullptr;
   LOOMC_EXPECT_OK(loomc_pass_program_create_from_target_pipeline(
@@ -102,16 +103,17 @@ ResultPtr CompileDivisionForGfx1151(loomc_target_environment_t* environment,
   ProgramPtr program_owner(program);
   ResultPtr prepared_owner(prepared);
   EXPECT_TRUE(loomc_result_succeeded(prepared));
-  loomc_target_specialization_t specialization = {};
-  specialization.function_symbol = loomc_make_cstring_view("divide");
-  specialization.target_profile = profile;
-  loomc_target_specialization_options_t target_options = {};
-  target_options.type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS;
-  target_options.structure_size = sizeof(target_options);
-  target_options.specializations = &specialization;
-  target_options.specialization_count = 1;
-  loomc_compile_options_t compile_options = {};
-  compile_options.next = &target_options;
+  loomc_target_specialization_t specialization = {
+      .function_symbol = loomc_make_cstring_view("divide"),
+      .target_profile = profile,
+  };
+  loomc_target_specialization_options_t target_options = {
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .specializations = &specialization,
+      .specialization_count = 1,
+  };
+  loomc_compile_options_t compile_options = {.next = &target_options};
   loomc_result_t* compiled = nullptr;
   LOOMC_EXPECT_OK(loomc_compile_module(compiler, workspace, program, module,
                                        &compile_options, allocator, &compiled));
@@ -138,10 +140,11 @@ TEST(CxxAssemblyTest, SourceAndEnvironmentOwnershipSurvivesBothFormats) {
         return result;
       }
     )cpp";
-    loomc_source_options_t source_options = {};
-    source_options.identifier = loomc_make_cstring_view("assembly.cxx");
-    source_options.contents = loomc_make_byte_span(text, sizeof(text) - 1);
-    source_options.storage = LOOMC_SOURCE_STORAGE_COPY;
+    loomc_source_options_t source_options = {
+        .identifier = loomc_make_cstring_view("assembly.cxx"),
+        .contents = loomc_make_byte_span(text, sizeof(text) - 1),
+        .storage = LOOMC_SOURCE_STORAGE_COPY,
+    };
     loomc_source_t* source = nullptr;
     LOOMC_ASSERT_OK(loomc_source_create(&source_options,
                                         loomc_allocator_system(), &source));
@@ -163,8 +166,7 @@ TEST(CxxAssemblyTest, SourceAndEnvironmentOwnershipSurvivesBothFormats) {
     EXPECT_NE(original.find("low.invoke inline"), std::string::npos);
     EXPECT_NE(original.find("reg<amdgpu.vgpr>"), std::string::npos);
     EXPECT_NE(original.find("vector<1xf32>"), std::string::npos);
-    loomc_module_serialize_options_t serialize_options = {};
-    serialize_options.format = format;
+    loomc_module_serialize_options_t serialize_options = {.format = format};
     loomc_source_t* serialized = nullptr;
     LOOMC_ASSERT_OK(loomc_module_serialize_to_source(
         module, &serialize_options, loomc_allocator_system(), &serialized));
@@ -208,10 +210,11 @@ TEST(CxxDiagnosticTest,
         "void divide(const unsigned* input, unsigned* output) {\n"
         "  output[0] = input[0] / input[1];\n"
         "}\n";
-    loomc_source_options_t source_options = {};
-    source_options.identifier = loomc_make_cstring_view("virtual/division.cxx");
-    source_options.contents = loomc_make_byte_span(text, sizeof(text) - 1);
-    source_options.storage = LOOMC_SOURCE_STORAGE_COPY;
+    loomc_source_options_t source_options = {
+        .identifier = loomc_make_cstring_view("virtual/division.cxx"),
+        .contents = loomc_make_byte_span(text, sizeof(text) - 1),
+        .storage = LOOMC_SOURCE_STORAGE_COPY,
+    };
     loomc_source_t* source = nullptr;
     LOOMC_ASSERT_OK(loomc_source_create(&source_options, allocator, &source));
     SourcePtr source_owner(source);
@@ -236,12 +239,12 @@ TEST(CxxDiagnosticTest,
     LOOMC_ASSERT_OK(
         loomc_target_environment_create_amdgpu(allocator, &environment));
     EnvironmentPtr environment_owner(environment);
-    loomc_context_target_options_t target_context_options = {};
-    target_context_options.type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS;
-    target_context_options.structure_size = sizeof(target_context_options);
-    target_context_options.target_environment = environment;
-    loomc_context_options_t context_options = {};
-    context_options.next = &target_context_options;
+    loomc_context_target_options_t target_context_options = {
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+        .structure_size = sizeof(target_context_options),
+        .target_environment = environment,
+    };
+    loomc_context_options_t context_options = {.next = &target_context_options};
     loomc_context_t* context = nullptr;
     LOOMC_ASSERT_OK(
         loomc_context_create(&context_options, allocator, &context));
@@ -309,13 +312,15 @@ TEST(CxxDiagnosticTest, CompilationSourceRetentionControlsHeaderSnapshots) {
       LOOMC_ASSERT_OK(
           loomc_target_environment_create_amdgpu(allocator, &environment));
       EnvironmentPtr environment_owner(environment);
-      loomc_context_target_options_t target_context_options = {};
-      target_context_options.type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS;
-      target_context_options.structure_size = sizeof(target_context_options);
-      target_context_options.target_environment = environment;
-      loomc_context_options_t context_options = {};
-      context_options.next = &target_context_options;
-      context_options.source_retention = source_retention;
+      loomc_context_target_options_t target_context_options = {
+          .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+          .structure_size = sizeof(target_context_options),
+          .target_environment = environment,
+      };
+      loomc_context_options_t context_options = {
+          .next = &target_context_options,
+          .source_retention = source_retention,
+      };
       loomc_context_t* context = nullptr;
       LOOMC_ASSERT_OK(
           loomc_context_create(&context_options, allocator, &context));
@@ -324,32 +329,33 @@ TEST(CxxDiagnosticTest, CompilationSourceRetentionControlsHeaderSnapshots) {
       LOOMC_ASSERT_OK(loomc_workspace_create(nullptr, allocator, &workspace));
       WorkspacePtr workspace_owner(workspace);
 
-      loomc_source_options_t header_options = {};
-      header_options.identifier =
-          loomc_make_cstring_view("/headers/division.h");
-      header_options.contents =
-          loomc_make_byte_span(header_text, sizeof(header_text) - 1);
-      header_options.storage = LOOMC_SOURCE_STORAGE_COPY;
+      loomc_source_options_t header_options = {
+          .identifier = loomc_make_cstring_view("/headers/division.h"),
+          .contents =
+              loomc_make_byte_span(header_text, sizeof(header_text) - 1),
+          .storage = LOOMC_SOURCE_STORAGE_COPY,
+      };
       loomc_source_t* header = nullptr;
       LOOMC_ASSERT_OK(loomc_source_create(&header_options, allocator, &header));
       HeaderProvider provider = {SourcePtr(header)};
 
       const char main_text[] = "#include <division.h>\n";
-      loomc_source_options_t source_options = {};
-      source_options.identifier = loomc_make_cstring_view("virtual/main.cxx");
-      source_options.contents =
-          loomc_make_byte_span(main_text, sizeof(main_text) - 1);
-      source_options.storage = LOOMC_SOURCE_STORAGE_COPY;
+      loomc_source_options_t source_options = {
+          .identifier = loomc_make_cstring_view("virtual/main.cxx"),
+          .contents = loomc_make_byte_span(main_text, sizeof(main_text) - 1),
+          .storage = LOOMC_SOURCE_STORAGE_COPY,
+      };
       loomc_source_t* source = nullptr;
       LOOMC_ASSERT_OK(loomc_source_create(&source_options, allocator, &source));
       SourcePtr source_owner(source);
       const loomc_string_view_t include_path =
           loomc_make_cstring_view("/headers");
-      loomc_cxx_import_options_t import_options = {};
-      import_options.source_provider = {HeaderProvider::Resolve, &provider};
-      import_options.include_paths = &include_path;
-      import_options.include_path_count = 1;
-      import_options.flags = LOOMC_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES;
+      loomc_cxx_import_options_t import_options = {
+          .flags = LOOMC_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES,
+          .source_provider = {HeaderProvider::Resolve, &provider},
+          .include_paths = &include_path,
+          .include_path_count = 1,
+      };
       loomc_module_t* module = nullptr;
       loomc_result_t* imported = nullptr;
       LOOMC_ASSERT_OK(loomc_module_import_cxx(context, workspace, source,

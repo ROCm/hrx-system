@@ -61,19 +61,19 @@ class XdnaProductTest : public ::testing::Test {
         loom_xdna_device_profile_lookup(IREE_SV("amd.xdna.strix_halo.17f0_11"));
     IREE_ASSERT(profile != nullptr);
     *out_program = (loom_aie2p_array_program_t){0};
-    *out_entry = (loom_aie2p_xdna_entry_t){
-        /*.name=*/IREE_SV("entry"),
-        /*.column_count=*/1,
-        /*.bindings=*/nullptr,
-        /*.binding_count=*/0,
-        /*.array_program=*/out_program,
-        /*.tiles=*/nullptr,
-        /*.tile_count=*/0,
+    *out_entry = loom_aie2p_xdna_entry_t{
+        .name = IREE_SV("entry"),
+        .column_count = 1,
+        .bindings = nullptr,
+        .binding_count = 0,
+        .array_program = out_program,
+        .tiles = nullptr,
+        .tile_count = 0,
     };
-    *out_product = (loom_aie2p_xdna_product_t){
-        /*.device_profile=*/profile,
-        /*.entries=*/out_entry,
-        /*.entry_count=*/1,
+    *out_product = loom_aie2p_xdna_product_t{
+        .device_profile = profile,
+        .entries = out_entry,
+        .entry_count = 1,
     };
   }
 
@@ -164,26 +164,26 @@ TEST_F(XdnaProductTest, PreservesRequirementsIndependentOfWorkerTopology) {
   };
   const iree_xdna_elf_binding_record_t bindings[] = {
       {
-          /*.kind=*/IREE_XDNA_ELF_BINDING_KIND_BUFFER,
-          /*.address_space=*/IREE_XDNA_ELF_BINDING_ADDRESS_SPACE_GLOBAL,
-          /*.access=*/IREE_XDNA_ELF_BINDING_ACCESS_READ,
-          /*.usage=*/IREE_XDNA_ELF_BINDING_USAGE_DEVICE_VISIBLE,
-          /*.minimum_byte_length=*/4096 + 256,
-          /*.minimum_alignment=*/256,
-          /*.minimum_byte_offset=*/256,
-          /*.maximum_byte_offset=*/1024,
+          .kind = IREE_XDNA_ELF_BINDING_KIND_BUFFER,
+          .address_space = IREE_XDNA_ELF_BINDING_ADDRESS_SPACE_GLOBAL,
+          .access = IREE_XDNA_ELF_BINDING_ACCESS_READ,
+          .usage = IREE_XDNA_ELF_BINDING_USAGE_DEVICE_VISIBLE,
+          .minimum_byte_length = 4096 + 256,
+          .minimum_alignment = 256,
+          .minimum_byte_offset = 256,
+          .maximum_byte_offset = 1024,
       },
       {
-          /*.kind=*/IREE_XDNA_ELF_BINDING_KIND_BUFFER,
-          /*.address_space=*/IREE_XDNA_ELF_BINDING_ADDRESS_SPACE_HOST,
-          /*.access=*/IREE_XDNA_ELF_BINDING_ACCESS_READ |
-              IREE_XDNA_ELF_BINDING_ACCESS_WRITE,
-          /*.usage=*/IREE_XDNA_ELF_BINDING_USAGE_DEVICE_VISIBLE |
-              IREE_XDNA_ELF_BINDING_USAGE_COHERENT,
-          /*.minimum_byte_length=*/65536 + 64,
-          /*.minimum_alignment=*/64,
-          /*.minimum_byte_offset=*/0,
-          /*.maximum_byte_offset=*/UINT64_MAX,
+          .kind = IREE_XDNA_ELF_BINDING_KIND_BUFFER,
+          .address_space = IREE_XDNA_ELF_BINDING_ADDRESS_SPACE_HOST,
+          .access = IREE_XDNA_ELF_BINDING_ACCESS_READ |
+                    IREE_XDNA_ELF_BINDING_ACCESS_WRITE,
+          .usage = IREE_XDNA_ELF_BINDING_USAGE_DEVICE_VISIBLE |
+                   IREE_XDNA_ELF_BINDING_USAGE_COHERENT,
+          .minimum_byte_length = 65536 + 64,
+          .minimum_alignment = 64,
+          .minimum_byte_offset = 0,
+          .maximum_byte_offset = UINT64_MAX,
       },
   };
   const loom_aie2p_xdna_entry_t entries[] = {
@@ -281,59 +281,59 @@ class SyntheticXdnaProduct {
     IREE_ASSERT_LE(tile_count, (iree_host_size_t)family_->column_count *
                                    compute->row_count);
 
-    sections_[0] = (loom_native_section_t){
-        /*.name=*/IREE_SV(".text.kernel"),
-        /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
-        /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-            LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
-        /*.address=*/0,
-        /*.alignment=*/16,
-        /*.contents=*/iree_make_const_byte_span(code_.data(), code_.size()),
+    sections_[0] = loom_native_section_t{
+        .name = IREE_SV(".text.kernel"),
+        .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+        .access = LOOM_NATIVE_SECTION_ACCESS_READ |
+                  LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
+        .address = 0,
+        .alignment = 16,
+        .contents = iree_make_const_byte_span(code_.data(), code_.size()),
     };
-    sections_[1] = (loom_native_section_t){
-        /*.name=*/IREE_SV(".storage.first"),
-        /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
-        /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-            LOOM_NATIVE_SECTION_ACCESS_WRITE,
-        /*.address=*/0x70000,
-        /*.alignment=*/64,
-        /*.contents=*/iree_const_byte_span_empty(),
-        /*.reservation_length=*/64,
+    sections_[1] = loom_native_section_t{
+        .name = IREE_SV(".storage.first"),
+        .storage = LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
+        .access =
+            LOOM_NATIVE_SECTION_ACCESS_READ | LOOM_NATIVE_SECTION_ACCESS_WRITE,
+        .address = 0x70000,
+        .alignment = 64,
+        .contents = iree_const_byte_span_empty(),
+        .reservation_length = 64,
     };
-    sections_[2] = (loom_native_section_t){
-        /*.name=*/IREE_SV(".storage.second"),
-        /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
-        /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-            LOOM_NATIVE_SECTION_ACCESS_WRITE,
-        /*.address=*/0x70100,
-        /*.alignment=*/64,
-        /*.contents=*/iree_const_byte_span_empty(),
-        /*.reservation_length=*/64,
+    sections_[2] = loom_native_section_t{
+        .name = IREE_SV(".storage.second"),
+        .storage = LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
+        .access =
+            LOOM_NATIVE_SECTION_ACCESS_READ | LOOM_NATIVE_SECTION_ACCESS_WRITE,
+        .address = 0x70100,
+        .alignment = 64,
+        .contents = iree_const_byte_span_empty(),
+        .reservation_length = 64,
     };
     placements_[0].memory_space = LOOM_XDNA_MEMORY_SPACE_PROGRAM;
     placements_[1].memory_space = LOOM_XDNA_MEMORY_SPACE_DATA;
     placements_[2].memory_space = LOOM_XDNA_MEMORY_SPACE_DATA;
-    linked_tile_ = (loom_aie2p_linked_tile_t){
-        /*.assembly=*/
-        {
-            /*.sections=*/sections_.data(),
-            /*.section_count=*/sections_.size(),
-        },
-        /*.section_placements=*/placements_.data(),
-        /*.section_placement_count=*/placements_.size(),
-        /*.symbol_layouts=*/nullptr,
-        /*.symbol_layout_count=*/0,
-        /*.entry_section_index=*/0,
-        /*.entry_address=*/0,
+    linked_tile_ = loom_aie2p_linked_tile_t{
+        .assembly =
+            {
+                .sections = sections_.data(),
+                .section_count = sections_.size(),
+            },
+        .section_placements = placements_.data(),
+        .section_placement_count = placements_.size(),
+        .symbol_layouts = nullptr,
+        .symbol_layout_count = 0,
+        .entry_section_index = 0,
+        .entry_address = 0,
     };
-    entry_symbol_ = (loom_native_object_symbol_t){
-        /*.name=*/IREE_SV("kernel"),
-        /*.section_contribution_index=*/0,
-        /*.section_offset=*/0,
-        /*.size=*/code_.size(),
-        /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
-        /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
-        /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+    entry_symbol_ = loom_native_object_symbol_t{
+        .name = IREE_SV("kernel"),
+        .section_contribution_index = 0,
+        .section_offset = 0,
+        .size = code_.size(),
+        .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+        .visibility = LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
+        .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
     };
     contribution_.object.symbols = &entry_symbol_;
     contribution_.object.symbol_count = 1;
@@ -353,30 +353,29 @@ class SyntheticXdnaProduct {
     for (iree_host_size_t i = 0; i < entry_count; ++i) {
       names_.emplace_back("entry_" + std::to_string(i));
       for (iree_host_size_t j = 0; j < tile_count; ++j) {
-        tiles_[i * tile_count + j] = (loom_aie2p_xdna_tile_t){
-            /*.coordinate=*/
-            {(uint16_t)(j / compute->row_count),
-             (uint16_t)(compute->first_row + j % compute->row_count)},
-            /*.contribution=*/&contribution_,
-            /*.linked_tile=*/&linked_tile_,
+        tiles_[i * tile_count + j] = loom_aie2p_xdna_tile_t{
+            .coordinate = {(uint16_t)(j / compute->row_count),
+                           (uint16_t)(compute->first_row +
+                                      j % compute->row_count)},
+            .contribution = &contribution_,
+            .linked_tile = &linked_tile_,
         };
       }
-      entries_[i] = (loom_aie2p_xdna_entry_t){
-          /*.name=*/iree_make_cstring_view(names_[i].c_str()),
-          /*.column_count=*/
-          (uint16_t)((tile_count + compute->row_count - 1u) /
-                     compute->row_count),
-          /*.bindings=*/nullptr,
-          /*.binding_count=*/0,
-          /*.array_program=*/&array_program_,
-          /*.tiles=*/tiles_.data() + i * tile_count,
-          /*.tile_count=*/tile_count,
+      entries_[i] = loom_aie2p_xdna_entry_t{
+          .name = iree_make_cstring_view(names_[i].c_str()),
+          .column_count = (uint16_t)((tile_count + compute->row_count - 1u) /
+                                     compute->row_count),
+          .bindings = nullptr,
+          .binding_count = 0,
+          .array_program = &array_program_,
+          .tiles = tiles_.data() + i * tile_count,
+          .tile_count = tile_count,
       };
     }
-    product_ = (loom_aie2p_xdna_product_t){
-        /*.device_profile=*/profile_,
-        /*.entries=*/entries_.data(),
-        /*.entry_count=*/entries_.size(),
+    product_ = loom_aie2p_xdna_product_t{
+        .device_profile = profile_,
+        .entries = entries_.data(),
+        .entry_count = entries_.size(),
     };
   }
 
@@ -425,68 +424,68 @@ TEST_F(XdnaProductTest, LoadsInitializedTileSectionsBeforeActivation) {
   };
   loom_native_section_t linked_sections[] = {
       {
-          /*.name=*/IREE_SV(".text.kernel"),
-          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
-          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-              LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
-          /*.address=*/0,
-          /*.alignment=*/16,
-          /*.contents=*/iree_make_const_byte_span(code.data(), code.size()),
+          .name = IREE_SV(".text.kernel"),
+          .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+          .access = LOOM_NATIVE_SECTION_ACCESS_READ |
+                    LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
+          .address = 0,
+          .alignment = 16,
+          .contents = iree_make_const_byte_span(code.data(), code.size()),
       },
       {
-          /*.name=*/IREE_SV(".rodata.table"),
-          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
-          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ,
-          /*.address=*/0x74020,
-          /*.alignment=*/32,
-          /*.contents=*/iree_make_const_byte_span(table.data(), table.size()),
+          .name = IREE_SV(".rodata.table"),
+          .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+          .access = LOOM_NATIVE_SECTION_ACCESS_READ,
+          .address = 0x74020,
+          .alignment = 32,
+          .contents = iree_make_const_byte_span(table.data(), table.size()),
       },
       {
-          /*.name=*/IREE_SV(".storage.kernel.scratch"),
-          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
-          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-              LOOM_NATIVE_SECTION_ACCESS_WRITE,
-          /*.address=*/0x70000,
-          /*.alignment=*/64,
-          /*.contents=*/iree_const_byte_span_empty(),
-          /*.reservation_length=*/64,
+          .name = IREE_SV(".storage.kernel.scratch"),
+          .storage = LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
+          .access = LOOM_NATIVE_SECTION_ACCESS_READ |
+                    LOOM_NATIVE_SECTION_ACCESS_WRITE,
+          .address = 0x70000,
+          .alignment = 64,
+          .contents = iree_const_byte_span_empty(),
+          .reservation_length = 64,
       },
   };
   const loom_aie2p_linked_section_placement_t linked_placements[] = {
       {
-          /*.memory_space=*/LOOM_XDNA_MEMORY_SPACE_PROGRAM,
-          /*.owner_offset=*/0,
+          .memory_space = LOOM_XDNA_MEMORY_SPACE_PROGRAM,
+          .owner_offset = 0,
       },
       {
-          /*.memory_space=*/LOOM_XDNA_MEMORY_SPACE_DATA,
-          /*.owner_offset=*/kDataOwnerOffset,
+          .memory_space = LOOM_XDNA_MEMORY_SPACE_DATA,
+          .owner_offset = kDataOwnerOffset,
       },
       {
-          /*.memory_space=*/LOOM_XDNA_MEMORY_SPACE_DATA,
-          /*.owner_offset=*/0,
+          .memory_space = LOOM_XDNA_MEMORY_SPACE_DATA,
+          .owner_offset = 0,
       },
   };
   const loom_aie2p_linked_tile_t linked_tile = {
-      /*.assembly=*/
-      {
-          /*.sections=*/linked_sections,
-          /*.section_count=*/IREE_ARRAYSIZE(linked_sections),
-      },
-      /*.section_placements=*/linked_placements,
-      /*.section_placement_count=*/IREE_ARRAYSIZE(linked_placements),
-      /*.symbol_layouts=*/nullptr,
-      /*.symbol_layout_count=*/0,
-      /*.entry_section_index=*/0,
-      /*.entry_address=*/0,
+      .assembly =
+          {
+              .sections = linked_sections,
+              .section_count = IREE_ARRAYSIZE(linked_sections),
+          },
+      .section_placements = linked_placements,
+      .section_placement_count = IREE_ARRAYSIZE(linked_placements),
+      .symbol_layouts = nullptr,
+      .symbol_layout_count = 0,
+      .entry_section_index = 0,
+      .entry_address = 0,
   };
   const loom_native_object_symbol_t entry_symbol = {
-      /*.name=*/IREE_SV("kernel"),
-      /*.section_contribution_index=*/0,
-      /*.section_offset=*/0,
-      /*.size=*/code.size(),
-      /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
-      /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
-      /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      .name = IREE_SV("kernel"),
+      .section_contribution_index = 0,
+      .section_offset = 0,
+      .size = code.size(),
+      .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+      .visibility = LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
+      .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
   };
   loom_aie2p_leaf_contribution_t contribution = {};
   contribution.object.symbols = &entry_symbol;
@@ -494,9 +493,9 @@ TEST_F(XdnaProductTest, LoadsInitializedTileSectionsBeforeActivation) {
   contribution.realization.entry_symbol_index = 0;
 
   const loom_aie2p_xdna_tile_t tile = {
-      /*.coordinate=*/kCoordinate,
-      /*.contribution=*/&contribution,
-      /*.linked_tile=*/&linked_tile,
+      .coordinate = kCoordinate,
+      .contribution = &contribution,
+      .linked_tile = &linked_tile,
   };
   constexpr uint32_t kActivationAddress = 0x02232000;
   constexpr uint32_t kActivationValue = 1;
@@ -511,23 +510,24 @@ TEST_F(XdnaProductTest, LoadsInitializedTileSectionsBeforeActivation) {
   records[2].value.register_mask_wait32 = {kCompletionAddress, 0x3F, 1};
   records[3].type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_WRITE32;
   records[3].value.register_write32 = {kActivationAddress, 0};
-  loom_aie2p_array_program_t array_program = {};
-  array_program.array_records = records;
-  array_program.array_record_count = IREE_ARRAYSIZE(records);
+  loom_aie2p_array_program_t array_program = {
+      .array_records = records,
+      .array_record_count = IREE_ARRAYSIZE(records),
+  };
 
   const loom_aie2p_xdna_entry_t entry = {
-      /*.name=*/IREE_SV("entry"),
-      /*.column_count=*/kCoordinate.column + 1,
-      /*.bindings=*/nullptr,
-      /*.binding_count=*/0,
-      /*.array_program=*/&array_program,
-      /*.tiles=*/&tile,
-      /*.tile_count=*/1,
+      .name = IREE_SV("entry"),
+      .column_count = kCoordinate.column + 1,
+      .bindings = nullptr,
+      .binding_count = 0,
+      .array_program = &array_program,
+      .tiles = &tile,
+      .tile_count = 1,
   };
   const loom_aie2p_xdna_product_t product = {
-      /*.device_profile=*/profile,
-      /*.entries=*/&entry,
-      /*.entry_count=*/1,
+      .device_profile = profile,
+      .entries = &entry,
+      .entry_count = 1,
   };
 
   loom_aie2p_xdna_product_issue_t issue = {};
@@ -708,82 +708,83 @@ TEST_F(XdnaProductTest, RejectsExactSectionHeaderOverflow) {
   std::vector<loom_native_section_t> linked_sections(kLinkedSectionCount);
   std::vector<loom_aie2p_linked_section_placement_t> linked_placements(
       kLinkedSectionCount);
-  linked_sections[0] = (loom_native_section_t){
-      /*.name=*/IREE_SV(".text.kernel"),
-      /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
-      /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-          LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
-      /*.address=*/0,
-      /*.alignment=*/16,
-      /*.contents=*/iree_make_const_byte_span(code.data(), code.size()),
+  linked_sections[0] = loom_native_section_t{
+      .name = IREE_SV(".text.kernel"),
+      .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+      .access =
+          LOOM_NATIVE_SECTION_ACCESS_READ | LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
+      .address = 0,
+      .alignment = 16,
+      .contents = iree_make_const_byte_span(code.data(), code.size()),
   };
   linked_placements[0].memory_space = LOOM_XDNA_MEMORY_SPACE_PROGRAM;
   for (iree_host_size_t i = 1; i < kLinkedSectionCount; ++i) {
-    linked_sections[i] = (loom_native_section_t){
-        /*.name=*/IREE_SV(".discard"),
-        /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
-        /*.access=*/LOOM_NATIVE_SECTION_ACCESS_NONE,
-        /*.address=*/(uint32_t)i,
-        /*.alignment=*/1,
-        /*.contents=*/iree_const_byte_span_empty(),
+    linked_sections[i] = loom_native_section_t{
+        .name = IREE_SV(".discard"),
+        .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+        .access = LOOM_NATIVE_SECTION_ACCESS_NONE,
+        .address = (uint32_t)i,
+        .alignment = 1,
+        .contents = iree_const_byte_span_empty(),
     };
     linked_placements[i].memory_space = LOOM_XDNA_MEMORY_SPACE_PROGRAM;
   }
   const loom_aie2p_linked_tile_t linked_tile = {
-      /*.assembly=*/
-      {
-          /*.sections=*/linked_sections.data(),
-          /*.section_count=*/linked_sections.size(),
-      },
-      /*.section_placements=*/linked_placements.data(),
-      /*.section_placement_count=*/linked_placements.size(),
-      /*.symbol_layouts=*/nullptr,
-      /*.symbol_layout_count=*/0,
-      /*.entry_section_index=*/0,
-      /*.entry_address=*/0,
+      .assembly =
+          {
+              .sections = linked_sections.data(),
+              .section_count = linked_sections.size(),
+          },
+      .section_placements = linked_placements.data(),
+      .section_placement_count = linked_placements.size(),
+      .symbol_layouts = nullptr,
+      .symbol_layout_count = 0,
+      .entry_section_index = 0,
+      .entry_address = 0,
   };
   const loom_native_object_symbol_t entry_symbol = {
-      /*.name=*/IREE_SV("kernel"),
-      /*.section_contribution_index=*/0,
-      /*.section_offset=*/0,
-      /*.size=*/code.size(),
-      /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
-      /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
-      /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      .name = IREE_SV("kernel"),
+      .section_contribution_index = 0,
+      .section_offset = 0,
+      .size = code.size(),
+      .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+      .visibility = LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
+      .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
   };
   loom_aie2p_leaf_contribution_t contribution = {};
   contribution.object.symbols = &entry_symbol;
   contribution.object.symbol_count = 1;
   contribution.realization.entry_symbol_index = 0;
   const loom_aie2p_xdna_tile_t tile = {
-      /*.coordinate=*/{0, 2},
-      /*.contribution=*/&contribution,
-      /*.linked_tile=*/&linked_tile,
+      .coordinate = {0, 2},
+      .contribution = &contribution,
+      .linked_tile = &linked_tile,
   };
-  loom_aie2p_program_record_t record = {};
-  record.type = LOOM_AIE2P_PROGRAM_RECORD_TILE_PROGRAM_LOAD;
+  loom_aie2p_program_record_t record = {
+      .type = LOOM_AIE2P_PROGRAM_RECORD_TILE_PROGRAM_LOAD,
+  };
   record.value.tile_program_load.tile_program_index = 0;
   const loom_aie2p_array_program_t program = {
-      /*.array_records=*/&record,
-      /*.array_record_count=*/1,
-      /*.control_records=*/nullptr,
-      /*.control_record_count=*/0,
-      /*.relocations=*/nullptr,
-      /*.relocation_count=*/0,
+      .array_records = &record,
+      .array_record_count = 1,
+      .control_records = nullptr,
+      .control_record_count = 0,
+      .relocations = nullptr,
+      .relocation_count = 0,
   };
   const loom_aie2p_xdna_entry_t entry = {
-      /*.name=*/IREE_SV("entry"),
-      /*.column_count=*/1,
-      /*.bindings=*/nullptr,
-      /*.binding_count=*/0,
-      /*.array_program=*/&program,
-      /*.tiles=*/&tile,
-      /*.tile_count=*/1,
+      .name = IREE_SV("entry"),
+      .column_count = 1,
+      .bindings = nullptr,
+      .binding_count = 0,
+      .array_program = &program,
+      .tiles = &tile,
+      .tile_count = 1,
   };
   const loom_aie2p_xdna_product_t product = {
-      /*.device_profile=*/profile,
-      /*.entries=*/&entry,
-      /*.entry_count=*/1,
+      .device_profile = profile,
+      .entries = &entry,
+      .entry_count = 1,
   };
 
   loom_aie2p_xdna_product_issue_t issue = {};

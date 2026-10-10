@@ -66,7 +66,7 @@ struct ConnectState {
   }
 
   iree_net_transport_connect_callback_t callback() {
-    return {/*.fn=*/OnConnect, /*.user_data=*/this};
+    return {.fn = OnConnect, .user_data = this};
   }
 };
 
@@ -88,7 +88,7 @@ struct AcceptState {
   }
 
   iree_net_listener_accept_callback_t callback() {
-    return {/*.fn=*/OnAccept, /*.user_data=*/this};
+    return {.fn = OnAccept, .user_data = this};
   }
 };
 
@@ -105,7 +105,7 @@ struct StopState {
   }
 
   iree_net_listener_stopped_callback_t callback() {
-    return {/*.fn=*/OnStopped, /*.user_data=*/this};
+    return {.fn = OnStopped, .user_data = this};
   }
 };
 
@@ -127,7 +127,7 @@ struct EndpointReadyState {
   }
 
   iree_net_endpoint_ready_callback_t callback() {
-    return {/*.fn=*/OnReady, /*.user_data=*/this};
+    return {.fn = OnReady, .user_data = this};
   }
 };
 
@@ -159,9 +159,9 @@ struct MessageState {
 
   iree_net_message_endpoint_callbacks_t callbacks() {
     return {
-        /*.on_message=*/OnMessage,
-        /*.on_error=*/OnError,
-        /*.user_data=*/this,
+        .on_message = OnMessage,
+        .on_error = OnError,
+        .user_data = this,
     };
   }
 };
@@ -214,17 +214,17 @@ struct ProtocolHandoffState {
 
   iree_net_message_endpoint_callbacks_t bootstrap_callbacks() {
     return {
-        /*.on_message=*/OnBootstrapMessage,
-        /*.on_error=*/OnError,
-        /*.user_data=*/this,
+        .on_message = OnBootstrapMessage,
+        .on_error = OnError,
+        .user_data = this,
     };
   }
 
   iree_net_message_endpoint_callbacks_t operational_callbacks() {
     return {
-        /*.on_message=*/OnOperationalMessage,
-        /*.on_error=*/OnError,
-        /*.user_data=*/this,
+        .on_message = OnOperationalMessage,
+        .on_error = OnError,
+        .user_data = this,
     };
   }
 };
@@ -269,10 +269,10 @@ struct ControlMessageState {
 
   iree_net_control_channel_callbacks_t callbacks() {
     return {
-        /*.on_data=*/OnData,
-        /*.on_goaway=*/OnGoaway,
-        /*.on_error=*/OnError,
-        /*.user_data=*/this,
+        .on_data = OnData,
+        .on_goaway = OnGoaway,
+        .on_error = OnError,
+        .user_data = this,
     };
   }
 };
@@ -341,10 +341,10 @@ struct QueueMessageState {
 
   iree_net_queue_channel_callbacks_t callbacks() {
     return {
-        /*.on_command=*/OnCommand,
-        /*.on_advance=*/OnAdvance,
-        /*.on_error=*/OnError,
-        /*.user_data=*/this,
+        .on_command = OnCommand,
+        .on_advance = OnAdvance,
+        .on_error = OnError,
+        .user_data = this,
     };
   }
 };
@@ -383,14 +383,13 @@ struct QueueBuildState {
       iree_async_span_list_t payload,
       iree_net_send_completion_callback_t completion_callback) {
     return {
-        /*.wait_frontier_count=*/static_cast<uint8_t>(wait_frontier.size()),
-        /*.signal_frontier_count=*/
-        static_cast<uint8_t>(signal_frontier.size()),
-        /*.generated_payload_length=*/generated_payload.size(),
-        /*.build=*/Build,
-        /*.build_user_data=*/this,
-        /*.payload=*/payload,
-        /*.completion_callback=*/completion_callback,
+        .wait_frontier_count = static_cast<uint8_t>(wait_frontier.size()),
+        .signal_frontier_count = static_cast<uint8_t>(signal_frontier.size()),
+        .generated_payload_length = generated_payload.size(),
+        .build = Build,
+        .build_user_data = this,
+        .payload = payload,
+        .completion_callback = completion_callback,
     };
   }
 };
@@ -486,13 +485,13 @@ struct BulkMessageState {
 
   iree_net_bulk_channel_callbacks_t callbacks() {
     return {
-        /*.on_start=*/OnStart,
-        /*.on_data=*/OnData,
-        /*.on_complete=*/OnComplete,
-        /*.on_abort=*/OnAbort,
-        /*.on_credit=*/OnCredit,
-        /*.on_error=*/OnError,
-        /*.user_data=*/this,
+        .on_start = OnStart,
+        .on_data = OnData,
+        .on_complete = OnComplete,
+        .on_abort = OnAbort,
+        .on_credit = OnCredit,
+        .on_error = OnError,
+        .user_data = this,
     };
   }
 };
@@ -515,7 +514,7 @@ struct SendState {
   }
 
   iree_net_send_completion_callback_t callback() {
-    return {/*.fn=*/OnComplete, /*.user_data=*/this};
+    return {.fn = OnComplete, .user_data = this};
   }
 };
 
@@ -531,7 +530,7 @@ struct DeactivateState {
   }
 
   iree_net_connection_deactivate_callback_t callback() {
-    return {/*.fn=*/OnDeactivated, /*.user_data=*/this};
+    return {.fn = OnDeactivated, .user_data = this};
   }
 };
 
@@ -549,9 +548,10 @@ struct ReceivePoolResources {
 static iree_status_t CreateReceivePool(iree_async_proactor_t* proactor,
                                        ReceivePoolResources* out_resources) {
   *out_resources = ReceivePoolResources{};
-  iree_async_slab_options_t slab_options = {};
-  slab_options.buffer_size = 64 * 1024;
-  slab_options.buffer_count = 16;
+  iree_async_slab_options_t slab_options = {
+      .buffer_size = 64 * 1024,
+      .buffer_count = 16,
+  };
   iree_status_t status = iree_async_slab_create(
       slab_options, iree_allocator_system(), &out_resources->slab);
   if (iree_status_is_ok(status)) {
@@ -1051,10 +1051,10 @@ TEST_F(TransportTest, RoutesBidirectionalMessagesOnOwningProactors) {
   client_send_.expected_bytes =
       (sizeof(client_prefix) - 1) + (sizeof(client_suffix) - 1);
   iree_net_message_endpoint_send_params_t send_params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+      .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span(client_prefix, sizeof(client_prefix) - 1)),
-      /*.data=*/iree_async_span_list_make(&client_span, 1),
-      /*.completion_callback=*/client_send_.callback(),
+      .data = iree_async_span_list_make(&client_span, 1),
+      .completion_callback = client_send_.callback(),
   };
   IREE_ASSERT_OK(iree_net_message_endpoint_send(client_endpoint, &send_params));
   client_prefix[0] = 'X';
@@ -1070,11 +1070,11 @@ TEST_F(TransportTest, RoutesBidirectionalMessagesOnOwningProactors) {
   server_send_.expected_poll_side = kServerPolling;
   server_send_.expected_bytes = sizeof(server_payload) - 1;
   send_params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
-          iree_make_const_byte_span(server_payload,
-                                    sizeof(server_payload) - 1)),
-      /*.data=*/iree_async_span_list_empty(),
-      /*.completion_callback=*/server_send_.callback(),
+      .generated_prefix =
+          iree_net_send_prefix_from_bytes(iree_make_const_byte_span(
+              server_payload, sizeof(server_payload) - 1)),
+      .data = iree_async_span_list_empty(),
+      .completion_callback = server_send_.callback(),
   };
   IREE_ASSERT_OK(iree_net_message_endpoint_send(server_endpoint, &send_params));
   server_payload[0] = 'X';
@@ -1121,10 +1121,10 @@ TEST_F(TransportTest, CallbackHandoffPreservesQueuedMessageOrder) {
     send_states[i].expected_poll_side = kClientPolling;
     send_states[i].expected_bytes = messages[i].size();
     iree_net_message_endpoint_send_params_t send_params = {
-        /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+        .generated_prefix = iree_net_send_prefix_from_bytes(
             iree_make_const_byte_span(messages[i].data(), messages[i].size())),
-        /*.data=*/iree_async_span_list_empty(),
-        /*.completion_callback=*/send_states[i].callback(),
+        .data = iree_async_span_list_empty(),
+        .completion_callback = send_states[i].callback(),
     };
     IREE_ASSERT_OK(
         iree_net_message_endpoint_send(client_endpoint, &send_params));
@@ -1257,9 +1257,9 @@ TEST_F(TransportTest, CarriesQueueCommandsAndAdvances) {
   IREE_ASSERT_OK(iree_net_message_endpoint_activate(server_endpoint));
 
   QueueBuildState command_builder = {
-      /*.wait_frontier=*/{{3, 5}, {7, 11}},
-      /*.signal_frontier=*/{{9, 13}},
-      /*.generated_payload=*/"generated:",
+      .wait_frontier = {{3, 5}, {7, 11}},
+      .signal_frontier = {{9, 13}},
+      .generated_payload = "generated:",
   };
   std::string command_suffix = "borrowed-command";
   iree_async_span_t command_span =
@@ -1280,9 +1280,9 @@ TEST_F(TransportTest, CarriesQueueCommandsAndAdvances) {
                                                      &command_params));
 
   QueueBuildState advance_builder = {
-      /*.wait_frontier=*/{},
-      /*.signal_frontier=*/{{9, 13}, {17, 19}},
-      /*.generated_payload=*/"advance:",
+      .wait_frontier = {},
+      .signal_frontier = {{9, 13}, {17, 19}},
+      .generated_payload = "advance:",
   };
   std::string advance_suffix = "complete";
   iree_async_span_t advance_span =
@@ -1529,10 +1529,10 @@ TEST_F(TransportTest, GeneratesLargeTransientPrefixWithoutSizeCliff) {
   send_state.expected_poll_side = kClientPolling;
   send_state.expected_bytes = prefix.size();
   iree_net_message_endpoint_send_params_t send_params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+      .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span(prefix.data(), prefix.size())),
-      /*.data=*/iree_async_span_list_empty(),
-      /*.completion_callback=*/send_state.callback(),
+      .data = iree_async_span_list_empty(),
+      .completion_callback = send_state.callback(),
   };
   IREE_ASSERT_OK(iree_net_message_endpoint_send(client_endpoint, &send_params));
   std::fill(prefix.begin(), prefix.end(), 'x');
@@ -1607,9 +1607,9 @@ TEST_F(TransportTest, SaturatedAdmissionResumesFromCompletion) {
 
     iree_status_t Send() {
       iree_net_message_endpoint_send_params_t params = {
-          /*.generated_prefix=*/{32, Write, this},
-          /*.data=*/iree_async_span_list_empty(),
-          /*.completion_callback=*/{Complete, this},
+          .generated_prefix = {32, Write, this},
+          .data = iree_async_span_list_empty(),
+          .completion_callback = {Complete, this},
       };
       return iree_net_message_endpoint_send(endpoint, &params);
     }
@@ -1717,9 +1717,9 @@ TEST_F(TransportTest, MovedMessagesSurviveConnectionTeardown) {
     iree_async_span_t span =
         iree_async_span_from_ptr(payloads[i].data(), payloads[i].size());
     iree_net_message_endpoint_send_params_t params = {
-        /*.generated_prefix=*/iree_net_send_prefix_empty(),
-        /*.data=*/iree_async_span_list_make(&span, 1),
-        /*.completion_callback=*/sends[i].callback(),
+        .generated_prefix = iree_net_send_prefix_empty(),
+        .data = iree_async_span_list_make(&span, 1),
+        .completion_callback = sends[i].callback(),
     };
     IREE_ASSERT_OK(iree_net_message_endpoint_send(client_endpoint, &params));
     // Acknowledge each delivery before sending another so coalescing cannot
@@ -1745,10 +1745,10 @@ TEST_F(TransportTest, MovedMessagesSurviveConnectionTeardown) {
   independent_send.expected_poll_side = kClientPolling;
   independent_send.expected_bytes = 7;
   iree_net_message_endpoint_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+      .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span("control", 7)),
-      /*.data=*/iree_async_span_list_empty(),
-      /*.completion_callback=*/independent_send.callback(),
+      .data = iree_async_span_list_empty(),
+      .completion_callback = independent_send.callback(),
   };
   IREE_ASSERT_OK(iree_net_message_endpoint_send(other_client, &params));
   PollBothUntil([&] {

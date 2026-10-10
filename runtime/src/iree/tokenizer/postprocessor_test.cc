@@ -23,12 +23,13 @@ iree_tokenizer_postprocessor_template_t MakeTemplate(
     std::initializer_list<uint8_t> infix_type_ids = {},
     std::initializer_list<uint8_t> suffix_type_ids = {},
     uint8_t sequence_a_type_id = 0, uint8_t sequence_b_type_id = 0) {
-  iree_tokenizer_postprocessor_template_t t = {};
-  t.prefix_count = static_cast<uint8_t>(prefix_ids.size());
-  t.infix_count = static_cast<uint8_t>(infix_ids.size());
-  t.suffix_count = static_cast<uint8_t>(suffix_ids.size());
-  t.sequence_a_type_id = sequence_a_type_id;
-  t.sequence_b_type_id = sequence_b_type_id;
+  iree_tokenizer_postprocessor_template_t t = {
+      .prefix_count = static_cast<uint8_t>(prefix_ids.size()),
+      .infix_count = static_cast<uint8_t>(infix_ids.size()),
+      .suffix_count = static_cast<uint8_t>(suffix_ids.size()),
+      .sequence_a_type_id = sequence_a_type_id,
+      .sequence_b_type_id = sequence_b_type_id,
+  };
 
   size_t i = 0;
   for (int32_t id : prefix_ids) {
@@ -71,17 +72,16 @@ iree_tokenizer_postprocessor_t MakePostprocessor(
     const iree_tokenizer_postprocessor_template_t& single,
     iree_tokenizer_postprocessor_flags_t flags =
         IREE_TOKENIZER_POSTPROCESSOR_FLAG_NONE) {
-  iree_tokenizer_postprocessor_t pp = {};
-  pp.single = single;
-  pp.flags = flags;
+  iree_tokenizer_postprocessor_t pp = {.single = single, .flags = flags};
   return pp;
 }
 
 TEST(PostprocessorTemplate, TotalCount) {
-  iree_tokenizer_postprocessor_template_t t = {};
-  t.prefix_count = 1;
-  t.infix_count = 2;
-  t.suffix_count = 1;
+  iree_tokenizer_postprocessor_template_t t = {
+      .prefix_count = 1,
+      .infix_count = 2,
+      .suffix_count = 1,
+  };
   EXPECT_EQ(iree_tokenizer_postprocessor_template_total_count(&t), 4);
 }
 
@@ -274,10 +274,11 @@ TEST(Postprocessor, AddPrefixSpaceStored) {
 
 TEST(Postprocessor, ValidateMaxPiecesExceeded) {
   // Build a template that exceeds MAX_PIECES (7).
-  iree_tokenizer_postprocessor_template_t too_many = {};
-  too_many.prefix_count = 4;
-  too_many.infix_count = 2;
-  too_many.suffix_count = 2;  // Total = 8 > 7.
+  iree_tokenizer_postprocessor_template_t too_many = {
+      .prefix_count = 4,
+      .infix_count = 2,
+      .suffix_count = 2,  // Total = 8 > 7.
+  };
 
   iree_tokenizer_postprocessor_t pp;
   iree_status_t status = iree_tokenizer_postprocessor_initialize(
@@ -286,14 +287,16 @@ TEST(Postprocessor, ValidateMaxPiecesExceeded) {
 }
 
 TEST(Postprocessor, ValidatePairMaxPiecesExceeded) {
-  iree_tokenizer_postprocessor_template_t single = {};
-  single.prefix_count = 1;
-  single.suffix_count = 1;
+  iree_tokenizer_postprocessor_template_t single = {
+      .prefix_count = 1,
+      .suffix_count = 1,
+  };
 
-  iree_tokenizer_postprocessor_template_t pair_too_many = {};
-  pair_too_many.prefix_count = 3;
-  pair_too_many.infix_count = 3;
-  pair_too_many.suffix_count = 3;  // Total = 9 > 7.
+  iree_tokenizer_postprocessor_template_t pair_too_many = {
+      .prefix_count = 3,
+      .infix_count = 3,
+      .suffix_count = 3,  // Total = 9 > 7.
+  };
 
   iree_tokenizer_postprocessor_t pp;
   iree_status_t status = iree_tokenizer_postprocessor_initialize(
@@ -320,9 +323,10 @@ TEST(Postprocessor, SupportsPairWithTypeIdsOnly) {
   // A pair template with no special tokens but different type_ids still counts
   // as pair-capable (needed for models that only differentiate by type_id).
   iree_tokenizer_postprocessor_template_t single = {};
-  iree_tokenizer_postprocessor_template_t pair = {};
-  pair.sequence_a_type_id = 0;
-  pair.sequence_b_type_id = 1;
+  iree_tokenizer_postprocessor_template_t pair = {
+      .sequence_a_type_id = 0,
+      .sequence_b_type_id = 1,
+  };
 
   iree_tokenizer_postprocessor_t pp;
   IREE_ASSERT_OK(iree_tokenizer_postprocessor_initialize(
@@ -567,9 +571,10 @@ TEST(PostprocessorEncodeState, AssignTypeIdsNoOpNullTypeIds) {
                            /*prefix_type_ids=*/{}, /*infix_type_ids=*/{},
                            /*suffix_type_ids=*/{},
                            /*sequence_a_type_id=*/1);
-  iree_tokenizer_postprocessor_encode_state_t state = {};
-  state.phase = IREE_TOKENIZER_POSTPROCESSOR_PHASE_SEQUENCE_A;
-  state.active_template = &tmpl;
+  iree_tokenizer_postprocessor_encode_state_t state = {
+      .active_template = &tmpl,
+      .phase = IREE_TOKENIZER_POSTPROCESSOR_PHASE_SEQUENCE_A,
+  };
 
   iree_tokenizer_token_id_t token_ids[4] = {};
   iree_tokenizer_token_output_t output =
@@ -639,9 +644,10 @@ TEST(PostprocessorEncodeState, FullBertPairFlow) {
       /*suffix_type_ids=*/{1},
       /*sequence_a_type_id=*/0, /*sequence_b_type_id=*/1);
 
-  iree_tokenizer_postprocessor_t pp = {};
-  pp.pair = pair_tmpl;
-  pp.flags = IREE_TOKENIZER_POSTPROCESSOR_FLAG_NONE;
+  iree_tokenizer_postprocessor_t pp = {
+      .pair = pair_tmpl,
+      .flags = IREE_TOKENIZER_POSTPROCESSOR_FLAG_NONE,
+  };
 
   iree_tokenizer_postprocessor_encode_state_t state;
   iree_tokenizer_postprocessor_encode_state_initialize(&pp, &pair_tmpl, &state);
@@ -729,8 +735,7 @@ TEST(PostprocessorEncodeState, PairBeginInfixNoInfix) {
       /*prefix_type_ids=*/{}, /*infix_type_ids=*/{}, /*suffix_type_ids=*/{},
       /*sequence_a_type_id=*/0, /*sequence_b_type_id=*/1);
 
-  iree_tokenizer_postprocessor_t pp = {};
-  pp.pair = tmpl;
+  iree_tokenizer_postprocessor_t pp = {.pair = tmpl};
 
   iree_tokenizer_postprocessor_encode_state_t state;
   iree_tokenizer_postprocessor_encode_state_initialize(&pp, &tmpl, &state);
@@ -749,8 +754,7 @@ TEST(PostprocessorEncodeState, PairTypeIdsOnlyTemplateKeepsSequencePhases) {
       /*prefix_type_ids=*/{}, /*infix_type_ids=*/{}, /*suffix_type_ids=*/{},
       /*sequence_a_type_id=*/0, /*sequence_b_type_id=*/1);
 
-  iree_tokenizer_postprocessor_t pp = {};
-  pp.pair = tmpl;
+  iree_tokenizer_postprocessor_t pp = {.pair = tmpl};
 
   iree_tokenizer_postprocessor_encode_state_t state;
   iree_tokenizer_postprocessor_encode_state_initialize(&pp, &tmpl, &state);
@@ -776,8 +780,7 @@ TEST(PostprocessorEncodeState, PairTypeIdsOnlyTemplateKeepsSequencePhases) {
 TEST(PostprocessorEncodeState, PairBeginInfixNoOpWrongPhase) {
   auto tmpl = MakeTemplate(/*prefix=*/{101}, /*infix=*/{102}, /*suffix=*/{102});
 
-  iree_tokenizer_postprocessor_t pp = {};
-  pp.pair = tmpl;
+  iree_tokenizer_postprocessor_t pp = {.pair = tmpl};
 
   iree_tokenizer_postprocessor_encode_state_t state;
   iree_tokenizer_postprocessor_encode_state_initialize(&pp, &tmpl, &state);
@@ -791,8 +794,7 @@ TEST(PostprocessorEncodeState, PairBeginInfixNoOpWrongPhase) {
 TEST(PostprocessorEncodeState, EmitInfixNoOpWrongPhase) {
   auto tmpl = MakeTemplate(/*prefix=*/{101}, /*infix=*/{102}, /*suffix=*/{102});
 
-  iree_tokenizer_postprocessor_t pp = {};
-  pp.pair = tmpl;
+  iree_tokenizer_postprocessor_t pp = {.pair = tmpl};
 
   iree_tokenizer_postprocessor_encode_state_t state;
   iree_tokenizer_postprocessor_encode_state_initialize(&pp, &tmpl, &state);
@@ -814,8 +816,7 @@ TEST(PostprocessorEncodeState, PairBeginSuffixFromSequenceB) {
       /*prefix_type_ids=*/{}, /*infix_type_ids=*/{}, /*suffix_type_ids=*/{},
       /*sequence_a_type_id=*/0, /*sequence_b_type_id=*/1);
 
-  iree_tokenizer_postprocessor_t pp = {};
-  pp.pair = tmpl;
+  iree_tokenizer_postprocessor_t pp = {.pair = tmpl};
 
   iree_tokenizer_postprocessor_encode_state_t state;
   iree_tokenizer_postprocessor_encode_state_initialize(&pp, &tmpl, &state);
@@ -834,8 +835,7 @@ TEST(PostprocessorEncodeState, PairRobertaDoubleInfix) {
       /*suffix_type_ids=*/{0},
       /*sequence_a_type_id=*/0, /*sequence_b_type_id=*/0);
 
-  iree_tokenizer_postprocessor_t pp = {};
-  pp.pair = tmpl;
+  iree_tokenizer_postprocessor_t pp = {.pair = tmpl};
 
   iree_tokenizer_postprocessor_encode_state_t state;
   iree_tokenizer_postprocessor_encode_state_initialize(&pp, &tmpl, &state);
@@ -890,8 +890,7 @@ TEST(PostprocessorEncodeState, PairRobertaDoubleInfix) {
 TEST(PostprocessorEncodeState, HasPendingIncludesInfix) {
   auto tmpl = MakeTemplate(/*prefix=*/{101}, /*infix=*/{102}, /*suffix=*/{102});
 
-  iree_tokenizer_postprocessor_t pp = {};
-  pp.pair = tmpl;
+  iree_tokenizer_postprocessor_t pp = {.pair = tmpl};
 
   iree_tokenizer_postprocessor_encode_state_t state;
   iree_tokenizer_postprocessor_encode_state_initialize(&pp, &tmpl, &state);

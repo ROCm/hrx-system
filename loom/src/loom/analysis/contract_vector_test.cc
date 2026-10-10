@@ -159,31 +159,31 @@ class ContractVectorTest : public ::testing::Test {
   }
 
   loom_contract_vector_mma_options_t GpuMatrixMmaOptions() {
-    return (loom_contract_vector_mma_options_t){
-        /*.fragment_projection=*/
-        LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_EXPLICIT,
-        /*.k_group_size=*/1,
-        /*.fragment=*/
-        (loom_contract_fragment_t){
-            /*.atom_bits=*/LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
-            /*.vector_bit_width=*/{},
-            /*.source_lane_count=*/{},
-            /*.result_lane_count=*/{},
-            /*.subgroup_size=*/64,
-        },
-        /*.capability_class=*/LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX,
-        /*.policy=*/LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
+    return loom_contract_vector_mma_options_t{
+        .fragment_projection =
+            LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_EXPLICIT,
+        .k_group_size = 1,
+        .fragment =
+            loom_contract_fragment_t{
+                .atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
+                .vector_bit_width = {},
+                .source_lane_count = {},
+                .result_lane_count = {},
+                .subgroup_size = 64,
+            },
+        .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX,
+        .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
     };
   }
 
   loom_contract_vector_mma_options_t PackedVectorMmaOptions() {
-    return (loom_contract_vector_mma_options_t){
-        /*.fragment_projection=*/
-        LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_PACKED_VECTOR,
-        /*.k_group_size=*/0,
-        /*.fragment=*/{},
-        /*.capability_class=*/LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT,
-        /*.policy=*/LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
+    return loom_contract_vector_mma_options_t{
+        .fragment_projection =
+            LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_PACKED_VECTOR,
+        .k_group_size = 0,
+        .fragment = {},
+        .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT,
+        .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
     };
   }
 
@@ -669,19 +669,19 @@ func.def @fixed_record_mma(%lhs_view: view<1x176xi8, #ggml.q5_k>, %rhs_data: vec
   const loom_op_t* op = FirstVectorMmaOp(module_ptr.get());
   ASSERT_NE(op, nullptr);
   const loom_contract_vector_mma_options_t options = {
-      /*.fragment_projection=*/
-      LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_EXPLICIT,
-      /*.k_group_size=*/8,
-      /*.fragment=*/
-      {
-          /*.atom_bits=*/LOOM_CONTRACT_FRAGMENT_INTERNAL,
-          /*.vector_bit_width=*/0,
-          /*.source_lane_count=*/64,
-          /*.result_lane_count=*/64,
-          /*.subgroup_size=*/0,
-      },
-      /*.capability_class=*/LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX,
-      /*.policy=*/LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
+      .fragment_projection =
+          LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_EXPLICIT,
+      .k_group_size = 8,
+      .fragment =
+          {
+              .atom_bits = LOOM_CONTRACT_FRAGMENT_INTERNAL,
+              .vector_bit_width = 0,
+              .source_lane_count = 64,
+              .result_lane_count = 64,
+              .subgroup_size = 0,
+          },
+      .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX,
+      .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
   };
   loom_contract_request_t request = {};
   loom_contract_diagnostic_t diagnostic = {};

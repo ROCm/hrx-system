@@ -201,16 +201,16 @@ TEST_F(TypeIndexTest, GeneralConstructionRetainsCanonicalChildren) {
 
 TEST_F(TypeIndexTest, ParameterAttributesRetainTypeDependencyIdentity) {
   static const loom_attr_descriptor_t parameters[] = {{
-      /*.name=*/LOOM_BSTRING_REF(8, "metadata"),
-      /*.attr_kind=*/LOOM_ATTR_DICT,
+      .name = LOOM_BSTRING_REF(8, "metadata"),
+      .attr_kind = LOOM_ATTR_DICT,
   }};
   static const loom_parameterized_type_descriptor_t descriptor = {
-      /*.name=*/LOOM_BSTRING_REF(13, "test.metadata"),
-      /*.parameter_descriptors=*/parameters,
-      /*.fact_domain=*/nullptr,
-      /*.ir_kind=*/LOOM_TYPE_PARAMETERIZED,
-      /*.type_flags=*/0,
-      /*.parameter_count=*/1,
+      .name = LOOM_BSTRING_REF(13, "test.metadata"),
+      .parameter_descriptors = parameters,
+      .fact_domain = nullptr,
+      .ir_kind = LOOM_TYPE_PARAMETERIZED,
+      .type_flags = 0,
+      .parameter_count = 1,
   };
   loom_string_id_t key = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("shape"), &key));

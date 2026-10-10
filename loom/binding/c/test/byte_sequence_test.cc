@@ -47,8 +47,8 @@ TEST(ByteSequenceTest, CopiesAndEnumeratesImmutableContents) {
 
   std::vector<uint8_t> enumerated;
   loomc_byte_sequence_callback_t callback = {
-      /*.fn=*/AppendSegment,
-      /*.user_data=*/&enumerated,
+      .fn = AppendSegment,
+      .user_data = &enumerated,
   };
   LOOMC_EXPECT_OK(loomc_byte_sequence_enumerate(sequence, callback));
   EXPECT_THAT(enumerated, ElementsAre(1, 2, 3, 4));

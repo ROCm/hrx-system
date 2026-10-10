@@ -15,10 +15,11 @@ amdf_status_t CtsDeviceCache::GetInstance(amdf_instance_t** out_instance) {
     initialization_status_ = amdf_cts_provider_query_api()(
         AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST, &api_);
     if (amdf_status_is_ok(initialization_status_)) {
-      amdf_instance_create_info_t create_info = {};
-      create_info.type = AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-      create_info.structure_size = sizeof(create_info);
-      create_info.native_lifetime = native_lifetime_;
+      amdf_instance_create_info_t create_info = {
+          .type = AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+          .structure_size = sizeof(create_info),
+          .native_lifetime = native_lifetime_,
+      };
       initialization_status_ = api_->instance_create(&create_info, &instance_);
     }
   }
@@ -74,9 +75,10 @@ amdf_status_t CtsDeviceCache::GetDevice(amdf_endpoint_t* endpoint,
                               AMDF_GPU_EXTENSION_VERSION_LATEST, &extension);
     if (amdf_status_is_ok(device.status)) {
       const auto* gpu_api = static_cast<const amdf_gpu_api_t*>(extension);
-      amdf_gpu_device_create_info_t create_info = {};
-      create_info.type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_CREATE_INFO;
-      create_info.structure_size = sizeof(create_info);
+      amdf_gpu_device_create_info_t create_info = {
+          .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_CREATE_INFO,
+          .structure_size = sizeof(create_info),
+      };
       device.status =
           gpu_api->device_create(endpoint, &create_info, &device.handle);
     }
@@ -86,9 +88,10 @@ amdf_status_t CtsDeviceCache::GetDevice(amdf_endpoint_t* endpoint,
         AMDF_XDNA_EXTENSION_VERSION_LATEST, &extension);
     if (amdf_status_is_ok(device.status)) {
       const auto* xdna_api = static_cast<const amdf_xdna_api_t*>(extension);
-      amdf_xdna_device_create_info_t create_info = {};
-      create_info.type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_CREATE_INFO;
-      create_info.structure_size = sizeof(create_info);
+      amdf_xdna_device_create_info_t create_info = {
+          .type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_CREATE_INFO,
+          .structure_size = sizeof(create_info),
+      };
       device.status =
           xdna_api->device_create(endpoint, &create_info, &device.handle);
     }

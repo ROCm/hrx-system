@@ -147,10 +147,11 @@ class SemaphoreTest : public ::testing::Test {
       iree_hal_amdgpu_epoch_signal_table_register(
           table, i, hsa_signal_t{uint64_t(i + 1)});
     }
-    iree_hal_amdgpu_host_queue_t queue = {};
-    queue.logical_device = reinterpret_cast<iree_hal_device_t*>(fake_device_);
-    queue.axis = test_queue_axis(queue_index);
-    queue.epoch_table = table;
+    iree_hal_amdgpu_host_queue_t queue = {
+        .logical_device = reinterpret_cast<iree_hal_device_t*>(fake_device_),
+        .axis = test_queue_axis(queue_index),
+        .epoch_table = table,
+    };
     queue.wait_barrier_strategy =
         IREE_HAL_AMDGPU_WAIT_BARRIER_STRATEGY_AQL_BARRIER_VALUE;
     iree_slim_mutex_initialize(&queue.locks.submission_mutex);

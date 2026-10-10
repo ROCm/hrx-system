@@ -62,18 +62,18 @@ iree_status_t EncodeDescriptor(
       return iree_make_status(IREE_STATUS_NOT_FOUND,
                               "AIE2P test register was not found");
     }
-    assignments[i] = (loom_low_allocation_assignment_t){
-        /*.value_id=*/{},
-        /*.descriptor_reg_class_id=*/
-        descriptor_set->reg_class_alts[operand->reg_class_alt_start]
-            .reg_class_id,
-        /*.flags=*/{},
-        /*.start_point=*/{},
-        /*.end_point=*/{},
-        /*.unit_count=*/1,
-        /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-        /*.location_base=*/register_id,
-        /*.location_count=*/1,
+    assignments[i] = loom_low_allocation_assignment_t{
+        .value_id = {},
+        .descriptor_reg_class_id =
+            descriptor_set->reg_class_alts[operand->reg_class_alt_start]
+                .reg_class_id,
+        .flags = {},
+        .start_point = {},
+        .end_point = {},
+        .unit_count = 1,
+        .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+        .location_base = register_id,
+        .location_count = 1,
     };
     assignment_ptrs[i] = &assignments[i];
   }
@@ -787,8 +787,8 @@ TEST(DescriptorEncodingTest, ScalarPairMovesPreserveBothWords) {
   for (unsigned source = 0; source < 16; ++source) {
     for (unsigned destination = 0; destination < 16; ++destination) {
       const loom_aie2p_register_move_t move = {
-          /*.source=*/register_id("l" + std::to_string(source)),
-          /*.destination=*/register_id("l" + std::to_string(destination)),
+          .source = register_id("l" + std::to_string(source)),
+          .destination = register_id("l" + std::to_string(destination)),
       };
       loom_aie2p_register_move_t parts[2];
       ASSERT_EQ(loom_aie2p_descriptor_move_parts(move, parts), 2);

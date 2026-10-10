@@ -15,11 +15,12 @@ def _with_runtime_deps(deps):
         deps = []
     return deps + [_RUNTIME_DEFINES_DEP]
 
-def _with_runtime_compiler_options(copts, conlyopts, cxxopts):
+def _with_runtime_compiler_options(copts, conlyopts, cxxopts, features = None):
     return cc_opts.iree_code_compiler_options(
         copts = copts,
         conlyopts = conlyopts,
         cxxopts = cxxopts,
+        features = features,
     )
 
 runtime_cc_attrs = struct(

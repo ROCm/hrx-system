@@ -952,8 +952,8 @@ static iree_status_t QueueAlloca(iree_hal_amdgpu_host_queue_t* queue,
   params.queue_family_affinity = iree_hal_make_queue_family_affinity(
       iree_hal_queue_family_ordinal(iree_hal_queue_family(&queue->base)));
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/allocation_size,
+      .params = params,
+      .allocation_size = allocation_size,
   };
   return iree_hal_queue_alloca(&queue->base, wait_list, signal_list, pool,
                                /*request_count=*/1, &request, out_buffer);
@@ -1073,10 +1073,11 @@ static iree_status_t CreateSingleBlockPool(
         IREE_STATUS_FAILED_PRECONDITION,
         "queue pool backend query returned an incomplete backend bundle");
   }
-  iree_hal_fixed_block_pool_options_t options = {};
-  options.block_size = block_size;
-  options.blocks_per_slab = 1;
-  options.frontier_capacity = 2;
+  iree_hal_fixed_block_pool_options_t options = {
+      .block_size = block_size,
+      .blocks_per_slab = 1,
+      .frontier_capacity = 2,
+  };
   return iree::hal::cts::CreateFiniteBlockPool(
       backend, options, iree_allocator_system(), out_backing_pool, out_pool);
 }

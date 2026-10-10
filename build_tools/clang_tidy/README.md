@@ -307,24 +307,22 @@ do not transfer ownership and are accepted.
 
 ### `iree-cpp-designated-initializer`
 
-`iree-cpp-designated-initializer` diagnoses designated initializers in C++
-language modes before C++20. Clang accepts them as an extension in those modes,
-but portable aggregate initializers use IREE's comment field-label convention:
+`iree-cpp-designated-initializer` makes field names part of the C++ syntax in
+first-party C++20 implementation files. A comment such as `/*.field=*/` looks
+named to a reader but remains positional to the compiler, so it can silently
+initialize a different member after a declaration changes. When the comment
+agrees with the field selected by positional initialization, the check replaces
+it with a real designator:
 
 ```c++
+// Before.
 iree_hal_buffer_params_t params = {
     /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
     /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
     /*.usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT,
 };
-```
 
-The check uses the translation unit's configured language standard. C++20 and
-later support designated initializers, including in MSVC; libamdf explicitly
-selects C++20 for its private C++ code. C designated initializers also remain
-valid and are not diagnosed:
-
-```c
+// After.
 iree_hal_buffer_params_t params = {
     .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
     .access = IREE_HAL_MEMORY_ACCESS_ALL,
@@ -332,31 +330,65 @@ iree_hal_buffer_params_t params = {
 };
 ```
 
-The simple `.field = value` C++ form is fixable with `clang-tidy --fix`. The
-fix replaces the designator with `/*.field=*/` and leaves the initializer value
-unchanged. When an initializer skips a field, the fix inserts an explicit
-zero-initialized placeholder so the positional initializer keeps the original
-designated-initializer semantics:
+When a comment names a different field than the positional initializer selects,
+the check reports both names without choosing new behavior. It never inserts
+placeholder members. Sparse C++20 designated initialization already preserves
+the language's omitted-member initialization rules.
+
+The dot spelling is reserved for aggregate member migration. On function and
+constructor arguments, where C++ has no parameter designators, the check
+rewrites `/*.parameter=*/` to the established `/*parameter=*/` annotation. This
+token-only change makes it explicit that the name is documentation rather than
+language-enforced member selection.
+
+Members promoted from a standard anonymous union are named directly by the
+enclosing aggregate's designated initializer. The check resolves the union
+member activated by the positional spelling before comparing the label, so a
+matching label is fixable and a label naming a different union member remains a
+semantic mismatch.
+
+The same check folds a narrow aggregate setup form into the declaration:
 
 ```c++
 // Before.
+iree_example_t example = {};
+example.mode = IREE_EXAMPLE_MODE_DEFAULT;
+example.name = IREE_SVL("example");
+
+// After.
 iree_example_t example = {
     .mode = IREE_EXAMPLE_MODE_DEFAULT,
     .name = IREE_SVL("example"),
 };
-
-// After, assuming `flags` is declared between `mode` and `name`.
-iree_example_t example = {
-    /*.mode=*/IREE_EXAMPLE_MODE_DEFAULT,
-    /*.flags=*/{},
-    /*.name=*/IREE_SVL("example"),
-};
 ```
 
-Macro expansions are diagnosed but not automatically fixed. For macro bodies,
-update the macro definition. For macro arguments, rewrite the argument at the
-callsite or use zero-initialization plus field assignment when the initializer
-is intentionally sparse.
+This structural fix is limited to trivial local aggregates followed immediately
+by direct member assignments whose initialization semantics are equivalent. It
+folds the longest proven prefix, including a prefix followed by later state
+transitions. Side-effect-free member values may be reordered into declaration
+order; effectful values retain their evaluation order. A standard anonymous
+union may be omitted or name one promoted member directly.
+
+Unions, base subobjects, anonymous structs, default member initializers,
+volatile or atomic members, nontrivial initialization or assignment, narrowing
+conversions, self-reference, macro-produced braces, and intervening source text
+remain assignment-based when the proof does not hold. Those forms are not
+diagnosed: assignment is the required language mechanism for a state transition
+or for semantics that differ from initialization. The check reports only a
+construction spelling it can repair without changing behavior.
+
+`EnableCommentLabelConversion` and `EnableSetupBlockFolding` both default to
+`true`. Disable one while applying the other migration so token-local label
+changes and structural setup changes remain separate reviews. Normal policy
+enforcement leaves both paths enabled.
+
+The policy applies only to spellings in the main C++20 implementation file.
+Included headers retain their current spelling so installed public headers can
+still be consumed as C++17. C translation units keep their native designated
+initializers. Labels preceding macro-valued members and aggregate initializers
+spelled as macro arguments remain ordinary source text and are converted at
+their invocation-site spelling. Initializer syntax manufactured by a macro body
+requires source-level review rather than an edit through the expansion.
 
 ### `iree-extent-empty-initializer`
 

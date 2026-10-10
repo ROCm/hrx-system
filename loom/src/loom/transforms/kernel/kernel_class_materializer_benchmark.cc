@@ -148,12 +148,12 @@ class KernelClassMaterializerBenchmarkFixture {
     site_facts_.entries[0] = loom_value_facts_exact_i64(64);
     site_facts_.entries[1] = loom_value_facts_exact_i64(256);
     sites_[0] = {
-        /*.facts=*/&site_facts_,
-        /*.argument_values=*/&site_argument_values_[0],
+        .facts = &site_facts_,
+        .argument_values = &site_argument_values_[0],
     };
     sites_[1] = {
-        /*.facts=*/&site_facts_,
-        /*.argument_values=*/&site_argument_values_[1],
+        .facts = &site_facts_,
+        .argument_values = &site_argument_values_[1],
     };
     const loom_kernel_class_collection_options_t collection_options =
         loom_kernel_class_collection_options_default();

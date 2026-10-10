@@ -18,8 +18,8 @@ static loom_decision_predicate_operand_t Operand(
     loom_value_facts_t facts,
     uint32_t identity = LOOM_DECISION_OPERAND_IDENTITY_NONE) {
   return {
-      /*.facts=*/facts,
-      /*.identity=*/identity,
+      .facts = facts,
+      .identity = identity,
   };
 }
 

@@ -101,14 +101,14 @@ TEST(AttributeTest, PredicateValueTypeContracts) {
 
 TEST(AttributeTest, PredicateValueTypeContractsUseTypedRegisterSemantics) {
   const loom_register_type_data_t integer_data = {
-      /*.carrier_payload0=*/0,
-      /*.carrier_payload1=*/0,
-      /*.value_type=*/loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      .carrier_payload0 = 0,
+      .carrier_payload1 = 0,
+      .value_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32),
   };
   const loom_register_type_data_t float_data = {
-      /*.carrier_payload0=*/0,
-      /*.carrier_payload1=*/0,
-      /*.value_type=*/loom_type_scalar(LOOM_SCALAR_TYPE_F32),
+      .carrier_payload0 = 0,
+      .carrier_payload1 = 0,
+      .value_type = loom_type_scalar(LOOM_SCALAR_TYPE_F32),
   };
   const loom_type_t integer_register =
       loom_type_register_payload_with_value_type(&integer_data);

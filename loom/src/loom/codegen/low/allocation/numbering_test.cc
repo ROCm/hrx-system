@@ -166,10 +166,16 @@ TEST_F(LowAllocationNumberingTest, ImprovesCostWithoutGrowingStorage) {
 
 TEST_F(LowAllocationNumberingTest, EntryIdentitiesKeepExternalCoordinates) {
   const loom_low_allocation_abi_location_t entry[] = {
-      {/*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-       /*.descriptor_reg_class_id=*/0, /*.location_base=*/0},
-      {/*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-       /*.descriptor_reg_class_id=*/0, /*.location_base=*/4},
+      {
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .descriptor_reg_class_id = 0,
+          .location_base = 0,
+      },
+      {
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .descriptor_reg_class_id = 0,
+          .location_base = 4,
+      },
   };
   context_.entry_locations = entry;
   context_.entry_location_count = IREE_ARRAYSIZE(entry);
@@ -181,8 +187,11 @@ TEST_F(LowAllocationNumberingTest, EntryMoveSourceKeepsExternalCoordinates) {
   const loom_low_allocation_abi_location_t entry[] = {
       {},
       {},
-      {/*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-       /*.descriptor_reg_class_id=*/0, /*.location_base=*/4}};
+      {
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .descriptor_reg_class_id = 0,
+          .location_base = 4,
+      }};
   loom_low_move_t move = {};
   move.source.location_kind = move.destination.location_kind =
       LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
@@ -323,10 +332,11 @@ TEST_F(LowAllocationNumberingTest, IndependentClassesDoNotConflict) {
 }
 
 TEST_F(LowAllocationNumberingTest, OverlappingLeaseJoinsRigidBlocks) {
-  loom_low_allocation_storage_lease_t instance = {};
-  instance.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  instance.location_base = 3;
-  instance.location_count = 2;
+  loom_low_allocation_storage_lease_t instance = {
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = 3,
+      .location_count = 2,
+  };
   leases_.instances = &instance;
   leases_.instance_count = 1;
   Number();
@@ -337,15 +347,17 @@ TEST_F(LowAllocationNumberingTest, OverlappingLeaseJoinsRigidBlocks) {
 }
 
 TEST_F(LowAllocationNumberingTest, ReservedRangeKeepsItsOriginalCoordinates) {
-  loom_low_allocation_resolved_reserved_range_t reserved = {};
-  reserved.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  reserved.location_base = 8;
-  reserved.location_count = 1;
+  loom_low_allocation_resolved_reserved_range_t reserved = {
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = 8,
+      .location_count = 1,
+  };
   constraints_.reserved_ranges = &reserved;
   constraints_.reserved_range_count = 1;
   // The scalar at the reserved coordinate represents its ABI-fixed occupant.
-  loom_low_allocation_resolved_fixed_value_t fixed = {};
-  fixed.assignment = assignments_[2];
+  loom_low_allocation_resolved_fixed_value_t fixed = {
+      .assignment = assignments_[2],
+  };
   constraints_.fixed_values = &fixed;
   constraints_.fixed_value_count = 1;
   Number();
@@ -354,8 +366,9 @@ TEST_F(LowAllocationNumberingTest, ReservedRangeKeepsItsOriginalCoordinates) {
 }
 
 TEST_F(LowAllocationNumberingTest, KeepsFixedAndImplicitLocationsAnchored) {
-  loom_low_allocation_resolved_fixed_value_t fixed = {};
-  fixed.assignment = assignments_[0];
+  loom_low_allocation_resolved_fixed_value_t fixed = {
+      .assignment = assignments_[0],
+  };
   constraints_.fixed_values = &fixed;
   constraints_.fixed_value_count = 1;
   uint16_t implicit_counts[] = {1, 0};
@@ -373,14 +386,15 @@ TEST_F(LowAllocationNumberingTest, KeepsTargetAddressStateUnchanged) {
 }
 
 TEST_F(LowAllocationNumberingTest, AnchorsHardMaskedRelations) {
-  loom_low_placement_relation_t relation = {};
-  relation.kind = LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION;
-  relation.flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD;
-  relation.result_ordinal = 0;
-  relation.source_ordinal = 1;
-  relation.source_unit_offset = 1;
-  relation.location_mask = 3;
-  relation.unit_count = 1;
+  loom_low_placement_relation_t relation = {
+      .result_ordinal = 0,
+      .source_ordinal = 1,
+      .source_unit_offset = 1,
+      .unit_count = 1,
+      .location_mask = 3,
+      .kind = LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION,
+      .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD,
+  };
   placement_.relations = &relation;
   placement_.relation_count = 1;
   Number();

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "test/target/iree_hal_execution.h"
+#include "test/target/iree_hal_execution_test_util.h"
 
 #include <array>
 #include <cstdint>
@@ -187,15 +187,15 @@ loomc_status_t CreateTargetContext(const IreeHalKernelExecutionTarget& target,
   }
 
   loomc_context_target_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_environment=*/out_target_environment->get(),
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .target_environment = out_target_environment->get(),
   };
   loomc_context_options_t context_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-      /*.structure_size=*/sizeof(context_options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+      .structure_size = sizeof(context_options),
+      .next = &target_options,
   };
   loomc_context_t* context = nullptr;
   if (loomc_status_is_ok(status)) {
@@ -213,13 +213,13 @@ loomc_status_t CreateSource(const IreeHalKernelExecutionTarget& target,
   loomc_byte_span_t source_contents =
       loomc_make_byte_span(target.source_text.data, target.source_text.size);
   loomc_source_options_t source_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(source_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/target.source_identifier,
-      /*.contents=*/source_contents,
-      /*.storage=*/LOOMC_SOURCE_STORAGE_BORROWED,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(source_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = target.source_identifier,
+      .contents = source_contents,
+      .storage = LOOMC_SOURCE_STORAGE_BORROWED,
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status =
@@ -245,16 +245,16 @@ loomc_status_t SelectHalTarget(
     const iree_hal_executable_target_t** out_executable_target,
     ResultPtr* out_result) {
   loomc_iree_hal_target_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.identifier=*/target.target_profile_identifier,
-      /*.device=*/device,
-      /*.physical_device_affinity=*/
-      QueueFamilyPhysicalDeviceAffinity(device, queue_family),
-      /*.target_profile=*/nullptr,
-      /*.providers=*/target.target_providers,
-      /*.provider_count=*/target.target_provider_count,
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .identifier = target.target_profile_identifier,
+      .device = device,
+      .physical_device_affinity =
+          QueueFamilyPhysicalDeviceAffinity(device, queue_family),
+      .target_profile = nullptr,
+      .providers = target.target_providers,
+      .provider_count = target.target_provider_count,
   };
   loomc_iree_hal_target_selection_t selection = {};
   loomc_result_t* result = nullptr;
@@ -274,13 +274,13 @@ loomc_status_t CreateTargetPipeline(const IreeHalKernelExecutionTarget& target,
                                     PassProgramPtr* out_pass_program,
                                     ResultPtr* out_result) {
   loomc_target_pipeline_options_t pipeline_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
-      /*.structure_size=*/sizeof(pipeline_options),
-      /*.next=*/nullptr,
-      /*.identifier=*/target.target_pipeline_identifier,
-      /*.kind=*/target.target_pipeline_kind,
-      /*.control_flow_lowering=*/target.control_flow_lowering,
-      /*.source_to_low_max_errors=*/target.source_to_low_max_errors,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+      .structure_size = sizeof(pipeline_options),
+      .next = nullptr,
+      .identifier = target.target_pipeline_identifier,
+      .kind = target.target_pipeline_kind,
+      .control_flow_lowering = target.control_flow_lowering,
+      .source_to_low_max_errors = target.source_to_low_max_errors,
   };
   loomc_pass_program_t* pass_program = nullptr;
   loomc_result_t* result = nullptr;
@@ -317,25 +317,25 @@ loomc_status_t CompileArtifact(const IreeHalKernelExecutionTarget& target,
                                loomc_target_profile_t* target_profile,
                                loomc_module_t* module, ResultPtr* out_result) {
   const loomc_emit_options_t emit_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(emit_options),
-      /*.next=*/nullptr,
-      /*.artifact_format=*/target.artifact_format,
-      /*.identifier=*/target.artifact_identifier,
-      /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(emit_options),
+      .next = nullptr,
+      .artifact_format = target.artifact_format,
+      .identifier = target.artifact_identifier,
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
   const loomc_compile_artifact_options_t compile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
-      /*.structure_size=*/sizeof(compile_options),
-      /*.next=*/nullptr,
-      /*.roots=*/&target.kernel_export_name,
-      /*.root_count=*/1,
-      /*.excluded_roots=*/nullptr,
-      /*.excluded_root_count=*/0,
-      /*.target_profile=*/target_profile,
-      /*.config=*/nullptr,
-      /*.emit_options=*/&emit_options,
-      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .next = nullptr,
+      .roots = &target.kernel_export_name,
+      .root_count = 1,
+      .excluded_roots = nullptr,
+      .excluded_root_count = 0,
+      .target_profile = target_profile,
+      .config = nullptr,
+      .emit_options = &emit_options,
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_compile_artifact(
@@ -420,8 +420,8 @@ iree_status_t DispatchIreeHalKernel(
                                  iree_hal_buffer_byte_length(output_buffer)),
     };
     iree_hal_buffer_ref_list_t bindings = {
-        /*.count=*/2,
-        /*.values=*/binding_refs,
+        .count = 2,
+        .values = binding_refs,
     };
     iree_hal_dispatch_config_t dispatch_config =
         iree_hal_make_static_dispatch_config(
@@ -553,8 +553,8 @@ void RunIreeHalKernelExecutionTest(
   LOOMC_ASSERT_OK(loomc_launch_config_program_lookup_function(
       launch_program_ptr.get(), target.kernel_export_name, &launch_function));
   loomc_launch_config_t launch_config = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-      /*.structure_size=*/sizeof(launch_config),
+      .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+      .structure_size = sizeof(launch_config),
   };
   LOOMC_ASSERT_OK(loomc_launch_config_program_invoke(
       launch_program_ptr.get(), launch_function,
@@ -598,9 +598,9 @@ void RunIreeHalByteOffsetExecution(const IreeHalKernelExecution& execution) {
 
   uint64_t upload_value = 1;
   iree_hal_semaphore_list_t upload_signal = {
-      /*.count=*/1,
-      /*.semaphores=*/&transfer_semaphore,
-      /*.payload_values=*/&upload_value,
+      .count = 1,
+      .semaphores = &transfer_semaphore,
+      .payload_values = &upload_value,
   };
   iree_hal_transfer_operation_t upload_operations[2] = {};
   upload_operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
@@ -620,14 +620,14 @@ void RunIreeHalByteOffsetExecution(const IreeHalKernelExecution& execution) {
 
   uint64_t dispatch_value = 2;
   iree_hal_semaphore_list_t dispatch_wait = {
-      /*.count=*/1,
-      /*.semaphores=*/&transfer_semaphore,
-      /*.payload_values=*/&upload_value,
+      .count = 1,
+      .semaphores = &transfer_semaphore,
+      .payload_values = &upload_value,
   };
   iree_hal_semaphore_list_t dispatch_signal = {
-      /*.count=*/1,
-      /*.semaphores=*/&transfer_semaphore,
-      /*.payload_values=*/&dispatch_value,
+      .count = 1,
+      .semaphores = &transfer_semaphore,
+      .payload_values = &dispatch_value,
   };
   if (iree_status_is_ok(status)) {
     completion_value = upload_value;
@@ -639,14 +639,14 @@ void RunIreeHalByteOffsetExecution(const IreeHalKernelExecution& execution) {
 
   uint64_t download_value = 3;
   iree_hal_semaphore_list_t download_wait = {
-      /*.count=*/1,
-      /*.semaphores=*/&transfer_semaphore,
-      /*.payload_values=*/&dispatch_value,
+      .count = 1,
+      .semaphores = &transfer_semaphore,
+      .payload_values = &dispatch_value,
   };
   iree_hal_semaphore_list_t download_signal = {
-      /*.count=*/1,
-      /*.semaphores=*/&transfer_semaphore,
-      /*.payload_values=*/&download_value,
+      .count = 1,
+      .semaphores = &transfer_semaphore,
+      .payload_values = &download_value,
   };
   if (iree_status_is_ok(status)) {
     completion_value = dispatch_value;

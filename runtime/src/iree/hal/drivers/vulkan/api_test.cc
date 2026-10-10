@@ -28,25 +28,25 @@ static bool ContainsString(iree_host_size_t count, const char* const* values,
 
 TEST(ApiTest, ValidatesFeatureFamilies) {
   IREE_ASSERT_OK(iree_hal_vulkan_features_validate({
-      /*.general=*/IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE |
-          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64,
-      /*.atomics=*/IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_INT64,
+      .general = IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE |
+                 IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64,
+      .atomics = IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_INT64,
   }));
 }
 
 TEST(ApiTest, RejectsUnknownGeneralFeatureBits) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_vulkan_features_validate({
-                            /*.general=*/UINT32_C(1) << 31,
-                            /*.atomics=*/0,
+                            .general = UINT32_C(1) << 31,
+                            .atomics = 0,
                         }));
 }
 
 TEST(ApiTest, RejectsUnknownShaderAtomicFeatureBits) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_vulkan_features_validate({
-                            /*.general=*/0,
-                            /*.atomics=*/UINT32_C(1) << 31,
+                            .general = 0,
+                            .atomics = UINT32_C(1) << 31,
                         }));
 }
 
@@ -54,10 +54,9 @@ TEST(ApiTest, RejectsSparseResidencyWithoutSparseBinding) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_vulkan_features_validate({
-          /*.general=*/
-          IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_RESIDENCY_ALIASED &
-              ~IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_BINDING,
-          /*.atomics=*/0,
+          .general = IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_RESIDENCY_ALIASED &
+                     ~IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_BINDING,
+          .atomics = 0,
       }));
 }
 

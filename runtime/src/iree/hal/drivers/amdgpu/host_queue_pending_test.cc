@@ -183,8 +183,8 @@ static iree_status_t QueueAlloca(iree_hal_amdgpu_host_queue_t* queue,
   params.queue_family_affinity = iree_hal_make_queue_family_affinity(
       iree_hal_queue_family_ordinal(iree_hal_queue_family(&queue->base)));
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/allocation_size,
+      .params = params,
+      .allocation_size = allocation_size,
   };
   return iree_hal_queue_alloca(&queue->base, iree_hal_semaphore_list_empty(),
                                signal_list, pool,
@@ -338,9 +338,10 @@ static iree_status_t CreateExplicitFixedBlockPool(
   IREE_RETURN_IF_ERROR(iree_hal_pool_allocate_buffer(
       backing_pool, MakeTransientBufferParams(), block_size,
       iree_infinite_timeout(), backing_buffer.out()));
-  iree_hal_fixed_block_pool_options_t options = {};
-  options.block_size = block_size;
-  options.frontier_capacity = 2;
+  iree_hal_fixed_block_pool_options_t options = {
+      .block_size = block_size,
+      .frontier_capacity = 2,
+  };
   IREE_RETURN_IF_ERROR(iree_hal_fixed_block_pool_create_from_buffer(
       backing_buffer, 0, IREE_HAL_WHOLE_BUFFER, &options,
       iree_allocator_system(), out_pool));
@@ -365,8 +366,9 @@ TEST_F(HostQueuePendingTest,
   IREE_ASSERT_OK(CreateExplicitFixedBlockPool(device.base_device(), family,
                                               kByteLength, native_pool.out(),
                                               pool.out()));
-  iree_hal_pool_reservation_request_t request = {};
-  request.allocation_size = kByteLength;
+  iree_hal_pool_reservation_request_t request = {
+      .allocation_size = kByteLength,
+  };
   request.params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   request.params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   request.params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
@@ -396,12 +398,13 @@ TEST_F(HostQueuePendingTest,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
   Ref<iree_hal_buffer_t> readback;
-  iree_hal_buffer_params_t readback_params = {};
-  readback_params.type =
-      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-  readback_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  readback_params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+  iree_hal_buffer_params_t readback_params = {
+      .usage =
+          IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+              IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+  };
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device.allocator(), readback_params, kByteLength, readback.out()));
 
@@ -517,8 +520,9 @@ static iree_status_t CreateExplicitTlsfPool(
   options.tlsf_options.alignment = 16;
   options.tlsf_options.initial_block_capacity = 16;
   options.tlsf_options.frontier_capacity = 2;
-  iree_hal_passthrough_pool_options_t backing_options = {};
-  backing_options.epoch_query = iree_hal_pool_epoch_query_null();
+  iree_hal_passthrough_pool_options_t backing_options = {
+      .epoch_query = iree_hal_pool_epoch_query_null(),
+  };
   iree_hal_pool_t* backing_pool = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_passthrough_pool_create(
       backing_options, backend.slab_provider, backend.notification,
@@ -536,11 +540,10 @@ static iree_status_t SeedWaitableFixedBlockReservation(
   iree_hal_pool_reservation_t reservation;
   iree_hal_pool_acquire_info_t acquire_info;
   iree_hal_pool_acquire_result_t acquire_result;
-  iree_hal_buffer_params_t params = {};
-  params.min_alignment = 1;
+  iree_hal_buffer_params_t params = {.min_alignment = 1};
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/allocation_size,
+      .params = params,
+      .allocation_size = allocation_size,
   };
   IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservations(
       pool, 1, &request, /*requester_frontier=*/NULL,
@@ -643,8 +646,8 @@ TEST_F(HostQueuePendingTest,
   IREE_ASSERT_OK(iree_hal_amdgpu_host_queue_enqueue_host_action(
       queue, wait_list,
       iree_hal_amdgpu_reclaim_action_t{
-          /*.fn=*/RecordHostAction,
-          /*.user_data=*/&action_state,
+          .fn = RecordHostAction,
+          .user_data = &action_state,
       },
       /*operation_resources=*/NULL, /*operation_resource_count=*/0,
       (iree_hal_amdgpu_queue_barrier_t){0}));
@@ -753,8 +756,8 @@ TEST_F(HostQueuePendingTest, CapacityParkedHostActionRetriesAfterPostDrain) {
     status = iree_hal_amdgpu_host_queue_enqueue_host_action(
         queue, iree_hal_semaphore_list_empty(),
         iree_hal_amdgpu_reclaim_action_t{
-            /*.fn=*/RecordHostAction,
-            /*.user_data=*/&action_state,
+            .fn = RecordHostAction,
+            .user_data = &action_state,
         },
         /*operation_resources=*/NULL, /*operation_resource_count=*/0,
         (iree_hal_amdgpu_queue_barrier_t){0});

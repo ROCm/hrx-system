@@ -37,34 +37,40 @@ static iree_status_t CaptureDiagnostic(void* user_data,
 }
 
 static const loom_attr_descriptor_t kParameters[] = {
-    {/*.name=*/LOOM_BSTRING_REF(5, "first"),
-     /*.attr_kind=*/LOOM_ATTR_I64,
-     /*.flags=*/0},
-    {/*.name=*/LOOM_BSTRING_REF(6, "middle"),
-     /*.attr_kind=*/LOOM_ATTR_I64,
-     /*.flags=*/LOOM_ATTR_OPTIONAL},
-    {/*.name=*/LOOM_BSTRING_REF(4, "last"),
-     /*.attr_kind=*/LOOM_ATTR_I64,
-     /*.flags=*/0},
+    {
+        .name = LOOM_BSTRING_REF(5, "first"),
+        .attr_kind = LOOM_ATTR_I64,
+        .flags = 0,
+    },
+    {
+        .name = LOOM_BSTRING_REF(6, "middle"),
+        .attr_kind = LOOM_ATTR_I64,
+        .flags = LOOM_ATTR_OPTIONAL,
+    },
+    {
+        .name = LOOM_BSTRING_REF(4, "last"),
+        .attr_kind = LOOM_ATTR_I64,
+        .flags = 0,
+    },
 };
 static const loom_parameterized_type_descriptor_t kParameterDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(15, "wire.parameters"),
-    /*.parameter_descriptors=*/kParameters,
-    /*.fact_domain=*/nullptr,
-    /*.ir_kind=*/LOOM_TYPE_PARAMETERIZED,
-    /*.type_flags=*/0,
-    /*.parameter_count=*/IREE_ARRAYSIZE(kParameters),
-    /*.flags=*/0,
+    .name = LOOM_BSTRING_REF(15, "wire.parameters"),
+    .parameter_descriptors = kParameters,
+    .fact_domain = nullptr,
+    .ir_kind = LOOM_TYPE_PARAMETERIZED,
+    .type_flags = 0,
+    .parameter_count = IREE_ARRAYSIZE(kParameters),
+    .flags = 0,
 };
 static const loom_type_descriptor_t kTypeDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(15, "wire.parameters<"),
-    /*.ir_kind=*/LOOM_TYPE_PARAMETERIZED,
-    /*.param_count=*/IREE_ARRAYSIZE(kParameters),
-    /*.fact_domain=*/nullptr,
-    /*.semantics=*/{},
-    /*.format_elements=*/nullptr,
-    /*.format_element_count=*/0,
-    /*.parameterized=*/&kParameterDescriptor,
+    .name = LOOM_BSTRING_REF(15, "wire.parameters<"),
+    .ir_kind = LOOM_TYPE_PARAMETERIZED,
+    .param_count = IREE_ARRAYSIZE(kParameters),
+    .fact_domain = nullptr,
+    .semantics = {},
+    .format_elements = nullptr,
+    .format_element_count = 0,
+    .parameterized = &kParameterDescriptor,
 };
 static const loom_type_registry_entry_t kTypeRegistry[] = {
     {IREE_SV("wire.parameters"), &kTypeDescriptor},
@@ -125,14 +131,14 @@ class BytecodeTypeTest : public ::testing::Test {
   loom_bytecode_type_materializer_t MakeMaterializer(const uint8_t* data,
                                                      iree_host_size_t length) {
     return loom_bytecode_type_materializer_t{
-        /*.decoder=*/&decoder_,
-        /*.bytecode=*/iree_make_const_byte_span(data, length),
-        /*.context=*/&context_,
-        /*.module_view=*/&module_view_,
-        /*.scratch_arena=*/&scratch_arena_,
-        /*.output_module=*/module_,
-        /*.position=*/0,
-        /*.next_fact=*/module_view_.types.facts,
+        .decoder = &decoder_,
+        .bytecode = iree_make_const_byte_span(data, length),
+        .context = &context_,
+        .module_view = &module_view_,
+        .scratch_arena = &scratch_arena_,
+        .output_module = module_,
+        .position = 0,
+        .next_fact = module_view_.types.facts,
     };
   }
 

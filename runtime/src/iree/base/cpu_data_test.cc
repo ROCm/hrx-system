@@ -13,10 +13,10 @@ namespace {
 
 TEST(CpuDataTest, QueriesSyntheticFeatures) {
   iree_cpu_data_t cpu_data = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-      /*.fields=*/
-      {IREE_CPU_DATA0_X86_64_AVX2 | IREE_CPU_DATA0_X86_64_AVXVNNI |
-       IREE_CPU_DATA0_X86_64_AVXVNNIINT8 | IREE_CPU_DATA0_X86_64_AVXVNNIINT16},
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {IREE_CPU_DATA0_X86_64_AVX2 | IREE_CPU_DATA0_X86_64_AVXVNNI |
+                 IREE_CPU_DATA0_X86_64_AVXVNNIINT8 |
+                 IREE_CPU_DATA0_X86_64_AVXVNNIINT16},
   };
   EXPECT_EQ(IREE_CPU_FEATURE_AVAILABILITY_AVAILABLE,
             iree_cpu_data_query_feature(&cpu_data, IREE_SV("avx2")));
@@ -71,12 +71,12 @@ TEST(CpuDataTest, RejectsMalformedTargetKeys) {
 
 TEST(CpuDataTest, ChecksRequiredFeatureSubsets) {
   iree_cpu_data_t available = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-      /*.fields=*/{IREE_CPU_DATA0_X86_64_AVX | IREE_CPU_DATA0_X86_64_AVX2},
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {IREE_CPU_DATA0_X86_64_AVX | IREE_CPU_DATA0_X86_64_AVX2},
   };
   iree_cpu_data_t required = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-      /*.fields=*/{IREE_CPU_DATA0_X86_64_AVX2},
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {IREE_CPU_DATA0_X86_64_AVX2},
   };
   EXPECT_TRUE(iree_cpu_data_satisfies_features(&available, &required));
   required.fields[0] |= IREE_CPU_DATA0_X86_64_AVX512F;

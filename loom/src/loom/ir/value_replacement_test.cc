@@ -22,17 +22,17 @@ namespace loom {
 namespace {
 
 static const loom_attr_descriptor_t kLookupParameters[] = {{
-    /*.name=*/LOOM_BSTRING_REF(8, "metadata"),
-    /*.attr_kind=*/LOOM_ATTR_DICT,
+    .name = LOOM_BSTRING_REF(8, "metadata"),
+    .attr_kind = LOOM_ATTR_DICT,
 }};
 
 static const loom_parameterized_type_descriptor_t kLookupDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(11, "test.lookup"),
-    /*.parameter_descriptors=*/kLookupParameters,
-    /*.fact_domain=*/nullptr,
-    /*.ir_kind=*/LOOM_TYPE_PARAMETERIZED,
-    /*.type_flags=*/0,
-    /*.parameter_count=*/IREE_ARRAYSIZE(kLookupParameters),
+    .name = LOOM_BSTRING_REF(11, "test.lookup"),
+    .parameter_descriptors = kLookupParameters,
+    .fact_domain = nullptr,
+    .ir_kind = LOOM_TYPE_PARAMETERIZED,
+    .type_flags = 0,
+    .parameter_count = IREE_ARRAYSIZE(kLookupParameters),
 };
 
 class ScopedReplacement {
@@ -257,9 +257,10 @@ TEST_F(ValueReplacementTest,
   const loom_overflow_dim_t target_dimensions[] = {
       loom_dim_pack_dynamic(new_id_), loom_dim_pack_static(7),
       loom_dim_pack_dynamic(other_target_id), loom_dim_pack_dynamic(new_id_)};
-  loom_type_t source_leaf = {};
-  source_leaf.header =
-      loom_type_make_header(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, 4, 0);
+  loom_type_t source_leaf = {
+      .header =
+          loom_type_make_header(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, 4, 0),
+  };
   source_leaf.dims[0] = reinterpret_cast<uintptr_t>(source_dimensions);
   loom_type_t target_leaf = source_leaf;
   target_leaf.dims[0] = reinterpret_cast<uintptr_t>(target_dimensions);
@@ -334,16 +335,16 @@ TEST_F(ValueReplacementTest,
   const loom_type_t source = Pair(source_register, source_register);
   const loom_type_t target = Pair(target_register, target_register);
   const loom_type_value_remap_t other_remap = {
-      /*.source_values=*/&other_id,
-      /*.target_values=*/&other_target_id,
-      /*.count=*/1,
+      .source_values = &other_id,
+      .target_values = &other_target_id,
+      .count = 1,
   };
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&old_id_,
-      /*.target_values=*/&new_id_,
-      /*.count=*/1,
-      /*.flags=*/0,
-      /*.next=*/&other_remap,
+      .source_values = &old_id_,
+      .target_values = &new_id_,
+      .count = 1,
+      .flags = 0,
+      .next = &other_remap,
   };
   ASSERT_TRUE(
       loom_type_equal_after_value_remap(module_, source, target, &remap));
@@ -371,11 +372,11 @@ TEST_F(ValueReplacementTest,
   }
 
   const loom_type_value_remap_t absent_remap = {
-      /*.source_values=*/&old_id_,
-      /*.target_values=*/&absent_target_id,
-      /*.count=*/1,
-      /*.flags=*/0,
-      /*.next=*/&other_remap,
+      .source_values = &old_id_,
+      .target_values = &absent_target_id,
+      .count = 1,
+      .flags = 0,
+      .next = &other_remap,
   };
   {
     ScopedLookup lookup(module_, &absent_remap);
@@ -404,9 +405,9 @@ TEST_F(ValueReplacementTest, LookupLeavesNeedNoTraversalState) {
   const loom_type_t source = loom_type_table_get(&module_->types, source_id);
   const loom_type_t target = loom_type_table_get(&module_->types, target_id);
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&old_id_,
-      /*.target_values=*/&new_id_,
-      /*.count=*/1,
+      .source_values = &old_id_,
+      .target_values = &new_id_,
+      .count = 1,
   };
   const iree_host_size_t type_count = module_->types.count;
   const iree_host_size_t retained_bytes = module_->arena.used_allocation_size;
@@ -432,9 +433,9 @@ TEST_F(ValueReplacementTest,
     target = Pair(target, target);
   }
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&old_id_,
-      /*.target_values=*/&new_id_,
-      /*.count=*/1,
+      .source_values = &old_id_,
+      .target_values = &new_id_,
+      .count = 1,
   };
   const iree_host_size_t type_count = module_->types.count;
   const iree_host_size_t interner_count = module_->type_intern.count;
@@ -623,9 +624,10 @@ TEST_F(ValueReplacementTest, OverflowDimensionsPreserveOtherProviders) {
   const loom_overflow_dim_t dimensions[] = {
       loom_dim_pack_dynamic(old_id_), loom_dim_pack_static(7),
       loom_dim_pack_dynamic(other), loom_dim_pack_dynamic(old_id_)};
-  loom_type_t original = {};
-  original.header =
-      loom_type_make_header(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, 4, 0);
+  loom_type_t original = {
+      .header =
+          loom_type_make_header(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, 4, 0),
+  };
   original.dims[0] = reinterpret_cast<uintptr_t>(dimensions);
   const auto carrier = Carrier(original);
   IREE_ASSERT_OK(loom_value_replace_all_uses_with(module_, old_id_, new_id_));
@@ -674,9 +676,9 @@ TEST_F(ValueReplacementTest, EncodingOverflowDoesNotChangeTheCarrier) {
   ExpectDependencies(carrier, {old_encoding});
 
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&old_encoding,
-      /*.target_values=*/&new_encoding,
-      /*.count=*/1,
+      .source_values = &old_encoding,
+      .target_values = &new_encoding,
+      .count = 1,
   };
   ScopedLookup lookup(module_, &remap);
   bool equal = true;

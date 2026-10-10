@@ -213,10 +213,11 @@ TEST_F(FramedEndpointTest,
     EXPECT_EQ(iree_net_message_endpoint_query_send_budget(endpoints_[0]).slots,
               1u);
     const std::string text = "message-" + std::to_string(index);
-    iree_net_message_endpoint_send_params_t params = {};
-    params.generated_prefix = iree_net_send_prefix_from_bytes(
-        iree_make_const_byte_span(text.data(), text.size()));
-    params.completion_callback = completions[index].callback();
+    iree_net_message_endpoint_send_params_t params = {
+        .generated_prefix = iree_net_send_prefix_from_bytes(
+            iree_make_const_byte_span(text.data(), text.size())),
+        .completion_callback = completions[index].callback(),
+    };
     IREE_EXPECT_OK(iree_net_message_endpoint_send(endpoints_[0], &params));
   };
   for (size_t i = 0; i + 1 < kMessageCount; ++i) {

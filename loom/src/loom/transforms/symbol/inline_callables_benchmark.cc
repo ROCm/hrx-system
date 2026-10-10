@@ -75,27 +75,25 @@ typedef struct CallableSyntax {
 } CallableSyntax;
 
 static constexpr CallableSyntax kAuthoredFuncSyntax = {
-    /*.module_prefix=*/"",
-    /*.private_definition=*/"func.def inline ",
-    /*.public_definition=*/"func.def public ",
-    /*.body_introducer=*/"{\n",
-    /*.value_type=*/"i32",
-    /*.call_op=*/"func.call",
-    /*.branch_op=*/"cfg.br",
-    /*.return_op=*/"func.return",
+    .module_prefix = "",
+    .private_definition = "func.def inline ",
+    .public_definition = "func.def public ",
+    .body_introducer = "{\n",
+    .value_type = "i32",
+    .call_op = "func.call",
+    .branch_op = "cfg.br",
+    .return_op = "func.return",
 };
 
 static constexpr CallableSyntax kTargetLowSyntax = {
-    /*.module_prefix=*/"test.target<low_core> @target\n\n",
-    /*.private_definition=*/
-    "low.func.def target<test.low.core>(@target) ",
-    /*.public_definition=*/
-    "low.func.def public target<test.low.core>(@target) ",
-    /*.body_introducer=*/"{\n",
-    /*.value_type=*/"reg<test.i32>",
-    /*.call_op=*/"low.func.call",
-    /*.branch_op=*/"low.br",
-    /*.return_op=*/"low.return",
+    .module_prefix = "test.target<low_core> @target\n\n",
+    .private_definition = "low.func.def target<test.low.core>(@target) ",
+    .public_definition = "low.func.def public target<test.low.core>(@target) ",
+    .body_introducer = "{\n",
+    .value_type = "reg<test.i32>",
+    .call_op = "low.func.call",
+    .branch_op = "low.br",
+    .return_op = "low.return",
 };
 
 typedef struct CompositionWorkload {
@@ -305,7 +303,7 @@ static void AccumulateRegionShape(const loom_module_t* module,
 
 static ModuleShape MeasureModuleShape(const loom_module_t* module) {
   ModuleShape shape = {
-      /*.symbol_count=*/module->symbols.count,
+      .symbol_count = module->symbols.count,
   };
   for (loom_symbol_id_t symbol_id = 0; symbol_id < module->symbols.count;
        ++symbol_id) {
@@ -346,8 +344,9 @@ static int64_t ReadPassStatistic(const loom_pass_info_t* pass_info,
 
 static const loom_target_provider_t* RequireInlineProvider() {
   static const loom_target_provider_t provider = [] {
-    loom_target_provider_t value = {};
-    value.select_call_policy = loom_target_select_call_policy_require_inline;
+    loom_target_provider_t value = {
+        .select_call_policy = loom_target_select_call_policy_require_inline,
+    };
     return value;
   }();
   return &provider;
@@ -405,11 +404,11 @@ class InlineCallablesBenchmarkFixture {
     const std::string source = BuildCompositionSource(workload_);
     loom_module_t* module = nullptr;
     loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/
-        {
-            /*.fn=*/loom_diagnostic_stderr_sink,
-        },
-        /*.max_errors=*/20,
+        .diagnostic_sink =
+            {
+                .fn = loom_diagnostic_stderr_sink,
+            },
+        .max_errors = 20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &low_descriptor_registry_.registry, &parse_options.low_asm_environment);
@@ -555,9 +554,9 @@ class InlineCallablesBenchmarkFixture {
 static void BM_InlineComposition(benchmark::State& state, CallableMode mode,
                                  CompositionShape shape) {
   const CompositionWorkload workload = {
-      /*.mode=*/mode,
-      /*.shape=*/shape,
-      /*.scale=*/static_cast<uint32_t>(state.range(0)),
+      .mode = mode,
+      .shape = shape,
+      .scale = static_cast<uint32_t>(state.range(0)),
   };
   InlineCallablesBenchmarkFixture fixture(workload);
   RunMetrics metrics = {};
@@ -585,14 +584,15 @@ static void BM_InlineComposition(benchmark::State& state, CallableMode mode,
     const loom_pass_info_t* pass_info = loom_inline_callables_pass_info();
     std::vector<uint8_t> statistic_storage(
         pass_info->statistic_layout->storage_size, 0);
-    loom_pass_t pass = {};
-    pass.info = pass_info;
-    pass.module_run = loom_inline_callables_run;
-    pass.instance_arena = &pass_arena;
-    pass.arena = &pass_arena;
-    pass.statistic_storage = statistic_storage.data();
-    pass.environment =
-        mode == CallableMode::kTargetLow ? &pass_environment : nullptr;
+    loom_pass_t pass = {
+        .info = pass_info,
+        .module_run = loom_inline_callables_run,
+        .instance_arena = &pass_arena,
+        .arena = &pass_arena,
+        .statistic_storage = statistic_storage.data(),
+        .environment =
+            mode == CallableMode::kTargetLow ? &pass_environment : nullptr,
+    };
     const iree_string_view_t pass_options = mode == CallableMode::kTargetLow
                                                 ? IREE_SV("policy=target")
                                                 : IREE_SV("");
@@ -605,19 +605,16 @@ static void BM_InlineComposition(benchmark::State& state, CallableMode mode,
 
     state.PauseTiming();
     metrics = {
-        /*.output_shape=*/MeasureModuleShape(module),
-        /*.module_arena_bytes=*/module->arena.used_allocation_size +
-            module->type_uses.arena.used_allocation_size,
-        /*.pass_arena_bytes=*/pass_arena.used_allocation_size,
-        /*.required_edge_count=*/
-        ReadPassStatistic(pass_info, statistic_storage,
-                          IREE_SV("required-edges")),
-        /*.cloned_call_count=*/
-        ReadPassStatistic(pass_info, statistic_storage,
-                          IREE_SV("calls-cloned")),
-        /*.transferred_call_count=*/
-        ReadPassStatistic(pass_info, statistic_storage,
-                          IREE_SV("calls-transferred")),
+        .output_shape = MeasureModuleShape(module),
+        .module_arena_bytes = module->arena.used_allocation_size +
+                              module->type_uses.arena.used_allocation_size,
+        .pass_arena_bytes = pass_arena.used_allocation_size,
+        .required_edge_count = ReadPassStatistic(pass_info, statistic_storage,
+                                                 IREE_SV("required-edges")),
+        .cloned_call_count = ReadPassStatistic(pass_info, statistic_storage,
+                                               IREE_SV("calls-cloned")),
+        .transferred_call_count = ReadPassStatistic(
+            pass_info, statistic_storage, IREE_SV("calls-transferred")),
     };
     fixture.ValidateOutput(module, metrics);
     iree_arena_deinitialize(&pass_arena);

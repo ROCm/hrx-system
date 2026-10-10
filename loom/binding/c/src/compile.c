@@ -1011,8 +1011,8 @@ loomc_status_t loomc_compile_artifact(
 
   loom_function_version_owner_t* function_versions =
       loomc_module_function_version_owner(module);
-  iree_string_view_list_t roots = {0};
-  iree_string_view_list_t excluded_roots = {0};
+  iree_string_view_list_t roots = iree_string_view_list_empty();
+  iree_string_view_list_t excluded_roots = iree_string_view_list_empty();
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_compile_make_string_list(options ? options->roots : NULL,
                                             options ? options->root_count : 0,

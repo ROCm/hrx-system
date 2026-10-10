@@ -256,24 +256,26 @@ struct TransferPeer {
       // Completed snapshot copied synchronously by the admitted builder.
       const Positions* positions;
     } progress{this, &positions};
-    iree_net_queue_channel_send_params_t params = {};
-    params.signal_frontier_count = count;
-    params.build =
-        +[](void* user_data, const iree_net_queue_message_builder_t* builder) {
-          auto& progress = *static_cast<Progress*>(user_data);
-          size_t index = 0;
-          for (size_t axis = 0; axis < kTimelineCount; ++axis) {
-            if ((*progress.positions)[axis]) {
-              iree_net_queue_frontier_builder_set(
-                  &builder->signal_frontier, index++,
-                  {axis, (*progress.positions)[axis]});
-            }
-          }
-          ++progress.peer->sends;
-          return iree_ok_status();
-        };
-    params.build_user_data = &progress;
-    params.completion_callback = {OnSend, this};
+    iree_net_queue_channel_send_params_t params = {
+        .signal_frontier_count = count,
+        .build =
+            +[](void* user_data,
+                const iree_net_queue_message_builder_t* builder) {
+              auto& progress = *static_cast<Progress*>(user_data);
+              size_t index = 0;
+              for (size_t axis = 0; axis < kTimelineCount; ++axis) {
+                if ((*progress.positions)[axis]) {
+                  iree_net_queue_frontier_builder_set(
+                      &builder->signal_frontier, index++,
+                      {axis, (*progress.positions)[axis]});
+                }
+              }
+              ++progress.peer->sends;
+              return iree_ok_status();
+            },
+        .build_user_data = &progress,
+        .completion_callback = {OnSend, this},
+    };
     iree_status_t status =
         iree_net_queue_channel_send_advance(channel, &params);
     const bool accepted = iree_status_is_ok(status);
@@ -351,25 +353,27 @@ struct TransferPeer {
         // Number of records in the admitted payload.
         uint64_t count;
       } command{this, axis, count};
-      iree_net_queue_channel_send_params_t params = {};
-      params.signal_frontier_count = 1;
-      params.build = +[](void* user_data,
-                         const iree_net_queue_message_builder_t* builder) {
-        auto& command = *static_cast<Command*>(user_data);
-        auto& peer = *command.peer;
-        peer.submitted[command.axis] += command.count;
-        iree_net_queue_frontier_builder_set(
-            &builder->signal_frontier, 0,
-            {command.axis, peer.submitted[command.axis]});
-        ++peer.sends;
-        peer.window_high_water =
-            std::max(peer.window_high_water, peer.submitted[command.axis] -
-                                                 peer.observed[command.axis]);
-        return iree_ok_status();
+      iree_net_queue_channel_send_params_t params = {
+          .signal_frontier_count = 1,
+          .build =
+              +[](void* user_data,
+                  const iree_net_queue_message_builder_t* builder) {
+                auto& command = *static_cast<Command*>(user_data);
+                auto& peer = *command.peer;
+                peer.submitted[command.axis] += command.count;
+                iree_net_queue_frontier_builder_set(
+                    &builder->signal_frontier, 0,
+                    {command.axis, peer.submitted[command.axis]});
+                ++peer.sends;
+                peer.window_high_water = std::max(
+                    peer.window_high_water,
+                    peer.submitted[command.axis] - peer.observed[command.axis]);
+                return iree_ok_status();
+              },
+          .build_user_data = &command,
+          .payload = iree_async_span_list_make(spans.data(), spans.size()),
+          .completion_callback = {OnSend, this},
       };
-      params.build_user_data = &command;
-      params.payload = iree_async_span_list_make(spans.data(), spans.size());
-      params.completion_callback = {OnSend, this};
       iree_status_t status = iree_net_queue_channel_send_command(
           channel, IREE_NET_QUEUE_ID_NONE, &params);
       if (iree_status_is_resource_exhausted(status)) {
@@ -583,9 +587,10 @@ struct TrialSide {
       return std::move(created).status().release();
     }
     proactor = *created;
-    iree_async_slab_options_t slab_options = {};
-    slab_options.buffer_size = 64 * 1024;
-    slab_options.buffer_count = 16;
+    iree_async_slab_options_t slab_options = {
+        .buffer_size = 64 * 1024,
+        .buffer_count = 16,
+    };
     IREE_RETURN_IF_ERROR(
         iree_async_slab_create(slab_options, iree_allocator_system(), &slab));
     IREE_RETURN_IF_ERROR(iree_async_proactor_register_slab(

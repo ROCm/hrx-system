@@ -18,10 +18,11 @@ namespace {
 
 loom_liveness_interval_t Interval(uint32_t start, uint32_t end, uint32_t units,
                                   uint16_t class_id) {
-  loom_liveness_interval_t interval = {};
-  interval.start_point = start;
-  interval.end_point = end;
-  interval.unit_count = units;
+  loom_liveness_interval_t interval = {
+      .start_point = start,
+      .end_point = end,
+      .unit_count = units,
+  };
   interval.value_class.type_kind = LOOM_TYPE_REGISTER;
   interval.value_class.register_class_id = class_id;
   return interval;
@@ -61,16 +62,18 @@ class LowAllocationScalarPackingTest : public ::testing::Test {
       values[i] = {unit_count, intervals[i].start_point};
       unit_count += intervals[i].unit_count;
     }
-    loom_liveness_analysis_t liveness = {};
-    liveness.intervals = intervals.data();
-    liveness.interval_count = intervals.size();
-    liveness.value_ids = value_ids.data();
-    liveness.value_count = intervals.size();
-    liveness.value_interval_indices = interval_indices.data();
-    liveness.pressure_summaries = summaries_;
-    liveness.pressure_summary_count = IREE_ARRAYSIZE(summaries_);
-    loom_low_allocation_unit_liveness_t unit_liveness = {};
-    unit_liveness.values = values.data();
+    loom_liveness_analysis_t liveness = {
+        .intervals = intervals.data(),
+        .interval_count = intervals.size(),
+        .value_ids = value_ids.data(),
+        .value_count = intervals.size(),
+        .value_interval_indices = interval_indices.data(),
+        .pressure_summaries = summaries_,
+        .pressure_summary_count = IREE_ARRAYSIZE(summaries_),
+    };
+    loom_low_allocation_unit_liveness_t unit_liveness = {
+        .values = values.data(),
+    };
     unit_liveness.point_count = unit_count;
     const loom_low_placement_table_t placement = {};
     loom_low_allocation_interval_order_t order = {};

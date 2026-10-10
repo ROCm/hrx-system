@@ -68,9 +68,9 @@ ReferenceResult EvaluateReference(
     loom_template_provider_slice_t providers,
     loom_decision_program_resolution_policy_t policy) {
   ReferenceResult result = {
-      /*.kind=*/LOOM_DECISION_PROGRAM_RESULT_NO_MATCH,
-      /*.action_ordinal=*/LOOM_DECISION_PROGRAM_ACTION_INVALID,
-      /*.unresolved_action_ordinal=*/LOOM_DECISION_PROGRAM_ACTION_INVALID,
+      .kind = LOOM_DECISION_PROGRAM_RESULT_NO_MATCH,
+      .action_ordinal = LOOM_DECISION_PROGRAM_ACTION_INVALID,
+      .unresolved_action_ordinal = LOOM_DECISION_PROGRAM_ACTION_INVALID,
   };
   bool has_match = false;
   bool has_maybe = false;
@@ -215,17 +215,17 @@ class TemplateDecisionModelTest : public ::testing::Test {
         loom_func_symbol_facts_cast(base_facts);
     IREE_ASSERT(facts != nullptr);
     return {
-        /*.module=*/module,
-        /*.target_symbol=*/facts->target_symbol,
-        /*.target_facts=*/{},
-        /*.argument_ids=*/facts->argument_ids,
-        /*.result_ids=*/facts->result_ids,
-        /*.predicates=*/facts->predicates,
-        /*.target_conditions=*/facts->target_conditions,
-        /*.argument_count=*/facts->argument_count,
-        /*.result_count=*/facts->result_count,
-        /*.predicate_count=*/facts->predicate_count,
-        /*.target_condition_count=*/facts->target_condition_count,
+        .module = module,
+        .target_symbol = facts->target_symbol,
+        .target_facts = {},
+        .argument_ids = facts->argument_ids,
+        .result_ids = facts->result_ids,
+        .predicates = facts->predicates,
+        .target_conditions = facts->target_conditions,
+        .argument_count = facts->argument_count,
+        .result_count = facts->result_count,
+        .predicate_count = facts->predicate_count,
+        .target_condition_count = facts->target_condition_count,
     };
   }
 
@@ -235,9 +235,9 @@ class TemplateDecisionModelTest : public ::testing::Test {
       const loom_template_applicability_facts_t* application_facts) {
     const loom_template_applicability_target_t application_target = {};
     const loom_template_decision_site_t site = {
-        /*.application_op=*/apply_op,
-        /*.application_target=*/&application_target,
-        /*.application_facts=*/application_facts,
+        .application_op = apply_op,
+        .application_target = &application_target,
+        .application_facts = application_facts,
     };
     const loom_template_applicability_contract_t family_contract =
         FamilyContract(module, symbol_facts, model->family);
@@ -461,15 +461,15 @@ func.def public @entry(%x: index, %y: index, %m: index) -> (index, index) {
   IREE_ASSERT_OK(loom_value_fact_table_initialize(
       &value_facts, &analysis_arena_, module->values.count));
   loom_template_applicability_facts_t application_facts = {
-      /*.values=*/&value_facts,
+      .values = &value_facts,
   };
 
   for (iree_host_size_t i = 0; i < references.template_demands.count; ++i) {
     const loom_template_demand_t& demand =
         references.template_demands.values[i];
     const loom_symbol_ref_t family = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/demand.family_symbol_id,
+        .module_id = 0,
+        .symbol_id = demand.family_symbol_id,
     };
     const loom_template_decision_model_t* model =
         loom_template_decision_model_lookup(&models, family);
@@ -502,8 +502,8 @@ func.def public @entry(%x: index, %y: index, %m: index) -> (index, index) {
         }
       }
       const loom_symbol_ref_t family = {
-          /*.module_id=*/0,
-          /*.symbol_id=*/demand.family_symbol_id,
+          .module_id = 0,
+          .symbol_id = demand.family_symbol_id,
       };
       const loom_template_decision_model_t* model =
           loom_template_decision_model_lookup(&models, family);
@@ -568,8 +568,8 @@ TEST_F(TemplateDecisionModelTest, LargeCatalogLookupUsesOnlyDemandedFamilies) {
   for (iree_host_size_t i = 0; i < references.template_demands.family_count;
        ++i) {
     const loom_symbol_ref_t family = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/references.template_demands.family_symbol_ids[i],
+        .module_id = 0,
+        .symbol_id = references.template_demands.family_symbol_ids[i],
     };
     const loom_template_decision_model_t* model =
         loom_template_decision_model_lookup(&models, family);
@@ -579,8 +579,8 @@ TEST_F(TemplateDecisionModelTest, LargeCatalogLookupUsesOnlyDemandedFamilies) {
 
   ASSERT_GT(references.template_provider_count, 0u);
   const loom_symbol_ref_t provider_symbol = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/FindSymbol(module.get(), IREE_SV("provider_0")),
+      .module_id = 0,
+      .symbol_id = FindSymbol(module.get(), IREE_SV("provider_0")),
   };
   EXPECT_EQ(loom_template_decision_model_lookup(&models, provider_symbol),
             nullptr);
@@ -634,8 +634,8 @@ func.def public target(@application_target) @entry(%value: i32) -> (i32, i32) {
       &models));
 
   const loom_symbol_ref_t application_target_ref = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/FindSymbol(module.get(), IREE_SV("application_target")),
+      .module_id = 0,
+      .symbol_id = FindSymbol(module.get(), IREE_SV("application_target")),
   };
   const loom_symbol_facts_base_t* application_target_base = nullptr;
   IREE_ASSERT_OK(loom_symbol_fact_table_lookup_ref(&symbol_facts, module.get(),
@@ -645,8 +645,8 @@ func.def public target(@application_target) @entry(%value: i32) -> (i32, i32) {
       loom_target_symbol_facts_cast(application_target_base);
   ASSERT_NE(application_target_facts, nullptr);
   const loom_template_applicability_target_t application_target = {
-      /*.witness=*/application_target_ref,
-      /*.facts=*/application_target_facts->projection,
+      .witness = application_target_ref,
+      .facts = application_target_facts->projection,
   };
   loom_template_applicability_facts_t application_facts = {};
 
@@ -656,14 +656,15 @@ func.def public target(@application_target) @entry(%value: i32) -> (i32, i32) {
         references.template_demands.values[i];
     const loom_template_decision_model_t* model =
         loom_template_decision_model_lookup(
-            &models,
-            (loom_symbol_ref_t){/*.module_id=*/0,
-                                /*.symbol_id=*/demand.family_symbol_id});
+            &models, loom_symbol_ref_t{
+                         .module_id = 0,
+                         .symbol_id = demand.family_symbol_id,
+                     });
     ASSERT_NE(model, nullptr);
     const loom_template_decision_site_t site = {
-        /*.application_op=*/demand.apply_op,
-        /*.application_target=*/&application_target,
-        /*.application_facts=*/&application_facts,
+        .application_op = demand.apply_op,
+        .application_target = &application_target,
+        .application_facts = &application_facts,
     };
     std::array<loom_decision_program_choice_evidence_t, 3> evidence = {};
     std::array<uint32_t, 3> live_actions = {};

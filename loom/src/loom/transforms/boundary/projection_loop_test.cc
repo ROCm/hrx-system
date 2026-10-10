@@ -85,12 +85,12 @@ static iree_status_t PlanDuplicateLoopState(
   suffixes[0] = IREE_SV("first");
   suffixes[1] = IREE_SV("second");
   *out_schema = {
-      /*.rule=*/rule,
-      /*.component_types=*/component_types,
-      /*.component_name_suffixes=*/suffixes,
-      /*.component_count=*/2,
-      /*.destination_mode=*/LOOM_BOUNDARY_PROJECTION_DESTINATION_RECONSTRUCT,
-      /*.rule_plan=*/nullptr,
+      .rule = rule,
+      .component_types = component_types,
+      .component_name_suffixes = suffixes,
+      .component_count = 2,
+      .destination_mode = LOOM_BOUNDARY_PROJECTION_DESTINATION_RECONSTRUCT,
+      .rule_plan = nullptr,
   };
   *out_claimed = true;
   return iree_ok_status();
@@ -142,13 +142,12 @@ static iree_status_t PlanZeroComponentLoopState(
   *out_claimed = role == LOOM_BOUNDARY_PROJECTION_SLOT_LOOP_STATE;
   if (*out_claimed) {
     *out_schema = {
-        /*.rule=*/rule,
-        /*.component_types=*/nullptr,
-        /*.component_name_suffixes=*/nullptr,
-        /*.component_count=*/0,
-        /*.destination_mode=*/
-        LOOM_BOUNDARY_PROJECTION_DESTINATION_RECONSTRUCT,
-        /*.rule_plan=*/nullptr,
+        .rule = rule,
+        .component_types = nullptr,
+        .component_name_suffixes = nullptr,
+        .component_count = 0,
+        .destination_mode = LOOM_BOUNDARY_PROJECTION_DESTINATION_RECONSTRUCT,
+        .rule_plan = nullptr,
     };
   }
   return iree_ok_status();
@@ -184,8 +183,8 @@ static iree_status_t PlanTestSource(
   IREE_RETURN_IF_ERROR(iree_arena_allocate(plan->arena, sizeof(*source_plan),
                                            (void**)&source_plan));
   *source_plan = {
-      /*.value_id=*/source_value_id,
-      /*.dependency=*/IREE_HOST_SIZE_MAX,
+      .value_id = source_value_id,
+      .dependency = IREE_HOST_SIZE_MAX,
   };
   const loom_value_t* source_value =
       loom_module_value(plan->module, source_value_id);
@@ -207,9 +206,9 @@ static iree_status_t PlanTestSource(
     }
   }
   *out_source = {
-      /*.rule=*/rule,
-      /*.rule_plan=*/source_plan,
-      /*.boundary_op=*/boundary_op,
+      .rule = rule,
+      .rule_plan = source_plan,
+      .boundary_op = boundary_op,
   };
   *out_planned = true;
   return iree_ok_status();
@@ -307,114 +306,104 @@ static iree_status_t EliminateWithFirstComponent(
 }
 
 static const loom_boundary_projection_rule_t kDuplicateF32Rule = {
-    /*.name=*/IREE_SVL("test-duplicate-f32-loop-state"),
-    /*.type_kind_bits=*/
-    LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
-    /*.slot_role_bits=*/
-    LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
+    .name = IREE_SVL("test-duplicate-f32-loop-state"),
+    .type_kind_bits = LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
+    .slot_role_bits = LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
         LOOM_BOUNDARY_PROJECTION_SLOT_LOOP_STATE),
-    /*.function_applies=*/nullptr,
-    /*.slot_matches=*/MatchesF32LoopState,
-    /*.initialize=*/nullptr,
-    /*.prepare_function=*/nullptr,
-    /*.plan_slot=*/PlanDuplicateLoopState,
-    /*.transport=*/
-    {
-        /*.plan_source=*/PlanTestSource,
-        /*.materialize_source=*/MaterializeTestSource,
-        /*.reconstruct=*/ReconstructFromFirstComponent,
-        /*.eliminate=*/nullptr,
-    },
+    .function_applies = nullptr,
+    .slot_matches = MatchesF32LoopState,
+    .initialize = nullptr,
+    .prepare_function = nullptr,
+    .plan_slot = PlanDuplicateLoopState,
+    .transport =
+        {
+            .plan_source = PlanTestSource,
+            .materialize_source = MaterializeTestSource,
+            .reconstruct = ReconstructFromFirstComponent,
+            .eliminate = nullptr,
+        },
 };
 
 static const loom_boundary_projection_rule_t kDuplicateIndexRule = {
-    /*.name=*/IREE_SVL("test-duplicate-index-loop-state"),
-    /*.type_kind_bits=*/
-    LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
-    /*.slot_role_bits=*/
-    LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
+    .name = IREE_SVL("test-duplicate-index-loop-state"),
+    .type_kind_bits = LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
+    .slot_role_bits = LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
         LOOM_BOUNDARY_PROJECTION_SLOT_LOOP_STATE),
-    /*.function_applies=*/nullptr,
-    /*.slot_matches=*/MatchesIndexLoopState,
-    /*.initialize=*/nullptr,
-    /*.prepare_function=*/nullptr,
-    /*.plan_slot=*/PlanDuplicateLoopState,
-    /*.transport=*/
-    {
-        /*.plan_source=*/PlanTestSource,
-        /*.materialize_source=*/MaterializeTestSource,
-        /*.reconstruct=*/ReconstructFromFirstComponent,
-        /*.eliminate=*/nullptr,
-    },
+    .function_applies = nullptr,
+    .slot_matches = MatchesIndexLoopState,
+    .initialize = nullptr,
+    .prepare_function = nullptr,
+    .plan_slot = PlanDuplicateLoopState,
+    .transport =
+        {
+            .plan_source = PlanTestSource,
+            .materialize_source = MaterializeTestSource,
+            .reconstruct = ReconstructFromFirstComponent,
+            .eliminate = nullptr,
+        },
 };
 
 static const loom_boundary_projection_rule_t kEliminativeF32Rule = {
-    /*.name=*/IREE_SVL("test-eliminate-f32-loop-state"),
-    /*.type_kind_bits=*/
-    LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
-    /*.slot_role_bits=*/
-    LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
+    .name = IREE_SVL("test-eliminate-f32-loop-state"),
+    .type_kind_bits = LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
+    .slot_role_bits = LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
         LOOM_BOUNDARY_PROJECTION_SLOT_LOOP_STATE),
-    /*.function_applies=*/nullptr,
-    /*.slot_matches=*/MatchesF32LoopState,
-    /*.initialize=*/nullptr,
-    /*.prepare_function=*/nullptr,
-    /*.plan_slot=*/PlanEliminativeDuplicateLoopState,
-    /*.transport=*/
-    {
-        /*.plan_source=*/PlanTestSource,
-        /*.materialize_source=*/MaterializeTestSource,
-        /*.reconstruct=*/nullptr,
-        /*.eliminate=*/EliminateWithFirstComponent,
-    },
+    .function_applies = nullptr,
+    .slot_matches = MatchesF32LoopState,
+    .initialize = nullptr,
+    .prepare_function = nullptr,
+    .plan_slot = PlanEliminativeDuplicateLoopState,
+    .transport =
+        {
+            .plan_source = PlanTestSource,
+            .materialize_source = MaterializeTestSource,
+            .reconstruct = nullptr,
+            .eliminate = EliminateWithFirstComponent,
+        },
 };
 
 static const loom_boundary_projection_rule_t kZeroF32Rule = {
-    /*.name=*/IREE_SVL("test-zero-f32-loop-state"),
-    /*.type_kind_bits=*/
-    LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
-    /*.slot_role_bits=*/
-    LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
+    .name = IREE_SVL("test-zero-f32-loop-state"),
+    .type_kind_bits = LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
+    .slot_role_bits = LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
         LOOM_BOUNDARY_PROJECTION_SLOT_LOOP_STATE),
-    /*.function_applies=*/nullptr,
-    /*.slot_matches=*/MatchesF32LoopState,
-    /*.initialize=*/nullptr,
-    /*.prepare_function=*/nullptr,
-    /*.plan_slot=*/PlanZeroComponentLoopState,
-    /*.transport=*/
-    {
-        /*.plan_source=*/PlanTestSource,
-        /*.materialize_source=*/MaterializeTestSource,
-        /*.reconstruct=*/ReconstructZeroComponent,
-        /*.eliminate=*/nullptr,
-    },
+    .function_applies = nullptr,
+    .slot_matches = MatchesF32LoopState,
+    .initialize = nullptr,
+    .prepare_function = nullptr,
+    .plan_slot = PlanZeroComponentLoopState,
+    .transport =
+        {
+            .plan_source = PlanTestSource,
+            .materialize_source = MaterializeTestSource,
+            .reconstruct = ReconstructZeroComponent,
+            .eliminate = nullptr,
+        },
 };
 
 static const loom_boundary_projection_rule_t kRejectingIndexRule = {
-    /*.name=*/IREE_SVL("test-reject-index-loop-state"),
-    /*.type_kind_bits=*/
-    LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
-    /*.slot_role_bits=*/
-    LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
+    .name = IREE_SVL("test-reject-index-loop-state"),
+    .type_kind_bits = LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
+    .slot_role_bits = LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
         LOOM_BOUNDARY_PROJECTION_SLOT_LOOP_STATE),
-    /*.function_applies=*/nullptr,
-    /*.slot_matches=*/MatchesIndexLoopState,
-    /*.initialize=*/nullptr,
-    /*.prepare_function=*/nullptr,
-    /*.plan_slot=*/PlanRejectingDuplicateLoopState,
-    /*.transport=*/
-    {
-        /*.plan_source=*/PlanTestSource,
-        /*.materialize_source=*/MaterializeTestSource,
-        /*.reconstruct=*/ReconstructFromFirstComponent,
-        /*.eliminate=*/nullptr,
-    },
+    .function_applies = nullptr,
+    .slot_matches = MatchesIndexLoopState,
+    .initialize = nullptr,
+    .prepare_function = nullptr,
+    .plan_slot = PlanRejectingDuplicateLoopState,
+    .transport =
+        {
+            .plan_source = PlanTestSource,
+            .materialize_source = MaterializeTestSource,
+            .reconstruct = ReconstructFromFirstComponent,
+            .eliminate = nullptr,
+        },
 };
 
 static const loom_pass_info_t kProjectionPassInfo = {
-    /*.name=*/IREE_SVL("test-loop-boundary-projection"),
-    /*.description=*/IREE_SVL("Test LoopLike boundary projection."),
-    /*.kind=*/LOOM_PASS_MODULE,
+    .name = IREE_SVL("test-loop-boundary-projection"),
+    .description = IREE_SVL("Test LoopLike boundary projection."),
+    .kind = LOOM_PASS_MODULE,
 };
 
 class LoopBoundaryProjectionTest : public ::testing::Test {
@@ -462,7 +451,7 @@ class LoopBoundaryProjectionTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(&module_builder_, name, &name_id));
     loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    return {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    return {.module_id = 0, .symbol_id = symbol_id};
   }
 
   loom_func_like_t BuildFunction(iree_string_view_t name,
@@ -525,14 +514,14 @@ class LoopBoundaryProjectionTest : public ::testing::Test {
     const loom_boundary_projection_rule_t* rules[] = {rule};
     IREE_ASSERT_OK(loom_boundary_projection_run(
         &pass_, module_, /*version_list=*/nullptr,
-        {/*.values=*/rules, /*.count=*/IREE_ARRAYSIZE(rules)},
+        {.values = rules, .count = IREE_ARRAYSIZE(rules)},
         /*plan_sink=*/nullptr, out_statistics));
   }
 
   void Verify() {
     const loom_verify_options_t options = {
-        /*.sink=*/{loom_diagnostic_stderr_sink, nullptr},
-        /*.max_errors=*/20,
+        .sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 20,
     };
     loom_verify_result_t result = {};
     IREE_EXPECT_OK(loom_verify_module(module_, &options, &result));
@@ -558,11 +547,11 @@ class LoopBoundaryProjectionTest : public ::testing::Test {
 
   std::vector<loom_op_t*> CollectLoops(loom_func_like_t function) {
     std::vector<loom_op_t*> loops;
-    LoopCollector collector = {/*.module=*/module_, /*.loops=*/&loops};
+    LoopCollector collector = {.module = module_, .loops = &loops};
     loom_walk_result_t result = LOOM_WALK_CONTINUE;
     IREE_CHECK_OK(loom_walk_function(
         module_, function, LOOM_WALK_POST_ORDER,
-        {/*.fn=*/CollectLoopWithModule, /*.user_data=*/&collector}, &result));
+        {.fn = CollectLoopWithModule, .user_data = &collector}, &result));
     return loops;
   }
 
@@ -585,9 +574,9 @@ TEST_F(LoopBoundaryProjectionTest,
   const loom_value_id_t step = Index(&builder, 1);
   const loom_value_id_t initial = Constant(&builder, loom_attr_f64(1.0), f32);
   const loom_tied_result_t tie = {
-      /*.result_index=*/0,
-      /*.operand_index=*/3,
-      /*.has_type_change=*/false,
+      .result_index = 0,
+      .operand_index = 3,
+      .has_type_change = false,
   };
   loom_op_t* source_loop = nullptr;
   IREE_ASSERT_OK(loom_test_loop_build(&builder, lower, upper, step, &initial, 1,
@@ -867,9 +856,9 @@ TEST_F(LoopBoundaryProjectionTest, RejectsMismatchedOwnershipTieAtomically) {
   const loom_value_id_t step = Index(&builder, 1);
   const loom_value_id_t initial = Constant(&builder, loom_attr_f64(1.0), f32);
   const loom_tied_result_t tie = {
-      /*.result_index=*/0,
-      /*.operand_index=*/0,
-      /*.has_type_change=*/true,
+      .result_index = 0,
+      .operand_index = 0,
+      .has_type_change = true,
   };
   loom_op_t* source_loop = nullptr;
   IREE_ASSERT_OK(loom_test_loop_build(&builder, lower, upper, step, &initial, 1,

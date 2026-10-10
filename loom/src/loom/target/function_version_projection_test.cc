@@ -61,9 +61,9 @@ static iree_status_t ProjectTestProfileFacts(
 }
 
 static const loom_target_profile_type_t kTestProfileType = {
-    /*.name=*/IREE_SVL("function-version-projection-test"),
-    /*.fact_type=*/&loom_test_target_fact_type,
-    /*.project_facts=*/ProjectTestProfileFacts,
+    .name = IREE_SVL("function-version-projection-test"),
+    .fact_type = &loom_test_target_fact_type,
+    .project_facts = ProjectTestProfileFacts,
 };
 
 static iree_status_t MaterializeTestTargetDefinition(
@@ -120,12 +120,12 @@ static iree_status_t MaterializeTestTargetDefinition(
 }
 
 static const loom_target_provider_t kTestProvider = {
-    /*.profile_type=*/&kTestProfileType,
-    /*.materialize_definition=*/MaterializeTestTargetDefinition,
+    .profile_type = &kTestProfileType,
+    .materialize_definition = MaterializeTestTargetDefinition,
 };
 
 static const loom_target_provider_t kMissingMaterializerProvider = {
-    /*.profile_type=*/&kTestProfileType,
+    .profile_type = &kTestProfileType,
 };
 
 static const loom_target_provider_t* const kTestProviders[] = {
@@ -149,14 +149,14 @@ static TestTargetProfile MakeTestProfile(
     loom_test_target_kind_t kind,
     loom_target_fact_field_set_t explicit_fields = 0) {
   return TestTargetProfile{
-      /*.base=*/
-      {
-          /*.type=*/&kTestProfileType,
-          /*.target_bundle=*/
-          loom_target_bundle_table_lookup(&loom_test_target_bundles, kind),
-      },
-      /*.kind=*/kind,
-      /*.explicit_fields=*/explicit_fields,
+      .base =
+          {
+              .type = &kTestProfileType,
+              .target_bundle = loom_target_bundle_table_lookup(
+                  &loom_test_target_bundles, kind),
+          },
+      .kind = kind,
+      .explicit_fields = explicit_fields,
   };
 }
 
@@ -279,11 +279,11 @@ class TargetFunctionVersionProjectionTest : public ::testing::Test {
     SpecializationResult result(&version_arena_);
     IREE_CHECK_OK(loom_target_specialize_functions(environment, module,
                                                    {
-                                                       /*.values=*/requests,
-                                                       /*.count=*/request_count,
+                                                       .values = requests,
+                                                       .count = request_count,
                                                    },
-                                                   /*.bindings=*/{},
-                                                   /*.diagnostic_emitter=*/{},
+                                                   /*bindings=*/{},
+                                                   /*diagnostic_emitter=*/{},
                                                    &result.function_versions,
                                                    &result.error_count));
     IREE_ASSERT_EQ(result.error_count, 0u);
@@ -316,21 +316,21 @@ class TargetFunctionVersionProjectionTest : public ::testing::Test {
       const loom_target_provider_t* provider,
       const loom_target_facts_t* facts) {
     return loom_target_function_version_t{
-        /*.base=*/
-        {
-            /*.type=*/&loom_target_function_version_type,
-            /*.function=*/FindFunction(module, function_name),
-        },
-        /*.authored_target_name=*/{},
-        /*.target_requirement_facts=*/nullptr,
-        /*.resolved_target=*/
-        {
-            /*.provider=*/provider,
-            /*.facts=*/facts,
-        },
-        /*.target_context_ordinal=*/0,
-        /*.authored_target_is_exact=*/false,
-        /*.function_target_facts=*/facts,
+        .base =
+            {
+                .type = &loom_target_function_version_type,
+                .function = FindFunction(module, function_name),
+            },
+        .authored_target_name = {},
+        .target_requirement_facts = nullptr,
+        .resolved_target =
+            {
+                .provider = provider,
+                .facts = facts,
+            },
+        .target_context_ordinal = 0,
+        .authored_target_is_exact = false,
+        .function_target_facts = facts,
     };
   }
 
@@ -377,12 +377,12 @@ func.def public @right() {
       MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
   const loom_target_specialization_request_t requests[] = {
       {
-          /*.function_name=*/IREE_SV("left"),
-          /*.target_profile=*/&profile.base,
+          .function_name = IREE_SV("left"),
+          .target_profile = &profile.base,
       },
       {
-          /*.function_name=*/IREE_SV("right"),
-          /*.target_profile=*/&profile.base,
+          .function_name = IREE_SV("right"),
+          .target_profile = &profile.base,
       },
   };
   const SpecializationResult specialization =
@@ -429,8 +429,8 @@ func.def public target(@requirement) @entry() {
   const TestTargetProfile profile =
       MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE, explicit_fields);
   const loom_target_specialization_request_t request = {
-      /*.function_name=*/IREE_SV("entry"),
-      /*.target_profile=*/&profile.base,
+      .function_name = IREE_SV("entry"),
+      .target_profile = &profile.base,
   };
   const SpecializationResult specialization =
       Specialize(source.get(), &request, 1);
@@ -470,8 +470,8 @@ func.def public @entry() {
       MakeVersion(source.get(), IREE_SV("entry"), &kTestProvider, &facts);
   loom_function_version_t* version_values[] = {&version.base};
   const loom_function_version_list_t versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   ModulePtr projected = Project(source.get(), &versions);
@@ -498,8 +498,8 @@ func.def public target(@exact) @entry() {
   const TestTargetProfile profile =
       MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
   const loom_target_specialization_request_t request = {
-      /*.function_name=*/IREE_SV("entry"),
-      /*.target_profile=*/&profile.base,
+      .function_name = IREE_SV("entry"),
+      .target_profile = &profile.base,
   };
   const SpecializationResult specialization =
       Specialize(source.get(), &request, 1);
@@ -550,12 +550,12 @@ func.def public target(@exact) @second() {
       MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
   const loom_target_specialization_request_t requests[] = {
       {
-          /*.function_name=*/IREE_SV("first"),
-          /*.target_profile=*/&profile.base,
+          .function_name = IREE_SV("first"),
+          .target_profile = &profile.base,
       },
       {
-          /*.function_name=*/IREE_SV("second"),
-          /*.target_profile=*/&profile.base,
+          .function_name = IREE_SV("second"),
+          .target_profile = &profile.base,
       },
   };
   const SpecializationResult specialization =
@@ -610,8 +610,8 @@ func.def public target(@exact) @witness() {
       &witness_version.base,
   };
   const loom_function_version_list_t versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   ModulePtr projected = Project(source.get(), &versions);
@@ -642,12 +642,12 @@ func.def public @right() {
       MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
   const loom_target_specialization_request_t requests[] = {
       {
-          /*.function_name=*/IREE_SV("left"),
-          /*.target_profile=*/&left_profile.base,
+          .function_name = IREE_SV("left"),
+          .target_profile = &left_profile.base,
       },
       {
-          /*.function_name=*/IREE_SV("right"),
-          /*.target_profile=*/&right_profile.base,
+          .function_name = IREE_SV("right"),
+          .target_profile = &right_profile.base,
       },
   };
   const SpecializationResult specialization =
@@ -743,16 +743,16 @@ func.def @__loom_target_context_0_17() {
       MakeTestProfile(LOOM_TEST_TARGET_KIND_QUIRKY);
   const loom_target_specialization_request_t requests[] = {
       {
-          /*.function_name=*/IREE_SV("quirky_entry"),
-          /*.target_profile=*/&quirky_profile.base,
+          .function_name = IREE_SV("quirky_entry"),
+          .target_profile = &quirky_profile.base,
       },
       {
-          /*.function_name=*/IREE_SV("low_entry_copy"),
-          /*.target_profile=*/&low_profile.base,
+          .function_name = IREE_SV("low_entry_copy"),
+          .target_profile = &low_profile.base,
       },
       {
-          /*.function_name=*/IREE_SV("low_entry"),
-          /*.target_profile=*/&low_profile.base,
+          .function_name = IREE_SV("low_entry"),
+          .target_profile = &low_profile.base,
       },
   };
   const SpecializationResult specialization =
@@ -797,8 +797,8 @@ func.def public target(@exact) @entry() {
   const TestTargetProfile profile =
       MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
   const loom_target_specialization_request_t request = {
-      /*.function_name=*/IREE_SV("entry"),
-      /*.target_profile=*/&profile.base,
+      .function_name = IREE_SV("entry"),
+      .target_profile = &profile.base,
   };
   const SpecializationResult specialization =
       SpecializeWithEnvironment(&environment, source.get(), &request, 1);
@@ -829,8 +829,8 @@ func.def public @entry() {
   const TestTargetProfile profile =
       MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
   const loom_target_specialization_request_t request = {
-      /*.function_name=*/IREE_SV("entry"),
-      /*.target_profile=*/&profile.base,
+      .function_name = IREE_SV("entry"),
+      .target_profile = &profile.base,
   };
   const SpecializationResult specialization =
       SpecializeWithEnvironment(&environment, source.get(), &request, 1);
@@ -863,8 +863,8 @@ func.def public @entry() {
       MakeVersion(foreign.get(), IREE_SV("entry"), &kTestProvider, &facts);
   loom_function_version_t* version_values[] = {&version.base};
   const loom_function_version_list_t versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
   loom_module_t* projected_module = nullptr;
 
@@ -884,16 +884,16 @@ func.def public @entry() {
 }
 )");
   const loom_function_version_type_t other_type = {
-      /*.name=*/IREE_SVL("other"),
+      .name = IREE_SVL("other"),
   };
   loom_function_version_t version = {
-      /*.type=*/&other_type,
-      /*.function=*/FindFunction(source.get(), IREE_SV("entry")),
+      .type = &other_type,
+      .function = FindFunction(source.get(), IREE_SV("entry")),
   };
   loom_function_version_t* version_values[] = {&version};
   const loom_function_version_list_t versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
   loom_module_t* projected_module = nullptr;
 

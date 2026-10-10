@@ -53,7 +53,7 @@ struct ConnectState {
   }
 
   iree_net_transport_connect_callback_t callback() {
-    return {/*.fn=*/OnConnect, /*.user_data=*/this};
+    return {.fn = OnConnect, .user_data = this};
   }
 };
 
@@ -78,7 +78,7 @@ struct AcceptState {
   }
 
   iree_net_listener_accept_callback_t callback() {
-    return {/*.fn=*/OnAccept, /*.user_data=*/this};
+    return {.fn = OnAccept, .user_data = this};
   }
 };
 
@@ -99,7 +99,7 @@ struct StopState {
   }
 
   iree_net_listener_stopped_callback_t callback() {
-    return {/*.fn=*/OnStopped, /*.user_data=*/this};
+    return {.fn = OnStopped, .user_data = this};
   }
 };
 
@@ -115,7 +115,7 @@ struct DeactivateState {
   }
 
   iree_net_connection_deactivate_callback_t callback() {
-    return {/*.fn=*/OnDeactivated, /*.user_data=*/this};
+    return {.fn = OnDeactivated, .user_data = this};
   }
 };
 
@@ -140,7 +140,7 @@ struct ControlledAllocator {
                                    inout_ptr);
   }
 
-  iree_allocator_t value() { return {/*.self=*/this, /*.ctl=*/Control}; }
+  iree_allocator_t value() { return {.self = this, .ctl = Control}; }
 };
 
 class LoopbackFactoryTest : public ::testing::Test {

@@ -232,8 +232,8 @@ TEST_P(AsanAllocationTest, InBoundsAccessStaysQuiet) {
   binding_refs[0] = iree_hal_make_buffer_ref(
       buffer, /*offset=*/0, iree_hal_buffer_byte_length(buffer));
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   recorder()->Reset();
@@ -272,8 +272,9 @@ TEST_P(AsanAllocationTest, ScopedSourcesPreserveNativeSanitizerAdvice) {
     Ref<iree_hal_pool_t> pool;
     IREE_ASSERT_OK(iree_hal_tlsf_pool_create(
         source, &options, iree_allocator_system(), pool.out()));
-    iree_hal_pool_reservation_request_t request = {};
-    request.allocation_size = kAsanAllocationBufferLength;
+    iree_hal_pool_reservation_request_t request = {
+        .allocation_size = kAsanAllocationBufferLength,
+    };
     Ref<iree_hal_buffer_t> buffer;
     SemaphoreList allocated(device(), {0}, {1});
     IREE_ASSERT_OK(
@@ -327,8 +328,8 @@ TEST_P(AsanAllocationTest, AllocationRedzonesReport) {
   binding_refs[0] = iree_hal_make_buffer_ref(
       buffer, /*offset=*/0, iree_hal_buffer_byte_length(buffer));
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   recorder()->Reset();
@@ -342,8 +343,8 @@ TEST_P(AsanAllocationTest, AllocationRedzonesReport) {
   tail_binding_refs[0] = iree_hal_make_buffer_ref(
       buffer, kAsanAllocationBufferLength - 1, /*length=*/1);
   iree_hal_buffer_ref_list_t tail_bindings = {
-      /*.count=*/IREE_ARRAYSIZE(tail_binding_refs),
-      /*.values=*/tail_binding_refs,
+      .count = IREE_ARRAYSIZE(tail_binding_refs),
+      .values = tail_binding_refs,
   };
 
   recorder()->Reset();
@@ -384,8 +385,8 @@ TEST_P(AsanAllocationTest, QueueDeallocaReleaseReportsAfterSignal) {
   params.queue_family_affinity = iree_hal_make_queue_family_affinity(
       iree_hal_queue_family_ordinal(iree_hal_queue_family(queue)));
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/kAsanAllocationBufferLength,
+      .params = params,
+      .allocation_size = kAsanAllocationBufferLength,
   };
   enum class PoolKind { kNative, kTLSF, kFixedBlock };
   for (auto kind :
@@ -394,10 +395,11 @@ TEST_P(AsanAllocationTest, QueueDeallocaReleaseReportsAfterSignal) {
     Ref<iree_hal_pool_t> backing_pool;
     Ref<iree_hal_pool_t> pool;
     if (kind == PoolKind::kFixedBlock) {
-      iree_hal_fixed_block_pool_options_t options = {};
-      options.block_size = kAsanAllocationBufferLength;
-      options.blocks_per_slab = 2;
-      options.asan = backend.asan;
+      iree_hal_fixed_block_pool_options_t options = {
+          .block_size = kAsanAllocationBufferLength,
+          .blocks_per_slab = 2,
+          .asan = backend.asan,
+      };
       IREE_ASSERT_OK(CreateFiniteBlockPool(backend, options,
                                            iree_allocator_system(),
                                            backing_pool.out(), pool.out()));
@@ -476,10 +478,11 @@ TEST_P(AsanAllocationTest, GuardedFiniteAllocaWaitsForInheritedHostUse) {
   uint64_t host_epoch = 0;
   for (bool use_tlsf : {false, true}) {
     SCOPED_TRACE(use_tlsf ? "TLSF" : "fixed block");
-    iree_hal_fixed_block_pool_options_t source_options = {};
-    source_options.block_size = 65536;
-    source_options.blocks_per_slab = 1;
-    source_options.frontier_capacity = 1;
+    iree_hal_fixed_block_pool_options_t source_options = {
+        .block_size = 65536,
+        .blocks_per_slab = 1,
+        .frontier_capacity = 1,
+    };
     Ref<iree_hal_pool_t> backing_pool;
     Ref<iree_hal_pool_t> source_pool;
     IREE_ASSERT_OK(
@@ -515,15 +518,15 @@ TEST_P(AsanAllocationTest, GuardedFiniteAllocaWaitsForInheritedHostUse) {
         IREE_HAL_POOL_MATERIALIZE_FLAG_NONE, source.out()));
     Ref<iree_hal_pool_t> pool;
     if (use_tlsf) {
-      iree_hal_tlsf_pool_options_t options = {};
-      options.asan = backend.asan;
+      iree_hal_tlsf_pool_options_t options = {.asan = backend.asan};
       IREE_ASSERT_OK(iree_hal_tlsf_pool_create_from_buffer(
           source, 0, IREE_HAL_WHOLE_BUFFER, &options, iree_allocator_system(),
           pool.out()));
     } else {
-      iree_hal_fixed_block_pool_options_t options = {};
-      options.block_size = kAsanAllocationBufferLength;
-      options.asan = backend.asan;
+      iree_hal_fixed_block_pool_options_t options = {
+          .block_size = kAsanAllocationBufferLength,
+          .asan = backend.asan,
+      };
       IREE_ASSERT_OK(iree_hal_fixed_block_pool_create_from_buffer(
           source, 0, IREE_HAL_WHOLE_BUFFER, &options, iree_allocator_system(),
           pool.out()));

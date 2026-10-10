@@ -59,11 +59,12 @@ static iree_async_frontier_t* BuildFrontier(
 // Default options for a 1 MB range with 16-byte alignment and 8-entry
 // frontiers. Sufficient for most tests.
 static iree_hal_memory_tlsf_options_t DefaultOptions() {
-  iree_hal_memory_tlsf_options_t options = {};
-  options.range_length = 1024 * 1024;  // 1 MB
-  options.alignment = 16;
-  options.initial_block_capacity = 64;
-  options.frontier_capacity = 8;
+  iree_hal_memory_tlsf_options_t options = {
+      .range_length = 1024 * 1024,  // 1 MB
+      .alignment = 16,
+      .initial_block_capacity = 64,
+      .frontier_capacity = 8,
+  };
   return options;
 }
 
@@ -91,9 +92,7 @@ static iree_status_t TestAllocatorCtl(void* self,
 }
 
 static iree_allocator_t TestAllocator(TestAllocatorState* state) {
-  iree_allocator_t allocator = {};
-  allocator.self = state;
-  allocator.ctl = TestAllocatorCtl;
+  iree_allocator_t allocator = {.self = state, .ctl = TestAllocatorCtl};
   return allocator;
 }
 

@@ -67,13 +67,13 @@ static iree_status_t FakeCreateBuffer(void* user_data, iree_string_view_t name,
   memset(storage, 0, expected_byte_length);
 
   iree_hal_buffer_placement_t placement = {
-      /*.device=*/nullptr,
-      /*.queue_family_affinity=*/IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
-      /*.flags=*/IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
+      .device = nullptr,
+      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
   iree_hal_buffer_release_callback_t release_callback = {
-      /*.fn=*/FakeBufferRelease,
-      /*.user_data=*/storage,
+      .fn = FakeBufferRelease,
+      .user_data = storage,
   };
   iree_status_t status = iree_hal_heap_buffer_wrap(
       placement,
@@ -92,13 +92,13 @@ class GlobalTableTest : public ::testing::Test {
  protected:
   void SetUp() override {
     const iree_hal_amdgpu_global_table_params_t params = {
-        /*.host_allocator=*/iree_allocator_system(),
-        /*.resolver=*/
-        {
-            /*.user_data=*/&resolver_,
-            /*.try_verify=*/FakeTryVerify,
-            /*.create_buffer=*/FakeCreateBuffer,
-        },
+        .host_allocator = iree_allocator_system(),
+        .resolver =
+            {
+                .user_data = &resolver_,
+                .try_verify = FakeTryVerify,
+                .create_buffer = FakeCreateBuffer,
+            },
     };
     IREE_ASSERT_OK(iree_hal_amdgpu_global_table_initialize(&params, &table_));
   }

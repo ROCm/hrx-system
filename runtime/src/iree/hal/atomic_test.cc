@@ -17,14 +17,15 @@ namespace {
 static constexpr iree_hal_queue_priority_t kQueuePriority =
     IREE_HAL_QUEUE_PRIORITY_NORMAL;
 static const iree_hal_queue_family_spec_t kQueueFamilySpec = [] {
-  iree_hal_queue_family_spec_t spec = {};
-  spec.name = IREE_SV("test");
-  spec.priority_count = 1;
-  spec.priorities = &kQueuePriority;
-  spec.physical_device_affinity = 1;
-  spec.role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+  iree_hal_queue_family_spec_t spec = {
+      .name = IREE_SV("test"),
+      .priority_count = 1,
+      .priorities = &kQueuePriority,
+      .physical_device_affinity = 1,
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                     IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
-                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
+  };
   return spec;
 }();
 
@@ -117,12 +118,11 @@ TEST(AtomicTest, HostCapabilitiesFollowLockFreeWidths) {
 
 TEST(AtomicTest, ValidatesWaitParameters) {
   iree_hal_atomic_wait_params_t params = {
-      /*.value=*/1,
-      /*.mask=*/UINT32_MAX,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
-          IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-      /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
+      .value = 1,
+      .mask = UINT32_MAX,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
   };
   IREE_EXPECT_OK(iree_hal_atomic_wait_params_validate(params));
 
@@ -136,9 +136,9 @@ TEST(AtomicTest, ValidatesWaitParameters) {
 
 TEST(AtomicTest, RejectsNonCanonical32BitValues) {
   iree_hal_atomic_store_params_t params = {
-      /*.value=*/UINT64_C(1) << 32,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_NONE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+      .value = UINT64_C(1) << 32,
+      .flags = IREE_HAL_ATOMIC_FLAG_NONE,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_atomic_store_params_validate(params));
@@ -146,20 +146,20 @@ TEST(AtomicTest, RejectsNonCanonical32BitValues) {
 
 TEST(AtomicTest, AcceptsInapplicableStoreOrderingFlags) {
   const iree_hal_atomic_store_params_t params = {
-      /*.value=*/1,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+      .value = 1,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
   };
   IREE_EXPECT_OK(iree_hal_atomic_store_params_validate(params));
 }
 
 TEST(AtomicTest, ValidatesReadModifyWriteParameters) {
   iree_hal_atomic_rmw_params_t params = {
-      /*.operand=*/1,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
-          IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
-      /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+      .operand = 1,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+      .width = IREE_HAL_ATOMIC_WIDTH_64,
+      .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
   };
   IREE_EXPECT_OK(iree_hal_atomic_rmw_params_validate(params));
 
@@ -170,31 +170,31 @@ TEST(AtomicTest, ValidatesReadModifyWriteParameters) {
 
 TEST(AtomicTest, RejectsUnknownTargetErrorModes) {
   iree_hal_atomic_wait_params_t wait_params = {
-      /*.value=*/1,
-      /*.mask=*/UINT32_MAX,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_NONE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-      /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
-      /*.target_error_mode=*/2,
+      .value = 1,
+      .mask = UINT32_MAX,
+      .flags = IREE_HAL_ATOMIC_FLAG_NONE,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+      .target_error_mode = 2,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_atomic_wait_params_validate(wait_params));
 
   iree_hal_atomic_store_params_t store_params = {
-      /*.value=*/1,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_NONE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-      /*.target_error_mode=*/2,
+      .value = 1,
+      .flags = IREE_HAL_ATOMIC_FLAG_NONE,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .target_error_mode = 2,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_atomic_store_params_validate(store_params));
 
   iree_hal_atomic_rmw_params_t rmw_params = {
-      /*.operand=*/1,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_NONE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-      /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
-      /*.target_error_mode=*/2,
+      .operand = 1,
+      .flags = IREE_HAL_ATOMIC_FLAG_NONE,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+      .target_error_mode = 2,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_atomic_rmw_params_validate(rmw_params));
@@ -205,36 +205,36 @@ class AtomicTargetValidationTest : public ::testing::Test {
   static iree_hal_atomic_wait_params_t WaitParams(
       iree_hal_atomic_target_error_mode_t target_error_mode,
       iree_hal_atomic_width_t width = IREE_HAL_ATOMIC_WIDTH_32) {
-    return (iree_hal_atomic_wait_params_t){
-        /*.value=*/1,
-        /*.mask=*/width == IREE_HAL_ATOMIC_WIDTH_32 ? UINT32_MAX : UINT64_MAX,
-        /*.flags=*/IREE_HAL_ATOMIC_FLAG_NONE,
-        /*.width=*/width,
-        /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
-        /*.target_error_mode=*/target_error_mode,
+    return iree_hal_atomic_wait_params_t{
+        .value = 1,
+        .mask = width == IREE_HAL_ATOMIC_WIDTH_32 ? UINT32_MAX : UINT64_MAX,
+        .flags = IREE_HAL_ATOMIC_FLAG_NONE,
+        .width = width,
+        .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+        .target_error_mode = target_error_mode,
     };
   }
 
   static iree_hal_atomic_store_params_t StoreParams(
       iree_hal_atomic_target_error_mode_t target_error_mode,
       iree_hal_atomic_width_t width = IREE_HAL_ATOMIC_WIDTH_32) {
-    return (iree_hal_atomic_store_params_t){
-        /*.value=*/1,
-        /*.flags=*/IREE_HAL_ATOMIC_FLAG_NONE,
-        /*.width=*/width,
-        /*.target_error_mode=*/target_error_mode,
+    return iree_hal_atomic_store_params_t{
+        .value = 1,
+        .flags = IREE_HAL_ATOMIC_FLAG_NONE,
+        .width = width,
+        .target_error_mode = target_error_mode,
     };
   }
 
   static iree_hal_atomic_rmw_params_t RmwParams(
       iree_hal_atomic_target_error_mode_t target_error_mode,
       iree_hal_atomic_width_t width = IREE_HAL_ATOMIC_WIDTH_32) {
-    return (iree_hal_atomic_rmw_params_t){
-        /*.operand=*/1,
-        /*.flags=*/IREE_HAL_ATOMIC_FLAG_NONE,
-        /*.width=*/width,
-        /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
-        /*.target_error_mode=*/target_error_mode,
+    return iree_hal_atomic_rmw_params_t{
+        .operand = 1,
+        .flags = IREE_HAL_ATOMIC_FLAG_NONE,
+        .width = width,
+        .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+        .target_error_mode = target_error_mode,
     };
   }
 
@@ -307,10 +307,10 @@ class AtomicTargetValidationTest : public ::testing::Test {
         IREE_SV("atomic-test"), iree_allocator_system(),
         iree_allocator_system(), &allocator_));
     const iree_hal_buffer_params_t buffer_params = {
-        /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
-        /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-        /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+        .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+        .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
     };
     IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(allocator_, buffer_params,
                                                       16, &root_buffer_));
@@ -330,11 +330,11 @@ class AtomicTargetValidationTest : public ::testing::Test {
     command_buffer_vtable_.atomic_wait = NoopCommandBufferAtomicWait;
     command_buffer_vtable_.atomic_store = NoopCommandBufferAtomicStore;
     command_buffer_vtable_.atomic_rmw = NoopCommandBufferAtomicRmw;
-    iree_hal_device_queue_spec_t queues = {};
-    queues.family_count = 1;
-    queues.families = &kQueueFamilySpec;
-    iree_hal_device_spec_params_t spec_params = {};
-    spec_params.queues = &queues;
+    iree_hal_device_queue_spec_t queues = {
+        .family_count = 1,
+        .families = &kQueueFamilySpec,
+    };
+    iree_hal_device_spec_params_t spec_params = {.queues = &queues};
     iree_hal_device_spec_t* device_spec = nullptr;
     IREE_ASSERT_OK(iree_hal_device_spec_create(
         &spec_params, iree_allocator_system(), &device_spec));
@@ -407,13 +407,13 @@ TEST_F(AtomicTargetValidationTest,
   IREE_ASSERT_OK(iree_hal_command_buffer_end(&command_buffer_));
 
   const iree_hal_buffer_binding_t binding = {
-      /*.buffer=*/unaligned_buffer_,
-      /*.offset=*/0,
-      /*.length=*/4,
+      .buffer = unaligned_buffer_,
+      .offset = 0,
+      .length = 4,
   };
   const iree_hal_buffer_binding_table_t binding_table = {
-      /*.count=*/1,
-      /*.bindings=*/&binding,
+      .count = 1,
+      .bindings = &binding,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_command_buffer_validate_submission(
@@ -426,13 +426,13 @@ TEST_F(AtomicTargetValidationTest,
   IREE_ASSERT_OK(iree_hal_command_buffer_end(&command_buffer_));
 
   const iree_hal_buffer_binding_t binding = {
-      /*.buffer=*/unaligned_buffer_,
-      /*.offset=*/0,
-      /*.length=*/4,
+      .buffer = unaligned_buffer_,
+      .offset = 0,
+      .length = 4,
   };
   const iree_hal_buffer_binding_table_t binding_table = {
-      /*.count=*/1,
-      /*.bindings=*/&binding,
+      .count = 1,
+      .bindings = &binding,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INCOMPATIBLE,
                         iree_hal_command_buffer_validate_submission(
@@ -448,13 +448,13 @@ TEST_F(AtomicTargetValidationTest,
   IREE_ASSERT_OK(iree_hal_command_buffer_end(&command_buffer_));
 
   const iree_hal_buffer_binding_t binding = {
-      /*.buffer=*/unaligned_buffer_,
-      /*.offset=*/0,
-      /*.length=*/8,
+      .buffer = unaligned_buffer_,
+      .offset = 0,
+      .length = 8,
   };
   const iree_hal_buffer_binding_table_t binding_table = {
-      /*.count=*/1,
-      /*.bindings=*/&binding,
+      .count = 1,
+      .bindings = &binding,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_command_buffer_validate_submission(
@@ -470,13 +470,13 @@ TEST_F(AtomicTargetValidationTest,
   IREE_ASSERT_OK(iree_hal_command_buffer_end(&command_buffer_));
 
   const iree_hal_buffer_binding_t binding = {
-      /*.buffer=*/root_buffer_,
-      /*.offset=*/4,
-      /*.length=*/8,
+      .buffer = root_buffer_,
+      .offset = 4,
+      .length = 8,
   };
   const iree_hal_buffer_binding_table_t binding_table = {
-      /*.count=*/1,
-      /*.bindings=*/&binding,
+      .count = 1,
+      .bindings = &binding,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INCOMPATIBLE,
                         iree_hal_command_buffer_validate_submission(
@@ -511,10 +511,10 @@ TEST_F(AtomicTargetValidationTest,
           StoreParams(IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE)));
 
   const iree_hal_buffer_params_t bad_usage_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
   iree_hal_buffer_t* bad_usage_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
@@ -529,10 +529,10 @@ TEST_F(AtomicTargetValidationTest,
   iree_hal_buffer_release(bad_usage_buffer);
 
   const iree_hal_buffer_params_t bad_access_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_READ,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .access = IREE_HAL_MEMORY_ACCESS_READ,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
   iree_hal_buffer_t* bad_access_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(

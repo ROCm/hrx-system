@@ -33,69 +33,73 @@ TEST(DecisionProgramTest, SelectsScalarPredicateChoiceFromSsaFacts) {
   const int64_t constants[] = {128, 32};
   const loom_decision_program_predicate_t predicates[] = {
       {
-          /*.kind=*/LOOM_PREDICATE_GE,
-          /*.operand_count=*/2,
-          /*.reserved=*/{}, /*.operands=*/
-          {
-              loom_decision_program_argument_ref(0),
-              loom_decision_program_constant_ref(0),
-          },
+          .kind = LOOM_PREDICATE_GE,
+          .operand_count = 2,
+          .reserved = {},
+          .operands =
+              {
+                  loom_decision_program_argument_ref(0),
+                  loom_decision_program_constant_ref(0),
+              },
       },
       {
-          /*.kind=*/LOOM_PREDICATE_MULTIPLE_OF,
-          /*.operand_count=*/2,
-          /*.reserved=*/{}, /*.operands=*/
-          {
-              loom_decision_program_argument_ref(1),
-              loom_decision_program_constant_ref(1),
-          },
+          .kind = LOOM_PREDICATE_MULTIPLE_OF,
+          .operand_count = 2,
+          .reserved = {},
+          .operands =
+              {
+                  loom_decision_program_argument_ref(1),
+                  loom_decision_program_constant_ref(1),
+              },
       },
   };
   const loom_decision_program_choice_t choices[] = {
       {
-          /*.conjunction=*/
-          {
-              /*.first_predicate=*/0,
-              /*.first_feature=*/{},
-              /*.predicate_count=*/2,
-          },
-          /*.action_ordinal=*/7,
+          .conjunction =
+              {
+                  .first_predicate = 0,
+                  .first_feature = {},
+                  .predicate_count = 2,
+              },
+          .action_ordinal = 7,
       },
       {
-          /*.conjunction=*/{},
-          /*.action_ordinal=*/9,
+          .conjunction = {},
+          .action_ordinal = 9,
       },
   };
   const loom_decision_program_priority_group_t groups[] = {
-      {/*.choice_count=*/1},
-      {/*.choice_count=*/1},
+      {.choice_count = 1},
+      {.choice_count = 1},
   };
   const loom_decision_program_t program = {
-      /*.predicates=*/predicates,
-      /*.choices=*/choices,
-      /*.priority_groups=*/groups,
-      /*.constants=*/constants,
-      /*.hard_requirements=*/{},   /*.predicate_count=*/2,
-      /*.feature_count=*/{},       /*.constant_count=*/2,
-      /*.choice_count=*/2,
-      /*.priority_group_count=*/2,
+      .predicates = predicates,
+      .choices = choices,
+      .priority_groups = groups,
+      .constants = constants,
+      .hard_requirements = {},
+      .predicate_count = 2,
+      .feature_count = {},
+      .constant_count = 2,
+      .choice_count = 2,
+      .priority_group_count = 2,
   };
 
   std::array<loom_value_facts_t, 16> fact_entries = {};
   fact_entries[3] = loom_value_facts_exact_i64(128);
   fact_entries[11] = loom_value_facts_exact_i64(64);
   const loom_value_fact_table_t fact_table = {
-      /*.arena=*/{},
-      /*.transient_arena=*/{},
-      /*.entries=*/fact_entries.data(),
-      /*.first_value_id=*/0,
-      /*.count=*/{},
-      /*.capacity=*/fact_entries.size(),
+      .arena = {},
+      .transient_arena = {},
+      .entries = fact_entries.data(),
+      .first_value_id = 0,
+      .count = {},
+      .capacity = fact_entries.size(),
   };
   const loom_value_id_t arguments[] = {3, 11};
   const loom_decision_program_binding_t binding = {
-      /*.facts=*/&fact_table,
-      /*.argument_values=*/arguments,
+      .facts = &fact_table,
+      .argument_values = arguments,
   };
 
   uint32_t live_actions[2] = {};
@@ -125,33 +129,36 @@ TEST(DecisionProgramTest, SelectsScalarPredicateChoiceFromSsaFacts) {
 
 TEST(DecisionProgramTest, PreservesSsaIdentityAcrossSignaturePositions) {
   const loom_decision_program_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_EQ,
-      /*.operand_count=*/2,
-      /*.reserved=*/{}, /*.operands=*/
-      {
-          loom_decision_program_argument_ref(0),
-          loom_decision_program_argument_ref(1),
-      },
+      .kind = LOOM_PREDICATE_EQ,
+      .operand_count = 2,
+      .reserved = {},
+      .operands =
+          {
+              loom_decision_program_argument_ref(0),
+              loom_decision_program_argument_ref(1),
+          },
   };
   const loom_decision_program_choice_t choice = {
-      /*.conjunction=*/
-      {
-          /*.first_predicate=*/{},
-          /*.first_feature=*/{},
-          /*.predicate_count=*/1,
-      },
-      /*.action_ordinal=*/0,
+      .conjunction =
+          {
+              .first_predicate = {},
+              .first_feature = {},
+              .predicate_count = 1,
+          },
+      .action_ordinal = 0,
   };
-  const loom_decision_program_priority_group_t group = {/*.choice_count=*/1};
+  const loom_decision_program_priority_group_t group = {.choice_count = 1};
   const loom_decision_program_t program = {
-      /*.predicates=*/&predicate,
-      /*.choices=*/&choice,
-      /*.priority_groups=*/&group,
-      /*.constants=*/{},           /*.hard_requirements=*/{},
-      /*.predicate_count=*/1,
-      /*.feature_count=*/{},       /*.constant_count=*/{},
-      /*.choice_count=*/1,
-      /*.priority_group_count=*/1,
+      .predicates = &predicate,
+      .choices = &choice,
+      .priority_groups = &group,
+      .constants = {},
+      .hard_requirements = {},
+      .predicate_count = 1,
+      .feature_count = {},
+      .constant_count = {},
+      .choice_count = 1,
+      .priority_group_count = 1,
   };
   loom_value_facts_t entries[4];
   for (auto& entry : entries) {
@@ -160,18 +167,19 @@ TEST(DecisionProgramTest, PreservesSsaIdentityAcrossSignaturePositions) {
   // Values 1 and 2 are aliases of value 0; value 3 is independent.
   loom_value_id_t identities[] = {LOOM_VALUE_ID_INVALID, 0, 0,
                                   LOOM_VALUE_ID_INVALID};
-  loom_value_fact_table_t fact_table = {};
-  fact_table.entries = entries;
-  fact_table.count = IREE_ARRAYSIZE(entries);
-  fact_table.capacity = IREE_ARRAYSIZE(entries);
+  loom_value_fact_table_t fact_table = {
+      .entries = entries,
+      .count = IREE_ARRAYSIZE(entries),
+      .capacity = IREE_ARRAYSIZE(entries),
+  };
   fact_table.identities.entries = identities;
   fact_table.identities.capacity = IREE_ARRAYSIZE(identities);
   const loom_value_id_t arguments[][2] = {{0, 0}, {0, 1}, {1, 2}, {0, 3}};
   for (const auto& pair : arguments) {
     SCOPED_TRACE(::testing::Message() << pair[0] << ", " << pair[1]);
     const loom_decision_program_binding_t binding = {
-        /*.facts=*/&fact_table,
-        /*.argument_values=*/pair,
+        .facts = &fact_table,
+        .argument_values = pair,
     };
     uint32_t live_action = UINT32_MAX;
     uint32_t live_action_count = 0;
@@ -197,31 +205,45 @@ TEST(DecisionProgramTest, ResolutionPolicyControlsHigherUnknownChoice) {
   };
   const loom_decision_program_choice_t choices[] = {
       {
-          /*.conjunction=*/{/*.first_predicate=*/{}, /*.first_feature=*/0,
-                            /*.predicate_count=*/{}, /*.feature_count=*/1},
-          /*.action_ordinal=*/3,
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 0,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
+          .action_ordinal = 3,
       },
       {
-          /*.conjunction=*/{/*.first_predicate=*/{}, /*.first_feature=*/1,
-                            /*.predicate_count=*/{}, /*.feature_count=*/1},
-          /*.action_ordinal=*/5,
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 1,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
+          .action_ordinal = 5,
       },
   };
   const loom_decision_program_priority_group_t groups[] = {
-      {/*.choice_count=*/1},
-      {/*.choice_count=*/1},
+      {.choice_count = 1},
+      {.choice_count = 1},
   };
   const loom_decision_program_t program = {
-      /*.predicates=*/{},          /*.choices=*/choices,
-      /*.priority_groups=*/groups,
-      /*.constants=*/{},           /*.hard_requirements=*/{},
-      /*.predicate_count=*/{},     /*.feature_count=*/2,
-      /*.constant_count=*/{},      /*.choice_count=*/2,
-      /*.priority_group_count=*/2,
+      .predicates = {},
+      .choices = choices,
+      .priority_groups = groups,
+      .constants = {},
+      .hard_requirements = {},
+      .predicate_count = {},
+      .feature_count = 2,
+      .constant_count = {},
+      .choice_count = 2,
+      .priority_group_count = 2,
   };
   const loom_decision_program_feature_evaluator_t feature_evaluator = {
-      /*.fn=*/EvaluateFeature,
-      /*.user_data=*/feature_truths,
+      .fn = EvaluateFeature,
+      .user_data = feature_truths,
   };
 
   uint32_t live_actions[2] = {};
@@ -256,43 +278,62 @@ TEST(DecisionProgramTest, HardUnknownPreservesEveryPossibleChoice) {
   };
   const loom_decision_program_choice_t choices[] = {
       {
-          /*.conjunction=*/{/*.first_predicate=*/{}, /*.first_feature=*/1,
-                            /*.predicate_count=*/{}, /*.feature_count=*/1},
-          /*.action_ordinal=*/0,
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 1,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
+          .action_ordinal = 0,
       },
       {
-          /*.conjunction=*/{/*.first_predicate=*/{}, /*.first_feature=*/2,
-                            /*.predicate_count=*/{}, /*.feature_count=*/1},
-          /*.action_ordinal=*/1,
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 2,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
+          .action_ordinal = 1,
       },
       {
-          /*.conjunction=*/{/*.first_predicate=*/{}, /*.first_feature=*/3,
-                            /*.predicate_count=*/{}, /*.feature_count=*/1},
-          /*.action_ordinal=*/2,
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 3,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
+          .action_ordinal = 2,
       },
   };
   const loom_decision_program_priority_group_t groups[] = {
-      {/*.choice_count=*/1},
-      {/*.choice_count=*/1},
-      {/*.choice_count=*/1},
+      {.choice_count = 1},
+      {.choice_count = 1},
+      {.choice_count = 1},
   };
   const loom_decision_program_t program = {
-      /*.predicates=*/{},
-      /*.choices=*/choices,
-      /*.priority_groups=*/groups,
-      /*.constants=*/{},
-      /*.hard_requirements=*/
-      {/*.first_predicate=*/{}, /*.first_feature=*/0, /*.predicate_count=*/{},
-       /*.feature_count=*/1},
-      /*.predicate_count=*/{},
-      /*.feature_count=*/4,
-      /*.constant_count=*/{},
-      /*.choice_count=*/3,
-      /*.priority_group_count=*/3,
+      .predicates = {},
+      .choices = choices,
+      .priority_groups = groups,
+      .constants = {},
+      .hard_requirements =
+          {
+              .first_predicate = {},
+              .first_feature = 0,
+              .predicate_count = {},
+              .feature_count = 1,
+          },
+      .predicate_count = {},
+      .feature_count = 4,
+      .constant_count = {},
+      .choice_count = 3,
+      .priority_group_count = 3,
   };
   const loom_decision_program_feature_evaluator_t feature_evaluator = {
-      /*.fn=*/EvaluateFeature,
-      /*.user_data=*/feature_truths,
+      .fn = EvaluateFeature,
+      .user_data = feature_truths,
   };
 
   uint32_t live_actions[3] = {};
@@ -317,56 +358,80 @@ TEST(DecisionProgramTest, FullEvaluationCapturesLowerChoiceEvidence) {
   const int64_t constants[] = {1, 2};
   const loom_decision_program_predicate_t predicates[] = {
       {
-          /*.kind=*/LOOM_PREDICATE_EQ,
-          /*.operand_count=*/2,
-          /*.reserved=*/{},
-          /*.operands=*/
-          {
-              loom_decision_program_constant_ref(0),
-              loom_decision_program_constant_ref(1),
-          },
+          .kind = LOOM_PREDICATE_EQ,
+          .operand_count = 2,
+          .reserved = {},
+          .operands =
+              {
+                  loom_decision_program_constant_ref(0),
+                  loom_decision_program_constant_ref(1),
+              },
       },
   };
   const loom_decision_program_choice_t choices[] = {
       {
-          /*.conjunction=*/{/*.first_predicate=*/{}, /*.first_feature=*/0,
-                            /*.predicate_count=*/{}, /*.feature_count=*/1},
-          /*.action_ordinal=*/0,
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 0,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
+          .action_ordinal = 0,
       },
       {
-          /*.conjunction=*/{/*.first_predicate=*/{}, /*.first_feature=*/1,
-                            /*.predicate_count=*/{}, /*.feature_count=*/1},
-          /*.action_ordinal=*/1,
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 1,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
+          .action_ordinal = 1,
       },
       {
-          /*.conjunction=*/{/*.first_predicate=*/{}, /*.first_feature=*/2,
-                            /*.predicate_count=*/{}, /*.feature_count=*/1},
-          /*.action_ordinal=*/2,
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 2,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
+          .action_ordinal = 2,
       },
       {
-          /*.conjunction=*/{/*.first_predicate=*/0, /*.first_feature=*/2,
-                            /*.predicate_count=*/1, /*.feature_count=*/1},
-          /*.action_ordinal=*/3,
+          .conjunction =
+              {
+                  .first_predicate = 0,
+                  .first_feature = 2,
+                  .predicate_count = 1,
+                  .feature_count = 1,
+              },
+          .action_ordinal = 3,
       },
   };
   const loom_decision_program_priority_group_t groups[] = {
-      {/*.choice_count=*/1},
-      {/*.choice_count=*/1},
-      {/*.choice_count=*/1},
-      {/*.choice_count=*/1},
+      {.choice_count = 1},
+      {.choice_count = 1},
+      {.choice_count = 1},
+      {.choice_count = 1},
   };
   const loom_decision_program_t program = {
-      /*.predicates=*/predicates,  /*.choices=*/choices,
-      /*.priority_groups=*/groups,
-      /*.constants=*/constants,    /*.hard_requirements=*/{},
-      /*.predicate_count=*/1,      /*.feature_count=*/3,
-      /*.constant_count=*/2,       /*.choice_count=*/4,
-      /*.priority_group_count=*/4,
+      .predicates = predicates,
+      .choices = choices,
+      .priority_groups = groups,
+      .constants = constants,
+      .hard_requirements = {},
+      .predicate_count = 1,
+      .feature_count = 3,
+      .constant_count = 2,
+      .choice_count = 4,
+      .priority_group_count = 4,
   };
   const loom_decision_program_binding_t binding = {};
   const loom_decision_program_feature_evaluator_t feature_evaluator = {
-      /*.fn=*/EvaluateFeature,
-      /*.user_data=*/feature_truths,
+      .fn = EvaluateFeature,
+      .user_data = feature_truths,
   };
 
   loom_decision_program_choice_evidence_t evidence[4] = {};
@@ -411,9 +476,9 @@ ReferenceResult EvaluateReference(
     uint32_t choice_count,
     loom_decision_program_resolution_policy_t resolution_policy) {
   ReferenceResult result = {
-      /*.kind=*/LOOM_DECISION_PROGRAM_RESULT_NO_MATCH,
-      /*.action_ordinal=*/LOOM_DECISION_PROGRAM_ACTION_INVALID,
-      /*.unresolved_action_ordinal=*/LOOM_DECISION_PROGRAM_ACTION_INVALID,
+      .kind = LOOM_DECISION_PROGRAM_RESULT_NO_MATCH,
+      .action_ordinal = LOOM_DECISION_PROGRAM_ACTION_INVALID,
+      .unresolved_action_ordinal = LOOM_DECISION_PROGRAM_ACTION_INVALID,
   };
   if (hard_truth == LOOM_DECISION_TRUTH_FALSE) {
     result.kind = LOOM_DECISION_PROGRAM_RESULT_HARD_REJECT;
@@ -527,8 +592,8 @@ TEST(DecisionProgramTest, RandomRankedSemanticsAgreeWithReference) {
     truths[0] = static_cast<loom_decision_truth_t>(random() % 3);
     for (uint32_t i = 0; i < choice_count; ++i) {
       reference_choices[i] = {
-          /*.priority=*/static_cast<int64_t>(random() % 9) - 4,
-          /*.truth=*/static_cast<loom_decision_truth_t>(random() % 3),
+          .priority = static_cast<int64_t>(random() % 9) - 4,
+          .truth = static_cast<loom_decision_truth_t>(random() % 3),
       };
     }
     std::stable_sort(
@@ -541,39 +606,43 @@ TEST(DecisionProgramTest, RandomRankedSemanticsAgreeWithReference) {
     for (uint32_t i = 0; i < choice_count; ++i) {
       truths[i + 1] = reference_choices[i].truth;
       choices[i] = {
-          /*.conjunction=*/
-          {
-              /*.first_predicate=*/{},
-              /*.first_feature=*/i + 1,
-              /*.predicate_count=*/{},
-              /*.feature_count=*/1,
-          },
-          /*.action_ordinal=*/i,
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = i + 1,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
+          .action_ordinal = i,
       };
       if (i == 0 ||
           reference_choices[i].priority != reference_choices[i - 1].priority) {
-        groups[group_count++] = {/*.choice_count=*/1};
+        groups[group_count++] = {.choice_count = 1};
       } else {
         ++groups[group_count - 1].choice_count;
       }
     }
     const loom_decision_program_t program = {
-        /*.predicates=*/{},
-        /*.choices=*/choices.data(),
-        /*.priority_groups=*/groups.data(),
-        /*.constants=*/{},
-        /*.hard_requirements=*/
-        {/*.first_predicate=*/{}, /*.first_feature=*/0, /*.predicate_count=*/{},
-         /*.feature_count=*/1},
-        /*.predicate_count=*/{},
-        /*.feature_count=*/choice_count + 1,
-        /*.constant_count=*/{},
-        /*.choice_count=*/choice_count,
-        /*.priority_group_count=*/group_count,
+        .predicates = {},
+        .choices = choices.data(),
+        .priority_groups = groups.data(),
+        .constants = {},
+        .hard_requirements =
+            {
+                .first_predicate = {},
+                .first_feature = 0,
+                .predicate_count = {},
+                .feature_count = 1,
+            },
+        .predicate_count = {},
+        .feature_count = choice_count + 1,
+        .constant_count = {},
+        .choice_count = choice_count,
+        .priority_group_count = group_count,
     };
     const loom_decision_program_feature_evaluator_t feature_evaluator = {
-        /*.fn=*/EvaluateFeature,
-        /*.user_data=*/truths.data(),
+        .fn = EvaluateFeature,
+        .user_data = truths.data(),
     };
     for (const loom_decision_program_resolution_policy_t policy : {
              LOOM_DECISION_PROGRAM_DEFER_UNRESOLVED,

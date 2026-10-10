@@ -60,7 +60,7 @@ class CheckOpsTest : public ::testing::Test {
         module_, iree_make_cstring_view(name), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    return {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    return {.module_id = 0, .symbol_id = symbol_id};
   }
 
   loom_op_t* Benchmark(loom_symbol_ref_t name) {

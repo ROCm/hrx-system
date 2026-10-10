@@ -5,6 +5,8 @@ cmake_minimum_required(VERSION 3.20)
 project(hrx-package-smoke LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(NOT TARGET hrx::hrx)
   find_package(hrx CONFIG REQUIRED)

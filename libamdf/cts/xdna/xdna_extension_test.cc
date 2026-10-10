@@ -135,21 +135,22 @@ class XdnaEndpointTest : public ::testing::Test {
   }
 
   amdf_xdna_device_create_info_t MakeDeviceCreateInfo() {
-    amdf_xdna_device_create_info_t create_info = {};
-    create_info.type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_CREATE_INFO;
-    create_info.structure_size = sizeof(create_info);
+    amdf_xdna_device_create_info_t create_info = {
+        .type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_CREATE_INFO,
+        .structure_size = sizeof(create_info),
+    };
     return create_info;
   }
 
   amdf_xdna_context_create_info_t MakeContextCreateInfo(
       uint32_t logical_column_count = 1) {
-    amdf_xdna_context_create_info_t create_info = {};
-    create_info.type = AMDF_STRUCTURE_TYPE_XDNA_CONTEXT_CREATE_INFO;
-    create_info.structure_size = sizeof(create_info);
-    create_info.logical_column_count = logical_column_count;
-    create_info.physical_column_origin = AMDF_XDNA_PHYSICAL_COLUMN_ORIGIN_ANY;
-    create_info.acceptable_scheduling_modes =
-        AMDF_XDNA_SCHEDULING_MODE_TIME_SLICED;
+    amdf_xdna_context_create_info_t create_info = {
+        .type = AMDF_STRUCTURE_TYPE_XDNA_CONTEXT_CREATE_INFO,
+        .structure_size = sizeof(create_info),
+        .logical_column_count = logical_column_count,
+        .physical_column_origin = AMDF_XDNA_PHYSICAL_COLUMN_ORIGIN_ANY,
+        .acceptable_scheduling_modes = AMDF_XDNA_SCHEDULING_MODE_TIME_SLICED,
+    };
     return create_info;
   }
 
@@ -174,9 +175,10 @@ TEST_F(XdnaEndpointTest, ReturnsPassiveTargetIdentity) {
     GTEST_SKIP() << "no qualified XDNA endpoint present";
   }
 
-  amdf_xdna_endpoint_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO;
-  info.structure_size = sizeof(info);
+  amdf_xdna_endpoint_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO,
+      .structure_size = sizeof(info),
+  };
   ASSERT_TRUE(
       amdf_status_is_ok(xdna_api_->endpoint_query_info(endpoint_, &info)));
 
@@ -198,9 +200,10 @@ TEST_F(XdnaEndpointTest, RejectsMalformedOutputWithoutMutation) {
       amdf_status_code(xdna_api_->endpoint_query_info(endpoint_, nullptr)),
       AMDF_STATUS_CODE_INVALID_ARGUMENT);
 
-  amdf_xdna_endpoint_info_t info = {};
-  info.structure_size = sizeof(info);
-  info.architecture = UINT32_MAX;
+  amdf_xdna_endpoint_info_t info = {
+      .structure_size = sizeof(info),
+      .architecture = UINT32_MAX,
+  };
   EXPECT_EQ(amdf_status_code(xdna_api_->endpoint_query_info(endpoint_, &info)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
   EXPECT_EQ(info.architecture, UINT32_MAX);
@@ -246,9 +249,10 @@ TEST_F(XdnaMemoryDiscoveryTest, SelectsLiveProfileAndUsesNativeLimits) {
                 instance_, count, system_scopes.data(), &count),
             AMDF_STATUS_OK);
   amdf_memory_scope_t* system_scope = nullptr;
-  amdf_memory_scope_info_t scope_info = {};
-  scope_info.type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO;
-  scope_info.structure_size = sizeof(scope_info);
+  amdf_memory_scope_info_t scope_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+      .structure_size = sizeof(scope_info),
+  };
   for (auto* scope : system_scopes) {
     ASSERT_EQ(api_->memory_scope_query_info(scope, &scope_info),
               AMDF_STATUS_OK);
@@ -279,9 +283,10 @@ TEST_F(XdnaMemoryDiscoveryTest, SelectsLiveProfileAndUsesNativeLimits) {
                                                  local_scopes.data(), &count),
             AMDF_STATUS_OK);
   for (auto* scope : local_scopes) {
-    amdf_memory_scope_info_t info = {};
-    info.type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO;
-    info.structure_size = sizeof(info);
+    amdf_memory_scope_info_t info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+        .structure_size = sizeof(info),
+    };
     ASSERT_EQ(api_->memory_scope_query_info(scope, &info), AMDF_STATUS_OK);
     EXPECT_EQ(info.kind, AMDF_MEMORY_SCOPE_KIND_LOCAL);
     EXPECT_NE(scope, system_scope);
@@ -296,12 +301,14 @@ TEST_F(XdnaMemoryDiscoveryTest, SelectsLiveProfileAndUsesNativeLimits) {
               .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_XDNA_DMA,
           },
   };
-  amdf_memory_profile_t live = {};
-  live.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  live.structure_size = sizeof(live);
-  amdf_memory_access_capabilities_t live_access = {};
-  live_access.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
-  live_access.structure_size = sizeof(live_access);
+  amdf_memory_profile_t live = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+      .structure_size = sizeof(live),
+  };
+  amdf_memory_access_capabilities_t live_access = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+      .structure_size = sizeof(live_access),
+  };
   uint32_t selected_ordinal = AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
   constexpr auto required_roles =
       AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
@@ -329,15 +336,16 @@ TEST_F(XdnaMemoryDiscoveryTest, SelectsLiveProfileAndUsesNativeLimits) {
 
   const uint64_t granularity = live.allocation.byte_length_granularity;
   ASSERT_GT(granularity, 0u);
-  amdf_memory_create_info_t create = {};
-  create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-  create.structure_size = sizeof(create);
-  create.memory_profile_ordinal = live.ordinal;
-  create.access_count = 1;
-  create.accesses = &device_access;
-  create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-  create.byte_length = ((4097 + granularity - 1) / granularity) * granularity;
-  create.minimum_alignment = live.allocation.minimum_alignment;
+  amdf_memory_create_info_t create = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create),
+      .memory_profile_ordinal = live.ordinal,
+      .access_count = 1,
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .byte_length = ((4097 + granularity - 1) / granularity) * granularity,
+      .minimum_alignment = live.allocation.minimum_alignment,
+      .accesses = &device_access,
+  };
   ASSERT_LE(create.byte_length, live.allocation.maximum_byte_length);
   ASSERT_EQ(api_->memory_create(system_scope, &create, &memory_),
             AMDF_STATUS_OK);
@@ -354,19 +362,21 @@ TEST_F(XdnaMemoryDiscoveryTest, SelectsLiveProfileAndUsesNativeLimits) {
 
   const auto& host = live.host_mapping;
   ASSERT_GT(host.byte_length_granularity, 0u);
-  amdf_memory_map_info_t map = {};
-  map.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
-  map.structure_size = sizeof(map);
-  map.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+  amdf_memory_map_info_t map = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
+      .structure_size = sizeof(map),
+      .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+  };
   ASSERT_EQ(map.flags & host.supported_access, map.flags);
   map.byte_length = (create.byte_length / host.byte_length_granularity) *
                     host.byte_length_granularity;
   ASSERT_GT(map.byte_length, 0u);
   ASSERT_LE(map.byte_length, host.maximum_byte_length);
   ASSERT_EQ(api_->memory_map(memory_, &map, &mapping_), AMDF_STATUS_OK);
-  amdf_host_mapping_info_t mapping = {};
-  mapping.type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO;
-  mapping.structure_size = sizeof(mapping);
+  amdf_host_mapping_info_t mapping = {
+      .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
+      .structure_size = sizeof(mapping),
+  };
   ASSERT_EQ(api_->host_mapping_query_info(mapping_, &mapping), AMDF_STATUS_OK);
   ASSERT_EQ(mapping.byte_length, map.byte_length);
   auto* bytes = static_cast<uint8_t*>(mapping.pointer);
@@ -384,10 +394,11 @@ TEST_F(XdnaEndpointTest, RejectsGpuEndpointWithoutMutation) {
     GTEST_SKIP() << "no GPU endpoint present";
   }
 
-  amdf_xdna_endpoint_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO;
-  info.structure_size = sizeof(info);
-  info.architecture = UINT32_MAX;
+  amdf_xdna_endpoint_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO,
+      .structure_size = sizeof(info),
+      .architecture = UINT32_MAX,
+  };
   const amdf_status_t status = xdna_api_->endpoint_query_info(endpoint_, &info);
 
   EXPECT_EQ(amdf_status_domain(status), AMDF_STATUS_DOMAIN_API);
@@ -479,9 +490,10 @@ TEST_F(XdnaEndpointTest, MaterializesDeviceAndProgramIndependentContext) {
   if (!engine_found) {
     GTEST_SKIP() << "no qualified XDNA endpoint present";
   }
-  amdf_xdna_endpoint_info_t endpoint_info = {};
-  endpoint_info.type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO;
-  endpoint_info.structure_size = sizeof(endpoint_info);
+  amdf_xdna_endpoint_info_t endpoint_info = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO,
+      .structure_size = sizeof(endpoint_info),
+  };
   ASSERT_TRUE(amdf_status_is_ok(
       xdna_api_->endpoint_query_info(endpoint_, &endpoint_info)));
   const amdf_status_t create_status =
@@ -495,9 +507,10 @@ TEST_F(XdnaEndpointTest, MaterializesDeviceAndProgramIndependentContext) {
       << " code=" << amdf_status_code(create_status);
   ASSERT_NE(device_, nullptr);
 
-  amdf_xdna_device_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO;
-  info.structure_size = sizeof(info);
+  amdf_xdna_device_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO,
+      .structure_size = sizeof(info),
+  };
   ASSERT_TRUE(amdf_status_is_ok(xdna_api_->device_query_info(device_, &info)));
   EXPECT_NE(info.id.words[0] | info.id.words[1], 0u);
   EXPECT_EQ(info.reset_epoch, 1u);
@@ -518,16 +531,18 @@ TEST_F(XdnaEndpointTest, MaterializesDeviceAndProgramIndependentContext) {
     EXPECT_GT(info.instruction.byte_length_granularity, 0u);
   }
 
-  amdf_xdna_device_info_t second_info = {};
-  second_info.type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO;
-  second_info.structure_size = sizeof(second_info);
+  amdf_xdna_device_info_t second_info = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO,
+      .structure_size = sizeof(second_info),
+  };
   ASSERT_TRUE(
       amdf_status_is_ok(xdna_api_->device_query_info(device_, &second_info)));
   EXPECT_EQ(std::memcmp(&info, &second_info, sizeof(info)), 0);
 
-  amdf_xdna_endpoint_info_t repeated_endpoint_info = {};
-  repeated_endpoint_info.type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO;
-  repeated_endpoint_info.structure_size = sizeof(repeated_endpoint_info);
+  amdf_xdna_endpoint_info_t repeated_endpoint_info = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO,
+      .structure_size = sizeof(repeated_endpoint_info),
+  };
   ASSERT_TRUE(amdf_status_is_ok(
       xdna_api_->endpoint_query_info(endpoint_, &repeated_endpoint_info)));
   EXPECT_EQ(std::memcmp(&endpoint_info, &repeated_endpoint_info,
@@ -556,9 +571,10 @@ TEST_F(XdnaEndpointTest, MaterializesDeviceAndProgramIndependentContext) {
   EXPECT_EQ(output, sentinel);
   ASSERT_TRUE(amdf_status_is_ok(
       xdna_api_->context_create(device_, &context_create_info, &context_)));
-  amdf_xdna_context_info_t context_info = {};
-  context_info.type = AMDF_STRUCTURE_TYPE_XDNA_CONTEXT_INFO;
-  context_info.structure_size = sizeof(context_info);
+  amdf_xdna_context_info_t context_info = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_CONTEXT_INFO,
+      .structure_size = sizeof(context_info),
+  };
   ASSERT_TRUE(amdf_status_is_ok(
       xdna_api_->context_query_info(context_, &context_info)));
   EXPECT_NE(context_info.id.words[0] | context_info.id.words[1], 0u);
@@ -570,11 +586,12 @@ TEST_F(XdnaEndpointTest, MaterializesDeviceAndProgramIndependentContext) {
             context_create_info.logical_column_count);
   EXPECT_EQ(context_info.row_count, info.array.row_count);
 
-  amdf_xdna_context_placement_info_t placement = {};
-  placement.type = AMDF_STRUCTURE_TYPE_XDNA_CONTEXT_PLACEMENT_INFO;
-  placement.structure_size = sizeof(placement);
-  placement.column_origin = UINT32_MAX;
-  placement.column_count = UINT32_MAX;
+  amdf_xdna_context_placement_info_t placement = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_CONTEXT_PLACEMENT_INFO,
+      .structure_size = sizeof(placement),
+      .column_origin = UINT32_MAX,
+      .column_count = UINT32_MAX,
+  };
   const amdf_xdna_context_placement_info_t original_placement = placement;
   const amdf_status_t placement_status =
       xdna_api_->context_query_placement_info(context_, &placement);
@@ -652,9 +669,10 @@ TEST_F(XdnaEndpointTest, RejectsMalformedDeviceInfoWithoutMutation) {
   EXPECT_EQ(amdf_status_code(xdna_api_->device_query_info(nullptr, nullptr)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
 
-  amdf_xdna_device_info_t info = {};
-  info.structure_size = sizeof(info);
-  info.reset_epoch = UINT64_MAX;
+  amdf_xdna_device_info_t info = {
+      .structure_size = sizeof(info),
+      .reset_epoch = UINT64_MAX,
+  };
   EXPECT_EQ(amdf_status_code(xdna_api_->device_query_info(device_, &info)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
   EXPECT_EQ(info.reset_epoch, UINT64_MAX);
@@ -678,9 +696,10 @@ TEST_F(XdnaContextTest, RejectsMalformedContextInfoWithoutMutation) {
                 xdna_api_->context_query_placement_info(nullptr, nullptr)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
 
-  amdf_xdna_context_placement_info_t placement = {};
-  placement.structure_size = sizeof(placement);
-  placement.column_count = UINT32_MAX;
+  amdf_xdna_context_placement_info_t placement = {
+      .structure_size = sizeof(placement),
+      .column_count = UINT32_MAX,
+  };
   EXPECT_EQ(amdf_status_code(
                 xdna_api_->context_query_placement_info(context_, &placement)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
@@ -692,9 +711,10 @@ TEST_F(XdnaContextTest, RejectsMalformedContextInfoWithoutMutation) {
             AMDF_STATUS_CODE_UNSUPPORTED);
   EXPECT_EQ(placement.column_count, UINT32_MAX);
 
-  amdf_xdna_context_info_t info = {};
-  info.structure_size = sizeof(info);
-  info.reset_epoch = UINT64_MAX;
+  amdf_xdna_context_info_t info = {
+      .structure_size = sizeof(info),
+      .reset_epoch = UINT64_MAX,
+  };
   EXPECT_EQ(amdf_status_code(xdna_api_->context_query_info(context_, &info)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
   EXPECT_EQ(info.reset_epoch, UINT64_MAX);

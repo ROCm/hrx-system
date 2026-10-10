@@ -40,14 +40,15 @@ class ScheduleCompletionDemandTest : public ::testing::Test {
   void Append(uint32_t producer, uint32_t consumer,
               loom_low_schedule_dependency_kind_t kind =
                   LOOM_LOW_SCHEDULE_DEPENDENCY_SSA) {
-    loom_low_schedule_dependency_t dependency = {};
-    dependency.producer_node = producer;
-    dependency.consumer_node = consumer;
-    dependency.kind = kind;
-    dependency.producer_attachment_index = UINT16_MAX;
-    dependency.consumer_attachment_index = UINT16_MAX;
-    dependency.producer_event_id = UINT16_MAX;
-    dependency.consumer_event_id = UINT16_MAX;
+    loom_low_schedule_dependency_t dependency = {
+        .producer_node = producer,
+        .consumer_node = consumer,
+        .producer_attachment_index = UINT16_MAX,
+        .consumer_attachment_index = UINT16_MAX,
+        .producer_event_id = UINT16_MAX,
+        .consumer_event_id = UINT16_MAX,
+        .kind = kind,
+    };
     IREE_ASSERT_OK(loom_low_schedule_dependency_graph_append(
         &graph_, dependency, &arena_));
   }

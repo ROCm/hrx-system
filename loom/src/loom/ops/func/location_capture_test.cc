@@ -34,9 +34,10 @@ class LocationCaptureTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     const auto* data = loom_location_capture_test_data_create();
     std::string text(reinterpret_cast<const char*>(data[0].data), data[0].size);
-    loom_input_request_t request = {};
-    request.source = iree_make_string_view(text.data(), text.size());
-    request.path = IREE_SV("source.loom");
+    loom_input_request_t request = {
+        .source = iree_make_string_view(text.data(), text.size()),
+        .path = IREE_SV("source.loom"),
+    };
     IREE_ASSERT_OK(loom_input_module_load(&loom_input_text_provider, &request,
                                           &context_, &pool_,
                                           iree_allocator_system(), &input_));
@@ -186,8 +187,7 @@ TEST_F(LocationCaptureTest, SharedGraphRetainsOpaqueTaggedAndUnavailableData) {
                                   file, payload, sizeof(payload));
   tag.flags = LOOM_LOCATION_FLAG_SYNTHETIC;
   IREE_ASSERT_OK(loom_module_add_location(module, tag, &tagged));
-  loom_location_entry_t opaque = {};
-  opaque.kind = LOOM_LOCATION_OPAQUE;
+  loom_location_entry_t opaque = {.kind = LOOM_LOCATION_OPAQUE};
   opaque.opaque.source_id = source;
   opaque.opaque.data = payload;
   opaque.opaque.data_length = sizeof(payload);
@@ -195,8 +195,7 @@ TEST_F(LocationCaptureTest, SharedGraphRetainsOpaqueTaggedAndUnavailableData) {
   IREE_ASSERT_OK(loom_module_add_location(module, opaque, &external));
   loom_location_id_t children[] = {tagged, external, file, tagged,
                                    LOOM_LOCATION_UNKNOWN};
-  loom_location_entry_t fused = {};
-  fused.kind = LOOM_LOCATION_FUSED;
+  loom_location_entry_t fused = {.kind = LOOM_LOCATION_FUSED};
   fused.fused.count = IREE_ARRAYSIZE(children);
   fused.fused.children = children;
   loom_location_id_t root;

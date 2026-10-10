@@ -25,11 +25,11 @@ iree_status_t MakeBindAddress(std::string* out_address) {
 
 const TransportBackend& GetTransportBackend() {
   static const TransportBackend backend = {
-      /*.name=*/"tcp",
-      /*.required_capabilities=*/IREE_NET_TRANSPORT_CAPABILITY_RELIABLE |
-          IREE_NET_TRANSPORT_CAPABILITY_ORDERED,
-      /*.create_factory=*/CreateFactory,
-      /*.make_bind_address=*/MakeBindAddress,
+      .name = "tcp",
+      .required_capabilities = IREE_NET_TRANSPORT_CAPABILITY_RELIABLE |
+                               IREE_NET_TRANSPORT_CAPABILITY_ORDERED,
+      .create_factory = CreateFactory,
+      .make_bind_address = MakeBindAddress,
   };
   return backend;
 }

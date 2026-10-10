@@ -6,6 +6,7 @@
 
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//build_tools/bazel:cc_opts.bzl", "cc_opts")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -13,14 +14,20 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+_CXX_OPTIONS = cc_opts.iree_cxx_standard_options()
+
 cc_binary(
     name = "embed_data",
     srcs = ["embed_data.cc"],
+    cxxopts = _CXX_OPTIONS.cxxopts,
+    features = _CXX_OPTIONS.features,
 )
 
 cc_test(
     name = "embed_data_test",
     srcs = ["embed_data_test.cc"],
+    cxxopts = _CXX_OPTIONS.cxxopts,
+    features = _CXX_OPTIONS.features,
     deps = [
         "//build_tools/embed_data/testdata:empty_embed",
         "//build_tools/embed_data/testdata:flat_embed",

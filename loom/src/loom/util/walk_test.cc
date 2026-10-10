@@ -48,7 +48,7 @@ class WalkTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
     loom_op_t* func_op = NULL;
     IREE_ASSERT_OK(loom_test_func_build(&module_builder, 0, 0, 0, callee, NULL,
                                         0, NULL, 0, NULL, 0, NULL, 0,
@@ -489,9 +489,9 @@ TEST_F(WalkTest, DeepNesting) {
 
   constexpr uint16_t kNestedTrigger = kMapCount / 2;
   NestedWalkState nested_state = {
-      /*.module=*/module_,
-      /*.trigger_op=*/maps[kNestedTrigger],
-      /*.nested_region=*/loom_test_map_body(maps[kNestedTrigger]),
+      .module = module_,
+      .trigger_op = maps[kNestedTrigger],
+      .nested_region = loom_test_map_body(maps[kNestedTrigger]),
   };
   walk_result = LOOM_WALK_CONTINUE;
   IREE_ASSERT_OK(loom_walk_function(module_, func_like_, LOOM_WALK_PRE_ORDER,

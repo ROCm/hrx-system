@@ -153,40 +153,40 @@ iree_status_t EmitFakeArtifactWithDiagnostic(
       loom_param_string(IREE_SV("test-sentinel")),
   };
   const loom_diagnostic_emission_t emission = {
-      /*.module=*/nullptr,
-      /*.op=*/nullptr,
-      /*.error=*/loom_error_def_lookup(LOOM_ERROR_DOMAIN_FOLD, 1),
-      /*.params=*/params,
-      /*.param_count=*/IREE_ARRAYSIZE(params),
+      .module = nullptr,
+      .op = nullptr,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_FOLD, 1),
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
   };
   IREE_RETURN_IF_ERROR(
       iree_diagnostic_emit(request->diagnostic_emitter, &emission));
   if (request->compile_report != nullptr) {
     const loom_target_compile_report_wait_action_row_t wait_action = {
-        /*.function_name=*/IREE_SVL("entry"),
-        /*.counter_name=*/IREE_SVL("fake.counter"),
-        /*.action_name=*/IREE_SVL("planned"),
-        /*.reason_name=*/IREE_SVL("fake.reason"),
-        /*.counter_id=*/1,
-        /*.action_id=*/2,
-        /*.reason_id=*/3,
-        /*.block_index=*/4,
-        /*.node_index=*/5,
-        /*.scheduled_ordinal=*/6,
-        /*.producer_node=*/7,
-        /*.producer_scheduled_ordinal=*/8,
-        /*.producer_operation_name=*/IREE_SVL("test.identity"),
-        /*.producer_descriptor_key=*/iree_string_view_empty(),
-        /*.producer_semantic_tag=*/iree_string_view_empty(),
-        /*.consumer_node=*/5,
-        /*.consumer_scheduled_ordinal=*/6,
-        /*.consumer_operation_name=*/IREE_SVL("test.identity"),
-        /*.consumer_descriptor_key=*/iree_string_view_empty(),
-        /*.consumer_semantic_tag=*/iree_string_view_empty(),
-        /*.target_count=*/0,
-        /*.outstanding_before=*/1,
-        /*.outstanding_after=*/0,
-        /*.drained_count=*/1,
+        .function_name = IREE_SVL("entry"),
+        .counter_name = IREE_SVL("fake.counter"),
+        .action_name = IREE_SVL("planned"),
+        .reason_name = IREE_SVL("fake.reason"),
+        .counter_id = 1,
+        .action_id = 2,
+        .reason_id = 3,
+        .block_index = 4,
+        .node_index = 5,
+        .scheduled_ordinal = 6,
+        .producer_node = 7,
+        .producer_scheduled_ordinal = 8,
+        .producer_operation_name = IREE_SVL("test.identity"),
+        .producer_descriptor_key = iree_string_view_empty(),
+        .producer_semantic_tag = iree_string_view_empty(),
+        .consumer_node = 5,
+        .consumer_scheduled_ordinal = 6,
+        .consumer_operation_name = IREE_SVL("test.identity"),
+        .consumer_descriptor_key = iree_string_view_empty(),
+        .consumer_semantic_tag = iree_string_view_empty(),
+        .target_count = 0,
+        .outstanding_before = 1,
+        .outstanding_after = 0,
+        .drained_count = 1,
     };
     IREE_RETURN_IF_ERROR(loom_target_compile_report_record_wait_action_row(
         request->compile_report, &wait_action));
@@ -204,39 +204,39 @@ iree_status_t RejectFakeArtifact(const loom_target_emit_request_t* request,
 }
 
 static const loom_target_emitter_t kFakeElfEmitter = {
-    /*.name=*/{"fake-elf", 8},
-    /*.public_artifact_format=*/{"fake-elf", 8},
-    /*.default_identifier=*/{"fake.bin", 8},
-    /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
-    /*.default_pipeline_options=*/{},
-    /*.emit=*/EmitFakeArtifact,
+    .name = {"fake-elf", 8},
+    .public_artifact_format = {"fake-elf", 8},
+    .default_identifier = {"fake.bin", 8},
+    .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+    .default_pipeline_options = {},
+    .emit = EmitFakeArtifact,
 };
 
 static const loom_target_emitter_t kFakeWasmEmitter = {
-    /*.name=*/{"fake-wasm", 9},
-    /*.public_artifact_format=*/{"fake-wasm", 9},
-    /*.default_identifier=*/{"fake.wasm", 9},
-    /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_WASM_BINARY,
-    /*.default_pipeline_options=*/{},
-    /*.emit=*/EmitFakeArtifact,
+    .name = {"fake-wasm", 9},
+    .public_artifact_format = {"fake-wasm", 9},
+    .default_identifier = {"fake.wasm", 9},
+    .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_WASM_BINARY,
+    .default_pipeline_options = {},
+    .emit = EmitFakeArtifact,
 };
 
 static const loom_target_emitter_t kFakeDiagnosticEmitter = {
-    /*.name=*/{"fake-elf-diagnostic", 19},
-    /*.public_artifact_format=*/{"fake-elf-diagnostic", 19},
-    /*.default_identifier=*/{"fake-diagnostic.bin", 19},
-    /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
-    /*.default_pipeline_options=*/{},
-    /*.emit=*/EmitFakeArtifactWithDiagnostic,
+    .name = {"fake-elf-diagnostic", 19},
+    .public_artifact_format = {"fake-elf-diagnostic", 19},
+    .default_identifier = {"fake-diagnostic.bin", 19},
+    .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+    .default_pipeline_options = {},
+    .emit = EmitFakeArtifactWithDiagnostic,
 };
 
 static const loom_target_emitter_t kFakeRejectEmitter = {
-    /*.name=*/{"fake-reject", 11},
-    /*.public_artifact_format=*/{"fake-reject", 11},
-    /*.default_identifier=*/{"rejected.bin", 12},
-    /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
-    /*.default_pipeline_options=*/{},
-    /*.emit=*/RejectFakeArtifact,
+    .name = {"fake-reject", 11},
+    .public_artifact_format = {"fake-reject", 11},
+    .default_identifier = {"rejected.bin", 12},
+    .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+    .default_pipeline_options = {},
+    .emit = RejectFakeArtifact,
 };
 
 static const loom_target_emitter_t* const kFakeElfEmitters[] = {
@@ -281,9 +281,9 @@ static iree_status_t ProjectTestTargetProfileFacts(
 }
 
 static const loom_target_profile_type_t kTestTargetProfileType = {
-    /*.name=*/IREE_SVL("loomc-target-test"),
-    /*.fact_type=*/&loom_test_target_fact_type,
-    /*.project_facts=*/ProjectTestTargetProfileFacts,
+    .name = IREE_SVL("loomc-target-test"),
+    .fact_type = &loom_test_target_fact_type,
+    .project_facts = ProjectTestTargetProfileFacts,
 };
 
 static iree_status_t RegisterTestTargetContext(loom_context_t* context) {
@@ -294,9 +294,9 @@ static iree_status_t RegisterTestTargetContext(loom_context_t* context) {
 // can prove loss prevention without relying on an incomplete production
 // target.
 static const loom_target_provider_t kTestTargetProvider = {
-    /*.profile_type=*/&kTestTargetProfileType,
-    /*.materialize_definition=*/nullptr,
-    /*.register_context=*/RegisterTestTargetContext,
+    .profile_type = &kTestTargetProfileType,
+    .materialize_definition = nullptr,
+    .register_context = RegisterTestTargetContext,
 };
 
 static const loom_target_provider_t* const kTestTargetProviders[] = {
@@ -304,8 +304,8 @@ static const loom_target_provider_t* const kTestTargetProviders[] = {
 };
 
 static const loom_target_provider_set_t kTestTargetProviderSet = {
-    /*.providers=*/kTestTargetProviders,
-    /*.provider_count=*/IREE_ARRAYSIZE(kTestTargetProviders),
+    .providers = kTestTargetProviders,
+    .provider_count = IREE_ARRAYSIZE(kTestTargetProviders),
 };
 
 static void DeinitializeTestTargetProfile(loom_target_profile_t* base_profile,
@@ -314,91 +314,91 @@ static void DeinitializeTestTargetProfile(loom_target_profile_t* base_profile,
 }
 
 static const loom_target_provider_t kFakeElfProvider = {
-    /*.profile_type=*/nullptr,
-    /*.materialize_definition=*/nullptr,
-    /*.register_context=*/nullptr,
-    /*.initialize_low_descriptor_registry=*/nullptr,
-    /*.initialize_low_lower_policy_registry=*/nullptr,
-    /*.initialize_math_policy_registry=*/nullptr,
-    /*.low_legality_provider_list=*/{},
-    /*.legalizer_provider_list=*/{},
-    /*.low_packet_diagnostic_provider_list=*/{},
-    /*.low_asm_diagnostic_provider_list=*/{},
-    /*.low_verify_provider_list=*/{},
-    /*.emitter_list=*/
-    {
-        /*.values=*/kFakeElfEmitters,
-        /*.count=*/IREE_ARRAYSIZE(kFakeElfEmitters),
-    },
-    /*.canonical_module_emitter=*/nullptr,
-    /*.pass_registry=*/nullptr,
-    /*.contribute_pipeline=*/nullptr,
+    .profile_type = nullptr,
+    .materialize_definition = nullptr,
+    .register_context = nullptr,
+    .initialize_low_descriptor_registry = nullptr,
+    .initialize_low_lower_policy_registry = nullptr,
+    .initialize_math_policy_registry = nullptr,
+    .low_legality_provider_list = {},
+    .legalizer_provider_list = {},
+    .low_packet_diagnostic_provider_list = {},
+    .low_asm_diagnostic_provider_list = {},
+    .low_verify_provider_list = {},
+    .emitter_list =
+        {
+            .values = kFakeElfEmitters,
+            .count = IREE_ARRAYSIZE(kFakeElfEmitters),
+        },
+    .canonical_module_emitter = nullptr,
+    .pass_registry = nullptr,
+    .contribute_pipeline = nullptr,
 };
 
 static const loom_target_provider_t kFakeWasmProvider = {
-    /*.profile_type=*/nullptr,
-    /*.materialize_definition=*/nullptr,
-    /*.register_context=*/nullptr,
-    /*.initialize_low_descriptor_registry=*/nullptr,
-    /*.initialize_low_lower_policy_registry=*/nullptr,
-    /*.initialize_math_policy_registry=*/nullptr,
-    /*.low_legality_provider_list=*/{},
-    /*.legalizer_provider_list=*/{},
-    /*.low_packet_diagnostic_provider_list=*/{},
-    /*.low_asm_diagnostic_provider_list=*/{},
-    /*.low_verify_provider_list=*/{},
-    /*.emitter_list=*/
-    {
-        /*.values=*/kFakeWasmEmitters,
-        /*.count=*/IREE_ARRAYSIZE(kFakeWasmEmitters),
-    },
-    /*.canonical_module_emitter=*/nullptr,
-    /*.pass_registry=*/nullptr,
-    /*.contribute_pipeline=*/nullptr,
+    .profile_type = nullptr,
+    .materialize_definition = nullptr,
+    .register_context = nullptr,
+    .initialize_low_descriptor_registry = nullptr,
+    .initialize_low_lower_policy_registry = nullptr,
+    .initialize_math_policy_registry = nullptr,
+    .low_legality_provider_list = {},
+    .legalizer_provider_list = {},
+    .low_packet_diagnostic_provider_list = {},
+    .low_asm_diagnostic_provider_list = {},
+    .low_verify_provider_list = {},
+    .emitter_list =
+        {
+            .values = kFakeWasmEmitters,
+            .count = IREE_ARRAYSIZE(kFakeWasmEmitters),
+        },
+    .canonical_module_emitter = nullptr,
+    .pass_registry = nullptr,
+    .contribute_pipeline = nullptr,
 };
 
 static const loom_target_provider_t kFakeDiagnosticProvider = {
-    /*.profile_type=*/nullptr,
-    /*.materialize_definition=*/nullptr,
-    /*.register_context=*/nullptr,
-    /*.initialize_low_descriptor_registry=*/nullptr,
-    /*.initialize_low_lower_policy_registry=*/nullptr,
-    /*.initialize_math_policy_registry=*/nullptr,
-    /*.low_legality_provider_list=*/{},
-    /*.legalizer_provider_list=*/{},
-    /*.low_packet_diagnostic_provider_list=*/{},
-    /*.low_asm_diagnostic_provider_list=*/{},
-    /*.low_verify_provider_list=*/{},
-    /*.emitter_list=*/
-    {
-        /*.values=*/kFakeDiagnosticEmitters,
-        /*.count=*/IREE_ARRAYSIZE(kFakeDiagnosticEmitters),
-    },
-    /*.canonical_module_emitter=*/nullptr,
-    /*.pass_registry=*/nullptr,
-    /*.contribute_pipeline=*/nullptr,
+    .profile_type = nullptr,
+    .materialize_definition = nullptr,
+    .register_context = nullptr,
+    .initialize_low_descriptor_registry = nullptr,
+    .initialize_low_lower_policy_registry = nullptr,
+    .initialize_math_policy_registry = nullptr,
+    .low_legality_provider_list = {},
+    .legalizer_provider_list = {},
+    .low_packet_diagnostic_provider_list = {},
+    .low_asm_diagnostic_provider_list = {},
+    .low_verify_provider_list = {},
+    .emitter_list =
+        {
+            .values = kFakeDiagnosticEmitters,
+            .count = IREE_ARRAYSIZE(kFakeDiagnosticEmitters),
+        },
+    .canonical_module_emitter = nullptr,
+    .pass_registry = nullptr,
+    .contribute_pipeline = nullptr,
 };
 
 static const loom_target_provider_t kFakeRejectProvider = {
-    /*.profile_type=*/nullptr,
-    /*.materialize_definition=*/nullptr,
-    /*.register_context=*/nullptr,
-    /*.initialize_low_descriptor_registry=*/nullptr,
-    /*.initialize_low_lower_policy_registry=*/nullptr,
-    /*.initialize_math_policy_registry=*/nullptr,
-    /*.low_legality_provider_list=*/{},
-    /*.legalizer_provider_list=*/{},
-    /*.low_packet_diagnostic_provider_list=*/{},
-    /*.low_asm_diagnostic_provider_list=*/{},
-    /*.low_verify_provider_list=*/{},
-    /*.emitter_list=*/
-    {
-        /*.values=*/kFakeRejectEmitters,
-        /*.count=*/IREE_ARRAYSIZE(kFakeRejectEmitters),
-    },
-    /*.canonical_module_emitter=*/nullptr,
-    /*.pass_registry=*/nullptr,
-    /*.contribute_pipeline=*/nullptr,
+    .profile_type = nullptr,
+    .materialize_definition = nullptr,
+    .register_context = nullptr,
+    .initialize_low_descriptor_registry = nullptr,
+    .initialize_low_lower_policy_registry = nullptr,
+    .initialize_math_policy_registry = nullptr,
+    .low_legality_provider_list = {},
+    .legalizer_provider_list = {},
+    .low_packet_diagnostic_provider_list = {},
+    .low_asm_diagnostic_provider_list = {},
+    .low_verify_provider_list = {},
+    .emitter_list =
+        {
+            .values = kFakeRejectEmitters,
+            .count = IREE_ARRAYSIZE(kFakeRejectEmitters),
+        },
+    .canonical_module_emitter = nullptr,
+    .pass_registry = nullptr,
+    .contribute_pipeline = nullptr,
 };
 
 std::string ToString(loomc_string_view_t value) {
@@ -484,15 +484,15 @@ TargetEnvironmentPtr CreateTestTargetEnvironment() {
 
 ContextPtr CreateTargetContext(loomc_target_environment_t* target_environment) {
   loomc_context_target_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_environment=*/target_environment,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .target_environment = target_environment,
   };
   loomc_context_options_t context_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-      /*.structure_size=*/sizeof(context_options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+      .structure_size = sizeof(context_options),
+      .next = &target_options,
   };
   loomc_context_t* context = nullptr;
   loomc_status_t status = loomc_context_create(
@@ -510,14 +510,13 @@ TargetProfilePtr CreateTestTargetProfile(
                                          (void**)&internal_profile));
   IREE_ASSERT(internal_profile != nullptr);
   *internal_profile = TestTargetProfile{
-      /*.base=*/
-      {
-          /*.type=*/&kTestTargetProfileType,
-          /*.target_bundle=*/
-          loom_target_bundle_table_lookup(&loom_test_target_bundles,
-                                          LOOM_TEST_TARGET_KIND_LOW_CORE),
-      },
-      /*.subgroup_size=*/subgroup_size,
+      .base =
+          {
+              .type = &kTestTargetProfileType,
+              .target_bundle = loom_target_bundle_table_lookup(
+                  &loom_test_target_bundles, LOOM_TEST_TARGET_KIND_LOW_CORE),
+          },
+      .subgroup_size = subgroup_size,
   };
   IREE_ASSERT(internal_profile->base.target_bundle != nullptr);
   loomc_target_profile_t* profile = nullptr;
@@ -531,13 +530,13 @@ TargetProfilePtr CreateTestTargetProfile(
 
 SourcePtr CreateTextSource(const char* identifier, const char* contents) {
   loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
-      /*.contents=*/loomc_make_byte_span(contents, strlen(contents)),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view(identifier),
+      .contents = loomc_make_byte_span(contents, strlen(contents)),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status =
@@ -669,12 +668,12 @@ TEST(TargetTest, EmitSelectsOnlyLinkedEmitterWhenFormatOmitted) {
       CreateIdentityModule(context.get(), workspace.get(), "entry");
 
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.artifact_format=*/loomc_string_view_empty(),
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .artifact_format = loomc_string_view_empty(),
+      .identifier = loomc_string_view_empty(),
+      .artifact_flags = 0,
   };
   ResultPtr result = EmitModule(target_environment.get(), workspace.get(),
                                 module.get(), &options);
@@ -703,12 +702,12 @@ TEST(TargetTest, EmitReturnsRequestedTargetListing) {
       CreateIdentityModule(context.get(), workspace.get(), "entry");
 
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.artifact_format=*/loomc_string_view_empty(),
-      /*.identifier=*/loomc_make_cstring_view("candidate.bin"),
-      /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .artifact_format = loomc_string_view_empty(),
+      .identifier = loomc_make_cstring_view("candidate.bin"),
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING,
   };
   ResultPtr result = EmitModule(target_environment.get(), workspace.get(),
                                 module.get(), &options);
@@ -737,27 +736,27 @@ TEST(TargetTest, EmitPreservesSemanticRejectionWithoutInventingDiagnostic) {
       CreateIdentityModule(context.get(), workspace.get(), "entry");
 
   loomc_artifact_manifest_options_t manifest_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
-      /*.structure_size=*/sizeof(manifest_options),
-      /*.next=*/nullptr,
-      /*.mode=*/LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY,
-      /*.identifier=*/loomc_string_view_empty(),
+      .type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
+      .structure_size = sizeof(manifest_options),
+      .next = nullptr,
+      .mode = LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY,
+      .identifier = loomc_string_view_empty(),
   };
   loomc_compile_report_options_t report_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
-      /*.structure_size=*/sizeof(report_options),
-      /*.next=*/&manifest_options,
-      /*.mode=*/LOOMC_COMPILE_REPORT_MODE_SUMMARY,
-      /*.format=*/LOOMC_COMPILE_REPORT_FORMAT_JSON,
-      /*.identifier=*/loomc_string_view_empty(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(report_options),
+      .next = &manifest_options,
+      .mode = LOOMC_COMPILE_REPORT_MODE_SUMMARY,
+      .format = LOOMC_COMPILE_REPORT_FORMAT_JSON,
+      .identifier = loomc_string_view_empty(),
   };
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&report_options,
-      /*.artifact_format=*/loomc_string_view_empty(),
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &report_options,
+      .artifact_format = loomc_string_view_empty(),
+      .identifier = loomc_string_view_empty(),
+      .artifact_flags = 0,
   };
   ResultPtr result = EmitModule(target_environment.get(), workspace.get(),
                                 module.get(), &options);
@@ -791,19 +790,19 @@ TEST(TargetTest, EmitReturnsArtifactManifestSidecar) {
       CreateIdentityModule(context.get(), workspace.get(), "entry");
 
   loomc_artifact_manifest_options_t manifest_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
-      /*.structure_size=*/sizeof(manifest_options),
-      /*.next=*/nullptr,
-      /*.mode=*/LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY,
-      /*.identifier=*/loomc_string_view_empty(),
+      .type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
+      .structure_size = sizeof(manifest_options),
+      .next = nullptr,
+      .mode = LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY,
+      .identifier = loomc_string_view_empty(),
   };
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&manifest_options,
-      /*.artifact_format=*/loomc_string_view_empty(),
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &manifest_options,
+      .artifact_format = loomc_string_view_empty(),
+      .identifier = loomc_string_view_empty(),
+      .artifact_flags = 0,
   };
   ResultPtr result = EmitModule(target_environment.get(), workspace.get(),
                                 module.get(), &options);
@@ -843,20 +842,20 @@ TEST(TargetTest, EmitReturnsCompileReportArtifact) {
       CreateIdentityModule(context.get(), workspace.get(), "entry");
 
   loomc_compile_report_options_t report_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
-      /*.structure_size=*/sizeof(report_options),
-      /*.next=*/nullptr,
-      /*.mode=*/LOOMC_COMPILE_REPORT_MODE_SUMMARY,
-      /*.format=*/LOOMC_COMPILE_REPORT_FORMAT_JSON,
-      /*.identifier=*/loomc_string_view_empty(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(report_options),
+      .next = nullptr,
+      .mode = LOOMC_COMPILE_REPORT_MODE_SUMMARY,
+      .format = LOOMC_COMPILE_REPORT_FORMAT_JSON,
+      .identifier = loomc_string_view_empty(),
   };
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&report_options,
-      /*.artifact_format=*/loomc_string_view_empty(),
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &report_options,
+      .artifact_format = loomc_string_view_empty(),
+      .identifier = loomc_string_view_empty(),
+      .artifact_flags = 0,
   };
   ResultPtr result = EmitModule(target_environment.get(), workspace.get(),
                                 module.get(), &options);
@@ -900,20 +899,20 @@ TEST(TargetTest, EmitReturnsTextCompileReportArtifact) {
       CreateIdentityModule(context.get(), workspace.get(), "entry");
 
   loomc_compile_report_options_t report_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
-      /*.structure_size=*/sizeof(report_options),
-      /*.next=*/nullptr,
-      /*.mode=*/LOOMC_COMPILE_REPORT_MODE_SUMMARY,
-      /*.format=*/LOOMC_COMPILE_REPORT_FORMAT_TEXT,
-      /*.identifier=*/loomc_string_view_empty(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(report_options),
+      .next = nullptr,
+      .mode = LOOMC_COMPILE_REPORT_MODE_SUMMARY,
+      .format = LOOMC_COMPILE_REPORT_FORMAT_TEXT,
+      .identifier = loomc_string_view_empty(),
   };
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&report_options,
-      /*.artifact_format=*/loomc_string_view_empty(),
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &report_options,
+      .artifact_format = loomc_string_view_empty(),
+      .identifier = loomc_string_view_empty(),
+      .artifact_flags = 0,
   };
   ResultPtr result = EmitModule(target_environment.get(), workspace.get(),
                                 module.get(), &options);
@@ -948,20 +947,20 @@ TEST(TargetTest, EmitRetainsDiagnosticsInDetailedCompileReport) {
       CreateIdentityModule(context.get(), workspace.get(), "entry");
 
   loomc_compile_report_options_t report_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
-      /*.structure_size=*/sizeof(report_options),
-      /*.next=*/nullptr,
-      /*.mode=*/LOOMC_COMPILE_REPORT_MODE_DETAILS,
-      /*.format=*/LOOMC_COMPILE_REPORT_FORMAT_JSON,
-      /*.identifier=*/loomc_string_view_empty(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(report_options),
+      .next = nullptr,
+      .mode = LOOMC_COMPILE_REPORT_MODE_DETAILS,
+      .format = LOOMC_COMPILE_REPORT_FORMAT_JSON,
+      .identifier = loomc_string_view_empty(),
   };
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&report_options,
-      /*.artifact_format=*/loomc_string_view_empty(),
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &report_options,
+      .artifact_format = loomc_string_view_empty(),
+      .identifier = loomc_string_view_empty(),
+      .artifact_flags = 0,
   };
   ResultPtr result = EmitModule(target_environment.get(), workspace.get(),
                                 module.get(), &options);
@@ -1000,37 +999,37 @@ TEST(TargetTest, EmitArtifactManifestLooseOptionsOverrideTypedDefaults) {
 
   const loomc_option_entry_t entries[] = {
       {
-          /*.key=*/loomc_make_cstring_view(
+          .key = loomc_make_cstring_view(
               LOOMC_EMIT_OPTION_KEY_ARTIFACT_MANIFEST_MODE),
-          /*.value=*/loomc_make_cstring_view("summary"),
+          .value = loomc_make_cstring_view("summary"),
       },
       {
-          /*.key=*/loomc_make_cstring_view(
+          .key = loomc_make_cstring_view(
               LOOMC_EMIT_OPTION_KEY_ARTIFACT_MANIFEST_IDENTIFIER),
-          /*.value=*/loomc_make_cstring_view("sidecar.json"),
+          .value = loomc_make_cstring_view("sidecar.json"),
       },
   };
   loomc_option_dict_t dict = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_OPTION_DICT,
-      /*.structure_size=*/sizeof(dict),
-      /*.next=*/nullptr,
-      /*.entries=*/entries,
-      /*.entry_count=*/IREE_ARRAYSIZE(entries),
+      .type = LOOMC_STRUCTURE_TYPE_OPTION_DICT,
+      .structure_size = sizeof(dict),
+      .next = nullptr,
+      .entries = entries,
+      .entry_count = IREE_ARRAYSIZE(entries),
   };
   loomc_artifact_manifest_options_t manifest_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
-      /*.structure_size=*/sizeof(manifest_options),
-      /*.next=*/&dict,
-      /*.mode=*/LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY,
-      /*.identifier=*/loomc_make_cstring_view("default.json"),
+      .type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
+      .structure_size = sizeof(manifest_options),
+      .next = &dict,
+      .mode = LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY,
+      .identifier = loomc_make_cstring_view("default.json"),
   };
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&manifest_options,
-      /*.artifact_format=*/loomc_string_view_empty(),
-      /*.identifier=*/loomc_make_cstring_view("primary.bin"),
-      /*.artifact_flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &manifest_options,
+      .artifact_format = loomc_string_view_empty(),
+      .identifier = loomc_make_cstring_view("primary.bin"),
+      .artifact_flags = 0,
   };
   ResultPtr result = EmitModule(target_environment.get(), workspace.get(),
                                 module.get(), &options);
@@ -1059,38 +1058,38 @@ TEST(TargetTest, EmitCompileReportLooseOptionsOverrideTypedDefaults) {
 
   const loomc_option_entry_t entries[] = {
       {
-          /*.key=*/loomc_make_cstring_view(
+          .key = loomc_make_cstring_view(
               LOOMC_EMIT_OPTION_KEY_COMPILE_REPORT_MODE),
-          /*.value=*/loomc_make_cstring_view("json-details"),
+          .value = loomc_make_cstring_view("json-details"),
       },
       {
-          /*.key=*/loomc_make_cstring_view(
+          .key = loomc_make_cstring_view(
               LOOMC_EMIT_OPTION_KEY_COMPILE_REPORT_IDENTIFIER),
-          /*.value=*/loomc_make_cstring_view("report.json"),
+          .value = loomc_make_cstring_view("report.json"),
       },
   };
   loomc_option_dict_t dict = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_OPTION_DICT,
-      /*.structure_size=*/sizeof(dict),
-      /*.next=*/nullptr,
-      /*.entries=*/entries,
-      /*.entry_count=*/IREE_ARRAYSIZE(entries),
+      .type = LOOMC_STRUCTURE_TYPE_OPTION_DICT,
+      .structure_size = sizeof(dict),
+      .next = nullptr,
+      .entries = entries,
+      .entry_count = IREE_ARRAYSIZE(entries),
   };
   loomc_compile_report_options_t report_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
-      /*.structure_size=*/sizeof(report_options),
-      /*.next=*/&dict,
-      /*.mode=*/LOOMC_COMPILE_REPORT_MODE_SUMMARY,
-      /*.format=*/LOOMC_COMPILE_REPORT_FORMAT_JSON,
-      /*.identifier=*/loomc_make_cstring_view("default.json"),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(report_options),
+      .next = &dict,
+      .mode = LOOMC_COMPILE_REPORT_MODE_SUMMARY,
+      .format = LOOMC_COMPILE_REPORT_FORMAT_JSON,
+      .identifier = loomc_make_cstring_view("default.json"),
   };
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&report_options,
-      /*.artifact_format=*/loomc_string_view_empty(),
-      /*.identifier=*/loomc_make_cstring_view("primary.bin"),
-      /*.artifact_flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &report_options,
+      .artifact_format = loomc_string_view_empty(),
+      .identifier = loomc_make_cstring_view("primary.bin"),
+      .artifact_flags = 0,
   };
   ResultPtr result = EmitModule(target_environment.get(), workspace.get(),
                                 module.get(), &options);
@@ -1118,19 +1117,19 @@ TEST(TargetTest, EmitRejectsArtifactManifestIdentifierWithoutMode) {
       CreateIdentityModule(context.get(), workspace.get(), "entry");
 
   loomc_artifact_manifest_options_t manifest_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
-      /*.structure_size=*/sizeof(manifest_options),
-      /*.next=*/nullptr,
-      /*.mode=*/LOOMC_ARTIFACT_MANIFEST_MODE_NONE,
-      /*.identifier=*/loomc_make_cstring_view("sidecar.json"),
+      .type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
+      .structure_size = sizeof(manifest_options),
+      .next = nullptr,
+      .mode = LOOMC_ARTIFACT_MANIFEST_MODE_NONE,
+      .identifier = loomc_make_cstring_view("sidecar.json"),
   };
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&manifest_options,
-      /*.artifact_format=*/loomc_string_view_empty(),
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &manifest_options,
+      .artifact_format = loomc_string_view_empty(),
+      .identifier = loomc_string_view_empty(),
+      .artifact_flags = 0,
   };
   loomc_result_t* result = nullptr;
   LOOMC_EXPECT_STATUS_IS(
@@ -1154,20 +1153,20 @@ TEST(TargetTest, EmitRejectsCompileReportIdentifierWithoutMode) {
       CreateIdentityModule(context.get(), workspace.get(), "entry");
 
   loomc_compile_report_options_t report_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
-      /*.structure_size=*/sizeof(report_options),
-      /*.next=*/nullptr,
-      /*.mode=*/LOOMC_COMPILE_REPORT_MODE_NONE,
-      /*.format=*/LOOMC_COMPILE_REPORT_FORMAT_JSON,
-      /*.identifier=*/loomc_make_cstring_view("report.json"),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(report_options),
+      .next = nullptr,
+      .mode = LOOMC_COMPILE_REPORT_MODE_NONE,
+      .format = LOOMC_COMPILE_REPORT_FORMAT_JSON,
+      .identifier = loomc_make_cstring_view("report.json"),
   };
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&report_options,
-      /*.artifact_format=*/loomc_string_view_empty(),
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &report_options,
+      .artifact_format = loomc_string_view_empty(),
+      .identifier = loomc_string_view_empty(),
+      .artifact_flags = 0,
   };
   loomc_result_t* result = nullptr;
   LOOMC_EXPECT_STATUS_IS(
@@ -1230,12 +1229,12 @@ TEST(TargetTest, EmitReportsMissingFormatThroughResult) {
       CreateIdentityModule(context.get(), workspace.get(), "entry");
 
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.artifact_format=*/loomc_make_cstring_view("missing"),
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .artifact_format = loomc_make_cstring_view("missing"),
+      .identifier = loomc_string_view_empty(),
+      .artifact_flags = 0,
   };
   ResultPtr result = EmitModule(target_environment.get(), workspace.get(),
                                 module.get(), &options);
@@ -1251,8 +1250,8 @@ func.def public @entry(%x: i32) -> (i32) {
 }
 )");
   loomc_link_index_source_options_t source_options = {
-      /*.provider_name=*/loomc_make_cstring_view("jit-input"),
-      /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
+      .provider_name = loomc_make_cstring_view("jit-input"),
+      .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
   };
   loomc_status_t status = loomc_link_index_builder_add_source(
       builder.get(), source.get(), &source_options, nullptr);
@@ -1278,21 +1277,22 @@ TEST(TargetTest, AcceptsSanitizerPipelineOptions) {
   TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
   ContextPtr context = CreateTargetContext(target_environment.get());
   loomc_sanitizer_options_t sanitizer_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
-      /*.structure_size=*/sizeof(sanitizer_options),
-      /*.next=*/nullptr,
-      /*.checks=*/LOOMC_SANITIZER_CHECKS_ASAN_LIKE |
-          LOOMC_SANITIZER_CHECKS_UBSAN_LIKE | LOOMC_SANITIZER_CHECKS_TSAN_LIKE,
-      /*.flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
+      .structure_size = sizeof(sanitizer_options),
+      .next = nullptr,
+      .checks = LOOMC_SANITIZER_CHECKS_ASAN_LIKE |
+                LOOMC_SANITIZER_CHECKS_UBSAN_LIKE |
+                LOOMC_SANITIZER_CHECKS_TSAN_LIKE,
+      .flags = 0,
   };
   loomc_target_pipeline_options_t pipeline_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
-      /*.structure_size=*/sizeof(pipeline_options),
-      /*.next=*/&sanitizer_options,
-      /*.identifier=*/loomc_make_cstring_view("sanitized"),
-      /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
-      /*.control_flow_lowering=*/LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
-      /*.source_to_low_max_errors=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+      .structure_size = sizeof(pipeline_options),
+      .next = &sanitizer_options,
+      .identifier = loomc_make_cstring_view("sanitized"),
+      .kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+      .source_to_low_max_errors = 0,
   };
   PassProgramPtr pass_program =
       CreateTargetPipelinePassProgram(context.get(), &pipeline_options);
@@ -1303,20 +1303,20 @@ TEST(TargetTest, RejectsUnknownSanitizerCheckBits) {
   TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
   ContextPtr context = CreateTargetContext(target_environment.get());
   loomc_sanitizer_options_t sanitizer_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
-      /*.structure_size=*/sizeof(sanitizer_options),
-      /*.next=*/nullptr,
-      /*.checks=*/1ull << 63,
-      /*.flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
+      .structure_size = sizeof(sanitizer_options),
+      .next = nullptr,
+      .checks = 1ull << 63,
+      .flags = 0,
   };
   loomc_target_pipeline_options_t pipeline_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
-      /*.structure_size=*/sizeof(pipeline_options),
-      /*.next=*/&sanitizer_options,
-      /*.identifier=*/loomc_make_cstring_view("bad-sanitizer"),
-      /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
-      /*.control_flow_lowering=*/LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
-      /*.source_to_low_max_errors=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+      .structure_size = sizeof(pipeline_options),
+      .next = &sanitizer_options,
+      .identifier = loomc_make_cstring_view("bad-sanitizer"),
+      .kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+      .source_to_low_max_errors = 0,
   };
 
   loomc_pass_program_t* pass_program = nullptr;
@@ -1333,21 +1333,21 @@ TEST(TargetTest, RejectsUnknownSanitizerReportingMode) {
   TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
   ContextPtr context = CreateTargetContext(target_environment.get());
   loomc_sanitizer_options_t sanitizer_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
-      /*.structure_size=*/sizeof(sanitizer_options),
-      /*.next=*/nullptr,
-      /*.checks=*/LOOMC_SANITIZER_CHECK_ACCESS,
-      /*.flags=*/0,
-      /*.reporting_mode=*/(loomc_sanitizer_reporting_mode_t)99,
+      .type = LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
+      .structure_size = sizeof(sanitizer_options),
+      .next = nullptr,
+      .checks = LOOMC_SANITIZER_CHECK_ACCESS,
+      .flags = 0,
+      .reporting_mode = (loomc_sanitizer_reporting_mode_t)99,
   };
   loomc_target_pipeline_options_t pipeline_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
-      /*.structure_size=*/sizeof(pipeline_options),
-      /*.next=*/&sanitizer_options,
-      /*.identifier=*/loomc_make_cstring_view("bad-sanitizer-reporting"),
-      /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
-      /*.control_flow_lowering=*/LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
-      /*.source_to_low_max_errors=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+      .structure_size = sizeof(pipeline_options),
+      .next = &sanitizer_options,
+      .identifier = loomc_make_cstring_view("bad-sanitizer-reporting"),
+      .kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+      .source_to_low_max_errors = 0,
   };
 
   loomc_pass_program_t* pass_program = nullptr;
@@ -1363,17 +1363,17 @@ TEST(TargetTest, RejectsUnknownSanitizerReportingMode) {
 TEST(TargetTest, RejectsSanitizerOptionsOnPlainPassProgramOptions) {
   ContextPtr context = CreateContext();
   loomc_sanitizer_options_t sanitizer_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
-      /*.structure_size=*/sizeof(sanitizer_options),
-      /*.next=*/nullptr,
-      /*.checks=*/LOOMC_SANITIZER_CHECK_ACCESS,
-      /*.flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
+      .structure_size = sizeof(sanitizer_options),
+      .next = nullptr,
+      .checks = LOOMC_SANITIZER_CHECK_ACCESS,
+      .flags = 0,
   };
   loomc_pass_program_options_t pass_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_PASS_PROGRAM_OPTIONS,
-      /*.structure_size=*/sizeof(pass_options),
-      /*.next=*/&sanitizer_options,
-      /*.identifier=*/loomc_make_cstring_view("plain-pass-program"),
+      .type = LOOMC_STRUCTURE_TYPE_PASS_PROGRAM_OPTIONS,
+      .structure_size = sizeof(pass_options),
+      .next = &sanitizer_options,
+      .identifier = loomc_make_cstring_view("plain-pass-program"),
   };
 
   loomc_pass_program_t* pass_program = nullptr;
@@ -1452,38 +1452,38 @@ func.def public @unbound() {
   ModulePtr module =
       DeserializeModule(context.get(), workspace.get(), source.get());
   const loomc_target_specialization_t specialization = {
-      /*.function_symbol=*/loomc_make_cstring_view("host"),
-      /*.target_profile=*/host_profile.get(),
+      .function_symbol = loomc_make_cstring_view("host"),
+      .target_profile = host_profile.get(),
   };
   const loomc_target_binding_t target_bindings[] = {
       {
-          /*.target_symbol=*/loomc_make_cstring_view("@prefill_device"),
-          /*.target_profile=*/shared_device_profile.get(),
+          .target_symbol = loomc_make_cstring_view("@prefill_device"),
+          .target_profile = shared_device_profile.get(),
       },
       {
-          /*.target_symbol=*/loomc_make_cstring_view("batch_device"),
-          /*.target_profile=*/shared_device_profile.get(),
+          .target_symbol = loomc_make_cstring_view("batch_device"),
+          .target_profile = shared_device_profile.get(),
       },
       {
-          /*.target_symbol=*/loomc_make_cstring_view("decode_device"),
-          /*.target_profile=*/decode_profile.get(),
+          .target_symbol = loomc_make_cstring_view("decode_device"),
+          .target_profile = decode_profile.get(),
       },
   };
   const loomc_target_specialization_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.specializations=*/&specialization,
-      /*.specialization_count=*/1,
-      /*.target_bindings=*/target_bindings,
-      /*.target_binding_count=*/IREE_ARRAYSIZE(target_bindings),
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .specializations = &specialization,
+      .specialization_count = 1,
+      .target_bindings = target_bindings,
+      .target_binding_count = IREE_ARRAYSIZE(target_bindings),
   };
   const loomc_compile_options_t compile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(compile_options),
-      /*.next=*/&target_options,
-      /*.module_name=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_REPORT_JSON,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .next = &target_options,
+      .module_name = loomc_string_view_empty(),
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_REPORT_JSON,
   };
 
   loomc_result_t* result = nullptr;
@@ -1605,13 +1605,13 @@ func.def public target(@device) @entry() {
   ModulePtr module =
       DeserializeModule(context.get(), workspace.get(), source.get());
   loomc_target_specialization_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
   };
   const loomc_compile_options_t compile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(compile_options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .next = &target_options,
   };
 
   const auto expect_rejected =
@@ -1638,52 +1638,52 @@ func.def public target(@device) @entry() {
   expect_rejected(LOOMC_STATUS_INVALID_ARGUMENT, nullptr, 0, nullptr, 1);
 
   const loomc_target_binding_t missing_profile_binding = {
-      /*.target_symbol=*/loomc_make_cstring_view("device"),
-      /*.target_profile=*/nullptr,
+      .target_symbol = loomc_make_cstring_view("device"),
+      .target_profile = nullptr,
   };
   expect_rejected(LOOMC_STATUS_INVALID_ARGUMENT, nullptr, 0,
                   &missing_profile_binding, 1);
 
   const loomc_target_binding_t missing_binding = {
-      /*.target_symbol=*/loomc_make_cstring_view("missing"),
-      /*.target_profile=*/profile.get(),
+      .target_symbol = loomc_make_cstring_view("missing"),
+      .target_profile = profile.get(),
   };
   expect_rejected(LOOMC_STATUS_NOT_FOUND, nullptr, 0, &missing_binding, 1);
 
   const loomc_target_binding_t concrete_binding = {
-      /*.target_symbol=*/loomc_make_cstring_view("concrete"),
-      /*.target_profile=*/profile.get(),
+      .target_symbol = loomc_make_cstring_view("concrete"),
+      .target_profile = profile.get(),
   };
   expect_rejected(LOOMC_STATUS_INVALID_ARGUMENT, nullptr, 0, &concrete_binding,
                   1);
 
   const loomc_target_binding_t duplicate_bindings[] = {
       {
-          /*.target_symbol=*/loomc_make_cstring_view("device"),
-          /*.target_profile=*/profile.get(),
+          .target_symbol = loomc_make_cstring_view("device"),
+          .target_profile = profile.get(),
       },
       {
-          /*.target_symbol=*/loomc_make_cstring_view("@device"),
-          /*.target_profile=*/profile.get(),
+          .target_symbol = loomc_make_cstring_view("@device"),
+          .target_profile = profile.get(),
       },
   };
   expect_rejected(LOOMC_STATUS_INVALID_ARGUMENT, nullptr, 0, duplicate_bindings,
                   IREE_ARRAYSIZE(duplicate_bindings));
 
   const loomc_target_specialization_t specialization = {
-      /*.function_symbol=*/loomc_make_cstring_view("entry"),
-      /*.target_profile=*/profile.get(),
+      .function_symbol = loomc_make_cstring_view("entry"),
+      .target_profile = profile.get(),
   };
   const loomc_target_binding_t overlapping_binding = {
-      /*.target_symbol=*/loomc_make_cstring_view("device"),
-      /*.target_profile=*/profile.get(),
+      .target_symbol = loomc_make_cstring_view("device"),
+      .target_profile = profile.get(),
   };
   expect_rejected(LOOMC_STATUS_INVALID_ARGUMENT, &specialization, 1,
                   &overlapping_binding, 1);
 
   const loomc_target_binding_t unused_binding = {
-      /*.target_symbol=*/loomc_make_cstring_view("unused"),
-      /*.target_profile=*/profile.get(),
+      .target_symbol = loomc_make_cstring_view("unused"),
+      .target_profile = profile.get(),
   };
   target_options.specializations = nullptr;
   target_options.specialization_count = 0;
@@ -1723,22 +1723,22 @@ func.def public target(@device) @entry() {
   ModulePtr module =
       DeserializeModule(context.get(), workspace.get(), source.get());
   const loomc_target_binding_t binding = {
-      /*.target_symbol=*/loomc_make_cstring_view("device"),
-      /*.target_profile=*/profile.get(),
+      .target_symbol = loomc_make_cstring_view("device"),
+      .target_profile = profile.get(),
   };
   const loomc_target_specialization_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.specializations=*/nullptr,
-      /*.specialization_count=*/0,
-      /*.target_bindings=*/&binding,
-      /*.target_binding_count=*/1,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .specializations = nullptr,
+      .specialization_count = 0,
+      .target_bindings = &binding,
+      .target_binding_count = 1,
   };
   const loomc_compile_options_t compile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(compile_options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .next = &target_options,
   };
 
   loomc_result_t* result = nullptr;
@@ -1763,24 +1763,24 @@ TEST(TargetTest, RejectsSerializationWithoutATargetMaterializer) {
   PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
 
   const loomc_target_specialization_t specialization = {
-      /*.function_symbol=*/loomc_make_cstring_view("entry"),
-      /*.target_profile=*/profile.get(),
+      .function_symbol = loomc_make_cstring_view("entry"),
+      .target_profile = profile.get(),
   };
   loomc_target_specialization_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.specializations=*/&specialization,
-      /*.specialization_count=*/1,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .specializations = &specialization,
+      .specialization_count = 1,
   };
   loomc_compile_options_t compile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(compile_options),
-      /*.next=*/&target_options,
-      /*.module_name=*/loomc_make_cstring_view("jit_kernel"),
-      /*.artifact_flags=*/0,
-      /*.config_flags=*/0,
-      /*.config_module=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .next = &target_options,
+      .module_name = loomc_make_cstring_view("jit_kernel"),
+      .artifact_flags = 0,
+      .config_flags = 0,
+      .config_module = nullptr,
   };
 
   for (int i = 0; i < 2; ++i) {
@@ -1803,11 +1803,11 @@ TEST(TargetTest, RejectsSerializationWithoutATargetMaterializer) {
     EXPECT_NE(function_versions->values[0]->type, nullptr);
     EXPECT_NE(function_versions->values[0]->function.op, nullptr);
     loomc_module_serialize_options_t serialize_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-        /*.structure_size=*/sizeof(serialize_options),
-        /*.next=*/nullptr,
-        /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-        /*.identifier=*/loomc_make_cstring_view("module.loom"),
+        .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+        .structure_size = sizeof(serialize_options),
+        .next = nullptr,
+        .format = LOOMC_SOURCE_FORMAT_TEXT,
+        .identifier = loomc_make_cstring_view("module.loom"),
     };
     loomc_source_t* serialized_source = nullptr;
     LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_FAILED_PRECONDITION,
@@ -1866,8 +1866,8 @@ TEST(TargetTest, RejectsSerializationWithoutATargetMaterializer) {
     EXPECT_TRUE(path.Remove());
 
     const loomc_target_specialization_t missing_specialization = {
-        /*.function_symbol=*/loomc_make_cstring_view("missing"),
-        /*.target_profile=*/profile.get(),
+        .function_symbol = loomc_make_cstring_view("missing"),
+        .target_profile = profile.get(),
     };
     target_options.specializations = &missing_specialization;
     result = nullptr;
@@ -1890,24 +1890,24 @@ TEST(TargetTest, CompileRejectsAnUnrepresentableModuleArtifact) {
   PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
 
   const loomc_target_specialization_t specialization = {
-      /*.function_symbol=*/loomc_make_cstring_view("entry"),
-      /*.target_profile=*/profile.get(),
+      .function_symbol = loomc_make_cstring_view("entry"),
+      .target_profile = profile.get(),
   };
   loomc_target_specialization_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.specializations=*/&specialization,
-      /*.specialization_count=*/1,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .specializations = &specialization,
+      .specialization_count = 1,
   };
   loomc_compile_options_t compile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(compile_options),
-      /*.next=*/&target_options,
-      /*.module_name=*/loomc_make_cstring_view("jit_kernel"),
-      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
-      /*.config_flags=*/0,
-      /*.config_module=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .next = &target_options,
+      .module_name = loomc_make_cstring_view("jit_kernel"),
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+      .config_flags = 0,
+      .config_module = nullptr,
   };
 
   WorkspacePtr workspace = CreateWorkspace();
@@ -1928,20 +1928,20 @@ TEST(TargetTest, RejectsSpecializationOptionsOnPassProgramCreation) {
   TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
   ContextPtr context = CreateTargetContext(target_environment.get());
   const loomc_target_specialization_t specialization = {
-      /*.function_symbol=*/loomc_make_cstring_view("entry"),
-      /*.target_profile=*/profile.get(),
+      .function_symbol = loomc_make_cstring_view("entry"),
+      .target_profile = profile.get(),
   };
   loomc_target_specialization_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.specializations=*/&specialization,
-      /*.specialization_count=*/1,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .specializations = &specialization,
+      .specialization_count = 1,
   };
   loomc_pass_program_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_PASS_PROGRAM_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_PASS_PROGRAM_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &target_options,
   };
 
   loomc_pass_program_t* pass_program = nullptr;
@@ -1959,22 +1959,22 @@ TEST(TargetTest, AcceptsEmptySpecializationOptionsDuringLink) {
   LinkIndexPtr link_index = CreateSingleSourceLinkIndex(context.get());
 
   loomc_target_specialization_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.specializations=*/nullptr,
-      /*.specialization_count=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .specializations = nullptr,
+      .specialization_count = 0,
   };
   loomc_link_options_t link_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
-      /*.structure_size=*/sizeof(link_options),
-      /*.next=*/&target_options,
-      /*.link_index=*/link_index.get(),
-      /*.module_name=*/loomc_make_cstring_view("linked_jit_module"),
-      /*.mode=*/LOOMC_LINK_MODE_LINK,
-      /*.root_symbols=*/nullptr,
-      /*.root_symbol_count=*/0,
-      /*.flags=*/LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS,
+      .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+      .structure_size = sizeof(link_options),
+      .next = &target_options,
+      .link_index = link_index.get(),
+      .module_name = loomc_make_cstring_view("linked_jit_module"),
+      .mode = LOOMC_LINK_MODE_LINK,
+      .root_symbols = nullptr,
+      .root_symbol_count = 0,
+      .flags = LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS,
   };
 
   WorkspacePtr workspace = CreateWorkspace();
@@ -1996,20 +1996,20 @@ TEST(TargetTest, RejectsSpecializationOptionsDuringEmission) {
   ModulePtr module =
       CreateIdentityModule(context.get(), workspace.get(), "entry");
   const loomc_target_specialization_t specialization = {
-      /*.function_symbol=*/loomc_make_cstring_view("entry"),
-      /*.target_profile=*/profile.get(),
+      .function_symbol = loomc_make_cstring_view("entry"),
+      .target_profile = profile.get(),
   };
   loomc_target_specialization_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.specializations=*/&specialization,
-      /*.specialization_count=*/1,
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .specializations = &specialization,
+      .specialization_count = 1,
   };
   loomc_emit_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &target_options,
   };
 
   loomc_result_t* result = nullptr;

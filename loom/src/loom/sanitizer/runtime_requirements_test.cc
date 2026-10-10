@@ -103,9 +103,7 @@ class SanitizerRuntimeRequirementsTest
   }
 
   loom_predicate_t MakeRangePredicate(loom_value_id_t value) {
-    loom_predicate_t predicate = {};
-    predicate.kind = LOOM_PREDICATE_RANGE;
-    predicate.arg_count = 3;
+    loom_predicate_t predicate = {.kind = LOOM_PREDICATE_RANGE, .arg_count = 3};
     predicate.arg_tags[0] = LOOM_PRED_ARG_VALUE;
     predicate.arg_tags[1] = LOOM_PRED_ARG_CONST;
     predicate.arg_tags[2] = LOOM_PRED_ARG_CONST;
@@ -210,9 +208,9 @@ class SanitizerRuntimeRequirementsTest
   loom_sanitizer_runtime_requirements_t Query(
       loom_sanitizer_reporting_mode_t reporting_mode) {
     const loom_sanitizer_options_t options = {
-        /*.checks=*/0,
-        /*.flags=*/0,
-        /*.reporting_mode=*/reporting_mode,
+        .checks = 0,
+        .flags = 0,
+        .reporting_mode = reporting_mode,
     };
     loom_sanitizer_runtime_requirements_t requirements =
         LOOM_SANITIZER_RUNTIME_REQUIREMENT_NONE;
@@ -235,9 +233,9 @@ TEST(SanitizerRuntimeRequirementsOptionsTest, DisabledRequiresNothing) {
 
 TEST(SanitizerRuntimeRequirementsOptionsTest, CombinesEnabledServices) {
   const loom_sanitizer_options_t options = {
-      /*.checks=*/LOOM_SANITIZER_CHECK_ACCESS | LOOM_SANITIZER_CHECK_RACE,
-      /*.flags=*/0,
-      /*.reporting_mode=*/LOOM_SANITIZER_REPORTING_MODE_DEFAULT,
+      .checks = LOOM_SANITIZER_CHECK_ACCESS | LOOM_SANITIZER_CHECK_RACE,
+      .flags = 0,
+      .reporting_mode = LOOM_SANITIZER_REPORTING_MODE_DEFAULT,
   };
   EXPECT_EQ(loom_sanitizer_runtime_requirements_from_options(&options),
             LOOM_SANITIZER_RUNTIME_REQUIREMENT_FEEDBACK |
@@ -247,9 +245,9 @@ TEST(SanitizerRuntimeRequirementsOptionsTest, CombinesEnabledServices) {
 
 TEST(SanitizerRuntimeRequirementsOptionsTest, TrapOmitsFeedback) {
   const loom_sanitizer_options_t options = {
-      /*.checks=*/LOOM_SANITIZER_CHECK_ACCESS | LOOM_SANITIZER_CHECK_RACE,
-      /*.flags=*/0,
-      /*.reporting_mode=*/LOOM_SANITIZER_REPORTING_MODE_TRAP,
+      .checks = LOOM_SANITIZER_CHECK_ACCESS | LOOM_SANITIZER_CHECK_RACE,
+      .flags = 0,
+      .reporting_mode = LOOM_SANITIZER_REPORTING_MODE_TRAP,
   };
   EXPECT_EQ(loom_sanitizer_runtime_requirements_from_options(&options),
             LOOM_SANITIZER_RUNTIME_REQUIREMENT_ACCESS_SHADOW |

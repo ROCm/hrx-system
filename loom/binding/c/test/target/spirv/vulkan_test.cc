@@ -433,23 +433,23 @@ TargetProfilePtr CreateVulkanProfile(
         ExtensionEnumeration::kEnabled) {
   g_mock_vulkan_device = const_cast<MockVulkanDevice*>(&device);
   loomc_spirv_vulkan_function_table_t functions = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_VULKAN_FUNCTION_TABLE,
-      /*.structure_size=*/sizeof(functions),
-      /*.next=*/nullptr,
-      /*.get_physical_device_properties2=*/MockGetPhysicalDeviceProperties2,
-      /*.get_physical_device_features2=*/MockGetPhysicalDeviceFeatures2,
-      /*.enumerate_device_extension_properties=*/
-      extension_enumeration == ExtensionEnumeration::kEnabled
-          ? MockEnumerateDeviceExtensionProperties
-          : nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_SPIRV_VULKAN_FUNCTION_TABLE,
+      .structure_size = sizeof(functions),
+      .next = nullptr,
+      .get_physical_device_properties2 = MockGetPhysicalDeviceProperties2,
+      .get_physical_device_features2 = MockGetPhysicalDeviceFeatures2,
+      .enumerate_device_extension_properties =
+          extension_enumeration == ExtensionEnumeration::kEnabled
+              ? MockEnumerateDeviceExtensionProperties
+              : nullptr,
   };
   loomc_spirv_vulkan_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_VULKAN_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("mock-vulkan-device"),
-      /*.physical_device=*/device.handle,
-      /*.functions=*/&functions,
+      .type = LOOMC_STRUCTURE_TYPE_SPIRV_VULKAN_PROFILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("mock-vulkan-device"),
+      .physical_device = device.handle,
+      .functions = &functions,
   };
   loomc_target_profile_t* profile = nullptr;
   loomc_result_t* result = nullptr;
@@ -672,20 +672,20 @@ TEST(TargetSpirvVulkanTest, RejectsMissingFunctionPointers) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   MockVulkanDevice device;
   loomc_spirv_vulkan_function_table_t functions = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_VULKAN_FUNCTION_TABLE,
-      /*.structure_size=*/sizeof(functions),
-      /*.next=*/nullptr,
-      /*.get_physical_device_properties2=*/nullptr,
-      /*.get_physical_device_features2=*/MockGetPhysicalDeviceFeatures2,
-      /*.enumerate_device_extension_properties=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_SPIRV_VULKAN_FUNCTION_TABLE,
+      .structure_size = sizeof(functions),
+      .next = nullptr,
+      .get_physical_device_properties2 = nullptr,
+      .get_physical_device_features2 = MockGetPhysicalDeviceFeatures2,
+      .enumerate_device_extension_properties = nullptr,
   };
   loomc_spirv_vulkan_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_VULKAN_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("bad-vulkan-device"),
-      /*.physical_device=*/device.handle,
-      /*.functions=*/&functions,
+      .type = LOOMC_STRUCTURE_TYPE_SPIRV_VULKAN_PROFILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("bad-vulkan-device"),
+      .physical_device = device.handle,
+      .functions = &functions,
   };
   loomc_target_profile_t* profile = nullptr;
   loomc_result_t* result = nullptr;

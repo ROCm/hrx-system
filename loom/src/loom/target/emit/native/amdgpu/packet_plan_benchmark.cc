@@ -99,33 +99,33 @@ struct FixtureSpec {
 };
 
 constexpr FixtureSpec kMemoryControl = {
-    /*.name=*/"memory_control",
-    /*.input_stage=*/FixtureInputStage::kGeneratedLow,
-    /*.generated_matrix=*/{},
+    .name = "memory_control",
+    .input_stage = FixtureInputStage::kGeneratedLow,
+    .generated_matrix = {},
 };
 
 // A straight-line matrix workload that isolates the common single-block
 // coexecution path without CFG frontier propagation.
 constexpr FixtureSpec kMatrixSingleBlockCanary = {
-    /*.name=*/"matrix_single_block_canary",
-    /*.input_stage=*/FixtureInputStage::kGeneratedLow,
-    /*.generated_matrix=*/
-    {
-        /*.phase_count=*/1,
-        /*.valu_packets_per_phase=*/4,
-        /*.dependent_valu_packets_per_phase=*/4,
-    },
+    .name = "matrix_single_block_canary",
+    .input_stage = FixtureInputStage::kGeneratedLow,
+    .generated_matrix =
+        {
+            .phase_count = 1,
+            .valu_packets_per_phase = 4,
+            .dependent_valu_packets_per_phase = 4,
+        },
 };
 
 constexpr FixtureSpec kMatrixDependencyCanary = {
-    /*.name=*/"matrix_dependency_canary",
-    /*.input_stage=*/FixtureInputStage::kGeneratedLow,
-    /*.generated_matrix=*/
-    {
-        /*.phase_count=*/2,
-        /*.valu_packets_per_phase=*/4,
-        /*.dependent_valu_packets_per_phase=*/4,
-    },
+    .name = "matrix_dependency_canary",
+    .input_stage = FixtureInputStage::kGeneratedLow,
+    .generated_matrix =
+        {
+            .phase_count = 2,
+            .valu_packets_per_phase = 4,
+            .dependent_valu_packets_per_phase = 4,
+        },
 };
 
 // Legal adversarial topology for storage-lease overlap planning. Every address
@@ -135,14 +135,14 @@ constexpr FixtureSpec kMatrixDependencyCanary = {
 // broad live topology makes this a planner stress case rather than a workload
 // performance proxy.
 constexpr FixtureSpec kMatrixLeaseOverlapStress = {
-    /*.name=*/"matrix_lease_overlap_stress",
-    /*.input_stage=*/FixtureInputStage::kGeneratedLow,
-    /*.generated_matrix=*/
-    {
-        /*.phase_count=*/17,
-        /*.valu_packets_per_phase=*/208,
-        /*.dependent_valu_packets_per_phase=*/64,
-    },
+    .name = "matrix_lease_overlap_stress",
+    .input_stage = FixtureInputStage::kGeneratedLow,
+    .generated_matrix =
+        {
+            .phase_count = 17,
+            .valu_packets_per_phase = 208,
+            .dependent_valu_packets_per_phase = 64,
+        },
 };
 
 // Fixed-shape 4096-token, 18-head, 256-wide online attention workload. The
@@ -150,9 +150,9 @@ constexpr FixtureSpec kMatrixLeaseOverlapStress = {
 // immutable planner frame is built, keeping the benchmark coupled to the
 // shipping compilation boundary rather than a retained low-IR snapshot.
 constexpr FixtureSpec kAttentionBf16 = {
-    /*.name=*/"attention_bf16",
-    /*.input_stage=*/FixtureInputStage::kAuthoredSource,
-    /*.generated_matrix=*/{},
+    .name = "attention_bf16",
+    .input_stage = FixtureInputStage::kAuthoredSource,
+    .generated_matrix = {},
 };
 
 static void AbortOnError(iree_status_t status) {
@@ -204,21 +204,21 @@ struct FrameAnalysis {
 
 static FrameAnalysis AnalyzeFrame(const loom_low_emission_frame_t& frame) {
   FrameAnalysis analysis = {
-      /*.shape=*/
-      {
-          /*.block_count=*/frame.schedule.block_count,
-          /*.packet_count=*/frame.schedule.scheduled_node_count,
-          /*.assignment_count=*/frame.allocation.assignment_count,
-          /*.edge_copy_count=*/frame.allocation.edge_copy_count,
-          /*.coalesced_edge_copy_count=*/0,
-          /*.matrix_packet_count=*/0,
-          /*.storage_lease_count=*/
-          frame.allocation.storage_leases.record_count,
-          /*.storage_lease_unit_count=*/0,
-          /*.storage_release_count=*/
-          frame.allocation.storage_release_action_count,
-      },
-      /*.signature=*/HashValue(kFnvOffsetBasis, frame.schedule.block_count),
+      .shape =
+          {
+              .block_count = frame.schedule.block_count,
+              .packet_count = frame.schedule.scheduled_node_count,
+              .assignment_count = frame.allocation.assignment_count,
+              .edge_copy_count = frame.allocation.edge_copy_count,
+              .coalesced_edge_copy_count = 0,
+              .matrix_packet_count = 0,
+              .storage_lease_count =
+                  frame.allocation.storage_leases.record_count,
+              .storage_lease_unit_count = 0,
+              .storage_release_count =
+                  frame.allocation.storage_release_action_count,
+          },
+      .signature = HashValue(kFnvOffsetBasis, frame.schedule.block_count),
   };
   analysis.signature =
       HashValue(analysis.signature, frame.schedule.scheduled_node_count);
@@ -489,15 +489,15 @@ class PacketPlanFixture {
     target_registry_ = loom_target_environment_low_descriptor_registry(
         native_target_environment_);
     loomc_context_target_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.target_environment=*/target_environment_,
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+        .structure_size = sizeof(target_options),
+        .next = nullptr,
+        .target_environment = target_environment_,
     };
     loomc_context_options_t context_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-        /*.structure_size=*/sizeof(context_options),
-        /*.next=*/&target_options,
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+        .structure_size = sizeof(context_options),
+        .next = &target_options,
     };
     AbortOnError(iree_status_from_loomc(
         loomc_context_create(&context_options, compiler_allocator, &context_)));
@@ -514,13 +514,13 @@ class PacketPlanFixture {
                                      generated_source.size());
     }
     const loomc_source_options_t source_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-        /*.structure_size=*/sizeof(source_options),
-        /*.next=*/nullptr,
-        /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-        /*.identifier=*/loomc_make_cstring_view(spec.name),
-        /*.contents=*/loomc_make_byte_span(source.data, source.size),
-        /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+        .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+        .structure_size = sizeof(source_options),
+        .next = nullptr,
+        .format = LOOMC_SOURCE_FORMAT_TEXT,
+        .identifier = loomc_make_cstring_view(spec.name),
+        .contents = loomc_make_byte_span(source.data, source.size),
+        .storage = LOOMC_SOURCE_STORAGE_COPY,
     };
     loomc_source_t* compiler_source = nullptr;
     AbortOnError(iree_status_from_loomc(loomc_source_create(
@@ -569,9 +569,10 @@ class PacketPlanFixture {
     if (low_function == nullptr) {
       std::abort();
     }
-    loom_low_verify_options_t verify_options = {};
-    verify_options.descriptor_registry = &target_registry_.registry;
-    verify_options.max_errors = 20;
+    loom_low_verify_options_t verify_options = {
+        .descriptor_registry = &target_registry_.registry,
+        .max_errors = 20,
+    };
     loom_low_verify_result_t verify_result = {};
     loom_low_verify_scratch_t verify_scratch =
         loom_low_verify_scratch_for_module(module_);
@@ -609,11 +610,12 @@ class PacketPlanFixture {
     }
     loom_low_storage_lease_provider_t storage_lease_provider = {};
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
-    loom_low_emission_frame_options_t frame_options = {};
-    frame_options.descriptor_registry = &target_registry_.registry;
-    frame_options.residency_query = loom_amdgpu_occupancy_residency_view;
-    frame_options.instruction_preferences =
-        loom_amdgpu_placement_instruction_preferences(&resolved_target);
+    loom_low_emission_frame_options_t frame_options = {
+        .descriptor_registry = &target_registry_.registry,
+        .residency_query = loom_amdgpu_occupancy_residency_view,
+        .instruction_preferences =
+            loom_amdgpu_placement_instruction_preferences(&resolved_target),
+    };
     frame_options.schedule_pair_affinities = pair_affinities;
     frame_options.schedule_structural_state_reads = structural_state_reads;
     frame_options.schedule_flags =

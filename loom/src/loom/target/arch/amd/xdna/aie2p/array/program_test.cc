@@ -39,77 +39,78 @@ static void ExpectRegisterMaskWrite(const loom_aie2p_program_record_t& record,
 
 TEST(Aie2pArrayProgramTest, ResetsComputeDmaBeforePlannedQueueStarts) {
   const loom_aie2p_array_worker_plan_t worker_plan = {
-      /*.worker_index=*/0,
-      /*.coordinate=*/{0, 2},
+      .worker_index = 0,
+      .coordinate = {0, 2},
   };
   const loom_aie2p_array_channel_t channel = {
-      /*.value_id=*/0,
-      /*.sender_endpoint_index=*/0,
-      /*.receiver_endpoint_index=*/0,
-      /*.source_channel_index=*/0,
-      /*.binding_plan_index=*/UINT32_MAX,
-      /*.first_channel_slot=*/0,
-      /*.sender_dma_index=*/UINT32_MAX,
-      /*.capacity=*/1,
-      /*.record_count=*/1,
-      /*.record_byte_length=*/64,
-      /*.encoded_dma_record_length=*/16,
-      /*.transport=*/LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA,
+      .value_id = 0,
+      .sender_endpoint_index = 0,
+      .receiver_endpoint_index = 0,
+      .source_channel_index = 0,
+      .binding_plan_index = UINT32_MAX,
+      .first_channel_slot = 0,
+      .sender_dma_index = UINT32_MAX,
+      .capacity = 1,
+      .record_count = 1,
+      .record_byte_length = 64,
+      .encoded_dma_record_length = 16,
+      .transport = LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA,
   };
   const loom_aie2p_array_channel_slot_t channel_slot = {
-      /*.channel_index=*/0,
-      /*.slot=*/0,
-      /*.byte_length=*/64,
-      /*.sender_storage=*/{},
-      /*.receiver_storage=*/
-      {
-          /*.owner=*/{0, 2},
-          /*.owner_offset=*/0,
-          /*.load_address=*/0x00070000,
-      },
+      .channel_index = 0,
+      .slot = 0,
+      .byte_length = 64,
+      .sender_storage = {},
+      .receiver_storage =
+          {
+              .owner = {0, 2},
+              .owner_offset = 0,
+              .load_address = 0x00070000,
+          },
   };
   const loom_aie2p_array_lock_plan_t locks[] = {
       {
-          /*.channel_index=*/0,
-          /*.coordinate=*/{0, 2},
-          /*.lock_id=*/0,
-          /*.initial_value=*/1,
-          /*.ring_endpoint_direction=*/
-          LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE,
-          /*.consumer_ready=*/0,
+          .channel_index = 0,
+          .coordinate = {0, 2},
+          .lock_id = 0,
+          .initial_value = 1,
+          .ring_endpoint_direction =
+              LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE,
+          .consumer_ready = 0,
       },
       {
-          /*.channel_index=*/0,
-          /*.coordinate=*/{0, 2},
-          /*.lock_id=*/1,
-          /*.initial_value=*/0,
-          /*.ring_endpoint_direction=*/
-          LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE,
-          /*.consumer_ready=*/1,
+          .channel_index = 0,
+          .coordinate = {0, 2},
+          .lock_id = 1,
+          .initial_value = 0,
+          .ring_endpoint_direction =
+              LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE,
+          .consumer_ready = 1,
       },
   };
   const loom_aie2p_array_dma_plan_t dma = {
-      /*.channel_index=*/0,
-      /*.coordinate=*/{0, 2},
-      /*.direction=*/LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
-      /*.dma_channel=*/0,
-      /*.flags=*/0,
-      /*.buffer_descriptor_start=*/0,
-      /*.buffer_descriptor_count=*/1,
-      /*.credit_lock_index=*/0,
+      .channel_index = 0,
+      .coordinate = {0, 2},
+      .direction = LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
+      .dma_channel = 0,
+      .flags = 0,
+      .buffer_descriptor_start = 0,
+      .buffer_descriptor_count = 1,
+      .credit_lock_index = 0,
   };
-  loom_aie2p_array_plan_t plan = {};
-  plan.family = loom_xdna_npu2_array_family();
-  plan.channels = &channel;
-  plan.channel_count = 1;
-  plan.worker_plans = &worker_plan;
-  plan.worker_plan_count = 1;
-  plan.channel_slots = &channel_slot;
-  plan.channel_slot_count = 1;
-  plan.locks = locks;
-  plan.lock_count = IREE_ARRAYSIZE(locks);
-  plan.dma_channels = &dma;
-  plan.dma_channel_count = 1;
+  loom_aie2p_array_plan_t plan = {
+      .family = loom_xdna_npu2_array_family(),
+      .channels = &channel,
+      .channel_count = 1,
+      .worker_plans = &worker_plan,
+      .worker_plan_count = 1,
+      .channel_slots = &channel_slot,
+      .channel_slot_count = 1,
+      .locks = locks,
+      .lock_count = IREE_ARRAYSIZE(locks),
+      .dma_channels = &dma,
+      .dma_channel_count = 1,
+  };
 
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
@@ -165,77 +166,78 @@ TEST(Aie2pArrayProgramTest, ResetsComputeDmaBeforePlannedQueueStarts) {
 
 TEST(Aie2pArrayProgramTest, KeepsDmaServiceCoreReset) {
   const loom_aie2p_array_worker_plan_t worker_plan = {
-      /*.worker_index=*/0,
-      /*.coordinate=*/{0, 2},
+      .worker_index = 0,
+      .coordinate = {0, 2},
   };
   const loom_aie2p_array_channel_t channel = {
-      /*.value_id=*/0,
-      /*.sender_endpoint_index=*/0,
-      /*.receiver_endpoint_index=*/0,
-      /*.source_channel_index=*/0,
-      /*.binding_plan_index=*/UINT32_MAX,
-      /*.first_channel_slot=*/0,
-      /*.sender_dma_index=*/UINT32_MAX,
-      /*.capacity=*/1,
-      /*.record_count=*/1,
-      /*.record_byte_length=*/64,
-      /*.encoded_dma_record_length=*/16,
-      /*.transport=*/LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA,
+      .value_id = 0,
+      .sender_endpoint_index = 0,
+      .receiver_endpoint_index = 0,
+      .source_channel_index = 0,
+      .binding_plan_index = UINT32_MAX,
+      .first_channel_slot = 0,
+      .sender_dma_index = UINT32_MAX,
+      .capacity = 1,
+      .record_count = 1,
+      .record_byte_length = 64,
+      .encoded_dma_record_length = 16,
+      .transport = LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA,
   };
   const loom_aie2p_array_channel_slot_t channel_slot = {
-      /*.channel_index=*/0,
-      /*.slot=*/0,
-      /*.byte_length=*/64,
-      /*.sender_storage=*/{},
-      /*.receiver_storage=*/
-      {
-          /*.owner=*/{0, 3},
-          /*.owner_offset=*/0,
-          /*.load_address=*/0x00060000,
-      },
+      .channel_index = 0,
+      .slot = 0,
+      .byte_length = 64,
+      .sender_storage = {},
+      .receiver_storage =
+          {
+              .owner = {0, 3},
+              .owner_offset = 0,
+              .load_address = 0x00060000,
+          },
   };
   const loom_aie2p_array_lock_plan_t locks[] = {
       {
-          /*.channel_index=*/0,
-          /*.coordinate=*/{0, 3},
-          /*.lock_id=*/0,
-          /*.initial_value=*/1,
-          /*.ring_endpoint_direction=*/
-          LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE,
-          /*.consumer_ready=*/0,
+          .channel_index = 0,
+          .coordinate = {0, 3},
+          .lock_id = 0,
+          .initial_value = 1,
+          .ring_endpoint_direction =
+              LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE,
+          .consumer_ready = 0,
       },
       {
-          /*.channel_index=*/0,
-          /*.coordinate=*/{0, 3},
-          /*.lock_id=*/1,
-          /*.initial_value=*/0,
-          /*.ring_endpoint_direction=*/
-          LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE,
-          /*.consumer_ready=*/1,
+          .channel_index = 0,
+          .coordinate = {0, 3},
+          .lock_id = 1,
+          .initial_value = 0,
+          .ring_endpoint_direction =
+              LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE,
+          .consumer_ready = 1,
       },
   };
   const loom_aie2p_array_dma_plan_t dma = {
-      /*.channel_index=*/0,
-      /*.coordinate=*/{0, 3},
-      /*.direction=*/LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
-      /*.dma_channel=*/0,
-      /*.flags=*/LOOM_AIE2P_ARRAY_DMA_FLAG_SERVICE_TILE_LIFECYCLE,
-      /*.buffer_descriptor_start=*/0,
-      /*.buffer_descriptor_count=*/1,
-      /*.credit_lock_index=*/0,
+      .channel_index = 0,
+      .coordinate = {0, 3},
+      .direction = LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
+      .dma_channel = 0,
+      .flags = LOOM_AIE2P_ARRAY_DMA_FLAG_SERVICE_TILE_LIFECYCLE,
+      .buffer_descriptor_start = 0,
+      .buffer_descriptor_count = 1,
+      .credit_lock_index = 0,
   };
-  loom_aie2p_array_plan_t plan = {};
-  plan.family = loom_xdna_npu2_array_family();
-  plan.channels = &channel;
-  plan.channel_count = 1;
-  plan.worker_plans = &worker_plan;
-  plan.worker_plan_count = 1;
-  plan.channel_slots = &channel_slot;
-  plan.channel_slot_count = 1;
-  plan.locks = locks;
-  plan.lock_count = IREE_ARRAYSIZE(locks);
-  plan.dma_channels = &dma;
-  plan.dma_channel_count = 1;
+  loom_aie2p_array_plan_t plan = {
+      .family = loom_xdna_npu2_array_family(),
+      .channels = &channel,
+      .channel_count = 1,
+      .worker_plans = &worker_plan,
+      .worker_plan_count = 1,
+      .channel_slots = &channel_slot,
+      .channel_slot_count = 1,
+      .locks = locks,
+      .lock_count = IREE_ARRAYSIZE(locks),
+      .dma_channels = &dma,
+      .dma_channel_count = 1,
+  };
 
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
@@ -308,40 +310,41 @@ class Aie2pCompletionRouteTest
 TEST_P(Aie2pCompletionRouteTest, EmitsSelectedPacketResources) {
   const CompletionRouteCase& selected = GetParam();
   const loom_aie2p_array_binding_t binding = {
-      /*.value_id=*/0,
-      /*.ordinal=*/0,
-      /*.access=*/LOOM_AIE2P_ARRAY_BINDING_ACCESS_WRITE,
+      .value_id = 0,
+      .ordinal = 0,
+      .access = LOOM_AIE2P_ARRAY_BINDING_ACCESS_WRITE,
   };
   const loom_aie2p_array_binding_plan_t binding_plan = {
-      /*.binding_index=*/0,
-      /*.channel_index=*/0,
-      /*.dma_index=*/0,
-      /*.partition_lane=*/0,
-      /*.partition_lane_count=*/1,
-      /*.completion_route_index=*/0,
-      /*.binding_byte_offset=*/0,
-      /*.binding_span_byte_length=*/64,
-      /*.transfer_byte_length=*/64,
-      /*.task_repeat_count=*/1,
+      .binding_index = 0,
+      .channel_index = 0,
+      .dma_index = 0,
+      .partition_lane = 0,
+      .partition_lane_count = 1,
+      .completion_route_index = 0,
+      .binding_byte_offset = 0,
+      .binding_span_byte_length = 64,
+      .transfer_byte_length = 64,
+      .task_repeat_count = 1,
   };
   const loom_aie2p_array_dma_plan_t dma = {
-      /*.channel_index=*/0,
-      /*.coordinate=*/{0, 0},
-      /*.direction=*/LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
-      /*.dma_channel=*/0,
-      /*.flags=*/LOOM_AIE2P_ARRAY_DMA_FLAG_SHIM,
-      /*.buffer_descriptor_start=*/0,
-      /*.buffer_descriptor_count=*/1,
-      /*.credit_lock_index=*/UINT32_MAX,
+      .channel_index = 0,
+      .coordinate = {0, 0},
+      .direction = LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
+      .dma_channel = 0,
+      .flags = LOOM_AIE2P_ARRAY_DMA_FLAG_SHIM,
+      .buffer_descriptor_start = 0,
+      .buffer_descriptor_count = 1,
+      .credit_lock_index = UINT32_MAX,
   };
-  loom_aie2p_array_plan_t plan = {};
-  plan.family = loom_xdna_npu2_array_family();
-  plan.bindings = &binding;
-  plan.binding_count = 1;
-  plan.dma_channels = &dma;
-  plan.dma_channel_count = 1;
-  plan.binding_plans = &binding_plan;
-  plan.binding_plan_count = 1;
+  loom_aie2p_array_plan_t plan = {
+      .family = loom_xdna_npu2_array_family(),
+      .bindings = &binding,
+      .binding_count = 1,
+      .dma_channels = &dma,
+      .dma_channel_count = 1,
+      .binding_plans = &binding_plan,
+      .binding_plan_count = 1,
+  };
   plan.completion_routes = &selected.route;
   plan.completion_route_count = 1;
 
@@ -377,26 +380,29 @@ INSTANTIATE_TEST_SUITE_P(
     SelectedResources, Aie2pCompletionRouteTest,
     ::testing::Values(
         CompletionRouteCase{
-            /*.route=*/{/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
-                        /*destination_ordinal=*/2, /*packet_id=*/0,
-                        /*arbiter=*/0, /*master_select=*/0, /*rule_slot=*/0},
-            /*.master_value=*/0xC0000008,
-            /*.rule_address=*/0x0003F200,
-            /*.rule_value=*/0x001F0100},
+            .route = {/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
+                      /*destination_ordinal=*/2, /*packet_id=*/0,
+                      /*arbiter=*/0, /*master_select=*/0, /*rule_slot=*/0},
+            .master_value = 0xC0000008,
+            .rule_address = 0x0003F200,
+            .rule_value = 0x001F0100,
+        },
         CompletionRouteCase{
-            /*.route=*/{/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
-                        /*destination_ordinal=*/2, /*packet_id=*/12,
-                        /*arbiter=*/2, /*master_select=*/1, /*rule_slot=*/1},
-            /*.master_value=*/0xC0000012,
-            /*.rule_address=*/0x0003F204,
-            /*.rule_value=*/0x0C1F0112},
+            .route = {/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
+                      /*destination_ordinal=*/2, /*packet_id=*/12,
+                      /*arbiter=*/2, /*master_select=*/1, /*rule_slot=*/1},
+            .master_value = 0xC0000012,
+            .rule_address = 0x0003F204,
+            .rule_value = 0x0C1F0112,
+        },
         CompletionRouteCase{
-            /*.route=*/{/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
-                        /*destination_ordinal=*/2, /*packet_id=*/15,
-                        /*arbiter=*/5, /*master_select=*/3, /*rule_slot=*/3},
-            /*.master_value=*/0xC0000045,
-            /*.rule_address=*/0x0003F20C,
-            /*.rule_value=*/0x0F1F0135}));
+            .route = {/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
+                      /*destination_ordinal=*/2, /*packet_id=*/15,
+                      /*arbiter=*/5, /*master_select=*/3, /*rule_slot=*/3},
+            .master_value = 0xC0000045,
+            .rule_address = 0x0003F20C,
+            .rule_value = 0x0F1F0135,
+        }));
 
 }  // namespace
 }  // namespace loom

@@ -55,15 +55,15 @@ static iree_status_t MakeEncodingSummary(
     loom_value_fact_storage_schema_t storage_schema,
     loom_value_facts_t* out_facts) {
   loom_value_fact_encoding_summary_t summary = {
-      /*.role=*/role,
-      /*.static_spec_encoding_id=*/static_spec_encoding_id,
-      /*.address_layout=*/
-      {
-          /*.kind=*/layout_kind,
-          /*.rank=*/rank,
-          /*.strides=*/strides,
-      },
-      /*.storage_schema=*/storage_schema,
+      .role = role,
+      .static_spec_encoding_id = static_spec_encoding_id,
+      .address_layout =
+          {
+              .kind = layout_kind,
+              .rank = rank,
+              .strides = strides,
+          },
+      .storage_schema = storage_schema,
   };
   return loom_value_facts_make_encoding_summary(&table->context, summary,
                                                 out_facts);
@@ -217,8 +217,7 @@ TEST_F(EncodingFactDomainTest, DropsSummariesWithDifferentUntypedRoles) {
 }
 
 TEST_F(EncodingFactDomainTest, RetainsCommonStorageSchemaFacts) {
-  loom_value_fact_storage_schema_t schema = {};
-  schema.static_spec_encoding_id = 5;
+  loom_value_fact_storage_schema_t schema = {.static_spec_encoding_id = 5};
   schema.encoded_operand.payload_element_count = 32;
   loom_value_facts_t lhs_facts;
   loom_value_facts_t rhs_facts;

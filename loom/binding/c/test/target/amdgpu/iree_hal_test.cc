@@ -61,8 +61,7 @@ static const iree_hal_device_spec_t* FakeHalDeviceSpec(
 }
 
 static iree_hal_device_vtable_t MakeFakeHalDeviceVtable() {
-  iree_hal_device_vtable_t vtable = {};
-  vtable.device_spec = FakeHalDeviceSpec;
+  iree_hal_device_vtable_t vtable = {.device_spec = FakeHalDeviceSpec};
   return vtable;
 }
 
@@ -85,12 +84,12 @@ iree_status_t CreateAmdgpuDeviceSpec(const TestTarget* targets,
   for (iree_host_size_t i = 0; i < target_count && iree_status_is_ok(status);
        ++i) {
     const iree_hal_executable_target_t target = {
-        /*.family=*/IREE_SV("amdgpu"),
-        /*.target_key=*/targets[i].target_key,
-        /*.kind=*/targets[i].kind,
-        /*.priority=*/0,
-        /*.physical_device_affinity=*/targets[i].physical_device_affinity,
-        /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+        .family = IREE_SV("amdgpu"),
+        .target_key = targets[i].target_key,
+        .kind = targets[i].kind,
+        .priority = 0,
+        .physical_device_affinity = targets[i].physical_device_affinity,
+        .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
     };
     status =
         iree_hal_device_spec_builder_add_executable_target(&builder, &target);
@@ -143,13 +142,13 @@ TargetProfilePtr SelectTargetFromHal(
     const iree_hal_executable_target_t** out_executable_target = nullptr) {
   iree_hal_device_t* hal_device = reinterpret_cast<iree_hal_device_t*>(device);
   const loomc_amdgpu_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("fake-amdgpu"),
-      /*.device=*/hal_device,
-      /*.physical_device_affinity=*/physical_device_affinity,
-      /*.target_profile=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_AMDGPU_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("fake-amdgpu"),
+      .device = hal_device,
+      .physical_device_affinity = physical_device_affinity,
+      .target_profile = nullptr,
   };
   loomc_iree_hal_target_selection_t selection = {};
   loomc_status_t status = loomc_target_select_amdgpu_iree_hal(
@@ -355,15 +354,15 @@ TEST(LoomcAmdgpuIreeHalTargetTest, ProviderRoutesThroughGenericHalRouter) {
       loomc_amdgpu_iree_hal_target_provider(),
   };
   const loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("router"),
-      /*.device=*/hal_device,
-      /*.physical_device_affinity=*/1,
-      /*.target_profile=*/nullptr,
-      /*.providers=*/providers,
-      /*.provider_count=*/IREE_ARRAYSIZE(providers),
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("router"),
+      .device = hal_device,
+      .physical_device_affinity = 1,
+      .target_profile = nullptr,
+      .providers = providers,
+      .provider_count = IREE_ARRAYSIZE(providers),
   };
   loomc_result_t* result = nullptr;
   loomc_iree_hal_target_selection_t selection = {};
@@ -404,15 +403,15 @@ TEST(LoomcAmdgpuIreeHalTargetTest,
       loomc_amdgpu_iree_hal_target_provider(),
   };
   const loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.device=*/reinterpret_cast<iree_hal_device_t*>(&device),
-      /*.physical_device_affinity=*/1,
-      /*.target_profile=*/requested_profile_ptr.get(),
-      /*.providers=*/providers,
-      /*.provider_count=*/IREE_ARRAYSIZE(providers),
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_string_view_empty(),
+      .device = reinterpret_cast<iree_hal_device_t*>(&device),
+      .physical_device_affinity = 1,
+      .target_profile = requested_profile_ptr.get(),
+      .providers = providers,
+      .provider_count = IREE_ARRAYSIZE(providers),
   };
   loomc_iree_hal_target_selection_t selection = {};
   loomc_result_t* result = nullptr;
@@ -448,15 +447,15 @@ TEST(LoomcAmdgpuIreeHalTargetTest, ForcedProfileMustBeLoadableByDevice) {
       loomc_amdgpu_iree_hal_target_provider(),
   };
   const loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.device=*/reinterpret_cast<iree_hal_device_t*>(&device),
-      /*.physical_device_affinity=*/1,
-      /*.target_profile=*/requested_profile_ptr.get(),
-      /*.providers=*/providers,
-      /*.provider_count=*/IREE_ARRAYSIZE(providers),
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_string_view_empty(),
+      .device = reinterpret_cast<iree_hal_device_t*>(&device),
+      .physical_device_affinity = 1,
+      .target_profile = requested_profile_ptr.get(),
+      .providers = providers,
+      .provider_count = IREE_ARRAYSIZE(providers),
   };
   loomc_iree_hal_target_selection_t selection = {};
   loomc_result_t* result = nullptr;
@@ -483,15 +482,15 @@ TEST(LoomcAmdgpuIreeHalTargetTest, ProviderMissLetsRouterReportUnsupported) {
       loomc_amdgpu_iree_hal_target_provider(),
   };
   const loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("miss"),
-      /*.device=*/hal_device,
-      /*.physical_device_affinity=*/0,
-      /*.target_profile=*/nullptr,
-      /*.providers=*/providers,
-      /*.provider_count=*/IREE_ARRAYSIZE(providers),
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("miss"),
+      .device = hal_device,
+      .physical_device_affinity = 0,
+      .target_profile = nullptr,
+      .providers = providers,
+      .provider_count = IREE_ARRAYSIZE(providers),
   };
   loomc_result_t* result = nullptr;
   loomc_iree_hal_target_selection_t selection = {};

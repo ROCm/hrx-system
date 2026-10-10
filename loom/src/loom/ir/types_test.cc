@@ -59,36 +59,36 @@ static OwnedFunctionType BuildFunctionType(const loom_type_t* arg_types,
 
 static const loom_attr_descriptor_t kRepeatedTypeParameters[] = {
     {
-        /*.name=*/LOOM_BSTRING_REF(4, "left"),
-        /*.attr_kind=*/LOOM_ATTR_TYPE,
+        .name = LOOM_BSTRING_REF(4, "left"),
+        .attr_kind = LOOM_ATTR_TYPE,
     },
     {
-        /*.name=*/LOOM_BSTRING_REF(5, "right"),
-        /*.attr_kind=*/LOOM_ATTR_TYPE,
+        .name = LOOM_BSTRING_REF(5, "right"),
+        .attr_kind = LOOM_ATTR_TYPE,
     },
 };
 
 static const loom_parameterized_type_descriptor_t kRepeatedTypeDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(13, "test.repeated"),
-    /*.parameter_descriptors=*/kRepeatedTypeParameters,
-    /*.fact_domain=*/nullptr,
-    /*.ir_kind=*/LOOM_TYPE_PARAMETERIZED,
-    /*.type_flags=*/0,
-    /*.parameter_count=*/IREE_ARRAYSIZE(kRepeatedTypeParameters),
+    .name = LOOM_BSTRING_REF(13, "test.repeated"),
+    .parameter_descriptors = kRepeatedTypeParameters,
+    .fact_domain = nullptr,
+    .ir_kind = LOOM_TYPE_PARAMETERIZED,
+    .type_flags = 0,
+    .parameter_count = IREE_ARRAYSIZE(kRepeatedTypeParameters),
 };
 
 static const loom_attr_descriptor_t kRepeatedDictParameters[] = {{
-    /*.name=*/LOOM_BSTRING_REF(8, "metadata"),
-    /*.attr_kind=*/LOOM_ATTR_DICT,
+    .name = LOOM_BSTRING_REF(8, "metadata"),
+    .attr_kind = LOOM_ATTR_DICT,
 }};
 
 static const loom_parameterized_type_descriptor_t kRepeatedDictDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(18, "test.repeated_dict"),
-    /*.parameter_descriptors=*/kRepeatedDictParameters,
-    /*.fact_domain=*/nullptr,
-    /*.ir_kind=*/LOOM_TYPE_PARAMETERIZED,
-    /*.type_flags=*/0,
-    /*.parameter_count=*/IREE_ARRAYSIZE(kRepeatedDictParameters),
+    .name = LOOM_BSTRING_REF(18, "test.repeated_dict"),
+    .parameter_descriptors = kRepeatedDictParameters,
+    .fact_domain = nullptr,
+    .ir_kind = LOOM_TYPE_PARAMETERIZED,
+    .type_flags = 0,
+    .parameter_count = IREE_ARRAYSIZE(kRepeatedDictParameters),
 };
 
 TEST(TypesTest, FunctionTypeEqualAndHashAreStructural) {
@@ -300,15 +300,18 @@ TEST(TypesTest, MayReferenceValuesConservativelyClassifiesTypes) {
       loom_type_group_2d(loom_dim_pack_static(2), loom_dim_pack_static(4));
   loom_type_t dynamic_group = loom_type_group_1d(loom_dim_pack_dynamic(13));
   loom_register_type_data_t register_data = {42, 4, scalar};
-  loom_type_t function_type = {};
-  function_type.header = loom_type_make_raw_header(LOOM_TYPE_FUNCTION, 0, 0,
-                                                   LOOM_TYPE_FLAG_ALL_STATIC);
-  loom_type_t dialect_type = {};
-  dialect_type.header = loom_type_make_raw_header(LOOM_TYPE_DIALECT, 0, 0,
-                                                  LOOM_TYPE_FLAG_ALL_STATIC);
-  loom_type_t parameterized_type = {};
-  parameterized_type.header = loom_type_make_raw_header(
-      LOOM_TYPE_PARAMETERIZED, 0, 0, LOOM_TYPE_FLAG_ALL_STATIC);
+  loom_type_t function_type = {
+      .header = loom_type_make_raw_header(LOOM_TYPE_FUNCTION, 0, 0,
+                                          LOOM_TYPE_FLAG_ALL_STATIC),
+  };
+  loom_type_t dialect_type = {
+      .header = loom_type_make_raw_header(LOOM_TYPE_DIALECT, 0, 0,
+                                          LOOM_TYPE_FLAG_ALL_STATIC),
+  };
+  loom_type_t parameterized_type = {
+      .header = loom_type_make_raw_header(LOOM_TYPE_PARAMETERIZED, 0, 0,
+                                          LOOM_TYPE_FLAG_ALL_STATIC),
+  };
 
   EXPECT_FALSE(loom_type_may_reference_values(loom_type_none()));
   EXPECT_FALSE(loom_type_may_reference_values(scalar));
@@ -374,9 +377,9 @@ TEST_F(ModuleTypesTest, RepeatedChildrenReuseMappedTypeQueries) {
     target = target_nodes.back().get();
   }
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&source_value,
-      /*.target_values=*/&target_value,
-      /*.count=*/1,
+      .source_values = &source_value,
+      .target_values = &target_value,
+      .count = 1,
   };
   const loom_type_t mismatched_children[] = {
       target, loom_type_scalar(LOOM_SCALAR_TYPE_F32)};
@@ -433,9 +436,9 @@ TEST_F(ModuleTypesTest, RepeatedTypeAttributesReuseMappedQueries) {
   }
 
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&source_value,
-      /*.target_values=*/&target_value,
-      /*.count=*/1,
+      .source_values = &source_value,
+      .target_values = &target_value,
+      .count = 1,
   };
   EXPECT_TRUE(
       loom_type_equal_after_value_remap(module_, source, target, &remap));
@@ -524,9 +527,9 @@ TEST_F(ModuleTypesTest, NestedDictReusePreservesMappedTypeQueries) {
       &kRepeatedDictDescriptor, IREE_ARRAYSIZE(mismatched_parameters),
       mismatched_parameters);
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/&source_value,
-      /*.target_values=*/&target_value,
-      /*.count=*/1,
+      .source_values = &source_value,
+      .target_values = &target_value,
+      .count = 1,
   };
 
   EXPECT_TRUE(
@@ -540,11 +543,12 @@ TEST_F(ModuleTypesTest, NestedDictReusePreservesMappedTypeQueries) {
 }
 
 TEST_F(ModuleTypesTest, InvalidKindsPreserveRawIdentityForDiagnostics) {
-  loom_type_t first = {};
-  first.header = loom_type_make_raw_header(
-      /*kind=*/static_cast<loom_type_kind_t>(4), /*element_type=*/1,
-      /*rank=*/0, /*flags=*/0);
-  first.encoding_id = 2;
+  loom_type_t first = {
+      .header = loom_type_make_raw_header(
+          /*kind=*/static_cast<loom_type_kind_t>(4), /*element_type=*/1,
+          /*rank=*/0, /*flags=*/0),
+      .encoding_id = 2,
+  };
   loom_type_t different = first;
   different.encoding_id = 3;
 
@@ -834,16 +838,16 @@ TEST_F(ModuleTypesTest, ValueRemapComposesDiscontiguousSpans) {
   loom_value_id_t source_inner[] = {11};
   loom_value_id_t target_inner[] = {13};
   const loom_type_value_remap_t inner_remap = {
-      /*.source_values=*/source_inner,
-      /*.target_values=*/target_inner,
-      /*.count=*/IREE_ARRAYSIZE(source_inner),
+      .source_values = source_inner,
+      .target_values = target_inner,
+      .count = IREE_ARRAYSIZE(source_inner),
   };
   const loom_type_value_remap_t remap = {
-      /*.source_values=*/source_outer,
-      /*.target_values=*/target_outer,
-      /*.count=*/IREE_ARRAYSIZE(source_outer),
-      /*.flags=*/0,
-      /*.next=*/&inner_remap,
+      .source_values = source_outer,
+      .target_values = target_outer,
+      .count = IREE_ARRAYSIZE(source_outer),
+      .flags = 0,
+      .next = &inner_remap,
   };
 
   EXPECT_TRUE(
@@ -868,16 +872,16 @@ TEST_F(ModuleTypesTest, ValueRemapIndexesContiguousDefinitionSpans) {
   const loom_value_id_t external_source = values[4];
   const loom_value_id_t external_target = values[5];
   const loom_type_value_remap_t external_remap = {
-      /*.source_values=*/&external_source,
-      /*.target_values=*/&external_target,
-      /*.count=*/1,
+      .source_values = &external_source,
+      .target_values = &external_target,
+      .count = 1,
   };
   const loom_type_value_remap_t indexed_remap = {
-      /*.source_values=*/source_values,
-      /*.target_values=*/target_values,
-      /*.count=*/IREE_ARRAYSIZE(source_values),
-      /*.flags=*/LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
-      /*.next=*/&external_remap,
+      .source_values = source_values,
+      .target_values = target_values,
+      .count = IREE_ARRAYSIZE(source_values),
+      .flags = LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
+      .next = &external_remap,
   };
   const loom_type_t source =
       loom_type_shaped_2d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,

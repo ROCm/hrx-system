@@ -67,8 +67,7 @@ TEST(DelayAluTest, ScalarCycleSelectorsDoNotCompleteVectorProducers) {
 }
 
 TEST(DelayAluTest, EpochWrapRequestsClearingRetainedLocationFacts) {
-  loom_amdgpu_delay_alu_state_t state = {};
-  state.epoch = UINT32_MAX;
+  loom_amdgpu_delay_alu_state_t state = {.epoch = UINT32_MAX};
   loom_amdgpu_delay_alu_complete(&state, 1 | (5 << 7));
   EXPECT_TRUE(loom_amdgpu_delay_alu_reset(&state));
   EXPECT_NE(state.epoch, 0);

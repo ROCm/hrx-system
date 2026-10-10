@@ -181,14 +181,14 @@ loomc_status_t OpenTraceArtifact(void* user_data,
                               "-" + point + "-" + ToString(event->pass_key) +
                               ".loom";
   artifacts->open_contents.clear();
-  *out_artifact = (loomc_pass_trace_artifact_t){
-      /*.reference=*/loomc_make_string_view(artifacts->open_reference.data(),
-                                            artifacts->open_reference.size()),
-      /*.sink=*/
-      {
-          /*.write=*/AppendTrace,
-          /*.user_data=*/&artifacts->open_contents,
-      },
+  *out_artifact = loomc_pass_trace_artifact_t{
+      .reference = loomc_make_string_view(artifacts->open_reference.data(),
+                                          artifacts->open_reference.size()),
+      .sink =
+          {
+              .write = AppendTrace,
+              .user_data = &artifacts->open_contents,
+          },
   };
   return loomc_ok_status();
 }
@@ -233,15 +233,15 @@ TEST(TargetWasmTest, CompilesArtifactWithEmitterDefaultPipeline) {
   TargetProfilePtr target_profile(raw_target_profile);
 
   loomc_context_target_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_environment=*/target_environment.get(),
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .target_environment = target_environment.get(),
   };
   loomc_context_options_t context_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-      /*.structure_size=*/sizeof(context_options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+      .structure_size = sizeof(context_options),
+      .next = &target_options,
   };
   loomc_context_t* raw_context = nullptr;
   LOOMC_ASSERT_OK(loomc_context_create(&context_options,
@@ -254,13 +254,13 @@ TEST(TargetWasmTest, CompilesArtifactWithEmitterDefaultPipeline) {
   WorkspacePtr workspace(raw_workspace);
 
   loomc_source_options_t source_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(source_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("exports.loom"),
-      /*.contents=*/loomc_make_byte_span(kSource, sizeof(kSource) - 1),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(source_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("exports.loom"),
+      .contents = loomc_make_byte_span(kSource, sizeof(kSource) - 1),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* raw_source = nullptr;
   LOOMC_ASSERT_OK(loomc_source_create(&source_options, loomc_allocator_system(),
@@ -281,30 +281,30 @@ TEST(TargetWasmTest, CompilesArtifactWithEmitterDefaultPipeline) {
       context.get(), nullptr, loomc_allocator_system(), &raw_compiler));
   CompilerPtr compiler(raw_compiler);
   const loomc_compile_report_options_t report_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
-      /*.structure_size=*/sizeof(report_options),
-      /*.next=*/nullptr,
-      /*.mode=*/LOOMC_COMPILE_REPORT_MODE_SUMMARY,
-      /*.format=*/LOOMC_COMPILE_REPORT_FORMAT_JSON,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(report_options),
+      .next = nullptr,
+      .mode = LOOMC_COMPILE_REPORT_MODE_SUMMARY,
+      .format = LOOMC_COMPILE_REPORT_FORMAT_JSON,
   };
   const loomc_emit_options_t emit_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(emit_options),
-      /*.next=*/&report_options,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(emit_options),
+      .next = &report_options,
   };
   const loomc_config_options_t config_options = {
-      /*.bindings=*/nullptr,
-      /*.binding_count=*/0,
-      /*.json_object=*/loomc_string_view_empty(),
-      /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+      .bindings = nullptr,
+      .binding_count = 0,
+      .json_object = loomc_string_view_empty(),
+      .flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
   };
   const loomc_sanitizer_options_t sanitizer_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
-      /*.structure_size=*/sizeof(sanitizer_options),
-      /*.next=*/nullptr,
-      /*.checks=*/LOOMC_SANITIZER_CHECKS_ASAN_LIKE,
-      /*.flags=*/LOOMC_SANITIZER_FLAG_NONE,
-      /*.reporting_mode=*/LOOMC_SANITIZER_REPORTING_MODE_TRAP,
+      .type = LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
+      .structure_size = sizeof(sanitizer_options),
+      .next = nullptr,
+      .checks = LOOMC_SANITIZER_CHECKS_ASAN_LIKE,
+      .flags = LOOMC_SANITIZER_FLAG_NONE,
+      .reporting_mode = LOOMC_SANITIZER_REPORTING_MODE_TRAP,
   };
   TraceArtifacts trace_artifacts;
   std::string pass_trace;
@@ -312,49 +312,49 @@ TEST(TargetWasmTest, CompilesArtifactWithEmitterDefaultPipeline) {
       loomc_make_cstring_view("prepared-low"),
   };
   const loomc_pass_trace_options_t pass_trace_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_PASS_TRACE_OPTIONS,
-      /*.structure_size=*/sizeof(pass_trace_options),
-      /*.next=*/&sanitizer_options,
-      /*.format=*/LOOMC_PASS_TRACE_FORMAT_JSONL,
-      /*.flags=*/0,
-      /*.tool_name=*/loomc_make_cstring_view("loomc-wasm-test"),
-      /*.input_identifier=*/loomc_make_cstring_view("exports.loom"),
-      /*.before_filters=*/before_filters,
-      /*.before_filter_count=*/IREE_ARRAYSIZE(before_filters),
-      /*.after_filters=*/nullptr,
-      /*.after_filter_count=*/0,
-      /*.sink=*/
-      {
-          /*.write=*/AppendTrace,
-          /*.user_data=*/&pass_trace,
-      },
-      /*.artifact_sink=*/
-      {
-          /*.open=*/OpenTraceArtifact,
-          /*.close=*/CloseTraceArtifact,
-          /*.user_data=*/&trace_artifacts,
-      },
+      .type = LOOMC_STRUCTURE_TYPE_PASS_TRACE_OPTIONS,
+      .structure_size = sizeof(pass_trace_options),
+      .next = &sanitizer_options,
+      .format = LOOMC_PASS_TRACE_FORMAT_JSONL,
+      .flags = 0,
+      .tool_name = loomc_make_cstring_view("loomc-wasm-test"),
+      .input_identifier = loomc_make_cstring_view("exports.loom"),
+      .before_filters = before_filters,
+      .before_filter_count = IREE_ARRAYSIZE(before_filters),
+      .after_filters = nullptr,
+      .after_filter_count = 0,
+      .sink =
+          {
+              .write = AppendTrace,
+              .user_data = &pass_trace,
+          },
+      .artifact_sink =
+          {
+              .open = OpenTraceArtifact,
+              .close = CloseTraceArtifact,
+              .user_data = &trace_artifacts,
+          },
   };
   const loomc_string_view_t excluded_roots[] = {
       loomc_make_cstring_view("dead_config_user"),
   };
   const loomc_compile_artifact_options_t compile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
-      /*.structure_size=*/sizeof(compile_options),
-      /*.next=*/&pass_trace_options,
-      /*.roots=*/nullptr,
-      /*.root_count=*/0,
-      /*.excluded_roots=*/excluded_roots,
-      /*.excluded_root_count=*/IREE_ARRAYSIZE(excluded_roots),
-      /*.target_profile=*/target_profile.get(),
-      /*.config=*/&config_options,
-      /*.emit_options=*/&emit_options,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .next = &pass_trace_options,
+      .roots = nullptr,
+      .root_count = 0,
+      .excluded_roots = excluded_roots,
+      .excluded_root_count = IREE_ARRAYSIZE(excluded_roots),
+      .target_profile = target_profile.get(),
+      .config = &config_options,
+      .emit_options = &emit_options,
   };
   const loomc_artifact_manifest_options_t manifest_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
-      /*.structure_size=*/sizeof(manifest_options),
-      /*.next=*/nullptr,
-      /*.mode=*/LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY,
+      .type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
+      .structure_size = sizeof(manifest_options),
+      .next = nullptr,
+      .mode = LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY,
   };
   loomc_emit_options_t manifest_emit_options = emit_options;
   manifest_emit_options.next = &manifest_options;

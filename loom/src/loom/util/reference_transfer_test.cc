@@ -45,12 +45,13 @@ class ReferenceTransferTest : public ::testing::Test {
 
   loom_value_facts_t Buffer(loom_value_id_t value,
                             loom_value_fact_reference_origin_t origin) {
-    loom_value_fact_buffer_reference_t reference = {};
-    reference.maximum_byte_extent = loom_value_facts_exact_i64(256);
-    reference.minimum_alignment = 64;
-    reference.root_value_id = value;
-    reference.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
-    reference.origin = origin;
+    loom_value_fact_buffer_reference_t reference = {
+        .maximum_byte_extent = loom_value_facts_exact_i64(256),
+        .minimum_alignment = 64,
+        .root_value_id = value,
+        .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
+        .origin = origin,
+    };
     loom_value_facts_t facts;
     IREE_CHECK_OK(loom_value_facts_make_buffer_reference(&facts_.context,
                                                          reference, &facts));
@@ -186,18 +187,18 @@ TEST_F(ReferenceTransferTest, RebindingPreservesOtherFactsAndInternsOrigins) {
 
 TEST_F(ReferenceTransferTest, ViewOriginsPreserveCoordinatesAcrossTables) {
   const auto buffer = Argument(loom_type_buffer());
-  loom_value_fact_view_reference_t source_reference = {};
-  source_reference.base_byte_offset = loom_value_facts_exact_i64(16);
-  source_reference.footprint_byte_length = loom_value_facts_exact_i64(32);
-  source_reference.minimum_alignment = 16;
-  source_reference.root_minimum_alignment = 64;
-  source_reference.static_element_byte_count = 4;
-  source_reference.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;
-  source_reference.root_value_id = buffer;
-  source_reference.buffer_value_id = buffer;
-  source_reference.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
-  source_reference.origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY,
-                             buffer};
+  loom_value_fact_view_reference_t source_reference = {
+      .base_byte_offset = loom_value_facts_exact_i64(16),
+      .footprint_byte_length = loom_value_facts_exact_i64(32),
+      .minimum_alignment = 16,
+      .root_minimum_alignment = 64,
+      .static_element_byte_count = 4,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+      .root_value_id = buffer,
+      .buffer_value_id = buffer,
+      .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
+      .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, buffer},
+  };
   loom_value_facts_t source;
   IREE_ASSERT_OK(loom_value_facts_make_view_reference(
       &facts_.context, source_reference, &source));

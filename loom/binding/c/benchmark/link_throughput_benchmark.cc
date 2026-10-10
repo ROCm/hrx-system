@@ -121,16 +121,16 @@ class LinkCatalogFixture {
     std::string source_text =
         BuildCatalogSource(root_count_, values_per_root_, &root_names_);
     const loomc_source_options_t source_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-        /*.structure_size=*/sizeof(source_options),
-        /*.next=*/nullptr,
-        /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-        /*.identifier=*/loomc_make_cstring_view("link_catalog.loom"),
-        /*.contents=*/
-        loomc_make_byte_span(source_text.data(), source_text.size()),
-        /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
-        /*.release=*/nullptr,
-        /*.release_user_data=*/nullptr,
+        .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+        .structure_size = sizeof(source_options),
+        .next = nullptr,
+        .format = LOOMC_SOURCE_FORMAT_TEXT,
+        .identifier = loomc_make_cstring_view("link_catalog.loom"),
+        .contents =
+            loomc_make_byte_span(source_text.data(), source_text.size()),
+        .storage = LOOMC_SOURCE_STORAGE_COPY,
+        .release = nullptr,
+        .release_user_data = nullptr,
     };
     loomc_source_t* source = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(
@@ -158,12 +158,12 @@ class LinkCatalogFixture {
           RequireSucceededResult(result_ptr.get(), "catalog parsing"));
 
       const loomc_module_serialize_options_t serialize_options = {
-          /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-          /*.structure_size=*/sizeof(serialize_options),
-          /*.next=*/nullptr,
-          /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
-          /*.identifier=*/loomc_make_cstring_view("link_catalog.loombc"),
-          /*.text_presentation=*/LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT,
+          .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+          .structure_size = sizeof(serialize_options),
+          .next = nullptr,
+          .format = LOOMC_SOURCE_FORMAT_BYTECODE,
+          .identifier = loomc_make_cstring_view("link_catalog.loombc"),
+          .text_presentation = LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT,
       };
       loomc_source_t* bytecode_source = nullptr;
       IREE_RETURN_IF_ERROR(to_iree_status(loomc_module_serialize_to_source(
@@ -191,8 +191,8 @@ class LinkCatalogFixture {
     LinkIndexBuilderPtr builder_ptr(builder);
 
     const loomc_link_index_source_options_t source_options = {
-        /*.provider_name=*/loomc_make_cstring_view("catalog"),
-        /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = loomc_make_cstring_view("catalog"),
+        .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
     };
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_link_index_builder_add_source(
         builder_ptr.get(), source_.get(), &source_options,
@@ -238,16 +238,16 @@ class LinkCatalogFixture {
     const loomc_string_view_t root_symbol =
         loomc_make_string_view(root.data(), root.size());
     const loomc_link_options_t options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
-        /*.structure_size=*/sizeof(options),
-        /*.next=*/nullptr,
-        /*.link_index=*/index,
-        /*.module_name=*/loomc_make_cstring_view("selected_kernel"),
-        /*.mode=*/LOOMC_LINK_MODE_LINK,
-        /*.root_symbols=*/&root_symbol,
-        /*.root_symbol_count=*/1,
-        /*.flags=*/0,
-        /*.config=*/{},
+        .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+        .structure_size = sizeof(options),
+        .next = nullptr,
+        .link_index = index,
+        .module_name = loomc_make_cstring_view("selected_kernel"),
+        .mode = LOOMC_LINK_MODE_LINK,
+        .root_symbols = &root_symbol,
+        .root_symbol_count = 1,
+        .flags = 0,
+        .config = {},
     };
     loomc_module_t* module = nullptr;
     loomc_result_t* result = nullptr;

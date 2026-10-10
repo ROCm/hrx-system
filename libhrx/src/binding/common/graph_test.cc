@@ -128,9 +128,9 @@ TEST(GraphTest, ReorderedAddedDependencyUsesFinalWorkstreamIndex) {
   }
 
   iree_hal_streaming_graph_edge_t edge = {
-      /*.next=*/nullptr,
-      /*.from=*/node_storage[17].get(),
-      /*.to=*/node_storage[0].get(),
+      .next = nullptr,
+      .from = node_storage[17].get(),
+      .to = node_storage[0].get(),
   };
 
   iree_arena_block_pool_t block_pool;
@@ -160,18 +160,19 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
   std::array<iree_hal_streaming_parameter_op_t, kArgumentCount> operations = {};
   for (uint16_t i = 0; i < kArgumentCount; ++i) {
     operations[i].copy = {
-        /*.size=*/sizeof(uint32_t),
-        /*.native_abi_destination_offset=*/
-        static_cast<uint16_t>(i * sizeof(uint32_t)),
-        /*.source_offset=*/static_cast<uint16_t>(i * sizeof(uint32_t)),
-        /*.source_ordinal=*/static_cast<uint16_t>(i),
-        /*.constant_destination_offset=*/
-        static_cast<uint16_t>(i * sizeof(uint32_t)),
+        .size = sizeof(uint32_t),
+        .native_abi_destination_offset =
+            static_cast<uint16_t>(i * sizeof(uint32_t)),
+        .source_offset = static_cast<uint16_t>(i * sizeof(uint32_t)),
+        .source_ordinal = static_cast<uint16_t>(i),
+        .constant_destination_offset =
+            static_cast<uint16_t>(i * sizeof(uint32_t)),
     };
   }
 
-  iree_hal_streaming_symbol_t symbol = {};
-  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  iree_hal_streaming_symbol_t symbol = {
+      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
+  };
   symbol.parameters.buffer_size = kArgumentCount * sizeof(uint32_t);
   symbol.parameters.constant_bytes = kArgumentCount * sizeof(uint32_t);
   symbol.parameters.direct_arg_bytes = kArgumentCount * sizeof(uint32_t);
@@ -180,8 +181,9 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
 
   for (size_t missing_ordinal = 0; missing_ordinal < kArgumentCount;
        ++missing_ordinal) {
-    iree_hal_streaming_graph_t graph = {};
-    graph.host_allocator = iree_allocator_system();
+    iree_hal_streaming_graph_t graph = {
+        .host_allocator = iree_allocator_system(),
+    };
 
     std::array<uint8_t, kArgumentCount * sizeof(uint32_t)> constants = {};
     memset(constants.data(), 0xA5, constants.size());
@@ -208,8 +210,8 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
                                           /*length=*/31),
     };
     node.attrs.kernel.bindings = {
-        /*.count=*/binding_storage.size(),
-        /*.values=*/binding_storage.data(),
+        .count = binding_storage.size(),
+        .values = binding_storage.data(),
     };
     node.attrs.kernel.binding_capacity = binding_storage.size();
 
@@ -221,12 +223,12 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
     };
     arguments[missing_ordinal] = nullptr;
     const iree_hal_streaming_dispatch_params_t params = {
-        /*.grid_dim=*/{23, 29, 31},
-        /*.block_dim=*/{37, 41, 43},
-        /*.shared_memory_bytes=*/47,
-        /*.buffer=*/arguments.data(),
-        /*.buffer_size=*/0,
-        /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
+        .grid_dim = {23, 29, 31},
+        .block_dim = {37, 41, 43},
+        .shared_memory_bytes = 47,
+        .buffer = arguments.data(),
+        .buffer_size = 0,
+        .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
     };
 
     EXPECT_THAT(Status(iree_hal_streaming_graph_set_kernel_node_params(
@@ -251,8 +253,9 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
 }
 
 TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
-  iree_hal_streaming_graph_t graph = {};
-  graph.host_allocator = iree_allocator_system();
+  iree_hal_streaming_graph_t graph = {
+      .host_allocator = iree_allocator_system(),
+  };
 
   std::array<uint8_t, 16> constants = {};
   constants.fill(0x5A);
@@ -271,23 +274,24 @@ TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
   node.attrs.kernel.constants_capacity = constants.size();
   std::array<iree_hal_buffer_ref_t, 1> binding_storage = {};
   node.attrs.kernel.bindings = {
-      /*.count=*/binding_storage.size(),
-      /*.values=*/binding_storage.data(),
+      .count = binding_storage.size(),
+      .values = binding_storage.data(),
   };
   node.attrs.kernel.binding_capacity = binding_storage.size();
 
-  iree_hal_streaming_symbol_t symbol = {};
-  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  iree_hal_streaming_symbol_t symbol = {
+      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
+  };
   symbol.parameters.constant_bytes = constants.size();
   symbol.parameters.direct_arg_bytes = constants.size();
 
   const iree_hal_streaming_dispatch_params_t params = {
-      /*.grid_dim=*/{},
-      /*.block_dim=*/{},
-      /*.shared_memory_bytes=*/0,
-      /*.buffer=*/reinterpret_cast<void*>(uintptr_t{1}),
-      /*.buffer_size=*/0,
-      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
+      .grid_dim = {},
+      .block_dim = {},
+      .shared_memory_bytes = 0,
+      .buffer = reinterpret_cast<void*>(uintptr_t{1}),
+      .buffer_size = 0,
+      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -303,8 +307,9 @@ TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
 }
 
 TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
-  iree_hal_streaming_graph_t graph = {};
-  graph.host_allocator = iree_allocator_system();
+  iree_hal_streaming_graph_t graph = {
+      .host_allocator = iree_allocator_system(),
+  };
 
   std::array<uint8_t, 24> constants = {};
   constants.fill(0xA5);
@@ -316,8 +321,9 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
       iree_make_const_byte_span(constants.data(), constants.size());
   node.attrs.kernel.constants_capacity = constants.size();
 
-  iree_hal_streaming_symbol_t symbol = {};
-  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  iree_hal_streaming_symbol_t symbol = {
+      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
+  };
   symbol.parameters.constant_bytes = 16;
   symbol.parameters.direct_arg_bytes = 16;
 
@@ -326,14 +332,14 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
     exact_arguments[i] = i;
   }
   const iree_hal_streaming_dispatch_params_t exact_params = {
-      /*.grid_dim=*/{},
-      /*.block_dim=*/{},
-      /*.shared_memory_bytes=*/0,
-      /*.buffer=*/exact_arguments.data(),
-      /*.buffer_size=*/exact_arguments.size(),
-      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
-      /*.workitem_count=*/{},
-      /*.binding_function=*/reinterpret_cast<void*>(uintptr_t{0x1234}),
+      .grid_dim = {},
+      .block_dim = {},
+      .shared_memory_bytes = 0,
+      .buffer = exact_arguments.data(),
+      .buffer_size = exact_arguments.size(),
+      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
+      .workitem_count = {},
+      .binding_function = reinterpret_cast<void*>(uintptr_t{0x1234}),
   };
   IREE_EXPECT_OK(iree_hal_streaming_graph_set_kernel_node_params(
       &node, &symbol, &exact_params));
@@ -353,12 +359,12 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
     padded_arguments[i] = static_cast<uint8_t>(0x80u + i);
   }
   const iree_hal_streaming_dispatch_params_t padded_params = {
-      /*.grid_dim=*/{},
-      /*.block_dim=*/{},
-      /*.shared_memory_bytes=*/0,
-      /*.buffer=*/padded_arguments.data(),
-      /*.buffer_size=*/padded_arguments.size(),
-      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
+      .grid_dim = {},
+      .block_dim = {},
+      .shared_memory_bytes = 0,
+      .buffer = padded_arguments.data(),
+      .buffer_size = padded_arguments.size(),
+      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
   };
   IREE_EXPECT_OK(iree_hal_streaming_graph_set_kernel_node_params(
       &node, &symbol, &padded_params));
@@ -369,15 +375,16 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
   EXPECT_NE(0, memcmp(padded_arguments.data(), constants.data(),
                       padded_arguments.size()));
 
-  iree_hal_streaming_symbol_t empty_symbol = {};
-  empty_symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  iree_hal_streaming_symbol_t empty_symbol = {
+      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
+  };
   const iree_hal_streaming_dispatch_params_t empty_params = {
-      /*.grid_dim=*/{},
-      /*.block_dim=*/{},
-      /*.shared_memory_bytes=*/0,
-      /*.buffer=*/nullptr,
-      /*.buffer_size=*/0,
-      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
+      .grid_dim = {},
+      .block_dim = {},
+      .shared_memory_bytes = 0,
+      .buffer = nullptr,
+      .buffer_size = 0,
+      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED,
   };
   IREE_EXPECT_OK(iree_hal_streaming_graph_set_kernel_node_params(
       &node, &empty_symbol, &empty_params));
@@ -385,8 +392,9 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
 }
 
 TEST(GraphTest, ArgsArrayPackingProducesCompleteNativeAbiImage) {
-  iree_hal_streaming_graph_t graph = {};
-  graph.host_allocator = iree_allocator_system();
+  iree_hal_streaming_graph_t graph = {
+      .host_allocator = iree_allocator_system(),
+  };
 
   constexpr iree_host_size_t kNativeArgumentSize = 52;
   std::array<uint8_t, kNativeArgumentSize> constants;
@@ -400,42 +408,43 @@ TEST(GraphTest, ArgsArrayPackingProducesCompleteNativeAbiImage) {
       iree_make_const_byte_span(constants.data(), constants.size());
   node.attrs.kernel.constants_capacity = constants.size();
   node.attrs.kernel.bindings = {
-      /*.count=*/binding_storage.size(),
-      /*.values=*/binding_storage.data(),
+      .count = binding_storage.size(),
+      .values = binding_storage.data(),
   };
   node.attrs.kernel.binding_capacity = binding_storage.size();
 
   std::array<iree_hal_streaming_parameter_op_t, 4> operations = {};
   operations[0].copy = {
-      /*.size=*/sizeof(uint32_t),
-      /*.native_abi_destination_offset=*/4,
-      /*.source_offset=*/0,
-      /*.source_ordinal=*/0,
-      /*.constant_destination_offset=*/0,
+      .size = sizeof(uint32_t),
+      .native_abi_destination_offset = 4,
+      .source_offset = 0,
+      .source_ordinal = 0,
+      .constant_destination_offset = 0,
   };
   operations[1].copy = {
-      /*.size=*/sizeof(uint16_t),
-      /*.native_abi_destination_offset=*/28,
-      /*.source_offset=*/12,
-      /*.source_ordinal=*/2,
-      /*.constant_destination_offset=*/4,
+      .size = sizeof(uint16_t),
+      .native_abi_destination_offset = 28,
+      .source_offset = 12,
+      .source_ordinal = 2,
+      .constant_destination_offset = 4,
   };
   operations[2].resolve = {
-      /*.native_abi_destination_offset=*/16,
-      /*.reserved=*/0,
-      /*.source_offset=*/4,
-      /*.source_ordinal=*/1,
-      /*.destination_ordinal=*/1,
+      .native_abi_destination_offset = 16,
+      .reserved = 0,
+      .source_offset = 4,
+      .source_ordinal = 1,
+      .destination_ordinal = 1,
   };
   operations[3].resolve = {
-      /*.native_abi_destination_offset=*/40,
-      /*.reserved=*/0,
-      /*.source_offset=*/14,
-      /*.source_ordinal=*/3,
-      /*.destination_ordinal=*/0,
+      .native_abi_destination_offset = 40,
+      .reserved = 0,
+      .source_offset = 14,
+      .source_ordinal = 3,
+      .destination_ordinal = 0,
   };
-  iree_hal_streaming_symbol_t symbol = {};
-  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  iree_hal_streaming_symbol_t symbol = {
+      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
+  };
   symbol.parameters.buffer_size = 22;
   symbol.parameters.constant_bytes = 6;
   symbol.parameters.direct_arg_bytes = kNativeArgumentSize;
@@ -454,12 +463,12 @@ TEST(GraphTest, ArgsArrayPackingProducesCompleteNativeAbiImage) {
       &pointer3,
   };
   const iree_hal_streaming_dispatch_params_t params = {
-      /*.grid_dim=*/{1, 1, 1},
-      /*.block_dim=*/{1, 1, 1},
-      /*.shared_memory_bytes=*/0,
-      /*.buffer=*/arguments.data(),
-      /*.buffer_size=*/0,
-      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
+      .grid_dim = {1, 1, 1},
+      .block_dim = {1, 1, 1},
+      .shared_memory_bytes = 0,
+      .buffer = arguments.data(),
+      .buffer_size = 0,
+      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
   };
 
   IREE_ASSERT_OK(
@@ -482,8 +491,9 @@ TEST(GraphTest, ArgsArrayPackingProducesCompleteNativeAbiImage) {
 }
 
 TEST(GraphTest, ArgsArrayPackingRejectsDuplicateSourceWithoutMutation) {
-  iree_hal_streaming_graph_t graph = {};
-  graph.host_allocator = iree_allocator_system();
+  iree_hal_streaming_graph_t graph = {
+      .host_allocator = iree_allocator_system(),
+  };
 
   std::array<uint8_t, 16> constants;
   constants.fill(0xA5);
@@ -502,28 +512,29 @@ TEST(GraphTest, ArgsArrayPackingRejectsDuplicateSourceWithoutMutation) {
       iree_make_const_byte_span(constants.data(), constants.size());
   node.attrs.kernel.constants_capacity = constants.size();
   node.attrs.kernel.bindings = {
-      /*.count=*/binding_storage.size(),
-      /*.values=*/binding_storage.data(),
+      .count = binding_storage.size(),
+      .values = binding_storage.data(),
   };
   node.attrs.kernel.binding_capacity = binding_storage.size();
 
   std::array<iree_hal_streaming_parameter_op_t, 2> operations = {};
   operations[0].copy = {
-      /*.size=*/sizeof(uint32_t),
-      /*.native_abi_destination_offset=*/0,
-      /*.source_offset=*/0,
-      /*.source_ordinal=*/0,
-      /*.constant_destination_offset=*/0,
+      .size = sizeof(uint32_t),
+      .native_abi_destination_offset = 0,
+      .source_offset = 0,
+      .source_ordinal = 0,
+      .constant_destination_offset = 0,
   };
   operations[1].resolve = {
-      /*.native_abi_destination_offset=*/8,
-      /*.reserved=*/0,
-      /*.source_offset=*/4,
-      /*.source_ordinal=*/0,
-      /*.destination_ordinal=*/0,
+      .native_abi_destination_offset = 8,
+      .reserved = 0,
+      .source_offset = 4,
+      .source_ordinal = 0,
+      .destination_ordinal = 0,
   };
-  iree_hal_streaming_symbol_t symbol = {};
-  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  iree_hal_streaming_symbol_t symbol = {
+      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
+  };
   symbol.parameters.buffer_size = 12;
   symbol.parameters.constant_bytes = 4;
   symbol.parameters.direct_arg_bytes = constants.size();
@@ -534,12 +545,12 @@ TEST(GraphTest, ArgsArrayPackingRejectsDuplicateSourceWithoutMutation) {
   uint32_t value = 7;
   std::array<void*, 1> arguments = {&value};
   const iree_hal_streaming_dispatch_params_t params = {
-      /*.grid_dim=*/{},
-      /*.block_dim=*/{},
-      /*.shared_memory_bytes=*/0,
-      /*.buffer=*/arguments.data(),
-      /*.buffer_size=*/0,
-      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
+      .grid_dim = {},
+      .block_dim = {},
+      .shared_memory_bytes = 0,
+      .buffer = arguments.data(),
+      .buffer_size = 0,
+      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
   };
 
   IREE_EXPECT_STATUS_IS(
@@ -632,8 +643,9 @@ struct FailOnAttemptAllocator {
 TEST(GraphTest, NodePublicationIsFailureAtomic) {
   FailOnAttemptAllocator allocator;
   allocator.fail_on_allocation_attempt = 3;
-  iree_hal_streaming_graph_t graph = {};
-  graph.arena_allocator = allocator.AsAllocator();
+  iree_hal_streaming_graph_t graph = {
+      .arena_allocator = allocator.AsAllocator(),
+  };
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -1269,11 +1281,11 @@ void InitializeSingleCopySymbol(uint16_t direct_arg_bytes,
                                 iree_hal_streaming_parameter_op_t* operation,
                                 iree_hal_streaming_symbol_t* out_symbol) {
   operation->copy = {
-      /*.size=*/sizeof(uint32_t),
-      /*.native_abi_destination_offset=*/destination_offset,
-      /*.source_offset=*/0,
-      /*.source_ordinal=*/0,
-      /*.constant_destination_offset=*/0,
+      .size = sizeof(uint32_t),
+      .native_abi_destination_offset = destination_offset,
+      .source_offset = 0,
+      .source_ordinal = 0,
+      .constant_destination_offset = 0,
   };
   out_symbol->type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
   out_symbol->parameters.buffer_size = sizeof(uint32_t);
@@ -1285,20 +1297,21 @@ void InitializeSingleCopySymbol(uint16_t direct_arg_bytes,
 
 TEST(GraphTest, LaunchUsesInlineArgumentStorageForSmallMetadata) {
   ProbedHostAllocator allocator;
-  iree_hal_streaming_stream_t stream = {};
-  stream.host_allocator = allocator.AsAllocator();
+  iree_hal_streaming_stream_t stream = {
+      .host_allocator = allocator.AsAllocator(),
+  };
   iree_hal_streaming_parameter_op_t operation = {};
   iree_hal_streaming_symbol_t symbol = {};
   InitializeSingleCopySymbol(/*direct_arg_bytes=*/128,
                              /*destination_offset=*/64, &operation, &symbol);
   std::array<void*, 1> arguments = {nullptr};
   const iree_hal_streaming_dispatch_params_t params = {
-      /*.grid_dim=*/{},
-      /*.block_dim=*/{},
-      /*.shared_memory_bytes=*/0,
-      /*.buffer=*/arguments.data(),
-      /*.buffer_size=*/0,
-      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
+      .grid_dim = {},
+      .block_dim = {},
+      .shared_memory_bytes = 0,
+      .buffer = arguments.data(),
+      .buffer_size = 0,
+      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
   };
 
   IREE_EXPECT_STATUS_IS(
@@ -1310,20 +1323,21 @@ TEST(GraphTest, LaunchUsesInlineArgumentStorageForSmallMetadata) {
 
 TEST(GraphTest, LaunchFreesHeapArgumentStorageAfterPackingFailure) {
   ProbedHostAllocator allocator;
-  iree_hal_streaming_stream_t stream = {};
-  stream.host_allocator = allocator.AsAllocator();
+  iree_hal_streaming_stream_t stream = {
+      .host_allocator = allocator.AsAllocator(),
+  };
   iree_hal_streaming_parameter_op_t operation = {};
   iree_hal_streaming_symbol_t symbol = {};
   InitializeSingleCopySymbol(/*direct_arg_bytes=*/512,
                              /*destination_offset=*/256, &operation, &symbol);
   std::array<void*, 1> arguments = {nullptr};
   const iree_hal_streaming_dispatch_params_t params = {
-      /*.grid_dim=*/{},
-      /*.block_dim=*/{},
-      /*.shared_memory_bytes=*/0,
-      /*.buffer=*/arguments.data(),
-      /*.buffer_size=*/0,
-      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
+      .grid_dim = {},
+      .block_dim = {},
+      .shared_memory_bytes = 0,
+      .buffer = arguments.data(),
+      .buffer_size = 0,
+      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
   };
 
   IREE_EXPECT_STATUS_IS(
@@ -1337,8 +1351,9 @@ TEST(GraphTest, LaunchFreesHeapArgumentStorageAfterPackingFailure) {
 TEST(GraphTest, LaunchReportsHeapArgumentStorageAllocationFailure) {
   ProbedHostAllocator allocator;
   allocator.fail_allocations = true;
-  iree_hal_streaming_stream_t stream = {};
-  stream.host_allocator = allocator.AsAllocator();
+  iree_hal_streaming_stream_t stream = {
+      .host_allocator = allocator.AsAllocator(),
+  };
   iree_hal_streaming_parameter_op_t operation = {};
   iree_hal_streaming_symbol_t symbol = {};
   InitializeSingleCopySymbol(/*direct_arg_bytes=*/512,
@@ -1346,12 +1361,12 @@ TEST(GraphTest, LaunchReportsHeapArgumentStorageAllocationFailure) {
   uint32_t value = 7;
   std::array<void*, 1> arguments = {&value};
   const iree_hal_streaming_dispatch_params_t params = {
-      /*.grid_dim=*/{},
-      /*.block_dim=*/{},
-      /*.shared_memory_bytes=*/0,
-      /*.buffer=*/arguments.data(),
-      /*.buffer_size=*/0,
-      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
+      .grid_dim = {},
+      .block_dim = {},
+      .shared_memory_bytes = 0,
+      .buffer = arguments.data(),
+      .buffer_size = 0,
+      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
   };
 
   IREE_EXPECT_STATUS_IS(

@@ -20,18 +20,18 @@ namespace loom {
 namespace {
 
 static const loom_attr_descriptor_t kElementParameter = {
-    /*.name=*/LOOM_BSTRING_REF(7, "element"),
-    /*.attr_kind=*/LOOM_ATTR_TYPE,
+    .name = LOOM_BSTRING_REF(7, "element"),
+    .attr_kind = LOOM_ATTR_TYPE,
 };
 static const loom_encoding_family_descriptor_t kTypedEncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(5, "typed"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/1,
-    /*.parameter_descriptors=*/&kElementParameter,
+    .name = LOOM_BSTRING_REF(5, "typed"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = 1,
+    .parameter_descriptors = &kElementParameter,
 };
 static const loom_encoding_vtable_t kTypedEncodingVtable = {
-    /*.descriptor=*/&kTypedEncodingDescriptor,
+    .descriptor = &kTypedEncodingDescriptor,
 };
 
 class MixedTablesTest : public ::testing::TestWithParam<int> {
@@ -151,7 +151,7 @@ class MixedTablesTest : public ::testing::TestWithParam<int> {
     EXPECT_EQ(module->types.count, count + encoding_offset + 1);
     EXPECT_EQ(module->encodings.count, count + encoding_offset);
     const loom_verify_options_t options = {
-        /*.sink=*/{loom_diagnostic_stderr_sink, nullptr},
+        .sink = {loom_diagnostic_stderr_sink, nullptr},
     };
     loom_verify_result_t result = {};
     IREE_ASSERT_OK(loom_verify_module(module, &options, &result));
@@ -188,7 +188,7 @@ TEST_P(MixedTablesTest, FullAndSelectedOutputSurviveSourceTeardown) {
     const auto span = iree_make_const_byte_span(bytes.data(), bytes.size());
     const auto filename = IREE_SV("mixed_tables.loombc");
     const loom_bytecode_read_options_t options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
     };
     loom_bytecode_read_result_t result = {};
     IREE_ASSERT_OK(loom_bytecode_read_module(span, filename, &context_,
@@ -197,7 +197,7 @@ TEST_P(MixedTablesTest, FullAndSelectedOutputSurviveSourceTeardown) {
     ASSERT_EQ(result.error_count, 0u);
     ASSERT_NE(full_, nullptr);
     const loom_bytecode_index_options_t index_options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
     };
     loom_bytecode_file_metadata_t metadata = {};
     IREE_ASSERT_OK(loom_bytecode_read_index(

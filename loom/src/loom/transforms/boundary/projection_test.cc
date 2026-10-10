@@ -37,13 +37,12 @@ static iree_status_t PlanZeroComponentSlot(
     return iree_ok_status();
   }
   *out_schema = {
-      /*.rule=*/rule,
-      /*.component_types=*/nullptr,
-      /*.component_name_suffixes=*/nullptr,
-      /*.component_count=*/0,
-      /*.destination_mode=*/
-      LOOM_BOUNDARY_PROJECTION_DESTINATION_RECONSTRUCT,
-      /*.rule_plan=*/nullptr,
+      .rule = rule,
+      .component_types = nullptr,
+      .component_name_suffixes = nullptr,
+      .component_count = 0,
+      .destination_mode = LOOM_BOUNDARY_PROJECTION_DESTINATION_RECONSTRUCT,
+      .rule_plan = nullptr,
   };
   *out_claimed = true;
   return iree_ok_status();
@@ -63,9 +62,9 @@ static iree_status_t PlanZeroComponentSource(
   (void)source_value_id;
   IREE_ASSERT(schema->rule == rule);
   *out_source = {
-      /*.rule=*/rule,
-      /*.rule_plan=*/nullptr,
-      /*.boundary_op=*/boundary_op,
+      .rule = rule,
+      .rule_plan = nullptr,
+      .boundary_op = boundary_op,
   };
   *out_planned = true;
   return iree_ok_status();
@@ -103,24 +102,22 @@ static iree_status_t ReconstructZeroComponentSlot(
 }
 
 static const loom_boundary_projection_rule_t kZeroComponentRule = {
-    /*.name=*/IREE_SVL("test-zero-component"),
-    /*.type_kind_bits=*/
-    LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
-    /*.slot_role_bits=*/
-    LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
+    .name = IREE_SVL("test-zero-component"),
+    .type_kind_bits = LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
+    .slot_role_bits = LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
         LOOM_BOUNDARY_PROJECTION_SLOT_BLOCK_ARGUMENT),
-    /*.function_applies=*/nullptr,
-    /*.slot_matches=*/nullptr,
-    /*.initialize=*/nullptr,
-    /*.prepare_function=*/nullptr,
-    /*.plan_slot=*/PlanZeroComponentSlot,
-    /*.transport=*/
-    {
-        /*.plan_source=*/PlanZeroComponentSource,
-        /*.materialize_source=*/MaterializeZeroComponentSource,
-        /*.reconstruct=*/ReconstructZeroComponentSlot,
-        /*.eliminate=*/nullptr,
-    },
+    .function_applies = nullptr,
+    .slot_matches = nullptr,
+    .initialize = nullptr,
+    .prepare_function = nullptr,
+    .plan_slot = PlanZeroComponentSlot,
+    .transport =
+        {
+            .plan_source = PlanZeroComponentSource,
+            .materialize_source = MaterializeZeroComponentSource,
+            .reconstruct = ReconstructZeroComponentSlot,
+            .eliminate = nullptr,
+        },
 };
 
 typedef struct IdentitySourcePlan {
@@ -151,12 +148,12 @@ static iree_status_t PlanEliminativeIdentitySlot(
                                            (void**)&component_type));
   *component_type = type;
   *out_schema = {
-      /*.rule=*/rule,
-      /*.component_types=*/component_type,
-      /*.component_name_suffixes=*/nullptr,
-      /*.component_count=*/1,
-      /*.destination_mode=*/LOOM_BOUNDARY_PROJECTION_DESTINATION_ELIMINATE,
-      /*.rule_plan=*/nullptr,
+      .rule = rule,
+      .component_types = component_type,
+      .component_name_suffixes = nullptr,
+      .component_count = 1,
+      .destination_mode = LOOM_BOUNDARY_PROJECTION_DESTINATION_ELIMINATE,
+      .rule_plan = nullptr,
   };
   *out_claimed = true;
   return iree_ok_status();
@@ -195,9 +192,9 @@ static iree_status_t PlanRejectableEliminativeIdentitySource(
                                            (void**)&source_plan));
   source_plan->value_id = source_value_id;
   *out_source = {
-      /*.rule=*/rule,
-      /*.rule_plan=*/source_plan,
-      /*.boundary_op=*/boundary_op,
+      .rule = rule,
+      .rule_plan = source_plan,
+      .boundary_op = boundary_op,
   };
   *out_planned = true;
   return iree_ok_status();
@@ -238,24 +235,22 @@ static iree_status_t EliminateIdentitySlot(
 }
 
 static const loom_boundary_projection_rule_t kRejectableIdentityRule = {
-    /*.name=*/IREE_SVL("test-rejectable-identity"),
-    /*.type_kind_bits=*/
-    LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
-    /*.slot_role_bits=*/
-    LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
+    .name = IREE_SVL("test-rejectable-identity"),
+    .type_kind_bits = LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
+    .slot_role_bits = LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
         LOOM_BOUNDARY_PROJECTION_SLOT_BLOCK_ARGUMENT),
-    /*.function_applies=*/nullptr,
-    /*.slot_matches=*/nullptr,
-    /*.initialize=*/nullptr,
-    /*.prepare_function=*/nullptr,
-    /*.plan_slot=*/PlanEliminativeIdentitySlot,
-    /*.transport=*/
-    {
-        /*.plan_source=*/PlanRejectableEliminativeIdentitySource,
-        /*.materialize_source=*/MaterializeEliminativeIdentitySource,
-        /*.reconstruct=*/nullptr,
-        /*.eliminate=*/EliminateIdentitySlot,
-    },
+    .function_applies = nullptr,
+    .slot_matches = nullptr,
+    .initialize = nullptr,
+    .prepare_function = nullptr,
+    .plan_slot = PlanEliminativeIdentitySlot,
+    .transport =
+        {
+            .plan_source = PlanRejectableEliminativeIdentitySource,
+            .materialize_source = MaterializeEliminativeIdentitySource,
+            .reconstruct = nullptr,
+            .eliminate = EliminateIdentitySlot,
+        },
 };
 
 typedef struct FinalPlanObservation {
@@ -310,9 +305,9 @@ static iree_status_t CountSelectedFunctionPreparation(
 }
 
 static const loom_pass_info_t kProjectionPassInfo = {
-    /*.name=*/IREE_SVL("test-boundary-projection"),
-    /*.description=*/IREE_SVL("Test boundary projection."),
-    /*.kind=*/LOOM_PASS_MODULE,
+    .name = IREE_SVL("test-boundary-projection"),
+    .description = IREE_SVL("Test boundary projection."),
+    .kind = LOOM_PASS_MODULE,
 };
 
 class BoundaryProjectionTest : public ::testing::Test {
@@ -377,7 +372,7 @@ class BoundaryProjectionTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(&module_builder_, name, &name_id));
     loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    return {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    return {.module_id = 0, .symbol_id = symbol_id};
   }
 
   loom_builder_t BlockBuilder(loom_op_t* function_op, loom_block_t* block) {
@@ -459,14 +454,14 @@ class BoundaryProjectionTest : public ::testing::Test {
     const loom_boundary_projection_rule_t* rules[] = {rule};
     IREE_ASSERT_OK(loom_boundary_projection_run(
         &pass_, module_, /*version_list=*/nullptr,
-        {/*.values=*/rules, /*.count=*/IREE_ARRAYSIZE(rules)}, plan_sink,
+        {.values = rules, .count = IREE_ARRAYSIZE(rules)}, plan_sink,
         out_statistics));
   }
 
   void Verify(loom_module_t* module) {
     const loom_verify_options_t options = {
-        /*.sink=*/{loom_diagnostic_stderr_sink, nullptr},
-        /*.max_errors=*/20,
+        .sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 20,
     };
     loom_verify_result_t result = {};
     IREE_EXPECT_OK(loom_verify_module(module, &options, &result));
@@ -509,12 +504,12 @@ TEST_F(BoundaryProjectionTest, ObservesFinalPlanBeforeMutation) {
   Verify(module_);
 
   FinalPlanObservation observation = {
-      /*.block=*/diamond.projected_block,
-      /*.value_id=*/diamond.projected_argument,
+      .block = diamond.projected_block,
+      .value_id = diamond.projected_argument,
   };
   const loom_boundary_projection_plan_sink_t plan_sink = {
-      /*.fn=*/ObserveFinalPlan,
-      /*.user_data=*/&observation,
+      .fn = ObserveFinalPlan,
+      .user_data = &observation,
   };
   loom_boundary_projection_statistics_t statistics = {};
   Project(&kZeroComponentRule, &statistics, &plan_sink);

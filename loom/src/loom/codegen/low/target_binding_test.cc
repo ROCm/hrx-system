@@ -80,8 +80,7 @@ class LowTargetBindingTest : public ::testing::Test {
 
   ModulePtr ParseModule(const char* source) {
     loom_module_t* module = nullptr;
-    loom_text_parse_options_t options = {};
-    options.max_errors = 20;
+    loom_text_parse_options_t options = {.max_errors = 20};
     loom_low_descriptor_text_asm_environment_initialize(
         &registry_, &options.low_asm_environment);
     IREE_CHECK_OK(loom_text_parse(iree_make_cstring_view(source),
@@ -369,8 +368,8 @@ low.func.def target<test.low.core>(@target) @kernel() {
       LookupFunctionOp(module.get(), IREE_SV("kernel")),
       /*function_target_facts=*/nullptr, &empty_registry,
       {
-          /*.fn=*/CaptureDiagnostic,
-          /*.user_data=*/&capture,
+          .fn = CaptureDiagnostic,
+          .user_data = &capture,
       },
       &target));
 
@@ -420,8 +419,8 @@ low.func.def target<test.low.alt>(@target) @kernel() {
       LookupFunctionOp(module.get(), IREE_SV("kernel")),
       /*function_target_facts=*/nullptr, &registry_,
       {
-          /*.fn=*/CaptureDiagnostic,
-          /*.user_data=*/&capture,
+          .fn = CaptureDiagnostic,
+          .user_data = &capture,
       },
       &target));
 

@@ -96,16 +96,16 @@ class TargetFactsTest : public ::testing::Test {
 
 TEST(TargetFactRelationTest, DistinctFactsRequireFamilyIdentityRelation) {
   static const loom_target_fact_type_t kFactType = {
-      /*.name=*/IREE_SVL("no-identity"),
-      /*.storage_size=*/sizeof(loom_target_facts_t),
+      .name = IREE_SVL("no-identity"),
+      .storage_size = sizeof(loom_target_facts_t),
   };
   const loom_target_facts_t lhs = {
-      /*.fact_type=*/&kFactType,
-      /*.selector=*/7,
+      .fact_type = &kFactType,
+      .selector = 7,
   };
   const loom_target_facts_t rhs = {
-      /*.fact_type=*/&kFactType,
-      /*.selector=*/7,
+      .fact_type = &kFactType,
+      .selector = 7,
   };
 
   EXPECT_TRUE(loom_target_facts_satisfy_identity_requirement(&lhs, &lhs));
@@ -142,19 +142,20 @@ TEST_F(TargetFactsTest, ProjectionBorrowsStringsWithoutRetainingSourceAccess) {
   loom_target_facts_t second;
   {
     loom_target_record_view_t record = {
-        /*.descriptor=*/descriptor,
-        /*.name=*/IREE_SV("source_target"),
-        /*.attributes=*/attributes.data(),
-        /*.attribute_count=*/vtable->attribute_count,
-        /*.selector=*/selector,
-        /*.strings=*/
-        {
-            /*.context=*/first_strings,
-            /*.lookup=*/
-            [](const void* context, loom_string_id_t id) {
-              return static_cast<const iree_string_view_t*>(context)[id];
+        .descriptor = descriptor,
+        .name = IREE_SV("source_target"),
+        .attributes = attributes.data(),
+        .attribute_count = vtable->attribute_count,
+        .selector = selector,
+        .strings =
+            {
+                .context = first_strings,
+                .lookup =
+                    [](const void* context, loom_string_id_t id) {
+                      return static_cast<const iree_string_view_t*>(
+                          context)[id];
+                    },
             },
-        },
     };
     loom_target_facts_project_record(&record, bundle, &first);
     record.strings.context = second_strings;

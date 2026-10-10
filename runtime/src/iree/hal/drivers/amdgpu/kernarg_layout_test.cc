@@ -28,14 +28,14 @@ static std::vector<uint8_t> AllocateStorage(
 
 TEST(KernargLayoutTest, InitializesPackedBindingPrefixLayout) {
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {/*.target_qword_index=*/0},
-      {/*.target_qword_index=*/1},
+      {.target_qword_index = 0},
+      {.target_qword_index = 1},
   };
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          /*.target_byte_offset=*/16,
-          /*.source_byte_offset=*/0,
-          /*.byte_length=*/8,
+          .target_byte_offset = 16,
+          .source_byte_offset = 0,
+          .byte_length = 8,
       },
   };
   std::vector<uint8_t> storage = AllocateStorage(
@@ -44,16 +44,16 @@ TEST(KernargLayoutTest, InitializesPackedBindingPrefixLayout) {
       reinterpret_cast<iree_hal_amdgpu_kernarg_layout_t*>(storage.data());
 
   iree_hal_amdgpu_kernarg_layout_params_t params = {
-      /*.kernarg_byte_length=*/24,
-      /*.kernarg_alignment=*/8,
-      /*.constant_byte_length=*/8,
-      /*.implicit_args_byte_offset=*/
-      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
-      /*.declared_flags=*/{},
-      /*.binding_count=*/IREE_ARRAYSIZE(binding_slots),
-      /*.binding_slots=*/binding_slots,
-      /*.constant_span_count=*/IREE_ARRAYSIZE(constant_spans),
-      /*.constant_spans=*/constant_spans,
+      .kernarg_byte_length = 24,
+      .kernarg_alignment = 8,
+      .constant_byte_length = 8,
+      .implicit_args_byte_offset =
+          IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
+      .declared_flags = {},
+      .binding_count = IREE_ARRAYSIZE(binding_slots),
+      .binding_slots = binding_slots,
+      .constant_span_count = IREE_ARRAYSIZE(constant_spans),
+      .constant_spans = constant_spans,
   };
   IREE_ASSERT_OK(iree_hal_amdgpu_kernarg_layout_initialize(
       &params, storage.size(), layout));
@@ -84,18 +84,18 @@ TEST(KernargLayoutTest, InitializesPackedBindingPrefixLayout) {
 
 TEST(KernargLayoutTest, MarksSparseInterleavedLayoutForZeroFill) {
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {/*.target_qword_index=*/1},
+      {.target_qword_index = 1},
   };
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          /*.target_byte_offset=*/0,
-          /*.source_byte_offset=*/0,
-          /*.byte_length=*/3,
+          .target_byte_offset = 0,
+          .source_byte_offset = 0,
+          .byte_length = 3,
       },
       {
-          /*.target_byte_offset=*/20,
-          /*.source_byte_offset=*/3,
-          /*.byte_length=*/2,
+          .target_byte_offset = 20,
+          .source_byte_offset = 3,
+          .byte_length = 2,
       },
   };
   std::vector<uint8_t> storage = AllocateStorage(
@@ -104,16 +104,16 @@ TEST(KernargLayoutTest, MarksSparseInterleavedLayoutForZeroFill) {
       reinterpret_cast<iree_hal_amdgpu_kernarg_layout_t*>(storage.data());
 
   iree_hal_amdgpu_kernarg_layout_params_t params = {
-      /*.kernarg_byte_length=*/24,
-      /*.kernarg_alignment=*/8,
-      /*.constant_byte_length=*/5,
-      /*.implicit_args_byte_offset=*/
-      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
-      /*.declared_flags=*/{},
-      /*.binding_count=*/IREE_ARRAYSIZE(binding_slots),
-      /*.binding_slots=*/binding_slots,
-      /*.constant_span_count=*/IREE_ARRAYSIZE(constant_spans),
-      /*.constant_spans=*/constant_spans,
+      .kernarg_byte_length = 24,
+      .kernarg_alignment = 8,
+      .constant_byte_length = 5,
+      .implicit_args_byte_offset =
+          IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
+      .declared_flags = {},
+      .binding_count = IREE_ARRAYSIZE(binding_slots),
+      .binding_slots = binding_slots,
+      .constant_span_count = IREE_ARRAYSIZE(constant_spans),
+      .constant_spans = constant_spans,
   };
   IREE_ASSERT_OK(iree_hal_amdgpu_kernarg_layout_initialize(
       &params, storage.size(), layout));
@@ -129,7 +129,7 @@ TEST(KernargLayoutTest, MarksSparseInterleavedLayoutForZeroFill) {
 
 TEST(KernargLayoutTest, MarksImplicitArgsLayoutForZeroFill) {
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {/*.target_qword_index=*/0},
+      {.target_qword_index = 0},
   };
   std::vector<uint8_t> storage = AllocateStorage(IREE_ARRAYSIZE(binding_slots),
                                                  /*constant_span_count=*/0);
@@ -137,13 +137,13 @@ TEST(KernargLayoutTest, MarksImplicitArgsLayoutForZeroFill) {
       reinterpret_cast<iree_hal_amdgpu_kernarg_layout_t*>(storage.data());
 
   iree_hal_amdgpu_kernarg_layout_params_t params = {
-      /*.kernarg_byte_length=*/272,
-      /*.kernarg_alignment=*/8,
-      /*.constant_byte_length=*/0,
-      /*.implicit_args_byte_offset=*/16,
-      /*.declared_flags=*/{},
-      /*.binding_count=*/IREE_ARRAYSIZE(binding_slots),
-      /*.binding_slots=*/binding_slots,
+      .kernarg_byte_length = 272,
+      .kernarg_alignment = 8,
+      .constant_byte_length = 0,
+      .implicit_args_byte_offset = 16,
+      .declared_flags = {},
+      .binding_count = IREE_ARRAYSIZE(binding_slots),
+      .binding_slots = binding_slots,
   };
   IREE_ASSERT_OK(iree_hal_amdgpu_kernarg_layout_initialize(
       &params, storage.size(), layout));
@@ -157,13 +157,13 @@ TEST(KernargLayoutTest, MarksImplicitArgsLayoutForZeroFill) {
 
 TEST(KernargLayoutTest, RejectsImplicitBlockCountWithoutImplicitArgs) {
   iree_hal_amdgpu_kernarg_layout_params_t params = {
-      /*.kernarg_byte_length=*/16,
-      /*.kernarg_alignment=*/8,
-      /*.constant_byte_length=*/{},
-      /*.implicit_args_byte_offset=*/
-      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
-      /*.declared_flags=*/
-      IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_USES_IMPLICIT_BLOCK_COUNT,
+      .kernarg_byte_length = 16,
+      .kernarg_alignment = 8,
+      .constant_byte_length = {},
+      .implicit_args_byte_offset =
+          IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
+      .declared_flags =
+          IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_USES_IMPLICIT_BLOCK_COUNT,
   };
   std::vector<uint8_t> storage = AllocateStorage(/*binding_count=*/0,
                                                  /*constant_span_count=*/0);
@@ -177,14 +177,14 @@ TEST(KernargLayoutTest, RejectsImplicitBlockCountWithoutImplicitArgs) {
 
 TEST(KernargLayoutTest, EmplacesPackedBindingPrefixLayout) {
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {/*.target_qword_index=*/0},
-      {/*.target_qword_index=*/1},
+      {.target_qword_index = 0},
+      {.target_qword_index = 1},
   };
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          /*.target_byte_offset=*/16,
-          /*.source_byte_offset=*/0,
-          /*.byte_length=*/4,
+          .target_byte_offset = 16,
+          .source_byte_offset = 0,
+          .byte_length = 4,
       },
   };
   std::vector<uint8_t> storage = AllocateStorage(
@@ -192,16 +192,16 @@ TEST(KernargLayoutTest, EmplacesPackedBindingPrefixLayout) {
   iree_hal_amdgpu_kernarg_layout_t* layout =
       reinterpret_cast<iree_hal_amdgpu_kernarg_layout_t*>(storage.data());
   iree_hal_amdgpu_kernarg_layout_params_t params = {
-      /*.kernarg_byte_length=*/20,
-      /*.kernarg_alignment=*/8,
-      /*.constant_byte_length=*/4,
-      /*.implicit_args_byte_offset=*/
-      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
-      /*.declared_flags=*/{},
-      /*.binding_count=*/IREE_ARRAYSIZE(binding_slots),
-      /*.binding_slots=*/binding_slots,
-      /*.constant_span_count=*/IREE_ARRAYSIZE(constant_spans),
-      /*.constant_spans=*/constant_spans,
+      .kernarg_byte_length = 20,
+      .kernarg_alignment = 8,
+      .constant_byte_length = 4,
+      .implicit_args_byte_offset =
+          IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
+      .declared_flags = {},
+      .binding_count = IREE_ARRAYSIZE(binding_slots),
+      .binding_slots = binding_slots,
+      .constant_span_count = IREE_ARRAYSIZE(constant_spans),
+      .constant_spans = constant_spans,
   };
   IREE_ASSERT_OK(iree_hal_amdgpu_kernarg_layout_initialize(
       &params, storage.size(), layout));
@@ -226,18 +226,18 @@ TEST(KernargLayoutTest, EmplacesPackedBindingPrefixLayout) {
 
 TEST(KernargLayoutTest, EmplacesSparseInterleavedLayoutWithZeroFill) {
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {/*.target_qword_index=*/1},
+      {.target_qword_index = 1},
   };
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          /*.target_byte_offset=*/0,
-          /*.source_byte_offset=*/0,
-          /*.byte_length=*/3,
+          .target_byte_offset = 0,
+          .source_byte_offset = 0,
+          .byte_length = 3,
       },
       {
-          /*.target_byte_offset=*/20,
-          /*.source_byte_offset=*/3,
-          /*.byte_length=*/2,
+          .target_byte_offset = 20,
+          .source_byte_offset = 3,
+          .byte_length = 2,
       },
   };
   std::vector<uint8_t> storage = AllocateStorage(
@@ -245,16 +245,16 @@ TEST(KernargLayoutTest, EmplacesSparseInterleavedLayoutWithZeroFill) {
   iree_hal_amdgpu_kernarg_layout_t* layout =
       reinterpret_cast<iree_hal_amdgpu_kernarg_layout_t*>(storage.data());
   iree_hal_amdgpu_kernarg_layout_params_t params = {
-      /*.kernarg_byte_length=*/24,
-      /*.kernarg_alignment=*/8,
-      /*.constant_byte_length=*/5,
-      /*.implicit_args_byte_offset=*/
-      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
-      /*.declared_flags=*/{},
-      /*.binding_count=*/IREE_ARRAYSIZE(binding_slots),
-      /*.binding_slots=*/binding_slots,
-      /*.constant_span_count=*/IREE_ARRAYSIZE(constant_spans),
-      /*.constant_spans=*/constant_spans,
+      .kernarg_byte_length = 24,
+      .kernarg_alignment = 8,
+      .constant_byte_length = 5,
+      .implicit_args_byte_offset =
+          IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
+      .declared_flags = {},
+      .binding_count = IREE_ARRAYSIZE(binding_slots),
+      .binding_slots = binding_slots,
+      .constant_span_count = IREE_ARRAYSIZE(constant_spans),
+      .constant_spans = constant_spans,
   };
   IREE_ASSERT_OK(iree_hal_amdgpu_kernarg_layout_initialize(
       &params, storage.size(), layout));
@@ -276,11 +276,12 @@ TEST(KernargLayoutTest, EmplacesSparseInterleavedLayoutWithZeroFill) {
 
 TEST(KernargLayoutTest, RejectsKernargPacketsBeyondLayoutLimit) {
   iree_hal_amdgpu_kernarg_layout_params_t params = {
-      /*.kernarg_byte_length=*/
-      IREE_HAL_AMDGPU_KERNARG_LAYOUT_MAX_BYTE_LENGTH + 1u,
-      /*.kernarg_alignment=*/8,
-      /*.constant_byte_length=*/{}, /*.implicit_args_byte_offset=*/
-      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
+      .kernarg_byte_length =
+          IREE_HAL_AMDGPU_KERNARG_LAYOUT_MAX_BYTE_LENGTH + 1u,
+      .kernarg_alignment = 8,
+      .constant_byte_length = {},
+      .implicit_args_byte_offset =
+          IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
   };
   std::vector<uint8_t> storage = AllocateStorage(/*binding_count=*/0,
                                                  /*constant_span_count=*/0);
@@ -294,26 +295,26 @@ TEST(KernargLayoutTest, RejectsKernargPacketsBeyondLayoutLimit) {
 
 TEST(KernargLayoutTest, RejectsOverlappingTargetRanges) {
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {/*.target_qword_index=*/0},
+      {.target_qword_index = 0},
   };
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          /*.target_byte_offset=*/4,
-          /*.source_byte_offset=*/0,
-          /*.byte_length=*/4,
+          .target_byte_offset = 4,
+          .source_byte_offset = 0,
+          .byte_length = 4,
       },
   };
   iree_hal_amdgpu_kernarg_layout_params_t params = {
-      /*.kernarg_byte_length=*/16,
-      /*.kernarg_alignment=*/8,
-      /*.constant_byte_length=*/4,
-      /*.implicit_args_byte_offset=*/
-      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
-      /*.declared_flags=*/{},
-      /*.binding_count=*/IREE_ARRAYSIZE(binding_slots),
-      /*.binding_slots=*/binding_slots,
-      /*.constant_span_count=*/IREE_ARRAYSIZE(constant_spans),
-      /*.constant_spans=*/constant_spans,
+      .kernarg_byte_length = 16,
+      .kernarg_alignment = 8,
+      .constant_byte_length = 4,
+      .implicit_args_byte_offset =
+          IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
+      .declared_flags = {},
+      .binding_count = IREE_ARRAYSIZE(binding_slots),
+      .binding_slots = binding_slots,
+      .constant_span_count = IREE_ARRAYSIZE(constant_spans),
+      .constant_spans = constant_spans,
   };
   std::vector<uint8_t> storage = AllocateStorage(
       IREE_ARRAYSIZE(binding_slots), IREE_ARRAYSIZE(constant_spans));
@@ -328,22 +329,22 @@ TEST(KernargLayoutTest, RejectsOverlappingTargetRanges) {
 TEST(KernargLayoutTest, RejectsConstantSourceGaps) {
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          /*.target_byte_offset=*/0,
-          /*.source_byte_offset=*/2,
-          /*.byte_length=*/2,
+          .target_byte_offset = 0,
+          .source_byte_offset = 2,
+          .byte_length = 2,
       },
   };
   iree_hal_amdgpu_kernarg_layout_params_t params = {
-      /*.kernarg_byte_length=*/8,
-      /*.kernarg_alignment=*/8,
-      /*.constant_byte_length=*/4,
-      /*.implicit_args_byte_offset=*/
-      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
-      /*.declared_flags=*/{},
-      /*.binding_count=*/{},
-      /*.binding_slots=*/{},
-      /*.constant_span_count=*/IREE_ARRAYSIZE(constant_spans),
-      /*.constant_spans=*/constant_spans,
+      .kernarg_byte_length = 8,
+      .kernarg_alignment = 8,
+      .constant_byte_length = 4,
+      .implicit_args_byte_offset =
+          IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
+      .declared_flags = {},
+      .binding_count = {},
+      .binding_slots = {},
+      .constant_span_count = IREE_ARRAYSIZE(constant_spans),
+      .constant_spans = constant_spans,
   };
   std::vector<uint8_t> storage = AllocateStorage(
       /*binding_count=*/0, IREE_ARRAYSIZE(constant_spans));
@@ -357,10 +358,11 @@ TEST(KernargLayoutTest, RejectsConstantSourceGaps) {
 
 TEST(KernargLayoutTest, RejectsTooLittleStorage) {
   iree_hal_amdgpu_kernarg_layout_params_t params = {
-      /*.kernarg_byte_length=*/0,
-      /*.kernarg_alignment=*/8,
-      /*.constant_byte_length=*/{}, /*.implicit_args_byte_offset=*/
-      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
+      .kernarg_byte_length = 0,
+      .kernarg_alignment = 8,
+      .constant_byte_length = {},
+      .implicit_args_byte_offset =
+          IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
   };
   uint8_t storage[sizeof(iree_hal_amdgpu_kernarg_layout_t) - 1] = {0};
 

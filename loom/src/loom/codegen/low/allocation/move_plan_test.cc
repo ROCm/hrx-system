@@ -45,8 +45,9 @@ class LowAllocationMovePlanTest : public ::testing::Test {
   }
 
   ModulePtr Parse(const char* source) {
-    loom_text_parse_options_t options = {};
-    options.diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr};
+    loom_text_parse_options_t options = {
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+    };
     loom_low_descriptor_text_asm_environment_initialize(
         &registry_.registry, &options.low_asm_environment);
     loom_module_t* module = nullptr;
@@ -119,9 +120,10 @@ low.func.def target<test.low.core> @subtrees(%condition: reg<test.i32>, %lhs: re
   return %returned
 }
 )");
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+  };
   loom_low_emission_frame_t frame = {};
   bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(
@@ -165,9 +167,10 @@ low.func.def target<test.low.core> @reordered(%lhs: reg<test.i32>, %rhs: reg<tes
   return %result
 }
 )");
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+  };
   loom_low_emission_frame_t frame = {};
   bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(
@@ -211,11 +214,12 @@ low.func.def target<test.low.core> @swap(%lhs: reg<test.phys>, %rhs: reg<test.ph
       {loom_block_arg_id(exit, 0),
        LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 0, 2},
   };
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
-  options.allocation_fixed_values = fixed_values;
-  options.allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values);
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+      .allocation_fixed_values = fixed_values,
+      .allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values),
+  };
   loom_low_emission_frame_t frame = {};
   bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(

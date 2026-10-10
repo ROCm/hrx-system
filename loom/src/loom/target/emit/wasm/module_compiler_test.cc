@@ -18,8 +18,8 @@ TEST(WasmModuleCompilerTest, ComposesTargetAndCanonicalEmitter) {
       &loom_wasm_compiler_provider_set, &environment));
 
   const loom_target_specification_t specification = {
-      /*.family=*/IREE_SVL("wasm"),
-      /*.selector=*/IREE_SVL("simd128"),
+      .family = IREE_SVL("wasm"),
+      .selector = IREE_SVL("simd128"),
   };
   const loom_target_profile_t* profile = nullptr;
   IREE_ASSERT_OK(loom_target_environment_select_profile(

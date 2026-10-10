@@ -109,8 +109,7 @@ class ConsumptionVerificationTest : public ::testing::Test {
       handles.push_back(loom_func_like_cast(module_, function));
     }
     testing::DiagnosticCapture capture;
-    loom_verify_options_t options = {};
-    options.sink = capture.sink();
+    loom_verify_options_t options = {.sink = capture.sink()};
     loom_verify_result_t result = {};
     IREE_ASSERT_OK(loom_verify_functions(module_, handles.data(),
                                          handles.size(), &options, &result));

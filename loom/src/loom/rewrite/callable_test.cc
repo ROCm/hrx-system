@@ -59,7 +59,7 @@ class CallableInlineTest : public ::testing::Test {
     loom_string_id_t name_id = InternString(name);
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    return (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    return loom_symbol_ref_t{.module_id = 0, .symbol_id = symbol_id};
   }
 
   loom_string_id_t InternString(iree_string_view_t string) {
@@ -462,7 +462,7 @@ TEST_F(CallableInlineTest, OrdersCfgSpliceBeforeExternalTailResultUse) {
   EXPECT_EQ(loom_func_return_operands(return_op).values[0], negated);
 
   const loom_verify_options_t verify_options = {
-      /*.sink=*/{loom_diagnostic_stderr_sink, nullptr},
+      .sink = {loom_diagnostic_stderr_sink, nullptr},
   };
   loom_verify_result_t verify_result = {};
   IREE_ASSERT_OK(loom_verify_module(module_, &verify_options, &verify_result));
@@ -973,8 +973,8 @@ TEST_F(CallableInlineTest, CloneDefinitionRemapsOnlySelfReferences) {
   loom_ir_remap_op_projection_t calls[] = {{source_self_call, nullptr},
                                            {source_helper_call, nullptr}};
   const loom_callable_clone_options_t options = {
-      /*.observer=*/{},
-      /*.op_projection=*/{calls, IREE_ARRAYSIZE(calls)},
+      .observer = {},
+      .op_projection = {calls, IREE_ARRAYSIZE(calls)},
   };
   loom_func_like_t cloned = {};
   IREE_ASSERT_OK(loom_callable_clone_definition(&module_builder_, source,
@@ -1092,7 +1092,7 @@ TEST_P(CallableBatchTest, PublishesBlockOrderAcrossInterleavedCallers) {
   }
   EXPECT_EQ(callee_body->block_count, 2u);
   const loom_verify_options_t verify_options = {
-      /*.sink=*/{loom_diagnostic_stderr_sink, nullptr},
+      .sink = {loom_diagnostic_stderr_sink, nullptr},
   };
   loom_verify_result_t verify_result = {};
   IREE_ASSERT_OK(loom_verify_module(module_, &verify_options, &verify_result));

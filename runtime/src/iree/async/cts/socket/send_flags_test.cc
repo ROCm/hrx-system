@@ -557,9 +557,10 @@ TEST_P(SendFlagsTest, ZeroCopyBufferSafetyOnCompletion) {
 // kernel uses FIXED_BUF mode to avoid per-operation page pinning.
 TEST_P(SendFlagsTest, ZeroCopySendRegisteredSlab) {
   // Create slab with power-of-2 buffer count (io_uring requirement).
-  iree_async_slab_options_t slab_options = {};
-  slab_options.buffer_size = 4096;
-  slab_options.buffer_count = 16;
+  iree_async_slab_options_t slab_options = {
+      .buffer_size = 4096,
+      .buffer_count = 16,
+  };
 
   iree_async_slab_t* slab = nullptr;
   IREE_ASSERT_OK(
@@ -632,9 +633,10 @@ TEST_P(SendFlagsTest, ZeroCopySendRegisteredSlab) {
 // sequentially.
 TEST_P(SendFlagsTest, ZeroCopySendRegisteredLargeTransfer) {
   // 64KB buffers, 16 count = 1MB total capacity.
-  iree_async_slab_options_t slab_options = {};
-  slab_options.buffer_size = 64 * 1024;
-  slab_options.buffer_count = 16;
+  iree_async_slab_options_t slab_options = {
+      .buffer_size = 64 * 1024,
+      .buffer_count = 16,
+  };
 
   iree_async_slab_t* slab = nullptr;
   IREE_ASSERT_OK(
@@ -711,9 +713,10 @@ TEST_P(SendFlagsTest, ZeroCopySendRegisteredLargeTransfer) {
 // Zero-copy send with partial buffer (non-zero offset within span).
 // Verifies that the fixed-buffer path handles subspans correctly.
 TEST_P(SendFlagsTest, ZeroCopySendPartialBuffer) {
-  iree_async_slab_options_t slab_options = {};
-  slab_options.buffer_size = 4096;
-  slab_options.buffer_count = 16;
+  iree_async_slab_options_t slab_options = {
+      .buffer_size = 4096,
+      .buffer_count = 16,
+  };
 
   iree_async_slab_t* slab = nullptr;
   IREE_ASSERT_OK(
@@ -796,9 +799,10 @@ TEST_P(SendFlagsTest, ZeroCopySendPartialBuffer) {
 // Multi-buffer sends use SENDMSG[_ZC] which does NOT support FIXED_BUF - this
 // confirms the fallback to ad-hoc ZC page pinning works correctly.
 TEST_P(SendFlagsTest, ScatterGatherFromRegistered) {
-  iree_async_slab_options_t slab_options = {};
-  slab_options.buffer_size = 1024;
-  slab_options.buffer_count = 16;
+  iree_async_slab_options_t slab_options = {
+      .buffer_size = 1024,
+      .buffer_count = 16,
+  };
 
   iree_async_slab_t* slab = nullptr;
   IREE_ASSERT_OK(
@@ -882,9 +886,10 @@ TEST_P(SendFlagsTest, ScatterGatherFromRegistered) {
 // Concurrent sends from registered buffers: submit 4 sends simultaneously.
 // Verifies no corruption when multiple registered-buffer sends are in flight.
 TEST_P(SendFlagsTest, ConcurrentRegisteredSends) {
-  iree_async_slab_options_t slab_options = {};
-  slab_options.buffer_size = 1024;
-  slab_options.buffer_count = 16;
+  iree_async_slab_options_t slab_options = {
+      .buffer_size = 1024,
+      .buffer_count = 16,
+  };
 
   iree_async_slab_t* slab = nullptr;
   IREE_ASSERT_OK(
@@ -1055,9 +1060,10 @@ TEST_P(SendFlagsTest, ZeroCopySendUnregisteredFallback) {
 // exercises the ad-hoc ZC path where some buffers are registered and some are
 // not.
 TEST_P(SendFlagsTest, ScatterGatherMixedRegistration) {
-  iree_async_slab_options_t slab_options = {};
-  slab_options.buffer_size = 1024;
-  slab_options.buffer_count = 16;
+  iree_async_slab_options_t slab_options = {
+      .buffer_size = 1024,
+      .buffer_count = 16,
+  };
 
   iree_async_slab_t* slab = nullptr;
   IREE_ASSERT_OK(
@@ -1204,9 +1210,10 @@ TEST_P(SendFlagsTest, ZeroCopyFallbackWhenCapabilityDisabled) {
 // to verify buffer management handles multiple slabs correctly.
 TEST_P(SendFlagsTest, ZeroCopySendMultipleSlabs) {
   // Create first slab (1KB buffers).
-  iree_async_slab_options_t slab_a_options = {};
-  slab_a_options.buffer_size = 1024;
-  slab_a_options.buffer_count = 16;
+  iree_async_slab_options_t slab_a_options = {
+      .buffer_size = 1024,
+      .buffer_count = 16,
+  };
 
   iree_async_slab_t* slab_a = nullptr;
   IREE_ASSERT_OK(
@@ -1221,9 +1228,10 @@ TEST_P(SendFlagsTest, ZeroCopySendMultipleSlabs) {
       region_a, iree_allocator_system(), &pool_a));
 
   // Create second slab (2KB buffers).
-  iree_async_slab_options_t slab_b_options = {};
-  slab_b_options.buffer_size = 2048;
-  slab_b_options.buffer_count = 16;
+  iree_async_slab_options_t slab_b_options = {
+      .buffer_size = 2048,
+      .buffer_count = 16,
+  };
 
   iree_async_slab_t* slab_b = nullptr;
   IREE_ASSERT_OK(

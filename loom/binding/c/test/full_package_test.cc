@@ -75,25 +75,25 @@ void ExpectSucceededResult(const loomc_result_t* result) {
 
 TEST(LoomcFullPackageTest, LinksCoreAndSpirvTargetPackages) {
   loomc_spirv_vulkan_function_table_t vulkan_functions = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_VULKAN_FUNCTION_TABLE,
-      /*.structure_size=*/sizeof(vulkan_functions),
-      /*.next=*/nullptr,
-      /*.get_physical_device_properties2=*/nullptr,
-      /*.get_physical_device_features2=*/nullptr,
-      /*.enumerate_device_extension_properties=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_SPIRV_VULKAN_FUNCTION_TABLE,
+      .structure_size = sizeof(vulkan_functions),
+      .next = nullptr,
+      .get_physical_device_properties2 = nullptr,
+      .get_physical_device_features2 = nullptr,
+      .enumerate_device_extension_properties = nullptr,
   };
   EXPECT_EQ(vulkan_functions.type,
             LOOMC_STRUCTURE_TYPE_SPIRV_VULKAN_FUNCTION_TABLE);
   loomc_iree_hal_target_options_t hal_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(hal_options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("full-package"),
-      /*.device=*/nullptr,
-      /*.physical_device_affinity=*/0,
-      /*.target_profile=*/nullptr,
-      /*.providers=*/nullptr,
-      /*.provider_count=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(hal_options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("full-package"),
+      .device = nullptr,
+      .physical_device_affinity = 0,
+      .target_profile = nullptr,
+      .providers = nullptr,
+      .provider_count = 0,
   };
   EXPECT_EQ(hal_options.type, LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS);
   const loomc_iree_hal_target_provider_t* provider =
@@ -106,15 +106,15 @@ TEST(LoomcFullPackageTest, LinksCoreAndSpirvTargetPackages) {
   TargetEnvironmentPtr target_environment_ptr(target_environment);
 
   loomc_context_target_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_environment=*/target_environment_ptr.get(),
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .target_environment = target_environment_ptr.get(),
   };
   loomc_context_options_t context_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-      /*.structure_size=*/sizeof(context_options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+      .structure_size = sizeof(context_options),
+      .next = &target_options,
   };
   loomc_context_t* context = nullptr;
   LOOMC_ASSERT_OK(loomc_context_create(&context_options,
@@ -125,15 +125,15 @@ TEST(LoomcFullPackageTest, LinksCoreAndSpirvTargetPackages) {
   loomc_byte_span_t source_contents =
       loomc_make_byte_span(kVulkaninfoJson, strlen(kVulkaninfoJson));
   loomc_source_options_t source_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(source_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_UNKNOWN,
-      /*.identifier=*/loomc_make_cstring_view("vulkaninfo.json"),
-      /*.contents=*/source_contents,
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
-      /*.release=*/nullptr,
-      /*.release_user_data=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(source_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_UNKNOWN,
+      .identifier = loomc_make_cstring_view("vulkaninfo.json"),
+      .contents = source_contents,
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
+      .release = nullptr,
+      .release_user_data = nullptr,
   };
   loomc_source_t* source = nullptr;
   LOOMC_ASSERT_OK(
@@ -150,8 +150,8 @@ TEST(LoomcFullPackageTest, LinksCoreAndSpirvTargetPackages) {
   ExpectSucceededResult(result_ptr.get());
 
   loomc_spirv_limit_value_t storage_limit = {
-      /*.state=*/LOOMC_TARGET_FACT_STATE_UNKNOWN,
-      /*.value=*/0,
+      .state = LOOMC_TARGET_FACT_STATE_UNKNOWN,
+      .value = 0,
   };
   LOOMC_ASSERT_OK(loomc_spirv_target_profile_query_limit(
       profile_ptr.get(), LOOMC_SPIRV_LIMIT_MAX_WORKGROUP_STORAGE_BYTES,

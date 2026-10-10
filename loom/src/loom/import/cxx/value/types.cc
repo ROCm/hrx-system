@@ -69,11 +69,13 @@ loom_type_t make_view_type(loom_scalar_type_t element,
   if (dimensions.size() <= 2) {
     flags |= LOOM_TYPE_FLAG_INLINE_DIMS;
   }
-  loom_type_t result = {};
-  result.header = loom_type_make_header(
-      LOOM_TYPE_VIEW, element, static_cast<uint8_t>(dimensions.size()), flags);
-  result.encoding_id = static_cast<uint16_t>(encoding);
-  result.encoding_flags = LOOM_ENCODING_FLAG_SSA;
+  loom_type_t result = {
+      .header =
+          loom_type_make_header(LOOM_TYPE_VIEW, element,
+                                static_cast<uint8_t>(dimensions.size()), flags),
+      .encoding_id = static_cast<uint16_t>(encoding),
+      .encoding_flags = LOOM_ENCODING_FLAG_SSA,
+  };
   if (dimensions.size() <= 2) {
     std::copy(dimensions.begin(), dimensions.end(), result.dims);
   } else {

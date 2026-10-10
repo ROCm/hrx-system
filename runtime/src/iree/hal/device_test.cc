@@ -65,10 +65,10 @@ static iree_status_t CountingProfileSinkEndSession(
 }
 
 static const iree_hal_profile_sink_vtable_t kCountingProfileSinkVTable = {
-    /*.destroy=*/CountingProfileSinkDestroy,
-    /*.begin_session=*/CountingProfileSinkBeginSession,
-    /*.write=*/CountingProfileSinkWrite,
-    /*.end_session=*/CountingProfileSinkEndSession,
+    .destroy = CountingProfileSinkDestroy,
+    .begin_session = CountingProfileSinkBeginSession,
+    .write = CountingProfileSinkWrite,
+    .end_session = CountingProfileSinkEndSession,
 };
 
 static void CountingProfileSinkInitialize(CountingProfileSink* sink) {
@@ -115,9 +115,9 @@ TEST(DeviceSpecTest, MockDeviceAdvertisesEnabledExecutableTarget) {
                                              iree_allocator_system(), &device));
 
   const iree_hal_executable_target_selection_t selection = {
-      /*.family=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY),
-      /*.target_key=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY),
-      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_VIRTUAL,
+      .family = IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY),
+      .target_key = IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_VIRTUAL,
   };
   const iree_hal_executable_target_selection_result_t result =
       iree_hal_device_spec_select_executable_target(

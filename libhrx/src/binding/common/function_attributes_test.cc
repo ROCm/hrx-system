@@ -20,34 +20,33 @@ iree_hal_device_spec_t* CreateDeviceSpec(
     uint64_t maximum_workgroup_local_memory_size,
     uint64_t maximum_workgroup_local_memory_size_optin) {
   iree_hal_device_dispatch_spec_t dispatch = {
-      /*.launch=*/
-      {
-          /*.maximum_workgroup_invocations=*/
-          maximum_workgroup_invocations,
-      },
-      /*.subgroup=*/{},
-      /*.execution=*/
-      {
-          /*.unit_count=*/0,
-          /*.group_count=*/0,
-          /*.maximum_resident_workgroup_count=*/0,
-          /*.maximum_resident_invocation_count=*/0,
-          /*.maximum_resident_subgroup_count=*/0,
-          /*.maximum_register_count=*/0,
-          /*.maximum_workgroup_register_count=*/0,
-          /*.maximum_local_memory_size=*/0,
-          /*.maximum_workgroup_local_memory_size=*/
-          maximum_workgroup_local_memory_size,
-          /*.maximum_workgroup_local_memory_size_optin=*/
-          maximum_workgroup_local_memory_size_optin,
-      },
+      .launch =
+          {
+              .maximum_workgroup_invocations = maximum_workgroup_invocations,
+          },
+      .subgroup = {},
+      .execution =
+          {
+              .unit_count = 0,
+              .group_count = 0,
+              .maximum_resident_workgroup_count = 0,
+              .maximum_resident_invocation_count = 0,
+              .maximum_resident_subgroup_count = 0,
+              .maximum_register_count = 0,
+              .maximum_workgroup_register_count = 0,
+              .maximum_local_memory_size = 0,
+              .maximum_workgroup_local_memory_size =
+                  maximum_workgroup_local_memory_size,
+              .maximum_workgroup_local_memory_size_optin =
+                  maximum_workgroup_local_memory_size_optin,
+          },
   };
   iree_hal_device_spec_params_t params = {
-      /*.identity=*/nullptr,
-      /*.memory=*/nullptr,
-      /*.virtual_memory=*/nullptr,
-      /*.queues=*/nullptr,
-      /*.dispatch=*/&dispatch,
+      .identity = nullptr,
+      .memory = nullptr,
+      .virtual_memory = nullptr,
+      .queues = nullptr,
+      .dispatch = &dispatch,
   };
   iree_hal_device_spec_t* device_spec = nullptr;
   IREE_CHECK_OK(iree_hal_device_spec_create(&params, iree_allocator_system(),
@@ -57,21 +56,20 @@ iree_hal_device_spec_t* CreateDeviceSpec(
 
 iree_hal_executable_function_info_t MakeFunctionInfo() {
   return iree_hal_executable_function_info_t{
-      /*.name=*/IREE_SV("test_kernel"),
-      /*.flags=*/IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE,
-      /*.constant_byte_length=*/0,
-      /*.binding_count=*/0,
-      /*.parameter_count=*/0,
-      /*.maximum_workgroup_invocations=*/512,
-      /*.workgroup_size=*/{},
-      /*.resource_usage=*/
-      {
-          /*.provided_flags=*/
-          IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_ALL,
-          /*.fixed_workgroup_local_memory_size=*/4096,
-          /*.fixed_private_memory_size=*/64,
-          /*.invocation_register_count=*/40,
-      },
+      .name = IREE_SV("test_kernel"),
+      .flags = IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE,
+      .constant_byte_length = 0,
+      .binding_count = 0,
+      .parameter_count = 0,
+      .maximum_workgroup_invocations = 512,
+      .workgroup_size = {},
+      .resource_usage =
+          {
+              .provided_flags = IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_ALL,
+              .fixed_workgroup_local_memory_size = 4096,
+              .fixed_private_memory_size = 64,
+              .invocation_register_count = 40,
+          },
   };
 }
 

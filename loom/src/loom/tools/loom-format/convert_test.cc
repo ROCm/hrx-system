@@ -57,10 +57,10 @@ class LoomFormatConvertTest : public ::testing::Test {
                               loom_module_format_t output_format) {
     loom_format_output_t output = {0};
     loom_format_convert_options_t options = {
-        /*.input_format=*/input_format,
-        /*.output_format=*/output_format,
-        /*.diagnostic_sink=*/{0},
-        /*.low_asm_environment=*/low_asm_environment_,
+        .input_format = input_format,
+        .output_format = output_format,
+        .diagnostic_sink = {0},
+        .low_asm_environment = low_asm_environment_,
     };
     IREE_EXPECT_OK(loom_format_convert(
         iree_make_const_byte_span(input.data, input.size), IREE_SV("test"),
@@ -75,10 +75,10 @@ class LoomFormatConvertTest : public ::testing::Test {
                               loom_module_format_t output_format) {
     loom_format_output_t output = {0};
     loom_format_convert_options_t options = {
-        /*.input_format=*/input_format,
-        /*.output_format=*/output_format,
-        /*.diagnostic_sink=*/{0},
-        /*.low_asm_environment=*/low_asm_environment_,
+        .input_format = input_format,
+        .output_format = output_format,
+        .diagnostic_sink = {0},
+        .low_asm_environment = low_asm_environment_,
     };
     IREE_EXPECT_OK(loom_format_convert(input, IREE_SV("test"), &context_,
                                        &block_pool_, &options, &output,
@@ -227,9 +227,9 @@ TEST_F(LoomFormatConvertTest, RejectsUnresolvedCallBeforeWritingOutput) {
     std::vector<std::string> error_ids;
     loom_format_output_t output = {0};
     loom_format_convert_options_t options = {
-        /*.input_format=*/LOOM_MODULE_FORMAT_TEXT,
-        /*.output_format=*/output_format,
-        /*.diagnostic_sink=*/{CaptureDiagnostic, &error_ids},
+        .input_format = LOOM_MODULE_FORMAT_TEXT,
+        .output_format = output_format,
+        .diagnostic_sink = {CaptureDiagnostic, &error_ids},
     };
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -282,9 +282,9 @@ TEST_F(LoomFormatConvertTest, ExplicitBytecodeInputRoundTripsToText) {
 TEST_F(LoomFormatConvertTest, RejectsAutoOutputFormat) {
   loom_format_output_t output = {0};
   loom_format_convert_options_t options = {
-      /*.input_format=*/LOOM_MODULE_FORMAT_TEXT,
-      /*.output_format=*/LOOM_MODULE_FORMAT_AUTO,
-      /*.diagnostic_sink=*/{0},
+      .input_format = LOOM_MODULE_FORMAT_TEXT,
+      .output_format = LOOM_MODULE_FORMAT_AUTO,
+      .diagnostic_sink = {0},
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -298,9 +298,9 @@ TEST_F(LoomFormatConvertTest, RejectsAutoOutputFormat) {
 TEST_F(LoomFormatConvertTest, MalformedTextReturnsInvalidArgument) {
   loom_format_output_t output = {0};
   loom_format_convert_options_t options = {
-      /*.input_format=*/LOOM_MODULE_FORMAT_TEXT,
-      /*.output_format=*/LOOM_MODULE_FORMAT_TEXT,
-      /*.diagnostic_sink=*/{0},
+      .input_format = LOOM_MODULE_FORMAT_TEXT,
+      .output_format = LOOM_MODULE_FORMAT_TEXT,
+      .diagnostic_sink = {0},
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,

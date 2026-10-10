@@ -78,8 +78,7 @@ TEST(SourceMemoryAccessPlanTest, ClassifiesRetainedRejectionBits) {
 }
 
 TEST(SourceMemoryAccessPlanTest, IncludesPhysicalRootByteOffset) {
-  loom_low_source_memory_access_plan_t plan = {};
-  plan.static_byte_offset = 12;
+  loom_low_source_memory_access_plan_t plan = {.static_byte_offset = 12};
   EXPECT_TRUE(
       loom_low_source_memory_access_plan_include_root_byte_offset(&plan, 20));
   EXPECT_EQ(plan.static_byte_offset, 32);
@@ -91,8 +90,9 @@ TEST(SourceMemoryAccessPlanTest, IncludesPhysicalRootByteOffset) {
 }
 
 TEST(SourceMemoryAccessPlanTest, RejectsPhysicalRootByteOffsetOverflow) {
-  loom_low_source_memory_access_plan_t plan = {};
-  plan.static_byte_offset = INT64_MAX - 4;
+  loom_low_source_memory_access_plan_t plan = {
+      .static_byte_offset = INT64_MAX - 4,
+  };
   EXPECT_FALSE(
       loom_low_source_memory_access_plan_include_root_byte_offset(&plan, 8));
   EXPECT_EQ(plan.static_byte_offset, INT64_MAX - 4);
@@ -1277,15 +1277,16 @@ TEST_F(SourceMemoryPlanTest, NoaliasBufferArgFeedsComparableAliasScope) {
 }
 
 TEST_F(SourceMemoryPlanTest, SummaryCapturesStridedPacketSlot) {
-  loom_low_source_memory_access_plan_t plan = {};
-  plan.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE;
-  plan.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
-  plan.alias_scope_id = 7;
-  plan.element_byte_count = 2;
-  plan.vector_lane_count = 8;
-  plan.vector_lane_byte_stride = 2;
-  plan.static_byte_offset = 16;
-  plan.dynamic_term_count = 1;
+  loom_low_source_memory_access_plan_t plan = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
+      .alias_scope_id = 7,
+      .element_byte_count = 2,
+      .vector_lane_count = 8,
+      .vector_lane_byte_stride = 2,
+      .static_byte_offset = 16,
+      .dynamic_term_count = 1,
+  };
   plan.dynamic_terms[0].byte_stride = 64;
   plan.dynamic_terms[0].byte_facts = loom_value_facts_exact_i64(0);
 
@@ -1325,8 +1326,9 @@ TEST(SourceMemoryPlan, SummaryRetainsAtomicObservationSemantics) {
       LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_STORE,
   };
   for (const auto operation_kind : atomic_observations) {
-    loom_low_source_memory_access_plan_t plan = {};
-    plan.operation_kind = operation_kind;
+    loom_low_source_memory_access_plan_t plan = {
+        .operation_kind = operation_kind,
+    };
     loom_low_byte_interval_t interval = {};
     loom_low_memory_access_summary_t summary = {};
     loom_low_source_memory_access_plan_make_summary(&plan, &interval, &summary);
@@ -1341,8 +1343,9 @@ TEST(SourceMemoryPlan, SummaryRetainsAtomicObservationSemantics) {
       LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_CMPXCHG,
   };
   for (const auto operation_kind : non_observations) {
-    loom_low_source_memory_access_plan_t plan = {};
-    plan.operation_kind = operation_kind;
+    loom_low_source_memory_access_plan_t plan = {
+        .operation_kind = operation_kind,
+    };
     loom_low_byte_interval_t interval = {};
     loom_low_memory_access_summary_t summary = {};
     loom_low_source_memory_access_plan_make_summary(&plan, &interval, &summary);
@@ -1351,14 +1354,15 @@ TEST(SourceMemoryPlan, SummaryRetainsAtomicObservationSemantics) {
 }
 
 TEST(SourceMemoryPlan, DynamicPacketOffsetsPreserveDivisibility) {
-  loom_low_source_memory_access_plan_t plan = {};
-  plan.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-  plan.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;
-  plan.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
-  plan.element_byte_count = 4;
-  plan.vector_lane_count = 4;
-  plan.vector_lane_byte_stride = 4;
-  plan.dynamic_term_count = 1;
+  loom_low_source_memory_access_plan_t plan = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+      .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
+      .element_byte_count = 4,
+      .vector_lane_count = 4,
+      .vector_lane_byte_stride = 4,
+      .dynamic_term_count = 1,
+  };
   plan.dynamic_terms[0].byte_stride = 16;
   plan.dynamic_terms[0].byte_facts = loom_value_facts_make(16, 64, 16);
 
@@ -1389,10 +1393,12 @@ TEST(SourceMemoryPlan, DynamicPacketOffsetsPreserveDivisibility) {
 }
 
 TEST(SourceMemoryComponentTest, RetainedComponentConvertsExactCoordinateUnits) {
-  loom_low_source_memory_dynamic_term_t term = {};
-  term.byte_stride = 4;
-  loom_low_source_memory_access_plan_t access = {};
-  access.retained_component = {&term, 0b1010};
+  loom_low_source_memory_dynamic_term_t term = {
+      .byte_stride = 4,
+  };
+  loom_low_source_memory_access_plan_t access = {
+      .retained_component = {&term, 0b1010},
+  };
   EXPECT_EQ(loom_low_source_memory_access_retained_component(&access, 0, 1),
             &access.retained_component);
   EXPECT_EQ(loom_low_source_memory_access_retained_component(&access, 0, 4),
@@ -1405,10 +1411,10 @@ TEST(SourceMemoryComponentTest, RetainedComponentConvertsExactCoordinateUnits) {
 }
 
 TEST(SourceMemoryComponentTest, MaterializedPrefixCannotOverlapComponent) {
-  loom_low_source_memory_dynamic_term_t term = {};
-  term.byte_stride = 4;
-  loom_low_source_memory_access_plan_t access = {};
-  access.retained_component = {&term, 0b1010};
+  loom_low_source_memory_dynamic_term_t term = {.byte_stride = 4};
+  loom_low_source_memory_access_plan_t access = {
+      .retained_component = {&term, 0b1010},
+  };
   EXPECT_EQ(loom_low_source_memory_access_retained_component(&access, 1, 1),
             &access.retained_component);
   EXPECT_EQ(loom_low_source_memory_access_retained_component(&access, 2, 1),

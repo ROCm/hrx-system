@@ -189,8 +189,7 @@ class EncodingBenchmarkFixture {
   ~EncodingBenchmarkFixture() { loom_context_deinitialize(&context_); }
 
   iree_status_t Parse(iree_string_view_t source, loom_module_t** out_module) {
-    loom_text_parse_options_t options = {};
-    options.max_errors = 1;
+    loom_text_parse_options_t options = {.max_errors = 1};
     return loom_text_parse(source, IREE_SV("encoding_benchmark.loom"),
                            &context_, block_pool_.get(), &options, out_module);
   }
@@ -1154,14 +1153,13 @@ static iree_status_t CanonicalizeDynamicEncodingQueryBranches(
       cleanup_pattern_registry->fact_refinement_policy, &canonicalizer);
   if (iree_status_is_ok(status)) {
     const loom_canonicalizer_options_t options = {
-        /*.max_iterations=*/0,
-        /*.patterns=*/
-        loom_canonicalizer_pattern_registries_from_cleanup_registry(
+        .max_iterations = 0,
+        .patterns = loom_canonicalizer_pattern_registries_from_cleanup_registry(
             cleanup_pattern_registry),
-        /*.target_facts=*/nullptr,
-        /*.math_policy=*/nullptr,
-        /*.seed_facts=*/{},
-        /*.refine_boundary=*/{},
+        .target_facts = nullptr,
+        .math_policy = nullptr,
+        .seed_facts = {},
+        .refine_boundary = {},
     };
     status = loom_canonicalizer_run_function(&canonicalizer, function, &options,
                                              out_result);

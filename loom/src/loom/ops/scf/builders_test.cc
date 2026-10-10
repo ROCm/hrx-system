@@ -78,9 +78,10 @@ TEST_P(ScfBuilderTest, ProjectsReservedResultSchemeToEachEntry) {
   const uint64_t initial_dims[] = {loom_dim_pack_dynamic(size),
                                    loom_dim_pack_dynamic(size),
                                    loom_dim_pack_dynamic(size)};
-  loom_type_t view_type = {};
-  view_type.header =
-      loom_type_make_header(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I32, 3, 0);
+  loom_type_t view_type = {
+      .header =
+          loom_type_make_header(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I32, 3, 0),
+  };
   view_type.dims[0] = (uint64_t)(uintptr_t)initial_dims;
   view_type.encoding_flags = LOOM_ENCODING_FLAG_SSA;
   view_type.encoding_id = (uint16_t)layout;

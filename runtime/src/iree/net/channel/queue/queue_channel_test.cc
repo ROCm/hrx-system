@@ -86,8 +86,8 @@ struct SendCompletion {
 
   iree_net_send_completion_callback_t callback() {
     return {
-        /*.fn=*/Callback,
-        /*.user_data=*/this,
+        .fn = Callback,
+        .user_data = this,
     };
   }
 };
@@ -96,8 +96,8 @@ class TestEndpoint {
  public:
   iree_net_message_endpoint_t endpoint() {
     return {
-        /*.self=*/this,
-        /*.vtable=*/&vtable_,
+        .self = this,
+        .vtable = &vtable_,
     };
   }
 
@@ -129,8 +129,8 @@ class TestEndpoint {
   std::vector<const uint8_t*> last_borrowed_span_pointers;
   std::vector<std::vector<uint8_t>> sent_messages;
   iree_net_carrier_send_budget_t budget = {
-      /*.bytes=*/12345,
-      /*.slots=*/7,
+      .bytes = 12345,
+      .slots = 7,
   };
 
  private:
@@ -205,11 +205,11 @@ class TestEndpoint {
 };
 
 const iree_net_message_endpoint_vtable_t TestEndpoint::vtable_ = {
-    /*.set_callbacks=*/TestEndpoint::SetCallbacks,
-    /*.activate=*/TestEndpoint::Activate,
-    /*.deactivate=*/TestEndpoint::Deactivate,
-    /*.send=*/TestEndpoint::Send,
-    /*.query_send_budget=*/TestEndpoint::QuerySendBudget,
+    .set_callbacks = TestEndpoint::SetCallbacks,
+    .activate = TestEndpoint::Activate,
+    .deactivate = TestEndpoint::Deactivate,
+    .send = TestEndpoint::Send,
+    .query_send_budget = TestEndpoint::QuerySendBudget,
 };
 
 struct CallbackState {
@@ -265,10 +265,10 @@ struct CallbackState {
 
   iree_net_queue_channel_callbacks_t callbacks() {
     return {
-        /*.on_command=*/OnCommand,
-        /*.on_advance=*/OnAdvance,
-        /*.on_error=*/OnError,
-        /*.user_data=*/this,
+        .on_command = OnCommand,
+        .on_advance = OnAdvance,
+        .on_error = OnError,
+        .user_data = this,
     };
   }
 };
@@ -317,14 +317,13 @@ struct BuildState {
                                   !signal_frontier.empty() ||
                                   !generated_payload.empty();
     return {
-        /*.wait_frontier_count=*/static_cast<uint8_t>(wait_frontier.size()),
-        /*.signal_frontier_count=*/
-        static_cast<uint8_t>(signal_frontier.size()),
-        /*.generated_payload_length=*/generated_payload.size(),
-        /*.build=*/requires_builder ? Build : nullptr,
-        /*.build_user_data=*/requires_builder ? this : nullptr,
-        /*.payload=*/payload,
-        /*.completion_callback=*/completion_callback,
+        .wait_frontier_count = static_cast<uint8_t>(wait_frontier.size()),
+        .signal_frontier_count = static_cast<uint8_t>(signal_frontier.size()),
+        .generated_payload_length = generated_payload.size(),
+        .build = requires_builder ? Build : nullptr,
+        .build_user_data = requires_builder ? this : nullptr,
+        .payload = payload,
+        .completion_callback = completion_callback,
     };
   }
 };
@@ -472,9 +471,9 @@ TEST_F(QueueChannelTest, MalformedMessagesFailBeforeDispatch) {
 TEST_F(QueueChannelTest, GeneratedCommandPreservesBorrowedPayload) {
   Attach();
   BuildState build_state = {
-      /*.wait_frontier=*/{{3, 5}, {7, 11}},
-      /*.signal_frontier=*/{{9, 13}},
-      /*.generated_payload=*/{'m', 'e', 't', 'a'},
+      .wait_frontier = {{3, 5}, {7, 11}},
+      .signal_frontier = {{9, 13}},
+      .generated_payload = {'m', 'e', 't', 'a'},
   };
   std::vector<uint8_t> first = {1, 2, 3};
   std::vector<uint8_t> second = {4, 5};
@@ -524,9 +523,9 @@ TEST_F(QueueChannelTest, StableCommandNeedsNoApplicationBuilder) {
 TEST_F(QueueChannelTest, AdvanceUsesNoQueueId) {
   Attach();
   BuildState build_state = {
-      /*.wait_frontier=*/{},
-      /*.signal_frontier=*/{{9, 13}},
-      /*.generated_payload=*/{},
+      .wait_frontier = {},
+      .signal_frontier = {{9, 13}},
+      .generated_payload = {},
   };
   SendCompletion completion;
   const iree_net_queue_channel_send_params_t params =
@@ -564,9 +563,9 @@ TEST_F(QueueChannelTest, RejectedSendDoesNotRunBuilderOrCompletion) {
   Attach();
   endpoint_.reject_send_code = IREE_STATUS_RESOURCE_EXHAUSTED;
   BuildState build_state = {
-      /*.wait_frontier=*/{},
-      /*.signal_frontier=*/{{9, 13}},
-      /*.generated_payload=*/{'x'},
+      .wait_frontier = {},
+      .signal_frontier = {{9, 13}},
+      .generated_payload = {'x'},
   };
   SendCompletion completion;
   const iree_net_queue_channel_send_params_t params =
@@ -583,10 +582,10 @@ TEST_F(QueueChannelTest, RejectedSendDoesNotRunBuilderOrCompletion) {
 TEST_F(QueueChannelTest, BuilderFailureCompletesAcceptedSend) {
   Attach();
   BuildState build_state = {
-      /*.wait_frontier=*/{},
-      /*.signal_frontier=*/{{9, 13}},
-      /*.generated_payload=*/{'x'},
-      /*.status_code=*/IREE_STATUS_ABORTED,
+      .wait_frontier = {},
+      .signal_frontier = {{9, 13}},
+      .generated_payload = {'x'},
+      .status_code = IREE_STATUS_ABORTED,
   };
   SendCompletion completion;
   const iree_net_queue_channel_send_params_t params =
@@ -603,16 +602,17 @@ TEST_F(QueueChannelTest, BuilderFailureCompletesAcceptedSend) {
 TEST_F(QueueChannelTest, ValidatesSemanticsBeforeEndpointAdmission) {
   Attach();
   SendCompletion completion;
-  iree_net_queue_channel_send_params_t params = {};
-  params.completion_callback = completion.callback();
+  iree_net_queue_channel_send_params_t params = {
+      .completion_callback = completion.callback(),
+  };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_net_queue_channel_send_command(channel_, 0, &params));
   EXPECT_EQ(endpoint_.send_count, 0);
 
   BuildState advance_with_wait = {
-      /*.wait_frontier=*/{{1, 1}},
-      /*.signal_frontier=*/{{2, 1}},
+      .wait_frontier = {{1, 1}},
+      .signal_frontier = {{2, 1}},
   };
   params = advance_with_wait.params(iree_async_span_list_empty(),
                                     completion.callback());

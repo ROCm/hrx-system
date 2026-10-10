@@ -19,20 +19,20 @@ static void CreateDeviceSpecWithFeatureQualifiedTargets(
 
   const iree_hal_executable_target_t targets[] = {
       {
-          /*.family=*/IREE_SV("amdgpu"),
-          /*.target_key=*/IREE_SV("gfx942:sramecc+:xnack-"),
-          /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-          /*.priority=*/100,
-          /*.physical_device_affinity=*/1ull,
-          /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+          .family = IREE_SV("amdgpu"),
+          .target_key = IREE_SV("gfx942:sramecc+:xnack-"),
+          .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
+          .priority = 100,
+          .physical_device_affinity = 1ull,
+          .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
       },
       {
-          /*.family=*/IREE_SV("amdgpu"),
-          /*.target_key=*/IREE_SV("gfx9-4-generic:sramecc+:xnack-"),
-          /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
-          /*.priority=*/50,
-          /*.physical_device_affinity=*/1ull,
-          /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+          .family = IREE_SV("amdgpu"),
+          .target_key = IREE_SV("gfx9-4-generic:sramecc+:xnack-"),
+          .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
+          .priority = 50,
+          .physical_device_affinity = 1ull,
+          .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
       },
   };
   for (const auto& target : targets) {

@@ -18,6 +18,7 @@ from pathlib import Path
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--clang-tidy", required=True, type=Path)
+    parser.add_argument("--clangxx", type=Path)
     parser.add_argument("--plugin", required=True, type=Path)
     args, unittest_args = parser.parse_known_args()
     sys.argv = [sys.argv[0], *unittest_args]
@@ -88,6 +89,83 @@ def run_clang_tidy_fix(
         if completed.returncode != 0:
             raise RuntimeError(output)
         return output, fixed_source.read_text()
+
+
+def run_clang_tidy_fix_and_compile(
+    *,
+    clang_tidy: Path,
+    clangxx: Path | None,
+    plugin: Path,
+    checks: str,
+    source: Path,
+    companion_files: list[Path] | None = None,
+    compiler_args: list[str] | None = None,
+    clang_tidy_args: list[str] | None = None,
+) -> tuple[str, str, dict[str, str]]:
+    if clangxx is None:
+        raise ValueError("--clangxx is required when compiling fixed source")
+    if companion_files is None:
+        companion_files = []
+    if compiler_args is None:
+        compiler_args = ["-std=c++20"]
+    if clang_tidy_args is None:
+        clang_tidy_args = []
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temporary_directory = Path(temp_dir)
+        fixed_source = temporary_directory / source.name
+        shutil.copy2(source, fixed_source)
+        fixed_companions: dict[str, Path] = {}
+        for companion_file in companion_files:
+            fixed_companion = temporary_directory / companion_file.name
+            shutil.copy2(companion_file, fixed_companion)
+            fixed_companions[companion_file.name] = fixed_companion
+        tidy = subprocess.run(
+            [
+                str(clang_tidy),
+                f"--load={plugin}",
+                f"--checks={checks}",
+                *clang_tidy_args,
+                "--fix",
+                str(fixed_source),
+                "--",
+                *compiler_args,
+                f"-I{temporary_directory}",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        output = tidy.stdout + tidy.stderr
+        if tidy.returncode != 0:
+            raise RuntimeError(output)
+        compile_result = subprocess.run(
+            [
+                str(clangxx),
+                *compiler_args,
+                f"-I{temporary_directory}",
+                "-fsyntax-only",
+                str(fixed_source),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if compile_result.returncode != 0:
+            raise RuntimeError(
+                "fixed source failed to compile:\n"
+                + compile_result.stdout
+                + compile_result.stderr
+                + "\nfixed source:\n"
+                + fixed_source.read_text()
+            )
+        return (
+            output,
+            fixed_source.read_text(),
+            {
+                name: companion.read_text()
+                for name, companion in fixed_companions.items()
+            },
+        )
 
 
 class ClangTidyAssertions(unittest.TestCase):

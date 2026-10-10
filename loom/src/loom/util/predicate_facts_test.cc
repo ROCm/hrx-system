@@ -38,9 +38,7 @@ TEST_F(PredicateFactsTest, SmallListStaysAllocationFree) {
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 1));
   const loom_value_id_t value = 0;
   loom_value_facts_t facts = loom_value_facts_unknown();
-  loom_predicate_t predicate = {};
-  predicate.kind = LOOM_PREDICATE_RANGE;
-  predicate.arg_count = 3;
+  loom_predicate_t predicate = {.kind = LOOM_PREDICATE_RANGE, .arg_count = 3};
   predicate.arg_tags[0] = LOOM_PRED_ARG_VALUE;
   predicate.arg_tags[1] = LOOM_PRED_ARG_CONST;
   predicate.arg_tags[2] = LOOM_PRED_ARG_CONST;
@@ -72,9 +70,7 @@ TEST_F(PredicateFactsTest, RangeUsesLiteralAndExternalEndpointFacts) {
                                               loom_value_facts_exact_i64(17)));
 
   loom_value_facts_t target_facts = loom_value_facts_unknown();
-  loom_predicate_t predicate = {};
-  predicate.kind = LOOM_PREDICATE_RANGE;
-  predicate.arg_count = 3;
+  loom_predicate_t predicate = {.kind = LOOM_PREDICATE_RANGE, .arg_count = 3};
   predicate.arg_tags[0] = LOOM_PRED_ARG_VALUE;
   predicate.arg_tags[1] = LOOM_PRED_ARG_CONST;
   predicate.arg_tags[2] = LOOM_PRED_ARG_VALUE;
@@ -114,9 +110,7 @@ TEST_F(PredicateFactsTest, RangeUsesBothExternalEndpointIntervals) {
   IREE_ASSERT_OK(loom_value_fact_table_define(&table, kUpper, upper_facts));
 
   loom_value_facts_t target_facts = loom_value_facts_unknown();
-  loom_predicate_t predicate = {};
-  predicate.kind = LOOM_PREDICATE_RANGE;
-  predicate.arg_count = 3;
+  loom_predicate_t predicate = {.kind = LOOM_PREDICATE_RANGE, .arg_count = 3};
   predicate.arg_tags[0] = LOOM_PRED_ARG_VALUE;
   predicate.arg_tags[1] = LOOM_PRED_ARG_VALUE;
   predicate.arg_tags[2] = LOOM_PRED_ARG_VALUE;
@@ -145,9 +139,7 @@ TEST_F(PredicateFactsTest, RangeRefinesAliasEndpointsReciprocally) {
   loom_value_facts_t facts[] = {loom_value_facts_make(0, 100, 1),
                                 loom_value_facts_unknown(),
                                 loom_value_facts_unknown()};
-  loom_predicate_t predicate = {};
-  predicate.kind = LOOM_PREDICATE_RANGE;
-  predicate.arg_count = 3;
+  loom_predicate_t predicate = {.kind = LOOM_PREDICATE_RANGE, .arg_count = 3};
   predicate.arg_tags[0] = LOOM_PRED_ARG_VALUE;
   predicate.arg_tags[1] = LOOM_PRED_ARG_VALUE;
   predicate.arg_tags[2] = LOOM_PRED_ARG_VALUE;
@@ -176,9 +168,7 @@ TEST_F(PredicateFactsTest, RangeRejectsFloatEndpointIntervals) {
   IREE_ASSERT_OK(loom_value_fact_table_define(&table, kUpper, upper_facts));
 
   loom_value_facts_t target_facts = loom_value_facts_unknown();
-  loom_predicate_t predicate = {};
-  predicate.kind = LOOM_PREDICATE_RANGE;
-  predicate.arg_count = 3;
+  loom_predicate_t predicate = {.kind = LOOM_PREDICATE_RANGE, .arg_count = 3};
   predicate.arg_tags[0] = LOOM_PRED_ARG_VALUE;
   predicate.arg_tags[1] = LOOM_PRED_ARG_CONST;
   predicate.arg_tags[2] = LOOM_PRED_ARG_VALUE;
@@ -293,9 +283,7 @@ TEST_F(PredicateFactsTest, FloatRelationsDoNotUseIntegerIntervals) {
                                 loom_value_facts_unknown()};
   facts[0].flags |= LOOM_VALUE_FACT_FLOAT;
   facts[1].flags |= LOOM_VALUE_FACT_FLOAT;
-  loom_predicate_t predicate = {};
-  predicate.kind = LOOM_PREDICATE_EQ;
-  predicate.arg_count = 2;
+  loom_predicate_t predicate = {.kind = LOOM_PREDICATE_EQ, .arg_count = 2};
   predicate.arg_tags[0] = LOOM_PRED_ARG_VALUE;
   predicate.arg_tags[1] = LOOM_PRED_ARG_VALUE;
   predicate.args[0] = values[0];

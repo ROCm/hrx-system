@@ -806,8 +806,8 @@ BENCHMARK_DEFINE_F(DecodeBenchmark, Decode)(benchmark::State& state) {
     token_index_ = (token_index_ + 1) % kTokenPoolSize;
 
     iree_tokenizer_token_id_list_t id_list = {
-        /*.count=*/tokens.size(),
-        /*.values=*/reinterpret_cast<const int32_t*>(tokens.data()),
+        .count = tokens.size(),
+        .values = reinterpret_cast<const int32_t*>(tokens.data()),
     };
 
     iree_tokenizer_decode_state_t* decode_state = nullptr;
@@ -951,9 +951,9 @@ BENCHMARK_DEFINE_F(StreamingDecodeBenchmark, Stream)
       }
 
       iree_tokenizer_token_id_list_t id_list = {
-          /*.count=*/chunk,
-          /*.values=*/
-          reinterpret_cast<const int32_t*>(tokens.data() + token_position),
+          .count = chunk,
+          .values =
+              reinterpret_cast<const int32_t*>(tokens.data() + token_position),
       };
 
       iree_host_size_t tokens_consumed = 0;

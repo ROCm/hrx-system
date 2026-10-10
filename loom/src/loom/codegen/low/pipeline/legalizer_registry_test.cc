@@ -56,17 +56,19 @@ static void ExpectReferenceProvider(
 
 TEST(LowLegalizerRegistryTest, TargetProvidersPrecedeGenericProviders) {
   const loom_target_legalizer_rule_t target_rules[] = {
-      {/*.flags=*/LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
-       /*.root_kind=*/LOOM_OP_SCALAR_EXTF,
-       /*.first_operand_element_types=*/0,
-       /*.match=*/nullptr,
-       /*.legalize=*/TargetLegalize},
+      {
+          .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
+          .root_kind = LOOM_OP_SCALAR_EXTF,
+          .first_operand_element_types = 0,
+          .match = nullptr,
+          .legalize = TargetLegalize,
+      },
   };
   const loom_target_legalizer_provider_t target_provider = {
-      /*.name=*/IREE_SVL("target"),
-      /*.strategy=*/LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
-      /*.rules=*/target_rules,
-      /*.rule_count=*/IREE_ARRAYSIZE(target_rules),
+      .name = IREE_SVL("target"),
+      .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
+      .rules = target_rules,
+      .rule_count = IREE_ARRAYSIZE(target_rules),
   };
   const loom_target_legalizer_provider_t* target_providers[] = {
       &target_provider,

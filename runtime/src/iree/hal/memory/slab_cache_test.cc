@@ -269,8 +269,7 @@ TEST_F(SlabCacheTest, PendingReturnPreservesExactHistoryAndPrefersReady) {
       cache_, 2, requests.data(), nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
       reservations.data(), infos.data(), &result));
   iree_hal_pool_release_reservations(cache_, 1, &reservations[0], nullptr);
-  iree_async_single_frontier_t frontier = {};
-  frontier.entry_count = 1;
+  iree_async_single_frontier_t frontier = {.entry_count = 1};
   frontier.entries[0] = {Axis(0), 7};
   const auto* history = iree_async_fixed_frontier_as_const_frontier(&frontier);
   iree_hal_pool_release_reservations(cache_, 1, &reservations[1], history);
@@ -416,8 +415,7 @@ TEST_F(SlabCacheTest, ChildReturnPreservesUntouchedAlignmentTailHistory) {
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(Acquire(cache_, 4097, nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
                          &reservation, &info, &result));
-  iree_async_single_frontier_t original = {};
-  original.entry_count = 1;
+  iree_async_single_frontier_t original = {.entry_count = 1};
   original.entries[0] = {Axis(0), 7};
   const auto* original_history =
       iree_async_fixed_frontier_as_const_frontier(&original);
@@ -430,8 +428,7 @@ TEST_F(SlabCacheTest, ChildReturnPreservesUntouchedAlignmentTailHistory) {
   EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK);
   // The child owns only the aligned 4096-byte interval. Return that interval
   // under its later epoch; the untouched final byte still carries axis 0.
-  iree_async_single_frontier_t later = {};
-  later.entry_count = 1;
+  iree_async_single_frontier_t later = {.entry_count = 1};
   later.entries[0] = {Axis(1), 11};
   iree_hal_pool_release_reservations(
       child, 1, &reservation,
@@ -620,8 +617,7 @@ TEST_F(SlabCacheTest, InteriorRangePreparationPreservesNeighbors) {
   const uint8_t pattern = 0x6D;
   IREE_ASSERT_OK(
       iree_hal_buffer_map_fill(backing, 0, IREE_HAL_WHOLE_BUFFER, &pattern, 1));
-  iree_hal_fixed_block_pool_options_t options = {};
-  options.block_size = 1024;
+  iree_hal_fixed_block_pool_options_t options = {.block_size = 1024};
   iree_hal_pool_t* interior = nullptr;
   IREE_ASSERT_OK(iree_hal_fixed_block_pool_create_from_buffer(
       backing, 16, 1024, &options, allocator_, &interior));

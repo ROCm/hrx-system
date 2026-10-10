@@ -40,8 +40,7 @@ class MemPoolBackingTest : public ::testing::Test {
   }
 
   MemPool CreatePool(size_t max_size = 0) {
-    hrx_mem_pool_props_t properties = {};
-    properties.max_size = max_size;
+    hrx_mem_pool_props_t properties = {.max_size = max_size};
     hrx_mem_pool_t pool = nullptr;
     IREE_EXPECT_OK(
         hrx_status_to_iree(hrx_mem_pool_create(device_, &properties, &pool)));

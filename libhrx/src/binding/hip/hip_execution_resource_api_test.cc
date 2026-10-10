@@ -1096,30 +1096,33 @@ TEST_F(HipExecutionResourceApiTest,
             api_.batch_mem_op(stream, 1, &parameter, /*flags=*/0));
 
   const dim3 one = {1, 1, 1};
-  hipLaunchConfig_t runtime_config = {};
-  runtime_config.gridDim = one;
-  runtime_config.blockDim = one;
-  runtime_config.stream = stream;
+  hipLaunchConfig_t runtime_config = {
+      .gridDim = one,
+      .blockDim = one,
+      .stream = stream,
+  };
   const void* function = reinterpret_cast<const void*>(uintptr_t{1});
   EXPECT_EQ(hipErrorStreamDetached,
             api_.launch_kernel_ex(&runtime_config, function,
                                   /*arguments=*/nullptr));
 
-  HIP_LAUNCH_CONFIG driver_config = {};
-  driver_config.gridDimX = 1;
-  driver_config.gridDimY = 1;
-  driver_config.gridDimZ = 1;
-  driver_config.blockDimX = 1;
-  driver_config.blockDimY = 1;
-  driver_config.blockDimZ = 1;
-  driver_config.hStream = stream;
+  HIP_LAUNCH_CONFIG driver_config = {
+      .gridDimX = 1,
+      .gridDimY = 1,
+      .gridDimZ = 1,
+      .blockDimX = 1,
+      .blockDimY = 1,
+      .blockDimZ = 1,
+      .hStream = stream,
+  };
   EXPECT_EQ(hipErrorStreamDetached,
             api_.driver_launch_kernel_ex(
                 &driver_config, (hipFunction_t)function,
                 /*kernel_parameters=*/nullptr, /*extra=*/nullptr));
 
-  hipLaunchAttribute cooperative_attribute = {};
-  cooperative_attribute.id = hipLaunchAttributeCooperative;
+  hipLaunchAttribute cooperative_attribute = {
+      .id = hipLaunchAttributeCooperative,
+  };
   cooperative_attribute.val.cooperative = 1;
   runtime_config.attrs = &cooperative_attribute;
   runtime_config.numAttrs = 1;
@@ -1133,8 +1136,9 @@ TEST_F(HipExecutionResourceApiTest,
                 &driver_config, (hipFunction_t)function,
                 /*kernel_parameters=*/nullptr, /*extra=*/nullptr));
 
-  hipLaunchAttribute prefetch_attribute = {};
-  prefetch_attribute.id = hipLaunchAttributeExtDynDataPrefetch;
+  hipLaunchAttribute prefetch_attribute = {
+      .id = hipLaunchAttributeExtDynDataPrefetch,
+  };
   runtime_config.attrs = &prefetch_attribute;
   runtime_config.numAttrs = 1;
   driver_config.attrs = &prefetch_attribute;
@@ -1164,12 +1168,12 @@ TEST_F(HipExecutionResourceApiTest,
                 /*block_dim_z=*/1, /*shared_memory_bytes=*/0, stream,
                 /*kernel_parameters=*/nullptr));
   hipLaunchParams multi_device_launch = {
-      /*.func=*/const_cast<void*>(function),
-      /*.gridDim=*/one,
-      /*.blockDim=*/one,
-      /*.args=*/nullptr,
-      /*.sharedMem=*/0,
-      /*.stream=*/stream,
+      .func = const_cast<void*>(function),
+      .gridDim = one,
+      .blockDim = one,
+      .args = nullptr,
+      .sharedMem = 0,
+      .stream = stream,
   };
   EXPECT_EQ(hipErrorStreamDetached,
             api_.launch_multi_device(&multi_device_launch,

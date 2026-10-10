@@ -70,9 +70,10 @@ class FunctionTest : public ::testing::Test {
 
 TEST_F(FunctionTest, EmptyLeafNeedsOnlyReturn) {
   iree_host_size_t block_starts[] = {0, 0};
-  loom_x86_function_t function = {};
-  function.block_starts = block_starts;
-  function.block_count = 1;
+  loom_x86_function_t function = {
+      .block_starts = block_starts,
+      .block_count = 1,
+  };
 
   IREE_ASSERT_OK(loom_x86_function_write(&function, nullptr, 0, nullptr,
                                          stream_, &arena_));
@@ -81,10 +82,11 @@ TEST_F(FunctionTest, EmptyLeafNeedsOnlyReturn) {
 
 TEST_F(FunctionTest, DirtyUpperVectorStateCleansBeforeReturn) {
   iree_host_size_t block_starts[] = {0, 0};
-  loom_x86_function_t function = {};
-  function.block_starts = block_starts;
-  function.block_count = 1;
-  function.may_dirty_upper_vector_state = true;
+  loom_x86_function_t function = {
+      .block_starts = block_starts,
+      .block_count = 1,
+      .may_dirty_upper_vector_state = true,
+  };
 
   IREE_ASSERT_OK(loom_x86_function_write(&function, nullptr, 0, nullptr,
                                          stream_, &arena_));
@@ -93,11 +95,12 @@ TEST_F(FunctionTest, DirtyUpperVectorStateCleansBeforeReturn) {
 
 TEST_F(FunctionTest, DirtyUpperVectorStatePreservesWideResult) {
   iree_host_size_t block_starts[] = {0, 0};
-  loom_x86_function_t function = {};
-  function.block_starts = block_starts;
-  function.block_count = 1;
-  function.may_dirty_upper_vector_state = true;
-  function.has_upper_vector_result = true;
+  loom_x86_function_t function = {
+      .block_starts = block_starts,
+      .block_count = 1,
+      .may_dirty_upper_vector_state = true,
+      .has_upper_vector_result = true,
+  };
 
   IREE_ASSERT_OK(loom_x86_function_write(&function, nullptr, 0, nullptr,
                                          stream_, &arena_));
@@ -110,14 +113,15 @@ TEST_F(FunctionTest, DirtyUpperVectorStateCleansBeforeEligibleCall) {
   };
   iree_host_size_t block_starts[] = {0, IREE_ARRAYSIZE(instructions)};
   const uint32_t cleanup_indices[] = {0};
-  loom_x86_function_t function = {};
-  function.instructions = instructions;
-  function.instruction_count = IREE_ARRAYSIZE(instructions);
-  function.block_starts = block_starts;
-  function.block_count = 1;
-  function.may_dirty_upper_vector_state = true;
-  function.upper_vector_call_cleanup_indices = cleanup_indices;
-  function.upper_vector_call_cleanup_count = IREE_ARRAYSIZE(cleanup_indices);
+  loom_x86_function_t function = {
+      .instructions = instructions,
+      .instruction_count = IREE_ARRAYSIZE(instructions),
+      .block_starts = block_starts,
+      .block_count = 1,
+      .may_dirty_upper_vector_state = true,
+      .upper_vector_call_cleanup_indices = cleanup_indices,
+      .upper_vector_call_cleanup_count = IREE_ARRAYSIZE(cleanup_indices),
+  };
 
   IREE_ASSERT_OK(loom_x86_function_write(&function, nullptr, 0, nullptr,
                                          stream_, &arena_));
@@ -126,8 +130,7 @@ TEST_F(FunctionTest, DirtyUpperVectorStateCleansBeforeEligibleCall) {
 }
 
 TEST_F(FunctionTest, PackedVectorRecipeUsesOrdinaryWriterPath) {
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 17;
+  loom_x86_encoding_operands_t operands = {.result = 17};
   operands.inputs[0] = 18;
   operands.inputs[1] = 19;
   loom_x86_instruction_t instructions[] = {
@@ -135,11 +138,11 @@ TEST_F(FunctionTest, PackedVectorRecipeUsesOrdinaryWriterPath) {
   };
   iree_host_size_t block_starts[] = {0, IREE_ARRAYSIZE(instructions)};
   const loom_x86_function_t function = {
-      /*.instructions=*/instructions,
-      /*.instruction_count=*/IREE_ARRAYSIZE(instructions),
-      /*.symbol_fixup_count=*/0,
-      /*.block_starts=*/block_starts,
-      /*.block_count=*/1,
+      .instructions = instructions,
+      .instruction_count = IREE_ARRAYSIZE(instructions),
+      .symbol_fixup_count = 0,
+      .block_starts = block_starts,
+      .block_count = 1,
   };
 
   IREE_ASSERT_OK(loom_x86_function_write(&function, nullptr, 0, nullptr,
@@ -148,18 +151,17 @@ TEST_F(FunctionTest, PackedVectorRecipeUsesOrdinaryWriterPath) {
 }
 
 TEST_F(FunctionTest, ReadOnlyDataUsesGenericObjectFixup) {
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 1;
+  loom_x86_encoding_operands_t operands = {.result = 1};
   loom_x86_instruction_t instructions[] = {
       {operands, 7, 0xe440, 0x096f},
   };
   iree_host_size_t block_starts[] = {0, IREE_ARRAYSIZE(instructions)};
   const loom_x86_function_t function = {
-      /*.instructions=*/instructions,
-      /*.instruction_count=*/IREE_ARRAYSIZE(instructions),
-      /*.symbol_fixup_count=*/1,
-      /*.block_starts=*/block_starts,
-      /*.block_count=*/1,
+      .instructions = instructions,
+      .instruction_count = IREE_ARRAYSIZE(instructions),
+      .symbol_fixup_count = 1,
+      .block_starts = block_starts,
+      .block_count = 1,
   };
   uint32_t symbol_indices[8] = {};
   symbol_indices[7] = 3;
@@ -177,15 +179,18 @@ TEST_F(FunctionTest, ReadOnlyDataUsesGenericObjectFixup) {
 }
 
 TEST_F(FunctionTest, RestoreStackAndRegistersAfterResultTransport) {
-  loom_x86_encoding_operands_t left = {};
-  left.result = 3;  // RBX.
-  left.immediate = 42;
-  loom_x86_encoding_operands_t right = {};
-  right.result = 12;  // R12.
-  right.immediate = 43;
-  loom_x86_encoding_operands_t result = {};
-  result.result = 0;     // RAX.
-  result.inputs[0] = 3;  // RBX.
+  loom_x86_encoding_operands_t left = {
+      .immediate = 42,
+      .result = 3,  // RBX.
+  };
+  loom_x86_encoding_operands_t right = {
+      .immediate = 43,
+      .result = 12,  // R12.
+  };
+  loom_x86_encoding_operands_t result = {
+      .result = 0,    // RAX.
+      .inputs = {3},  // RBX.
+  };
   loom_x86_instruction_t instructions[] = {
       Instruction(LOOM_X86_ENCODING_FORM_CONSTANT,
                   0xb8 | LOOM_X86_ENCODING_REX_W, left),
@@ -196,17 +201,17 @@ TEST_F(FunctionTest, RestoreStackAndRegistersAfterResultTransport) {
   };
   iree_host_size_t block_starts[] = {0, IREE_ARRAYSIZE(instructions)};
   const loom_x86_function_t function = {
-      /*.instructions=*/instructions,
-      /*.instruction_count=*/IREE_ARRAYSIZE(instructions),
-      /*.symbol_fixup_count=*/0,
-      /*.block_starts=*/block_starts,
-      /*.block_count=*/1,
-      /*.saved_registers=*/(1u << 3) | (1u << 12),
-      /*.may_dirty_upper_vector_state=*/false,
-      /*.has_upper_vector_result=*/false,
-      /*.upper_vector_call_cleanup_indices=*/nullptr,
-      /*.upper_vector_call_cleanup_count=*/0,
-      /*.stack=*/{24, 16, {}},
+      .instructions = instructions,
+      .instruction_count = IREE_ARRAYSIZE(instructions),
+      .symbol_fixup_count = 0,
+      .block_starts = block_starts,
+      .block_count = 1,
+      .saved_registers = (1u << 3) | (1u << 12),
+      .may_dirty_upper_vector_state = false,
+      .has_upper_vector_result = false,
+      .upper_vector_call_cleanup_indices = nullptr,
+      .upper_vector_call_cleanup_count = 0,
+      .stack = {24, 16, {}},
   };
   IREE_ASSERT_OK(loom_x86_function_write(&function, nullptr, 0, nullptr,
                                          stream_, &arena_));
@@ -215,9 +220,10 @@ TEST_F(FunctionTest, RestoreStackAndRegistersAfterResultTransport) {
   rbx.inputs[0] = 3;
   loom_x86_encoding_operands_t r12 = {};
   r12.inputs[0] = 12;
-  loom_x86_encoding_operands_t stack = {};
-  stack.result = 4;
-  stack.immediate = 24;
+  loom_x86_encoding_operands_t stack = {
+      .immediate = 24,
+      .result = 4,
+  };
   EXPECT_EQ(Read(),
             Encode(Instruction(LOOM_X86_ENCODING_FORM_PUSH, 0, rbx)) +
                 Encode(Instruction(LOOM_X86_ENCODING_FORM_PUSH, 0, r12)) +
@@ -234,14 +240,16 @@ TEST_F(FunctionTest, RestoreStackAndRegistersAfterResultTransport) {
 }
 
 TEST_F(FunctionTest, BranchesSkipEntryTransportAndPreservation) {
-  loom_x86_encoding_operands_t entry = {};
-  entry.result = 3;     // RBX.
-  entry.inputs[0] = 2;  // RDX.
+  loom_x86_encoding_operands_t entry = {
+      .result = 3,    // RBX.
+      .inputs = {2},  // RDX.
+  };
   loom_x86_encoding_operands_t condition = {};
   condition.inputs[0] = 7;  // EDI.
-  loom_x86_encoding_operands_t value = {};
-  value.result = 3;  // RBX.
-  value.immediate = 42;
+  loom_x86_encoding_operands_t value = {
+      .immediate = 42,
+      .result = 3,  // RBX.
+  };
   loom_x86_instruction_t instructions[] = {
       Instruction(LOOM_X86_ENCODING_FORM_MOVE, 0x8b | LOOM_X86_ENCODING_REX_W,
                   entry),
@@ -255,17 +263,17 @@ TEST_F(FunctionTest, BranchesSkipEntryTransportAndPreservation) {
   // the exit reaches stack restoration before POP and RET.
   iree_host_size_t block_starts[] = {1, 1, 2, 4, 4};
   const loom_x86_function_t function = {
-      /*.instructions=*/instructions,
-      /*.instruction_count=*/IREE_ARRAYSIZE(instructions),
-      /*.symbol_fixup_count=*/0,
-      /*.block_starts=*/block_starts,
-      /*.block_count=*/4,
-      /*.saved_registers=*/1u << 3,
-      /*.may_dirty_upper_vector_state=*/false,
-      /*.has_upper_vector_result=*/false,
-      /*.upper_vector_call_cleanup_indices=*/nullptr,
-      /*.upper_vector_call_cleanup_count=*/0,
-      /*.stack=*/{16, 16, {}},
+      .instructions = instructions,
+      .instruction_count = IREE_ARRAYSIZE(instructions),
+      .symbol_fixup_count = 0,
+      .block_starts = block_starts,
+      .block_count = 4,
+      .saved_registers = 1u << 3,
+      .may_dirty_upper_vector_state = false,
+      .has_upper_vector_result = false,
+      .upper_vector_call_cleanup_indices = nullptr,
+      .upper_vector_call_cleanup_count = 0,
+      .stack = {16, 16, {}},
   };
 
   // Layout also works when a previous function has already used the stream.
@@ -285,9 +293,10 @@ TEST_F(FunctionTest, BranchesSkipEntryTransportAndPreservation) {
       -static_cast<int64_t>(branch_length + body_length + jump_length);
   loom_x86_encoding_operands_t rbx = {};
   rbx.inputs[0] = 3;
-  loom_x86_encoding_operands_t stack = {};
-  stack.result = 4;
-  stack.immediate = 16;
+  loom_x86_encoding_operands_t stack = {
+      .immediate = 16,
+      .result = 4,
+  };
   EXPECT_EQ(Read(),
             prefix + Encode(Instruction(LOOM_X86_ENCODING_FORM_PUSH, 0, rbx)) +
                 Encode(Instruction(LOOM_X86_ENCODING_FORM_BINARY_IMMEDIATE,
@@ -303,10 +312,11 @@ TEST_F(FunctionTest, BranchesSkipEntryTransportAndPreservation) {
 
 TEST_F(FunctionTest, RealignmentRestoresTheSavedStackPointerBeforePops) {
   iree_host_size_t block_starts[] = {0, 0};
-  loom_x86_function_t function = {};
-  function.block_starts = block_starts;
-  function.block_count = 1;
-  function.saved_registers = 1u << 3;
+  loom_x86_function_t function = {
+      .block_starts = block_starts,
+      .block_count = 1,
+      .saved_registers = 1u << 3,
+  };
   function.stack.allocation_size = 64;
   function.stack.alignment = 64;
   function.stack.realignment.mask = -64;
@@ -317,21 +327,23 @@ TEST_F(FunctionTest, RealignmentRestoresTheSavedStackPointerBeforePops) {
 
   loom_x86_encoding_operands_t rbx = {};
   rbx.inputs[0] = 3;
-  loom_x86_encoding_operands_t capture = {};
-  capture.result = 11;
+  loom_x86_encoding_operands_t capture = {.result = 11};
   capture.inputs[0] = 4;
-  loom_x86_encoding_operands_t align = {};
-  align.result = 4;
-  align.immediate = -64;
-  loom_x86_encoding_operands_t allocate = {};
-  allocate.result = 4;
-  allocate.immediate = 64;
+  loom_x86_encoding_operands_t align = {
+      .immediate = -64,
+      .result = 4,
+  };
+  loom_x86_encoding_operands_t allocate = {
+      .immediate = 64,
+      .result = 4,
+  };
   loom_x86_encoding_operands_t save = {};
   save.inputs[0] = 11;
   save.inputs[1] = 4;
   save.immediate = 8;
-  loom_x86_encoding_operands_t restore = {};
-  restore.result = 4;
+  loom_x86_encoding_operands_t restore = {
+      .result = 4,
+  };
   restore.inputs[0] = 4;
   restore.immediate = 8;
   EXPECT_EQ(Read(),
@@ -355,20 +367,20 @@ TEST_F(FunctionTest, RealignmentRestoresTheSavedStackPointerBeforePops) {
 TEST_F(FunctionTest, SymbolFixupsKeepSectionOffsetsAndTheirOwnNamespace) {
   const std::string prefix = "preceding section bytes";
   IREE_ASSERT_OK(iree_io_stream_write(stream_, prefix.size(), prefix.data()));
-  loom_x86_encoding_operands_t address = {};
-  address.result = 0;
+  loom_x86_encoding_operands_t address = {.result = 0};
   loom_x86_instruction_t instructions[] = {
       Instruction(LOOM_X86_ENCODING_FORM_ADDRESS_PC_RELATIVE,
                   0x8d | LOOM_X86_ENCODING_REX_W, address, 2),
       Instruction(LOOM_X86_ENCODING_FORM_CALL, 0, {}, 0),
   };
   iree_host_size_t block_starts[] = {0, IREE_ARRAYSIZE(instructions)};
-  loom_x86_function_t function = {};
-  function.instructions = instructions;
-  function.instruction_count = IREE_ARRAYSIZE(instructions);
-  function.symbol_fixup_count = 2;
-  function.block_starts = block_starts;
-  function.block_count = 1;
+  loom_x86_function_t function = {
+      .instructions = instructions,
+      .instruction_count = IREE_ARRAYSIZE(instructions),
+      .symbol_fixup_count = 2,
+      .block_starts = block_starts,
+      .block_count = 1,
+  };
   function.stack.allocation_size = 8;
   function.stack.alignment = 16;
   const uint32_t symbol_indices[] = {4, 1, 3};
@@ -391,10 +403,11 @@ TEST_F(FunctionTest, SymbolFixupsKeepSectionOffsetsAndTheirOwnNamespace) {
 
 TEST_F(FunctionTest, FramePointerDoesNotSuppressOutgoingStackRealignment) {
   iree_host_size_t block_starts[] = {0, 0};
-  loom_x86_function_t function = {};
-  function.block_starts = block_starts;
-  function.block_count = 1;
-  function.saved_registers = (1u << 3) | (1u << 5);
+  loom_x86_function_t function = {
+      .block_starts = block_starts,
+      .block_count = 1,
+      .saved_registers = (1u << 3) | (1u << 5),
+  };
   function.stack.allocation_size = 64;
   function.stack.alignment = 32;
   function.stack.has_frame_pointer = true;
@@ -406,17 +419,17 @@ TEST_F(FunctionTest, FramePointerDoesNotSuppressOutgoingStackRealignment) {
   rbx.inputs[0] = 3;
   loom_x86_encoding_operands_t rbp = {};
   rbp.inputs[0] = 5;
-  loom_x86_encoding_operands_t establish = {};
-  establish.result = 5;
+  loom_x86_encoding_operands_t establish = {.result = 5};
   establish.inputs[0] = 4;
-  loom_x86_encoding_operands_t align = {};
-  align.result = 4;
-  align.immediate = -32;
-  loom_x86_encoding_operands_t allocate = {};
-  allocate.result = 4;
-  allocate.immediate = 64;
-  loom_x86_encoding_operands_t restore = {};
-  restore.result = 4;
+  loom_x86_encoding_operands_t align = {
+      .immediate = -32,
+      .result = 4,
+  };
+  loom_x86_encoding_operands_t allocate = {
+      .immediate = 64,
+      .result = 4,
+  };
+  loom_x86_encoding_operands_t restore = {.result = 4};
   restore.inputs[0] = 5;
   EXPECT_EQ(Read(),
             Encode(Instruction(LOOM_X86_ENCODING_FORM_PUSH, 0, rbx)) +

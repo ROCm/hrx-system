@@ -17,8 +17,7 @@ using ::loom::testing::DiagnosticEmissionCapture;
 
 TEST(KernelLaunchConfigTest, AcceptsAbsentOrCompleteClusterSize) {
   for (const uint16_t operand_count : {6, 9}) {
-    loom_op_t op = {};
-    op.operand_count = operand_count;
+    loom_op_t op = {.operand_count = operand_count};
     DiagnosticEmissionCapture capture;
     IREE_EXPECT_OK(loom_kernel_launch_config_verify(
         /*module=*/nullptr, &op, capture.emitter()));
@@ -28,8 +27,7 @@ TEST(KernelLaunchConfigTest, AcceptsAbsentOrCompleteClusterSize) {
 
 TEST(KernelLaunchConfigTest, RejectsPartialClusterSize) {
   for (const uint16_t operand_count : {7, 8}) {
-    loom_op_t op = {};
-    op.operand_count = operand_count;
+    loom_op_t op = {.operand_count = operand_count};
     DiagnosticEmissionCapture capture;
     IREE_EXPECT_OK(loom_kernel_launch_config_verify(
         /*module=*/nullptr, &op, capture.emitter()));

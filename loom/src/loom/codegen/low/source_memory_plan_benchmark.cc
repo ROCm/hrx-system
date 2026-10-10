@@ -149,8 +149,8 @@ class SourceMemoryPlanBenchmark {
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
     const loom_symbol_ref_t callee = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
     loom_op_t* func_op = nullptr;
     IREE_CHECK_OK(loom_test_func_build(
@@ -211,12 +211,12 @@ class SourceMemoryPlanBenchmark {
     loom_value_id_t dynamic_index = source_index_;
     if (indexing_ != Indexing::kLinear) {
       const loom_predicate_t range = {
-          /*.kind=*/LOOM_PREDICATE_RANGE,
-          /*.arg_count=*/3,
-          /*.arg_tags=*/
-          {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST, LOOM_PRED_ARG_CONST},
-          /*.reserved=*/{},
-          /*.args=*/{source_index_, 0, 1024 * 1024},
+          .kind = LOOM_PREDICATE_RANGE,
+          .arg_count = 3,
+          .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                       LOOM_PRED_ARG_CONST},
+          .reserved = {},
+          .args = {source_index_, 0, 1024 * 1024},
       };
       const auto index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
       loom_op_t* assumed = nullptr;

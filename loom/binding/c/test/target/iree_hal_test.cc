@@ -61,13 +61,13 @@ ModulePtr ParseModule(const char* source_text) {
   WorkspacePtr workspace_ptr(workspace);
 
   const loomc_source_options_t source_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(source_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("runtime_features.loom"),
-      /*.contents=*/loomc_make_byte_span(source_text, strlen(source_text)),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(source_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("runtime_features.loom"),
+      .contents = loomc_make_byte_span(source_text, strlen(source_text)),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(
@@ -135,17 +135,17 @@ loomc_status_t FakeSelectTarget(
   loomc_target_profile_t* profile = nullptr;
   loomc_result_t* result = nullptr;
   loomc_spirv_profile_options_t profile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(profile_options),
-      /*.next=*/nullptr,
-      /*.identifier=*/options->identifier,
-      /*.preset=*/LOOMC_SPIRV_PROFILE_PRESET_NONE,
-      /*.feature_facts=*/nullptr,
-      /*.feature_fact_count=*/0,
-      /*.limit_facts=*/nullptr,
-      /*.limit_fact_count=*/0,
-      /*.environment_facts=*/nullptr,
-      /*.environment_fact_count=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
+      .structure_size = sizeof(profile_options),
+      .next = nullptr,
+      .identifier = options->identifier,
+      .preset = LOOMC_SPIRV_PROFILE_PRESET_NONE,
+      .feature_facts = nullptr,
+      .feature_fact_count = 0,
+      .limit_facts = nullptr,
+      .limit_fact_count = 0,
+      .environment_facts = nullptr,
+      .environment_fact_count = 0,
   };
   loomc_status_t status = loomc_target_profile_create_spirv(
       target_environment, &profile_options, allocator, &profile, &result);
@@ -173,15 +173,15 @@ TEST(LoomcIreeHalTargetTest, RejectsInvalidArguments) {
                                    &selection, &result));
 
   loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("invalid"),
-      /*.device=*/nullptr,
-      /*.physical_device_affinity=*/0,
-      /*.target_profile=*/nullptr,
-      /*.providers=*/nullptr,
-      /*.provider_count=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("invalid"),
+      .device = nullptr,
+      .physical_device_affinity = 0,
+      .target_profile = nullptr,
+      .providers = nullptr,
+      .provider_count = 0,
   };
   LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
                          loomc_target_select_iree_hal(
@@ -192,15 +192,15 @@ TEST(LoomcIreeHalTargetTest, RejectsInvalidArguments) {
 TEST(LoomcIreeHalTargetTest, EmptyProviderTableReturnsFailedResult) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("empty"),
-      /*.device=*/FakeDevice(),
-      /*.physical_device_affinity=*/0,
-      /*.target_profile=*/nullptr,
-      /*.providers=*/nullptr,
-      /*.provider_count=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("empty"),
+      .device = FakeDevice(),
+      .physical_device_affinity = 0,
+      .target_profile = nullptr,
+      .providers = nullptr,
+      .provider_count = 0,
   };
   loomc_result_t* result = nullptr;
   loomc_iree_hal_target_selection_t selection = {};
@@ -216,32 +216,32 @@ TEST(LoomcIreeHalTargetTest, EmptyProviderTableReturnsFailedResult) {
 
 TEST(LoomcIreeHalTargetTest, UnsupportedProvidersReturnFailedResult) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  FakeProviderState first_state = {/*.supports=*/false, /*.call_count=*/0};
-  FakeProviderState second_state = {/*.supports=*/false, /*.call_count=*/0};
+  FakeProviderState first_state = {.supports = false, .call_count = 0};
+  FakeProviderState second_state = {.supports = false, .call_count = 0};
   const loomc_iree_hal_target_provider_t first_provider = {
-      /*.name=*/loomc_make_cstring_view("first"),
-      /*.user_data=*/&first_state,
-      /*.select_target=*/FakeSelectTarget,
+      .name = loomc_make_cstring_view("first"),
+      .user_data = &first_state,
+      .select_target = FakeSelectTarget,
   };
   const loomc_iree_hal_target_provider_t second_provider = {
-      /*.name=*/loomc_make_cstring_view("second"),
-      /*.user_data=*/&second_state,
-      /*.select_target=*/FakeSelectTarget,
+      .name = loomc_make_cstring_view("second"),
+      .user_data = &second_state,
+      .select_target = FakeSelectTarget,
   };
   const loomc_iree_hal_target_provider_t* providers[] = {
       &first_provider,
       &second_provider,
   };
   loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("unsupported"),
-      /*.device=*/FakeDevice(),
-      /*.physical_device_affinity=*/0,
-      /*.target_profile=*/nullptr,
-      /*.providers=*/providers,
-      /*.provider_count=*/2,
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("unsupported"),
+      .device = FakeDevice(),
+      .physical_device_affinity = 0,
+      .target_profile = nullptr,
+      .providers = providers,
+      .provider_count = 2,
   };
   loomc_result_t* result = nullptr;
   loomc_iree_hal_target_selection_t selection = {};
@@ -259,23 +259,23 @@ TEST(LoomcIreeHalTargetTest, UnsupportedProvidersReturnFailedResult) {
 
 TEST(LoomcIreeHalTargetTest, OneEnabledRouteCreatesProfile) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  FakeProviderState state = {/*.supports=*/true, /*.call_count=*/0};
+  FakeProviderState state = {.supports = true, .call_count = 0};
   const loomc_iree_hal_target_provider_t provider = {
-      /*.name=*/loomc_make_cstring_view("enabled"),
-      /*.user_data=*/&state,
-      /*.select_target=*/FakeSelectTarget,
+      .name = loomc_make_cstring_view("enabled"),
+      .user_data = &state,
+      .select_target = FakeSelectTarget,
   };
   const loomc_iree_hal_target_provider_t* providers[] = {&provider};
   loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("enabled"),
-      /*.device=*/FakeDevice(),
-      /*.physical_device_affinity=*/0,
-      /*.target_profile=*/nullptr,
-      /*.providers=*/providers,
-      /*.provider_count=*/1,
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("enabled"),
+      .device = FakeDevice(),
+      .physical_device_affinity = 0,
+      .target_profile = nullptr,
+      .providers = providers,
+      .provider_count = 1,
   };
   loomc_result_t* result = nullptr;
   loomc_iree_hal_target_selection_t selection = {};
@@ -294,23 +294,23 @@ TEST(LoomcIreeHalTargetTest, OneEnabledRouteCreatesProfile) {
 
 TEST(LoomcIreeHalTargetTest, MultipleRoutesStopAtFirstSupportedProvider) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  FakeProviderState first_state = {/*.supports=*/false, /*.call_count=*/0};
-  FakeProviderState second_state = {/*.supports=*/true, /*.call_count=*/0};
-  FakeProviderState third_state = {/*.supports=*/true, /*.call_count=*/0};
+  FakeProviderState first_state = {.supports = false, .call_count = 0};
+  FakeProviderState second_state = {.supports = true, .call_count = 0};
+  FakeProviderState third_state = {.supports = true, .call_count = 0};
   const loomc_iree_hal_target_provider_t first_provider = {
-      /*.name=*/loomc_make_cstring_view("first"),
-      /*.user_data=*/&first_state,
-      /*.select_target=*/FakeSelectTarget,
+      .name = loomc_make_cstring_view("first"),
+      .user_data = &first_state,
+      .select_target = FakeSelectTarget,
   };
   const loomc_iree_hal_target_provider_t second_provider = {
-      /*.name=*/loomc_make_cstring_view("second"),
-      /*.user_data=*/&second_state,
-      /*.select_target=*/FakeSelectTarget,
+      .name = loomc_make_cstring_view("second"),
+      .user_data = &second_state,
+      .select_target = FakeSelectTarget,
   };
   const loomc_iree_hal_target_provider_t third_provider = {
-      /*.name=*/loomc_make_cstring_view("third"),
-      /*.user_data=*/&third_state,
-      /*.select_target=*/FakeSelectTarget,
+      .name = loomc_make_cstring_view("third"),
+      .user_data = &third_state,
+      .select_target = FakeSelectTarget,
   };
   const loomc_iree_hal_target_provider_t* providers[] = {
       &first_provider,
@@ -318,15 +318,15 @@ TEST(LoomcIreeHalTargetTest, MultipleRoutesStopAtFirstSupportedProvider) {
       &third_provider,
   };
   loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("multi"),
-      /*.device=*/FakeDevice(),
-      /*.physical_device_affinity=*/0,
-      /*.target_profile=*/nullptr,
-      /*.providers=*/providers,
-      /*.provider_count=*/3,
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("multi"),
+      .device = FakeDevice(),
+      .physical_device_affinity = 0,
+      .target_profile = nullptr,
+      .providers = providers,
+      .provider_count = 3,
   };
   loomc_result_t* result = nullptr;
   loomc_iree_hal_target_selection_t selection = {};
@@ -358,10 +358,10 @@ TEST(LoomcIreeHalRuntimeFeaturesTest, RejectsInvalidArguments) {
                              module.get(), nullptr, nullptr));
 
   const loomc_sanitizer_options_t invalid_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
-      /*.structure_size=*/sizeof(invalid_options),
-      /*.next=*/nullptr,
-      /*.checks=*/1ull << 63,
+      .type = LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
+      .structure_size = sizeof(invalid_options),
+      .next = nullptr,
+      .checks = 1ull << 63,
   };
   runtime_features = IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_FEEDBACK;
   LOOMC_EXPECT_STATUS_IS(
@@ -375,12 +375,12 @@ TEST(LoomcIreeHalRuntimeFeaturesTest, MapsRequestedSanitizerServices) {
   ModulePtr module = ParseModule("");
   ASSERT_NE(module, nullptr);
   loomc_sanitizer_options_t sanitizer_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
-      /*.structure_size=*/sizeof(sanitizer_options),
-      /*.next=*/nullptr,
-      /*.checks=*/LOOMC_SANITIZER_CHECK_ACCESS | LOOMC_SANITIZER_CHECK_RACE,
-      /*.flags=*/0,
-      /*.reporting_mode=*/LOOMC_SANITIZER_REPORTING_MODE_DEFAULT,
+      .type = LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
+      .structure_size = sizeof(sanitizer_options),
+      .next = nullptr,
+      .checks = LOOMC_SANITIZER_CHECK_ACCESS | LOOMC_SANITIZER_CHECK_RACE,
+      .flags = 0,
+      .reporting_mode = LOOMC_SANITIZER_REPORTING_MODE_DEFAULT,
   };
 
   iree_hal_device_runtime_feature_flags_t runtime_features =

@@ -51,8 +51,9 @@ iree_status_t loom_cxx_import(iree_string_view_t source,
     std::unique_ptr<loom_module_t, decltype(&loom_module_free)> module(
         raw_module, loom_module_free);
     translate(parsed.unit(), parsed.diagnostics(), module.get(), *options);
-    loom_verify_options_t verification_options = {};
-    verification_options.sink = options->diagnostic_sink;
+    loom_verify_options_t verification_options = {
+        .sink = options->diagnostic_sink,
+    };
     loom_verify_result_t verification = {};
     check(
         loom_verify_module(module.get(), &verification_options, &verification));

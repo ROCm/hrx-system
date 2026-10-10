@@ -42,10 +42,11 @@ static bool FindDynamicQueueFamily(
     }
     const iree_hal_queue_family_ordinal_t family_ordinal =
         (iree_hal_queue_family_ordinal_t)i;
-    DynamicQueueFamily family = {};
-    family.ordinal = family_ordinal;
-    family.identity = iree_hal_device_queue_family(device, family_ordinal);
-    family.spec = family_spec;
+    DynamicQueueFamily family = {
+        .ordinal = family_ordinal,
+        .identity = iree_hal_device_queue_family(device, family_ordinal),
+        .spec = family_spec,
+    };
     if (!family.identity) {
       return false;
     }

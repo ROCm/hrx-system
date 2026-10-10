@@ -97,9 +97,9 @@ iree_status_t InjectedFlushQueueExecute(
   wait_semaphores[wait_semaphore_list.count] = queue->execute_gate;
   wait_values[wait_semaphore_list.count] = queue->execute_gate_value;
   const iree_hal_semaphore_list_t gated_waits = {
-      /*.count=*/wait_semaphore_list.count + 1,
-      /*.semaphores=*/wait_semaphores.data(),
-      /*.payload_values=*/wait_values.data(),
+      .count = wait_semaphore_list.count + 1,
+      .semaphores = wait_semaphores.data(),
+      .payload_values = wait_values.data(),
   };
   iree_status_t status =
       iree_hal_queue_execute(queue->target, gated_waits, signal_semaphore_list,
@@ -123,22 +123,22 @@ iree_status_t InjectedFlushQueueFlush(iree_hal_queue_t* base_queue) {
 }
 
 const iree_hal_queue_vtable_t kInjectedFlushQueueVtable = {
-    /*.destroy=*/DestroyInjectedFlushQueue,
-    /*.barrier=*/InjectedFlushQueueBarrier,
-    /*.execute=*/InjectedFlushQueueExecute,
-    /*.host_call=*/nullptr,
-    /*.query_dispatch_concurrency=*/nullptr,
-    /*.dispatch=*/nullptr,
-    /*.atomic_wait=*/nullptr,
-    /*.atomic_store=*/nullptr,
-    /*.atomic_rmw=*/nullptr,
-    /*.timestamp=*/nullptr,
-    /*.flush=*/InjectedFlushQueueFlush,
-    /*.alloca=*/nullptr,
-    /*.dealloca=*/nullptr,
-    /*.transfer=*/nullptr,
-    /*.read=*/nullptr,
-    /*.write=*/nullptr,
+    .destroy = DestroyInjectedFlushQueue,
+    .barrier = InjectedFlushQueueBarrier,
+    .execute = InjectedFlushQueueExecute,
+    .host_call = nullptr,
+    .query_dispatch_concurrency = nullptr,
+    .dispatch = nullptr,
+    .atomic_wait = nullptr,
+    .atomic_store = nullptr,
+    .atomic_rmw = nullptr,
+    .timestamp = nullptr,
+    .flush = InjectedFlushQueueFlush,
+    .alloca = nullptr,
+    .dealloca = nullptr,
+    .transfer = nullptr,
+    .read = nullptr,
+    .write = nullptr,
 };
 
 void InitializeInjectedFlushQueue(iree_hal_queue_t* target,
@@ -204,8 +204,9 @@ class CpuStreamingMemoryTest : public ::testing::Test {
                                      iree_allocator_system(),
                                      &device_entry_.block_pool);
 
-    iree_hal_streaming_context_flags_t context_flags = {};
-    context_flags.scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO;
+    iree_hal_streaming_context_flags_t context_flags = {
+        .scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO,
+    };
     IREE_ASSERT_OK(iree_hal_streaming_context_create(
         &device_entry_, context_flags, iree_allocator_system(), &context_));
     IREE_ASSERT_OK(iree_hal_streaming_stream_create(
@@ -376,9 +377,9 @@ TEST_F(CpuStreamingMemoryTest,
   uint64_t second_initial_pending = 0;
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(streams); ++i) {
     const iree_hal_semaphore_list_t gate_wait = {
-        /*.count=*/1,
-        /*.semaphores=*/&gate,
-        /*.payload_values=*/&gate_values[i],
+        .count = 1,
+        .semaphores = &gate,
+        .payload_values = &gate_values[i],
     };
     IREE_ASSERT_OK(
         iree_hal_streaming_stream_wait_semaphores(streams[i], gate_wait));

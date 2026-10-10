@@ -65,9 +65,9 @@ class LinkDependencyReportTest : public ::testing::Test {
     const iree_string_view_t source = FindSource(filename);
     EXPECT_FALSE(iree_string_view_is_empty(source));
     const loom_link_module_index_add_options_t options = {
-        /*.provider_name=*/
-        iree_make_string_view(provider_name.data(), provider_name.size()),
-        /*.role=*/role,
+        .provider_name =
+            iree_make_string_view(provider_name.data(), provider_name.size()),
+        .role = role,
     };
     iree_host_size_t provider_ordinal = 0;
     IREE_EXPECT_OK(loom_link_module_index_add_text(
@@ -102,8 +102,8 @@ class LinkDependencyReportTest : public ::testing::Test {
       const loom_link_module_index_t* index,
       const std::array<iree_host_size_t, 2>& direct_providers) {
     const loom_link_dependency_analysis_options_t options = {
-        /*.direct_provider_ordinals=*/direct_providers.data(),
-        /*.direct_provider_count=*/direct_providers.size(),
+        .direct_provider_ordinals = direct_providers.data(),
+        .direct_provider_count = direct_providers.size(),
     };
     loom_link_dependency_analysis_t analysis = {};
     IREE_CHECK_OK(loom_link_dependency_analyze(

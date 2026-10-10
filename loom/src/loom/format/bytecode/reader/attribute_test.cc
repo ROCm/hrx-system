@@ -62,19 +62,19 @@ class BytecodeAttributeTest : public ::testing::Test {
 
   loom_bytecode_attribute_validator_t MakeValidator() {
     return loom_bytecode_attribute_validator_t{
-        /*.decoder=*/&decoder_,
-        /*.context=*/&context_,
-        /*.module_view=*/&module_view_,
+        .decoder = &decoder_,
+        .context = &context_,
+        .module_view = &module_view_,
     };
   }
 
   loom_bytecode_attribute_materializer_t MakeMaterializer() {
     return loom_bytecode_attribute_materializer_t{
-        /*.decoder=*/&decoder_,
-        /*.context=*/&context_,
-        /*.module_view=*/&module_view_,
-        /*.scratch_arena=*/&scratch_arena_,
-        /*.output_module=*/module_,
+        .decoder = &decoder_,
+        .context = &context_,
+        .module_view = &module_view_,
+        .scratch_arena = &scratch_arena_,
+        .output_module = module_,
     };
   }
 
@@ -166,9 +166,9 @@ TEST_F(BytecodeAttributeTest, SsaPredicatesResolveThroughConcreteValueMap) {
       module_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &value_id));
   const loom_value_id_t values[] = {value_id};
   const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
-      /*.symbol_name=*/IREE_SV("function"),
-      /*.values=*/values,
-      /*.value_count=*/IREE_ARRAYSIZE(values),
+      .symbol_name = IREE_SV("function"),
+      .values = values,
+      .value_count = IREE_ARRAYSIZE(values),
   };
   loom_bytecode_attribute_materializer_t materializer = MakeMaterializer();
   loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
@@ -189,13 +189,12 @@ TEST_F(BytecodeAttributeTest, CompleteBindingsSurviveAttributeScratchReset) {
       module_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &width));
   iree_arena_allocator_t scope_arena;
   iree_arena_initialize(&block_pool_, &scope_arena);
-  loom_bytecode_type_bindings_t bindings = {};
-  bindings.arena = &scope_arena;
+  loom_bytecode_type_bindings_t bindings = {.arena = &scope_arena};
   const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
-      /*.symbol_name=*/IREE_SV("function"),
-      /*.values=*/&width,
-      /*.value_count=*/1,
-      /*.bindings=*/&bindings,
+      .symbol_name = IREE_SV("function"),
+      .values = &width,
+      .value_count = 1,
+      .bindings = &bindings,
   };
   loom_bytecode_attribute_materializer_t materializer = MakeMaterializer();
   // A complete group record, then a later attribute reusing its scoped node.
@@ -235,13 +234,12 @@ TEST_F(BytecodeAttributeTest, ScopedRegisterRetainsCarrierAndBoundValueType) {
       module_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &width));
   iree_arena_allocator_t scope_arena;
   iree_arena_initialize(&block_pool_, &scope_arena);
-  loom_bytecode_type_bindings_t bindings = {};
-  bindings.arena = &scope_arena;
+  loom_bytecode_type_bindings_t bindings = {.arena = &scope_arena};
   const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
-      /*.symbol_name=*/IREE_SV("function"),
-      /*.values=*/&width,
-      /*.value_count=*/1,
-      /*.bindings=*/&bindings,
+      .symbol_name = IREE_SV("function"),
+      .values = &width,
+      .value_count = 1,
+      .bindings = &bindings,
   };
   // The vector is completed before its register parent; the parent references
   // that final child rather than an unbound native type template.
@@ -295,13 +293,12 @@ TEST_F(BytecodeAttributeTest, ScopedViewAlignmentValidatesBeforeNarrowing) {
     SCOPED_TRACE(alignment);
     iree_arena_allocator_t scope_arena;
     iree_arena_initialize(&block_pool_, &scope_arena);
-    loom_bytecode_type_bindings_t bindings = {};
-    bindings.arena = &scope_arena;
+    loom_bytecode_type_bindings_t bindings = {.arena = &scope_arena};
     const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
-        /*.symbol_name=*/IREE_SV("function"),
-        /*.values=*/&width,
-        /*.value_count=*/1,
-        /*.bindings=*/&bindings,
+        .symbol_name = IREE_SV("function"),
+        .values = &width,
+        .value_count = 1,
+        .bindings = &bindings,
     };
     // One scoped view node with a dynamic dimension and no encoding. All
     // fields after the kind use varints, unlike the global type table.
@@ -366,13 +363,12 @@ TEST_F(BytecodeAttributeTest, ScopedDialectNameUsesFullStringOrdinal) {
       module_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &width));
   iree_arena_allocator_t scope_arena;
   iree_arena_initialize(&block_pool_, &scope_arena);
-  loom_bytecode_type_bindings_t bindings = {};
-  bindings.arena = &scope_arena;
+  loom_bytecode_type_bindings_t bindings = {.arena = &scope_arena};
   const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
-      /*.symbol_name=*/IREE_SV("function"),
-      /*.values=*/&width,
-      /*.value_count=*/1,
-      /*.bindings=*/&bindings,
+      .symbol_name = IREE_SV("function"),
+      .values = &width,
+      .value_count = 1,
+      .bindings = &bindings,
   };
   const uint8_t data[] = {
       1,    12,   2,    LOOM_BYTECODE_TYPE_GROUP,
@@ -405,8 +401,8 @@ TEST_F(BytecodeAttributeTest, SsaValidationRejectsOutOfRangeValue) {
       0x01, LOOM_PRED_ARG_CONST,        0x20,
   };
   const loom_bytecode_attribute_ssa_validation_scope_t scope = {
-      /*.symbol_name=*/IREE_SV("function"),
-      /*.value_count=*/1,
+      .symbol_name = IREE_SV("function"),
+      .value_count = 1,
   };
   loom_bytecode_attribute_validator_t validator = MakeValidator();
   loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));

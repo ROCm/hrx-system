@@ -42,10 +42,11 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue fill signals completion semaphore",
                  "[queue_ops][fill][sync]") {
   hrx_allocator_t alloc = hrx().device_allocator(device_);
 
-  hrx_buffer_params_t params = {};
-  params.type = HRX_MEMORY_TYPE_DEVICE_LOCAL;
-  params.access = HRX_MEMORY_ACCESS_ALL;
-  params.usage = HRX_BUFFER_USAGE_TRANSFER;
+  hrx_buffer_params_t params = {
+      .type = HRX_MEMORY_TYPE_DEVICE_LOCAL,
+      .access = HRX_MEMORY_ACCESS_ALL,
+      .usage = HRX_BUFFER_USAGE_TRANSFER,
+  };
 
   constexpr size_t kWordCount = 4096;
   constexpr uint32_t kPattern = 0xA5C33CA5u;
@@ -83,10 +84,11 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue copy signals completion semaphore",
                  "[queue_ops][copy][sync]") {
   hrx_allocator_t alloc = hrx().device_allocator(device_);
 
-  hrx_buffer_params_t params = {};
-  params.type = HRX_MEMORY_TYPE_DEVICE_LOCAL;
-  params.access = HRX_MEMORY_ACCESS_ALL;
-  params.usage = HRX_BUFFER_USAGE_TRANSFER;
+  hrx_buffer_params_t params = {
+      .type = HRX_MEMORY_TYPE_DEVICE_LOCAL,
+      .access = HRX_MEMORY_ACCESS_ALL,
+      .usage = HRX_BUFFER_USAGE_TRANSFER,
+  };
 
   constexpr size_t kByteCount = 16 * 1024;
   hrx_buffer_t src = nullptr;

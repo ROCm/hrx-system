@@ -54,7 +54,7 @@ TEST_F(PassVerifyTest, RejectsNullPipelineOp) {
   loom_module_t* module = Parse(IREE_SV(""));
   ASSERT_NE(module, nullptr);
   loom_pass_verify_options_t options = {
-      /*.registry=*/loom_test_pass_registry(),
+      .registry = loom_test_pass_registry(),
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -292,8 +292,8 @@ TEST_F(PassVerifyTest, RejectsUnresolvedCall) {
   IREE_ASSERT_OK(loom_pass_call_set_callee(
       module, call,
       loom_attr_symbol({
-          /*.module_id=*/0,
-          /*.symbol_id=*/(uint16_t)module->symbols.count,
+          .module_id = 0,
+          .symbol_id = (uint16_t)module->symbols.count,
       })));
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, VerifyModule(module));

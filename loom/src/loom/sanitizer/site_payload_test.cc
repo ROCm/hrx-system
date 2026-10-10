@@ -20,14 +20,15 @@ std::string StringViewToString(iree_string_view_t value) {
 }
 
 loom_sanitizer_site_payload_t BaselinePayload() {
-  loom_sanitizer_site_payload_t payload = {};
-  payload.site_kind = LOOM_SANITIZER_SITE_KIND_ACCESS;
-  payload.check_kind = LOOM_SANITIZER_CHECK_KIND_ACCESS_RANGE;
-  payload.provenance_kind = LOOM_SANITIZER_PROVENANCE_KIND_ASSUME;
-  payload.lane_policy = LOOM_SANITIZER_LANE_POLICY_PER_LANE;
-  payload.lineage_role = LOOM_SANITIZER_LINEAGE_ROLE_ORIGINAL;
-  payload.flags = 0;
-  payload.extension_data = iree_const_byte_span_empty();
+  loom_sanitizer_site_payload_t payload = {
+      .site_kind = LOOM_SANITIZER_SITE_KIND_ACCESS,
+      .check_kind = LOOM_SANITIZER_CHECK_KIND_ACCESS_RANGE,
+      .provenance_kind = LOOM_SANITIZER_PROVENANCE_KIND_ASSUME,
+      .lane_policy = LOOM_SANITIZER_LANE_POLICY_PER_LANE,
+      .lineage_role = LOOM_SANITIZER_LINEAGE_ROLE_ORIGINAL,
+      .flags = 0,
+      .extension_data = iree_const_byte_span_empty(),
+  };
   return payload;
 }
 

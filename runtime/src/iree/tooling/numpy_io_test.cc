@@ -147,11 +147,11 @@ static void LoadArrayAndAssertContents(iree_io_stream_t* stream,
                                        iree_hal_element_type_t element_type,
                                        iree_hal_encoding_type_t encoding_type,
                                        std::vector<T> contents) {
-  iree_hal_buffer_params_t buffer_params = {};
-  buffer_params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
-  buffer_params.access = IREE_HAL_MEMORY_ACCESS_READ;
-  buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  iree_hal_buffer_params_t buffer_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
+      .access = IREE_HAL_MEMORY_ACCESS_READ,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+  };
   iree_hal_buffer_view_t* buffer_view = NULL;
   IREE_ASSERT_OK(iree_numpy_npy_load_ndarray(
       stream, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT, buffer_params,
@@ -169,11 +169,11 @@ TEST_F(NumpyIOTest, LoadEmptyFile) {
   ASSERT_TRUE(iree_io_stream_is_eos(stream.get()));
 
   // Try (and fail) to parse something from the empty file.
-  iree_hal_buffer_params_t buffer_params = {};
-  buffer_params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
-  buffer_params.access = IREE_HAL_MEMORY_ACCESS_READ;
-  buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  iree_hal_buffer_params_t buffer_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
+      .access = IREE_HAL_MEMORY_ACCESS_READ,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+  };
   iree_hal_buffer_view_t* buffer_view = NULL;
   EXPECT_THAT(Status(iree_numpy_npy_load_ndarray(
                   stream.get(), IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT,
@@ -214,11 +214,11 @@ TEST_F(NumpyIOTest, RejectMalformedHeaderWithoutDictSeparator) {
       "{'descr': '|i1' 'fortran_order': False, 'shape': (3,)}", {1, 2, 3});
   auto stream = OpenInputBytes(file);
 
-  iree_hal_buffer_params_t buffer_params = {};
-  buffer_params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
-  buffer_params.access = IREE_HAL_MEMORY_ACCESS_READ;
-  buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  iree_hal_buffer_params_t buffer_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
+      .access = IREE_HAL_MEMORY_ACCESS_READ,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+  };
   iree_hal_buffer_view_t* buffer_view = NULL;
   EXPECT_THAT(Status(iree_numpy_npy_load_ndarray(
                   stream.get(), IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT,
@@ -376,11 +376,11 @@ static void RoundTripArrays(iree_io_stream_t* source_stream,
                             iree_io_stream_t* target_stream,
                             iree_hal_allocator_t* device_allocator) {
   while (!iree_io_stream_is_eos(source_stream)) {
-    iree_hal_buffer_params_t buffer_params = {};
-    buffer_params.usage =
-        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
-    buffer_params.access = IREE_HAL_MEMORY_ACCESS_READ;
-    buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+    iree_hal_buffer_params_t buffer_params = {
+        .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
+        .access = IREE_HAL_MEMORY_ACCESS_READ,
+        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+    };
     iree_hal_buffer_view_t* buffer_view = NULL;
     IREE_ASSERT_OK(iree_numpy_npy_load_ndarray(
         source_stream, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT, buffer_params,

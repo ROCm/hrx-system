@@ -139,8 +139,8 @@ static iree_status_t iree_hal_amdgpu_global_table_benchmark_create_heap_buffer(
       /*offset=*/0, &storage));
 
   iree_hal_buffer_release_callback_t release_callback = {
-      /*.fn=*/iree_hal_amdgpu_global_table_benchmark_buffer_release,
-      /*.user_data=*/storage,
+      .fn = iree_hal_amdgpu_global_table_benchmark_buffer_release,
+      .user_data = storage,
   };
   iree_status_t status = iree_hal_heap_buffer_wrap(
       iree_hal_buffer_placement_undefined(),
@@ -238,14 +238,14 @@ static iree_status_t iree_hal_amdgpu_global_table_benchmark_fixture_initialize(
   }
 
   const iree_hal_amdgpu_global_table_params_t params = {
-      /*.host_allocator=*/iree_allocator_system(),
-      /*.resolver=*/
-      {
-          /*.user_data=*/&out_fixture->resolver,
-          /*.try_verify=*/iree_hal_amdgpu_global_table_benchmark_try_verify,
-          /*.create_buffer=*/
-          iree_hal_amdgpu_global_table_benchmark_create_buffer,
-      },
+      .host_allocator = iree_allocator_system(),
+      .resolver =
+          {
+              .user_data = &out_fixture->resolver,
+              .try_verify = iree_hal_amdgpu_global_table_benchmark_try_verify,
+              .create_buffer =
+                  iree_hal_amdgpu_global_table_benchmark_create_buffer,
+          },
   };
   if (iree_status_is_ok(status)) {
     status =
@@ -356,26 +356,27 @@ static iree_status_t iree_hal_amdgpu_global_table_benchmark_run(
   return status;
 }
 
-#define IREE_HAL_AMDGPU_GLOBAL_TABLE_BENCHMARK_REGISTER(                       \
-    suffix, name, mode_value, entry_count_value)                               \
-  static const iree_hal_amdgpu_global_table_benchmark_config_t                 \
-      iree_hal_amdgpu_global_table_benchmark_config_##suffix = {               \
-          /*.mode=*/mode_value,                                                \
-          /*.entry_count=*/entry_count_value,                                  \
-  };                                                                           \
-  static const iree_benchmark_def_t                                            \
-      iree_hal_amdgpu_global_table_benchmark_def_##suffix = {                  \
-          /*.flags=*/{},                                                       \
-          /*.time_unit=*/IREE_BENCHMARK_UNIT_NANOSECOND,                       \
-          /*.minimum_duration_ns=*/{},                                         \
-          /*.iteration_count=*/{},                                             \
-          /*.run=*/iree_hal_amdgpu_global_table_benchmark_run, /*.user_data=*/ \
-          &iree_hal_amdgpu_global_table_benchmark_config_##suffix,             \
-  };                                                                           \
-  static const iree_benchmark_def_t*                                           \
-      iree_hal_amdgpu_global_table_benchmark_registration_##suffix             \
-          IREE_ATTRIBUTE_UNUSED = iree_benchmark_register(                     \
-              iree_make_cstring_view(name),                                    \
+#define IREE_HAL_AMDGPU_GLOBAL_TABLE_BENCHMARK_REGISTER(               \
+    suffix, name, mode_value, entry_count_value)                       \
+  static const iree_hal_amdgpu_global_table_benchmark_config_t         \
+      iree_hal_amdgpu_global_table_benchmark_config_##suffix = {       \
+          .mode = mode_value,                                          \
+          .entry_count = entry_count_value,                            \
+  };                                                                   \
+  static const iree_benchmark_def_t                                    \
+      iree_hal_amdgpu_global_table_benchmark_def_##suffix = {          \
+          .flags = {},                                                 \
+          .time_unit = IREE_BENCHMARK_UNIT_NANOSECOND,                 \
+          .minimum_duration_ns = {},                                   \
+          .iteration_count = {},                                       \
+          .run = iree_hal_amdgpu_global_table_benchmark_run,           \
+          .user_data =                                                 \
+              &iree_hal_amdgpu_global_table_benchmark_config_##suffix, \
+  };                                                                   \
+  static const iree_benchmark_def_t*                                   \
+      iree_hal_amdgpu_global_table_benchmark_registration_##suffix     \
+          IREE_ATTRIBUTE_UNUSED = iree_benchmark_register(             \
+              iree_make_cstring_view(name),                            \
               &iree_hal_amdgpu_global_table_benchmark_def_##suffix)
 
 #define IREE_HAL_AMDGPU_GLOBAL_TABLE_BENCHMARK_REGISTER_FOR_COUNT(suffix,      \

@@ -95,10 +95,10 @@ iree_status_t TestRequirementProviderAppendNames(
 }
 
 const loom_check_requirement_provider_t kTestRequirementProvider = {
-    /*.name=*/IREE_SVL("test"),
-    /*.match=*/TestRequirementProviderMatches,
-    /*.query=*/TestRequirementProviderQuery,
-    /*.append_names=*/TestRequirementProviderAppendNames,
+    .name = IREE_SVL("test"),
+    .match = TestRequirementProviderMatches,
+    .query = TestRequirementProviderQuery,
+    .append_names = TestRequirementProviderAppendNames,
 };
 
 const loom_check_requirement_provider_t* const kTestRequirementProviders[] = {
@@ -126,15 +126,15 @@ iree_status_t TestEmitProviderExecute(
         loom_param_string(IREE_SV("fake.emit")),
     };
     loom_diagnostic_t diagnostic = {
-        /*.severity=*/status_after_diagnostic ||
-                iree_string_view_equal(request->target_options,
-                                       IREE_SV("error"))
-            ? LOOM_DIAGNOSTIC_ERROR
-            : LOOM_DIAGNOSTIC_REMARK,
-        /*.error=*/loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 6),
-        /*.params=*/params,
-        /*.param_count=*/IREE_ARRAYSIZE(params),
-        /*.emitter=*/LOOM_EMITTER_PASS,
+        .severity = status_after_diagnostic ||
+                            iree_string_view_equal(request->target_options,
+                                                   IREE_SV("error"))
+                        ? LOOM_DIAGNOSTIC_ERROR
+                        : LOOM_DIAGNOSTIC_REMARK,
+        .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 6),
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+        .emitter = LOOM_EMITTER_PASS,
     };
     diagnostic.origin.filename = request->filename;
     diagnostic.origin.start_line = 1;
@@ -160,13 +160,13 @@ iree_status_t TestEmitProviderAppendNames(
 }
 
 const loom_check_emit_provider_t kTestEmitProvider = {
-    /*.name=*/IREE_SVL("test"),
-    /*.flags=*/0,
-    /*.match=*/TestEmitProviderMatches,
-    /*.check_requirements=*/nullptr,
-    /*.execute=*/TestEmitProviderExecute,
-    /*.execute_native=*/nullptr,
-    /*.append_names=*/TestEmitProviderAppendNames,
+    .name = IREE_SVL("test"),
+    .flags = 0,
+    .match = TestEmitProviderMatches,
+    .check_requirements = nullptr,
+    .execute = TestEmitProviderExecute,
+    .execute_native = nullptr,
+    .append_names = TestEmitProviderAppendNames,
 };
 
 bool TestNativeEmitProviderMatches(const loom_check_emit_provider_t* provider,
@@ -196,13 +196,13 @@ iree_status_t TestNativeEmitProviderAppendNames(
 }
 
 const loom_check_emit_provider_t kTestNativeEmitProvider = {
-    /*.name=*/IREE_SVL("native test"),
-    /*.flags=*/0,
-    /*.match=*/TestNativeEmitProviderMatches,
-    /*.check_requirements=*/nullptr,
-    /*.execute=*/nullptr,
-    /*.execute_native=*/TestNativeEmitProviderExecute,
-    /*.append_names=*/TestNativeEmitProviderAppendNames,
+    .name = IREE_SVL("native test"),
+    .flags = 0,
+    .match = TestNativeEmitProviderMatches,
+    .check_requirements = nullptr,
+    .execute = nullptr,
+    .execute_native = TestNativeEmitProviderExecute,
+    .append_names = TestNativeEmitProviderAppendNames,
 };
 
 const loom_check_emit_provider_t* const kTestEmitProviders[] = {
@@ -228,9 +228,9 @@ iree_status_t TestForeignInputNativeLoad(const loom_input_request_t* request,
 }
 
 const loom_input_provider_t kTestForeignInputProvider = {
-    /*.name=*/IREE_SVL("test-foreign"),
-    /*.suffixes=*/{},
-    /*.load=*/TestForeignInputNativeLoad,
+    .name = IREE_SVL("test-foreign"),
+    .suffixes = {},
+    .load = TestForeignInputNativeLoad,
 };
 
 const loom_input_provider_t* const kTestForeignInputProviders[] = {
@@ -261,13 +261,13 @@ iree_status_t TestForeignInputImport(
   }
 
   const loomc_source_options_t text_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(text_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_source_identifier(source),
-      /*.contents=*/loomc_source_contents(source),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_BORROWED,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(text_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_source_identifier(source),
+      .contents = loomc_source_contents(source),
+      .storage = LOOMC_SOURCE_STORAGE_BORROWED,
   };
   loomc_source_t* text_source = nullptr;
   iree_status_t status = iree_status_from_loomc(loomc_source_create(
@@ -282,39 +282,39 @@ iree_status_t TestForeignInputImport(
 }
 
 const loom_check_environment_t kExecuteTestEnvironment = {
-    /*.input_providers=*/{},
-    /*.register_context=*/
-    {
-        /*.fn=*/RegisterTestContext,
-        /*.user_data=*/nullptr,
-    },
-    /*.target_environment=*/{},
-    /*.compile_session=*/nullptr,
-    /*.cleanup_pattern_provider_set=*/
-    loom_cleanup_configured_pattern_provider_set(),
+    .input_providers = {},
+    .register_context =
+        {
+            .fn = RegisterTestContext,
+            .user_data = nullptr,
+        },
+    .target_environment = {},
+    .compile_session = nullptr,
+    .cleanup_pattern_provider_set =
+        loom_cleanup_configured_pattern_provider_set(),
 };
 
 const loom_check_environment_t kExecuteTestProviderEnvironment = {
-    /*.input_providers=*/{},
-    /*.register_context=*/
-    {
-        /*.fn=*/RegisterTestContext,
-        /*.user_data=*/nullptr,
-    },
-    /*.target_environment=*/{},
-    /*.compile_session=*/nullptr,
-    /*.cleanup_pattern_provider_set=*/
-    loom_cleanup_configured_pattern_provider_set(),
-    /*.emit_providers=*/
-    {
-        /*.providers=*/kTestEmitProviders,
-        /*.provider_count=*/IREE_ARRAYSIZE(kTestEmitProviders),
-    },
-    /*.requirement_providers=*/
-    {
-        /*.providers=*/kTestRequirementProviders,
-        /*.provider_count=*/IREE_ARRAYSIZE(kTestRequirementProviders),
-    },
+    .input_providers = {},
+    .register_context =
+        {
+            .fn = RegisterTestContext,
+            .user_data = nullptr,
+        },
+    .target_environment = {},
+    .compile_session = nullptr,
+    .cleanup_pattern_provider_set =
+        loom_cleanup_configured_pattern_provider_set(),
+    .emit_providers =
+        {
+            .providers = kTestEmitProviders,
+            .provider_count = IREE_ARRAYSIZE(kTestEmitProviders),
+        },
+    .requirement_providers =
+        {
+            .providers = kTestRequirementProviders,
+            .provider_count = IREE_ARRAYSIZE(kTestRequirementProviders),
+        },
 };
 
 class ExecuteTest : public ::testing::Test {
@@ -334,14 +334,14 @@ class ExecuteTest : public ::testing::Test {
     execute_environment_ = kExecuteTestEnvironment;
     execute_environment_.target_environment = target_environment_;
     compile_session_ = {
-        /*.provider=*/nullptr,
-        /*.host_allocator=*/iree_allocator_system(),
-        /*.target_environment=*/public_target_environment,
+        .provider = nullptr,
+        .host_allocator = iree_allocator_system(),
+        .target_environment = public_target_environment,
     };
     execute_environment_.compile_session = &compile_session_;
     execute_environment_.emit_providers = {
-        /*.providers=*/kTestEmitProviders,
-        /*.provider_count=*/IREE_ARRAYSIZE(kTestEmitProviders),
+        .providers = kTestEmitProviders,
+        .provider_count = IREE_ARRAYSIZE(kTestEmitProviders),
     };
     provider_environment_ = kExecuteTestProviderEnvironment;
     provider_environment_.target_environment = target_environment_;
@@ -387,8 +387,7 @@ class ExecuteTest : public ::testing::Test {
     if (iree_status_is_ok(status)) {
       loom_check_result_initialize(iree_allocator_system(), out_result);
       result_initialized = true;
-      loom_input_request_t input_request = {};
-      input_request.path = IREE_SV("test.loom-test");
+      loom_input_request_t input_request = {.path = IREE_SV("test.loom-test")};
       status = loom_check_execute_case(
           &file.cases[0], 0, &report, iree_make_cstring_view("test.loom-test"),
           &input_request, environment, &context_, &block_pool_,
@@ -579,8 +578,8 @@ TEST_F(ExecuteTest, PrintedIRMustParseBeforeUpdating) {
   loom_check_result_t result;
   loom_check_result_initialize(iree_allocator_system(), &result);
   const loom_text_print_options_t options = {
-      /*.flags=*/LOOM_TEXT_PRINT_DEFAULT,
-      /*.low_asm_environment=*/{},
+      .flags = LOOM_TEXT_PRINT_DEFAULT,
+      .low_asm_environment = {},
   };
   bool valid = true;
   IREE_ASSERT_OK(loom_check_validate_printed_ir(IREE_SV("%undefined\n"),
@@ -598,8 +597,8 @@ TEST_F(ExecuteTest, PrintedIRMustBeStableBeforeUpdating) {
   loom_check_result_t result;
   loom_check_result_initialize(iree_allocator_system(), &result);
   const loom_text_print_options_t options = {
-      /*.flags=*/LOOM_TEXT_PRINT_DEFAULT,
-      /*.low_asm_environment=*/{},
+      .flags = LOOM_TEXT_PRINT_DEFAULT,
+      .low_asm_environment = {},
   };
   bool valid = true;
   IREE_ASSERT_OK(loom_check_validate_printed_ir(IREE_SV("func.def @f() {}"),
@@ -762,18 +761,20 @@ TEST_F(ExecuteTest, HeaderDiagnosticCannotMatchOrEditTheMainSource) {
   IREE_ASSERT_OK(loom_check_file_report_initialize(&file, &arena, &report));
   loom_check_result_t result;
   loom_check_result_initialize(iree_allocator_system(), &result);
-  loom_check_diagnostic_collector_t collector = {};
-  collector.arena = &arena;
-  collector.host_allocator = iree_allocator_system();
-  collector.filename = IREE_SV("test.loom-test");
-  collector.result = &result;
+  loom_check_diagnostic_collector_t collector = {
+      .arena = &arena,
+      .host_allocator = iree_allocator_system(),
+      .filename = IREE_SV("test.loom-test"),
+      .result = &result,
+  };
   loom_diagnostic_param_t parameter =
       loom_param_string(IREE_SV("invalid input"));
-  loom_diagnostic_t diagnostic = {};
-  diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
-  diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 36);
-  diagnostic.params = &parameter;
-  diagnostic.param_count = 1;
+  loom_diagnostic_t diagnostic = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 36),
+      .params = &parameter,
+      .param_count = 1,
+  };
   diagnostic.origin.filename = IREE_SV("included.h");
   diagnostic.origin.start_line = 2;
   IREE_ASSERT_OK(loom_check_diagnostic_collector_sink(&collector, &diagnostic));
@@ -1430,13 +1431,13 @@ TEST_F(ExecuteTest, EmitProviderCanOwnTarget) {
 TEST_F(ExecuteTest, NativeEmitProviderUsesOnePublicAdmission) {
   TestForeignImportState import_state;
   const loom_check_compile_provider_t compile_provider = {
-      /*.import=*/TestForeignInputImport,
-      /*.import_user_data=*/&import_state,
+      .import = TestForeignInputImport,
+      .import_user_data = &import_state,
   };
   compile_session_.provider = &compile_provider;
   provider_environment_.input_providers = {
-      /*.values=*/kTestForeignInputProviders,
-      /*.count=*/IREE_ARRAYSIZE(kTestForeignInputProviders),
+      .values = kTestForeignInputProviders,
+      .count = IREE_ARRAYSIZE(kTestForeignInputProviders),
   };
 
   loom_check_result_t result;

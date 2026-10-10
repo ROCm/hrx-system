@@ -98,28 +98,32 @@ static bool JsonArrayContainsString(iree_string_view_t array,
 }
 
 TEST(BenchmarkReportTest, WritesSelectedSampleAndCliIterationOverrides) {
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
-  iree_benchmark_loom_candidate_identity_t candidate = {};
-  candidate.candidate_id = IREE_SV("candidate");
+  iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run")};
+  iree_benchmark_loom_candidate_identity_t candidate = {
+      .candidate_id = IREE_SV("candidate"),
+  };
   loom_module_t module = {};
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("sampled_choice_latency");
-  benchmark_plan.sample_count = 2;
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("sampled_choice_latency"),
+      .sample_count = 2,
+  };
   benchmark_plan.cartesian_sample_count = 2;
-  loom_testbench_case_plan_t case_plan = {};
-  case_plan.name = IREE_SV("sampled_choice");
-  case_plan.sample_count = 2;
+  loom_testbench_case_plan_t case_plan = {
+      .name = IREE_SV("sampled_choice"),
+      .sample_count = 2,
+  };
   case_plan.cartesian_sample_count = 2;
-  iree_benchmark_loom_benchmark_policy_t policy = {};
-  policy.measure_kind = IREE_BENCHMARK_LOOM_MEASURE_CASE_END_TO_END;
-  policy.measure = IREE_SV("case_end_to_end");
-  policy.iterations = 2;
-  iree_benchmark_loom_selected_benchmark_t selection = {};
-  selection.identity = candidate;
-  selection.benchmark_plan = &benchmark_plan;
-  selection.case_plan = &case_plan;
-  selection.policy = policy;
+  iree_benchmark_loom_benchmark_policy_t policy = {
+      .measure_kind = IREE_BENCHMARK_LOOM_MEASURE_CASE_END_TO_END,
+      .measure = IREE_SV("case_end_to_end"),
+      .iterations = 2,
+  };
+  iree_benchmark_loom_selected_benchmark_t selection = {
+      .identity = candidate,
+      .benchmark_plan = &benchmark_plan,
+      .case_plan = &case_plan,
+      .policy = policy,
+  };
   iree_benchmark_loom_options_t options = {};
   iree_benchmark_loom_options_initialize(&options);
   options.sample_ordinal = 1;
@@ -146,17 +150,18 @@ TEST(BenchmarkReportTest, WritesSelectedSampleAndCliIterationOverrides) {
 }
 
 TEST(BenchmarkReportTest, WritesScenarioPlanDomain) {
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
+  iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run")};
   loom_module_t module = {};
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("scenario_throughput");
-  benchmark_plan.sample_count = 10;
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("scenario_throughput"),
+      .sample_count = 10,
+  };
   benchmark_plan.cartesian_sample_count = 10;
-  loom_testbench_scenario_plan_t scenario_plan = {};
-  scenario_plan.name = IREE_SV("scenario");
-  scenario_plan.configuration_count = 2;
-  scenario_plan.trial_count = 3;
+  loom_testbench_scenario_plan_t scenario_plan = {
+      .name = IREE_SV("scenario"),
+      .configuration_count = 2,
+      .trial_count = 3,
+  };
   iree_benchmark_loom_selected_benchmark_t selection = {};
   selection.identity.candidate_id = IREE_SV("candidate");
   selection.benchmark_plan = &benchmark_plan;
@@ -183,20 +188,22 @@ TEST(BenchmarkReportTest, WritesScenarioPlanDomain) {
 }
 
 TEST(BenchmarkReportTest, WritesScenarioResultCoordinate) {
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("scenario_throughput");
-  loom_testbench_scenario_plan_t scenario_plan = {};
-  scenario_plan.name = IREE_SV("scenario");
-  iree_benchmark_loom_benchmark_policy_t policy = {};
-  policy.measure = IREE_SV("dispatch_complete");
-  iree_benchmark_loom_benchmark_result_t result = {};
-  result.executed = true;
-  result.passed = true;
-  result.has_benchmark_sample_ordinal = true;
-  result.benchmark_sample_ordinal = 17;
-  result.has_scenario_coordinate = true;
-  result.scenario_coordinate = {2, 3, 5};
-  result.samples_per_iteration = 1;
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("scenario_throughput"),
+  };
+  loom_testbench_scenario_plan_t scenario_plan = {.name = IREE_SV("scenario")};
+  iree_benchmark_loom_benchmark_policy_t policy = {
+      .measure = IREE_SV("dispatch_complete"),
+  };
+  iree_benchmark_loom_benchmark_result_t result = {
+      .executed = true,
+      .passed = true,
+      .has_benchmark_sample_ordinal = true,
+      .benchmark_sample_ordinal = 17,
+      .has_scenario_coordinate = true,
+      .scenario_coordinate = {2, 3, 5},
+      .samples_per_iteration = 1,
+  };
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -265,11 +272,12 @@ TEST(BenchmarkReportTest, OmitsEmptyStatusCodeMessage) {
 }
 
 TEST(BenchmarkReportTest, WritesHalProfileErrorWithStatusCodeFields) {
-  loom_run_hal_profile_summary_t profile = {};
-  profile.requested = true;
-  profile.executed = true;
-  profile.has_error = true;
-  profile.error_code = IREE_STATUS_RESOURCE_EXHAUSTED;
+  loom_run_hal_profile_summary_t profile = {
+      .requested = true,
+      .executed = true,
+      .has_error = true,
+      .error_code = IREE_STATUS_RESOURCE_EXHAUSTED,
+  };
   const iree_string_view_t message = IREE_SV("profile collection failed");
   profile.error_message_length = message.size;
   memcpy(profile.error_message, message.data, message.size);
@@ -297,23 +305,25 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
   ByteSequencePtr compile_report_contents =
       CopyByteSequence(compile_report_json);
   const loomc_artifact_t compile_report_artifact = {
-      /*.kind=*/LOOMC_ARTIFACT_KIND_REPORT,
-      /*.format=*/
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON),
-      /*.identifier=*/loomc_make_cstring_view("compile_report"),
-      /*.contents=*/compile_report_contents.get(),
+      .kind = LOOMC_ARTIFACT_KIND_REPORT,
+      .format =
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON),
+      .identifier = loomc_make_cstring_view("compile_report"),
+      .contents = compile_report_contents.get(),
   };
 
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("kernel_latency");
-  loom_testbench_case_plan_t case_plan = {};
-  case_plan.name = IREE_SV("kernel_case");
-  iree_benchmark_loom_benchmark_policy_t policy = {};
-  policy.measure = IREE_SV("case_end_to_end");
-  iree_benchmark_loom_benchmark_result_t result = {};
-  result.executed = true;
-  result.passed = true;
-  result.samples_per_iteration = 1;
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("kernel_latency"),
+  };
+  loom_testbench_case_plan_t case_plan = {.name = IREE_SV("kernel_case")};
+  iree_benchmark_loom_benchmark_policy_t policy = {
+      .measure = IREE_SV("case_end_to_end"),
+  };
+  iree_benchmark_loom_benchmark_result_t result = {
+      .executed = true,
+      .passed = true,
+      .samples_per_iteration = 1,
+  };
   result.timing.count = 1;
   result.timing.total_ns = 10;
   result.timing.minimum_ns = 10;
@@ -420,19 +430,21 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
 }
 
 TEST(BenchmarkReportTest, WritesHalTimingCountsAndWarnings) {
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("kernel_latency");
-  loom_testbench_case_plan_t case_plan = {};
-  case_plan.name = IREE_SV("kernel_case");
-  iree_benchmark_loom_benchmark_policy_t policy = {};
-  policy.measure = IREE_SV("dispatch_complete");
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("kernel_latency"),
+  };
+  loom_testbench_case_plan_t case_plan = {.name = IREE_SV("kernel_case")};
+  iree_benchmark_loom_benchmark_policy_t policy = {
+      .measure = IREE_SV("dispatch_complete"),
+  };
   policy.hal_options.timing.stable_p90_to_p50_delta_ppm = 100000;
 
-  iree_benchmark_loom_benchmark_result_t result = {};
-  result.executed = true;
-  result.passed = true;
-  result.samples_per_iteration = 1;
-  result.has_hal_benchmark = true;
+  iree_benchmark_loom_benchmark_result_t result = {
+      .executed = true,
+      .passed = true,
+      .samples_per_iteration = 1,
+      .has_hal_benchmark = true,
+  };
   result.hal_benchmark.timing.batch_size = 1;
   result.hal_benchmark.timing.measured_batch_count = 3;
   result.hal_benchmark.timing.measured_operation_count = 3;
@@ -561,53 +573,55 @@ TEST(BenchmarkReportTest, WritesHalTimingCountsAndWarnings) {
 }
 
 TEST(BenchmarkReportTest, WritesExactWorkloadAndResolvedLaunchConfig) {
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("dynamic_latency");
-  loom_testbench_case_plan_t case_plan = {};
-  case_plan.name = IREE_SV("dynamic_case");
-  iree_benchmark_loom_benchmark_policy_t policy = {};
-  policy.measure = IREE_SV("dispatch_complete");
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("dynamic_latency"),
+  };
+  loom_testbench_case_plan_t case_plan = {.name = IREE_SV("dynamic_case")};
+  iree_benchmark_loom_benchmark_policy_t policy = {
+      .measure = IREE_SV("dispatch_complete"),
+  };
 
   iree_benchmark_loom_workload_value_t workload_values[] = {
       {
-          /*.type=*/LOOM_SCALAR_TYPE_INDEX,
-          /*.value=*/4096,
+          .type = LOOM_SCALAR_TYPE_INDEX,
+          .value = 4096,
       },
       {
-          /*.type=*/LOOM_SCALAR_TYPE_I32,
-          /*.value=*/513,
+          .type = LOOM_SCALAR_TYPE_I32,
+          .value = 513,
       },
   };
   iree_benchmark_loom_launch_record_t launch_record = {
-      /*.case_sample_ordinal=*/3,
-      /*.sequence_step_ordinal=*/0,
-      /*.entry=*/IREE_SV("dynamic_kernel"),
-      /*.workload_values=*/workload_values,
-      /*.workload_value_count=*/IREE_ARRAYSIZE(workload_values),
-      /*.launch_config=*/
-      {
-          /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-          /*.structure_size=*/sizeof(loomc_launch_config_t),
-          /*.next=*/nullptr,
-          /*.workgroup_count=*/{65, 2, 1},
-          /*.workgroup_size=*/{64, 1, 1},
-          /*.workgroup_cluster_size=*/{2, 1, 1},
-          /*.subgroup_size=*/32,
-          /*.workgroup_storage_bytes=*/0,
-      },
+      .case_sample_ordinal = 3,
+      .sequence_step_ordinal = 0,
+      .entry = IREE_SV("dynamic_kernel"),
+      .workload_values = workload_values,
+      .workload_value_count = IREE_ARRAYSIZE(workload_values),
+      .launch_config =
+          {
+              .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+              .structure_size = sizeof(loomc_launch_config_t),
+              .next = nullptr,
+              .workgroup_count = {65, 2, 1},
+              .workgroup_size = {64, 1, 1},
+              .workgroup_cluster_size = {2, 1, 1},
+              .subgroup_size = 32,
+              .workgroup_storage_bytes = 0,
+          },
   };
   iree_benchmark_loom_launch_evidence_t launch_evidence = {
-      /*.host_allocator=*/{},
-      /*.records=*/&launch_record,
-      /*.record_count=*/1,
-      /*.workload_values=*/workload_values,
-      /*.workload_value_count=*/IREE_ARRAYSIZE(workload_values),
+      .host_allocator = {},
+      .records = &launch_record,
+      .record_count = 1,
+      .workload_values = workload_values,
+      .workload_value_count = IREE_ARRAYSIZE(workload_values),
   };
-  iree_benchmark_loom_benchmark_result_t result = {};
-  result.executed = true;
-  result.passed = true;
-  result.samples_per_iteration = 1;
-  result.launch_evidence = &launch_evidence;
+  iree_benchmark_loom_benchmark_result_t result = {
+      .executed = true,
+      .passed = true,
+      .samples_per_iteration = 1,
+      .launch_evidence = &launch_evidence,
+  };
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -659,18 +673,20 @@ TEST(BenchmarkReportTest, WritesExactWorkloadAndResolvedLaunchConfig) {
 }
 
 TEST(BenchmarkReportTest, ScopesComparableDispatchTimingToProfileReplay) {
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
-  benchmark_plan.name = IREE_SV("kernel_latency");
-  loom_testbench_case_plan_t case_plan = {};
-  case_plan.name = IREE_SV("kernel_case");
-  iree_benchmark_loom_benchmark_policy_t policy = {};
-  policy.measure = IREE_SV("dispatch_complete");
+  loom_testbench_benchmark_plan_t benchmark_plan = {
+      .name = IREE_SV("kernel_latency"),
+  };
+  loom_testbench_case_plan_t case_plan = {.name = IREE_SV("kernel_case")};
+  iree_benchmark_loom_benchmark_policy_t policy = {
+      .measure = IREE_SV("dispatch_complete"),
+  };
 
-  iree_benchmark_loom_benchmark_result_t result = {};
-  result.executed = true;
-  result.passed = true;
-  result.samples_per_iteration = 1;
-  result.has_hal_benchmark = true;
+  iree_benchmark_loom_benchmark_result_t result = {
+      .executed = true,
+      .passed = true,
+      .samples_per_iteration = 1,
+      .has_hal_benchmark = true,
+  };
   result.hal_benchmark.timing.batch_size = 16;
   result.hal_benchmark.timing.measured_batch_count = 4;
   result.hal_benchmark.timing.measured_operation_count = 64;
@@ -851,44 +867,43 @@ TEST(BenchmarkReportTest, ScopesComparableDispatchTimingToProfileReplay) {
 
 TEST(BenchmarkReportTest, WritesArtifactManifestSidecarPath) {
   iree::testing::TempFilePath bundle_dir("loom_benchmark_bundle");
-  iree_benchmark_loom_artifact_bundle_options_t bundle_options = {};
-  bundle_options.dir = bundle_dir.path_view();
-  bundle_options.policy = IREE_BENCHMARK_LOOM_ARTIFACT_BUNDLE_POLICY_DEBUG;
-  bundle_options.output_format = IREE_BENCHMARK_LOOM_OUTPUT_FORMAT_SNAPSHOT;
+  iree_benchmark_loom_artifact_bundle_options_t bundle_options = {
+      .dir = bundle_dir.path_view(),
+      .policy = IREE_BENCHMARK_LOOM_ARTIFACT_BUNDLE_POLICY_DEBUG,
+      .output_format = IREE_BENCHMARK_LOOM_OUTPUT_FORMAT_SNAPSHOT,
+  };
   iree_benchmark_loom_artifact_bundle_t bundle = {};
   IREE_ASSERT_OK(iree_benchmark_loom_artifact_bundle_initialize(
       &bundle_options, iree_allocator_system(), &bundle));
 
-  iree_benchmark_loom_hal_context_t context = {};
-  context.artifact_bundle = &bundle;
+  iree_benchmark_loom_hal_context_t context = {.artifact_bundle = &bundle};
   context.execution.host_allocator = iree_allocator_system();
   const char kManifestJson[] = "{\"kind\":\"loom.artifact_manifest\"}";
   ByteSequencePtr manifest_contents =
       CopyByteSequence(iree_make_cstring_view(kManifestJson));
   const loomc_artifact_t manifest_artifact = {
-      /*.kind=*/LOOMC_ARTIFACT_KIND_REPORT,
-      /*.format=*/
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_ARTIFACT_MANIFEST_JSON),
-      /*.identifier=*/loomc_make_cstring_view("artifact_manifest"),
-      /*.contents=*/manifest_contents.get(),
+      .kind = LOOMC_ARTIFACT_KIND_REPORT,
+      .format =
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_ARTIFACT_MANIFEST_JSON),
+      .identifier = loomc_make_cstring_view("artifact_manifest"),
+      .contents = manifest_contents.get(),
   };
   ByteSequencePtr executable_contents = CopyByteSequence(IREE_SV("exe"));
   const loomc_artifact_t executable_artifact = {
-      /*.kind=*/LOOMC_ARTIFACT_KIND_EXECUTABLE,
-      /*.format=*/loomc_make_cstring_view("test-executable"),
-      /*.identifier=*/loomc_make_cstring_view("module.bin"),
-      /*.contents=*/executable_contents.get(),
+      .kind = LOOMC_ARTIFACT_KIND_EXECUTABLE,
+      .format = loomc_make_cstring_view("test-executable"),
+      .identifier = loomc_make_cstring_view("module.bin"),
+      .contents = executable_contents.get(),
   };
 
-  iree_benchmark_loom_hal_actual_provider_t provider = {};
-  provider.context = &context;
+  iree_benchmark_loom_hal_actual_provider_t provider = {.context = &context};
   provider.execution.artifacts.executable = &executable_artifact;
   provider.execution.artifacts.artifact_manifest = &manifest_artifact;
 
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
-  iree_benchmark_loom_candidate_identity_t candidate = {};
-  candidate.candidate_id = IREE_SV("candidate");
+  iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run")};
+  iree_benchmark_loom_candidate_identity_t candidate = {
+      .candidate_id = IREE_SV("candidate"),
+  };
   IREE_ASSERT_OK(iree_benchmark_loom_write_compiled_artifacts(
       &run, &candidate, &provider, iree_allocator_system()));
 
@@ -914,23 +929,25 @@ TEST(BenchmarkReportTest, WritesArtifactManifestSidecarPath) {
 
 TEST(BenchmarkReportTest, WritesManifestFileIdentityErrors) {
   iree::testing::TempFilePath bundle_dir("loom_benchmark_manifest_bundle");
-  iree_benchmark_loom_artifact_bundle_options_t bundle_options = {};
-  bundle_options.dir = bundle_dir.path_view();
-  bundle_options.policy = IREE_BENCHMARK_LOOM_ARTIFACT_BUNDLE_POLICY_DEBUG;
-  bundle_options.output_format = IREE_BENCHMARK_LOOM_OUTPUT_FORMAT_SNAPSHOT;
+  iree_benchmark_loom_artifact_bundle_options_t bundle_options = {
+      .dir = bundle_dir.path_view(),
+      .policy = IREE_BENCHMARK_LOOM_ARTIFACT_BUNDLE_POLICY_DEBUG,
+      .output_format = IREE_BENCHMARK_LOOM_OUTPUT_FORMAT_SNAPSHOT,
+  };
   iree_benchmark_loom_artifact_bundle_t bundle = {};
   IREE_ASSERT_OK(iree_benchmark_loom_artifact_bundle_initialize(
       &bundle_options, iree_allocator_system(), &bundle));
 
   std::string source_path = bundle_dir.path() + "/missing-source.loom";
-  iree_benchmark_loom_run_identity_t run = {};
-  run.run_id = IREE_SV("run");
-  run.source = iree_make_string_view(source_path.data(), source_path.size());
-  run.results_path = bundle.results_path;
-  run.file_output_dir = bundle.file_output_dir;
-  run.profile_artifacts_dir = bundle.profile_artifacts_dir;
-  run.artifact_bundle_dir = bundle.dir;
-  run.artifact_bundle_policy = IREE_SV("debug");
+  iree_benchmark_loom_run_identity_t run = {
+      .run_id = IREE_SV("run"),
+      .source = iree_make_string_view(source_path.data(), source_path.size()),
+      .results_path = bundle.results_path,
+      .file_output_dir = bundle.file_output_dir,
+      .profile_artifacts_dir = bundle.profile_artifacts_dir,
+      .artifact_bundle_dir = bundle.dir,
+      .artifact_bundle_policy = IREE_SV("debug"),
+  };
   iree_benchmark_loom_hal_context_t hal_context = {};
   IREE_ASSERT_OK(iree_benchmark_loom_write_artifact_bundle_manifest(
       &bundle, &run, &hal_context, IREE_SV("source text"),

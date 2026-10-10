@@ -58,7 +58,7 @@ struct ConnectState {
   }
 
   iree_net_transport_connect_callback_t callback() {
-    return {/*.fn=*/OnConnect, /*.user_data=*/this};
+    return {.fn = OnConnect, .user_data = this};
   }
 };
 
@@ -76,7 +76,7 @@ struct StopState {
   }
 
   iree_net_listener_stopped_callback_t callback() {
-    return {/*.fn=*/OnStopped, /*.user_data=*/this};
+    return {.fn = OnStopped, .user_data = this};
   }
 };
 
@@ -134,7 +134,7 @@ struct AcceptState {
   }
 
   iree_net_listener_accept_callback_t callback() {
-    return {/*.fn=*/OnAccept, /*.user_data=*/this};
+    return {.fn = OnAccept, .user_data = this};
   }
 };
 
@@ -146,7 +146,7 @@ struct DeactivateState {
   }
 
   iree_net_connection_deactivate_callback_t callback() {
-    return {/*.fn=*/OnDeactivated, /*.user_data=*/this};
+    return {.fn = OnDeactivated, .user_data = this};
   }
 };
 
@@ -181,11 +181,11 @@ struct ConcurrentStopState {
   }
 
   iree_net_listener_accept_callback_t accept_callback() {
-    return {/*.fn=*/OnAccept, /*.user_data=*/this};
+    return {.fn = OnAccept, .user_data = this};
   }
 
   iree_net_listener_stopped_callback_t stopped_callback() {
-    return {/*.fn=*/OnStopped, /*.user_data=*/this};
+    return {.fn = OnStopped, .user_data = this};
   }
 };
 
@@ -210,7 +210,7 @@ struct ControlledAllocator {
                                    inout_ptr);
   }
 
-  iree_allocator_t value() { return {/*.self=*/this, /*.ctl=*/Control}; }
+  iree_allocator_t value() { return {.self = this, .ctl = Control}; }
 };
 
 enum class ProactorBackend { kPlatform, kPosix };
@@ -686,9 +686,10 @@ TEST_P(TcpFactoryTest, SessionDeactivationJoinsSilentNativeConnect) {
   SilentPeer peer;
   CreateSilentPeer(&peer);
   iree_async_slab_t* slab = nullptr;
-  iree_async_slab_options_t slab_options = {};
-  slab_options.buffer_size = 1024;
-  slab_options.buffer_count = 4;
+  iree_async_slab_options_t slab_options = {
+      .buffer_size = 1024,
+      .buffer_count = 4,
+  };
   IREE_ASSERT_OK(
       iree_async_slab_create(slab_options, iree_allocator_system(), &slab));
   iree_async_region_t* region = nullptr;
@@ -701,31 +702,34 @@ TEST_P(TcpFactoryTest, SessionDeactivationJoinsSilentNativeConnect) {
   iree_async_slab_release(slab);
 
   bool deactivated = false;
-  iree_net_session_callbacks_t callbacks = {};
-  callbacks.on_ready = [](void*, iree_net_session_t*,
-                          const iree_net_bootstrap_peer_info_view_t*,
-                          iree_net_bootstrap_capabilities_t) {
-    ADD_FAILURE() << "Silent peer cannot complete session bootstrap";
+  iree_net_session_callbacks_t callbacks = {
+      .on_ready =
+          [](void*, iree_net_session_t*,
+             const iree_net_bootstrap_peer_info_view_t*,
+             iree_net_bootstrap_capabilities_t) {
+            ADD_FAILURE() << "Silent peer cannot complete session bootstrap";
+          },
+      .on_control_data =
+          [](void*, iree_net_session_t*, iree_net_control_data_flags_t,
+             iree_const_byte_span_t, iree_async_buffer_lease_t*) {
+            ADD_FAILURE() << "Silent peer cannot send control data";
+            return iree_ok_status();
+          },
+      .on_goaway =
+          [](void*, iree_net_session_t*, uint32_t) {
+            ADD_FAILURE() << "Silent peer cannot send GOAWAY";
+          },
+      .on_error = [](void*, iree_net_session_t*,
+                     iree_status_t status) { IREE_EXPECT_OK(status); },
+      .on_deactivated =
+          [](void* user_data, iree_net_session_t* session) {
+            EXPECT_EQ(iree_net_session_state(session),
+                      IREE_NET_SESSION_STATE_DEACTIVATED);
+            iree_net_session_release(session);
+            *static_cast<bool*>(user_data) = true;
+          },
+      .user_data = &deactivated,
   };
-  callbacks.on_control_data =
-      [](void*, iree_net_session_t*, iree_net_control_data_flags_t,
-         iree_const_byte_span_t, iree_async_buffer_lease_t*) {
-        ADD_FAILURE() << "Silent peer cannot send control data";
-        return iree_ok_status();
-      };
-  callbacks.on_goaway = [](void*, iree_net_session_t*, uint32_t) {
-    ADD_FAILURE() << "Silent peer cannot send GOAWAY";
-  };
-  callbacks.on_error = [](void*, iree_net_session_t*, iree_status_t status) {
-    IREE_EXPECT_OK(status);
-  };
-  callbacks.on_deactivated = [](void* user_data, iree_net_session_t* session) {
-    EXPECT_EQ(iree_net_session_state(session),
-              IREE_NET_SESSION_STATE_DEACTIVATED);
-    iree_net_session_release(session);
-    *static_cast<bool*>(user_data) = true;
-  };
-  callbacks.user_data = &deactivated;
   auto options = iree_net_session_options_default();
   iree_net_session_t* session = nullptr;
   IREE_ASSERT_OK(iree_net_session_connect(

@@ -40,50 +40,50 @@ using ::loom::testing::FindDiagnostic;
 using ::loom::testing::GetStringParam;
 
 static const loom_encoding_family_descriptor_t kDenseEncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(5, "dense"),
-    /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+    .name = LOOM_BSTRING_REF(5, "dense"),
+    .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
 };
 static const loom_encoding_vtable_t kDenseEncodingVtable = {
-    /*.descriptor=*/&kDenseEncodingDescriptor,
+    .descriptor = &kDenseEncodingDescriptor,
 };
 
 static const loom_attr_descriptor_t kQ8_0EncodingParameters[] = {{
-    /*.name=*/LOOM_BSTRING_REF(5, "block"),
-    /*.attr_kind=*/LOOM_ATTR_I64,
-    /*.flags=*/LOOM_ATTR_OPTIONAL,
+    .name = LOOM_BSTRING_REF(5, "block"),
+    .attr_kind = LOOM_ATTR_I64,
+    .flags = LOOM_ATTR_OPTIONAL,
 }};
 static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingParameters),
-    /*.parameter_descriptors=*/kQ8_0EncodingParameters,
+    .name = LOOM_BSTRING_REF(4, "q8_0"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = IREE_ARRAYSIZE(kQ8_0EncodingParameters),
+    .parameter_descriptors = kQ8_0EncodingParameters,
 };
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    /*.descriptor=*/&kQ8_0EncodingDescriptor,
+    .descriptor = &kQ8_0EncodingDescriptor,
 };
 
 static const loom_encoding_family_descriptor_t kQ6KEncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(4, "q6_k"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .name = LOOM_BSTRING_REF(4, "q6_k"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
 };
 static const loom_encoding_vtable_t kQ6KEncodingVtable = {
-    /*.descriptor=*/&kQ6KEncodingDescriptor,
+    .descriptor = &kQ6KEncodingDescriptor,
 };
 
 static const loom_attr_descriptor_t kQuantizationEncodingParameters[] = {{
-    /*.name=*/LOOM_BSTRING_REF(4, "bits"),
-    /*.attr_kind=*/LOOM_ATTR_I64,
+    .name = LOOM_BSTRING_REF(4, "bits"),
+    .attr_kind = LOOM_ATTR_I64,
 }};
 static const loom_encoding_family_descriptor_t kQuantizationDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(12, "quantization"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/IREE_ARRAYSIZE(kQuantizationEncodingParameters),
-    /*.parameter_descriptors=*/kQuantizationEncodingParameters,
+    .name = LOOM_BSTRING_REF(12, "quantization"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = IREE_ARRAYSIZE(kQuantizationEncodingParameters),
+    .parameter_descriptors = kQuantizationEncodingParameters,
 };
 static const loom_encoding_vtable_t kQuantizationEncodingVtable = {
-    /*.descriptor=*/&kQuantizationDescriptor,
+    .descriptor = &kQuantizationDescriptor,
 };
 
 class ParserTest : public ::testing::Test {
@@ -459,8 +459,7 @@ TEST_F(ParserTest, ParsedOpScratchFramesStayDepthSafeWhileParentIsActive) {
 
 TEST_F(ParserTest, ScopeFramesReuseHashStorageAcrossSiblingScopes) {
   loom_parser_scope_t root_scope = {};
-  loom_parser_t parser = {};
-  parser.scope = &root_scope;
+  loom_parser_t parser = {.scope = &root_scope};
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
 
   IREE_ASSERT_OK(loom_parser_scope_push(&parser, &root_scope, &parser.scope));
@@ -514,8 +513,7 @@ TEST_F(ParserTest, ScopeFramesReuseHashStorageAcrossSiblingScopes) {
 
 TEST_F(ParserTest, ScopeFramesPreserveParentLookupAndRejectLocalDuplicates) {
   loom_parser_scope_t root_scope = {};
-  loom_parser_t parser = {};
-  parser.scope = &root_scope;
+  loom_parser_t parser = {.scope = &root_scope};
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
 
   bool duplicate = true;
@@ -579,10 +577,11 @@ TEST_F(ParserTest, FunctionTypeScratchAndModulePayloadAreReusedOnInternHits) {
                                       /*hints=*/nullptr,
                                       iree_allocator_system(), &module));
   loom_parser_scope_t root_scope = {};
-  loom_parser_t parser = {};
-  parser.module = module;
-  parser.context = &context_;
-  parser.scope = &root_scope;
+  loom_parser_t parser = {
+      .module = module,
+      .context = &context_,
+      .scope = &root_scope,
+  };
   parser.definition_scope.pop_at = UINT16_MAX;
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
 
@@ -636,10 +635,11 @@ TEST_F(ParserTest, RegisterTypeRequiresTargetLowDescriptorContext) {
                                       /*hints=*/nullptr,
                                       iree_allocator_system(), &module));
   loom_parser_scope_t root_scope = {};
-  loom_parser_t parser = {};
-  parser.module = module;
-  parser.context = &context_;
-  parser.scope = &root_scope;
+  loom_parser_t parser = {
+      .module = module,
+      .context = &context_,
+      .scope = &root_scope,
+  };
   parser.definition_scope.pop_at = UINT16_MAX;
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
   loom_tokenizer_initialize(IREE_SV("reg<test.ptr x4>"), IREE_SV("test.loom"),
@@ -1096,8 +1096,8 @@ TEST_F(ParserTest, ReturnsSymbolReferencesFromParsedSnapshot) {
       "test.record @dependency\n";
   capture_.Reset();
   loom_text_parse_options_t options = {
-      /*.diagnostic_sink=*/capture_.sink(),
-      /*.max_errors=*/100,
+      .diagnostic_sink = capture_.sink(),
+      .max_errors = 100,
   };
   iree_arena_allocator_t symbol_reference_arena;
   iree_arena_initialize(&block_pool_, &symbol_reference_arena);

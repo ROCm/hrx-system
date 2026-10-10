@@ -30,9 +30,10 @@ TEST_F(AqlLdsTest, StaticStorageExchangesBetweenWaves) {
   constexpr std::array<uint32_t, 3> kSeeds = {0x13579bdfu, 0xa5c31f27u,
                                               0x2468ace1u};
 
-  amdf_gpu_endpoint_info_t endpoint_info = {};
-  endpoint_info.type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO;
-  endpoint_info.structure_size = sizeof(endpoint_info);
+  amdf_gpu_endpoint_info_t endpoint_info = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
+      .structure_size = sizeof(endpoint_info),
+  };
   ASSERT_EQ(gpu_api_->endpoint_query_info(endpoint_, &endpoint_info),
             AMDF_STATUS_OK);
   const auto* selected = kernels::lds_exchange::kKernels.Find(endpoint_info);

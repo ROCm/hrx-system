@@ -454,19 +454,19 @@ TEST_F(ConditionFactsTest, ExactOperandFactsProveEquivalentLiteralRelation) {
   Query(loom_index_cmp_result(compare), /*assumed_truth=*/false);
 
   const loom_condition_integer_relation_t queried = {
-      /*.relation=*/LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
-      /*.left=*/
-      {
-          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-          /*.value_id=*/value,
-          /*.constant=*/0,
-      },
-      /*.right=*/
-      {
-          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
-          /*.value_id=*/LOOM_VALUE_ID_INVALID,
-          /*.constant=*/32,
-      },
+      .relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
+      .left =
+          {
+              .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+              .value_id = value,
+              .constant = 0,
+          },
+      .right =
+          {
+              .kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+              .value_id = LOOM_VALUE_ID_INVALID,
+              .constant = 32,
+          },
   };
   bool result = true;
   EXPECT_TRUE(loom_condition_fact_set_proves_integer_relation(
@@ -816,8 +816,9 @@ TEST_F(ConditionFactsTest, ScalarIdentityPreservesRangeRefinement) {
   IREE_ASSERT_OK(
       loom_value_fact_table_compute_op(&fact_table_, module_, alias));
   const loom_value_id_t result = loom_op_const_results(alias)[0];
-  loom_condition_integer_relation_t relation = {};
-  relation.relation = LOOM_SYMBOLIC_INTEGER_RELATION_LT;
+  loom_condition_integer_relation_t relation = {
+      .relation = LOOM_SYMBOLIC_INTEGER_RELATION_LT,
+  };
   relation.left.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE;
   relation.left.value_id = input;
   relation.right.kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT;
@@ -998,9 +999,9 @@ TEST_F(ConditionFactsTest, CompleteConjunctionQueryCanonicalizesAllOutcomes) {
   const loom_value_id_t equal = loom_index_cmp_result(
       BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_EQ, middle, right));
   const loom_condition_assumption_t assumptions[] = {
-      {/*.condition=*/less, /*.assumed_truth=*/true},
-      {/*.condition=*/equal, /*.assumed_truth=*/false},
-      {/*.condition=*/less, /*.assumed_truth=*/true},
+      {.condition = less, .assumed_truth = true},
+      {.condition = equal, .assumed_truth = false},
+      {.condition = less, .assumed_truth = true},
   };
   loom_condition_derivation_t derivation;
   loom_condition_derivation_initialize(&analysis_arena_, &derivation);

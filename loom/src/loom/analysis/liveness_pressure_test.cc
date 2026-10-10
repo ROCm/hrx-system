@@ -61,19 +61,21 @@ class LivenessPressureTest : public ::testing::Test {
   void TearDown() override { DeinitializeStorage(); }
 
   static loom_liveness_value_class_t RegisterClass() {
-    loom_liveness_value_class_t result = {};
-    result.type_kind = LOOM_TYPE_REGISTER;
-    result.register_class_id = TEST_LOW_CORE_REG_CLASS_ID_TEST_I32;
-    result.register_descriptor_set_stable_id =
-        loom_test_low_core_descriptor_set()->stable_id;
+    loom_liveness_value_class_t result = {
+        .type_kind = LOOM_TYPE_REGISTER,
+        .register_class_id = TEST_LOW_CORE_REG_CLASS_ID_TEST_I32,
+        .register_descriptor_set_stable_id =
+            loom_test_low_core_descriptor_set()->stable_id,
+    };
     return result;
   }
 
   static loom_liveness_value_class_t ScalarClass(loom_scalar_type_t type) {
-    loom_liveness_value_class_t result = {};
-    result.type_kind = LOOM_TYPE_SCALAR;
-    result.element_type = type;
-    result.register_class_id = LOOM_LOW_REGISTER_CLASS_ID_INVALID;
+    loom_liveness_value_class_t result = {
+        .type_kind = LOOM_TYPE_SCALAR,
+        .element_type = type,
+        .register_class_id = LOOM_LOW_REGISTER_CLASS_ID_INVALID,
+    };
     return result;
   }
 
@@ -89,29 +91,31 @@ class LivenessPressureTest : public ::testing::Test {
                            ? UINT32_MAX
                            : static_cast<uint32_t>(intervals_.size()));
     if (!segments.empty()) {
-      loom_liveness_interval_t interval = {};
-      interval.value_id = id;
-      interval.start_point = segments.front().start_point;
-      interval.end_point = segments.back().end_point;
-      interval.value_class = value_class;
-      interval.unit_count = units;
+      loom_liveness_interval_t interval = {
+          .value_id = id,
+          .start_point = segments.front().start_point,
+          .end_point = segments.back().end_point,
+          .value_class = value_class,
+          .unit_count = units,
+      };
       intervals_.push_back(interval);
       segments_.insert(segments_.end(), segments.begin(), segments.end());
     }
   }
 
   loom_liveness_analysis_t Analysis() const {
-    loom_liveness_analysis_t analysis = {};
-    analysis.blocks = blocks_.data();
-    analysis.block_count = blocks_.size();
-    analysis.intervals = intervals_.data();
-    analysis.interval_count = intervals_.size();
-    analysis.value_ids = value_ids_.data();
-    analysis.value_count = value_ids_.size();
-    analysis.value_interval_indices = indices_.data();
-    analysis.segments = segments_.data();
-    analysis.segment_count = segments_.size();
-    analysis.value_segment_ranges = ranges_.data();
+    loom_liveness_analysis_t analysis = {
+        .blocks = blocks_.data(),
+        .block_count = blocks_.size(),
+        .intervals = intervals_.data(),
+        .interval_count = intervals_.size(),
+        .value_ids = value_ids_.data(),
+        .value_count = value_ids_.size(),
+        .value_interval_indices = indices_.data(),
+        .segments = segments_.data(),
+        .segment_count = segments_.size(),
+        .value_segment_ranges = ranges_.data(),
+    };
     return analysis;
   }
 
@@ -143,8 +147,9 @@ class LivenessPressureTest : public ::testing::Test {
                          return loom_liveness_value_class_equal(
                              summary.value_class, interval->value_class);
                        })) {
-        loom_liveness_pressure_summary_t summary = {};
-        summary.value_class = interval->value_class;
+        loom_liveness_pressure_summary_t summary = {
+            .value_class = interval->value_class,
+        };
         summaries.push_back(summary);
       }
     }

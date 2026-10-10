@@ -65,8 +65,8 @@ class LinkPlanProjectionTest : public ::testing::Test {
   loom_module_t* Parse(iree_string_view_t source) {
     loom_module_t* module = nullptr;
     const loom_text_parse_options_t options = {
-        /*.diagnostic_sink=*/{},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {},
+        .max_errors = 20,
     };
     IREE_EXPECT_OK(loom_text_parse(source, IREE_SV("projection_test.loom"),
                                    &context_, &block_pool_, &options, &module));
@@ -88,8 +88,8 @@ class LinkPlanProjectionTest : public ::testing::Test {
                  iree_string_view_t provider_name,
                  loom_link_provider_role_t role) {
     const loom_link_module_index_add_options_t options = {
-        /*.provider_name=*/provider_name,
-        /*.role=*/role,
+        .provider_name = provider_name,
+        .role = role,
     };
     IREE_ASSERT_OK(loom_link_module_index_add_materialized(
         index, module, &options, /*out_provider_ordinal=*/nullptr));
@@ -136,8 +136,8 @@ func.def @helper(%x: i32) -> (i32) {
             LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   const iree_string_view_t roots[] = {IREE_SV("@entry")};
   const loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_LINK,
-      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+      .mode = LOOM_LINK_PLAN_LINK,
+      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
   };
   LinkPlanPtr plan = BuildPlan(index.get(), &options);
 

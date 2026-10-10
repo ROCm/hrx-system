@@ -49,8 +49,7 @@ class RequirementsTest : public ::testing::Test {
   }
 
   ModulePtr ParseModule(const char* source) {
-    loom_text_parse_options_t options = {};
-    options.max_errors = 20;
+    loom_text_parse_options_t options = {.max_errors = 20};
     loom_module_t* module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(iree_make_cstring_view(source),
                                    IREE_SV("requirements_test.loom"), &context_,
@@ -80,15 +79,15 @@ static iree_status_t QueryEnabled(
   IREE_RETURN_IF_ERROR(loom_testbench_requirement_read_optional_i64_attr(
       module, attrs, IREE_SV("enabled"), &present, &enabled));
   const bool enabled_predicate = present && enabled != 0;
-  *out_result = (loom_testbench_requirement_provider_result_t){
-      /*.state=*/
-      enabled_predicate ? LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_SATISFIED
-                        : LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNSATISFIED,
-      /*.provider_code=*/
-      enabled_predicate ? iree_string_view_empty() : IREE_SV("fake_disabled"),
-      /*.display_message=*/
-      enabled_predicate ? iree_string_view_empty()
-                        : IREE_SV("fake requirement was disabled"),
+  *out_result = loom_testbench_requirement_provider_result_t{
+      .state = enabled_predicate
+                   ? LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_SATISFIED
+                   : LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNSATISFIED,
+      .provider_code = enabled_predicate ? iree_string_view_empty()
+                                         : IREE_SV("fake_disabled"),
+      .display_message = enabled_predicate
+                             ? iree_string_view_empty()
+                             : IREE_SV("fake requirement was disabled"),
   };
   return iree_ok_status();
 }
@@ -99,10 +98,10 @@ static iree_status_t QueryUnavailable(
   (void)user_data;
   (void)module;
   (void)attrs;
-  *out_result = (loom_testbench_requirement_provider_result_t){
-      /*.state=*/LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNAVAILABLE,
-      /*.provider_code=*/IREE_SV("fake_runtime_unavailable"),
-      /*.display_message=*/IREE_SV("fake runtime unavailable"),
+  *out_result = loom_testbench_requirement_provider_result_t{
+      .state = LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNAVAILABLE,
+      .provider_code = IREE_SV("fake_runtime_unavailable"),
+      .display_message = IREE_SV("fake runtime unavailable"),
   };
   return iree_ok_status();
 }
@@ -135,14 +134,14 @@ check.case @unavailable_requirement {
 
   const loom_testbench_requirement_provider_t providers[] = {
       {
-          /*.name=*/IREE_SV("fake.enabled"),
-          /*.user_data=*/nullptr,
-          /*.query=*/QueryEnabled,
+          .name = IREE_SV("fake.enabled"),
+          .user_data = nullptr,
+          .query = QueryEnabled,
       },
       {
-          /*.name=*/IREE_SV("fake.unavailable"),
-          /*.user_data=*/nullptr,
-          /*.query=*/QueryUnavailable,
+          .name = IREE_SV("fake.unavailable"),
+          .user_data = nullptr,
+          .query = QueryUnavailable,
       },
   };
   loom_testbench_requirement_provider_registry_t registry = {};

@@ -45,8 +45,9 @@ static hsa_status_t HSA_API FakeAqlQueueExecutionAgentGetInfo(
 }
 
 static iree_hal_amdgpu_libhsa_t AqlQueueExecutionQueryLibhsa() {
-  iree_hal_amdgpu_libhsa_t libhsa = {};
-  libhsa.hsa_agent_get_info = FakeAqlQueueExecutionAgentGetInfo;
+  iree_hal_amdgpu_libhsa_t libhsa = {
+      .hsa_agent_get_info = FakeAqlQueueExecutionAgentGetInfo,
+  };
   return libhsa;
 }
 
@@ -104,8 +105,9 @@ TEST(AqlRingTest, CommitsExtendedDispatchFormatAndSetupAtomically) {
   iree_hal_amdgpu_aql_packet_t packet;
   std::memset(&packet, 0xCC, sizeof(packet));
 
-  iree_hal_amdgpu_aql_dispatch_params_t params = {};
-  params.kernel_object = 0x1234;
+  iree_hal_amdgpu_aql_dispatch_params_t params = {
+      .kernel_object = 0x1234,
+  };
   params.workgroup_size[0] = 64;
   params.workgroup_size[1] = 1;
   params.workgroup_size[2] = 1;
@@ -140,9 +142,10 @@ TEST(AqlRingTest, CommitsExtendedDispatchFormatAndSetupAtomically) {
 // Native queues can write a DOORBELL-kind signal's MMIO pointer directly.
 TEST(AqlRingTest, NativeQueueResolvesMmioPointerForDoorbellKind) {
   volatile int64_t doorbell_mmio = 0;
-  iree_amd_signal_t signal = {};
-  signal.kind = IREE_AMD_SIGNAL_KIND_DOORBELL;
-  signal.hardware_doorbell_ptr = (volatile uint64_t*)&doorbell_mmio;
+  iree_amd_signal_t signal = {
+      .kind = IREE_AMD_SIGNAL_KIND_DOORBELL,
+      .hardware_doorbell_ptr = (volatile uint64_t*)&doorbell_mmio,
+  };
 
   iree_hal_amdgpu_aql_packet_t packets[4] = {};
   iree_amd_queue_t queue = {};
@@ -167,9 +170,10 @@ TEST(AqlRingTest, NativeQueueResolvesMmioPointerForDoorbellKind) {
 // HSA signal API even when the exposed signal has DOORBELL kind.
 TEST(AqlRingTest, Pm4EmulatedQueueUsesHsaSignalForDoorbellKind) {
   volatile int64_t doorbell_value = 0;
-  iree_amd_signal_t signal = {};
-  signal.kind = IREE_AMD_SIGNAL_KIND_DOORBELL;
-  signal.hardware_doorbell_ptr = (volatile uint64_t*)&doorbell_value;
+  iree_amd_signal_t signal = {
+      .kind = IREE_AMD_SIGNAL_KIND_DOORBELL,
+      .hardware_doorbell_ptr = (volatile uint64_t*)&doorbell_value,
+  };
 
   iree_hal_amdgpu_aql_packet_t packets[4] = {};
   iree_amd_queue_t queue = {};
@@ -188,8 +192,9 @@ TEST(AqlRingTest, Pm4EmulatedQueueUsesHsaSignalForDoorbellKind) {
 // A USER-kind signal stores a value (not a pointer) in the same union slot, so
 // the fast-path pointer must stay NULL even when that value is non-zero.
 TEST(AqlRingTest, InitializeLeavesPointerNullForUserKind) {
-  iree_amd_signal_t signal = {};
-  signal.kind = IREE_AMD_SIGNAL_KIND_USER;
+  iree_amd_signal_t signal = {
+      .kind = IREE_AMD_SIGNAL_KIND_USER,
+  };
   signal.value = 0x1234;  // a blind pointer read would yield a non-NULL ptr
 
   iree_hal_amdgpu_aql_packet_t packets[4] = {};
@@ -242,8 +247,9 @@ static void RecordSignalStore(hsa_signal_t signal, hsa_signal_value_t value) {
 // A libhsa whose only populated thunk is the signal store used by the doorbell
 // fallback; every other entry stays NULL.
 static iree_hal_amdgpu_libhsa_t MakeRecordingLibhsa() {
-  iree_hal_amdgpu_libhsa_t libhsa = {};
-  libhsa.hsa_signal_store_screlease = RecordSignalStore;
+  iree_hal_amdgpu_libhsa_t libhsa = {
+      .hsa_signal_store_screlease = RecordSignalStore,
+  };
   return libhsa;
 }
 
@@ -254,8 +260,7 @@ TEST(AqlRingTest, DoorbellFastPathWritesMmioRegister) {
   iree_hal_amdgpu_libhsa_t libhsa = MakeRecordingLibhsa();
   g_recorded_signal_store = {};
 
-  iree_hal_amdgpu_aql_ring_t ring = {};
-  ring.libhsa = &libhsa;
+  iree_hal_amdgpu_aql_ring_t ring = {.libhsa = &libhsa};
   ring.doorbell.ptr = &doorbell_mmio;
 
   iree_hal_amdgpu_aql_ring_doorbell(&ring, 0x1234);
@@ -270,8 +275,7 @@ TEST(AqlRingTest, DoorbellFallbackStoresSignalViaLibhsa) {
   iree_hal_amdgpu_libhsa_t libhsa = MakeRecordingLibhsa();
   g_recorded_signal_store = {};
 
-  iree_hal_amdgpu_aql_ring_t ring = {};
-  ring.libhsa = &libhsa;
+  iree_hal_amdgpu_aql_ring_t ring = {.libhsa = &libhsa};
   ring.doorbell.ptr = nullptr;  // forces the fallback path
   ring.doorbell.signal.handle = 0xABCD;
 

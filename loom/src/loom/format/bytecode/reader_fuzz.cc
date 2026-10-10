@@ -98,11 +98,11 @@ static std::vector<uint8_t> fuzz_write_module(
 static loom_bytecode_read_options_t fuzz_read_options(
     uint32_t* diagnostic_count) {
   loom_bytecode_read_options_t options = {
-      /*.diagnostic_sink=*/
-      {
-          /*.fn=*/fuzz_capture_diagnostic,
-          /*.user_data=*/diagnostic_count,
-      },
+      .diagnostic_sink =
+          {
+              .fn = fuzz_capture_diagnostic,
+              .user_data = diagnostic_count,
+          },
   };
   loom_low_repr_environment_initialize(&g_low_registry.registry,
                                        &options.low_repr_environment);

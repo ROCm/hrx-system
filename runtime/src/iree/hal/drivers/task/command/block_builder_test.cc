@@ -212,15 +212,17 @@ TEST_F(BlockBuilderTest, CommandOpSplitKeepsBindingIndicesBlockLocal) {
   iree_hal_cmd_block_builder_initialize(&block_pool_, &builder);
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
 
-  iree_hal_executable_dispatch_attrs_v0_t dispatch_attrs = {};
-  dispatch_attrs.binding_count = 12;
-  iree_hal_task_executable_t executable = {};
-  executable.dispatch_attrs = &dispatch_attrs;
-  executable.export_count = 1;
+  iree_hal_executable_dispatch_attrs_v0_t dispatch_attrs = {
+      .binding_count = 12,
+  };
+  iree_hal_task_executable_t executable = {
+      .dispatch_attrs = &dispatch_attrs,
+      .export_count = 1,
+  };
 
   iree_hal_dispatch_config_t config = {
-      /*.workgroup_size=*/{1, 1, 1},
-      /*.workgroup_count=*/{1, 1, 1},
+      .workgroup_size = {1, 1, 1},
+      .workgroup_count = {1, 1, 1},
   };
   for (int i = 0; i < 100; ++i) {
     iree_hal_cmd_fixup_t* fixups = NULL;

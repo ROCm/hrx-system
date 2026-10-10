@@ -93,8 +93,8 @@ static const iree_test_role_t kDataExchangeRoles[] = {
     {"reader", reader_role, /*signals_ready=*/false},
 };
 static const iree_coordinated_test_config_t kDataExchangeConfig = {
-    /*.roles=*/kDataExchangeRoles,
-    /*.role_count=*/2,
+    .roles = kDataExchangeRoles,
+    .role_count = 2,
 };
 
 // A role that exits with a nonzero code.
@@ -102,8 +102,8 @@ static const iree_test_role_t kFailingRoles[] = {
     {"failing", failing_role, /*signals_ready=*/false},
 };
 static const iree_coordinated_test_config_t kFailingConfig = {
-    /*.roles=*/kFailingRoles,
-    /*.role_count=*/1,
+    .roles = kFailingRoles,
+    .role_count = 1,
 };
 
 // A role that exits before publishing the readiness condition.
@@ -111,8 +111,8 @@ static const iree_test_role_t kFailsBeforeReadyRoles[] = {
     {"failing", failing_role, /*signals_ready=*/true},
 };
 static const iree_coordinated_test_config_t kFailsBeforeReadyConfig = {
-    /*.roles=*/kFailsBeforeReadyRoles,
-    /*.role_count=*/1,
+    .roles = kFailsBeforeReadyRoles,
+    .role_count = 1,
 };
 
 // All role functions must be reachable from the registered child dispatcher,
@@ -124,8 +124,8 @@ static const iree_test_role_t kAllRoles[] = {
     {"arguments", argument_role, /*signals_ready=*/false},
 };
 static const iree_coordinated_test_config_t kAllRolesConfig = {
-    /*.roles=*/kAllRoles,
-    /*.role_count=*/IREE_ARRAYSIZE(kAllRoles),
+    .roles = kAllRoles,
+    .role_count = IREE_ARRAYSIZE(kAllRoles),
 };
 IREE_COORDINATED_TEST_REGISTER(kAllRolesConfig);
 

@@ -17,8 +17,7 @@ TEST(IndexCarrierTest, ReadsTypedTargetWidths) {
   loom_target_facts_t target_facts = {};
   target_facts.storage.snapshot.index_bitwidth = 32;
   target_facts.storage.snapshot.offset_bitwidth = 64;
-  loom_fact_context_t context = {};
-  context.target_facts = &target_facts;
+  loom_fact_context_t context = {.target_facts = &target_facts};
 
   EXPECT_EQ(
       loom_index_target_carrier_bitwidth(&context, LOOM_SCALAR_TYPE_INDEX), 32);

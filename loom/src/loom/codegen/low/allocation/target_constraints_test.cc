@@ -49,12 +49,12 @@ class LowAllocationTargetConstraintsTest : public ::testing::Test {
     IREE_ASSERT(target_bundle != nullptr);
     loom_target_facts_builder_initialize(&loom_test_target_fact_type,
                                          target_bundle, &target_facts_);
-    target_ = (loom_low_resolved_target_t){
-        /*.target_facts=*/&target_facts_,
-        /*.target_name=*/target_bundle->name,
-        /*.descriptor_set_key=*/target_bundle->config->contract_set_key,
-        /*.feature_bits=*/target_bundle->config->contract_feature_bits,
-        /*.descriptor_set=*/loom_test_low_core_descriptor_set(),
+    target_ = loom_low_resolved_target_t{
+        .target_facts = &target_facts_,
+        .target_name = target_bundle->name,
+        .descriptor_set_key = target_bundle->config->contract_set_key,
+        .feature_bits = target_bundle->config->contract_feature_bits,
+        .descriptor_set = loom_test_low_core_descriptor_set(),
     };
   }
 
@@ -80,9 +80,10 @@ class LowAllocationTargetConstraintsTest : public ::testing::Test {
 };
 
 TEST_F(LowAllocationTargetConstraintsTest, ClampsBudgetToDescriptorCapacity) {
-  loom_low_allocation_budget_t budget = {};
-  budget.register_class = IREE_SV("test.phys");
-  budget.max_units = 64;
+  loom_low_allocation_budget_t budget = {
+      .register_class = IREE_SV("test.phys"),
+      .max_units = 64,
+  };
 
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
@@ -101,9 +102,10 @@ TEST_F(LowAllocationTargetConstraintsTest, ClampsBudgetToDescriptorCapacity) {
 }
 
 TEST_F(LowAllocationTargetConstraintsTest, AppliesBudgetToUnboundedClass) {
-  loom_low_allocation_budget_t budget = {};
-  budget.register_class = IREE_SV("test.i32");
-  budget.max_units = 7;
+  loom_low_allocation_budget_t budget = {
+      .register_class = IREE_SV("test.i32"),
+      .max_units = 7,
+  };
 
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
@@ -171,14 +173,15 @@ TEST_F(LowAllocationTargetConstraintsTest, ReferenceSpillingIsTargetDeclared) {
 
 TEST_F(LowAllocationTargetConstraintsTest,
        ValidatesAllocatableAndFixedLocationWindowsSeparately) {
-  loom_low_allocation_budget_t budget = {};
-  budget.register_class = IREE_SV("test.phys");
-  budget.max_units = 16;
+  loom_low_allocation_budget_t budget = {
+      .register_class = IREE_SV("test.phys"),
+      .max_units = 16,
+  };
 
   DiagnosticCapture capture = {};
   const iree_diagnostic_emitter_t emitter = {
-      /*.fn=*/CaptureDiagnostic,
-      /*.user_data=*/&capture,
+      .fn = CaptureDiagnostic,
+      .user_data = &capture,
   };
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
@@ -290,8 +293,8 @@ TEST_F(LowAllocationTargetConstraintsTest,
 
   DiagnosticCapture capture = {};
   const iree_diagnostic_emitter_t emitter = {
-      /*.fn=*/CaptureDiagnostic,
-      /*.user_data=*/&capture,
+      .fn = CaptureDiagnostic,
+      .user_data = &capture,
   };
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
@@ -306,11 +309,12 @@ TEST_F(LowAllocationTargetConstraintsTest,
 
 TEST_F(LowAllocationTargetConstraintsTest,
        SearchLimitIncludesAssignmentsAndReservedRanges) {
-  loom_low_allocation_reserved_range_t reserved_range = {};
-  reserved_range.register_class = IREE_SV("test.phys");
-  reserved_range.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  reserved_range.location_base = 10;
-  reserved_range.location_count = 2;
+  loom_low_allocation_reserved_range_t reserved_range = {
+      .register_class = IREE_SV("test.phys"),
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = 10,
+      .location_count = 2,
+  };
 
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
@@ -388,11 +392,12 @@ TEST_F(LowAllocationTargetConstraintsTest,
 
 TEST_F(LowAllocationTargetConstraintsTest,
        ReservedRangesConflictAcrossAliasedClasses) {
-  loom_low_allocation_reserved_range_t reserved_range = {};
-  reserved_range.register_class = IREE_SV("test.pressure.alias32");
-  reserved_range.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  reserved_range.location_base = 2;
-  reserved_range.location_count = 2;
+  loom_low_allocation_reserved_range_t reserved_range = {
+      .register_class = IREE_SV("test.pressure.alias32"),
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = 2,
+      .location_count = 2,
+  };
 
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
@@ -410,13 +415,14 @@ TEST_F(LowAllocationTargetConstraintsTest,
           LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER),
       4u);
 
-  loom_low_allocation_assignment_t candidate = {};
-  candidate.value_id = LOOM_VALUE_ID_INVALID;
-  candidate.descriptor_reg_class_id =
-      RegisterClassId(IREE_SV("test.pressure.alias64"));
-  candidate.unit_count = 1;
-  candidate.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  candidate.location_count = 1;
+  loom_low_allocation_assignment_t candidate = {
+      .value_id = LOOM_VALUE_ID_INVALID,
+      .descriptor_reg_class_id =
+          RegisterClassId(IREE_SV("test.pressure.alias64")),
+      .unit_count = 1,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_count = 1,
+  };
   ASSERT_TRUE(
       loom_low_allocation_target_constraints_can_order_reserved_candidate(
           &constraints, &candidate));
@@ -450,12 +456,13 @@ TEST_F(LowAllocationTargetConstraintsTest,
   ASSERT_EQ(constraints.error_count, 0u);
   ASSERT_EQ(constraints.reserved_range_count, IREE_ARRAYSIZE(reserved_ranges));
 
-  loom_low_allocation_assignment_t candidate = {};
-  candidate.value_id = LOOM_VALUE_ID_INVALID;
-  candidate.descriptor_reg_class_id = RegisterClassId(IREE_SV("test.i32"));
-  candidate.unit_count = 1;
-  candidate.location_kind = LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID;
-  candidate.location_count = 1;
+  loom_low_allocation_assignment_t candidate = {
+      .value_id = LOOM_VALUE_ID_INVALID,
+      .descriptor_reg_class_id = RegisterClassId(IREE_SV("test.i32")),
+      .unit_count = 1,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID,
+      .location_count = 1,
+  };
   ASSERT_TRUE(
       loom_low_allocation_target_constraints_can_order_reserved_candidate(
           &constraints, &candidate));
@@ -552,11 +559,11 @@ TEST_F(LowAllocationTargetConstraintsTest,
   uint32_t unit_start_points[] = {2, 0, 1, 0};
   uint32_t unit_end_points[] = {3, 2, 3, 3};
   const uint16_t reg_class_id = RegisterClassId(IREE_SV("test.phys"));
-  loom_liveness_value_class_t value_class = {};
-  value_class.type_kind = LOOM_TYPE_REGISTER;
-  value_class.register_descriptor_set_stable_id =
-      target_.descriptor_set->stable_id;
-  value_class.register_class_id = reg_class_id;
+  loom_liveness_value_class_t value_class = {
+      .type_kind = LOOM_TYPE_REGISTER,
+      .register_class_id = reg_class_id,
+      .register_descriptor_set_stable_id = target_.descriptor_set->stable_id,
+  };
   loom_module_value_ordinal_scratch_acquire(module);
   for (uint32_t i = 0; i < kValueCount; ++i) {
     IREE_ASSERT_OK(loom_module_define_value(
@@ -571,22 +578,25 @@ TEST_F(LowAllocationTargetConstraintsTest,
     intervals[i].start_point = unit_start_points[i];
     intervals[i].end_point = unit_end_points[i];
   }
-  loom_local_value_domain_t domain = {};
-  domain.module = module;
-  domain.value_ids = values;
-  domain.value_count = kValueCount;
-  domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = intervals;
-  liveness.interval_count = kValueCount;
-  liveness.value_ids = values;
-  liveness.value_count = kValueCount;
-  liveness.value_interval_indices = interval_indices;
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = unit_values;
-  unit_liveness.start_points = unit_start_points;
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  loom_local_value_domain_t domain = {
+      .module = module,
+      .value_ids = values,
+      .value_count = kValueCount,
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED,
+  };
+  loom_liveness_analysis_t liveness = {
+      .intervals = intervals,
+      .interval_count = kValueCount,
+      .value_ids = values,
+      .value_count = kValueCount,
+      .value_interval_indices = interval_indices,
+  };
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = unit_values,
+      .start_points = unit_start_points,
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   uint64_t incomplete_storage_words[] = {0};
   unit_liveness.values_with_incomplete_storage_segments = {
       kValueCount, incomplete_storage_words};
@@ -602,9 +612,10 @@ TEST_F(LowAllocationTargetConstraintsTest,
                      LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
     relation.unit_count = 1;
   }
-  loom_low_placement_table_t placement = {};
-  placement.relations = relations;
-  placement.relation_count = IREE_ARRAYSIZE(relations);
+  loom_low_placement_table_t placement = {
+      .relations = relations,
+      .relation_count = IREE_ARRAYSIZE(relations),
+  };
   const loom_value_ordinal_t tied_storage_origins[] = {1, 1, 1};
   placement.tied_storage_origins_by_value_ordinal = tied_storage_origins;
   for (uint32_t mask = 1; mask < (1u << kValueCount); ++mask) {
@@ -694,13 +705,15 @@ TEST_F(LowAllocationTargetConstraintsTest,
       &value));
   loom_module_value_ordinal_scratch_acquire(module);
   loom_module_value_ordinal_scratch_set(module, value, 0);
-  loom_local_value_domain_t domain = {};
-  domain.module = module;
-  domain.value_ids = &value;
-  domain.value_count = 1;
-  domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
-  loom_liveness_interval_t interval = {};
-  interval.value_id = value;
+  loom_local_value_domain_t domain = {
+      .module = module,
+      .value_ids = &value,
+      .value_count = 1,
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED,
+  };
+  loom_liveness_interval_t interval = {
+      .value_id = value,
+  };
   interval.value_class.type_kind = LOOM_TYPE_REGISTER;
   interval.value_class.register_descriptor_set_stable_id =
       target_.descriptor_set->stable_id;
@@ -708,25 +721,29 @@ TEST_F(LowAllocationTargetConstraintsTest,
   interval.unit_count = 1;
   interval.end_point = 1;
   uint32_t zero = 0, one = 1;
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = &interval;
-  liveness.interval_count = 1;
-  liveness.value_ids = &value;
-  liveness.value_count = 1;
-  liveness.value_interval_indices = &zero;
+  loom_liveness_analysis_t liveness = {
+      .intervals = &interval,
+      .interval_count = 1,
+      .value_ids = &value,
+      .value_count = 1,
+      .value_interval_indices = &zero,
+  };
   loom_low_allocation_unit_liveness_value_t unit_value = {};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = &unit_value;
-  unit_liveness.start_points = &zero;
-  unit_liveness.end_points = &one;
-  unit_liveness.point_count = 1;
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = &unit_value,
+      .start_points = &zero,
+      .end_points = &one,
+      .point_count = 1,
+  };
   uint64_t incomplete_storage_words[] = {0};
   unit_liveness.values_with_incomplete_storage_segments = {
       1, incomplete_storage_words};
-  loom_low_placement_operand_constraints_t operand = {};
-  operand.addressable_unit_count = 8;
-  loom_low_placement_table_t placement = {};
-  placement.operand_constraints_by_interval = &operand;
+  loom_low_placement_operand_constraints_t operand = {
+      .addressable_unit_count = 8,
+  };
+  loom_low_placement_table_t placement = {
+      .operand_constraints_by_interval = &operand,
+  };
   // The class's ABI-fixed window at 32 is legal storage, but still cannot be
   // encoded by an operand restricted to the first eight registers.
   for (uint32_t location : {7, 8, 32}) {
@@ -785,11 +802,11 @@ TEST_F(LowAllocationTargetConstraintsTest,
   uint32_t unit_ends[kValueCount];
   loom_low_allocation_fixed_value_t fixed_values[kFixedCount] = {};
   const uint16_t reg_class_id = RegisterClassId(IREE_SV("test.i32"));
-  loom_liveness_value_class_t value_class = {};
-  value_class.type_kind = LOOM_TYPE_REGISTER;
-  value_class.register_descriptor_set_stable_id =
-      target_.descriptor_set->stable_id;
-  value_class.register_class_id = reg_class_id;
+  loom_liveness_value_class_t value_class = {
+      .type_kind = LOOM_TYPE_REGISTER,
+      .register_class_id = reg_class_id,
+      .register_descriptor_set_stable_id = target_.descriptor_set->stable_id,
+  };
   loom_module_value_ordinal_scratch_acquire(module);
   uint32_t segment_count = 0;
   for (uint32_t i = 0; i < kValueCount; ++i) {
@@ -825,25 +842,28 @@ TEST_F(LowAllocationTargetConstraintsTest,
       fixed_values[i].location_count = 1;
     }
   }
-  loom_local_value_domain_t domain = {};
-  domain.module = module;
-  domain.value_ids = values;
-  domain.value_count = kValueCount;
-  domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = intervals;
-  liveness.interval_count = kValueCount;
-  liveness.value_ids = values;
-  liveness.value_count = kValueCount;
-  liveness.value_interval_indices = interval_indices;
-  liveness.segments = segments;
+  loom_local_value_domain_t domain = {
+      .module = module,
+      .value_ids = values,
+      .value_count = kValueCount,
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED,
+  };
+  loom_liveness_analysis_t liveness = {
+      .intervals = intervals,
+      .interval_count = kValueCount,
+      .value_ids = values,
+      .value_count = kValueCount,
+      .value_interval_indices = interval_indices,
+      .segments = segments,
+  };
   liveness.segment_count = segment_count;
   liveness.value_segment_ranges = segment_ranges;
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = unit_values;
-  unit_liveness.start_points = unit_starts;
-  unit_liveness.end_points = unit_ends;
-  unit_liveness.point_count = kValueCount;
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = unit_values,
+      .start_points = unit_starts,
+      .end_points = unit_ends,
+      .point_count = kValueCount,
+  };
   uint64_t incomplete_storage_words[] = {0};
   unit_liveness.values_with_incomplete_storage_segments = {
       kValueCount, incomplete_storage_words};
@@ -880,13 +900,14 @@ TEST_F(LowAllocationTargetConstraintsTest,
                 &constraints, LOOM_VALUE_ID_INVALID),
             nullptr);
 
-  loom_low_allocation_assignment_t candidate = {};
-  candidate.value_id = values[kFixedCount];
-  candidate.descriptor_reg_class_id = reg_class_id;
-  candidate.location_kind = LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID;
-  candidate.location_count = 1;
-  candidate.unit_count = 1;
-  candidate.unit_point_start = kFixedCount;
+  loom_low_allocation_assignment_t candidate = {
+      .value_id = values[kFixedCount],
+      .descriptor_reg_class_id = reg_class_id,
+      .unit_count = 1,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID,
+      .location_count = 1,
+      .unit_point_start = kFixedCount,
+  };
   loom_low_allocation_fixed_availability_t availability = {};
   IREE_ASSERT_OK(loom_low_allocation_fixed_availability_initialize(
       &constraints, &arena_, &availability));
@@ -1045,22 +1066,25 @@ TEST_F(LowAllocationTargetConstraintsTest,
         target_.descriptor_set->stable_id;
     intervals[i].value_class.register_class_id = reg_class_id;
   }
-  loom_local_value_domain_t domain = {};
-  domain.module = module;
-  domain.value_ids = values;
-  domain.value_count = kValueCount;
-  domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = intervals;
-  liveness.interval_count = kValueCount;
-  liveness.value_ids = values;
-  liveness.value_count = kValueCount;
-  liveness.value_interval_indices = interval_indices;
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = unit_values;
-  unit_liveness.start_points = unit_starts;
-  unit_liveness.end_points = unit_ends;
-  unit_liveness.point_count = kValueCount;
+  loom_local_value_domain_t domain = {
+      .module = module,
+      .value_ids = values,
+      .value_count = kValueCount,
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED,
+  };
+  loom_liveness_analysis_t liveness = {
+      .intervals = intervals,
+      .interval_count = kValueCount,
+      .value_ids = values,
+      .value_count = kValueCount,
+      .value_interval_indices = interval_indices,
+  };
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = unit_values,
+      .start_points = unit_starts,
+      .end_points = unit_ends,
+      .point_count = kValueCount,
+  };
   uint64_t incomplete_storage_words[] = {0};
   unit_liveness.values_with_incomplete_storage_segments = {
       kValueCount, incomplete_storage_words};
@@ -1087,15 +1111,16 @@ TEST_F(LowAllocationTargetConstraintsTest,
   }
   ASSERT_EQ(constraints.error_count, 0u);
 
-  loom_low_allocation_assignment_t candidate = {};
-  candidate.value_id = values[1];
-  candidate.descriptor_reg_class_id = narrow_reg_class_id;
-  candidate.start_point = 0;
-  candidate.end_point = 10;
-  candidate.unit_count = 1;
-  candidate.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  candidate.location_count = 1;
-  candidate.unit_point_start = 1;
+  loom_low_allocation_assignment_t candidate = {
+      .value_id = values[1],
+      .descriptor_reg_class_id = narrow_reg_class_id,
+      .start_point = 0,
+      .end_point = 10,
+      .unit_count = 1,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_count = 1,
+      .unit_point_start = 1,
+  };
   for (uint16_t ordinal = 0; ordinal < 3; ++ordinal) {
     candidate.location_base =
         loom_low_descriptor_set_physical_register_candidate(

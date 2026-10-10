@@ -80,11 +80,11 @@ class VectorMemoryTest : public ::testing::Test {
     loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
     IREE_CHECK_OK(loom_module_intern_string(module_, name, &name_id));
     loom_encoding_t encoding = {
-        /*.name_id=*/name_id,
-        /*.alias_id=*/LOOM_STRING_ID_INVALID,
-        /*.attribute_count=*/attribute_count,
-        /*.family=*/{},
-        /*.attributes=*/attributes,
+        .name_id = name_id,
+        .alias_id = LOOM_STRING_ID_INVALID,
+        .attribute_count = attribute_count,
+        .family = {},
+        .attributes = attributes,
     };
     uint16_t encoding_id = 0;
     IREE_CHECK_OK(loom_module_add_encoding(module_, &encoding, &encoding_id));
@@ -103,9 +103,9 @@ class VectorMemoryTest : public ::testing::Test {
     int64_t strides[] = {stride};
     loom_named_attr_t attributes[] = {
         {
-            /*.name_id=*/strides_name,
-            /*.reserved=*/{},
-            /*.value=*/loom_attr_i64_array(strides, IREE_ARRAYSIZE(strides)),
+            .name_id = strides_name,
+            .reserved = {},
+            .value = loom_attr_i64_array(strides, IREE_ARRAYSIZE(strides)),
         },
     };
     return AddEncoding(IREE_SV("encoding.layout.strided"), attributes,
@@ -121,14 +121,14 @@ class VectorMemoryTest : public ::testing::Test {
         loom_module_intern_string(module_, IREE_SV("schema"), &schema_name));
     loom_named_attr_t attributes[] = {
         {
-            /*.name_id=*/layout_name,
-            /*.reserved=*/{},
-            /*.value=*/loom_attr_encoding(layout),
+            .name_id = layout_name,
+            .reserved = {},
+            .value = loom_attr_encoding(layout),
         },
         {
-            /*.name_id=*/schema_name,
-            /*.reserved=*/{},
-            /*.value=*/loom_attr_encoding(schema),
+            .name_id = schema_name,
+            .reserved = {},
+            .value = loom_attr_encoding(schema),
         },
     };
     return AddEncoding(IREE_SV("encoding.storage"), attributes,
@@ -158,14 +158,14 @@ class VectorMemoryTest : public ::testing::Test {
         loom_module_intern_string(module_, IREE_SV("schema"), &schema_name));
     loom_named_value_t params[] = {
         {
-            /*.name_id=*/layout_name,
-            /*.reserved=*/{},
-            /*.value_id=*/layout,
+            .name_id = layout_name,
+            .reserved = {},
+            .value_id = layout,
         },
         {
-            /*.name_id=*/schema_name,
-            /*.reserved=*/{},
-            /*.value_id=*/schema,
+            .name_id = schema_name,
+            .reserved = {},
+            .value_id = schema,
         },
     };
     loom_op_t* storage = nullptr;
@@ -294,9 +294,10 @@ TEST_F(VectorMemoryTest, BlockedFragmentFootprintUsesRankThreeShape) {
       loom_dim_pack_dynamic(rows),
       loom_dim_pack_dynamic(columns),
   };
-  loom_type_t view_type = {};
-  view_type.header = loom_type_make_header(
-      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_BF16, /*rank=*/3, /*flags=*/0);
+  loom_type_t view_type = {
+      .header = loom_type_make_header(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_BF16,
+                                      /*rank=*/3, /*flags=*/0),
+  };
   view_type.dims[0] = (uint64_t)(uintptr_t)view_dimensions;
   loom_value_id_t view = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_builder_define_block_arg(

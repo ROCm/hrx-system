@@ -23,9 +23,10 @@ TEST_CASE_METHOD(HrxTestFixture, "allocator_allocate_buffer device local",
                  "[allocator][alloc]") {
   hrx_allocator_t alloc = hrx().device_allocator(device_);
 
-  hrx_buffer_params_t params = {};
-  params.type = HRX_MEMORY_TYPE_DEVICE_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE;
-  params.usage = HRX_BUFFER_USAGE_DEFAULT;
+  hrx_buffer_params_t params = {
+      .type = HRX_MEMORY_TYPE_DEVICE_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage = HRX_BUFFER_USAGE_DEFAULT,
+  };
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().allocator_allocate_buffer(alloc, params, 4096, &buf));
@@ -42,9 +43,10 @@ TEST_CASE_METHOD(HrxTestFixture, "allocator_allocate_buffer host mappable",
                  "[allocator][alloc]") {
   hrx_allocator_t alloc = hrx().device_allocator(device_);
 
-  hrx_buffer_params_t params = {};
-  params.type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE;
-  params.usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED;
+  hrx_buffer_params_t params = {
+      .type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED,
+  };
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().allocator_allocate_buffer(alloc, params, 256, &buf));
@@ -70,9 +72,10 @@ TEST_CASE_METHOD(HrxTestFixture, "allocator_import_buffer from host ptr",
   uint8_t* host_data = (uint8_t*)host_raw;
   memset(host_data, 0xAA, 128);
 
-  hrx_buffer_params_t params = {};
-  params.type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE;
-  params.usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED;
+  hrx_buffer_params_t params = {
+      .type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED,
+  };
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(

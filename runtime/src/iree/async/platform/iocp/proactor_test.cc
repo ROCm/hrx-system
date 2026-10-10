@@ -56,7 +56,7 @@ struct ControlledAllocator {
                                    inout_ptr);
   }
 
-  iree_allocator_t value() { return {/*.self=*/this, /*.ctl=*/Control}; }
+  iree_allocator_t value() { return {.self = this, .ctl = Control}; }
 };
 
 static void RecordCompletion(void* user_data, iree_async_operation_t* operation,
@@ -372,7 +372,7 @@ TEST(IocpProactorSubmitTest, CarrierAllocationFailureRollsBackCloseAndMessage) {
 
   MessageState message_state;
   iree_async_proactor_set_message_callback(
-      target, {/*.fn=*/RecordMessage, /*.user_data=*/&message_state});
+      target, {.fn = RecordMessage, .user_data = &message_state});
 
   iree_async_socket_t* socket = nullptr;
   IREE_ASSERT_OK(iree_async_socket_create(source, IREE_ASYNC_SOCKET_TYPE_TCP,

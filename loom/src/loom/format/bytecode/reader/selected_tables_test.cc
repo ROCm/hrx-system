@@ -18,25 +18,25 @@ namespace {
 
 static const loom_attr_descriptor_t kEncodingParameters[] = {
     {
-        /*.name=*/LOOM_BSTRING_REF(5, "block"),
-        /*.attr_kind=*/LOOM_ATTR_I64,
-        /*.flags=*/LOOM_ATTR_OPTIONAL,
+        .name = LOOM_BSTRING_REF(5, "block"),
+        .attr_kind = LOOM_ATTR_I64,
+        .flags = LOOM_ATTR_OPTIONAL,
     },
     {
-        /*.name=*/LOOM_BSTRING_REF(4, "base"),
-        /*.attr_kind=*/LOOM_ATTR_ENCODING,
-        /*.flags=*/LOOM_ATTR_OPTIONAL,
+        .name = LOOM_BSTRING_REF(4, "base"),
+        .attr_kind = LOOM_ATTR_ENCODING,
+        .flags = LOOM_ATTR_OPTIONAL,
     },
 };
 static const loom_encoding_family_descriptor_t kEncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/IREE_ARRAYSIZE(kEncodingParameters),
-    /*.parameter_descriptors=*/kEncodingParameters,
+    .name = LOOM_BSTRING_REF(4, "q8_0"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = IREE_ARRAYSIZE(kEncodingParameters),
+    .parameter_descriptors = kEncodingParameters,
 };
 static const loom_encoding_vtable_t kEncodingVtable = {
-    /*.descriptor=*/&kEncodingDescriptor,
+    .descriptor = &kEncodingDescriptor,
 };
 
 static iree_status_t AcceptDiagnostic(void* user_data,
@@ -197,12 +197,13 @@ TEST_F(BytecodeSelectedTablesTest, MaterializesOnlyReachedMixedTableFacts) {
                                   });
   locations[1].entry_length = bytecode.size() - locations[1].entry_offset;
 
-  loom_bytecode_module_metadata_t metadata = {};
-  metadata.strings = {IREE_ARRAYSIZE(strings), strings};
-  metadata.sources = {IREE_ARRAYSIZE(sources), sources};
-  metadata.types = {IREE_ARRAYSIZE(types), types};
-  metadata.encodings = {IREE_ARRAYSIZE(encodings), encodings};
-  metadata.locations = {IREE_ARRAYSIZE(locations), locations};
+  loom_bytecode_module_metadata_t metadata = {
+      .strings = {IREE_ARRAYSIZE(strings), strings},
+      .sources = {IREE_ARRAYSIZE(sources), sources},
+      .types = {IREE_ARRAYSIZE(types), types},
+      .encodings = {IREE_ARRAYSIZE(encodings), encodings},
+      .locations = {IREE_ARRAYSIZE(locations), locations},
+  };
   loom_bytecode_selected_table_materializer_t materializer;
   InitializeMaterializer(bytecode, &metadata, &materializer);
 
@@ -266,9 +267,10 @@ TEST_F(BytecodeSelectedTablesTest, ReusesInheritedSourceWhenComposingLocation) {
                                       0x04,  // Coordinates.
                                   });
   locations[1].entry_length = bytecode.size() - locations[1].entry_offset;
-  loom_bytecode_module_metadata_t metadata = {};
-  metadata.sources = {IREE_ARRAYSIZE(sources), sources};
-  metadata.locations = {IREE_ARRAYSIZE(locations), locations};
+  loom_bytecode_module_metadata_t metadata = {
+      .sources = {IREE_ARRAYSIZE(sources), sources},
+      .locations = {IREE_ARRAYSIZE(locations), locations},
+  };
 
   loom_source_id_t inherited_source_id = LOOM_SOURCE_ID_INVALID;
   IREE_ASSERT_OK(
@@ -304,9 +306,10 @@ TEST_F(BytecodeSelectedTablesTest, InterleavedReadersShareCurrentSourceNames) {
     locations[i + 1].entry_length =
         bytecode.size() - locations[i + 1].entry_offset;
   }
-  loom_bytecode_module_metadata_t metadata = {};
-  metadata.sources = {IREE_ARRAYSIZE(sources), sources};
-  metadata.locations = {IREE_ARRAYSIZE(locations), locations};
+  loom_bytecode_module_metadata_t metadata = {
+      .sources = {IREE_ARRAYSIZE(sources), sources},
+      .locations = {IREE_ARRAYSIZE(locations), locations},
+  };
   iree_string_view_t other_sources[] = {sources[1], sources[2], sources[0]};
   loom_bytecode_module_metadata_t other_metadata = metadata;
   other_metadata.sources = {IREE_ARRAYSIZE(other_sources), other_sources};
@@ -354,9 +357,10 @@ TEST_F(BytecodeSelectedTablesTest, StandaloneSourcesStayUnindexedUntilShared) {
     bytecode.insert(bytecode.end(), {1, 2, 3, 4});
     locations.push_back({offset, bytecode.size() - offset});
   }
-  loom_bytecode_module_metadata_t metadata = {};
-  metadata.sources = {sources.size(), sources.data()};
-  metadata.locations = {locations.size(), locations.data()};
+  loom_bytecode_module_metadata_t metadata = {
+      .sources = {sources.size(), sources.data()},
+      .locations = {locations.size(), locations.data()},
+  };
   for (uint32_t reader = 0; reader < 3; ++reader) {
     loom_bytecode_selected_table_materializer_t materializer;
     InitializeMaterializer(bytecode, &metadata, &materializer);
@@ -393,11 +397,12 @@ TEST_F(BytecodeSelectedTablesTest, ResolvesExternalSymbolsByDenseSourceIndex) {
   symbols[0].name = strings[1];
   symbols[0].name_string_index = 1;
   uint32_t symbol_ordinal_by_string_index[] = {UINT32_MAX, 0};
-  loom_bytecode_module_metadata_t metadata = {};
-  metadata.strings = {IREE_ARRAYSIZE(strings), strings};
-  metadata.symbol_count = IREE_ARRAYSIZE(symbols);
-  metadata.symbols = symbols;
-  metadata.symbol_ordinal_by_string_index = symbol_ordinal_by_string_index;
+  loom_bytecode_module_metadata_t metadata = {
+      .strings = {IREE_ARRAYSIZE(strings), strings},
+      .symbol_count = IREE_ARRAYSIZE(symbols),
+      .symbols = symbols,
+      .symbol_ordinal_by_string_index = symbol_ordinal_by_string_index,
+  };
 
   loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("projected"),
@@ -406,9 +411,9 @@ TEST_F(BytecodeSelectedTablesTest, ResolvesExternalSymbolsByDenseSourceIndex) {
   IREE_ASSERT_OK(
       loom_module_add_symbol(module_, target_name_id, &target_symbol_id));
   ExternalSymbolResolver resolver = {
-      /*.expected_source_ordinal=*/0,
-      /*.target_ref=*/{/*.module_id=*/0, /*.symbol_id=*/target_symbol_id},
-      /*.invocation_count=*/0,
+      .expected_source_ordinal = 0,
+      .target_ref = {.module_id = 0, .symbol_id = target_symbol_id},
+      .invocation_count = 0,
   };
   loom_bytecode_selected_table_materializer_t materializer;
   loom_bytecode_selected_table_materializer_initialize(
@@ -504,9 +509,10 @@ TEST_F(BytecodeSelectedTablesTest, ProjectsMixedStructuralPayloads) {
                    /*argument_count=*/1, /*result_count=*/1,
                    /*dialect_type_id=*/2, /*register_type_id=*/1});
   entries[3].entry_length = bytecode.size() - entries[3].entry_offset;
-  loom_bytecode_module_metadata_t metadata = {};
-  metadata.strings = {IREE_ARRAYSIZE(strings), strings};
-  metadata.types = {IREE_ARRAYSIZE(entries), entries};
+  loom_bytecode_module_metadata_t metadata = {
+      .strings = {IREE_ARRAYSIZE(strings), strings},
+      .types = {IREE_ARRAYSIZE(entries), entries},
+  };
   loom_bytecode_selected_table_materializer_t materializer;
   InitializeMaterializer(bytecode, &metadata, &materializer);
   loom_type_id_t target_type_id = LOOM_TYPE_ID_INVALID;
@@ -557,8 +563,9 @@ TEST_F(BytecodeSelectedTablesTest, MaterializesDeepTypeChainIteratively) {
     AppendUVarint(/*prior_type_id=*/i - 1, &bytecode);
     entries[i].entry_length = bytecode.size() - entries[i].entry_offset;
   }
-  loom_bytecode_module_metadata_t metadata = {};
-  metadata.types = {entries.size(), entries.data()};
+  loom_bytecode_module_metadata_t metadata = {
+      .types = {entries.size(), entries.data()},
+  };
   loom_bytecode_selected_table_materializer_t materializer;
   InitializeMaterializer(bytecode, &metadata, &materializer);
 
@@ -631,8 +638,9 @@ TEST_F(BytecodeSelectedTablesTest, ReusesWorklistAcrossWideTypeRoots) {
     AppendUVarint(/*type_id=*/2, &bytecode);
   }
   entries[3].entry_length = bytecode.size() - entries[3].entry_offset;
-  loom_bytecode_module_metadata_t metadata = {};
-  metadata.types = {IREE_ARRAYSIZE(entries), entries};
+  loom_bytecode_module_metadata_t metadata = {
+      .types = {IREE_ARRAYSIZE(entries), entries},
+  };
   loom_bytecode_selected_table_materializer_t materializer;
   InitializeMaterializer(bytecode, &metadata, &materializer);
 
@@ -695,8 +703,9 @@ TEST_F(BytecodeSelectedTablesTest, MaterializesDeepLocationChainIteratively) {
     AppendUVarint(/*data_length=*/0, &bytecode);
     entries[i].entry_length = bytecode.size() - entries[i].entry_offset;
   }
-  loom_bytecode_module_metadata_t metadata = {};
-  metadata.locations = {entries.size(), entries.data()};
+  loom_bytecode_module_metadata_t metadata = {
+      .locations = {entries.size(), entries.data()},
+  };
   loom_bytecode_selected_table_materializer_t materializer;
   InitializeMaterializer(bytecode, &metadata, &materializer);
 

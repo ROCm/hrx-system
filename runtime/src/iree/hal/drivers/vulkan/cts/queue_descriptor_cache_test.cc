@@ -30,9 +30,9 @@ TEST_P(VulkanQueueDescriptorCacheTest, DeferredUnalignedFillsExceedOneBlock) {
 
   for (iree_host_size_t i = 0; i < kSubmissionCount; ++i) {
     iree_hal_semaphore_list_t signal_list = {
-        /*.count=*/1,
-        /*.semaphores=*/&signals.semaphores[i],
-        /*.payload_values=*/&signals.payload_values[i],
+        .count = 1,
+        .semaphores = &signals.semaphores[i],
+        .payload_values = &signals.payload_values[i],
     };
     IREE_ASSERT_OK(iree_hal_queue_fill(
         transfer_queue_, gate, signal_list, target_buffer.get(), i,

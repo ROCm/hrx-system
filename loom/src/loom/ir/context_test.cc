@@ -27,50 +27,50 @@ static const loom_bstring_t kQ8_0EncodingFormatNames[] = {
     LOOM_BSTRING_REF(2, "i8"),
 };
 static const loom_attr_descriptor_t kQ8_0EncodingParameters[] = {{
-    /*.name=*/LOOM_BSTRING_REF(6, "format"),
-    /*.attr_kind=*/LOOM_ATTR_ENUM,
-    /*.flags=*/0,
-    /*.enum_max_value=*/0,
-    /*.enum_case_names=*/kQ8_0EncodingFormatNames,
+    .name = LOOM_BSTRING_REF(6, "format"),
+    .attr_kind = LOOM_ATTR_ENUM,
+    .flags = 0,
+    .enum_max_value = 0,
+    .enum_case_names = kQ8_0EncodingFormatNames,
 }};
 static const loom_encoding_alias_parameter_t kQ8_0EncodingAliasParameters[] = {
     {
-        /*.parameter_index=*/0,
-        /*.flags=*/LOOM_ENCODING_ALIAS_PARAMETER_FIXED,
-        /*.value=*/loom_attr_enum(0),
+        .parameter_index = 0,
+        .flags = LOOM_ENCODING_ALIAS_PARAMETER_FIXED,
+        .value = loom_attr_enum(0),
     },
 };
 static const loom_encoding_alias_descriptor_t kQ8_0EncodingAliases[] = {
     {
-        /*.name=*/LOOM_BSTRING_REF(16, "encoding.test_i8"),
-        /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingAliasParameters),
-        /*.parameters=*/kQ8_0EncodingAliasParameters,
+        .name = LOOM_BSTRING_REF(16, "encoding.test_i8"),
+        .parameter_count = IREE_ARRAYSIZE(kQ8_0EncodingAliasParameters),
+        .parameters = kQ8_0EncodingAliasParameters,
     },
 };
 static const uint8_t kQ8_0EncodingAliasOrdinals[] = {1};
 
 static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingParameters),
-    /*.parameter_descriptors=*/kQ8_0EncodingParameters,
-    /*.dynamic_parameter_count=*/0,
-    /*.dynamic_parameter_descriptors=*/nullptr,
-    /*.fixed_metadata=*/nullptr,
-    /*.alias_count=*/IREE_ARRAYSIZE(kQ8_0EncodingAliases),
-    /*.alias_discriminator_parameter_index=*/0,
-    /*.aliases=*/kQ8_0EncodingAliases,
-    /*.alias_ordinals_by_discriminator=*/kQ8_0EncodingAliasOrdinals,
+    .name = LOOM_BSTRING_REF(4, "q8_0"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = IREE_ARRAYSIZE(kQ8_0EncodingParameters),
+    .parameter_descriptors = kQ8_0EncodingParameters,
+    .dynamic_parameter_count = 0,
+    .dynamic_parameter_descriptors = nullptr,
+    .fixed_metadata = nullptr,
+    .alias_count = IREE_ARRAYSIZE(kQ8_0EncodingAliases),
+    .alias_discriminator_parameter_index = 0,
+    .aliases = kQ8_0EncodingAliases,
+    .alias_ordinals_by_discriminator = kQ8_0EncodingAliasOrdinals,
 };
 
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    /*.descriptor=*/&kQ8_0EncodingDescriptor,
+    .descriptor = &kQ8_0EncodingDescriptor,
 };
 
 static const loom_type_descriptor_t kTestTypeDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(9, "test.type"),
-    /*.ir_kind=*/LOOM_TYPE_DIALECT,
+    .name = LOOM_BSTRING_REF(9, "test.type"),
+    .ir_kind = LOOM_TYPE_DIALECT,
 };
 
 static const loom_type_registry_entry_t kTestTypeEntries[] = {
@@ -110,28 +110,28 @@ TEST_F(ContextTest, FinalizeBuildsOpNameLookupTable) {
       8, 4, 't', 'e', 's', 't', '.', 'n', 'o', 'p', '\0',
   };
   static const loom_op_vtable_t kTestOpVtable = {
-      /*.traits=*/{},
-      /*.fixed_operand_count=*/{},
-      /*.fixed_result_count=*/{},
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.operand_role_mask=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/{},
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kTestOpName,
+      .traits = {},
+      .fixed_operand_count = {},
+      .fixed_result_count = {},
+      .attribute_count = {},
+      .region_count = {},
+      .vtable_flags = {},
+      .symbol_kind = {},
+      .constraint_count = {},
+      .operand_descriptor_count = {},
+      .operand_role_mask = {},
+      .successor_selector_operand_index = {},
+      .canonicalize = {},
+      .infer_facts = {},
+      .effective_traits = {},
+      .attr_descriptors = {},
+      .operand_descriptors = {},
+      .type_transfer = {},
+      .result_descriptors = {},
+      .region_descriptors = {},
+      .constraints = {},
+      .verify = {},
+      .name = kTestOpName,
   };
   static const loom_op_vtable_t* const kTestDialectVtables[] = {
       &kTestOpVtable,
@@ -158,37 +158,37 @@ TEST_F(ContextTest, RegisterDialectSemanticsResolvesByOpKind) {
       8, 4, 't', 'e', 's', 't', '.', 'n', 'o', 'p', '\0',
   };
   static const loom_op_vtable_t kTestOpVtable = {
-      /*.traits=*/{},
-      /*.fixed_operand_count=*/{},
-      /*.fixed_result_count=*/{},
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.operand_role_mask=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/{},
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kTestOpName,
+      .traits = {},
+      .fixed_operand_count = {},
+      .fixed_result_count = {},
+      .attribute_count = {},
+      .region_count = {},
+      .vtable_flags = {},
+      .symbol_kind = {},
+      .constraint_count = {},
+      .operand_descriptor_count = {},
+      .operand_role_mask = {},
+      .successor_selector_operand_index = {},
+      .canonicalize = {},
+      .infer_facts = {},
+      .effective_traits = {},
+      .attr_descriptors = {},
+      .operand_descriptors = {},
+      .type_transfer = {},
+      .result_descriptors = {},
+      .region_descriptors = {},
+      .constraints = {},
+      .verify = {},
+      .name = kTestOpName,
   };
   static const loom_op_vtable_t* const kTestDialectVtables[] = {
       &kTestOpVtable,
   };
   static const loom_op_semantics_t kTestDialectSemantics[] = {
       {
-          /*.phase=*/LOOM_OP_PHASE_EXECUTABLE,
-          /*.condition_refinement_index=*/0,
-          /*.contract_families=*/LOOM_CONTRACT_VECTOR_CONTRACTION,
+          .phase = LOOM_OP_PHASE_EXECUTABLE,
+          .condition_refinement_index = 0,
+          .contract_families = LOOM_CONTRACT_VECTOR_CONTRACTION,
       },
   };
 
@@ -216,36 +216,36 @@ TEST_F(ContextTest, RegisterDialectSemanticsRequiresMatchingVtables) {
       8, 4, 't', 'e', 's', 't', '.', 'n', 'o', 'p', '\0',
   };
   static const loom_op_vtable_t kTestOpVtable = {
-      /*.traits=*/{},
-      /*.fixed_operand_count=*/{},
-      /*.fixed_result_count=*/{},
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.operand_role_mask=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/{},
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kTestOpName,
+      .traits = {},
+      .fixed_operand_count = {},
+      .fixed_result_count = {},
+      .attribute_count = {},
+      .region_count = {},
+      .vtable_flags = {},
+      .symbol_kind = {},
+      .constraint_count = {},
+      .operand_descriptor_count = {},
+      .operand_role_mask = {},
+      .successor_selector_operand_index = {},
+      .canonicalize = {},
+      .infer_facts = {},
+      .effective_traits = {},
+      .attr_descriptors = {},
+      .operand_descriptors = {},
+      .type_transfer = {},
+      .result_descriptors = {},
+      .region_descriptors = {},
+      .constraints = {},
+      .verify = {},
+      .name = kTestOpName,
   };
   static const loom_op_vtable_t* const kTestDialectVtables[] = {
       &kTestOpVtable,
   };
   static const loom_op_semantics_t kTestDialectSemantics[] = {
       {
-          /*.phase=*/LOOM_OP_PHASE_EXECUTABLE,
-          /*.condition_refinement_index=*/0,
+          .phase = LOOM_OP_PHASE_EXECUTABLE,
+          .condition_refinement_index = 0,
       },
   };
 
@@ -268,43 +268,43 @@ TEST_F(ContextTest, ConditionRefinementsResolveThroughOpSemantics) {
       8, 4, 't', 'e', 's', 't', '.', 'n', 'o', 'p', '\0',
   };
   static const loom_op_vtable_t kTestOpVtable = {
-      /*.traits=*/{},
-      /*.fixed_operand_count=*/1,
-      /*.fixed_result_count=*/1,
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.operand_role_mask=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/{},
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kTestOpName,
+      .traits = {},
+      .fixed_operand_count = 1,
+      .fixed_result_count = 1,
+      .attribute_count = {},
+      .region_count = {},
+      .vtable_flags = {},
+      .symbol_kind = {},
+      .constraint_count = {},
+      .operand_descriptor_count = {},
+      .operand_role_mask = {},
+      .successor_selector_operand_index = {},
+      .canonicalize = {},
+      .infer_facts = {},
+      .effective_traits = {},
+      .attr_descriptors = {},
+      .operand_descriptors = {},
+      .type_transfer = {},
+      .result_descriptors = {},
+      .region_descriptors = {},
+      .constraints = {},
+      .verify = {},
+      .name = kTestOpName,
   };
   static const loom_op_vtable_t* const kTestDialectVtables[] = {
       &kTestOpVtable,
   };
   static const loom_op_semantics_t kTestDialectSemantics[] = {
       {
-          /*.phase=*/LOOM_OP_PHASE_EXECUTABLE,
-          /*.condition_refinement_index=*/1,
+          .phase = LOOM_OP_PHASE_EXECUTABLE,
+          .condition_refinement_index = 1,
       },
   };
   static const loom_condition_refinement_descriptor_t kRefinements[] = {
       {
-          /*.materialize=*/TestMaterializeConditionRefinement,
-          /*.source_operand_index=*/0,
-          /*.truth_flags=*/LOOM_CONDITION_REFINEMENT_TRUTH_TRUE,
+          .materialize = TestMaterializeConditionRefinement,
+          .source_operand_index = 0,
+          .truth_flags = LOOM_CONDITION_REFINEMENT_TRUTH_TRUE,
       },
   };
 
@@ -332,36 +332,36 @@ TEST_F(ContextTest, FinalizeRejectsInvalidConditionRefinementIndex) {
       8, 4, 't', 'e', 's', 't', '.', 'n', 'o', 'p', '\0',
   };
   static const loom_op_vtable_t kTestOpVtable = {
-      /*.traits=*/{},
-      /*.fixed_operand_count=*/1,
-      /*.fixed_result_count=*/1,
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.operand_role_mask=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/{},
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kTestOpName,
+      .traits = {},
+      .fixed_operand_count = 1,
+      .fixed_result_count = 1,
+      .attribute_count = {},
+      .region_count = {},
+      .vtable_flags = {},
+      .symbol_kind = {},
+      .constraint_count = {},
+      .operand_descriptor_count = {},
+      .operand_role_mask = {},
+      .successor_selector_operand_index = {},
+      .canonicalize = {},
+      .infer_facts = {},
+      .effective_traits = {},
+      .attr_descriptors = {},
+      .operand_descriptors = {},
+      .type_transfer = {},
+      .result_descriptors = {},
+      .region_descriptors = {},
+      .constraints = {},
+      .verify = {},
+      .name = kTestOpName,
   };
   static const loom_op_vtable_t* const kTestDialectVtables[] = {
       &kTestOpVtable,
   };
   static const loom_op_semantics_t kTestDialectSemantics[] = {
       {
-          /*.phase=*/LOOM_OP_PHASE_EXECUTABLE,
-          /*.condition_refinement_index=*/1,
+          .phase = LOOM_OP_PHASE_EXECUTABLE,
+          .condition_refinement_index = 1,
       },
   };
 
@@ -381,11 +381,11 @@ TEST_F(ContextTest, ParameterizedAttributeFamiliesResolveByKindAndName) {
       "test.tile";
   static const loom_parameterized_attr_descriptor_t kFamilies[] = {
       {
-          /*.name=*/kFamilyName,
-          /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
-          /*.parameter_count=*/0,
-          /*.primary_parameter_index=*/
-          LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,
+          .name = kFamilyName,
+          .kind = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
+          .parameter_count = 0,
+          .primary_parameter_index =
+              LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,
       },
   };
 
@@ -413,11 +413,11 @@ TEST_F(ContextTest, ParameterizedAttributeRegistrationRejectsWrongKind) {
       "test.tile";
   static const loom_parameterized_attr_descriptor_t kFamilies[] = {
       {
-          /*.name=*/kFamilyName,
-          /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 1),
-          /*.parameter_count=*/0,
-          /*.primary_parameter_index=*/
-          LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,
+          .name = kFamilyName,
+          .kind = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 1),
+          .parameter_count = 0,
+          .primary_parameter_index =
+              LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,
       },
   };
 
@@ -433,10 +433,10 @@ TEST_F(ContextTest, ParameterizedAttributeRegistrationRejectsInvalidPrimary) {
       "test.compact";
   static const loom_parameterized_attr_descriptor_t kFamilies[] = {
       {
-          /*.name=*/kFamilyName,
-          /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
-          /*.parameter_count=*/0,
-          /*.primary_parameter_index=*/0,
+          .name = kFamilyName,
+          .kind = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
+          .parameter_count = 0,
+          .primary_parameter_index = 0,
       },
   };
 
@@ -455,18 +455,18 @@ TEST_F(ContextTest, ParameterizedAttributeRegistrationRejectsOptionalPrimary) {
       "value";
   static const loom_attr_descriptor_t kParameters[] = {
       {
-          /*.name=*/kParameterName,
-          /*.attr_kind=*/LOOM_ATTR_I64,
-          /*.flags=*/LOOM_ATTR_OPTIONAL,
+          .name = kParameterName,
+          .attr_kind = LOOM_ATTR_I64,
+          .flags = LOOM_ATTR_OPTIONAL,
       },
   };
   static const loom_parameterized_attr_descriptor_t kFamilies[] = {
       {
-          /*.name=*/kFamilyName,
-          /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
-          /*.parameter_count=*/IREE_ARRAYSIZE(kParameters),
-          /*.primary_parameter_index=*/0,
-          /*.parameter_descriptors=*/kParameters,
+          .name = kFamilyName,
+          .kind = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
+          .parameter_count = IREE_ARRAYSIZE(kParameters),
+          .primary_parameter_index = 0,
+          .parameter_descriptors = kParameters,
       },
   };
 
@@ -609,11 +609,11 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsDuplicateName) {
       loom_context_register_encoding_vtable(&context_, &kQ8_0EncodingVtable));
 
   static const loom_encoding_family_descriptor_t kDuplicateDescriptor = {
-      /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
-      /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+      .name = LOOM_BSTRING_REF(4, "q8_0"),
+      .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
   };
   static const loom_encoding_vtable_t kDuplicate = {
-      /*.descriptor=*/&kDuplicateDescriptor,
+      .descriptor = &kDuplicateDescriptor,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_ALREADY_EXISTS,
@@ -623,7 +623,7 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsDuplicateName) {
 TEST_F(ContextTest, RegisterEncodingVtableRejectsMissingName) {
   static const loom_encoding_family_descriptor_t kMissingNameDescriptor = {};
   static const loom_encoding_vtable_t kMissingName = {
-      /*.descriptor=*/&kMissingNameDescriptor,
+      .descriptor = &kMissingNameDescriptor,
   };
   iree_status_t status =
       loom_context_register_encoding_vtable(&context_, &kMissingName);
@@ -634,14 +634,14 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsMissingName) {
 
 TEST_F(ContextTest, RegisterEncodingVtableRejectsMissingParameterDescriptors) {
   static const loom_encoding_family_descriptor_t kMalformedDescriptor = {
-      /*.name=*/LOOM_BSTRING_REF(9, "malformed"),
-      /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-      /*.family_flags=*/{},
-      /*.parameter_count=*/1,
-      /*.parameter_descriptors=*/nullptr,
+      .name = LOOM_BSTRING_REF(9, "malformed"),
+      .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+      .family_flags = {},
+      .parameter_count = 1,
+      .parameter_descriptors = nullptr,
   };
   static const loom_encoding_vtable_t kMalformedVtable = {
-      /*.descriptor=*/&kMalformedDescriptor,
+      .descriptor = &kMalformedDescriptor,
   };
 
   IREE_EXPECT_STATUS_IS(
@@ -651,30 +651,30 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsMissingParameterDescriptors) {
 
 TEST_F(ContextTest, RegisterEncodingVtableRejectsMalformedFixedMetadata) {
   static const loom_encoding_family_fixed_metadata_t kFixedMetadata = {
-      /*.operand_summary=*/{},
-      /*.required_auxiliary_keys=*/{},
-      /*.record=*/
-      {
-          /*.geometry=*/
+      .operand_summary = {},
+      .required_auxiliary_keys = {},
+      .record =
           {
-              /*.logical_element_count=*/32,
-              /*.storage_byte_count=*/18,
-              /*.required_alignment=*/3,
+              .geometry =
+                  {
+                      .logical_element_count = 32,
+                      .storage_byte_count = 18,
+                      .required_alignment = 3,
+                  },
           },
-      },
   };
   static const loom_encoding_family_descriptor_t kMalformedDescriptor = {
-      /*.name=*/LOOM_BSTRING_REF(9, "malformed"),
-      /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-      /*.family_flags=*/{},
-      /*.parameter_count=*/{},
-      /*.parameter_descriptors=*/{},
-      /*.dynamic_parameter_count=*/{},
-      /*.dynamic_parameter_descriptors=*/{},
-      /*.fixed_metadata=*/&kFixedMetadata,
+      .name = LOOM_BSTRING_REF(9, "malformed"),
+      .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+      .family_flags = {},
+      .parameter_count = {},
+      .parameter_descriptors = {},
+      .dynamic_parameter_count = {},
+      .dynamic_parameter_descriptors = {},
+      .fixed_metadata = &kFixedMetadata,
   };
   static const loom_encoding_vtable_t kMalformedVtable = {
-      /*.descriptor=*/&kMalformedDescriptor,
+      .descriptor = &kMalformedDescriptor,
   };
 
   IREE_EXPECT_STATUS_IS(
@@ -685,17 +685,17 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsMalformedFixedMetadata) {
 TEST_F(ContextTest, RegisterEncodingVtableRestrictsFixedMetadataToSchemas) {
   static const loom_encoding_family_fixed_metadata_t kFixedMetadata = {};
   static const loom_encoding_family_descriptor_t kMalformedDescriptor = {
-      /*.name=*/LOOM_BSTRING_REF(9, "malformed"),
-      /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-      /*.family_flags=*/{},
-      /*.parameter_count=*/{},
-      /*.parameter_descriptors=*/{},
-      /*.dynamic_parameter_count=*/{},
-      /*.dynamic_parameter_descriptors=*/{},
-      /*.fixed_metadata=*/&kFixedMetadata,
+      .name = LOOM_BSTRING_REF(9, "malformed"),
+      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      .family_flags = {},
+      .parameter_count = {},
+      .parameter_descriptors = {},
+      .dynamic_parameter_count = {},
+      .dynamic_parameter_descriptors = {},
+      .fixed_metadata = &kFixedMetadata,
   };
   static const loom_encoding_vtable_t kMalformedVtable = {
-      /*.descriptor=*/&kMalformedDescriptor,
+      .descriptor = &kMalformedDescriptor,
   };
 
   IREE_EXPECT_STATUS_IS(
@@ -705,17 +705,17 @@ TEST_F(ContextTest, RegisterEncodingVtableRestrictsFixedMetadataToSchemas) {
 
 TEST_F(ContextTest, RegisterEncodingVtableRequiresPairedStaticCallbacks) {
   static const loom_encoding_vtable_t kPredicateOnlyVtable = {
-      /*.descriptor=*/&kQ8_0EncodingDescriptor,
-      /*.is_static_valid=*/TestEncodingIsStaticValid,
+      .descriptor = &kQ8_0EncodingDescriptor,
+      .is_static_valid = TestEncodingIsStaticValid,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_context_register_encoding_vtable(&context_, &kPredicateOnlyVtable));
 
   static const loom_encoding_vtable_t kDiagnosticOnlyVtable = {
-      /*.descriptor=*/&kQ8_0EncodingDescriptor,
-      /*.is_static_valid=*/{},
-      /*.diagnose_static=*/TestEncodingDiagnoseStatic,
+      .descriptor = &kQ8_0EncodingDescriptor,
+      .is_static_valid = {},
+      .diagnose_static = TestEncodingDiagnoseStatic,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,

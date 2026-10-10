@@ -85,8 +85,10 @@ std::optional<PredicateConstant> float_predicate_constant(
     return std::nullopt;
   }
   const auto value = static_cast<int64_t>(*number);
-  return PredicateConstant{.unsigned_value = static_cast<uint64_t>(value),
-                           .signed_value = value};
+  return PredicateConstant{
+      .unsigned_value = static_cast<uint64_t>(value),
+      .signed_value = value,
+  };
 }
 
 std::optional<PredicateConstant> predicate_constant(

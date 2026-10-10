@@ -57,83 +57,83 @@ static iree_hal_device_spec_t* CreateTestDeviceSpec(
   }
 
   iree_hal_physical_device_spec_t physical_device = {
-      /*.identity=*/
-      {
-          /*.display_name=*/iree_make_cstring_view("test physical device"),
-          /*.backend_path=*/iree_make_cstring_view("test://physical"),
-          /*.vendor_id=*/0,
-          /*.device_id=*/0,
-          /*.revision_id=*/0,
-          /*.uuid=*/uuid,
-          /*.pci=*/{0, 0, 0, 0},
-          /*.numa=*/{numa_node},
-          /*.flags=*/physical_identity_flags,
-      },
-      /*.physical_ordinal=*/logical_ordinal,
-      /*.partition_ordinal=*/0,
-      /*.partition_count=*/1,
-      /*.physical_device_affinity=*/1ull << logical_ordinal,
+      .identity =
+          {
+              .display_name = iree_make_cstring_view("test physical device"),
+              .backend_path = iree_make_cstring_view("test://physical"),
+              .vendor_id = 0,
+              .device_id = 0,
+              .revision_id = 0,
+              .uuid = uuid,
+              .pci = {0, 0, 0, 0},
+              .numa = {numa_node},
+              .flags = physical_identity_flags,
+          },
+      .physical_ordinal = logical_ordinal,
+      .partition_ordinal = 0,
+      .partition_count = 1,
+      .physical_device_affinity = 1ull << logical_ordinal,
   };
   iree_hal_device_identity_spec_t identity = {
-      /*.logical_device_id=*/iree_make_cstring_view(driver_id),
-      /*.display_name=*/iree_make_cstring_view("test logical device"),
-      /*.driver_id=*/iree_make_cstring_view(driver_id),
-      /*.driver_version=*/iree_make_cstring_view("test"),
-      /*.backend_id=*/iree_make_cstring_view(backend_id),
-      /*.device_path=*/iree_make_cstring_view("test://logical"),
-      /*.vendor_name=*/iree_make_cstring_view("test"),
-      /*.vendor_id=*/0,
-      /*.device_id=*/0,
-      /*.revision_id=*/0,
-      /*.logical_ordinal=*/logical_ordinal,
-      /*.physical_device_count=*/1,
-      /*.physical_devices=*/&physical_device,
-      /*.flags=*/IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+      .logical_device_id = iree_make_cstring_view(driver_id),
+      .display_name = iree_make_cstring_view("test logical device"),
+      .driver_id = iree_make_cstring_view(driver_id),
+      .driver_version = iree_make_cstring_view("test"),
+      .backend_id = iree_make_cstring_view(backend_id),
+      .device_path = iree_make_cstring_view("test://logical"),
+      .vendor_name = iree_make_cstring_view("test"),
+      .vendor_id = 0,
+      .device_id = 0,
+      .revision_id = 0,
+      .logical_ordinal = logical_ordinal,
+      .physical_device_count = 1,
+      .physical_devices = &physical_device,
+      .flags = IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
   };
 
   iree_hal_external_buffer_handle_spec_t external_buffer_handles[1] = {
       {
-          /*.handle_type_mask=*/IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,
-          /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
-              IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
-          /*.allowed_buffer_usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT,
-          /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-          /*.compatible_memory_type_mask=*/UINT32_MAX,
-          /*.flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS,
+          .handle_type_mask = IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,
+          .direction_flags = IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
+                             IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
+          .allowed_buffer_usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
+          .allowed_memory_access = IREE_HAL_MEMORY_ACCESS_ALL,
+          .compatible_memory_type_mask = UINT32_MAX,
+          .flags = IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS,
       },
   };
   iree_hal_device_memory_spec_t memory = {
-      /*.heap_count=*/0,
-      /*.heaps=*/NULL,
-      /*.memory_type_count=*/0,
-      /*.memory_types=*/NULL,
-      /*.external_buffer_handle_count=*/
-      (flags & TEST_DEVICE_SPEC_FLAG_EXTERNAL_BUFFER_HANDLES) ? 1u : 0u,
-      /*.external_buffer_handles=*/external_buffer_handles,
-      /*.flags=*/IREE_HAL_DEVICE_MEMORY_SPEC_FLAG_NONE,
+      .heap_count = 0,
+      .heaps = NULL,
+      .memory_type_count = 0,
+      .memory_types = NULL,
+      .external_buffer_handle_count =
+          (flags & TEST_DEVICE_SPEC_FLAG_EXTERNAL_BUFFER_HANDLES) ? 1u : 0u,
+      .external_buffer_handles = external_buffer_handles,
+      .flags = IREE_HAL_DEVICE_MEMORY_SPEC_FLAG_NONE,
   };
   iree_hal_external_timepoint_handle_spec_t external_timepoint_handles[1] = {
       {
-          /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE,
-          /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
-              IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
-          /*.compatibility=*/IREE_HAL_SEMAPHORE_COMPATIBILITY_DEVICE_WAIT,
-          /*.flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_NONE,
+          .handle_type = IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE,
+          .direction_flags = IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
+                             IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
+          .compatibility = IREE_HAL_SEMAPHORE_COMPATIBILITY_DEVICE_WAIT,
+          .flags = IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_NONE,
       },
   };
   iree_hal_device_queue_spec_t queues = {
-      /*.family_count=*/0,
-      /*.families=*/NULL,
-      /*.external_timepoint_handle_count=*/
-      (flags & TEST_DEVICE_SPEC_FLAG_EXTERNAL_TIMEPOINT_HANDLES) ? 1u : 0u,
-      /*.external_timepoint_handles=*/external_timepoint_handles,
-      /*.flags=*/IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
+      .family_count = 0,
+      .families = NULL,
+      .external_timepoint_handle_count =
+          (flags & TEST_DEVICE_SPEC_FLAG_EXTERNAL_TIMEPOINT_HANDLES) ? 1u : 0u,
+      .external_timepoint_handles = external_timepoint_handles,
+      .flags = IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
   };
   iree_hal_device_spec_params_t params = {
-      /*.identity=*/&identity,
-      /*.memory=*/&memory,
-      /*.virtual_memory=*/NULL,
-      /*.queues=*/&queues,
+      .identity = &identity,
+      .memory = &memory,
+      .virtual_memory = NULL,
+      .queues = &queues,
   };
   iree_hal_device_spec_t* device_spec = NULL;
   IREE_CHECK_OK(iree_hal_device_spec_create(&params, iree_allocator_system(),
@@ -573,8 +573,8 @@ TEST(ResourceOrigin, Initialize) {
   iree_hal_topology_edge_t edge = iree_hal_topology_edge_make_self();
 
   iree_hal_resource_origin_t origin = {
-      /*.self_edge=*/edge.lo,
-      /*.topology_index=*/3,
+      .self_edge = edge.lo,
+      .topology_index = 3,
   };
 
   EXPECT_EQ(origin.self_edge, edge.lo);
@@ -595,12 +595,12 @@ TEST(ResourceOrigin, CompatibilityCheck) {
   lo2 = iree_hal_topology_edge_set_capability_flags(lo2, 0x42);
 
   iree_hal_resource_origin_t origin1 = {
-      /*.self_edge=*/edge1.lo,
-      /*.topology_index=*/0,
+      .self_edge = edge1.lo,
+      .topology_index = 0,
   };
   iree_hal_resource_origin_t origin2 = {
-      /*.self_edge=*/lo2,
-      /*.topology_index=*/1,
+      .self_edge = lo2,
+      .topology_index = 1,
   };
 
   // Self-edges should be different.

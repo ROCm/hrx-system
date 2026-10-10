@@ -84,14 +84,14 @@ static iree_status_t CreateAmdgpuBenchmarkTarget(
   const loomc_string_view_t processor =
       loomc_make_cstring_view(target.processor);
   const loomc_amdgpu_profile_options_t profile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(profile_options),
-      /*.next=*/nullptr,
-      /*.identifier=*/processor,
-      /*.identity=*/
-      {
-          /*.target=*/processor,
-      },
+      .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
+      .structure_size = sizeof(profile_options),
+      .next = nullptr,
+      .identifier = processor,
+      .identity =
+          {
+              .target = processor,
+          },
   };
   loomc_target_profile_t* raw_profile = nullptr;
   IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_profile_create_amdgpu(
@@ -108,21 +108,21 @@ static iree_status_t EmitAmdgpuBenchmarkArtifact(
     loomc_string_view_t identifier, loomc_compile_report_mode_t report_mode,
     int64_t* out_artifact_byte_count) {
   const loomc_compile_report_options_t report_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
-      /*.structure_size=*/sizeof(report_options),
-      /*.next=*/nullptr,
-      /*.mode=*/report_mode,
-      /*.format=*/LOOMC_COMPILE_REPORT_FORMAT_JSON,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      .structure_size = sizeof(report_options),
+      .next = nullptr,
+      .mode = report_mode,
+      .format = LOOMC_COMPILE_REPORT_FORMAT_JSON,
   };
   const loomc_emit_options_t emit_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(emit_options),
-      /*.next=*/report_mode != LOOMC_COMPILE_REPORT_MODE_NONE ? &report_options
-                                                              : nullptr,
-      /*.artifact_format=*/
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
-      /*.identifier=*/identifier,
-      /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(emit_options),
+      .next = report_mode != LOOMC_COMPILE_REPORT_MODE_NONE ? &report_options
+                                                            : nullptr,
+      .artifact_format =
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
+      .identifier = identifier,
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
 
   loomc_result_t* raw_result = nullptr;
@@ -253,142 +253,142 @@ const EmbeddedSource kI32MemoryChainSource = FindEmbeddedSource(
   RegisterInputScalingCompileBenchmarks(
       kAmdgpuWorkloadTarget, "FfnGateUpQuadraticBF16",
       {
-          /*.source=*/FindEmbeddedSource(
-              loomc_benchmark_ffn_gate_up_smoke_create(),
-              loomc_benchmark_ffn_gate_up_smoke_size(),
-              "gate_up_quadratic_bf16_amdgpu.loom"),
-          /*.function_symbol=*/"ffn_gate_up_quadratic_bf16",
-          /*.artifact_identifier=*/"ffn_gate_up_quadratic_bf16.hsaco",
-          /*.input_size_config_symbol=*/"ffn_gate_up.input_size",
+          .source =
+              FindEmbeddedSource(loomc_benchmark_ffn_gate_up_smoke_create(),
+                                 loomc_benchmark_ffn_gate_up_smoke_size(),
+                                 "gate_up_quadratic_bf16_amdgpu.loom"),
+          .function_symbol = "ffn_gate_up_quadratic_bf16",
+          .artifact_identifier = "ffn_gate_up_quadratic_bf16.hsaco",
+          .input_size_config_symbol = "ffn_gate_up.input_size",
       },
       {512, 1024, 4096}, {512, 1024, 4096});
   RegisterPipelineCompileBenchmarks(
       kAmdgpuWorkloadTarget, "ScfPipeline",
       {
-          /*.source=*/FindEmbeddedSource(
+          .source = FindEmbeddedSource(
               loomc_benchmark_synthetic_pipeline_smoke_create(),
               loomc_benchmark_synthetic_pipeline_smoke_size(),
               "segmented_read_ahead.loom"),
-          /*.function_symbol=*/"segmented_read_ahead",
-          /*.artifact_identifier=*/"pipeline_benchmark.hsaco",
+          .function_symbol = "segmented_read_ahead",
+          .artifact_identifier = "pipeline_benchmark.hsaco",
       });
   RegisterPipelineCompileBenchmarks(
       kAmdgpuWorkloadTarget, "ScfGuardedPipeline",
       {
-          /*.source=*/FindEmbeddedSource(
+          .source = FindEmbeddedSource(
               loomc_benchmark_synthetic_pipeline_smoke_create(),
               loomc_benchmark_synthetic_pipeline_smoke_size(),
               "segmented_guarded_read_ahead.loom"),
-          /*.function_symbol=*/"segmented_guarded_read_ahead",
-          /*.artifact_identifier=*/"guarded_pipeline_benchmark.hsaco",
+          .function_symbol = "segmented_guarded_read_ahead",
+          .artifact_identifier = "guarded_pipeline_benchmark.hsaco",
       });
   RegisterInputScalingCompileBenchmarks(
       kAmdgpuWorkloadTarget, "ScfUnrollFenced",
       {
-          /*.source=*/FindEmbeddedSource(
+          .source = FindEmbeddedSource(
               loomc_benchmark_synthetic_unroll_smoke_create(),
               loomc_benchmark_synthetic_unroll_smoke_size(),
               "unroll_recurrence.loom"),
-          /*.function_symbol=*/"unroll_fenced",
-          /*.artifact_identifier=*/"unroll_fenced.hsaco",
-          /*.input_size_config_symbol=*/"benchmark.unroll_count",
+          .function_symbol = "unroll_fenced",
+          .artifact_identifier = "unroll_fenced.hsaco",
+          .input_size_config_symbol = "benchmark.unroll_count",
       },
       {8, 16, 32, 64, 128, 256, 512, 1024}, {8, 32, 128, 512, 1024});
   RegisterInputScalingCompileBenchmarks(
       kAmdgpuWorkloadTarget, "ScfUnrollNestedReads",
       {
-          /*.source=*/FindEmbeddedSource(
+          .source = FindEmbeddedSource(
               loomc_benchmark_synthetic_unroll_smoke_create(),
               loomc_benchmark_synthetic_unroll_smoke_size(),
               "unroll_recurrence.loom"),
-          /*.function_symbol=*/"unroll_read_body",
-          /*.artifact_identifier=*/"unroll_read_body.hsaco",
-          /*.input_size_config_symbol=*/"benchmark.unroll_count",
+          .function_symbol = "unroll_read_body",
+          .artifact_identifier = "unroll_read_body.hsaco",
+          .input_size_config_symbol = "benchmark.unroll_count",
       },
       {8, 16, 32, 64, 128, 256, 512, 1024}, {8, 32, 128, 512, 1024});
   RegisterInputScalingCompileBenchmarks(
       kAmdgpuWorkloadTarget, "ScfUnrollFree",
       {
-          /*.source=*/FindEmbeddedSource(
+          .source = FindEmbeddedSource(
               loomc_benchmark_synthetic_unroll_smoke_create(),
               loomc_benchmark_synthetic_unroll_smoke_size(),
               "unroll_recurrence.loom"),
-          /*.function_symbol=*/"unroll_free",
-          /*.artifact_identifier=*/"unroll_free.hsaco",
-          /*.input_size_config_symbol=*/"benchmark.unroll_count",
+          .function_symbol = "unroll_free",
+          .artifact_identifier = "unroll_free.hsaco",
+          .input_size_config_symbol = "benchmark.unroll_count",
       },
       {8, 16, 32, 64, 128, 256, 512, 1024}, {8, 32, 128, 512, 1024});
   RegisterInputScalingCompileBenchmarks(
       kAmdgpuWorkloadTarget, "ScfUnrollScopedWrites",
       {
-          /*.source=*/FindEmbeddedSource(
+          .source = FindEmbeddedSource(
               loomc_benchmark_synthetic_unroll_smoke_create(),
               loomc_benchmark_synthetic_unroll_smoke_size(),
               "unroll_recurrence.loom"),
-          /*.function_symbol=*/"unroll_scoped_writes",
-          /*.artifact_identifier=*/"unroll_scoped_writes.hsaco",
-          /*.input_size_config_symbol=*/"benchmark.unroll_count",
+          .function_symbol = "unroll_scoped_writes",
+          .artifact_identifier = "unroll_scoped_writes.hsaco",
+          .input_size_config_symbol = "benchmark.unroll_count",
       },
       {8, 16, 32, 64, 128, 256, 512, 1024}, {8, 32, 128, 512, 1024});
   RegisterInputScalingCompileBenchmarks(
       kAmdgpuWorkloadTarget, "PackedTableLookupU4",
       {
-          /*.source=*/FindEmbeddedSource(
+          .source = FindEmbeddedSource(
               loomc_benchmark_synthetic_packed_table_lookup_smoke_create(),
               loomc_benchmark_synthetic_packed_table_lookup_smoke_size(),
               "packed_table_lookup_u4.loom"),
-          /*.function_symbol=*/"packed_table_lookup_u4",
-          /*.artifact_identifier=*/"packed_table_lookup_u4.hsaco",
-          /*.input_size_config_symbol=*/"benchmark.lookup_lane_count",
+          .function_symbol = "packed_table_lookup_u4",
+          .artifact_identifier = "packed_table_lookup_u4.hsaco",
+          .input_size_config_symbol = "benchmark.lookup_lane_count",
       },
       {4, 8, 16, 32, 64}, {4, 8, 16, 32, 64});
   RegisterInputScalingCompileBenchmarks(
       kAmdgpuWorkloadTarget, "PairedMatrixHelpers",
       {
-          /*.source=*/FindEmbeddedSource(
+          .source = FindEmbeddedSource(
               loomc_benchmark_synthetic_paired_matrix_smoke_create(),
               loomc_benchmark_synthetic_paired_matrix_smoke_size(),
               "paired_matrix_helpers.loom"),
-          /*.function_symbol=*/"paired_matrix_helpers",
-          /*.artifact_identifier=*/"paired_matrix_helpers.hsaco",
-          /*.input_size_config_symbol=*/"benchmark.pair_count",
+          .function_symbol = "paired_matrix_helpers",
+          .artifact_identifier = "paired_matrix_helpers.hsaco",
+          .input_size_config_symbol = "benchmark.pair_count",
       },
       {1, 2, 4, 8, 16, 32, 64, 128}, {1, 2, 4, 8, 16, 32, 64, 128});
   RegisterInputScalingCompileBenchmarks(
       kAmdgpuWorkloadTarget, "PairedScopedMatrixHelpers",
       {
-          /*.source=*/FindEmbeddedSource(
+          .source = FindEmbeddedSource(
               loomc_benchmark_synthetic_paired_matrix_smoke_create(),
               loomc_benchmark_synthetic_paired_matrix_smoke_size(),
               "paired_scoped_matrix_helpers.loom"),
-          /*.function_symbol=*/"paired_scoped_matrix_helpers",
-          /*.artifact_identifier=*/"paired_scoped_matrix_helpers.hsaco",
-          /*.input_size_config_symbol=*/"benchmark.pair_count",
+          .function_symbol = "paired_scoped_matrix_helpers",
+          .artifact_identifier = "paired_scoped_matrix_helpers.hsaco",
+          .input_size_config_symbol = "benchmark.pair_count",
       },
       {1, 2, 4, 8, 16, 32, 64, 128}, {1, 2, 4, 8, 16, 32, 64, 128});
   RegisterAttentionCompileBenchmarks(
       kAmdgpuWorkloadTarget,
       {
-          /*.source=*/kAttentionPrefillSource,
-          /*.function_symbol=*/"attention_prefill_f16_wmma",
-          /*.artifact_identifier=*/"attention_prefill_benchmark.hsaco",
+          .source = kAttentionPrefillSource,
+          .function_symbol = "attention_prefill_f16_wmma",
+          .artifact_identifier = "attention_prefill_benchmark.hsaco",
       });
   RegisterInputScalingCompileBenchmarks(
       kAmdgpuWorkloadTarget, "FfnRoutedGateUpQ4KQ8",
       {
-          /*.source=*/kFfnRoutedGateUpSource,
-          /*.function_symbol=*/"ffn_routed_gate_up_swiglu_q4k_q8",
-          /*.artifact_identifier=*/"ffn_routed_gate_up_benchmark.hsaco",
-          /*.input_size_config_symbol=*/"ffn_routed_gate_up.input_size",
+          .source = kFfnRoutedGateUpSource,
+          .function_symbol = "ffn_routed_gate_up_swiglu_q4k_q8",
+          .artifact_identifier = "ffn_routed_gate_up_benchmark.hsaco",
+          .input_size_config_symbol = "ffn_routed_gate_up.input_size",
       },
       {1024, 2048, 4096, 8192, 16384, 32768}, {1024, 4096, 16384});
   RegisterInputScalingCompileBenchmarks(
       kAmdgpuWorkloadTarget, "FfnGateUpQuadraticF32",
       {
-          /*.source=*/kFfnGateUpSource,
-          /*.function_symbol=*/"ffn_gate_up_quadratic_f32",
-          /*.artifact_identifier=*/"ffn_gate_up_benchmark.hsaco",
-          /*.input_size_config_symbol=*/"ffn_gate_up.input_size",
+          .source = kFfnGateUpSource,
+          .function_symbol = "ffn_gate_up_quadratic_f32",
+          .artifact_identifier = "ffn_gate_up_benchmark.hsaco",
+          .input_size_config_symbol = "ffn_gate_up.input_size",
       },
       {1024, 2048, 4096, 8192, 16384, 32768}, {1024, 4096, 16384});
   return true;

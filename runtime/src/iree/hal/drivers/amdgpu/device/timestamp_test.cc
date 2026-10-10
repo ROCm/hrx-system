@@ -34,9 +34,10 @@ static constexpr KernelTableEntry kKernelTable[] = {
 };
 
 static iree_hal_amdgpu_device_kernel_args_t MakeTimestampKernelArgs() {
-  iree_hal_amdgpu_device_kernel_args_t kernel_args = {};
-  kernel_args.kernel_object = 0x12345678ull;
-  kernel_args.setup = 2;
+  iree_hal_amdgpu_device_kernel_args_t kernel_args = {
+      .kernel_object = 0x12345678ull,
+      .setup = 2,
+  };
   kernel_args.workgroup_size[0] = 32;
   kernel_args.workgroup_size[1] = 1;
   kernel_args.workgroup_size[2] = 1;
@@ -58,11 +59,12 @@ TEST(TimestampTest, AbiRecordLayoutIsFixed) {
 }
 
 TEST(TimestampTest, MakesRecordHeader) {
-  iree_hal_amdgpu_timestamp_record_header_t header = {};
-  header.record_length = sizeof(iree_hal_amdgpu_dispatch_timestamp_record_t);
-  header.version = IREE_HAL_AMDGPU_TIMESTAMP_RECORD_VERSION_0;
-  header.type = IREE_HAL_AMDGPU_TIMESTAMP_RECORD_TYPE_DISPATCH;
-  header.record_ordinal = 7;
+  iree_hal_amdgpu_timestamp_record_header_t header = {
+      .record_length = sizeof(iree_hal_amdgpu_dispatch_timestamp_record_t),
+      .version = IREE_HAL_AMDGPU_TIMESTAMP_RECORD_VERSION_0,
+      .type = IREE_HAL_AMDGPU_TIMESTAMP_RECORD_TYPE_DISPATCH,
+      .record_ordinal = 7,
+  };
 
   EXPECT_EQ(header.record_length,
             sizeof(iree_hal_amdgpu_dispatch_timestamp_record_t));

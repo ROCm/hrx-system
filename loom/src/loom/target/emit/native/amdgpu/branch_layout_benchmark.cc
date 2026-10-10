@@ -26,30 +26,30 @@ static void BM_SharedLongEdges(benchmark::State& state) {
   const uint64_t anchor_spacing = static_cast<uint64_t>(state.range(2));
   const uint64_t byte_length = (uint64_t{anchor_count} + 1u) * anchor_spacing;
   const loom_amdgpu_branch_layout_block_t target_block = {
-      /*.byte_offset=*/byte_length,
+      .byte_offset = byte_length,
   };
   std::vector<loom_amdgpu_branch_layout_input_edge_t> edges(edge_count);
   for (uint32_t i = 0; i < edge_count; ++i) {
     edges[i] = {
-        /*.source_byte_offset=*/uint64_t{i} * 4u,
-        /*.target_block_index=*/0,
+        .source_byte_offset = uint64_t{i} * 4u,
+        .target_block_index = 0,
     };
   }
   std::vector<loom_amdgpu_branch_layout_anchor_t> anchors(anchor_count);
   for (uint32_t i = 0; i < anchor_count; ++i) {
     anchors[i] = {
-        /*.byte_offset=*/uint64_t{i + 1u} * anchor_spacing,
-        /*.packet_index=*/i,
+        .byte_offset = uint64_t{i + 1u} * anchor_spacing,
+        .packet_index = i,
     };
   }
   const loom_amdgpu_branch_layout_input_t input = {
-      /*.byte_length=*/byte_length,
-      /*.blocks=*/&target_block,
-      /*.block_count=*/1,
-      /*.edges=*/edges.data(),
-      /*.edge_count=*/edges.size(),
-      /*.anchors=*/anchors.data(),
-      /*.anchor_count=*/anchors.size(),
+      .byte_length = byte_length,
+      .blocks = &target_block,
+      .block_count = 1,
+      .edges = edges.data(),
+      .edge_count = edges.size(),
+      .anchors = anchors.data(),
+      .anchor_count = anchors.size(),
   };
 
   iree_arena_block_pool_t block_pool;

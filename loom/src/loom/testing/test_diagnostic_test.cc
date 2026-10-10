@@ -33,28 +33,32 @@ class TestDiagnosticTest : public ::testing::Test {
 
 TEST_F(TestDiagnosticTest, MatchesStructuredConstraints) {
   loom_test_diagnostic_param_t params[] = {
-      {/*.name=*/IREE_SV("operand_name"), /*.value=*/IREE_SV("operand")},
-      {/*.name=*/IREE_SV("actual_type"), /*.value=*/IREE_SV("i32")},
-      {/*.name=*/IREE_SV("expected_type"),
-       /*.value=*/IREE_SV("floating-point scalar")},
+      {.name = IREE_SV("operand_name"), .value = IREE_SV("operand")},
+      {.name = IREE_SV("actual_type"), .value = IREE_SV("i32")},
+      {
+          .name = IREE_SV("expected_type"),
+          .value = IREE_SV("floating-point scalar"),
+      },
   };
-  loom_test_diagnostic_t diagnostic = {};
-  diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
-  diagnostic.domain = LOOM_ERROR_DOMAIN_TYPE;
-  diagnostic.code = 3;
+  loom_test_diagnostic_t diagnostic = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .domain = LOOM_ERROR_DOMAIN_TYPE,
+      .code = 3,
+  };
   diagnostic.origin.line = 7;
   diagnostic.origin.filename = IREE_SV("case.loom-test");
   diagnostic.message = IREE_SV("operand requires a floating-point scalar");
   diagnostic.params = params;
   diagnostic.param_count = IREE_ARRAYSIZE(params);
 
-  loom_test_annotation_t annotation = {};
-  annotation.message_substring_count = 1;
-  annotation.param_match_count = 1;
-  annotation.severity = LOOM_DIAGNOSTIC_ERROR;
-  annotation.domain = LOOM_ERROR_DOMAIN_TYPE;
-  annotation.code = 3;
-  annotation.target_line = 7;
+  loom_test_annotation_t annotation = {
+      .message_substring_count = 1,
+      .param_match_count = 1,
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .domain = LOOM_ERROR_DOMAIN_TYPE,
+      .code = 3,
+      .target_line = 7,
+  };
   annotation.message_substrings[0] = IREE_SV("floating-point");
   annotation.param_matches[0].name = IREE_SV("actual_type");
   annotation.param_matches[0].value = IREE_SV("i32");
@@ -108,9 +112,10 @@ TEST_F(TestDiagnosticTest, MaterializationPreservesSourceIdentity) {
   std::string filename = "included.h";
   loom_diagnostic_param_t parameter =
       loom_param_string(IREE_SV("invalid input"));
-  loom_diagnostic_t emitted = {};
-  emitted.severity = LOOM_DIAGNOSTIC_ERROR;
-  emitted.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 36);
+  loom_diagnostic_t emitted = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 36),
+  };
   ASSERT_NE(emitted.error, nullptr);
   emitted.params = &parameter;
   emitted.param_count = 1;
@@ -123,11 +128,12 @@ TEST_F(TestDiagnosticTest, MaterializationPreservesSourceIdentity) {
       &emitted, &options, &arena_, iree_allocator_system(), &diagnostic));
   filename.assign(filename.size(), '?');
 
-  loom_test_annotation_t annotation = {};
-  annotation.severity = LOOM_DIAGNOSTIC_ERROR;
-  annotation.domain = LOOM_ERROR_DOMAIN_PARSE;
-  annotation.code = 36;
-  annotation.target_line = 1;
+  loom_test_annotation_t annotation = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .domain = LOOM_ERROR_DOMAIN_PARSE,
+      .code = 36,
+      .target_line = 1,
+  };
   EXPECT_FALSE(loom_test_diagnostic_matches_annotation(
       &diagnostic, &annotation, IREE_SV("case.loom-test")));
   EXPECT_TRUE(loom_test_diagnostic_matches_annotation(&diagnostic, &annotation,

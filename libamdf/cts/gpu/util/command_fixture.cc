@@ -11,9 +11,10 @@ amdf_status_t FindGpuQueueFamily(const amdf_api_t* api,
                                  const GpuQueueRequirements& requirements,
                                  amdf_queue_family_info_t* out_family,
                                  bool* out_matches) {
-  amdf_endpoint_info_t endpoint_info = {};
-  endpoint_info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
-  endpoint_info.structure_size = sizeof(endpoint_info);
+  amdf_endpoint_info_t endpoint_info = {
+      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+      .structure_size = sizeof(endpoint_info),
+  };
   amdf_status_t status = api->endpoint_query_info(endpoint, &endpoint_info);
   if (!amdf_status_is_ok(status)) {
     return status;
@@ -21,9 +22,10 @@ amdf_status_t FindGpuQueueFamily(const amdf_api_t* api,
   bool matches = false;
   for (uint32_t ordinal = 0; ordinal < endpoint_info.queue_family_count;
        ++ordinal) {
-    amdf_queue_family_info_t family = {};
-    family.type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO;
-    family.structure_size = sizeof(family);
+    amdf_queue_family_info_t family = {
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+        .structure_size = sizeof(family),
+    };
     status = api->endpoint_query_queue_family_info(endpoint, ordinal, &family);
     if (!amdf_status_is_ok(status)) {
       return status;
@@ -61,13 +63,16 @@ void GpuCommandTest::CreateMemory(amdf_memory_access_t access,
                                   GpuMemory** out_memory) {
   const amdf_memory_device_access_t attachment = {
       device_,
-      {.access = access,
-       .flags =
-           AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
-  amdf_memory_create_info_t creation = {};
-  creation.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-  creation.structure_size = sizeof(creation);
-  creation.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
+      {
+          .access = access,
+          .flags =
+              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+      }};
+  amdf_memory_create_info_t creation = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(creation),
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+  };
   creation.memory_profile_ordinal = FindGpuMemoryProfileOrdinal(
       api_, system_scope_, device_,
       AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,

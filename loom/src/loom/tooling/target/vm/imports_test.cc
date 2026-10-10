@@ -358,10 +358,11 @@ class VMSourceCaptureTest : public VMImportsTest {
     IREE_ASSERT_OK(loom_op_registry_register_all_dialects(&context));
     IREE_ASSERT_OK(loom_context_finalize(&context));
     const auto* data = loom_location_capture_test_data_create();
-    loom_input_request_t request = {};
-    request.source = iree_make_string_view(
-        reinterpret_cast<const char*>(data[0].data), data[0].size);
-    request.path = IREE_SV("admitted.loom");
+    loom_input_request_t request = {
+        .source = iree_make_string_view(
+            reinterpret_cast<const char*>(data[0].data), data[0].size),
+        .path = IREE_SV("admitted.loom"),
+    };
     loom_input_module_t input;
     IREE_ASSERT_OK(loom_input_module_load(&loom_input_text_provider, &request,
                                           &context, &pool,
@@ -390,8 +391,9 @@ class VMSourceCaptureTest : public VMImportsTest {
         IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_READABLE |
             IREE_IO_STREAM_MODE_SEEKABLE,
         4096, iree_allocator_system(), &stream));
-    loom_bytecode_write_options_t write_options = {};
-    write_options.location_mode = LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS;
+    loom_bytecode_write_options_t write_options = {
+        .location_mode = LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS,
+    };
     IREE_ASSERT_OK(loom_bytecode_write_module(input.module, stream,
                                               &write_options, &pool));
     std::vector<uint8_t> serialized(iree_io_stream_length(stream));
@@ -407,15 +409,15 @@ class VMSourceCaptureTest : public VMImportsTest {
     IREE_ASSERT_OK(iree_status_from_loomc(loomc_target_environment_create_vm(
         compiler_allocator, &target_environment)));
     loomc_context_target_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.target_environment=*/target_environment,
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+        .structure_size = sizeof(target_options),
+        .next = nullptr,
+        .target_environment = target_environment,
     };
     loomc_context_options_t context_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-        /*.structure_size=*/sizeof(context_options),
-        /*.next=*/&target_options,
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+        .structure_size = sizeof(context_options),
+        .next = &target_options,
     };
     loomc_context_t* compiler_context = nullptr;
     IREE_ASSERT_OK(iree_status_from_loomc(loomc_context_create(
@@ -432,14 +434,13 @@ class VMSourceCaptureTest : public VMImportsTest {
         compiler_allocator, &profile)));
 
     const loomc_source_options_t source_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-        /*.structure_size=*/sizeof(source_options),
-        /*.next=*/nullptr,
-        /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
-        /*.identifier=*/loomc_make_cstring_view("stripped.loombc"),
-        /*.contents=*/
-        loomc_make_byte_span(serialized.data(), serialized.size()),
-        /*.storage=*/LOOMC_SOURCE_STORAGE_BORROWED,
+        .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+        .structure_size = sizeof(source_options),
+        .next = nullptr,
+        .format = LOOMC_SOURCE_FORMAT_BYTECODE,
+        .identifier = loomc_make_cstring_view("stripped.loombc"),
+        .contents = loomc_make_byte_span(serialized.data(), serialized.size()),
+        .storage = LOOMC_SOURCE_STORAGE_BORROWED,
     };
     loomc_source_t* compiler_source = nullptr;
     IREE_ASSERT_OK(iree_status_from_loomc(loomc_source_create(
@@ -455,23 +456,23 @@ class VMSourceCaptureTest : public VMImportsTest {
 
     const loomc_string_view_t root = loomc_make_cstring_view("captured");
     const loomc_emit_options_t emit_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-        /*.structure_size=*/sizeof(emit_options),
-        /*.next=*/nullptr,
-        /*.artifact_format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_VM),
+        .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+        .structure_size = sizeof(emit_options),
+        .next = nullptr,
+        .artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_VM),
     };
     const loomc_compile_artifact_options_t compile_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
-        /*.structure_size=*/sizeof(compile_options),
-        /*.next=*/nullptr,
-        /*.roots=*/&root,
-        /*.root_count=*/1,
-        /*.excluded_roots=*/nullptr,
-        /*.excluded_root_count=*/0,
-        /*.target_profile=*/profile,
-        /*.config=*/nullptr,
-        /*.emit_options=*/&emit_options,
-        /*.artifact_flags=*/0,
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
+        .structure_size = sizeof(compile_options),
+        .next = nullptr,
+        .roots = &root,
+        .root_count = 1,
+        .excluded_roots = nullptr,
+        .excluded_root_count = 0,
+        .target_profile = profile,
+        .config = nullptr,
+        .emit_options = &emit_options,
+        .artifact_flags = 0,
     };
     loomc_result_t* compile_result = nullptr;
     IREE_ASSERT_OK(iree_status_from_loomc(loomc_compile_artifact(

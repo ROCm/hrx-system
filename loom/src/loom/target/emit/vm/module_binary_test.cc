@@ -50,9 +50,9 @@ static iree_status_t counting_byte_sequence_enumerate(
 }
 
 static const iree_byte_sequence_vtable_t counting_byte_sequence_vtable = {
-    /*.destroy=*/counting_byte_sequence_destroy,
-    /*.enumerate=*/counting_byte_sequence_enumerate,
-    /*.try_get_contiguous_span=*/NULL,
+    .destroy = counting_byte_sequence_destroy,
+    .enumerate = counting_byte_sequence_enumerate,
+    .try_get_contiguous_span = NULL,
 };
 
 TEST(VMModuleBinaryTest,
@@ -64,14 +64,16 @@ TEST(VMModuleBinaryTest,
                                 &function_bytecode.base);
   function_bytecode.contents =
       iree_make_const_byte_span(function_bytes, sizeof(function_bytes));
-  iree_vm_bytecode_v0_function_row_t function_row = {};
-  function_row.bytecode_length_u32 = sizeof(function_bytes);
-  function_row.block_count_u32 = 1;
-  loom_vm_program_plan_t plan = {};
-  plan.functions = &function_row;
-  plan.function_count = 1;
-  plan.function_bytecode = &function_bytecode.base;
-  plan.maximum_block_count = 1;
+  iree_vm_bytecode_v0_function_row_t function_row = {
+      .bytecode_length_u32 = sizeof(function_bytes),
+      .block_count_u32 = 1,
+  };
+  loom_vm_program_plan_t plan = {
+      .functions = &function_row,
+      .function_count = 1,
+      .function_bytecode = &function_bytecode.base,
+      .maximum_block_count = 1,
+  };
 
   iree_byte_sequence_t* first_binary = NULL;
   iree_byte_sequence_t* second_binary = NULL;

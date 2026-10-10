@@ -267,19 +267,18 @@ static void iree_hal_test_opaque_slab_provider_query_properties(
 
 const iree_hal_slab_provider_vtable_t
     iree_hal_test_opaque_slab_provider_vtable = {
-        /*.destroy=*/iree_hal_test_opaque_slab_provider_destroy,
-        /*.acquire_slab=*/iree_hal_test_opaque_slab_provider_acquire_slab,
-        /*.release_slab=*/iree_hal_test_opaque_slab_provider_release_slab,
-        /*.wrap_buffer=*/iree_hal_test_opaque_slab_provider_wrap_buffer,
-        /*.validate_asan_options=*/
-        iree_hal_test_opaque_slab_provider_validate_asan_options,
-        /*.advise_asan_range=*/
-        iree_hal_test_opaque_slab_provider_advise_asan_range,
-        /*.prefault=*/iree_hal_test_opaque_slab_provider_prefault,
-        /*.trim=*/iree_hal_test_opaque_slab_provider_trim,
-        /*.query_stats=*/iree_hal_test_opaque_slab_provider_query_stats,
-        /*.query_properties=*/
-        iree_hal_test_opaque_slab_provider_query_properties,
+        .destroy = iree_hal_test_opaque_slab_provider_destroy,
+        .acquire_slab = iree_hal_test_opaque_slab_provider_acquire_slab,
+        .release_slab = iree_hal_test_opaque_slab_provider_release_slab,
+        .wrap_buffer = iree_hal_test_opaque_slab_provider_wrap_buffer,
+        .validate_asan_options =
+            iree_hal_test_opaque_slab_provider_validate_asan_options,
+        .advise_asan_range =
+            iree_hal_test_opaque_slab_provider_advise_asan_range,
+        .prefault = iree_hal_test_opaque_slab_provider_prefault,
+        .trim = iree_hal_test_opaque_slab_provider_trim,
+        .query_stats = iree_hal_test_opaque_slab_provider_query_stats,
+        .query_properties = iree_hal_test_opaque_slab_provider_query_properties,
 };
 
 static iree_hal_pool_reservation_request_t MakeReservationRequest(
@@ -319,8 +318,8 @@ static iree_status_t MaterializeOneReservation(
     const iree_hal_pool_reservation_t* reservation,
     iree_hal_pool_materialize_flags_t flags, iree_hal_buffer_t** out_buffer) {
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/reservation->byte_length,
+      .params = params,
+      .allocation_size = reservation->byte_length,
   };
   return iree_hal_pool_materialize_reservations(pool, 1, &request, reservation,
                                                 flags, out_buffer);
@@ -386,8 +385,7 @@ static iree_status_t CreateGrowingPool(
     iree_hal_slab_provider_t* provider, iree_async_notification_t* notification,
     iree_async_frontier_tracker_t* tracker, iree_hal_pool_epoch_query_t query,
     iree_allocator_t allocator, iree_hal_pool_t** out_pool) {
-  iree_hal_passthrough_pool_options_t source_options = {};
-  source_options.epoch_query = query;
+  iree_hal_passthrough_pool_options_t source_options = {.epoch_query = query};
   iree_hal_pool_t* source = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_passthrough_pool_create(
       source_options, provider, notification, tracker, test_maintenance(),
@@ -399,19 +397,21 @@ static iree_status_t CreateGrowingPool(
 }
 
 static iree_hal_fixed_block_pool_options_t DefaultOptions() {
-  iree_hal_fixed_block_pool_options_t options = {};
-  options.block_size = 256;
-  options.blocks_per_slab = 4;
-  options.frontier_capacity = 2;
+  iree_hal_fixed_block_pool_options_t options = {
+      .block_size = 256,
+      .blocks_per_slab = 4,
+      .frontier_capacity = 2,
+  };
   return options;
 }
 
 static iree_hal_asan_pool_options_t ShadowOptions() {
-  iree_hal_asan_pool_options_t options = {};
-  options.mode = IREE_HAL_ASAN_POOL_MODE_SHADOW;
-  options.shadow_granule_size = 8;
-  options.redzone_size = 16;
-  options.backing_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT;
+  iree_hal_asan_pool_options_t options = {
+      .mode = IREE_HAL_ASAN_POOL_MODE_SHADOW,
+      .shadow_granule_size = 8,
+      .redzone_size = 16,
+      .backing_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT,
+  };
   return options;
 }
 

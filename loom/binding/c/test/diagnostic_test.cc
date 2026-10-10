@@ -26,8 +26,9 @@ ResultPtr Capture(
                                       source_retention,
                                       loomc_allocator_system(), &result));
   loom_diagnostic_param_t param = loom_param_string(IREE_SV("x"));
-  loom_diagnostic_t diagnostic = {};
-  diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
+  loom_diagnostic_t diagnostic = {
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+  };
   diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
   diagnostic.emitter = LOOM_EMITTER_PARSER;
   diagnostic.params = &param;
@@ -39,10 +40,11 @@ ResultPtr Capture(
 }
 
 SourcePtr CreateSource(const char* identifier, const char* contents) {
-  loomc_source_options_t options = {};
-  options.identifier = loomc_make_cstring_view(identifier);
-  options.contents = loomc_make_byte_span(contents, strlen(contents));
-  options.storage = LOOMC_SOURCE_STORAGE_COPY;
+  loomc_source_options_t options = {
+      .identifier = loomc_make_cstring_view(identifier),
+      .contents = loomc_make_byte_span(contents, strlen(contents)),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
+  };
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(
       loomc_source_create(&options, loomc_allocator_system(), &source));
@@ -51,13 +53,14 @@ SourcePtr CreateSource(const char* identifier, const char* contents) {
 
 TEST(DiagnosticTest, OwnsRecordedIdentityWithoutText) {
   std::string filename = "virtual/kernel.cxx";
-  loom_source_range_t range = {};
-  range.provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE;
-  range.filename = iree_make_string_view(filename.data(), filename.size());
-  range.start_line = 7;
-  range.start_column = 12;
-  range.end_line = 7;
-  range.end_column = 25;
+  loom_source_range_t range = {
+      .provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE,
+      .filename = iree_make_string_view(filename.data(), filename.size()),
+      .start_line = 7,
+      .start_column = 12,
+      .end_line = 7,
+      .end_column = 25,
+  };
   auto result = Capture(range);
   filename.assign("released");
   ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
@@ -82,9 +85,10 @@ TEST(DiagnosticTest, InputIdentityAloneCannotSupplyOriginalText) {
       SCOPED_TRACE(original);
       auto source = CreateSource(input_name, "different contents");
       std::string text = original;
-      loom_source_range_t range = {};
-      range.filename = IREE_SV("header.h");
-      range.source = iree_make_string_view(text.data(), text.size());
+      loom_source_range_t range = {
+          .filename = IREE_SV("header.h"),
+          .source = iree_make_string_view(text.data(), text.size()),
+      };
       range.provenance = text.empty()
                              ? LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE
                              : LOOM_SOURCE_PROVENANCE_EXACT_SOURCE;
@@ -113,11 +117,12 @@ TEST(DiagnosticTest, InputIdentityAloneCannotSupplyOriginalText) {
 TEST(DiagnosticTest, RetainsMatchingSourceOwner) {
   auto source = CreateSource("source.loom", "original");
   auto contents = loomc_source_contents(source.get());
-  loom_source_range_t range = {};
-  range.provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE;
-  range.filename = IREE_SV("source.loom");
-  range.source = iree_make_string_view(
-      reinterpret_cast<const char*>(contents.data), contents.data_length);
+  loom_source_range_t range = {
+      .provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
+      .filename = IREE_SV("source.loom"),
+      .source = iree_make_string_view(
+          reinterpret_cast<const char*>(contents.data), contents.data_length),
+  };
   range.start_line = range.start_column = range.end_line = 1;
   range.end_column = 9;
   range.end = contents.data_length;
@@ -132,17 +137,18 @@ TEST(DiagnosticTest, RetainsMatchingSourceOwner) {
 TEST(DiagnosticTest, MetadataRetentionOwnsIdentityAndCoordinatesOnly) {
   auto source = CreateSource("source.loom", "original");
   const auto contents = loomc_source_contents(source.get());
-  loom_source_range_t range = {};
-  range.provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE;
-  range.filename = IREE_SV("source.loom");
-  range.source = iree_make_string_view(
-      reinterpret_cast<const char*>(contents.data), contents.data_length);
-  range.start = 2;
-  range.end = 6;
-  range.start_line = 4;
-  range.start_column = 3;
-  range.end_line = 4;
-  range.end_column = 7;
+  loom_source_range_t range = {
+      .provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
+      .filename = IREE_SV("source.loom"),
+      .source = iree_make_string_view(
+          reinterpret_cast<const char*>(contents.data), contents.data_length),
+      .start = 2,
+      .end = 6,
+      .start_line = 4,
+      .start_column = 3,
+      .end_line = 4,
+      .end_column = 7,
+  };
   auto result =
       Capture(range, source.get(), LOOMC_SOURCE_RETENTION_METADATA_ONLY);
   source.reset();
@@ -164,18 +170,20 @@ TEST(DiagnosticTest, MetadataRetentionOwnsIdentityAndCoordinatesOnly) {
 TEST(DiagnosticTest, RetainsCanonicalFormatting) {
   auto source = CreateSource("source.loom", "duplicate");
   const auto contents = loomc_source_contents(source.get());
-  loom_source_range_t range = {};
-  range.provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE;
-  range.filename = IREE_SV("source.loom");
-  range.source = iree_make_string_view(
-      reinterpret_cast<const char*>(contents.data), contents.data_length);
+  loom_source_range_t range = {
+      .provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
+      .filename = IREE_SV("source.loom"),
+      .source = iree_make_string_view(
+          reinterpret_cast<const char*>(contents.data), contents.data_length),
+  };
   range.start_line = range.end_line = 1;
   range.start_column = 1;
   range.end_column = 10;
   range.end = contents.data_length;
   loom_diagnostic_param_t param = loom_param_string(IREE_SV("value"));
-  loom_diagnostic_t diagnostic = {};
-  diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 2);
+  loom_diagnostic_t diagnostic = {
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 2),
+  };
   diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
   diagnostic.emitter = LOOM_EMITTER_PARSER;
   diagnostic.params = &param;
@@ -218,9 +226,10 @@ TEST(DiagnosticTest, RelatedLocationsOwnLabelsAndShareOnlyMatchingSnapshots) {
     std::string filename = "header.h";
     std::string text = "x\ndeclaration";
     std::string label = "defined here";
-    loom_source_range_t primary = {};
-    primary.provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE;
-    primary.filename = IREE_SV("input.loom");
+    loom_source_range_t primary = {
+        .provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE,
+        .filename = IREE_SV("input.loom"),
+    };
     primary.start_line = primary.start_column = primary.end_line = 1;
     primary.end_column = 9;
     if (has_contents) {
@@ -255,8 +264,9 @@ TEST(DiagnosticTest, RelatedLocationsOwnLabelsAndShareOnlyMatchingSnapshots) {
     related[3].source_location.end = 8;
 
     loom_diagnostic_param_t param = loom_param_string(IREE_SV("x"));
-    loom_diagnostic_t diagnostic = {};
-    diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
+    loom_diagnostic_t diagnostic = {
+        .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+    };
     diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
     diagnostic.emitter = LOOM_EMITTER_PARSER;
     diagnostic.params = &param;
@@ -348,8 +358,9 @@ struct DiagnosticAllocator {
 TEST(DiagnosticTest,
      FailedRelatedCaptureReleasesSourcesAndLeavesResultReusable) {
   loom_diagnostic_param_t param = loom_param_string(IREE_SV("x"));
-  loom_diagnostic_t diagnostic = {};
-  diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
+  loom_diagnostic_t diagnostic = {
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+  };
   diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
   diagnostic.emitter = LOOM_EMITTER_PARSER;
   diagnostic.params = &param;

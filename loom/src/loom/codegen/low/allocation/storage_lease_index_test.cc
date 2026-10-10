@@ -39,14 +39,15 @@ class LowAllocationStorageLeaseIndexTest : public ::testing::Test {
       uint16_t reg_class = 0,
       loom_low_allocation_location_kind_t kind =
           LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-    loom_low_allocation_storage_lease_t lease = {};
-    lease.start_point = start;
-    lease.end_point = end;
-    lease.location_base = location;
-    lease.location_count = width;
-    lease.descriptor_reg_class_id = reg_class;
-    lease.location_kind = kind;
-    lease.release_action_index = LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE;
+    loom_low_allocation_storage_lease_t lease = {
+        .start_point = start,
+        .end_point = end,
+        .release_action_index = LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
+        .descriptor_reg_class_id = reg_class,
+        .location_kind = kind,
+        .location_base = location,
+        .location_count = width,
+    };
     return lease;
   }
 

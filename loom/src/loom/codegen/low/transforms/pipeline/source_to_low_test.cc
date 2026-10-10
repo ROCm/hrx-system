@@ -91,11 +91,12 @@ static loom_pass_descriptor_t MakeFunctionPassDescriptor(
     iree_string_view_t key, loom_pass_info_fn_t info,
     loom_function_pass_fn_t function_run,
     loom_pass_create_fn_t create = nullptr) {
-  loom_pass_descriptor_t descriptor = {};
-  descriptor.key = key;
-  descriptor.info = info;
-  descriptor.function_run = function_run;
-  descriptor.create = create;
+  loom_pass_descriptor_t descriptor = {
+      .key = key,
+      .info = info,
+      .function_run = function_run,
+      .create = create,
+  };
   return descriptor;
 }
 
@@ -136,8 +137,8 @@ class LowLowerPassTest : public ::testing::Test {
 
   ModulePtr Parse(iree_string_view_t source) {
     loom_text_parse_options_t parse_options = {
-        /*.diagnostic_sink=*/{},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {},
+        .max_errors = 20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &registry_.registry, &parse_options.low_asm_environment);
@@ -155,7 +156,7 @@ class LowLowerPassTest : public ::testing::Test {
     IREE_ASSERT(name_id != LOOM_STRING_ID_INVALID);
     const uint16_t symbol_id = loom_module_find_symbol(module, name_id);
     IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
-    return (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    return loom_symbol_ref_t{.module_id = 0, .symbol_id = symbol_id};
   }
 
   iree_status_t RunSourceToLow(
@@ -170,31 +171,32 @@ class LowLowerPassTest : public ::testing::Test {
     std::vector<uint8_t> statistic_storage(
         pass_info->statistic_layout->storage_size, 0);
     const loom_codegen_pass_environment_options_t environment_options = {
-        /*.descriptor_registry=*/&registry_.registry,
-        /*.lower_policy_registry=*/policy_registry,
-        /*.legality_provider_list=*/nullptr,
-        /*.legalizer_registry=*/nullptr,
-        /*.math_policy_registry=*/nullptr,
-        /*.compile_report=*/nullptr,
-        /*.target_environment=*/nullptr,
+        .descriptor_registry = &registry_.registry,
+        .lower_policy_registry = policy_registry,
+        .legality_provider_list = nullptr,
+        .legalizer_registry = nullptr,
+        .math_policy_registry = nullptr,
+        .compile_report = nullptr,
+        .target_environment = nullptr,
     };
     loom_codegen_pass_environment_storage_t codegen_environment_storage;
     loom_pass_environment_t environment =
         loom_codegen_pass_environment_storage_initialize(
             &environment_options, function_versions,
             &codegen_environment_storage);
-    loom_pass_t pass = {};
-    pass.info = pass_info;
-    pass.module_run = loom_low_source_to_low_run;
-    pass.instance_arena = &instance_arena;
-    pass.arena = &instance_arena;
-    pass.statistic_storage = statistic_storage.data();
-    pass.environment = &environment;
-    pass.value_facts = &value_facts;
+    loom_pass_t pass = {
+        .info = pass_info,
+        .module_run = loom_low_source_to_low_run,
+        .instance_arena = &instance_arena,
+        .arena = &instance_arena,
+        .statistic_storage = statistic_storage.data(),
+        .environment = &environment,
+        .value_facts = &value_facts,
+    };
     if (collector != nullptr) {
       pass.diagnostic_emitter = {
-          /*.fn=*/CollectDiagnosticEmission,
-          /*.user_data=*/collector,
+          .fn = CollectDiagnosticEmission,
+          .user_data = collector,
       };
     }
 
@@ -213,31 +215,33 @@ class LowLowerPassTest : public ::testing::Test {
       const loom_function_version_list_t* function_versions = nullptr,
       DiagnosticEmissionCollector* collector = nullptr) {
     static const loom_pass_option_enum_value_t kRewriteValues[] = {
-        {/*.value=*/IREE_SVL("call")},
-        {/*.value=*/IREE_SVL("inline")},
+        {.value = IREE_SVL("call")},
+        {.value = IREE_SVL("inline")},
     };
     static const loom_pass_option_schema_t kSelectionOptions[] = {
-        {/*.name=*/IREE_SVL("rewrite"),
-         /*.kind=*/LOOM_PASS_OPTION_SCHEMA_ENUM,
-         /*.flags=*/0,
-         /*.minimum_uint32=*/0,
-         /*.maximum_uint32=*/0,
-         /*.enum_values=*/kRewriteValues,
-         /*.enum_value_count=*/IREE_ARRAYSIZE(kRewriteValues)},
+        {
+            .name = IREE_SVL("rewrite"),
+            .kind = LOOM_PASS_OPTION_SCHEMA_ENUM,
+            .flags = 0,
+            .minimum_uint32 = 0,
+            .maximum_uint32 = 0,
+            .enum_values = kRewriteValues,
+            .enum_value_count = IREE_ARRAYSIZE(kRewriteValues),
+        },
     };
     static const loom_pass_descriptor_t kPassDescriptors[] = {
         {
-            /*.key=*/IREE_SVL("inline-callables"),
-            /*.info=*/loom_inline_callables_pass_info,
-            /*.module_run=*/{loom_inline_callables_run},
-            /*.create=*/nullptr,
-            /*.destroy=*/nullptr,
-            /*.flags=*/0,
-            /*.unavailable_reason=*/{},
-            /*.option_schema=*/nullptr,
-            /*.option_schema_count=*/0,
-            /*.requirement_defs=*/nullptr,
-            /*.requirement_count=*/0,
+            .key = IREE_SVL("inline-callables"),
+            .info = loom_inline_callables_pass_info,
+            .module_run = loom_inline_callables_run,
+            .create = nullptr,
+            .destroy = nullptr,
+            .flags = 0,
+            .unavailable_reason = {},
+            .option_schema = nullptr,
+            .option_schema_count = 0,
+            .requirement_defs = nullptr,
+            .requirement_count = 0,
         },
         MakeFunctionPassDescriptor(IREE_SV("low-dce"), loom_low_dce_pass_info,
                                    loom_low_dce_run),
@@ -246,58 +250,58 @@ class LowLowerPassTest : public ::testing::Test {
                                    loom_low_materialize_allocation_run,
                                    loom_low_materialize_allocation_create),
         {
-            /*.key=*/IREE_SVL("select-templates"),
-            /*.info=*/loom_template_selection_pass_info,
-            /*.module_run=*/{loom_template_selection_run},
-            /*.create=*/loom_template_selection_create,
-            /*.destroy=*/nullptr,
-            /*.flags=*/0,
-            /*.unavailable_reason=*/{},
-            /*.option_schema=*/kSelectionOptions,
-            /*.option_schema_count=*/IREE_ARRAYSIZE(kSelectionOptions),
-            /*.requirement_defs=*/nullptr,
-            /*.requirement_count=*/0,
+            .key = IREE_SVL("select-templates"),
+            .info = loom_template_selection_pass_info,
+            .module_run = loom_template_selection_run,
+            .create = loom_template_selection_create,
+            .destroy = nullptr,
+            .flags = 0,
+            .unavailable_reason = {},
+            .option_schema = kSelectionOptions,
+            .option_schema_count = IREE_ARRAYSIZE(kSelectionOptions),
+            .requirement_defs = nullptr,
+            .requirement_count = 0,
         },
         {
-            /*.key=*/IREE_SVL("source-to-low"),
-            /*.info=*/loom_low_source_to_low_pass_info,
-            /*.module_run=*/{loom_low_source_to_low_run},
-            /*.create=*/loom_low_source_to_low_create,
-            /*.destroy=*/nullptr,
-            /*.flags=*/0,
-            /*.unavailable_reason=*/{},
-            /*.option_schema=*/nullptr,
-            /*.option_schema_count=*/0,
-            /*.requirement_defs=*/nullptr,
-            /*.requirement_count=*/0,
+            .key = IREE_SVL("source-to-low"),
+            .info = loom_low_source_to_low_pass_info,
+            .module_run = loom_low_source_to_low_run,
+            .create = loom_low_source_to_low_create,
+            .destroy = nullptr,
+            .flags = 0,
+            .unavailable_reason = {},
+            .option_schema = nullptr,
+            .option_schema_count = 0,
+            .requirement_defs = nullptr,
+            .requirement_count = 0,
         },
         {
-            /*.key=*/IREE_SVL("symbol-dce"),
-            /*.info=*/loom_symbol_dce_pass_info,
-            /*.module_run=*/{loom_symbol_dce_run},
-            /*.create=*/nullptr,
-            /*.destroy=*/nullptr,
-            /*.flags=*/0,
-            /*.unavailable_reason=*/{},
-            /*.option_schema=*/nullptr,
-            /*.option_schema_count=*/0,
-            /*.requirement_defs=*/nullptr,
-            /*.requirement_count=*/0,
+            .key = IREE_SVL("symbol-dce"),
+            .info = loom_symbol_dce_pass_info,
+            .module_run = loom_symbol_dce_run,
+            .create = nullptr,
+            .destroy = nullptr,
+            .flags = 0,
+            .unavailable_reason = {},
+            .option_schema = nullptr,
+            .option_schema_count = 0,
+            .requirement_defs = nullptr,
+            .requirement_count = 0,
         },
     };
     static const loom_pass_registry_t kPassRegistry = {
-        /*.descriptors=*/kPassDescriptors,
-        /*.descriptor_count=*/IREE_ARRAYSIZE(kPassDescriptors),
+        .descriptors = kPassDescriptors,
+        .descriptor_count = IREE_ARRAYSIZE(kPassDescriptors),
     };
 
     const loom_codegen_pass_environment_options_t environment_options = {
-        /*.descriptor_registry=*/&registry_.registry,
-        /*.lower_policy_registry=*/&policy_registry_,
-        /*.legality_provider_list=*/nullptr,
-        /*.legalizer_registry=*/nullptr,
-        /*.math_policy_registry=*/nullptr,
-        /*.compile_report=*/nullptr,
-        /*.target_environment=*/nullptr,
+        .descriptor_registry = &registry_.registry,
+        .lower_policy_registry = &policy_registry_,
+        .legality_provider_list = nullptr,
+        .legalizer_registry = nullptr,
+        .math_policy_registry = nullptr,
+        .compile_report = nullptr,
+        .target_environment = nullptr,
     };
     loom_codegen_pass_environment_storage_t codegen_environment_storage;
     loom_pass_environment_t environment =
@@ -305,16 +309,16 @@ class LowLowerPassTest : public ::testing::Test {
             &environment_options, function_versions,
             &codegen_environment_storage);
     loom_pass_tool_run_options_t run_options = {
-        /*.registry=*/&kPassRegistry,
-        /*.environment=*/environment,
-        /*.function_versions=*/function_versions,
-        /*.predicate_provider=*/{},
-        /*.block_pool=*/&block_pool_,
+        .registry = &kPassRegistry,
+        .environment = environment,
+        .function_versions = function_versions,
+        .predicate_provider = {},
+        .block_pool = &block_pool_,
     };
     if (collector != nullptr) {
       run_options.diagnostic_emitter = {
-          /*.fn=*/CollectDiagnosticEmission,
-          /*.user_data=*/collector,
+          .fn = CollectDiagnosticEmission,
+          .user_data = collector,
       };
     }
     loom_pass_run_result_t run_result = {};
@@ -337,26 +341,27 @@ class LowLowerPassTest : public ::testing::Test {
     std::vector<uint8_t> statistic_storage(
         pass_info->statistic_layout->storage_size, 0);
     const loom_codegen_pass_environment_options_t environment_options = {
-        /*.descriptor_registry=*/&registry_.registry,
-        /*.lower_policy_registry=*/&policy_registry_,
-        /*.legality_provider_list=*/nullptr,
-        /*.legalizer_registry=*/nullptr,
-        /*.math_policy_registry=*/nullptr,
-        /*.compile_report=*/nullptr,
-        /*.target_environment=*/nullptr,
+        .descriptor_registry = &registry_.registry,
+        .lower_policy_registry = &policy_registry_,
+        .legality_provider_list = nullptr,
+        .legalizer_registry = nullptr,
+        .math_policy_registry = nullptr,
+        .compile_report = nullptr,
+        .target_environment = nullptr,
     };
     loom_codegen_pass_environment_storage_t codegen_environment_storage;
     loom_pass_environment_t environment =
         loom_codegen_pass_environment_storage_initialize(
             &environment_options, function_versions,
             &codegen_environment_storage);
-    loom_pass_t pass = {};
-    pass.info = pass_info;
-    pass.module_run = loom_inline_callables_run;
-    pass.instance_arena = &instance_arena;
-    pass.arena = &instance_arena;
-    pass.statistic_storage = statistic_storage.data();
-    pass.environment = &environment;
+    loom_pass_t pass = {
+        .info = pass_info,
+        .module_run = loom_inline_callables_run,
+        .instance_arena = &instance_arena,
+        .arena = &instance_arena,
+        .statistic_storage = statistic_storage.data(),
+        .environment = &environment,
+    };
 
     iree_status_t status = loom_inline_callables_create(&pass, options);
     if (iree_status_is_ok(status)) {
@@ -434,14 +439,14 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionTargetFacts) {
       &function_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
   loom_low_source_selection_options_t options = {
-      /*.policy_registry=*/&policy_registry,
-      /*.diagnostic_emitter=*/{},
-      /*.function_versions=*/&function_versions,
-      /*.collect_target_candidates=*/false,
+      .policy_registry = &policy_registry,
+      .diagnostic_emitter = {},
+      .function_versions = &function_versions,
+      .collect_target_candidates = false,
   };
   loom_low_source_selection_list_t selections = {};
   IREE_ASSERT_OK(loom_low_select_lowering_symbols(module.get(), &options,
@@ -494,7 +499,7 @@ TEST_F(LowLowerPassTest, FinalizesPoliciesOnceWithoutAdditionalStorage) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
   const loom_low_source_selection_options_t options = {
-      /*.policy_registry=*/&policy_registry_,
+      .policy_registry = &policy_registry_,
   };
   loom_low_source_selection_list_t selections = {};
   IREE_ASSERT_OK(loom_low_select_lowering_symbols(module.get(), &options,
@@ -504,12 +509,13 @@ TEST_F(LowLowerPassTest, FinalizesPoliciesOnceWithoutAdditionalStorage) {
   std::vector<int> order;
   loom_low_lower_policy_t first = *selections.values[2].policy;
   first.finalize_module = {
-      /*.fn=*/[](void* user_data, loom_module_t*,
-                 loom_low_lower_module_state_t*, iree_arena_allocator_t*) {
-        static_cast<std::vector<int>*>(user_data)->push_back(1);
-        return iree_ok_status();
-      },
-      /*.user_data=*/&order,
+      .fn =
+          [](void* user_data, loom_module_t*, loom_low_lower_module_state_t*,
+             iree_arena_allocator_t*) {
+            static_cast<std::vector<int>*>(user_data)->push_back(1);
+            return iree_ok_status();
+          },
+      .user_data = &order,
   };
   loom_low_lower_policy_t second = first;
   second.finalize_module.fn = [](void* user_data, loom_module_t*,
@@ -586,8 +592,8 @@ TEST_F(LowLowerPassTest, ModuleInternalVersionLowersWithoutArtifactAbi) {
       &function_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
 
   IREE_ASSERT_OK(RunSourceToLow(&policy_registry_, module.get(), nullptr,
@@ -644,8 +650,8 @@ TEST_F(LowLowerPassTest,
       &function_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
 
   IREE_ASSERT_OK(RunFlatPipeline(
@@ -769,13 +775,13 @@ TEST_F(LowLowerPassTest,
   };
   loom_low_lower_policy_t policy = *loom_test_low_lower_policy();
   policy.contract.rule_sets = {
-      /*.count=*/IREE_ARRAYSIZE(rule_sets),
-      /*.values=*/rule_sets,
+      .count = IREE_ARRAYSIZE(rule_sets),
+      .values = rule_sets,
   };
   const loom_low_lower_policy_registry_entry_t entries[] = {
       {
-          /*.contract_set_key=*/IREE_SVL("test.low.core"),
-          /*.policy=*/&policy,
+          .contract_set_key = IREE_SVL("test.low.core"),
+          .policy = &policy,
       },
   };
   loom_low_lower_policy_registry_t policy_registry = {};
@@ -846,8 +852,9 @@ TEST_F(LowLowerPassTest, InvokeNormalizesToDirectLowCallWithPolicyPreserved) {
   EXPECT_EQ(loom_low_func_call_callee(call_op).module_id, helper_ref.module_id);
   EXPECT_EQ(loom_low_func_call_callee(call_op).symbol_id, helper_ref.symbol_id);
 
-  loom_target_provider_t direct_provider = {};
-  direct_provider.select_call_policy = loom_target_select_call_policy_direct;
+  loom_target_provider_t direct_provider = {
+      .select_call_policy = loom_target_select_call_policy_direct,
+  };
   loom_target_function_version_t entry_version = {};
   entry_version.base.type = &loom_target_function_version_type;
   entry_version.base.function = entry;
@@ -856,8 +863,8 @@ TEST_F(LowLowerPassTest, InvokeNormalizesToDirectLowCallWithPolicyPreserved) {
       &entry_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
 
   IREE_ASSERT_OK(RunInlineCallables(module.get(), &function_versions,
@@ -938,20 +945,20 @@ TEST_F(LowLowerPassTest,
   EXPECT_FALSE(loom_region_has_convergent_effects(body));
 
   const loom_target_snapshot_t target_snapshot = {
-      /*.name=*/IREE_SVL("test-alt"),
+      .name = IREE_SVL("test-alt"),
   };
   const loom_target_export_plan_t target_export_plan = {
-      /*.name=*/IREE_SVL("test-alt-function"),
+      .name = IREE_SVL("test-alt-function"),
   };
   const loom_target_config_t target_config = {
-      /*.name=*/IREE_SVL("test.low.alt"),
-      /*.contract_set_key=*/IREE_SVL("test.low.alt"),
+      .name = IREE_SVL("test.low.alt"),
+      .contract_set_key = IREE_SVL("test.low.alt"),
   };
   const loom_target_bundle_t target_bundle = {
-      /*.name=*/IREE_SVL("test-alt"),
-      /*.snapshot=*/&target_snapshot,
-      /*.export_plan=*/&target_export_plan,
-      /*.config=*/&target_config,
+      .name = IREE_SVL("test-alt"),
+      .snapshot = &target_snapshot,
+      .export_plan = &target_export_plan,
+      .config = &target_config,
   };
   loom_target_facts_t target_facts = {};
   loom_target_facts_builder_initialize(&loom_test_target_fact_type,
@@ -1082,8 +1089,8 @@ TEST_F(LowLowerPassTest, InlineRetainsCalleeWithImmutableFunctionVersion) {
       &helper_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
 
   IREE_ASSERT_OK(RunInlineCallables(module.get(), &function_versions,
@@ -1126,11 +1133,12 @@ TEST_F(LowLowerPassTest, LowCallPolicyIsSelectedPerCallerProvider) {
       "  low.return %result : reg<test.i32>\n"
       "}\n"));
 
-  loom_target_provider_t require_inline_provider = {};
-  require_inline_provider.select_call_policy =
-      loom_target_select_call_policy_require_inline;
-  loom_target_provider_t direct_provider = {};
-  direct_provider.select_call_policy = loom_target_select_call_policy_direct;
+  loom_target_provider_t require_inline_provider = {
+      .select_call_policy = loom_target_select_call_policy_require_inline,
+  };
+  loom_target_provider_t direct_provider = {
+      .select_call_policy = loom_target_select_call_policy_direct,
+  };
 
   const loom_symbol_ref_t required_caller_ref =
       FindSymbolRef(module.get(), IREE_SV("required_caller"));
@@ -1153,8 +1161,8 @@ TEST_F(LowLowerPassTest, LowCallPolicyIsSelectedPerCallerProvider) {
       &direct_caller_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
 
   IREE_ASSERT_OK(RunInlineCallables(module.get(), &function_versions,
@@ -1195,8 +1203,9 @@ TEST_F(LowLowerPassTest, CallPolicyDistinguishesSemanticAndLowStages) {
               "  low.return %result : reg<test.i32>\n"
               "}\n"));
 
-  loom_target_provider_t provider = {};
-  provider.select_call_policy = RequireInlineSemanticCalls;
+  loom_target_provider_t provider = {
+      .select_call_policy = RequireInlineSemanticCalls,
+  };
 
   const loom_symbol_ref_t source_caller_ref =
       FindSymbolRef(module.get(), IREE_SV("source_caller"));
@@ -1219,8 +1228,8 @@ TEST_F(LowLowerPassTest, CallPolicyDistinguishesSemanticAndLowStages) {
       &low_caller_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
 
   IREE_ASSERT_OK(RunInlineCallables(module.get(), &function_versions,

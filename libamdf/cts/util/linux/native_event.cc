@@ -52,9 +52,10 @@ amdf_native_event_type_t NativeEventType() {
 }
 
 ::testing::AssertionResult WaitNativeEvent(const amdf_native_event_t& event) {
-  struct pollfd poll_event = {};
-  poll_event.fd = static_cast<int>(event.payload.file_descriptor);
-  poll_event.events = POLLIN;
+  struct pollfd poll_event = {
+      .fd = static_cast<int>(event.payload.file_descriptor),
+      .events = POLLIN,
+  };
   int result;
   do {
     result = poll(&poll_event, 1, -1);

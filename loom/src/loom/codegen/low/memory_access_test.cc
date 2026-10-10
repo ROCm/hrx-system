@@ -19,44 +19,44 @@ namespace {
 static loom_low_memory_access_summary_t MakeStridedSummary(
     uint32_t alias_root_id, uint64_t stride_bytes, uint64_t begin_bytes,
     uint64_t end_bytes) {
-  return (loom_low_memory_access_summary_t){
-      /*.memory_space=*/LOOM_LOW_MEMORY_SPACE_WORKGROUP,
-      /*.source_flags=*/0,
-      /*.alias_root_id=*/alias_root_id,
-      /*.alias_group_id=*/LOOM_LOW_MEMORY_ALIAS_ID_NONE,
-      /*.precision_flags=*/LOOM_LOW_MEMORY_ACCESS_PRECISION_SPACE |
-          LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT |
-          LOOM_LOW_MEMORY_ACCESS_PRECISION_STRIDED_INTERVAL,
-      /*.strided_interval=*/
-      {
-          /*.stride_bytes=*/stride_bytes,
-          /*.begin_bytes=*/begin_bytes,
-          /*.end_bytes=*/end_bytes,
-      },
+  return loom_low_memory_access_summary_t{
+      .memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP,
+      .source_flags = 0,
+      .alias_root_id = alias_root_id,
+      .alias_group_id = LOOM_LOW_MEMORY_ALIAS_ID_NONE,
+      .precision_flags = LOOM_LOW_MEMORY_ACCESS_PRECISION_SPACE |
+                         LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT |
+                         LOOM_LOW_MEMORY_ACCESS_PRECISION_STRIDED_INTERVAL,
+      .strided_interval =
+          {
+              .stride_bytes = stride_bytes,
+              .begin_bytes = begin_bytes,
+              .end_bytes = end_bytes,
+          },
   };
 }
 
 static loom_low_memory_access_summary_t MakeIntervalSummary(
     loom_low_byte_interval_t* interval, uint32_t alias_root_id,
     int64_t begin_bytes, int64_t end_bytes) {
-  *interval = (loom_low_byte_interval_t){
-      /*.begin_facts=*/loom_value_facts_make(begin_bytes, begin_bytes, 1),
-      /*.end_facts=*/loom_value_facts_make(end_bytes, end_bytes, 1),
-      /*.begin_expr_id=*/LOOM_LOW_MEMORY_EXPR_ID_NONE,
-      /*.end_expr_id=*/LOOM_LOW_MEMORY_EXPR_ID_NONE,
-      /*.precision_flags=*/LOOM_LOW_BYTE_INTERVAL_PRECISION_BEGIN_RANGE |
-          LOOM_LOW_BYTE_INTERVAL_PRECISION_END_RANGE,
+  *interval = loom_low_byte_interval_t{
+      .begin_facts = loom_value_facts_make(begin_bytes, begin_bytes, 1),
+      .end_facts = loom_value_facts_make(end_bytes, end_bytes, 1),
+      .begin_expr_id = LOOM_LOW_MEMORY_EXPR_ID_NONE,
+      .end_expr_id = LOOM_LOW_MEMORY_EXPR_ID_NONE,
+      .precision_flags = LOOM_LOW_BYTE_INTERVAL_PRECISION_BEGIN_RANGE |
+                         LOOM_LOW_BYTE_INTERVAL_PRECISION_END_RANGE,
   };
-  return (loom_low_memory_access_summary_t){
-      /*.memory_space=*/LOOM_LOW_MEMORY_SPACE_WORKGROUP,
-      /*.source_flags=*/0,
-      /*.alias_root_id=*/alias_root_id,
-      /*.alias_group_id=*/LOOM_LOW_MEMORY_ALIAS_ID_NONE,
-      /*.precision_flags=*/LOOM_LOW_MEMORY_ACCESS_PRECISION_SPACE |
-          LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT |
-          LOOM_LOW_MEMORY_ACCESS_PRECISION_INTERVAL,
-      /*.strided_interval=*/{},
-      /*.byte_interval=*/interval,
+  return loom_low_memory_access_summary_t{
+      .memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP,
+      .source_flags = 0,
+      .alias_root_id = alias_root_id,
+      .alias_group_id = LOOM_LOW_MEMORY_ALIAS_ID_NONE,
+      .precision_flags = LOOM_LOW_MEMORY_ACCESS_PRECISION_SPACE |
+                         LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT |
+                         LOOM_LOW_MEMORY_ACCESS_PRECISION_INTERVAL,
+      .strided_interval = {},
+      .byte_interval = interval,
   };
 }
 
@@ -310,12 +310,16 @@ TEST(MemoryAccessTest, AffinePingPongBanksShareOneParityIdentity) {
   constexpr loom_value_id_t kParityValue = 17;
   const int scope = 0;
   const loom_symbolic_term_t terms[2] = {
-      {/*.coefficient=*/kStageBytes,
-       /*.value_id=*/kParityValue,
-       /*.relation_value_id=*/kParityValue},
-      {/*.coefficient=*/-kStageBytes,
-       /*.value_id=*/kParityValue,
-       /*.relation_value_id=*/kParityValue},
+      {
+          .coefficient = kStageBytes,
+          .value_id = kParityValue,
+          .relation_value_id = kParityValue,
+      },
+      {
+          .coefficient = -kStageBytes,
+          .value_id = kParityValue,
+          .relation_value_id = kParityValue,
+      },
   };
   loom_low_memory_relative_interval_t intervals[2] = {};
   loom_low_memory_access_summary_t accesses[2] = {};
@@ -346,12 +350,8 @@ TEST(MemoryAccessTest, AffinePingPongBanksRequireTheSameParityIdentity) {
   constexpr int64_t kStageBytes = 34048;
   const int scope = 0;
   const loom_symbolic_term_t terms[2] = {
-      {/*.coefficient=*/kStageBytes,
-       /*.value_id=*/17,
-       /*.relation_value_id=*/17},
-      {/*.coefficient=*/-kStageBytes,
-       /*.value_id=*/18,
-       /*.relation_value_id=*/18},
+      {.coefficient = kStageBytes, .value_id = 17, .relation_value_id = 17},
+      {.coefficient = -kStageBytes, .value_id = 18, .relation_value_id = 18},
   };
   loom_low_memory_relative_interval_t intervals[2] = {};
   loom_low_memory_access_summary_t accesses[2] = {};
@@ -406,23 +406,24 @@ TEST_F(MemoryAccessMapTest,
   IREE_ASSERT_OK(loom_low_memory_access_map_create(&target_arena_, &target));
   loom_op_t packets[4] = {};
   const loom_symbolic_term_t term = {4, 7, 7};
-  loom_symbolic_congruence_t periodic = {};
-  periodic.modulus = 64;
+  loom_symbolic_congruence_t periodic = {.modulus = 64};
   periodic.expression.terms = &term;
   periodic.expression.term_count = 1;
   periodic.expression.flags = LOOM_SYMBOLIC_EXPR_FLAG_LINEAR;
-  loom_low_memory_relative_interval_t interval = {};
-  interval.scope = source;
-  interval.storage_id = 2;
-  interval.disjoint_storage_ordinal = 3;
-  interval.origin = periodic.expression;
+  loom_low_memory_relative_interval_t interval = {
+      .scope = source,
+      .storage_id = 2,
+      .disjoint_storage_ordinal = 3,
+      .origin = periodic.expression,
+  };
   interval.origin.facts = loom_value_facts_unknown();
   interval.origin.congruence = &periodic;
   interval.upper = 16;
-  loom_low_memory_access_summary_t access = {};
-  access.memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP;
-  access.source_flags = LOOM_LOW_MEMORY_ACCESS_SOURCE_FLAG_ATOMIC_OBSERVATION;
-  access.relative_interval = &interval;
+  loom_low_memory_access_summary_t access = {
+      .memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP,
+      .source_flags = LOOM_LOW_MEMORY_ACCESS_SOURCE_FLAG_ATOMIC_OBSERVATION,
+      .relative_interval = &interval,
+  };
   IREE_ASSERT_OK(
       loom_low_memory_access_map_insert(source, &packets[0], 0, &access));
   interval.lower = 16;

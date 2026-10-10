@@ -107,8 +107,7 @@ check.scenario public @paired configure[2](%configuration: index, %configuration
   check.return
 }
 )";
-    loom_text_parse_options_t options = {};
-    options.max_errors = 20;
+    loom_text_parse_options_t options = {.max_errors = 20};
     loom_module_t* module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(iree_make_cstring_view(source),
                                    IREE_SV("scenario_values_test.loom"),
@@ -141,8 +140,7 @@ check.scenario public @paired configure[2](%configuration: index, %configuration
 
   static void AssignI32(loom_testbench_value_table_t* table,
                         loom_value_id_t value_id, int32_t payload) {
-    loom_testbench_value_t value = {};
-    value.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR;
+    loom_testbench_value_t value = {.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR};
     value.scalar.kind = IREE_TOOLING_VALUE_KIND_I32;
     value.scalar.storage.i32 = payload;
     IREE_ASSERT_OK(

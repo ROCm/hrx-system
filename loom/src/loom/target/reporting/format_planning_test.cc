@@ -73,48 +73,51 @@ TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
       &report, LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_LOW_CONCAT,
       /*packet_count=*/2, /*unit_count=*/8);
 
-  loom_target_compile_report_pressure_row_t pressure = {};
-  pressure.function_name = IREE_SVL("branchy");
-  pressure.register_class = IREE_SVL("amdgpu.vgpr");
-  pressure.type_kind = LOOM_TYPE_REGISTER;
-  pressure.element_type = LOOM_SCALAR_TYPE_I32;
-  pressure.peak_live_units = 96;
-  pressure.peak_live_values = 16;
-  pressure.peak_point = 4;
-  pressure.peak_block_name = IREE_SVL("entry");
-  pressure.peak_operation_name = IREE_SVL("low.op<amdgpu.v_add_u32>");
+  loom_target_compile_report_pressure_row_t pressure = {
+      .function_name = IREE_SVL("branchy"),
+      .register_class = IREE_SVL("amdgpu.vgpr"),
+      .type_kind = LOOM_TYPE_REGISTER,
+      .element_type = LOOM_SCALAR_TYPE_I32,
+      .peak_live_units = 96,
+      .peak_live_values = 16,
+      .peak_point = 4,
+      .peak_block_name = IREE_SVL("entry"),
+      .peak_operation_name = IREE_SVL("low.op<amdgpu.v_add_u32>"),
+  };
   IREE_ASSERT_OK(
       loom_target_compile_report_record_pressure_row(&report, &pressure));
 
-  loom_target_compile_report_pressure_origin_row_t origin = {};
-  origin.function_name = IREE_SVL("branchy");
-  origin.register_class = pressure.register_class;
-  origin.type_kind = LOOM_TYPE_REGISTER;
-  origin.element_type = LOOM_SCALAR_TYPE_I32;
-  origin.peak_point = 4;
-  origin.peak_block_name = IREE_SVL("entry");
-  origin.peak_operation_name = pressure.peak_operation_name;
-  origin.origin_kind = LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_DOT;
-  origin.origin_operation_name = IREE_SVL("low.op<amdgpu.v_dot4_i32_i8>");
-  origin.semantic_tag = IREE_SVL("dot.i32.i8");
-  origin.sample_value_name = IREE_SVL("acc");
-  origin.live_units = 64;
-  origin.live_values = 8;
+  loom_target_compile_report_pressure_origin_row_t origin = {
+      .function_name = IREE_SVL("branchy"),
+      .register_class = pressure.register_class,
+      .type_kind = LOOM_TYPE_REGISTER,
+      .element_type = LOOM_SCALAR_TYPE_I32,
+      .peak_point = 4,
+      .peak_block_name = IREE_SVL("entry"),
+      .peak_operation_name = pressure.peak_operation_name,
+      .origin_kind = LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_DOT,
+      .origin_operation_name = IREE_SVL("low.op<amdgpu.v_dot4_i32_i8>"),
+      .semantic_tag = IREE_SVL("dot.i32.i8"),
+      .sample_value_name = IREE_SVL("acc"),
+      .live_units = 64,
+      .live_values = 8,
+  };
   IREE_ASSERT_OK(
       loom_target_compile_report_record_pressure_origin_row(&report, &origin));
 
-  loom_target_compile_report_schedule_band_row_t band = {};
-  band.flags = LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX;
-  band.function_name = IREE_SVL("branchy");
-  band.block_name = IREE_SVL("body");
-  band.block_index = 2;
-  band.first_packet_index = 17;
-  band.first_scheduled_ordinal = 5;
-  band.node_count = 4;
-  band.origin_kind = LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_LOCAL_MEMORY;
-  band.origin_operation_name = IREE_SVL("low.op<amdgpu.ds_read2_b32>");
-  band.semantic_tag = IREE_SVL("memory.workgroup.load2.u32");
-  band.sample_value_name = IREE_SVL("tile");
+  loom_target_compile_report_schedule_band_row_t band = {
+      .flags = LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX,
+      .function_name = IREE_SVL("branchy"),
+      .block_name = IREE_SVL("body"),
+      .block_index = 2,
+      .first_packet_index = 17,
+      .first_scheduled_ordinal = 5,
+      .node_count = 4,
+      .origin_kind = LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_LOCAL_MEMORY,
+      .origin_operation_name = IREE_SVL("low.op<amdgpu.ds_read2_b32>"),
+      .semantic_tag = IREE_SVL("memory.workgroup.load2.u32"),
+      .sample_value_name = IREE_SVL("tile"),
+  };
   band.static_instruction_mix.descriptor_count = 4;
   band.static_instruction_mix.local_memory_count = 4;
   band.dynamic_instruction_mix.descriptor_count = 8;
@@ -124,19 +127,20 @@ TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
   IREE_ASSERT_OK(
       loom_target_compile_report_record_schedule_band_row(&report, &band));
 
-  loom_target_compile_report_schedule_band_summary_row_t band_summary = {};
-  band_summary.flags = band.flags;
-  band_summary.function_name = band.function_name;
-  band_summary.block_name = band.block_name;
-  band_summary.block_index = band.block_index;
-  band_summary.first_packet_index = band.first_packet_index;
-  band_summary.band_count = 3;
-  band_summary.node_count = 12;
-  band_summary.max_band_node_count = 4;
-  band_summary.origin_kind = band.origin_kind;
-  band_summary.origin_operation_name = band.origin_operation_name;
-  band_summary.semantic_tag = band.semantic_tag;
-  band_summary.sample_value_name = band.sample_value_name;
+  loom_target_compile_report_schedule_band_summary_row_t band_summary = {
+      .flags = band.flags,
+      .function_name = band.function_name,
+      .block_name = band.block_name,
+      .block_index = band.block_index,
+      .first_packet_index = band.first_packet_index,
+      .band_count = 3,
+      .node_count = 12,
+      .max_band_node_count = 4,
+      .origin_kind = band.origin_kind,
+      .origin_operation_name = band.origin_operation_name,
+      .semantic_tag = band.semantic_tag,
+      .sample_value_name = band.sample_value_name,
+  };
   band_summary.static_instruction_mix.descriptor_count = 12;
   band_summary.static_instruction_mix.local_memory_count = 12;
   band_summary.dynamic_instruction_mix.descriptor_count = 24;
@@ -146,80 +150,82 @@ TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
   IREE_ASSERT_OK(loom_target_compile_report_record_schedule_band_summary_row(
       &report, &band_summary));
 
-  loom_target_compile_report_spill_row_t spill = {};
-  spill.kind = LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_PLANNED;
-  spill.function_name = IREE_SVL("branchy");
-  spill.value_name = IREE_SVL("rhs");
-  spill.register_class = IREE_SVL("amdgpu.vgpr");
-  spill.type_kind = LOOM_TYPE_REGISTER;
-  spill.element_type = LOOM_SCALAR_TYPE_I32;
-  spill.origin_kind = LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_DOT;
-  spill.origin_operation_name = origin.origin_operation_name;
-  spill.semantic_tag = origin.semantic_tag;
-  spill.assignment_index = 2;
-  spill.slot_index = 1;
-  spill.slot_space = IREE_SVL("stack");
-  spill.byte_size = 4;
-  spill.byte_alignment = 4;
-  spill.store_count = 1;
-  spill.store_bytes = 4;
-  spill.reload_count = 2;
-  spill.reload_bytes = 8;
+  loom_target_compile_report_spill_row_t spill = {
+      .kind = LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_PLANNED,
+      .function_name = IREE_SVL("branchy"),
+      .value_name = IREE_SVL("rhs"),
+      .register_class = IREE_SVL("amdgpu.vgpr"),
+      .type_kind = LOOM_TYPE_REGISTER,
+      .element_type = LOOM_SCALAR_TYPE_I32,
+      .origin_kind = LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_DOT,
+      .origin_operation_name = origin.origin_operation_name,
+      .semantic_tag = origin.semantic_tag,
+      .assignment_index = 2,
+      .slot_index = 1,
+      .slot_space = IREE_SVL("stack"),
+      .byte_size = 4,
+      .byte_alignment = 4,
+      .store_count = 1,
+      .store_bytes = 4,
+      .reload_count = 2,
+      .reload_bytes = 8,
+  };
   IREE_ASSERT_OK(loom_target_compile_report_record_spill_row(&report, &spill));
 
-  loom_target_compile_report_allocation_failure_row_t failure = {};
-  failure.function_name = IREE_SVL("branchy");
-  failure.value_name = IREE_SVL("blocked");
-  failure.register_class = IREE_SVL("test.scc");
-  failure.type_kind = LOOM_TYPE_REGISTER;
-  failure.element_type = LOOM_SCALAR_TYPE_INDEX;
-  failure.failure_code = IREE_SVL("unspillable-register-exhausted");
-  failure.blocking_kind =
-      LOOM_TARGET_COMPILE_REPORT_ALLOCATION_FAILURE_BLOCKING_ACTIVE_ASSIGNMENT;
-  failure.origin_operation_name = IREE_SVL("low.return");
-  failure.origin_block_name = IREE_SVL("entry");
-  failure.start_point = 2;
-  failure.end_point = 5;
-  failure.required_unit_count = 1;
-  failure.budget_units = 1;
-  failure.peak_live_units = 2;
-  failure.location_kind = IREE_SVL("physical_register");
-  failure.location_count = 1;
-  failure.conflict_value_name = IREE_SVL("leader");
-  failure.conflict_start_point = 0;
-  failure.conflict_end_point = 5;
+  loom_target_compile_report_allocation_failure_row_t failure = {
+      .function_name = IREE_SVL("branchy"),
+      .value_name = IREE_SVL("blocked"),
+      .register_class = IREE_SVL("test.scc"),
+      .type_kind = LOOM_TYPE_REGISTER,
+      .element_type = LOOM_SCALAR_TYPE_INDEX,
+      .failure_code = IREE_SVL("unspillable-register-exhausted"),
+      .blocking_kind =
+          LOOM_TARGET_COMPILE_REPORT_ALLOCATION_FAILURE_BLOCKING_ACTIVE_ASSIGNMENT,
+      .origin_operation_name = IREE_SVL("low.return"),
+      .origin_block_name = IREE_SVL("entry"),
+      .start_point = 2,
+      .end_point = 5,
+      .required_unit_count = 1,
+      .budget_units = 1,
+      .peak_live_units = 2,
+      .location_kind = IREE_SVL("physical_register"),
+      .location_count = 1,
+      .conflict_value_name = IREE_SVL("leader"),
+      .conflict_start_point = 0,
+      .conflict_end_point = 5,
+  };
   IREE_ASSERT_OK(loom_target_compile_report_record_allocation_failure_row(
       &report, &failure));
 
-  loom_target_compile_report_allocation_high_water_row_t high_water = {};
-  high_water.function_name = IREE_SVL("branchy");
-  high_water.value_name = IREE_SVL("rhs_window");
-  high_water.register_class = IREE_SVL("amdgpu.vgpr");
-  high_water.type_kind = LOOM_TYPE_REGISTER;
-  high_water.element_type = LOOM_SCALAR_TYPE_I32;
-  high_water.assignment_index = 5;
-  high_water.origin_operation_name = IREE_SVL("low.op<amdgpu.ds_load_b128>");
-  high_water.origin_kind =
-      LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_LOCAL_MEMORY;
-  high_water.semantic_tag = IREE_SVL("memory.workgroup.load.u128");
-  high_water.start_point = 17;
-  high_water.end_point = 24;
-  high_water.required_unit_count = 4;
-  high_water.location_kind = IREE_SVL("physical_register");
-  high_water.location_base = 248;
-  high_water.location_count = 4;
-  high_water.high_water_units = 252;
-  high_water.lower_free_unit_count = 13;
-  high_water.lower_largest_free_run_unit_count = 6;
-  high_water.active_assignment_blocker_count = 47;
-  high_water.active_assignment_blocker_units = 244;
+  loom_target_compile_report_allocation_high_water_row_t high_water = {
+      .function_name = IREE_SVL("branchy"),
+      .value_name = IREE_SVL("rhs_window"),
+      .register_class = IREE_SVL("amdgpu.vgpr"),
+      .type_kind = LOOM_TYPE_REGISTER,
+      .element_type = LOOM_SCALAR_TYPE_I32,
+      .assignment_index = 5,
+      .origin_operation_name = IREE_SVL("low.op<amdgpu.ds_load_b128>"),
+      .origin_kind = LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_LOCAL_MEMORY,
+      .semantic_tag = IREE_SVL("memory.workgroup.load.u128"),
+      .start_point = 17,
+      .end_point = 24,
+      .required_unit_count = 4,
+      .location_kind = IREE_SVL("physical_register"),
+      .location_base = 248,
+      .location_count = 4,
+      .high_water_units = 252,
+      .lower_free_unit_count = 13,
+      .lower_largest_free_run_unit_count = 6,
+      .active_assignment_blocker_count = 47,
+      .active_assignment_blocker_units = 244,
+  };
   IREE_ASSERT_OK(loom_target_compile_report_record_allocation_high_water_row(
       &report, &high_water));
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_text(&report, &options, &builder));
@@ -309,22 +315,24 @@ TEST(CompileReportFormatTest, FormatsWaitPlanningRows) {
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   report.requested_detail_flags = LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN;
 
-  loom_target_compile_report_wait_plan_t wait_plan = {};
-  wait_plan.action_count = 5;
-  wait_plan.explicit_action_count = 1;
-  wait_plan.planned_action_count = 4;
-  wait_plan.full_drain_count = 2;
-  wait_plan.partial_wait_count = 3;
-  wait_plan.drained_count = 6;
-  wait_plan.max_drained_count = 4;
-  wait_plan.max_outstanding_before = 6;
-  wait_plan.max_full_drain_outstanding_before = 6;
+  loom_target_compile_report_wait_plan_t wait_plan = {
+      .action_count = 5,
+      .explicit_action_count = 1,
+      .planned_action_count = 4,
+      .full_drain_count = 2,
+      .partial_wait_count = 3,
+      .drained_count = 6,
+      .max_drained_count = 4,
+      .max_outstanding_before = 6,
+      .max_full_drain_outstanding_before = 6,
+  };
   loom_target_compile_report_record_wait_plan(&report, &wait_plan);
 
-  loom_target_compile_report_wait_counter_row_t counter = {};
-  counter.function_name = IREE_SVL("branchy");
-  counter.counter_name = IREE_SVL("vmem_load");
-  counter.counter_id = 1;
+  loom_target_compile_report_wait_counter_row_t counter = {
+      .function_name = IREE_SVL("branchy"),
+      .counter_name = IREE_SVL("vmem_load"),
+      .counter_id = 1,
+  };
   counter.summary.action_count = 3;
   counter.summary.planned_action_count = 3;
   counter.summary.full_drain_count = 1;
@@ -336,12 +344,13 @@ TEST(CompileReportFormatTest, FormatsWaitPlanningRows) {
   IREE_ASSERT_OK(
       loom_target_compile_report_record_wait_counter_row(&report, &counter));
 
-  loom_target_compile_report_wait_reason_summary_row_t reason = {};
-  reason.function_name = counter.function_name;
-  reason.counter_name = counter.counter_name;
-  reason.reason_name = IREE_SVL("amdgpu.ssa_use");
-  reason.counter_id = 1;
-  reason.reason_id = 2;
+  loom_target_compile_report_wait_reason_summary_row_t reason = {
+      .function_name = counter.function_name,
+      .counter_name = counter.counter_name,
+      .reason_name = IREE_SVL("amdgpu.ssa_use"),
+      .counter_id = 1,
+      .reason_id = 2,
+  };
   reason.summary.action_count = 1;
   reason.summary.planned_action_count = 1;
   reason.summary.partial_wait_count = 1;
@@ -351,31 +360,32 @@ TEST(CompileReportFormatTest, FormatsWaitPlanningRows) {
   IREE_ASSERT_OK(loom_target_compile_report_record_wait_reason_summary_row(
       &report, &reason));
 
-  loom_target_compile_report_wait_action_row_t action = {};
-  action.function_name = counter.function_name;
-  action.counter_name = counter.counter_name;
-  action.action_name = IREE_SVL("planned");
-  action.reason_name = reason.reason_name;
-  action.counter_id = 1;
-  action.action_id = 2;
-  action.reason_id = 2;
-  action.block_index = 1;
-  action.node_index = 42;
-  action.scheduled_ordinal = 17;
-  action.producer_node = 8;
-  action.producer_scheduled_ordinal = 3;
-  action.producer_operation_name = IREE_SVL("low.op<amdgpu.global_load_b32>");
-  action.producer_descriptor_key = IREE_SVL("amdgpu.global_load_b32");
-  action.producer_semantic_tag = IREE_SVL("memory.load.u32");
-  action.consumer_node = 42;
-  action.consumer_scheduled_ordinal = 17;
-  action.consumer_operation_name = IREE_SVL("low.op<amdgpu.v_add_u32>");
-  action.consumer_descriptor_key = IREE_SVL("amdgpu.v_add_u32");
-  action.consumer_semantic_tag = IREE_SVL("vector.add.i32");
-  action.target_count = 2;
-  action.outstanding_before = 6;
-  action.outstanding_after = 2;
-  action.drained_count = 4;
+  loom_target_compile_report_wait_action_row_t action = {
+      .function_name = counter.function_name,
+      .counter_name = counter.counter_name,
+      .action_name = IREE_SVL("planned"),
+      .reason_name = reason.reason_name,
+      .counter_id = 1,
+      .action_id = 2,
+      .reason_id = 2,
+      .block_index = 1,
+      .node_index = 42,
+      .scheduled_ordinal = 17,
+      .producer_node = 8,
+      .producer_scheduled_ordinal = 3,
+      .producer_operation_name = IREE_SVL("low.op<amdgpu.global_load_b32>"),
+      .producer_descriptor_key = IREE_SVL("amdgpu.global_load_b32"),
+      .producer_semantic_tag = IREE_SVL("memory.load.u32"),
+      .consumer_node = 42,
+      .consumer_scheduled_ordinal = 17,
+      .consumer_operation_name = IREE_SVL("low.op<amdgpu.v_add_u32>"),
+      .consumer_descriptor_key = IREE_SVL("amdgpu.v_add_u32"),
+      .consumer_semantic_tag = IREE_SVL("vector.add.i32"),
+      .target_count = 2,
+      .outstanding_before = 6,
+      .outstanding_after = 2,
+      .drained_count = 4,
+  };
   IREE_ASSERT_OK(
       loom_target_compile_report_record_wait_action_row(&report, &action));
 
@@ -408,7 +418,7 @@ TEST(CompileReportFormatTest, FormatsWaitPlanningRows) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   const loom_target_compile_report_format_options_t options = {
-      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_text(&report, &options, &builder));

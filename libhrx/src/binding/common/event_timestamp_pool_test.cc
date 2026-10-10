@@ -106,13 +106,13 @@ iree_status_t RecordingAllocatorAllocateBuffer(
 }
 
 const iree_hal_allocator_vtable_t kRecordingAllocatorVtable = {
-    /*.destroy=*/RecordingAllocatorDestroy,
-    /*.host_allocator=*/RecordingAllocatorHostAllocator,
-    /*.trim=*/nullptr,
-    /*.query_statistics=*/nullptr,
-    /*.query_memory_heaps=*/nullptr,
-    /*.query_buffer_compatibility=*/nullptr,
-    /*.allocate_buffer=*/RecordingAllocatorAllocateBuffer,
+    .destroy = RecordingAllocatorDestroy,
+    .host_allocator = RecordingAllocatorHostAllocator,
+    .trim = nullptr,
+    .query_statistics = nullptr,
+    .query_memory_heaps = nullptr,
+    .query_buffer_compatibility = nullptr,
+    .allocate_buffer = RecordingAllocatorAllocateBuffer,
 };
 
 // Retains |delegate|; the caller keeps its own reference to release.

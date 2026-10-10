@@ -28,8 +28,9 @@ iree_hal_queue_family_affinity_t QueueFamilyAffinity(iree_hal_queue_t* queue) {
 }
 
 iree_hal_buffer_params_t MakeAllocationParams(iree_hal_queue_t* queue) {
-  iree_hal_buffer_params_t params = {};
-  params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
+  iree_hal_buffer_params_t params = {
+      .type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE,
+  };
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
   params.queue_family_affinity = QueueFamilyAffinity(queue);
@@ -39,8 +40,8 @@ iree_hal_buffer_params_t MakeAllocationParams(iree_hal_queue_t* queue) {
 iree_hal_pool_reservation_request_t MakeRequest(iree_hal_queue_t* queue,
                                                 iree_device_size_t size) {
   return {
-      /*.params=*/MakeAllocationParams(queue),
-      /*.allocation_size=*/size,
+      .params = MakeAllocationParams(queue),
+      .allocation_size = size,
   };
 }
 
@@ -75,74 +76,74 @@ class SubspanSlabProvider : public iree_hal_slab_provider_t {
 };
 
 const iree_hal_slab_provider_vtable_t SubspanSlabProvider::vtable_ = {
-    /*.destroy=*/[](iree_hal_slab_provider_t* provider) {
-      delete Cast(provider);
-    },
-    /*.acquire_slab=*/
-    [](iree_hal_slab_provider_t* provider, iree_device_size_t min_length,
-       iree_device_size_t min_alignment, iree_hal_slab_t* out_slab) {
-      return iree_hal_slab_provider_acquire_slab(
-          Cast(provider)->inner_, min_length, min_alignment, out_slab);
-    },
-    /*.release_slab=*/
-    [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab) {
-      iree_hal_slab_provider_release_slab(Cast(provider)->inner_, slab);
-    },
-    /*.wrap_buffer=*/
-    [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab,
-       iree_device_size_t slab_offset, iree_device_size_t allocation_size,
-       iree_hal_buffer_params_t params,
-       iree_hal_buffer_release_callback_t release_callback,
-       iree_hal_buffer_t** out_buffer) {
-      auto* self = Cast(provider);
-      Ref<iree_hal_buffer_t> backing;
-      IREE_RETURN_IF_ERROR(iree_hal_slab_provider_wrap_buffer(
-          self->inner_, slab, 0, slab->length, params,
-          iree_hal_buffer_release_callback_null(), backing.out()));
-      IREE_RETURN_IF_ERROR(iree_hal_subspan_buffer_create_with_callback(
-          backing, iree_hal_buffer_byte_offset(backing) + slab_offset,
-          allocation_size, release_callback, iree_allocator_system(),
-          out_buffer));
-      self->views.push_back(*out_buffer);
-      return iree_ok_status();
-    },
-    /*.validate_asan_options=*/
-    [](const iree_hal_slab_provider_t* provider,
-       const iree_hal_asan_pool_options_t* options) {
-      return iree_hal_slab_provider_validate_asan_options(
-          Cast(provider)->inner_, options);
-    },
-    /*.advise_asan_range=*/
-    [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab,
-       iree_device_size_t backing_offset,
-       iree_hal_asan_range_advice_flags_t flags,
-       const iree_hal_asan_allocation_layout_t* layout) {
-      iree_hal_slab_provider_advise_asan_range(Cast(provider)->inner_, slab,
-                                               backing_offset, flags, layout);
-    },
-    /*.prefault=*/
-    [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab,
-       iree_device_size_t offset, iree_device_size_t length) {
-      iree_hal_slab_provider_prefault(Cast(provider)->inner_, slab, offset,
-                                      length);
-    },
-    /*.trim=*/
-    [](iree_hal_slab_provider_t* provider, iree_hal_pool_trim_flags_t flags) {
-      iree_hal_slab_provider_trim(Cast(provider)->inner_, flags);
-    },
-    /*.query_stats=*/
-    [](const iree_hal_slab_provider_t* provider,
-       iree_hal_slab_provider_visited_set_t* visited,
-       iree_hal_slab_provider_stats_t* out_stats) {
-      iree_hal_slab_provider_query_stats(Cast(provider)->inner_, visited,
-                                         out_stats);
-    },
-    /*.query_properties=*/
-    [](const iree_hal_slab_provider_t* provider,
-       iree_hal_slab_provider_properties_t* properties) {
-      iree_hal_slab_provider_query_properties(Cast(provider)->inner_,
-                                              properties);
-    },
+    .destroy =
+        [](iree_hal_slab_provider_t* provider) { delete Cast(provider); },
+    .acquire_slab =
+        [](iree_hal_slab_provider_t* provider, iree_device_size_t min_length,
+           iree_device_size_t min_alignment, iree_hal_slab_t* out_slab) {
+          return iree_hal_slab_provider_acquire_slab(
+              Cast(provider)->inner_, min_length, min_alignment, out_slab);
+        },
+    .release_slab =
+        [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab) {
+          iree_hal_slab_provider_release_slab(Cast(provider)->inner_, slab);
+        },
+    .wrap_buffer =
+        [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab,
+           iree_device_size_t slab_offset, iree_device_size_t allocation_size,
+           iree_hal_buffer_params_t params,
+           iree_hal_buffer_release_callback_t release_callback,
+           iree_hal_buffer_t** out_buffer) {
+          auto* self = Cast(provider);
+          Ref<iree_hal_buffer_t> backing;
+          IREE_RETURN_IF_ERROR(iree_hal_slab_provider_wrap_buffer(
+              self->inner_, slab, 0, slab->length, params,
+              iree_hal_buffer_release_callback_null(), backing.out()));
+          IREE_RETURN_IF_ERROR(iree_hal_subspan_buffer_create_with_callback(
+              backing, iree_hal_buffer_byte_offset(backing) + slab_offset,
+              allocation_size, release_callback, iree_allocator_system(),
+              out_buffer));
+          self->views.push_back(*out_buffer);
+          return iree_ok_status();
+        },
+    .validate_asan_options =
+        [](const iree_hal_slab_provider_t* provider,
+           const iree_hal_asan_pool_options_t* options) {
+          return iree_hal_slab_provider_validate_asan_options(
+              Cast(provider)->inner_, options);
+        },
+    .advise_asan_range =
+        [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab,
+           iree_device_size_t backing_offset,
+           iree_hal_asan_range_advice_flags_t flags,
+           const iree_hal_asan_allocation_layout_t* layout) {
+          iree_hal_slab_provider_advise_asan_range(
+              Cast(provider)->inner_, slab, backing_offset, flags, layout);
+        },
+    .prefault =
+        [](iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab,
+           iree_device_size_t offset, iree_device_size_t length) {
+          iree_hal_slab_provider_prefault(Cast(provider)->inner_, slab, offset,
+                                          length);
+        },
+    .trim =
+        [](iree_hal_slab_provider_t* provider,
+           iree_hal_pool_trim_flags_t flags) {
+          iree_hal_slab_provider_trim(Cast(provider)->inner_, flags);
+        },
+    .query_stats =
+        [](const iree_hal_slab_provider_t* provider,
+           iree_hal_slab_provider_visited_set_t* visited,
+           iree_hal_slab_provider_stats_t* out_stats) {
+          iree_hal_slab_provider_query_stats(Cast(provider)->inner_, visited,
+                                             out_stats);
+        },
+    .query_properties =
+        [](const iree_hal_slab_provider_t* provider,
+           iree_hal_slab_provider_properties_t* properties) {
+          iree_hal_slab_provider_query_properties(Cast(provider)->inner_,
+                                                  properties);
+        },
 };
 
 }  // namespace
@@ -172,8 +173,7 @@ class QueueAllocaTest : public CtsTestBase<> {
           IREE_STATUS_FAILED_PRECONDITION,
           "queue pool backend query returned an incomplete bundle");
     }
-    iree_hal_passthrough_pool_options_t options = {};
-    options.asan = backend.asan;
+    iree_hal_passthrough_pool_options_t options = {.asan = backend.asan};
     return iree_hal_passthrough_pool_create(
         options, backend.slab_provider, backend.notification,
         backend.frontier_tracker, backend.maintenance, iree_allocator_system(),
@@ -194,8 +194,9 @@ class QueueAllocaTest : public CtsTestBase<> {
     options.tlsf_options.alignment = IREE_HAL_MEMORY_TLSF_MIN_ALIGNMENT;
     options.tlsf_options.frontier_capacity = 2;
     options.asan = backend.asan;
-    iree_hal_passthrough_pool_options_t backing_options = {};
-    backing_options.epoch_query = backend.epoch_query;
+    iree_hal_passthrough_pool_options_t backing_options = {
+        .epoch_query = backend.epoch_query,
+    };
     iree_hal_pool_t* backing_pool = nullptr;
     IREE_RETURN_IF_ERROR(iree_hal_passthrough_pool_create(
         backing_options, backend.slab_provider, backend.notification,
@@ -218,11 +219,12 @@ class QueueAllocaTest : public CtsTestBase<> {
           IREE_STATUS_FAILED_PRECONDITION,
           "queue pool backend query returned an incomplete bundle");
     }
-    iree_hal_fixed_block_pool_options_t options = {};
-    options.block_size = block_size;
-    options.blocks_per_slab = block_count;
-    options.frontier_capacity = 2;
-    options.asan = backend.asan;
+    iree_hal_fixed_block_pool_options_t options = {
+        .block_size = block_size,
+        .blocks_per_slab = block_count,
+        .frontier_capacity = 2,
+        .asan = backend.asan,
+    };
     return CreateFiniteBlockPool(backend, options, iree_allocator_system(),
                                  out_backing_pool, out_pool);
   }
@@ -327,8 +329,9 @@ TEST_P(QueueAllocaTest, IndependentAllocatorsShareCachedNativeBacking) {
   // Both allocation policies can give and receive the same cached range.
   for (uint32_t policies = 0; policies < 4; ++policies) {
     SCOPED_TRACE(policies);
-    iree_hal_passthrough_pool_options_t native_options = {};
-    native_options.epoch_query = backend.epoch_query;
+    iree_hal_passthrough_pool_options_t native_options = {
+        .epoch_query = backend.epoch_query,
+    };
     Ref<iree_hal_pool_t> native;
     IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
         native_options, backend.slab_provider, backend.notification,
@@ -352,11 +355,12 @@ TEST_P(QueueAllocaTest, IndependentAllocatorsShareCachedNativeBacking) {
     for (uint32_t iteration = 0; iteration < 2; ++iteration) {
       auto& child = children[iteration];
       if (policies & (1u << iteration)) {
-        iree_hal_fixed_block_pool_options_t options = {};
-        options.block_size = 256;
-        options.blocks_per_slab = 16;
-        options.frontier_capacity = 2;
-        options.asan = backend.asan;
+        iree_hal_fixed_block_pool_options_t options = {
+            .block_size = 256,
+            .blocks_per_slab = 16,
+            .frontier_capacity = 2,
+            .asan = backend.asan,
+        };
         IREE_ASSERT_OK(iree_hal_fixed_block_pool_create(
             cache, &options, iree_allocator_system(), child.out()));
       } else {
@@ -435,11 +439,12 @@ TEST_P(QueueAllocaTest, BlockedSiblingResumesFromSharedCache) {
     Ref<iree_hal_pool_t> children[2];
     for (uint32_t i = 0; i < 2; ++i) {
       if (policies & (1u << i)) {
-        iree_hal_fixed_block_pool_options_t options = {};
-        options.block_size = 256;
-        options.blocks_per_slab = 16;
-        options.frontier_capacity = 2;
-        options.asan = backend.asan;
+        iree_hal_fixed_block_pool_options_t options = {
+            .block_size = 256,
+            .blocks_per_slab = 16,
+            .frontier_capacity = 2,
+            .asan = backend.asan,
+        };
         IREE_ASSERT_OK(iree_hal_fixed_block_pool_create(
             cache, &options, iree_allocator_system(), children[i].out()));
       } else {
@@ -523,11 +528,12 @@ TEST_P(QueueAllocaTest, MapsSubspanBackingInNativeCoordinates) {
     GTEST_SKIP() << "queue pool backing is not host visible";
   }
 
-  iree_hal_fixed_block_pool_options_t options = {};
-  options.block_size = 256;
-  options.blocks_per_slab = 2;
-  options.frontier_capacity = 2;
-  options.asan = backend.asan;
+  iree_hal_fixed_block_pool_options_t options = {
+      .block_size = 256,
+      .blocks_per_slab = 2,
+      .frontier_capacity = 2,
+      .asan = backend.asan,
+  };
   backend.slab_provider = provider.get();
   Ref<iree_hal_pool_t> backing_pool;
   Ref<iree_hal_pool_t> pool;
@@ -603,9 +609,10 @@ TEST_P(QueueAllocaTest, NestedBufferPoolsPreserveRangesAndOwnership) {
   Ref<iree_hal_buffer_t> source_view;
   IREE_ASSERT_OK(iree_hal_buffer_subspan(
       source, 256, 4096, iree_allocator_system(), source_view.out()));
-  iree_hal_fixed_block_pool_options_t block_options = {};
-  block_options.block_size = 512;
-  block_options.frontier_capacity = 2;
+  iree_hal_fixed_block_pool_options_t block_options = {
+      .block_size = 512,
+      .frontier_capacity = 2,
+  };
   Ref<iree_hal_pool_t> blocks;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         iree_hal_fixed_block_pool_create_from_buffer(

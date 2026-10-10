@@ -64,9 +64,11 @@ amdf_status_t Pm4SdmaTest::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
 
 void Pm4SdmaTest::SelectCreation(Backing& backing) {
   backing.attachment = {device_,
-                        {.access = backing.access,
-                         .flags = AMDF_MEMORY_FLAG_HOST_COHERENT |
-                                  AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
+                        {
+                            .access = backing.access,
+                            .flags = AMDF_MEMORY_FLAG_HOST_COHERENT |
+                                     AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+                        }};
   auto& creation = backing.creation;
   creation.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   creation.structure_size = sizeof(creation);
@@ -140,16 +142,18 @@ void Pm4SdmaTest::ResolvePairs(
   for (const Edge& edge : edges) {
     SCOPED_TRACE(edge.name);
     const Backing& backing = backings[edge.backing];
-    amdf_memory_pair_info_t pair = {};
-    pair.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-    pair.structure_size = sizeof(pair);
+    amdf_memory_pair_info_t pair = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+        .structure_size = sizeof(pair),
+    };
     if (query_kind == PairQuery::kProfile) {
       const auto& creation = backing.creation;
-      amdf_memory_profile_pair_query_t query = {};
-      query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
-      query.structure_size = sizeof(query);
-      query.memory_profile_ordinal = creation.memory_profile_ordinal;
-      query.required_flags = creation.required_flags;
+      amdf_memory_profile_pair_query_t query = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY,
+          .structure_size = sizeof(query),
+          .memory_profile_ordinal = creation.memory_profile_ordinal,
+          .required_flags = creation.required_flags,
+      };
       query.access_count = creation.access_count;
       query.accesses = creation.accesses;
       query.registered_host_cacheability =

@@ -42,10 +42,10 @@ class StdinRestorer {
 
 TEST(KFDStandaloneTest, GetClockCountersFailsForInvalidDescriptor) {
   iree_hal_amdgpu_kfd_clock_counters_t counters = {
-      /*.gpu_clock_counter=*/1,
-      /*.cpu_clock_counter=*/2,
-      /*.system_clock_counter=*/3,
-      /*.system_clock_freq=*/4,
+      .gpu_clock_counter = 1,
+      .cpu_clock_counter = 2,
+      .system_clock_counter = 3,
+      .system_clock_freq = 4,
   };
 
 #if defined(IREE_PLATFORM_LINUX)

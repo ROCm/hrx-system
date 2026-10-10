@@ -219,8 +219,7 @@ TEST_F(ModuleStringTest, CopiesCompleteBytesBeforeReturning) {
 }
 
 TEST_F(ModuleStringTest, HintsSizeBucketsWithoutReservingStringViews) {
-  loom_module_size_hints_t hints = {};
-  hints.string_count = 4096;
+  loom_module_size_hints_t hints = {.string_count = 4096};
   ASSERT_NO_FATAL_FAILURE(CreateModule(&hints));
   EXPECT_EQ(module_->strings.count, 1u);
   EXPECT_EQ(module_->strings.segments.segment_count, 1u);

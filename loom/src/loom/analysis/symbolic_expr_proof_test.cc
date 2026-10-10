@@ -84,8 +84,7 @@ static bool AppendConditionFacts(
 static loom_condition_integer_relation_t ValueRelation(
     loom_symbolic_integer_relation_t relation, loom_value_id_t left,
     loom_value_id_t right) {
-  loom_condition_integer_relation_t result = {};
-  result.relation = relation;
+  loom_condition_integer_relation_t result = {.relation = relation};
   result.left.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE;
   result.left.value_id = left;
   result.right.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE;
@@ -95,19 +94,18 @@ static loom_condition_integer_relation_t ValueRelation(
 
 static loom_condition_fact_set_t SingleRelationFacts(
     loom_condition_integer_relation_t* relation) {
-  loom_condition_fact_set_t facts = {};
-  facts.integer_relations = relation;
-  facts.integer_relation_count = 1;
-  facts.integer_relation_capacity = 1;
+  loom_condition_fact_set_t facts = {
+      .integer_relations = relation,
+      .integer_relation_count = 1,
+      .integer_relation_capacity = 1,
+  };
   return facts;
 }
 
 static loom_predicate_t ValuePredicate(loom_predicate_kind_t kind,
                                        loom_value_id_t left,
                                        loom_value_id_t right) {
-  loom_predicate_t predicate = {};
-  predicate.kind = kind;
-  predicate.arg_count = 2;
+  loom_predicate_t predicate = {.kind = kind, .arg_count = 2};
   predicate.arg_tags[0] = LOOM_PRED_ARG_VALUE;
   predicate.arg_tags[1] = LOOM_PRED_ARG_VALUE;
   predicate.args[0] = left;
@@ -119,24 +117,24 @@ static iree_status_t ProveSemanticallyEquivalentUpperBound(
     loom_symbolic_expr_context_t* context, loom_value_id_t relation_value,
     loom_value_id_t query_value, loom_symbolic_proof_result_t* out_result) {
   loom_condition_integer_relation_t relation = {
-      /*.relation=*/LOOM_SYMBOLIC_INTEGER_RELATION_LE,
-      /*.left=*/
-      {
-          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
-          /*.value_id=*/LOOM_VALUE_ID_INVALID,
-          /*.constant=*/0,
-      },
-      /*.right=*/
-      {
-          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-          /*.value_id=*/relation_value,
-          /*.constant=*/0,
-      },
+      .relation = LOOM_SYMBOLIC_INTEGER_RELATION_LE,
+      .left =
+          {
+              .kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+              .value_id = LOOM_VALUE_ID_INVALID,
+              .constant = 0,
+          },
+      .right =
+          {
+              .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+              .value_id = relation_value,
+              .constant = 0,
+          },
   };
   loom_condition_fact_set_t condition_facts = {
-      /*.integer_relations=*/&relation,
-      /*.integer_relation_count=*/1,
-      /*.integer_relation_capacity=*/1,
+      .integer_relations = &relation,
+      .integer_relation_count = 1,
+      .integer_relation_capacity = 1,
   };
   ScopedConditionFacts condition_scope(context, &condition_facts);
 
@@ -292,11 +290,11 @@ TEST_F(SymbolicExprTest, DifferencePreservesAssumedValue) {
   loom_value_id_t value = DefineIndexValue();
   loom_value_id_t other = DefineIndexValue();
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_LT,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{value, other},
+      .kind = LOOM_PREDICATE_LT,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {value, other},
   };
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_op_t* assume_op = nullptr;
@@ -361,11 +359,11 @@ TEST_F(SymbolicExprTest, AssumedValueRelationPredicatesProveRelations) {
   loom_value_id_t induction = DefineIndexValue();
   loom_value_id_t upper_bound = DefineIndexValue();
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_LT,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{induction, upper_bound},
+      .kind = LOOM_PREDICATE_LT,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {induction, upper_bound},
   };
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_op_t* assume_op = nullptr;
@@ -404,11 +402,11 @@ TEST_F(SymbolicExprTest, CheckedIdentityPredicateProvesDynamicExtent) {
   const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   const loom_type_t result_types[] = {index_type, index_type};
   const loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_LT,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{row, row_count},
+      .kind = LOOM_PREDICATE_LT,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {row, row_count},
   };
   loom_op_t* assertion_op = nullptr;
   IREE_ASSERT_OK(loom_sanitizer_assert_value_build(
@@ -437,11 +435,11 @@ TEST_F(SymbolicExprTest, CheckedIdentityNonStrictPredicateDoesNotProveExtent) {
   const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   const loom_type_t result_types[] = {index_type, index_type};
   const loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_LE,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{row, row_count},
+      .kind = LOOM_PREDICATE_LE,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {row, row_count},
   };
   loom_op_t* assertion_op = nullptr;
   IREE_ASSERT_OK(loom_sanitizer_assert_value_build(
@@ -467,11 +465,11 @@ TEST_F(SymbolicExprTest, ScaledStrictRelationProvesLessEqualWithUnitExtent) {
   loom_value_id_t induction = DefineIndexValue();
   loom_value_id_t upper_bound = DefineIndexValue();
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_LT,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{induction, upper_bound},
+      .kind = LOOM_PREDICATE_LT,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {induction, upper_bound},
   };
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_op_t* assume_op = nullptr;
@@ -550,21 +548,26 @@ TEST_F(SymbolicExprTest, AffineConditionProofsRespectRelationOrientation) {
       for (int orientation = 0; orientation < 2; ++orientation) {
         SCOPED_TRACE(orientation);
         loom_condition_integer_relation_t relation = {
-            /*.relation=*/test_case.relation,
-            /*.left=*/
-            {/*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-             /*.value_id=*/orientation == 0 ? loom_index_add_result(shifted_op)
-                                            : right},
-            /*.right=*/
-            {/*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-             /*.value_id=*/orientation == 0
-                 ? right
-                 : loom_index_add_result(shifted_op)},
+            .relation = test_case.relation,
+            .left =
+                {
+                    .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                    .value_id = orientation == 0
+                                    ? loom_index_add_result(shifted_op)
+                                    : right,
+                },
+            .right =
+                {
+                    .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                    .value_id = orientation == 0
+                                    ? right
+                                    : loom_index_add_result(shifted_op),
+                },
         };
         loom_condition_fact_set_t condition_facts = {
-            /*.integer_relations=*/&relation,
-            /*.integer_relation_count=*/1,
-            /*.integer_relation_capacity=*/1,
+            .integer_relations = &relation,
+            .integer_relation_count = 1,
+            .integer_relation_capacity = 1,
         };
         ScopedConditionFacts condition_scope(&expression_context_,
                                              &condition_facts);
@@ -622,17 +625,18 @@ TEST_F(SymbolicExprTest, EqualityMatchesOppositeSemanticProducerTerms) {
   const loom_value_id_t query_left = BuildScalarAndI(right_source, mask);
   const loom_value_id_t query_right = BuildScalarAndI(left_source, mask);
   loom_condition_integer_relation_t relation = {
-      /*.relation=*/LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
-      /*.left=*/
-      {/*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE, /*.value_id=*/left},
-      /*.right=*/
-      {/*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-       /*.value_id=*/right},
+      .relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
+      .left = {.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE, .value_id = left},
+      .right =
+          {
+              .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+              .value_id = right,
+          },
   };
   loom_condition_fact_set_t condition_facts = {
-      /*.integer_relations=*/&relation,
-      /*.integer_relation_count=*/1,
-      /*.integer_relation_capacity=*/1,
+      .integer_relations = &relation,
+      .integer_relation_count = 1,
+      .integer_relation_capacity = 1,
   };
   ScopedConditionFacts condition_scope(&expression_context_, &condition_facts);
   const int64_t scales[] = {-4, 4};
@@ -675,18 +679,22 @@ TEST_F(SymbolicExprTest, EqualityMultiplierOverflowDoesNotProveOrder) {
   for (int orientation = 0; orientation < 2; ++orientation) {
     SCOPED_TRACE(orientation);
     loom_condition_integer_relation_t relation = {
-        /*.relation=*/LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
-        /*.left=*/
-        {/*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-         /*.value_id=*/orientation == 0 ? left : right},
-        /*.right=*/
-        {/*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-         /*.value_id=*/orientation == 0 ? right : left},
+        .relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
+        .left =
+            {
+                .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                .value_id = orientation == 0 ? left : right,
+            },
+        .right =
+            {
+                .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                .value_id = orientation == 0 ? right : left,
+            },
     };
     loom_condition_fact_set_t condition_facts = {
-        /*.integer_relations=*/&relation,
-        /*.integer_relation_count=*/1,
-        /*.integer_relation_capacity=*/1,
+        .integer_relations = &relation,
+        .integer_relation_count = 1,
+        .integer_relation_capacity = 1,
     };
     ScopedConditionFacts condition_scope(&expression_context_,
                                          &condition_facts);
@@ -726,11 +734,11 @@ TEST_F(SymbolicExprTest, ShiftedStrictRelationProvesWideExtent) {
       LOOM_LOCATION_UNKNOWN, &last_valid_start_op));
   loom_value_id_t last_valid_start = loom_index_sub_result(last_valid_start_op);
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_LT,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{origin, last_valid_start},
+      .kind = LOOM_PREDICATE_LT,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {origin, last_valid_start},
   };
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_op_t* assume_op = nullptr;
@@ -766,11 +774,11 @@ TEST_F(SymbolicExprTest, AssumedRightValueRelationPredicatesAreSwapped) {
   loom_value_id_t induction = DefineIndexValue();
   loom_value_id_t upper_bound = DefineIndexValue();
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_GT,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{upper_bound, induction},
+      .kind = LOOM_PREDICATE_GT,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {upper_bound, induction},
   };
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_op_t* assume_op = nullptr;
@@ -791,11 +799,11 @@ TEST_F(SymbolicExprTest, ScalarAssumePredicatesProveRelations) {
   loom_value_id_t element = DefineI64Value();
   loom_value_id_t bound = DefineI64Value();
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_LE,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{element, bound},
+      .kind = LOOM_PREDICATE_LE,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {element, bound},
   };
   loom_type_t i64_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
   loom_op_t* assume_op = nullptr;
@@ -825,11 +833,11 @@ TEST_F(SymbolicExprTest, ProvesFlattenedAddressFromDynamicAxisBounds) {
 
   loom_value_id_t row_values[] = {row_source, row_count_source};
   loom_predicate_t row_predicate = {
-      /*.kind=*/LOOM_PREDICATE_LT,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{row_source, row_count_source, 0},
+      .kind = LOOM_PREDICATE_LT,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {row_source, row_count_source, 0},
   };
   loom_type_t row_result_types[] = {index_type, index_type};
   loom_op_t* row_assume_op = nullptr;
@@ -947,12 +955,12 @@ TEST_F(SymbolicExprTest, ProvesBoundsFromIdentityRangeEndpointFacts) {
   DefineFacts(lower, loom_value_facts_make(-128, -32, 1));
   DefineFacts(upper, loom_value_facts_make(32, 4096, 1));
   const loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_RANGE,
-      /*.arg_count=*/3,
-      /*.arg_tags=*/
-      {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{value, lower, upper},
+      .kind = LOOM_PREDICATE_RANGE,
+      .arg_count = 3,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                   LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {value, lower, upper},
   };
   const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_op_t* assume_op = nullptr;
@@ -981,12 +989,12 @@ TEST_F(SymbolicExprTest, ProvesBoundsFromIdentityRangeEndpointFacts) {
 TEST_F(SymbolicExprTest, ProvesLessEqualFromExpressionFactsAfterExpansion) {
   loom_value_id_t value_id = DefineIndexValue();
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_RANGE,
-      /*.arg_count=*/3,
-      /*.arg_tags=*/
-      {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST, LOOM_PRED_ARG_CONST},
-      /*.reserved=*/{},
-      /*.args=*/{value_id, 0, 10},
+      .kind = LOOM_PREDICATE_RANGE,
+      .arg_count = 3,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                   LOOM_PRED_ARG_CONST},
+      .reserved = {},
+      .args = {value_id, 0, 10},
   };
   loom_op_t* assume_op = nullptr;
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
@@ -1054,11 +1062,11 @@ TEST_F(SymbolicExprTest, ProvesAssumedIndexRemainderIsBelowDynamicDivisor) {
   loom_value_id_t remainder = loom_index_rem_result(remainder_op);
 
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_GE,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-      /*.reserved=*/{},
-      /*.args=*/{remainder, 0},
+      .kind = LOOM_PREDICATE_GE,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+      .reserved = {},
+      .args = {remainder, 0},
   };
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_op_t* assume_op = nullptr;
@@ -1482,11 +1490,11 @@ TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopLowerBound) {
   loom_value_id_t lower_bound = loom_scf_select_result(lower_bound_op);
 
   loom_predicate_t lower_bound_predicate = {
-      /*.kind=*/LOOM_PREDICATE_GE,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{raw_induction, lower_bound},
+      .kind = LOOM_PREDICATE_GE,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {raw_induction, lower_bound},
   };
   loom_op_t* assume_op = nullptr;
   IREE_ASSERT_OK(loom_index_assume_build(&builder_, &raw_induction, 1,
@@ -1676,29 +1684,29 @@ TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopDivBounds) {
   // the case proof below.
   loom_predicate_t tap_predicates[11] = {
       {
-          /*.kind=*/LOOM_PREDICATE_GE,
-          /*.arg_count=*/2,
-          /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-          /*.reserved=*/{},
-          /*.args=*/{raw_tap, loom_scf_select_result(lower_bound_op)},
+          .kind = LOOM_PREDICATE_GE,
+          .arg_count = 2,
+          .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+          .reserved = {},
+          .args = {raw_tap, loom_scf_select_result(lower_bound_op)},
       },
       {
-          /*.kind=*/LOOM_PREDICATE_LT,
-          /*.arg_count=*/2,
-          /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-          /*.reserved=*/{},
-          /*.args=*/{raw_tap, loom_scf_select_result(upper_bound_op)},
+          .kind = LOOM_PREDICATE_LT,
+          .arg_count = 2,
+          .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+          .reserved = {},
+          .args = {raw_tap, loom_scf_select_result(upper_bound_op)},
       },
   };
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(irrelevant_selects); ++i) {
     const loom_value_id_t selected =
         loom_scf_select_result(irrelevant_selects[i]);
-    tap_predicates[i + 2] = (loom_predicate_t){
-        /*.kind=*/LOOM_PREDICATE_EQ,
-        /*.arg_count=*/2,
-        /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-        /*.reserved=*/{},
-        /*.args=*/{selected, selected},
+    tap_predicates[i + 2] = loom_predicate_t{
+        .kind = LOOM_PREDICATE_EQ,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+        .reserved = {},
+        .args = {selected, selected},
     };
   }
   loom_op_t* assume_op = nullptr;

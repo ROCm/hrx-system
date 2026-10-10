@@ -26,12 +26,12 @@ namespace loom {
 namespace {
 
 static const loom_cleanup_special_value_policy_t kSpecialValuePolicy = {
-    /*.type_has_poison_materializer=*/loom_type_has_poison_materializer,
-    /*.materialize_poison=*/loom_poison_build,
-    /*.op_is_empty=*/loom_op_is_empty,
-    /*.type_has_empty_materializer=*/loom_type_has_empty_materializer,
-    /*.materialize_empty=*/loom_empty_build,
-    /*.materialize_constant=*/loom_constant_build,
+    .type_has_poison_materializer = loom_type_has_poison_materializer,
+    .materialize_poison = loom_poison_build,
+    .op_is_empty = loom_op_is_empty,
+    .type_has_empty_materializer = loom_type_has_empty_materializer,
+    .materialize_empty = loom_empty_build,
+    .materialize_constant = loom_constant_build,
 };
 
 class CanonicalizerTest : public ::testing::Test {
@@ -68,7 +68,7 @@ class CanonicalizerTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
     loom_op_t* func_op = NULL;
     IREE_ASSERT_OK(loom_test_func_build(&module_builder, 0, 0, 0, callee, NULL,
                                         0, NULL, 0, NULL, 0, NULL, 0,
@@ -125,9 +125,9 @@ class CanonicalizerTest : public ::testing::Test {
     IREE_RETURN_IF_ERROR(loom_module_intern_string(module_, name, &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_module_add_symbol(module_, name_id, &symbol_id));
-    *out_symbol_ref = (loom_symbol_ref_t){
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+    *out_symbol_ref = loom_symbol_ref_t{
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
     return iree_ok_status();
   }
@@ -235,21 +235,21 @@ TEST_F(CanonicalizerTest, InitializesRegionOnceAndMaintainsNewRoots) {
   InitializeSinglePatternRegistry(&pre_fold_pattern, &pre_fold_storage);
 
   const loom_canonicalizer_options_t options = {
-      /*.max_iterations=*/0,
-      /*.patterns=*/
-      {
-          /*.region_initialization=*/
-          loom_rewrite_pattern_registry_storage_registry(
-              &initialization_storage),
-          /*.pre_fold=*/
-          loom_rewrite_pattern_registry_storage_registry(&pre_fold_storage),
-          /*.post_type=*/nullptr,
-          /*.post_canonicalization=*/nullptr,
-      },
-      /*.target_facts=*/nullptr,
-      /*.math_policy=*/nullptr,
-      /*.seed_facts=*/{},
-      /*.refine_boundary=*/{},
+      .max_iterations = 0,
+      .patterns =
+          {
+              .region_initialization =
+                  loom_rewrite_pattern_registry_storage_registry(
+                      &initialization_storage),
+              .pre_fold = loom_rewrite_pattern_registry_storage_registry(
+                  &pre_fold_storage),
+              .post_type = nullptr,
+              .post_canonicalization = nullptr,
+          },
+      .target_facts = nullptr,
+      .math_policy = nullptr,
+      .seed_facts = {},
+      .refine_boundary = {},
   };
   IREE_EXPECT_OK(run_canonicalize(func_like_, &options));
   EXPECT_EQ(state.initialization_visit_count, 1u);
@@ -478,12 +478,12 @@ TEST_F(CanonicalizerTest, FactRefinementChainUsesBoundedNames) {
                                              &constant_op));
     const loom_value_id_t exact = loom_index_constant_result(constant_op);
     const loom_predicate_t predicate = {
-        /*.kind=*/LOOM_PREDICATE_LT,
-        /*.arg_count=*/2,
-        /*.arg_tags=*/
-        {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_NONE},
-        /*.reserved=*/{},
-        /*.args=*/{exact, upper, 0},
+        .kind = LOOM_PREDICATE_LT,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                     LOOM_PRED_ARG_NONE},
+        .reserved = {},
+        .args = {exact, upper, 0},
     };
     loom_op_t* assume_op = nullptr;
     IREE_ASSERT_OK(loom_index_assume_build(&builder_, &exact, 1, &predicate, 1,
@@ -537,13 +537,13 @@ TEST_F(CanonicalizerTest, FactRefinementBatchesVariadicRelations) {
                                              &constant_op));
     exact_values[i] = loom_index_constant_result(constant_op);
     result_types[i] = index_type;
-    predicates[i] = (loom_predicate_t){
-        /*.kind=*/LOOM_PREDICATE_LT,
-        /*.arg_count=*/2,
-        /*.arg_tags=*/
-        {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_NONE},
-        /*.reserved=*/{},
-        /*.args=*/{exact_values[i], upper_values[i], 0},
+    predicates[i] = loom_predicate_t{
+        .kind = LOOM_PREDICATE_LT,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                     LOOM_PRED_ARG_NONE},
+        .reserved = {},
+        .args = {exact_values[i], upper_values[i], 0},
     };
   }
   loom_op_t* assume_op = nullptr;
@@ -1016,8 +1016,7 @@ TEST_F(CanonicalizerTest, DriverAcceptsSeedFacts) {
       module_, &pass_arena, &value_facts, &kSpecialValuePolicy,
       /*fact_refinement_policy=*/nullptr, &canonicalizer));
   loom_canonicalizer_result_t result;
-  loom_canonicalizer_options_t options = {};
-  options.seed_facts = {&seed_facts, &arg, 1};
+  loom_canonicalizer_options_t options = {.seed_facts = {&seed_facts, &arg, 1}};
   IREE_ASSERT_OK(loom_canonicalizer_run_function(&canonicalizer, func_like_,
                                                  &options, &result));
 
@@ -1055,33 +1054,32 @@ TEST_F(CanonicalizerTest, DriverPreservesExplicitTargetFactsAcrossSideRegions) {
                                             &split_op));
   loom_func_like_t split_func = loom_func_like_cast(module_, split_op);
 
-  loom_target_snapshot_t snapshot = {};
-  snapshot.name = IREE_SVL("target-context-test");
-  loom_target_export_plan_t export_plan = {};
-  export_plan.name = IREE_SVL("target-context-test");
-  loom_target_config_t config = {};
-  config.name = IREE_SVL("target-context-test");
+  loom_target_snapshot_t snapshot = {.name = IREE_SVL("target-context-test")};
+  loom_target_export_plan_t export_plan = {
+      .name = IREE_SVL("target-context-test"),
+  };
+  loom_target_config_t config = {.name = IREE_SVL("target-context-test")};
   loom_target_bundle_t bundle = {
-      /*.name=*/IREE_SVL("target-context-test"),
-      /*.snapshot=*/&snapshot,
-      /*.export_plan=*/&export_plan,
-      /*.config=*/&config,
+      .name = IREE_SVL("target-context-test"),
+      .snapshot = &snapshot,
+      .export_plan = &export_plan,
+      .config = &config,
   };
   const loom_target_fact_type_t target_fact_type = {
-      /*.name=*/IREE_SVL("test"),
-      /*.storage_size=*/sizeof(loom_target_facts_t),
+      .name = IREE_SVL("test"),
+      .storage_size = sizeof(loom_target_facts_t),
   };
   loom_target_facts_t target_facts = {
-      /*.fact_type=*/&target_fact_type,
-      /*.selector=*/0,
-      /*.explicit_fields=*/0,
-      /*.storage=*/
-      {
-          /*.snapshot=*/snapshot,
-          /*.export_plan=*/export_plan,
-          /*.config=*/config,
-          /*.bundle=*/bundle,
-      },
+      .fact_type = &target_fact_type,
+      .selector = 0,
+      .explicit_fields = 0,
+      .storage =
+          {
+              .snapshot = snapshot,
+              .export_plan = export_plan,
+              .config = config,
+              .bundle = bundle,
+          },
   };
   loom_target_bundle_storage_rebind(&target_facts.storage);
 
@@ -1101,9 +1099,10 @@ TEST_F(CanonicalizerTest, DriverPreservesExplicitTargetFactsAcrossSideRegions) {
       module_, &pass_arena, &value_facts, &kSpecialValuePolicy,
       /*fact_refinement_policy=*/nullptr, &canonicalizer));
   loom_canonicalizer_result_t result;
-  loom_canonicalizer_options_t options = {};
-  options.target_facts = &target_facts;
-  options.seed_facts = {&seed_facts, nullptr, 0};
+  loom_canonicalizer_options_t options = {
+      .target_facts = &target_facts,
+      .seed_facts = {&seed_facts, nullptr, 0},
+  };
   IREE_ASSERT_OK(loom_canonicalizer_run_function(&canonicalizer, split_func,
                                                  &options, &result));
 
@@ -1170,8 +1169,9 @@ TEST_F(CanonicalizerTest, RegionDriverAcceptsSeedFacts) {
       module_, &pass_arena, &value_facts, &kSpecialValuePolicy,
       /*fact_refinement_policy=*/nullptr, &canonicalizer));
   loom_canonicalizer_result_t result;
-  loom_canonicalizer_options_t options = {};
-  options.seed_facts = {&seed_facts, &config_arg, 1};
+  loom_canonicalizer_options_t options = {
+      .seed_facts = {&seed_facts, &config_arg, 1},
+  };
   IREE_ASSERT_OK(loom_canonicalizer_run_region(
       &canonicalizer, split_func, config, split_op, &options, &result));
 

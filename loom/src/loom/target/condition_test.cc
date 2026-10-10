@@ -162,8 +162,8 @@ TEST_F(TargetConditionTest, ConditionWithoutValidatorIsValid) {
 
 TEST_F(TargetConditionTest, EvaluatesNormalizedSubgroupSize) {
   static const loom_target_fact_type_t kFactType = {
-      /*.name=*/IREE_SVL("normalized-test"),
-      /*.storage_size=*/sizeof(loom_target_facts_t),
+      .name = IREE_SVL("normalized-test"),
+      .storage_size = sizeof(loom_target_facts_t),
   };
   loom_attribute_t slot = {};
   const loom_attribute_t condition =
@@ -191,12 +191,12 @@ TEST_F(TargetConditionTest, EvaluatesNormalizedSubgroupSize) {
 
 TEST_F(TargetConditionTest, RejectsIncompatibleStaticFactFamily) {
   static const loom_target_fact_type_t kRequiredFactType = {
-      /*.name=*/IREE_SVL("required-test"),
-      /*.storage_size=*/sizeof(loom_target_facts_t),
+      .name = IREE_SVL("required-test"),
+      .storage_size = sizeof(loom_target_facts_t),
   };
   static const loom_target_fact_type_t kOtherFactType = {
-      /*.name=*/IREE_SVL("other-test"),
-      /*.storage_size=*/sizeof(loom_target_facts_t),
+      .name = IREE_SVL("other-test"),
+      .storage_size = sizeof(loom_target_facts_t),
   };
   loom_target_condition_descriptor_t typed_descriptor =
       loom_target_subgroup_size_condition;

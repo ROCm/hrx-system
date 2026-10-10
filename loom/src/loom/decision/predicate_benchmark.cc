@@ -16,8 +16,8 @@ namespace {
 
 static loom_decision_predicate_operand_t Operand(loom_value_facts_t facts) {
   return {
-      /*.facts=*/facts,
-      /*.identity=*/LOOM_DECISION_OPERAND_IDENTITY_NONE,
+      .facts = facts,
+      .identity = LOOM_DECISION_OPERAND_IDENTITY_NONE,
   };
 }
 

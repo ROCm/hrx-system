@@ -133,12 +133,12 @@ static iree_status_t BuildAttentionSource(const loomc_source_t* fixture_source,
 static iree_status_t CaptureModuleShape(const loomc_module_t* module,
                                         ModuleShape* out_shape) {
   const loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("attention-shape.loom"),
-      /*.text_presentation=*/LOOMC_MODULE_TEXT_PRESENTATION_GENERIC,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("attention-shape.loom"),
+      .text_presentation = LOOMC_MODULE_TEXT_PRESENTATION_GENERIC,
   };
   loomc_source_t* raw_source = nullptr;
   IREE_RETURN_IF_ERROR(to_iree_status(loomc_module_serialize_text_to_source(
@@ -217,9 +217,9 @@ class AttentionCompileScenario final : public TargetCompileScenario {
     if (target_profile() != nullptr) {
       for (const std::string& kernel_symbol : kernel_symbols_) {
         target_specializations_.push_back({
-            /*.function_symbol=*/loomc_make_string_view(kernel_symbol.data(),
-                                                        kernel_symbol.size()),
-            /*.target_profile=*/target_profile(),
+            .function_symbol = loomc_make_string_view(kernel_symbol.data(),
+                                                      kernel_symbol.size()),
+            .target_profile = target_profile(),
         });
       }
     }
@@ -352,24 +352,24 @@ class AttentionCompileScenario final : public TargetCompileScenario {
                                 const PassProgramPtr& pass_program,
                                 bool specialize_target) {
     const loomc_target_specialization_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.specializations=*/target_specializations_.data(),
-        /*.specialization_count=*/target_specializations_.size(),
-        /*.target_bindings=*/nullptr,
-        /*.target_binding_count=*/0,
+        .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+        .structure_size = sizeof(target_options),
+        .next = nullptr,
+        .specializations = target_specializations_.data(),
+        .specialization_count = target_specializations_.size(),
+        .target_bindings = nullptr,
+        .target_binding_count = 0,
     };
     const loomc_compile_options_t compile_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-        /*.structure_size=*/sizeof(compile_options),
-        /*.next=*/specialize_target && !target_specializations_.empty()
-            ? &target_options
-            : nullptr,
-        /*.module_name=*/loomc_make_cstring_view("attention_benchmark"),
-        /*.artifact_flags=*/0,
-        /*.config_flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-        /*.config_module=*/nullptr,
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+        .structure_size = sizeof(compile_options),
+        .next = specialize_target && !target_specializations_.empty()
+                    ? &target_options
+                    : nullptr,
+        .module_name = loomc_make_cstring_view("attention_benchmark"),
+        .artifact_flags = 0,
+        .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+        .config_module = nullptr,
     };
     loomc_result_t* raw_result = nullptr;
     iree_status_t status = to_iree_status(loomc_compile_module(
@@ -584,27 +584,26 @@ class InputScalingCompileScenario final : public TargetCompileScenario {
         CloneModule(template_module_.get(), workspace.get(), &module));
 
     const loomc_target_specialization_t specialization = {
-        /*.function_symbol=*/
-        loomc_make_cstring_view(workload_.function_symbol),
-        /*.target_profile=*/target_profile(),
+        .function_symbol = loomc_make_cstring_view(workload_.function_symbol),
+        .target_profile = target_profile(),
     };
     const loomc_target_specialization_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.specializations=*/&specialization,
-        /*.specialization_count=*/1,
-        /*.target_bindings=*/nullptr,
-        /*.target_binding_count=*/0,
+        .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+        .structure_size = sizeof(target_options),
+        .next = nullptr,
+        .specializations = &specialization,
+        .specialization_count = 1,
+        .target_bindings = nullptr,
+        .target_binding_count = 0,
     };
     const loomc_compile_options_t compile_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-        /*.structure_size=*/sizeof(compile_options),
-        /*.next=*/target_profile() != nullptr ? &target_options : nullptr,
-        /*.module_name=*/loomc_make_cstring_view("input_scaling_benchmark"),
-        /*.artifact_flags=*/0,
-        /*.config_flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-        /*.config_module=*/config_module_.get(),
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+        .structure_size = sizeof(compile_options),
+        .next = target_profile() != nullptr ? &target_options : nullptr,
+        .module_name = loomc_make_cstring_view("input_scaling_benchmark"),
+        .artifact_flags = 0,
+        .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+        .config_module = config_module_.get(),
     };
     loomc_result_t* raw_result = nullptr;
     iree_status_t status = to_iree_status(loomc_compile_module(
@@ -713,13 +712,13 @@ class PipelineCompileScenario final : public TargetCompileScenario {
         loomc_make_cstring_view("unroll-scf-for,canonicalize,cse,dce"),
         &expansion_program));
     const loomc_compile_options_t expansion_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-        /*.structure_size=*/sizeof(expansion_options),
-        /*.next=*/nullptr,
-        /*.module_name=*/loomc_make_cstring_view("pipeline-expansion"),
-        /*.artifact_flags=*/0,
-        /*.config_flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-        /*.config_module=*/config_module.get(),
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+        .structure_size = sizeof(expansion_options),
+        .next = nullptr,
+        .module_name = loomc_make_cstring_view("pipeline-expansion"),
+        .artifact_flags = 0,
+        .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+        .config_module = config_module.get(),
     };
     IREE_RETURN_IF_ERROR(Compile(template_workspace_, template_module_,
                                  expansion_program, expansion_options));
@@ -778,24 +777,24 @@ class PipelineCompileScenario final : public TargetCompileScenario {
         CloneModule(template_module_.get(), workspace.get(), &module));
     if (spec_.phase != PipelineCompilePhase::kClone) {
       const loomc_target_specialization_t specialization = {
-          /*.function_symbol=*/
-          loomc_make_cstring_view(spec_.workload.function_symbol),
-          /*.target_profile=*/target_profile(),
+          .function_symbol =
+              loomc_make_cstring_view(spec_.workload.function_symbol),
+          .target_profile = target_profile(),
       };
       const loomc_target_specialization_options_t target_options = {
-          /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-          /*.structure_size=*/sizeof(target_options),
-          /*.next=*/nullptr,
-          /*.specializations=*/&specialization,
-          /*.specialization_count=*/1,
+          .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+          .structure_size = sizeof(target_options),
+          .next = nullptr,
+          .specializations = &specialization,
+          .specialization_count = 1,
       };
       const loomc_compile_options_t options = {
-          /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-          /*.structure_size=*/sizeof(options),
-          /*.next=*/spec_.phase == PipelineCompilePhase::kCompileAndEmit
-              ? &target_options
-              : nullptr,
-          /*.module_name=*/loomc_make_cstring_view("pipeline-benchmark"),
+          .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+          .structure_size = sizeof(options),
+          .next = spec_.phase == PipelineCompilePhase::kCompileAndEmit
+                      ? &target_options
+                      : nullptr,
+          .module_name = loomc_make_cstring_view("pipeline-benchmark"),
       };
       IREE_RETURN_IF_ERROR(Compile(workspace, module, pass_program_, options));
       if (spec_.phase == PipelineCompilePhase::kCompileAndEmit) {
@@ -867,9 +866,9 @@ void RegisterAttentionCompileBenchmarks(const WorkloadCompileTarget& target,
   auto register_phase = [&](AttentionCompilePhase phase, const char* phase_name,
                             std::initializer_list<int64_t> kernel_copy_counts) {
     const AttentionBenchmarkSpec spec = {
-        /*.phase=*/phase,
-        /*.target=*/&target,
-        /*.workload=*/workload,
+        .phase = phase,
+        .target = &target,
+        .workload = workload,
     };
     const std::string name =
         BuildBenchmarkName("AttentionPrefill", phase_name, target);
@@ -918,9 +917,9 @@ void RegisterInputScalingCompileBenchmarks(
                             const char* phase_name,
                             std::initializer_list<int64_t> input_sizes) {
     const InputScalingBenchmarkSpec spec = {
-        /*.phase=*/phase,
-        /*.target=*/&target,
-        /*.workload=*/workload,
+        .phase = phase,
+        .target = &target,
+        .workload = workload,
     };
     const std::string name =
         BuildBenchmarkName(workload_name, phase_name, target);

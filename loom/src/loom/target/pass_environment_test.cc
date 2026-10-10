@@ -191,10 +191,11 @@ TEST_F(TargetPassFactsTest, RefinedVersionSuppliesFunctionTargetFactsDirectly) {
 
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
-  loom_pass_t pass = {};
-  pass.instance_arena = &arena;
-  pass.arena = &arena;
-  pass.function_version = &function_version.base;
+  loom_pass_t pass = {
+      .instance_arena = &arena,
+      .arena = &arena,
+      .function_version = &function_version.base,
+  };
   bool resolved = false;
   const loom_target_facts_t* resolved_facts = nullptr;
   IREE_ASSERT_OK(loom_target_pass_resolve_function_facts(
@@ -213,9 +214,10 @@ TEST_F(TargetPassFactsTest, UnrefinedFunctionProjectsAuthoredFacts) {
   iree_arena_initialize(&block_pool_, &instance_arena);
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(&block_pool_, &scratch_arena);
-  loom_pass_t pass = {};
-  pass.instance_arena = &instance_arena;
-  pass.arena = &scratch_arena;
+  loom_pass_t pass = {
+      .instance_arena = &instance_arena,
+      .arena = &scratch_arena,
+  };
   bool resolved = false;
   const loom_target_facts_t* resolved_facts = nullptr;
   IREE_ASSERT_OK(loom_target_pass_resolve_function_facts(
@@ -239,9 +241,10 @@ TEST_F(TargetPassFactsTest, ProjectedFactsSurviveScratchArenaReset) {
   iree_arena_initialize(&block_pool_, &instance_arena);
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(&block_pool_, &scratch_arena);
-  loom_pass_t pass = {};
-  pass.instance_arena = &instance_arena;
-  pass.arena = &scratch_arena;
+  loom_pass_t pass = {
+      .instance_arena = &instance_arena,
+      .arena = &scratch_arena,
+  };
 
   bool resolved = false;
   const loom_target_facts_t* resolved_facts = nullptr;
@@ -272,9 +275,10 @@ TEST_F(TargetPassFactsTest, TargetlessFunctionHasNoTargetFacts) {
   iree_arena_initialize(&block_pool_, &instance_arena);
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(&block_pool_, &scratch_arena);
-  loom_pass_t pass = {};
-  pass.instance_arena = &instance_arena;
-  pass.arena = &scratch_arena;
+  loom_pass_t pass = {
+      .instance_arena = &instance_arena,
+      .arena = &scratch_arena,
+  };
   bool resolved = false;
   const loom_target_facts_t* resolved_facts = nullptr;
   IREE_ASSERT_OK(loom_target_pass_resolve_function_facts(

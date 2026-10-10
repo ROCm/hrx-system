@@ -351,15 +351,15 @@ TEST_F(VerifyStructureTest, AlternativeRequiredAncestorsAcceptEitherKind) {
       LOOM_OP_TEST_MAP,
   };
   const loom_op_placement_descriptor_t placement = {
-      /*.required_parents=*/nullptr,
-      /*.required_ancestors=*/nullptr,
-      /*.required_any_ancestors=*/required_ancestors,
-      /*.forbidden_ancestors=*/nullptr,
-      /*.required_any_ancestor_names=*/"test.isolated_region or test.map",
-      /*.required_parent_count=*/0,
-      /*.required_ancestor_count=*/0,
-      /*.required_any_ancestor_count=*/IREE_ARRAYSIZE(required_ancestors),
-      /*.forbidden_ancestor_count=*/0,
+      .required_parents = nullptr,
+      .required_ancestors = nullptr,
+      .required_any_ancestors = required_ancestors,
+      .forbidden_ancestors = nullptr,
+      .required_any_ancestor_names = "test.isolated_region or test.map",
+      .required_parent_count = 0,
+      .required_ancestor_count = 0,
+      .required_any_ancestor_count = IREE_ARRAYSIZE(required_ancestors),
+      .forbidden_ancestor_count = 0,
   };
   loom_op_t* op = Dictionary(0);
   loom_op_vtable_t vtable = *loom_op_vtable(module_, op);
@@ -367,16 +367,14 @@ TEST_F(VerifyStructureTest, AlternativeRequiredAncestorsAcceptEitherKind) {
 
   for (loom_op_kind_t ancestor_kind : required_ancestors) {
     SCOPED_TRACE(ancestor_kind);
-    loom_op_t ancestor = {};
-    ancestor.kind = ancestor_kind;
+    loom_op_t ancestor = {.kind = ancestor_kind};
     op->parent_op = &ancestor;
     result_ = {};
     loom_verify_op_placement(&state_, op, &vtable);
     EXPECT_EQ(result_.error_count, 0u);
   }
 
-  loom_op_t wrong_ancestor = {};
-  wrong_ancestor.kind = LOOM_OP_TEST_CONSTANT;
+  loom_op_t wrong_ancestor = {.kind = LOOM_OP_TEST_CONSTANT};
   op->parent_op = &wrong_ancestor;
   result_ = {};
   loom_verify_op_placement(&state_, op, &vtable);

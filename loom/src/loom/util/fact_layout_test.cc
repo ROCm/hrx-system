@@ -99,9 +99,10 @@ TEST_F(FactLayoutTest, NumericTransferDoesNotTransferSsaBindings) {
       loom_value_fact_table_define_layout_strides(&table_, 2, {strides, 2}));
   const loom_value_facts_t numeric_strides[] = {loom_value_facts_make(8, 12, 1),
                                                 loom_value_facts_exact_i64(1)};
-  loom_value_fact_encoding_summary_t summary = {};
-  summary.address_layout = {LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED, 2,
-                            numeric_strides};
+  loom_value_fact_encoding_summary_t summary = {
+      .address_layout = {LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED, 2,
+                         numeric_strides},
+  };
   loom_value_facts_t facts;
   IREE_ASSERT_OK(
       loom_value_facts_make_encoding_summary(&table_.context, summary, &facts));

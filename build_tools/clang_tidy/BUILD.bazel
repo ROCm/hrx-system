@@ -8,10 +8,13 @@ load("@iree_clang_tidy_llvm//:config.bzl", "CLANG_TIDY_LLVM_COPTS", "CLANG_TIDY_
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//python:defs.bzl", "py_binary", "py_test")
+load("//build_tools/bazel:cc_opts.bzl", "cc_opts")
 load(":clang_tidy.bzl", "iree_clang_tidy", "iree_recursion_analysis")
 load(":test/clang_tidy_test.bzl", "clang_tidy_test_plugin")
 
 package(default_visibility = ["//visibility:public"])
+
+_CXX_OPTIONS = cc_opts.iree_cxx_standard_options()
 
 exports_files([
     "clang_tidy_config.yaml",
@@ -72,6 +75,8 @@ py_test(
 cc_binary(
     name = "IREEClangTidyPlugin.so",
     srcs = [
+        "iree/DesignatedInitializerCheck.cc",
+        "iree/DesignatedInitializerCheck.h",
         "iree/ExtentChecks.cc",
         "iree/ExtentChecks.h",
         "iree/IreeTidyModule.cc",
@@ -91,6 +96,8 @@ cc_binary(
         "iree/TraceChecks.h",
     ],
     copts = CLANG_TIDY_LLVM_COPTS,
+    cxxopts = _CXX_OPTIONS.cxxopts,
+    features = _CXX_OPTIONS.features,
     includes = ["."],
     linkshared = True,
     tags = ["manual"],
@@ -103,6 +110,31 @@ cc_binary(
 clang_tidy_test_plugin(
     name = "test_plugin",
     testonly = True,
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+py_test(
+    name = "designated_initializer_check_test",
+    srcs = [
+        "test/clang_tidy_test.py",
+        "test/designated_initializer_check_test.py",
+    ],
+    args = [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--clangxx=$(location @iree_clang_tidy_llvm//:clang++)",
+        "--plugin=$(location :test_plugin)",
+    ],
+    data = [
+        "test/designated_initializer_check.c",
+        "test/designated_initializer_check.cc",
+        "test/designated_initializer_check.h",
+        ":test_plugin",
+        "@iree_clang_tidy_llvm//:clang++",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+    imports = ["test"],
+    main = "test/designated_initializer_check_test.py",
     tags = ["manual"],
     target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
 )
@@ -324,6 +356,7 @@ test_suite(
     tags = ["manual"],
     tests = [
         ":aggregate_recursion_summaries_test",
+        ":designated_initializer_check_test",
         ":extent_checks_test",
         ":lifecycle_checks_test",
         ":plugin_smoke_test",
@@ -343,7 +376,8 @@ cc_library(
         "test/action_smoke.c",
         "test/action_smoke.cc",
     ],
-    features = ["layering_check"],
+    cxxopts = _CXX_OPTIONS.cxxopts,
+    features = _CXX_OPTIONS.features + ["layering_check"],
     tags = ["manual"],
 )
 

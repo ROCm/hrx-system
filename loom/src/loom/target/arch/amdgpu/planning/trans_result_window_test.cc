@@ -29,11 +29,12 @@ class AmdgpuTransResultWindowTest : public ::testing::Test {
 
   static loom_low_allocation_assignment_t PhysicalVgpr(uint32_t base,
                                                        uint32_t count) {
-    loom_low_allocation_assignment_t assignment = {};
-    assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-    assignment.descriptor_reg_class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR;
-    assignment.location_base = base;
-    assignment.location_count = count;
+    loom_low_allocation_assignment_t assignment = {
+        .descriptor_reg_class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR,
+        .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+        .location_base = base,
+        .location_count = count,
+    };
     return assignment;
   }
 

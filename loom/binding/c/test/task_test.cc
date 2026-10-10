@@ -39,8 +39,8 @@ static void DestroyTestTask(loomc_task_t* base_task) {
 }
 
 static const loomc_task_vtable_t kTestTaskVtable = {
-    /*.execute=*/ExecuteTestTask,
-    /*.destroy=*/DestroyTestTask,
+    .execute = ExecuteTestTask,
+    .destroy = DestroyTestTask,
 };
 
 static loomc_task_t* AllocateTestTask(int* execution_count,
@@ -82,9 +82,9 @@ static loomc_status_t SubmitTestTask(void* user_data, loomc_task_t* task) {
 }
 
 static loomc_task_sink_t TestTaskSink(test_sink_t* sink) {
-  return (loomc_task_sink_t){
-      /*.submit=*/SubmitTestTask,
-      /*.user_data=*/sink,
+  return loomc_task_sink_t{
+      .submit = SubmitTestTask,
+      .user_data = sink,
   };
 }
 
@@ -93,10 +93,10 @@ TEST(TaskTest, AcceptedSubmissionTransfersExecutionAndDestruction) {
   int destruction_count = 0;
   loomc_host_size_t worker_ordinal = 0;
   test_sink_t sink = {
-      /*.accepts_tasks=*/true,
-      /*.executes_inline=*/false,
-      /*.worker_ordinal=*/7,
-      /*.pending_task=*/nullptr,
+      .accepts_tasks = true,
+      .executes_inline = false,
+      .worker_ordinal = 7,
+      .pending_task = nullptr,
   };
   loomc_task_t* task =
       AllocateTestTask(&execution_count, &destruction_count, &worker_ordinal);
@@ -118,10 +118,10 @@ TEST(TaskTest, RejectedSubmissionLeavesOwnershipWithCaller) {
   int destruction_count = 0;
   loomc_host_size_t worker_ordinal = 0;
   test_sink_t sink = {
-      /*.accepts_tasks=*/false,
-      /*.executes_inline=*/false,
-      /*.worker_ordinal=*/0,
-      /*.pending_task=*/nullptr,
+      .accepts_tasks = false,
+      .executes_inline = false,
+      .worker_ordinal = 0,
+      .pending_task = nullptr,
   };
   loomc_task_t* task =
       AllocateTestTask(&execution_count, &destruction_count, &worker_ordinal);
@@ -142,10 +142,10 @@ TEST(TaskTest, InlineSubmissionMayDestroyTaskBeforeReturning) {
   int destruction_count = 0;
   loomc_host_size_t worker_ordinal = 0;
   test_sink_t sink = {
-      /*.accepts_tasks=*/true,
-      /*.executes_inline=*/true,
-      /*.worker_ordinal=*/3,
-      /*.pending_task=*/nullptr,
+      .accepts_tasks = true,
+      .executes_inline = true,
+      .worker_ordinal = 3,
+      .pending_task = nullptr,
   };
 
   LOOMC_ASSERT_OK(loomc_task_sink_submit(
@@ -162,10 +162,10 @@ TEST(TaskTest, InvalidProtocolIsRejectedBeforeEnteringSink) {
   int destruction_count = 0;
   loomc_host_size_t worker_ordinal = 0;
   test_sink_t sink = {
-      /*.accepts_tasks=*/true,
-      /*.executes_inline=*/false,
-      /*.worker_ordinal=*/0,
-      /*.pending_task=*/nullptr,
+      .accepts_tasks = true,
+      .executes_inline = false,
+      .worker_ordinal = 0,
+      .pending_task = nullptr,
   };
   loomc_task_t invalid_task = {};
 

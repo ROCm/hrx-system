@@ -43,9 +43,9 @@ static iree_status_t TestFrameLength(void* user_data,
 
 static iree_net_frame_length_callback_t TestFrameLengthCallback() {
   return {
-      /*.fn=*/TestFrameLength,
-      /*.user_data=*/nullptr,
-      /*.max_header_size=*/kHeaderSize,
+      .fn = TestFrameLength,
+      .user_data = nullptr,
+      .max_header_size = kHeaderSize,
   };
 }
 
@@ -133,8 +133,8 @@ class Accumulator {
     accumulator_ =
         reinterpret_cast<iree_net_frame_accumulator_t*>(storage_.data());
     iree_net_frame_complete_callback_t on_frame = {
-        /*.fn=*/TestContext::OnFrame,
-        /*.user_data=*/context,
+        .fn = TestContext::OnFrame,
+        .user_data = context,
     };
     IREE_CHECK_OK(iree_net_frame_accumulator_initialize(
         accumulator_, max_frame_size, frame_length, on_frame, host_allocator));
@@ -169,8 +169,8 @@ TEST(FrameAccumulatorTest, InitializeValidatesConfiguration) {
       uint8_t storage[sizeof(iree_net_frame_accumulator_t) + kHeaderSize];
   auto* accumulator = reinterpret_cast<iree_net_frame_accumulator_t*>(storage);
   iree_net_frame_complete_callback_t on_frame = {
-      /*.fn=*/TestContext::OnFrame,
-      /*.user_data=*/nullptr,
+      .fn = TestContext::OnFrame,
+      .user_data = nullptr,
   };
   iree_net_frame_length_callback_t frame_length = TestFrameLengthCallback();
 
@@ -417,9 +417,9 @@ static iree_status_t NeverResolveFrameLength(void* user_data,
 TEST(FrameAccumulatorTest, BoundsUnresolvedHeader) {
   TestContext context;
   iree_net_frame_length_callback_t frame_length = {
-      /*.fn=*/NeverResolveFrameLength,
-      /*.user_data=*/nullptr,
-      /*.max_header_size=*/8,
+      .fn = NeverResolveFrameLength,
+      .user_data = nullptr,
+      .max_header_size = 8,
   };
   Accumulator accumulator(&context, iree_allocator_system(), kMaxFrameSize,
                           frame_length);

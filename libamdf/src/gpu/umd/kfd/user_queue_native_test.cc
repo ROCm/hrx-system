@@ -14,8 +14,7 @@
 namespace {
 
 TEST(KfdUserQueueNativeTest, FailedVmFaultQueryPreservesOutput) {
-  amdf_gpu_umd_device_t device = {};
-  device.render_descriptor = -1;
+  amdf_gpu_umd_device_t device = {.render_descriptor = -1};
   struct drm_amdgpu_info_gpuvm_fault fault;
   std::memset(&fault, 0xA5, sizeof(fault));
   const struct drm_amdgpu_info_gpuvm_fault original_fault = fault;
@@ -27,8 +26,7 @@ TEST(KfdUserQueueNativeTest, FailedVmFaultQueryPreservesOutput) {
 }
 
 TEST(KfdUserQueueNativeTest, DestroyPreservesNativeErrorDomain) {
-  amdf_gpu_umd_device_t device = {};
-  device.descriptor = -1;
+  amdf_gpu_umd_device_t device = {.descriptor = -1};
   const auto* native_api = amdf_gpu_kfd_user_queue_default_native_api();
   EXPECT_EQ(native_api->queue_destroy(native_api->user_data, &device, 47),
             amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EBADF));

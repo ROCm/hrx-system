@@ -224,9 +224,11 @@ loom_symbol_ref_t AssemblyIntrinsic::fragment(
           : loom_location_table_const_entry(&module->locations,
                                             function->location)
                 ->file.source_id;
-  fragments.record(callable, {.source_id = source_id,
-                              .source = range.source,
-                              .filename = range.filename});
+  fragments.record(callable, {
+                                 .source_id = source_id,
+                                 .source = range.source,
+                                 .filename = range.filename,
+                             });
   fragments_.emplace(literal, symbol);
   return symbol;
 }

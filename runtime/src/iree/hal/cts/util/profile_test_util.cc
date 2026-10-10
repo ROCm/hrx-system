@@ -472,10 +472,10 @@ static iree_status_t TestProfileSinkEndSession(
 }
 
 static const iree_hal_profile_sink_vtable_t kTestProfileSinkVTable = {
-    /*.destroy=*/TestProfileSinkDestroy,
-    /*.begin_session=*/TestProfileSinkBeginSession,
-    /*.write=*/TestProfileSinkWrite,
-    /*.end_session=*/TestProfileSinkEndSession,
+    .destroy = TestProfileSinkDestroy,
+    .begin_session = TestProfileSinkBeginSession,
+    .write = TestProfileSinkWrite,
+    .end_session = TestProfileSinkEndSession,
 };
 
 void TestProfileSinkInitialize(TestProfileSink* sink) {

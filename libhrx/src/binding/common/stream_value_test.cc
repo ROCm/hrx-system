@@ -35,10 +35,11 @@ template <typename Cleanup>
 ScopeExit(Cleanup) -> ScopeExit<Cleanup>;
 
 iree_hal_queue_family_spec_t MakeValueWaitFamily(uint32_t queue_count = 1) {
-  iree_hal_queue_family_spec_t family = {};
-  family.provisioned_queue_count = queue_count;
-  family.physical_device_affinity = UINT64_C(1) << 0;
-  family.role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
+  iree_hal_queue_family_spec_t family = {
+      .provisioned_queue_count = queue_count,
+      .physical_device_affinity = UINT64_C(1) << 0,
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
+  };
   family.zero_compute_atomic_capabilities.operations.device_scope_32 =
       IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
   family.zero_compute_atomic_capabilities.operations.device_scope_64 =
@@ -124,8 +125,9 @@ TEST(StreamQueueCapabilitiesTest, RejectsMissingFamilySpecification) {
 }
 
 TEST(StreamValueTimelineTest, OverflowDoesNotReserveDuplicateValue) {
-  iree_hal_streaming_stream_t stream = {};
-  stream.pending_value = IREE_HAL_SEMAPHORE_MAX_VALUE;
+  iree_hal_streaming_stream_t stream = {
+      .pending_value = IREE_HAL_SEMAPHORE_MAX_VALUE,
+  };
   uint64_t wait_value = 17;
   uint64_t signal_value = 23;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -140,21 +142,24 @@ TEST(StreamValueWaitLaneTest, TerminalHoleDoesNotRetireBlockedLane) {
   iree_hal_streaming_context_t context = {};
   iree_slim_mutex_initialize(&context.value_wait_lane_mutex);
 
-  iree_hal_streaming_value_wait_lane_t lane = {};
-  lane.list_state = IREE_HAL_STREAMING_VALUE_WAIT_LANE_LIST_STATE_PENDING;
-  iree_hal_streaming_value_wait_submission_t pending = {};
-  pending.state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED;
-  pending.lane = &lane;
-  iree_hal_streaming_value_wait_submission_t failed_hole = {};
-  failed_hole.state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED;
-  failed_hole.lane = &lane;
-  failed_hole.is_terminal = true;
-  failed_hole.has_failed = true;
-  iree_hal_streaming_value_wait_submission_t completed_hole = {};
-  completed_hole.state =
-      IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED;
-  completed_hole.lane = &lane;
-  completed_hole.is_terminal = true;
+  iree_hal_streaming_value_wait_lane_t lane = {
+      .list_state = IREE_HAL_STREAMING_VALUE_WAIT_LANE_LIST_STATE_PENDING,
+  };
+  iree_hal_streaming_value_wait_submission_t pending = {
+      .lane = &lane,
+      .state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED,
+  };
+  iree_hal_streaming_value_wait_submission_t failed_hole = {
+      .lane = &lane,
+      .state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED,
+      .is_terminal = true,
+      .has_failed = true,
+  };
+  iree_hal_streaming_value_wait_submission_t completed_hole = {
+      .lane = &lane,
+      .state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED,
+      .is_terminal = true,
+  };
   pending.next = &failed_hole;
   failed_hole.prev = &pending;
   failed_hole.next = &completed_hole;
@@ -667,11 +672,11 @@ TEST(StreamValueWaitLaneTest,
   ASSERT_NE(foreign_queue, wait_queue);
 
   const iree_hal_buffer_params_t buffer_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE |
-          IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+               IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       iree_hal_device_allocator(device), buffer_params, sizeof(uint32_t),
@@ -706,13 +711,13 @@ TEST(StreamValueWaitLaneTest,
   IREE_ASSERT_OK(iree_hal_queue_atomic_wait(
       wait_queue, iree_hal_semaphore_list_empty(), wait_signal_list,
       target_buffer, /*target_offset=*/0,
-      (iree_hal_atomic_wait_params_t){
-          /*.value=*/1,
-          /*.mask=*/UINT32_MAX,
-          /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
-              IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
-          /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-          /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+      iree_hal_atomic_wait_params_t{
+          .value = 1,
+          .mask = UINT32_MAX,
+          .flags =
+              IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          .width = IREE_HAL_ATOMIC_WIDTH_32,
+          .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
       },
       /*barriers=*/NULL));
   wait_submission_accepted = true;
@@ -724,9 +729,10 @@ TEST(StreamValueWaitLaneTest,
       owner_timeline,
       iree_make_status(IREE_STATUS_ABORTED, "independent owner failure"));
 
-  iree_hal_streaming_value_wait_submission_t submission = {};
-  submission.completion_semaphore = lane_completion;
-  submission.state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED;
+  iree_hal_streaming_value_wait_submission_t submission = {
+      .completion_semaphore = lane_completion,
+      .state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED,
+  };
   lane.queue = wait_queue;
   lane.list_state = IREE_HAL_STREAMING_VALUE_WAIT_LANE_LIST_STATE_PENDING;
   lane.submission_head = &submission;

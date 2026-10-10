@@ -327,9 +327,10 @@ iree_tokenizer_t* BuildWordPieceTokenizer(iree_tokenizer_vocab_t* vocab,
                                    CreateBPEModelIgnoreMerges(vocab));
   iree_tokenizer_builder_set_vocab(builder.get(), vocab);
 
-  iree_tokenizer_decoder_wordpiece_config_t config = {};
-  config.prefix = iree_make_cstring_view("##");
-  config.cleanup = cleanup;
+  iree_tokenizer_decoder_wordpiece_config_t config = {
+      .prefix = iree_make_cstring_view("##"),
+      .cleanup = cleanup,
+  };
   iree_tokenizer_decoder_t* decoder = nullptr;
   IREE_CHECK_OK(iree_tokenizer_decoder_wordpiece_allocate(
       config, iree_allocator_system(), &decoder));
@@ -1012,8 +1013,8 @@ TEST_F(TokenizerDecodeTest, NoDecoderFailsWithPrecondition) {
   iree_host_size_t text_length = 0;
   std::vector<int32_t> token_ids = {0, 1};
   iree_tokenizer_token_id_list_t id_list = {
-      /*.count=*/token_ids.size(),
-      /*.values=*/token_ids.data(),
+      .count = token_ids.size(),
+      .values = token_ids.data(),
   };
   iree_status_t status = iree_tokenizer_decode_state_feed(
       state.state(), id_list,

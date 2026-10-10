@@ -44,8 +44,7 @@ class SpirvModuleValueTableTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    const loom_symbol_ref_t callee = {/*.module_id=*/0,
-                                      /*.symbol_id=*/symbol_id};
+    const loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
     loom_op_t* func_op = NULL;
     IREE_ASSERT_OK(loom_test_func_build(&module_builder, 0, 0, 0, callee, NULL,
                                         0, NULL, 0, NULL, 0, NULL, 0,
@@ -78,9 +77,9 @@ class SpirvModuleValueTableTest : public ::testing::Test {
   }
 
   loom_spirv_value_type_t U32ValueType() {
-    return (loom_spirv_value_type_t){
-        /*.value_class=*/LOOM_SPIRV_VALUE_CLASS_SCALAR,
-        /*.scalar_type=*/LOOM_SPIRV_SCALAR_TYPE_U32,
+    return loom_spirv_value_type_t{
+        .value_class = LOOM_SPIRV_VALUE_CLASS_SCALAR,
+        .scalar_type = LOOM_SPIRV_SCALAR_TYPE_U32,
     };
   }
 
@@ -115,10 +114,10 @@ TEST_F(SpirvModuleValueTableTest, ReservesDefinesAndLooksUpValueRefs) {
   EXPECT_EQ(second_result_id, first_result_id);
 
   loom_spirv_module_value_table_define(&table, value_id,
-                                       (loom_spirv_module_value_ref_t){
-                                           /*.id=*/first_result_id,
-                                           /*.type_id=*/7,
-                                           /*.value_type=*/U32ValueType(),
+                                       loom_spirv_module_value_ref_t{
+                                           .id = first_result_id,
+                                           .type_id = 7,
+                                           .value_type = U32ValueType(),
                                        });
   loom_spirv_module_value_ref_t value_ref =
       loom_spirv_module_value_table_lookup(&table, value_id);

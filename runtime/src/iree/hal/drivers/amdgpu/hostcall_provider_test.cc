@@ -283,8 +283,9 @@ TEST_F(HostcallProviderTest, OmittedProviderCreatesNoResources) {
 TEST_F(HostcallProviderTest, UnknownExtensionIsSkipped) {
   iree::hal::cts::DeviceCreateContext create_context;
   IREE_ASSERT_OK(create_context.Initialize(host_allocator_));
-  iree_hal_device_create_params_extension_t unknown_extension = {};
-  unknown_extension.type = UINT32_MAX;
+  iree_hal_device_create_params_extension_t unknown_extension = {
+      .type = UINT32_MAX,
+  };
   iree_hal_device_create_params_t create_params = *create_context.params();
   create_params.next = &unknown_extension;
 

@@ -21,9 +21,9 @@ TEST(AmdgpuDriverOptionsTest, DriverParamsAreRejectedUntilDefined) {
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_amdgpu_driver_options_parse(&options, (iree_string_pair_list_t){
-                                                         /*.count=*/1,
-                                                         /*.pairs=*/&pair,
+      iree_hal_amdgpu_driver_options_parse(&options, iree_string_pair_list_t{
+                                                         .count = 1,
+                                                         .pairs = &pair,
                                                      }));
 }
 
@@ -34,9 +34,9 @@ TEST(AmdgpuDriverOptionsTest, LogicalDeviceParamsAreRejectedUntilDefined) {
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_amdgpu_logical_device_options_parse(
-                            &options, (iree_string_pair_list_t){
-                                          /*.count=*/1,
-                                          /*.pairs=*/&pair,
+                            &options, iree_string_pair_list_t{
+                                          .count = 1,
+                                          .pairs = &pair,
                                       }));
 }
 
@@ -103,9 +103,9 @@ TEST(AmdgpuDriverOptionsTest, HostTsanRejectsAsanBeforeLoadingHsa) {
 TEST(AmdgpuDriverOptionsTest, RejectsMissingSearchPathStorageBeforeLoadingHsa) {
   iree_hal_amdgpu_driver_options_t options;
   iree_hal_amdgpu_driver_options_initialize(&options);
-  options.libhsa_search_paths = (iree_string_view_list_t){
-      /*.count=*/1,
-      /*.values=*/NULL,
+  options.libhsa_search_paths = iree_string_view_list_t{
+      .count = 1,
+      .values = NULL,
   };
 
   iree_hal_driver_t* driver = NULL;
@@ -120,9 +120,9 @@ TEST(AmdgpuDriverOptionsTest, RejectsMissingSearchPathDataBeforeLoadingHsa) {
   iree_hal_amdgpu_driver_options_t options;
   iree_hal_amdgpu_driver_options_initialize(&options);
   const iree_string_view_t search_path = iree_make_string_view(NULL, 1);
-  options.libhsa_search_paths = (iree_string_view_list_t){
-      /*.count=*/1,
-      /*.values=*/&search_path,
+  options.libhsa_search_paths = iree_string_view_list_t{
+      .count = 1,
+      .values = &search_path,
   };
 
   iree_hal_driver_t* driver = NULL;

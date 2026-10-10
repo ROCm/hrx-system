@@ -67,10 +67,10 @@ class KernelBarrierLifetimeTest : public ::testing::Test {
         module.get(), loom_func_like_body(function), &analysis_arena_,
         &value_domain));
     const loom_kernel_barrier_lifetime_options_t options = {
-        /*.value_domain=*/&value_domain,
-        /*.fact_table=*/&facts,
-        /*.emitter=*/{},
-        /*.phase_name=*/IREE_SV("test"),
+        .value_domain = &value_domain,
+        .fact_table = &facts,
+        .emitter = {},
+        .phase_name = IREE_SV("test"),
     };
     loom_kernel_barrier_lifetime_result_t result = {};
     IREE_EXPECT_OK(loom_kernel_barrier_lifetime_verify_function(

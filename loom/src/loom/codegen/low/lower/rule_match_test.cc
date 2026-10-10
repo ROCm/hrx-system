@@ -29,31 +29,33 @@ TEST(LowLowerSourceMemoryMatchTest, SelectsExactRejectionReason) {
     diagnostics.rejection_diagnostic_indices[reason] =
         static_cast<uint16_t>(100 + reason);
   }
-  loom_low_lower_source_memory_t constraint = {};
-  constraint.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-  constraint.root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ANY;
-  constraint.address_layout = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY;
-  constraint.dynamic_term_count = 0;
-  constraint.dynamic_view_base_term_count = 0;
-  constraint.dynamic_index_source =
-      LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_NONE;
-  constraint.memory_space_mask = LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL;
-  constraint.element_byte_count = 4;
-  constraint.vector_lane_count = 1;
-  constraint.minimum_alignment = 4;
-  loom_low_lower_source_memory_shape_t shape = {};
-  shape.vector_lane_byte_stride = 4;
-  shape.static_byte_offset_minimum = 0;
-  shape.static_byte_offset_maximum = 0;
+  loom_low_lower_source_memory_t constraint = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+      .root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ANY,
+      .address_layout = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY,
+      .dynamic_term_count = 0,
+      .dynamic_view_base_term_count = 0,
+      .dynamic_index_source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_NONE,
+      .memory_space_mask = LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL,
+      .vector_lane_count = 1,
+      .minimum_alignment = 4,
+      .element_byte_count = 4,
+  };
+  loom_low_lower_source_memory_shape_t shape = {
+      .vector_lane_byte_stride = 4,
+      .static_byte_offset_minimum = 0,
+      .static_byte_offset_maximum = 0,
+  };
 
-  loom_low_source_memory_access_plan_t access = {};
-  access.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-  access.root_value_id = 0;
-  access.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;
-  access.element_byte_count = 4;
-  access.vector_lane_count = 1;
-  access.vector_lane_byte_stride = 4;
-  access.minimum_alignment = 4;
+  loom_low_source_memory_access_plan_t access = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+      .root_value_id = 0,
+      .element_byte_count = 4,
+      .vector_lane_count = 1,
+      .vector_lane_byte_stride = 4,
+      .minimum_alignment = 4,
+  };
 
   loom_low_lower_rule_match_context_t context = {};
   uint16_t diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
@@ -77,8 +79,8 @@ TEST(LowLowerSourceMemoryMatchTest, SelectsExactRejectionReason) {
             100 + LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_VECTOR_LANE_COUNT);
 
   context.vector_lane_projection = {
-      /*.source_lane_count=*/2,
-      /*.projected_lane_count=*/1,
+      .source_lane_count = 2,
+      .projected_lane_count = 1,
   };
   EXPECT_TRUE(loom_low_lower_rule_source_memory_matches(
       &context, &constraint, &shape, &diagnostics, &access, 0,
@@ -121,15 +123,17 @@ TEST(LowLowerSourceMemoryMatchTest, SelectsExactRejectionReason) {
 }
 
 TEST(LowLowerRuleSelectionTest, RanksActionableFailuresBeforeDepth) {
-  loom_low_lower_rule_failure_t diagnostic_failure = {};
-  diagnostic_failure.has_source_op_span = true;
-  diagnostic_failure.diagnostic_index = 1;
-  diagnostic_failure.matched_guard_count = 1;
-  loom_low_lower_rule_failure_t structural_nonmatch = {};
-  structural_nonmatch.has_source_op_span = true;
-  structural_nonmatch.diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
-  structural_nonmatch.matched_guard_count = 10;
-  structural_nonmatch.source_memory_compatible = true;
+  loom_low_lower_rule_failure_t diagnostic_failure = {
+      .diagnostic_index = 1,
+      .matched_guard_count = 1,
+      .has_source_op_span = true,
+  };
+  loom_low_lower_rule_failure_t structural_nonmatch = {
+      .diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE,
+      .matched_guard_count = 10,
+      .source_memory_compatible = true,
+      .has_source_op_span = true,
+  };
 
   EXPECT_TRUE(loom_low_lower_rule_failure_is_better(diagnostic_failure,
                                                     structural_nonmatch));
@@ -138,14 +142,16 @@ TEST(LowLowerRuleSelectionTest, RanksActionableFailuresBeforeDepth) {
 }
 
 TEST(LowLowerRuleSelectionTest, UsesCompatibilityThenDepthForEqualFailures) {
-  loom_low_lower_rule_failure_t shallow_failure = {};
-  shallow_failure.has_source_op_span = true;
-  shallow_failure.diagnostic_index = 1;
-  shallow_failure.matched_guard_count = 1;
-  loom_low_lower_rule_failure_t deep_failure = {};
-  deep_failure.has_source_op_span = true;
-  deep_failure.diagnostic_index = 2;
-  deep_failure.matched_guard_count = 2;
+  loom_low_lower_rule_failure_t shallow_failure = {
+      .diagnostic_index = 1,
+      .matched_guard_count = 1,
+      .has_source_op_span = true,
+  };
+  loom_low_lower_rule_failure_t deep_failure = {
+      .diagnostic_index = 2,
+      .matched_guard_count = 2,
+      .has_source_op_span = true,
+  };
   loom_low_lower_rule_failure_t compatible_failure = shallow_failure;
   compatible_failure.source_memory_compatible = true;
 
@@ -240,12 +246,13 @@ class LowLowerRuleMatchTest : public ::testing::Test {
       loom_low_lower_source_node_relation_t relation,
       bool reject_related_guard = false) {
     loom_low_lower_value_ref_t value_refs[2] = {};
-    loom_low_lower_source_node_t source_node = {};
-    source_node.relation = relation;
-    source_node.source_op_kind = related_op_kind;
-    source_node.parent_node_index = 0;
-    source_node.parent_value_ref_index = 0;
-    source_node.node_value_ref_index = 1;
+    loom_low_lower_source_node_t source_node = {
+        .relation = relation,
+        .parent_node_index = 0,
+        .source_op_kind = related_op_kind,
+        .parent_value_ref_index = 0,
+        .node_value_ref_index = 1,
+    };
     if (relation == LOOM_LOW_LOWER_SOURCE_NODE_ADJACENT_UNIQUE_USER) {
       value_refs[0].kind = LOOM_LOW_LOWER_VALUE_REF_RESULT;
       value_refs[0].source_node_index = 0;
@@ -268,22 +275,24 @@ class LowLowerRuleMatchTest : public ::testing::Test {
       guard_payload.u64 = UINT64_MAX;
       source_node.guard_count = 1;
     }
-    loom_low_lower_rule_t rule = {};
-    rule.source_node_span = LOOM_LOW_LOWER_SOURCE_NODE_SPAN(0, 1);
-    const loom_low_lower_rule_span_t span = {
-        /*.source_op_kind=*/source_op->kind,
-        /*.rule_start=*/0,
-        /*.rule_count=*/1,
+    loom_low_lower_rule_t rule = {
+        .source_node_span = LOOM_LOW_LOWER_SOURCE_NODE_SPAN(0, 1),
     };
-    loom_low_lower_rule_set_t rule_set = {};
-    rule_set.spans = &span;
-    rule_set.span_count = 1;
-    rule_set.rules = &rule;
-    rule_set.rule_count = 1;
-    rule_set.value_refs = value_refs;
-    rule_set.value_ref_count = IREE_ARRAYSIZE(value_refs);
-    rule_set.source_nodes = &source_node;
-    rule_set.source_node_count = 1;
+    const loom_low_lower_rule_span_t span = {
+        .source_op_kind = source_op->kind,
+        .rule_start = 0,
+        .rule_count = 1,
+    };
+    loom_low_lower_rule_set_t rule_set = {
+        .spans = &span,
+        .span_count = 1,
+        .rules = &rule,
+        .rule_count = 1,
+        .value_refs = value_refs,
+        .value_ref_count = IREE_ARRAYSIZE(value_refs),
+        .source_nodes = &source_node,
+        .source_node_count = 1,
+    };
     if (reject_related_guard) {
       rule_set.guard_payloads = &guard_payload;
       rule_set.guard_payload_count = 1;
@@ -292,18 +301,17 @@ class LowLowerRuleMatchTest : public ::testing::Test {
       rule_set.guard_refs = &guard_ref;
       rule_set.guard_ref_count = 1;
     }
-    loom_low_lower_rule_match_context_t match_context = {};
-    match_context.module = module_;
+    loom_low_lower_rule_match_context_t match_context = {.module = module_};
 
     loom_low_lower_rule_selection_t selection = {};
     IREE_EXPECT_OK(loom_low_lower_rule_set_select_with_match_context(
         &match_context, &rule_set, source_op, &selection));
     SourceGraphSelection result = {
-        /*.source_nodes=*/{},
-        /*.diagnostic_source_op=*/selection.failure.diagnostic_source_op,
-        /*.source_node_count=*/selection.source_node_count,
-        /*.selected=*/selection.rule != nullptr,
-        /*.has_source_op_span=*/selection.failure.has_source_op_span,
+        .source_nodes = {},
+        .diagnostic_source_op = selection.failure.diagnostic_source_op,
+        .source_node_count = selection.source_node_count,
+        .selected = selection.rule != nullptr,
+        .has_source_op_span = selection.failure.has_source_op_span,
     };
     for (uint8_t i = 0; i < selection.source_node_count; ++i) {
       result.source_nodes[i] = selection.source_nodes[i];
@@ -314,33 +322,36 @@ class LowLowerRuleMatchTest : public ::testing::Test {
   bool SelectValueNoUsesAfter(
       const loom_op_t* source_op,
       loom_consumption_region_query_t* consumption_query) {
-    loom_low_lower_guard_t guard = {};
-    guard.kind = LOOM_LOW_LOWER_GUARD_VALUE_NO_USES_AFTER;
-    guard.diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
-    const loom_low_lower_guard_ref_t guard_ref = 0;
-    loom_low_lower_value_ref_t value_ref = {};
-    value_ref.kind = LOOM_LOW_LOWER_VALUE_REF_OPERAND;
-    loom_low_lower_rule_t rule = {};
-    rule.guard_count = 1;
-    const loom_low_lower_rule_span_t span = {
-        /*.source_op_kind=*/source_op->kind,
-        /*.rule_start=*/0,
-        /*.rule_count=*/1,
+    loom_low_lower_guard_t guard = {
+        .kind = LOOM_LOW_LOWER_GUARD_VALUE_NO_USES_AFTER,
+        .diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE,
     };
-    loom_low_lower_rule_set_t rule_set = {};
-    rule_set.spans = &span;
-    rule_set.span_count = 1;
-    rule_set.rules = &rule;
-    rule_set.rule_count = 1;
-    rule_set.guards = &guard;
-    rule_set.guard_count = 1;
-    rule_set.guard_refs = &guard_ref;
-    rule_set.guard_ref_count = 1;
-    rule_set.value_refs = &value_ref;
-    rule_set.value_ref_count = 1;
-    loom_low_lower_rule_match_context_t match_context = {};
-    match_context.module = module_;
-    match_context.consumption_query = consumption_query;
+    const loom_low_lower_guard_ref_t guard_ref = 0;
+    loom_low_lower_value_ref_t value_ref = {
+        .kind = LOOM_LOW_LOWER_VALUE_REF_OPERAND,
+    };
+    loom_low_lower_rule_t rule = {.guard_count = 1};
+    const loom_low_lower_rule_span_t span = {
+        .source_op_kind = source_op->kind,
+        .rule_start = 0,
+        .rule_count = 1,
+    };
+    loom_low_lower_rule_set_t rule_set = {
+        .spans = &span,
+        .span_count = 1,
+        .rules = &rule,
+        .rule_count = 1,
+        .value_refs = &value_ref,
+        .value_ref_count = 1,
+        .guards = &guard,
+        .guard_count = 1,
+        .guard_refs = &guard_ref,
+        .guard_ref_count = 1,
+    };
+    loom_low_lower_rule_match_context_t match_context = {
+        .module = module_,
+        .consumption_query = consumption_query,
+    };
     loom_low_lower_rule_selection_t selection = {};
     IREE_EXPECT_OK(loom_low_lower_rule_set_select_with_match_context(
         &match_context, &rule_set, source_op, &selection));
@@ -402,23 +413,23 @@ TEST_F(LowLowerRuleMatchTest, SelectsFirstMatchAndResetsReusedSelection) {
   rules[2].guard_start = 1;
   rules[2].guard_count = 1;
   const loom_low_lower_rule_span_t span = {
-      /*.source_op_kind=*/LOOM_OP_INDEX_CONSTANT,
-      /*.rule_start=*/0,
-      /*.rule_count=*/3,
+      .source_op_kind = LOOM_OP_INDEX_CONSTANT,
+      .rule_start = 0,
+      .rule_count = 3,
   };
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.spans = &span;
-  rule_set.span_count = 1;
-  rule_set.rules = rules;
-  rule_set.rule_count = IREE_ARRAYSIZE(rules);
-  rule_set.guard_payloads = guard_payloads;
-  rule_set.guard_payload_count = IREE_ARRAYSIZE(guard_payloads);
-  rule_set.guards = guards;
-  rule_set.guard_count = IREE_ARRAYSIZE(guards);
-  rule_set.guard_refs = guard_refs;
-  rule_set.guard_ref_count = IREE_ARRAYSIZE(guard_refs);
-  loom_low_lower_rule_match_context_t match_context = {};
-  match_context.module = module_;
+  loom_low_lower_rule_set_t rule_set = {
+      .spans = &span,
+      .span_count = 1,
+      .rules = rules,
+      .rule_count = IREE_ARRAYSIZE(rules),
+      .guard_payloads = guard_payloads,
+      .guard_payload_count = IREE_ARRAYSIZE(guard_payloads),
+      .guards = guards,
+      .guard_count = IREE_ARRAYSIZE(guards),
+      .guard_refs = guard_refs,
+      .guard_ref_count = IREE_ARRAYSIZE(guard_refs),
+  };
+  loom_low_lower_rule_match_context_t match_context = {.module = module_};
   const loom_op_t* source_op = BuildConstant(5);
 
   loom_low_lower_rule_selection_t selection = {};
@@ -453,32 +464,33 @@ TEST_F(LowLowerRuleMatchTest, SelectsFirstMatchAndResetsReusedSelection) {
 }
 
 TEST_F(LowLowerRuleMatchTest, MatchesI64AttributeSumsWithoutSignedOverflow) {
-  loom_low_lower_guard_t guard = {};
-  guard.kind = LOOM_LOW_LOWER_GUARD_ATTR_I64_SUM_EQ;
+  loom_low_lower_guard_t guard = {
+      .kind = LOOM_LOW_LOWER_GUARD_ATTR_I64_SUM_EQ,
+  };
   guard.selector.attribute.attr_index = 0;
   guard.selector.attribute.other_attr_index = 0;
   guard.diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
   guard.payload_ordinal = 1;
   loom_low_lower_guard_payload_t guard_payload = {};
   const loom_low_lower_guard_ref_t guard_ref = 0;
-  loom_low_lower_rule_t rule = {};
-  rule.guard_count = 1;
+  loom_low_lower_rule_t rule = {.guard_count = 1};
   const loom_low_lower_rule_span_t span = {
-      /*.source_op_kind=*/LOOM_OP_INDEX_CONSTANT,
-      /*.rule_start=*/0,
-      /*.rule_count=*/1,
+      .source_op_kind = LOOM_OP_INDEX_CONSTANT,
+      .rule_start = 0,
+      .rule_count = 1,
   };
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.spans = &span;
-  rule_set.span_count = 1;
-  rule_set.rules = &rule;
-  rule_set.rule_count = 1;
-  rule_set.guard_payloads = &guard_payload;
-  rule_set.guard_payload_count = 1;
-  rule_set.guards = &guard;
-  rule_set.guard_count = 1;
-  rule_set.guard_refs = &guard_ref;
-  rule_set.guard_ref_count = 1;
+  loom_low_lower_rule_set_t rule_set = {
+      .spans = &span,
+      .span_count = 1,
+      .rules = &rule,
+      .rule_count = 1,
+      .guard_payloads = &guard_payload,
+      .guard_payload_count = 1,
+      .guards = &guard,
+      .guard_count = 1,
+      .guard_refs = &guard_ref,
+      .guard_ref_count = 1,
+  };
   struct Case {
     int64_t value;
     int64_t expected_sum;
@@ -494,8 +506,7 @@ TEST_F(LowLowerRuleMatchTest, MatchesI64AttributeSumsWithoutSignedOverflow) {
   for (const Case& test_case : cases) {
     const loom_op_t* op = BuildConstant(test_case.value);
     guard_payload.i64 = test_case.expected_sum;
-    loom_low_lower_rule_match_context_t match_context = {};
-    match_context.module = module_;
+    loom_low_lower_rule_match_context_t match_context = {.module = module_};
     loom_low_lower_rule_selection_t selection = {};
     IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
         &match_context, &rule_set, op, &selection));
@@ -512,28 +523,29 @@ TEST_F(LowLowerRuleMatchTest, MatchesBiasedPowersWithoutSignedOverflow) {
   guard.diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
   guard.payload_ordinal = 1;
   const loom_low_lower_guard_ref_t guard_ref = 0;
-  loom_low_lower_value_ref_t value_ref = {};
-  value_ref.kind = LOOM_LOW_LOWER_VALUE_REF_RESULT;
-  loom_low_lower_rule_t rule = {};
-  rule.guard_count = 1;
-  const loom_low_lower_rule_span_t span = {
-      /*.source_op_kind=*/LOOM_OP_INDEX_CONSTANT,
-      /*.rule_start=*/0,
-      /*.rule_count=*/1,
+  loom_low_lower_value_ref_t value_ref = {
+      .kind = LOOM_LOW_LOWER_VALUE_REF_RESULT,
   };
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.spans = &span;
-  rule_set.span_count = 1;
-  rule_set.rules = &rule;
-  rule_set.rule_count = 1;
-  rule_set.guard_payloads = &guard_payload;
-  rule_set.guard_payload_count = 1;
-  rule_set.guards = &guard;
-  rule_set.guard_count = 1;
-  rule_set.guard_refs = &guard_ref;
-  rule_set.guard_ref_count = 1;
-  rule_set.value_refs = &value_ref;
-  rule_set.value_ref_count = 1;
+  loom_low_lower_rule_t rule = {.guard_count = 1};
+  const loom_low_lower_rule_span_t span = {
+      .source_op_kind = LOOM_OP_INDEX_CONSTANT,
+      .rule_start = 0,
+      .rule_count = 1,
+  };
+  loom_low_lower_rule_set_t rule_set = {
+      .spans = &span,
+      .span_count = 1,
+      .rules = &rule,
+      .rule_count = 1,
+      .value_refs = &value_ref,
+      .value_ref_count = 1,
+      .guard_payloads = &guard_payload,
+      .guard_payload_count = 1,
+      .guards = &guard,
+      .guard_count = 1,
+      .guard_refs = &guard_ref,
+      .guard_ref_count = 1,
+  };
   struct Case {
     // Exact source value.
     int64_t value;
@@ -566,9 +578,10 @@ TEST_F(LowLowerRuleMatchTest, MatchesBiasedPowersWithoutSignedOverflow) {
         &facts, loom_index_constant_result(op),
         loom_value_facts_exact_i64(test_case.value)));
     guard_payload.addend = test_case.addend;
-    loom_low_lower_rule_match_context_t match_context = {};
-    match_context.module = module_;
-    match_context.fact_table = &facts;
+    loom_low_lower_rule_match_context_t match_context = {
+        .module = module_,
+        .fact_table = &facts,
+    };
     loom_low_lower_rule_selection_t selection = {};
     IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
         &match_context, &rule_set, op, &selection));
@@ -578,36 +591,38 @@ TEST_F(LowLowerRuleMatchTest, MatchesBiasedPowersWithoutSignedOverflow) {
 }
 
 TEST_F(LowLowerRuleMatchTest, MatchesFloatingPowersInExponentRange) {
-  loom_low_lower_guard_t guard = {};
-  guard.kind = LOOM_LOW_LOWER_GUARD_VALUE_EXACT_POWER_OF_TWO_FLOAT;
-  guard.diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
-  guard.payload_ordinal = 1;
+  loom_low_lower_guard_t guard = {
+      .kind = LOOM_LOW_LOWER_GUARD_VALUE_EXACT_POWER_OF_TWO_FLOAT,
+      .diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE,
+      .payload_ordinal = 1,
+  };
   loom_low_lower_guard_payload_t guard_payload = {};
   guard_payload.i64_range.minimum = -9;
   guard_payload.i64_range.maximum = -8;
   const loom_low_lower_guard_ref_t guard_ref = 0;
-  loom_low_lower_value_ref_t value_ref = {};
-  value_ref.kind = LOOM_LOW_LOWER_VALUE_REF_RESULT;
-  loom_low_lower_rule_t rule = {};
-  rule.guard_count = 1;
-  const loom_low_lower_rule_span_t span = {
-      /*.source_op_kind=*/LOOM_OP_SCALAR_CONSTANT,
-      /*.rule_start=*/0,
-      /*.rule_count=*/1,
+  loom_low_lower_value_ref_t value_ref = {
+      .kind = LOOM_LOW_LOWER_VALUE_REF_RESULT,
   };
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.spans = &span;
-  rule_set.span_count = 1;
-  rule_set.rules = &rule;
-  rule_set.rule_count = 1;
-  rule_set.guard_payloads = &guard_payload;
-  rule_set.guard_payload_count = 1;
-  rule_set.guards = &guard;
-  rule_set.guard_count = 1;
-  rule_set.guard_refs = &guard_ref;
-  rule_set.guard_ref_count = 1;
-  rule_set.value_refs = &value_ref;
-  rule_set.value_ref_count = 1;
+  loom_low_lower_rule_t rule = {.guard_count = 1};
+  const loom_low_lower_rule_span_t span = {
+      .source_op_kind = LOOM_OP_SCALAR_CONSTANT,
+      .rule_start = 0,
+      .rule_count = 1,
+  };
+  loom_low_lower_rule_set_t rule_set = {
+      .spans = &span,
+      .span_count = 1,
+      .rules = &rule,
+      .rule_count = 1,
+      .value_refs = &value_ref,
+      .value_ref_count = 1,
+      .guard_payloads = &guard_payload,
+      .guard_payload_count = 1,
+      .guards = &guard,
+      .guard_count = 1,
+      .guard_refs = &guard_ref,
+      .guard_ref_count = 1,
+  };
   struct Case {
     double value;
     bool matches;
@@ -624,9 +639,10 @@ TEST_F(LowLowerRuleMatchTest, MatchesFloatingPowersInExponentRange) {
     IREE_ASSERT_OK(loom_value_fact_table_define(
         &facts, loom_scalar_constant_result(op),
         loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, test_case.value)));
-    loom_low_lower_rule_match_context_t match_context = {};
-    match_context.module = module_;
-    match_context.fact_table = &facts;
+    loom_low_lower_rule_match_context_t match_context = {
+        .module = module_,
+        .fact_table = &facts,
+    };
     loom_low_lower_rule_selection_t selection = {};
     IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
         &match_context, &rule_set, op, &selection));
@@ -636,36 +652,38 @@ TEST_F(LowLowerRuleMatchTest, MatchesFloatingPowersInExponentRange) {
 }
 
 TEST_F(LowLowerRuleMatchTest, MatchesSubnormalPolicyPermissionOrRetainedFact) {
-  loom_low_lower_guard_t guard = {};
-  guard.kind =
-      LOOM_LOW_LOWER_GUARD_VALUE_NOT_SUBNORMAL_OR_INSTANCE_FLAGS_HAS_ALL;
-  guard.diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
-  guard.payload_ordinal = 1;
+  loom_low_lower_guard_t guard = {
+      .kind =
+          LOOM_LOW_LOWER_GUARD_VALUE_NOT_SUBNORMAL_OR_INSTANCE_FLAGS_HAS_ALL,
+      .diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE,
+      .payload_ordinal = 1,
+  };
   loom_low_lower_guard_payload_t guard_payload = {};
   guard_payload.u64 = LOOM_SCALAR_FLOATCONVERSIONFLAGS_DAZ;
   const loom_low_lower_guard_ref_t guard_ref = 0;
-  loom_low_lower_value_ref_t value_ref = {};
-  value_ref.kind = LOOM_LOW_LOWER_VALUE_REF_OPERAND;
-  loom_low_lower_rule_t rule = {};
-  rule.guard_count = 1;
-  const loom_low_lower_rule_span_t span = {
-      /*.source_op_kind=*/LOOM_OP_SCALAR_FPTRUNC,
-      /*.rule_start=*/0,
-      /*.rule_count=*/1,
+  loom_low_lower_value_ref_t value_ref = {
+      .kind = LOOM_LOW_LOWER_VALUE_REF_OPERAND,
   };
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.spans = &span;
-  rule_set.span_count = 1;
-  rule_set.rules = &rule;
-  rule_set.rule_count = 1;
-  rule_set.value_refs = &value_ref;
-  rule_set.value_ref_count = 1;
-  rule_set.guard_payloads = &guard_payload;
-  rule_set.guard_payload_count = 1;
-  rule_set.guards = &guard;
-  rule_set.guard_count = 1;
-  rule_set.guard_refs = &guard_ref;
-  rule_set.guard_ref_count = 1;
+  loom_low_lower_rule_t rule = {.guard_count = 1};
+  const loom_low_lower_rule_span_t span = {
+      .source_op_kind = LOOM_OP_SCALAR_FPTRUNC,
+      .rule_start = 0,
+      .rule_count = 1,
+  };
+  loom_low_lower_rule_set_t rule_set = {
+      .spans = &span,
+      .span_count = 1,
+      .rules = &rule,
+      .rule_count = 1,
+      .value_refs = &value_ref,
+      .value_ref_count = 1,
+      .guard_payloads = &guard_payload,
+      .guard_payload_count = 1,
+      .guards = &guard,
+      .guard_count = 1,
+      .guard_refs = &guard_ref,
+      .guard_ref_count = 1,
+  };
 
   struct Case {
     uint8_t instance_flags;
@@ -688,9 +706,10 @@ TEST_F(LowLowerRuleMatchTest, MatchesSubnormalPolicyPermissionOrRetainedFact) {
     IREE_ASSERT_OK(loom_value_fact_table_define(
         &facts, loom_scalar_constant_result(input_op),
         loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, test_case.input)));
-    loom_low_lower_rule_match_context_t match_context = {};
-    match_context.module = module_;
-    match_context.fact_table = test_case.provide_facts ? &facts : nullptr;
+    loom_low_lower_rule_match_context_t match_context = {
+        .module = module_,
+        .fact_table = test_case.provide_facts ? &facts : nullptr,
+    };
     loom_low_lower_rule_selection_t selection = {};
     IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
         &match_context, &rule_set, source_op, &selection));
@@ -701,75 +720,78 @@ TEST_F(LowLowerRuleMatchTest, MatchesSubnormalPolicyPermissionOrRetainedFact) {
 TEST_F(LowLowerRuleMatchTest, MatchesCompleteStorageOperandSchema) {
   const loom_op_t* source_op = BuildScalarConstant(7);
   const loom_value_fact_encoded_operand_schema_t actual_schema = {
-      /*.element_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN,
-      /*.scale_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0,
-      /*.secondary_scale_format=*/{},
-      /*.payload_packing=*/LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES,
-      /*.scale_topology=*/LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D,
-      /*.affine_policy=*/LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY,
-      /*.rounding_policy=*/{},
-      /*.codebook_policy=*/{},
-      /*.sparsity_policy=*/{},
-      /*.flags=*/{},
-      /*.sparsity_group=*/{},
-      /*.payload_register_count=*/{},
-      /*.payload_element_count=*/8,
-      /*.scale_group=*/
-      {
-          /*.element_count=*/8,
-          /*.shape=*/{8},
-      },
-      /*.scale_operand_count=*/1,
+      .element_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN,
+      .scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0,
+      .secondary_scale_format = {},
+      .payload_packing = LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES,
+      .scale_topology = LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D,
+      .affine_policy = LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY,
+      .rounding_policy = {},
+      .codebook_policy = {},
+      .sparsity_policy = {},
+      .flags = {},
+      .sparsity_group = {},
+      .payload_register_count = {},
+      .payload_element_count = 8,
+      .scale_group =
+          {
+              .element_count = 8,
+              .shape = {8},
+          },
+      .scale_operand_count = 1,
   };
   loom_value_fact_table_t facts = {};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts, &module_->arena,
                                                   module_->values.count));
   loom_value_facts_t source_facts = {};
   const loom_value_fact_encoding_summary_t summary = {
-      /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-      /*.static_spec_encoding_id=*/{},
-      /*.address_layout=*/{},
-      /*.storage_schema=*/
-      {
-          /*.static_spec_encoding_id=*/{},
-          /*.encoded_operand=*/actual_schema,
-      },
+      .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+      .static_spec_encoding_id = {},
+      .address_layout = {},
+      .storage_schema =
+          {
+              .static_spec_encoding_id = {},
+              .encoded_operand = actual_schema,
+          },
   };
   IREE_ASSERT_OK(loom_value_facts_make_encoding_summary(&facts.context, summary,
                                                         &source_facts));
   IREE_ASSERT_OK(loom_value_fact_table_define(
       &facts, loom_scalar_constant_result(source_op), source_facts));
 
-  loom_low_lower_guard_t guard = {};
-  guard.kind = LOOM_LOW_LOWER_GUARD_VALUE_STORAGE_OPERAND_SCHEMA;
-  guard.diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
+  loom_low_lower_guard_t guard = {
+      .kind = LOOM_LOW_LOWER_GUARD_VALUE_STORAGE_OPERAND_SCHEMA,
+      .diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE,
+  };
   const loom_low_lower_guard_ref_t guard_ref = 0;
-  loom_low_lower_value_ref_t value_ref = {};
-  value_ref.kind = LOOM_LOW_LOWER_VALUE_REF_RESULT;
-  loom_low_lower_rule_t rule = {};
-  rule.guard_count = 1;
+  loom_low_lower_value_ref_t value_ref = {
+      .kind = LOOM_LOW_LOWER_VALUE_REF_RESULT,
+  };
+  loom_low_lower_rule_t rule = {.guard_count = 1};
   const loom_low_lower_rule_span_t span = {
-      /*.source_op_kind=*/LOOM_OP_SCALAR_CONSTANT,
-      /*.rule_start=*/0,
-      /*.rule_count=*/1,
+      .source_op_kind = LOOM_OP_SCALAR_CONSTANT,
+      .rule_start = 0,
+      .rule_count = 1,
   };
   loom_value_fact_encoded_operand_schema_t expected_schema = actual_schema;
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.spans = &span;
-  rule_set.span_count = 1;
-  rule_set.rules = &rule;
-  rule_set.rule_count = 1;
-  rule_set.guards = &guard;
-  rule_set.guard_count = 1;
-  rule_set.storage_operand_schemas = &expected_schema;
-  rule_set.storage_operand_schema_count = 1;
-  rule_set.guard_refs = &guard_ref;
-  rule_set.guard_ref_count = 1;
-  rule_set.value_refs = &value_ref;
-  rule_set.value_ref_count = 1;
-  loom_low_lower_rule_match_context_t match_context = {};
-  match_context.module = module_;
-  match_context.fact_table = &facts;
+  loom_low_lower_rule_set_t rule_set = {
+      .spans = &span,
+      .span_count = 1,
+      .rules = &rule,
+      .rule_count = 1,
+      .value_refs = &value_ref,
+      .value_ref_count = 1,
+      .guards = &guard,
+      .guard_count = 1,
+      .storage_operand_schemas = &expected_schema,
+      .storage_operand_schema_count = 1,
+      .guard_refs = &guard_ref,
+      .guard_ref_count = 1,
+  };
+  loom_low_lower_rule_match_context_t match_context = {
+      .module = module_,
+      .fact_table = &facts,
+  };
 
   loom_low_lower_rule_selection_t selection = {};
   IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
@@ -787,17 +809,19 @@ TEST_F(LowLowerRuleMatchTest, ContractQueriesMaySelectContractOnlyRules) {
   loom_low_lower_rule_t rules[2] = {};
   rules[0].flags = LOOM_LOW_LOWER_RULE_FLAG_CONTRACT_ONLY;
   const loom_low_lower_rule_span_t span = {
-      /*.source_op_kind=*/LOOM_OP_INDEX_CONSTANT,
-      /*.rule_start=*/0,
-      /*.rule_count=*/2,
+      .source_op_kind = LOOM_OP_INDEX_CONSTANT,
+      .rule_start = 0,
+      .rule_count = 2,
   };
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.spans = &span;
-  rule_set.span_count = 1;
-  rule_set.rules = rules;
-  rule_set.rule_count = IREE_ARRAYSIZE(rules);
-  loom_low_lower_rule_match_context_t match_context = {};
-  match_context.module = module_;
+  loom_low_lower_rule_set_t rule_set = {
+      .spans = &span,
+      .span_count = 1,
+      .rules = rules,
+      .rule_count = IREE_ARRAYSIZE(rules),
+  };
+  loom_low_lower_rule_match_context_t match_context = {
+      .module = module_,
+  };
   const loom_op_t* source_op = BuildConstant(5);
 
   loom_low_lower_rule_selection_t selection = {};
@@ -916,32 +940,33 @@ TEST_F(LowLowerRuleMatchTest, SelectsRootKindRejection) {
   loom_low_lower_source_memory_diagnostics_t diagnostics = {};
   diagnostics.rejection_diagnostic_indices
       [LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_ROOT_KIND] = 7;
-  loom_low_lower_source_memory_t constraint = {};
-  constraint.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-  constraint.root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ALLOCA;
-  constraint.address_layout = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY;
-  constraint.dynamic_term_count = 0;
-  constraint.dynamic_view_base_term_count = 0;
-  constraint.dynamic_index_source =
-      LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_NONE;
-  constraint.memory_space_mask = LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL;
-  constraint.element_byte_count = 4;
-  constraint.vector_lane_count = 1;
-  loom_low_lower_source_memory_shape_t shape = {};
-  shape.vector_lane_byte_stride = 4;
-  shape.static_byte_offset_minimum = 0;
-  shape.static_byte_offset_maximum = 0;
+  loom_low_lower_source_memory_t constraint = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+      .root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ALLOCA,
+      .address_layout = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY,
+      .dynamic_term_count = 0,
+      .dynamic_view_base_term_count = 0,
+      .dynamic_index_source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_NONE,
+      .memory_space_mask = LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL,
+      .vector_lane_count = 1,
+      .element_byte_count = 4,
+  };
+  loom_low_lower_source_memory_shape_t shape = {
+      .vector_lane_byte_stride = 4,
+      .static_byte_offset_minimum = 0,
+      .static_byte_offset_maximum = 0,
+  };
 
-  loom_low_source_memory_access_plan_t access = {};
-  access.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-  access.root_value_id = loom_index_constant_result(BuildConstant(0));
+  loom_low_source_memory_access_plan_t access = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+      .root_value_id = loom_index_constant_result(BuildConstant(0)),
+  };
   access.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;
   access.element_byte_count = 4;
   access.vector_lane_count = 1;
   access.vector_lane_byte_stride = 4;
 
-  loom_low_lower_rule_match_context_t context = {};
-  context.module = module_;
+  loom_low_lower_rule_match_context_t context = {.module = module_};
   uint16_t diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
   EXPECT_FALSE(loom_low_lower_rule_source_memory_matches(
       &context, &constraint, &shape, &diagnostics, &access, 0,

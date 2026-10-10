@@ -88,8 +88,9 @@ TEST_F(FuncLocationTest, DebugStrippingPreservesSemanticCaptures) {
       IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_READABLE |
           IREE_IO_STREAM_MODE_SEEKABLE,
       4096, iree_allocator_system(), &stream));
-  loom_bytecode_write_options_t options = {};
-  options.location_mode = LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS;
+  loom_bytecode_write_options_t options = {
+      .location_mode = LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS,
+  };
   IREE_ASSERT_OK(
       loom_bytecode_write_module(module_.get(), stream, &options, &pool_));
   std::vector<uint8_t> bytecode(iree_io_stream_length(stream));

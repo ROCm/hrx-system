@@ -27,11 +27,11 @@ TEST(LowLowerPolicyRegistryTest, LooksUpPolicyByContractKey) {
 
 TEST(LowLowerPolicyRegistryTest, LooksUpPolicyForTargetBundle) {
   loom_low_lower_policy_registry_t registry = MakeTestPolicyRegistry();
-  loom_target_config_t config = {};
-  config.contract_set_key = IREE_SV("test.low.core");
-  loom_target_bundle_t bundle = {};
-  bundle.name = IREE_SV("test-low");
-  bundle.config = &config;
+  loom_target_config_t config = {.contract_set_key = IREE_SV("test.low.core")};
+  loom_target_bundle_t bundle = {
+      .name = IREE_SV("test-low"),
+      .config = &config,
+  };
 
   const loom_low_lower_policy_t* policy =
       loom_low_lower_policy_registry_lookup_for_bundle(&registry, &bundle);
@@ -49,12 +49,12 @@ TEST(LowLowerPolicyRegistryTest, RejectsMissingContractKey) {
 TEST(LowLowerPolicyRegistryTest, ReturnsFirstDuplicateContractKey) {
   const loom_low_lower_policy_registry_entry_t entries[] = {
       {
-          /*.contract_set_key=*/IREE_SVL("test.low.core"),
-          /*.policy=*/loom_test_low_lower_policy(),
+          .contract_set_key = IREE_SVL("test.low.core"),
+          .policy = loom_test_low_lower_policy(),
       },
       {
-          /*.contract_set_key=*/IREE_SVL("test.low.core"),
-          /*.policy=*/loom_test_low_lower_policy(),
+          .contract_set_key = IREE_SVL("test.low.core"),
+          .policy = loom_test_low_lower_policy(),
       },
   };
   loom_low_lower_policy_registry_t registry = {};

@@ -46,10 +46,10 @@ static iree_status_t mock_factory_create_listener(
 }
 
 static const iree_net_transport_factory_vtable_t mock_factory_vtable = {
-    /*.destroy=*/mock_factory_destroy,
-    /*.query_capabilities=*/mock_factory_query_capabilities,
-    /*.connect=*/mock_factory_connect,
-    /*.create_listener=*/mock_factory_create_listener,
+    .destroy = mock_factory_destroy,
+    .query_capabilities = mock_factory_query_capabilities,
+    .connect = mock_factory_connect,
+    .create_listener = mock_factory_create_listener,
 };
 
 static iree_status_t mock_factory_create(iree_allocator_t allocator,
@@ -220,7 +220,7 @@ TEST_F(TransportRegistryTest, EnumerateCallbacksRunOutsideRegistryLock) {
       registry_, IREE_SV("test"), &factory->base));
   iree_net_transport_factory_release(&factory->base);
 
-  ReentrantEnumerateContext context = {/*.registry=*/registry_};
+  ReentrantEnumerateContext context = {.registry = registry_};
   IREE_ASSERT_OK(iree_net_transport_registry_enumerate(
       registry_, enumerate_query_registry_callback, &context));
   EXPECT_EQ(context.observed_count, 1u);
@@ -263,14 +263,14 @@ TEST_F(TransportRegistryTest, FreeReleasesFactories) {
 
   // Custom vtable that sets flag on destroy.
   static const iree_net_transport_factory_vtable_t tracking_vtable = {
-      /*.destroy=*/
-      [](iree_net_transport_factory_t* factory) {
-        factory_destroyed = true;
-        iree_allocator_free(iree_allocator_system(), factory);
-      },
-      /*.query_capabilities=*/mock_factory_query_capabilities,
-      /*.connect=*/mock_factory_connect,
-      /*.create_listener=*/mock_factory_create_listener,
+      .destroy =
+          [](iree_net_transport_factory_t* factory) {
+            factory_destroyed = true;
+            iree_allocator_free(iree_allocator_system(), factory);
+          },
+      .query_capabilities = mock_factory_query_capabilities,
+      .connect = mock_factory_connect,
+      .create_listener = mock_factory_create_listener,
   };
 
   mock_factory_t* factory = nullptr;

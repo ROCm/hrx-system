@@ -48,12 +48,12 @@ class BytecodeStringTableTest : public ::testing::Test {
   loom_bytecode_reader_section_t MakeSection(uint16_t kind, const uint8_t* data,
                                              iree_host_size_t length) {
     return loom_bytecode_reader_section_t{
-        /*.kind=*/kind,
-        /*.flags=*/{},
-        /*.offset=*/0,
-        /*.length=*/length,
-        /*.absolute_offset=*/41,
-        /*.bytes=*/iree_make_const_byte_span(data, length),
+        .kind = kind,
+        .flags = {},
+        .offset = 0,
+        .length = length,
+        .absolute_offset = 41,
+        .bytes = iree_make_const_byte_span(data, length),
     };
   }
 

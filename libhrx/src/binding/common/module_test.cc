@@ -176,27 +176,26 @@ class FakeExecutable {
 };
 
 const iree_hal_executable_vtable_t FakeExecutable::kVtable = {
-    /*.destroy=*/FakeExecutable::Destroy,
-    /*.function_count=*/FakeExecutable::FunctionCount,
-    /*.function_info=*/FakeExecutable::FunctionInfo,
-    /*.function_parameters=*/FakeExecutable::FunctionParameters,
-    /*.lookup_function_by_name=*/FakeExecutable::LookupFunctionByName,
-    /*.try_lookup_global_by_name=*/FakeExecutable::TryLookupGlobalByName,
-    /*.global_info=*/FakeExecutable::GlobalInfo,
-    /*.global_buffer=*/FakeExecutable::GlobalBuffer,
+    .destroy = FakeExecutable::Destroy,
+    .function_count = FakeExecutable::FunctionCount,
+    .function_info = FakeExecutable::FunctionInfo,
+    .function_parameters = FakeExecutable::FunctionParameters,
+    .lookup_function_by_name = FakeExecutable::LookupFunctionByName,
+    .try_lookup_global_by_name = FakeExecutable::TryLookupGlobalByName,
+    .global_info = FakeExecutable::GlobalInfo,
+    .global_buffer = FakeExecutable::GlobalBuffer,
 };
 
 iree_hal_executable_function_parameter_t MakeParameter(
     iree_hal_executable_function_parameter_type_t type, uint16_t size,
     uint16_t offset, uint16_t native_abi_offset) {
   return iree_hal_executable_function_parameter_t{
-      /*.type=*/type,
-      /*.flags=*/
-      IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET,
-      /*.size=*/size,
-      /*.offset=*/offset,
-      /*.native_abi_offset=*/native_abi_offset,
-      /*.name=*/iree_string_view_empty(),
+      .type = type,
+      .flags = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET,
+      .size = size,
+      .offset = offset,
+      .native_abi_offset = native_abi_offset,
+      .name = iree_string_view_empty(),
   };
 }
 

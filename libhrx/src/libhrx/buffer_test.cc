@@ -140,9 +140,9 @@ TEST_F(CpuBufferTest, PublicConstructionPreservesNativePointerAccess) {
       memset(storage, 0x5A, sizeof(storage));
       hrx_buffer_t buffer = nullptr;
       const hrx_buffer_params_t params = {
-          /*.type=*/HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
-          /*.access=*/HRX_MEMORY_ACCESS_ALL,
-          /*.usage=*/usage,
+          .type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+          .access = HRX_MEMORY_ACCESS_ALL,
+          .usage = usage,
       };
       if (construction == 0) {
         IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_allocate(

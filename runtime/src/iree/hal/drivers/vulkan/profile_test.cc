@@ -81,10 +81,10 @@ static iree_status_t FaultInjectingProfileSinkEndSession(
 }
 
 static const iree_hal_profile_sink_vtable_t kFaultInjectingProfileSinkVTable = {
-    /*.destroy=*/FaultInjectingProfileSinkDestroy,
-    /*.begin_session=*/FaultInjectingProfileSinkBeginSession,
-    /*.write=*/FaultInjectingProfileSinkWrite,
-    /*.end_session=*/FaultInjectingProfileSinkEndSession,
+    .destroy = FaultInjectingProfileSinkDestroy,
+    .begin_session = FaultInjectingProfileSinkBeginSession,
+    .write = FaultInjectingProfileSinkWrite,
+    .end_session = FaultInjectingProfileSinkEndSession,
 };
 
 static void FaultInjectingProfileSinkInitialize(

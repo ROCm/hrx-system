@@ -13,9 +13,9 @@ loom_cc_library(
   NAME
     iree_hal_execution_test_util
   HDRS
-    "iree_hal_execution.h"
+    "iree_hal_execution_test_util.h"
   SRCS
-    "iree_hal_execution.cc"
+    "iree_hal_execution_test_util.cc"
   DEPS
     iree::async
     iree::async::util::proactor_pool

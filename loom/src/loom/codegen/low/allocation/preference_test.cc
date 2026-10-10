@@ -182,13 +182,14 @@ TEST_F(LowAllocationPreferenceTest, InstructionUsesDoNotAffectStorageSearch) {
 
 TEST_F(LowAllocationPreferenceTest,
        WholeCopyPredictionYieldsToPublishedMembers) {
-  loom_low_placement_relation_t copy = {};
-  copy.result_ordinal = 1;
-  copy.source_ordinal = 3;
-  copy.unit_count = 2;
-  copy.kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE;
-  copy.cause = LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY;
-  copy.flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
+  loom_low_placement_relation_t copy = {
+      .result_ordinal = 1,
+      .source_ordinal = 3,
+      .unit_count = 2,
+      .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE,
+      .cause = LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY,
+      .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE,
+  };
   placement_.relations = &copy;
   placement_.relation_count = 1;
   ranges_[1] = {0, 1};

@@ -76,7 +76,7 @@ TEST_F(BytecodeRegionTest, RejectsSummaryCountLargerThanBoundedRegion) {
       0x00,  // block_count
       0x00,  // op_count
   };
-  loom_bytecode_region_summary_t summary = {/*.value_count=*/99};
+  loom_bytecode_region_summary_t summary = {.value_count = 99};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
                         ReadSummary(data, sizeof(data), &summary));
 

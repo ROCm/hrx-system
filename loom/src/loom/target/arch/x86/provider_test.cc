@@ -102,8 +102,8 @@ TEST_F(X86ProviderTest, SelectsStrongestExecutableCpuProfile) {
   };
   for (const auto& selection_case : cases) {
     iree_cpu_data_t cpu_data = {
-        /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-        /*.fields=*/{selection_case.cpu_features},
+        .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+        .fields = {selection_case.cpu_features},
     };
     loom_target_profile_selection_t selection = Select(&cpu_data);
     ASSERT_NE(selection.profile, nullptr);
@@ -137,7 +137,7 @@ TEST_F(X86ProviderTest, RequiresCompleteCpuFeatureClosures) {
       {"avx512", kAvx512CpuFeatures},
   };
   iree_cpu_data_t cpu_data = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
   };
   for (const auto& profile_case : cases) {
     const loom_target_profile_t* profile =
@@ -162,8 +162,8 @@ TEST_F(X86ProviderTest, PreservesAuthoredRequirementIdentity) {
   ASSERT_NE(requirement, nullptr);
 
   iree_cpu_data_t cpu_data = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-      /*.fields=*/{kAvx512CpuFeatures},
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {kAvx512CpuFeatures},
   };
   loom_target_profile_selection_t selection =
       Select(&cpu_data, &requirement->base);
@@ -191,8 +191,8 @@ TEST_F(X86ProviderTest, PreservesExplicitCoreContract) {
                                     LOOM_TARGET_FACT_FIELD_CONTRACT_SET_KEY);
 
   iree_cpu_data_t cpu_data = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-      /*.fields=*/{kAvx2CpuFeatures | IREE_CPU_DATA0_X86_64_AVXVNNIINT8},
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {kAvx2CpuFeatures | IREE_CPU_DATA0_X86_64_AVXVNNIINT8},
   };
   loom_target_profile_selection_t selection =
       Select(&cpu_data, &requirement->base);
@@ -207,13 +207,12 @@ TEST_F(X86ProviderTest, PreservesExplicitCoreContract) {
 
 TEST_F(X86ProviderTest, ProjectsCompleteCpuFactsAndExecutableFeatures) {
   iree_cpu_data_t cpu_data = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-      /*.fields=*/
-      {kAvx2CpuFeatures | IREE_CPU_DATA0_X86_64_AVXVNNI |
-           IREE_CPU_DATA0_X86_64_AVXVNNIINT8 |
-           IREE_CPU_DATA0_X86_64_AVXVNNIINT16 |
-           IREE_CPU_DATA0_X86_64_AVXNECONVERT,
-       2, 3, 4, 5, 6, 7, 8},
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {kAvx2CpuFeatures | IREE_CPU_DATA0_X86_64_AVXVNNI |
+                     IREE_CPU_DATA0_X86_64_AVXVNNIINT8 |
+                     IREE_CPU_DATA0_X86_64_AVXVNNIINT16 |
+                     IREE_CPU_DATA0_X86_64_AVXNECONVERT,
+                 2, 3, 4, 5, 6, 7, 8},
   };
   loom_target_profile_selection_t selection = Select(&cpu_data);
   ASSERT_NE(selection.profile, nullptr);
@@ -245,8 +244,8 @@ TEST_F(X86ProviderTest, ProjectsOptionalInstructionFeaturesIndependently) {
   };
   for (const auto& feature_case : cases) {
     iree_cpu_data_t cpu_data = {
-        /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-        /*.fields=*/{kAvx512CpuFeatures | feature_case.cpu_feature},
+        .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+        .fields = {kAvx512CpuFeatures | feature_case.cpu_feature},
     };
     loom_target_profile_selection_t selection = Select(&cpu_data);
     ASSERT_NE(selection.profile, nullptr);
@@ -261,8 +260,8 @@ TEST_F(X86ProviderTest, ProjectsOptionalInstructionFeaturesIndependently) {
 
 TEST_F(X86ProviderTest, DynamicProfileRequiresItsExactCpuFacts) {
   iree_cpu_data_t cpu_data = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-      /*.fields=*/{kAvx2CpuFeatures | IREE_CPU_DATA0_X86_64_AVXVNNIINT8, 17},
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {kAvx2CpuFeatures | IREE_CPU_DATA0_X86_64_AVXVNNIINT8, 17},
   };
   loom_target_profile_selection_t owned = Select(&cpu_data);
   ASSERT_NE(owned.profile, nullptr);
@@ -287,8 +286,8 @@ TEST_F(X86ProviderTest, DynamicProfileRequiresItsExactCpuFacts) {
 
 TEST_F(X86ProviderTest, RejectsNonExecutableAndForeignProfiles) {
   iree_cpu_data_t cpu_data = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-      /*.fields=*/{UINT64_MAX},
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {UINT64_MAX},
   };
   for (iree_string_view_t selector :
        {IREE_SV("packed_dot"), IREE_SV("avx512_packed_dot")}) {

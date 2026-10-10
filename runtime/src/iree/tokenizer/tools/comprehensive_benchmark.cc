@@ -134,7 +134,7 @@ R"seed(static iree_status_t hash_table_insert(hash_table_t* table, const char* k
   for (size_t probe = 0; probe < table->capacity; ++probe) {
     entry_t* entry = &table->entries[index];
     if (entry->key == NULL) {
-      *entry = (entry_t){
+      *entry = entry_t{
           .key = key, .key_length = key_length,
           .hash = hash, .value = value,
       };

@@ -41,13 +41,13 @@ std::string ToString(const loomc_byte_sequence_t* value) {
 TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
   char source_text[] = "bad";
   loomc_source_options_t source_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
-      /*.structure_size=*/0,
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("bad.loom"),
-      /*.contents=*/loomc_make_byte_span(source_text, sizeof(source_text) - 1),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_BORROWED,
+      .type = LOOMC_STRUCTURE_TYPE_NONE,
+      .structure_size = 0,
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("bad.loom"),
+      .contents = loomc_make_byte_span(source_text, sizeof(source_text) - 1),
+      .storage = LOOMC_SOURCE_STORAGE_BORROWED,
   };
   loomc_source_t* source = nullptr;
   LOOMC_ASSERT_OK(
@@ -64,32 +64,33 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
   char parameter_name[] = "expected_kind";
   char parameter_value[] = "thing";
   loomc_diagnostic_t diagnostic = {
-      /*.severity=*/LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
-      /*.code=*/loomc_make_string_view(code, sizeof(code) - 1),
-      /*.message=*/loomc_make_string_view(message, sizeof(message) - 1),
-      /*.formatted_text=*/
-      loomc_make_string_view(formatted, sizeof(formatted) - 1),
-      /*.range=*/
-      {
-          /*.source=*/source,
-          /*.start=*/0,
-          /*.end=*/3,
-          /*.start_line=*/1,
-          /*.start_column=*/1,
-          /*.end_line=*/1,
-          /*.end_column=*/4,
-      },
+      .severity = LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
+      .code = loomc_make_string_view(code, sizeof(code) - 1),
+      .message = loomc_make_string_view(message, sizeof(message) - 1),
+      .formatted_text =
+          loomc_make_string_view(formatted, sizeof(formatted) - 1),
+      .range =
+          {
+              .source = source,
+              .start = 0,
+              .end = 3,
+              .start_line = 1,
+              .start_column = 1,
+              .end_line = 1,
+              .end_column = 4,
+          },
   };
   char label[] = "defined here";
-  loomc_diagnostic_related_location_t related = {};
-  related.label = loomc_make_cstring_view(label);
-  related.range = diagnostic.range;
+  loomc_diagnostic_related_location_t related = {
+      .label = loomc_make_cstring_view(label),
+      .range = diagnostic.range,
+  };
   diagnostic.related_locations = &related;
   diagnostic.related_location_count = 1;
   diagnostic.related_location_omitted_count = 2;
   loomc_diagnostic_parameter_t parameter = {
-      /*.name=*/loomc_make_cstring_view(parameter_name),
-      /*.value=*/loomc_make_cstring_view(parameter_value),
+      .name = loomc_make_cstring_view(parameter_name),
+      .value = loomc_make_cstring_view(parameter_value),
   };
   diagnostic.parameters = &parameter;
   diagnostic.parameter_count = 1;
@@ -112,11 +113,10 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
       loomc_allocator_system(), &contents_sequence));
   ByteSequencePtr contents_owner(contents_sequence);
   loomc_artifact_t artifact = {
-      /*.kind=*/LOOMC_ARTIFACT_KIND_REPORT,
-      /*.format=*/loomc_make_string_view(format, sizeof(format) - 1),
-      /*.identifier=*/
-      loomc_make_string_view(identifier, sizeof(identifier) - 1),
-      /*.contents=*/contents_sequence,
+      .kind = LOOMC_ARTIFACT_KIND_REPORT,
+      .format = loomc_make_string_view(format, sizeof(format) - 1),
+      .identifier = loomc_make_string_view(identifier, sizeof(identifier) - 1),
+      .contents = contents_sequence,
   };
   LOOMC_ASSERT_OK(loomc_result_add_artifact(result, &artifact));
   contents_owner.reset();
@@ -174,14 +174,13 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
 TEST(ResultTest, MetadataDiagnosticsRetainLocationWithoutSourceContents) {
   const char source_text[] = "bad";
   const loomc_source_options_t source_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(source_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("bad.loom"),
-      /*.contents=*/
-      loomc_make_byte_span(source_text, sizeof(source_text) - 1),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_BORROWED,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(source_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("bad.loom"),
+      .contents = loomc_make_byte_span(source_text, sizeof(source_text) - 1),
+      .storage = LOOMC_SOURCE_STORAGE_BORROWED,
   };
   loomc_source_t* source = nullptr;
   LOOMC_ASSERT_OK(
@@ -193,24 +192,24 @@ TEST(ResultTest, MetadataDiagnosticsRetainLocationWithoutSourceContents) {
                                       loomc_allocator_system(), &result));
   ResultPtr result_owner(result);
   loomc_diagnostic_t diagnostic = {
-      /*.severity=*/LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
-      /*.code=*/loomc_make_cstring_view("PARSE/001"),
-      /*.message=*/loomc_make_cstring_view("expected a thing"),
-      /*.formatted_text=*/loomc_string_view_empty(),
-      /*.range=*/
-      {
-          /*.source=*/source,
-          /*.start=*/1,
-          /*.end=*/2,
-          /*.start_line=*/5,
-          /*.start_column=*/6,
-          /*.end_line=*/5,
-          /*.end_column=*/7,
-      },
+      .severity = LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
+      .code = loomc_make_cstring_view("PARSE/001"),
+      .message = loomc_make_cstring_view("expected a thing"),
+      .formatted_text = loomc_string_view_empty(),
+      .range =
+          {
+              .source = source,
+              .start = 1,
+              .end = 2,
+              .start_line = 5,
+              .start_column = 6,
+              .end_line = 5,
+              .end_column = 7,
+          },
   };
   const loomc_diagnostic_related_location_t related_location = {
-      /*.label=*/loomc_make_cstring_view("declared here"),
-      /*.range=*/diagnostic.range,
+      .label = loomc_make_cstring_view("declared here"),
+      .range = diagnostic.range,
   };
   diagnostic.related_locations = &related_location;
   diagnostic.related_location_count = 1;
@@ -241,8 +240,7 @@ TEST(ResultTest, RejectsDiagnosticWithMissingRelatedLocations) {
                                       LOOMC_SOURCE_RETENTION_EXACT,
                                       loomc_allocator_system(), &result));
   ResultPtr result_owner(result);
-  loomc_diagnostic_t diagnostic = {};
-  diagnostic.related_location_count = 1;
+  loomc_diagnostic_t diagnostic = {.related_location_count = 1};
   LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
                          loomc_result_add_diagnostic(result, &diagnostic));
   EXPECT_EQ(loomc_result_diagnostic_count(result), 0u);
@@ -254,8 +252,7 @@ TEST(ResultTest, RejectsDiagnosticWithMissingParameters) {
                                       LOOMC_SOURCE_RETENTION_EXACT,
                                       loomc_allocator_system(), &result));
   ResultPtr result_owner(result);
-  loomc_diagnostic_t diagnostic = {};
-  diagnostic.parameter_count = 1;
+  loomc_diagnostic_t diagnostic = {.parameter_count = 1};
   LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
                          loomc_result_add_diagnostic(result, &diagnostic));
   EXPECT_EQ(loomc_result_diagnostic_count(result), 0u);
@@ -286,10 +283,10 @@ TEST(ResultTest, RejectsMalformedArtifact) {
                                       loomc_allocator_system(), &result));
 
   loomc_artifact_t artifact = {
-      /*.kind=*/LOOMC_ARTIFACT_KIND_REPORT,
-      /*.format=*/loomc_make_cstring_view("text"),
-      /*.identifier=*/loomc_make_cstring_view("broken"),
-      /*.contents=*/nullptr,
+      .kind = LOOMC_ARTIFACT_KIND_REPORT,
+      .format = loomc_make_cstring_view("text"),
+      .identifier = loomc_make_cstring_view("broken"),
+      .contents = nullptr,
   };
   loomc_status_t status = loomc_result_add_artifact(result, &artifact);
   LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, status);

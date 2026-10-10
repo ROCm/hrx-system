@@ -193,12 +193,12 @@ TEST(FloatFacts, ClassifiesSubnormalsAtEveryDeclaredWidth) {
 TEST(FloatFacts, AppliesIndependentConversionSubnormalPermissions) {
   const loom_float_conversion_policy_t strict = {0};
   const loom_float_conversion_policy_t flush_input = {
-      /*.may_flush_input_subnormal=*/true,
-      /*.may_flush_result_subnormal=*/false,
+      .may_flush_input_subnormal = true,
+      .may_flush_result_subnormal = false,
   };
   const loom_float_conversion_policy_t flush_result = {
-      /*.may_flush_input_subnormal=*/false,
-      /*.may_flush_result_subnormal=*/true,
+      .may_flush_input_subnormal = false,
+      .may_flush_result_subnormal = true,
   };
 
   const loom_value_facts_t f16_subnormal =
@@ -233,8 +233,8 @@ TEST(FloatFacts, AppliesIndependentConversionSubnormalPermissions) {
   const loom_value_facts_t normal =
       loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 1.0);
   const loom_float_conversion_policy_t flush_both = {
-      /*.may_flush_input_subnormal=*/true,
-      /*.may_flush_result_subnormal=*/true,
+      .may_flush_input_subnormal = true,
+      .may_flush_result_subnormal = true,
   };
   loom_value_facts_eval_float_conversion(LOOM_SCALAR_TYPE_F32,
                                          LOOM_SCALAR_TYPE_BF16, flush_both,

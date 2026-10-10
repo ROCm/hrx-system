@@ -102,14 +102,13 @@ class LinkDependencyTest : public ::testing::Test {
     const iree_string_view_t contents = FindSource(filename);
     ASSERT_FALSE(iree_string_view_is_empty(contents));
     const loomc_source_options_t source_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-        /*.structure_size=*/sizeof(source_options),
-        /*.next=*/nullptr,
-        /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-        /*.identifier=*/
-        loomc_make_string_view(filename.data(), filename.size()),
-        /*.contents=*/loomc_make_byte_span(contents.data, contents.size),
-        /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+        .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+        .structure_size = sizeof(source_options),
+        .next = nullptr,
+        .format = LOOMC_SOURCE_FORMAT_TEXT,
+        .identifier = loomc_make_string_view(filename.data(), filename.size()),
+        .contents = loomc_make_byte_span(contents.data, contents.size),
+        .storage = LOOMC_SOURCE_STORAGE_COPY,
     };
     loomc_source_t* source = nullptr;
     LOOMC_ASSERT_OK(loomc_source_create(&source_options,
@@ -117,9 +116,9 @@ class LinkDependencyTest : public ::testing::Test {
     SourcePtr source_ptr(source);
 
     const loomc_link_index_source_options_t index_options = {
-        /*.provider_name=*/
-        loomc_make_string_view(provider_name.data(), provider_name.size()),
-        /*.role=*/role,
+        .provider_name =
+            loomc_make_string_view(provider_name.data(), provider_name.size()),
+        .role = role,
     };
     loomc_link_index_source_slot_t slot = {};
     LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
@@ -131,15 +130,15 @@ class LinkDependencyTest : public ::testing::Test {
                     loomc_host_size_t direct_provider_count,
                     loomc_link_dependency_artifact_flags_t artifact_flags) {
     const loomc_link_dependency_analysis_options_t options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_DEPENDENCY_ANALYSIS_OPTIONS,
-        /*.structure_size=*/sizeof(options),
-        /*.next=*/nullptr,
-        /*.direct_provider_ordinals=*/direct_provider_ordinals,
-        /*.direct_provider_count=*/direct_provider_count,
-        /*.component_name=*/loomc_make_cstring_view("//model:layers"),
-        /*.artifact_flags=*/artifact_flags,
-        /*.report_identifier=*/
-        loomc_make_cstring_view("layers.dependencies.json"),
+        .type = LOOMC_STRUCTURE_TYPE_LINK_DEPENDENCY_ANALYSIS_OPTIONS,
+        .structure_size = sizeof(options),
+        .next = nullptr,
+        .direct_provider_ordinals = direct_provider_ordinals,
+        .direct_provider_count = direct_provider_count,
+        .component_name = loomc_make_cstring_view("//model:layers"),
+        .artifact_flags = artifact_flags,
+        .report_identifier =
+            loomc_make_cstring_view("layers.dependencies.json"),
     };
     loomc_result_t* result = nullptr;
     loomc_status_t status = loomc_link_analyze_dependencies(
@@ -219,11 +218,11 @@ TEST_F(LinkDependencyTest, OmitsReportWhenItIsNotRequested) {
   const std::array<loomc_host_size_t, 2> direct_providers = {
       direct_provider_ordinal_, unused_provider_ordinal_};
   const loomc_link_dependency_analysis_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_DEPENDENCY_ANALYSIS_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.direct_provider_ordinals=*/direct_providers.data(),
-      /*.direct_provider_count=*/direct_providers.size(),
+      .type = LOOMC_STRUCTURE_TYPE_LINK_DEPENDENCY_ANALYSIS_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .direct_provider_ordinals = direct_providers.data(),
+      .direct_provider_count = direct_providers.size(),
   };
   loomc_result_t* result = nullptr;
   LOOMC_ASSERT_OK(loomc_link_analyze_dependencies(
@@ -236,11 +235,11 @@ TEST_F(LinkDependencyTest, OmitsReportWhenItIsNotRequested) {
 
 TEST_F(LinkDependencyTest, RejectsInvalidDirectProviderSelection) {
   const loomc_link_dependency_analysis_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_DEPENDENCY_ANALYSIS_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.direct_provider_ordinals=*/&input_provider_ordinal_,
-      /*.direct_provider_count=*/1,
+      .type = LOOMC_STRUCTURE_TYPE_LINK_DEPENDENCY_ANALYSIS_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .direct_provider_ordinals = &input_provider_ordinal_,
+      .direct_provider_count = 1,
   };
   loomc_result_t* result = reinterpret_cast<loomc_result_t*>(0x1);
   LOOMC_EXPECT_STATUS_IS(
@@ -252,14 +251,14 @@ TEST_F(LinkDependencyTest, RejectsInvalidDirectProviderSelection) {
 
 TEST_F(LinkDependencyTest, RejectsReportIdentifierWithoutReportArtifact) {
   const loomc_link_dependency_analysis_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_DEPENDENCY_ANALYSIS_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.direct_provider_ordinals=*/nullptr,
-      /*.direct_provider_count=*/0,
-      /*.component_name=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
-      /*.report_identifier=*/loomc_make_cstring_view("orphan.json"),
+      .type = LOOMC_STRUCTURE_TYPE_LINK_DEPENDENCY_ANALYSIS_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .direct_provider_ordinals = nullptr,
+      .direct_provider_count = 0,
+      .component_name = loomc_string_view_empty(),
+      .artifact_flags = 0,
+      .report_identifier = loomc_make_cstring_view("orphan.json"),
   };
   loomc_result_t* result = reinterpret_cast<loomc_result_t*>(0x1);
   LOOMC_EXPECT_STATUS_IS(

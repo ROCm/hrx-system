@@ -189,10 +189,10 @@ TEST_P(CommandBufferCopyBufferTest, CopySizeAndAlignmentClasses) {
     iree_device_size_t target_offset = 0;
   };
   const AlignmentCase alignment_cases[] = {
-      {/*.name=*/"aligned16", /*.source_offset=*/0, /*.target_offset=*/0},
-      {/*.name=*/"aligned8_not16", /*.source_offset=*/8, /*.target_offset=*/8},
-      {/*.name=*/"aligned4_not8", /*.source_offset=*/4, /*.target_offset=*/4},
-      {/*.name=*/"byte_misaligned", /*.source_offset=*/1, /*.target_offset=*/2},
+      {.name = "aligned16", .source_offset = 0, .target_offset = 0},
+      {.name = "aligned8_not16", .source_offset = 8, .target_offset = 8},
+      {.name = "aligned4_not8", .source_offset = 4, .target_offset = 4},
+      {.name = "byte_misaligned", .source_offset = 1, .target_offset = 2},
   };
   const iree_device_size_t common_sizes[] = {
       4, 8, 16, 31, 32, 33, 64, 128, 256, 1024, 4 * 1024, 16 * 1024, 64 * 1024,

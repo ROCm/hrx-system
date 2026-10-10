@@ -62,7 +62,7 @@ class GlobalFactsTest : public ::testing::Test {
                         const loom_module_t* second_module) {
     const loom_module_t* source_modules[] = {first_module, second_module};
     loom_link_options_t options = {
-        /*.module_name=*/IREE_SV("linked"),
+        .module_name = IREE_SV("linked"),
     };
     loom_module_t* linked_module = nullptr;
     IREE_EXPECT_OK(loom_link_materialized_modules(

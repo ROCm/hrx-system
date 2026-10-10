@@ -205,8 +205,7 @@ TEST(AqlEncodingTest, BarrierValueEncodesMaskedEpochAndLessThanCondition) {
 }
 
 TEST(AqlEncodingTest, Gfx9CodeCacheInvalidateUsesBounded256ByteRange) {
-  amdf_gpu_endpoint_info_t endpoint = {};
-  endpoint.gfx_ip = {9, 4, 2};
+  amdf_gpu_endpoint_info_t endpoint = {.gfx_ip = {9, 4, 2}};
   const auto commands =
       aql::CodeCacheInvalidate(endpoint, UINT64_C(0x1234567887654300), 1408);
   // ROCm 8d57824901ff amd_gpu_pm4.h: ACQUIRE_MEM opcode 0x58, seven
@@ -222,8 +221,9 @@ TEST(AqlEncodingTest, Gfx9CodeCacheInvalidateUsesBounded256ByteRange) {
 TEST(AqlEncodingTest, RdnaCodePublicationSelectsGenerationSpecificGcr) {
   for (uint32_t target : {110501u, 120000u, 120500u}) {
     SCOPED_TRACE(target);
-    amdf_gpu_endpoint_info_t endpoint = {};
-    endpoint.gfx_ip = {target / 10000, (target / 100) % 100, target % 100};
+    amdf_gpu_endpoint_info_t endpoint = {
+        .gfx_ip = {target / 10000, (target / 100) % 100, target % 100},
+    };
     const auto commands =
         aql::CodeCacheInvalidate(endpoint, UINT64_C(0x1234567887654300), 1408);
     // RDNA's eight-dword ACQUIRE_MEM appends GCR instead of COHER_CNTL.

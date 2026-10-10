@@ -30,11 +30,12 @@ static iree_hal_amdgpu_device_kernel_args_t MakeKernelArgs(
     uint32_t private_segment_size, uint32_t group_segment_size) {
   static_assert(IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE ==
                 IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE);
-  iree_hal_amdgpu_device_kernel_args_t kernel_args = {};
-  kernel_args.kernel_object = kernel_object;
-  kernel_args.kernarg_size = IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE;
-  kernel_args.kernarg_alignment = 8;
-  kernel_args.setup = setup;
+  iree_hal_amdgpu_device_kernel_args_t kernel_args = {
+      .kernel_object = kernel_object,
+      .setup = setup,
+      .kernarg_size = IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE,
+      .kernarg_alignment = 8,
+  };
   kernel_args.workgroup_size[0] = workgroup_size_x;
   kernel_args.workgroup_size[1] = 1;
   kernel_args.workgroup_size[2] = 1;
@@ -44,29 +45,30 @@ static iree_hal_amdgpu_device_kernel_args_t MakeKernelArgs(
 }
 
 static iree_hal_amdgpu_device_kernels_t MakeKernels() {
-  iree_hal_amdgpu_device_kernels_t kernels = {};
-  kernels.iree_hal_amdgpu_device_buffer_fill_x1 =
-      MakeKernelArgs(kFillX1KernelObject, 1, 32, 4, 8);
-  kernels.iree_hal_amdgpu_device_buffer_fill_x2 =
-      MakeKernelArgs(kFillX2KernelObject, 2, 32, 5, 9);
-  kernels.iree_hal_amdgpu_device_buffer_fill_x4 =
-      MakeKernelArgs(kFillX4KernelObject, 3, 32, 6, 10);
-  kernels.iree_hal_amdgpu_device_buffer_fill_x8 =
-      MakeKernelArgs(kFillX8KernelObject, 4, 32, 7, 11);
-  kernels.iree_hal_amdgpu_device_buffer_fill_block_x16 =
-      MakeKernelArgs(kFillBlockX16KernelObject, 5, 32, 8, 12);
-  kernels.iree_hal_amdgpu_device_buffer_fill_block_unaligned_x16 =
-      MakeKernelArgs(kFillBlockUnalignedX16KernelObject, 6, 32, 9, 13);
-  kernels.iree_hal_amdgpu_device_buffer_copy_x1 =
-      MakeKernelArgs(kCopyX1KernelObject, 7, 32, 10, 14);
-  kernels.iree_hal_amdgpu_device_buffer_copy_block_x4 =
-      MakeKernelArgs(kCopyBlockX4KernelObject, 8, 32, 11, 15);
-  kernels.iree_hal_amdgpu_device_buffer_copy_block_x8 =
-      MakeKernelArgs(kCopyBlockX8KernelObject, 9, 32, 12, 16);
-  kernels.iree_hal_amdgpu_device_buffer_copy_block_x16 =
-      MakeKernelArgs(kCopyBlockX16KernelObject, 10, 32, 13, 17);
-  kernels.iree_hal_amdgpu_device_buffer_copy_block_unaligned_x16 =
-      MakeKernelArgs(kCopyBlockUnalignedX16KernelObject, 11, 32, 14, 18);
+  iree_hal_amdgpu_device_kernels_t kernels = {
+      .iree_hal_amdgpu_device_buffer_fill_x1 =
+          MakeKernelArgs(kFillX1KernelObject, 1, 32, 4, 8),
+      .iree_hal_amdgpu_device_buffer_fill_x2 =
+          MakeKernelArgs(kFillX2KernelObject, 2, 32, 5, 9),
+      .iree_hal_amdgpu_device_buffer_fill_x4 =
+          MakeKernelArgs(kFillX4KernelObject, 3, 32, 6, 10),
+      .iree_hal_amdgpu_device_buffer_fill_x8 =
+          MakeKernelArgs(kFillX8KernelObject, 4, 32, 7, 11),
+      .iree_hal_amdgpu_device_buffer_fill_block_x16 =
+          MakeKernelArgs(kFillBlockX16KernelObject, 5, 32, 8, 12),
+      .iree_hal_amdgpu_device_buffer_fill_block_unaligned_x16 =
+          MakeKernelArgs(kFillBlockUnalignedX16KernelObject, 6, 32, 9, 13),
+      .iree_hal_amdgpu_device_buffer_copy_x1 =
+          MakeKernelArgs(kCopyX1KernelObject, 7, 32, 10, 14),
+      .iree_hal_amdgpu_device_buffer_copy_block_x4 =
+          MakeKernelArgs(kCopyBlockX4KernelObject, 8, 32, 11, 15),
+      .iree_hal_amdgpu_device_buffer_copy_block_x8 =
+          MakeKernelArgs(kCopyBlockX8KernelObject, 9, 32, 12, 16),
+      .iree_hal_amdgpu_device_buffer_copy_block_x16 =
+          MakeKernelArgs(kCopyBlockX16KernelObject, 10, 32, 13, 17),
+      .iree_hal_amdgpu_device_buffer_copy_block_unaligned_x16 =
+          MakeKernelArgs(kCopyBlockUnalignedX16KernelObject, 11, 32, 14, 18),
+  };
   return kernels;
 }
 
@@ -388,9 +390,9 @@ TEST(BlitTest, FillEmplaceRejectsUnsupportedPatternLengthWithoutMutation) {
   packet.setup = 0x55AAu;
   packet.kernel_object = 0xDEADCAFEu;
   iree_hal_amdgpu_device_buffer_fill_kernargs_t kernargs = {
-      /*.target_ptr=*/(void*)0x1234,
-      /*.element_length=*/7,
-      /*.pattern=*/0x99,
+      .target_ptr = (void*)0x1234,
+      .element_length = 7,
+      .pattern = 0x99,
   };
 
   EXPECT_FALSE(iree_hal_amdgpu_device_buffer_fill_emplace(

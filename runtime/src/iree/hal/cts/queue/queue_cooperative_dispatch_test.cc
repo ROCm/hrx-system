@@ -119,8 +119,8 @@ class QueueCooperativeDispatchTest : public CtsTestBase<> {
         iree_hal_make_buffer_ref(output_buffer, 0, IREE_HAL_WHOLE_BUFFER),
     };
     const iree_hal_buffer_ref_list_t bindings = {
-        /*.count=*/IREE_ARRAYSIZE(binding_values),
-        /*.values=*/binding_values,
+        .count = IREE_ARRAYSIZE(binding_values),
+        .values = binding_values,
     };
     SemaphoreList completion(device_, {0}, {1});
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
@@ -198,9 +198,9 @@ TEST_P(QueueCooperativeDispatchTest, ReportedMaximumGridSynchronizes) {
   ASSERT_LE(dynamic_workgroup_local_memory, UINT32_MAX);
 
   const iree_hal_queue_dispatch_concurrency_params_t params = {
-      /*.workgroup_size=*/{kWorkgroupSize, 1, 1},
-      /*.dynamic_workgroup_local_memory=*/
-      (uint32_t)dynamic_workgroup_local_memory,
+      .workgroup_size = {kWorkgroupSize, 1, 1},
+      .dynamic_workgroup_local_memory =
+          (uint32_t)dynamic_workgroup_local_memory,
   };
   iree_hal_queue_dispatch_concurrency_t concurrency;
   iree_status_t status = iree_hal_queue_query_dispatch_concurrency(
@@ -234,8 +234,8 @@ TEST_P(QueueCooperativeDispatchTest,
                                         IREE_HAL_WHOLE_BUFFER),
   };
   const iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   Ref<iree_hal_command_buffer_t> command_buffer;
@@ -269,28 +269,28 @@ TEST_P(QueueCooperativeDispatchTest,
       {first_output_buffer, 0, IREE_HAL_WHOLE_BUFFER},
   };
   const iree_hal_buffer_binding_table_t first_binding_table = {
-      /*.count=*/IREE_ARRAYSIZE(first_binding_values),
-      /*.bindings=*/first_binding_values,
+      .count = IREE_ARRAYSIZE(first_binding_values),
+      .bindings = first_binding_values,
   };
   const iree_hal_buffer_binding_t second_binding_values[] = {
       {second_scratch_buffer, 0, IREE_HAL_WHOLE_BUFFER},
       {second_output_buffer, 0, IREE_HAL_WHOLE_BUFFER},
   };
   const iree_hal_buffer_binding_table_t second_binding_table = {
-      /*.count=*/IREE_ARRAYSIZE(second_binding_values),
-      /*.bindings=*/second_binding_values,
+      .count = IREE_ARRAYSIZE(second_binding_values),
+      .bindings = second_binding_values,
   };
 
   SemaphoreList completions(device_, {0, 0}, {1, 1});
   const iree_hal_semaphore_list_t first_signal = {
-      /*.count=*/1,
-      /*.semaphores=*/completions.semaphores.data(),
-      /*.payload_values=*/completions.payload_values.data(),
+      .count = 1,
+      .semaphores = completions.semaphores.data(),
+      .payload_values = completions.payload_values.data(),
   };
   const iree_hal_semaphore_list_t second_signal = {
-      /*.count=*/1,
-      /*.semaphores=*/completions.semaphores.data() + 1,
-      /*.payload_values=*/completions.payload_values.data() + 1,
+      .count = 1,
+      .semaphores = completions.semaphores.data() + 1,
+      .payload_values = completions.payload_values.data() + 1,
   };
   // No dependency edge orders these submissions. Each execution of the same
   // command buffer must therefore carry its own grid synchronization state.

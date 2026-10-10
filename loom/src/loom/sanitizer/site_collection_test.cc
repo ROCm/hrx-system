@@ -22,21 +22,20 @@ namespace {
 loom_sanitizer_site_payload_t MakePayload(
     loom_sanitizer_check_kind_t check_kind,
     loom_sanitizer_site_kind_t site_kind = LOOM_SANITIZER_SITE_KIND_VALUE) {
-  loom_sanitizer_site_payload_t payload = {};
-  payload.site_kind = site_kind;
-  payload.check_kind = check_kind;
-  payload.provenance_kind = LOOM_SANITIZER_PROVENANCE_KIND_ASSUME;
-  payload.lane_policy = LOOM_SANITIZER_LANE_POLICY_SCALAR;
-  payload.lineage_role = LOOM_SANITIZER_LINEAGE_ROLE_ORIGINAL;
-  payload.flags = 0;
-  payload.extension_data = iree_const_byte_span_empty();
+  loom_sanitizer_site_payload_t payload = {
+      .site_kind = site_kind,
+      .check_kind = check_kind,
+      .provenance_kind = LOOM_SANITIZER_PROVENANCE_KIND_ASSUME,
+      .lane_policy = LOOM_SANITIZER_LANE_POLICY_SCALAR,
+      .lineage_role = LOOM_SANITIZER_LINEAGE_ROLE_ORIGINAL,
+      .flags = 0,
+      .extension_data = iree_const_byte_span_empty(),
+  };
   return payload;
 }
 
 loom_predicate_t MakeRangePredicate(loom_value_id_t value_id) {
-  loom_predicate_t predicate = {};
-  predicate.kind = LOOM_PREDICATE_RANGE;
-  predicate.arg_count = 3;
+  loom_predicate_t predicate = {.kind = LOOM_PREDICATE_RANGE, .arg_count = 3};
   predicate.arg_tags[0] = LOOM_PRED_ARG_VALUE;
   predicate.arg_tags[1] = LOOM_PRED_ARG_CONST;
   predicate.arg_tags[2] = LOOM_PRED_ARG_CONST;
@@ -106,7 +105,7 @@ class SiteCollectionTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
     loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
     IREE_ASSERT_OK(loom_module_intern_type(module_, index_type, &index_type));
     IREE_ASSERT_OK(loom_kernel_def_build(

@@ -45,8 +45,8 @@ class VectorMemoryFootprintPassTest : public ::testing::Test {
 
   loom_module_t* Parse(iree_string_view_t source) {
     const loom_text_parse_options_t options = {
-        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
-        /*.max_errors=*/20,
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 20,
     };
     IREE_EXPECT_OK(
         loom_text_parse(source, IREE_SV("memory_footprint_test.loom"),
@@ -77,11 +77,12 @@ TEST_F(VectorMemoryFootprintPassTest, PreservesReadOnlyFunctionFacts) {
   loom_pass_value_fact_lifecycle_counts_t counts = {};
   value_facts_.lifecycle_counts = &counts;
 
-  loom_pass_t pass = {};
-  pass.info = loom_vector_memory_footprint_pass_info();
-  pass.instance_arena = &pass_arena_;
-  pass.arena = &pass_arena_;
-  pass.value_facts = &value_facts_;
+  loom_pass_t pass = {
+      .info = loom_vector_memory_footprint_pass_info(),
+      .instance_arena = &pass_arena_,
+      .arena = &pass_arena_,
+      .value_facts = &value_facts_,
+  };
   ASSERT_NE(pass.info->statistic_layout, nullptr);
   void* statistic_storage = nullptr;
   IREE_ASSERT_OK(iree_arena_allocate(&pass_arena_,

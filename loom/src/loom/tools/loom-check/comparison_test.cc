@@ -21,9 +21,10 @@ class ComparisonTest : public ::testing::Test {
   iree_status_t Compare(
       const char* checks, const char* actual,
       loom_test_output_flags_t flags = LOOM_TEST_OUTPUT_CHECKS) {
-    loom_test_case_t test_case = {};
-    test_case.output_flags = flags;
-    test_case.expected = iree_make_cstring_view(checks);
+    loom_test_case_t test_case = {
+        .output_flags = flags,
+        .expected = iree_make_cstring_view(checks),
+    };
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(&result_.actual_output, actual));
     return loom_check_compare_output(&test_case, iree_allocator_system(),

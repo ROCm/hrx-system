@@ -84,7 +84,7 @@ TEST(EndpointLifecycleTest, ActivationIsExclusiveAndRollbackRestoresCreated) {
 
 TEST(EndpointLifecycleTest, StandaloneCallbackMayDestroyLifecycle) {
   DestroyLifecycleWitness witness = {
-      /*.lifecycle=*/new iree_net_endpoint_lifecycle_t,
+      .lifecycle = new iree_net_endpoint_lifecycle_t,
   };
   iree_net_endpoint_lifecycle_initialize(
       /*connection_barrier=*/nullptr, witness.lifecycle);
@@ -314,8 +314,8 @@ TEST(EndpointLifecycleTest,
   IREE_ASSERT_OK(iree_net_endpoint_lifecycle_activate(&lifecycle));
 
   ReentrantDrainWitness witness = {
-      /*.lifecycle=*/&lifecycle,
-      /*.barrier=*/&barrier,
+      .lifecycle = &lifecycle,
+      .barrier = &barrier,
   };
   iree_net_endpoint_lifecycle_actions_t actions =
       IREE_NET_ENDPOINT_LIFECYCLE_ACTION_NONE;

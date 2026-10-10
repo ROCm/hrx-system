@@ -486,9 +486,9 @@ std::vector<uint8_t> MakeBundle(
   uint64_t next_payload_offset = payload_offset;
   for (const auto& entry : entries) {
     const BundleEntry bundle_entry = {
-        /*.offset=*/next_payload_offset,
-        /*.size=*/entry.second.size(),
-        /*.triple_size=*/entry.first.size(),
+        .offset = next_payload_offset,
+        .size = entry.second.size(),
+        .triple_size = entry.first.size(),
     };
     AppendBytes(bundle, &bundle_entry, sizeof(bundle_entry));
     AppendBytes(bundle, entry.first.data(), entry.first.size());
@@ -2319,10 +2319,11 @@ static_assert(sizeof(HipFatHeader) == 24, "wrapper must be 24 bytes");
 // validation and key projection that production uses.
 static iree_hal_executable_target_t MakeAmdgpuDeviceTarget(
     iree_string_view_t target_key) {
-  iree_hal_executable_target_t target = {};
-  target.family = IREE_SV("amdgpu");
-  target.target_key = target_key;
-  target.physical_device_affinity = 1;
+  iree_hal_executable_target_t target = {
+      .family = IREE_SV("amdgpu"),
+      .target_key = target_key,
+      .physical_device_affinity = 1,
+  };
   return target;
 }
 
@@ -2333,16 +2334,17 @@ TEST(KpackIntegration, HipkWrapperResolvesToElf) {
   std::string path = WriteTempFile("integration.kpack", archive);
   auto metadata = MakeMetadata("lib/libhip.so", {path});
 
-  HipFatHeader header = {};
-  header.magic = 0x4b504948u;  // "HIPK"
-  header.version = 1;
-  header.binary = metadata.data();
-  header.reserved = reinterpret_cast<void*>(static_cast<uintptr_t>(0));
+  HipFatHeader header = {
+      .magic = 0x4b504948u,  // "HIPK"
+      .version = 1,
+      .binary = metadata.data(),
+      .reserved = reinterpret_cast<void*>(static_cast<uintptr_t>(0)),
+  };
 
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_target},
+      {.executable_target = &executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -2361,15 +2363,16 @@ TEST(KpackIntegration, HipkWrapperNoMatchReportsNotFound) {
   std::string path = WriteTempFile("integration_nomatch.kpack", archive);
   auto metadata = MakeMetadata("lib/libhip.so", {path});
 
-  HipFatHeader header = {};
-  header.magic = 0x4b504948u;
-  header.version = 1;
-  header.binary = metadata.data();
+  HipFatHeader header = {
+      .magic = 0x4b504948u,
+      .version = 1,
+      .binary = metadata.data(),
+  };
 
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx942"));  // not in the archive
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_target},
+      {.executable_target = &executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   EXPECT_THAT(
@@ -2390,15 +2393,16 @@ TEST(KpackIntegration, HipkResolvesBundleCodeObject) {
   std::string path = WriteTempFile("integration_bundle.kpack", archive);
   auto metadata = MakeMetadata("lib/libhip.so", {path});
 
-  HipFatHeader header = {};
-  header.magic = 0x4b504948u;  // "HIPK"
-  header.version = 1;
-  header.binary = metadata.data();
+  HipFatHeader header = {
+      .magic = 0x4b504948u,  // "HIPK"
+      .version = 1,
+      .binary = metadata.data(),
+  };
 
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_target},
+      {.executable_target = &executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -2419,15 +2423,16 @@ TEST(KpackIntegration, HipkResolvedGarbageRejected) {
   std::string path = WriteTempFile("integration_garbage.kpack", archive);
   auto metadata = MakeMetadata("lib/libhip.so", {path});
 
-  HipFatHeader header = {};
-  header.magic = 0x4b504948u;
-  header.version = 1;
-  header.binary = metadata.data();
+  HipFatHeader header = {
+      .magic = 0x4b504948u,
+      .version = 1,
+      .binary = metadata.data(),
+  };
 
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_target},
+      {.executable_target = &executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   EXPECT_THAT(
@@ -2447,16 +2452,17 @@ TEST(KpackIntegration, HipkReservedSelectsCoIndex) {
   std::string path = WriteTempFile("integration_coindex.kpack", archive);
   auto metadata = MakeMetadata("lib/libhip.so", {path});
 
-  HipFatHeader header = {};
-  header.magic = 0x4b504948u;
-  header.version = 1;
-  header.binary = metadata.data();
-  header.reserved = reinterpret_cast<void*>(static_cast<uintptr_t>(1));
+  HipFatHeader header = {
+      .magic = 0x4b504948u,
+      .version = 1,
+      .binary = metadata.data(),
+      .reserved = reinterpret_cast<void*>(static_cast<uintptr_t>(1)),
+  };
 
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.executable_target=*/&executable_target},
+      {.executable_target = &executable_target},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(

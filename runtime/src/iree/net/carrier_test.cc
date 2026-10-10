@@ -43,7 +43,7 @@ struct MockCarrier {
       iree_net_carrier_t* carrier) {
     MockCarrier* mock = reinterpret_cast<MockCarrier*>(carrier);
     ++mock->query_budget_count;
-    return {/*.bytes=*/4096, /*.slots=*/4};
+    return {.bytes = 4096, .slots = 4};
   }
 
   static iree_status_t Send(iree_net_carrier_t* carrier,
@@ -93,12 +93,12 @@ struct MockCarrier {
 };
 
 const iree_net_carrier_vtable_t MockCarrier::kVtable = {
-    /*.destroy=*/MockCarrier::Destroy,
-    /*.activate=*/MockCarrier::Activate,
-    /*.deactivate=*/MockCarrier::Deactivate,
-    /*.query_send_budget=*/MockCarrier::QuerySendBudget,
-    /*.send=*/MockCarrier::Send,
-    /*.shutdown=*/MockCarrier::Shutdown,
+    .destroy = MockCarrier::Destroy,
+    .activate = MockCarrier::Activate,
+    .deactivate = MockCarrier::Deactivate,
+    .query_send_budget = MockCarrier::QuerySendBudget,
+    .send = MockCarrier::Send,
+    .shutdown = MockCarrier::Shutdown,
 };
 
 void MockCarrier::Initialize() {
@@ -106,9 +106,11 @@ void MockCarrier::Initialize() {
                               /*max_send_spans=*/8, iree_allocator_system(),
                               &base);
   IREE_ASSERT_OK(iree_net_carrier_set_handlers(
-      &base, {/*.on_receive=*/MockCarrier::HandleReceive,
-              /*.on_error=*/MockCarrier::HandleError,
-              /*.user_data=*/this}));
+      &base, {
+                 .on_receive = MockCarrier::HandleReceive,
+                 .on_error = MockCarrier::HandleError,
+                 .user_data = this,
+             }));
 }
 
 struct SendCompletion {
@@ -137,36 +139,36 @@ class CarrierTest : public ::testing::Test {
 TEST_F(CarrierTest, SendValidatesSpanListBeforeSubmission) {
   SendCompletion completion;
   iree_net_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_empty(),
-      /*.data=*/iree_async_span_list_empty(),
-      /*.completion_callback=*/
-      {
-          /*.fn=*/SendCompletion::Handle,
-          /*.user_data=*/&completion,
-      },
+      .generated_prefix = iree_net_send_prefix_empty(),
+      .data = iree_async_span_list_empty(),
+      .completion_callback =
+          {
+              .fn = SendCompletion::Handle,
+              .user_data = &completion,
+          },
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_carrier_send(&carrier_.base, &params));
 
   params.generated_prefix = {
-      /*.length=*/1,
-      /*.write=*/nullptr,
-      /*.user_data=*/nullptr,
+      .length = 1,
+      .write = nullptr,
+      .user_data = nullptr,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_carrier_send(&carrier_.base, &params));
 
   params.generated_prefix = {
-      /*.length=*/0,
-      /*.write=*/iree_net_send_prefix_copy,
-      /*.user_data=*/nullptr,
+      .length = 0,
+      .write = iree_net_send_prefix_copy,
+      .user_data = nullptr,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_carrier_send(&carrier_.base, &params));
 
   params.generated_prefix = iree_net_send_prefix_empty();
 
-  params.data = {/*.values=*/nullptr, /*.count=*/1};
+  params.data = {.values = nullptr, .count = 1};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_carrier_send(&carrier_.base, &params));
 
@@ -196,13 +198,13 @@ TEST_F(CarrierTest, AcceptedSendHasTerminalCompletion) {
   iree_async_span_t span = iree_async_span_from_ptr(payload, sizeof(payload));
   SendCompletion completion;
   iree_net_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_empty(),
-      /*.data=*/iree_async_span_list_make(&span, 1),
-      /*.completion_callback=*/
-      {
-          /*.fn=*/SendCompletion::Handle,
-          /*.user_data=*/&completion,
-      },
+      .generated_prefix = iree_net_send_prefix_empty(),
+      .data = iree_async_span_list_make(&span, 1),
+      .completion_callback =
+          {
+              .fn = SendCompletion::Handle,
+              .user_data = &completion,
+          },
   };
   IREE_ASSERT_OK(iree_net_carrier_send(&carrier_.base, &params));
   EXPECT_EQ(carrier_.send_count, 1);
@@ -220,14 +222,14 @@ TEST_F(CarrierTest, GeneratedPrefixHasTerminalCompletion) {
   memset(prefix, 0xA5, sizeof(prefix));
   SendCompletion completion;
   iree_net_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+      .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span(prefix, sizeof(prefix))),
-      /*.data=*/iree_async_span_list_empty(),
-      /*.completion_callback=*/
-      {
-          /*.fn=*/SendCompletion::Handle,
-          /*.user_data=*/&completion,
-      },
+      .data = iree_async_span_list_empty(),
+      .completion_callback =
+          {
+              .fn = SendCompletion::Handle,
+              .user_data = &completion,
+          },
   };
   IREE_ASSERT_OK(iree_net_carrier_send(&carrier_.base, &params));
   EXPECT_EQ(carrier_.send_count, 1);
@@ -245,14 +247,14 @@ TEST_F(CarrierTest, GeneratedPrefixHasTerminalCompletion) {
 TEST_F(CarrierTest, GeneratedPrefixFailureCompletesAcceptedSend) {
   SendCompletion completion;
   iree_net_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+      .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span(nullptr, 1)),
-      /*.data=*/iree_async_span_list_empty(),
-      /*.completion_callback=*/
-      {
-          /*.fn=*/SendCompletion::Handle,
-          /*.user_data=*/&completion,
-      },
+      .data = iree_async_span_list_empty(),
+      .completion_callback =
+          {
+              .fn = SendCompletion::Handle,
+              .user_data = &completion,
+          },
   };
   IREE_ASSERT_OK(iree_net_carrier_send(&carrier_.base, &params));
   EXPECT_EQ(carrier_.send_count, 1);
@@ -277,14 +279,14 @@ TEST_F(CarrierTest, TerminalErrorStopsAdmissionAndBudget) {
   uint8_t prefix = 0;
   SendCompletion completion;
   iree_net_send_params_t params = {
-      /*.generated_prefix=*/iree_net_send_prefix_from_bytes(
+      .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span(&prefix, 1)),
-      /*.data=*/iree_async_span_list_empty(),
-      /*.completion_callback=*/
-      {
-          /*.fn=*/SendCompletion::Handle,
-          /*.user_data=*/&completion,
-      },
+      .data = iree_async_span_list_empty(),
+      .completion_callback =
+          {
+              .fn = SendCompletion::Handle,
+              .user_data = &completion,
+          },
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
                         iree_net_carrier_send(&carrier_.base, &params));

@@ -1580,10 +1580,12 @@ TEST_F(KfdUserQueueTest, AqlStatusObservesItsNativeInactiveSignal) {
 
 TEST_F(KfdUserQueueTest, ComputeFamilyCannotSilentlyIgnoreRequestedScratch) {
   auto create_info = MakeCreateInfo();
-  create_info.scratch = {.device_address = 0x10000000,
-                         .byte_length = 4096,
-                         .maximum_private_segment_byte_length = 16,
-                         .maximum_wave_count = 4};
+  create_info.scratch = {
+      .device_address = 0x10000000,
+      .byte_length = 4096,
+      .maximum_private_segment_byte_length = 16,
+      .maximum_wave_count = 4,
+  };
   EXPECT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
                                            &queue_result_),
             amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));

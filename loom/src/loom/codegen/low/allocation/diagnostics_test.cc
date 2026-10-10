@@ -23,8 +23,8 @@ iree_status_t UnexpectedEmit(void* user_data,
 TEST(LowAllocationDiagnosticsTest, EmptyTableEmitsNoDiagnostics) {
   loom_low_allocation_table_t table = {};
   const iree_diagnostic_emitter_t emitter = {
-      /*.fn=*/UnexpectedEmit,
-      /*.user_data=*/nullptr,
+      .fn = UnexpectedEmit,
+      .user_data = nullptr,
   };
 
   IREE_EXPECT_OK(loom_low_allocation_diagnostics_emit(

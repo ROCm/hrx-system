@@ -35,9 +35,10 @@ static iree_status_t CreateBuiltinPass(const loom_pass_descriptor_t* descriptor,
   iree_arena_allocator_t instance_arena = {};
   iree_arena_initialize(&block_pool, &instance_arena);
 
-  loom_pass_t pass = {};
-  pass.info = descriptor->info();
-  pass.instance_arena = &instance_arena;
+  loom_pass_t pass = {
+      .info = descriptor->info(),
+      .instance_arena = &instance_arena,
+  };
   iree_status_t status = descriptor->create ? descriptor->create(&pass, options)
                                             : iree_ok_status();
   if (iree_status_is_ok(status) && descriptor->destroy) {
@@ -81,11 +82,11 @@ TEST(PassBuiltinRegistryTest, ComposesOptionalExtensionRegistry) {
             loom_pass_builtin_registry()->descriptor_count);
 
   static const loom_pass_descriptor_t kExtensionDescriptors[] = {
-      {/*.key=*/IREE_SVL("zz-test-extension")},
+      {.key = IREE_SVL("zz-test-extension")},
   };
   static const loom_pass_registry_t kExtensionRegistry = {
-      /*.descriptors=*/kExtensionDescriptors,
-      /*.descriptor_count=*/IREE_ARRAYSIZE(kExtensionDescriptors),
+      .descriptors = kExtensionDescriptors,
+      .descriptor_count = IREE_ARRAYSIZE(kExtensionDescriptors),
   };
   loom_pass_registry_storage_t extended_storage = {};
   IREE_ASSERT_OK(loom_pass_registry_storage_initialize_with_builtins(
@@ -106,11 +107,11 @@ TEST(PassBuiltinRegistryTest, ComposesOptionalExtensionRegistry) {
 
 TEST(PassBuiltinRegistryTest, RejectsBuiltinKeyReplacement) {
   static const loom_pass_descriptor_t kDuplicateDescriptors[] = {
-      {/*.key=*/IREE_SVL("canonicalize")},
+      {.key = IREE_SVL("canonicalize")},
   };
   static const loom_pass_registry_t kDuplicateRegistry = {
-      /*.descriptors=*/kDuplicateDescriptors,
-      /*.descriptor_count=*/IREE_ARRAYSIZE(kDuplicateDescriptors),
+      .descriptors = kDuplicateDescriptors,
+      .descriptor_count = IREE_ARRAYSIZE(kDuplicateDescriptors),
   };
   loom_pass_registry_storage_t storage = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,

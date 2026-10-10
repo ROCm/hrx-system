@@ -68,8 +68,9 @@ class ProgramPlanFixture {
     source_module_ = ParseAndVerify(BuildSource(launch_shape, launch_count));
     CheckStatus(loom_link_module_index_allocate(
         &context_, &block_pool_, iree_allocator_system(), &index_));
-    loom_link_module_index_add_options_t add_options = {};
-    add_options.provider_name = IREE_SV("command_plan_benchmark");
+    loom_link_module_index_add_options_t add_options = {
+        .provider_name = IREE_SV("command_plan_benchmark"),
+    };
     CheckStatus(loom_link_module_index_add_materialized(
         index_, source_module_, &add_options,
         /*out_provider_ordinal=*/nullptr));
@@ -79,13 +80,14 @@ class ProgramPlanFixture {
       std::abort();
     }
     const loom_link_plan_root_facet_t root_facet = {
-        /*.symbol_ordinal=*/root_symbol_->ordinal,
-        /*.kind=*/LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION,
+        .symbol_ordinal = root_symbol_->ordinal,
+        .kind = LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION,
     };
-    loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_LINK;
-    options.root_facets = {1, &root_facet};
-    options.dependency_policy = LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS;
+    loom_link_plan_options_t options = {
+        .mode = LOOM_LINK_PLAN_LINK,
+        .root_facets = {1, &root_facet},
+        .dependency_policy = LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS,
+    };
     CheckStatus(loom_link_plan_build(index_, &options, iree_allocator_system(),
                                      &plan_));
   }
@@ -103,10 +105,11 @@ class ProgramPlanFixture {
 
   loom_link_plan_materialization_t Materialize(
       iree_arena_allocator_t* arena, loom_symbol_ref_t* out_root_ref) {
-    loom_link_plan_materialization_environment_t environment = {};
-    environment.context = &context_;
-    environment.block_pool = &block_pool_;
-    environment.allocator = iree_allocator_system();
+    loom_link_plan_materialization_environment_t environment = {
+        .context = &context_,
+        .block_pool = &block_pool_,
+        .allocator = iree_allocator_system(),
+    };
     loom_link_plan_materialization_t materialization = {};
     CheckStatus(loom_link_plan_materialize(plan_, &environment,
                                            IREE_SV("command_plan_benchmark"),
@@ -243,9 +246,10 @@ kernel.def @tiles(%extent: index) {
   }
 
   loom_module_t* ParseAndVerify(const std::string& source) {
-    loom_text_parse_options_t parse_options = {};
-    parse_options.diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr};
-    parse_options.max_errors = 20;
+    loom_text_parse_options_t parse_options = {
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+        .max_errors = 20,
+    };
     loom_module_t* module = nullptr;
     CheckStatus(
         loom_text_parse(iree_make_string_view(source.data(), source.size()),
@@ -378,21 +382,21 @@ static void RunIndexedProgramPlanBenchmark(benchmark::State& state,
                              static_cast<iree_host_size_t>(state.range(0)));
   const iree_host_size_t root_symbol_ordinal = fixture.root_symbol_ordinal();
   const loom_link_plan_materialization_environment_t environment = {
-      /*.context=*/fixture.context(),
-      /*.block_pool=*/fixture.block_pool(),
-      /*.low_repr_environment=*/{},
-      /*.diagnostic_sink=*/nullptr,
-      /*.prepare_module=*/nullptr,
-      /*.user_data=*/nullptr,
-      /*.allocator=*/iree_allocator_system(),
+      .context = fixture.context(),
+      .block_pool = fixture.block_pool(),
+      .low_repr_environment = {},
+      .diagnostic_sink = nullptr,
+      .prepare_module = nullptr,
+      .user_data = nullptr,
+      .allocator = iree_allocator_system(),
   };
   loom_cmd_program_plan_index_options_t options;
   loom_cmd_program_plan_index_options_initialize(&options);
   KernelRequestCapture capture;
   if (request_mode == KernelRequestMode::kPublish) {
     options.kernel_request_sink = {
-        /*.publish=*/CaptureKernelRequest,
-        /*.user_data=*/&capture,
+        .publish = CaptureKernelRequest,
+        .user_data = &capture,
     };
   }
 

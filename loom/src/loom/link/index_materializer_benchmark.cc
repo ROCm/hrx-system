@@ -56,15 +56,15 @@ class TemplateCatalogFixture {
     CheckStatus(loom_link_module_index_allocate(
         &context_, &block_pool_, iree_allocator_system(), &index_));
     const loom_link_module_index_add_options_t root_options = {
-        /*.provider_name=*/IREE_SV("root"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = IREE_SV("root"),
+        .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
     };
     CheckStatus(loom_link_module_index_add_materialized(
         index_, root_module_, &root_options,
         /*out_provider_ordinal=*/nullptr));
     const loom_link_module_index_add_options_t library_options = {
-        /*.provider_name=*/IREE_SV("library"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+        .provider_name = IREE_SV("library"),
+        .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
     };
     CheckStatus(loom_link_module_index_add_bytecode(
         index_,
@@ -102,14 +102,16 @@ class TemplateCatalogFixture {
 
   loom_link_index_materialization_t Materialize() {
     const iree_string_view_t root = IREE_SV("@entry");
-    loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_LINK;
-    options.root_symbols = {/*.count=*/1, /*.values=*/&root};
-    options.unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ERROR;
-    loom_link_plan_materialization_environment_t environment = {};
-    environment.context = &context_;
-    environment.block_pool = &block_pool_;
-    environment.allocator = iree_allocator_system();
+    loom_link_plan_options_t options = {
+        .mode = LOOM_LINK_PLAN_LINK,
+        .root_symbols = {.count = 1, .values = &root},
+        .unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ERROR,
+    };
+    loom_link_plan_materialization_environment_t environment = {
+        .context = &context_,
+        .block_pool = &block_pool_,
+        .allocator = iree_allocator_system(),
+    };
     loom_link_index_materialization_t materialization = {};
     CheckStatus(loom_link_index_materialize(
         index_, &options, &environment, IREE_SV("linked"), &materialization));

@@ -15,17 +15,19 @@ namespace {
 loom_low_reg_class_t RegClass(uint16_t alias_set_id,
                               uint16_t allocatable_count = 0,
                               loom_low_reg_class_flags_t flags = 0) {
-  loom_low_reg_class_t reg_class = {};
-  reg_class.alias_set_id = alias_set_id;
-  reg_class.allocatable_count = allocatable_count;
-  reg_class.flags = flags;
+  loom_low_reg_class_t reg_class = {
+      .flags = flags,
+      .allocatable_count = allocatable_count,
+      .alias_set_id = alias_set_id,
+  };
   return reg_class;
 }
 
 loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
                                         iree_host_size_t reg_class_count) {
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.reg_classes = reg_classes;
+  loom_low_descriptor_set_t descriptor_set = {
+      .reg_classes = reg_classes,
+  };
   descriptor_set.reg_class_count = reg_class_count;
   return descriptor_set;
 }
@@ -34,12 +36,13 @@ loom_low_allocation_assignment_t Assignment(
     uint16_t descriptor_reg_class_id,
     loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
     uint32_t location_count) {
-  loom_low_allocation_assignment_t assignment = {};
-  assignment.descriptor_reg_class_id = descriptor_reg_class_id;
-  assignment.location_kind = location_kind;
-  assignment.location_base = location_base;
-  assignment.location_count = location_count;
-  assignment.unit_count = location_count;
+  loom_low_allocation_assignment_t assignment = {
+      .descriptor_reg_class_id = descriptor_reg_class_id,
+      .unit_count = location_count,
+      .location_kind = location_kind,
+      .location_base = location_base,
+      .location_count = location_count,
+  };
   return assignment;
 }
 
@@ -165,14 +168,14 @@ TEST(LowAllocationStorageTest, EvaluatesConcretePlacementRelations) {
       /*location_count=*/2);
 
   loom_low_placement_relation_t relation = {
-      /*.op=*/nullptr,
-      /*.result_ordinal=*/0,
-      /*.source_ordinal=*/1,
-      /*.result_unit_offset=*/0,
-      /*.source_unit_offset=*/0,
-      /*.unit_count=*/1,
-      {/*.location_mask=*/1},
-      /*.kind=*/LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION,
+      .op = nullptr,
+      .result_ordinal = 0,
+      .source_ordinal = 1,
+      .result_unit_offset = 0,
+      .source_unit_offset = 0,
+      .unit_count = 1,
+      .location_mask = 1,
+      .kind = LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION,
   };
   EXPECT_TRUE(loom_low_allocation_storage_placement_relation_satisfied(
       &descriptor_set, &relation, &result, &source));
@@ -216,22 +219,22 @@ TEST(LowAllocationStorageTest, MatchesExplicitRegisterAtomicStorage) {
   const uint16_t atomic_units[] = {0, 1, 0, 2, 3};
   const loom_low_physical_register_t physical_registers[] = {
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/0,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 0,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/2,
-          /*.atomic_unit_count=*/1,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 2,
+          .atomic_unit_count = 1,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/3,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 3,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
   };
   reg_classes[0].candidate_lookup.register_count = 3;
@@ -496,24 +499,25 @@ TEST(LowAllocationStorageTest, ResolvesCompletePhysicalCandidateRangeFamily) {
     allocation_ordinals[i] = kCandidateCount - i - 1;
     atomic_units[i] = i;
   }
-  loom_low_reg_class_t reg_class = {};
-  reg_class.flags =
-      LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
-      LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS |
-      LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES;
-  reg_class.allocatable_count = kCandidateCount;
-  reg_class.physical_atomic_unit_count = 1;
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.reg_classes = &reg_class;
-  descriptor_set.reg_class_count = 1;
-  descriptor_set.physical_registers = physical_registers;
-  descriptor_set.physical_register_count = kCandidateCount;
-  descriptor_set.physical_register_candidate_ids = candidate_ids;
-  descriptor_set.physical_register_allocation_ordinals = allocation_ordinals;
-  descriptor_set.physical_register_candidate_count = kCandidateCount;
-  descriptor_set.physical_register_atomic_units = atomic_units;
-  descriptor_set.physical_register_atomic_unit_count = kCandidateCount;
-  descriptor_set.physical_register_unit_count = kCandidateCount;
+  loom_low_reg_class_t reg_class = {
+      .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+               LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS |
+               LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES,
+      .allocatable_count = kCandidateCount,
+      .physical_atomic_unit_count = 1,
+  };
+  loom_low_descriptor_set_t descriptor_set = {
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+      .physical_registers = physical_registers,
+      .physical_register_count = kCandidateCount,
+      .physical_register_candidate_ids = candidate_ids,
+      .physical_register_allocation_ordinals = allocation_ordinals,
+      .physical_register_candidate_count = kCandidateCount,
+      .physical_register_atomic_units = atomic_units,
+      .physical_register_atomic_unit_count = kCandidateCount,
+      .physical_register_unit_count = kCandidateCount,
+  };
 
   for (uint32_t unit_count = 1; unit_count <= kCandidateCount; ++unit_count) {
     bool seen_bases[kCandidateCount] = {};
@@ -649,14 +653,14 @@ TEST(LowAllocationStorageTest, MatchesExplicitRegisterCandidateOrdinals) {
           descriptor_set, partner_reg_class_id, 0),
       /*location_count=*/1);
   const loom_low_placement_relation_t relation = {
-      /*.op=*/nullptr,
-      /*.result_ordinal=*/0,
-      /*.source_ordinal=*/1,
-      /*.result_unit_offset=*/0,
-      /*.source_unit_offset=*/0,
-      /*.unit_count=*/1,
-      {/*.location_mask=*/0},
-      /*.kind=*/LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL,
+      .op = nullptr,
+      .result_ordinal = 0,
+      .source_ordinal = 1,
+      .result_unit_offset = 0,
+      .source_unit_offset = 0,
+      .unit_count = 1,
+      .location_mask = 0,
+      .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL,
   };
 
   EXPECT_TRUE(loom_low_allocation_storage_placement_relation_satisfied(

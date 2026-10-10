@@ -15,11 +15,12 @@ loom_low_allocation_assignment_t Assignment(
     uint16_t descriptor_reg_class_id,
     loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
     uint32_t location_count) {
-  loom_low_allocation_assignment_t assignment = {};
-  assignment.descriptor_reg_class_id = descriptor_reg_class_id;
-  assignment.location_kind = location_kind;
-  assignment.location_base = location_base;
-  assignment.location_count = location_count;
+  loom_low_allocation_assignment_t assignment = {
+      .descriptor_reg_class_id = descriptor_reg_class_id,
+      .location_kind = location_kind,
+      .location_base = location_base,
+      .location_count = location_count,
+  };
   return assignment;
 }
 

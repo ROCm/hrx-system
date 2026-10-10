@@ -15,15 +15,16 @@ void GpuUserQueue::Initialize(
     const amdf_gpu_queue_scratch_t& scratch,
     amdf_user_queue_capabilities_t required_capabilities,
     uint64_t ring_byte_length) {
-  amdf_gpu_user_queue_create_info_t create = {};
-  create.type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO;
-  create.structure_size = sizeof(create);
-  create.queue_family_ordinal = family.ordinal;
-  create.priority = AMDF_QUEUE_PRIORITY_NORMAL;
-  create.producer_mode = producer_mode;
-  create.required_capabilities = required_capabilities;
-  create.ring_byte_length = ring_byte_length;
-  create.scratch = scratch;
+  amdf_gpu_user_queue_create_info_t create = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
+      .structure_size = sizeof(create),
+      .queue_family_ordinal = family.ordinal,
+      .priority = AMDF_QUEUE_PRIORITY_NORMAL,
+      .producer_mode = producer_mode,
+      .required_capabilities = required_capabilities,
+      .ring_byte_length = ring_byte_length,
+      .scratch = scratch,
+  };
   ASSERT_EQ(gpu_api->user_queue_create(device, &create, &queue),
             AMDF_STATUS_OK);
   info.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO;

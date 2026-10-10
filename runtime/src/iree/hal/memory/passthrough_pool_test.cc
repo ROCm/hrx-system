@@ -279,19 +279,18 @@ static void iree_hal_test_opaque_slab_provider_query_properties(
 
 const iree_hal_slab_provider_vtable_t
     iree_hal_test_opaque_slab_provider_vtable = {
-        /*.destroy=*/iree_hal_test_opaque_slab_provider_destroy,
-        /*.acquire_slab=*/iree_hal_test_opaque_slab_provider_acquire_slab,
-        /*.release_slab=*/iree_hal_test_opaque_slab_provider_release_slab,
-        /*.wrap_buffer=*/iree_hal_test_opaque_slab_provider_wrap_buffer,
-        /*.validate_asan_options=*/
-        iree_hal_test_opaque_slab_provider_validate_asan_options,
-        /*.advise_asan_range=*/
-        iree_hal_test_opaque_slab_provider_advise_asan_range,
-        /*.prefault=*/iree_hal_test_opaque_slab_provider_prefault,
-        /*.trim=*/iree_hal_test_opaque_slab_provider_trim,
-        /*.query_stats=*/iree_hal_test_opaque_slab_provider_query_stats,
-        /*.query_properties=*/
-        iree_hal_test_opaque_slab_provider_query_properties,
+        .destroy = iree_hal_test_opaque_slab_provider_destroy,
+        .acquire_slab = iree_hal_test_opaque_slab_provider_acquire_slab,
+        .release_slab = iree_hal_test_opaque_slab_provider_release_slab,
+        .wrap_buffer = iree_hal_test_opaque_slab_provider_wrap_buffer,
+        .validate_asan_options =
+            iree_hal_test_opaque_slab_provider_validate_asan_options,
+        .advise_asan_range =
+            iree_hal_test_opaque_slab_provider_advise_asan_range,
+        .prefault = iree_hal_test_opaque_slab_provider_prefault,
+        .trim = iree_hal_test_opaque_slab_provider_trim,
+        .query_stats = iree_hal_test_opaque_slab_provider_query_stats,
+        .query_properties = iree_hal_test_opaque_slab_provider_query_properties,
 };
 
 class PassthroughPoolTest : public ::testing::Test {
@@ -362,19 +361,20 @@ static iree_status_t MaterializeOneReservation(
     const iree_hal_pool_reservation_t* reservation,
     iree_hal_pool_materialize_flags_t flags, iree_hal_buffer_t** out_buffer) {
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/reservation->byte_length,
+      .params = params,
+      .allocation_size = reservation->byte_length,
   };
   return iree_hal_pool_materialize_reservations(pool, 1, &request, reservation,
                                                 flags, out_buffer);
 }
 
 static iree_hal_asan_pool_options_t ShadowOptions() {
-  iree_hal_asan_pool_options_t options = {};
-  options.mode = IREE_HAL_ASAN_POOL_MODE_SHADOW;
-  options.shadow_granule_size = 8;
-  options.redzone_size = 16;
-  options.backing_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT;
+  iree_hal_asan_pool_options_t options = {
+      .mode = IREE_HAL_ASAN_POOL_MODE_SHADOW,
+      .shadow_granule_size = 8,
+      .redzone_size = 16,
+      .backing_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT,
+  };
   return options;
 }
 
@@ -862,8 +862,7 @@ TEST_F(PassthroughPoolTest,
   // Even a sealed device group permits new queue identities. The allocation
   // precedes registration and must still accept the complete release history.
   IREE_ASYNC_FIXED_FRONTIER_TYPE(FullFrontier, UINT8_MAX);
-  FullFrontier frontier = {};
-  frontier.entry_count = UINT8_MAX;
+  FullFrontier frontier = {.entry_count = UINT8_MAX};
   for (uint32_t i = 0; i < frontier.entry_count; ++i) {
     frontier.entries[i] = {
         iree_async_axis_make_queue(1, 0, 0, static_cast<uint8_t>(i), 0), i + 1};
@@ -928,8 +927,7 @@ TEST_F(PassthroughPoolTest, ReturnedTokenAndViewsBothPrecedeRetirement) {
   const iree_async_axis_t axis = iree_async_axis_make_queue(1, 0, 0, 0, 0);
   IREE_ASSERT_OK(
       iree_async_frontier_tracker_register_axis(tracker_, axis, nullptr));
-  iree_async_single_frontier_t frontier = {};
-  frontier.entry_count = 1;
+  iree_async_single_frontier_t frontier = {.entry_count = 1};
   frontier.entries[0] = {axis, 1};
   ReleaseOneReservation(pool_, &reservation,
                         iree_async_fixed_frontier_as_const_frontier(&frontier));
@@ -954,8 +952,7 @@ TEST_F(PassthroughPoolTest, FailedAxisQuarantinesPendingNativeBacking) {
                                        IREE_HAL_POOL_RESERVE_FLAG_NONE,
                                        &reservation, &info, &result));
   IREE_ASYNC_FIXED_FRONTIER_TYPE(PairFrontier, 2);
-  PairFrontier frontier = {};
-  frontier.entry_count = 2;
+  PairFrontier frontier = {.entry_count = 2};
   for (uint8_t i = 0; i < 2; ++i) {
     frontier.entries[i] = {iree_async_axis_make_queue(1, 0, 0, i, 0), 1};
     IREE_ASSERT_OK(iree_async_frontier_tracker_register_axis(
@@ -996,8 +993,7 @@ TEST_F(PassthroughPoolTest,
   IREE_ASSERT_OK(AcquireOneReservation(pool_, 4096, 16, nullptr,
                                        IREE_HAL_POOL_RESERVE_FLAG_NONE,
                                        &reservation, &info, &result));
-  iree_async_single_frontier_t frontier = {};
-  frontier.entry_count = 1;
+  iree_async_single_frontier_t frontier = {.entry_count = 1};
   frontier.entries[0] = {iree_async_axis_make_queue(1, 0, 0, 0, 0), 1};
   IREE_ASSERT_OK(iree_async_frontier_tracker_register_axis(
       tracker_, frontier.entries[0].axis, nullptr));
@@ -1022,8 +1018,7 @@ TEST_F(PassthroughPoolTest, MaintenanceDrainDoesNotJoinPendingRetirement) {
   IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
       {}, slab_provider, notification_, tracker_, test_maintenance(),
       allocator_, &pool));
-  iree_async_single_frontier_t frontier = {};
-  frontier.entry_count = 1;
+  iree_async_single_frontier_t frontier = {.entry_count = 1};
   frontier.entries[0] = {iree_async_axis_make_queue(1, 0, 0, 0, 0), 1};
   IREE_ASSERT_OK(iree_async_frontier_tracker_register_axis(
       tracker_, frontier.entries[0].axis, nullptr));
@@ -1081,8 +1076,7 @@ TEST_F(PassthroughPoolTest, FrontierDispatchRacesFinalPoolRelease) {
     IREE_ASSERT_OK(AcquireOneReservation(pool_, 4096, 16, nullptr,
                                          IREE_HAL_POOL_RESERVE_FLAG_NONE,
                                          &reservation, &info, &result));
-    iree_async_single_frontier_t frontier = {};
-    frontier.entry_count = 1;
+    iree_async_single_frontier_t frontier = {.entry_count = 1};
     frontier.entries[0] = {axis, epoch};
     ReleaseOneReservation(
         pool_, &reservation,
@@ -1191,8 +1185,7 @@ TEST(PassthroughPool, CreateRejectsASANWhenProviderCannotAdviseRanges) {
   IREE_ASSERT_OK(iree_async_notification_create(
       test_proactor(), IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification));
 
-  iree_hal_passthrough_pool_options_t options = {};
-  options.asan = ShadowOptions();
+  iree_hal_passthrough_pool_options_t options = {.asan = ShadowOptions()};
 
   iree_hal_pool_t* pool = NULL;
   IREE_EXPECT_STATUS_IS(
@@ -1215,8 +1208,7 @@ TEST(PassthroughPool, ASANAdvisesBackingRangeAndExposesUserRange) {
   IREE_ASSERT_OK(iree_async_notification_create(
       test_proactor(), IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification));
 
-  iree_hal_passthrough_pool_options_t options = {};
-  options.asan = ShadowOptions();
+  iree_hal_passthrough_pool_options_t options = {.asan = ShadowOptions()};
 
   iree_hal_pool_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
@@ -1309,8 +1301,7 @@ TEST(PassthroughPool, ASANAdvisesBackingRangeAndExposesUserRange) {
   const iree_async_axis_t axis = iree_async_axis_make_queue(1, 0, 1, 0, 0);
   IREE_ASSERT_OK(iree_async_frontier_tracker_register_axis(
       test_frontier_tracker(), axis, nullptr));
-  iree_async_single_frontier_t frontier = {};
-  frontier.entry_count = 1;
+  iree_async_single_frontier_t frontier = {.entry_count = 1};
   frontier.entries[0] = {axis, 1};
   ReleaseOneReservation(pool, &reservation,
                         iree_async_fixed_frontier_as_const_frontier(&frontier));

@@ -284,11 +284,11 @@ TEST_F(FactTableComputeTest, ExactDynamicRelationsAreRetainedLazily) {
   IREE_ASSERT_OK(loom_value_fact_table_define(&table_, inputs_[0],
                                               loom_value_facts_exact_i64(5)));
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_LT,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{inputs_[0], inputs_[1]},
+      .kind = LOOM_PREDICATE_LT,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {inputs_[0], inputs_[1]},
   };
   loom_op_t* assume = nullptr;
   IREE_ASSERT_OK(loom_index_assume_build(&builder_, &inputs_[0], 1, &predicate,
@@ -339,11 +339,11 @@ TEST_F(FactTableComputeTest,
   IREE_ASSERT_OK(loom_value_fact_table_define(&table_, inputs_[0],
                                               loom_value_facts_exact_i64(5)));
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_LT,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{inputs_[0], inputs_[1]},
+      .kind = LOOM_PREDICATE_LT,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {inputs_[0], inputs_[1]},
   };
   loom_op_t* assume = nullptr;
   IREE_ASSERT_OK(loom_index_assume_build(&builder_, &inputs_[0], 1, &predicate,
@@ -360,11 +360,11 @@ TEST_F(FactTableComputeTest, ExactRelationRetentionGrowsWithCandidates) {
   IREE_ASSERT_OK(loom_value_fact_table_define(&table_, inputs_[0],
                                               loom_value_facts_exact_i64(5)));
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_LT,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{inputs_[0], inputs_[1]},
+      .kind = LOOM_PREDICATE_LT,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {inputs_[0], inputs_[1]},
   };
   std::vector<loom_op_t*> assumes;
   assumes.reserve(kAssumeCount);
@@ -473,11 +473,11 @@ TEST_F(FactTableComputeTest,
       loom_value_fact_table_compute_op(&table_, module_, second_select));
 
   loom_predicate_t predicate = {
-      /*.kind=*/LOOM_PREDICATE_GE,
-      /*.arg_count=*/2,
-      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      /*.reserved=*/{},
-      /*.args=*/{inputs_[0], loom_scf_select_result(first_select)},
+      .kind = LOOM_PREDICATE_GE,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      .reserved = {},
+      .args = {inputs_[0], loom_scf_select_result(first_select)},
   };
   loom_op_t* assume = nullptr;
   IREE_ASSERT_OK(loom_index_assume_build(&builder_, &inputs_[0], 1, &predicate,
@@ -734,14 +734,14 @@ TEST_F(FactTableComputeTest, ConditionLoopRetainsAndReplacesBodyEntryFacts) {
                              loom_condition_integer_operand_t right,
                              bool expected_proven, bool expected_result) {
     const loom_condition_integer_relation_t queried = {
-        /*.relation=*/relation,
-        /*.left=*/
-        {
-            /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-            /*.value_id=*/left,
-            /*.constant=*/0,
-        },
-        /*.right=*/right,
+        .relation = relation,
+        .left =
+            {
+                .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                .value_id = left,
+                .constant = 0,
+            },
+        .right = right,
     };
     bool result = false;
     EXPECT_EQ(loom_condition_edge_projection_proves_integer_relation(
@@ -752,14 +752,14 @@ TEST_F(FactTableComputeTest, ConditionLoopRetainsAndReplacesBodyEntryFacts) {
     }
   };
   const loom_condition_integer_operand_t upper_bound = {
-      /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-      /*.value_id=*/bound,
-      /*.constant=*/0,
+      .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+      .value_id = bound,
+      .constant = 0,
   };
   const loom_condition_integer_operand_t zero = {
-      /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
-      /*.value_id=*/LOOM_VALUE_ID_INVALID,
-      /*.constant=*/0,
+      .kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+      .value_id = LOOM_VALUE_ID_INVALID,
+      .constant = 0,
   };
   for (loom_value_id_t body_argument : body_arguments) {
     expect_relation(LOOM_SYMBOLIC_INTEGER_RELATION_LT, body_argument,
@@ -880,17 +880,17 @@ TEST_F(FactTableComputeTest, ConditionLoopFactorsDuplicatePayloadRelations) {
   for (iree_host_size_t left = 0; left < 2; ++left) {
     for (iree_host_size_t right = 2; right < 4; ++right) {
       const loom_condition_integer_relation_t query = {
-          /*.relation=*/LOOM_SYMBOLIC_INTEGER_RELATION_LT,
-          /*.left=*/
-          {
-              /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-              /*.value_id=*/body_arguments[left],
-          },
-          /*.right=*/
-          {
-              /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-              /*.value_id=*/body_arguments[right],
-          },
+          .relation = LOOM_SYMBOLIC_INTEGER_RELATION_LT,
+          .left =
+              {
+                  .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                  .value_id = body_arguments[left],
+              },
+          .right =
+              {
+                  .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                  .value_id = body_arguments[right],
+              },
       };
       bool result = false;
       EXPECT_TRUE(loom_condition_edge_projection_proves_integer_relation(

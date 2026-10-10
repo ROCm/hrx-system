@@ -143,17 +143,17 @@ static void AppendDeviceObjectRecord(iree_hal_replay_file_writer_t* writer,
                                      uint64_t sequence_ordinal,
                                      iree_hal_replay_object_id_t device_id) {
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/device_id,
-      /*.related_object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_NONE,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = device_id,
+      .related_object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_NONE,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, metadata, {});
 }
@@ -164,22 +164,22 @@ static void AppendQueueObjectRecord(iree_hal_replay_file_writer_t* writer,
                                     iree_hal_replay_object_id_t queue_id,
                                     uint32_t queue_ordinal) {
   const iree_hal_replay_provisioned_queue_object_payload_t payload = {
-      /*.family_ordinal=*/0,
-      /*.queue_ordinal=*/queue_ordinal,
-      /*.reserved0=*/0,
+      .family_ordinal = 0,
+      .queue_ordinal = queue_ordinal,
+      .reserved0 = 0,
   };
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/queue_id,
-      /*.related_object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_NONE,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = queue_id,
+      .related_object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_NONE,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload))});
@@ -190,24 +190,23 @@ static void AppendSemaphoreCreateRecord(
     iree_hal_replay_object_id_t device_id,
     iree_hal_replay_object_id_t semaphore_id) {
   const iree_hal_replay_semaphore_object_payload_t payload = {
-      /*.queue_family_affinity=*/iree_hal_make_queue_family_affinity(0),
-      /*.initial_value=*/0,
-      /*.flags=*/IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
-      /*.reserved0=*/0,
+      .queue_family_affinity = iree_hal_make_queue_family_affinity(0),
+      .initial_value = 0,
+      .flags = IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+      .reserved0 = 0,
   };
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/device_id,
-      /*.related_object_id=*/semaphore_id,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_SEMAPHORE_OBJECT,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
-      /*.operation_code=*/
-      IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_SEMAPHORE,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = device_id,
+      .related_object_id = semaphore_id,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_SEMAPHORE_OBJECT,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_SEMAPHORE,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload))});
@@ -220,27 +219,27 @@ static void AppendQueueBarrierRecord(iree_hal_replay_file_writer_t* writer,
                                      iree_hal_replay_object_id_t semaphore_id,
                                      bool is_wait) {
   const iree_hal_replay_queue_barrier_payload_t payload = {
-      /*.flags=*/IREE_HAL_QUEUE_BARRIER_FLAG_NONE,
-      /*.wait_semaphore_count=*/is_wait ? 1u : 0u,
-      /*.signal_semaphore_count=*/is_wait ? 0u : 1u,
-      /*.reserved0=*/0,
+      .flags = IREE_HAL_QUEUE_BARRIER_FLAG_NONE,
+      .wait_semaphore_count = is_wait ? 1u : 0u,
+      .signal_semaphore_count = is_wait ? 0u : 1u,
+      .reserved0 = 0,
   };
   const iree_hal_replay_semaphore_timepoint_payload_t timepoint = {
-      /*.semaphore_id=*/semaphore_id,
-      /*.value=*/1,
+      .semaphore_id = semaphore_id,
+      .value = 1,
   };
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/queue_id,
-      /*.related_object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = queue_id,
+      .related_object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(
       writer, metadata,
@@ -260,17 +259,17 @@ static void AppendQueueAtomicWaitRecord(iree_hal_replay_file_writer_t* writer,
   payload.params.width = IREE_HAL_ATOMIC_WIDTH_32;
   payload.params.condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL;
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/queue_id,
-      /*.related_object_id=*/payload.target_ref.buffer_id,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_WAIT,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_WAIT,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = queue_id,
+      .related_object_id = payload.target_ref.buffer_id,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_WAIT,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_WAIT,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload))});
@@ -281,27 +280,28 @@ static void AppendImmediateQueueTransferRecord(
     iree_hal_replay_object_id_t device_id,
     iree_hal_replay_object_id_t queue_id) {
   const iree_hal_replay_queue_transfer_payload_t payload = {
-      /*.wait_semaphore_count=*/0,
-      /*.signal_semaphore_count=*/0,
-      /*.operation_count=*/1,
-      /*.data_length=*/0,
+      .wait_semaphore_count = 0,
+      .signal_semaphore_count = 0,
+      .operation_count = 1,
+      .data_length = 0,
   };
-  iree_hal_replay_queue_transfer_operation_payload_t operation = {};
-  operation.type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+  iree_hal_replay_queue_transfer_operation_payload_t operation = {
+      .type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+  };
   operation.source_ref.buffer_id = queue_id + 11;
   operation.source_ref.length = 4;
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/queue_id,
-      /*.related_object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = queue_id,
+      .related_object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(
       writer, metadata,
@@ -315,8 +315,7 @@ static void AppendDispatchRecord(
     iree_hal_replay_object_id_t target_id,
     iree_hal_replay_object_id_t executable_id,
     iree_hal_replay_operation_code_t operation_code) {
-  iree_hal_replay_dispatch_payload_t payload = {};
-  payload.executable_id = executable_id;
+  iree_hal_replay_dispatch_payload_t payload = {.executable_id = executable_id};
   payload.workgroup_size[0] = 1;
   payload.workgroup_size[1] = 1;
   payload.workgroup_size[2] = 1;
@@ -326,21 +325,20 @@ static void AppendDispatchRecord(
   const bool is_queue_dispatch =
       operation_code == IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_DISPATCH;
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/target_id,
-      /*.related_object_id=*/
-      is_queue_dispatch ? executable_id : IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_DISPATCH,
-      /*.object_type=*/
-      static_cast<iree_hal_replay_object_type_t>(
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = target_id,
+      .related_object_id =
+          is_queue_dispatch ? executable_id : IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_DISPATCH,
+      .object_type = static_cast<iree_hal_replay_object_type_t>(
           is_queue_dispatch ? IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE
                             : IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER),
-      /*.operation_code=*/operation_code,
-      /*.status_code=*/IREE_STATUS_OK,
+      .operation_code = operation_code,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload))});
@@ -351,42 +349,42 @@ static void AppendCommandBufferCreateRecords(
     iree_hal_replay_object_id_t device_id,
     iree_hal_replay_object_id_t command_buffer_id) {
   const iree_hal_replay_queue_family_command_buffer_object_payload_t payload = {
-      /*.mode=*/IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      /*.command_categories=*/IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-      /*.queue_family_ordinal=*/0,
-      /*.reserved0=*/0,
-      /*.binding_capacity=*/0,
+      .mode = IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+      .command_categories = IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+      .queue_family_ordinal = 0,
+      .reserved0 = 0,
+      .binding_capacity = 0,
   };
   const iree_hal_replay_file_record_metadata_t operation_metadata = {
-      /*.sequence_ordinal=*/(*sequence_ordinal)++,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/device_id,
-      /*.related_object_id=*/command_buffer_id,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/
-      IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_FAMILY_COMMAND_BUFFER_OBJECT,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
-      /*.operation_code=*/
-      IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_COMMAND_BUFFER,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = (*sequence_ordinal)++,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = device_id,
+      .related_object_id = command_buffer_id,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type =
+          IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_FAMILY_COMMAND_BUFFER_OBJECT,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+      .operation_code =
+          IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_COMMAND_BUFFER,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, operation_metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload))});
   const iree_hal_replay_file_record_metadata_t object_metadata = {
-      /*.sequence_ordinal=*/(*sequence_ordinal)++,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/command_buffer_id,
-      /*.related_object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/
-      IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_FAMILY_COMMAND_BUFFER_OBJECT,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_NONE,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = (*sequence_ordinal)++,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = command_buffer_id,
+      .related_object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type =
+          IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_FAMILY_COMMAND_BUFFER_OBJECT,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_NONE,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, object_metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload))});
@@ -397,24 +395,24 @@ static void AppendQueueExecuteRecord(
     iree_hal_replay_object_id_t device_id, iree_hal_replay_object_id_t queue_id,
     iree_hal_replay_object_id_t command_buffer_id) {
   const iree_hal_replay_queue_execute_payload_t payload = {
-      /*.command_buffer_id=*/command_buffer_id,
-      /*.flags=*/IREE_HAL_QUEUE_EXECUTE_FLAG_NONE,
-      /*.wait_semaphore_count=*/0,
-      /*.signal_semaphore_count=*/0,
-      /*.binding_count=*/0,
+      .command_buffer_id = command_buffer_id,
+      .flags = IREE_HAL_QUEUE_EXECUTE_FLAG_NONE,
+      .wait_semaphore_count = 0,
+      .signal_semaphore_count = 0,
+      .binding_count = 0,
   };
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/queue_id,
-      /*.related_object_id=*/command_buffer_id,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_EXECUTE,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_EXECUTE,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = queue_id,
+      .related_object_id = command_buffer_id,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_EXECUTE,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_EXECUTE,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload))});
@@ -426,28 +424,28 @@ static void AppendVmmProtectRecord(iree_hal_replay_file_writer_t* writer,
   constexpr iree_hal_replay_object_id_t kAllocatorId = 20;
   constexpr iree_hal_replay_object_id_t kVirtualBufferId = 21;
   const iree_hal_replay_allocator_virtual_memory_protect_payload_t payload = {
-      /*.virtual_buffer_id=*/kVirtualBufferId,
-      /*.virtual_offset=*/0,
-      /*.size=*/4096,
-      /*.queue_family_affinity=*/iree_hal_make_queue_family_affinity(0),
-      /*.access_scope=*/IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
-      /*.reserved0=*/0,
-      /*.protection=*/IREE_HAL_MEMORY_PROTECTION_READ,
+      .virtual_buffer_id = kVirtualBufferId,
+      .virtual_offset = 0,
+      .size = 4096,
+      .queue_family_affinity = iree_hal_make_queue_family_affinity(0),
+      .access_scope = IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
+      .reserved0 = 0,
+      .protection = IREE_HAL_MEMORY_PROTECTION_READ,
   };
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/kAllocatorId,
-      /*.related_object_id=*/kVirtualBufferId,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/
-      IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_ALLOCATOR,
-      /*.operation_code=*/
-      IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = kAllocatorId,
+      .related_object_id = kVirtualBufferId,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type =
+          IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_ALLOCATOR,
+      .operation_code =
+          IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload))});
@@ -459,24 +457,24 @@ static void AppendVmmUnmapRecord(iree_hal_replay_file_writer_t* writer,
   constexpr iree_hal_replay_object_id_t kAllocatorId = 20;
   constexpr iree_hal_replay_object_id_t kVirtualBufferId = 21;
   const iree_hal_replay_allocator_virtual_memory_unmap_payload_t payload = {
-      /*.virtual_buffer_id=*/kVirtualBufferId,
-      /*.virtual_offset=*/0,
-      /*.size=*/4096,
+      .virtual_buffer_id = kVirtualBufferId,
+      .virtual_offset = 0,
+      .size = 4096,
   };
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/kAllocatorId,
-      /*.related_object_id=*/kVirtualBufferId,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/
-      IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_ALLOCATOR,
-      /*.operation_code=*/
-      IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = kAllocatorId,
+      .related_object_id = kVirtualBufferId,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type =
+          IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_ALLOCATOR,
+      .operation_code =
+          IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload))});
@@ -485,23 +483,23 @@ static void AppendVmmUnmapRecord(iree_hal_replay_file_writer_t* writer,
 static void AppendScopeBeginRecord(iree_hal_replay_file_writer_t* writer,
                                    uint64_t sequence_ordinal) {
   const iree_hal_replay_scope_payload_t payload = {
-      /*.name_length=*/4,
-      /*.flags=*/IREE_HAL_REPLAY_SCOPE_FLAG_NONE,
-      /*.reserved0=*/0,
-      /*.reserved1=*/0,
+      .name_length = 4,
+      .flags = IREE_HAL_REPLAY_SCOPE_FLAG_NONE,
+      .reserved0 = 0,
+      .reserved1 = 0,
   };
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.related_object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_REPLAY_SCOPE,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_NONE,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_REPLAY_SCOPE_BEGIN,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .related_object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_REPLAY_SCOPE,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_NONE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_REPLAY_SCOPE_BEGIN,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload)),
@@ -882,13 +880,13 @@ static std::vector<uint8_t> MakeMockExecutableData(
   const uint32_t function_count = 1;
   std::memcpy(data.data(), &function_count, sizeof(function_count));
   const MockExecutableFunctionRecord record = {
-      /*.constant_count=*/constant_count,
-      /*.binding_count=*/binding_count,
-      /*.flags=*/0,
-      /*.workgroup_size=*/{workgroup_size_x, 1, 1},
-      /*.name_length=*/sizeof(name) - 1,
-      /*.native_abi_offset=*/native_abi_offset,
-      /*.parameter_size=*/parameter_size,
+      .constant_count = constant_count,
+      .binding_count = binding_count,
+      .flags = 0,
+      .workgroup_size = {workgroup_size_x, 1, 1},
+      .name_length = sizeof(name) - 1,
+      .native_abi_offset = native_abi_offset,
+      .parameter_size = parameter_size,
   };
   std::memcpy(data.data() + 4, &record, sizeof(record));
   std::memcpy(data.data() + 4 + sizeof(record), name, sizeof(name) - 1);
@@ -924,13 +922,13 @@ static std::vector<uint8_t> MakeNamedMockExecutableData(
     data.resize(data.size() + name_length);
 
     const MockExecutableFunctionRecord record = {
-        /*.constant_count=*/function_record.constant_count,
-        /*.binding_count=*/function_record.binding_count,
-        /*.flags=*/0,
-        /*.workgroup_size=*/{function_record.workgroup_size_x, 1, 1},
-        /*.name_length=*/(uint8_t)name_length,
-        /*.native_abi_offset=*/0,
-        /*.parameter_size=*/0,
+        .constant_count = function_record.constant_count,
+        .binding_count = function_record.binding_count,
+        .flags = 0,
+        .workgroup_size = {function_record.workgroup_size_x, 1, 1},
+        .name_length = (uint8_t)name_length,
+        .native_abi_offset = 0,
+        .parameter_size = 0,
     };
     std::memcpy(data.data() + 4 + function_ordinal * sizeof(record), &record,
                 sizeof(record));
@@ -956,10 +954,10 @@ static void CaptureMockExecutableLoad(iree_const_byte_span_t executable_data,
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
   const iree_hal_executable_target_selection_t target_selection = {
-      /*.family=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY),
-      /*.target_key=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY),
-      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_VIRTUAL,
-      /*.physical_device_affinity=*/1,
+      .family = IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY),
+      .target_key = IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_VIRTUAL,
+      .physical_device_affinity = 1,
   };
   const iree_hal_executable_target_selection_result_t target_result =
       iree_hal_device_spec_select_executable_target(
@@ -1076,7 +1074,7 @@ TEST(ReplayExecuteTest, ObservesScopeEvents) {
 
   std::vector<std::string> events;
   ReplayScopeCallbackState callback_state = {
-      /*.events=*/&events,
+      .events = &events,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -1129,9 +1127,9 @@ TEST(ReplayExecuteTest, ReplaysDynamicQueueAcquisition) {
   iree_hal_semaphore_t* signal_semaphores[] = {semaphore};
   uint64_t signal_values[] = {1};
   const iree_hal_semaphore_list_t signal_list = {
-      /*.count=*/IREE_ARRAYSIZE(signal_semaphores),
-      /*.semaphores=*/signal_semaphores,
-      /*.payload_values=*/signal_values,
+      .count = IREE_ARRAYSIZE(signal_semaphores),
+      .semaphores = signal_semaphores,
+      .payload_values = signal_values,
   };
   IREE_ASSERT_OK(iree_hal_queue_barrier(queue, iree_hal_semaphore_list_empty(),
                                         signal_list, /*barriers=*/NULL,
@@ -1178,7 +1176,7 @@ TEST(ReplayExecuteTest, ExecutesPreparedPlanRepeatedly) {
 
   std::vector<std::string> events;
   ReplayScopeCallbackState callback_state = {
-      /*.events=*/&events,
+      .events = &events,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -1213,12 +1211,11 @@ TEST(ReplayExecuteTest, SubstitutesRecordedExecutablePayload) {
       &storage);
 
   TestExecutableSubstitutionState substitution_state = {
-      /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_data=*/
-      iree_make_const_byte_span(replacement_data.data(),
-                                replacement_data.size()),
-      /*.invocation_count=*/0,
-      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .source = iree_make_cstring_view("replacement.mock"),
+      .executable_data = iree_make_const_byte_span(replacement_data.data(),
+                                                   replacement_data.size()),
+      .invocation_count = 0,
+      .executable_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -1249,12 +1246,11 @@ TEST(ReplayExecuteTest, UsesRecordedExecutableMetadataForSubstitution) {
   CorruptFirstCapturedExecutableData(&storage);
 
   TestExecutableSubstitutionState substitution_state = {
-      /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_data=*/
-      iree_make_const_byte_span(replacement_data.data(),
-                                replacement_data.size()),
-      /*.invocation_count=*/0,
-      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .source = iree_make_cstring_view("replacement.mock"),
+      .executable_data = iree_make_const_byte_span(replacement_data.data(),
+                                                   replacement_data.size()),
+      .invocation_count = 0,
+      .executable_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -1273,30 +1269,30 @@ TEST(ReplayExecuteTest, UsesRecordedExecutableMetadataForSubstitution) {
 TEST(ReplayExecuteTest, SubstitutesRecordedExecutablePayloadByName) {
   std::vector<uint8_t> captured_data = MakeNamedMockExecutableData({
       {
-          /*.name=*/"first",
-          /*.constant_count=*/2,
-          /*.binding_count=*/3,
-          /*.workgroup_size_x=*/4,
+          .name = "first",
+          .constant_count = 2,
+          .binding_count = 3,
+          .workgroup_size_x = 4,
       },
       {
-          /*.name=*/"second",
-          /*.constant_count=*/5,
-          /*.binding_count=*/6,
-          /*.workgroup_size_x=*/7,
+          .name = "second",
+          .constant_count = 5,
+          .binding_count = 6,
+          .workgroup_size_x = 7,
       },
   });
   std::vector<uint8_t> replacement_data = MakeNamedMockExecutableData({
       {
-          /*.name=*/"second",
-          /*.constant_count=*/5,
-          /*.binding_count=*/6,
-          /*.workgroup_size_x=*/7,
+          .name = "second",
+          .constant_count = 5,
+          .binding_count = 6,
+          .workgroup_size_x = 7,
       },
       {
-          /*.name=*/"first",
-          /*.constant_count=*/2,
-          /*.binding_count=*/3,
-          /*.workgroup_size_x=*/4,
+          .name = "first",
+          .constant_count = 2,
+          .binding_count = 3,
+          .workgroup_size_x = 4,
       },
   });
   std::vector<uint8_t> storage(32768, 0);
@@ -1306,12 +1302,11 @@ TEST(ReplayExecuteTest, SubstitutesRecordedExecutablePayloadByName) {
   CorruptFirstCapturedExecutableData(&storage);
 
   TestExecutableSubstitutionState substitution_state = {
-      /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_data=*/
-      iree_make_const_byte_span(replacement_data.data(),
-                                replacement_data.size()),
-      /*.invocation_count=*/0,
-      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .source = iree_make_cstring_view("replacement.mock"),
+      .executable_data = iree_make_const_byte_span(replacement_data.data(),
+                                                   replacement_data.size()),
+      .invocation_count = 0,
+      .executable_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -1340,12 +1335,11 @@ TEST(ReplayExecuteTest, RejectsExecutableSubstitutionAbiMismatch) {
       &storage);
 
   TestExecutableSubstitutionState substitution_state = {
-      /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_data=*/
-      iree_make_const_byte_span(replacement_data.data(),
-                                replacement_data.size()),
-      /*.invocation_count=*/0,
-      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .source = iree_make_cstring_view("replacement.mock"),
+      .executable_data = iree_make_const_byte_span(replacement_data.data(),
+                                                   replacement_data.size()),
+      .invocation_count = 0,
+      .executable_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -1377,12 +1371,11 @@ TEST(ReplayExecuteTest,
   CorruptFirstCapturedExecutableData(&storage);
 
   TestExecutableSubstitutionState substitution_state = {
-      /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_data=*/
-      iree_make_const_byte_span(replacement_data.data(),
-                                replacement_data.size()),
-      /*.invocation_count=*/0,
-      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .source = iree_make_cstring_view("replacement.mock"),
+      .executable_data = iree_make_const_byte_span(replacement_data.data(),
+                                                   replacement_data.size()),
+      .invocation_count = 0,
+      .executable_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -1412,12 +1405,11 @@ TEST(ReplayExecuteTest, PreservesWideNativeParameterSize) {
       &storage);
 
   TestExecutableSubstitutionState substitution_state = {
-      /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_data=*/
-      iree_make_const_byte_span(replacement_data.data(),
-                                replacement_data.size()),
-      /*.invocation_count=*/0,
-      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .source = iree_make_cstring_view("replacement.mock"),
+      .executable_data = iree_make_const_byte_span(replacement_data.data(),
+                                                   replacement_data.size()),
+      .invocation_count = 0,
+      .executable_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -2118,11 +2110,11 @@ TEST(ReplayExecuteTest, ExecutesRecordedFdBackedQueueWrite) {
   iree_io_file_handle_release(file_handle);
 
   const iree_hal_buffer_params_t buffer_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
-          IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
+               IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
   iree_hal_buffer_t* source_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
@@ -2138,12 +2130,13 @@ TEST(ReplayExecuteTest, ExecutesRecordedFdBackedQueueWrite) {
       /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
   uint64_t signal_value = 1;
   const iree_hal_semaphore_list_t signal_list = {
-      /*.count=*/1,
-      /*.semaphores=*/&signal_semaphore,
-      /*.payload_values=*/&signal_value,
+      .count = 1,
+      .semaphores = &signal_semaphore,
+      .payload_values = &signal_value,
   };
-  iree_hal_barrier_t publication = {};
-  publication.flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+  iree_hal_barrier_t publication = {
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
   const iree_hal_barrier_list_t publication_list = {1, &publication};
   const iree_hal_queue_barriers_t barriers = {&publication_list, nullptr};
   IREE_ASSERT_OK(iree_hal_queue_write(
@@ -2208,8 +2201,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueAlloca) {
   iree_hal_queue_pool_backend_t backend = {};
   IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
       wrapped_device, iree_hal_queue_family(wrapped_queue), &backend));
-  iree_hal_passthrough_pool_options_t pool_options = {};
-  pool_options.asan = backend.asan;
+  iree_hal_passthrough_pool_options_t pool_options = {.asan = backend.asan};
   iree_hal_pool_t* pool = nullptr;
   IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
       pool_options, backend.slab_provider, backend.notification,
@@ -2236,8 +2228,8 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueAlloca) {
   params.queue_family_affinity = iree_hal_make_queue_family_affinity(
       iree_hal_queue_family_ordinal(iree_hal_queue_family(wrapped_queue)));
   const iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/16,
+      .params = params,
+      .allocation_size = 16,
   };
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_queue_alloca(
@@ -2320,9 +2312,10 @@ TEST(ReplayExecuteTest, ExecutesHostAllocationImportedBufferRecord) {
       0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
       0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
   };
-  iree_hal_external_buffer_t external_buffer = {};
-  external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION;
-  external_buffer.size = sizeof(imported_storage);
+  iree_hal_external_buffer_t external_buffer = {
+      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+      .size = sizeof(imported_storage),
+  };
   external_buffer.handle.host_allocation.ptr = imported_storage;
 
   iree_hal_buffer_params_t params = {0};
@@ -2418,14 +2411,16 @@ TEST(ReplayExecuteTest, SkipsFailedUnsupportedImportedBufferRecord) {
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(wrapped_device);
   ASSERT_NE(nullptr, allocator);
 
-  iree_hal_external_buffer_t external_buffer = {};
-  external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_FD;
-  external_buffer.size = 16;
+  iree_hal_external_buffer_t external_buffer = {
+      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_FD,
+      .size = 16,
+  };
 
-  iree_hal_buffer_params_t params = {};
-  params.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params.usage = IREE_HAL_BUFFER_USAGE_MAPPING;
+  iree_hal_buffer_params_t params = {
+      .usage = IREE_HAL_BUFFER_USAGE_MAPPING,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
+  };
   iree_hal_buffer_t* imported_buffer = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
@@ -2464,11 +2459,11 @@ TEST(ReplayExecuteTest, ExecutesRecordedExactQueueTransfer) {
   ASSERT_NE(nullptr, allocator);
 
   const iree_hal_buffer_params_t buffer_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER |
-          IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .usage =
+          IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
   iree_hal_buffer_t* source_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
@@ -2488,9 +2483,9 @@ TEST(ReplayExecuteTest, ExecutesRecordedExactQueueTransfer) {
       /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
   uint64_t signal_value = 1;
   const iree_hal_semaphore_list_t signal_list = {
-      /*.count=*/1,
-      /*.semaphores=*/&semaphore,
-      /*.payload_values=*/&signal_value,
+      .count = 1,
+      .semaphores = &semaphore,
+      .payload_values = &signal_value,
   };
   const uint8_t fill_pattern = 0xA5;
   const uint8_t update_data[] = {0xE0, 0x21, 0x22, 0x23, 0x24, 0xE5};
@@ -2528,24 +2523,26 @@ TEST(ReplayExecuteTest, ExecutesRecordedExactQueueTransfer) {
       target_buffer, 4, 8, iree_allocator_system(), &barrier_view));
   {
     const iree_hal_memory_transition_recipe_info_t operation = {
-        /*.kind=*/IREE_HAL_MEMORY_TRANSITION_KIND_RANGE,
-        /*.executor=*/IREE_HAL_MEMORY_TRANSITION_EXECUTOR_QUEUE,
-        /*.operation=*/IREE_HAL_MEMORY_TRANSITION_OPERATION_RELEASE_TO_SYSTEM,
-        /*.range_granularity=*/64,
+        .kind = IREE_HAL_MEMORY_TRANSITION_KIND_RANGE,
+        .executor = IREE_HAL_MEMORY_TRANSITION_EXECUTOR_QUEUE,
+        .operation = IREE_HAL_MEMORY_TRANSITION_OPERATION_RELEASE_TO_SYSTEM,
+        .range_granularity = 64,
     };
     const iree_hal_memory_transition_recipe_t recipe = {
-        /*.effects=*/{IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM},
-        /*.operation_count=*/1,
-        /*.operations=*/&operation,
+        .effects = {IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM},
+        .operation_count = 1,
+        .operations = &operation,
     };
-    iree_hal_buffer_barrier_t range = {};
-    range.source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
-    range.target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ;
-    range.buffer_ref = iree_hal_make_buffer_ref(barrier_view, 2, 4);
-    range.recipe = &recipe;
-    iree_hal_barrier_t after = {};
-    after.source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER;
-    after.target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST;
+    iree_hal_buffer_barrier_t range = {
+        .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+        .target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ,
+        .buffer_ref = iree_hal_make_buffer_ref(barrier_view, 2, 4),
+        .recipe = &recipe,
+    };
+    iree_hal_barrier_t after = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+    };
     after.effects.bits = IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM |
                          IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM;
     after.buffer_barrier_count = 1;
@@ -2725,20 +2722,19 @@ TEST(ReplayExecuteTest, ExecutesRecordedCommandBufferTransfers) {
       command_buffer, iree_hal_make_buffer_ref(buffer, 0, 16), &fill_pattern,
       sizeof(fill_pattern), IREE_HAL_FILL_FLAG_NONE));
   const iree_hal_memory_barrier_t transfer_barrier = {
-      /*.source_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-      /*.target_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
   };
   const iree_hal_barrier_t execution_barrier = {
-      /*.source_stage_mask=*/IREE_HAL_EXECUTION_STAGE_TRANSFER,
-      /*.target_stage_mask=*/IREE_HAL_EXECUTION_STAGE_TRANSFER,
-      /*.flags=*/IREE_HAL_BARRIER_FLAG_NONE,
-      /*.effects=*/
-      {IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM |
-       IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM},
-      /*.memory_barrier_count=*/1,
-      /*.memory_barriers=*/&transfer_barrier,
-      /*.buffer_barrier_count=*/0,
-      /*.buffer_barriers=*/nullptr,
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .flags = IREE_HAL_BARRIER_FLAG_NONE,
+      .effects = {IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM |
+                  IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM},
+      .memory_barrier_count = 1,
+      .memory_barriers = &transfer_barrier,
+      .buffer_barrier_count = 0,
+      .buffer_barriers = nullptr,
   };
   IREE_ASSERT_OK(
       iree_hal_command_buffer_barrier(command_buffer, &execution_barrier));

@@ -77,14 +77,14 @@ class TunerFlowScenario final : public CompileScenario {
                                            source_.get(), &module));
 
     loomc_compile_options_t options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-        /*.structure_size=*/sizeof(options),
-        /*.next=*/nullptr,
-        /*.module_name=*/loomc_make_cstring_view("tuner_kernel"),
-        /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE,
-        /*.config_flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-        /*.config_module=*/
-        config_modules_[job_ordinal % config_modules_.size()].get(),
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+        .structure_size = sizeof(options),
+        .next = nullptr,
+        .module_name = loomc_make_cstring_view("tuner_kernel"),
+        .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE,
+        .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+        .config_module =
+            config_modules_[job_ordinal % config_modules_.size()].get(),
     };
 
     loomc_result_t* raw_result = nullptr;
@@ -169,38 +169,36 @@ class ModelFlowScenario final : public CompileScenario {
 
     loomc_config_binding_t bindings[] = {
         {
-            /*.key=*/
-            loomc_make_string_view(config_keys_[kernel_ordinal].data(),
-                                   config_keys_[kernel_ordinal].size()),
-            /*.value=*/loomc_make_cstring_view(hidden_size_value),
+            .key = loomc_make_string_view(config_keys_[kernel_ordinal].data(),
+                                          config_keys_[kernel_ordinal].size()),
+            .value = loomc_make_cstring_view(hidden_size_value),
         },
         {
-            /*.key=*/
-            loomc_make_string_view(bias_keys_[kernel_ordinal].data(),
-                                   bias_keys_[kernel_ordinal].size()),
-            /*.value=*/loomc_make_cstring_view(bias_value),
+            .key = loomc_make_string_view(bias_keys_[kernel_ordinal].data(),
+                                          bias_keys_[kernel_ordinal].size()),
+            .value = loomc_make_cstring_view(bias_value),
         },
     };
     loomc_string_view_t root_symbol =
         loomc_make_string_view(root_symbols_[kernel_ordinal].data(),
                                root_symbols_[kernel_ordinal].size());
     loomc_link_options_t link_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
-        /*.structure_size=*/sizeof(link_options),
-        /*.next=*/nullptr,
-        /*.link_index=*/link_index_.get(),
-        /*.module_name=*/loomc_make_cstring_view("model_kernel"),
-        /*.mode=*/LOOMC_LINK_MODE_LINK,
-        /*.root_symbols=*/&root_symbol,
-        /*.root_symbol_count=*/1,
-        /*.flags=*/0,
-        /*.config=*/
-        {
-            /*.bindings=*/bindings,
-            /*.binding_count=*/IREE_ARRAYSIZE(bindings),
-            /*.json_object=*/loomc_string_view_empty(),
-            /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-        },
+        .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+        .structure_size = sizeof(link_options),
+        .next = nullptr,
+        .link_index = link_index_.get(),
+        .module_name = loomc_make_cstring_view("model_kernel"),
+        .mode = LOOMC_LINK_MODE_LINK,
+        .root_symbols = &root_symbol,
+        .root_symbol_count = 1,
+        .flags = 0,
+        .config =
+            {
+                .bindings = bindings,
+                .binding_count = IREE_ARRAYSIZE(bindings),
+                .json_object = loomc_string_view_empty(),
+                .flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+            },
     };
 
     loomc_module_t* raw_module = nullptr;
@@ -214,13 +212,13 @@ class ModelFlowScenario final : public CompileScenario {
     IREE_RETURN_IF_ERROR(RequireSucceededResult(link_result.get(), "linking"));
 
     loomc_compile_options_t compile_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-        /*.structure_size=*/sizeof(compile_options),
-        /*.next=*/nullptr,
-        /*.module_name=*/loomc_make_cstring_view("model_kernel"),
-        /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE,
-        /*.config_flags=*/0,
-        /*.config_module=*/nullptr,
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+        .structure_size = sizeof(compile_options),
+        .next = nullptr,
+        .module_name = loomc_make_cstring_view("model_kernel"),
+        .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE,
+        .config_flags = 0,
+        .config_module = nullptr,
     };
 
     loomc_result_t* raw_compile_result = nullptr;

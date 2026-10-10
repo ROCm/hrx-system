@@ -92,8 +92,8 @@ class SymbolDCETest : public ::testing::Test {
     loom_low_descriptor_text_asm_environment_initialize(
         &low_descriptor_registry_, &low_asm_environment);
     loom_text_print_options_t options = {
-        /*.flags=*/LOOM_TEXT_PRINT_DEFAULT,
-        /*.low_asm_environment=*/low_asm_environment,
+        .flags = LOOM_TEXT_PRINT_DEFAULT,
+        .low_asm_environment = low_asm_environment,
     };
     iree_string_builder_t builder;
     iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -114,11 +114,12 @@ class SymbolDCETest : public ::testing::Test {
     const loom_pass_statistic_layout_t* statistic_layout =
         pass_info->statistic_layout;
     std::vector<uint8_t> statistic_storage(statistic_layout->storage_size, 0);
-    loom_pass_t pass = {};
-    pass.info = pass_info;
-    pass.instance_arena = &pass_arena;
-    pass.arena = &pass_arena;
-    pass.statistic_storage = statistic_storage.data();
+    loom_pass_t pass = {
+        .info = pass_info,
+        .instance_arena = &pass_arena,
+        .arena = &pass_arena,
+        .statistic_storage = statistic_storage.data(),
+    };
     const auto target_capability =
         loom_target_pass_capability_make_mutable(nullptr, versions);
     const loom_pass_environment_capability_t* capabilities[] = {
@@ -140,8 +141,8 @@ class SymbolDCETest : public ::testing::Test {
 
   void VerifyOk(loom_module_t* module) {
     loom_verify_options_t options = {
-        /*.sink=*/{loom_diagnostic_stderr_sink, NULL},
-        /*.max_errors=*/20,
+        .sink = {loom_diagnostic_stderr_sink, NULL},
+        .max_errors = 20,
     };
     loom_verify_result_t result = {};
     IREE_EXPECT_OK(loom_verify_module(module, &options, &result));
@@ -173,7 +174,7 @@ class SymbolDCETest : public ::testing::Test {
 
   loom_module_t* ReadModule(const std::vector<uint8_t>& bytes) {
     loom_bytecode_read_options_t options = {
-        /*.diagnostic_sink=*/{},
+        .diagnostic_sink = {},
     };
     loom_bytecode_read_result_t result = {0};
     loom_module_t* module = nullptr;

@@ -40,10 +40,11 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
     loom_module_value_ordinal_scratch_set(module, value_ids[i], i);
   }
 
-  loom_liveness_value_class_t value_class = {};
-  value_class.type_kind = LOOM_TYPE_REGISTER;
-  value_class.register_descriptor_set_stable_id = 17;
-  value_class.register_class_id = 0;
+  loom_liveness_value_class_t value_class = {
+      .type_kind = LOOM_TYPE_REGISTER,
+      .register_class_id = 0,
+      .register_descriptor_set_stable_id = 17,
+  };
   loom_liveness_interval_t intervals[4] = {};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(intervals); ++i) {
     intervals[i].value_id = value_ids[i];
@@ -57,25 +58,27 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
   intervals[2].start_point = 4;
   intervals[2].end_point = 10;
   const uint32_t interval_indices[] = {0, 1, 2, 3};
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = intervals;
-  liveness.interval_count = IREE_ARRAYSIZE(intervals);
-  liveness.value_ids = value_ids;
-  liveness.value_count = IREE_ARRAYSIZE(value_ids);
-  liveness.value_interval_indices = interval_indices;
+  loom_liveness_analysis_t liveness = {
+      .intervals = intervals,
+      .interval_count = IREE_ARRAYSIZE(intervals),
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .value_interval_indices = interval_indices,
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {
       {0, 2}, {2, 3}, {4, 4}, {8, 5}};
   uint32_t unit_start_points[] = {2, 2, 3, 3, 2, 2, 3, 3, 5, 5};
   uint32_t unit_end_points[] = {4, 4, 4, 4, 10, 10, 10, 10, 14, 14};
   uint64_t incomplete_storage_words[] = {0};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = unit_values;
-  unit_liveness.start_points = unit_start_points;
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
-  unit_liveness.values_with_incomplete_storage_segments = {
-      liveness.value_count, incomplete_storage_words};
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = unit_values,
+      .start_points = unit_start_points,
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+      .values_with_incomplete_storage_segments = {liveness.value_count,
+                                                  incomplete_storage_words},
+  };
 
   loom_low_placement_relation_t relations[2] = {};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(relations); ++i) {
@@ -92,68 +95,74 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
   const loom_low_placement_relation_range_t source_ranges[] = {
       {0, 1}, {1, 1}, {2, 0}, {2, 0}};
   const uint32_t source_relations[] = {0, 1};
-  loom_low_placement_table_t placement = {};
-  placement.value_ids = value_ids;
-  placement.value_count = IREE_ARRAYSIZE(value_ids);
-  placement.relations = relations;
-  placement.relation_count = IREE_ARRAYSIZE(relations);
-  placement.ranges_by_result_ordinal = result_ranges;
-  placement.ranges_by_source_ordinal = source_ranges;
-  placement.relation_indices_by_source_ordinal = source_relations;
+  loom_low_placement_table_t placement = {
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .relations = relations,
+      .relation_count = IREE_ARRAYSIZE(relations),
+      .ranges_by_result_ordinal = result_ranges,
+      .relation_indices_by_source_ordinal = source_relations,
+      .ranges_by_source_ordinal = source_ranges,
+  };
   loom_low_placement_operand_constraints_t operands[4] = {};
   operands[0].addressable_unit_count = 16;
   placement.operand_constraints_by_interval = operands;
 
-  loom_low_reg_class_t reg_class = {};
-  reg_class.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
-  reg_class.alloc_unit_bits = 32;
-  reg_class.allocatable_count = 16;
-  reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
-  loom_low_descriptor_set_t descriptors = {};
-  descriptors.stable_id = 17;
-  descriptors.reg_classes = &reg_class;
-  descriptors.reg_class_count = 1;
-  loom_low_resolved_target_t target = {};
-  target.descriptor_set = &descriptors;
-  loom_low_allocation_resolved_reserved_range_t prefix = {};
-  prefix.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  prefix.location_count = 2;
+  loom_low_reg_class_t reg_class = {
+      .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
+      .alloc_unit_bits = 32,
+      .allocatable_count = 16,
+      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+  };
+  loom_low_descriptor_set_t descriptors = {
+      .stable_id = 17,
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
+  loom_low_resolved_target_t target = {.descriptor_set = &descriptors};
+  loom_low_allocation_resolved_reserved_range_t prefix = {
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_count = 2,
+  };
   uint32_t high_water[] = {6};
   uint32_t constrained_high_water[] = {prefix.location_count};
-  loom_low_allocation_target_constraints_t constraints = {};
-  constraints.module = module;
-  constraints.target = &target;
-  constraints.reserved_ranges = &prefix;
-  constraints.reserved_range_count = 1;
-  constraints.max_assigned_location_end_by_reg_class = high_water;
-  constraints.max_constrained_location_end_by_reg_class =
-      constrained_high_water;
+  loom_low_allocation_target_constraints_t constraints = {
+      .module = module,
+      .target = &target,
+      .reserved_ranges = &prefix,
+      .reserved_range_count = 1,
+      .max_assigned_location_end_by_reg_class = high_water,
+      .max_constrained_location_end_by_reg_class = constrained_high_water,
+  };
 
-  loom_low_allocation_assignment_t future = {};
-  future.value_id = value_ids[3];
-  future.descriptor_reg_class_id = value_class.register_class_id;
-  future.unit_count = 2;
-  future.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  future.location_count = 2;
-  future.unit_point_start = 8;
-  future.end_point = 14;
+  loom_low_allocation_assignment_t future = {
+      .value_id = value_ids[3],
+      .descriptor_reg_class_id = value_class.register_class_id,
+      .end_point = 14,
+      .unit_count = 2,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_count = 2,
+      .unit_point_start = 8,
+  };
   const uint32_t assignment_indices[] = {UINT32_MAX, UINT32_MAX, UINT32_MAX, 0};
-  loom_low_allocation_assignment_map_t assignments = {};
-  assignments.module = module;
-  assignments.liveness = &liveness;
-  assignments.assignments = &future;
-  assignments.assignment_count = 1;
-  assignments.assignment_indices_by_value_ordinal = assignment_indices;
+  loom_low_allocation_assignment_map_t assignments = {
+      .module = module,
+      .liveness = &liveness,
+      .assignments = &future,
+      .assignment_count = 1,
+      .assignment_indices_by_value_ordinal = assignment_indices,
+  };
   loom_low_allocation_storage_lease_state_t leases = {};
-  loom_low_allocation_search_context_t context = {};
-  context.module = module;
-  context.descriptor_set = &descriptors;
-  context.liveness = &liveness;
-  context.unit_liveness = &unit_liveness;
-  context.target_constraints = &constraints;
-  context.assignment_map = &assignments;
-  context.placement = &placement;
-  context.storage_leases = &leases;
+  loom_low_allocation_search_context_t context = {
+      .module = module,
+      .descriptor_set = &descriptors,
+      .liveness = &liveness,
+      .unit_liveness = &unit_liveness,
+      .target_constraints = &constraints,
+      .assignment_map = &assignments,
+      .placement = &placement,
+      .storage_leases = &leases,
+  };
 
   const loom_low_placement_value_ref_t values[] = {
       {0, LOOM_LOW_PLACEMENT_VALUE_OPERAND, 0},
@@ -168,16 +177,17 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
   const loom_low_placement_preference_binding_t bindings[] = {{2, 0}, {3, 1}};
   const uint32_t use_indices[] = {0, 0};
   const uint32_t offsets[] = {0, 0, 0, 1, 2};
-  loom_low_placement_preference_index_t preferences = {};
-  preferences.uses = &use;
-  preferences.bindings = bindings;
-  preferences.use_indices = use_indices;
-  preferences.offsets_by_origin = offsets;
-  preferences.use_count = 1;
-  preferences.binding_count = 2;
-  preferences.max_incident_use_count = 1;
-  preferences.max_incident_binding_count = 2;
-  preferences.max_memo_entry_count = 4;
+  loom_low_placement_preference_index_t preferences = {
+      .uses = &use,
+      .bindings = bindings,
+      .use_indices = use_indices,
+      .offsets_by_origin = offsets,
+      .use_count = 1,
+      .binding_count = 2,
+      .max_incident_use_count = 1,
+      .max_incident_binding_count = 2,
+      .max_memo_entry_count = 4,
+  };
   loom_low_allocation_preference_workspace_t workspace = {};
   IREE_ASSERT_OK(loom_low_allocation_preference_workspace_initialize(
       &preferences, &arena, &workspace));
@@ -246,10 +256,10 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
   const iree_string_view_t resource_names[] = {IREE_SVL("register")};
   const loom_target_residency_cliff_t cliffs[] = {{0, 8, 8, 4}};
   const loom_target_residency_cliff_range_t cliff_ranges[] = {{0, 1}};
-  loom_target_residency_model_t residency_model = {};
-  residency_model.best_tier = 8;
-  residency_model.direct_resources = {resource_names, cliffs, 1, cliff_ranges,
-                                      1};
+  loom_target_residency_model_t residency_model = {
+      .best_tier = 8,
+      .direct_resources = {resource_names, cliffs, 1, cliff_ranges, 1},
+  };
   for (uint32_t tier_limit : {8u, 4u, 0u}) {
     context.residency =
         loom_target_residency_view(&residency_model, tier_limit);

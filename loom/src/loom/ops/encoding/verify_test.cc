@@ -39,11 +39,11 @@ static iree_status_t EmitEncodingParamError(iree_diagnostic_emitter_t emitter,
       loom_param_string(param_name),
   };
   loom_diagnostic_emission_t emission = {
-      /*.module=*/nullptr,
-      /*.op=*/op,
-      /*.error=*/error,
-      /*.params=*/diagnostic_params,
-      /*.param_count=*/IREE_ARRAYSIZE(diagnostic_params),
+      .module = nullptr,
+      .op = op,
+      .error = error,
+      .params = diagnostic_params,
+      .param_count = IREE_ARRAYSIZE(diagnostic_params),
   };
   return iree_diagnostic_emit(emitter, &emission);
 }
@@ -62,24 +62,23 @@ static iree_status_t VerifyRequiresLayoutDefine(
 
 static const loom_encoding_dynamic_parameter_descriptor_t
     kRequiresLayoutDynamicParameters[] = {{
-        /*.name=*/LOOM_BSTRING_REF(6, "layout"),
-        /*.type_constraint=*/LOOM_TYPE_CONSTRAINT_ANY_ENCODING,
+        .name = LOOM_BSTRING_REF(6, "layout"),
+        .type_constraint = LOOM_TYPE_CONSTRAINT_ANY_ENCODING,
     }};
 static const loom_encoding_family_descriptor_t kRequiresLayoutDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(15, "requires_layout"),
-    /*.role=*/LOOM_ENCODING_ROLE_UNKNOWN,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/{},
-    /*.parameter_descriptors=*/{},
-    /*.dynamic_parameter_count=*/
-    IREE_ARRAYSIZE(kRequiresLayoutDynamicParameters),
-    /*.dynamic_parameter_descriptors=*/kRequiresLayoutDynamicParameters,
+    .name = LOOM_BSTRING_REF(15, "requires_layout"),
+    .role = LOOM_ENCODING_ROLE_UNKNOWN,
+    .family_flags = {},
+    .parameter_count = {},
+    .parameter_descriptors = {},
+    .dynamic_parameter_count = IREE_ARRAYSIZE(kRequiresLayoutDynamicParameters),
+    .dynamic_parameter_descriptors = kRequiresLayoutDynamicParameters,
 };
 static const loom_encoding_vtable_t kRequiresLayoutEncodingVtable = {
-    /*.descriptor=*/&kRequiresLayoutDescriptor,
-    /*.is_static_valid=*/{},
-    /*.diagnose_static=*/{},
-    /*.verify_define=*/VerifyRequiresLayoutDefine,
+    .descriptor = &kRequiresLayoutDescriptor,
+    .is_static_valid = {},
+    .diagnose_static = {},
+    .verify_define = VerifyRequiresLayoutDefine,
 };
 
 class EncodingVerifyTest : public ::testing::Test {
@@ -112,9 +111,10 @@ class EncodingVerifyTest : public ::testing::Test {
   void VerifySource(const char* source, DiagnosticCapture* capture,
                     loom_verify_result_t* result) {
     DiagnosticCapture parse_capture;
-    loom_text_parse_options_t parse_options = {};
-    parse_options.diagnostic_sink = parse_capture.sink();
-    parse_options.max_errors = 100;
+    loom_text_parse_options_t parse_options = {
+        .diagnostic_sink = parse_capture.sink(),
+        .max_errors = 100,
+    };
 
     loom_module_t* module = nullptr;
     IREE_ASSERT_OK(loom_text_parse(IREE_SV(source), IREE_SV("test.loom"),
@@ -129,9 +129,10 @@ class EncodingVerifyTest : public ::testing::Test {
   void VerifyModule(loom_module_t* module, DiagnosticCapture* capture,
                     loom_verify_result_t* result) {
     capture->Reset();
-    loom_verify_options_t verify_options = {};
-    verify_options.sink = capture->sink();
-    verify_options.max_errors = 100;
+    loom_verify_options_t verify_options = {
+        .sink = capture->sink(),
+        .max_errors = 100,
+    };
     IREE_ASSERT_OK(loom_verify_module(module, &verify_options, result));
   }
 
@@ -219,16 +220,16 @@ TEST_F(EncodingVerifyTest, UnusedMalformedStaticEncodingIsDiagnosed) {
   IREE_ASSERT_OK(
       loom_module_intern_string(module, IREE_SV("thirty_two"), &value_id));
   loom_named_attr_t parameter = {
-      /*.name_id=*/parameter_name_id,
-      /*.reserved=*/{},
-      /*.value=*/loom_attr_string(value_id),
+      .name_id = parameter_name_id,
+      .reserved = {},
+      .value = loom_attr_string(value_id),
   };
   loom_encoding_t encoding = {
-      /*.name_id=*/encoding_name_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/1,
-      /*.family=*/{},
-      /*.attributes=*/&parameter,
+      .name_id = encoding_name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = &parameter,
   };
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));

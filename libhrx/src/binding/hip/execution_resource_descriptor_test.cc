@@ -19,103 +19,111 @@ static constexpr iree_hal_queue_priority_t kQueuePriorities[] = {
 };
 static constexpr iree_hal_queue_execution_resource_group_spec_t
     kExecutionResourceGroups[] = {
-        {/*.minimum_selected_resource_count=*/1},
+        {.minimum_selected_resource_count = 1},
 };
 static constexpr iree_hal_queue_execution_resource_spec_t
     kExecutionResources[] = {
-        {/*.group_ordinal=*/0,
-         /*.first_execution_unit_ordinal=*/0,
-         /*.execution_unit_count=*/2},
-        {/*.group_ordinal=*/0,
-         /*.first_execution_unit_ordinal=*/2,
-         /*.execution_unit_count=*/2},
-        {/*.group_ordinal=*/0,
-         /*.first_execution_unit_ordinal=*/4,
-         /*.execution_unit_count=*/2},
-        {/*.group_ordinal=*/0,
-         /*.first_execution_unit_ordinal=*/6,
-         /*.execution_unit_count=*/2},
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 0,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 2,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 4,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 6,
+            .execution_unit_count = 2,
+        },
 };
 
 static iree_hal_device_spec_t* CreateDeviceSpec() {
   const iree_hal_physical_device_spec_t physical_device = {
-      /*.identity=*/
-      {
-          /*.display_name=*/IREE_SV("Test GPU"),
-          /*.backend_path=*/IREE_SV("test://gpu"),
-      },
-      /*.physical_ordinal=*/0,
-      /*.partition_ordinal=*/0,
-      /*.partition_count=*/1,
-      /*.physical_device_affinity=*/1,
+      .identity =
+          {
+              .display_name = IREE_SV("Test GPU"),
+              .backend_path = IREE_SV("test://gpu"),
+          },
+      .physical_ordinal = 0,
+      .partition_ordinal = 0,
+      .partition_count = 1,
+      .physical_device_affinity = 1,
   };
   const iree_hal_device_identity_spec_t identity = {
-      /*.logical_device_id=*/IREE_SV("hip-resource-descriptor-test"),
-      /*.display_name=*/IREE_SV("HIP resource descriptor test device"),
-      /*.driver_id=*/IREE_SV("mock"),
-      /*.driver_version=*/IREE_SV("test"),
-      /*.backend_id=*/IREE_SV("mock"),
-      /*.device_path=*/IREE_SV("test://device"),
-      /*.vendor_name=*/IREE_SV("Test"),
-      /*.vendor_id=*/0,
-      /*.device_id=*/0,
-      /*.revision_id=*/0,
-      /*.logical_ordinal=*/0,
-      /*.physical_device_count=*/1,
-      /*.physical_devices=*/&physical_device,
-      /*.flags=*/IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+      .logical_device_id = IREE_SV("hip-resource-descriptor-test"),
+      .display_name = IREE_SV("HIP resource descriptor test device"),
+      .driver_id = IREE_SV("mock"),
+      .driver_version = IREE_SV("test"),
+      .backend_id = IREE_SV("mock"),
+      .device_path = IREE_SV("test://device"),
+      .vendor_name = IREE_SV("Test"),
+      .vendor_id = 0,
+      .device_id = 0,
+      .revision_id = 0,
+      .logical_ordinal = 0,
+      .physical_device_count = 1,
+      .physical_devices = &physical_device,
+      .flags = IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
   };
   const iree_hal_queue_family_spec_t queue_families[] = {
       {
-          /*.name=*/IREE_SV("dispatch-a"),
-          /*.provisioned_queue_count=*/0,
-          /*.priority_count=*/IREE_ARRAYSIZE(kQueuePriorities),
-          /*.priorities=*/kQueuePriorities,
-          /*.execution_unit_count=*/8,
-          /*.execution_resource_group_count=*/
-          IREE_ARRAYSIZE(kExecutionResourceGroups),
-          /*.execution_resource_groups=*/kExecutionResourceGroups,
-          /*.execution_resource_count=*/IREE_ARRAYSIZE(kExecutionResources),
-          /*.execution_resources=*/kExecutionResources,
-          /*.supported_queue_features=*/IREE_HAL_QUEUE_FEATURE_FLAG_NONE,
-          /*.timestamp_valid_bits=*/0,
-          /*.timestamp_frequency_hz=*/0,
-          /*.physical_device_affinity=*/1,
-          /*.role_flags=*/IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
-          /*.atomic_capabilities=*/{},
-          /*.zero_compute_atomic_capabilities=*/{},
-          /*.flags=*/IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION,
+          .name = IREE_SV("dispatch-a"),
+          .provisioned_queue_count = 0,
+          .priority_count = IREE_ARRAYSIZE(kQueuePriorities),
+          .priorities = kQueuePriorities,
+          .execution_unit_count = 8,
+          .execution_resource_group_count =
+              IREE_ARRAYSIZE(kExecutionResourceGroups),
+          .execution_resource_groups = kExecutionResourceGroups,
+          .execution_resource_count = IREE_ARRAYSIZE(kExecutionResources),
+          .execution_resources = kExecutionResources,
+          .supported_queue_features = IREE_HAL_QUEUE_FEATURE_FLAG_NONE,
+          .timestamp_valid_bits = 0,
+          .timestamp_frequency_hz = 0,
+          .physical_device_affinity = 1,
+          .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+          .atomic_capabilities = {},
+          .zero_compute_atomic_capabilities = {},
+          .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION,
       },
       {
-          /*.name=*/IREE_SV("dispatch-b"),
-          /*.provisioned_queue_count=*/0,
-          /*.priority_count=*/IREE_ARRAYSIZE(kQueuePriorities),
-          /*.priorities=*/kQueuePriorities,
-          /*.execution_unit_count=*/8,
-          /*.execution_resource_group_count=*/
-          IREE_ARRAYSIZE(kExecutionResourceGroups),
-          /*.execution_resource_groups=*/kExecutionResourceGroups,
-          /*.execution_resource_count=*/IREE_ARRAYSIZE(kExecutionResources),
-          /*.execution_resources=*/kExecutionResources,
-          /*.supported_queue_features=*/IREE_HAL_QUEUE_FEATURE_FLAG_NONE,
-          /*.timestamp_valid_bits=*/0,
-          /*.timestamp_frequency_hz=*/0,
-          /*.physical_device_affinity=*/1,
-          /*.role_flags=*/IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
-          /*.atomic_capabilities=*/{},
-          /*.zero_compute_atomic_capabilities=*/{},
-          /*.flags=*/IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION,
+          .name = IREE_SV("dispatch-b"),
+          .provisioned_queue_count = 0,
+          .priority_count = IREE_ARRAYSIZE(kQueuePriorities),
+          .priorities = kQueuePriorities,
+          .execution_unit_count = 8,
+          .execution_resource_group_count =
+              IREE_ARRAYSIZE(kExecutionResourceGroups),
+          .execution_resource_groups = kExecutionResourceGroups,
+          .execution_resource_count = IREE_ARRAYSIZE(kExecutionResources),
+          .execution_resources = kExecutionResources,
+          .supported_queue_features = IREE_HAL_QUEUE_FEATURE_FLAG_NONE,
+          .timestamp_valid_bits = 0,
+          .timestamp_frequency_hz = 0,
+          .physical_device_affinity = 1,
+          .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+          .atomic_capabilities = {},
+          .zero_compute_atomic_capabilities = {},
+          .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION,
       },
   };
   const iree_hal_device_queue_spec_t queues = {
-      /*.family_count=*/IREE_ARRAYSIZE(queue_families),
-      /*.families=*/queue_families,
+      .family_count = IREE_ARRAYSIZE(queue_families),
+      .families = queue_families,
   };
   const iree_hal_device_spec_params_t params = {
-      /*.identity=*/&identity,
-      /*.memory=*/nullptr,
-      /*.virtual_memory=*/nullptr,
-      /*.queues=*/&queues,
+      .identity = &identity,
+      .memory = nullptr,
+      .virtual_memory = nullptr,
+      .queues = &queues,
   };
   iree_hal_device_spec_t* device_spec = nullptr;
   IREE_CHECK_OK(iree_hal_device_spec_create(&params, iree_allocator_system(),
@@ -167,11 +175,11 @@ TEST_F(ExecutionResourceDescriptorTest, UnionsDisjointExactSets) {
   const iree_hal_queue_execution_resource_ordinal_t odd_ordinals[] = {1, 3};
   hipDevResource resources[] = {
       CreateResource(
-          /*family_ordinal=*/0, {/*.count=*/IREE_ARRAYSIZE(even_ordinals),
-                                 /*.ordinals=*/even_ordinals}),
+          /*family_ordinal=*/0,
+          {.count = IREE_ARRAYSIZE(even_ordinals), .ordinals = even_ordinals}),
       CreateResource(
-          /*family_ordinal=*/0, {/*.count=*/IREE_ARRAYSIZE(odd_ordinals),
-                                 /*.ordinals=*/odd_ordinals}),
+          /*family_ordinal=*/0,
+          {.count = IREE_ARRAYSIZE(odd_ordinals), .ordinals = odd_ordinals}),
   };
   resources[0].nextResource = &resources[1];
 
@@ -217,14 +225,18 @@ TEST_F(ExecutionResourceDescriptorTest,
   const iree_hal_queue_execution_resource_ordinal_t disjoint_ordinals[] = {2,
                                                                            3};
   const hipDevResource first_resource = CreateResource(
-      /*family_ordinal=*/0, {/*.count=*/IREE_ARRAYSIZE(first_ordinals),
-                             /*.ordinals=*/first_ordinals});
+      /*family_ordinal=*/0,
+      {.count = IREE_ARRAYSIZE(first_ordinals), .ordinals = first_ordinals});
   const hipDevResource overlap_resource = CreateResource(
-      /*family_ordinal=*/0, {/*.count=*/IREE_ARRAYSIZE(overlap_ordinals),
-                             /*.ordinals=*/overlap_ordinals});
+      /*family_ordinal=*/0, {
+                                .count = IREE_ARRAYSIZE(overlap_ordinals),
+                                .ordinals = overlap_ordinals,
+                            });
   const hipDevResource other_family_resource = CreateResource(
-      /*family_ordinal=*/1, {/*.count=*/IREE_ARRAYSIZE(disjoint_ordinals),
-                             /*.ordinals=*/disjoint_ordinals});
+      /*family_ordinal=*/1, {
+                                .count = IREE_ARRAYSIZE(disjoint_ordinals),
+                                .ordinals = disjoint_ordinals,
+                            });
 
   auto expect_invalid_without_publication =
       [&](const hipDevResource& second_resource) {

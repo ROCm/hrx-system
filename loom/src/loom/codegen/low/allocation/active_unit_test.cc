@@ -17,23 +17,25 @@ loom_low_allocation_assignment_t Assignment(
     loom_value_id_t value_id, uint16_t descriptor_reg_class_id,
     uint32_t start_point, uint32_t end_point, uint32_t location_base,
     uint32_t location_count, uint32_t unit_point_start) {
-  loom_low_allocation_assignment_t assignment = {};
-  assignment.value_id = value_id;
-  assignment.descriptor_reg_class_id = descriptor_reg_class_id;
-  assignment.start_point = start_point;
-  assignment.end_point = end_point;
-  assignment.unit_count = location_count;
-  assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  assignment.location_base = location_base;
-  assignment.location_count = location_count;
-  assignment.unit_point_start = unit_point_start;
+  loom_low_allocation_assignment_t assignment = {
+      .value_id = value_id,
+      .descriptor_reg_class_id = descriptor_reg_class_id,
+      .start_point = start_point,
+      .end_point = end_point,
+      .unit_count = location_count,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = location_base,
+      .location_count = location_count,
+      .unit_point_start = unit_point_start,
+  };
   return assignment;
 }
 
 loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
                                         iree_host_size_t reg_class_count) {
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.reg_classes = reg_classes;
+  loom_low_descriptor_set_t descriptor_set = {
+      .reg_classes = reg_classes,
+  };
   descriptor_set.reg_class_count = reg_class_count;
   return descriptor_set;
 }
@@ -47,8 +49,8 @@ loom_low_allocation_live_range_sweep_t LiveRangeSweep(
     (*segment_starts)[i] = assignments[i].liveness_segments.start;
   }
   return {
-      /*.point=*/point,
-      /*.segment_starts_by_assignment_index=*/segment_starts->data(),
+      .point = point,
+      .segment_starts_by_assignment_index = segment_starts->data(),
   };
 }
 
@@ -63,9 +65,10 @@ TEST(LowAllocationActiveUnitTest, FindsAndRemovesIndexedConflicts) {
   const loom_low_descriptor_set_t descriptor_set =
       DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
   uint32_t unit_end_points[] = {10, 10, 10, 10};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   const loom_low_allocation_assignment_t assignments[] = {
       Assignment(/*value_id=*/1, /*descriptor_reg_class_id=*/0,
                  /*start_point=*/0, /*end_point=*/10, /*location_base=*/4,
@@ -153,9 +156,10 @@ TEST(LowAllocationActiveUnitTest, RecyclesEntriesAcrossAssignmentLifetimes) {
   loom_low_allocation_live_range_sweep_t live_range_sweep = LiveRangeSweep(
       assignments, kAssignmentCount, /*point=*/0, &segment_starts);
   uint32_t unit_end_points[] = {10};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   loom_low_allocation_active_unit_index_t index = {};
   IREE_ASSERT_OK(loom_low_allocation_active_unit_index_initialize(
       &descriptor_set, kAssignmentCount, kUnitCount, &arena, &index));
@@ -213,7 +217,7 @@ TEST(LowAllocationActiveUnitTest, OrdersOnlyDefiniteContinuousScalarConflicts) {
       Assignment(7, 1, 0, 10, 5, 1, 0), Assignment(8, 0, 0, 10, 7, 1, 0),
       Assignment(9, 0, 0, 10, 8, 1, 0),
   };
-  assignments[7].liveness_segments = {/*.start=*/0, /*.count=*/1};
+  assignments[7].liveness_segments = {.start = 0, .count = 1};
   assignments[8].location_kind = LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID;
 
   loom_low_allocation_active_unit_index_t index = {};
@@ -454,10 +458,11 @@ TEST(LowAllocationActiveUnitTest, RefinesIndexedConflictByUnitStart) {
       DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
   uint32_t unit_start_points[] = {0, 5, 2, 2};
   uint32_t unit_end_points[] = {10, 10, 5, 6};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.start_points = unit_start_points;
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .start_points = unit_start_points,
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(/*value_id=*/1, /*descriptor_reg_class_id=*/0,
                  /*start_point=*/0, /*end_point=*/10, /*location_base=*/4,
@@ -568,22 +573,22 @@ TEST(LowAllocationActiveUnitTest, IndexesExplicitRegisterAtomicUnits) {
   reg_classes[1].physical_register_candidate_start = 2;
   const loom_low_physical_register_t physical_registers[] = {
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/0,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 0,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/2,
-          /*.atomic_unit_count=*/1,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 2,
+          .atomic_unit_count = 1,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/3,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 3,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
   };
   reg_classes[0].candidate_lookup.register_count = 3;
@@ -609,9 +614,10 @@ TEST(LowAllocationActiveUnitTest, IndexesExplicitRegisterAtomicUnits) {
       IREE_ARRAYSIZE(atomic_units);
 
   uint32_t unit_end_points[] = {10, 10};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(/*value_id=*/1, /*descriptor_reg_class_id=*/0,
                  /*start_point=*/0, /*end_point=*/10, /*location_base=*/0,

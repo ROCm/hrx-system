@@ -127,13 +127,13 @@ TEST_F(HalInvocationTest,
   loom_run_hal_invocation_request_initialize(&request);
   request.runtime = &runtime;
   request.artifact = &executable;
-  request.bindings = (loom_run_hal_binding_specs_t){
-      /*.values=*/bindings,
-      /*.count=*/IREE_ARRAYSIZE(bindings),
+  request.bindings = loom_run_hal_binding_specs_t{
+      .values = bindings,
+      .count = IREE_ARRAYSIZE(bindings),
   };
-  request.expected_bindings = (loom_run_hal_binding_specs_t){
-      /*.values=*/expected_bindings,
-      /*.count=*/IREE_ARRAYSIZE(expected_bindings),
+  request.expected_bindings = loom_run_hal_binding_specs_t{
+      .values = expected_bindings,
+      .count = IREE_ARRAYSIZE(expected_bindings),
   };
 
   loom_run_hal_invocation_result_t result = {};
@@ -225,11 +225,11 @@ TEST_F(HalInvocationTest, PreparePlanFromListsRetainsBindings) {
   IREE_ASSERT_OK(iree_hal_allocator_create_heap(
       IREE_SV("hal_invocation_test"), iree_allocator_system(),
       iree_allocator_system(), &allocator));
-  iree_hal_buffer_params_t buffer_params = {};
-  buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
-  buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  buffer_params.usage =
-      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  iree_hal_buffer_params_t buffer_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+  };
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       allocator, buffer_params, /*allocation_size=*/4, &buffer));
@@ -260,11 +260,11 @@ TEST_F(HalInvocationTest, BindingListTotalByteLengthUsesLogicalBufferExtents) {
       IREE_SV("hal_invocation_test"), iree_allocator_system(),
       iree_allocator_system(), &allocator));
 
-  iree_hal_buffer_params_t buffer_params = {};
-  buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
-  buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  buffer_params.usage =
-      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  iree_hal_buffer_params_t buffer_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+  };
   iree_hal_buffer_t* allocation = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       allocator, buffer_params, /*allocation_size=*/256, &allocation));
@@ -342,7 +342,7 @@ TEST_F(HalInvocationTest,
        DispatchBatchRejectsZeroDispatchCountBeforeDeviceUse) {
   loom_run_hal_runtime_t runtime = {};
   loom_run_hal_prepared_candidate_t candidate = {
-      /*.executable=*/reinterpret_cast<iree_hal_executable_t*>(1),
+      .executable = reinterpret_cast<iree_hal_executable_t*>(1),
   };
   loom_run_hal_invocation_plan_t plan = {};
   loom_run_hal_invocation_plan_initialize(&plan);

@@ -157,12 +157,12 @@ TEST_P(DispatchMultiEntrypointTest, NegateAndDouble) {
   }
 
   iree_hal_buffer_ref_list_t negate_bindings = {
-      /*.count=*/IREE_ARRAYSIZE(negate_binding_refs),
-      /*.values=*/negate_binding_refs,
+      .count = IREE_ARRAYSIZE(negate_binding_refs),
+      .values = negate_binding_refs,
   };
   iree_hal_buffer_ref_list_t double_bindings = {
-      /*.count=*/IREE_ARRAYSIZE(double_binding_refs),
-      /*.values=*/double_binding_refs,
+      .count = IREE_ARRAYSIZE(double_binding_refs),
+      .values = double_binding_refs,
   };
 
   iree_hal_command_buffer_t* command_buffer = nullptr;
@@ -178,17 +178,18 @@ TEST_P(DispatchMultiEntrypointTest, NegateAndDouble) {
       iree_const_byte_span_empty(), negate_bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   const iree_hal_barrier_t execution_barrier = {
-      /*.source_stage_mask=*/IREE_HAL_EXECUTION_STAGE_DISPATCH |
-          IREE_HAL_EXECUTION_STAGE_TRANSFER |
-          IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-      /*.target_stage_mask=*/IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE |
-          IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
-      /*.flags=*/IREE_HAL_BARRIER_FLAG_NONE,
-      /*.effects=*/{},
-      /*.memory_barrier_count=*/0,
-      /*.memory_barriers=*/nullptr,
-      /*.buffer_barrier_count=*/0,
-      /*.buffer_barriers=*/nullptr,
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH |
+                           IREE_HAL_EXECUTION_STAGE_TRANSFER |
+                           IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE |
+                           IREE_HAL_EXECUTION_STAGE_DISPATCH |
+                           IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .flags = IREE_HAL_BARRIER_FLAG_NONE,
+      .effects = {},
+      .memory_barrier_count = 0,
+      .memory_barriers = nullptr,
+      .buffer_barrier_count = 0,
+      .buffer_barriers = nullptr,
   };
   IREE_ASSERT_OK(
       iree_hal_command_buffer_barrier(command_buffer, &execution_barrier));

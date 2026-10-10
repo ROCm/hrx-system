@@ -124,8 +124,8 @@ TEST_P(AsanExecutableTest, PublishesConfigGlobal) {
       iree_hal_make_buffer_ref(fallback_buffer, /*offset=*/0,
                                iree_hal_buffer_byte_length(fallback_buffer));
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   const uint32_t constant_data[] = {0x4153414Eu, 0x43464721u};
@@ -198,8 +198,8 @@ TEST_P(AsanExecutableTest, PublishesFeedbackConfigGlobal) {
       iree_hal_make_buffer_ref(fallback_buffer, /*offset=*/0,
                                iree_hal_buffer_byte_length(fallback_buffer));
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   const uint32_t constant_data[] = {0x4644424Bu, 0x43464721u};
@@ -242,8 +242,8 @@ TEST_P(AsanExecutableTest, ReportsAsanPacketThroughFeedback) {
       iree_hal_make_buffer_ref(fallback_buffer, /*offset=*/0,
                                iree_hal_buffer_byte_length(fallback_buffer));
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   const uint32_t constant_data[] = {0x4153414Eu, 0x52505421u};

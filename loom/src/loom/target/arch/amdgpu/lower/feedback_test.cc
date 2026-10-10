@@ -84,9 +84,9 @@ class AmdgpuFeedbackTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(&builder_, name, &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    return (loom_symbol_ref_t){
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+    return loom_symbol_ref_t{
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
   }
 
@@ -266,8 +266,8 @@ class AmdgpuFeedbackTest : public ::testing::Test {
 
   void VerifyModuleOk() {
     loom_verify_options_t options = {
-        /*.sink=*/{loom_diagnostic_stderr_sink, NULL},
-        /*.max_errors=*/20,
+        .sink = {loom_diagnostic_stderr_sink, NULL},
+        .max_errors = 20,
     };
     loom_verify_result_t result = {};
     IREE_ASSERT_OK(loom_verify_module(module_, &options, &result));
@@ -275,10 +275,11 @@ class AmdgpuFeedbackTest : public ::testing::Test {
   }
 
   void VerifyLowModuleOk() {
-    loom_low_verify_options_t options = {};
-    options.descriptor_registry = &low_registry_.registry;
-    options.emitter = {EmitDiagnosticToStderr, NULL};
-    options.max_errors = 20;
+    loom_low_verify_options_t options = {
+        .descriptor_registry = &low_registry_.registry,
+        .emitter = {EmitDiagnosticToStderr, NULL},
+        .max_errors = 20,
+    };
     loom_low_verify_scratch_t scratch =
         loom_low_verify_scratch_for_module(module_);
     loom_low_verify_result_t result = {};
@@ -1492,15 +1493,15 @@ TEST_F(AmdgpuFeedbackTest, EmitsPacketHeaderStores) {
       LOOM_LOCATION_UNKNOWN, &packet_address));
 
   loom_amdgpu_feedback_packet_header_t header = {
-      /*.record_length=*/(uint32_t)loom_amdgpu_feedback_packet_length(
+      .record_length = (uint32_t)loom_amdgpu_feedback_packet_length(
           /*payload_length=*/64),
-      /*.kind=*/LOOM_AMDGPU_FEEDBACK_PACKET_KIND_ASAN,
-      /*.flags=*/LOOM_AMDGPU_FEEDBACK_PACKET_FLAG_ASYNC,
-      /*.sequence=*/channel_values.ring_capacity,
-      /*.source_dispatch_ptr=*/config_values.notify_signal,
-      /*.source_workgroup_id_x=*/config_values.flags,
-      /*.source_workitem_id_x=*/channel_values.flags,
-      /*.source_context=*/config_values.source_context,
+      .kind = LOOM_AMDGPU_FEEDBACK_PACKET_KIND_ASAN,
+      .flags = LOOM_AMDGPU_FEEDBACK_PACKET_FLAG_ASYNC,
+      .sequence = channel_values.ring_capacity,
+      .source_dispatch_ptr = config_values.notify_signal,
+      .source_workgroup_id_x = config_values.flags,
+      .source_workitem_id_x = channel_values.flags,
+      .source_context = config_values.source_context,
   };
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_packet_header(
       &builder_, descriptor_set_, &packet_address, &header,

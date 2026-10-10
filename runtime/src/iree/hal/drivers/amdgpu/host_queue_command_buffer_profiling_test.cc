@@ -341,11 +341,11 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       IREE_HAL_EXECUTION_STAGE_DISPATCH,
       iree_hal_make_buffer_ref(fixture.input_buffer, /*offset=*/0,
                                sizeof(uint32_t)),
-      (iree_hal_atomic_store_params_t){
-          /*.value=*/5,
-          /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE |
-              IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
-          /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+      iree_hal_atomic_store_params_t{
+          .value = 5,
+          .flags =
+              IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+          .width = IREE_HAL_ATOMIC_WIDTH_32,
       }));
   const uint32_t fill_value = 7;
   IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
@@ -360,18 +360,18 @@ TEST_F(HostQueueCommandBufferProfilingTest,
                                sizeof(update_value)),
       IREE_HAL_UPDATE_FLAG_NONE));
   const iree_hal_memory_barrier_t transfer_to_transfer_barrier = {
-      /*.source_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-      /*.target_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
   };
   const iree_hal_barrier_t execution_barrier = {
-      /*.source_stage_mask=*/IREE_HAL_EXECUTION_STAGE_TRANSFER,
-      /*.target_stage_mask=*/IREE_HAL_EXECUTION_STAGE_TRANSFER,
-      /*.flags=*/IREE_HAL_BARRIER_FLAG_NONE,
-      /*.effects=*/{},
-      /*.memory_barrier_count=*/1,
-      /*.memory_barriers=*/&transfer_to_transfer_barrier,
-      /*.buffer_barrier_count=*/0,
-      /*.buffer_barriers=*/nullptr,
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .flags = IREE_HAL_BARRIER_FLAG_NONE,
+      .effects = {},
+      .memory_barrier_count = 1,
+      .memory_barriers = &transfer_to_transfer_barrier,
+      .buffer_barrier_count = 0,
+      .buffer_barriers = nullptr,
   };
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(fixture.command_buffer,
                                                  &execution_barrier));
@@ -383,18 +383,18 @@ TEST_F(HostQueueCommandBufferProfilingTest,
                                sizeof(uint32_t)),
       IREE_HAL_COPY_FLAG_NONE));
   const iree_hal_memory_barrier_t transfer_to_dispatch_barrier = {
-      /*.source_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-      /*.target_scope=*/IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
   };
   const iree_hal_barrier_t dispatch_dependency = {
-      /*.source_stage_mask=*/IREE_HAL_EXECUTION_STAGE_TRANSFER,
-      /*.target_stage_mask=*/IREE_HAL_EXECUTION_STAGE_DISPATCH,
-      /*.flags=*/IREE_HAL_BARRIER_FLAG_NONE,
-      /*.effects=*/{},
-      /*.memory_barrier_count=*/1,
-      /*.memory_barriers=*/&transfer_to_dispatch_barrier,
-      /*.buffer_barrier_count=*/0,
-      /*.buffer_barriers=*/nullptr,
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .flags = IREE_HAL_BARRIER_FLAG_NONE,
+      .effects = {},
+      .memory_barrier_count = 1,
+      .memory_barriers = &transfer_to_dispatch_barrier,
+      .buffer_barrier_count = 0,
+      .buffer_barriers = nullptr,
   };
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(fixture.command_buffer,
                                                  &dispatch_dependency));

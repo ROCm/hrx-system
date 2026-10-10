@@ -243,16 +243,12 @@ TEST_F(ParameterIndexProviderTest, GatherBatchPreservesGroupSignals) {
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, second_signal.out()));
 
   ParameterRequest first_request = {
-      /*.key=*/IREE_SV("first"),
-      /*.span=*/
-      {/*.parameter_offset=*/0, /*.buffer_offset=*/0,
-       /*.length=*/4},
+      .key = IREE_SV("first"),
+      .span = {.parameter_offset = 0, .buffer_offset = 0, .length = 4},
   };
   ParameterRequest second_request = {
-      /*.key=*/IREE_SV("second"),
-      /*.span=*/
-      {/*.parameter_offset=*/0, /*.buffer_offset=*/0,
-       /*.length=*/4},
+      .key = IREE_SV("second"),
+      .span = {.parameter_offset = 0, .buffer_offset = 0, .length = 4},
   };
 
   uint64_t first_signal_value = 1;
@@ -261,38 +257,38 @@ TEST_F(ParameterIndexProviderTest, GatherBatchPreservesGroupSignals) {
   iree_hal_semaphore_t* second_signal_ptr = second_signal.get();
   iree_io_parameter_gather_t gathers[2] = {
       {
-          /*.source_scope=*/IREE_SV("model"),
-          /*.target_buffer=*/first_buffer.get(),
-          /*.count=*/1,
-          /*.enumerator=*/
-          {
-              /*.fn=*/EnumerateParameterRequest,
-              /*.user_data=*/&first_request,
-          },
-          /*.wait_semaphore_list=*/iree_hal_semaphore_list_empty(),
-          /*.signal_semaphore_list=*/
-          {
-              /*.count=*/1,
-              /*.semaphores=*/&first_signal_ptr,
-              /*.payload_values=*/&first_signal_value,
-          },
+          .source_scope = IREE_SV("model"),
+          .target_buffer = first_buffer.get(),
+          .count = 1,
+          .enumerator =
+              {
+                  .fn = EnumerateParameterRequest,
+                  .user_data = &first_request,
+              },
+          .wait_semaphore_list = iree_hal_semaphore_list_empty(),
+          .signal_semaphore_list =
+              {
+                  .count = 1,
+                  .semaphores = &first_signal_ptr,
+                  .payload_values = &first_signal_value,
+              },
       },
       {
-          /*.source_scope=*/IREE_SV("model"),
-          /*.target_buffer=*/second_buffer.get(),
-          /*.count=*/1,
-          /*.enumerator=*/
-          {
-              /*.fn=*/EnumerateParameterRequest,
-              /*.user_data=*/&second_request,
-          },
-          /*.wait_semaphore_list=*/iree_hal_semaphore_list_empty(),
-          /*.signal_semaphore_list=*/
-          {
-              /*.count=*/1,
-              /*.semaphores=*/&second_signal_ptr,
-              /*.payload_values=*/&second_signal_value,
-          },
+          .source_scope = IREE_SV("model"),
+          .target_buffer = second_buffer.get(),
+          .count = 1,
+          .enumerator =
+              {
+                  .fn = EnumerateParameterRequest,
+                  .user_data = &second_request,
+              },
+          .wait_semaphore_list = iree_hal_semaphore_list_empty(),
+          .signal_semaphore_list =
+              {
+                  .count = 1,
+                  .semaphores = &second_signal_ptr,
+                  .payload_values = &second_signal_value,
+              },
       },
   };
 
@@ -349,40 +345,37 @@ TEST_F(ParameterIndexProviderTest, GatherBatchReadsAdjacentFileSpans) {
 
   ParameterRequest requests[3] = {
       {
-          /*.key=*/IREE_SV("first"),
-          /*.span=*/
-          {/*.parameter_offset=*/0, /*.buffer_offset=*/0, /*.length=*/4},
+          .key = IREE_SV("first"),
+          .span = {.parameter_offset = 0, .buffer_offset = 0, .length = 4},
       },
       {
-          /*.key=*/IREE_SV("second"),
-          /*.span=*/
-          {/*.parameter_offset=*/0, /*.buffer_offset=*/4, /*.length=*/4},
+          .key = IREE_SV("second"),
+          .span = {.parameter_offset = 0, .buffer_offset = 4, .length = 4},
       },
       {
-          /*.key=*/IREE_SV("third"),
-          /*.span=*/
-          {/*.parameter_offset=*/0, /*.buffer_offset=*/8, /*.length=*/4},
+          .key = IREE_SV("third"),
+          .span = {.parameter_offset = 0, .buffer_offset = 8, .length = 4},
       },
   };
 
   uint64_t signal_value = 1;
   iree_hal_semaphore_t* signal_ptr = signal.get();
   iree_io_parameter_gather_t gather = {
-      /*.source_scope=*/IREE_SV("model"),
-      /*.target_buffer=*/target_buffer.get(),
-      /*.count=*/IREE_ARRAYSIZE(requests),
-      /*.enumerator=*/
-      {
-          /*.fn=*/EnumerateParameterRequest,
-          /*.user_data=*/requests,
-      },
-      /*.wait_semaphore_list=*/iree_hal_semaphore_list_empty(),
-      /*.signal_semaphore_list=*/
-      {
-          /*.count=*/1,
-          /*.semaphores=*/&signal_ptr,
-          /*.payload_values=*/&signal_value,
-      },
+      .source_scope = IREE_SV("model"),
+      .target_buffer = target_buffer.get(),
+      .count = IREE_ARRAYSIZE(requests),
+      .enumerator =
+          {
+              .fn = EnumerateParameterRequest,
+              .user_data = requests,
+          },
+      .wait_semaphore_list = iree_hal_semaphore_list_empty(),
+      .signal_semaphore_list =
+          {
+              .count = 1,
+              .semaphores = &signal_ptr,
+              .payload_values = &signal_value,
+          },
   };
 
   IREE_ASSERT_OK(iree_io_parameter_provider_gather_batch(
@@ -445,14 +438,12 @@ TEST_F(ParameterIndexProviderTest, ScatterBatchPreservesGroupSemaphores) {
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, second_signal.out()));
 
   ParameterRequest first_request = {
-      /*.key=*/IREE_SV("first"),
-      /*.span=*/
-      {/*.parameter_offset=*/0, /*.buffer_offset=*/0, /*.length=*/4},
+      .key = IREE_SV("first"),
+      .span = {.parameter_offset = 0, .buffer_offset = 0, .length = 4},
   };
   ParameterRequest second_request = {
-      /*.key=*/IREE_SV("second"),
-      /*.span=*/
-      {/*.parameter_offset=*/0, /*.buffer_offset=*/0, /*.length=*/4},
+      .key = IREE_SV("second"),
+      .span = {.parameter_offset = 0, .buffer_offset = 0, .length = 4},
   };
 
   uint64_t first_wait_value = 1;
@@ -465,48 +456,48 @@ TEST_F(ParameterIndexProviderTest, ScatterBatchPreservesGroupSemaphores) {
   iree_hal_semaphore_t* second_signal_ptr = second_signal.get();
   iree_io_parameter_scatter_t scatters[2] = {
       {
-          /*.target_scope=*/IREE_SV("model"),
-          /*.source_buffer=*/first_buffer.get(),
-          /*.count=*/1,
-          /*.enumerator=*/
-          {
-              /*.fn=*/EnumerateParameterRequest,
-              /*.user_data=*/&first_request,
-          },
-          /*.wait_semaphore_list=*/
-          {
-              /*.count=*/1,
-              /*.semaphores=*/&first_wait_ptr,
-              /*.payload_values=*/&first_wait_value,
-          },
-          /*.signal_semaphore_list=*/
-          {
-              /*.count=*/1,
-              /*.semaphores=*/&first_signal_ptr,
-              /*.payload_values=*/&first_signal_value,
-          },
+          .target_scope = IREE_SV("model"),
+          .source_buffer = first_buffer.get(),
+          .count = 1,
+          .enumerator =
+              {
+                  .fn = EnumerateParameterRequest,
+                  .user_data = &first_request,
+              },
+          .wait_semaphore_list =
+              {
+                  .count = 1,
+                  .semaphores = &first_wait_ptr,
+                  .payload_values = &first_wait_value,
+              },
+          .signal_semaphore_list =
+              {
+                  .count = 1,
+                  .semaphores = &first_signal_ptr,
+                  .payload_values = &first_signal_value,
+              },
       },
       {
-          /*.target_scope=*/IREE_SV("model"),
-          /*.source_buffer=*/second_buffer.get(),
-          /*.count=*/1,
-          /*.enumerator=*/
-          {
-              /*.fn=*/EnumerateParameterRequest,
-              /*.user_data=*/&second_request,
-          },
-          /*.wait_semaphore_list=*/
-          {
-              /*.count=*/1,
-              /*.semaphores=*/&second_wait_ptr,
-              /*.payload_values=*/&second_wait_value,
-          },
-          /*.signal_semaphore_list=*/
-          {
-              /*.count=*/1,
-              /*.semaphores=*/&second_signal_ptr,
-              /*.payload_values=*/&second_signal_value,
-          },
+          .target_scope = IREE_SV("model"),
+          .source_buffer = second_buffer.get(),
+          .count = 1,
+          .enumerator =
+              {
+                  .fn = EnumerateParameterRequest,
+                  .user_data = &second_request,
+              },
+          .wait_semaphore_list =
+              {
+                  .count = 1,
+                  .semaphores = &second_wait_ptr,
+                  .payload_values = &second_wait_value,
+              },
+          .signal_semaphore_list =
+              {
+                  .count = 1,
+                  .semaphores = &second_signal_ptr,
+                  .payload_values = &second_signal_value,
+              },
       },
   };
 
@@ -587,40 +578,37 @@ TEST_F(ParameterIndexProviderTest, ScatterBatchWritesAdjacentFileSpans) {
 
   ParameterRequest requests[3] = {
       {
-          /*.key=*/IREE_SV("first"),
-          /*.span=*/
-          {/*.parameter_offset=*/0, /*.buffer_offset=*/0, /*.length=*/4},
+          .key = IREE_SV("first"),
+          .span = {.parameter_offset = 0, .buffer_offset = 0, .length = 4},
       },
       {
-          /*.key=*/IREE_SV("second"),
-          /*.span=*/
-          {/*.parameter_offset=*/0, /*.buffer_offset=*/4, /*.length=*/4},
+          .key = IREE_SV("second"),
+          .span = {.parameter_offset = 0, .buffer_offset = 4, .length = 4},
       },
       {
-          /*.key=*/IREE_SV("third"),
-          /*.span=*/
-          {/*.parameter_offset=*/0, /*.buffer_offset=*/8, /*.length=*/4},
+          .key = IREE_SV("third"),
+          .span = {.parameter_offset = 0, .buffer_offset = 8, .length = 4},
       },
   };
 
   uint64_t signal_value = 1;
   iree_hal_semaphore_t* signal_ptr = signal.get();
   iree_io_parameter_scatter_t scatter = {
-      /*.target_scope=*/IREE_SV("model"),
-      /*.source_buffer=*/source_buffer.get(),
-      /*.count=*/IREE_ARRAYSIZE(requests),
-      /*.enumerator=*/
-      {
-          /*.fn=*/EnumerateParameterRequest,
-          /*.user_data=*/requests,
-      },
-      /*.wait_semaphore_list=*/iree_hal_semaphore_list_empty(),
-      /*.signal_semaphore_list=*/
-      {
-          /*.count=*/1,
-          /*.semaphores=*/&signal_ptr,
-          /*.payload_values=*/&signal_value,
-      },
+      .target_scope = IREE_SV("model"),
+      .source_buffer = source_buffer.get(),
+      .count = IREE_ARRAYSIZE(requests),
+      .enumerator =
+          {
+              .fn = EnumerateParameterRequest,
+              .user_data = requests,
+          },
+      .wait_semaphore_list = iree_hal_semaphore_list_empty(),
+      .signal_semaphore_list =
+          {
+              .count = 1,
+              .semaphores = &signal_ptr,
+              .payload_values = &signal_value,
+          },
   };
 
   IREE_ASSERT_OK(iree_io_parameter_provider_scatter_batch(

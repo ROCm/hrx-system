@@ -35,6 +35,10 @@
 
 namespace iree::async::cts {
 
+constexpr iree_async_futex_flags_t kPrivateU32FutexFlags =
+    static_cast<iree_async_futex_flags_t>(IREE_ASYNC_FUTEX_SIZE_U32) |
+    static_cast<iree_async_futex_flags_t>(IREE_ASYNC_FUTEX_FLAG_PRIVATE);
+
 class FutexTest : public CtsTestBase<> {
  protected:
   void SetUp() override {
@@ -56,8 +60,7 @@ class FutexTest : public CtsTestBase<> {
     operation->base.user_data = user_data;
     operation->futex_address = address;
     operation->expected_value = expected;
-    operation->futex_flags =
-        IREE_ASYNC_FUTEX_SIZE_U32 | IREE_ASYNC_FUTEX_FLAG_PRIVATE;
+    operation->futex_flags = kPrivateU32FutexFlags;
   }
 
   // Initializes a FUTEX_WAKE operation.
@@ -71,8 +74,7 @@ class FutexTest : public CtsTestBase<> {
     operation->base.user_data = user_data;
     operation->futex_address = address;
     operation->wake_count = count;
-    operation->futex_flags =
-        IREE_ASYNC_FUTEX_SIZE_U32 | IREE_ASYNC_FUTEX_FLAG_PRIVATE;
+    operation->futex_flags = kPrivateU32FutexFlags;
   }
 };
 
@@ -377,8 +379,7 @@ TEST_P(FutexTest, FutexRoundTrip) {
   wait_op.base.user_data = &context;
   wait_op.futex_address = &futex_a;
   wait_op.expected_value = 0;
-  wait_op.futex_flags =
-      IREE_ASYNC_FUTEX_SIZE_U32 | IREE_ASYNC_FUTEX_FLAG_PRIVATE;
+  wait_op.futex_flags = kPrivateU32FutexFlags;
 
   // Submit the wait operation.
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
@@ -439,8 +440,7 @@ TEST_P(FutexTest, FutexChainedOperations) {
   wait_op.base.flags = IREE_ASYNC_OPERATION_FLAG_LINKED;  // Link to next op.
   wait_op.futex_address = &futex_word;
   wait_op.expected_value = 0;
-  wait_op.futex_flags =
-      IREE_ASYNC_FUTEX_SIZE_U32 | IREE_ASYNC_FUTEX_FLAG_PRIVATE;
+  wait_op.futex_flags = kPrivateU32FutexFlags;
 
   iree_async_nop_operation_t nop;
   memset(&nop, 0, sizeof(nop));

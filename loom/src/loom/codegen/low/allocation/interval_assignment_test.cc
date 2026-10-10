@@ -61,10 +61,11 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
 };
 
 loom_liveness_value_class_t RegisterValueClass(uint64_t descriptor_set_id) {
-  loom_liveness_value_class_t value_class = {};
-  value_class.type_kind = LOOM_TYPE_REGISTER;
-  value_class.register_descriptor_set_stable_id = descriptor_set_id;
-  value_class.register_class_id = 0;
+  loom_liveness_value_class_t value_class = {
+      .type_kind = LOOM_TYPE_REGISTER,
+      .register_class_id = 0,
+      .register_descriptor_set_stable_id = descriptor_set_id,
+  };
   return value_class;
 }
 
@@ -79,62 +80,69 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   const loom_liveness_value_class_t value_class =
       RegisterValueClass(descriptor_set_id);
   const loom_liveness_interval_t interval = {
-      /*.value_id=*/value,
-      /*.start_point=*/0,
-      /*.end_point=*/8,
-      /*.value_class=*/value_class,
-      /*.unit_count=*/2,
+      .value_id = value,
+      .start_point = 0,
+      .end_point = 8,
+      .value_class = value_class,
+      .unit_count = 2,
   };
   loom_value_id_t value_ids[] = {value};
-  loom_local_value_domain_t value_domain = {};
-  value_domain.module = module;
-  value_domain.value_ids = value_ids;
-  value_domain.value_count = IREE_ARRAYSIZE(value_ids);
-  value_domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
+  loom_local_value_domain_t value_domain = {
+      .module = module,
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED,
+  };
   const uint32_t interval_indices[] = {0};
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = &interval;
-  liveness.interval_count = 1;
-  liveness.value_ids = value_ids;
-  liveness.value_count = IREE_ARRAYSIZE(value_ids);
-  liveness.value_interval_indices = interval_indices;
+  loom_liveness_analysis_t liveness = {
+      .intervals = &interval,
+      .interval_count = 1,
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .value_interval_indices = interval_indices,
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {{0, 0}};
   uint32_t unit_start_points[] = {0, 0};
   uint32_t unit_end_points[] = {8, 8};
   uint64_t edge_handoff_words[] = {0};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = unit_values;
-  unit_liveness.start_points = unit_start_points;
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
-  unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
-                                                           edge_handoff_words};
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = unit_values,
+      .start_points = unit_start_points,
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+      .values_with_incomplete_storage_segments = {liveness.value_count,
+                                                  edge_handoff_words},
+  };
 
   loom_low_placement_relation_range_t placement_ranges[] = {
       {
-          /*.start=*/0,
-          /*.count=*/0,
+          .start = 0,
+          .count = 0,
       },
   };
-  loom_low_placement_table_t placement = {};
-  placement.module = module;
-  placement.value_ids = value_ids;
-  placement.value_count = IREE_ARRAYSIZE(value_ids);
-  placement.ranges_by_result_ordinal = placement_ranges;
-  placement.ranges_by_source_ordinal = placement_ranges;
+  loom_low_placement_table_t placement = {
+      .module = module,
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .ranges_by_result_ordinal = placement_ranges,
+      .ranges_by_source_ordinal = placement_ranges,
+  };
 
-  loom_low_reg_class_t reg_class = {};
-  reg_class.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
-  reg_class.alloc_unit_bits = 32;
-  reg_class.allocatable_count = 4;
-  reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.stable_id = descriptor_set_id;
-  descriptor_set.reg_classes = &reg_class;
-  descriptor_set.reg_class_count = 1;
-  loom_low_resolved_target_t target = {};
-  target.descriptor_set = &descriptor_set;
+  loom_low_reg_class_t reg_class = {
+      .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
+      .alloc_unit_bits = 32,
+      .allocatable_count = 4,
+      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+  };
+  loom_low_descriptor_set_t descriptor_set = {
+      .stable_id = descriptor_set_id,
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
+  loom_low_resolved_target_t target = {
+      .descriptor_set = &descriptor_set,
+  };
   target.descriptor_set_key = IREE_SV("test");
   loom_op_t function_op = {};
   loom_low_allocation_target_constraints_t target_constraints = {};
@@ -146,22 +154,22 @@ TEST_F(LowAllocationIntervalAssignmentTest,
 
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
-      /*.module=*/module,
-      /*.body=*/nullptr,
-      /*.function_op=*/&function_op,
-      /*.target=*/&target,
-      /*.liveness=*/&liveness,
-      /*.value_domain=*/&value_domain,
-      /*.schedule=*/nullptr,
-      /*.placement=*/&placement,
-      /*.preferences=*/nullptr,
-      /*.target_constraints=*/&target_constraints,
-      /*.entry_locations=*/nullptr,
-      /*.entry_location_count=*/0,
-      /*.storage_transport=*/nullptr,
-      /*.unit_liveness=*/&unit_liveness,
-      /*.storage_leases=*/&storage_leases,
-      /*.arena=*/&arena_,
+      .module = module,
+      .body = nullptr,
+      .function_op = &function_op,
+      .target = &target,
+      .liveness = &liveness,
+      .value_domain = &value_domain,
+      .schedule = nullptr,
+      .placement = &placement,
+      .preferences = nullptr,
+      .target_constraints = &target_constraints,
+      .entry_locations = nullptr,
+      .entry_location_count = 0,
+      .storage_transport = nullptr,
+      .unit_liveness = &unit_liveness,
+      .storage_leases = &storage_leases,
+      .arena = &arena_,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
   // The enclosing allocator may retain facts in the scratch arena's prefix.
@@ -217,99 +225,110 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       RegisterValueClass(descriptor_set_id);
   const loom_liveness_interval_t intervals[] = {
       {
-          /*.value_id=*/first_value,
-          /*.start_point=*/0,
-          /*.end_point=*/4,
-          /*.value_class=*/value_class,
-          /*.unit_count=*/1,
+          .value_id = first_value,
+          .start_point = 0,
+          .end_point = 4,
+          .value_class = value_class,
+          .unit_count = 1,
       },
       {
-          /*.value_id=*/second_value,
-          /*.start_point=*/0,
-          /*.end_point=*/4,
-          /*.value_class=*/value_class,
-          /*.unit_count=*/1,
+          .value_id = second_value,
+          .start_point = 0,
+          .end_point = 4,
+          .value_class = value_class,
+          .unit_count = 1,
       },
       {
-          /*.value_id=*/aggregate_value,
-          /*.start_point=*/5,
-          /*.end_point=*/8,
-          /*.value_class=*/value_class,
-          /*.unit_count=*/2,
+          .value_id = aggregate_value,
+          .start_point = 5,
+          .end_point = 8,
+          .value_class = value_class,
+          .unit_count = 2,
       },
   };
   loom_value_id_t value_ids[] = {first_value, second_value, aggregate_value};
-  loom_local_value_domain_t value_domain = {};
-  value_domain.module = module;
-  value_domain.value_ids = value_ids;
-  value_domain.value_count = IREE_ARRAYSIZE(value_ids);
-  value_domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
+  loom_local_value_domain_t value_domain = {
+      .module = module,
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED,
+  };
   const uint32_t interval_indices[] = {0, 1, 2};
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = intervals;
-  liveness.interval_count = IREE_ARRAYSIZE(intervals);
-  liveness.value_ids = value_ids;
-  liveness.value_count = IREE_ARRAYSIZE(value_ids);
-  liveness.value_interval_indices = interval_indices;
+  loom_liveness_analysis_t liveness = {
+      .intervals = intervals,
+      .interval_count = IREE_ARRAYSIZE(intervals),
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .value_interval_indices = interval_indices,
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {
       {0, 0}, {1, 0}, {2, 5}};
   uint32_t unit_start_points[] = {0, 0, 5, 5};
   uint32_t unit_end_points[] = {4, 4, 8, 8};
   uint64_t edge_handoff_words[] = {0};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = unit_values;
-  unit_liveness.start_points = unit_start_points;
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
-  unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
-                                                           edge_handoff_words};
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = unit_values,
+      .start_points = unit_start_points,
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+      .values_with_incomplete_storage_segments = {liveness.value_count,
+                                                  edge_handoff_words},
+  };
 
   loom_low_placement_relation_range_t placement_ranges[3] = {};
-  loom_low_placement_table_t placement = {};
-  placement.module = module;
-  placement.value_ids = value_ids;
-  placement.value_count = IREE_ARRAYSIZE(value_ids);
-  placement.ranges_by_result_ordinal = placement_ranges;
-  placement.ranges_by_source_ordinal = placement_ranges;
+  loom_low_placement_table_t placement = {
+      .module = module,
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .ranges_by_result_ordinal = placement_ranges,
+      .ranges_by_source_ordinal = placement_ranges,
+  };
 
-  loom_low_reg_class_t reg_class = {};
-  reg_class.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
-                    LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS;
-  reg_class.physical_atomic_unit_count = 2;
-  reg_class.alloc_unit_bits = 512;
-  reg_class.allocatable_count = 2;
-  reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
+  loom_low_reg_class_t reg_class = {
+      .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+               LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
+      .alloc_unit_bits = 512,
+      .allocatable_count = 2,
+      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      .physical_atomic_unit_count = 2,
+  };
   loom_low_physical_register_t physical_registers[] = {
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/0,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 0,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/2,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 2,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/4,
-          /*.atomic_unit_count=*/4,
-          /*.reserved=*/0,
-          /*.view_lookup=*/
-          {/*.ordinal_start=*/0, /*.class_base=*/0,
-           /*.class_count=*/1},
+          .name_string_ref = 0,
+          .atomic_unit_start = 4,
+          .atomic_unit_count = 4,
+          .reserved = 0,
+          .view_lookup =
+              {
+                  .ordinal_start = 0,
+                  .class_base = 0,
+                  .class_count = 1,
+              },
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/8,
-          /*.atomic_unit_count=*/4,
-          /*.reserved=*/0,
-          /*.view_lookup=*/
-          {/*.ordinal_start=*/1, /*.class_base=*/0,
-           /*.class_count=*/0},
+          .name_string_ref = 0,
+          .atomic_unit_start = 8,
+          .atomic_unit_count = 4,
+          .reserved = 0,
+          .view_lookup =
+              {
+                  .ordinal_start = 1,
+                  .class_base = 0,
+                  .class_count = 0,
+              },
       },
   };
   reg_class.candidate_lookup.register_count = 2;
@@ -320,50 +339,51 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   const uint32_t view_ordinals[] = {0, 1};
   const loom_low_physical_register_view_t physical_register_views[] = {
       {
-          /*.physical_register_id=*/2,
-          /*.reg_class_id=*/0,
-          /*.unit_candidate_ordinal_start=*/0,
-          /*.unit_count=*/2,
-          /*.packing_rank=*/0,
+          .physical_register_id = 2,
+          .reg_class_id = 0,
+          .unit_candidate_ordinal_start = 0,
+          .unit_count = 2,
+          .packing_rank = 0,
       },
       {
-          /*.physical_register_id=*/3,
-          /*.reg_class_id=*/0,
-          /*.unit_candidate_ordinal_start=*/2,
-          /*.unit_count=*/2,
-          /*.packing_rank=*/0,
+          .physical_register_id = 3,
+          .reg_class_id = 0,
+          .unit_candidate_ordinal_start = 2,
+          .unit_count = 2,
+          .packing_rank = 0,
       },
   };
   const uint16_t physical_register_view_unit_candidate_ordinals[] = {1, 0, 0,
                                                                      1};
   const uint16_t allocation_ordinals[] = {0, 1};
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.stable_id = descriptor_set_id;
-  descriptor_set.reg_classes = &reg_class;
-  descriptor_set.reg_class_count = 1;
-  descriptor_set.physical_registers = physical_registers;
-  descriptor_set.physical_register_count = IREE_ARRAYSIZE(physical_registers);
-  descriptor_set.physical_register_candidate_ordinals = candidate_ordinals;
-  descriptor_set.physical_register_candidate_ordinal_count =
-      IREE_ARRAYSIZE(candidate_ordinals);
-  descriptor_set.physical_register_candidate_ids = physical_register_candidates;
-  descriptor_set.physical_register_allocation_ordinals = allocation_ordinals;
-  descriptor_set.physical_register_candidate_count =
-      IREE_ARRAYSIZE(physical_register_candidates);
-  descriptor_set.physical_register_atomic_units =
-      physical_register_atomic_units;
-  descriptor_set.physical_register_atomic_unit_count =
-      IREE_ARRAYSIZE(physical_register_atomic_units);
-  descriptor_set.physical_register_view_ordinals = view_ordinals;
-  descriptor_set.physical_register_view_ordinal_count = 1;
-  descriptor_set.physical_register_views = physical_register_views;
-  descriptor_set.physical_register_view_count = 1;
-  descriptor_set.physical_register_view_unit_candidate_ordinals =
-      physical_register_view_unit_candidate_ordinals;
-  descriptor_set.physical_register_view_unit_candidate_ordinal_count =
-      IREE_ARRAYSIZE(physical_register_view_unit_candidate_ordinals);
-  loom_low_resolved_target_t target = {};
-  target.descriptor_set = &descriptor_set;
+  loom_low_descriptor_set_t descriptor_set = {
+      .stable_id = descriptor_set_id,
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+      .physical_registers = physical_registers,
+      .physical_register_count = IREE_ARRAYSIZE(physical_registers),
+      .physical_register_candidate_ids = physical_register_candidates,
+      .physical_register_allocation_ordinals = allocation_ordinals,
+      .physical_register_candidate_count =
+          IREE_ARRAYSIZE(physical_register_candidates),
+      .physical_register_candidate_ordinals = candidate_ordinals,
+      .physical_register_candidate_ordinal_count =
+          IREE_ARRAYSIZE(candidate_ordinals),
+      .physical_register_atomic_units = physical_register_atomic_units,
+      .physical_register_atomic_unit_count =
+          IREE_ARRAYSIZE(physical_register_atomic_units),
+      .physical_register_view_ordinals = view_ordinals,
+      .physical_register_view_ordinal_count = 1,
+      .physical_register_views = physical_register_views,
+      .physical_register_view_count = 1,
+      .physical_register_view_unit_candidate_ordinals =
+          physical_register_view_unit_candidate_ordinals,
+      .physical_register_view_unit_candidate_ordinal_count =
+          IREE_ARRAYSIZE(physical_register_view_unit_candidate_ordinals),
+  };
+  loom_low_resolved_target_t target = {
+      .descriptor_set = &descriptor_set,
+  };
   target.descriptor_set_key = IREE_SV("test");
   loom_op_t function_op = {};
   loom_low_allocation_target_constraints_t target_constraints = {};
@@ -375,22 +395,22 @@ TEST_F(LowAllocationIntervalAssignmentTest,
 
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
-      /*.module=*/module,
-      /*.body=*/nullptr,
-      /*.function_op=*/&function_op,
-      /*.target=*/&target,
-      /*.liveness=*/&liveness,
-      /*.value_domain=*/&value_domain,
-      /*.schedule=*/nullptr,
-      /*.placement=*/&placement,
-      /*.preferences=*/nullptr,
-      /*.target_constraints=*/&target_constraints,
-      /*.entry_locations=*/nullptr,
-      /*.entry_location_count=*/0,
-      /*.storage_transport=*/nullptr,
-      /*.unit_liveness=*/&unit_liveness,
-      /*.storage_leases=*/&storage_leases,
-      /*.arena=*/&arena_,
+      .module = module,
+      .body = nullptr,
+      .function_op = &function_op,
+      .target = &target,
+      .liveness = &liveness,
+      .value_domain = &value_domain,
+      .schedule = nullptr,
+      .placement = &placement,
+      .preferences = nullptr,
+      .target_constraints = &target_constraints,
+      .entry_locations = nullptr,
+      .entry_location_count = 0,
+      .storage_transport = nullptr,
+      .unit_liveness = &unit_liveness,
+      .storage_leases = &storage_leases,
+      .arena = &arena_,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
@@ -440,96 +460,103 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       RegisterValueClass(descriptor_set_id);
   const loom_liveness_interval_t intervals[] = {
       {
-          /*.value_id=*/source_value,
-          /*.start_point=*/0,
-          /*.end_point=*/6,
-          /*.value_class=*/value_class,
-          /*.unit_count=*/1,
+          .value_id = source_value,
+          .start_point = 0,
+          .end_point = 6,
+          .value_class = value_class,
+          .unit_count = 1,
       },
       {
-          /*.value_id=*/result_value,
-          /*.start_point=*/2,
-          /*.end_point=*/6,
-          /*.value_class=*/value_class,
-          /*.unit_count=*/1,
+          .value_id = result_value,
+          .start_point = 2,
+          .end_point = 6,
+          .value_class = value_class,
+          .unit_count = 1,
       },
   };
   loom_value_id_t value_ids[] = {source_value, result_value};
   const uint32_t interval_indices[] = {0, 1};
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = intervals;
-  liveness.interval_count = IREE_ARRAYSIZE(intervals);
-  liveness.value_ids = value_ids;
-  liveness.value_count = IREE_ARRAYSIZE(value_ids);
-  liveness.value_interval_indices = interval_indices;
+  loom_liveness_analysis_t liveness = {
+      .intervals = intervals,
+      .interval_count = IREE_ARRAYSIZE(intervals),
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .value_interval_indices = interval_indices,
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {{0, 0}, {1, 2}};
   uint32_t unit_start_points[] = {0, 0};
   uint32_t unit_end_points[] = {6, 6};
   uint64_t edge_handoff_words[] = {0};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = unit_values;
-  unit_liveness.start_points = unit_start_points;
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
-  unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
-                                                           edge_handoff_words};
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = unit_values,
+      .start_points = unit_start_points,
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+      .values_with_incomplete_storage_segments = {liveness.value_count,
+                                                  edge_handoff_words},
+  };
 
   const uint32_t relation_indices_by_source[] = {0};
-  loom_low_placement_relation_t relation = {};
-  relation.result_ordinal = 1;
-  relation.source_ordinal = 0;
-  relation.unit_count = 1;
-  relation.kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE;
-  relation.cause = LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT;
-  relation.flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD |
-                   LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
+  loom_low_placement_relation_t relation = {
+      .result_ordinal = 1,
+      .source_ordinal = 0,
+      .unit_count = 1,
+      .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE,
+      .cause = LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT,
+      .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD |
+               LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE,
+  };
   loom_low_placement_relation_range_t ranges_by_result[] = {
       {
-          /*.start=*/0,
-          /*.count=*/0,
+          .start = 0,
+          .count = 0,
       },
       {
-          /*.start=*/0,
-          /*.count=*/1,
+          .start = 0,
+          .count = 1,
       },
   };
   loom_low_placement_relation_range_t ranges_by_source[] = {
       {
-          /*.start=*/0,
-          /*.count=*/1,
+          .start = 0,
+          .count = 1,
       },
       {
-          /*.start=*/1,
-          /*.count=*/0,
+          .start = 1,
+          .count = 0,
       },
   };
-  loom_low_placement_table_t placement = {};
-  placement.module = module;
-  placement.value_ids = value_ids;
-  placement.value_count = IREE_ARRAYSIZE(value_ids);
-  placement.relations = &relation;
-  placement.relation_count = 1;
-  placement.ranges_by_result_ordinal = ranges_by_result;
-  placement.relation_indices_by_source_ordinal = relation_indices_by_source;
-  placement.ranges_by_source_ordinal = ranges_by_source;
+  loom_low_placement_table_t placement = {
+      .module = module,
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .relations = &relation,
+      .relation_count = 1,
+      .ranges_by_result_ordinal = ranges_by_result,
+      .relation_indices_by_source_ordinal = relation_indices_by_source,
+      .ranges_by_source_ordinal = ranges_by_source,
+  };
   const loom_value_ordinal_t tied_origins[] = {0, 0};
   placement.tied_storage_origins_by_value_ordinal = tied_origins;
   const loom_value_ordinal_t storage_order[] = {1, 0};
   placement.storage_value_order = storage_order;
   placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
 
-  loom_low_reg_class_t reg_class = {};
-  reg_class.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
-  reg_class.alloc_unit_bits = 32;
-  reg_class.allocatable_count = 8;
-  reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.stable_id = descriptor_set_id;
-  descriptor_set.reg_classes = &reg_class;
-  descriptor_set.reg_class_count = 1;
-  loom_low_resolved_target_t target = {};
-  target.descriptor_set = &descriptor_set;
+  loom_low_reg_class_t reg_class = {
+      .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
+      .alloc_unit_bits = 32,
+      .allocatable_count = 8,
+      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+  };
+  loom_low_descriptor_set_t descriptor_set = {
+      .stable_id = descriptor_set_id,
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
+  loom_low_resolved_target_t target = {
+      .descriptor_set = &descriptor_set,
+  };
   target.descriptor_set_key = IREE_SV("test");
   loom_op_t function_op = {};
   loom_low_allocation_target_constraints_t target_constraints = {};
@@ -540,23 +567,24 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       &arena_, &target_constraints));
   const loom_low_allocation_fixed_value_t fixed_values[] = {
       {
-          /*.value_id=*/source_value,
-          /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-          /*.location_base=*/3,
-          /*.location_count=*/1,
+          .value_id = source_value,
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_base = 3,
+          .location_count = 1,
       },
       {
-          /*.value_id=*/result_value,
-          /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-          /*.location_base=*/3,
-          /*.location_count=*/1,
+          .value_id = result_value,
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_base = 3,
+          .location_count = 1,
       },
   };
-  loom_local_value_domain_t value_domain = {};
-  value_domain.module = module;
-  value_domain.value_ids = value_ids;
-  value_domain.value_count = IREE_ARRAYSIZE(value_ids);
-  value_domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
+  loom_local_value_domain_t value_domain = {
+      .module = module,
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED,
+  };
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_resolve_fixed_locations(
       &target_constraints, &liveness, &value_domain,
       placement.operand_constraints_by_interval,
@@ -567,22 +595,22 @@ TEST_F(LowAllocationIntervalAssignmentTest,
 
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
-      /*.module=*/module,
-      /*.body=*/nullptr,
-      /*.function_op=*/&function_op,
-      /*.target=*/&target,
-      /*.liveness=*/&liveness,
-      /*.value_domain=*/&value_domain,
-      /*.schedule=*/nullptr,
-      /*.placement=*/&placement,
-      /*.preferences=*/nullptr,
-      /*.target_constraints=*/&target_constraints,
-      /*.entry_locations=*/nullptr,
-      /*.entry_location_count=*/0,
-      /*.storage_transport=*/nullptr,
-      /*.unit_liveness=*/&unit_liveness,
-      /*.storage_leases=*/&storage_leases,
-      /*.arena=*/&arena_,
+      .module = module,
+      .body = nullptr,
+      .function_op = &function_op,
+      .target = &target,
+      .liveness = &liveness,
+      .value_domain = &value_domain,
+      .schedule = nullptr,
+      .placement = &placement,
+      .preferences = nullptr,
+      .target_constraints = &target_constraints,
+      .entry_locations = nullptr,
+      .entry_location_count = 0,
+      .storage_transport = nullptr,
+      .unit_liveness = &unit_liveness,
+      .storage_leases = &storage_leases,
+      .arena = &arena_,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(

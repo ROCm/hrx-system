@@ -272,8 +272,7 @@ TEST_P(DeviceSdmaLookaheadTest, ReuseJoinsEveryIndependentReader) {
   }
   std::array<uint32_t, 1024> expected_control;
   expected_control.fill(kControlGuard);
-  aql::Signal joined = {};
-  joined.kind = 1;
+  aql::Signal joined = {.kind = 1};
   std::memcpy(expected_control.data(), &joined, sizeof(joined));
   expected_control[kCompletionOffset / 4] = 0;
   std::memcpy(expected_control.data() + kLengthsOffset / 4,

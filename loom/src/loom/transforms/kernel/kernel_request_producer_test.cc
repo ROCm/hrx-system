@@ -175,8 +175,8 @@ kernel.def @classified() {
   iree_host_size_t AddMaterializedSource(loom_link_module_index_t* index,
                                          const loom_module_t* module) {
     const loom_link_module_index_add_options_t options = {
-        /*.provider_name=*/IREE_SV("kernel-source"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = IREE_SV("kernel-source"),
+        .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
     };
     iree_host_size_t provider_ordinal = 0;
     IREE_CHECK_OK(loom_link_module_index_add_materialized(
@@ -188,8 +188,8 @@ kernel.def @classified() {
                                      const std::vector<uint8_t>& bytecode,
                                      const loom_module_t* source_module) {
     const loom_link_module_index_add_options_t options = {
-        /*.provider_name=*/IREE_SV("kernel-source"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = IREE_SV("kernel-source"),
+        .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
     };
     iree_host_size_t provider_ordinal = 0;
     IREE_CHECK_OK(loom_link_module_index_add_bytecode(
@@ -220,13 +220,13 @@ kernel.def @classified() {
 
   loom_link_plan_materialization_environment_t MaterializationEnvironment() {
     return loom_link_plan_materialization_environment_t{
-        /*.context=*/&context_,
-        /*.block_pool=*/&block_pool_,
-        /*.low_repr_environment=*/{},
-        /*.diagnostic_sink=*/nullptr,
-        /*.prepare_module=*/nullptr,
-        /*.user_data=*/nullptr,
-        /*.allocator=*/iree_allocator_system(),
+        .context = &context_,
+        .block_pool = &block_pool_,
+        .low_repr_environment = {},
+        .diagnostic_sink = nullptr,
+        .prepare_module = nullptr,
+        .user_data = nullptr,
+        .allocator = iree_allocator_system(),
     };
   }
 
@@ -251,12 +251,12 @@ kernel.def @classified() {
     out_argument_values[0] = 0;
     out_argument_values[1] = 1;
     out_sites[0] = {
-        /*.facts=*/out_facts,
-        /*.argument_values=*/&out_argument_values[0],
+        .facts = out_facts,
+        .argument_values = &out_argument_values[0],
     };
     out_sites[1] = {
-        /*.facts=*/out_facts,
-        /*.argument_values=*/&out_argument_values[1],
+        .facts = out_facts,
+        .argument_values = &out_argument_values[1],
     };
   }
 
@@ -282,7 +282,7 @@ TEST_F(KernelRequestProducerTest,
   BuildSites(&scratch_arena, &site_facts, sites, argument_values);
 
   RequestCapture capture = {
-      /*.block_pool=*/&block_pool_,
+      .block_pool = &block_pool_,
   };
   const loom_kernel_class_collection_options_t collection_options =
       loom_kernel_class_collection_options_default();
@@ -292,9 +292,9 @@ TEST_F(KernelRequestProducerTest,
   IREE_ASSERT_OK(loom_kernel_request_producer_publish(
       producer.get(), &environment, source_symbol_ordinal, sites,
       IREE_ARRAYSIZE(sites), &collection_options,
-      (loom_kernel_request_sink_t){
-          /*.publish=*/CaptureRequest,
-          /*.user_data=*/&capture,
+      loom_kernel_request_sink_t{
+          .publish = CaptureRequest,
+          .user_data = &capture,
       },
       &scratch_arena, &collection));
   ASSERT_EQ(collection.class_count, 2u);
@@ -355,9 +355,9 @@ TEST_F(KernelRequestProducerTest, StopsAfterSinkFailureBeforeMaterialization) {
                         loom_kernel_request_producer_publish(
                             producer.get(), &environment, source_symbol_ordinal,
                             sites, IREE_ARRAYSIZE(sites), &collection_options,
-                            (loom_kernel_request_sink_t){
-                                /*.publish=*/RejectRequest,
-                                /*.user_data=*/&state,
+                            loom_kernel_request_sink_t{
+                                .publish = RejectRequest,
+                                .user_data = &state,
                             },
                             &scratch_arena, &collection));
   EXPECT_EQ(state.call_count, 1u);

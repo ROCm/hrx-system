@@ -18,11 +18,12 @@ def _with_hrx_deps(deps):
         deps = []
     return deps + _HRX_DEPS
 
-def _with_hrx_compiler_options(copts, conlyopts, cxxopts):
+def _with_hrx_compiler_options(copts, conlyopts, cxxopts, features = None):
     return cc_opts.iree_code_compiler_options(
         copts = copts,
         conlyopts = conlyopts,
         cxxopts = cxxopts,
+        features = features,
     )
 
 hrx_cc_attrs = struct(

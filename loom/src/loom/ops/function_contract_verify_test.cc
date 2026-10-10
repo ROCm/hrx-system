@@ -52,7 +52,7 @@ class FunctionContractVerifyTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_module_intern_string(module_, name, &name_id));
     loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    *out_symbol = loom_symbol_ref_t{/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    *out_symbol = loom_symbol_ref_t{.module_id = 0, .symbol_id = symbol_id};
   }
 
   void AddIndexDeclaration(iree_string_view_t name, loom_op_t** out_op) {
@@ -98,17 +98,17 @@ TEST_F(FunctionContractVerifyTest,
         loom_block_add_arg(module_, loom_module_block(module_), target));
   }
   const loom_type_value_remap_t result_remap = {
-      /*.source_values=*/results.values,
-      /*.target_values=*/&targets[3],
-      /*.count=*/3,
-      /*.flags=*/LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
+      .source_values = results.values,
+      .target_values = &targets[3],
+      .count = 3,
+      .flags = LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
   };
   const loom_type_value_remap_t argument_remap = {
-      /*.source_values=*/&arguments.values[1],
-      /*.target_values=*/targets,
-      /*.count=*/3,
-      /*.flags=*/LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
-      /*.next=*/&result_remap,
+      .source_values = &arguments.values[1],
+      .target_values = targets,
+      .count = 3,
+      .flags = LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
+      .next = &result_remap,
   };
 
   // The slice begins at operand one. Results, other declarations and block

@@ -81,8 +81,9 @@ class HalDispatchTest : public ::testing::Test {
     const std::vector<char> bytes((std::istreambuf_iterator<char>(input)),
                                   std::istreambuf_iterator<char>());
     ASSERT_FALSE(bytes.empty());
-    iree_hal_executable_target_selection_t selection = {};
-    selection.family = IREE_SV("cpu");
+    iree_hal_executable_target_selection_t selection = {
+        .family = IREE_SV("cpu"),
+    };
     const auto target = iree_hal_device_spec_select_executable_target(
         iree_hal_device_spec(device_), &selection);
     ASSERT_EQ(target.outcome,
@@ -148,10 +149,10 @@ TEST_F(HalDispatchTest, GridCallsAndIndependentImageLifetime) {
   std::array<uint32_t, kPrefix + kCount + 2> output = {};
   output.front() = 0x76543210;
   output.back() = 0xfedcba98;
-  iree_hal_buffer_params_t buffer_params = {};
-  buffer_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  buffer_params.usage =
-      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  iree_hal_buffer_params_t buffer_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+  };
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       iree_hal_device_allocator(device_), buffer_params, sizeof(output),
       &buffer_));
@@ -215,10 +216,10 @@ TEST_F(HalDispatchTest, NarrowParameterAndZeroWork) {
 
   std::array<uint8_t, 8> output;
   output.fill(0xc8);
-  iree_hal_buffer_params_t buffer_params = {};
-  buffer_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  buffer_params.usage =
-      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  iree_hal_buffer_params_t buffer_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+  };
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       iree_hal_device_allocator(device_), buffer_params, output.size(),
       &buffer_));

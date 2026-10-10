@@ -16,35 +16,35 @@ namespace {
 
 static const loom_attr_descriptor_t kEncodingParameters[] = {
     {
-        /*.name=*/LOOM_BSTRING_REF(4, "base"),
-        /*.attr_kind=*/LOOM_ATTR_ENCODING,
-        /*.flags=*/LOOM_ATTR_OPTIONAL,
+        .name = LOOM_BSTRING_REF(4, "base"),
+        .attr_kind = LOOM_ATTR_ENCODING,
+        .flags = LOOM_ATTR_OPTIONAL,
     },
     {
-        /*.name=*/LOOM_BSTRING_REF(5, "block"),
-        /*.attr_kind=*/LOOM_ATTR_I64,
-        /*.flags=*/LOOM_ATTR_OPTIONAL,
+        .name = LOOM_BSTRING_REF(5, "block"),
+        .attr_kind = LOOM_ATTR_I64,
+        .flags = LOOM_ATTR_OPTIONAL,
     },
     {
-        /*.name=*/LOOM_BSTRING_REF(7, "element"),
-        /*.attr_kind=*/LOOM_ATTR_TYPE,
-        /*.flags=*/LOOM_ATTR_OPTIONAL,
+        .name = LOOM_BSTRING_REF(7, "element"),
+        .attr_kind = LOOM_ATTR_TYPE,
+        .flags = LOOM_ATTR_OPTIONAL,
     },
     {
-        /*.name=*/LOOM_BSTRING_REF(7, "options"),
-        /*.attr_kind=*/LOOM_ATTR_DICT,
-        /*.flags=*/LOOM_ATTR_OPTIONAL,
+        .name = LOOM_BSTRING_REF(7, "options"),
+        .attr_kind = LOOM_ATTR_DICT,
+        .flags = LOOM_ATTR_OPTIONAL,
     },
 };
 static const loom_encoding_family_descriptor_t kEncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/IREE_ARRAYSIZE(kEncodingParameters),
-    /*.parameter_descriptors=*/kEncodingParameters,
+    .name = LOOM_BSTRING_REF(4, "q8_0"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = IREE_ARRAYSIZE(kEncodingParameters),
+    .parameter_descriptors = kEncodingParameters,
 };
 static const loom_encoding_vtable_t kEncodingVtable = {
-    /*.descriptor=*/&kEncodingDescriptor,
+    .descriptor = &kEncodingDescriptor,
 };
 
 static iree_status_t AcceptDiagnostic(void* user_data,
@@ -93,12 +93,12 @@ class BytecodeEncodingValidatorTest : public ::testing::Test {
   loom_bytecode_reader_section_t MakeSection(const uint8_t* data,
                                              iree_host_size_t length) {
     return loom_bytecode_reader_section_t{
-        /*.kind=*/LOOM_BYTECODE_SECTION_ENCODINGS,
-        /*.flags=*/{},
-        /*.offset=*/0,
-        /*.length=*/length,
-        /*.absolute_offset=*/41,
-        /*.bytes=*/iree_make_const_byte_span(data, length),
+        .kind = LOOM_BYTECODE_SECTION_ENCODINGS,
+        .flags = {},
+        .offset = 0,
+        .length = length,
+        .absolute_offset = 41,
+        .bytes = iree_make_const_byte_span(data, length),
     };
   }
 

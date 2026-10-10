@@ -27,11 +27,11 @@ class CpuPoolTest : public ::testing::Test {
 
   iree_hal_buffer_params_t BufferParams() const {
     return {
-        /*.usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT |
-            IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
-        /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-        /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+        .usage = IREE_HAL_BUFFER_USAGE_DEFAULT |
+                 IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
+        .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
     };
   }
 
@@ -161,8 +161,8 @@ TEST_F(CpuPoolTest, BatchedReservationsRetainPoolUntilRelease) {
       backend_.frontier_tracker, iree_allocator_system(), &pool));
 
   const iree_hal_pool_reservation_request_t requests[2] = {
-      {/*.params=*/params, /*.allocation_size=*/4096},
-      {/*.params=*/params, /*.allocation_size=*/8192},
+      {.params = params, .allocation_size = 4096},
+      {.params = params, .allocation_size = 8192},
   };
   iree_hal_pool_reservation_t reservations[2];
   iree_hal_pool_acquire_info_t acquire_infos[2];
@@ -218,8 +218,8 @@ TEST_F(CpuPoolTest, AcceptsWeakerAndRejectsInvalidOrStrongerAlignment) {
       backend_.frontier_tracker, iree_allocator_system(), &pool));
 
   iree_hal_pool_reservation_request_t request = {
-      /*.params=*/params,
-      /*.allocation_size=*/4096,
+      .params = params,
+      .allocation_size = 4096,
   };
   iree_hal_pool_reservation_t reservation;
   iree_hal_pool_acquire_info_t acquire_info;

@@ -141,8 +141,7 @@ TEST_F(CfgPostdominanceTest, FullBlockIndexRangeWithoutRecursiveStack) {
 }
 
 TEST_F(CfgPostdominanceTest, MalformedGraphIsUnavailable) {
-  loom_cfg_graph_t graph = {};
-  graph.malformed = true;
+  loom_cfg_graph_t graph = {.malformed = true};
   loom_cfg_postdominance_t postdominance;
   IREE_ASSERT_OK(loom_cfg_postdominance_build(&graph, &arena_, &postdominance));
   EXPECT_FALSE(postdominance.available);

@@ -38,44 +38,50 @@ void Pm4RecipeQueue::Initialize(
     return;
   }
 
-  amdf_gpu_kernel_queue_create_info_t queue_create = {};
-  queue_create.type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO;
-  queue_create.structure_size = sizeof(queue_create);
-  queue_create.queue_family_ordinal = family.ordinal;
-  queue_create.maximum_pending_submission_count = 1;
+  amdf_gpu_kernel_queue_create_info_t queue_create = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
+      .structure_size = sizeof(queue_create),
+      .queue_family_ordinal = family.ordinal,
+      .maximum_pending_submission_count = 1,
+  };
   ASSERT_EQ(gpu_api->kernel_queue_create(device, &queue_create, &kernel_queue_),
             AMDF_STATUS_OK);
   const amdf_memory_device_access_t access = {
       device,
-      {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
-                 AMDF_MEMORY_ACCESS_EXECUTE,
-       .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
-       .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU}};
+      {
+          .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
+                    AMDF_MEMORY_ACCESS_EXECUTE,
+          .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+          .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
+      }};
   const uint32_t ordinal = FindGpuMemoryProfileOrdinal(
       api, system_scope, device,
       AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
       AMDF_MEMORY_FLAG_HOST_VISIBLE, access.requirements);
   ASSERT_NE(ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
-  amdf_memory_access_capabilities_t capabilities = {};
-  capabilities.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
-  capabilities.structure_size = sizeof(capabilities);
+  amdf_memory_profile_t profile = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+      .structure_size = sizeof(profile),
+  };
+  amdf_memory_access_capabilities_t capabilities = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+      .structure_size = sizeof(capabilities),
+  };
   ASSERT_EQ(api->memory_scope_query_device_profile(
                 system_scope, ordinal, 1, &access, &profile, &capabilities),
             AMDF_STATUS_OK);
   const uint64_t granularity = profile.allocation.byte_length_granularity;
   ASSERT_GT(granularity, 0u);
-  amdf_memory_create_info_t create = {};
-  create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-  create.structure_size = sizeof(create);
-  create.memory_profile_ordinal = ordinal;
-  create.access_count = 1;
-  create.accesses = &access;
-  create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-  create.byte_length = (4096 + granularity - 1) / granularity * granularity;
-  create.minimum_alignment = profile.allocation.minimum_alignment;
+  amdf_memory_create_info_t create = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create),
+      .memory_profile_ordinal = ordinal,
+      .access_count = 1,
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .byte_length = (4096 + granularity - 1) / granularity * granularity,
+      .minimum_alignment = profile.allocation.minimum_alignment,
+      .accesses = &access,
+  };
   ASSERT_NO_FATAL_FAILURE(commands_.Create(api, system_scope, create));
 }
 
@@ -101,12 +107,15 @@ void Pm4RecipeQueue::Initialize(
                                 flush_status);
     }
     const amdf_gpu_kernel_command_t command = {
-        .memory = commands_.memory, .byte_length = words.size_bytes()};
-    amdf_gpu_kernel_queue_submission_info_t submit = {};
-    submit.type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO;
-    submit.structure_size = sizeof(submit);
-    submit.command_count = 1;
-    submit.commands = &command;
+        .memory = commands_.memory,
+        .byte_length = words.size_bytes(),
+    };
+    amdf_gpu_kernel_queue_submission_info_t submit = {
+        .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO,
+        .structure_size = sizeof(submit),
+        .command_count = 1,
+        .commands = &command,
+    };
     const auto submit_status =
         gpu_api->kernel_queue_submit(kernel_queue_, &submit, &submission_);
     if (!amdf_status_is_ok(submit_status)) {
@@ -188,9 +197,10 @@ void Pm4RecipeQueue::Initialize(
 
 ::testing::AssertionResult Pm4RecipeQueue::Retire(const amdf_api_t* api) {
   if (kernel_queue_) {
-    amdf_kernel_queue_status_t status = {};
-    status.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
-    status.structure_size = sizeof(status);
+    amdf_kernel_queue_status_t status = {
+        .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
+        .structure_size = sizeof(status),
+    };
     const auto query_status =
         api->kernel_queue_query_status(kernel_queue_, &status);
     if (!amdf_status_is_ok(query_status)) {
@@ -211,9 +221,10 @@ void Pm4RecipeQueue::Initialize(
     if (!amdf_status_is_ok(wait_status)) {
       return QueueStatusFailure("user_queue_wait_consumed", wait_status);
     }
-    amdf_user_queue_status_t status = {};
-    status.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS;
-    status.structure_size = sizeof(status);
+    amdf_user_queue_status_t status = {
+        .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS,
+        .structure_size = sizeof(status),
+    };
     const auto query_status =
         api->user_queue_query_status(user_queue_.queue, &status);
     if (!amdf_status_is_ok(query_status)) {

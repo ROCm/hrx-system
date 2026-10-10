@@ -57,8 +57,8 @@ class LowLowerRuleValueTest : public ::testing::Test {
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
     const loom_symbol_ref_t symbol = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
+        .module_id = 0,
+        .symbol_id = symbol_id,
     };
     const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
     const loom_type_t bf16_vector_type = loom_type_shaped_1d(
@@ -154,9 +154,10 @@ TEST_F(LowLowerRuleValueTest, ResolvesSourceValueReferencesAndFields) {
   value_refs[1].index = 1;
   value_refs[2].kind = LOOM_LOW_LOWER_VALUE_REF_RESULT;
   value_refs[2].index = 0;
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.value_refs = value_refs;
-  rule_set.value_ref_count = IREE_ARRAYSIZE(value_refs);
+  loom_low_lower_rule_set_t rule_set = {
+      .value_refs = value_refs,
+      .value_ref_count = IREE_ARRAYSIZE(value_refs),
+  };
 
   EXPECT_EQ(loom_low_lower_rule_source_value(module_, &rule_set, addi_op_, 0),
             arguments_[0]);
@@ -183,9 +184,10 @@ TEST_F(LowLowerRuleValueTest, ResolvesVariadicResultElements) {
   value_refs[1].kind = LOOM_LOW_LOWER_VALUE_REF_RESULT;
   value_refs[1].index = 0;
   value_refs[1].element_index = 1;
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.value_refs = value_refs;
-  rule_set.value_ref_count = IREE_ARRAYSIZE(value_refs);
+  loom_low_lower_rule_set_t rule_set = {
+      .value_refs = value_refs,
+      .value_ref_count = IREE_ARRAYSIZE(value_refs),
+  };
 
   const loom_value_slice_t results =
       loom_scalar_assume_results(variadic_result_op_);
@@ -208,24 +210,25 @@ TEST_F(LowLowerRuleValueTest, ResolvesVariadicResultElements) {
 TEST_F(LowLowerRuleValueTest, ResolvesValuesAcrossSourceGraphNodes) {
   const loom_low_lower_value_ref_t value_refs[] = {
       {
-          /*.kind=*/LOOM_LOW_LOWER_VALUE_REF_OPERAND,
-          /*.source_node_index=*/0,
-          /*.index=*/0,
+          .kind = LOOM_LOW_LOWER_VALUE_REF_OPERAND,
+          .source_node_index = 0,
+          .index = 0,
       },
       {
-          /*.kind=*/LOOM_LOW_LOWER_VALUE_REF_OPERAND,
-          /*.source_node_index=*/1,
-          /*.index=*/1,
+          .kind = LOOM_LOW_LOWER_VALUE_REF_OPERAND,
+          .source_node_index = 1,
+          .index = 1,
       },
       {
-          /*.kind=*/LOOM_LOW_LOWER_VALUE_REF_RESULT,
-          /*.source_node_index=*/1,
-          /*.index=*/0,
+          .kind = LOOM_LOW_LOWER_VALUE_REF_RESULT,
+          .source_node_index = 1,
+          .index = 0,
       },
   };
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.value_refs = value_refs;
-  rule_set.value_ref_count = IREE_ARRAYSIZE(value_refs);
+  loom_low_lower_rule_set_t rule_set = {
+      .value_refs = value_refs,
+      .value_ref_count = IREE_ARRAYSIZE(value_refs),
+  };
   const loom_op_t* source_nodes[] = {addi_op_, muli_op_};
 
   EXPECT_EQ(loom_low_lower_rule_source_value_from_nodes(
@@ -278,13 +281,14 @@ TEST_F(LowLowerRuleValueTest,
   EXPECT_EQ(provenance_origin.source_value_id, arguments_[3]);
 
   const loom_low_lower_value_ref_t value_ref = {
-      /*.kind=*/LOOM_LOW_LOWER_VALUE_REF_EXACT_LANE_ORIGIN_OPERAND,
-      /*.source_node_index=*/0,
-      /*.index=*/0,
+      .kind = LOOM_LOW_LOWER_VALUE_REF_EXACT_LANE_ORIGIN_OPERAND,
+      .source_node_index = 0,
+      .index = 0,
   };
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.value_refs = &value_ref;
-  rule_set.value_ref_count = 1;
+  loom_low_lower_rule_set_t rule_set = {
+      .value_refs = &value_ref,
+      .value_ref_count = 1,
+  };
   loom_value_id_t resolved = LOOM_VALUE_ID_INVALID;
   ASSERT_TRUE(loom_low_lower_rule_resolve_source_value_from_nodes(
       module_, &fact_table_, (loom_target_contract_vector_lane_projection_t){0},
@@ -305,13 +309,14 @@ TEST_F(LowLowerRuleValueTest, ResolvesUniformElementOrigins) {
        {LOOM_LOW_LOWER_VALUE_REF_UNIFORM_ELEMENT_ORIGIN_OPERAND,
         LOOM_LOW_LOWER_VALUE_REF_EXACT_UNIFORM_ELEMENT_ORIGIN_OPERAND}) {
     const loom_low_lower_value_ref_t value_ref = {
-        /*.kind=*/static_cast<uint8_t>(kind),
-        /*.source_node_index=*/0,
-        /*.index=*/0,
+        .kind = static_cast<uint8_t>(kind),
+        .source_node_index = 0,
+        .index = 0,
     };
-    loom_low_lower_rule_set_t rule_set = {};
-    rule_set.value_refs = &value_ref;
-    rule_set.value_ref_count = 1;
+    loom_low_lower_rule_set_t rule_set = {
+        .value_refs = &value_ref,
+        .value_ref_count = 1,
+    };
     loom_value_id_t resolved = LOOM_VALUE_ID_INVALID;
     ASSERT_TRUE(loom_low_lower_rule_resolve_source_value_from_nodes(
         module_, &fact_table_,

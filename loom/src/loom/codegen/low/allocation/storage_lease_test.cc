@@ -77,24 +77,25 @@ class LowAllocationStorageLeaseTest : public ::testing::Test {
 };
 
 loom_low_reg_class_t RegClass(uint16_t alias_set_id) {
-  loom_low_reg_class_t reg_class = {};
-  reg_class.alias_set_id = alias_set_id;
+  loom_low_reg_class_t reg_class = {.alias_set_id = alias_set_id};
   return reg_class;
 }
 
 loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
                                         iree_host_size_t reg_class_count) {
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.reg_classes = reg_classes;
+  loom_low_descriptor_set_t descriptor_set = {
+      .reg_classes = reg_classes,
+  };
   descriptor_set.reg_class_count = reg_class_count;
   return descriptor_set;
 }
 
 loom_liveness_block_info_t LivenessBlock(uint32_t start_point,
                                          uint32_t end_point) {
-  loom_liveness_block_info_t block = {};
-  block.start_point = start_point;
-  block.end_point = end_point;
+  loom_liveness_block_info_t block = {
+      .start_point = start_point,
+      .end_point = end_point,
+  };
   return block;
 }
 
@@ -102,29 +103,32 @@ loom_liveness_analysis_t Liveness(const loom_liveness_block_info_t* blocks,
                                   iree_host_size_t block_count,
                                   const loom_value_id_t* value_ids,
                                   iree_host_size_t value_count) {
-  loom_liveness_analysis_t liveness = {};
-  liveness.blocks = blocks;
-  liveness.block_count = block_count;
-  liveness.value_ids = value_ids;
-  liveness.value_count = value_count;
+  loom_liveness_analysis_t liveness = {
+      .blocks = blocks,
+      .block_count = block_count,
+      .value_ids = value_ids,
+      .value_count = value_count,
+  };
   return liveness;
 }
 
 loom_low_schedule_block_t ScheduleBlock(uint32_t scheduled_node_start,
                                         uint32_t scheduled_node_count) {
-  loom_low_schedule_block_t block = {};
-  block.scheduled_node_start = scheduled_node_start;
-  block.scheduled_node_count = scheduled_node_count;
+  loom_low_schedule_block_t block = {
+      .scheduled_node_start = scheduled_node_start,
+      .scheduled_node_count = scheduled_node_count,
+  };
   return block;
 }
 
 loom_low_schedule_node_t ScheduleOperandNode(uint32_t block_index,
                                              uint32_t scheduled_ordinal,
                                              loom_value_ordinal_t operand) {
-  loom_low_schedule_node_t node = {};
-  node.block_index = block_index;
-  node.scheduled_ordinal = scheduled_ordinal;
-  node.operand_count = 1;
+  loom_low_schedule_node_t node = {
+      .block_index = block_index,
+      .scheduled_ordinal = scheduled_ordinal,
+      .operand_count = 1,
+  };
   node.value_ordinals.inline_value_ordinals[0] = operand;
   return node;
 }
@@ -136,41 +140,43 @@ loom_low_schedule_table_t Schedule(
     iree_host_size_t node_count, const uint32_t* scheduled_node_indices,
     iree_host_size_t scheduled_node_count,
     const uint32_t* value_producer_nodes) {
-  loom_low_schedule_table_t schedule = {};
-  schedule.module = module;
-  schedule.function_op = function_op;
-  schedule.value_ids = liveness.value_ids;
-  schedule.value_count = (loom_value_ordinal_t)liveness.value_count;
-  schedule.value_producer_nodes = value_producer_nodes;
-  schedule.liveness = liveness;
-  schedule.blocks = blocks;
-  schedule.block_count = block_count;
-  schedule.nodes = nodes;
-  schedule.node_count = node_count;
-  schedule.scheduled_node_indices = scheduled_node_indices;
-  schedule.scheduled_node_count = scheduled_node_count;
+  loom_low_schedule_table_t schedule = {
+      .module = module,
+      .function_op = function_op,
+      .value_ids = liveness.value_ids,
+      .value_count = (loom_value_ordinal_t)liveness.value_count,
+      .value_producer_nodes = value_producer_nodes,
+      .liveness = liveness,
+      .blocks = blocks,
+      .block_count = block_count,
+      .nodes = nodes,
+      .node_count = node_count,
+      .scheduled_node_indices = scheduled_node_indices,
+      .scheduled_node_count = scheduled_node_count,
+  };
   return schedule;
 }
 
 loom_low_storage_lease_record_t StorageLeaseRecord() {
-  loom_low_storage_lease_record_t record = {};
-  record.packet_index = 0;
-  record.node_index = 0;
-  record.block_index = 0;
-  record.scheduled_ordinal = 0;
-  record.kind = LOOM_LOW_STORAGE_LEASE_SOURCE_READ;
-  record.attachment = LOOM_LOW_STORAGE_LEASE_ATTACHMENT_OPERAND;
-  record.attachment_index = 0;
-  record.unit_offset = 1;
-  record.unit_count = 2;
-  record.release_scope = LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS;
-  record.release_class_id = 7;
-  record.release_class_name = IREE_SV("test.progress");
-  record.release_action_id = 9;
-  record.release_action_name = IREE_SV("test.release-storage");
-  record.release_reason_id = 11;
-  record.release_reason_name = IREE_SV("test.storage-hazard");
-  record.flags = LOOM_LOW_STORAGE_LEASE_FLAG_STARTS_AT_ISSUE;
+  loom_low_storage_lease_record_t record = {
+      .packet_index = 0,
+      .node_index = 0,
+      .block_index = 0,
+      .scheduled_ordinal = 0,
+      .kind = LOOM_LOW_STORAGE_LEASE_SOURCE_READ,
+      .attachment = LOOM_LOW_STORAGE_LEASE_ATTACHMENT_OPERAND,
+      .attachment_index = 0,
+      .unit_offset = 1,
+      .unit_count = 2,
+      .release_scope = LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS,
+      .release_class_id = 7,
+      .release_class_name = IREE_SV("test.progress"),
+      .release_action_id = 9,
+      .release_action_name = IREE_SV("test.release-storage"),
+      .release_reason_id = 11,
+      .release_reason_name = IREE_SV("test.storage-hazard"),
+      .flags = LOOM_LOW_STORAGE_LEASE_FLAG_STARTS_AT_ISSUE,
+  };
   return record;
 }
 
@@ -178,10 +184,11 @@ loom_low_storage_lease_table_t StorageLeaseTable(
     const loom_low_schedule_table_t* schedule,
     const loom_low_storage_lease_record_t* records,
     iree_host_size_t record_count) {
-  loom_low_storage_lease_table_t table = {};
-  table.schedule = schedule;
-  table.records = records;
-  table.record_count = record_count;
+  loom_low_storage_lease_table_t table = {
+      .schedule = schedule,
+      .records = records,
+      .record_count = record_count,
+  };
   return table;
 }
 
@@ -191,14 +198,15 @@ loom_low_allocation_assignment_t Assignment(loom_value_id_t value_id,
                                             uint32_t end_point,
                                             uint32_t location_base,
                                             uint32_t location_count) {
-  loom_low_allocation_assignment_t assignment = {};
-  assignment.value_id = value_id;
-  assignment.descriptor_reg_class_id = descriptor_reg_class_id;
-  assignment.start_point = start_point;
-  assignment.end_point = end_point;
-  assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  assignment.location_base = location_base;
-  assignment.location_count = location_count;
+  loom_low_allocation_assignment_t assignment = {
+      .value_id = value_id,
+      .descriptor_reg_class_id = descriptor_reg_class_id,
+      .start_point = start_point,
+      .end_point = end_point,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = location_base,
+      .location_count = location_count,
+  };
   return assignment;
 }
 
@@ -208,16 +216,17 @@ loom_low_placement_relation_t StorageRelation(
     uint32_t unit_count, loom_low_placement_cause_t cause,
     loom_low_placement_relation_flags_t flags =
         LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE) {
-  loom_low_placement_relation_t relation = {};
-  relation.result_ordinal = result_ordinal;
-  relation.source_ordinal = source_ordinal;
-  relation.result_unit_offset = result_unit_offset;
-  relation.source_unit_offset = source_unit_offset;
-  relation.unit_count = unit_count;
-  relation.kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE;
-  relation.cause = cause;
-  relation.flags = flags;
-  relation.source_operand_index = LOOM_LOW_PLACEMENT_SOURCE_OPERAND_NONE;
+  loom_low_placement_relation_t relation = {
+      .result_ordinal = result_ordinal,
+      .source_ordinal = source_ordinal,
+      .result_unit_offset = result_unit_offset,
+      .source_unit_offset = source_unit_offset,
+      .unit_count = unit_count,
+      .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE,
+      .cause = cause,
+      .flags = flags,
+      .source_operand_index = LOOM_LOW_PLACEMENT_SOURCE_OPERAND_NONE,
+  };
   return relation;
 }
 
@@ -662,22 +671,22 @@ TEST_F(LowAllocationStorageIdentityTest, RequiresExactExplicitRegisterViews) {
   const uint16_t atomic_units[] = {0, 1, 0, 2, 3};
   const loom_low_physical_register_t physical_registers[] = {
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/0,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 0,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/2,
-          /*.atomic_unit_count=*/1,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 2,
+          .atomic_unit_count = 1,
+          .reserved = 0,
       },
       {
-          /*.name_string_ref=*/0,
-          /*.atomic_unit_start=*/3,
-          /*.atomic_unit_count=*/2,
-          /*.reserved=*/0,
+          .name_string_ref = 0,
+          .atomic_unit_start = 3,
+          .atomic_unit_count = 2,
+          .reserved = 0,
       },
   };
   reg_classes[0].candidate_lookup.register_count = 3;
@@ -789,14 +798,16 @@ TEST_F(LowAllocationStorageLeaseTest,
       {/*start_point=*/16, /*end_point=*/20},
   };
   uint32_t unit_end_points[] = {20, 20};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   unit_liveness.storage_segments.entries = storage_segments;
   uint32_t expiration_entry = 0;
-  loom_low_allocation_storage_lease_state_t state = {};
-  state.unit_liveness = &unit_liveness;
-  state.availability_expiration_heap = &expiration_entry;
+  loom_low_allocation_storage_lease_state_t state = {
+      .unit_liveness = &unit_liveness,
+      .availability_expiration_heap = &expiration_entry,
+  };
 
   auto candidate = Assignment(
       /*value_id=*/1, /*descriptor_reg_class_id=*/0,
@@ -957,9 +968,10 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
   const loom_low_allocation_storage_identity_t storage_identity = {};
 
   uint32_t unit_end_points[] = {point.program_point + 1};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   unit_liveness.storage_segments.entries = liveness.segments;
   loom_low_allocation_storage_lease_state_t state = {};
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
@@ -1238,13 +1250,15 @@ TEST_F(LowAllocationStorageLeaseTest,
   const loom_low_descriptor_set_t descriptor_set =
       DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
   const loom_liveness_segment_t segments[] = {{0, 2}, {6, 10}, {1, 7}};
-  loom_liveness_analysis_t liveness = {};
-  liveness.segments = segments;
-  liveness.segment_count = IREE_ARRAYSIZE(segments);
+  loom_liveness_analysis_t liveness = {
+      .segments = segments,
+      .segment_count = IREE_ARRAYSIZE(segments),
+  };
   uint32_t unit_end_points[] = {10};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_points = unit_end_points;
-  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   unit_liveness.storage_segments.entries = segments;
 
   for (const auto kind : {LOOM_LOW_STORAGE_LEASE_SOURCE_READ,
@@ -1260,27 +1274,29 @@ TEST_F(LowAllocationStorageLeaseTest,
       record.unit_offset = 0;
       const loom_low_storage_lease_table_t table =
           StorageLeaseTable(nullptr, &record, 1);
-      loom_low_allocation_storage_lease_t lease = {};
-      lease.value_id = 0;
-      lease.start_point = 2;
-      lease.end_point = 6;
-      lease.descriptor_reg_class_id = 0;
-      lease.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-      lease.location_base = 10;
-      lease.location_count = 2;
+      loom_low_allocation_storage_lease_t lease = {
+          .value_id = 0,
+          .start_point = 2,
+          .end_point = 6,
+          .descriptor_reg_class_id = 0,
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_base = 10,
+          .location_count = 2,
+      };
       auto leased_assignment =
           Assignment(/*value_id=*/0, /*descriptor_reg_class_id=*/0,
                      /*start_point=*/0, /*end_point=*/1,
                      /*location_base=*/10, /*location_count=*/2);
       leased_assignment.unit_count = 2;
       uint8_t instance_written = 1;
-      loom_low_allocation_storage_lease_state_t state = {};
-      state.lease_table = &table;
-      state.assignments = &leased_assignment;
-      state.unit_liveness = &unit_liveness;
-      state.instances = &lease;
-      state.instance_written = &instance_written;
-      state.instance_count = 1;
+      loom_low_allocation_storage_lease_state_t state = {
+          .lease_table = &table,
+          .unit_liveness = &unit_liveness,
+          .assignments = &leased_assignment,
+          .instances = &lease,
+          .instance_written = &instance_written,
+          .instance_count = 1,
+      };
       loom_low_allocation_storage_lease_unit_index_t index = {};
       if (indexed) {
         IREE_ASSERT_OK(loom_low_allocation_storage_lease_unit_index_initialize(

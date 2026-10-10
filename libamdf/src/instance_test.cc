@@ -11,9 +11,10 @@
 namespace {
 
 TEST(InstanceLifetimeTest, DefaultsToProcessLifetime) {
-  amdf_instance_create_info_t create_info = {};
-  create_info.type = AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-  create_info.structure_size = sizeof(create_info);
+  amdf_instance_create_info_t create_info = {
+      .type = AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+      .structure_size = sizeof(create_info),
+  };
   amdf_instance_t* instance = nullptr;
   ASSERT_EQ(amdf_instance_create(&create_info, &instance), AMDF_STATUS_OK);
   EXPECT_EQ(instance->gpu, nullptr);
@@ -23,10 +24,11 @@ TEST(InstanceLifetimeTest, DefaultsToProcessLifetime) {
 }
 
 TEST(InstanceLifetimeTest, CopiesPolicyBeforeAnyEndpointIsOpened) {
-  amdf_instance_create_info_t create_info = {};
-  create_info.type = AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-  create_info.structure_size = sizeof(create_info);
-  create_info.native_lifetime = AMDF_NATIVE_LIFETIME_INSTANCE;
+  amdf_instance_create_info_t create_info = {
+      .type = AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+      .structure_size = sizeof(create_info),
+      .native_lifetime = AMDF_NATIVE_LIFETIME_INSTANCE,
+  };
   amdf_instance_t* instance = nullptr;
   ASSERT_EQ(amdf_instance_create(&create_info, &instance), AMDF_STATUS_OK);
   create_info.native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS;

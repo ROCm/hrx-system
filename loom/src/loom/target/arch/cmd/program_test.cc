@@ -398,16 +398,11 @@ TEST(CmdProgramTest, IteratesCanonicalBarrierWavesOnce) {
   loom_cmd_program_barrier_wave_iterator_t iterator;
   loom_cmd_program_barrier_wave_iterator_initialize(&program, &iterator);
   const loom_cmd_program_barrier_wave_t expected[] = {
-      {/*.ordinal=*/1, /*.commands=*/{/*.first_command=*/0,
-                                      /*.command_count=*/1}},
-      {/*.ordinal=*/2, /*.commands=*/{/*.first_command=*/1,
-                                      /*.command_count=*/2}},
-      {/*.ordinal=*/3, /*.commands=*/{/*.first_command=*/3,
-                                      /*.command_count=*/1}},
-      {/*.ordinal=*/4, /*.commands=*/{/*.first_command=*/4,
-                                      /*.command_count=*/1}},
-      {/*.ordinal=*/5, /*.commands=*/{/*.first_command=*/5,
-                                      /*.command_count=*/1}},
+      {.ordinal = 1, .commands = {.first_command = 0, .command_count = 1}},
+      {.ordinal = 2, .commands = {.first_command = 1, .command_count = 2}},
+      {.ordinal = 3, .commands = {.first_command = 3, .command_count = 1}},
+      {.ordinal = 4, .commands = {.first_command = 4, .command_count = 1}},
+      {.ordinal = 5, .commands = {.first_command = 5, .command_count = 1}},
   };
   for (const loom_cmd_program_barrier_wave_t& expected_wave : expected) {
     loom_cmd_program_barrier_wave_t wave = {};

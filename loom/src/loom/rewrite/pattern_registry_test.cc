@@ -47,14 +47,14 @@ TEST(RewritePatternRegistryTest, IndexesSparseKindsAndPreservesProviderOrder) {
       {vector_kind, RecordPattern, &kTagThree},
   };
   const loom_rewrite_pattern_provider_t first_provider = {
-      /*.name=*/IREE_SVL("first"),
-      /*.patterns=*/first_patterns,
-      /*.pattern_count=*/IREE_ARRAYSIZE(first_patterns),
+      .name = IREE_SVL("first"),
+      .patterns = first_patterns,
+      .pattern_count = IREE_ARRAYSIZE(first_patterns),
   };
   const loom_rewrite_pattern_provider_t second_provider = {
-      /*.name=*/IREE_SVL("second"),
-      /*.patterns=*/second_patterns,
-      /*.pattern_count=*/IREE_ARRAYSIZE(second_patterns),
+      .name = IREE_SVL("second"),
+      .patterns = second_patterns,
+      .pattern_count = IREE_ARRAYSIZE(second_patterns),
   };
   const loom_rewrite_pattern_provider_t* provider_values[] = {
       &first_provider,
@@ -123,9 +123,9 @@ TEST(RewritePatternRegistryTest, AppliesOnlyTheRootedSpanUntilARewrite) {
       {scalar_kind, RecordPattern, &kTagTwo},
   };
   const loom_rewrite_pattern_provider_t provider = {
-      /*.name=*/IREE_SVL("test"),
-      /*.patterns=*/patterns,
-      /*.pattern_count=*/IREE_ARRAYSIZE(patterns),
+      .name = IREE_SVL("test"),
+      .patterns = patterns,
+      .pattern_count = IREE_ARRAYSIZE(patterns),
   };
   const loom_rewrite_pattern_provider_t* provider_values[] = {&provider};
   loom_rewrite_pattern_registry_storage_t storage = {};
@@ -136,8 +136,9 @@ TEST(RewritePatternRegistryTest, AppliesOnlyTheRootedSpanUntilARewrite) {
   const loom_rewrite_pattern_registry_t* registry =
       loom_rewrite_pattern_registry_storage_registry(&storage);
 
-  loom_op_t op = {};
-  op.kind = scalar_kind;
+  loom_op_t op = {
+      .kind = scalar_kind,
+  };
   ApplyContext context;
   context.rewrite_tag = kTagTwo;
   bool changed = false;
@@ -189,9 +190,9 @@ TEST(RewritePatternRegistryTest, RejectsMalformedProviders) {
           iree_allocator_system(), &storage));
 
   const loom_rewrite_pattern_provider_t missing_table = {
-      /*.name=*/IREE_SVL("missing-table"),
-      /*.patterns=*/nullptr,
-      /*.pattern_count=*/1,
+      .name = IREE_SVL("missing-table"),
+      .patterns = nullptr,
+      .pattern_count = 1,
   };
   const loom_rewrite_pattern_provider_t* missing_table_values[] = {
       &missing_table,
@@ -206,9 +207,9 @@ TEST(RewritePatternRegistryTest, RejectsMalformedProviders) {
       {LOOM_OP_KIND_UNKNOWN, RecordPattern, nullptr},
   };
   const loom_rewrite_pattern_provider_t unknown_root_provider = {
-      /*.name=*/IREE_SVL("unknown-root"),
-      /*.patterns=*/unknown_root,
-      /*.pattern_count=*/IREE_ARRAYSIZE(unknown_root),
+      .name = IREE_SVL("unknown-root"),
+      .patterns = unknown_root,
+      .pattern_count = IREE_ARRAYSIZE(unknown_root),
   };
   const loom_rewrite_pattern_provider_t* unknown_root_values[] = {
       &unknown_root_provider,
@@ -223,9 +224,9 @@ TEST(RewritePatternRegistryTest, RejectsMalformedProviders) {
       {LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 0), nullptr, nullptr},
   };
   const loom_rewrite_pattern_provider_t missing_callback_provider = {
-      /*.name=*/IREE_SVL("missing-callback"),
-      /*.patterns=*/missing_callback,
-      /*.pattern_count=*/IREE_ARRAYSIZE(missing_callback),
+      .name = IREE_SVL("missing-callback"),
+      .patterns = missing_callback,
+      .pattern_count = IREE_ARRAYSIZE(missing_callback),
   };
   const loom_rewrite_pattern_provider_t* missing_callback_values[] = {
       &missing_callback_provider,

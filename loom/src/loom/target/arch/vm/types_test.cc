@@ -17,19 +17,19 @@ namespace {
 static const loom_type_reference_key_t kResourceReference = {
     IREE_SVL("test.provider"), IREE_SVL("resource")};
 static const loom_type_descriptor_t kResourceDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(8, "test.ref<"),
-    /*.ir_kind=*/LOOM_TYPE_DIALECT,
-    /*.param_count=*/0,
-    /*.fact_domain=*/nullptr,
-    /*.semantics=*/
-    {
-        /*.semantic=*/LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE,
-        /*.contract_families=*/0,
-    },
-    /*.format_elements=*/nullptr,
-    /*.format_element_count=*/0,
-    /*.parameterized=*/nullptr,
-    /*.reference=*/&kResourceReference,
+    .name = LOOM_BSTRING_REF(8, "test.ref<"),
+    .ir_kind = LOOM_TYPE_DIALECT,
+    .param_count = 0,
+    .fact_domain = nullptr,
+    .semantics =
+        {
+            .semantic = LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE,
+            .contract_families = 0,
+        },
+    .format_elements = nullptr,
+    .format_element_count = 0,
+    .parameterized = nullptr,
+    .reference = &kResourceReference,
 };
 static const loom_type_registry_entry_t kTypeRegistry[] = {
     {IREE_SV("test.ref"), &kResourceDescriptor},

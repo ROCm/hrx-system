@@ -125,14 +125,15 @@ class TargetEntrySelectionTest : public ::testing::Test {
   loom_target_entry_t SelectNamedEntry(
       loom_module_t* module, iree_string_view_t function_name,
       const loom_function_version_list_t* function_versions) {
-    loom_target_entry_options_t options = {};
-    options.entry_symbol = function_name;
-    options.function_versions = function_versions;
+    loom_target_entry_options_t options = {
+        .entry_symbol = function_name,
+        .function_versions = function_versions,
+    };
     loom_target_entry_diagnostic_emitter_t diagnostic_emitter = {};
     loom_target_entry_diagnostic_emitter_initialize(
         module, &options, LOOM_EMITTER_VERIFIER, &diagnostic_emitter);
     const loom_target_entry_predicate_t predicate = {
-        /*.fn=*/AcceptEntry,
+        .fn = AcceptEntry,
     };
     bool selected = false;
     loom_target_entry_t entry = {};
@@ -156,8 +157,9 @@ TEST_F(TargetEntrySelectionTest, EmissionAndRelatedOpsUseTheirOwnModules) {
   const loom_source_entry_t snapshot = {0, iree_make_cstring_view(first_source),
                                         first->sources.entries[0]};
   loom_source_table_resolver_t table = {first.get(), &snapshot, 1};
-  loom_target_entry_options_t options = {};
-  options.source_resolver = {loom_source_table_resolve, &table};
+  loom_target_entry_options_t options = {
+      .source_resolver = {loom_source_table_resolve, &table},
+  };
   options.diagnostic_sink.fn = [](void*, const loom_diagnostic_t* diagnostic) {
     EXPECT_EQ(diagnostic->origin.provenance,
               LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE);
@@ -190,14 +192,15 @@ TEST_F(TargetEntrySelectionTest, EmissionAndRelatedOpsUseTheirOwnModules) {
   related[1].module = second.get();
   related[1].op = loom_module_block(second.get())->first_op;
   related[1].label = IREE_SV("other");
-  loom_diagnostic_emission_t emission = {};
-  emission.module = second.get();
-  emission.op = loom_module_block(second.get())->first_op;
-  emission.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
-  emission.params = params;
-  emission.param_count = IREE_ARRAYSIZE(params);
-  emission.related_ops = related;
-  emission.related_op_count = IREE_ARRAYSIZE(related);
+  loom_diagnostic_emission_t emission = {
+      .module = second.get(),
+      .op = loom_module_block(second.get())->first_op,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .related_ops = related,
+      .related_op_count = IREE_ARRAYSIZE(related),
+  };
   IREE_ASSERT_OK(
       iree_diagnostic_emit(loom_target_entry_emitter(&emitter), &emission));
   EXPECT_EQ(emitter.error_count, 1u);
@@ -213,36 +216,36 @@ TEST_F(TargetEntrySelectionTest, ForwardingPreservesRawEmissionIdentity) {
     loom_diagnostic_emission_t emission;
   } capture = {};
   const iree_diagnostic_emitter_t downstream = {
-      /*.fn=*/[](void* user_data, const loom_diagnostic_emission_t* emission) {
-        auto* capture = static_cast<ForwardingCapture*>(user_data);
-        capture->called = true;
-        capture->emission = *emission;
-        return iree_ok_status();
-      },
-      /*.user_data=*/&capture,
+      .fn =
+          [](void* user_data, const loom_diagnostic_emission_t* emission) {
+            auto* capture = static_cast<ForwardingCapture*>(user_data);
+            capture->called = true;
+            capture->emission = *emission;
+            return iree_ok_status();
+          },
+      .user_data = &capture,
   };
   loom_target_entry_diagnostic_emitter_t emitter = {
-      /*.forwarding_emitter=*/downstream,
+      .forwarding_emitter = downstream,
   };
 
   const loom_diagnostic_param_t params[] = {
       loom_param_string(IREE_SV("value")),
   };
   const loom_diagnostic_related_op_t related[] = {{
-      /*.label=*/IREE_SV("related"),
-      /*.module=*/module.get(),
-      /*.op=*/op,
-      /*.field_ref=*/
-      loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0),
+      .label = IREE_SV("related"),
+      .module = module.get(),
+      .op = op,
+      .field_ref = loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0),
   }};
   const loom_diagnostic_emission_t emission = {
-      /*.module=*/module.get(),
-      /*.op=*/op,
-      /*.error=*/loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
-      /*.params=*/params,
-      /*.param_count=*/IREE_ARRAYSIZE(params),
-      /*.related_ops=*/related,
-      /*.related_op_count=*/IREE_ARRAYSIZE(related),
+      .module = module.get(),
+      .op = op,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .related_ops = related,
+      .related_op_count = IREE_ARRAYSIZE(related),
   };
   IREE_ASSERT_OK(
       iree_diagnostic_emit(loom_target_entry_emitter(&emitter), &emission));
@@ -282,8 +285,8 @@ func.def public target(@generic) @entry() {
       &function_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   const loom_target_entry_t entry =
@@ -319,8 +322,8 @@ func.def public @targetless() {
       &function_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   const loom_target_entry_t entry =
