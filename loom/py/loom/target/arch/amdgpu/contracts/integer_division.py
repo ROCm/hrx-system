@@ -121,6 +121,7 @@ def _magic_division_sgpr_emits(
     *,
     kind: UnsignedDivisorMagicKind,
     result: ValueRef,
+    numerator: ValueRef = _DIRECT_LHS,
 ) -> tuple[EmitDescriptorOp, ...]:
     move = descriptor_by_key(descriptor_set, "amdgpu.s_mov_b32")
     multiply_hi = descriptor_by_key(descriptor_set, "amdgpu.s_mul_hi_u32")
@@ -143,7 +144,7 @@ def _magic_division_sgpr_emits(
         ),
         EmitDescriptorOp(
             descriptor=multiply_hi,
-            operands={"lhs": _DIRECT_LHS, "rhs": ValueRef.temporary("magic")},
+            operands={"lhs": numerator, "rhs": ValueRef.temporary("magic")},
             results={
                 "dst": ValueRef.temporary("quotient") if kind.has_shift else result
             },
@@ -156,7 +157,7 @@ def _magic_division_sgpr_emits(
                 EmitDescriptorOp(
                     descriptor=subtract,
                     operands={
-                        "lhs": _DIRECT_LHS,
+                        "lhs": numerator,
                         "rhs": ValueRef.temporary("quotient"),
                     },
                     results={"dst": ValueRef.temporary("npq")},
@@ -239,6 +240,7 @@ def _magic_division_vgpr_emits(
     materializer: ValueMaterializer,
     kind: UnsignedDivisorMagicKind,
     result: ValueRef,
+    numerator: ValueRef | None = None,
 ) -> tuple[EmitDescriptorOp, ...]:
     move = descriptor_by_key(descriptor_set, "amdgpu.v_mov_b32")
     multiply_hi = descriptor_by_key(descriptor_set, "amdgpu.v_mul_hi_u32")
@@ -250,6 +252,8 @@ def _magic_division_vgpr_emits(
         if kind.has_add
         else ValueRef.temporary("quotient")
     )
+    if numerator is None:
+        numerator = _materialized_operand("lhs", materializer)
     emits = [
         EmitDescriptorOp(
             descriptor=move,
@@ -262,7 +266,7 @@ def _magic_division_vgpr_emits(
         EmitDescriptorOp(
             descriptor=multiply_hi,
             operands={
-                "lhs": _materialized_operand("lhs", materializer),
+                "lhs": numerator,
                 "rhs": ValueRef.temporary("magic"),
             },
             results={
@@ -278,10 +282,7 @@ def _magic_division_vgpr_emits(
                 EmitDescriptorOp(
                     descriptor=subtract,
                     operands={
-                        "lhs": _materialized_operand(
-                            "lhs",
-                            materializer,
-                        ),
+                        "lhs": numerator,
                         "rhs": ValueRef.temporary("quotient"),
                     },
                     results={"dst": ValueRef.temporary("npq")},
@@ -441,6 +442,101 @@ def _magic_remainder_sgpr_rule(
             EmitDescriptorOp(
                 descriptor=subtract,
                 operands={"lhs": _DIRECT_LHS, "rhs": ValueRef.temporary("product")},
+                results={"dst": _RESULT},
+            ),
+        ),
+    )
+
+
+def _signed_constant_remainder_sgpr_rule(
+    descriptor_set: DescriptorSet, *, kind: UnsignedDivisorMagicKind
+) -> DescriptorRule:
+    move = descriptor_by_key(descriptor_set, "amdgpu.s_mov_b32")
+    arithmetic_shift = descriptor_by_key(descriptor_set, "amdgpu.s_ashr_i32")
+    xor = descriptor_by_key(descriptor_set, "amdgpu.s_xor_b32")
+    subtract = descriptor_by_key(descriptor_set, "amdgpu.s_sub_u32")
+    multiply = descriptor_by_key(descriptor_set, "amdgpu.s_mul_i32")
+    sign = ValueRef.temporary("sign")
+    magnitude = ValueRef.temporary("magnitude")
+    quotient = ValueRef.temporary("quotient_final")
+    remainder_magnitude = ValueRef.temporary("remainder_magnitude")
+    return DescriptorRule(
+        source_op=scalar_arithmetic.scalar_remsi,
+        descriptor=multiply,
+        guards=(
+            *_magic_division_guards(_I32, register_class="amdgpu.sgpr", kind=kind),
+            *_descriptor_available_guards(
+                *_magic_division_sgpr_descriptors(descriptor_set, kind=kind),
+                arithmetic_shift,
+                xor,
+                subtract,
+                multiply,
+            ),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=move,
+                results={"dst": ValueRef.temporary("shift_31")},
+                result_types={"dst": _RESULT},
+                immediates={"imm32": 31},
+            ),
+            EmitDescriptorOp(
+                descriptor=arithmetic_shift,
+                operands={
+                    "lhs": _DIRECT_LHS,
+                    "rhs": ValueRef.temporary("shift_31"),
+                },
+                results={"dst": sign},
+                result_types={"dst": _RESULT},
+            ),
+            EmitDescriptorOp(
+                descriptor=xor,
+                operands={"lhs": _DIRECT_LHS, "rhs": sign},
+                results={"dst": ValueRef.temporary("xor_magnitude")},
+                result_types={"dst": _RESULT},
+            ),
+            EmitDescriptorOp(
+                descriptor=subtract,
+                operands={
+                    "lhs": ValueRef.temporary("xor_magnitude"),
+                    "rhs": sign,
+                },
+                results={"dst": magnitude},
+                result_types={"dst": _RESULT},
+            ),
+            *_magic_division_sgpr_emits(
+                descriptor_set,
+                kind=kind,
+                result=quotient,
+                numerator=magnitude,
+            ),
+            EmitDescriptorOp(
+                descriptor=multiply,
+                operands={"lhs": quotient, "rhs": _DIRECT_RHS},
+                results={"dst": ValueRef.temporary("product")},
+                result_types={"dst": _RESULT},
+            ),
+            EmitDescriptorOp(
+                descriptor=subtract,
+                operands={
+                    "lhs": magnitude,
+                    "rhs": ValueRef.temporary("product"),
+                },
+                results={"dst": remainder_magnitude},
+                result_types={"dst": _RESULT},
+            ),
+            EmitDescriptorOp(
+                descriptor=xor,
+                operands={"lhs": remainder_magnitude, "rhs": sign},
+                results={"dst": ValueRef.temporary("signed_xor")},
+                result_types={"dst": _RESULT},
+            ),
+            EmitDescriptorOp(
+                descriptor=subtract,
+                operands={
+                    "lhs": ValueRef.temporary("signed_xor"),
+                    "rhs": sign,
+                },
                 results={"dst": _RESULT},
             ),
         ),
@@ -666,6 +762,7 @@ def integer_division_rules(descriptor_set: DescriptorSet) -> tuple[DescriptorRul
                     ),
                 )
             )
+        rules.append(_signed_constant_remainder_sgpr_rule(descriptor_set, kind=kind))
         for source_op, type_pattern in (
             (index.index_rem, _INDEX),
             (scalar_arithmetic.scalar_remui, _I32),
