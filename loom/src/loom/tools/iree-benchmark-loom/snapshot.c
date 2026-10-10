@@ -901,8 +901,8 @@ iree_status_t iree_benchmark_loom_snapshot_sink_write(
   iree_status_t status =
       iree_benchmark_loom_snapshot_sink_append_json(snapshot, &output);
   if (iree_status_is_ok(status)) {
-    status = iree_benchmark_loom_create_parent_directory(
-        iree_string_view_trim(path), state->host_allocator);
+    status = loom_tooling_create_parent_directory(iree_string_view_trim(path),
+                                                  state->host_allocator);
   }
   if (iree_status_is_ok(status)) {
     status = loom_tooling_write_output_file(

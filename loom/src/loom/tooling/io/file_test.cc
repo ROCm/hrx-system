@@ -65,6 +65,129 @@ TEST(FileTest, ValidatesExclusiveStdoutOutput) {
       output_paths, IREE_ARRAYSIZE(output_paths)));
 }
 
+TEST(FileTest, ResolvesFixtureReads) {
+  struct ReadCase {
+    // Directory containing the primary input module.
+    const char* directory;
+    // Authored fixture path to resolve.
+    const char* path;
+    // Complete path passed to the filesystem provider.
+    const char* expected;
+  };
+  const ReadCase cases[] = {
+      {"modules", "fixtures/input.npy", "modules/fixtures/input.npy"},
+      {"modules", "../input.npy", "modules/../input.npy"},
+      {"", "fixtures/input.npy", "fixtures/input.npy"},
+      {"modules", "/fixtures/input.npy", "/fixtures/input.npy"},
+      {"modules", "C:/fixtures/input.npy", "C:/fixtures/input.npy"},
+      {"modules", "C:\\fixtures\\input.npy", "C:\\fixtures\\input.npy"},
+      {"modules", "\\\\server\\input.npy", "\\\\server\\input.npy"},
+  };
+  for (const ReadCase& test_case : cases) {
+    SCOPED_TRACE(test_case.path);
+    char* resolved = nullptr;
+    IREE_ASSERT_OK(loom_tooling_resolve_file_read_path(
+        iree_make_cstring_view(test_case.directory),
+        iree_make_cstring_view(test_case.path), iree_allocator_system(),
+        &resolved));
+    EXPECT_STREQ(resolved, test_case.expected);
+    iree_allocator_free(iree_allocator_system(), resolved);
+  }
+  for (const char* path : {"", "-"}) {
+    char* resolved = nullptr;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          loom_tooling_resolve_file_read_path(
+                              IREE_SV("modules"), iree_make_cstring_view(path),
+                              iree_allocator_system(), &resolved));
+    EXPECT_EQ(resolved, nullptr);
+  }
+}
+
+TEST(FileTest, RejectsEmbeddedNulFixtureReads) {
+  const char path[] = "fixtures/input.npy\0ignored.npy";
+  const iree_string_view_t authored_path =
+      iree_make_string_view(path, sizeof(path) - 1);
+  for (const char* directory : {"modules", ""}) {
+    char* resolved = nullptr;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          loom_tooling_resolve_file_read_path(
+                              iree_make_cstring_view(directory), authored_path,
+                              iree_allocator_system(), &resolved));
+    EXPECT_EQ(resolved, nullptr);
+    iree_allocator_free(iree_allocator_system(), resolved);
+  }
+}
+
+TEST(FileTest, ResolvesRelativeFileWrites) {
+  char* resolved = nullptr;
+  IREE_ASSERT_OK(loom_tooling_resolve_file_write_path(
+      IREE_SV(" artifacts "), IREE_SV(" nested/actual.npy "),
+      iree_allocator_system(), &resolved));
+  EXPECT_STREQ(resolved, "artifacts/nested/actual.npy");
+  iree_allocator_free(iree_allocator_system(), resolved);
+
+  IREE_ASSERT_OK(loom_tooling_resolve_file_write_path(
+      IREE_SV("artifacts/"), IREE_SV("nested/./actual.npy"),
+      iree_allocator_system(), &resolved));
+  EXPECT_STREQ(resolved, "artifacts/nested/./actual.npy");
+  iree_allocator_free(iree_allocator_system(), resolved);
+}
+
+TEST(FileTest, RejectsNonRelativeFileWrites) {
+  const char* paths[] = {
+      "",
+      " ",
+      "-",
+      " - ",
+      "/out.npy",
+      " /out.npy ",
+      "../out.npy",
+      "nested/../out.npy",
+      "nested/..",
+      "C:/out.npy",
+      "C:\\out.npy",
+      "C:out.npy",
+      "\\out.npy",
+      "\\\\server\\out.npy",
+      "nested\\out.npy",
+  };
+  for (const char* path : paths) {
+    SCOPED_TRACE(path);
+    char* resolved = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_tooling_resolve_file_write_path(
+            IREE_SV("artifacts"), iree_make_cstring_view(path),
+            iree_allocator_system(), &resolved));
+    EXPECT_EQ(resolved, nullptr);
+  }
+}
+
+TEST(FileTest, RejectsEmbeddedNulFileWrites) {
+  const char path[] = "nested/actual.npy\0ignored.npy";
+  char* resolved = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_tooling_resolve_file_write_path(
+          IREE_SV("artifacts"), iree_make_string_view(path, sizeof(path) - 1),
+          iree_allocator_system(), &resolved));
+  EXPECT_EQ(resolved, nullptr);
+  iree_allocator_free(iree_allocator_system(), resolved);
+}
+
+TEST(FileTest, RequiresExplicitFileOutputDirectory) {
+  for (const char* directory : {"", " ", "-", " - "}) {
+    SCOPED_TRACE(directory);
+    char* resolved = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_tooling_resolve_file_write_path(
+            iree_make_cstring_view(directory), IREE_SV("actual.npy"),
+            iree_allocator_system(), &resolved));
+    EXPECT_EQ(resolved, nullptr);
+  }
+}
+
 TEST(FileTest, WritesSegmentedByteSequenceInLogicalOrder) {
   iree_io_stream_t* stream = nullptr;
   IREE_ASSERT_OK(iree_io_vec_stream_create(IREE_IO_STREAM_MODE_WRITABLE, 64,

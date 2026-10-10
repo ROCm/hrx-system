@@ -200,6 +200,34 @@ events and event-capture overflow still fail the sample.
 capture an actual value always or only on failure. This is an evidence output,
 not the oracle: checked source still states how success is decided.
 
+```loom
+check.file.write.npy value(%output) path("nested/actual.npy") mode(always) : tensor<1024xf32>
+```
+
+Run the case with `iree-test-loom module.loom --file-output-dir=artifacts` to
+write that value to `artifacts/nested/actual.npy`. Missing parent directories
+are created. The directory is required only when a write is performed: a
+passing case with only `mode(on_failure)` writes needs no output directory.
+The test tool has no implicit temporary output directory. The benchmark tool
+uses the same authored path rules while retaining its artifact-bundle or
+run-specific default output directory.
+
+Each performed write flushes buffered bytes to its output stream before the
+case completes. Write and flush failures fail the case; this does not promise
+durability across a system crash.
+
+Authored output paths are relative, use `/` separators, and contain no `..`
+components; absolute and Windows drive-qualified paths are rejected. Empty
+paths and `-` do not name output files, and `--file-output-dir=-` is invalid.
+Embedded NUL characters are invalid in both read and write paths.
+These are lexical path rules, not a filesystem sandbox: existing symbolic links
+are followed by the operating system.
+
+Relative `check.file.read.npy` paths resolve beside the primary input module,
+including a bytecode module; stdin input uses the current working directory.
+Absolute fixture read paths are also accepted. Fixture reads are independent of
+`--file-output-dir`, so a later invocation names the exported file explicitly.
+
 ## A scenario compares independent executions
 
 [`check.scenario`](../reference/dialects/check/ops/scenario.md) describes a

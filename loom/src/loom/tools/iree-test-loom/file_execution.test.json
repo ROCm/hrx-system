@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "writes an actual tensor subspan and reads it in another invocation",
+      "steps": [
+        {
+          "name": "encode-reader",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/file_cases.loom",
+              "--mode=merge",
+              "--to=bc",
+              "--output={tmp}/reader.loombc"
+            ]
+          }
+        },
+        {
+          "name": "write-actual",
+          "run": {
+            "tool": "iree-test-loom",
+            "args": [
+              "{srcdir}/testdata/file_cases.loom",
+              "--case=@write_actual",
+              "--file-output-dir={tmp}/outputs"
+            ]
+          },
+          "stdout": {
+            "contains": ["\"failed_sample_count\":0", "\"passed\":true"]
+          },
+          "files": [{"path": "{tmp}/outputs/nested/actual.npy", "non_empty": true}]
+        },
+        {
+          "name": "read-actual",
+          "run": {
+            "tool": "iree-test-loom",
+            "args": ["{tmp}/reader.loombc", "--case=@read_actual"]
+          },
+          "stdout": {
+            "contains": ["\"sample_count\":1", "\"failed_sample_count\":0", "\"passed\":true"]
+          }
+        },
+        {
+          "name": "capture-failure",
+          "run": {
+            "tool": "iree-test-loom",
+            "args": [
+              "{srcdir}/testdata/file_cases.loom",
+              "--case=@failing_artifact",
+              "--file-output-dir={tmp}/outputs"
+            ]
+          },
+          "exit": {"nonzero": true},
+          "stdout": {
+            "contains": ["\"failed_sample_count\":1", "\"passed\":false"]
+          },
+          "files": [{"path": "{tmp}/outputs/nested/failure.npy", "equals": "{tmp}/outputs/nested/actual.npy"}]
+        },
+        {
+          "name": "read-failure-actual-not-expected",
+          "run": {
+            "tool": "iree-test-loom",
+            "args": ["{tmp}/reader.loombc", "--case=@read_failure_artifact"]
+          },
+          "stdout": {
+            "contains": ["\"failed_sample_count\":0", "\"passed\":true"]
+          }
+        },
+        {
+          "name": "reject-escaped-nul-read",
+          "run": {
+            "tool": "iree-test-loom",
+            "args": ["{tmp}/reader.loombc", "--case=@nul_input"]
+          },
+          "exit": {"nonzero": true},
+          "stderr": {"contains": ["check.file.read path contains an embedded NUL character"]}
+        },
+        {
+          "name": "reject-escaped-nul-write",
+          "run": {
+            "tool": "iree-test-loom",
+            "args": [
+              "{srcdir}/testdata/file_cases.loom",
+              "--case=@nul_output",
+              "--file-output-dir={tmp}/outputs"
+            ]
+          },
+          "exit": {"nonzero": true},
+          "stderr": {"contains": ["check.file.write path contains an embedded NUL character"]},
+          "files": [{"path": "{tmp}/outputs/nested/actual.npy", "equals": "{tmp}/outputs/nested/failure.npy"}]
+        }
+      ]
+    },
+    {
+      "name": "requires an explicit directory only when writing",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": ["{srcdir}/testdata/file_cases.loom", "--case=@passing_failure_artifact"]
+      },
+      "stdout": {"contains": ["\"failed_sample_count\":0", "\"passed\":true"]},
+      "files": [{"path": "{tmp}/nested/failure.npy", "exists": false}]
+    },
+    {
+      "name": "rejects a write without an output directory",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": ["{srcdir}/testdata/file_cases.loom", "--case=@write_actual"]
+      },
+      "exit": {"nonzero": true},
+      "stderr": {"contains": ["check.file.write requires --file-output-dir"]},
+      "files": [{"path": "{tmp}/nested/actual.npy", "exists": false}]
+    },
+    {
+      "name": "rejects stdout as a directory even without a performed write",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/file_cases.loom",
+          "--case=@passing_failure_artifact",
+          "--file-output-dir=-"
+        ]
+      },
+      "exit": {"nonzero": true},
+      "stderr": {"contains": ["--file-output-dir must name a directory, not '-'"]}
+    },
+    {
+      "name": "rejects lexical traversal before opening an output",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/file_cases.loom",
+          "--case=@escaping_output",
+          "--file-output-dir={tmp}/outputs"
+        ]
+      },
+      "exit": {"nonzero": true},
+      "stderr": {"contains": ["must stay within --file-output-dir"]},
+      "files": [
+        {"path": "{tmp}/escape.npy", "exists": false},
+        {"path": "{tmp}/outputs", "exists": false}
+      ]
+    }
+  ]
+}

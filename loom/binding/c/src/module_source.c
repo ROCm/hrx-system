@@ -306,6 +306,9 @@ loomc_status_t loomc_module_serialize_to_path(
     status = loomc_status_from_iree(
         iree_io_stream_write(stream, contents.data_length, contents.data));
   }
+  if (loomc_status_is_ok(status)) {
+    status = loomc_status_from_iree(iree_io_stream_flush(stream));
+  }
   iree_io_stream_release(stream);
   loomc_source_release(source);
   return status;

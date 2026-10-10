@@ -1,0 +1,57 @@
+check.case @write_actual {
+  %storage = check.generate.iota offset(-9) step(3) : tensor<8xi32>
+  %actual = check.tensor.view %storage offset(4) : tensor<8xi32> -> tensor<2x3xi32>
+  %expected = check.generate.iota offset(-6) step(3) : tensor<2x3xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<2x3xi32>
+  check.file.write.npy value(%actual) path("nested/actual.npy") mode(always) : tensor<2x3xi32>
+  check.return
+}
+
+check.case @read_actual {
+  %actual = check.file.read.npy path("outputs/nested/actual.npy") : tensor<2x3xi32>
+  %expected = check.generate.iota offset(-6) step(3) : tensor<2x3xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<2x3xi32>
+  check.return
+}
+
+check.case @passing_failure_artifact {
+  %actual = check.generate.iota offset(-6) step(3) : tensor<2x3xi32>
+  %expected = check.generate.iota offset(-6) step(3) : tensor<2x3xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<2x3xi32>
+  check.file.write.npy value(%actual) path("nested/failure.npy") mode(on_failure) : tensor<2x3xi32>
+  check.return
+}
+
+check.case @failing_artifact {
+  %actual = check.generate.iota offset(-6) step(3) : tensor<2x3xi32>
+  %expected = check.generate.fill value(999) : tensor<2x3xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<2x3xi32>
+  check.file.write.npy value(%actual) path("nested/failure.npy") mode(on_failure) : tensor<2x3xi32>
+  check.return
+}
+
+check.case @read_failure_artifact {
+  %actual = check.file.read.npy path("outputs/nested/failure.npy") : tensor<2x3xi32>
+  %expected = check.generate.iota offset(-6) step(3) : tensor<2x3xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<2x3xi32>
+  check.return
+}
+
+check.case @escaping_output {
+  %actual = check.generate.iota offset(-6) step(3) : tensor<2x3xi32>
+  check.file.write.npy value(%actual) path("../escape.npy") mode(always) : tensor<2x3xi32>
+  check.return
+}
+
+check.case @nul_input {
+  %actual = check.file.read.npy path("outputs/nested/actual.npy\u0000ignored.npy") : tensor<2x3xi32>
+  %expected = check.generate.iota offset(-6) step(3) : tensor<2x3xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<2x3xi32>
+  check.return
+}
+
+check.case @nul_output {
+  %actual = check.generate.fill value(999) : tensor<2x3xi32>
+  check.file.write.npy value(%actual) path("nested/actual.npy\u0000ignored.npy") mode(always) : tensor<2x3xi32>
+  check.return
+}

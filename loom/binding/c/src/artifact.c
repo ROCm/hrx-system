@@ -180,6 +180,9 @@ loomc_status_t loomc_artifact_write_to_path(const loomc_artifact_t* artifact,
                                 .user_data = stream,
                             });
   }
+  if (loomc_status_is_ok(status)) {
+    status = loomc_status_from_iree(iree_io_stream_flush(stream));
+  }
   iree_io_stream_release(stream);
   return status;
 }

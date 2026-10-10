@@ -616,6 +616,67 @@ TEST(VecStreamTest, WriteSeekAndFillUninitializedBlocks) {
   EXPECT_EQ(actual, expected);
 }
 
+TEST(VecStreamTest, FlushPreservesBlocksAndRetainedLifetime) {
+  tracking_allocator_t allocator_state = {iree_allocator_system(), false, 0, 0};
+  iree_io_stream_t* raw_stream = NULL;
+  IREE_ASSERT_OK(iree_io_vec_stream_create(
+      IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE |
+          IREE_IO_STREAM_MODE_SEEKABLE,
+      1024, make_tracking_allocator(&allocator_state), &raw_stream));
+  StreamPtr stream(raw_stream, iree_io_stream_release);
+  std::vector<uint8_t> expected(2503, 0x5A);
+  IREE_ASSERT_OK(
+      iree_io_stream_write(stream.get(), expected.size(), expected.data()));
+  std::vector<segment_view_t> segments;
+  IREE_ASSERT_OK(iree_io_vec_stream_enumerate_blocks(
+      stream.get(), collect_segment_view, &segments));
+  ASSERT_GT(segments.size(), 2u);
+  IREE_ASSERT_OK(
+      iree_io_stream_seek(stream.get(), IREE_IO_STREAM_SEEK_SET, 17));
+  iree_io_stream_retain(stream.get());
+  StreamPtr alias(stream.get(), iree_io_stream_release);
+  const auto allocation_count = allocator_state.allocation_count;
+  const auto free_count = allocator_state.free_count;
+
+  allocator_state.fail_allocations = true;
+  IREE_ASSERT_OK(iree_io_stream_flush(stream.get()));
+  EXPECT_EQ(allocator_state.allocation_count, allocation_count);
+  EXPECT_EQ(allocator_state.free_count, free_count);
+  EXPECT_EQ(iree_io_stream_offset(alias.get()), 17);
+  EXPECT_EQ(iree_io_stream_length(alias.get()), expected.size());
+  segment_comparison_state_t comparison_state = {&segments, 0, true};
+  IREE_ASSERT_OK(iree_io_vec_stream_enumerate_blocks(
+      alias.get(), compare_segment_view, &comparison_state));
+  EXPECT_TRUE(comparison_state.all_match);
+  EXPECT_EQ(comparison_state.index, segments.size());
+  stream.reset();
+  EXPECT_EQ(allocator_state.free_count, free_count);
+
+  // A retained reader can still use every block, and publication does not make
+  // the stream immutable or consume its contents.
+  const uint8_t replacement = 0xA5;
+  IREE_ASSERT_OK(
+      iree_io_stream_write(alias.get(), sizeof(replacement), &replacement));
+  expected[17] = replacement;
+  IREE_ASSERT_OK(iree_io_stream_flush(alias.get()));
+  IREE_ASSERT_OK(iree_io_stream_seek(alias.get(), IREE_IO_STREAM_SEEK_SET, 0));
+  std::vector<uint8_t> actual(expected.size());
+  IREE_ASSERT_OK(iree_io_stream_read(alias.get(), actual.size(), actual.data(),
+                                     /*out_buffer_length=*/NULL));
+  EXPECT_EQ(actual, expected);
+  alias.reset();
+  EXPECT_EQ(allocator_state.free_count, allocation_count);
+}
+
+TEST(VecStreamTest, FlushRejectsReadOnly) {
+  IREE_ASSERT_OK_AND_ASSIGN(auto stream,
+                            CreateStream(IREE_IO_STREAM_MODE_READABLE));
+  EXPECT_THAT(Status(iree_io_stream_flush(stream.get())),
+              StatusIs(StatusCode::kPermissionDenied));
+  EXPECT_EQ(iree_io_stream_offset(stream.get()), 0);
+  EXPECT_EQ(iree_io_stream_length(stream.get()), 0);
+}
+
 TEST(VecStreamTest, GrowthFailureLeavesInitializedContents) {
   tracking_allocator_t allocator_state = {iree_allocator_system(), false, 0, 0};
   iree_io_stream_t* raw_stream = nullptr;

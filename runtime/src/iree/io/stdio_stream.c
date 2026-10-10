@@ -6,6 +6,7 @@
 
 #include "iree/io/stdio_stream.h"
 
+#include <errno.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -399,6 +400,16 @@ static iree_status_t iree_io_stdio_stream_write(iree_io_stream_t* base_stream,
   return status;
 }
 
+static iree_status_t iree_io_stdio_stream_flush(iree_io_stream_t* base_stream) {
+  iree_io_stdio_stream_t* stream = iree_io_stdio_stream_cast(base_stream);
+  if (fflush(stream->handle) != 0) {
+    const int flush_error = errno;
+    return iree_make_status(iree_status_code_from_errno(flush_error),
+                            "failed to flush stream: errno %d", flush_error);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_io_stdio_stream_fill(
     iree_io_stream_t* base_stream, iree_io_stream_pos_t count,
     const void* pattern, iree_host_size_t pattern_length) {
@@ -446,6 +457,7 @@ static const iree_io_stream_vtable_t iree_io_stdio_stream_vtable = {
     .seek = iree_io_stdio_stream_seek,
     .read = iree_io_stdio_stream_read,
     .write = iree_io_stdio_stream_write,
+    .flush = iree_io_stdio_stream_flush,
     .fill = iree_io_stdio_stream_fill,
     .map_read = iree_io_stdio_stream_map_read,
     .map_write = iree_io_stdio_stream_map_write,

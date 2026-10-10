@@ -151,20 +151,6 @@ iree_status_t iree_benchmark_loom_dup_string_view(iree_string_view_t value,
 iree_status_t iree_benchmark_loom_append_sanitized_path_component(
     iree_string_view_t value, iree_string_builder_t* builder);
 
-// Joins two filesystem path components into allocator-owned storage.
-iree_status_t iree_benchmark_loom_join_path(iree_string_view_t lhs,
-                                            iree_string_view_t rhs,
-                                            iree_allocator_t allocator,
-                                            char** out_path);
-
-// Creates |path| and any missing parent directories.
-iree_status_t iree_benchmark_loom_create_directory_if_needed(
-    iree_string_view_t path, iree_allocator_t allocator);
-
-// Creates the parent directory for |path| when it is non-empty.
-iree_status_t iree_benchmark_loom_create_parent_directory(
-    iree_string_view_t path, iree_allocator_t allocator);
-
 // Records a file observed by the run artifact bundle.
 iree_status_t iree_benchmark_loom_artifact_bundle_record_file(
     iree_benchmark_loom_artifact_bundle_t* bundle,

@@ -163,6 +163,20 @@ iree_execution_test_suite(
     "hostonly"
 )
 
+iree_execution_test_suite(
+  NAME
+    file_execution_test
+  MANIFESTS
+    "file_execution.test.json"
+  TOOLS
+    "iree-test-loom=::iree-test-loom"
+    "loom-link=loom::tools::loom-link"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/file_cases.loom"
+  LABELS
+    "hostonly"
+)
+
 if(LOOM_TARGET_ARCH_VM)
 iree_execution_test_suite(
   NAME

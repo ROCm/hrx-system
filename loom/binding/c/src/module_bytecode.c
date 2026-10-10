@@ -206,6 +206,13 @@ static iree_status_t loomc_module_byte_buffer_stream_write(
   return iree_ok_status();
 }
 
+static iree_status_t loomc_module_byte_buffer_stream_flush(
+    iree_io_stream_t* base_stream) {
+  // Writes already update the owned byte buffer.
+  (void)base_stream;
+  return iree_ok_status();
+}
+
 static iree_status_t loomc_module_byte_buffer_stream_fill(
     iree_io_stream_t* base_stream, iree_io_stream_pos_t count,
     const void* pattern, iree_host_size_t pattern_length) {
@@ -247,6 +254,7 @@ static const iree_io_stream_vtable_t loomc_module_byte_buffer_stream_vtable = {
     .seek = loomc_module_byte_buffer_stream_seek,
     .read = loomc_module_byte_buffer_stream_read,
     .write = loomc_module_byte_buffer_stream_write,
+    .flush = loomc_module_byte_buffer_stream_flush,
     .fill = loomc_module_byte_buffer_stream_fill,
     .map_read = loomc_module_byte_buffer_stream_map_read,
     .map_write = loomc_module_byte_buffer_stream_map_write,

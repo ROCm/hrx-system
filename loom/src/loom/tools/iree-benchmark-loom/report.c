@@ -1657,9 +1657,9 @@ static iree_status_t iree_benchmark_loom_write_candidate_byte_artifact(
 
   char* path_storage = NULL;
   iree_status_t status =
-      iree_benchmark_loom_join_path(directory, leaf, allocator, &path_storage);
+      loom_tooling_file_path_join(directory, leaf, allocator, &path_storage);
   if (iree_status_is_ok(status)) {
-    status = iree_benchmark_loom_create_parent_directory(
+    status = loom_tooling_create_parent_directory(
         iree_make_cstring_view(path_storage), allocator);
   }
   if (iree_status_is_ok(status)) {
@@ -1851,9 +1851,9 @@ iree_status_t iree_benchmark_loom_write_compile_report_artifact(
       iree_benchmark_loom_append_compile_report_artifact_leaf(run, candidate,
                                                               provider, &leaf);
   if (iree_status_is_ok(status)) {
-    status = iree_benchmark_loom_join_path(bundle->compile_report_dir,
-                                           iree_string_builder_view(&leaf),
-                                           allocator, &path_storage);
+    status = loom_tooling_file_path_join(bundle->compile_report_dir,
+                                         iree_string_builder_view(&leaf),
+                                         allocator, &path_storage);
   }
 
   iree_string_builder_t artifact;
@@ -1863,7 +1863,7 @@ iree_status_t iree_benchmark_loom_write_compile_report_artifact(
         run, candidate, benchmark_plan, case_plan, provider, &artifact);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_benchmark_loom_create_parent_directory(
+    status = loom_tooling_create_parent_directory(
         iree_make_cstring_view(path_storage), allocator);
   }
   if (iree_status_is_ok(status)) {

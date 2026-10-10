@@ -329,6 +329,7 @@ loom_cc_test(
 loom_cc_test(
     name = "value_materializer_test",
     srcs = ["value_materializer_test.cc"],
+    tags = ["requires-filesystem"],
     deps = [
         ":testbench",
         ":value_materializer",

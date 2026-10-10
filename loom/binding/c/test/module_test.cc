@@ -256,6 +256,27 @@ TEST(ModuleTest, RejectsContradictoryExplicitSerializeFormat) {
   EXPECT_EQ(serialized_source, nullptr);
 }
 
+#if defined(IREE_PLATFORM_LINUX)
+TEST(ModuleTest, SerializeToPathReportsBufferedWriteFailure) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  ModulePtr module = CreateFunctionModule(context.get(), workspace.get());
+  ASSERT_NE(module.get(), nullptr);
+  const loomc_module_serialize_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
+  };
+
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_RESOURCE_EXHAUSTED,
+      loomc_module_serialize_to_path(module.get(), &options,
+                                     loomc_make_cstring_view("/dev/full"),
+                                     loomc_allocator_system()));
+}
+#endif  // IREE_PLATFORM_LINUX
+
 TEST(ModuleTest, ParseDiagnosticRetainsRemappedIdentityAndText) {
   auto context = CreateContext();
   auto workspace = CreateWorkspace();

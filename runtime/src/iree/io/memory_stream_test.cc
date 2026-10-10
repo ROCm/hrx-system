@@ -455,6 +455,65 @@ TEST(MemoryStreamTest, Write) {
   iree_io_stream_release(stream);
 }
 
+TEST(MemoryStreamTest, FlushPreservesStorageAndRetainedLifetime) {
+  int callback_count = 0;
+  iree_io_stream_release_callback_t release_callback = {
+      +[](void* user_data, iree_io_stream_t* /*stream*/) {
+        ++*static_cast<int*>(user_data);
+      },
+      &callback_count,
+  };
+  uint8_t data[8] = {};
+  iree_io_stream_t* stream = NULL;
+  IREE_ASSERT_OK(iree_io_memory_stream_wrap(
+      IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE |
+          IREE_IO_STREAM_MODE_MAPPABLE,
+      iree_make_byte_span(data, sizeof(data)), release_callback,
+      iree_allocator_system(), &stream));
+  iree_io_stream_retain(stream);
+
+  const uint8_t prefix[] = {1, 2, 3};
+  IREE_EXPECT_OK(iree_io_stream_write(stream, sizeof(prefix), prefix));
+  iree_byte_span_t mapped = iree_byte_span_empty();
+  IREE_EXPECT_OK(iree_io_stream_map_write(stream, 2, &mapped));
+  EXPECT_EQ(mapped.data, data + 3);
+  EXPECT_EQ(mapped.data_length, 2);
+  IREE_EXPECT_OK(iree_io_stream_flush(stream));
+  EXPECT_EQ(iree_io_stream_offset(stream), 5);
+  EXPECT_EQ(iree_io_stream_length(stream), sizeof(data));
+  EXPECT_EQ(callback_count, 0);
+  iree_io_stream_release(stream);
+  EXPECT_EQ(callback_count, 0);
+
+  // The mapped span and retained stream both remain usable after publication.
+  mapped.data[0] = 4;
+  mapped.data[1] = 5;
+  const uint8_t suffix[] = {6, 7, 8};
+  IREE_EXPECT_OK(iree_io_stream_write(stream, sizeof(suffix), suffix));
+  IREE_EXPECT_OK(iree_io_stream_flush(stream));
+  EXPECT_EQ(iree_io_stream_offset(stream), sizeof(data));
+  EXPECT_THAT(data, ElementsAre(1, 2, 3, 4, 5, 6, 7, 8));
+  iree_io_stream_release(stream);
+  EXPECT_EQ(callback_count, 1);
+}
+
+TEST(MemoryStreamTest, FlushRejectsReadOnly) {
+  uint8_t data[] = {1, 2, 3};
+  iree_io_stream_t* stream = NULL;
+  IREE_ASSERT_OK(iree_io_memory_stream_wrap(
+      IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_SEEKABLE,
+      iree_make_byte_span(data, sizeof(data)),
+      iree_io_stream_release_callback_null(), iree_allocator_system(),
+      &stream));
+  IREE_EXPECT_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 1));
+  EXPECT_THAT(Status(iree_io_stream_flush(stream)),
+              StatusIs(StatusCode::kPermissionDenied));
+  EXPECT_EQ(iree_io_stream_offset(stream), 1);
+  EXPECT_EQ(iree_io_stream_length(stream), sizeof(data));
+  EXPECT_THAT(data, ElementsAre(1, 2, 3));
+  iree_io_stream_release(stream);
+}
+
 TEST(MemoryStreamTest, Fill) {
   uint8_t data[16] = {0xDD};
   iree_io_stream_t* stream = NULL;

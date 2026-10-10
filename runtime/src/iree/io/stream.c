@@ -197,6 +197,18 @@ iree_io_stream_write(iree_io_stream_t* stream, iree_host_size_t buffer_length,
   return status;
 }
 
+IREE_API_EXPORT iree_status_t iree_io_stream_flush(iree_io_stream_t* stream) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_RETURN_IF_ERROR(
+      iree_io_stream_validate_mode(iree_io_stream_mode(stream),
+                                   IREE_IO_STREAM_MODE_WRITABLE),
+      "flushing the stream");
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status = stream->vtable->flush(stream);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 IREE_API_EXPORT iree_status_t
 iree_io_stream_write_char(iree_io_stream_t* stream, char c) {
   return iree_io_stream_write(stream, sizeof(c), &c);

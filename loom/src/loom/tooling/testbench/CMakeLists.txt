@@ -382,6 +382,8 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::check
+  LABELS
+    "requires-filesystem"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

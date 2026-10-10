@@ -627,6 +627,9 @@ IREE_API_EXPORT iree_status_t iree_io_build_parameter_archive(
     }
   }
 
+  if (iree_status_is_ok(status)) {
+    status = iree_io_stream_flush(target_stream);
+  }
   iree_io_stream_release(target_stream);
 
   // Flush file contents before returning to the caller (in case they open the

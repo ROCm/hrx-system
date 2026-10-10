@@ -43,10 +43,15 @@ static iree_status_t loom_tooling_file_path_dup(iree_string_view_t path,
                                                 iree_allocator_t allocator,
                                                 char** out_path) {
   *out_path = NULL;
+  iree_host_size_t storage_size = 0;
+  if (!iree_host_size_checked_add(path.size, 1, &storage_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "path storage size overflow");
+  }
   char* storage = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(allocator, path.size + 1, (void**)&storage));
-  iree_string_view_to_cstring(path, storage, path.size + 1);
+      iree_allocator_malloc(allocator, storage_size, (void**)&storage));
+  iree_string_view_to_cstring(path, storage, storage_size);
   *out_path = storage;
   return iree_ok_status();
 }
@@ -130,6 +135,96 @@ iree_status_t loom_tooling_file_path_join(iree_string_view_t lhs,
   return iree_file_path_join(lhs, rhs, allocator, out_path);
 }
 
+static bool loom_tooling_file_path_has_drive(iree_string_view_t path) {
+  if (path.size < 2 || path.data[1] != ':') {
+    return false;
+  }
+  const char drive = path.data[0];
+  return (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z');
+}
+
+static bool loom_tooling_file_path_is_absolute(iree_string_view_t path) {
+  if (iree_string_view_is_empty(path)) {
+    return false;
+  }
+  return path.data[0] == '/' || path.data[0] == '\\' ||
+         (loom_tooling_file_path_has_drive(path) && path.size >= 3 &&
+          (path.data[2] == '/' || path.data[2] == '\\'));
+}
+
+iree_status_t loom_tooling_resolve_file_read_path(
+    iree_string_view_t input_directory, iree_string_view_t path,
+    iree_allocator_t allocator, char** out_path) {
+  *out_path = NULL;
+  if (iree_string_view_find_char(path, '\0', 0) != IREE_STRING_VIEW_NPOS) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "check.file.read path contains an embedded NUL "
+                            "character");
+  }
+  if (loom_tooling_file_path_is_stdio(path)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "check.file.read paths must name a file");
+  }
+  if (loom_tooling_file_path_is_absolute(path) ||
+      iree_string_view_is_empty(input_directory)) {
+    return loom_tooling_file_path_dup(path, allocator, out_path);
+  }
+  return loom_tooling_file_path_join(input_directory, path, allocator,
+                                     out_path);
+}
+
+iree_status_t loom_tooling_resolve_file_write_path(
+    iree_string_view_t output_directory, iree_string_view_t path,
+    iree_allocator_t allocator, char** out_path) {
+  *out_path = NULL;
+  if (iree_string_view_find_char(path, '\0', 0) != IREE_STRING_VIEW_NPOS) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "check.file.write path contains an embedded NUL "
+                            "character");
+  }
+  output_directory = iree_string_view_trim(output_directory);
+  path = iree_string_view_trim(path);
+  if (iree_string_view_is_empty(output_directory)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "check.file.write requires --file-output-dir");
+  }
+  if (iree_string_view_equal(output_directory, IREE_SV("-"))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--file-output-dir must name a directory, not '-'");
+  }
+  if (loom_tooling_file_path_is_stdio(path)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "check.file.write paths must name a file");
+  }
+  if (loom_tooling_file_path_is_absolute(path) ||
+      loom_tooling_file_path_has_drive(path)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "check.file.write path '%.*s' must be relative to --file-output-dir",
+        (int)path.size, path.data);
+  }
+  iree_string_view_t remaining = path;
+  while (!iree_string_view_is_empty(remaining)) {
+    iree_string_view_t component = iree_string_view_empty();
+    iree_string_view_split(remaining, '/', &component, &remaining);
+    if (iree_string_view_equal(component, IREE_SV(".."))) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "check.file.write path '%.*s' must stay within --file-output-dir",
+          (int)path.size, path.data);
+    }
+    if (iree_string_view_find_char(component, '\\', 0) !=
+        IREE_STRING_VIEW_NPOS) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "check.file.write path '%.*s' must use '/' separators",
+          (int)path.size, path.data);
+    }
+  }
+  return loom_tooling_file_path_join(output_directory, path, allocator,
+                                     out_path);
+}
+
 iree_status_t loom_tooling_create_directory_if_needed(
     iree_string_view_t path, iree_allocator_t allocator) {
   path = iree_string_view_trim(path);
@@ -186,6 +281,12 @@ iree_status_t loom_tooling_create_directory_if_needed(
   }
   iree_allocator_free(allocator, storage);
   return status;
+}
+
+iree_status_t loom_tooling_create_parent_directory(iree_string_view_t path,
+                                                   iree_allocator_t allocator) {
+  return loom_tooling_create_directory_if_needed(iree_file_path_dirname(path),
+                                                 allocator);
 }
 
 iree_status_t loom_tooling_read_input_file(

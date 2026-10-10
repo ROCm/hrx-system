@@ -13,6 +13,7 @@
 #include "loom/tooling/execution/hal/benchmark.h"
 #include "loom/tooling/execution/hal/invocation.h"
 #include "loom/tooling/execution/hal/testbench_actual.h"
+#include "loom/tooling/io/file.h"
 #include "loom/tools/iree-benchmark-loom/case_execution.h"
 #include "loom/tools/iree-benchmark-loom/input_ring.h"
 #include "loom/tools/iree-benchmark-loom/output.h"
@@ -521,7 +522,7 @@ iree_status_t iree_benchmark_loom_run_hal_benchmark_sample(
         case_sample_ordinal, &profile_artifact_path);
     if (iree_status_is_ok(status) &&
         iree_string_builder_size(&profile_artifact_path) != 0) {
-      status = iree_benchmark_loom_create_parent_directory(
+      status = loom_tooling_create_parent_directory(
           iree_string_builder_view(&profile_artifact_path), allocator);
     }
     if (iree_status_is_ok(status) &&
@@ -604,7 +605,7 @@ iree_status_t iree_benchmark_loom_run_hal_sequence_benchmark_sample(
         case_sample_ordinal, &profile_artifact_path);
     if (iree_status_is_ok(status) &&
         iree_string_builder_size(&profile_artifact_path) != 0) {
-      status = iree_benchmark_loom_create_parent_directory(
+      status = loom_tooling_create_parent_directory(
           iree_string_builder_view(&profile_artifact_path), allocator);
     }
     if (iree_status_is_ok(status) &&

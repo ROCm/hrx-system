@@ -6,6 +6,8 @@
 
 #include "loom/tooling/testbench/value_materializer.h"
 
+#include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -14,6 +16,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/memory/heap_pool.h"
 #include "iree/io/memory_stream.h"
+#include "iree/io/stdio_stream.h"
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -657,6 +660,48 @@ check.case @file_io {
                                   IREE_HAL_ELEMENT_TYPE_FLOAT_32,
                                   {1.1f, 2.2f, 3.3f});
   iree_hal_buffer_view_release(written_buffer_view);
+
+#if defined(IREE_PLATFORM_LINUX)
+  // Serialization fits in the stdio buffer and succeeds before publication.
+  // The materializer owns publication and must report the deferred ENOSPC.
+  for (bool publish : {false, true}) {
+    char write_buffer[BUFSIZ];
+    ASSERT_LT(iree_io_stream_length(written_stream_), sizeof(write_buffer));
+    auto file = std::unique_ptr<FILE, int (*)(FILE*)>(fopen("/dev/full", "wb"),
+                                                      &fclose);
+    ASSERT_NE(file, nullptr);
+    ASSERT_EQ(setvbuf(file.get(), write_buffer, _IOFBF, sizeof(write_buffer)),
+              0);
+    iree_io_stream_t* stream = nullptr;
+    IREE_ASSERT_OK(iree_io_stdio_stream_wrap(IREE_IO_STREAM_MODE_WRITABLE,
+                                             file.get(), /*owns_handle=*/false,
+                                             host_allocator_, &stream));
+    if (publish) {
+      // Keep a reference so releasing the callback's reference cannot flush
+      // through stream destruction instead of the publication operation.
+      options.open_write_file.fn =
+          [](void* user_data, iree_string_view_t /*path*/,
+             iree_io_stream_t** out_stream) -> iree_status_t {
+        auto* stream = static_cast<iree_io_stream_t*>(user_data);
+        iree_io_stream_retain(stream);
+        *out_stream = stream;
+        return iree_ok_status();
+      };
+      options.open_write_file.user_data = stream;
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          loom_testbench_write_case_files(&options, &case_plan, &table,
+                                          /*case_failed=*/false));
+      EXPECT_NE(ferror(file.get()), 0);
+    } else {
+      IREE_EXPECT_OK(iree_numpy_npy_save_ndarray(
+          stream, IREE_NUMPY_NPY_SAVE_OPTION_DEFAULT, input_view,
+          host_allocator_));
+      EXPECT_EQ(ferror(file.get()), 0);
+    }
+    iree_io_stream_release(stream);
+  }
+#endif  // IREE_PLATFORM_LINUX
 
   loom_testbench_value_deinitialize(&input);
   loom_testbench_value_table_deinitialize(&table);

@@ -67,6 +67,10 @@ typedef struct iree_io_stream_t iree_io_stream_t;
 IREE_API_EXPORT void iree_io_stream_retain(iree_io_stream_t* stream);
 
 // Releases the given |stream| from the caller.
+// Release has no status channel. Callers requiring write completion and error
+// reporting must flush before releasing; release does not guarantee successful
+// output publication, durable storage, or successful closure of the backing
+// sink.
 IREE_API_EXPORT void iree_io_stream_release(iree_io_stream_t* stream);
 
 // Returns the mode of the stream indicating what operations may be performed.
@@ -114,6 +118,15 @@ iree_io_stream_read(iree_io_stream_t* stream, iree_host_size_t buffer_capacity,
 IREE_API_EXPORT iree_status_t
 iree_io_stream_write(iree_io_stream_t* stream, iree_host_size_t buffer_length,
                      const void* buffer);
+
+// Completes pending writes to the backing sink and reports buffered write
+// errors. Requires the stream have IREE_IO_STREAM_MODE_WRITABLE. On success,
+// prior writes are available through the backing sink without releasing the
+// stream. This does not guarantee durable storage or report errors from later
+// closing the sink. The stream remains open at the same offset and can accept
+// further writes. Memory-backed streams have no pending output and this
+// operation is a no-op.
+IREE_API_EXPORT iree_status_t iree_io_stream_flush(iree_io_stream_t* stream);
 
 // Writes a single character/byte to the stream.
 // Requires the stream have IREE_IO_STREAM_MODE_WRITABLE.
@@ -219,6 +232,8 @@ typedef struct iree_io_stream_vtable_t {
   iree_status_t(IREE_API_PTR* write)(iree_io_stream_t* stream,
                                      iree_host_size_t buffer_length,
                                      const void* buffer);
+  // Completes pending output without changing the stream lifetime or offset.
+  iree_status_t(IREE_API_PTR* flush)(iree_io_stream_t* stream);
   iree_status_t(IREE_API_PTR* fill)(iree_io_stream_t* stream,
                                     iree_io_stream_pos_t count,
                                     const void* pattern,

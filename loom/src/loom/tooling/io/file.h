@@ -55,9 +55,31 @@ iree_status_t loom_tooling_file_path_join(iree_string_view_t lhs,
                                           iree_allocator_t allocator,
                                           char** out_path);
 
+// Resolves an authored fixture read path into allocator-owned NUL-terminated
+// storage. Absolute paths are preserved; relative paths use |input_directory|,
+// or the working directory when it is empty. Empty, "-", and embedded-NUL paths
+// are rejected. |input_directory| is a directory from the CLI input filename.
+iree_status_t loom_tooling_resolve_file_read_path(
+    iree_string_view_t input_directory, iree_string_view_t path,
+    iree_allocator_t allocator, char** out_path);
+
+// Resolves an authored output path beneath an explicitly selected directory.
+// Both arguments are whitespace-trimmed. The directory must be nonempty and
+// cannot be "-"; the path must name a relative file using '/' separators with
+// no '..' components or embedded NUL. |output_directory| is a CLI-selected
+// directory. This is a lexical policy, not a symlink sandbox. On success,
+// |out_path| receives allocator-owned NUL-terminated storage.
+iree_status_t loom_tooling_resolve_file_write_path(
+    iree_string_view_t output_directory, iree_string_view_t path,
+    iree_allocator_t allocator, char** out_path);
+
 // Creates |path| and any missing parent directories.
 iree_status_t loom_tooling_create_directory_if_needed(
     iree_string_view_t path, iree_allocator_t allocator);
+
+// Creates the parent directory for |path| when it is nonempty.
+iree_status_t loom_tooling_create_parent_directory(iree_string_view_t path,
+                                                   iree_allocator_t allocator);
 
 // Reads |path| into |out_contents|, treating empty and "-" paths as stdin.
 iree_status_t loom_tooling_read_input_file(

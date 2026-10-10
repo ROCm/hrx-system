@@ -245,6 +245,13 @@ static iree_status_t iree_io_memory_stream_write(iree_io_stream_t* base_stream,
   return iree_ok_status();
 }
 
+static iree_status_t iree_io_memory_stream_flush(
+    iree_io_stream_t* base_stream) {
+  // Writes already update the caller-owned backing memory.
+  (void)base_stream;
+  return iree_ok_status();
+}
+
 static iree_status_t iree_io_memory_stream_fill(
     iree_io_stream_t* base_stream, iree_io_stream_pos_t count,
     const void* pattern, iree_host_size_t pattern_length) {
@@ -344,6 +351,7 @@ static const iree_io_stream_vtable_t iree_io_memory_stream_vtable = {
     .seek = iree_io_memory_stream_seek,
     .read = iree_io_memory_stream_read,
     .write = iree_io_memory_stream_write,
+    .flush = iree_io_memory_stream_flush,
     .fill = iree_io_memory_stream_fill,
     .map_read = iree_io_memory_stream_map_read,
     .map_write = iree_io_memory_stream_map_write,

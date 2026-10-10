@@ -232,6 +232,17 @@ iree_execution_test_suite(
 )
 
 iree_execution_test_suite(
+    name = "file_execution_test",
+    data = ["testdata/file_cases.loom"],
+    manifests = ["file_execution.test.json"],
+    tags = ["hostonly"],
+    tools = {
+        "iree-test-loom": ":iree-test-loom",
+        "loom-link": "//loom/src/loom/tools/loom-link",
+    },
+)
+
+iree_execution_test_suite(
     name = "scenario_execution_test",
     data = ["testdata/scenario_cases.loom"],
     manifests = ["scenario_execution.test.json"],

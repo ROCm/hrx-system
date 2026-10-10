@@ -163,6 +163,19 @@ TEST(ArtifactTest, WriteToPath) {
   EXPECT_TRUE(path.Remove());
 }
 
+#if defined(IREE_PLATFORM_LINUX)
+TEST(ArtifactTest, WriteToPathReportsBufferedWriteFailure) {
+  loomc_byte_sequence_t* contents = nullptr;
+  loomc_artifact_t artifact = MakeTextModuleArtifact(&contents);
+  ByteSequencePtr contents_owner(contents);
+
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_RESOURCE_EXHAUSTED,
+                         loomc_artifact_write_to_path(
+                             &artifact, loomc_make_cstring_view("/dev/full"),
+                             loomc_allocator_system()));
+}
+#endif  // IREE_PLATFORM_LINUX
+
 TEST(ArtifactTest, SegmentedContentsRemainComposable) {
   const std::string expected(2048, 'x');
   ByteSequencePtr contents = MakeSegmentedSequence(expected);

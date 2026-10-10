@@ -556,6 +556,12 @@ static iree_status_t iree_io_vec_stream_write(iree_io_stream_t* base_stream,
   return iree_ok_status();
 }
 
+static iree_status_t iree_io_vec_stream_flush(iree_io_stream_t* base_stream) {
+  // Writes already update the retained blocks; flushing does not detach them.
+  (void)base_stream;
+  return iree_ok_status();
+}
+
 static iree_status_t iree_io_vec_stream_fill_1(iree_io_vec_stream_t* stream,
                                                iree_io_stream_pos_t count,
                                                uint8_t pattern) {
@@ -642,6 +648,7 @@ static const iree_io_stream_vtable_t iree_io_vec_stream_vtable = {
     .seek = iree_io_vec_stream_seek,
     .read = iree_io_vec_stream_read,
     .write = iree_io_vec_stream_write,
+    .flush = iree_io_vec_stream_flush,
     .fill = iree_io_vec_stream_fill,
     .map_read = iree_io_vec_stream_map_read,
     .map_write = iree_io_vec_stream_map_write,

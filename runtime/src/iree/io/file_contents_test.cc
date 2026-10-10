@@ -11,6 +11,7 @@
 #if IREE_FILE_IO_ENABLE
 
 #include <cstring>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -163,6 +164,87 @@ TEST(FileContents, StdioStreamFillMultiBytePattern) {
 
   iree_io_file_contents_free(read_contents);
 }
+
+TEST(FileContents, StdioStreamFlushPublishesBeforeRelease) {
+  iree::testing::TempFilePath path("iree_stdio_flush_test");
+  iree_io_stream_t* raw_stream = NULL;
+  IREE_ASSERT_OK(iree_io_stdio_stream_open(
+      IREE_IO_STDIO_STREAM_MODE_WRITE | IREE_IO_STDIO_STREAM_MODE_DISCARD,
+      path.path_view(), iree_allocator_system(), &raw_stream));
+  std::unique_ptr<iree_io_stream_t, decltype(&iree_io_stream_release)> stream(
+      raw_stream, iree_io_stream_release);
+
+  const uint8_t contents[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  constexpr iree_host_size_t kWriteLength = 3;
+  for (iree_host_size_t offset = 0; offset < sizeof(contents);
+       offset += kWriteLength) {
+    IREE_ASSERT_OK(
+        iree_io_stream_write(stream.get(), kWriteLength, contents + offset));
+    EXPECT_EQ(iree_io_stream_offset(stream.get()), offset + kWriteLength);
+    // Querying length or seeking could implicitly flush a stdio stream. Read
+    // through a separate handle after the explicit publication boundary
+    // instead.
+    IREE_ASSERT_OK(iree_io_stream_flush(stream.get()));
+    EXPECT_EQ(iree_io_stream_offset(stream.get()), offset + kWriteLength);
+
+    iree_io_file_contents_t* raw_contents = NULL;
+    IREE_ASSERT_OK(iree_io_file_contents_read(
+        path.path_view(), iree_allocator_system(), &raw_contents));
+    std::unique_ptr<iree_io_file_contents_t,
+                    decltype(&iree_io_file_contents_free)>
+        read_contents(raw_contents, iree_io_file_contents_free);
+    ASSERT_EQ(read_contents->const_buffer.data_length, offset + kWriteLength);
+    EXPECT_EQ(memcmp(read_contents->const_buffer.data, contents,
+                     offset + kWriteLength),
+              0);
+  }
+  IREE_EXPECT_OK(iree_io_stream_flush(stream.get()));
+}
+
+TEST(FileContents, StdioStreamFlushRejectsReadOnly) {
+  iree::testing::TempFilePath path("iree_stdio_flush_read_only_test");
+  const uint8_t contents[] = {0x11, 0x22, 0x33};
+  IREE_ASSERT_OK(iree_io_file_contents_write(
+      path.path_view(), iree_make_const_byte_span(contents, sizeof(contents)),
+      iree_allocator_system()));
+  iree_io_stream_t* raw_stream = NULL;
+  IREE_ASSERT_OK(iree_io_stdio_stream_open(
+      IREE_IO_STDIO_STREAM_MODE_READ, path.path_view(), iree_allocator_system(),
+      &raw_stream));
+  std::unique_ptr<iree_io_stream_t, decltype(&iree_io_stream_release)> stream(
+      raw_stream, iree_io_stream_release);
+  EXPECT_THAT(Status(iree_io_stream_flush(stream.get())),
+              StatusIs(StatusCode::kPermissionDenied));
+  EXPECT_EQ(iree_io_stream_offset(stream.get()), 0);
+  uint8_t actual[sizeof(contents)] = {};
+  IREE_ASSERT_OK(iree_io_stream_read(stream.get(), sizeof(actual), actual,
+                                     /*out_buffer_length=*/NULL));
+  EXPECT_EQ(memcmp(actual, contents, sizeof(contents)), 0);
+}
+
+#if defined(IREE_PLATFORM_LINUX)
+
+TEST(FileContents, StdioStreamFlushReportsDeferredWriteFailure) {
+  char buffer[4096];
+  std::unique_ptr<FILE, int (*)(FILE*)> file(fopen("/dev/full", "wb"), fclose);
+  ASSERT_NE(file.get(), nullptr);
+  ASSERT_EQ(setvbuf(file.get(), buffer, _IOFBF, sizeof(buffer)), 0);
+  iree_io_stream_t* raw_stream = NULL;
+  IREE_ASSERT_OK(iree_io_stdio_stream_wrap(
+      IREE_IO_STREAM_MODE_WRITABLE, file.get(), /*owns_handle=*/false,
+      iree_allocator_system(), &raw_stream));
+  std::unique_ptr<iree_io_stream_t, decltype(&iree_io_stream_release)> stream(
+      raw_stream, iree_io_stream_release);
+
+  // The write must succeed in the real stdio buffer so the error is reported at
+  // the explicit flush, not an earlier write or a later void release.
+  const uint8_t value = 0x5A;
+  IREE_ASSERT_OK(iree_io_stream_write(stream.get(), sizeof(value), &value));
+  EXPECT_THAT(Status(iree_io_stream_flush(stream.get())),
+              StatusIs(StatusCode::kResourceExhausted));
+}
+
+#endif  // IREE_PLATFORM_LINUX
 
 // Tests that a file opened for reading can be opened again concurrently.
 // Validates FILE_SHARE_READ behavior on Windows. Without it, the second open
