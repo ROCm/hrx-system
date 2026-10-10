@@ -11,9 +11,11 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -34,6 +36,107 @@ IREE_FLAG(string, model_source, "",
 namespace {
 
 using loom_serve::testing::StalledStderr;
+
+// A serialized serving-owner process, sharing the exact host with compilation
+// and an optional already-admitted service cohort. Only the outer test waits.
+struct ModelLoad {
+  static void Wake(void* user_data) {
+    auto* self = static_cast<ModelLoad*>(user_data);
+    iree_task_executor_schedule_process(self->executor, &self->process);
+  }
+
+  static iree_status_t Drain(iree_task_process_t* process,
+                             const iree_task_worker_context_t*,
+                             iree_task_process_drain_result_t* result) {
+    auto* self = static_cast<ModelLoad*>(process->user_data);
+    std::unique_lock<std::mutex> lock(self->mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      return iree_ok_status();
+    }
+    if (!self->complete) {
+      self->status = iree_status_join(
+          self->status,
+          loom_serve_finite_load_advance(self->load, 0, &self->complete));
+      if (self->cancel_after_start && !self->complete) {
+        // The first CPU task has been accepted, even with only one worker.
+        self->status = iree_status_join(
+            self->status, loom_serve_finite_load_advance(
+                              self->load, LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL,
+                              &self->complete));
+      }
+      if (self->complete) {
+        self->report = *loom_serve_finite_load_report(self->load);
+        if (iree_status_is_ok(self->status)) {
+          self->model = loom_serve_finite_load_take_model(self->load);
+        }
+        self->status = iree_status_join(
+            self->status,
+            loom_serve_finite_load_destroy(std::exchange(self->load, nullptr)));
+      }
+    }
+    bool pending = false;
+    if (self->service) {
+      self->status = iree_status_join(
+          self->status,
+          self->service->advance(self->service->self, 0, &result->did_work));
+      pending = self->service->is_pending(self->service->self);
+    }
+    result->completed = self->complete && !pending;
+    return iree_ok_status();
+  }
+
+  static void Release(iree_task_process_t* process) {
+    auto* self = static_cast<ModelLoad*>(process->user_data);
+    std::lock_guard<std::mutex> lock(self->mutex);
+    self->released = true;
+    self->condition.notify_one();
+  }
+
+  iree_status_t Run(loom_serve_device_t* device,
+                    const loom_serve_finite_model_options_t& options) {
+    executor = loom_serve_host_executor(loom_serve_device_host(device));
+    iree_task_process_initialize(Drain, 0, 1, &process);
+    process.user_data = this;
+    process.release_fn = Release;
+    IREE_RETURN_IF_ERROR(loom_serve_finite_load_create(
+        device, &options, Wake, this, &load, iree_allocator_system()));
+    if (service) {
+      service->set_observer(service->self, {Wake, this});
+    }
+    Wake(this);
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [&] { return released; });
+    if (service) {
+      service->set_observer(service->self, {});
+    }
+    return status;
+  }
+
+  // Borrowed shared executor for both owner turns and private preparation.
+  iree_task_executor_t* executor = nullptr;
+  // Optional live service advanced by this same serialized pool owner.
+  loom_serve_http_service_t* service = nullptr;
+  // Owned in-progress load, consumed at its terminal owner turn.
+  loom_serve_finite_load_t* load = nullptr;
+  // Prepared model transferred to the outer fixture on success.
+  loom_serve_finite_model_t* model = nullptr;
+  // Copied terminal evidence, surviving failed or cancelled preparation.
+  loom_serve_compilation_report_t report = {};
+  // Owner process; asynchronous callbacks only wake it.
+  iree_task_process_t process = {};
+  // Serializes owner turns and the final release with the outer test.
+  std::mutex mutex;
+  // Outer-only notification of actual process retirement.
+  std::condition_variable condition;
+  // Exercises cancellation after actual task acceptance, not a fake callback.
+  bool cancel_after_start = false;
+  // Terminal preparation outcome has been consumed and load destroyed.
+  bool complete = false;
+  // Executor has made its final access to this process.
+  bool released = false;
+  // Terminal outcome, owned by the outer caller after Run.
+  iree_status_t status = iree_ok_status();
+};
 
 class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
  protected:
@@ -65,8 +168,9 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
         .source_directory = iree_make_cstring_view(directory.c_str()),
         .asset_directory = iree_make_cstring_view(directory.c_str()),
         .options = IREE_SV("{\"batch_units\":64}")};
-    IREE_ASSERT_OK(loom_serve_finite_model_create(device_, &model_options,
-                                                  &model_, allocator_));
+    ModelLoad load;
+    IREE_ASSERT_OK(load.Run(device_, model_options));
+    model_ = load.model;
     EXPECT_EQ(loom_serve_finite_model_batch_limit(model_), 64u);
   }
 
@@ -254,7 +358,8 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
     weights.write(reinterpret_cast<const char*>(length), sizeof(length));
     weights.write(header.data(), header.size());
     uint8_t factor[4];
-    iree_unaligned_store_le_u32(factor, 0x40000000);  // F32 2.0.
+    // F32 1.0; the source-selected preparation command doubles it on device.
+    iree_unaligned_store_le_u32(factor, 0x3f800000);
     weights.write(reinterpret_cast<const char*>(factor), sizeof(factor));
     weights.close();
     ASSERT_TRUE(weights.good());
@@ -506,6 +611,91 @@ TEST_P(SourceEmbeddingServiceTest,
   EXPECT_EQ(
       Read(Send(R"({"model":"fixture","input":"a"})")).find("HTTP/1.1 200"),
       0u);
+}
+
+TEST_P(SourceEmbeddingServiceTest,
+       WeightedLoadSharesTheServingWorkerAndNeverWritesStderr) {
+  const std::string package =
+      iree::testing::MakeTempFilePath("live_weighted_embedding");
+  ASSERT_NO_FATAL_FAILURE(WriteWeightedPackage(package));
+  const loom_serve_finite_model_options_t options = {
+      .source_directory = iree_make_cstring_view(package.c_str()),
+      .asset_directory = iree_make_cstring_view(package.c_str()),
+      .options = IREE_SV("{}")};
+  const int resident = Send(R"({"model":"fixture","input":"a"})");
+  Accept();
+  ModelLoad load;
+  load.service = &interface_;
+  iree_status_t status;
+  {
+    StalledStderr stalled;
+    ASSERT_NO_FATAL_FAILURE(stalled.Begin());
+    status = load.Run(device_, options);
+  }
+  retained_ = load.model;
+  IREE_ASSERT_OK(status);
+  ASSERT_NE(retained_, nullptr);
+  EXPECT_NE(Read(resident).find(R"("embedding":[1,1,1,1])"), std::string::npos);
+  EXPECT_EQ(load.report.commands, 2u);  // Consumer and in-place preparer.
+  EXPECT_EQ(load.report.workers, GetParam());
+  EXPECT_EQ(load.report.diagnostic_count, 0u);
+
+  // Preparation has not loaded weights. First use activates and transforms
+  // canonical bytes in place; exact output distinguishes the prepared factor.
+  EXPECT_EQ(loom_serve_residency_activity(
+                loom_serve_finite_model_residency(retained_))
+                .activations,
+            0u);
+  loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
+  std::swap(model_, retained_);
+  ASSERT_NO_FATAL_FAILURE(CreateService(0));
+  const int prepared = Send(R"({"model":"fixture","input":"a"})");
+  Accept();
+  Drain();
+  EXPECT_NE(Read(prepared).find(R"("embedding":[2,2,2,2])"), std::string::npos);
+}
+
+TEST_P(SourceEmbeddingServiceTest,
+       CancelledAndFailedLoadsKeepTheirResidentPeerUsable) {
+  const std::string package =
+      iree::testing::MakeTempFilePath("invalid_embedding");
+  ASSERT_NO_FATAL_FAILURE(WriteWeightedPackage(package));
+  // copy_file preserves read-only runfile permissions on this owned copy.
+  std::filesystem::permissions(package + "/control.loom",
+                               std::filesystem::perms::owner_write,
+                               std::filesystem::perm_options::add);
+  std::ofstream invalid(package + "/control.loom");
+  invalid << "this is not a Loom program\n";
+  invalid.close();
+  ASSERT_TRUE(invalid.good());
+  for (bool cancel : {true, false}) {
+    const auto& source = cancel ? directory_ : package;
+    const loom_serve_finite_model_options_t options = {
+        .source_directory = iree_make_cstring_view(source.c_str()),
+        .asset_directory = iree_make_cstring_view(source.c_str()),
+        .options = IREE_SV("{}")};
+    const int resident = Send(R"({"model":"fixture","input":"a"})");
+    Accept();
+    ModelLoad load;
+    load.service = &interface_;
+    load.cancel_after_start = cancel;
+    iree_status_t status;
+    {
+      StalledStderr stalled;
+      ASSERT_NO_FATAL_FAILURE(stalled.Begin());
+      status = load.Run(device_, options);
+    }
+    IREE_EXPECT_STATUS_IS(
+        cancel ? IREE_STATUS_CANCELLED : IREE_STATUS_INVALID_ARGUMENT, status);
+    EXPECT_EQ(load.model, nullptr);
+    EXPECT_EQ(load.report.commands, 0u);
+    if (!cancel) {
+      EXPECT_GT(load.report.diagnostic_count, 0u);
+      EXPECT_GT(load.report.diagnostics[0].message_length, 0u);
+    }
+    EXPECT_NE(Read(resident).find(R"("embedding":[1,1,1,1])"),
+              std::string::npos);
+  }
 }
 
 TEST_P(SourceEmbeddingServiceTest,

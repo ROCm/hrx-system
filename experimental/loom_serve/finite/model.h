@@ -7,6 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_FINITE_MODEL_H_
 #define EXPERIMENTAL_LOOM_SERVE_FINITE_MODEL_H_
 
+#include "experimental/loom_serve/runtime/compilation.h"
 #include "experimental/loom_serve/runtime/device.h"
 #include "iree/tokenizer/tokenizer.h"
 #include "iree/vm/buffer.h"
@@ -20,13 +21,57 @@ extern "C" {
 typedef struct loom_serve_finite_model_t loom_serve_finite_model_t;
 
 typedef struct loom_serve_finite_model_options_t {
-  // Source package directory, borrowed during creation.
+  // Source package directory, borrowed through load completion.
   iree_string_view_t source_directory;
   // Asset directory interpreted by the cold source program.
   iree_string_view_t asset_directory;
   // Source-owned JSON object configuring capacity and model policy.
   iree_string_view_t options;
 } loom_serve_finite_model_options_t;
+
+// Owner-driven preparation. Private CPU/JIT work runs on the shared host;
+// advance alone binds shared memory, residency and runtime capabilities.
+typedef struct loom_serve_finite_load_t loom_serve_finite_load_t;
+
+// Called after accepted preparation work retires. May only notify/schedule
+// the serialized owner; it must not call back into the load or block. Payload
+// and borrowed device/options remain live through the load's terminal advance.
+typedef void (*loom_serve_finite_load_wake_fn_t)(void* user_data);
+
+// Allocates an unstarted operation without model storage reservation, source
+// I/O or work submission. Options' views are borrowed, not copied. A registered
+// but drained deployment can defer creating this operation altogether.
+iree_status_t loom_serve_finite_load_create(
+    loom_serve_device_t* device,
+    const loom_serve_finite_model_options_t* options,
+    loom_serve_finite_load_wake_fn_t wake, void* user_data,
+    loom_serve_finite_load_t** out_load, iree_allocator_t host_allocator);
+
+enum loom_serve_finite_load_flag_bits_e {
+  // Stops subsequent phases, retiring any accepted CPU/JIT work before the
+  // terminal CANCELLED result. No callback tears down shared resources.
+  LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL = 1u << 0,
+};
+typedef uint32_t loom_serve_finite_load_flags_t;
+
+// Serialized pool-owner turn. Never waits for tasks or device work. After a
+// nonterminal result, wake schedules another turn. A terminal result transfers
+// exclusive access to the owner, including on failure; no callbacks remain.
+// Call until *out_complete, then inspect evidence and take or destroy the load.
+iree_status_t loom_serve_finite_load_advance(
+    loom_serve_finite_load_t* load, loom_serve_finite_load_flags_t flags,
+    bool* out_complete);
+
+// Terminal-only queries. Evidence is borrowed until take_model or destruction;
+// take_model transfers a successfully prepared, still-unactivated model.
+const loom_serve_compilation_report_t* loom_serve_finite_load_report(
+    const loom_serve_finite_load_t* load);
+loom_serve_finite_model_t* loom_serve_finite_load_take_model(
+    loom_serve_finite_load_t* load);
+
+// Destroys a terminal operation and any untaken model. Preparation submits no
+// queue work, so partial-load cleanup requires no asynchronous retirement.
+iree_status_t loom_serve_finite_load_destroy(loom_serve_finite_load_t* load);
 
 // Source ABI (all metadata integers and F32 results are little-endian):
 // prepare.loom: prepare(asset_root, options: buffer) ->
@@ -45,8 +90,10 @@ typedef struct loom_serve_finite_model_options_t {
 // roots (input/output) plus compiler-reflected private workspace. Every stage
 // shares exactly the same fixed parameter placement. Source run uses runner
 // execute_2/feedback; only compact final vectors cross to the host.
-// Creation indexes weights without loading them. The shared device outlives
-// this model. Failure releases partial ownership and leaves *out_model NULL.
+// The cold outer-application constructor drives the same asynchronous load and
+// joins it outside the shared worker pool. Creation indexes weights without
+// loading them. The shared device outlives this model. Failure releases partial
+// ownership and leaves *out_model NULL. Live owners use load_advance instead.
 iree_status_t loom_serve_finite_model_create(
     loom_serve_device_t* device,
     const loom_serve_finite_model_options_t* options,

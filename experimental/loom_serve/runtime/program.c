@@ -12,9 +12,7 @@
 struct loom_serve_program_t {
   // Host allocation policy for the owner and all VM storage.
   iree_allocator_t allocator;
-  // Owned bytecode module retaining its emitted image.
-  iree_vm_module_t* module;
-  // Owned linked program retaining its native libraries.
+  // Owned linked program retaining bytecode and native libraries.
   iree_vm_program_t* program;
   // Owned process borrowing no session state.
   iree_vm_process_t* process;
@@ -33,20 +31,15 @@ void loom_serve_program_destroy(loom_serve_program_t* program) {
     iree_vm_invocation_deinitialize(program->invocation);
   }
   iree_vm_program_release(program->program);
-  iree_vm_module_release(program->module);
   iree_allocator_free(program->allocator, program);
 }
 
-iree_status_t loom_serve_program_create(
+iree_status_t loom_serve_program_compile(
     iree_vm_environment_t* environment, iree_string_view_t source_path,
     iree_host_size_t root_count, const iree_string_view_t* roots,
-    iree_vm_module_span_t libraries, loom_serve_compilation_report_t* report,
-    iree_allocator_t host_allocator, loom_serve_program_t** out_program) {
-  *out_program = NULL;
-  loom_serve_program_t* program = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*program),
-                                             (void**)&program));
-  program->allocator = host_allocator;
+    loom_serve_compilation_report_t* report, iree_allocator_t host_allocator,
+    iree_vm_module_t** out_module) {
+  *out_module = NULL;
   iree_const_byte_span_t image = iree_const_byte_span_empty();
   iree_status_t status = loom_serve_jit_compile_vm(
       source_path, root_count, roots, report, host_allocator, &image);
@@ -54,16 +47,26 @@ iree_status_t loom_serve_program_create(
     status = iree_vm_bytecode_module_create_trusted(
         environment, IREE_SV("model"),
         (iree_vm_bytecode_module_storage_t){image, host_allocator},
-        host_allocator, &program->module);
+        host_allocator, out_module);
     if (!iree_status_is_ok(status)) {
       iree_allocator_free(host_allocator, (void*)image.data);
     }
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_vm_program_create(
-        (iree_vm_program_modules_t){program->module, libraries}, host_allocator,
-        &program->program);
-  }
+  return status;
+}
+
+iree_status_t loom_serve_program_link(iree_vm_module_t* module,
+                                      iree_vm_module_span_t libraries,
+                                      iree_allocator_t host_allocator,
+                                      loom_serve_program_t** out_program) {
+  *out_program = NULL;
+  loom_serve_program_t* program = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*program),
+                                             (void**)&program));
+  program->allocator = host_allocator;
+  iree_status_t status =
+      iree_vm_program_create((iree_vm_program_modules_t){module, libraries},
+                             host_allocator, &program->program);
   if (iree_status_is_ok(status)) {
     status = iree_vm_invocation_initialize(
         iree_make_byte_span(program->storage, sizeof(program->storage)),
@@ -79,6 +82,24 @@ iree_status_t loom_serve_program_create(
   } else {
     loom_serve_program_destroy(program);
   }
+  return status;
+}
+
+iree_status_t loom_serve_program_create(
+    iree_vm_environment_t* environment, iree_string_view_t source_path,
+    iree_host_size_t root_count, const iree_string_view_t* roots,
+    iree_vm_module_span_t libraries, loom_serve_compilation_report_t* report,
+    iree_allocator_t host_allocator, loom_serve_program_t** out_program) {
+  *out_program = NULL;
+  iree_vm_module_t* module = NULL;
+  iree_status_t status =
+      loom_serve_program_compile(environment, source_path, root_count, roots,
+                                 report, host_allocator, &module);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_serve_program_link(module, libraries, host_allocator, out_program);
+  }
+  iree_vm_module_release(module);
   return status;
 }
 

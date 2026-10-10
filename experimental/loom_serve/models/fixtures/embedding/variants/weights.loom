@@ -3,6 +3,25 @@ amdgpu.target<gfx11-generic> @weighted_target {subgroup_size = 32}
 kernel.decl @pool() launch(%input: buffer, %hidden: buffer)
 kernel.decl @project() launch(%input: buffer, %hidden: buffer, %output: buffer)
 
+// Converts the checkpoint scalar directly in final storage on activation.
+kernel.def target(@weighted_target) @double_factor() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%storage: buffer) {
+  %origin = index.constant 0 : offset
+  %factor = buffer.view %storage[%origin] : buffer -> view<1xf32>
+  %value = view.load %factor[0] : view<1xf32> -> f32
+  %two = scalar.constant 2.0 : f32
+  %prepared = scalar.mulf %value, %two : f32
+  view.store %prepared, %factor[0] : f32, view<1xf32>
+  kernel.return
+}
+
+command.program.def public @prepare_factor() launch(%storage: buffer) {
+  kernel.launch @double_factor(%storage) : (buffer)
+  command.return
+}
+
 // A replacement package can add immutable parameters without changing the
 // native finite-vector ABI. This head scales all live vectors on device.
 kernel.def target(@weighted_target) @scale() {
