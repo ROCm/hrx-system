@@ -276,7 +276,8 @@ static iree_status_t weight_prepare_spans(
   const iree_string_view_t roots[] = {IREE_SVL("prepare_weight")};
   iree_status_t status = loom_serve_program_create(
       environment, policy_path, IREE_ARRAYSIZE(roots), roots,
-      iree_vm_module_span_empty(), allocator, &program);
+      iree_vm_module_span_empty(), loom_serve_jit_report(jit), allocator,
+      &program);
   iree_vm_ref_types_t types = {0};
   if (iree_status_is_ok(status)) {
     status = iree_vm_ref_types_resolve(

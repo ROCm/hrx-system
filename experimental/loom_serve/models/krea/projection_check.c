@@ -29,6 +29,8 @@ IREE_FLAG(string, expected_adapter, "",
 IREE_FLAG(int32_t, rows, 576, "Image token count, a positive multiple of 16.");
 
 typedef struct projection_check_t {
+  // Copied startup evidence, rendered by the outer tool after preparation.
+  loom_serve_compilation_report_t compilation;
   // Application group, destroyed after all model and host I/O storage.
   loom_serve_device_group_t* group;
   // Borrowed device and queues within the application group.
@@ -116,7 +118,8 @@ static iree_status_t projection_initialize(projection_check_t* check,
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
       device, dispatch,
       loom_serve_host_task_pool(loom_serve_device_host(check->owner)),
-      iree_make_cstring_view(FLAG_model), NULL, allocator, &check->jit));
+      iree_make_cstring_view(FLAG_model), NULL, &check->compilation, allocator,
+      &check->jit));
   char rows[32];
   snprintf(rows, sizeof(rows), "%d", FLAG_rows);
   const loomc_config_binding_t binding = {
@@ -284,6 +287,10 @@ int main(int argc, char** argv) {
   const iree_allocator_t allocator = iree_allocator_system();
   projection_check_t check = {0};
   iree_status_t status = projection_initialize(&check, allocator);
+  loom_output_stream_t output;
+  loom_output_stream_for_file(stderr, &output);
+  status = iree_status_join(
+      status, loom_serve_compilation_write(&check.compilation, &output));
   if (iree_status_is_ok(status)) {
     status = projection_run(&check);
   }

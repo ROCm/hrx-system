@@ -22,6 +22,9 @@ namespace {
 
 class PacketTest : public ::testing::Test {
  protected:
+  // Copied compiler evidence retained beyond individual results.
+  loom_serve_compilation_report_t compilation = {};
+
   void SetUp() override {
     IREE_ASSERT_OK(iree_vm_environment_allocate(allocator, &environment));
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
@@ -32,8 +35,8 @@ class PacketTest : public ::testing::Test {
                                         IREE_SVL("encode_state")};
     IREE_ASSERT_OK(loom_serve_program_create(
         environment, iree_make_cstring_view(FLAG_control_source),
-        IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_empty(), allocator,
-        &program));
+        IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_empty(), &compilation,
+        allocator, &program));
     IREE_ASSERT_OK(
         iree_vm_process_lookup_function(loom_serve_program_process(program),
                                         IREE_SV("model"), roots[0], &encode));

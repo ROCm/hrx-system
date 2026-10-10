@@ -203,7 +203,8 @@ def main():
         # child. A pull endpoint cannot promise post-shutdown observations.
     text = (args.output / "server.log").read_text()
     cold = [json.loads(line) for line in text.splitlines() if line.startswith("{")]
-    assert text.count('"event":"jit_stage"') == 2
+    compilations = [event for event in cold if event["event"] == "compilation"]
+    assert len(compilations) == 1 and compilations[0]["commands"] == 2
     residencies = [event for event in cold if event["event"] == "image_residency"]
     assert len(residencies) == 1
     residency = residencies[0]

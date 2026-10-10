@@ -43,6 +43,8 @@ IREE_FLAG(bool, report_only, false,
           "Nonfinite values and execution failures still fail.");
 
 typedef struct component_check_t {
+  // Copied startup evidence, rendered by the outer tool after preparation.
+  loom_serve_compilation_report_t compilation;
   // Application group outliving all accepted work and borrowed payloads.
   loom_serve_device_group_t* group;
   // Borrowed device and queues within the application group.
@@ -171,7 +173,8 @@ static iree_status_t component_initialize(component_check_t* check,
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
       device, dispatch,
       loom_serve_host_task_pool(loom_serve_device_host(check->owner)),
-      iree_make_cstring_view(FLAG_model), NULL, allocator, &check->jit));
+      iree_make_cstring_view(FLAG_model), NULL, &check->compilation, allocator,
+      &check->jit));
   IREE_RETURN_IF_ERROR(component_compile(check, allocator));
   const loom_cmd_program_t* program =
       loom_serve_jit_stage_program(check->stage);
@@ -438,6 +441,10 @@ int main(int argc, char** argv) {
   const iree_allocator_t allocator = iree_allocator_system();
   component_check_t check = {0};
   iree_status_t status = component_initialize(&check, allocator);
+  loom_output_stream_t output;
+  loom_output_stream_for_file(stderr, &output);
+  status = iree_status_join(
+      status, loom_serve_compilation_write(&check.compilation, &output));
   if (iree_status_is_ok(status)) {
     status = component_run(&check, allocator);
   }

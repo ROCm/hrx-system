@@ -46,6 +46,9 @@ std::string View(const loom_serve_text_chat_completion_t& completion) {
 
 class QwenChatTest : public ::testing::Test {
  protected:
+  // Copied compiler evidence retained beyond individual results.
+  loom_serve_compilation_report_t compilation = {};
+
   void SetUp() override {
     iree_string_builder_initialize(iree_allocator_system(), &calls_);
     IREE_ASSERT_OK(
@@ -89,8 +92,8 @@ class QwenChatTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_serve_program_create(
         environment_, iree_make_cstring_view(FLAG_chat_source),
         IREE_ARRAYSIZE(roots), roots,
-        iree_vm_module_span_from_array(libraries_), iree_allocator_system(),
-        &program_));
+        iree_vm_module_span_from_array(libraries_), &compilation,
+        iree_allocator_system(), &program_));
     IREE_ASSERT_OK(loom_serve_text_chat_policy_initialize(environment_,
                                                           program_, &policy_));
   }
@@ -401,7 +404,7 @@ TEST_F(QwenChatTest, SourceMayReturnAnInputAliasAsTheCheckpoint) {
   loom_serve_program_t* program = nullptr;
   IREE_ASSERT_OK(loom_serve_program_create(
       environment_, iree_make_cstring_view(FLAG_alias_source),
-      IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_empty(),
+      IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_empty(), &compilation,
       iree_allocator_system(), &program));
   auto policy = policy_;
   policy.invocation = loom_serve_program_invocation(program);
@@ -552,8 +555,8 @@ TEST_F(QwenChatTest, IndependentPolicyOwnsRolesToolsAndRetainedTranscript) {
   // Only the tokenizer capability is linked. There is no XML codec to call.
   IREE_ASSERT_OK(loom_serve_program_create(
       environment_, iree_make_cstring_view(FLAG_portable_source),
-      IREE_ARRAYSIZE(roots), roots, {libraries_, 1}, iree_allocator_system(),
-      &program_));
+      IREE_ARRAYSIZE(roots), roots, {libraries_, 1}, &compilation,
+      iree_allocator_system(), &program_));
   IREE_ASSERT_OK(
       loom_serve_text_chat_policy_initialize(environment_, program_, &policy_));
   EXPECT_EQ(std::string(policy_.name.data, policy_.name.size), "portable-chat");

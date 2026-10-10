@@ -78,7 +78,8 @@ def main():
     ]
     residencies = [event for event in events if event.get("event") == "image_residency"]
     prepared = [event for event in events if event.get("event") == "image_prepared"]
-    assert retained.count('"event":"jit_stage"') == 2
+    compilations = [event for event in events if event["event"] == "compilation"]
+    assert len(compilations) == 1 and compilations[0]["commands"] == 2
     assert len(residencies) == 1
     residency = residencies[0]
     assert [stage["tag"] for stage in residency["stages"]] == [512, 128]

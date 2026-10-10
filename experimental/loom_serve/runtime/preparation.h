@@ -7,6 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_RUNTIME_PREPARATION_H_
 #define EXPERIMENTAL_LOOM_SERVE_RUNTIME_PREPARATION_H_
 
+#include "experimental/loom_serve/runtime/compilation.h"
 #include "iree/vm/environment.h"
 #include "iree/vm/program.h"
 #include "iree/vm/variant.h"
@@ -60,10 +61,12 @@ typedef struct loom_serve_preparation_t loom_serve_preparation_t;
 // No JIT command compilation, device allocation or parameter IO occurs here.
 // On failure all partial declarations are released and *out_preparation is
 // NULL.
+// report receives copied compiler diagnostics independently of this outcome.
 iree_status_t loom_serve_preparation_create(
     iree_vm_environment_t* environment, iree_string_view_t source_path,
     iree_string_view_t entry, iree_vm_variant_span_t arguments,
     iree_vm_variant_span_t results, iree_vm_module_span_t libraries,
+    loom_serve_compilation_report_t* report,
     loom_serve_preparation_t** out_preparation,
     iree_allocator_t host_allocator);
 

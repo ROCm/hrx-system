@@ -69,8 +69,8 @@ class ControlTest
         std::filesystem::path(FLAG_control_sources).parent_path().string();
     IREE_ASSERT_OK(loom_serve_jit_create(
         device_, dispatch, loom_serve_host_task_pool(host_),
-        iree_make_cstring_view(directory_.c_str()), nullptr, allocator_,
-        &jit_));
+        iree_make_cstring_view(directory_.c_str()), nullptr, &compilation_,
+        allocator_, &jit_));
     IREE_ASSERT_OK(Prepare(family, "prefill_to_decode", &commands_[0]));
     IREE_ASSERT_OK(Prepare(family, "decode_transition", &commands_[1]));
     IREE_ASSERT_OK(Prepare(family, "device_continuation", &commands_[2]));
@@ -198,7 +198,7 @@ class ControlTest
     const iree_string_view_t roots[] = {IREE_SVL("step"), IREE_SVL("fork")};
     IREE_RETURN_IF_ERROR(loom_serve_jit_compile_vm(
         iree_make_cstring_view(path.c_str()), IREE_ARRAYSIZE(roots), roots,
-        allocator_, &image));
+        &compilation_, allocator_, &image));
     iree_status_t status = iree_vm_bytecode_module_create_trusted(
         environment_, IREE_SV("model"), {image, allocator_}, allocator_,
         &bytecode_module_);
@@ -308,6 +308,8 @@ class ControlTest
   static constexpr std::array<size_t, 3> kContinuationLengths = {96, 16, 16};
   // Host allocation policy used for all runtime objects.
   iree_allocator_t allocator_ = iree_allocator_system();
+  // Copied compiler evidence retained beyond individual results.
+  loom_serve_compilation_report_t compilation_ = {};
   // Shared compiler workers and I/O services outliving the device.
   loom_serve_host_t* host_ = nullptr;
   // Cross-queue frontier registry retained through group destruction.

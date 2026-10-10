@@ -1,0 +1,2 @@
+// Malformed input exercises diagnostics before a source index or VM exists.
+func.def public @broken(}

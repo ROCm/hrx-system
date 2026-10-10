@@ -8,6 +8,7 @@
 #define EXPERIMENTAL_LOOM_SERVE_RUNTIME_JIT_H_
 
 #include "experimental/loom_serve/runtime/command.h"
+#include "experimental/loom_serve/runtime/compilation.h"
 #include "loomc/config.h"
 #include "loomc/sanitizer.h"
 #include "loomc/task_pool.h"
@@ -27,14 +28,21 @@ typedef struct loom_serve_jit_stage_t loom_serve_jit_stage_t;
 // with blank lines and lines beginning with # ignored. All providers are
 // indexed once. The selected queue family, device and task executor are
 // retained until destruction. The pool handle is borrowed only during creation.
+// report receives copied evidence even on failure and outlives the catalog.
+// Only the serialized compilation owner accesses it between completions.
 iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
                                     iree_hal_queue_t* dispatch,
                                     loomc_task_pool_t* task_pool,
                                     iree_string_view_t source_directory,
                                     const loomc_sanitizer_options_t* sanitizer,
+                                    loom_serve_compilation_report_t* report,
                                     iree_allocator_t host_allocator,
                                     loom_serve_jit_t** out_jit);
 void loom_serve_jit_destroy(loom_serve_jit_t* jit);
+
+// Borrowed evidence accumulator for serialized VM/parameter preparation using
+// this catalog. Native tasks merge into it before publishing completion.
+loom_serve_compilation_report_t* loom_serve_jit_report(loom_serve_jit_t* jit);
 
 // Receives the owned stage on success (NULL on failure) and owns status. Runs
 // on a shared task worker after every native request has retired. May schedule
@@ -87,6 +95,7 @@ iree_status_t loom_serve_jit_stage_record(
 iree_status_t loom_serve_jit_compile_vm(iree_string_view_t source_path,
                                         iree_host_size_t root_count,
                                         const iree_string_view_t* roots,
+                                        loom_serve_compilation_report_t* report,
                                         iree_allocator_t host_allocator,
                                         iree_const_byte_span_t* out_image);
 

@@ -22,6 +22,9 @@ namespace {
 
 class InputTest : public ::testing::TestWithParam<bool> {
  protected:
+  // Copied compiler evidence retained beyond individual results.
+  loom_serve_compilation_report_t compilation = {};
+
   void SetUp() override {
     IREE_ASSERT_OK(iree_vm_environment_allocate(allocator, &environment));
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
@@ -57,7 +60,7 @@ class InputTest : public ::testing::TestWithParam<bool> {
     IREE_ASSERT_OK(loom_serve_program_create(
         environment, iree_make_cstring_view(FLAG_input_source),
         IREE_ARRAYSIZE(roots), roots, (iree_vm_module_span_t){&module, 1},
-        allocator, &program));
+        &compilation, allocator, &program));
   }
   void TearDown() override {
     loom_serve_program_destroy(program);

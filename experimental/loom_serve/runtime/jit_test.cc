@@ -11,6 +11,13 @@
 #include <filesystem>
 #include <mutex>
 
+#if defined(__linux__)
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <cerrno>
+#endif
+
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/execution.h"
 #include "experimental/loom_serve/runtime/module.h"
@@ -22,8 +29,59 @@
 #include "iree/vm/sync.h"
 
 IREE_FLAG(string, jit_sources, "", "Portable test source catalog.");
+IREE_FLAG(string, invalid_sources, "", "Malformed source catalog.");
 
 namespace {
+
+#if defined(__linux__)
+// A full blocking sink makes an accidental worker-side diagnostic write hang
+// until the outer test harness reports failure. There is no consumer thread.
+class FullStderr {
+ public:
+  int Redirect() {
+    if (pipe2(pipe_, O_CLOEXEC | O_NONBLOCK) != 0) {
+      return errno;
+    }
+    char bytes[4096] = {};
+    while (write(pipe_[1], bytes, sizeof(bytes)) > 0) {
+    }
+    if (errno != EAGAIN) {
+      return errno;
+    }
+    if (fcntl(pipe_[1], F_SETFL, 0) != 0) {
+      return errno;
+    }
+    if (fflush(stderr) != 0) {
+      return errno;
+    }
+    original_ = dup(STDERR_FILENO);
+    if (original_ < 0) {
+      return errno;
+    }
+    return dup2(pipe_[1], STDERR_FILENO) < 0 ? errno : 0;
+  }
+  ~FullStderr() {
+    if (original_ >= 0) {
+      // Restore before reporting cleanup failures to the test runner.
+      const int restored = dup2(original_, STDERR_FILENO);
+      EXPECT_GE(restored, 0);
+      EXPECT_EQ(close(original_), 0);
+    }
+    if (pipe_[1] >= 0) {
+      EXPECT_EQ(close(pipe_[1]), 0);
+    }
+    if (pipe_[0] >= 0) {
+      EXPECT_EQ(close(pipe_[0]), 0);
+    }
+  }
+
+ private:
+  // Pipe endpoints owned through restoration of the process stderr handle.
+  int pipe_[2] = {-1, -1};
+  // Saved process stderr descriptor, or -1 before successful duplication.
+  int original_ = -1;
+};
+#endif
 
 // A scheduler process submits compilation from the same executor that must
 // compile its native requests. Only the outer test thread waits. One worker
@@ -113,8 +171,8 @@ class JitTest : public ::testing::TestWithParam<int> {
     IREE_ASSERT_OK(loom_serve_jit_create(
         device_, dispatch_,
         loom_serve_host_task_pool(loom_serve_device_host(device_owner_)),
-        iree_make_cstring_view(directory_.c_str()), nullptr, allocator_,
-        &jit_));
+        iree_make_cstring_view(directory_.c_str()), nullptr, &compilation_,
+        allocator_, &jit_));
   }
 
   void TearDown() override {
@@ -205,7 +263,7 @@ class JitTest : public ::testing::TestWithParam<int> {
                                         IREE_SVL("selected_step")};
     IREE_RETURN_IF_ERROR(loom_serve_jit_compile_vm(
         iree_make_cstring_view(path.c_str()), IREE_ARRAYSIZE(roots), roots,
-        allocator_, &image));
+        &compilation_, allocator_, &image));
     auto status = iree_vm_bytecode_module_create_trusted(
         environment_, IREE_SV("model"), {image, allocator_}, allocator_,
         &bytecode_);
@@ -230,6 +288,8 @@ class JitTest : public ::testing::TestWithParam<int> {
 
   // Host allocation policy for all fixture resources.
   iree_allocator_t allocator_ = iree_allocator_system();
+  // Copied compiler evidence retained beyond individual results.
+  loom_serve_compilation_report_t compilation_ = {};
   // Application group outliving all compiler, VM and I/O resources.
   loom_serve_device_group_t* group_ = nullptr;
   // Borrowed device record within the application group.
@@ -286,16 +346,28 @@ class JitTest : public ::testing::TestWithParam<int> {
 };
 
 TEST_P(JitTest, SourceDefaultsAndOverridesShareVmAndGpuState) {
+  // The same exact-output witness runs with a sink unable to accept any byte.
+#if defined(__linux__)
+  FullStderr blocked;
+  ASSERT_EQ(blocked.Redirect(), 0);
+#endif
   // A failed native task must join its accepted siblings before compiler reuse.
   IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Compile("3", 0, IREE_SV("invalid_native")));
   ASSERT_EQ(commands_[0], nullptr);
+  EXPECT_GT(compilation_.severities[LOOMC_DIAGNOSTIC_SEVERITY_ERROR], 0u);
+  ASSERT_GT(compilation_.diagnostic_count, 0u);
+  EXPECT_GT(compilation_.diagnostics[0].message_length, 0u);
   IREE_ASSERT_OK(Compile(nullptr, 0));
   IREE_ASSERT_OK(Compile("7", 1));
   IREE_ASSERT_OK(PrepareVm());
   // Prepared commands must outlive all compiler/source storage.
   loom_serve_jit_destroy(jit_);
   jit_ = nullptr;
+  EXPECT_EQ(compilation_.commands, 3u);
+  EXPECT_EQ(compilation_.entries, 16u);
+  EXPECT_EQ(compilation_.workers, GetParam());
+  EXPECT_GT(compilation_.duration_ns, 0u);
   iree_hal_buffer_params_t params = {};
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
@@ -332,6 +404,48 @@ TEST_P(JitTest, SourceDefaultsAndOverridesShareVmAndGpuState) {
   for (size_t i = 0; i < output_.size(); ++i) {
     EXPECT_EQ(output_[i], 112 + 2 * i) << "specialized element " << i;
   }
+}
+
+TEST_P(JitTest, SourceFailureOutlivesUnconstructedCatalogAndVm) {
+#if defined(__linux__)
+  FullStderr blocked;
+  ASSERT_EQ(blocked.Redirect(), 0);
+#endif
+  const std::string directory =
+      std::filesystem::path(FLAG_invalid_sources).parent_path().string();
+  loom_serve_jit_t* invalid = nullptr;
+  loom_serve_compilation_report_t report = {};
+  auto status = loom_serve_jit_create(
+      device_, dispatch_,
+      loom_serve_host_task_pool(loom_serve_device_host(device_owner_)),
+      iree_make_cstring_view(directory.c_str()), nullptr, &report, allocator_,
+      &invalid);
+  EXPECT_FALSE(iree_status_is_ok(status));
+  EXPECT_EQ(invalid, nullptr);
+  EXPECT_GT(report.severities[LOOMC_DIAGNOSTIC_SEVERITY_ERROR], 0u);
+  ASSERT_GT(report.diagnostic_count, 0u);
+  EXPECT_GT(report.diagnostics[0].line, 0u);
+  EXPECT_GT(report.diagnostics[0].source_length, 0u);
+  const auto message = iree_status_message(status);
+  EXPECT_NE(std::string(message.data, message.size).find("invalid.loom"),
+            std::string::npos);
+  iree_status_free(status);
+  loom_serve_jit_destroy(invalid);
+
+  const std::string path = directory + "/invalid.loom";
+  const iree_string_view_t root = IREE_SVL("broken");
+  // More failures than retained slots leave complete severity counters.
+  for (size_t i = 0; i < 10; ++i) {
+    iree_const_byte_span_t image = {};
+    status = loom_serve_jit_compile_vm(iree_make_cstring_view(path.c_str()), 1,
+                                       &root, &report, allocator_, &image);
+    EXPECT_FALSE(iree_status_is_ok(status));
+    EXPECT_EQ(image.data, nullptr);
+    iree_status_free(status);
+  }
+  EXPECT_EQ(report.diagnostic_count, IREE_ARRAYSIZE(report.diagnostics));
+  EXPECT_GE(report.severities[LOOMC_DIAGNOSTIC_SEVERITY_ERROR], 11u);
+  EXPECT_EQ(report.commands, 0u);
 }
 
 TEST_P(JitTest, InvalidConfigurationLeavesCompilerReusable) {

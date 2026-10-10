@@ -263,6 +263,21 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    compilation
+  HDRS
+    "compilation.h"
+  SRCS
+    "compilation.c"
+  DEPS
+    iree::base
+    loom::binding::c::loomc
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     jit
   HDRS
     "jit.h"
@@ -270,6 +285,7 @@ loom_cc_library(
     "jit.c"
   DEPS
     ::command
+    ::compilation
     iree::base
     iree::base::internal::path
     iree::base::threading
@@ -286,6 +302,20 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    compilation_test
+  SRCS
+    "compilation_test.cc"
+  DEPS
+    ::compilation
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::util::stream
+)
+
 if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_test(
   NAME
@@ -293,6 +323,8 @@ loom_cc_test(
   SRCS
     "jit_test.cc"
   DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/compilation/invalid.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/compilation/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/jit/config.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/jit/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/jit/sources.txt"
@@ -314,6 +346,7 @@ loom_cc_test(
     loom::binding::c::loomc
   ARGS
     "--jit_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/jit/sources.txt}}"
+    "--invalid_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/compilation/sources.txt}}"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
   RESOURCE_GROUP
@@ -329,6 +362,7 @@ loom_cc_library(
   SRCS
     "program.c"
   DEPS
+    ::compilation
     ::jit
     iree::base
     iree::vm
@@ -387,6 +421,7 @@ loom_cc_library(
   SRCS
     "preparation.c"
   DEPS
+    ::compilation
     ::program
     iree::base
     iree::base::internal::path

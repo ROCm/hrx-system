@@ -6,6 +6,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_RUNTIME_PROGRAM_H_
 #define EXPERIMENTAL_LOOM_SERVE_RUNTIME_PROGRAM_H_
 
+#include "experimental/loom_serve/runtime/compilation.h"
 #include "iree/vm/environment.h"
 #include "iree/vm/invocation.h"
 #include "iree/vm/process.h"
@@ -25,13 +26,12 @@ typedef struct loom_serve_program_t loom_serve_program_t;
 // scopes must outlive the program and any returned references. Libraries are
 // retained by the program.
 // No compiler storage or source-file mapping survives this call.
-iree_status_t loom_serve_program_create(iree_vm_environment_t* environment,
-                                        iree_string_view_t source_path,
-                                        iree_host_size_t root_count,
-                                        const iree_string_view_t* roots,
-                                        iree_vm_module_span_t libraries,
-                                        iree_allocator_t host_allocator,
-                                        loom_serve_program_t** out_program);
+// report accumulates copied source diagnostics, including on failure.
+iree_status_t loom_serve_program_create(
+    iree_vm_environment_t* environment, iree_string_view_t source_path,
+    iree_host_size_t root_count, const iree_string_view_t* roots,
+    iree_vm_module_span_t libraries, loom_serve_compilation_report_t* report,
+    iree_allocator_t host_allocator, loom_serve_program_t** out_program);
 
 // Releases VM ownership only. The caller joins native asynchronous work before
 // destroying the program or any host payloads that work borrows.

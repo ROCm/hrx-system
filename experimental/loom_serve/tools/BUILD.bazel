@@ -116,11 +116,13 @@ loom_cc_binary(
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
+        "//experimental/loom_serve/runtime:compilation",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:jit",
         "//experimental/loom_serve/runtime:weights",
         "//loom/binding/c:loomc",
+        "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:path",

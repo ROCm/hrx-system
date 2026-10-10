@@ -46,6 +46,7 @@ static iree_status_t text_argument(const iree_vm_ref_types_t* types,
 }
 
 static iree_status_t run(iree_allocator_t allocator) {
+  loom_serve_compilation_report_t compilation = {0};
   uint64_t seed = 0;
   IREE_RETURN_IF_ERROR(
       iree_json_parse_uint64(iree_make_cstring_view(FLAG_seed), &seed));
@@ -90,7 +91,8 @@ static iree_status_t run(iree_allocator_t allocator) {
         environment, iree_make_cstring_view(prepare_path), IREE_SV("prepare"),
         iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(metadata),
-        (iree_vm_module_span_t){&input, 1}, &preparation, allocator);
+        (iree_vm_module_span_t){&input, 1}, &compilation, &preparation,
+        allocator);
   }
   iree_allocator_free(allocator, prepare_path);
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
@@ -143,7 +145,7 @@ static iree_status_t run(iree_allocator_t allocator) {
   if (iree_status_is_ok(status)) {
     status = loom_serve_program_create(
         environment, iree_make_cstring_view(control_path), 1, &entry,
-        (iree_vm_module_span_t){&input, 1}, allocator, &program);
+        (iree_vm_module_span_t){&input, 1}, &compilation, allocator, &program);
   }
   iree_allocator_free(allocator, control_path);
   iree_vm_buffer_t* tags = NULL;
@@ -227,6 +229,10 @@ static iree_status_t run(iree_allocator_t allocator) {
   iree_vm_module_release(input);
   iree_tokenizer_free(tokenizer);
   iree_vm_environment_free(environment);
+  loom_output_stream_t output;
+  loom_output_stream_for_file(stderr, &output);
+  status = iree_status_join(
+      status, loom_serve_compilation_write(&compilation, &output));
   return status;
 }
 

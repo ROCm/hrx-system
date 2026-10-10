@@ -235,11 +235,24 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "compilation",
+    srcs = ["compilation.c"],
+    hdrs = ["compilation.h"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "jit",
     srcs = ["jit.c"],
     hdrs = ["jit.h"],
     deps = [
         ":command",
+        ":compilation",
         "//loom/binding/c:loomc",
         "//loom/binding/c:task_pool",
         "//loom/binding/c:task_queue",
@@ -257,10 +270,28 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "compilation_test",
+    srcs = ["compilation_test.cc"],
+    deps = [
+        ":compilation",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "jit_test",
     srcs = ["jit_test.cc"],
-    args = ["--jit_sources=$(rootpath :testdata/jit/sources.txt)"],
+    args = [
+        "--jit_sources=$(rootpath :testdata/jit/sources.txt)",
+        "--invalid_sources=$(rootpath :testdata/compilation/sources.txt)",
+    ],
     data = [
+        "testdata/compilation/invalid.loom",
+        "testdata/compilation/sources.txt",
         "testdata/jit/config.loom",
         "testdata/jit/control.loom",
         "testdata/jit/sources.txt",
@@ -295,6 +326,7 @@ loom_cc_library(
     srcs = ["program.c"],
     hdrs = ["program.h"],
     deps = [
+        ":compilation",
         ":jit",
         "//runtime/src/iree/base",
         "//runtime/src/iree/vm",
@@ -343,6 +375,7 @@ loom_cc_library(
     srcs = ["preparation.c"],
     hdrs = ["preparation.h"],
     deps = [
+        ":compilation",
         ":program",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/base",

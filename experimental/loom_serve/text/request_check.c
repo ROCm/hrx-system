@@ -83,6 +83,7 @@ static iree_status_t report(const loom_serve_text_chat_t* chat,
 }
 
 static iree_status_t run(iree_allocator_t allocator) {
+  loom_serve_compilation_report_t compilation = {0};
   if (!FLAG_model[0] || !FLAG_tokenizer[0] || !FLAG_request[0] ||
       FLAG_capacity <= 0 || FLAG_capacity > 262144) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -128,7 +129,8 @@ static iree_status_t run(iree_allocator_t allocator) {
   if (iree_status_is_ok(status)) {
     status = loom_serve_program_create(
         environment, iree_make_cstring_view(path), IREE_ARRAYSIZE(roots), roots,
-        iree_vm_module_span_from_array(libraries), allocator, &program);
+        iree_vm_module_span_from_array(libraries), &compilation, allocator,
+        &program);
   }
   iree_allocator_free(allocator, path);
   loom_serve_text_chat_policy_t policy = {0};
@@ -192,6 +194,10 @@ static iree_status_t run(iree_allocator_t allocator) {
   }
   iree_tokenizer_free(tokenizer);
   iree_vm_environment_free(environment);
+  loom_output_stream_t output;
+  loom_output_stream_for_file(stderr, &output);
+  status = iree_status_join(
+      status, loom_serve_compilation_write(&compilation, &output));
   return status;
 }
 

@@ -61,6 +61,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::path
+    iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::input
@@ -79,6 +80,7 @@ loom_cc_library(
     iree::tooling::device_util
     iree::vm
     loom::binding::c::loomc
+    loom::util::stream
   PUBLIC
 )
 endif()

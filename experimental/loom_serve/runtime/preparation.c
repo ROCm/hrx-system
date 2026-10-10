@@ -329,6 +329,7 @@ iree_status_t loom_serve_preparation_create(
     iree_vm_environment_t* environment, iree_string_view_t source_path,
     iree_string_view_t entry, iree_vm_variant_span_t arguments,
     iree_vm_variant_span_t results, iree_vm_module_span_t libraries,
+    loom_serve_compilation_report_t* report,
     loom_serve_preparation_t** out_preparation,
     iree_allocator_t host_allocator) {
   *out_preparation = NULL;
@@ -377,8 +378,8 @@ iree_status_t loom_serve_preparation_create(
     }
     status = loom_serve_program_create(
         environment, source_path, 1, &entry,
-        (iree_vm_module_span_t){linked, libraries.count + 1}, host_allocator,
-        &program);
+        (iree_vm_module_span_t){linked, libraries.count + 1}, report,
+        host_allocator, &program);
   }
   iree_allocator_free(host_allocator, linked);
   if (iree_status_is_ok(status)) {

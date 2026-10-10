@@ -19,6 +19,9 @@ namespace {
 
 class ProgramTest : public ::testing::Test {
  protected:
+  // Copied compiler evidence retained beyond individual results.
+  loom_serve_compilation_report_t compilation = {};
+
   void TearDown() override {
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
@@ -50,8 +53,8 @@ TEST_F(ProgramTest, SourcePolicyQueriesBorrowedKeysAndOwnsResults) {
   const iree_string_view_t roots[] = {IREE_SVL("prepare_weight")};
   IREE_ASSERT_OK(loom_serve_program_create(
       environment, iree_make_cstring_view(FLAG_policy_source),
-      IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_empty(), allocator,
-      &program));
+      IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_empty(), &compilation,
+      allocator, &program));
   iree_vm_function_t function = {};
   IREE_ASSERT_OK(iree_vm_process_lookup_function(
       loom_serve_program_process(program), IREE_SV("model"),

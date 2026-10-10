@@ -59,6 +59,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::path
     iree::experimental::loom_serve::runtime::command
+    iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::input
@@ -84,6 +85,7 @@ loom_cc_library(
     iree::tooling::device_util
     iree::vm
     loom::binding::c::loomc
+    loom::util::stream
   PUBLIC
 )
 endif()
@@ -331,6 +333,7 @@ loom_cc_binary(
     iree::base
     iree::base::internal::path
     iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::input
     iree::experimental::loom_serve::runtime::json
     iree::experimental::loom_serve::runtime::program

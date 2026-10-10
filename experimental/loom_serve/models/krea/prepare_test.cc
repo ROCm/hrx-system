@@ -24,6 +24,9 @@ std::string String(iree_string_view_t value) {
 
 class PreparationTest : public ::testing::Test {
  protected:
+  // Copied compiler evidence retained beyond individual results.
+  loom_serve_compilation_report_t compilation = {};
+
   void SetUp() override {
     IREE_ASSERT_OK(iree_vm_environment_allocate(allocator, &environment));
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
@@ -62,7 +65,8 @@ class PreparationTest : public ::testing::Test {
         environment, iree_make_cstring_view(FLAG_model_source),
         IREE_SV("prepare"), iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
-        (iree_vm_module_span_t){&input, 1}, &preparation, allocator);
+        (iree_vm_module_span_t){&input, 1}, &compilation, &preparation,
+        allocator);
   }
 
   // Host declarations outlive all temporary VM reference and argument storage.

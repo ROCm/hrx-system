@@ -6,6 +6,7 @@
 
 #include "experimental/loom_serve/finite/model.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "experimental/loom_serve/runtime/device.h"
@@ -32,6 +33,8 @@ typedef struct finite_model_stage_t {
 struct loom_serve_finite_model_t {
   // Allocator owning this model and its host feedback storage.
   iree_allocator_t allocator;
+  // Copied startup evidence, independent of every compiler result lifetime.
+  loom_serve_compilation_report_t compilation;
   // Owned public identifier returned by the source bootstrap.
   iree_string_view_t name;
   // Positive additive cohort capacity returned by the cold source.
@@ -221,7 +224,8 @@ static iree_status_t finite_prepare(
         model->control.environment, iree_make_cstring_view(path),
         IREE_SV("prepare"), iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
-        (iree_vm_module_span_t){modules, 2}, &model->preparation, allocator);
+        (iree_vm_module_span_t){modules, 2}, &model->compilation,
+        &model->preparation, allocator);
   }
   int64_t capacities[4] = {0};
   for (iree_host_size_t i = 0; i < 4 && iree_status_is_ok(status); ++i) {
@@ -443,8 +447,8 @@ static iree_status_t finite_create_control(loom_serve_finite_model_t* model,
     status = loom_serve_program_create(
         model->control.environment, iree_make_cstring_view(path),
         IREE_ARRAYSIZE(roots), roots,
-        (iree_vm_module_span_t){native_modules, 3}, allocator,
-        &model->control.program);
+        (iree_vm_module_span_t){native_modules, 3}, &model->compilation,
+        allocator, &model->control.program);
   }
   iree_allocator_free(allocator, path);
   iree_vm_module_release(native_modules[0]);
@@ -483,7 +487,8 @@ static iree_status_t finite_model_initialize(
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
       device, dispatch,
       loom_serve_host_task_pool(loom_serve_device_host(model->owner)),
-      options->source_directory, NULL, allocator, &model->jit));
+      options->source_directory, NULL, &model->compilation, allocator,
+      &model->jit));
   for (uint32_t i = 0; i < model->stages.count; ++i) {
     finite_model_stage_t* stage = &model->stages.values[i];
     const loom_serve_preparation_stage_t* declaration =
@@ -561,6 +566,10 @@ iree_status_t loom_serve_finite_model_create(
   if (iree_status_is_ok(status)) {
     status = finite_model_initialize(model, options);
   }
+  loom_output_stream_t output;
+  loom_output_stream_for_file(stderr, &output);
+  status = iree_status_join(
+      status, loom_serve_compilation_write(&model->compilation, &output));
   if (iree_status_is_ok(status)) {
     *out_model = model;
   } else {

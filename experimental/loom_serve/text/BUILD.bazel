@@ -58,6 +58,7 @@ loom_cc_library(
         ":chat",
         ":storage",
         "//experimental/loom_serve/runtime:command",
+        "//experimental/loom_serve/runtime:compilation",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:input",
@@ -75,6 +76,7 @@ loom_cc_library(
         "//experimental/loom_serve/storage:relocation",
         "//experimental/loom_serve/storage:snapshot",
         "//loom/binding/c:loomc",
+        "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/hal",
@@ -315,6 +317,7 @@ loom_cc_binary(
     ]),
     deps = [
         ":chat",
+        "//experimental/loom_serve/runtime:compilation",
         "//experimental/loom_serve/runtime:input",
         "//experimental/loom_serve/runtime:json",
         "//experimental/loom_serve/runtime:program",

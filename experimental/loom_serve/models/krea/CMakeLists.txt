@@ -106,6 +106,7 @@ loom_cc_binary(
     iree::base::internal
     iree::base::internal::path
     iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::jit
@@ -113,6 +114,7 @@ loom_cc_binary(
     iree::hal
     iree::io::file_handle
     loom::binding::c::loomc
+    loom::util::stream
   TESTONLY
 )
 endif()

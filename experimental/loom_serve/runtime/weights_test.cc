@@ -216,8 +216,8 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     IREE_ASSERT_OK(loom_serve_jit_create(
         device_, dispatch_,
         loom_serve_host_task_pool(loom_serve_device_host(device_owner_)),
-        iree_make_cstring_view(directory_.c_str()), nullptr, allocator_,
-        &jit_));
+        iree_make_cstring_view(directory_.c_str()), nullptr, &compilation_,
+        allocator_, &jit_));
     WriteCheckpoint(path_.path(), 0);
     iree_hal_buffer_params_t params = {};
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
@@ -356,6 +356,8 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
 
   // Allocation policy for the real runtime and compiler.
   iree_allocator_t allocator_ = iree_allocator_system();
+  // Copied compiler evidence retained beyond individual results.
+  loom_serve_compilation_report_t compilation_ = {};
   // Application group outliving all compiler, VM and I/O resources.
   loom_serve_device_group_t* group_ = nullptr;
   // Borrowed device record within the application group.

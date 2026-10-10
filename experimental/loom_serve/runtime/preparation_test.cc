@@ -18,6 +18,9 @@ namespace {
 
 class PreparationTest : public ::testing::Test {
  protected:
+  // Copied compiler evidence retained beyond individual results.
+  loom_serve_compilation_report_t compilation = {};
+
   void SetUp() override {
     IREE_ASSERT_OK(iree_vm_environment_allocate(allocator, &environment));
   }
@@ -39,8 +42,8 @@ TEST_F(PreparationTest, TextConfigurationCopiesValueSpelling) {
   IREE_ASSERT_OK(loom_serve_preparation_create(
       environment, iree_make_cstring_view(FLAG_boundary_source),
       IREE_SV("text_config"), iree_vm_variant_span_empty(),
-      iree_vm_variant_span_empty(), iree_vm_module_span_empty(), &preparation,
-      allocator));
+      iree_vm_variant_span_empty(), iree_vm_module_span_empty(), &compilation,
+      &preparation, allocator));
   const auto* stage = loom_serve_preparation_stage(preparation, 0);
   ASSERT_EQ(stage->config.binding_count, 1);
   const auto& value = stage->config.bindings[0].value;
@@ -66,8 +69,8 @@ TEST_F(PreparationTest, CatalogGrowthPreservesEveryDeclaration) {
   IREE_ASSERT_OK(loom_serve_preparation_create(
       environment, iree_make_cstring_view(FLAG_boundary_source),
       IREE_SV("large_catalog"), iree_vm_variant_span_empty(),
-      iree_vm_variant_span_empty(), iree_vm_module_span_empty(), &preparation,
-      bounded_allocator));
+      iree_vm_variant_span_empty(), iree_vm_module_span_empty(), &compilation,
+      &preparation, bounded_allocator));
   ASSERT_EQ(loom_serve_preparation_stage_count(preparation), 33);
   for (size_t i = 0; i < 33; ++i) {
     const auto* stage = loom_serve_preparation_stage(preparation, i);
@@ -109,7 +112,7 @@ TEST_F(PreparationTest, InvalidDeclarationsReleasePartialOwnership) {
             environment, iree_make_cstring_view(FLAG_boundary_source),
             iree_make_cstring_view(test.entry), iree_vm_variant_span_empty(),
             iree_vm_variant_span_empty(), iree_vm_module_span_empty(),
-            &preparation, allocator));
+            &compilation, &preparation, allocator));
     EXPECT_EQ(preparation, nullptr);
   }
 }

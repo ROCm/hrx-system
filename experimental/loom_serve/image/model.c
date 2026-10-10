@@ -33,6 +33,8 @@ typedef struct image_model_stage_t {
 struct loom_serve_image_model_t {
   // Allocator owning this model and its host feedback storage.
   iree_allocator_t allocator;
+  // Copied startup evidence, independent of every compiler result lifetime.
+  loom_serve_compilation_report_t compilation;
   // Owned public identifier returned by the source bootstrap.
   iree_string_view_t name;
   // Maximum opaque request byte length returned by the source bootstrap.
@@ -206,7 +208,8 @@ static iree_status_t image_prepare(
         model->control.environment, iree_make_cstring_view(path),
         IREE_SV("prepare"), iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
-        (iree_vm_module_span_t){&input, 1}, &model->preparation, allocator);
+        (iree_vm_module_span_t){&input, 1}, &model->compilation,
+        &model->preparation, allocator);
   }
   int64_t capacity = 0;
   iree_vm_buffer_t* metadata[2] = {0};
@@ -419,8 +422,8 @@ static iree_status_t image_create_control(loom_serve_image_model_t* model,
     status = loom_serve_program_create(
         model->control.environment, iree_make_cstring_view(path),
         IREE_ARRAYSIZE(roots), roots,
-        (iree_vm_module_span_t){native_modules, 2}, allocator,
-        &model->control.program);
+        (iree_vm_module_span_t){native_modules, 2}, &model->compilation,
+        allocator, &model->control.program);
   }
   iree_allocator_free(allocator, path);
   iree_vm_module_release(native_modules[0]);
@@ -457,7 +460,8 @@ static iree_status_t image_model_initialize(
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
       device, dispatch,
       loom_serve_host_task_pool(loom_serve_device_host(model->owner)),
-      options->source_directory, NULL, allocator, &model->jit));
+      options->source_directory, NULL, &model->compilation, allocator,
+      &model->jit));
   uint64_t workspace_length = 0;
   uint64_t workspace_alignment = 0;
   uint64_t executable_count = 0;
@@ -596,6 +600,10 @@ iree_status_t loom_serve_image_model_create(
   if (iree_status_is_ok(status)) {
     status = image_model_initialize(model, options);
   }
+  loom_output_stream_t output;
+  loom_output_stream_for_file(stderr, &output);
+  status = iree_status_join(
+      status, loom_serve_compilation_write(&model->compilation, &output));
   if (iree_status_is_ok(status)) {
     *out_model = model;
   } else {

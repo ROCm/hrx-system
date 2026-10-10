@@ -160,6 +160,7 @@ loom_cc_binary(
     iree::base::internal::json
     iree::base::internal::path
     iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::input
     iree::experimental::loom_serve::runtime::preparation
     iree::experimental::loom_serve::runtime::program
@@ -167,6 +168,7 @@ loom_cc_binary(
     iree::tokenizer
     iree::tokenizer::format::huggingface::tokenizer_json
     iree::vm
+    loom::util::stream
   TESTONLY
 )
 endif()
@@ -201,6 +203,7 @@ loom_cc_library(
     ::generator
     iree::base
     iree::base::internal::path
+    iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::input
@@ -219,6 +222,7 @@ loom_cc_library(
     iree::tooling::device_util
     iree::vm
     loom::binding::c::loomc
+    loom::util::stream
   PUBLIC
 )
 endif()

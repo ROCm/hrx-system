@@ -74,6 +74,8 @@ typedef struct text_stage_t {
 struct loom_serve_text_model_t {
   // Host allocation policy used for all owned resources.
   iree_allocator_t allocator;
+  // Copied startup evidence, independent of every compiler result lifetime.
+  loom_serve_compilation_report_t compilation;
   // Borrowed shared owner outliving every model resource and host I/O payload.
   loom_serve_device_t* device_owner;
   // GPU device and allocation domain borrowed from device_owner.
@@ -456,7 +458,7 @@ static iree_status_t text_create_program(loom_serve_text_model_t* runner,
     status = loom_serve_program_create(
         runner->environment, iree_make_cstring_view(path),
         IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_from_array(libraries),
-        runner->allocator, &runner->program);
+        &runner->compilation, runner->allocator, &runner->program);
   }
   iree_vm_module_release(libraries[3]);
   iree_vm_module_release(libraries[2]);
@@ -561,7 +563,8 @@ static iree_status_t text_prepare(loom_serve_text_model_t* model,
         model->environment, iree_make_cstring_view(path), IREE_SV("prepare"),
         iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
-        (iree_vm_module_span_t){&input, 1}, &model->preparation, allocator);
+        (iree_vm_module_span_t){&input, 1}, &model->compilation,
+        &model->preparation, allocator);
   }
   int64_t prefill_capacity = 0;
   int32_t shared_stage_count = 0;
@@ -676,8 +679,8 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
       model->device, model->dispatch,
       loom_serve_host_task_pool(loom_serve_device_host(model->device_owner)),
-      options->source_directory, &options->kernel_sanitizer, model->allocator,
-      &model->jit));
+      options->source_directory, &options->kernel_sanitizer,
+      &model->compilation, model->allocator, &model->jit));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < stage_count && iree_status_is_ok(status);
        ++i) {
@@ -784,6 +787,10 @@ iree_status_t loom_serve_text_model_create(
   model->row_count = options->row_count;
   loom_serve_text_state_initialize(options, &model->state, host_allocator);
   iree_status_t status = text_initialize(model, options);
+  loom_output_stream_t output;
+  loom_output_stream_for_file(stderr, &output);
+  status = iree_status_join(
+      status, loom_serve_compilation_write(&model->compilation, &output));
   if (iree_status_is_ok(status)) {
     *out_model = model;
   } else {

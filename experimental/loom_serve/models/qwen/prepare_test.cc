@@ -27,6 +27,9 @@ std::string String(iree_string_view_t value) {
 
 class PrepareTest : public ::testing::Test {
  protected:
+  // Copied compiler evidence retained beyond individual results.
+  loom_serve_compilation_report_t compilation = {};
+
   void SetUp() override {
     IREE_ASSERT_OK(iree_vm_environment_allocate(allocator, &environment));
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
@@ -83,8 +86,8 @@ class PrepareTest : public ::testing::Test {
     iree_status_t status = loom_serve_preparation_create(
         environment, iree_make_cstring_view(FLAG_prepare_source),
         IREE_SV("prepare"), iree_vm_variant_span_from_array(arguments),
-        iree_vm_variant_span_from_array(results), {&input, 1}, &preparation,
-        allocator);
+        iree_vm_variant_span_from_array(results), {&input, 1}, &compilation,
+        &preparation, allocator);
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
     IREE_ASSERT_STATUS_IS(expected, status);
   }

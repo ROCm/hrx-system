@@ -20,6 +20,9 @@ namespace {
 
 class Krea2ControlTest : public ::testing::Test {
  protected:
+  // Copied compiler evidence retained beyond individual results.
+  loom_serve_compilation_report_t compilation = {};
+
   void SetUp() override {
     IREE_ASSERT_OK(iree_vm_environment_allocate(allocator, &environment));
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
@@ -30,7 +33,7 @@ class Krea2ControlTest : public ::testing::Test {
     const iree_string_view_t root = IREE_SVL("prepare_request");
     IREE_ASSERT_OK(loom_serve_program_create(
         environment, iree_make_cstring_view(FLAG_control_source), 1, &root,
-        (iree_vm_module_span_t){&input, 1}, allocator, &program));
+        (iree_vm_module_span_t){&input, 1}, &compilation, allocator, &program));
     IREE_ASSERT_OK(iree_vm_process_lookup_function(
         loom_serve_program_process(program), IREE_SV("model"), root, &prepare));
   }

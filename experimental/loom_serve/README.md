@@ -244,9 +244,12 @@ launch counts, buffer requirements, and entry mapping.
 All target stages must place the shared weights identically; model preparation
 checks this before allocating the one weight slab. MTP references existing
 target weight views and allocates only its additional parameter groups.
-`jit_stage` records expose the root, compiled request count, entry count, pool
-worker count, and cold compilation/load duration. Warm execution reuses commands
-and storage without compiler tasks.
+Cold `compilation` records expose command attempts, native request and entry
+counts, pool worker count, and accumulated compilation/load duration. Source
+diagnostics are copied before compiler results retire, with severity counts and
+explicit retention limits. Only the outer construction caller renders JSONL;
+compiler workers never write to a sink. Warm execution reuses commands and
+storage without compiler tasks.
 
 The [model source guide](models/qwen/README.md) describes the math and
 differential checks. Qwen's source bootstrap currently limits epochs to 512
