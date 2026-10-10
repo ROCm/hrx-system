@@ -666,6 +666,66 @@ def check_empty_server(server, directory):
         print(json.dumps({"event": "empty_server_joined", "catalog": mode}), flush=True)
 
 
+def check_sporadic_connections(process, client):
+    tasks = Path(f"/proc/{process.pid}/task")
+
+    def thread_ids():
+        return {entry.name for entry in tasks.iterdir()}
+
+    expected_threads = thread_ids()
+    address = urlsplit("http://" + client.address)
+    peers = []
+    try:
+        for target_count in (64, 256):
+            while len(peers) < target_count:
+                peer = socket.create_connection((address.hostname, address.port))
+                peers.append(peer)
+                # A partial header retains the connection but creates no
+                # application request or worker task waiting on this client.
+                peer.sendall(b"GET /healthz HTTP/1.1\r\nHost: local\r\n")
+            vectors = client.request(
+                "/v1/embeddings",
+                {"model": "vectors", "input": ["ab", "bbb"], "dimensions": 2},
+            )
+            assert [item["embedding"] for item in vectors["data"]] == [[3, 2], [6, 3]]
+            assert thread_ids() == expected_threads
+        # Complete the most recently connected peers first; incomplete earlier
+        # requests cannot hold later clients or inference behind them.
+        completed = 0
+        for offset in range(len(peers), 0, -16):
+            batch = peers[max(0, offset - 16) : offset]
+            for peer in batch:
+                peer.sendall(b"\r\n")
+            for peer in batch:
+                response = http.client.HTTPResponse(peer)
+                try:
+                    response.begin()
+                    assert response.status == 200
+                    assert json.loads(response.read()) == {"status": "ready"}
+                    completed += 1
+                finally:
+                    response.close()
+                    peer.close()
+            assert client.request("/readyz") == {"status": "ready"}
+        assert completed == 256
+        assert thread_ids() == expected_threads
+        print(
+            json.dumps(
+                {
+                    "event": "sporadic_connections_joined",
+                    "connections": completed,
+                    "task_workers": 1,
+                    "server_threads": len(expected_threads),
+                    "added_threads": 0,
+                }
+            ),
+            flush=True,
+        )
+    finally:
+        for peer in peers:
+            peer.close()
+
+
 def check_multiple_bindings(server, directory, catalog):
     socket_path = directory / 'serve "local".sock'
     log_path = directory / "multiple-bindings.log"
@@ -676,12 +736,13 @@ def check_multiple_bindings(server, directory, catalog):
             "--listen=127.0.0.1:0",
             f"--listen=unix:{socket_path}",
             "--workers=1",
+            "--connections=320",
             "--pool_backing=fixed",
             "--heartbeat_ms=0",
         ],
         log_path,
         cwd=directory,
-    ) as (_, address):
+    ) as (process, address):
         assert address is not None, log_path.read_text()
         client = Client(address)
         expected_models = client.request("/v1/models")
@@ -712,6 +773,7 @@ def check_multiple_bindings(server, directory, catalog):
             model="vectors",
         )
         assert client.request("/v1/models") == expected_models
+        check_sporadic_connections(process, client)
     assert not socket_path.exists()
     locators = [
         json.loads(line)
