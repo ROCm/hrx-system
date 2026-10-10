@@ -230,8 +230,8 @@ loom_cc_library(
     iree::base
     iree::base::threading
     iree::experimental::loom_serve::http::request
-    iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::http::timer
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
@@ -266,6 +266,7 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::runtime::signals
+    iree::experimental::loom_serve::serving::router
 )
 endif()
 

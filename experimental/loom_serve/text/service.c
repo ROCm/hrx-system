@@ -2104,23 +2104,3 @@ loom_serve_http_service_t loom_serve_text_service_interface(
       .capacity_domain = loom_serve_residency_cache(
           loom_serve_text_model_residency(service->model))};
 }
-
-iree_status_t loom_serve_text_service_run(
-    loom_serve_text_model_t* model, loom_serve_http_server_t* server,
-    const loom_serve_text_service_options_t* options,
-    iree_allocator_t host_allocator) {
-  loom_serve_text_service_t* service = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_text_service_create(model, options, &service, host_allocator));
-  const loom_serve_http_service_t interface =
-      loom_serve_text_service_interface(service);
-  iree_status_t status = loom_serve_http_router_run(
-      service->cpu.executor, server, 1, &interface,
-      (loom_serve_http_router_options_t){
-          .request_quota = options->row_count,
-          .holding_capacity =
-              loom_serve_http_server_connection_capacity(server) / 2},
-      host_allocator);
-  loom_serve_text_service_destroy(service, iree_status_code(status));
-  return status;
-}

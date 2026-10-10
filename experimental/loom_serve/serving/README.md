@@ -11,9 +11,9 @@ request storage. Registering the same checkpoint twice creates two
 prepared parameter residencies; it does not deduplicate those weights.
 
 The application owns one [host](../runtime/host.h) with shared IREE task workers
-and asynchronous I/O services. Each catalog's JIT queue uses those workers;
-adding a model does not create another compiler thread pool. Compilation has
-an asynchronous completion API; startup constructors join on the application
+and asynchronous I/O services. Every catalog borrows the host's shared JIT task
+queue; adding or removing a model neither creates nor joins a compiler pool.
+Compilation has an asynchronous completion API; startup constructors join on the application
 thread. HTTP admission and model scheduling run as a cooperative task process:
 bounded serialized turns preserve shared memory-policy ownership, while CPU
 preparation/output and device work proceed independently. Network, task release,
@@ -24,6 +24,12 @@ a connection or listener creates no private thread. A listener can retire while
 its accepted response streams continue, and one failed bind leaves the other
 listeners and model state intact. Process signals belong to the application,
 not individual listeners.
+
+The [routing owner](router.h) belongs to this application layer. Modality
+services implement the [HTTP service contract](../http/service.h) without
+depending on the router, listener lifetime, or application run loop. The
+single-model executables use the same create, route, retire and destroy
+ownership sequence as the shared server.
 
 The catalog selects source packages and deployment options. Model math,
 checkpoint interpretation, storage geometry and chat policy remain in the

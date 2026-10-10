@@ -55,6 +55,7 @@ loom_cc_test(
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:host",
         "//experimental/loom_serve/runtime:residency",
+        "//experimental/loom_serve/serving:router",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:base64",

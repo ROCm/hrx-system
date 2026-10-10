@@ -9,7 +9,7 @@
 
 #include "experimental/loom_serve/finite/model.h"
 #include "experimental/loom_serve/finite/protocol.h"
-#include "experimental/loom_serve/http/router.h"
+#include "experimental/loom_serve/http/service.h"
 
 #ifdef __cplusplus
 extern "C" {

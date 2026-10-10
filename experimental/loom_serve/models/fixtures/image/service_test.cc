@@ -18,6 +18,7 @@
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/output.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
+#include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/internal/base64.h"
 #include "iree/base/tooling/flags.h"
@@ -87,8 +88,19 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
           .pending_capacity = 8,
           .heartbeat_interval = 0,
       };
-      status_ = loom_serve_image_service_run(host_, generator, server_,
-                                             &options, allocator_);
+      loom_serve_image_service_t* service = nullptr;
+      status_ = loom_serve_image_service_create(host_, generator, &options,
+                                                &service, allocator_);
+      if (iree_status_is_ok(status_)) {
+        const auto interface = loom_serve_image_service_interface(service);
+        status_ = loom_serve_router_run(
+            loom_serve_host_executor(host_), server_, 1, &interface,
+            {.request_quota = options.pending_capacity,
+             .holding_capacity =
+                 loom_serve_http_server_connection_capacity(server_) / 2},
+            allocator_);
+      }
+      loom_serve_image_service_destroy(service);
     });
   }
 
@@ -210,7 +222,7 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
   EXPECT_NE(
       Read(Send("GET", "/v1/status"))
           .find(
-              R"("status":{"phase":"idle","queued_requests":0,"active_requests":0,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":0.000000000})"),
+              R"("status":{"phase":"idle","queued_requests":0,"active_requests":0,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":0.000000000,"admission":"open","held_requests":0,"tokenizer_requests":0})"),
       std::string::npos);
   EXPECT_NE(Read(Send("GET", "/readyz")).find(R"({"status":"ready"})"),
             std::string::npos);

@@ -18,6 +18,7 @@
 #include "experimental/loom_serve/runtime/host_flags.h"
 #include "experimental/loom_serve/runtime/signals.h"
 #include "experimental/loom_serve/serving/configuration.h"
+#include "experimental/loom_serve/serving/router.h"
 #include "experimental/loom_serve/text/schedule.h"
 #include "experimental/loom_serve/text/service.h"
 #include "iree/async/proactor.h"
@@ -300,10 +301,10 @@ int main(int argc, char** argv) {
     status = serving_ready(listeners[i], configuration.model_count);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_http_router_run(
+    status = loom_serve_router_run(
         loom_serve_host_executor(host), server, configuration.model_count,
         services,
-        (loom_serve_http_router_options_t){
+        (loom_serve_router_options_t){
             .request_quota = (iree_host_size_t)FLAG_connections,
             .holding_capacity = (iree_host_size_t)(FLAG_held_requests < 0
                                                        ? FLAG_connections / 2

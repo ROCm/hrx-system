@@ -19,6 +19,7 @@
 
 #include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
+#include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -177,8 +178,19 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     service_ = std::thread([this, chunk_size] {
       auto options = ServiceOptions();
       options.chunk_size = chunk_size;
-      status_ =
-          loom_serve_text_service_run(model_, server_, &options, allocator_);
+      loom_serve_text_service_t* service = nullptr;
+      status_ = loom_serve_text_service_create(model_, &options, &service,
+                                               allocator_);
+      if (iree_status_is_ok(status_)) {
+        const auto interface = loom_serve_text_service_interface(service);
+        status_ = loom_serve_router_run(
+            loom_serve_host_executor(host_), server_, 1, &interface,
+            {.request_quota = options.row_count,
+             .holding_capacity =
+                 loom_serve_http_server_connection_capacity(server_) / 2},
+            allocator_);
+      }
+      loom_serve_text_service_destroy(service, iree_status_code(status_));
     });
   }
 

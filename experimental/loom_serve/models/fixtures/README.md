@@ -127,7 +127,7 @@ CPU protocol and catalog checks run without model files or a GPU:
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/serving:configuration_test \
-  //experimental/loom_serve/http:router_test \
+  //experimental/loom_serve/serving:router_test \
   //experimental/loom_serve/embedding:protocol_test \
   //experimental/loom_serve/decision:protocol_test
 ```

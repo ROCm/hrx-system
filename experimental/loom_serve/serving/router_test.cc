@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/http/router.h"
+#include "experimental/loom_serve/serving/router.h"
 
 #include <sys/socket.h>
 #include <unistd.h>
@@ -237,7 +237,7 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
           held_.Interface(tokenizer_a_, &a_),
           other_.Interface(nullptr, nullptr),
           escaped_.Interface(nullptr, nullptr)};
-      status_ = loom_serve_http_router_run(
+      status_ = loom_serve_router_run(
           executor_, server_, IREE_ARRAYSIZE(services), services,
           {.request_quota = 4, .holding_capacity = holding_capacity_},
           iree_allocator_system());
@@ -738,19 +738,19 @@ TEST_P(HttpRouterTest, ShutdownReleasesHeldClaimsWithoutAdmittingThem) {
 
 TEST_P(HttpRouterTest, RejectsAQuotaThatCouldExcludeEveryControlConnection) {
   for (const auto options : {
-           loom_serve_http_router_options_t{.request_quota = 0,
-                                            .holding_capacity = 0},
-           loom_serve_http_router_options_t{
+           loom_serve_router_options_t{.request_quota = 0,
+                                       .holding_capacity = 0},
+           loom_serve_router_options_t{
                .request_quota = 4, .holding_capacity = connection_capacity_},
-           loom_serve_http_router_options_t{
+           loom_serve_router_options_t{
                .request_quota = 4,
                .holding_capacity = connection_capacity_ + 1},
        }) {
     // Validation happens before the owner installs any transport observer.
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
-        loom_serve_http_router_run(executor_, server_, 0, nullptr, options,
-                                   iree_allocator_system()));
+        loom_serve_router_run(executor_, server_, 0, nullptr, options,
+                              iree_allocator_system()));
   }
   EXPECT_EQ(Read(Send("GET", "/healthz")).find("HTTP/1.1 200"), 0u);
 }

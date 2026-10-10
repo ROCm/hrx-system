@@ -106,8 +106,8 @@ loom_cc_library(
     iree::base::internal::base64
     iree::base::threading
     iree::experimental::loom_serve::http::request
-    iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::http::timer
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host
@@ -132,11 +132,11 @@ loom_cc_test(
     iree::base
     iree::base::threading
     iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::telemetry::record
     iree::experimental::loom_serve::telemetry::stream
     iree::hal
@@ -263,6 +263,7 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::runtime::signals
+    iree::experimental::loom_serve::serving::router
 )
 endif()
 

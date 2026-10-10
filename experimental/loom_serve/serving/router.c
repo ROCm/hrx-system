@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/http/router.h"
+#include "experimental/loom_serve/serving/router.h"
 
 #include <inttypes.h>
 
@@ -1002,10 +1002,12 @@ static bool router_is_released(void* user_data) {
   return released;
 }
 
-iree_status_t loom_serve_http_router_run(
-    iree_task_executor_t* executor, loom_serve_http_server_t* server,
-    iree_host_size_t service_count, const loom_serve_http_service_t* services,
-    loom_serve_http_router_options_t options, iree_allocator_t host_allocator) {
+iree_status_t loom_serve_router_run(iree_task_executor_t* executor,
+                                    loom_serve_http_server_t* server,
+                                    iree_host_size_t service_count,
+                                    const loom_serve_http_service_t* services,
+                                    loom_serve_router_options_t options,
+                                    iree_allocator_t host_allocator) {
   if (!options.request_quota ||
       options.holding_capacity >=
           loom_serve_http_server_connection_capacity(server)) {

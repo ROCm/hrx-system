@@ -98,24 +98,14 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    router
+    service
   HDRS
-    "router.h"
-  SRCS
-    "router.c"
+    "service.h"
   DEPS
-    ::logs
-    ::request
     ::server
-    ::tokenization
     iree::base
-    iree::base::internal::json
-    iree::base::threading
     iree::experimental::loom_serve::telemetry::stream
-    iree::task
     iree::tokenizer
-    loom::util::json
-    loom::util::stream
   PUBLIC
 )
 
@@ -181,28 +171,6 @@ loom_cc_library(
     iree::net::carrier::stream
   PUBLIC
 )
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-loom_cc_test(
-  NAME
-    router_test
-  SRCS
-    "router_test.cc"
-  DEPS
-    ::listener
-    ::request
-    ::router
-    ::server
-    iree::async
-    iree::async::util::proactor_pool
-    iree::base
-    iree::task
-    iree::testing::gtest
-    iree::testing::gtest_main
-    iree::tokenizer
-    iree::tokenizer::format::huggingface::tokenizer_json
-)
-endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(

@@ -843,24 +843,3 @@ iree_status_t loom_serve_image_service_create(
   }
   return status;
 }
-
-iree_status_t loom_serve_image_service_run(
-    loom_serve_host_t* host, loom_serve_image_generator_t generator,
-    loom_serve_http_server_t* server,
-    const loom_serve_image_service_options_t* options,
-    iree_allocator_t host_allocator) {
-  loom_serve_image_service_t* service = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_image_service_create(
-      host, generator, options, &service, host_allocator));
-  const loom_serve_http_service_t interface =
-      loom_serve_image_service_interface(service);
-  const iree_status_t status = loom_serve_http_router_run(
-      loom_serve_host_executor(host), server, 1, &interface,
-      (loom_serve_http_router_options_t){
-          .request_quota = options->pending_capacity,
-          .holding_capacity =
-              loom_serve_http_server_connection_capacity(server) / 2},
-      host_allocator);
-  loom_serve_image_service_destroy(service);
-  return status;
-}

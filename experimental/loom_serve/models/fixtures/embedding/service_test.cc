@@ -24,6 +24,7 @@
 #include "experimental/loom_serve/embedding/protocol.h"
 #include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
+#include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -328,7 +329,7 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
   void StartRouter() {
     interface_.set_observer(interface_.self, {});
     router_ = std::thread([this] {
-      status_ = loom_serve_http_router_run(
+      status_ = loom_serve_router_run(
           loom_serve_host_executor(host_), server_, 1, &interface_,
           {.request_quota = 16, .holding_capacity = 8}, allocator_);
     });

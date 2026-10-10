@@ -35,8 +35,8 @@ loom_cc_library(
     iree::base
     iree::base::threading
     iree::experimental::loom_serve::http::request
-    iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::http::timer
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host

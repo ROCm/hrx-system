@@ -19,6 +19,7 @@
 
 #include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/runtime/device.h"
+#include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/threading/notification.h"
 #include "iree/testing/gtest.h"
@@ -169,7 +170,7 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   const auto interface = loom_serve_image_service_interface(image);
   iree_status_t service_status = iree_ok_status();
   std::thread service([&] {
-    service_status = loom_serve_http_router_run(
+    service_status = loom_serve_router_run(
         loom_serve_host_executor(host), server, 1, &interface,
         {.request_quota = options.pending_capacity, .holding_capacity = 8},
         iree_allocator_system());
@@ -455,7 +456,7 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
   };
   size_t completed_events[2] = {};
   std::thread router([&] {
-    status = loom_serve_http_router_run(
+    status = loom_serve_router_run(
         loom_serve_host_executor(host), server, 2, services,
         {.request_quota = 8, .holding_capacity = 8}, allocator);
     for (size_t i = 0; i < 2; ++i) {

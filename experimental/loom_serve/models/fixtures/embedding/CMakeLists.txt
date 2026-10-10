@@ -53,7 +53,6 @@ loom_cc_test(
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
     iree::experimental::loom_serve::runtime::compilation
@@ -61,6 +60,7 @@ loom_cc_test(
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::runtime::residency
+    iree::experimental::loom_serve::serving::router
     iree::hal
     iree::task
     iree::testing::gtest

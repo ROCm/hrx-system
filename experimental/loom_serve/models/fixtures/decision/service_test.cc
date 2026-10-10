@@ -16,6 +16,7 @@
 #include "experimental/loom_serve/decision/protocol.h"
 #include "experimental/loom_serve/embedding/protocol.h"
 #include "experimental/loom_serve/http/listener.h"
+#include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -176,7 +177,7 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
     interfaces_[1] = loom_serve_finite_service_interface(services_[1]);
     interfaces_[0].set_observer(interfaces_[0].self, {});
     router_ = std::thread([this] {
-      status_ = loom_serve_http_router_run(
+      status_ = loom_serve_router_run(
           loom_serve_host_executor(host_), server_, 2, interfaces_,
           {.request_quota = 16, .holding_capacity = 8}, allocator_);
     });

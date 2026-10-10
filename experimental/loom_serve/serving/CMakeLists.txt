@@ -11,6 +11,52 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    router
+  HDRS
+    "router.h"
+  SRCS
+    "router.c"
+  DEPS
+    iree::base
+    iree::base::internal::json
+    iree::base::threading
+    iree::experimental::loom_serve::http::logs
+    iree::experimental::loom_serve::http::request
+    iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::http::service
+    iree::experimental::loom_serve::http::tokenization
+    iree::experimental::loom_serve::telemetry::stream
+    iree::task
+    iree::tokenizer
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    router_test
+  SRCS
+    "router_test.cc"
+  DEPS
+    ::router
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::experimental::loom_serve::http::listener
+    iree::experimental::loom_serve::http::request
+    iree::experimental::loom_serve::http::server
+    iree::task
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
+)
+endif()
+
+loom_cc_library(
+  NAME
     configuration
   HDRS
     "configuration.h"
@@ -31,6 +77,7 @@ loom_cc_binary(
     "server.c"
   DEPS
     ::configuration
+    ::router
     iree::async
     iree::base
     iree::base::tooling::flags
@@ -39,7 +86,6 @@ loom_cc_binary(
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::image::model
     iree::experimental::loom_serve::image::service

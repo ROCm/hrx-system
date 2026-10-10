@@ -52,10 +52,10 @@ loom_cc_test(
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::serving::router
     iree::testing::gtest
     iree::testing::gtest_main
   ARGS

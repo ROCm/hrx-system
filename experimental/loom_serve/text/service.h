@@ -7,7 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_SERVICE_H_
 #define IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_SERVICE_H_
 
-#include "experimental/loom_serve/http/router.h"
+#include "experimental/loom_serve/http/service.h"
 #include "experimental/loom_serve/text/model.h"
 #include "experimental/loom_serve/text/schedule.h"
 
@@ -53,23 +53,9 @@ iree_status_t loom_serve_text_service_create(
     loom_serve_text_service_t** out_service, iree_allocator_t host_allocator);
 
 // Returns borrowed callbacks for the shared owner loop. They take connection
-// claims, preserve model-local sessions/checkpoints, and advance one cohort.
-loom_serve_http_service_t loom_serve_text_service_interface(
-    loom_serve_text_service_t* service);
-
-// Relinquishes every accepted connection after readiness retirement. On
-// terminal failure, unresolved device reservations remain pinned for model
-// destruction; on ordinary completed-boundary shutdown, unused reservations are
-// released. terminal_code is the owner loop's result, including another model's
-// failure. The owner has consumed all CPU, device and heartbeat callbacks,
-// including timer cancellation receipts, before this call. Null is accepted.
-// The borrowed model and transport both outlive this call.
-void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
-                                     iree_status_code_t terminal_code);
-
-// Runs one application owner until transport shutdown or model failure. Model
-// and transport are borrowed. Each epoch gathers credited ready rows, executes
-// their known/verifier spans asynchronously and commits outputs after readiness
+// claims and preserve model-local sessions/checkpoints. Each epoch gathers
+// credited ready rows, executes their known/verifier spans asynchronously and
+// commits outputs after readiness
 // before reusing feedback. Other services can advance while an epoch executes.
 // Heartbeats observe a copied snapshot and continue during model waits.
 // Admission owns and physically backs the exact completion high-water, private
@@ -92,12 +78,19 @@ void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
 // replacement fits. Host image bytes are reported separately from device pages.
 // Untagged requests without an explicit pin always replay. Peer cancellation
 // discards its live row, not independently pinned endpoints, at a completed
-// stage boundary. Return relinquishes every connection view before the caller
-// destroys transport/model. Capacities match the created model.
-iree_status_t loom_serve_text_service_run(
-    loom_serve_text_model_t* model, loom_serve_http_server_t* server,
-    const loom_serve_text_service_options_t* options,
-    iree_allocator_t host_allocator);
+// stage boundary. Capacities match the created model.
+loom_serve_http_service_t loom_serve_text_service_interface(
+    loom_serve_text_service_t* service);
+
+// Relinquishes every accepted connection after readiness retirement. On
+// terminal failure, unresolved device reservations remain pinned for model
+// destruction; on ordinary completed-boundary shutdown, unused reservations are
+// released. terminal_code is the owner loop's result, including another model's
+// failure. The owner has consumed all CPU, device and heartbeat callbacks,
+// including timer cancellation receipts, before this call. Null is accepted.
+// The borrowed model and transport both outlive this call.
+void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
+                                     iree_status_code_t terminal_code);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -12,6 +12,7 @@
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
 #include "experimental/loom_serve/runtime/signals.h"
+#include "experimental/loom_serve/serving/router.h"
 #include "experimental/loom_serve/text/flags.h"
 #include "experimental/loom_serve/text/service.h"
 #include "iree/async/proactor.h"
@@ -202,8 +203,20 @@ int main(int argc, char** argv) {
           .mtp_depth = (iree_host_size_t)FLAG_mtp_depth,
           .continuation_epochs = (iree_host_size_t)FLAG_continuation_epochs,
       };
-      status = loom_serve_text_service_run(model, server, &service_options,
-                                           allocator);
+      loom_serve_text_service_t* service = NULL;
+      status = loom_serve_text_service_create(model, &service_options, &service,
+                                              allocator);
+      if (iree_status_is_ok(status)) {
+        const loom_serve_http_service_t interface =
+            loom_serve_text_service_interface(service);
+        status = loom_serve_router_run(
+            loom_serve_host_executor(host), server, 1, &interface,
+            (loom_serve_router_options_t){
+                .request_quota = service_options.row_count,
+                .holding_capacity = (iree_host_size_t)FLAG_connections / 2},
+            allocator);
+      }
+      loom_serve_text_service_destroy(service, iree_status_code(status));
     }
   }
   loom_serve_signals_destroy(signals);

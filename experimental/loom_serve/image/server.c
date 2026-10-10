@@ -13,6 +13,7 @@
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
 #include "experimental/loom_serve/runtime/signals.h"
+#include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 
@@ -132,8 +133,20 @@ int main(int argc, char** argv) {
         .pending_capacity = (iree_host_size_t)FLAG_pending_requests,
         .heartbeat_interval = (iree_duration_t)FLAG_heartbeat_ms * 1000000,
     };
-    status = loom_serve_image_service_run(host, generator, server, &options,
-                                          allocator);
+    loom_serve_image_service_t* service = NULL;
+    status = loom_serve_image_service_create(host, generator, &options,
+                                             &service, allocator);
+    if (iree_status_is_ok(status)) {
+      const loom_serve_http_service_t interface =
+          loom_serve_image_service_interface(service);
+      status = loom_serve_router_run(
+          loom_serve_host_executor(host), server, 1, &interface,
+          (loom_serve_router_options_t){
+              .request_quota = options.pending_capacity,
+              .holding_capacity = (iree_host_size_t)FLAG_connections / 2},
+          allocator);
+    }
+    loom_serve_image_service_destroy(service);
   }
   loom_serve_signals_destroy(signals);
   status = iree_status_join(status, loom_serve_http_listener_destroy(listener));
