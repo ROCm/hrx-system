@@ -388,19 +388,19 @@ static iree_status_t iree_hal_amd_xdna_device_query_queue_pool_backend(
 static iree_status_t iree_hal_amd_xdna_device_profiling_begin(
     iree_hal_device_t* device,
     const iree_hal_device_profiling_options_t* options) {
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "XDNA device does not support profiling_begin");
 }
 
 static iree_status_t iree_hal_amd_xdna_device_profiling_flush(
     iree_hal_device_t* device) {
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "XDNA device does not support profiling_flush");
 }
 
 static iree_status_t iree_hal_amd_xdna_device_profiling_end(
     iree_hal_device_t* device) {
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "XDNA device does not support profiling_end");
 }
 
