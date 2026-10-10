@@ -439,6 +439,7 @@ static iree_status_t loom_low_emission_frame_build_impl(
       .allocation_budget_count = options->allocation_budget_count,
       .pair_affinities = options->schedule_pair_affinities,
       .preferred_pair_uses = preferred_pair_uses,
+      .required_register_values = required_register_values,
       .per_user_placement_values = per_user_placement_values,
       .structural_state_reads = options->schedule_structural_state_reads,
       .structural_models = options->schedule_structural_models,

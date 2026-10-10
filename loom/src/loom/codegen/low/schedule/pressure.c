@@ -596,7 +596,8 @@ static void loom_low_schedule_nominate_unspillable_completion(
     loom_value_ordinal_t value_ordinal) {
   const loom_low_schedule_value_record_t* value = &state->values[value_ordinal];
   const uint16_t reg_class_id = value->register_class_id;
-  if (!iree_any_bit_set(value->flags, LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE) ||
+  if (!loom_low_schedule_value_requires_register(value) ||
+      !iree_any_bit_set(value->flags, LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE) ||
       iree_any_bit_set(value->flags, LOOM_LOW_SCHEDULE_VALUE_FLAG_FORWARDED)) {
     return;
   }
@@ -1253,6 +1254,7 @@ static bool loom_low_schedule_descriptor_frontier_is_non_growing(
     // existing nomination path owns the remainder of the chain.
     if (candidate_use_count != 0 && consumer_use_count != 0 &&
         pressure_state->remaining_consumer_counts[value_ordinal] == 2 &&
+        loom_low_schedule_value_requires_register(value) &&
         iree_any_bit_set(value->flags, LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE)) {
       const uint16_t completion_domain_id =
           loom_low_schedule_unspillable_completion_domain_id(

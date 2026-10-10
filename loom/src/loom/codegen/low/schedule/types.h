@@ -774,6 +774,10 @@ typedef struct loom_low_schedule_options_t {
   loom_low_schedule_pair_affinity_list_t pair_affinities;
   // Optional concrete pair groups preferred when rescheduling rewritten IR.
   loom_low_placement_pair_use_list_t preferred_pair_uses;
+  // Borrowed module-value membership whose values require physical registers.
+  // Spill materialization owns this monotonic fact; scheduling uses it to
+  // close bounded lifetimes before allocation reaches a hard capacity.
+  iree_bitmap_t required_register_values;
   // Borrowed module-value membership retained by allocation repair. Marked
   // results have private per-user placement, either from cloning or from
   // retaining an already-adjacent definition separated by scheduling.

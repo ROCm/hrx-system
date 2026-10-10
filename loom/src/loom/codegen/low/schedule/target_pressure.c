@@ -229,7 +229,8 @@ static void loom_low_schedule_score_candidate_pressure_limit(
     loom_low_schedule_candidate_score_t* score, uint16_t reg_class_id,
     uint32_t limit_units, uint64_t current_live_units, int64_t delta_units,
     uint64_t transient_added_units, uint32_t packing_reserve_units,
-    uint32_t unspillable_activation_units, bool is_unspillable) {
+    uint32_t unspillable_activation_units,
+    bool requires_hard_register_capacity) {
   if (limit_units == UINT32_MAX) {
     return;
   }
@@ -245,7 +246,7 @@ static void loom_low_schedule_score_candidate_pressure_limit(
         candidate_live_units, iree_math_saturating_add_u64(
                                   current_live_units, transient_added_units));
   }
-  if (is_unspillable && candidate_live_units > limit_units &&
+  if (requires_hard_register_capacity && candidate_live_units > limit_units &&
       candidate_live_units > current_live_units) {
     score->flags |=
         LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
@@ -305,10 +306,35 @@ static void loom_low_schedule_score_candidate_pressure_limit(
   }
 }
 
+static bool loom_low_schedule_candidate_opens_required_register_lifetime(
+    const loom_low_schedule_build_state_t* state, uint32_t candidate_node_index,
+    uint16_t completion_domain_id) {
+  if (candidate_node_index == LOOM_LOW_SCHEDULE_NODE_NONE ||
+      completion_domain_id == UINT16_MAX) {
+    return false;
+  }
+  const loom_low_schedule_node_t* node = &state->nodes[candidate_node_index];
+  const loom_value_ordinal_t* result_ordinals =
+      loom_low_schedule_node_const_result_ordinals(node);
+  for (uint16_t result_index = 0; result_index < node->result_count;
+       ++result_index) {
+    const loom_low_schedule_value_record_t* value =
+        &state->values[result_ordinals[result_index]];
+    if (value->remaining_use_count != 0 &&
+        loom_low_schedule_value_requires_register(value) &&
+        loom_low_schedule_unspillable_completion_domain_id(
+            state, value->register_class_id) == completion_domain_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static void loom_low_schedule_score_candidate_pressure_limit_for_class(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
-    loom_low_schedule_candidate_score_t* score, uint16_t reg_class_id) {
+    loom_low_schedule_candidate_score_t* score, uint32_t candidate_node_index,
+    uint16_t reg_class_id) {
   if (state->pressure_limits.alias_sets != NULL &&
       state->target.descriptor_set->reg_classes[reg_class_id].alias_set_id !=
           0) {
@@ -343,13 +369,16 @@ static void loom_low_schedule_score_candidate_pressure_limit_for_class(
       unspillable_activation_units,
       iree_all_bits_set(
           state->target.descriptor_set->reg_classes[reg_class_id].flags,
-          LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE));
+          LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE) ||
+          loom_low_schedule_candidate_opens_required_register_lifetime(
+              state, candidate_node_index, completion_domain_id));
 }
 
 static void loom_low_schedule_score_candidate_pressure_limit_for_alias_set(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
-    loom_low_schedule_candidate_score_t* score, uint16_t alias_set_id) {
+    loom_low_schedule_candidate_score_t* score, uint32_t candidate_node_index,
+    uint16_t alias_set_id) {
   const loom_low_schedule_alias_pressure_record_t* record =
       &pressure_state->alias_sets.records[alias_set_id];
   const uint16_t reg_class_id = state->pressure_limits.alias_sets[alias_set_id]
@@ -371,20 +400,23 @@ static void loom_low_schedule_score_candidate_pressure_limit_for_alias_set(
           record->candidate_lifetime.early_added_units,
           record->candidate_lifetime.late_released_units),
       record->packing_reserve_units, unspillable_activation_units,
-      state->pressure_limits.alias_sets[alias_set_id].all_classes_unspillable);
+      state->pressure_limits.alias_sets[alias_set_id].all_classes_unspillable ||
+          loom_low_schedule_candidate_opens_required_register_lifetime(
+              state, candidate_node_index, completion_domain_id));
 }
 
 static void loom_low_schedule_score_candidate_pressure_limits(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
-    loom_low_schedule_candidate_score_t* score) {
+    uint32_t candidate_node_index, loom_low_schedule_candidate_score_t* score) {
   if (state->pressure_limits.by_reg_class == NULL ||
       pressure_state->current_live_units_by_reg_class == NULL) {
     return;
   }
   for (iree_host_size_t i = 0; i < pressure_state->block_reg_class_count; ++i) {
     loom_low_schedule_score_candidate_pressure_limit_for_class(
-        state, pressure_state, score, pressure_state->block_reg_class_ids[i]);
+        state, pressure_state, score, candidate_node_index,
+        pressure_state->block_reg_class_ids[i]);
   }
   for (iree_host_size_t i = 0;
        i < pressure_state->candidate_delta_touched_count; ++i) {
@@ -394,12 +426,13 @@ static void loom_low_schedule_score_candidate_pressure_limits(
       continue;
     }
     loom_low_schedule_score_candidate_pressure_limit_for_class(
-        state, pressure_state, score, reg_class_id);
+        state, pressure_state, score, candidate_node_index, reg_class_id);
   }
   for (iree_host_size_t i = 0; i < pressure_state->alias_sets.block_count;
        ++i) {
     loom_low_schedule_score_candidate_pressure_limit_for_alias_set(
-        state, pressure_state, score, pressure_state->alias_sets.block_ids[i]);
+        state, pressure_state, score, candidate_node_index,
+        pressure_state->alias_sets.block_ids[i]);
   }
   for (iree_host_size_t i = 0;
        i < pressure_state->alias_sets.candidate_delta_touched_count; ++i) {
@@ -410,7 +443,7 @@ static void loom_low_schedule_score_candidate_pressure_limits(
       continue;
     }
     loom_low_schedule_score_candidate_pressure_limit_for_alias_set(
-        state, pressure_state, score, alias_set_id);
+        state, pressure_state, score, candidate_node_index, alias_set_id);
   }
 }
 
@@ -1057,8 +1090,8 @@ void loom_low_schedule_target_pressure_score_candidate(
   score->persistent_pressure_cliff_penalty = score->pressure_cliff_penalty;
   loom_low_schedule_score_candidate_register_packing_resources(
       state, pressure_state, candidate_node_index, score);
-  loom_low_schedule_score_candidate_pressure_limits(state, pressure_state,
-                                                    score);
+  loom_low_schedule_score_candidate_pressure_limits(
+      state, pressure_state, candidate_node_index, score);
   loom_low_schedule_score_active_unspillable_completions(
       state, pressure_state, candidate_node_index, score);
 }

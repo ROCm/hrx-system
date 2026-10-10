@@ -166,6 +166,8 @@ enum loom_low_schedule_value_flag_bits_e {
   LOOM_LOW_SCHEDULE_VALUE_FLAG_FORWARDED = 1u << 6,
   // At least one occurrence in the current candidate reads after result writes.
   LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_LATE_READ = 1u << 7,
+  // Allocation requires this value to remain in physical register storage.
+  LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER = 1u << 8,
 };
 typedef uint16_t loom_low_schedule_value_flags_t;
 
@@ -197,6 +199,12 @@ typedef struct loom_low_schedule_value_record_t {
   // Mutable per-schedule flags.
   loom_low_schedule_value_flags_t flags;
 } loom_low_schedule_value_record_t;
+
+static inline bool loom_low_schedule_value_requires_register(
+    const loom_low_schedule_value_record_t* value) {
+  return iree_any_bit_set(value->flags,
+                          LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER);
+}
 
 typedef struct loom_low_schedule_alias_pressure_limit_t {
   // Hard live-unit limit shared by the alias set.

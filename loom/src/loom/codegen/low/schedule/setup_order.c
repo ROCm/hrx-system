@@ -42,6 +42,9 @@ static bool loom_low_schedule_setup_order_is_member(
     // and issue-slot scheduling instead of acquiring these ordering edges.
     const loom_low_schedule_value_record_t* result =
         &state->values[loom_low_schedule_node_const_result_ordinals(node)[0]];
+    if (!loom_low_schedule_value_requires_register(result)) {
+      return false;
+    }
     const uint16_t domain = loom_low_schedule_unspillable_completion_domain_id(
         state, result->register_class_id);
     return domain != UINT16_MAX && result->unit_count == 1 &&

@@ -268,11 +268,13 @@ static uint64_t loom_low_schedule_compute_unspillable_result_units(
        ++result_index) {
     const loom_low_schedule_value_record_t* value =
         &state->values[result_ordinals[result_index]];
-    if (loom_low_schedule_unspillable_completion_domain_id(
-            state, value->register_class_id) == completion_domain_id) {
-      result_units =
-          iree_math_saturating_add_u64(result_units, value->unit_count);
+    if (!loom_low_schedule_value_requires_register(value) ||
+        loom_low_schedule_unspillable_completion_domain_id(
+            state, value->register_class_id) != completion_domain_id) {
+      continue;
     }
+    result_units =
+        iree_math_saturating_add_u64(result_units, value->unit_count);
   }
   return result_units;
 }
@@ -309,6 +311,7 @@ static uint64_t loom_low_schedule_unspillable_handoff_replacement_units(
         state->value_domain->value_ids[relation->destination_ordinal]);
     if (!loom_value_is_block_arg(destination_value) ||
         loom_value_def_block(destination_value) != consumer_block ||
+        !loom_low_schedule_value_requires_register(destination) ||
         loom_low_schedule_unspillable_completion_domain_id(
             state, destination->register_class_id) != completion_domain_id) {
       continue;
@@ -332,7 +335,8 @@ static uint64_t loom_low_schedule_compute_unspillable_operand_units(
         operand_ordinals[operand_index];
     const loom_low_schedule_value_record_t* value =
         &state->values[operand_ordinal];
-    if (loom_low_schedule_operand_has_future_activation(
+    if (loom_low_schedule_value_requires_register(value) &&
+        loom_low_schedule_operand_has_future_activation(
             state, node, operand_ordinals, operand_index, source_range_start) &&
         loom_low_schedule_unspillable_completion_domain_id(
             state, value->register_class_id) == completion_domain_id) {
@@ -404,7 +408,8 @@ loom_low_schedule_select_unspillable_result_completion(
        ++result_index) {
     const loom_low_schedule_value_record_t* value =
         &state->values[result_ordinals[result_index]];
-    if (loom_low_schedule_unspillable_completion_domain_id(
+    if (!loom_low_schedule_value_requires_register(value) ||
+        loom_low_schedule_unspillable_completion_domain_id(
             state, value->register_class_id) != completion_domain_id) {
       continue;
     }
@@ -631,6 +636,7 @@ void loom_low_schedule_pressure_compute_node_priorities(
               loom_low_schedule_value_record_t* value =
                   &state->values[value_ordinal];
               if (state->value_producer_nodes[value_ordinal] != node_index ||
+                  !loom_low_schedule_value_requires_register(value) ||
                   iree_any_bit_set(value->flags,
                                    LOOM_LOW_SCHEDULE_VALUE_FLAG_FORWARDED) ||
                   loom_low_schedule_unspillable_completion_domain_id(

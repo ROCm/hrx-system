@@ -85,6 +85,15 @@ static iree_status_t loom_low_schedule_initialize_value_records(
             &state->register_type_resolver, type, &value->register_class_id,
             NULL)) {
       value->unit_count = loom_low_register_type_unit_count(type);
+      const loom_low_reg_class_t* reg_class =
+          &state->target.descriptor_set->reg_classes[value->register_class_id];
+      if (iree_all_bits_set(reg_class->flags,
+                            LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE) ||
+          (value_id < state->options->required_register_values.bit_count &&
+           iree_bitmap_test(state->options->required_register_values,
+                            value_id))) {
+        value->flags |= LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+      }
     }
   }
   return iree_ok_status();
@@ -280,23 +289,18 @@ static void loom_low_schedule_record_pressure_limit(uint32_t* existing_limit,
   }
 }
 
-// Returns the hard capacity owned by an unspillable register storage domain,
-// or UINT32_MAX when values in the class may spill or have no finite limit.
+// Returns the hard capacity owned by a required-register storage domain, or
+// UINT32_MAX when the class has no finite limit.
 static uint32_t loom_low_schedule_unspillable_completion_capacity(
     const loom_low_schedule_build_state_t* state, uint16_t reg_class_id) {
   const loom_low_reg_class_t* reg_class =
       &state->target.descriptor_set->reg_classes[reg_class_id];
-  if (!iree_all_bits_set(reg_class->flags,
-                         LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE)) {
-    return UINT32_MAX;
-  }
   if (reg_class->alias_set_id == 0) {
     return state->pressure_limits.by_reg_class[reg_class_id];
   }
   const loom_low_schedule_alias_pressure_limit_t* alias_limit =
       &state->pressure_limits.alias_sets[reg_class->alias_set_id];
-  return alias_limit->all_classes_unspillable ? alias_limit->live_unit_limit
-                                              : UINT32_MAX;
+  return alias_limit->live_unit_limit;
 }
 
 static iree_status_t loom_low_schedule_initialize_pressure_limits(
@@ -421,9 +425,9 @@ static iree_status_t loom_low_schedule_initialize_pressure_limits(
     return iree_ok_status();
   }
 
-  // Build domains from register classes the function can make live. The
-  // domain-ID table doubles as a used-class marker until the class scan below
-  // replaces each marker with its final dense ID.
+  // Build domains from register classes containing values that allocation
+  // cannot spill. The domain-ID table doubles as a required-class marker until
+  // the class scan below replaces each marker with its final dense ID.
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       state->scratch_arena, descriptor_set->reg_class_count,
       sizeof(*state->pressure_limits
@@ -439,7 +443,9 @@ static iree_status_t loom_low_schedule_initialize_pressure_limits(
        value_ordinal < state->value_domain->value_count; ++value_ordinal) {
     const uint16_t reg_class_id =
         state->values[value_ordinal].register_class_id;
-    if (reg_class_id != LOOM_LOW_REG_CLASS_NONE) {
+    if (reg_class_id != LOOM_LOW_REG_CLASS_NONE &&
+        loom_low_schedule_value_requires_register(
+            &state->values[value_ordinal])) {
       state->pressure_limits
           .unspillable_completion_domain_ids_by_reg_class[reg_class_id] = 0;
     }
