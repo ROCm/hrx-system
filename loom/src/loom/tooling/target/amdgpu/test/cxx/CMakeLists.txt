@@ -3689,7 +3689,6 @@ if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_
 loom_execution_test(
   NAME
     iq4xs_gate_up_test_double_buffered_execute_amdgpu_test
-  CORRECTNESS_ONLY
   MODULE
     "::iq4xs_gate_up_module"
   RUNNER_ARGS
@@ -3720,7 +3719,6 @@ if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_
 loom_execution_test(
   NAME
     iq4xs_gate_up_test_double_buffered_execute_amdgpu_access_test
-  CORRECTNESS_ONLY
   MODULE
     "::iq4xs_gate_up_module"
   RUNNER_ARGS
@@ -3753,7 +3751,6 @@ if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_
 loom_execution_test(
   NAME
     iq4xs_gate_up_test_single_buffered_execute_amdgpu_test
-  CORRECTNESS_ONLY
   MODULE
     "::iq4xs_gate_up_module"
   RUNNER_ARGS
@@ -3784,7 +3781,6 @@ if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_
 loom_execution_test(
   NAME
     iq4xs_gate_up_test_single_buffered_execute_amdgpu_access_test
-  CORRECTNESS_ONLY
   MODULE
     "::iq4xs_gate_up_module"
   RUNNER_ARGS
@@ -3819,7 +3815,6 @@ if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_
 loom_execution_test(
   NAME
     iq4xs_gate_up_async_test_double_buffered_execute_amdgpu_test
-  CORRECTNESS_ONLY
   MODULE
     "::iq4xs_gate_up_module"
   RUNNER_ARGS
@@ -3850,7 +3845,6 @@ if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_
 loom_execution_test(
   NAME
     iq4xs_gate_up_async_test_double_buffered_execute_amdgpu_access_test
-  CORRECTNESS_ONLY
   MODULE
     "::iq4xs_gate_up_module"
   RUNNER_ARGS
@@ -3898,7 +3892,6 @@ if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_
 loom_execution_test(
   NAME
     iq4xs_gate_up_async_test_single_buffered_execute_amdgpu_test
-  CORRECTNESS_ONLY
   MODULE
     "::iq4xs_gate_up_module"
   RUNNER_ARGS
@@ -3929,7 +3922,6 @@ if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_
 loom_execution_test(
   NAME
     iq4xs_gate_up_async_test_single_buffered_execute_amdgpu_access_test
-  CORRECTNESS_ONLY
   MODULE
     "::iq4xs_gate_up_module"
   RUNNER_ARGS

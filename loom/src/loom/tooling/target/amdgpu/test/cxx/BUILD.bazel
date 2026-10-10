@@ -538,7 +538,6 @@ loom_test_module(
 
 loom_test(
     name = "iq4xs_gate_up_test",
-    benchmark_smoke = False,
     case = "iq4xs_gate_up_values",
     configs = _IQ4XS_GATE_UP_SYNC_CONFIGS,
     execution_profiles = _EXECUTION_PROFILES,
@@ -549,7 +548,6 @@ loom_test(
 
 loom_test(
     name = "iq4xs_gate_up_async_test",
-    benchmark_smoke = False,
     case = "iq4xs_gate_up_values",
     compile_targets = ["//loom/target/amdgpu:gfx942"],
     configs = _IQ4XS_GATE_UP_ASYNC_CONFIGS,
