@@ -539,9 +539,14 @@ static iree_status_t image_model_initialize(
           &model->weights.values[reflected.fixed_buffer_index]};
       status = loom_serve_weights_create(
           device, loom_serve_device_transfer_queue(model->owner), dispatch,
-          loom_serve_device_memory_pool(model->owner), model->jit, command_mode,
-          0, 1, &root, parameter->path, iree_make_cstring_view(policy),
+          loom_serve_device_memory_pool(model->owner), 0, 1, &root,
           &model->weights.plans[i], allocator);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_weights_prepare(
+          model->weights.plans[i], loom_serve_device_host(model->owner),
+          model->jit, command_mode, parameter->path,
+          iree_make_cstring_view(policy));
     }
     iree_allocator_free(allocator, policy);
   }

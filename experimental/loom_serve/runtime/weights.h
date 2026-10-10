@@ -47,8 +47,8 @@ typedef struct loom_serve_weight_activity_t {
   uint64_t groups;
 } loom_serve_weight_activity_t;
 
-// Resolves final weight roots without submitting device work. Checkpoint
-// metadata is indexed here; payload reads wait for activation. The first
+// Resolves final weight roots on the serialized pool owner without submitting
+// device work, indexing files or compiling source. The first
 // shared_root_count roots have identical parameter placement; subsequent roots
 // either share existing placement or own new parameters. Zero shared roots is
 // valid. Only the selected roots are populated; other roots of their programs
@@ -59,34 +59,57 @@ typedef struct loom_serve_weight_activity_t {
 // roots in separate calls, then records with both populated slots. The same
 // tensor name in distinct checkpoint domains does not imply shared storage.
 //
+// With pool, roots have stable virtual addresses and start without physical
+// backing. NULL selects explicitly fixed storage (including device ASAN use);
+// deactivation is unavailable in that mode. Successful source preparation is
+// required before activation, and activation before any consumer executes.
+//
+// On failure both populated root slots and a non-NULL *out_weights remain
+// caller-owned for teardown. Release consumer commands and root slots before
+// destroying this plan.
+iree_status_t loom_serve_weights_create(
+    iree_hal_device_t* device, iree_hal_queue_t* transfer,
+    iree_hal_queue_t* dispatch, loom_serve_memory_pool_t* pool,
+    iree_host_size_t shared_root_count, iree_host_size_t root_count,
+    const loom_serve_weight_root_t* roots, loom_serve_weights_t** out_weights,
+    iree_allocator_t host_allocator);
+
+// Receives the terminal source preparation status on a shared task worker.
+// All preparation tasks/compiler accesses have retired before this callback.
+// Pool mutation and activation return to the serialized model owner.
+typedef void (*loom_serve_weights_completion_fn_t)(void* user_data,
+                                                   iree_status_t status);
+
+// Exclusively prepares a newly created plan without mutating its pool or
+// submitting device work. CPU source policy/indexing and native compilation
+// run on the shared host. Payload reads wait for activation; open checkpoint
+// handles and recorded preparers remain cached, not a second weight copy.
+//
 // policy_path names source with the VM export:
 //   prepare_weight(buffer key) -> (buffer command_root, i64 byte_length)
 // The key is a read-only, non-NUL-terminated tensor name. Empty command_root
 // and zero byte_length preserve file bytes. Otherwise command_root names a
-// fully specified source command, and byte_length must equal the reflected
-// tensor size. A preparer has one mutable binding, no fixed buffers, and no
-// global scratch. Each distinct root is JITed once; each activation prepares
-// every unique tensor once directly in final storage. Invalid policy fails
-// plan creation.
+// fully specified command, and byte_length equals the reflected tensor size.
+// A preparer has one mutable binding, no fixed buffers, and no global scratch.
+// Each distinct root is JITed once; activation prepares each unique tensor once
+// directly in final storage. The temporary VM policy is released before JIT.
 //
-// With pool, roots have stable virtual addresses and start without physical
-// backing. NULL selects explicitly fixed storage (including device ASAN use);
-// deactivation is unavailable in that mode. Activation is required in either
-// mode before any consumer executes. The cold VM policy is released here;
-// resolved preparation commands and the checkpoint provider remain cached.
-//
-// On failure both populated root slots and a non-NULL *out_weights remain
-// caller-owned for teardown. Release consumer commands and root slots before
-// destroying this plan. The normal file I/O mode retains open checkpoint
-// handles, not a second in-memory copy of the parameter payload.
-iree_status_t loom_serve_weights_create(
-    iree_hal_device_t* device, iree_hal_queue_t* transfer,
-    iree_hal_queue_t* dispatch, loom_serve_memory_pool_t* pool,
+// Success accepts exclusive access to weights and jit until completion, which
+// may run before return. The caller keeps both, paths, host and user_data alive
+// through that callback. Rejection owes no callback. Preparation is attempted
+// once per plan; failure returns ownership for destruction, not activation.
+iree_status_t loom_serve_weights_prepare_async(
+    loom_serve_weights_t* weights, loom_serve_host_t* host,
     loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
-    iree_host_size_t shared_root_count, iree_host_size_t root_count,
-    const loom_serve_weight_root_t* roots, iree_string_view_t weights_path,
-    iree_string_view_t policy_path, loom_serve_weights_t** out_weights,
-    iree_allocator_t host_allocator);
+    iree_string_view_t weights_path, iree_string_view_t policy_path,
+    loom_serve_weights_completion_fn_t completion, void* user_data);
+
+// Cold outer-application join over the same preparation. Never called by a
+// shared worker; live model loading consumes prepare_async completion instead.
+iree_status_t loom_serve_weights_prepare(
+    loom_serve_weights_t* weights, loom_serve_host_t* host,
+    loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
+    iree_string_view_t weights_path, iree_string_view_t policy_path);
 
 // Commits storage and streams/prepares directly into final roots through four
 // independent queue lanes, importing readiness into the consuming execution

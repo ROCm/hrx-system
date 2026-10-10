@@ -154,10 +154,14 @@ static iree_status_t projection_initialize(projection_check_t* check,
         &check->weights[i]};
     status = loom_serve_weights_create(
         device, loom_serve_device_transfer_queue(check->owner), dispatch, NULL,
-        check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, 0, 1, &root,
-        iree_make_cstring_view(checkpoints[i]),
-        iree_make_cstring_view(policy_path), &check->weight_plans[i],
-        allocator);
+        0, 1, &root, &check->weight_plans[i], allocator);
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_weights_prepare(
+          check->weight_plans[i], loom_serve_device_host(check->owner),
+          check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+          iree_make_cstring_view(checkpoints[i]),
+          iree_make_cstring_view(policy_path));
+    }
     if (iree_status_is_ok(status)) {
       status =
           loom_serve_weights_activate(check->weight_plans[i], check->execution);

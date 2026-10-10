@@ -25,6 +25,75 @@ IREE_FLAG(string, weight_sources, "", "Weight loader source catalog.");
 
 namespace {
 
+// Models the loader's owner turn: submit private policy/index/JIT preparation
+// and return so that the same sole worker can execute the accepted work.
+struct Preparation {
+  static iree_status_t Submit(iree_task_process_t* process,
+                              const iree_task_worker_context_t*,
+                              iree_task_process_drain_result_t* result) {
+    auto* self = static_cast<Preparation*>(process->user_data);
+    auto status = loom_serve_weights_prepare_async(
+        self->weights, self->host, self->jit,
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, self->checkpoint, self->policy,
+        Complete, self);
+    if (!iree_status_is_ok(status)) {
+      Complete(self, status);
+    }
+    result->completed = true;
+    result->did_work = true;
+    return iree_ok_status();
+  }
+
+  static void Complete(void* user_data, iree_status_t status) {
+    auto* self = static_cast<Preparation*>(user_data);
+    std::lock_guard<std::mutex> lock(self->mutex);
+    self->status = status;
+    self->ready = true;
+    self->condition.notify_one();
+  }
+
+  static void Release(iree_task_process_t* process) {
+    auto* self = static_cast<Preparation*>(process->user_data);
+    std::lock_guard<std::mutex> lock(self->mutex);
+    self->released = true;
+    self->condition.notify_one();
+  }
+
+  iree_status_t Run() {
+    iree_task_process_initialize(Submit, 0, 1, &process);
+    process.user_data = this;
+    process.release_fn = Release;
+    iree_task_executor_schedule_process(loom_serve_host_executor(host),
+                                        &process);
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [&] { return ready && released; });
+    return status;
+  }
+
+  // Borrowed unactivated model plan, owned by the fixture through completion.
+  loom_serve_weights_t* weights = nullptr;
+  // Borrowed one-worker host shared with source compilation and serving.
+  loom_serve_host_t* host = nullptr;
+  // Borrowed exclusive compiler catalog.
+  loom_serve_jit_t* jit = nullptr;
+  // Borrowed file locator retained by the outer test owner.
+  iree_string_view_t checkpoint = {};
+  // Borrowed source policy path retained through completion.
+  iree_string_view_t policy = {};
+  // Loader's finite submitting turn, not a thread or waiting worker.
+  iree_task_process_t process = {};
+  // Joins both terminal callbacks with the test thread's final access.
+  std::mutex mutex;
+  // Outer test notification; not part of the production preparation path.
+  std::condition_variable condition;
+  // Terminal source preparation has delivered ownership and status.
+  bool ready = false;
+  // Executor has made its final access to the loader's submitting process.
+  bool released = false;
+  // Owned terminal preparation status transferred to the outer test caller.
+  iree_status_t status = iree_ok_status();
+};
+
 // The only worker submits activation and native consumption, then returns.
 // Another task must run to release consumption's predecessor. Completion is a
 // public proactor multi-wait, not a worker join or a driver-specific callback.
@@ -284,11 +353,22 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
                             const std::string& path) {
     const std::string policy = directory_ + "/policy.loom";
     auto** plan = &plans_[plan_count_++];
-    return loom_serve_weights_create(
-        device_, transfer_, dispatch_, pool_, jit_,
-        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, shared_count, root_count, roots,
-        iree_make_cstring_view(path.c_str()),
-        iree_make_cstring_view(policy.c_str()), plan, allocator_);
+    IREE_RETURN_IF_ERROR(loom_serve_weights_create(
+        device_, transfer_, dispatch_, pool_, shared_count, root_count, roots,
+        plan, allocator_));
+    const auto before = loom_serve_weights_statistics(*plan);
+    Preparation preparation;
+    preparation.weights = *plan;
+    preparation.host = loom_serve_device_host(device_owner_);
+    preparation.jit = jit_;
+    preparation.checkpoint = iree_make_cstring_view(path.c_str());
+    preparation.policy = iree_make_cstring_view(policy.c_str());
+    auto status = preparation.Run();
+    const auto after = loom_serve_weights_statistics(*plan);
+    EXPECT_EQ(after.reserved_bytes, before.reserved_bytes);
+    EXPECT_EQ(after.committed_bytes, before.committed_bytes);
+    EXPECT_EQ(loom_serve_weights_activity(*plan).activations, 0u);
+    return status;
   }
 
   iree_status_t LoadRoots(iree_host_size_t shared_count,
@@ -410,6 +490,8 @@ TEST_P(WeightsTest, MultiplePreparersAndSharedRootsPrepareEachTensorOnce) {
   IREE_ASSERT_OK(Compile(1, "target"));
   IREE_ASSERT_OK(Compile(2, "auxiliary"));
   IREE_ASSERT_OK(Load(2, 3));
+  // Three consumer commands plus exactly two distinct source preparers.
+  EXPECT_EQ(compilation_.commands, 5u);
   EXPECT_EQ(buffers_[0][0], buffers_[1][0]);
   Run(0, 70);
   Run(1, 70);
@@ -495,6 +577,22 @@ TEST_P(WeightsTest, PolicySizeMismatchRejectsBeforeFileSubmission) {
 TEST_P(WeightsTest, MissingPreparationRootFailsCompilation) {
   IREE_ASSERT_OK(Compile(0, "missing"));
   IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Load(0, 1));
+}
+
+TEST_P(WeightsTest, CheckpointIndexFailureLeavesTheSharedCompilerUsable) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto failed_root = Root(0, 0);
+  IREE_ASSERT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      CreateRoots(0, 1, &failed_root, path_.path() + ".missing.safetensors"));
+  EXPECT_EQ(loom_serve_weights_activity(plans_[0]).read_bytes, 0u);
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
+  // The failed plan retains its own roots for normal owner-side cleanup while
+  // another plan prepares and consumes through the same single-worker host.
+  IREE_ASSERT_OK(Compile(1, "target"));
+  const auto live_root = Root(1, 0);
+  IREE_ASSERT_OK(LoadRoots(0, 1, &live_root, path_.path()));
+  Run(1, 70);
 }
 
 TEST_P(WeightsTest, MissingFileParameterFailsTheLoad) {

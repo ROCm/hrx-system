@@ -223,9 +223,13 @@ static iree_status_t component_initialize(component_check_t* check,
           &check->weights[parameter_root.fixed_buffer_index]};
       status = loom_serve_weights_create(
           device, loom_serve_device_transfer_queue(check->owner), dispatch,
-          NULL, check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, 0, 1, &root,
-          checkpoints.values[r], iree_make_cstring_view(FLAG_weight_policy),
-          &check->weight_plans[r], allocator);
+          NULL, 0, 1, &root, &check->weight_plans[r], allocator);
+      if (iree_status_is_ok(status)) {
+        status = loom_serve_weights_prepare(
+            check->weight_plans[r], loom_serve_device_host(check->owner),
+            check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+            checkpoints.values[r], iree_make_cstring_view(FLAG_weight_policy));
+      }
       if (iree_status_is_ok(status)) {
         status = loom_serve_weights_activate(check->weight_plans[r],
                                              check->execution);

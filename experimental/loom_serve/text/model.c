@@ -317,10 +317,15 @@ static iree_status_t text_prepare_weights(loom_serve_text_model_t* model,
   if (iree_status_is_ok(status)) {
     status = loom_serve_weights_create(
         model->device, model->transfer, model->dispatch,
-        loom_serve_device_memory_pool(model->device_owner), model->jit,
-        model->command_mode, model->shared_stage_count, root_count, roots,
-        checkpoint->path, iree_make_cstring_view(policy_path), &model->weights,
+        loom_serve_device_memory_pool(model->device_owner),
+        model->shared_stage_count, root_count, roots, &model->weights,
         model->allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_weights_prepare(
+        model->weights, loom_serve_device_host(model->device_owner), model->jit,
+        model->command_mode, checkpoint->path,
+        iree_make_cstring_view(policy_path));
   }
   iree_allocator_free(model->allocator, policy_path);
   iree_allocator_free(model->allocator, roots);

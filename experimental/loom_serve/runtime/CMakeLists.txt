@@ -535,10 +535,12 @@ loom_cc_library(
     "weights.c"
   DEPS
     ::execution
+    ::host
     ::jit
     ::program
     ::retirement
     iree::base
+    iree::base::threading
     iree::experimental::loom_serve::storage::memory
     iree::hal
     iree::io::parameter_index
@@ -546,6 +548,7 @@ loom_cc_library(
     iree::io::parameter_provider
     iree::tooling::parameter_util
     iree::vm
+    loom::binding::c::loomc
     loom::target::arch::cmd::program
   PUBLIC
 )
