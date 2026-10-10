@@ -6,7 +6,6 @@
 
 #include "experimental/loom_serve/text/service.h"
 
-#include <signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -18,6 +17,7 @@
 #include <thread>
 #include <vector>
 
+#include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
@@ -92,7 +92,6 @@ class Oracle {
 class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(iree_async_signal_block_default());
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
     const loom_serve_device_options_t device_options = {.uri =
                                                             IREE_SV("amdgpu")};
@@ -108,9 +107,13 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     IREE_ASSERT_OK(
         loom_serve_text_model_create(device_, &options, &model_, allocator_));
     auto server_options = loom_serve_http_server_options_default();
-    server_options.port = 0;
     IREE_ASSERT_OK(
-        loom_serve_http_server_create(&server_options, &server_, allocator_));
+        loom_serve_http_server_create(loom_serve_host_proactor_pool(host_),
+                                      &server_options, &server_, allocator_));
+    auto listener_options = loom_serve_http_listener_options_default();
+    listener_options.address = IREE_SV("127.0.0.1:0");
+    IREE_ASSERT_OK(loom_serve_http_listener_create(server_, &listener_options,
+                                                   &listener_, allocator_));
   }
 
   void WriteWeights(uint32_t bias) {
@@ -148,11 +151,12 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
 
   void TearDown() override {
     if (service_.joinable()) {
-      EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+      loom_serve_http_server_request_stop(server_);
       service_.join();
       IREE_EXPECT_OK(status_);
     }
-    IREE_EXPECT_OK(loom_serve_http_server_destroy(server_));
+    IREE_EXPECT_OK(loom_serve_http_listener_destroy(listener_));
+    loom_serve_http_server_destroy(server_);
     IREE_EXPECT_OK(loom_serve_text_model_destroy(model_));
     IREE_EXPECT_OK(loom_serve_device_group_destroy(group_));
     loom_serve_host_release(host_);
@@ -183,7 +187,7 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
            const std::string& method = "POST") {
     const int client = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     EXPECT_GE(client, 0);
-    const auto* address = loom_serve_http_server_address(server_);
+    const auto* address = loom_serve_http_listener_address(listener_);
     EXPECT_EQ(
         connect(client, reinterpret_cast<const sockaddr*>(address->storage),
                 address->length),
@@ -269,6 +273,8 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
   loom_serve_text_model_t* model_ = nullptr;
   // Real loopback HTTP carrier.
   loom_serve_http_server_t* server_ = nullptr;
+  // Independent binding borrowing the HTTP owner and shared host pool.
+  loom_serve_http_listener_t* listener_ = nullptr;
   // Outer application thread, not a model worker dependency wait.
   std::thread service_;
   // Consumed after joining the application thread.
@@ -373,7 +379,7 @@ TEST_P(SourceTextServiceTest, TelemetryWrapDoesNotBlockTextOrChangeCounters) {
   EXPECT_NE(resumed.find(totals), std::string::npos);
   EXPECT_NE(poll("").find(R"("partial":true)"), std::string::npos);
   EXPECT_EQ(cursor_of(poll(fast)), fast);
-  EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+  loom_serve_http_server_request_stop(server_);
   service_.join();
   IREE_EXPECT_OK(status_);
 }

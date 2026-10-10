@@ -150,8 +150,21 @@ loom_cc_library(
         ":request",
         "//experimental/loom_serve/telemetry:stream",
         "//runtime/src/iree/async",
-        "//runtime/src/iree/async:platform",
-        "//runtime/src/iree/async/util:proactor_thread",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/net:carrier",
+    ],
+)
+
+loom_cc_library(
+    name = "listener",
+    srcs = ["listener.c"],
+    hdrs = ["listener.h"],
+    deps = [
+        ":server",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/net:carrier",
@@ -167,10 +180,12 @@ loom_cc_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":listener",
         ":request",
         ":router",
         ":server",
         "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/task",
         "//runtime/src/iree/testing:gtest",
@@ -188,13 +203,16 @@ loom_cc_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":listener",
         ":request",
         ":server",
         "//experimental/loom_serve/telemetry:stream",
         "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )

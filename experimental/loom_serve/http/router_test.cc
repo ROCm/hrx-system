@@ -6,7 +6,6 @@
 
 #include "experimental/loom_serve/http/router.h"
 
-#include <signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -18,6 +17,7 @@
 #include <thread>
 #include <vector>
 
+#include "experimental/loom_serve/http/listener.h"
 #include "iree/async/proactor.h"
 #include "iree/task/topology.h"
 #include "iree/testing/gtest.h"
@@ -204,7 +204,9 @@ struct ModelService {
 class HttpRouterTest : public ::testing::TestWithParam<int> {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(iree_async_signal_block_default());
+    IREE_ASSERT_OK(iree_async_proactor_pool_create(
+        1, nullptr, iree_async_proactor_pool_options_default(),
+        iree_allocator_system(), &pool_));
     iree_task_topology_t topology;
     iree_task_topology_initialize_from_group_count(GetParam(), &topology);
     iree_task_executor_options_t executor_options;
@@ -214,9 +216,12 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
     iree_task_topology_deinitialize(&topology);
     IREE_ASSERT_OK(status);
     auto options = loom_serve_http_server_options_default();
-    options.port = 0;
-    IREE_ASSERT_OK(loom_serve_http_server_create(&options, &server_,
+    IREE_ASSERT_OK(loom_serve_http_server_create(pool_, &options, &server_,
                                                  iree_allocator_system()));
+    auto listener_options = loom_serve_http_listener_options_default();
+    listener_options.address = IREE_SV("127.0.0.1:0");
+    IREE_ASSERT_OK(loom_serve_http_listener_create(
+        server_, &listener_options, &listener_, iree_allocator_system()));
     IREE_ASSERT_OK(iree_tokenizer_from_huggingface_json(
         IREE_SV(R"({"model":{"type":"BPE","vocab":{"a":0,"b":1},
                               "merges":[]},"decoder":{"type":"ByteFallback"}})"),
@@ -239,7 +244,7 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
   }
   void TearDown() override {
     if (owner_.joinable()) {
-      EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+      loom_serve_http_server_request_stop(server_);
       owner_.join();
     }
     IREE_EXPECT_STATUS_IS(expected_code_, status_);
@@ -249,7 +254,9 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
         loom_serve_http_connection_abort(connection);
       }
     }
-    IREE_EXPECT_OK(loom_serve_http_server_destroy(server_));
+    IREE_EXPECT_OK(loom_serve_http_listener_destroy(listener_));
+    loom_serve_http_server_destroy(server_);
+    iree_async_proactor_pool_release(pool_);
     iree_tokenizer_free(tokenizer_b_);
     iree_tokenizer_free(tokenizer_a_);
     iree_task_executor_release(executor_);
@@ -258,7 +265,7 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
            const std::string& body = "", const std::string& headers = "") {
     const int client = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     EXPECT_GE(client, 0);
-    const auto* address = loom_serve_http_server_address(server_);
+    const auto* address = loom_serve_http_listener_address(listener_);
     EXPECT_EQ(
         connect(client, reinterpret_cast<const sockaddr*>(address->storage),
                 address->length),
@@ -291,8 +298,12 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
     EXPECT_EQ(close(client), 0);
     return result;
   }
-  // Real loopback transport and its separate proactor owner.
+  // HTTP connection owner with no private polling thread.
   loom_serve_http_server_t* server_ = nullptr;
+  // Independent binding to the shared connection owner.
+  loom_serve_http_listener_t* listener_ = nullptr;
+  // Shared persistent I/O infrastructure.
+  iree_async_proactor_pool_t* pool_ = nullptr;
   // Shared task workers, joined only after the router's final release.
   iree_task_executor_t* executor_ = nullptr;
   // Immutable tokenizers outliving accepted jobs, with intentionally distinct
@@ -587,7 +598,7 @@ TEST_P(HttpRouterTest, HeldModelLeavesIndependentRequestsRunnable) {
 TEST_P(HttpRouterTest, ShutdownDrainsAcceptedReadinessBeforeDetaching) {
   const int held = Send("POST", "/v1/chat/completions", R"({"model":"held"})");
   held_.WaitSubmitted();
-  EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+  loom_serve_http_server_request_stop(server_);
   held_.WaitStopping();
   EXPECT_FALSE(returned_.load());
   held_.Release();

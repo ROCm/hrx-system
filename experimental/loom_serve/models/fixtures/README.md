@@ -23,7 +23,7 @@ from the repository root:
 build_tools/bin/iree-bazel-run --config=opt \
   //experimental/loom_serve/serving:server -- \
   --models=experimental/loom_serve/models/fixtures/catalog.json \
-  --port=8080 --workers=1
+  --listen=127.0.0.1:8080 --workers=1
 ```
 
 Managed build and hardware-runner policies still apply. When execution uses a

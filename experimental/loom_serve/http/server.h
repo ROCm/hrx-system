@@ -9,52 +9,51 @@
 
 #include "experimental/loom_serve/http/request.h"
 #include "experimental/loom_serve/telemetry/stream.h"
-#include "iree/async/address.h"
+#include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/notification.h"
+#include "iree/net/carrier.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Local-only HTTP byte transport. One standard proactor thread services raw TCP
-// carriers independently of the application's serialized scheduler turns. Each
-// connection carries one request and a close-delimited response. This layer
-// knows neither model rows nor chat/SSE semantics.
+// HTTP connection owner independent of socket listeners and process signals.
+// Raw ordered carriers deliver bytes using the shared proactor pool while the
+// application claims requests on serialized scheduler turns. Each connection
+// carries one request and a close-delimited response. This layer knows neither
+// model rows nor chat/SSE semantics and creates no private workers.
 typedef struct loom_serve_http_server_t loom_serve_http_server_t;
 typedef struct loom_serve_http_connection_t loom_serve_http_connection_t;
 
 // Transport budgets are independent of active model rows and queued admission.
 typedef struct loom_serve_http_server_options_t {
-  // Loopback TCP port; zero selects an ephemeral port.
-  uint16_t port;
   // Maximum simultaneous connections, including queued and draining requests.
   iree_host_size_t connection_capacity;
   // Per-connection framing limits; completed bytes remain owned until release.
   loom_serve_http_request_limits_t request_limits;
 } loom_serve_http_server_options_t;
 
-// Defaults to port 8080, 64 connections, 16 KiB headers, 64 headers and 8 MiB
+// Defaults to 64 connections, 16 KiB headers, 64 headers and 8 MiB
 // bodies. Body storage grows on demand within these explicit bounds.
 loom_serve_http_server_options_t loom_serve_http_server_options_default(void);
 
-// Binds loopback and starts network I/O. The executable calls
-// iree_async_signal_block_default before creating any threads if it wants
-// SIGINT/SIGTERM delivery here. The server owns those signal subscriptions.
+// Creates a connection owner without binding listeners or registering signals.
+// Retains |proactor_pool| to keep shared I/O progress alive through connection
+// retirement, including after their originating listeners have stopped.
 iree_status_t loom_serve_http_server_create(
+    iree_async_proactor_pool_t* proactor_pool,
     const loom_serve_http_server_options_t* options,
     loom_serve_http_server_t** out_server, iree_allocator_t host_allocator);
 
-// Stops admission, cancels/drains accepted I/O and joins the polling thread.
-// The application first relinquishes all connection/request views. Returns
-// listener failures; individual peer failures are diagnosed and retired
-// locally. Null is accepted. A fatal proactor failure aborts this experimental
-// process: accepted I/O cannot be safely reclaimed after its polling owner has
-// failed.
-iree_status_t loom_serve_http_server_destroy(loom_serve_http_server_t* server);
+// Cancels/drains accepted I/O and releases shared progress ownership. All
+// listeners have retired and the application has relinquished all request
+// views. This outer application join never runs on a task or proactor callback.
+// Individual peer failures remain in diagnostic history. NULL is accepted.
+void loom_serve_http_server_destroy(loom_serve_http_server_t* server);
 
-// Borrowed bound address and notification, valid until server destruction.
-const iree_async_address_t* loom_serve_http_server_address(
-    const loom_serve_http_server_t* server);
+// Borrowed progress infrastructure and notification, live until destruction.
+iree_async_proactor_pool_t* loom_serve_http_server_proactor_pool(
+    loom_serve_http_server_t* server);
 iree_notification_t* loom_serve_http_server_notification(
     loom_serve_http_server_t* server);
 
@@ -86,8 +85,20 @@ typedef struct loom_serve_http_observer_t {
 void loom_serve_http_server_set_observer(loom_serve_http_server_t* server,
                                          loom_serve_http_observer_t observer);
 
-// True after a shutdown signal or terminal listener failure.
+// Stops request admission and wakes the application to drain its services.
+// Does not cancel active connections or stop shared I/O infrastructure.
+void loom_serve_http_server_request_stop(loom_serve_http_server_t* server);
+
+// True after request_stop, independent of individual listener lifetimes.
 bool loom_serve_http_server_is_stopping(loom_serve_http_server_t* server);
+
+// Transfers a CREATED reliable ordered carrier to HTTP connection ownership.
+// The carrier is either activated or released if admission is closed/full or
+// setup fails. Per-peer failures are recorded without stopping other peers.
+// Its progress comes from this server's pool. Callers join all accept callbacks
+// before destroying the server; concurrent accepts are permitted.
+void loom_serve_http_server_accept(loom_serve_http_server_t* server,
+                                   iree_net_carrier_t* carrier);
 
 // Collects retired connections and claims one completed request, or returns
 // null. The request and connection are borrowed until finish or abort. The

@@ -7,10 +7,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/service.h"
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
+#include "experimental/loom_serve/runtime/signals.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 
@@ -34,15 +36,21 @@ IREE_FLAG(int32_t, heartbeat_ms, 1000,
           "Periodic image-state report interval; zero disables heartbeats.");
 
 // One cold CLI locator, separate from model telemetry and serving workers.
-static iree_status_t image_ready(loom_serve_http_server_t* server) {
+static iree_status_t image_ready(loom_serve_http_listener_t* listener) {
   char storage[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
   iree_string_view_t address;
   IREE_RETURN_IF_ERROR(
-      iree_async_address_format(loom_serve_http_server_address(server),
+      iree_async_address_format(loom_serve_http_listener_address(listener),
                                 sizeof(storage), storage, &address));
   fprintf(stderr, "{\"event\":\"ready\",\"address\":\"%.*s\",\"models\":1}\n",
           (int)address.size, address.data);
   return iree_ok_status();
+}
+
+static void image_shutdown_requested(void* user_data,
+                                     iree_async_signal_t signal) {
+  (void)signal;
+  loom_serve_http_server_request_stop(user_data);
 }
 
 int main(int argc, char** argv) {
@@ -57,11 +65,16 @@ int main(int argc, char** argv) {
   }
   const iree_allocator_t allocator = iree_allocator_system();
   iree_status_t status = iree_async_signal_block_default();
+  if (iree_status_is_ok(status)) {
+    status = iree_async_signal_ignore_broken_pipe();
+  }
   loom_serve_image_model_t* model = NULL;
   loom_serve_device_group_t* group = NULL;
   loom_serve_device_t* device = NULL;
   loom_serve_host_t* host = NULL;
   loom_serve_http_server_t* server = NULL;
+  loom_serve_http_listener_t* listener = NULL;
+  loom_serve_signals_t* signals = NULL;
   if (iree_status_is_ok(status)) {
     status = loom_serve_host_create_from_flags(&host, allocator);
   }
@@ -83,14 +96,30 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     loom_serve_http_server_options_t options =
         loom_serve_http_server_options_default();
-    options.port = (uint16_t)FLAG_port;
     options.connection_capacity = (iree_host_size_t)FLAG_connections;
     options.request_limits.body_byte_capacity =
         (iree_host_size_t)FLAG_request_body_bytes;
-    status = loom_serve_http_server_create(&options, &server, allocator);
+    status = loom_serve_http_server_create(loom_serve_host_proactor_pool(host),
+                                           &options, &server, allocator);
   }
   if (iree_status_is_ok(status)) {
-    status = image_ready(server);
+    status = loom_serve_signals_create(
+        loom_serve_host_proactor_pool(host),
+        (iree_async_signal_callback_t){image_shutdown_requested, server},
+        &signals, allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    char address[32];
+    snprintf(address, sizeof(address), "127.0.0.1:%d", FLAG_port);
+    loom_serve_http_listener_options_t options =
+        loom_serve_http_listener_options_default();
+    options.address = iree_make_cstring_view(address);
+    options.backlog = FLAG_connections;
+    status =
+        loom_serve_http_listener_create(server, &options, &listener, allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = image_ready(listener);
   }
   if (iree_status_is_ok(status)) {
     const loom_serve_image_generator_t generator =
@@ -106,7 +135,9 @@ int main(int argc, char** argv) {
     status = loom_serve_image_service_run(host, generator, server, &options,
                                           allocator);
   }
-  status = iree_status_join(status, loom_serve_http_server_destroy(server));
+  loom_serve_signals_destroy(signals);
+  status = iree_status_join(status, loom_serve_http_listener_destroy(listener));
+  loom_serve_http_server_destroy(server);
   status = iree_status_join(status, loom_serve_image_model_destroy(model));
   status = iree_status_join(status, loom_serve_device_group_destroy(group));
   loom_serve_host_release(host);

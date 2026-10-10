@@ -8,8 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
+#include "experimental/loom_serve/runtime/signals.h"
 #include "experimental/loom_serve/text/flags.h"
 #include "experimental/loom_serve/text/service.h"
 #include "iree/async/proactor.h"
@@ -40,6 +42,12 @@ IREE_FLAG(int32_t, max_tokens, 512,
           "Default output token limit, including EOS.");
 IREE_FLAG(int32_t, heartbeat_ms, 1000,
           "Periodic state report interval; zero disables heartbeats.");
+
+static void text_shutdown_requested(void* user_data,
+                                    iree_async_signal_t signal) {
+  (void)signal;
+  loom_serve_http_server_request_stop(user_data);
+}
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
@@ -87,11 +95,16 @@ int main(int argc, char** argv) {
   }
   const iree_allocator_t allocator = iree_allocator_system();
   iree_status_t status = iree_async_signal_block_default();
+  if (iree_status_is_ok(status)) {
+    status = iree_async_signal_ignore_broken_pipe();
+  }
   loom_serve_text_model_t* model = NULL;
   loom_serve_device_group_t* group = NULL;
   loom_serve_device_t* device = NULL;
   loom_serve_host_t* host = NULL;
   loom_serve_http_server_t* server = NULL;
+  loom_serve_http_listener_t* listener = NULL;
+  loom_serve_signals_t* signals = NULL;
   const loom_serve_text_flag_defaults_t defaults = {
       .row_count = (iree_host_size_t)FLAG_rows,
       .pool_capacity =
@@ -139,17 +152,34 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     loom_serve_http_server_options_t server_options =
         loom_serve_http_server_options_default();
-    server_options.port = (uint16_t)FLAG_port;
     server_options.connection_capacity = (iree_host_size_t)FLAG_connections;
     server_options.request_limits.body_byte_capacity =
         (iree_host_size_t)FLAG_request_body_bytes;
-    status = loom_serve_http_server_create(&server_options, &server, allocator);
+    status = loom_serve_http_server_create(loom_serve_host_proactor_pool(host),
+                                           &server_options, &server, allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_signals_create(
+        loom_serve_host_proactor_pool(host),
+        (iree_async_signal_callback_t){text_shutdown_requested, server},
+        &signals, allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    char address[32];
+    snprintf(address, sizeof(address), "127.0.0.1:%d", FLAG_port);
+    loom_serve_http_listener_options_t options =
+        loom_serve_http_listener_options_default();
+    options.address = iree_make_cstring_view(address);
+    options.backlog = FLAG_connections;
+    status =
+        loom_serve_http_listener_create(server, &options, &listener, allocator);
   }
   if (iree_status_is_ok(status)) {
     char storage[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
     iree_string_view_t address;
-    status = iree_async_address_format(loom_serve_http_server_address(server),
-                                       sizeof(storage), storage, &address);
+    status =
+        iree_async_address_format(loom_serve_http_listener_address(listener),
+                                  sizeof(storage), storage, &address);
     if (iree_status_is_ok(status)) {
       fprintf(stderr,
               "{\"event\":\"ready\",\"address\":\"%.*s\",\"rows\":%d,\"chunk_"
@@ -176,7 +206,9 @@ int main(int argc, char** argv) {
                                            allocator);
     }
   }
-  status = iree_status_join(status, loom_serve_http_server_destroy(server));
+  loom_serve_signals_destroy(signals);
+  status = iree_status_join(status, loom_serve_http_listener_destroy(listener));
+  loom_serve_http_server_destroy(server);
   status = iree_status_join(status, loom_serve_text_model_destroy(model));
   status = iree_status_join(status, loom_serve_device_group_destroy(group));
   loom_serve_host_release(host);

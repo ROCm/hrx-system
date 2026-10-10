@@ -345,7 +345,7 @@ def running_server(server, directory, catalog, workers):
         [
             str(server),
             f"--models={catalog.relative_to(directory)}",
-            "--port=0",
+            "--listen=127.0.0.1:0",
             f"--workers={workers}",
             "--pool_backing=fixed",
             "--heartbeat_ms=0",
@@ -580,7 +580,7 @@ def check_startup_failures(server, directory, catalog):
                 [
                     str(server),
                     f"--models={catalog_path.relative_to(directory)}",
-                    "--port=0",
+                    "--listen=127.0.0.1:0",
                     "--workers=1",
                     "--pool_backing=fixed",
                 ],
@@ -608,6 +608,65 @@ def check_startup_failures(server, directory, catalog):
             ),
             flush=True,
         )
+
+
+def check_multiple_bindings(server, directory, catalog):
+    socket_path = directory / 'serve "local".sock'
+    log_path = directory / "multiple-bindings.log"
+    with child_server(
+        [
+            str(server),
+            f"--models={catalog.relative_to(directory)}",
+            "--listen=127.0.0.1:0",
+            f"--listen=unix:{socket_path}",
+            "--workers=1",
+            "--pool_backing=fixed",
+            "--heartbeat_ms=0",
+        ],
+        log_path,
+        cwd=directory,
+    ) as (_, address):
+        assert address is not None, log_path.read_text()
+        client = Client(address)
+        expected_models = client.request("/v1/models")
+        connection = http.client.HTTPConnection("localhost")
+        connection.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            connection.sock.connect(str(socket_path))
+            connection.request(
+                "POST",
+                "/v1/embeddings",
+                json.dumps(
+                    {"model": "vectors", "input": ["a", "bbb"], "dimensions": 2}
+                ),
+                {"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            assert response.status == 200
+            result = json.loads(response.read())
+            assert [entry["embedding"] for entry in result["data"]] == [[1, 1], [6, 3]]
+            assert result["usage"]["prompt_tokens"] == 4
+        finally:
+            connection.close()
+        # The request submitted over Unix belongs to the same model observed
+        # over TCP, not a second independently constructed deployment.
+        wait_counters(
+            urlsplit("http://" + address),
+            lambda counts: counts["completed"] == 1,
+            model="vectors",
+        )
+        assert client.request("/v1/models") == expected_models
+    assert not socket_path.exists()
+    locators = [
+        json.loads(line)
+        for line in log_path.read_text().splitlines()
+        if line.startswith('{"event":"ready"')
+    ]
+    assert [locator["address"] for locator in locators] == [
+        address,
+        "unix:" + str(socket_path),
+    ]
+    print(json.dumps({"event": "multiple_bindings_joined", "bindings": 2}), flush=True)
 
 
 def main():
@@ -654,6 +713,7 @@ def main():
         catalog_path.parent.mkdir()
         catalog_path.write_text(json.dumps(catalog))
         check_startup_failures(server, directory, catalog)
+        check_multiple_bindings(server, directory, catalog_path)
         for workers in (1, 4):
             with running_server(server, directory, catalog_path, workers) as (
                 client,

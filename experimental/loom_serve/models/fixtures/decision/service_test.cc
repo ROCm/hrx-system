@@ -6,7 +6,6 @@
 
 #include "experimental/loom_serve/finite/service.h"
 
-#include <signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -16,6 +15,7 @@
 
 #include "experimental/loom_serve/decision/protocol.h"
 #include "experimental/loom_serve/embedding/protocol.h"
+#include "experimental/loom_serve/http/listener.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -41,7 +41,6 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
   }
   void SetUp() override {
     iree_notification_initialize(&notification_);
-    IREE_ASSERT_OK(iree_async_signal_block_default());
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
     const loom_serve_device_options_t options = {.uri = IREE_SV("amdgpu")};
     IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &options, &group_,
@@ -63,13 +62,17 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
          },
          this});
     auto http_options = loom_serve_http_server_options_default();
-    http_options.port = 0;
     IREE_ASSERT_OK(
-        loom_serve_http_server_create(&http_options, &server_, allocator_));
+        loom_serve_http_server_create(loom_serve_host_proactor_pool(host_),
+                                      &http_options, &server_, allocator_));
+    auto listener_options = loom_serve_http_listener_options_default();
+    listener_options.address = IREE_SV("127.0.0.1:0");
+    IREE_ASSERT_OK(loom_serve_http_listener_create(server_, &listener_options,
+                                                   &listener_, allocator_));
   }
   void TearDown() override {
     if (router_.joinable()) {
-      EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+      loom_serve_http_server_request_stop(server_);
       router_.join();
       IREE_EXPECT_OK(status_);
     }
@@ -79,7 +82,8 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
         loom_serve_finite_service_destroy(services_[i]);
       }
     }
-    IREE_EXPECT_OK(loom_serve_http_server_destroy(server_));
+    IREE_EXPECT_OK(loom_serve_http_listener_destroy(listener_));
+    loom_serve_http_server_destroy(server_);
     for (auto* model : models_) {
       IREE_EXPECT_OK(loom_serve_finite_model_destroy(model));
     }
@@ -91,7 +95,7 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
            const char* method = "POST") {
     const int client = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     EXPECT_GE(client, 0);
-    const auto* address = loom_serve_http_server_address(server_);
+    const auto* address = loom_serve_http_listener_address(listener_);
     EXPECT_EQ(
         connect(client, reinterpret_cast<const sockaddr*>(address->storage),
                 address->length),
@@ -191,8 +195,10 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
   loom_serve_finite_service_t* services_[2] = {};
   // Exact production scheduling and routing interfaces.
   loom_serve_http_service_t interfaces_[2] = {};
-  // Real loopback TCP listener.
+  // Shared HTTP connection and request owner.
   loom_serve_http_server_t* server_ = nullptr;
+  // Independent binding borrowing the HTTP owner and shared host pool.
+  loom_serve_http_listener_t* listener_ = nullptr;
   // Outer direct-driver readiness, never a worker dependency wait.
   iree_notification_t notification_;
   // Completion/release generation for direct scheduling turns.

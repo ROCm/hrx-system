@@ -47,6 +47,7 @@ loom_cc_test(
     iree::base
     iree::base::threading
     iree::base::tooling::flags
+    iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
     iree::experimental::loom_serve::runtime::device

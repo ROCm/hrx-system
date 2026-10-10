@@ -52,6 +52,7 @@ loom_cc_test(
     iree::experimental::loom_serve::embedding::protocol
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
+    iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::models::fixtures::stalled_stderr

@@ -1,7 +1,8 @@
 # Serving multiple source models
 
 `//experimental/loom_serve/serving:server` serves named text, image, embedding and
-decision deployments through one loopback HTTP listener. All deployments borrow
+decision deployments through one logical HTTP server with independently owned
+TCP, IPv6, and Unix-domain listeners. All deployments borrow
 one device, parameter residency cache and private command workspace backing.
 Each owns its work and
 feedback timelines, source-JIT programs and weights. Text deployments own their
@@ -18,6 +19,11 @@ bounded serialized turns preserve shared memory-policy ownership, while CPU
 preparation/output and device work proceed independently. Network, task release,
 model frontiers and heartbeat deadlines wake the owner directly. Only the outer
 application caller joins final scheduler release; no task waits for device work.
+Listeners and accepted connections use the host's shared proactor pool. Adding
+a connection or listener creates no private thread. A listener can retire while
+its accepted response streams continue, and one failed bind leaves the other
+listeners and model state intact. Process signals belong to the application,
+not individual listeners.
 
 The catalog selects source packages and deployment options. Model math,
 checkpoint interpretation, storage geometry and chat policy remain in the
@@ -100,7 +106,8 @@ not a learned embedding model.
 ~~~sh
 build_tools/bin/iree-bazel-run --config=opt \
   //experimental/loom_serve/serving:server -- \
-  --models=/path/to/models.json --port=8080 \
+  --models=/path/to/models.json --listen=127.0.0.1:8080 \
+  --listen=unix:/path/to/loom-serve.sock \
   --pool_backing=elastic --memory_bytes=38654705664
 ~~~
 
@@ -116,6 +123,20 @@ The budget must fit each model's weights plus live retained state; this example'
 36 GiB fits either model separately, not all deployments together.
 Other defaults and accepted ranges are in
 [configuration.c](configuration.c).
+
+`--listen` is repeatable and defaults to `127.0.0.1:8080`. Numeric IPv4
+`host:port`, IPv6 `[host]:port`, and `unix:path` use the same HTTP/SSE
+protocol and route to the same model instances and connection budget. A port of
+zero selects an ephemeral port. One cold `ready` record reports each bound
+address after all bindings succeed. A conflicting Unix socket path is never
+removed to force startup; successfully bound filesystem paths are removed on
+listener destruction. The deployment owns their namespace exclusively.
+
+For a trusted sandbox-local Unix endpoint:
+
+~~~sh
+curl --unix-socket /path/to/loom-serve.sock http://localhost/v1/models
+~~~
 
 ## Requests and retained state
 

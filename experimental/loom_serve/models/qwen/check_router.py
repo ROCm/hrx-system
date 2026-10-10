@@ -225,7 +225,7 @@ def main():
     command = [
         str(arguments.server.resolve()),
         f"--models={catalog.resolve()}",
-        "--port=0",
+        "--listen=127.0.0.1:0",
         "--heartbeat_ms=250",
         f"--workers={arguments.workers}",
         "--pool_backing=elastic",

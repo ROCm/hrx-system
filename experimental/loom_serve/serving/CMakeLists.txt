@@ -38,6 +38,7 @@ loom_cc_binary(
     iree::experimental::loom_serve::embedding::protocol
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
+    iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::image::model
@@ -45,12 +46,15 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
+    iree::experimental::loom_serve::runtime::signals
     iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule
     iree::experimental::loom_serve::text::service
     iree::io::file_handle
     loom::binding::c::loomc
+    loom::util::json
+    loom::util::stream
 )
 endif()
 

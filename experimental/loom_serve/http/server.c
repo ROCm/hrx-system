@@ -9,15 +9,7 @@
 #include <limits.h>
 #include <string.h>
 
-#include "iree/async/api.h"
-#include "iree/async/proactor_platform.h"
-#include "iree/async/util/proactor_thread.h"
 #include "iree/base/threading/mutex.h"
-#include "iree/net/carrier/stream/carrier.h"
-
-enum {
-  HTTP_SEND_CAPACITY = 8,
-};
 
 typedef enum http_connection_flag_bits_e {
   HTTP_CONNECTION_OCCUPIED = 1u << 0,
@@ -26,15 +18,9 @@ typedef enum http_connection_flag_bits_e {
   HTTP_CONNECTION_FINISHED = 1u << 3,
   HTTP_CONNECTION_DEACTIVATING = 1u << 4,
   HTTP_CONNECTION_DRAINED = 1u << 5,
+  HTTP_CONNECTION_INITIALIZING = 1u << 6,
 } http_connection_flag_bits_t;
 typedef uint32_t http_connection_flags_t;
-
-enum {
-  HTTP_ACCEPT_PENDING = 1u << 0,
-  HTTP_ACCEPT_CANCEL_PENDING = 1u << 1,
-  HTTP_SERVER_STOPPING = 1u << 0,
-  HTTP_SERVER_SHUTDOWN_RECEIVED = 1u << 1,
-};
 
 struct loom_serve_http_connection_t {
   // Borrowed server outliving all callbacks and application claims.
@@ -64,27 +50,10 @@ struct loom_serve_http_server_t {
   iree_notification_t notification;
   // Application task wake target, with publication joined by the server mutex.
   loom_serve_http_observer_t observer;
-  // Network proactor, independent of the model's execution services.
-  iree_async_proactor_t* proactor;
-  // Standard polling owner; remains alive until all network resources retire.
-  iree_async_proactor_thread_t* thread;
-  // Owned loopback listener.
-  iree_async_socket_t* listener;
-  // Bound address retained once after bind, including the selected port.
-  iree_async_address_t address;
-  // Listener operation ownership, joined before this identity is reused.
-  struct {
-    // One reusable accept target, never reused across shutdown cancellation.
-    iree_async_socket_accept_operation_t operation;
-    // Owned cancellation receipt joined independently of target completion.
-    iree_async_cancel_request_t cancellation;
-    // Target and cancellation ownership bits protected by the server mutex.
-    uint32_t pending;
-  } accept;
-  // Shutdown intent and owner-thread acknowledgement, protected by the mutex.
-  uint32_t flags;
-  // Owned listener failure propagated by destroy.
-  iree_status_t failure;
+  // Retained shared progress owner, outliving all accepted carrier callbacks.
+  iree_async_proactor_pool_t* proactor_pool;
+  // Admission closure, protected by the mutex; active claims remain owned.
+  bool stopping;
   // Bounded history, with network/application writers serialized by mutex.
   loom_serve_telemetry_stream_t* diagnostics;
   // Fixed connection identities; a slot is reused only after caller and I/O
@@ -92,12 +61,12 @@ struct loom_serve_http_server_t {
   loom_serve_http_connection_t* connections;
 };
 
-static void http_notify(loom_serve_http_server_t* server) {
-  iree_slim_mutex_lock(&server->mutex);
+// Publication and the final callback access share the same mutex. A consumer
+// observing retirement may immediately reclaim storage after acquiring it.
+static void http_notify_locked(loom_serve_http_server_t* server) {
   if (server->observer.wake) {
     server->observer.wake(server->observer.user_data);
   }
-  iree_slim_mutex_unlock(&server->mutex);
   iree_notification_post(&server->notification, IREE_ALL_WAITERS);
 }
 
@@ -106,8 +75,8 @@ static void http_connection_deactivated(void* user_data) {
   loom_serve_http_server_t* server = connection->server;
   iree_slim_mutex_lock(&server->mutex);
   connection->flags |= HTTP_CONNECTION_DRAINED;
+  http_notify_locked(server);
   iree_slim_mutex_unlock(&server->mutex);
-  http_notify(server);
 }
 
 // All deactivation intent converges here. The occupied slot retains the carrier
@@ -131,9 +100,9 @@ static void http_connection_error(void* user_data, iree_status_t status) {
   loom_serve_http_server_t* server = connection->server;
   iree_slim_mutex_lock(&server->mutex);
   connection->failure = iree_status_join(connection->failure, status);
+  http_notify_locked(server);
   iree_slim_mutex_unlock(&server->mutex);
   http_connection_close(connection);
-  http_notify(server);
 }
 
 static iree_status_t http_connection_receive(void* user_data,
@@ -152,8 +121,8 @@ static iree_status_t http_connection_receive(void* user_data,
     iree_slim_mutex_lock(&connection->server->mutex);
     connection->request = request;
     connection->flags |= HTTP_CONNECTION_REQUEST_READY;
+    http_notify_locked(connection->server);
     iree_slim_mutex_unlock(&connection->server->mutex);
-    http_notify(connection->server);
   }
   // EOF is a half-close: a complete request may still receive its response.
   return status;
@@ -172,83 +141,24 @@ static void http_connection_send_completed(void* user_data,
       !iree_status_is_ok(connection->failure) ||
       (iree_any_bit_set(connection->flags, HTTP_CONNECTION_FINISHED) &&
        !connection->pending_sends);
+  http_notify_locked(server);
   iree_slim_mutex_unlock(&server->mutex);
   if (close) {
     http_connection_close(connection);
   }
-  http_notify(server);
 }
 
-static iree_status_t http_connection_create(
-    loom_serve_http_connection_t* connection, iree_async_socket_t* socket) {
-  loom_serve_http_server_t* server = connection->server;
-  IREE_RETURN_IF_ERROR(loom_serve_http_request_parser_create(
-      server->options.request_limits, &connection->parser, server->allocator));
-  iree_async_slab_t* slab = NULL;
-  const iree_async_slab_options_t slab_options = {
-      .buffer_size = 16384,
-      .buffer_count = 4,
-  };
-  iree_status_t status =
-      iree_async_slab_create(slab_options, server->allocator, &slab);
-  iree_async_region_t* region = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_async_proactor_register_slab(
-        server->proactor, slab, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &region);
-  }
-  iree_async_buffer_pool_t* pool = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_async_buffer_pool_create(region, server->allocator, &pool);
-  }
-  if (iree_status_is_ok(status)) {
-    iree_net_stream_carrier_options_t options =
-        iree_net_stream_carrier_options_default();
-    options.max_send_operations = HTTP_SEND_CAPACITY;
-    status =
-        iree_net_stream_carrier_create(server->proactor, socket, pool, &options,
-                                       server->allocator, &connection->carrier);
-  }
-  iree_async_buffer_pool_release(pool);
-  iree_async_region_release(region);
-  iree_async_slab_release(slab);
-  if (iree_status_is_ok(status)) {
-    status = iree_net_carrier_set_handlers(
-        connection->carrier,
-        (iree_net_carrier_handlers_t){http_connection_receive,
-                                      http_connection_error, connection});
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_net_carrier_activate(connection->carrier);
-  }
-  return status;
-}
-
-static void http_accept_cancelled(void* user_data) {
-  loom_serve_http_server_t* server = user_data;
-  iree_slim_mutex_lock(&server->mutex);
-  server->accept.pending &= ~HTTP_ACCEPT_CANCEL_PENDING;
-  iree_slim_mutex_unlock(&server->mutex);
-  http_notify(server);
-}
-
-static void http_accept_completed(void* user_data,
-                                  iree_async_operation_t* operation,
-                                  iree_status_t status,
-                                  iree_async_completion_flags_t flags) {
-  (void)operation;
-  loom_serve_http_server_t* server = user_data;
-  iree_slim_mutex_lock(&server->mutex);
-  server->accept.pending &= ~HTTP_ACCEPT_PENDING;
-  const bool cancel_pending =
-      iree_any_bit_set(server->accept.pending, HTTP_ACCEPT_CANCEL_PENDING);
+void loom_serve_http_server_accept(loom_serve_http_server_t* server,
+                                   iree_net_carrier_t* carrier) {
   loom_serve_http_connection_t* connection = NULL;
-  if (iree_status_is_ok(status) &&
-      !iree_any_bit_set(server->flags, HTTP_SERVER_STOPPING) &&
-      !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_CANCELLED)) {
+  iree_slim_mutex_lock(&server->mutex);
+  if (!server->stopping) {
     for (iree_host_size_t i = 0; i < server->options.connection_capacity; ++i) {
       if (!server->connections[i].flags) {
         connection = &server->connections[i];
-        connection->flags = HTTP_CONNECTION_OCCUPIED;
+        connection->flags =
+            HTTP_CONNECTION_OCCUPIED | HTTP_CONNECTION_INITIALIZING;
+        connection->carrier = carrier;
         break;
       }
     }
@@ -266,104 +176,38 @@ static void http_accept_completed(void* user_data,
       loom_serve_telemetry_stream_append(server->diagnostics, &record);
     }
   }
+  iree_slim_mutex_unlock(&server->mutex);
+  if (!connection) {
+    iree_net_carrier_release(carrier);
+    return;
+  }
+
+  iree_status_t status = loom_serve_http_request_parser_create(
+      server->options.request_limits, &connection->parser, server->allocator);
+  if (iree_status_is_ok(status)) {
+    status = iree_net_carrier_set_handlers(
+        carrier,
+        (iree_net_carrier_handlers_t){http_connection_receive,
+                                      http_connection_error, connection});
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_net_carrier_activate(carrier);
+  }
+  iree_slim_mutex_lock(&server->mutex);
   if (!iree_status_is_ok(status)) {
-    server->failure = iree_status_join(server->failure, status);
-    server->flags |= HTTP_SERVER_STOPPING;
+    // Failed activation accepts no I/O. The owner reclaims the occupied slot.
+    connection->failure = iree_status_join(connection->failure, status);
+    connection->flags |= HTTP_CONNECTION_DRAINED;
   }
+  connection->flags &= ~HTTP_CONNECTION_INITIALIZING;
+  http_notify_locked(server);
   iree_slim_mutex_unlock(&server->mutex);
-  if (connection) {
-    status = http_connection_create(connection,
-                                    server->accept.operation.accepted_socket);
-    if (!iree_status_is_ok(status)) {
-      // Activation is transactional: failed creation has no accepted I/O.
-      iree_slim_mutex_lock(&server->mutex);
-      connection->failure = status;
-      connection->flags |= HTTP_CONNECTION_DRAINED;
-      iree_slim_mutex_unlock(&server->mutex);
-    }
-  }
-  iree_async_socket_release(server->accept.operation.accepted_socket);
-  server->accept.operation.accepted_socket = NULL;
-  if (cancel_pending) {
-    iree_async_proactor_cancel_request_target_retired(
-        server->proactor, &server->accept.cancellation);
-  }
-  iree_slim_mutex_lock(&server->mutex);
-  const bool rearm = !iree_any_bit_set(server->flags, HTTP_SERVER_STOPPING);
-  if (rearm) {
-    server->accept.pending |= HTTP_ACCEPT_PENDING;
-  }
-  iree_slim_mutex_unlock(&server->mutex);
-  if (rearm) {
-    iree_async_operation_initialize(
-        &server->accept.operation.base, IREE_ASYNC_OPERATION_TYPE_SOCKET_ACCEPT,
-        IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
-        http_accept_completed, server);
-    status = iree_async_proactor_submit_one(server->proactor,
-                                            &server->accept.operation.base);
-    if (!iree_status_is_ok(status)) {
-      iree_slim_mutex_lock(&server->mutex);
-      server->accept.pending &= ~HTTP_ACCEPT_PENDING;
-      server->failure = iree_status_join(server->failure, status);
-      server->flags |= HTTP_SERVER_STOPPING;
-      iree_slim_mutex_unlock(&server->mutex);
-    }
-  }
-  http_notify(server);
-}
-
-static void http_shutdown_received(iree_async_proactor_t* proactor,
-                                   uint64_t message, void* user_data) {
-  (void)message;
-  loom_serve_http_server_t* server = user_data;
-  iree_slim_mutex_lock(&server->mutex);
-  const bool cancel =
-      iree_any_bit_set(server->accept.pending, HTTP_ACCEPT_PENDING);
-  if (cancel) {
-    server->accept.pending |= HTTP_ACCEPT_CANCEL_PENDING;
-  }
-  iree_slim_mutex_unlock(&server->mutex);
-  if (cancel) {
-    iree_status_t status = iree_async_proactor_request_cancel(
-        proactor, &server->accept.operation.base, &server->accept.cancellation);
-    if (!iree_status_is_ok(status)) {
-      iree_status_abort(status);
-    }
-  }
-  for (iree_host_size_t i = 0; i < server->options.connection_capacity; ++i) {
-    loom_serve_http_connection_t* connection = &server->connections[i];
-    if (connection->carrier) {
-      http_connection_close(connection);
-    }
-  }
-  iree_slim_mutex_lock(&server->mutex);
-  server->flags |= HTTP_SERVER_SHUTDOWN_RECEIVED;
-  iree_slim_mutex_unlock(&server->mutex);
-  http_notify(server);
-}
-
-static void http_shutdown_signal(void* user_data, iree_async_signal_t signal) {
-  (void)signal;
-  loom_serve_http_server_t* server = user_data;
-  iree_slim_mutex_lock(&server->mutex);
-  server->flags |= HTTP_SERVER_STOPPING;
-  iree_slim_mutex_unlock(&server->mutex);
-  http_notify(server);
-}
-
-static void http_proactor_failed(void* user_data, iree_status_t status) {
-  (void)user_data;
-  // The polling owner cannot return outstanding I/O storage after fatal
-  // failure.
-  iree_status_abort(status);
 }
 
 static bool http_server_drained(void* user_data) {
   loom_serve_http_server_t* server = user_data;
   iree_slim_mutex_lock(&server->mutex);
-  bool drained =
-      iree_any_bit_set(server->flags, HTTP_SERVER_SHUTDOWN_RECEIVED) &&
-      !server->accept.pending;
+  bool drained = true;
   for (iree_host_size_t i = 0; i < server->options.connection_capacity; ++i) {
     const http_connection_flags_t flags = server->connections[i].flags;
     drained &= !flags || iree_any_bit_set(flags, HTTP_CONNECTION_DRAINED);
@@ -397,123 +241,41 @@ static void http_connection_reclaim(loom_serve_http_connection_t* connection) {
   iree_slim_mutex_unlock(&server->mutex);
 }
 
-iree_status_t loom_serve_http_server_destroy(loom_serve_http_server_t* server) {
+void loom_serve_http_server_destroy(loom_serve_http_server_t* server) {
   if (!server) {
-    return iree_ok_status();
+    return;
   }
-  iree_slim_mutex_lock(&server->mutex);
-  server->flags |= HTTP_SERVER_STOPPING;
-  iree_slim_mutex_unlock(&server->mutex);
-  if (server->thread) {
-    iree_status_t status =
-        iree_async_proactor_send_message(server->proactor, 0);
-    if (!iree_status_is_ok(status)) {
-      iree_status_abort(status);
-    }
-    iree_notification_await(&server->notification, http_server_drained, server,
-                            iree_infinite_timeout());
-  } else if (iree_any_bit_set(server->accept.pending, HTTP_ACCEPT_PENDING)) {
-    // Thread creation failed before polling ownership was established. The
-    // creating thread can still join its accepted listener operation.
-    http_shutdown_received(server->proactor, 0, server);
-    while (!http_server_drained(server)) {
-      iree_status_t status = iree_async_proactor_poll(
-          server->proactor, iree_infinite_timeout(), NULL);
-      if (!iree_status_is_ok(status)) {
-        iree_status_abort(status);
-      }
+  loom_serve_http_server_request_stop(server);
+  for (iree_host_size_t i = 0; i < server->options.connection_capacity; ++i) {
+    loom_serve_http_connection_t* connection = &server->connections[i];
+    if (connection->carrier) {
+      http_connection_close(connection);
     }
   }
+  iree_notification_await(&server->notification, http_server_drained, server,
+                          iree_infinite_timeout());
   for (iree_host_size_t i = 0; i < server->options.connection_capacity; ++i) {
     if (server->connections[i].flags) {
       http_connection_reclaim(&server->connections[i]);
     }
   }
-  iree_async_socket_release(server->listener);
-  iree_status_t status = server->failure;
-  if (server->thread) {
-    iree_async_proactor_thread_request_stop(server->thread);
-    status =
-        iree_status_join(status, iree_async_proactor_thread_join(
-                                     server->thread, IREE_DURATION_INFINITE));
-    status = iree_status_join(
-        status, iree_async_proactor_thread_consume_status(server->thread));
-    iree_async_proactor_thread_release(server->thread);
-  } else if (server->proactor) {
-    iree_async_proactor_end_polling(server->proactor);
-  }
-  iree_async_proactor_release(server->proactor);
+  iree_async_proactor_pool_release(server->proactor_pool);
   loom_serve_telemetry_stream_destroy(server->diagnostics);
   iree_notification_deinitialize(&server->notification);
   iree_slim_mutex_deinitialize(&server->mutex);
   iree_allocator_free(server->allocator, server->connections);
   iree_allocator_free(server->allocator, server);
-  return status;
-}
-
-static iree_status_t http_server_initialize(loom_serve_http_server_t* server) {
-  IREE_RETURN_IF_ERROR(iree_async_signal_ignore_broken_pipe());
-  iree_async_proactor_options_t options = iree_async_proactor_options_default();
-  options.threading_mode = IREE_ASYNC_PROACTOR_THREADING_CROSS_THREAD;
-  options.debug_name = IREE_SV("loom-http");
-  IREE_RETURN_IF_ERROR(iree_async_proactor_create_platform(
-      options, server->allocator, &server->proactor));
-  iree_async_proactor_set_message_callback(
-      server->proactor,
-      (iree_async_proactor_message_callback_t){http_shutdown_received, server});
-  const iree_async_signal_t signals[] = {IREE_ASYNC_SIGNAL_INTERRUPT,
-                                         IREE_ASYNC_SIGNAL_TERMINATE};
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(signals) && iree_status_is_ok(status); ++i) {
-    iree_async_signal_subscription_t* subscription = NULL;
-    status = iree_async_proactor_subscribe_signal(
-        server->proactor, signals[i],
-        (iree_async_signal_callback_t){http_shutdown_signal, server},
-        &subscription);
-  }
-  IREE_RETURN_IF_ERROR(status);
-  IREE_RETURN_IF_ERROR(iree_async_socket_create(
-      server->proactor, IREE_ASYNC_SOCKET_TYPE_TCP,
-      IREE_ASYNC_SOCKET_OPTION_REUSE_ADDR | IREE_ASYNC_SOCKET_OPTION_NO_DELAY,
-      &server->listener));
-  iree_async_address_t address;
-  IREE_RETURN_IF_ERROR(iree_async_address_from_ipv4(
-      IREE_SV("127.0.0.1"), server->options.port, &address));
-  IREE_RETURN_IF_ERROR(iree_async_socket_bind(server->listener, &address));
-  IREE_RETURN_IF_ERROR(iree_async_socket_listen(
-      server->listener, server->options.connection_capacity));
-  IREE_RETURN_IF_ERROR(iree_async_socket_query_local_address(server->listener,
-                                                             &server->address));
-  iree_async_cancel_request_initialize(
-      (iree_async_cancel_callback_t){http_accept_cancelled, server},
-      &server->accept.cancellation);
-  iree_async_operation_initialize(
-      &server->accept.operation.base, IREE_ASYNC_OPERATION_TYPE_SOCKET_ACCEPT,
-      IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS, http_accept_completed,
-      server);
-  server->accept.operation.listen_socket = server->listener;
-  IREE_RETURN_IF_ERROR(iree_async_proactor_submit_one(
-      server->proactor, &server->accept.operation.base));
-  server->accept.pending |= HTTP_ACCEPT_PENDING;
-  iree_async_proactor_thread_options_t thread_options =
-      iree_async_proactor_thread_options_default();
-  thread_options.debug_name = IREE_SV("loom-http");
-  thread_options.error_callback = (iree_async_proactor_thread_error_callback_t){
-      http_proactor_failed, server};
-  return iree_async_proactor_thread_create(server->proactor, thread_options,
-                                           server->allocator, &server->thread);
 }
 
 loom_serve_http_server_options_t loom_serve_http_server_options_default(void) {
   return (loom_serve_http_server_options_t){
-      .port = 8080,
       .connection_capacity = 64,
       .request_limits = {16384, 8 * 1024 * 1024, 64},
   };
 }
 
 iree_status_t loom_serve_http_server_create(
+    iree_async_proactor_pool_t* proactor_pool,
     const loom_serve_http_server_options_t* options,
     loom_serve_http_server_t** out_server, iree_allocator_t host_allocator) {
   *out_server = NULL;
@@ -525,6 +287,8 @@ iree_status_t loom_serve_http_server_create(
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*server), (void**)&server));
   server->allocator = host_allocator;
+  server->proactor_pool = proactor_pool;
+  iree_async_proactor_pool_retain(proactor_pool);
   iree_slim_mutex_initialize(&server->mutex);
   iree_notification_initialize(&server->notification);
   iree_status_t status = loom_serve_telemetry_stream_create(
@@ -543,19 +307,18 @@ iree_status_t loom_serve_http_server_create(
     for (iree_host_size_t i = 0; i < options->connection_capacity; ++i) {
       server->connections[i].server = server;
     }
-    status = http_server_initialize(server);
   }
   if (iree_status_is_ok(status)) {
     *out_server = server;
   } else {
-    status = iree_status_join(status, loom_serve_http_server_destroy(server));
+    loom_serve_http_server_destroy(server);
   }
   return status;
 }
 
-const iree_async_address_t* loom_serve_http_server_address(
-    const loom_serve_http_server_t* server) {
-  return &server->address;
+iree_async_proactor_pool_t* loom_serve_http_server_proactor_pool(
+    loom_serve_http_server_t* server) {
+  return server->proactor_pool;
 }
 
 iree_notification_t* loom_serve_http_server_notification(
@@ -578,9 +341,16 @@ void loom_serve_http_server_set_observer(loom_serve_http_server_t* server,
   iree_slim_mutex_unlock(&server->mutex);
 }
 
+void loom_serve_http_server_request_stop(loom_serve_http_server_t* server) {
+  iree_slim_mutex_lock(&server->mutex);
+  server->stopping = true;
+  http_notify_locked(server);
+  iree_slim_mutex_unlock(&server->mutex);
+}
+
 bool loom_serve_http_server_is_stopping(loom_serve_http_server_t* server) {
   iree_slim_mutex_lock(&server->mutex);
-  const bool stopping = iree_any_bit_set(server->flags, HTTP_SERVER_STOPPING);
+  const bool stopping = server->stopping;
   iree_slim_mutex_unlock(&server->mutex);
   return stopping;
 }
@@ -594,13 +364,15 @@ loom_serve_http_connection_t* loom_serve_http_server_take_request(
     loom_serve_http_connection_t* connection = &server->connections[i];
     iree_slim_mutex_lock(&server->mutex);
     const http_connection_flags_t flags = connection->flags;
-    const bool reclaim = iree_any_bit_set(flags, HTTP_CONNECTION_DRAINED) &&
-                         !iree_any_bit_set(flags, HTTP_CONNECTION_CLAIMED);
+    const bool reclaim =
+        iree_any_bit_set(flags, HTTP_CONNECTION_DRAINED) &&
+        !iree_any_bit_set(
+            flags, HTTP_CONNECTION_CLAIMED | HTTP_CONNECTION_INITIALIZING);
     if (!selected && iree_any_bit_set(flags, HTTP_CONNECTION_REQUEST_READY) &&
-        !iree_any_bit_set(flags, HTTP_CONNECTION_CLAIMED |
-                                     HTTP_CONNECTION_FINISHED |
-                                     HTTP_CONNECTION_DEACTIVATING |
-                                     HTTP_CONNECTION_DRAINED) &&
+        !iree_any_bit_set(
+            flags, HTTP_CONNECTION_CLAIMED | HTTP_CONNECTION_FINISHED |
+                       HTTP_CONNECTION_DEACTIVATING | HTTP_CONNECTION_DRAINED |
+                       HTTP_CONNECTION_INITIALIZING) &&
         iree_status_is_ok(connection->failure)) {
       connection->flags |= HTTP_CONNECTION_CLAIMED;
       selected = connection;

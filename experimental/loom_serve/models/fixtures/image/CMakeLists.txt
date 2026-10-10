@@ -47,6 +47,7 @@ loom_cc_test(
     iree::base
     iree::base::internal::base64
     iree::base::tooling::flags
+    iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::image::model
     iree::experimental::loom_serve::image::output

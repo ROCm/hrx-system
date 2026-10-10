@@ -62,6 +62,7 @@ loom_cc_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        "//experimental/loom_serve/http:listener",
         "//experimental/loom_serve/http:server",
         "//experimental/loom_serve/models/fixtures:stalled_stderr",
         "//experimental/loom_serve/runtime:device",

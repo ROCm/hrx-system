@@ -52,6 +52,7 @@ loom_cc_test(
         "//experimental/loom_serve/embedding:protocol",
         "//experimental/loom_serve/finite:model",
         "//experimental/loom_serve/finite:service",
+        "//experimental/loom_serve/http:listener",
         "//experimental/loom_serve/http:router",
         "//experimental/loom_serve/http:server",
         "//experimental/loom_serve/runtime:device",

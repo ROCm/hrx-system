@@ -47,7 +47,7 @@ policy:
 
 ```sh
 iree-bazel-run //experimental/loom_serve/serving:server -- \
-  --models=/path/to/models.json --port=8080
+  --models=/path/to/models.json --listen=127.0.0.1:8080
 ```
 
 `POST /v1/embeddings` with

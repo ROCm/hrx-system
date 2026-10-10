@@ -6,7 +6,6 @@
 
 #include "experimental/loom_serve/http/server.h"
 
-#include <signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -15,32 +14,52 @@
 #include <string>
 #include <vector>
 
+#include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/async/proactor.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/testing/temp_file.h"
 
 namespace {
 
 class HttpServerTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(iree_async_signal_block_default());
+    IREE_ASSERT_OK(iree_async_proactor_pool_create(
+        1, nullptr, iree_async_proactor_pool_options_default(),
+        iree_allocator_system(), &pool_));
     auto options = loom_serve_http_server_options_default();
-    options.port = 0;
     options.connection_capacity = 24;
     options.request_limits.body_byte_capacity = 2 * 1024 * 1024;
-    IREE_ASSERT_OK(loom_serve_http_server_create(&options, &server_,
+    IREE_ASSERT_OK(loom_serve_http_server_create(pool_, &options, &server_,
                                                  iree_allocator_system()));
+    listener_ = Listen(IREE_SV("127.0.0.1:0"));
   }
 
   void TearDown() override {
-    IREE_EXPECT_OK(loom_serve_http_server_destroy(server_));
+    IREE_EXPECT_OK(loom_serve_http_listener_destroy(listener_));
+    for (auto* listener : additional_listeners_) {
+      IREE_EXPECT_OK(loom_serve_http_listener_destroy(listener));
+    }
+    loom_serve_http_server_destroy(server_);
+    iree_async_proactor_pool_release(pool_);
   }
 
-  int Connect() {
-    const auto* address = loom_serve_http_server_address(server_);
-    int client = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  loom_serve_http_listener_t* Listen(iree_string_view_t address) {
+    auto options = loom_serve_http_listener_options_default();
+    options.address = address;
+    loom_serve_http_listener_t* listener = nullptr;
+    IREE_EXPECT_OK(loom_serve_http_listener_create(server_, &options, &listener,
+                                                   iree_allocator_system()));
+    return listener;
+  }
+
+  int Connect(loom_serve_http_listener_t* listener = nullptr) {
+    const auto* address =
+        loom_serve_http_listener_address(listener ? listener : listener_);
+    const auto* native = reinterpret_cast<const sockaddr*>(address->storage);
+    int client = socket(native->sa_family, SOCK_STREAM | SOCK_CLOEXEC, 0);
     EXPECT_GE(client, 0);
     EXPECT_EQ(
         connect(client, reinterpret_cast<const sockaddr*>(address->storage),
@@ -91,7 +110,13 @@ class HttpServerTest : public ::testing::Test {
     return result;
   }
 
-  // Server under test, owning its real proactor thread and TCP carriers.
+  // Shared progress infrastructure used by every binding and connection.
+  iree_async_proactor_pool_t* pool_ = nullptr;
+  // Initial independently owned TCP binding.
+  loom_serve_http_listener_t* listener_ = nullptr;
+  // Other bindings retired before their borrowed server.
+  std::vector<loom_serve_http_listener_t*> additional_listeners_;
+  // Server under test, retaining shared progress without private workers.
   loom_serve_http_server_t* server_ = nullptr;
 };
 
@@ -197,8 +222,8 @@ TEST_F(HttpServerTest, ConfiguredBodiesAndClaimsOutliveOtherPeers) {
   int clients[20];
   loom_serve_http_connection_t* connections[20];
   const loom_serve_http_request_t* requests[20];
-  // More than the former fixed connection limit can wait for application
-  // admission. A long request is allowed by this server's byte budget.
+  // Multiple claims wait for application admission independently. A long
+  // request is allowed by this server's byte budget.
   const std::string body(1024 * 1024 + 1, 'x');
   for (int i = 0; i < 20; ++i) {
     clients[i] = Connect();
@@ -257,28 +282,101 @@ TEST_F(HttpServerTest, ShutdownDrainsOpenConnectionAndAccept) {
   ASSERT_NE(Take(&request), nullptr);
   // Abandon application views before destroying the server with I/O pending.
   request = nullptr;
-  IREE_ASSERT_OK(loom_serve_http_server_destroy(server_));
+  IREE_ASSERT_OK(loom_serve_http_listener_destroy(listener_));
+  listener_ = nullptr;
+  loom_serve_http_server_destroy(server_);
   server_ = nullptr;
   EXPECT_EQ(Read(client), "");
   ASSERT_EQ(close(client), 0);
 }
 
-TEST_F(HttpServerTest, ShutdownJoinsMessageAfterAcceptCompletesNaturally) {
-  ASSERT_EQ(kill(getpid(), SIGTERM), 0);
-  iree_notification_await(
-      loom_serve_http_server_notification(server_),
-      [](void* value) {
-        return loom_serve_http_server_is_stopping(
-            static_cast<loom_serve_http_server_t*>(value));
-      },
-      server_, iree_infinite_timeout());
-  // Complete the pending accept after the stop signal. It closes this socket
-  // without rearming, so shutdown must still join its owner-thread message.
+TEST_F(HttpServerTest, ServerAdmissionClosesIndependentlyOfListener) {
+  loom_serve_http_server_request_stop(server_);
+  EXPECT_TRUE(loom_serve_http_server_is_stopping(server_));
   int client = Connect();
   EXPECT_EQ(Read(client), "");
   ASSERT_EQ(close(client), 0);
-  IREE_ASSERT_OK(loom_serve_http_server_destroy(server_));
+  IREE_ASSERT_OK(loom_serve_http_listener_destroy(listener_));
+  listener_ = nullptr;
+  loom_serve_http_server_destroy(server_);
   server_ = nullptr;
+}
+
+TEST_F(HttpServerTest, StreamOutlivesListenerWhileOtherBindingsAdmit) {
+  iree::testing::TempFilePath path("http");
+  const std::string unix_address = "unix:" + path.path();
+  auto* unix_listener = Listen(iree_make_cstring_view(unix_address.c_str()));
+  ASSERT_NE(unix_listener, nullptr);
+  additional_listeners_.push_back(unix_listener);
+  auto* ipv6_listener = Listen(IREE_SV("[::1]:0"));
+  ASSERT_NE(ipv6_listener, nullptr);
+  additional_listeners_.push_back(ipv6_listener);
+
+  const int stream_client = Connect();
+  ASSERT_TRUE(
+      Write(stream_client, "GET /stream HTTP/1.1\r\nHost: local\r\n\r\n"));
+  const loom_serve_http_request_t* request = nullptr;
+  auto* stream = Take(&request);
+  ASSERT_NE(stream, nullptr);
+  const std::string prefix =
+      "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+      "Connection: close\r\n\r\ndata: first\n\n";
+  IREE_ASSERT_OK(loom_serve_http_connection_send(
+      stream, iree_make_cstring_view(prefix.c_str())));
+  loom_serve_http_listener_request_stop(listener_);
+  iree_notification_await(
+      loom_serve_http_listener_notification(listener_),
+      [](void* value) {
+        return loom_serve_http_listener_is_stopped(
+            static_cast<loom_serve_http_listener_t*>(value));
+      },
+      listener_, iree_infinite_timeout());
+  IREE_ASSERT_OK(loom_serve_http_listener_destroy(listener_));
+  listener_ = nullptr;
+  EXPECT_FALSE(loom_serve_http_server_is_stopping(server_));
+
+  for (auto* listener : additional_listeners_) {
+    const int client = Connect(listener);
+    ASSERT_TRUE(Write(client, "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n"));
+    auto* connection = Take(&request);
+    ASSERT_NE(connection, nullptr);
+    IREE_ASSERT_OK(loom_serve_http_connection_send(
+        connection, IREE_SV("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nOK")));
+    loom_serve_http_connection_finish(connection);
+    EXPECT_EQ(Read(client), "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nOK");
+    EXPECT_EQ(close(client), 0);
+  }
+  // Drop the caller's pool reference too: the HTTP owner retains progress.
+  iree_async_proactor_pool_release(pool_);
+  pool_ = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_http_connection_send(stream, IREE_SV("data: last\n\n")));
+  loom_serve_http_connection_finish(stream);
+  EXPECT_EQ(Read(stream_client), prefix + "data: last\n\n");
+  EXPECT_EQ(close(stream_client), 0);
+}
+
+TEST_F(HttpServerTest, FailedUnixBindDoesNotRemoveAnotherListener) {
+  iree::testing::TempFilePath path("http");
+  const std::string address = "unix:" + path.path();
+  auto options = loom_serve_http_listener_options_default();
+  options.address = iree_make_cstring_view(address.c_str());
+  auto* first = Listen(options.address);
+  ASSERT_NE(first, nullptr);
+  additional_listeners_.push_back(first);
+  loom_serve_http_listener_t* duplicate = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_serve_http_listener_create(server_, &options, &duplicate,
+                                      iree_allocator_system()));
+  EXPECT_EQ(duplicate, nullptr);
+  EXPECT_TRUE(path.Exists());
+  IREE_ASSERT_OK(loom_serve_http_listener_destroy(first));
+  additional_listeners_.clear();
+  EXPECT_FALSE(path.Exists());
+  auto* rebound = Listen(options.address);
+  ASSERT_NE(rebound, nullptr);
+  additional_listeners_.push_back(rebound);
 }
 
 }  // namespace

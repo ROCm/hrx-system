@@ -5,6 +5,7 @@
 
 #include "experimental/loom_serve/runtime/host.h"
 
+#include "iree/async/util/proactor_thread.h"
 #include "iree/base/threading/numa.h"
 #include "iree/task/topology.h"
 #include "loomc/iree.h"
@@ -22,6 +23,34 @@ struct loom_serve_host_t {
   // NUMA-local I/O services outliving every attached device.
   iree_async_proactor_pool_t* proactor_pool;
 };
+
+#if !IREE_PLATFORM_WASM
+static void serving_proactor_failed(void* user_data, iree_status_t status) {
+  (void)user_data;
+  // Fatal polling failure cannot retire accepted I/O storage. Operation-level
+  // errors still flow through their normal completion callbacks.
+  iree_status_abort(status);
+}
+
+static iree_status_t serving_proactor_thread_create(
+    void* user_data, iree_async_proactor_t* proactor, uint32_t node_id,
+    iree_allocator_t allocator, void** out_runner) {
+  (void)user_data;
+  iree_async_proactor_thread_options_t options =
+      iree_async_proactor_thread_options_default();
+  options.debug_name = IREE_SV("loom-io");
+  options.error_callback = (iree_async_proactor_thread_error_callback_t){
+      serving_proactor_failed, NULL};
+  if (node_id != UINT32_MAX) {
+    iree_thread_affinity_set_group_any(node_id, &options.affinity);
+  }
+  iree_async_proactor_thread_t* thread = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_async_proactor_thread_create(proactor, options, allocator, &thread));
+  *out_runner = thread;
+  return iree_ok_status();
+}
+#endif  // !IREE_PLATFORM_WASM
 
 iree_status_t loom_serve_host_create(iree_host_size_t worker_count,
                                      loom_serve_host_t** out_host,
@@ -54,10 +83,13 @@ iree_status_t loom_serve_host_create(iree_host_size_t worker_count,
         &host->task_pool));
   }
   if (iree_status_is_ok(status)) {
+    iree_async_proactor_pool_options_t options =
+        iree_async_proactor_pool_options_default();
+#if !IREE_PLATFORM_WASM
+    options.runner.create = serving_proactor_thread_create;
+#endif  // !IREE_PLATFORM_WASM
     status = iree_async_proactor_pool_create(
-        iree_numa_node_count(), NULL,
-        iree_async_proactor_pool_options_default(), allocator,
-        &host->proactor_pool);
+        iree_numa_node_count(), NULL, options, allocator, &host->proactor_pool);
   }
   if (iree_status_is_ok(status)) {
     *out_host = host;

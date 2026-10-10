@@ -6,7 +6,6 @@
 
 #include "experimental/loom_serve/finite/service.h"
 
-#include <signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -21,6 +20,7 @@
 #include <vector>
 
 #include "experimental/loom_serve/embedding/protocol.h"
+#include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
@@ -41,7 +41,6 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
 
   void SetUp() override {
     iree_notification_initialize(&notification_);
-    IREE_ASSERT_OK(iree_async_signal_block_default());
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
     const loom_serve_device_options_t device_options[] = {
         {.uri = IREE_SV("amdgpu")}, {.uri = IREE_SV("amdgpu")}};
@@ -53,9 +52,12 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
     ASSERT_NO_FATAL_FAILURE(CreateModel(directory_));
     ASSERT_NO_FATAL_FAILURE(CreateService(0));
     auto options = loom_serve_http_server_options_default();
-    options.port = 0;
-    IREE_ASSERT_OK(
-        loom_serve_http_server_create(&options, &server_, allocator_));
+    IREE_ASSERT_OK(loom_serve_http_server_create(
+        loom_serve_host_proactor_pool(host_), &options, &server_, allocator_));
+    auto listener_options = loom_serve_http_listener_options_default();
+    listener_options.address = IREE_SV("127.0.0.1:0");
+    IREE_ASSERT_OK(loom_serve_http_listener_create(server_, &listener_options,
+                                                   &listener_, allocator_));
   }
 
   void CreateModel(const std::string& directory) {
@@ -87,7 +89,7 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
 
   void TearDown() override {
     if (router_.joinable()) {
-      EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+      loom_serve_http_server_request_stop(server_);
       router_.join();
       IREE_EXPECT_OK(status_);
     }
@@ -95,7 +97,8 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
       interface_.set_observer(interface_.self, {});
       loom_serve_finite_service_destroy(service_);
     }
-    IREE_EXPECT_OK(loom_serve_http_server_destroy(server_));
+    IREE_EXPECT_OK(loom_serve_http_listener_destroy(listener_));
+    loom_serve_http_server_destroy(server_);
     IREE_EXPECT_OK(loom_serve_finite_model_destroy(model_));
     IREE_EXPECT_OK(loom_serve_finite_model_destroy(retained_));
     IREE_EXPECT_OK(loom_serve_device_group_destroy(group_));
@@ -107,7 +110,7 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
            const char* method = "POST", const std::string& headers = {}) {
     const int client = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     EXPECT_GE(client, 0);
-    const auto* address = loom_serve_http_server_address(server_);
+    const auto* address = loom_serve_http_listener_address(listener_);
     EXPECT_EQ(
         connect(client, reinterpret_cast<const sockaddr*>(address->storage),
                 address->length),
@@ -278,6 +281,8 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
   loom_serve_http_service_t interface_ = {};
   // Production loopback carrier, independent of scheduler turns.
   loom_serve_http_server_t* server_ = nullptr;
+  // Independent binding borrowing the HTTP owner and shared host pool.
+  loom_serve_http_listener_t* listener_ = nullptr;
   // Outer driver notification for actual task/queue readiness.
   iree_notification_t notification_;
   // Published callback generations.
@@ -446,7 +451,7 @@ TEST_P(SourceEmbeddingServiceTest,
                 .find("HTTP/1.1 404"),
             0u);
   // Shutdown itself must also retire while no stderr consumer is running.
-  EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+  loom_serve_http_server_request_stop(server_);
   router_.join();
   IREE_EXPECT_OK(status_);
   status_ = iree_ok_status();

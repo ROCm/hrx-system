@@ -21,9 +21,22 @@ loom_cc_library(
         "//loom/binding/c:loomc",
         "//loom/binding/c:task_pool",
         "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/async/util:proactor_thread",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_library(
+    name = "signals",
+    srcs = ["signals.c"],
+    hdrs = ["signals.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
     ],
 )
 
@@ -35,6 +48,24 @@ loom_cc_library(
         ":host",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
+    ],
+)
+
+loom_cc_test(
+    name = "signals_test",
+    srcs = ["signals_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":signals",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

@@ -7,7 +7,6 @@
 #include "experimental/loom_serve/image/service.h"
 
 #include <errno.h>
-#include <signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -18,6 +17,7 @@
 #include <thread>
 #include <tuple>
 
+#include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/runtime/device.h"
 #include "iree/async/proactor.h"
 #include "iree/base/threading/notification.h"
@@ -120,7 +120,6 @@ class ImageServiceTest
 
 TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   const auto [completion_mode, worker_count] = GetParam();
-  IREE_ASSERT_OK(iree_async_signal_block_default());
   loom_serve_host_t* host = nullptr;
   IREE_ASSERT_OK(
       loom_serve_host_create(worker_count, &host, iree_allocator_system()));
@@ -139,10 +138,15 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   IREE_ASSERT_OK(
       loom_serve_execution_barrier(gate.execution, {1, &predecessor, &held}));
   auto transport_options = loom_serve_http_server_options_default();
-  transport_options.port = 0;
   loom_serve_http_server_t* server = nullptr;
-  IREE_ASSERT_OK(loom_serve_http_server_create(&transport_options, &server,
-                                               iree_allocator_system()));
+  IREE_ASSERT_OK(loom_serve_http_server_create(
+      loom_serve_host_proactor_pool(host), &transport_options, &server,
+      iree_allocator_system()));
+  auto listener_options = loom_serve_http_listener_options_default();
+  listener_options.address = IREE_SV("127.0.0.1:0");
+  loom_serve_http_listener_t* listener = nullptr;
+  IREE_ASSERT_OK(loom_serve_http_listener_create(
+      server, &listener_options, &listener, iree_allocator_system()));
 
   const loom_serve_image_generator_t generator = {
       &gate,
@@ -193,7 +197,7 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
     }
   };
   EXPECT_FALSE(wait_event("\"event\":\"stream_begin\"", "").empty());
-  const auto* address = loom_serve_http_server_address(server);
+  const auto* address = loom_serve_http_listener_address(listener);
   auto read_response = [](int socket) {
     std::string response;
     char buffer[4096];
@@ -288,7 +292,7 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   }
 
   if (completion_mode == CompletionMode::kShutdown) {
-    EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+    loom_serve_http_server_request_stop(server);
     const std::string draining =
         wait_event("\"event\":\"image_shutdown\"", "\"request\":2");
     EXPECT_FALSE(draining.empty());
@@ -303,7 +307,7 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
     const std::string response = read_response(client);
     EXPECT_NE(response.find("200 OK"), std::string::npos);
     EXPECT_NE(response.find("\"b64_json\":\"iVBOR"), std::string::npos);
-    EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+    loom_serve_http_server_request_stop(server);
   }
   const bool failed = completion_mode == CompletionMode::kDeviceFailure;
   service.join();
@@ -327,7 +331,8 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   EXPECT_EQ(gate.completed, failed ? 0u : 1u);
   EXPECT_EQ(gate.discarded, 1u);
   EXPECT_EQ(close(client), 0);
-  IREE_EXPECT_OK(loom_serve_http_server_destroy(server));
+  IREE_EXPECT_OK(loom_serve_http_listener_destroy(listener));
+  loom_serve_http_server_destroy(server);
   iree_status_t drain_status = loom_serve_execution_drain(gate.execution);
   if (failed) {
     EXPECT_EQ(iree_status_code(drain_status), IREE_STATUS_ABORTED);
@@ -355,7 +360,6 @@ class ImageAdmissionTest
 
 TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
   const auto [mode, workers] = GetParam();
-  IREE_ASSERT_OK(iree_async_signal_block_default());
   const auto allocator = iree_allocator_system();
   loom_serve_host_t* host = nullptr;
   IREE_ASSERT_OK(loom_serve_host_create(workers, &host, allocator));
@@ -419,10 +423,15 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
     services[i] = loom_serve_image_service_interface(images[i]);
   }
   auto transport_options = loom_serve_http_server_options_default();
-  transport_options.port = 0;
   loom_serve_http_server_t* server = nullptr;
   IREE_ASSERT_OK(
-      loom_serve_http_server_create(&transport_options, &server, allocator));
+      loom_serve_http_server_create(loom_serve_host_proactor_pool(host),
+                                    &transport_options, &server, allocator));
+  auto listener_options = loom_serve_http_listener_options_default();
+  listener_options.address = IREE_SV("127.0.0.1:0");
+  loom_serve_http_listener_t* listener = nullptr;
+  IREE_ASSERT_OK(loom_serve_http_listener_create(server, &listener_options,
+                                                 &listener, allocator));
   iree_status_t status = iree_ok_status();
   auto generated_events = [&](size_t index) {
     // With periodic records disabled, this bounded request history fits even
@@ -457,7 +466,7 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
   auto send_request = [&](const std::string& model, uint64_t seed = 0) {
     const int peer = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     EXPECT_GE(peer, 0);
-    const auto* address = loom_serve_http_server_address(server);
+    const auto* address = loom_serve_http_listener_address(listener);
     EXPECT_EQ(connect(peer, reinterpret_cast<const sockaddr*>(address->storage),
                       address->length),
               0);
@@ -507,7 +516,7 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
     EXPECT_EQ(close(second), 0);
     gates[1].Await(ImageGate::kDiscarded);
   } else if (mode == AdmissionMode::kShutdown) {
-    EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+    loom_serve_http_server_request_stop(server);
     EXPECT_TRUE(receive(first).empty());
   }
   EXPECT_EQ(generated_events(0), 0u);
@@ -521,7 +530,7 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
       EXPECT_NE(receive(second).find("\"b64_json\":\"iVBOR"),
                 std::string::npos);
     }
-    EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+    loom_serve_http_server_request_stop(server);
   } else {
     EXPECT_TRUE(receive(second).empty());
   }
@@ -533,7 +542,8 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
   EXPECT_EQ(gates[1].discarded, mode == AdmissionMode::kResponse ? 0u : 1u);
   EXPECT_EQ(completed_events[0], 1u);
   EXPECT_EQ(completed_events[1], mode == AdmissionMode::kShutdown ? 0u : 1u);
-  IREE_EXPECT_OK(loom_serve_http_server_destroy(server));
+  IREE_EXPECT_OK(loom_serve_http_listener_destroy(listener));
+  loom_serve_http_server_destroy(server);
   IREE_EXPECT_OK(loom_serve_execution_drain(execution));
   loom_serve_execution_release(execution);
   if (independent_execution) {

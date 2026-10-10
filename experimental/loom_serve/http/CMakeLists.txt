@@ -156,11 +156,27 @@ loom_cc_library(
   DEPS
     ::request
     iree::async
-    iree::async::platform
-    iree::async::util::proactor_thread
+    iree::async::util::proactor_pool
     iree::base
     iree::base::threading
     iree::experimental::loom_serve::telemetry::stream
+    iree::net::carrier
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    listener
+  HDRS
+    "listener.h"
+  SRCS
+    "listener.c"
+  DEPS
+    ::server
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
     iree::net::carrier
     iree::net::carrier::stream
   PUBLIC
@@ -173,10 +189,12 @@ loom_cc_test(
   SRCS
     "router_test.cc"
   DEPS
+    ::listener
     ::request
     ::router
     ::server
     iree::async
+    iree::async::util::proactor_pool
     iree::base
     iree::task
     iree::testing::gtest
@@ -193,14 +211,17 @@ loom_cc_test(
   SRCS
     "server_test.cc"
   DEPS
+    ::listener
     ::request
     ::server
     iree::async
+    iree::async::util::proactor_pool
     iree::base
     iree::base::threading
     iree::experimental::loom_serve::telemetry::stream
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::testing::temp_file
 )
 endif()
 

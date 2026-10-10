@@ -44,6 +44,7 @@ loom_cc_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        "//experimental/loom_serve/http:listener",
         "//experimental/loom_serve/http:server",
         "//experimental/loom_serve/image:model",
         "//experimental/loom_serve/image:output",

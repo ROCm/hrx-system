@@ -18,11 +18,27 @@ loom_cc_library(
     "host.c"
   DEPS
     iree::async::util::proactor_pool
+    iree::async::util::proactor_thread
     iree::base
     iree::base::threading
     iree::task
     loom::binding::c::loomc
     loom::binding::c::task_pool
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    signals
+  HDRS
+    "signals.h"
+  SRCS
+    "signals.c"
+  DEPS
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
   PUBLIC
 )
 
@@ -39,6 +55,23 @@ loom_cc_library(
     iree::base::tooling::flags
   PUBLIC
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    signals_test
+  SRCS
+    "signals_test.cc"
+  DEPS
+    ::signals
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
 
 loom_cc_test(
   NAME
