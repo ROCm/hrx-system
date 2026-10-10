@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from enum import Enum
+
 from loom.target.low_descriptors import ImmediateKind, OperandRole
 
 from .vector_encoding import (
@@ -60,13 +62,13 @@ _EVEX_MASK_SELECT = vector_encoding_recipe(
     _R.RESULT, _R.INPUT_2, _R.INPUT_1, _B.EVEX_MASK
 )
 _INDEXED_LOAD = vector_encoding_recipe(
-    _R.RESULT, _R.INPUT_1, _R.INPUT_0, _B.LOAD, full_vector_tuple=True
+    _R.RESULT, _R.NONE, _R.INPUT_0, _B.LOAD, full_vector_tuple=True
 )
 _LOAD = vector_encoding_recipe(
     _R.RESULT, _R.NONE, _R.INPUT_0, _B.LOAD, full_vector_tuple=True
 )
 _INDEXED_STORE = vector_encoding_recipe(
-    _R.INPUT_0, _R.INPUT_2, _R.INPUT_1, _B.STORE, full_vector_tuple=True
+    _R.INPUT_0, _R.NONE, _R.INPUT_1, _B.STORE, full_vector_tuple=True
 )
 _STORE = vector_encoding_recipe(
     _R.INPUT_0, _R.NONE, _R.INPUT_1, _B.STORE, full_vector_tuple=True
@@ -77,6 +79,18 @@ _SIMD = ("x86.simd",)
 _GPR32 = ("x86.gpr32",)
 _GPR64 = ("x86.gpr64",)
 _K = ("x86.k",)
+
+
+class EvexMasking(Enum):
+    NONE = "none"
+    MERGE = "merge"
+    ZERO = "zero"
+
+
+class EvexMemorySource(Enum):
+    NONE = "none"
+    FULL = "full"
+    BROADCAST_32 = "broadcast32"
 
 
 def _operand(role: OperandRole, classes: tuple[str, ...]) -> VectorOperandShape:
@@ -195,6 +209,86 @@ def _vex_memory_load_instructions(
     return (
         _instruction(mnemonic, _LOAD, _OPERANDS_18, _IMMEDIATES_3, encoding),
         _instruction(mnemonic, _INDEXED_LOAD, _OPERANDS_19, _IMMEDIATES_2, encoding),
+    )
+
+
+def avx512_bf16_conversion_instruction(
+    *,
+    source_count: int,
+    masking: EvexMasking,
+    memory_source: EvexMemorySource,
+    indexed: bool,
+) -> VectorMachineInstruction:
+    """Builds one typed AVX512-BF16 conversion encoding form."""
+    if source_count not in (1, 2):
+        raise ValueError("AVX512-BF16 conversion requires one or two sources")
+    if indexed and memory_source is EvexMemorySource.NONE:
+        raise ValueError("indexed AVX512-BF16 conversion requires memory")
+
+    masked = masking is not EvexMasking.NONE
+    memory = memory_source is not EvexMemorySource.NONE
+    operands = [_operand(OperandRole.RESULT, _SIMD)]
+    if masked:
+        operands.append(_operand(OperandRole.OPERAND, _K))
+    if source_count == 2:
+        operands.append(_operand(OperandRole.OPERAND, _SIMD))
+    if memory:
+        operands.append(_operand(OperandRole.RESOURCE, _GPR64))
+        if indexed:
+            operands.append(_operand(OperandRole.RESOURCE, _GPR64))
+    else:
+        operands.append(_operand(OperandRole.OPERAND, _SIMD))
+    if masking is EvexMasking.MERGE:
+        operands.append(_operand(OperandRole.OPERAND, _SIMD))
+
+    input_offset = int(masked)
+    middle = (
+        VectorRegisterSelector(input_offset + 1)
+        if source_count == 2
+        else VectorRegisterSelector.NONE
+    )
+    rm = VectorRegisterSelector(input_offset + source_count)
+    if memory:
+        behavior = (
+            VectorEncodingBehavior.EVEX_MASK_LOAD
+            if masked
+            else VectorEncodingBehavior.LOAD
+        )
+    else:
+        behavior = (
+            VectorEncodingBehavior.EVEX_MASK
+            if masked
+            else VectorEncodingBehavior.REGISTERS
+        )
+    recipe = vector_encoding_recipe(
+        VectorRegisterSelector.RESULT,
+        middle,
+        rm,
+        behavior,
+        full_vector_tuple=memory_source is EvexMemorySource.FULL,
+        broadcast32=memory_source is EvexMemorySource.BROADCAST_32,
+        zero_mask=masking is EvexMasking.ZERO,
+    )
+    mnemonic = "vcvtneps2bf16" if source_count == 1 else "vcvtne2ps2bf16"
+    if indexed:
+        immediates = _IMMEDIATES_2
+    elif memory:
+        immediates = _IMMEDIATES_3
+    else:
+        immediates = ()
+    return _instruction(
+        mnemonic,
+        recipe,
+        tuple(operands),
+        immediates,
+        _encoding(
+            _EVEX,
+            _MAP_2,
+            2 if source_count == 1 else 3,
+            0,
+            0x72,
+            (128, 256, 512),
+        ),
     )
 
 

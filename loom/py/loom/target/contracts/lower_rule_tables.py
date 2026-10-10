@@ -134,6 +134,7 @@ LOWER_EMIT_FLAG_RECORD_SOURCE_MEMORY = 1 << 7
 LOWER_SOURCE_MEMORY_NONE = 0
 LOWER_RULE_FLAG_CONTRACT_ONLY = 1 << 0
 LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS = 1 << 1
+LOWER_RULE_FLAG_NONLOCAL_SOURCE_GRAPH = 1 << 2
 LOWER_RULE_PRIMARY_EMIT_NONE = 0xFFFF
 
 _LOW_VALUE_GUARD_KINDS = (
@@ -368,6 +369,7 @@ class CompiledLowerRuleSet:
     type_patterns: tuple[LowerTypePattern, ...]
     value_refs: tuple[LowerValueRef, ...]
     source_nodes: tuple[LowerSourceNode, ...]
+    nonlocal_source_op_kinds: tuple[int, ...]
     source_memories: tuple[LowerSourceMemory, ...]
     guards: tuple[LowerGuard, ...]
     attr_copies: tuple[LowerAttrCopy, ...]
@@ -461,3 +463,8 @@ def _op_kind_key(op: Op, op_ordinals: dict[int, int]) -> tuple[int, int]:
     except KeyError as exc:
         raise ValueError(f"op '{op.name}' is not present in dialect_ops") from exc
     return (op.group.dialect_id, op_index)
+
+
+def _op_kind_value(op: Op, op_ordinals: dict[int, int]) -> int:
+    dialect_id, op_index = _op_kind_key(op, op_ordinals)
+    return (dialect_id << 8) | op_index

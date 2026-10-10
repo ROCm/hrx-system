@@ -65,6 +65,7 @@ def generate_contract_index(
             raise ValueError(f"fragment '{table.name}' requires a lower-rule pool")
         fragment_symbol = f"loom_{c_identifier(table.name).lower()}_contract_fragment"
         bindings.append(f"{{&{fragment_symbol}, {rule_set_index}}}")
+    nonlocal_source_op_kinds = tuple(sorted({op_kind for _, _, lower_rules in fragments if lower_rules is not None for op_kind in lower_rules.nonlocal_source_op_kinds}))
 
     def array(c_type: str, suffix: str, rows: Sequence[str]) -> str:
         if not rows:
@@ -77,6 +78,11 @@ def generate_contract_index(
 
     rule_sets = array("loom_low_lower_rule_set_t* const", "Rules", rules)
     binding_table = array("loom_target_contract_binding_t", "Bindings", bindings)
+    nonlocal_source_op_kind_table = array(
+        "loom_op_kind_t",
+        "NonlocalSourceOpKinds",
+        [f"UINT16_C(0x{op_kind:04X})" for op_kind in nonlocal_source_op_kinds],
+    )
     cases = array(
         "loom_target_contract_case_t",
         "Cases",
@@ -112,8 +118,8 @@ def generate_contract_index(
             "",
             f"static const loom_target_contract_index_t {prefix}Index = {{",
             f"    {index.dialect_base_id}, {len(index.dialects)}, {dialect_table},",
-            f"    {len(index.cases)}, {cases}, {len(bindings)}, {binding_table},",
-            f"    {selection_data},",
+            f"    {len(index.cases)}, {cases}, {len(bindings)}, {len(nonlocal_source_op_kinds)},",
+            f"    {binding_table}, {selection_data}, {nonlocal_source_op_kind_table},",
             "};",
             "",
             f"#define {name} {{&{prefix}Index, {{{len(rules)}, {rule_sets}}}}}",

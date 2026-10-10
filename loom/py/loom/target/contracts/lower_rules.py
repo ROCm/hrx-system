@@ -110,6 +110,7 @@ from loom.target.contracts.lower_rule_tables import (
     LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN,
     LOWER_EMIT_FLAG_SWAP_OPERANDS_0_1,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
+    LOWER_RULE_FLAG_NONLOCAL_SOURCE_GRAPH,
     LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
     LOWER_RULE_PRIMARY_EMIT_NONE,
     LOWER_SOURCE_MEMORY_NONE,
@@ -132,12 +133,14 @@ from loom.target.contracts.lower_rule_tables import (
     _build_spans,
     _intern_program_rows,
     _op_kind_key,
+    _op_kind_value,
 )
 from loom.target.contracts.patterns import TypePattern
 from loom.target.contracts.rules import (
     DescriptorRule,
     OrdinalValueAliasRule,
     RecipeRule,
+    SourceNodeRelation,
     ValueAliasRule,
     ValueElideRule,
     contract_case_priority,
@@ -392,7 +395,33 @@ class _LowerRuleSetCompiler:
             )
             for index, source_node in enumerate(self._source_nodes)
         )
+        source_nodes, source_node_starts = _intern_program_rows(
+            source_nodes,
+            ((rule.source_node_start, rule.source_node_count) for rule in self._rules),
+        )
+        rules = tuple(
+            replace(
+                rule,
+                source_node_start=(
+                    source_node_starts[index] if rule.source_node_count else 0
+                ),
+            )
+            for index, rule in enumerate(rules)
+        )
         spans = _build_spans(rules, self._op_ordinals)
+        nonlocal_source_op_kinds = tuple(
+            sorted(
+                {
+                    _op_kind_value(source_node.source_op, self._op_ordinals)
+                    for source_node in source_nodes
+                    if source_node.relation
+                    in (
+                        SourceNodeRelation.EXCLUSIVE_USER,
+                        SourceNodeRelation.EXCLUSIVE_DEFINITION,
+                    )
+                }
+            )
+        )
         return CompiledLowerRuleSet(
             name=self._table.name,
             authored_case_indices=tuple(self._authored_case_indices),
@@ -401,6 +430,7 @@ class _LowerRuleSetCompiler:
             type_patterns=tuple(self._type_patterns),
             value_refs=tuple(self._value_refs),
             source_nodes=source_nodes,
+            nonlocal_source_op_kinds=nonlocal_source_op_kinds,
             source_memories=tuple(self._source_memories),
             guards=guards,
             attr_copies=tuple(self._attr_copies),
@@ -436,6 +466,12 @@ class _LowerRuleSetCompiler:
             int,
             dict[tuple[str, int], TypePattern],
         ] = {}
+        # Source-node relationships may reference variadic root operands before
+        # the root guards are emitted below. Make the root arity available when
+        # those relationship value references are lowered.
+        self._operand_segment_counts[0] = _operand_segment_counts(
+            rule.source_op, rule.guards
+        )
         source_node_start = len(self._source_nodes)
         for source_node_index, source_node in enumerate(rule.source_nodes, start=1):
             source_node_guard_start = len(self._guards)
@@ -511,6 +547,18 @@ class _LowerRuleSetCompiler:
                 primary_emit_ordinal=primary_emit_ordinal,
                 source_node_start=(source_node_start if rule.source_nodes else 0),
                 source_node_count=len(rule.source_nodes),
+                flags=(
+                    LOWER_RULE_FLAG_NONLOCAL_SOURCE_GRAPH
+                    if any(
+                        source_node.relation
+                        in (
+                            SourceNodeRelation.EXCLUSIVE_USER,
+                            SourceNodeRelation.EXCLUSIVE_DEFINITION,
+                        )
+                        for source_node in rule.source_nodes
+                    )
+                    else 0
+                ),
                 report_key=rule.report_key,
             )
         )
@@ -624,11 +672,19 @@ class _LowerRuleSetCompiler:
         *,
         source_node_index: int = 0,
     ) -> None:
-        self._operand_segment_counts[source_node_index] = _operand_segment_counts(
-            source_op, guards
-        )
-        for guard in _order_operand_segment_guards(source_op, guards):
-            self._append_guard(source_op, guard, type_patterns_by_field)
+        operand_segment_counts = _operand_segment_counts(source_op, guards)
+        self._operand_segment_counts[source_node_index] = operand_segment_counts
+        root_operand_segment_counts = self._operand_segment_counts.get(0)
+        self._operand_segment_counts[0] = operand_segment_counts
+        try:
+            for guard in _order_operand_segment_guards(source_op, guards):
+                self._append_guard(source_op, guard, type_patterns_by_field)
+        finally:
+            if source_node_index != 0:
+                if root_operand_segment_counts is None:
+                    del self._operand_segment_counts[0]
+                else:
+                    self._operand_segment_counts[0] = root_operand_segment_counts
 
     def _append_source_attr_guard(self, source_op: Op, guard: Guard) -> None:
         attr_index = _source_attr_index(source_op, guard.field)

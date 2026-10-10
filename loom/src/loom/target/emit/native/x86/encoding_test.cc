@@ -41,6 +41,12 @@ void ExpectVectorEncoding(uint16_t encoding_format_id, uint16_t encoding_id,
   }
 }
 
+constexpr uint16_t VectorRecipe(uint8_t reg, uint8_t middle, uint8_t rm,
+                                loom_x86_vector_encoding_behavior_t behavior) {
+  return LOOM_X86_ENCODING_FORMAT_VECTOR | reg | (middle << 4) | (rm << 8) |
+         (behavior << 12);
+}
+
 TEST(EncodingTest, VectorRegisterPrefixesAndBehaviors) {
   loom_x86_encoding_operands_t operands = {};
   operands.result = 1;
@@ -88,6 +94,90 @@ TEST(EncodingTest, VectorRegisterPrefixesAndBehaviors) {
                        {0x62, 0xf6, 0x6d, 0x48, 0xb8, 0xcb});
 }
 
+TEST(EncodingTest, EvexNdsMemoryBroadcastAndMaskModifiers) {
+  // These bytes agree with independent LLVM and GNU assembler outputs.
+  constexpr uint16_t kUnaryMerge = VectorRecipe(
+      LOOM_X86_VECTOR_REGISTER_RESULT, LOOM_X86_VECTOR_REGISTER_NONE,
+      LOOM_X86_VECTOR_REGISTER_INPUT_1, LOOM_X86_VECTOR_ENCODING_EVEX_MASK);
+  constexpr uint16_t kUnaryZero = kUnaryMerge | 8;
+  constexpr uint16_t kBinaryZero = VectorRecipe(
+      LOOM_X86_VECTOR_REGISTER_RESULT | 8, LOOM_X86_VECTOR_REGISTER_INPUT_1,
+      LOOM_X86_VECTOR_REGISTER_INPUT_2, LOOM_X86_VECTOR_ENCODING_EVEX_MASK);
+  constexpr uint16_t kBinaryLoad = VectorRecipe(
+      LOOM_X86_VECTOR_REGISTER_RESULT, LOOM_X86_VECTOR_REGISTER_INPUT_0 | 8,
+      LOOM_X86_VECTOR_REGISTER_INPUT_1, LOOM_X86_VECTOR_ENCODING_LOAD);
+  constexpr uint16_t kBinaryBroadcast = VectorRecipe(
+      LOOM_X86_VECTOR_REGISTER_RESULT, LOOM_X86_VECTOR_REGISTER_INPUT_0,
+      LOOM_X86_VECTOR_REGISTER_INPUT_1 | 8, LOOM_X86_VECTOR_ENCODING_LOAD);
+  constexpr uint16_t kMaskedUnaryLoad = VectorRecipe(
+      LOOM_X86_VECTOR_REGISTER_RESULT | 8, LOOM_X86_VECTOR_REGISTER_NONE | 8,
+      LOOM_X86_VECTOR_REGISTER_INPUT_1,
+      LOOM_X86_VECTOR_ENCODING_EVEX_MASK_LOAD);
+  constexpr uint16_t kMaskedUnaryBroadcast = VectorRecipe(
+      LOOM_X86_VECTOR_REGISTER_RESULT | 8, LOOM_X86_VECTOR_REGISTER_NONE,
+      LOOM_X86_VECTOR_REGISTER_INPUT_1 | 8,
+      LOOM_X86_VECTOR_ENCODING_EVEX_MASK_LOAD);
+  constexpr uint16_t kMaskedBinaryLoad = VectorRecipe(
+      LOOM_X86_VECTOR_REGISTER_RESULT | 8, LOOM_X86_VECTOR_REGISTER_INPUT_1 | 8,
+      LOOM_X86_VECTOR_REGISTER_INPUT_2,
+      LOOM_X86_VECTOR_ENCODING_EVEX_MASK_LOAD);
+  constexpr uint16_t kMaskedBinaryBroadcast = VectorRecipe(
+      LOOM_X86_VECTOR_REGISTER_RESULT | 8, LOOM_X86_VECTOR_REGISTER_INPUT_1,
+      LOOM_X86_VECTOR_REGISTER_INPUT_2 | 8,
+      LOOM_X86_VECTOR_ENCODING_EVEX_MASK_LOAD);
+  constexpr uint16_t kUnaryEncoding = 0x2a72;
+  constexpr uint16_t kBinaryEncoding = 0x2e72;
+
+  loom_x86_encoding_operands_t operands = {};
+  operands.result = 17;
+  operands.inputs[0] = 2;
+  operands.inputs[1] = 18;
+  operands.inputs[2] = 19;
+  operands.inputs[3] = 20;
+  ExpectVectorEncoding(kUnaryMerge, kUnaryEncoding, operands,
+                       {0x62, 0xa2, 0x7e, 0x0a, 0x72, 0xca});
+  ExpectVectorEncoding(kUnaryZero, kUnaryEncoding, operands,
+                       {0x62, 0xa2, 0x7e, 0x8a, 0x72, 0xca});
+  ExpectVectorEncoding(kBinaryZero, kBinaryEncoding, operands,
+                       {0x62, 0xa2, 0x6f, 0x82, 0x72, 0xcb});
+
+  operands = {};
+  operands.result = 17;
+  operands.inputs[0] = 18;
+  operands.inputs[1] = 8;
+  operands.inputs[2] = 9;
+  operands.immediate = 64;
+  operands.scale = 2;
+  operands.has_index = true;
+  ExpectVectorEncoding(kBinaryLoad, kBinaryEncoding, operands,
+                       {0x62, 0x82, 0x6f, 0x00, 0x72, 0x4c, 0x88, 0x04});
+  ExpectVectorEncoding(kBinaryBroadcast, kBinaryEncoding, operands,
+                       {0x62, 0x82, 0x6f, 0x10, 0x72, 0x4c, 0x88, 0x10});
+
+  operands = {};
+  operands.result = 17;
+  operands.inputs[0] = 2;
+  operands.inputs[1] = 8;
+  operands.inputs[2] = 9;
+  operands.inputs[3] = 19;
+  operands.immediate = 64;
+  operands.scale = 2;
+  operands.has_index = true;
+  ExpectVectorEncoding(kMaskedUnaryLoad, kUnaryEncoding, operands,
+                       {0x62, 0x82, 0x7e, 0x8a, 0x72, 0x4c, 0x88, 0x04});
+  ExpectVectorEncoding(kMaskedUnaryBroadcast, kUnaryEncoding, operands,
+                       {0x62, 0x82, 0x7e, 0x9a, 0x72, 0x4c, 0x88, 0x10});
+
+  operands.inputs[1] = 18;
+  operands.inputs[2] = 8;
+  operands.inputs[3] = 9;
+  operands.inputs[4] = 19;
+  ExpectVectorEncoding(kMaskedBinaryLoad, kBinaryEncoding, operands,
+                       {0x62, 0x82, 0x6f, 0x82, 0x72, 0x4c, 0x88, 0x04});
+  ExpectVectorEncoding(kMaskedBinaryBroadcast, kBinaryEncoding, operands,
+                       {0x62, 0x82, 0x6f, 0x92, 0x72, 0x4c, 0x88, 0x10});
+}
+
 TEST(EncodingTest, AvxVnniInt8FamilyHasExactReferenceBytes) {
   loom_x86_encoding_operands_t operands = {};
   operands.result = 1;
@@ -128,30 +218,31 @@ TEST(EncodingTest, AvxNeConvertFamilyHasExactReferenceBytes) {
   operands.inputs[1] = 9;
   operands.immediate = 0x1234;
   operands.scale = 2;
+  operands.has_index = true;
 
-  ExpectVectorEncoding(0xc1a0, 0x0ab1, operands,
+  ExpectVectorEncoding(0xc1c0, 0x0ab1, operands,
                        {0xc4, 0x82, 0x7a, 0xb1, 0xa4, 0x88, 0x34, 0x12, 0, 0});
-  ExpectVectorEncoding(0xc1a0, 0x4ab1, operands,
+  ExpectVectorEncoding(0xc1c0, 0x4ab1, operands,
                        {0xc4, 0x82, 0x7e, 0xb1, 0xa4, 0x88, 0x34, 0x12, 0, 0});
-  ExpectVectorEncoding(0xc1a0, 0x06b1, operands,
+  ExpectVectorEncoding(0xc1c0, 0x06b1, operands,
                        {0xc4, 0x82, 0x79, 0xb1, 0xa4, 0x88, 0x34, 0x12, 0, 0});
-  ExpectVectorEncoding(0xc1a0, 0x46b1, operands,
+  ExpectVectorEncoding(0xc1c0, 0x46b1, operands,
                        {0xc4, 0x82, 0x7d, 0xb1, 0xa4, 0x88, 0x34, 0x12, 0, 0});
-  ExpectVectorEncoding(0xc1a0, 0x0ab0, operands,
+  ExpectVectorEncoding(0xc1c0, 0x0ab0, operands,
                        {0xc4, 0x82, 0x7a, 0xb0, 0xa4, 0x88, 0x34, 0x12, 0, 0});
-  ExpectVectorEncoding(0xc1a0, 0x4ab0, operands,
+  ExpectVectorEncoding(0xc1c0, 0x4ab0, operands,
                        {0xc4, 0x82, 0x7e, 0xb0, 0xa4, 0x88, 0x34, 0x12, 0, 0});
-  ExpectVectorEncoding(0xc1a0, 0x06b0, operands,
+  ExpectVectorEncoding(0xc1c0, 0x06b0, operands,
                        {0xc4, 0x82, 0x79, 0xb0, 0xa4, 0x88, 0x34, 0x12, 0, 0});
-  ExpectVectorEncoding(0xc1a0, 0x46b0, operands,
+  ExpectVectorEncoding(0xc1c0, 0x46b0, operands,
                        {0xc4, 0x82, 0x7d, 0xb0, 0xa4, 0x88, 0x34, 0x12, 0, 0});
-  ExpectVectorEncoding(0xc1a0, 0x0eb0, operands,
+  ExpectVectorEncoding(0xc1c0, 0x0eb0, operands,
                        {0xc4, 0x82, 0x7b, 0xb0, 0xa4, 0x88, 0x34, 0x12, 0, 0});
-  ExpectVectorEncoding(0xc1a0, 0x4eb0, operands,
+  ExpectVectorEncoding(0xc1c0, 0x4eb0, operands,
                        {0xc4, 0x82, 0x7f, 0xb0, 0xa4, 0x88, 0x34, 0x12, 0, 0});
-  ExpectVectorEncoding(0xc1a0, 0x02b0, operands,
+  ExpectVectorEncoding(0xc1c0, 0x02b0, operands,
                        {0xc4, 0x82, 0x78, 0xb0, 0xa4, 0x88, 0x34, 0x12, 0, 0});
-  ExpectVectorEncoding(0xc1a0, 0x42b0, operands,
+  ExpectVectorEncoding(0xc1c0, 0x42b0, operands,
                        {0xc4, 0x82, 0x7c, 0xb0, 0xa4, 0x88, 0x34, 0x12, 0, 0});
 
   operands = {};
@@ -255,9 +346,9 @@ TEST(EncodingTest, EveryVectorRecipeHasExactReferenceBytes) {
        {0, 1, {2, 3, 4}, 0},
        6,
        {0x62, 0xf2, 0x5d, 0x0a, 0x66, 0xcb}},
-      {0xc1a0,
+      {0xc1c0,
        0x096f,
-       {16, 1, {1, 2, 0}, 1},
+       {16, 1, {1, 2}, 1, true},
        6,
        {0xc5, 0xfa, 0x6f, 0x4c, 0x51, 0x10}},
       {0xc1c0,
@@ -270,9 +361,9 @@ TEST(EncodingTest, EveryVectorRecipeHasExactReferenceBytes) {
        {16, 1, {1, 0, 0}, 0},
        5,
        {0xc5, 0xfa, 0x6f, 0x49, 0x10}},
-      {0xd2b1,
+      {0xd2c1,
        0x097f,
-       {16, 0, {1, 1, 2}, 1},
+       {16, 0, {1, 1, 2}, 1, true},
        6,
        {0xc5, 0xfa, 0x7f, 0x4c, 0x51, 0x10}},
       {0xd2c1,

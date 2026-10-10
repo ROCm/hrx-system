@@ -33,6 +33,9 @@ typedef struct loom_x86_instruction_t {
   uint16_t encoding_id;
 } loom_x86_instruction_t;
 
+static_assert(sizeof(loom_x86_instruction_t) == 24,
+              "prepared x86 instructions must remain compact");
+
 // Prepared instructions borrow no IR, schedule, or allocation storage. They
 // remain valid until their arena is reset. The producer consumes each shared
 // packet and its final transport once; byte encoding never revisits the IR.

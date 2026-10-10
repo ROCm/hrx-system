@@ -47,6 +47,8 @@ enum loom_low_lower_value_flag_bits_e {
   LOOM_LOW_LOWER_VALUE_MATERIALIZED = (uint8_t)1u << 4,
   // The planned binding inherits its carrier from one flattened source ordinal.
   LOOM_LOW_LOWER_VALUE_INHERITED_TYPE = (uint8_t)1u << 5,
+  // A later source op is owned by an already selected nonlocal source graph.
+  LOOM_LOW_LOWER_VALUE_SOURCE_GRAPH_RESERVED = (uint8_t)1u << 6,
 };
 typedef uint8_t loom_low_lower_value_flags_t;
 
@@ -149,6 +151,14 @@ typedef struct loom_low_lower_source_plan_t {
   loom_low_lower_realizations_t* realizations;
   // Storage demands and binding states indexed by source value ordinal.
   loom_low_lower_value_flags_t* value_flags;
+  // Direct selected-plan indices for operation kinds claimable by nonlocal
+  // source graphs, keyed by each source op's first result value. Prepared from
+  // source traversal order and NULL when the function has no candidate nodes.
+  uint32_t* selected_plan_indices_by_value_ordinal;
+  // Policy rule sets requiring per-rule primary descriptor feature queries,
+  // stored as a dense bitset. NULL when generated summaries prove every
+  // primary descriptor available for the active profile.
+  uint64_t* primary_descriptor_query_rule_set_bits;
   // Number of values addressed through selected fact-derived references.
   // Zero keeps ordinary rule selection and demand analysis on the direct path.
   loom_value_ordinal_t fact_storage_demand_count;

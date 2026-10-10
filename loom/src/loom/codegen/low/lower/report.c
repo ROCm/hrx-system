@@ -197,17 +197,17 @@ static iree_status_t loom_low_lower_report_prepare_selected_plan(
           selected_plan->rule_set->report_key_string_refs[report_key_index]);
     }
     if (selected_plan->rule->emit_count != 0 &&
-        selected_plan->rule->metadata.emit.primary_emit_ordinal !=
-            LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE &&
         selected_plan->resolved_emits != NULL) {
       const uint16_t primary_emit_ordinal =
-          selected_plan->rule->metadata.emit.primary_emit_ordinal;
-      IREE_ASSERT_LT(primary_emit_ordinal, selected_plan->rule->emit_count);
-      loom_low_lower_report_populate_descriptor(
-          context,
-          selected_plan->resolved_emits[primary_emit_ordinal]
-              .descriptor.descriptor,
-          &row);
+          loom_low_lower_rule_primary_emit_ordinal(selected_plan->rule);
+      if (primary_emit_ordinal != LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE) {
+        IREE_ASSERT_LT(primary_emit_ordinal, selected_plan->rule->emit_count);
+        loom_low_lower_report_populate_descriptor(
+            context,
+            selected_plan->resolved_emits[primary_emit_ordinal]
+                .descriptor.descriptor,
+            &row);
+      }
     }
   } else if (selected_plan->kind ==
              LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX) {

@@ -224,6 +224,10 @@ enum loom_low_lower_source_node_relation_e {
   LOOM_LOW_LOWER_SOURCE_NODE_ADJACENT_UNIQUE_USER = 0,
   // The node is the adjacent sole-use definition of a parent operand.
   LOOM_LOW_LOWER_SOURCE_NODE_ADJACENT_DEFINITION = 1,
+  // The node is the same-block sole ordinary user of a parent result.
+  LOOM_LOW_LOWER_SOURCE_NODE_EXCLUSIVE_USER = 2,
+  // The node is a same-block sole-use definition of a parent operand.
+  LOOM_LOW_LOWER_SOURCE_NODE_EXCLUSIVE_DEFINITION = 3,
 };
 
 typedef struct loom_low_lower_source_node_t {
@@ -1100,11 +1104,29 @@ typedef uint8_t loom_low_lower_rule_flags_t;
 #define LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS \
   ((loom_low_lower_rule_flags_t)1u << 1)
 
+// Source graph may span intervening operations and requires indexed ownership.
+#define LOOM_LOW_LOWER_RULE_FLAG_NONLOCAL_SOURCE_GRAPH \
+  ((loom_low_lower_rule_flags_t)1u << 2)
+
+// Primary emit ordinal occupies the complete metadata field instead of its
+// compact low byte. Wide primary emits retain dynamic feature resolution.
+#define LOOM_LOW_LOWER_RULE_FLAG_WIDE_PRIMARY_EMIT \
+  ((loom_low_lower_rule_flags_t)1u << 3)
+
 // Rule row has no structured report key.
 #define LOOM_LOW_LOWER_RULE_REPORT_KEY_NONE ((uint16_t)0)
 
 // Emission rule has no descriptor-bearing primary emit.
 #define LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE ((uint16_t)UINT16_MAX)
+
+// Feature class whose complete descriptor mask must be resolved dynamically.
+#define LOOM_LOW_LOWER_RULE_PRIMARY_FEATURE_CLASS_DYNAMIC ((uint8_t)UINT8_MAX)
+
+// Packs a primary emit ordinal and its generated descriptor feature class.
+// Class zero requires no target features; nonzero classes are one-based rows
+// in the owning rule set's primary_descriptor_feature_masks table.
+#define LOOM_LOW_LOWER_RULE_PRIMARY_EMIT(emit_ordinal, feature_class) \
+  ((uint16_t)(((uint16_t)(feature_class) << 8) | (uint16_t)(emit_ordinal)))
 
 typedef struct loom_low_lower_rule_t {
   // Packed first related source-node row and row count. The root source op is
@@ -1127,8 +1149,9 @@ typedef struct loom_low_lower_rule_t {
   union {
     // Metadata for descriptor-emission rules.
     struct {
-      // Ordinal of the descriptor emit representing the rule's primary action.
-      uint16_t primary_emit_ordinal;
+      // Packed primary emit ordinal and descriptor feature class, or the full
+      // ordinal when LOOM_LOW_LOWER_RULE_FLAG_WIDE_PRIMARY_EMIT is set.
+      uint16_t primary_emit;
     } emit;
     // Metadata for value alias and elision rules.
     struct {
@@ -1150,6 +1173,32 @@ typedef struct loom_low_lower_rule_t {
 } loom_low_lower_rule_t;
 static_assert(sizeof(loom_low_lower_rule_t) == 14,
               "loom_low_lower_rule_t must be 14 bytes");
+
+// Returns the descriptor emit representing the rule's primary action, or
+// LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE when the rule has no primary action.
+static inline uint16_t loom_low_lower_rule_primary_emit_ordinal(
+    const loom_low_lower_rule_t* rule) {
+  if (rule->metadata.emit.primary_emit ==
+          LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE ||
+      iree_any_bit_set(rule->flags,
+                       LOOM_LOW_LOWER_RULE_FLAG_WIDE_PRIMARY_EMIT)) {
+    return rule->metadata.emit.primary_emit;
+  }
+  return (uint8_t)rule->metadata.emit.primary_emit;
+}
+
+// Returns the generated primary descriptor feature class. Dynamic indicates
+// that the descriptor's complete feature mask must be resolved at selection.
+static inline uint8_t loom_low_lower_rule_primary_feature_class(
+    const loom_low_lower_rule_t* rule) {
+  if (rule->metadata.emit.primary_emit ==
+          LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE ||
+      iree_any_bit_set(rule->flags,
+                       LOOM_LOW_LOWER_RULE_FLAG_WIDE_PRIMARY_EMIT)) {
+    return LOOM_LOW_LOWER_RULE_PRIMARY_FEATURE_CLASS_DYNAMIC;
+  }
+  return (uint8_t)(rule->metadata.emit.primary_emit >> 8);
+}
 
 static inline uint16_t loom_low_lower_rule_source_node_start(
     const loom_low_lower_rule_t* rule) {
@@ -1179,6 +1228,13 @@ typedef uint16_t loom_low_lower_rule_set_flags_t;
 // still owned by target-local family analysis.
 #define LOOM_LOW_LOWER_RULE_SET_FLAG_TARGET_CONTRACT_QUERY \
   ((loom_low_lower_rule_set_flags_t)1u << 0)
+// Rule set contains source graphs that may span intervening operations.
+#define LOOM_LOW_LOWER_RULE_SET_FLAG_NONLOCAL_SOURCE_GRAPHS \
+  ((loom_low_lower_rule_set_flags_t)1u << 1)
+// Rule set contains primary descriptors whose complete feature masks must be
+// resolved dynamically.
+#define LOOM_LOW_LOWER_RULE_SET_FLAG_DYNAMIC_PRIMARY_DESCRIPTOR_FEATURES \
+  ((loom_low_lower_rule_set_flags_t)1u << 2)
 
 typedef struct loom_low_lower_rule_set_t {
   // Rule-set behavior flags.
@@ -1193,6 +1249,10 @@ typedef struct loom_low_lower_rule_set_t {
   const loom_low_lower_rule_t* rules;
   // Number of rows in rules.
   uint16_t rule_count;
+  // Number of rows in primary_descriptor_feature_masks.
+  uint16_t primary_descriptor_feature_mask_count;
+  // Interned required target-feature bits referenced by rule feature classes.
+  const uint64_t* primary_descriptor_feature_masks;
   // Rule-set string references referenced by one-based report-key ordinals.
   const loom_string_ref_t* report_key_string_refs;
   // Number of rows in report_key_string_refs.

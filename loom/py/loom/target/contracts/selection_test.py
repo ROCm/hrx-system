@@ -71,6 +71,7 @@ def _lower_rule_set(
         type_patterns=type_patterns,
         value_refs=value_refs,
         source_nodes=(),
+        nonlocal_source_op_kinds=(),
         source_memories=(),
         guards=tuple(guards),
         attr_copies=(),

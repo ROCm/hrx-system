@@ -69,6 +69,7 @@ iree_py_library(
     "descriptors/__init__.py"
     "descriptors/avx2.py"
     "descriptors/avx512.py"
+    "descriptors/avx512_bf16.py"
     "descriptors/avx512_fp16.py"
     "descriptors/avx_ne_convert.py"
     "descriptors/common.py"
@@ -157,6 +158,26 @@ iree_py_test(
   DEPS
     loom::py::loom::target::arch::x86::descriptors
     loom::py::loom::target::arch::x86::vector_families
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_test(
+  NAME
+    avx512_bf16_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "avx512_bf16_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.x86.avx512_bf16_test"
+  DEPS
+    loom::py::loom::target::arch::x86::descriptors
+    loom::py::loom::target::arch::x86::target_info
+    loom::py::loom::target::low_descriptors
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"

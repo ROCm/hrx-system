@@ -1,0 +1,26 @@
+// Every distinct AVX512-BF16 conversion operand mechanism must remain
+// authorable in target assembly.
+// RUN: roundtrip
+
+x86.target<packed_dot> @target {contract_feature_bits = 66, contract_set_key = "x86.avx512_bf16.core"}
+
+low.func.def target<x86.avx512_bf16.core>(@target) @conversion_forms(%xmm: reg<x86.xmm>, %ymm: reg<x86.ymm>, %zmm: reg<x86.zmm>, %mask: reg<x86.k>, %base: reg<x86.gpr64>, %index: reg<x86.gpr64>) asm {
+  %narrow128 = avx512_bf16.vcvtneps2bf16.xmm.xmm %xmm
+  %narrow256 = avx512_bf16.vcvtneps2bf16.xmm.ymm %ymm
+  %narrow512 = avx512_bf16.vcvtneps2bf16.ymm.zmm %zmm
+  %narrow_merge = avx512_bf16.vcvtneps2bf16.merge.ymm.zmm %mask, %zmm, %narrow512
+  %narrow_zero = avx512_bf16.vcvtneps2bf16.zero.ymm.zmm %mask, %zmm
+
+  %packed = avx512_bf16.vcvtne2ps2bf16.zmm %zmm, %zmm
+  %packed_merge = avx512_bf16.vcvtne2ps2bf16.merge.zmm %mask, %zmm, %zmm, %packed
+  %packed_zero = avx512_bf16.vcvtne2ps2bf16.zero.zmm %mask, %zmm, %zmm
+
+  %full = avx512_bf16.vcvtneps2bf16.load.xmm.ymm %base {disp32 = 64}
+  %full_indexed = avx512_bf16.vcvtneps2bf16.load.indexed.xmm.ymm %base, %index {disp32 = -32, scale = 4}
+  %broadcast = avx512_bf16.vcvtneps2bf16.broadcast.ymm.zmm %base {disp32 = 12}
+  %broadcast_indexed = avx512_bf16.vcvtneps2bf16.broadcast.indexed.ymm.zmm %base, %index {disp32 = 20, scale = 2}
+
+  %hardest = avx512_bf16.vcvtne2ps2bf16.load.indexed.merge.zmm %mask, %zmm, %base, %index, %packed_merge {disp32 = 128, scale = 8}
+  %masked_broadcast = avx512_bf16.vcvtne2ps2bf16.broadcast.zero.zmm %mask, %zmm, %base {disp32 = 4}
+  return
+}

@@ -18,6 +18,7 @@ from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
     LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
+    LOWER_RULE_FLAG_NONLOCAL_SOURCE_GRAPH,
     LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
     LOWER_SOURCE_MEMORY_NONE,
     CompiledLowerRuleSet,
@@ -92,6 +93,9 @@ _GUARD_OTHER_VALUE_REF_KINDS = frozenset(
         GuardKind.VECTOR_EXTRACT_SHAPE,
     )
 )
+
+_LOWER_RULE_FLAG_WIDE_PRIMARY_EMIT = 1 << 3
+_LOWER_RULE_PRIMARY_EMIT_ORDINAL_MAX = 0xFE
 
 _GUARD_NO_PAYLOAD_KINDS = frozenset(
     (
@@ -236,6 +240,8 @@ def source_node_row(row: LowerSourceNode) -> list[str]:
     relation_names = {
         SourceNodeRelation.ADJACENT_UNIQUE_USER: ("LOOM_LOW_LOWER_SOURCE_NODE_ADJACENT_UNIQUE_USER"),
         SourceNodeRelation.ADJACENT_DEFINITION: ("LOOM_LOW_LOWER_SOURCE_NODE_ADJACENT_DEFINITION"),
+        SourceNodeRelation.EXCLUSIVE_USER: ("LOOM_LOW_LOWER_SOURCE_NODE_EXCLUSIVE_USER"),
+        SourceNodeRelation.EXCLUSIVE_DEFINITION: ("LOOM_LOW_LOWER_SOURCE_NODE_EXCLUSIVE_DEFINITION"),
     }
     _append_field(fields, "relation", relation_names[row.relation], always=True)
     _append_field(
@@ -538,13 +544,18 @@ def _descriptor_ref_index(descriptor_refs: Mapping[str, int], descriptor: Descri
 
 
 def _rule_flags_c_expression(flags: int) -> str:
-    if flags == LOWER_RULE_FLAG_CONTRACT_ONLY:
-        return "LOOM_LOW_LOWER_RULE_FLAG_CONTRACT_ONLY"
-    if flags == LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS:
-        return "LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS"
-    if flags == (LOWER_RULE_FLAG_CONTRACT_ONLY | LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS):
-        return "LOOM_LOW_LOWER_RULE_FLAG_CONTRACT_ONLY | LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS"
-    return f"0x{flags:X}"
+    names = (
+        (LOWER_RULE_FLAG_CONTRACT_ONLY, "LOOM_LOW_LOWER_RULE_FLAG_CONTRACT_ONLY"),
+        (LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS, "LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS"),
+        (LOWER_RULE_FLAG_NONLOCAL_SOURCE_GRAPH, "LOOM_LOW_LOWER_RULE_FLAG_NONLOCAL_SOURCE_GRAPH"),
+        (_LOWER_RULE_FLAG_WIDE_PRIMARY_EMIT, "LOOM_LOW_LOWER_RULE_FLAG_WIDE_PRIMARY_EMIT"),
+    )
+    parts = [name for mask, name in names if flags & mask]
+    known_flags = sum(mask for mask, _ in names)
+    remaining_flags = flags & ~known_flags
+    if remaining_flags:
+        parts.append(f"0x{remaining_flags:X}")
+    return " | ".join(parts) if parts else "0"
 
 
 def guard_row(
@@ -1009,10 +1020,17 @@ def emit_row(descriptor_refs: Mapping[str, int], row: LowerEmit) -> list[str]:
 def rule_row(
     row: LowerRule,
     report_key_ordinals: Mapping[str, int],
+    primary_descriptor_feature_class: int = 0,
 ) -> list[str]:
     fields: list[str] = []
-    if row.flags:
-        _append_field(fields, "flags", _rule_flags_c_expression(row.flags), always=True)
+    flags = row.flags
+    primary_emit = row.primary_emit_ordinal
+    if primary_emit != 0xFFFF and primary_emit <= _LOWER_RULE_PRIMARY_EMIT_ORDINAL_MAX:
+        primary_emit = f"LOOM_LOW_LOWER_RULE_PRIMARY_EMIT({primary_emit}, {primary_descriptor_feature_class})"
+    elif primary_emit != 0xFFFF:
+        flags |= _LOWER_RULE_FLAG_WIDE_PRIMARY_EMIT
+    if flags:
+        _append_field(fields, "flags", _rule_flags_c_expression(flags), always=True)
     if row.report_key:
         _append_field(
             fields,
@@ -1036,8 +1054,8 @@ def rule_row(
         _append_field(fields, "emit_count", row.emit_count, always=True)
         _append_field(
             fields,
-            "metadata.emit.primary_emit_ordinal",
-            row.primary_emit_ordinal,
+            "metadata.emit.primary_emit",
+            primary_emit,
             always=True,
         )
     if row.alias_ref_count:
@@ -1085,6 +1103,9 @@ def rule_set_row(
     string_data_name: str,
     spans_name: str,
     rules_name: str,
+    primary_descriptor_feature_masks: tuple[int, ...],
+    primary_descriptor_feature_masks_name: str,
+    has_dynamic_primary_descriptor_features: bool,
     report_keys: tuple[str, ...],
     report_keys_name: str,
     type_patterns_name: str,
@@ -1125,12 +1146,32 @@ def rule_set_row(
     diagnostics_name: str,
 ) -> list[str]:
     fields: list[str] = []
+    flags: list[str] = []
     if source_contract.target_contract_query:
-        fields.append(".flags = LOOM_LOW_LOWER_RULE_SET_FLAG_TARGET_CONTRACT_QUERY")
+        flags.append("LOOM_LOW_LOWER_RULE_SET_FLAG_TARGET_CONTRACT_QUERY")
+    if any(
+        source_node.relation
+        in (
+            SourceNodeRelation.EXCLUSIVE_USER,
+            SourceNodeRelation.EXCLUSIVE_DEFINITION,
+        )
+        for source_node in table.source_nodes
+    ):
+        flags.append("LOOM_LOW_LOWER_RULE_SET_FLAG_NONLOCAL_SOURCE_GRAPHS")
+    if has_dynamic_primary_descriptor_features:
+        flags.append("LOOM_LOW_LOWER_RULE_SET_FLAG_DYNAMIC_PRIMARY_DESCRIPTOR_FEATURES")
+    if flags:
+        fields.append(f".flags = {' | '.join(flags)}")
     if string_pool.entries:
         fields.append(f".string_pool = {{.data = {string_data_name}, .data_length = sizeof({string_data_name}) - 1}}")
     _append_table_fields(fields, "spans", table.spans, spans_name)
     _append_table_fields(fields, "rules", table.rules, rules_name)
+    _append_table_fields(
+        fields,
+        "primary_descriptor_feature_masks",
+        primary_descriptor_feature_masks,
+        primary_descriptor_feature_masks_name,
+    )
     _append_table_fields(
         fields,
         "report_key_string_refs",

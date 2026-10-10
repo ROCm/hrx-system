@@ -219,6 +219,7 @@ def test_storage_generation_emits_current_public_views() -> None:
         source = (tmp_path / "avx512_features_descriptors.c").read_text(encoding="utf-8")
         composite_header = (tmp_path / "avx512_features_descriptors.h").read_text(encoding="utf-8")
         avx512_header = (tmp_path / "avx512_descriptors.h").read_text(encoding="utf-8")
+        avx512_bf16_header = (tmp_path / "avx512_bf16_descriptors.h").read_text(encoding="utf-8")
         avx2_header = (tmp_path / "avx2_descriptors.h").read_text(encoding="utf-8")
         avx2_features_header = (tmp_path / "avx2_features_descriptors.h").read_text(encoding="utf-8")
         avx512_fp16_header = (tmp_path / "avx512_fp16_descriptors.h").read_text(encoding="utf-8")
@@ -242,6 +243,7 @@ def test_storage_generation_emits_current_public_views() -> None:
     assert "static const loom_low_descriptor_t kX86Avx512FeaturesCoreStorageDescriptors[]" in source
     for view_prefix in (
         "X86Avx512Core",
+        "X86Avx512Bf16Core",
         "X86Avx2Core",
         "X86Avx2FeaturesCore",
         "X86PackedDotCore",
@@ -253,11 +255,11 @@ def test_storage_generation_emits_current_public_views() -> None:
         assert f"static const loom_low_descriptor_ref_t k{view_prefix}DescriptorRefs[]" not in source
         assert f"static const loom_low_asm_form_t k{view_prefix}AsmForms[]" not in source
     assert "static const loom_low_asm_form_t kX86AvxVnniCoreAsmForms[]" in source
-    assert source.count(".descriptors = kX86Avx512FeaturesCoreStorageDescriptors,") == 8
-    assert source.count(".descriptor_views = kX86Avx512FeaturesCoreStorageDescriptorViews,") == 8
+    assert source.count(".descriptors = kX86Avx512FeaturesCoreStorageDescriptors,") == 9
+    assert source.count(".descriptor_views = kX86Avx512FeaturesCoreStorageDescriptorViews,") == 9
     assert ".asm_forms = kX86AvxVnniCoreAsmForms," in source
-    assert source.count(".asm_forms = kX86Avx512FeaturesCoreStorageAsmForms,") == 8
-    assert source.count(".descriptor_refs = kX86Avx512FeaturesCoreStorageDescriptorRefs,") == 8
+    assert source.count(".asm_forms = kX86Avx512FeaturesCoreStorageAsmForms,") == 9
+    assert source.count(".descriptor_refs = kX86Avx512FeaturesCoreStorageDescriptorRefs,") == 9
     assert "kX86Avx2FeaturesCoreDescriptorMembershipWords" in source
     assert "kX86PackedDotCoreDescriptorMembershipWords" in source
     assert source.count(".descriptor_membership_words = kX86ScalarCoreDescriptorMembershipWords,") == 2
@@ -266,6 +268,7 @@ def test_storage_generation_emits_current_public_views() -> None:
     assert "avx_vnni.vpdpbusd.ymm" in string_data
     assert "vpdpbusd.ymm" in string_data
     assert "loom_x86_avx512_core_descriptor_set" in avx512_header
+    assert "loom_x86_avx512_bf16_core_descriptor_set" in avx512_bf16_header
     assert "loom_x86_avx2_core_descriptor_set" in avx2_header
     assert "loom_x86_avx2_features_core_descriptor_set" in avx2_features_header
     assert "loom_x86_avx512_fp16_core_descriptor_set" in avx512_fp16_header

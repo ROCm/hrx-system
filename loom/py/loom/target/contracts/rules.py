@@ -35,10 +35,12 @@ SOURCE_NODE_COUNT_BITS = (MAX_SOURCE_NODES - 1).bit_length()
 
 @unique
 class SourceNodeRelation(Enum):
-    """SSA relation used to find one source op adjacent to another."""
+    """SSA relation used to find one source op from another."""
 
     ADJACENT_UNIQUE_USER = "adjacent_unique_user"
     ADJACENT_DEFINITION = "adjacent_definition"
+    EXCLUSIVE_USER = "exclusive_user"
+    EXCLUSIVE_DEFINITION = "exclusive_definition"
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +120,52 @@ class SourceNode:
             guards=guards,
         )
 
+    @classmethod
+    def exclusive_user(
+        cls,
+        name: str,
+        *,
+        source_op: Op,
+        parent_result: ValueRef,
+        node_operand: ValueRef,
+        parent: str = "",
+        guards: Sequence[Guard] = (),
+    ) -> Self:
+        """Finds the sole user of a parent result in the same block."""
+
+        return cls(
+            name=name,
+            source_op=source_op,
+            relation=SourceNodeRelation.EXCLUSIVE_USER,
+            parent_value=parent_result,
+            node_value=node_operand,
+            parent=parent,
+            guards=guards,
+        )
+
+    @classmethod
+    def exclusive_definition(
+        cls,
+        name: str,
+        *,
+        source_op: Op,
+        parent_operand: ValueRef,
+        node_result: ValueRef,
+        parent: str = "",
+        guards: Sequence[Guard] = (),
+    ) -> Self:
+        """Finds a same-block definition whose result has one use."""
+
+        return cls(
+            name=name,
+            source_op=source_op,
+            relation=SourceNodeRelation.EXCLUSIVE_DEFINITION,
+            parent_value=parent_operand,
+            node_value=node_result,
+            parent=parent,
+            guards=guards,
+        )
+
     def validate(self, source_ops: dict[str, Op]) -> None:
         if not self.name:
             raise ValueError("descriptor-rule source node name must be non-empty")
@@ -139,6 +187,10 @@ class SourceNode:
                 f"{self.source_op.name}: related source nodes must be pure and "
                 "regionless"
             )
+        if not self.source_op.results:
+            raise ValueError(
+                f"{self.source_op.name}: related source nodes must produce a result"
+            )
         for subject, value_ref in (
             ("parent connection", self.parent_value),
             ("node connection", self.node_value),
@@ -153,7 +205,10 @@ class SourceNode:
                     f"{self.source_op.name}: source node '{self.name}' {subject} "
                     "cannot use a materializer"
                 )
-        if self.relation is SourceNodeRelation.ADJACENT_UNIQUE_USER:
+        if self.relation in (
+            SourceNodeRelation.ADJACENT_UNIQUE_USER,
+            SourceNodeRelation.EXCLUSIVE_USER,
+        ):
             expected_parent_kind = SourceValueKind.RESULT
             expected_node_kind = SourceValueKind.OPERAND
         else:

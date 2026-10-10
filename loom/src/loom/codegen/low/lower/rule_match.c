@@ -139,6 +139,37 @@ iree_status_t loom_low_lower_rule_resolve_descriptor_ref(
   return iree_ok_status();
 }
 
+static bool loom_low_lower_rule_descriptor_features_available(
+    const loom_low_lower_rule_match_context_t* match_context,
+    const loom_low_descriptor_t* descriptor) {
+  for (uint16_t i = 0; i < descriptor->feature_mask_word_count; ++i) {
+    const uint32_t word_index = descriptor->feature_mask_word_start + i;
+    const uint64_t required_bits =
+        match_context->descriptor_set->feature_mask_words[word_index];
+    const uint64_t available_bits = i == 0 ? match_context->feature_bits : 0;
+    if ((required_bits & ~available_bits) != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool loom_low_lower_rule_primary_feature_class_available(
+    const loom_low_lower_rule_match_context_t* match_context,
+    const loom_low_lower_rule_set_t* rule_set, uint8_t feature_class) {
+  if (feature_class == 0) {
+    return true;
+  }
+  IREE_ASSERT_NE(feature_class,
+                 LOOM_LOW_LOWER_RULE_PRIMARY_FEATURE_CLASS_DYNAMIC);
+  const uint16_t feature_mask_index = (uint16_t)(feature_class - 1u);
+  IREE_ASSERT_LT(feature_mask_index,
+                 rule_set->primary_descriptor_feature_mask_count);
+  const uint64_t required_features =
+      rule_set->primary_descriptor_feature_masks[feature_mask_index];
+  return (required_features & ~match_context->feature_bits) == 0;
+}
+
 static iree_status_t loom_low_lower_rule_descriptor_available(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set,
@@ -147,19 +178,10 @@ static iree_status_t loom_low_lower_rule_descriptor_available(
   const loom_low_descriptor_t* descriptor = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
       match_context, rule_set, descriptor_ref, &descriptor));
-  if (descriptor == NULL) {
-    return iree_ok_status();
+  if (descriptor != NULL) {
+    *out_available = loom_low_lower_rule_descriptor_features_available(
+        match_context, descriptor);
   }
-  for (uint16_t i = 0; i < descriptor->feature_mask_word_count; ++i) {
-    const uint32_t word_index = descriptor->feature_mask_word_start + i;
-    const uint64_t required_bits =
-        match_context->descriptor_set->feature_mask_words[word_index];
-    const uint64_t available_bits = i == 0 ? match_context->feature_bits : 0;
-    if ((required_bits & ~available_bits) != 0) {
-      return iree_ok_status();
-    }
-  }
-  *out_available = true;
   return iree_ok_status();
 }
 
@@ -1369,6 +1391,15 @@ static bool loom_low_lower_rule_resolve_source_node(
       }
       break;
     }
+    case LOOM_LOW_LOWER_SOURCE_NODE_EXCLUSIVE_USER: {
+      IREE_ASSERT_EQ(parent_value_ref->kind, LOOM_LOW_LOWER_VALUE_REF_RESULT);
+      IREE_ASSERT_EQ(node_value_ref->kind, LOOM_LOW_LOWER_VALUE_REF_OPERAND);
+      node_op = loom_use_user_op(loom_value_uses(connection_value)[0]);
+      if (parent_op->parent_block != node_op->parent_block) {
+        return false;
+      }
+      break;
+    }
     case LOOM_LOW_LOWER_SOURCE_NODE_ADJACENT_DEFINITION: {
       IREE_ASSERT_EQ(parent_value_ref->kind, LOOM_LOW_LOWER_VALUE_REF_OPERAND);
       IREE_ASSERT_EQ(node_value_ref->kind, LOOM_LOW_LOWER_VALUE_REF_RESULT);
@@ -1377,6 +1408,19 @@ static bool loom_low_lower_rule_resolve_source_node(
       }
       node_op = loom_value_def_op(connection_value);
       if (parent_op->prev_op != node_op ||
+          loom_use_user_op(loom_value_uses(connection_value)[0]) != parent_op) {
+        return false;
+      }
+      break;
+    }
+    case LOOM_LOW_LOWER_SOURCE_NODE_EXCLUSIVE_DEFINITION: {
+      IREE_ASSERT_EQ(parent_value_ref->kind, LOOM_LOW_LOWER_VALUE_REF_OPERAND);
+      IREE_ASSERT_EQ(node_value_ref->kind, LOOM_LOW_LOWER_VALUE_REF_RESULT);
+      if (loom_value_is_block_arg(connection_value)) {
+        return false;
+      }
+      node_op = loom_value_def_op(connection_value);
+      if (parent_op->parent_block != node_op->parent_block ||
           loom_use_user_op(loom_value_uses(connection_value)[0]) != parent_op) {
         return false;
       }
@@ -1403,6 +1447,69 @@ static bool loom_low_lower_rule_resolve_source_node(
   if (node_connection != connection) {
     source_nodes[source_node_index] = NULL;
     return false;
+  }
+  return true;
+}
+
+static bool loom_low_lower_rule_source_value_available_at_root(
+    const loom_low_lower_rule_match_context_t* match_context,
+    const loom_op_t* root_op, loom_value_id_t value_id) {
+  const loom_value_t* value =
+      loom_module_value(match_context->module, value_id);
+  if (loom_value_is_block_arg(value)) {
+    return true;
+  }
+  const loom_op_t* defining_op = loom_value_def_op(value);
+  IREE_ASSERT(defining_op != NULL);
+  return defining_op->parent_block != root_op->parent_block ||
+         defining_op->block_ordinal < root_op->block_ordinal;
+}
+
+static bool loom_low_lower_rule_nonlocal_source_operands_available(
+    const loom_low_lower_rule_match_context_t* match_context,
+    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
+    const loom_low_lower_rule_t* rule, const loom_op_t* const* source_nodes,
+    uint8_t source_node_count) {
+  for (uint16_t emit_ordinal = 0; emit_ordinal < rule->emit_count;
+       ++emit_ordinal) {
+    const loom_low_lower_emit_t* emit = loom_low_lower_rule_set_emit_at(
+        rule_set, (uint16_t)(rule->action.emit_start + emit_ordinal));
+    for (uint16_t operand_ordinal = 0;
+         operand_ordinal < emit->operand_ref_count; ++operand_ordinal) {
+      const uint16_t value_ref_index =
+          (uint16_t)(emit->operand_ref_start + operand_ordinal);
+      const loom_low_lower_value_ref_kind_t value_ref_kind =
+          rule_set->value_refs[value_ref_index].kind;
+      switch (value_ref_kind) {
+        case LOOM_LOW_LOWER_VALUE_REF_TEMPORARY:
+        case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_TERM:
+        case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET:
+        case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_BYTE_OFFSET:
+        case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_ADDRESS:
+        case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_ROOT:
+          continue;
+        case LOOM_LOW_LOWER_VALUE_REF_OPERAND:
+        case LOOM_LOW_LOWER_VALUE_REF_RESULT:
+        case LOOM_LOW_LOWER_VALUE_REF_EXACT_LANE_ORIGIN_OPERAND:
+        case LOOM_LOW_LOWER_VALUE_REF_EXACT_UNIFORM_ELEMENT_ORIGIN_OPERAND:
+        case LOOM_LOW_LOWER_VALUE_REF_UNIFORM_ELEMENT_ORIGIN_OPERAND:
+          break;
+        default:
+          IREE_ASSERT_UNREACHABLE("unknown generated value ref kind");
+          IREE_BUILTIN_UNREACHABLE();
+      }
+      loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
+      if (!loom_low_lower_rule_resolve_source_value_from_nodes(
+              match_context->module, match_context->fact_table,
+              match_context->vector_lane_projection, rule_set, source_op,
+              source_nodes, source_node_count, value_ref_index, &value_id)) {
+        return false;
+      }
+      if (!loom_low_lower_rule_source_value_available_at_root(
+              match_context, source_op, value_id)) {
+        return false;
+      }
+    }
   }
   return true;
 }
@@ -1512,6 +1619,14 @@ static iree_status_t loom_low_lower_rule_matches(
     *out_source_memory_compatible = source_memory_match.constraints_compatible;
     return iree_ok_status();
   }
+  if (iree_any_bit_set(rule->flags,
+                       LOOM_LOW_LOWER_RULE_FLAG_NONLOCAL_SOURCE_GRAPH) &&
+      !loom_low_lower_rule_nonlocal_source_operands_available(
+          match_context, rule_set, source_op, rule, out_source_nodes,
+          source_node_count)) {
+    *out_matched_guard_count = matched_guard_count;
+    return iree_ok_status();
+  }
   *out_matches = true;
   *out_matched_guard_count = matched_guard_count;
   *out_uses_source_memory_access = source_memory_match.has_source_memory;
@@ -1540,6 +1655,20 @@ bool loom_low_lower_rule_failure_is_better(
     return candidate.source_memory_compatible;
   }
   return candidate.matched_guard_count > incumbent.matched_guard_count;
+}
+
+bool loom_low_lower_rule_selections_have_same_source_graph(
+    const loom_low_lower_rule_selection_t* lhs,
+    const loom_low_lower_rule_selection_t* rhs) {
+  if (lhs->source_node_count != rhs->source_node_count) {
+    return false;
+  }
+  for (uint8_t i = 0; i < lhs->source_node_count; ++i) {
+    if (lhs->source_nodes[i] != rhs->source_nodes[i]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 iree_status_t loom_low_lower_rule_set_select_rule_range_with_match_context(
@@ -1996,16 +2125,61 @@ const loom_low_lower_diagnostic_t* loom_low_lower_rule_set_failure_diagnostic(
 loom_low_lower_descriptor_ref_t loom_low_lower_rule_primary_descriptor_ref(
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_rule_t* rule) {
-  if (rule->emit_count == 0 || rule->metadata.emit.primary_emit_ordinal ==
-                                   LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE) {
+  if (rule->emit_count == 0) {
     return LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE;
   }
-  IREE_ASSERT_LT(rule->metadata.emit.primary_emit_ordinal, rule->emit_count);
+  const uint16_t primary_emit_ordinal =
+      loom_low_lower_rule_primary_emit_ordinal(rule);
+  if (primary_emit_ordinal == LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE) {
+    return LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE;
+  }
+  IREE_ASSERT_LT(primary_emit_ordinal, rule->emit_count);
   const uint16_t emit_ref_index =
-      (uint16_t)(rule->action.emit_start +
-                 rule->metadata.emit.primary_emit_ordinal);
+      (uint16_t)(rule->action.emit_start + primary_emit_ordinal);
   return loom_low_lower_rule_set_emit_at(rule_set, emit_ref_index)
       ->descriptor_ref;
+}
+
+iree_status_t loom_low_lower_rule_query_primary_descriptor(
+    const loom_low_lower_rule_match_context_t* match_context,
+    const loom_low_lower_rule_set_t* rule_set,
+    const loom_low_lower_rule_t* rule,
+    loom_low_lower_rule_primary_descriptor_status_t* out_status) {
+  *out_status = LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_AVAILABLE;
+  if (rule->emit_count == 0) {
+    return iree_ok_status();
+  }
+  const uint16_t primary_emit_ordinal =
+      loom_low_lower_rule_primary_emit_ordinal(rule);
+  if (primary_emit_ordinal == LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE) {
+    return iree_ok_status();
+  }
+  const uint8_t feature_class = loom_low_lower_rule_primary_feature_class(rule);
+  if (iree_all_bits_set(
+          match_context->flags,
+          LOOM_LOW_LOWER_RULE_MATCH_FLAG_PRIMARY_DESCRIPTORS_BOUND) &&
+      feature_class != LOOM_LOW_LOWER_RULE_PRIMARY_FEATURE_CLASS_DYNAMIC) {
+    if (!loom_low_lower_rule_primary_feature_class_available(
+            match_context, rule_set, feature_class)) {
+      *out_status = LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_FEATURES_UNAVAILABLE;
+    }
+    return iree_ok_status();
+  }
+  const loom_low_lower_descriptor_ref_t primary_descriptor_ref =
+      loom_low_lower_rule_primary_descriptor_ref(rule_set, rule);
+  if (primary_descriptor_ref == LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
+    return iree_ok_status();
+  }
+  const loom_low_descriptor_t* primary_descriptor = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
+      match_context, rule_set, primary_descriptor_ref, &primary_descriptor));
+  if (primary_descriptor == NULL) {
+    *out_status = LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_MISSING;
+  } else if (!loom_low_lower_rule_descriptor_features_available(
+                 match_context, primary_descriptor)) {
+    *out_status = LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_FEATURES_UNAVAILABLE;
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_low_lower_rule_set_emit_selection_failure(

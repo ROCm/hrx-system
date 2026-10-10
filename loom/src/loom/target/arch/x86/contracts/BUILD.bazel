@@ -29,12 +29,13 @@ loom_target_contract_file_family(
         "--contract-index=LOOM_X86_AVX512_CONTRACT:x86.scalar,x86.avx2,x86.avx512",
         "--contract-index=LOOM_X86_PACKED_DOT_CONTRACT:x86.packed_dot",
         "--contract-index=LOOM_X86_AVX2_FEATURES_CONTRACT:x86.scalar,x86.avx2,x86.avx_ne_convert,x86.packed_dot",
-        "--contract-index=LOOM_X86_AVX512_FEATURES_CONTRACT:x86.scalar,x86.avx2,x86.avx512,x86.avx512_fp16,x86.avx_ne_convert,x86.packed_dot",
+        "--contract-index=LOOM_X86_AVX512_FEATURES_CONTRACT:x86.scalar,x86.avx2,x86.avx512,x86.avx512_fp16,x86.avx_ne_convert,x86.avx512_bf16,x86.packed_dot",
     ],
     comment = "Generating x86 contract table families",
     fragments = {
         "avx2": "x86.avx2",
         "avx512": "x86.avx512",
+        "avx512_bf16": "x86.avx512_bf16",
         "avx512_fp16": "x86.avx512_fp16",
         "avx_ne_convert": "x86.avx_ne_convert",
         "packed_dot": "x86.packed_dot",
@@ -79,6 +80,17 @@ loom_target_contract_cc_libraries(
 )
 
 loom_target_contract_cc_libraries(
+    name = "avx512_bf16",
+    contract_deps = ["//loom/src/loom/target:contract"],
+    lower_rule_deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+    ],
+)
+
+loom_target_contract_cc_libraries(
     name = "avx512_fp16",
     contract_deps = ["//loom/src/loom/target:contract"],
     lower_rule_deps = [
@@ -116,6 +128,8 @@ loom_cc_library(
         "avx2.h",
         "avx2_lower_rules.h",
         "avx512.h",
+        "avx512_bf16.h",
+        "avx512_bf16_lower_rules.h",
         "avx512_fp16.h",
         "avx512_fp16_lower_rules.h",
         "avx512_lower_rules.h",
@@ -130,6 +144,8 @@ loom_cc_library(
         ":avx2",
         ":avx2_lower_rules",
         ":avx512",
+        ":avx512_bf16",
+        ":avx512_bf16_lower_rules",
         ":avx512_fp16",
         ":avx512_fp16_lower_rules",
         ":avx512_lower_rules",

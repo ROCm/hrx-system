@@ -75,11 +75,13 @@ enum loom_x86_encoding_format_bits_e {
 };
 
 // Packed vector recipes use four-bit selectors for ModRM.reg in bits 0..3,
-// VEX.vvvv or a memory index in bits 4..7, and ModRM.r/m or a memory base in
-// bits 8..11. Memory recipes use selector bit 3 as the EVEX full-vector-tuple
-// flag. Bits 12..14 select the encoding behavior and bit 15 marks the recipe.
-// Selectors name allocated results and inputs or the bounded ModRM opcode
-// extensions used by immediate shift forms.
+// VEX.vvvv in bits 4..7, and ModRM.r/m in bits 8..11. Memory recipes select
+// their base through ModRM.r/m; an optional index immediately follows the base
+// in the concrete input array. Form-specific selector bit 3 modifiers encode
+// EVEX zeroing in ModRM.reg, a full-vector displacement tuple in VEX.vvvv, and
+// 32-bit embedded broadcast in ModRM.r/m. Bits 12..14 select the encoding
+// behavior and bit 15 marks the recipe. Selectors name allocated results and
+// inputs or the bounded ModRM opcode extensions used by immediate shift forms.
 typedef enum loom_x86_vector_register_selector_e {
   LOOM_X86_VECTOR_REGISTER_RESULT = 0,
   LOOM_X86_VECTOR_REGISTER_INPUT_0 = 1,
@@ -101,6 +103,7 @@ typedef enum loom_x86_vector_encoding_behavior_e {
   LOOM_X86_VECTOR_ENCODING_LOAD = 4,
   LOOM_X86_VECTOR_ENCODING_STORE = 5,
   LOOM_X86_VECTOR_ENCODING_RIP_LOAD = 6,
+  LOOM_X86_VECTOR_ENCODING_EVEX_MASK_LOAD = 7,
 } loom_x86_vector_encoding_behavior_t;
 
 enum loom_x86_encoding_flag_bits_e {
@@ -122,10 +125,15 @@ typedef struct loom_x86_encoding_operands_t {
   // Architectural result register; unused for stores and control transfers.
   uint8_t result;
   // Architectural input registers in descriptor operand order.
-  uint8_t inputs[3];
+  uint8_t inputs[5];
   // SIB scale exponent (0, 1, 2, or 3), not a byte multiplier.
   uint8_t scale;
+  // True when the input immediately after a selected memory base is an index.
+  bool has_index;
 } loom_x86_encoding_operands_t;
+
+static_assert(sizeof(loom_x86_encoding_operands_t) == 16,
+              "x86 encoding operands must remain compact");
 
 // A descriptor can expand into a bounded sequence (for example CMP, SETcc,
 // MOVZX). The longest supported sequence fits in 32 bytes. Preparation appends

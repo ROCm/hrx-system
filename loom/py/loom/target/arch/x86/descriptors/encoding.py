@@ -11,6 +11,7 @@ from enum import IntEnum, IntFlag
 from loom.target.arch.x86.vector_encoding import (
     VECTOR_ENCODING_FORMAT_MARKER,
     validate_vector_encoding_recipe,
+    vector_encoding_address_base_input,
 )
 from loom.target.low_descriptors import Descriptor, OperandRole
 
@@ -62,7 +63,8 @@ def validate_descriptor_encoding(descriptor: Descriptor) -> None:
     """Establishes the fixed native operand carrier bounds during generation."""
     if not descriptor.encoding_format_id:
         return
-    if descriptor.encoding_format_id & VECTOR_ENCODING_FORMAT_MARKER:
+    is_vector = bool(descriptor.encoding_format_id & VECTOR_ENCODING_FORMAT_MARKER)
+    if is_vector:
         try:
             validate_vector_encoding_recipe(descriptor.encoding_format_id)
         except ValueError as error:
@@ -88,9 +90,44 @@ def validate_descriptor_encoding(descriptor: Descriptor) -> None:
         o.role in (OperandRole.RESULT, OperandRole.OPERAND_RESULT)
         for o in descriptor.operands
     )
-    if inputs > 3 or results > 1 or len(descriptor.immediates) > 2:
+    if (
+        inputs > (5 if is_vector else 3)
+        or results > 1
+        or len(descriptor.immediates) > 2
+    ):
         raise ValueError(f"{descriptor.key}: native operand carrier overflow")
     if len(descriptor.immediates) == 2 and tuple(
         immediate.field_name for immediate in descriptor.immediates
     ) != ("disp32", "scale"):
         raise ValueError(f"{descriptor.key}: native addressing requires disp32, scale")
+    if is_vector:
+        try:
+            base_index = vector_encoding_address_base_input(
+                descriptor.encoding_format_id
+            )
+        except ValueError as error:
+            raise ValueError(f"{descriptor.key}: {error}") from error
+        if base_index is not None:
+            input_operands = tuple(
+                operand
+                for operand in descriptor.operands
+                if operand.role
+                in (
+                    OperandRole.OPERAND,
+                    OperandRole.OPERAND_RESULT,
+                    OperandRole.PREDICATE,
+                    OperandRole.RESOURCE,
+                )
+            )
+            address_count = 2 if len(descriptor.immediates) == 2 else 1
+            address_operands = input_operands[base_index : base_index + address_count]
+            if len(address_operands) != address_count or any(
+                operand.role != OperandRole.RESOURCE
+                or {alternative.reg_class for alternative in operand.reg_alts}
+                != {"x86.gpr64"}
+                for operand in address_operands
+            ):
+                raise ValueError(
+                    f"{descriptor.key}: vector memory address must use adjacent "
+                    "GPR64 resources"
+                )

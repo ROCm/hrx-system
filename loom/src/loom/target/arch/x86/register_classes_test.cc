@@ -96,7 +96,7 @@ TEST(X86RegisterClassesTest, ViewsPreserveRegisterVocabularyAndCapacity) {
       {loom_x86_avx512_features_core_descriptor_set(), {16, 16, 32, 32, 32, 8}},
       {loom_x86_packed_dot_core_descriptor_set(), {0, 0, 32, 32, 32, 0}},
       {loom_x86_avx512_vnni_core_descriptor_set(), {0, 0, 32, 32, 32, 0}},
-      {loom_x86_avx512_bf16_core_descriptor_set(), {0, 0, 32, 32, 32, 0}},
+      {loom_x86_avx512_bf16_core_descriptor_set(), {0, 16, 32, 32, 32, 8}},
       {loom_x86_avx_vnni_core_descriptor_set(), {0, 0, 16, 16, 0, 0}},
       {loom_x86_avx_vnni_int8_core_descriptor_set(), {0, 0, 16, 16, 0, 0}},
       {loom_x86_avx_vnni_int16_core_descriptor_set(), {0, 0, 16, 16, 0, 0}},

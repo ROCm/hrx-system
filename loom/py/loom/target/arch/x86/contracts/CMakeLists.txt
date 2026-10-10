@@ -16,6 +16,7 @@ iree_py_library(
     "__init__.py"
     "avx2.py"
     "avx512.py"
+    "avx512_bf16.py"
     "avx512_fp16.py"
     "avx512_predicate.py"
     "avx_ne_convert.py"
@@ -65,6 +66,29 @@ iree_py_test(
     loom::py::loom::dialect::scalar::scalar
     loom::py::loom::dialect::vector::vector
     loom::py::loom::dialect::view::view
+    loom::py::loom::target::contracts::contracts
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_test(
+  NAME
+    avx512_bf16_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
+  SRCS
+    "avx512_bf16_test.py"
+    "../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.x86.contracts.avx512_bf16_test"
+  DEPS
+    loom::py::loom::target::arch::x86::contracts::contracts
+    loom::py::loom::dialect::scalar::scalar
+    loom::py::loom::dialect::vector::vector
+    loom::py::loom::dialect::view::view
+    loom::py::loom::target::arch::x86::descriptors
     loom::py::loom::target::contracts::contracts
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"

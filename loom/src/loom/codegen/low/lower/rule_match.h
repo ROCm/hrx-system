@@ -87,6 +87,11 @@ typedef uint16_t loom_low_lower_rule_match_flags_t;
 #define LOOM_LOW_LOWER_RULE_MATCH_FLAG_CONTRACT_ONLY \
   ((loom_low_lower_rule_match_flags_t)1u << 0)
 
+// Primary descriptor refs come from the policy paired with descriptor_set.
+// Selection may consume generated feature classes without resolving presence.
+#define LOOM_LOW_LOWER_RULE_MATCH_FLAG_PRIMARY_DESCRIPTORS_BOUND \
+  ((loom_low_lower_rule_match_flags_t)1u << 1)
+
 struct loom_low_lower_rule_match_context_t {
   // Source module being matched.
   const loom_module_t* module;
@@ -180,6 +185,13 @@ bool loom_low_lower_rule_failure_is_better(
     loom_low_lower_rule_failure_t candidate,
     loom_low_lower_rule_failure_t incumbent);
 
+// Returns true when two matched rules cover the same resolved source graph.
+// Rules with different graph coverage are independent lowering choices even
+// when they share a root source op.
+bool loom_low_lower_rule_selections_have_same_source_graph(
+    const loom_low_lower_rule_selection_t* lhs,
+    const loom_low_lower_rule_selection_t* rhs);
+
 // Initializes a rule match context backed by a mutable lowering context.
 // |source_memory_state| retains the canonical source-memory plan across every
 // candidate rule inspected for one source op.
@@ -258,6 +270,25 @@ iree_status_t loom_low_lower_rule_resolve_descriptor_ref(
 loom_low_lower_descriptor_ref_t loom_low_lower_rule_primary_descriptor_ref(
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_rule_t* rule);
+
+typedef uint8_t loom_low_lower_rule_primary_descriptor_status_t;
+enum loom_low_lower_rule_primary_descriptor_status_e {
+  // The rule has no primary descriptor or it is ready for selection.
+  LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_AVAILABLE = 0,
+  // The descriptor key is absent from an externally supplied descriptor set.
+  LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_MISSING = 1,
+  // The descriptor is present but requires unavailable target features.
+  LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_FEATURES_UNAVAILABLE = 2,
+};
+
+// Queries the selected rule's primary descriptor status. Bound policy rule
+// sets use their generated feature class; external queries resolve the
+// complete descriptor mask and distinguish missing descriptor keys.
+iree_status_t loom_low_lower_rule_query_primary_descriptor(
+    const loom_low_lower_rule_match_context_t* match_context,
+    const loom_low_lower_rule_set_t* rule_set,
+    const loom_low_lower_rule_t* rule,
+    loom_low_lower_rule_primary_descriptor_status_t* out_status);
 
 // Emits the structured diagnostic for a failed selection.
 iree_status_t loom_low_lower_rule_set_emit_selection_failure(

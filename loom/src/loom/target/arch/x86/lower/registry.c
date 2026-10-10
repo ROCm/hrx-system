@@ -13,6 +13,8 @@
 #include "loom/target/arch/x86/contracts/avx2.h"
 #include "loom/target/arch/x86/contracts/avx2_lower_rules.h"
 #include "loom/target/arch/x86/contracts/avx512.h"
+#include "loom/target/arch/x86/contracts/avx512_bf16.h"
+#include "loom/target/arch/x86/contracts/avx512_bf16_lower_rules.h"
 #include "loom/target/arch/x86/contracts/avx512_fp16.h"
 #include "loom/target/arch/x86/contracts/avx512_fp16_lower_rules.h"
 #include "loom/target/arch/x86/contracts/avx512_lower_rules.h"
@@ -116,6 +118,16 @@ static bool loom_x86_type_is_low_xmm_16bit_payload(
   }
   return loom_scalar_type_set_contains(allowed_element_types,
                                        loom_type_element_type(type));
+}
+
+static bool loom_x86_avx512_features_support_low_xmm_bf16(
+    loom_x86_feature_bits_t feature_bits) {
+  if ((feature_bits & LOOM_X86_FEATURE_AVX_NE_CONVERT) != 0) {
+    return true;
+  }
+  const loom_x86_feature_bits_t required_features =
+      LOOM_X86_FEATURE_AVX512_BF16 | LOOM_X86_FEATURE_AVX512_VL;
+  return (feature_bits & required_features) == required_features;
 }
 
 static bool loom_x86_type_is_scalar_f32(loom_type_t type) {
@@ -232,6 +244,14 @@ static bool loom_x86_avx512_features_register_class_for_source_type(
   if ((feature_bits & LOOM_X86_FEATURE_AVX512_FP16) != 0 &&
       loom_x86_type_is_scalar_f16(source_type)) {
     *out_register_class = LOOM_X86_REGISTER_CLASS_XMM;
+    return true;
+  }
+  if (loom_x86_avx512_features_support_low_xmm_bf16(feature_bits) &&
+      loom_x86_type_is_low_xmm_16bit_payload(source_type,
+                                             LOOM_SCALAR_TYPE_SET_BF16) &&
+      loom_x86_static_vector_register_class_for_source_type(
+          source_type, /*minimum_vector_bit_width=*/64,
+          /*maximum_vector_bit_width=*/64, out_register_class)) {
     return true;
   }
   if ((feature_bits & LOOM_X86_FEATURE_AVX512_FP16) != 0 &&
@@ -561,6 +581,9 @@ static iree_status_t loom_x86_map_avx512_features_contract_value(
   if (loom_x86_avx512_features_register_class_for_source_type(
           source_type, feature_bits, &register_class) &&
       (loom_x86_type_is_scalar_f16(source_type) ||
+       (loom_x86_avx512_features_support_low_xmm_bf16(feature_bits) &&
+        loom_x86_type_is_low_xmm_16bit_payload(source_type,
+                                               LOOM_SCALAR_TYPE_SET_BF16)) ||
        loom_x86_type_is_low_xmm_16bit_payload(
            source_type, LOOM_SCALAR_TYPE_SET_F16 | LOOM_SCALAR_TYPE_SET_I16))) {
     *out_mapped_value =

@@ -19,12 +19,13 @@ from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
-from loom.dsl import EncodingOperandSummaryDef, Op
+from loom.dsl import ANY, PURE, EncodingOperandSummaryDef, Op, Operand
 from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
     LOWER_EMIT_FLAG_RECORD_SOURCE_MEMORY,
     LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
+    LOWER_RULE_FLAG_NONLOCAL_SOURCE_GRAPH,
     LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
     LOWER_RULE_PRIMARY_EMIT_NONE,
     AttrProject,
@@ -538,6 +539,153 @@ def test_compile_backward_related_source_node() -> None:
     assert parent_ref.source_node_index == 0
     assert node_ref.kind is SourceValueKind.RESULT
     assert node_ref.source_node_index == 1
+
+
+def test_compile_nonlocal_source_graph_marks_the_whole_rule() -> None:
+    fragment = ContractFragment(
+        name="test.nonlocal-source-graph",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=(
+            DescriptorRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                source_nodes=(
+                    SourceNode.exclusive_user(
+                        "multiply",
+                        source_op=scalar_arithmetic.scalar_muli,
+                        parent_result=ValueRef.result("result"),
+                        node_operand=ValueRef.operand("lhs"),
+                        guards=(Guard.value_type("rhs", Scalar("i32")),),
+                    ),
+                    SourceNode.adjacent_unique_user(
+                        "consumer",
+                        source_op=scalar_arithmetic.scalar_addi,
+                        parent="multiply",
+                        parent_result=ValueRef.result("result"),
+                        node_operand=ValueRef.operand("lhs"),
+                        guards=(
+                            Guard.value_type("rhs", Scalar("i32")),
+                            Guard.value_type("result", Scalar("i32")),
+                        ),
+                    ),
+                ),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                        operands={
+                            "lhs": ValueRef.operand("rhs", source_node="multiply"),
+                            "rhs": ValueRef.operand("rhs", source_node="consumer"),
+                        },
+                        results={
+                            "dst": ValueRef.result("result", source_node="consumer")
+                        },
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    compiled = compile_lower_rule_set(fragment, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    assert compiled.rules[0].flags == LOWER_RULE_FLAG_NONLOCAL_SOURCE_GRAPH
+    assert tuple(node.relation for node in compiled.source_nodes) == (
+        SourceNodeRelation.EXCLUSIVE_USER,
+        SourceNodeRelation.ADJACENT_UNIQUE_USER,
+    )
+    assert compiled.nonlocal_source_op_kinds == (
+        (scalar_arithmetic.scalar_muli.group.dialect_id << 8)
+        | ALL_SCALAR_OPS.index(scalar_arithmetic.scalar_muli),
+    )
+
+
+def test_related_source_node_requires_observable_result() -> None:
+    pure_sink = Op(
+        "test.pure_sink",
+        operands=[Operand("input", ANY)],
+        traits=[PURE],
+    )
+    source_node = SourceNode.exclusive_user(
+        "sink",
+        source_op=pure_sink,
+        parent_result=ValueRef.result("result"),
+        node_operand=ValueRef.operand("input"),
+    )
+
+    with pytest.raises(ValueError, match="must produce a result"):
+        source_node.validate({"": scalar_arithmetic.scalar_addi})
+
+
+def test_compile_related_source_node_from_variadic_root_operand() -> None:
+    fragment = ContractFragment(
+        name="test.variadic-root-related-source-node",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=(
+            DescriptorRule(
+                source_op=vector.vector_concat,
+                descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                source_nodes=(
+                    SourceNode.adjacent_definition(
+                        "producer",
+                        source_op=vector.vector_splat,
+                        parent_operand=ValueRef.operand("inputs", element=1),
+                        node_result=ValueRef.result("result"),
+                        guards=(
+                            Guard.value_type("scalar", Scalar("i32")),
+                            Guard.value_type("result", Vector("i32", lanes=1)),
+                        ),
+                    ),
+                    SourceNode.adjacent_unique_user(
+                        "consumer",
+                        source_op=vector.vector_concat,
+                        parent_result=ValueRef.result("result"),
+                        node_operand=ValueRef.operand("inputs"),
+                        guards=(
+                            Guard.operand_segment_count("inputs", 2),
+                            Guard.value_type("inputs", Vector("i32", lanes=2)),
+                            Guard.value_type(
+                                "inputs", Vector("i32", lanes=1), element=1
+                            ),
+                            Guard.value_type("result", Vector("i32", lanes=3)),
+                        ),
+                    ),
+                ),
+                guards=(
+                    Guard.operand_segment_count("inputs", 2),
+                    Guard.value_type("inputs", Vector("i32", lanes=1)),
+                    Guard.value_type("inputs", Vector("i32", lanes=1), element=1),
+                    Guard.value_type("result", Vector("i32", lanes=2)),
+                ),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                        operands={
+                            "lhs": ValueRef.operand("inputs"),
+                            "rhs": ValueRef.operand("scalar", source_node="producer"),
+                        },
+                        results={
+                            "dst": ValueRef.result("result", source_node="consumer")
+                        },
+                    ),
+                ),
+            ),
+        ),
+    )
+    fragment = replace(fragment, cases=fragment.cases * 2)
+
+    compiled = compile_lower_rule_set(fragment, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    assert len(compiled.source_nodes) == 2
+    assert compiled.rules[0].source_node_start == compiled.rules[1].source_node_start
+    producer, consumer = compiled.source_nodes
+    parent_ref = compiled.value_refs[producer.parent_value_ref_index]
+    assert parent_ref.kind is SourceValueKind.OPERAND
+    assert parent_ref.element_index == 1
+    assert parent_ref.source_node_index == 0
+    consumer_input_guard = compiled.guards[consumer.guard_start + 1]
+    consumer_input_ref = compiled.value_refs[consumer_input_guard.value_ref_index]
+    assert consumer_input_ref.kind is SourceValueKind.OPERAND
+    assert consumer_input_ref.element_index == 0
+    assert consumer_input_ref.source_node_index == 0
 
 
 def _expect_value_error(callable_obj: Callable[[], object], message: str) -> None:

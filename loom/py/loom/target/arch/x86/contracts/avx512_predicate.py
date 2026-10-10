@@ -145,6 +145,12 @@ def _all_operation_representations(lane_count: int) -> tuple[str, ...]:
     return ("x86.k", _CARRIER_REGISTER_CLASSES[lane_count])
 
 
+def avx512_predicate_carrier_register_class(lane_count: int) -> str:
+    """Returns the callable SIMD register class for a predicate shape."""
+
+    return _CARRIER_REGISTER_CLASSES[lane_count]
+
+
 def _mask_to_carrier_descriptor_key(lane_count: int) -> str:
     return (
         f"x86.avx512.vpmovm2{_CARRIER_ELEMENT_SUFFIXES[lane_count]}."
@@ -175,7 +181,7 @@ def _mask_to_carrier_emit(
     )
 
 
-def _carrier_to_mask_emit(
+def avx512_predicate_carrier_to_mask_emits(
     descriptor_lookup: _DescriptorLookup,
     lane_count: int,
     source: ValueRef,
@@ -230,7 +236,7 @@ def _predicate_extract_rules(
             dependencies.append(compress)
             source = ValueRef.temporary("mask")
             emits.extend(
-                _carrier_to_mask_emit(
+                avx512_predicate_carrier_to_mask_emits(
                     descriptor_lookup,
                     lane_count,
                     ValueRef.operand("source"),
@@ -326,7 +332,7 @@ def _predicate_insert_rules(
             dependencies.append(compress)
             mask = ValueRef.temporary("mask")
             emits.extend(
-                _carrier_to_mask_emit(
+                avx512_predicate_carrier_to_mask_emits(
                     descriptor_lookup,
                     lane_count,
                     ValueRef.operand("dest"),
@@ -851,7 +857,7 @@ def _select_rule(
     if condition_register_class != "x86.k":
         conversion = descriptor_lookup(_carrier_to_mask_descriptor_key(lane_count))
         emits.extend(
-            _carrier_to_mask_emit(
+            avx512_predicate_carrier_to_mask_emits(
                 descriptor_lookup,
                 lane_count,
                 ValueRef.operand("condition"),

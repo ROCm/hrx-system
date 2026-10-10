@@ -302,6 +302,25 @@ endif()
 if(LOOM_TARGET_ARCH_X86 AND IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_generated_file(
   NAME
+    avx512_bf16_callable_object
+  GENERATOR
+    loom::tools::loom-compile::loom-compile
+  OUTPUT
+    "avx512_bf16_callable.o"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/emit/native/x86/test/avx512_bf16_callable.loom"
+    "--target=x86:avx512_packed_dot"
+  INPUTS
+    "test/avx512_bf16_callable.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86 AND IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_generated_file(
+  NAME
     packed_dot_callable_object
   GENERATOR
     loom::tools::loom-compile::loom-compile
@@ -323,6 +342,7 @@ loom_cc_test(
   NAME
     callable_link_test
   SRCS
+    "avx512_bf16_callable.o"
     "avx512_callable.o"
     "callable.o"
     "callable_link_test.cc"

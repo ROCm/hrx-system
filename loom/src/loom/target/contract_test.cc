@@ -37,10 +37,16 @@ const loom_target_contract_dialect_table_t kDialects[] = {
     {0, nullptr},
 };
 const loom_target_contract_index_t kIndex = {
-    kTestDialectId, IREE_ARRAYSIZE(kDialects),
-    kDialects,      IREE_ARRAYSIZE(kCases),
-    kCases,         IREE_ARRAYSIZE(kBindings),
-    kBindings,      nullptr,
+    kTestDialectId,
+    IREE_ARRAYSIZE(kDialects),
+    kDialects,
+    IREE_ARRAYSIZE(kCases),
+    kCases,
+    IREE_ARRAYSIZE(kBindings),
+    0,
+    kBindings,
+    nullptr,
+    nullptr,
 };
 
 TEST(TargetContractQueryEnvironmentTest, MissingAllocatorReturnsNull) {

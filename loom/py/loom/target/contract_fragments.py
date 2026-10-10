@@ -164,6 +164,13 @@ CONTRACT_FRAGMENT_REGISTRATIONS = (
         aliases=("x86_avx512",),
     ),
     ContractFragmentRegistration(
+        key="x86.avx512_bf16",
+        module_name="loom.target.arch.x86.contracts.avx512_bf16",
+        symbol_name="X86_AVX512_BF16_CONTRACT_FRAGMENT",
+        dialect_ops_symbol_name="X86_AVX512_BF16_CONTRACT_DIALECT_OPS",
+        aliases=("x86_avx512_bf16",),
+    ),
+    ContractFragmentRegistration(
         key="x86.avx512_fp16",
         module_name="loom.target.arch.x86.contracts.avx512_fp16",
         symbol_name="X86_AVX512_FP16_CONTRACT_FRAGMENT",

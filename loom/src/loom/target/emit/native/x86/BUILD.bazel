@@ -272,6 +272,25 @@ loom_generated_file(
 )
 
 loom_generated_file(
+    name = "avx512_bf16_callable_object",
+    testonly = True,
+    args = [
+        "$(location test/avx512_bf16_callable.loom)",
+        "--target=x86:avx512_packed_dot",
+    ],
+    generator = "//loom/src/loom/tools/loom-compile:loom-compile",
+    inputs = ["test/avx512_bf16_callable.loom"],
+    output = "avx512_bf16_callable.o",
+    output_flag = "--output=",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+    ]) + [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+)
+
+loom_generated_file(
     name = "packed_dot_callable_object",
     testonly = True,
     args = [
@@ -293,6 +312,7 @@ loom_generated_file(
 loom_cc_test(
     name = "callable_link_test",
     srcs = [
+        "avx512_bf16_callable.o",
         "avx512_callable.o",
         "callable.o",
         "callable_link_test.cc",

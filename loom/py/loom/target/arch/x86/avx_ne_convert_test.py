@@ -34,7 +34,7 @@ def test_avx_ne_convert_rows_cover_the_complete_public_family() -> None:
         ):
             for operation, encoding_format_id in (
                 ("load", 0xC1C0),
-                ("load.indexed", 0xC1A0),
+                ("load.indexed", 0xC1C0),
             ):
                 key = f"x86.avx_ne_convert.{mnemonic}.{operation}.{register_suffix}"
                 expected_keys.add(key)
