@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <unistd.h>
@@ -342,6 +343,14 @@ static void iree_async_proactor_posix_destroy(
   iree_async_posix_wake_deinitialize(&proactor->wake);
   iree_async_posix_fd_map_deinitialize(&proactor->fd_map);
   iree_async_posix_event_set_free(proactor->event_set);
+
+  // Closing the event set proves no native readiness can reach sources that
+  // failed individual removal or remained active through final release.
+  while (proactor->event_sources) {
+    iree_async_event_source_t* source = proactor->event_sources;
+    proactor->event_sources = source->next;
+    iree_allocator_free(source->allocator, source);
+  }
 
   // Pools use external storage (in our allocation), just reset state.
   iree_async_posix_completion_pool_deinitialize(&proactor->completion_pool);
@@ -3906,15 +3915,28 @@ static void iree_async_proactor_posix_unregister_event_source(
   iree_async_proactor_posix_t* proactor =
       iree_async_proactor_posix_cast(base_proactor);
 
-  // Native removal must complete before returning borrowed handle ownership.
+  // Close callback admission before attempting native removal. Poll and
+  // unregistration share one owner thread, so no callback can be executing.
+  event_source->callback = iree_async_event_source_callback_null();
+
+  // Native removal must complete before returning borrowed ownership. A
+  // failed removal leaves the source linked for final event-set destruction.
   iree_status_t status =
       iree_async_posix_event_set_remove(proactor->event_set, event_source->fd);
-  if (!iree_status_is_ok(status)) {
-    iree_status_abort(status);
-  }
   // Ready batches carry descriptors, not source pointers. Map removal prevents
-  // any previously collected readiness from reaching this callback context.
+  // any previously collected readiness from reaching this source even when
+  // native event-set removal fails.
   iree_async_posix_fd_map_remove(&proactor->fd_map, event_source->fd);
+  if (!iree_status_is_ok(status)) {
+    if (callback.fn) {
+      callback.fn(callback.user_data, status);
+    } else {
+      iree_status_fprint(stderr, status);
+      iree_status_free(status);
+    }
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
 
   // Unlink from the proactor's event source list.
   if (event_source->prev) {
@@ -3932,7 +3954,7 @@ static void iree_async_proactor_posix_unregister_event_source(
   iree_allocator_free(allocator, event_source);
 
   if (callback.fn) {
-    callback.fn(callback.user_data);
+    callback.fn(callback.user_data, iree_ok_status());
   }
   IREE_TRACE_ZONE_END(z0);
 }

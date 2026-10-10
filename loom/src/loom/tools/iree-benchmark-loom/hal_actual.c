@@ -44,7 +44,7 @@ void iree_benchmark_loom_hal_actual_provider_initialize(
       .pass_program = compilation_options->pass_program,
       .requested_target_profile = compilation_options->requested_target_profile,
       .sanitizer = compilation_options->sanitizer,
-      .kernel_launch = kernel_launch,
+      .invocation = kernel_launch,
       .result_callback =
           {
               .fn = iree_benchmark_loom_hal_actual_observe_result,

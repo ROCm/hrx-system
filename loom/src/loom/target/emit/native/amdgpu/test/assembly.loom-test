@@ -18,6 +18,22 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_constants(%resource
 
 // ====
 
+// Structural copies from scalar to vector registers encode the scalar source
+// selector directly in VOP1 rather than interpreting it as a VGPR ordinal.
+// RUN: emit amdgpu-native-words @gfx942_sgpr_to_vgpr_copy waits=none strategy=source fixed=%source:physical_register:2:1 fixed=%result:physical_register:1:1
+amdgpu.target<gfx942> @gfx942_target
+
+low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_sgpr_to_vgpr_copy(%source: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = copy %source : reg<amdgpu.sgpr> -> reg<amdgpu.vgpr>
+  return %result
+}
+
+// ----
+0x7E020202
+0xBF810000
+
+// ====
+
 // Compiler hints partition the low schedule but have no target representation.
 // RUN: emit amdgpu-assembly @gfx11_compiler_hint waits=none strategy=source
 amdgpu.target<gfx1100> @gfx11_target

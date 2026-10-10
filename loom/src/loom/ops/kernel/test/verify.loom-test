@@ -198,8 +198,51 @@ func.def @wrong_argument_type(%argument: f32) {
 func.decl @ordinary_function()
 
 func.def @launch_requires_kernel_symbol() {
-  // ERROR@+1: SYMBOL/003 "expected kernel"
+  // ERROR@+1: SYMBOL/003 "expected kernel or kernel-scoped pipeline"
   kernel.launch @ordinary_function() : ()
+  func.return
+}
+
+// ====
+
+pipeline.def<kernel> @pipeline_launch_contract(%specialization: index) run(%storage: buffer) {
+}
+
+func.def @valid_pipeline_launch(%specialization: index, %storage: tensor<4xi32>) {
+  kernel.launch @pipeline_launch_contract[%specialization](%storage) : [index](tensor<4xi32>)
+  func.return
+}
+
+// ====
+
+pipeline.def @generic_pipeline_launch_contract() run(%storage: buffer) {
+}
+
+func.def @pipeline_launch_requires_kernel_scope(%storage: buffer) {
+  // ERROR@+1: STRUCTURE/014 "pipeline scope" "0" "kernel"
+  kernel.launch @generic_pipeline_launch_contract(%storage) : (buffer)
+  func.return
+}
+
+// ====
+
+pipeline.def<kernel> @pipeline_specialization_contract(%specialization: index) run() {
+}
+
+func.def @missing_pipeline_specialization() {
+  // ERROR@+1: STRUCTURE/013 "workload" "pipeline specialization"
+  kernel.launch @pipeline_specialization_contract() : ()
+  func.return
+}
+
+// ====
+
+pipeline.def<kernel> @pipeline_binding_contract() run(%storage: buffer) {
+}
+
+func.def @wrong_pipeline_binding_type(%storage: i32) {
+  // ERROR@+1: TYPE/001 "argument 0" "pipeline launch binding 0"
+  kernel.launch @pipeline_binding_contract(%storage) : (i32)
   func.return
 }
 

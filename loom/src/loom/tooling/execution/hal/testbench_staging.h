@@ -17,17 +17,42 @@ extern "C" {
 // Host fixtures remain owned by the value table so CPU oracles and observations
 // see the same allocations and aliases after readback.
 typedef struct loom_run_hal_testbench_staging_t {
-  // Allocator owning the transfer array.
+  // Borrowed runtime that outlives this staging lifecycle.
+  const loom_run_hal_runtime_t* runtime;
+  // Allocator owning the metadata storage.
   iree_allocator_t host_allocator;
-  // Upload copies from borrowed fixture allocations to owned device buffers.
-  iree_hal_transfer_operation_t* transfers;
-  // Number of owned device buffers and initialized transfer records.
-  iree_host_size_t transfer_count;
+  // Captured fixture-copy metadata.
+  struct {
+    // Base pointer for the single owned metadata allocation.
+    void* storage;
+    // Canonical copies from fixture allocation roots to device buffers.
+    iree_hal_transfer_operation_t* transfers;
+    // Reusable queue transfer descriptors.
+    iree_hal_transfer_operation_t* operations;
+    // Reusable scoped mappings of fixture allocations.
+    iree_hal_buffer_mapping_t* mappings;
+    // Queue-allocation requests corresponding to |transfers|.
+    iree_hal_pool_reservation_request_t* requests;
+    // Queue-allocated roots corresponding to |transfers|.
+    iree_hal_buffer_t** buffers;
+    // Number of initialized entries in every metadata array.
+    iree_host_size_t count;
+  } copies;
+  // Queue-allocation lifecycle state.
+  struct {
+    // Timeline carrying allocation, upload, and download progress.
+    iree_hal_semaphore_t* progress_semaphore;
+    // Independent terminal signal for queue deallocation.
+    iree_hal_semaphore_t* retirement_semaphore;
+    // True while explicit queue deallocation remains outstanding.
+    bool live;
+  } allocation;
 } loom_run_hal_testbench_staging_t;
 
 // Uploads each distinct host fixture allocation once and redirects |bindings|
 // to its device-local backing, preserving all allocation-relative offsets.
-// Device-local bindings pass through without allocation or transfer. Fixture
+// Bindings local to |runtime->device| pass through without allocation or
+// transfer. Other bindings must be host-mappable. Fixture
 // allocations must remain live and exclusively owned by this execution through
 // readback. The caller deinitializes |out_staging| even when staging fails.
 iree_status_t loom_run_hal_testbench_staging_initialize(
@@ -42,8 +67,10 @@ iree_status_t loom_run_hal_testbench_staging_readback(
     const loom_run_hal_runtime_t* runtime,
     loom_run_hal_testbench_staging_t* staging);
 
-// Releases staged device buffers and transfer storage after all work completes.
-void loom_run_hal_testbench_staging_deinitialize(
+// Retires any remaining queue allocation and releases staging storage. All
+// previously submitted dispatches must be terminal. Cleanup failures are
+// returned after releasing safe caller-owned references.
+iree_status_t loom_run_hal_testbench_staging_deinitialize(
     loom_run_hal_testbench_staging_t* staging);
 
 #ifdef __cplusplus

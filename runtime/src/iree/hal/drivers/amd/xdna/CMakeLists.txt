@@ -9,4 +9,547 @@
 
 iree_add_all_subdirs()
 
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    barrier
+  HDRS
+    "barrier.h"
+  SRCS
+    "barrier.c"
+  DEPS
+    iree::base
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    barrier_test
+  SRCS
+    "barrier_test.cc"
+  DEPS
+    ::barrier
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    context
+  HDRS
+    "context.h"
+  SRCS
+    "context.c"
+  DEPS
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::status
+    iree::hal::drivers::amd::xdna::image::aie2p::npu2
+    iree::hal::drivers::amd::xdna::image::aie2p::target
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    memory
+  HDRS
+    "memory.h"
+  SRCS
+    "memory.c"
+  DEPS
+    ::context
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    command_arena
+  HDRS
+    "command_arena.h"
+  SRCS
+    "command_arena.c"
+  DEPS
+    ::memory
+    iree::base
+    iree::base::threading
+    iree::hal::memory::tlsf
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    slab_provider
+  HDRS
+    "slab_provider.h"
+  SRCS
+    "slab_provider.c"
+  DEPS
+    ::memory
+    amdf::headers
+    iree::base
+    iree::base::internal
+    iree::hal
+    iree::hal::drivers::amd::status
+    iree::hal::memory::slab_provider
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    slab_provider_test
+  SRCS
+    "slab_provider_test.cc"
+  DEPS
+    ::slab_provider
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::memory::slab_provider
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    memory_transition
+  HDRS
+    "memory_transition.h"
+  SRCS
+    "memory_transition.c"
+  DEPS
+    amdf::headers
+    iree::base
+    iree::base::internal
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    memory_transition_test
+  SRCS
+    "memory_transition_test.cc"
+  DEPS
+    ::memory_transition
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    memory_backend
+  HDRS
+    "memory_backend.h"
+  SRCS
+    "memory_backend.c"
+  DEPS
+    ::context
+    ::memory_transition
+    ::slab_provider
+    amdf::headers
+    iree::base
+    iree::base::internal
+    iree::hal
+    iree::hal::drivers::amd::status
+    iree::hal::memory::maintenance
+    iree::hal::memory::passthrough_pool
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    memory_backend_test
+  SRCS
+    "memory_backend_test.cc"
+  DEPS
+    ::memory_backend
+    amdf::headers
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::memory::maintenance_thread
+    iree::hal::testing::mock_device
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    semaphore
+  HDRS
+    "semaphore.h"
+  SRCS
+    "semaphore.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::hal
+    iree::hal::utils::submitted_signal
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    semaphore_test
+  SRCS
+    "semaphore_test.cc"
+  DEPS
+    ::semaphore
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::utils::submitted_signal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    queue_frontier
+  HDRS
+    "queue_frontier.h"
+  SRCS
+    "queue_frontier.c"
+  DEPS
+    ::semaphore
+    iree::async
+    iree::base
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    queue_frontier_test
+  SRCS
+    "queue_frontier_test.cc"
+  DEPS
+    ::queue_frontier
+    ::semaphore
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    queue_storage
+  HDRS
+    "queue_storage.h"
+  SRCS
+    "queue_storage.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    queue_service
+  HDRS
+    "queue_service.h"
+  SRCS
+    "queue_service.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::base::threading::thread
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    queue_producer_index
+  HDRS
+    "queue_producer_index.h"
+  SRCS
+    "queue_producer_index.c"
+  DEPS
+    iree::base
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    queue_producer_index_test
+  SRCS
+    "queue_producer_index_test.cc"
+  DEPS
+    ::queue_producer_index
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    queue_storage_test
+  SRCS
+    "queue_storage_test.cc"
+  DEPS
+    ::queue_storage
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    transient_buffer
+  HDRS
+    "transient_buffer.h"
+  SRCS
+    "transient_buffer.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::internal::arena
+    iree::base::threading
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    queue
+  HDRS
+    "queue.h"
+    "queue_operation.h"
+  SRCS
+    "queue.c"
+    "queue_operation.c"
+  DEPS
+    ::barrier
+    ::context
+    ::executable
+    ::queue_frontier
+    ::queue_producer_index
+    ::queue_service
+    ::queue_storage
+    ::semaphore
+    ::transient_buffer
+    amdf::headers
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    executable
+  HDRS
+    "executable.h"
+  SRCS
+    "executable.c"
+  DEPS
+    ::command_arena
+    ::context
+    ::executable_storage
+    ::memory
+    amdf::headers
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::amd::status
+    iree::hal::drivers::amd::xdna::image
+    iree::schemas::xdna_executable
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    executable_storage
+  HDRS
+    "executable_storage.h"
+  SRCS
+    "executable_storage.c"
+  DEPS
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::xdna::image
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    executable_storage_test
+  SRCS
+    "executable_storage_test.cc"
+  DEPS
+    ::executable_storage
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::xdna::image::testing::image_fixture
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    device
+  HDRS
+    "device.h"
+  SRCS
+    "device.c"
+  DEPS
+    ::command_arena
+    ::context
+    ::executable
+    ::memory
+    ::memory_backend
+    ::queue
+    ::semaphore
+    amdf::headers
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::internal
+    iree::hal
+    iree::hal::memory::maintenance_thread
+    iree::hal::utils::device_spec_builder
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    driver
+  HDRS
+    "driver.h"
+  SRCS
+    "driver.c"
+  DEPS
+    ::context
+    ::device
+    amdf::amdf_static
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    queue_test
+  SRCS
+    "queue_test.cc"
+  DEPS
+    ::device
+    ::memory
+    ::memory_backend
+    ::queue
+    ::queue_frontier
+    ::semaphore
+    amdf::headers
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::xdna::image::testing::image_fixture
+    iree::hal::memory::slab_cache
+    iree::hal::memory::tlsf_pool
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

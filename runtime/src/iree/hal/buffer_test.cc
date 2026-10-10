@@ -46,10 +46,10 @@ TEST(BufferBindingTest, PublishesEveryInterfaceAndPreservesNativeFacts) {
   source.native_facts = 0x123456789ABCDEF0;
   const iree_hal_buffer_binding_layout_t layout = {
       sizeof(source), IREE_ARRAYSIZE(types), 0, types};
-  iree_hal_buffer_t buffer = {};
-  buffer.memory.bindings = source.bindings;
-  buffer.memory.binding_offset = 16;
-  iree_hal_buffer_copy_bindings(&buffer, &layout, target.bindings);
+  iree_hal_buffer_memory_view_t memory = {};
+  memory.bindings = source.bindings;
+  memory.binding_offset = 16;
+  iree_hal_buffer_memory_copy_bindings(&memory, &layout, target.bindings);
   EXPECT_EQ(target.bindings[0].host_pointer, storage + 16);
   EXPECT_EQ(target.bindings[1].device_address, 0x1010u);
   EXPECT_EQ(target.bindings[2].vulkan.buffer, 7u);
@@ -72,7 +72,7 @@ TEST(BufferBindingTest, PublishesEveryInterfaceAndPreservesNativeFacts) {
   for (uint16_t index : {1, 3, 4}) {
     source.bindings[index].device_address = 0;
   }
-  iree_hal_buffer_copy_bindings(&buffer, &layout, target.bindings);
+  iree_hal_buffer_memory_copy_bindings(&memory, &layout, target.bindings);
   EXPECT_EQ(target.bindings[0].host_pointer, nullptr);
   for (uint16_t index : {1, 3, 4}) {
     EXPECT_EQ(target.bindings[index].device_address, 0u);

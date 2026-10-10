@@ -414,7 +414,10 @@ TEST_F(PosixProactorSubmitTest, CancellationSurvivesInlineCallbackMapGrowth) {
       bool unregistered = false;
       iree_async_proactor_unregister_event_source(
           proactor_, source,
-          {+[](void* context) { *static_cast<bool*>(context) = true; },
+          {+[](void* context, iree_status_t status) {
+             IREE_EXPECT_OK(status);
+             *static_cast<bool*>(context) = true;
+           },
            &unregistered});
       EXPECT_TRUE(unregistered);
     }

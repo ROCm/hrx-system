@@ -2051,7 +2051,12 @@ kernel_launch = Op(
     "kernel.launch",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=("Launch a kernel with explicit workload and device-ABI operands. Workloads configure the launch and never alter the kernel ABI."),
+    doc=(
+        "Launch a kernel or issue a kernel-scoped pipeline with explicit "
+        "configuration and device-ABI operands. Workloads configure a kernel "
+        "launch; for a pipeline they supply the leading specialization "
+        "arguments."
+    ),
     operands=[
         Operand("workloads", ANY, variadic=True),
         Operand("arguments", ANY, variadic=True),
@@ -2060,7 +2065,7 @@ kernel_launch = Op(
         AttrDef(
             "callee",
             "symbol",
-            symbol_ref=SymbolReference("kernel", ["kernel"]),
+            symbol_ref=SymbolReference("kernel or kernel-scoped pipeline", ["kernel", "pipeline"]),
         ),
     ],
     traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT, NoAncestor("kernel.def")],

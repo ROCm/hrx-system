@@ -83,6 +83,20 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    host_semaphore
+  HDRS
+    "host_semaphore.h"
+  SRCS
+    "host_semaphore.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     libmpi
   HDRS
     "libmpi.h"
@@ -178,6 +192,29 @@ iree_cc_library(
     iree::base::internal
     iree::hal
   PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    submitted_signal
+  HDRS
+    "submitted_signal.h"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    submitted_signal_test
+  SRCS
+    "submitted_signal_test.cc"
+  DEPS
+    ::submitted_signal
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(

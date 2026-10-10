@@ -19,6 +19,21 @@ static LONG NTAPI ReturnCancellationResult(HANDLE handle,
   return *static_cast<LONG*>(handle);
 }
 
+static LONG NTAPI ReturnAssociationResult(HANDLE packet, HANDLE port,
+                                          HANDLE target, PVOID key,
+                                          PVOID context, LONG status,
+                                          ULONG_PTR information,
+                                          LONG* already_signaled) {
+  (void)port;
+  (void)target;
+  (void)key;
+  (void)context;
+  (void)status;
+  (void)information;
+  *already_signaled = FALSE;
+  return *static_cast<LONG*>(packet);
+}
+
 TEST(IocpEventSourceTest, ClassifiesNativeWithdrawal) {
   iree_async_proactor_iocp_t proactor = {};
   proactor.nt_wait_api.NtCancelWaitCompletionPacket = ReturnCancellationResult;
@@ -35,6 +50,69 @@ TEST(IocpEventSourceTest, ClassifiesNativeWithdrawal) {
       iree_async_proactor_iocp_cancel_wait_packet(
           &proactor, reinterpret_cast<uintptr_t>(&failure), &withdrawn));
   EXPECT_FALSE(withdrawn);
+}
+
+TEST(IocpEventSourceTest, CancellationFailureRetainsSource) {
+  LONG native_failure = static_cast<LONG>(0xC000000DL);
+  iree_async_proactor_iocp_t proactor = {};
+  proactor.nt_wait_api.NtCancelWaitCompletionPacket = ReturnCancellationResult;
+  iree_async_event_source_t source = {};
+  source.wait_packet_handle = reinterpret_cast<uintptr_t>(&native_failure);
+  source.flags = IREE_ASYNC_IOCP_EVENT_SOURCE_FLAG_ARMED;
+  source.callback = {
+      +[](void*, iree_async_event_source_t*, iree_async_poll_events_t) {},
+      nullptr};
+  proactor.event_sources = &source;
+  struct TerminalResult {
+    int callback_count = 0;
+    iree_status_code_t code = IREE_STATUS_OK;
+  } result;
+
+  iree_async_iocp_event_source_unregister(
+      &proactor.base, &source,
+      {+[](void* user_data, iree_status_t status) {
+         auto* result = static_cast<TerminalResult*>(user_data);
+         result->code = iree_status_code(status);
+         iree_status_free(status);
+         ++result->callback_count;
+       },
+       &result});
+
+  EXPECT_EQ(result.callback_count, 1);
+  EXPECT_EQ(result.code, IREE_STATUS_INTERNAL);
+  EXPECT_EQ(proactor.event_sources, &source);
+  EXPECT_TRUE(iree_any_bit_set(source.flags,
+                               IREE_ASYNC_IOCP_EVENT_SOURCE_FLAG_RETAINED));
+  EXPECT_EQ(source.callback.fn, nullptr);
+  EXPECT_EQ(source.wait_packet_handle,
+            reinterpret_cast<uintptr_t>(&native_failure));
+}
+
+TEST(IocpEventSourceTest, RearmFailureReturnsThroughDispatch) {
+  LONG native_failure = static_cast<LONG>(0xC000000DL);
+  iree_async_proactor_iocp_t proactor = {};
+  proactor.nt_wait_api.NtAssociateWaitCompletionPacket =
+      ReturnAssociationResult;
+  iree_async_event_source_t source = {};
+  source.wait_packet_handle = reinterpret_cast<uintptr_t>(&native_failure);
+  source.flags = IREE_ASYNC_IOCP_EVENT_SOURCE_FLAG_ARMED;
+  int ready_count = 0;
+  source.callback = {
+      +[](void* user_data, iree_async_event_source_t*,
+          iree_async_poll_events_t) { ++*static_cast<int*>(user_data); },
+      &ready_count};
+  proactor.event_sources = &source;
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INTERNAL,
+      iree_async_iocp_event_source_dispatch(&proactor, &source));
+
+  EXPECT_EQ(ready_count, 1);
+  EXPECT_EQ(proactor.event_sources, &source);
+  EXPECT_FALSE(
+      iree_any_bit_set(source.flags, IREE_ASYNC_IOCP_EVENT_SOURCE_FLAG_ARMED));
+  EXPECT_FALSE(iree_any_bit_set(source.flags,
+                                IREE_ASYNC_IOCP_EVENT_SOURCE_FLAG_RETAINED));
 }
 
 TEST(IocpEventSourceTest, JoinsDispatchOfDequeuedPacket) {
@@ -74,10 +152,13 @@ TEST(IocpEventSourceTest, JoinsDispatchOfDequeuedPacket) {
   int unregistered_count = 0;
   iree_async_proactor_unregister_event_source(
       proactor, source,
-      {+[](void* context) { ++*static_cast<int*>(context); },
+      {+[](void* context, iree_status_t status) {
+         IREE_EXPECT_OK(status);
+         ++*static_cast<int*>(context);
+       },
        &unregistered_count});
   EXPECT_EQ(unregistered_count, 0);
-  iree_async_iocp_event_source_dispatch(iocp, source);
+  IREE_ASSERT_OK(iree_async_iocp_event_source_dispatch(iocp, source));
   EXPECT_EQ(unregistered_count, 1);
   EXPECT_EQ(ready_count, 0);
   EXPECT_EQ(iocp->event_sources, nullptr);

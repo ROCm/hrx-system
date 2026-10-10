@@ -1781,7 +1781,7 @@ static iree_status_t iree_benchmark_loom_append_compile_report_artifact_json(
   iree_string_view_t entry_symbol = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_module_symbol_name_from_ref(
       provider->execution.native_module,
-      provider->execution.kernel_launch->callee_ref, &entry_symbol));
+      provider->execution.invocation->callee_ref, &entry_symbol));
 
   loom_output_stream_t stream;
   loom_output_stream_for_builder(output, &stream);
@@ -2284,7 +2284,7 @@ iree_status_t iree_benchmark_loom_append_compile_row(
   iree_string_view_t entry_symbol = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_module_symbol_name_from_ref(
       provider->execution.native_module,
-      provider->execution.kernel_launch->callee_ref, &entry_symbol));
+      provider->execution.invocation->callee_ref, &entry_symbol));
 
   loom_output_stream_t stream;
   loom_output_stream_for_builder(compile_output, &stream);

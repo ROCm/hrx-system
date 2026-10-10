@@ -45,6 +45,10 @@ typedef struct iree_hal_mock_device_options_t {
   // themselves. Queue families must not advertise provisioned queues.
   iree_hal_device_spec_t* device_spec;
 
+  // Optional borrowed native-memory metadata returned by the mock device.
+  // The caller keeps this live until the device is released.
+  const iree_hal_memory_backend_t* memory_backend;
+
   // Optional status returned by assign_topology_info. IREE_STATUS_OK means the
   // mock accepts the assignment normally.
   iree_status_code_t assign_topology_info_status_code;

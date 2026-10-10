@@ -221,15 +221,20 @@ struct rdma_event_channel* iree_net_rdma_connection_events_handle(
   return events->channel;
 }
 
-static void iree_net_rdma_connection_events_unregistered(void* user_data) {
+static void iree_net_rdma_connection_events_unregistered(void* user_data,
+                                                         iree_status_t status) {
   iree_net_rdma_connection_events_t* events = user_data;
+  if (!iree_status_is_ok(status)) {
+    iree_net_rdma_connection_events_fail(events, status);
+    return;
+  }
   events->monitor = NULL;
   events->flags &= ~IREE_NET_RDMA_CONNECTION_EVENTS_FLAG_STOPPING;
   events->flags |= IREE_NET_RDMA_CONNECTION_EVENTS_FLAG_STOPPED;
   iree_async_event_source_unregistered_callback_t callback =
       events->deactivated_callback;
   if (callback.fn) {
-    callback.fn(callback.user_data);
+    callback.fn(callback.user_data, iree_ok_status());
   }
 }
 
@@ -255,7 +260,7 @@ void iree_net_rdma_connection_events_deactivate(
             .user_data = events,
         });
   } else {
-    iree_net_rdma_connection_events_unregistered(events);
+    iree_net_rdma_connection_events_unregistered(events, iree_ok_status());
   }
 }
 

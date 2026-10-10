@@ -177,6 +177,7 @@ loom_cc_library(
     iree::base
     iree::base::threading
     iree::hal
+    iree::hal::memory::tlsf_pool
     iree::tooling::device_util
   PUBLIC
 )
@@ -298,7 +299,7 @@ loom_cc_test(
     iree::async::platform
     iree::base
     iree::hal
-    iree::hal::drivers::task::semaphore
+    iree::hal::utils::host_semaphore
     iree::testing::gtest
     iree::testing::gtest_main
 )

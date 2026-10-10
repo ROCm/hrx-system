@@ -99,7 +99,9 @@ iree_thread_create(iree_thread_entry_t entry, void* entry_arg,
 // Retains the given |thread| for the caller.
 IREE_API_EXPORT void iree_thread_retain(iree_thread_t* thread);
 
-// Releases the given |thread| from the caller.
+// Releases the given |thread| from the caller. A final release from another
+// thread waits for |thread| to return. A final release by |thread| itself
+// detaches its native handle so resources are reclaimed when it returns.
 IREE_API_EXPORT void iree_thread_release(iree_thread_t* thread);
 
 // Returns a platform-defined thread ID for the given |thread|.

@@ -14,9 +14,10 @@
 #include <utility>
 #include <vector>
 
-#include "experimental/xdna/executable.h"
+#include "experimental/xdna/direct_binding.h"
 #include "iree/base/internal/shm.h"
 #include "iree/base/internal/span.h"
+#include "iree/hal/drivers/amd/xdna/executable_storage.h"
 #include "iree/hal/drivers/amd/xdna/image/aie2p/npu2.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/add_i32.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/add_i32_npu4.h"
@@ -332,9 +333,7 @@ class XdnaExecutionFixture : public XdnaDeviceFixture {
         &binding.buffer));
     resolved_bindings_[ordinal].buffer_ref =
         iree_hal_make_buffer_ref(binding.buffer, 0, kBindingByteLength);
-    resolved_bindings_[ordinal].memory = memory;
-    resolved_bindings_[ordinal].memory_byte_offset =
-        memory_byte_offset + kBindingByteOffset;
+    resolved_bindings_[ordinal].byte_length = kBindingByteLength;
     ASSERT_EQ(
         api_->memory_query_address(memory, 0, AMDF_MEMORY_ADDRESS_XDNA_DMA,
                                    &resolved_bindings_[ordinal].device_address),
@@ -569,12 +568,12 @@ class XdnaExecutionFixture : public XdnaDeviceFixture {
     storage.mapping =
         iree_make_byte_span(instructions.pointer, execution->byte_length);
     storage.device_address = firmware_address;
-    IREE_ASSERT_OK(iree_hal_amd_xdna_executable_load(
+    IREE_ASSERT_OK(iree_hal_amd_xdna_executable_storage_load(
         executable_, entry_ordinal_, 1, &storage));
-    IREE_ASSERT_OK(iree_hal_amd_xdna_executable_bind(
+    IREE_ASSERT_OK(iree_xdna_executable_storage_bind(
         executable_, entry_ordinal_, 1, &storage, bindings.size(),
         bindings.data()));
-    IREE_ASSERT_OK(iree_hal_amd_xdna_executable_query_invocation(
+    IREE_ASSERT_OK(iree_hal_amd_xdna_executable_storage_query_invocation(
         executable_, entry_ordinal_, 1, &storage, &execution->command));
     execution->original_instructions.assign(
         instructions.pointer, instructions.pointer + execution->byte_length);

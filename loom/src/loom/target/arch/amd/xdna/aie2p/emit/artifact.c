@@ -26,6 +26,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/facts.h"
 #include "loom/target/arch/amd/xdna/aie2p/profile.h"
 #include "loom/target/arch/amd/xdna/aie2p/provider.h"
+#include "loom/target/arch/amd/xdna/aie2p/records/target_records.h"
 #include "loom/target/arch/amd/xdna/device/profile.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 #include "loom/target/function_version.h"
@@ -927,11 +928,15 @@ static iree_status_t loom_aie2p_xdna_emit_target_artifact(
   if (!*out_emitted) {
     return iree_ok_status();
   }
+  if (iree_any_bit_set(request->flags,
+                       LOOM_TARGET_EMIT_REQUEST_FLAG_RETAIN_TARGET_BUNDLE)) {
+    out_artifact->target_bundle = &loom_aie2p_array_target_bundle;
+  }
   out_artifact->target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
   return iree_ok_status();
 }
 
-static const loom_target_emitter_t loom_aie2p_xdna_artifact_emitter = {
+const loom_target_emitter_t loom_aie2p_xdna_artifact_emitter = {
     .name = IREE_SVL("xdna"),
     .public_artifact_format = IREE_SVL("xdna"),
     .default_identifier = IREE_SVL("module.xdna"),

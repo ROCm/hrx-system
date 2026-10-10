@@ -18,16 +18,35 @@ load(
     "//build_tools/vulkan/requirements:defs.bzl",
     "VULKAN_DEVICE_RESOURCE",
 )
+load("//libamdf/requirements:defs.bzl", "LIBAMDF", "LIBAMDF_XDNA", "XDNA_RESOURCE")
 load(
     "//runtime/requirements:defs.bzl",
     "AMDGPU_RESOURCE",
     "HAL_AMDGPU",
     "HAL_VULKAN",
     "HAL_WEBGPU",
+    "HAL_XDNA",
     "WEBGPU_DEVICE_RESOURCE",
 )
 
 PACKAGE_POLICIES = [
+    package_policy(
+        packages = ["runtime/src/iree/hal/drivers/amd/xdna/registration"],
+        build_requirements = [HAL_XDNA, LIBAMDF, LIBAMDF_XDNA],
+    ),
+    package_policy(
+        packages = ["runtime/src/iree/hal/drivers/amd/xdna/cts"],
+        build_requirements = [LIBAMDF, LIBAMDF_XDNA],
+        run_requirements = [XDNA_RESOURCE],
+        resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    ),
+    package_policy(
+        packages = [
+            "runtime/src/iree/hal/drivers/amd",
+            "runtime/src/iree/hal/drivers/amd/xdna",
+        ],
+        build_requirements = [LIBAMDF],
+    ),
     package_policy(
         packages = ["runtime/src/iree/hal/drivers/amdgpu/..."],
         excluded_packages = [

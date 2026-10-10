@@ -28,4 +28,23 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA)
+loom_cc_library(
+  NAME
+    iree_hal
+  HDRS
+    "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/amd/xdna/iree_hal.h"
+  SRCS
+    "iree_hal.c"
+  DEPS
+    ::xdna
+    iree::hal
+    loom::binding::c::loomc
+    loom::binding::c::target::iree_hal
+    loom::target::arch::amd::xdna::aie2p::target_profile
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

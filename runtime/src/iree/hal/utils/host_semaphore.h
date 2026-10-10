@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_HAL_DRIVERS_TASK_SEMAPHORE_H_
-#define IREE_HAL_DRIVERS_TASK_SEMAPHORE_H_
+#ifndef IREE_HAL_UTILS_HOST_SEMAPHORE_H_
+#define IREE_HAL_UTILS_HOST_SEMAPHORE_H_
 
 #include <stdint.h>
 
@@ -17,19 +17,16 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Creates a semaphore that integrates with the task system to allow for
-// pipelined wait and signal operations.
+// Creates a host timeline semaphore with asynchronous wait integration.
+// Timeline advancement publishes satisfied timepoints through |proactor|.
 // |proactor| is borrowed from the device's proactor pool and must outlive the
 // semaphore.
-iree_status_t iree_hal_task_semaphore_create(
+iree_status_t iree_hal_host_semaphore_create(
     iree_async_proactor_t* proactor, uint64_t initial_value,
     iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore);
-
-// Returns true if |semaphore| is a task system semaphore.
-bool iree_hal_task_semaphore_isa(iree_hal_semaphore_t* semaphore);
 
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
 
-#endif  // IREE_HAL_DRIVERS_TASK_SEMAPHORE_H_
+#endif  // IREE_HAL_UTILS_HOST_SEMAPHORE_H_

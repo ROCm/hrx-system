@@ -259,6 +259,74 @@ TEST_F(SlabCacheTest, IndependentChildrenReuseOneNativeAllocation) {
   iree_hal_pool_release_reservations(second, 1, &reservation, nullptr);
 }
 
+TEST_F(SlabCacheTest, ReservationViewPreservesPreparedRangeAndHistory) {
+  iree_hal_pool_reservation_t reservation;
+  iree_hal_pool_acquire_info_t info;
+  iree_hal_pool_acquire_result_t result;
+  IREE_ASSERT_OK(Acquire(cache_, 4096, nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+                         &reservation, &info, &result));
+  ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+
+  iree_async_single_frontier_t prior_use;
+  iree_async_single_frontier_initialize(&prior_use, Axis(0), 7);
+  const iree_async_frontier_t* prior_use_frontier =
+      iree_async_single_frontier_as_const_frontier(&prior_use);
+  iree_hal_pool_release_reservations(cache_, 1, &reservation,
+                                     prior_use_frontier);
+  IREE_ASSERT_OK(Acquire(cache_, 4096, prior_use_frontier,
+                         IREE_HAL_POOL_RESERVE_FLAG_NONE, &reservation, &info,
+                         &result));
+  ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK);
+  ASSERT_NE(info.reuse_frontier, nullptr);
+
+  iree_hal_pool_reservation_view_t view = {};
+  ASSERT_TRUE(
+      iree_hal_pool_query_reservation_views(cache_, 1, &reservation, &view));
+  ASSERT_NE(view.buffer, nullptr);
+  EXPECT_EQ(view.byte_length, reservation.byte_length);
+  EXPECT_EQ(view.memory.reuse_frontier, info.reuse_frontier);
+
+  const iree_hal_pool_reservation_request_t request = {params_, 4096};
+  iree_hal_buffer_t* materialized = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_materialize_reservations(
+      cache_, 1, &request, &reservation, IREE_HAL_POOL_MATERIALIZE_FLAG_NONE,
+      &materialized));
+  const iree_hal_buffer_memory_view_t materialized_memory =
+      iree_hal_buffer_memory_view(materialized);
+  EXPECT_EQ(view.byte_offset, iree_hal_buffer_byte_offset(materialized));
+  EXPECT_EQ(view.byte_length, iree_hal_buffer_byte_length(materialized));
+  EXPECT_EQ(view.memory.bindings, materialized_memory.bindings);
+  EXPECT_EQ(view.memory.binding_offset, materialized_memory.binding_offset);
+  EXPECT_EQ(view.memory.backing, materialized_memory.backing);
+  EXPECT_EQ(view.memory.offset, materialized_memory.offset);
+  EXPECT_EQ(view.memory.reuse_frontier, materialized_memory.reuse_frontier);
+
+  iree_hal_buffer_release(materialized);
+  iree_hal_pool_release_reservations(cache_, 1, &reservation, nullptr);
+}
+
+TEST_F(SlabCacheTest, NativePoolRequiresMaterialization) {
+  iree_hal_pool_reservation_t reservation;
+  iree_hal_pool_acquire_info_t info;
+  iree_hal_pool_acquire_result_t result;
+  IREE_ASSERT_OK(Acquire(native_, 64, nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+                         &reservation, &info, &result));
+  ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+
+  iree_hal_pool_reservation_view_t view = {
+      /*.buffer=*/reinterpret_cast<iree_hal_buffer_t*>(uintptr_t{1}),
+      /*.byte_offset=*/2,
+      /*.byte_length=*/3,
+      /*.memory=*/{},
+  };
+  EXPECT_FALSE(
+      iree_hal_pool_query_reservation_views(native_, 1, &reservation, &view));
+  EXPECT_EQ(view.buffer, reinterpret_cast<iree_hal_buffer_t*>(uintptr_t{1}));
+  EXPECT_EQ(view.byte_offset, 2u);
+  EXPECT_EQ(view.byte_length, 3u);
+  iree_hal_pool_release_reservations(native_, 1, &reservation, nullptr);
+}
+
 TEST_F(SlabCacheTest, PendingReturnPreservesExactHistoryAndPrefersReady) {
   std::array<iree_hal_pool_reservation_request_t, 2> requests = {
       {{params_, 4096}, {params_, 4096}}};

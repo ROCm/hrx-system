@@ -127,8 +127,10 @@ iree_async_proactor_thread_options_default(void) {
 //   - Call release() (releases proactor reference, frees thread).
 //
 // Owners that do not need the terminal status may omit join()/consume_status().
-// Final release joins the underlying thread after request_stop() and releases
-// any unconsumed terminal status.
+// Final release from another thread joins the underlying thread after
+// request_stop() and releases any unconsumed terminal status. Final release
+// from a completion or error callback requests stop and defers destruction
+// until the current poll call and thread entry point have returned.
 //
 // ## Thread safety
 //
@@ -151,10 +153,12 @@ iree_status_t iree_async_proactor_thread_create(
 // Retains a reference to the proactor thread.
 void iree_async_proactor_thread_retain(iree_async_proactor_thread_t* thread);
 
-// Releases a reference to the proactor thread. Before the final release the
-// thread must have exited or request_stop() must have been called. Final
-// release joins the underlying thread, releases the retained proactor, and
-// frees the thread. It must not be called from the proactor thread itself.
+// Releases a reference to the proactor thread. Before a final release from any
+// other thread, the proactor thread must have exited or request_stop() must
+// have been called. That release joins the underlying thread, releases the
+// retained proactor, and frees the thread. A final release from the proactor
+// thread requests stop and defers those actions until the current poll call
+// returns.
 void iree_async_proactor_thread_release(iree_async_proactor_thread_t* thread);
 
 // Requests the thread to stop after completing its current poll iteration.

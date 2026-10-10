@@ -132,6 +132,18 @@ TEST_F(CpuPoolTest, ExactPoolDefersNativeAllocationUntilGrowthIsAllowed) {
         IREE_HAL_POOL_RESERVE_FLAG_NONE, reservations, infos, &result));
     ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
     EXPECT_GT(allocation_count, original_allocation_count);
+    iree_hal_pool_reservation_view_t views[9] = {};
+    ASSERT_TRUE(iree_hal_pool_query_reservation_views(pool, request_count,
+                                                      reservations, views));
+    for (iree_host_size_t i = 0; i < request_count; ++i) {
+      EXPECT_EQ(views[i].buffer,
+                (iree_hal_buffer_t*)(uintptr_t)reservations[i].block_handle);
+      EXPECT_EQ(views[i].byte_offset,
+                iree_hal_buffer_byte_offset(views[i].buffer));
+      EXPECT_EQ(views[i].byte_length, reservations[i].byte_length);
+      EXPECT_EQ(views[i].memory.backing,
+                iree_hal_buffer_memory_view(views[i].buffer).backing);
+    }
     iree_hal_buffer_t* buffers[9];
     IREE_ASSERT_OK(iree_hal_pool_materialize_reservations(
         pool, request_count, requests, reservations,

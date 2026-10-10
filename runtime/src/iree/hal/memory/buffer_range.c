@@ -71,6 +71,23 @@ void iree_hal_pool_buffer_range_deinitialize(
   memset(range, 0, sizeof(*range));
 }
 
+void iree_hal_pool_buffer_range_query_reservation_view(
+    const iree_hal_pool_buffer_range_t* range, iree_device_size_t offset,
+    iree_device_size_t length, const iree_async_frontier_t* reuse_frontier,
+    iree_hal_pool_reservation_view_t* out_view) {
+  *out_view = (iree_hal_pool_reservation_view_t){
+      .buffer = range->buffer,
+      .byte_offset =
+          iree_hal_buffer_byte_offset(range->buffer) + range->offset + offset,
+      .byte_length = length,
+      .memory = range->memory,
+  };
+  out_view->memory.offset += offset;
+  out_view->memory.binding_offset += offset;
+  out_view->memory.reuse_frontier =
+      reuse_frontier && reuse_frontier->entry_count ? reuse_frontier : NULL;
+}
+
 iree_status_t iree_hal_pool_buffer_range_materialize(
     const iree_hal_pool_buffer_range_t* range, iree_device_size_t offset,
     iree_device_size_t length, iree_hal_buffer_params_t params,

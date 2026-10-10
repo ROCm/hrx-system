@@ -275,7 +275,10 @@ class CtsTestBase : public BaseType {
     bool completed = false;
     iree_async_proactor_unregister_event_source(
         proactor_, source,
-        {+[](void* user_data) { *static_cast<bool*>(user_data) = true; },
+        {+[](void* user_data, iree_status_t status) {
+           IREE_ASSERT_OK(status);
+           *static_cast<bool*>(user_data) = true;
+         },
          &completed});
     PollUntilCondition([&] { return completed; },
                        "event source unregistration");

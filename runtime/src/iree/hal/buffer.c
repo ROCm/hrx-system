@@ -319,22 +319,29 @@ static iree_hal_buffer_native_binding_t iree_hal_buffer_offset_native_binding(
 }
 
 IREE_API_EXPORT iree_hal_buffer_native_binding_t
-iree_hal_buffer_native_binding(const iree_hal_buffer_t* buffer,
-                               iree_hal_buffer_native_binding_slot_t slot) {
+iree_hal_buffer_memory_native_binding(
+    const iree_hal_buffer_memory_view_t* memory,
+    iree_hal_buffer_native_binding_slot_t slot) {
   return iree_hal_buffer_offset_native_binding(
-      buffer->memory.bindings[slot.index],
-      (iree_hal_buffer_interface_t)slot.type, buffer->memory.binding_offset);
+      memory->bindings[slot.index], (iree_hal_buffer_interface_t)slot.type,
+      memory->binding_offset);
 }
 
-IREE_API_EXPORT void iree_hal_buffer_copy_bindings(
-    const iree_hal_buffer_t* source,
+IREE_API_EXPORT iree_hal_buffer_native_binding_t
+iree_hal_buffer_native_binding(const iree_hal_buffer_t* buffer,
+                               iree_hal_buffer_native_binding_slot_t slot) {
+  return iree_hal_buffer_memory_native_binding(&buffer->memory, slot);
+}
+
+IREE_API_EXPORT void iree_hal_buffer_memory_copy_bindings(
+    const iree_hal_buffer_memory_view_t* source,
     const iree_hal_buffer_binding_layout_t* layout,
     iree_hal_buffer_native_binding_t* target) {
-  memcpy(target, source->memory.bindings, layout->byte_length);
+  memcpy(target, source->bindings, layout->byte_length);
   for (uint16_t i = 0; i < layout->binding_count; ++i) {
     target[i] = iree_hal_buffer_offset_native_binding(
         target[i], (iree_hal_buffer_interface_t)layout->types[i],
-        source->memory.binding_offset);
+        source->binding_offset);
   }
 }
 

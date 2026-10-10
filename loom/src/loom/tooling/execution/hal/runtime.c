@@ -10,6 +10,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/numa.h"
 #include "iree/hal/api.h"
+#include "iree/hal/memory/tlsf_pool.h"
 #include "iree/tooling/device_util.h"
 
 static iree_status_t loom_run_hal_runtime_select_queue(
@@ -40,6 +41,70 @@ static iree_status_t loom_run_hal_runtime_select_queue(
   return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                           "HAL device has no provisioned %s queue family",
                           role_name);
+}
+
+static iree_status_t loom_run_hal_runtime_create_staging_pool(
+    loom_run_hal_runtime_t* runtime, iree_allocator_t host_allocator) {
+  const iree_hal_queue_family_t* dispatch_family =
+      iree_hal_queue_family(runtime->dispatch_queue);
+  const iree_hal_queue_family_t* transfer_family =
+      iree_hal_queue_family(runtime->transfer_queue);
+  iree_hal_pool_family_access_t family_accesses[2] = {
+      {
+          .family = dispatch_family,
+          .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      },
+  };
+  iree_host_size_t family_count = 1;
+  if (transfer_family == dispatch_family) {
+    family_accesses[0].usage |= IREE_HAL_BUFFER_USAGE_TRANSFER;
+  } else {
+    family_accesses[family_count++] = (iree_hal_pool_family_access_t){
+        .family = transfer_family,
+        .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+    };
+  }
+  const iree_hal_pool_scope_t scope = {
+      .family_count = family_count,
+      .families = family_accesses,
+  };
+  iree_hal_slab_pool_options_t source_options;
+  iree_hal_slab_pool_options_initialize(&source_options);
+  source_options.trace_name = IREE_SV("loom-staging-source");
+
+  iree_hal_pool_t* source_pool = NULL;
+  iree_status_t status =
+      iree_hal_slab_pool_create(runtime->device_group, scope, &source_options,
+                                host_allocator, &source_pool);
+  if (iree_status_is_ok(status)) {
+    const iree_hal_device_spec_t* device_spec =
+        iree_hal_device_spec(runtime->device);
+    const iree_hal_device_dispatch_spec_t* dispatch_spec =
+        iree_hal_device_spec_dispatch(device_spec);
+    const iree_device_size_t pool_alignment = iree_max(
+        (iree_device_size_t)IREE_HAL_MEMORY_TLSF_MIN_ALIGNMENT,
+        dispatch_spec->addressing.minimum_buffer_device_address_alignment);
+    iree_hal_tlsf_pool_options_t pool_options = {
+        .tlsf_options =
+            {
+                // This is the smallest ordinary backing range. Every larger
+                // request gets dedicated backing sized from that request.
+                .range_length = pool_alignment,
+                .alignment = pool_alignment,
+            },
+        .trace_name = IREE_SV("loom-staging"),
+    };
+    const iree_hal_device_sanitizer_spec_t* sanitizer_spec =
+        iree_hal_device_spec_sanitizer(device_spec);
+    if (iree_any_bit_set(sanitizer_spec->flags,
+                         IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN)) {
+      pool_options.asan = sanitizer_spec->asan.pool_options;
+    }
+    status = iree_hal_tlsf_pool_create(source_pool, &pool_options,
+                                       host_allocator, &runtime->staging_pool);
+  }
+  iree_hal_pool_release(source_pool);
+  return status;
 }
 
 void loom_run_hal_runtime_options_initialize(
@@ -100,6 +165,9 @@ iree_status_t loom_run_hal_runtime_initialize(
         out_runtime->device, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
         "transfer", &out_runtime->transfer_queue);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_runtime_create_staging_pool(out_runtime, allocator);
+  }
   if (!iree_status_is_ok(status)) {
     loom_run_hal_runtime_deinitialize(out_runtime);
   }
@@ -123,6 +191,7 @@ void loom_run_hal_runtime_deinitialize(loom_run_hal_runtime_t* runtime) {
   }
   runtime->dispatch_queue = NULL;
   runtime->transfer_queue = NULL;
+  iree_hal_pool_release(runtime->staging_pool);
   iree_hal_device_group_release(runtime->device_group);
   iree_hal_device_release(runtime->device);
   *runtime = (loom_run_hal_runtime_t){0};

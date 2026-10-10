@@ -801,7 +801,7 @@ func.def public pure @device_dynamic(%workgroup_count: index) -> (index, index, 
   loom_run_hal_testbench_actual_provider_t provider = {};
   provider.context = &context;
   provider.native_module = native_module;
-  provider.kernel_launch = kernel_launch;
+  provider.invocation = kernel_launch;
   provider.launch_config_program =
       LoadLaunchConfigProgram(IREE_SV(kLaunchConfigSource));
   provider.launch_config_function = loomc_launch_config_function_invalid();

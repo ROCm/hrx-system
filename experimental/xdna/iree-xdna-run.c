@@ -10,12 +10,13 @@
 
 #include "amdf/amdf.h"
 #include "amdf/xdna.h"
-#include "experimental/xdna/amdf_status.h"
-#include "experimental/xdna/executable.h"
+#include "experimental/xdna/direct_binding.h"
 #include "iree/base/api.h"
 #include "iree/base/byte_sequence.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amd/status.h"
+#include "iree/hal/drivers/amd/xdna/executable_storage.h"
 #include "iree/hal/drivers/amd/xdna/image/aie2p/npu2.h"
 #include "iree/io/file_contents.h"
 
@@ -563,7 +564,7 @@ static iree_status_t iree_xdna_run_prepare_binding(
   run->resolved_bindings[ordinal] = (iree_hal_amd_xdna_executable_binding_t){
       .buffer_ref =
           iree_hal_make_buffer_ref(binding->buffer, 0, initial.data_length),
-      .memory = binding->memory,
+      .byte_length = initial.data_length,
       .device_address = dma_address,
   };
   return iree_ok_status();
@@ -702,9 +703,9 @@ static iree_status_t iree_xdna_run_prepare_storage(
   if (!iree_status_is_ok(status)) {
     return status;
   }
-  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_executable_load(
+  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_executable_storage_load(
       run->image, run->entry_ordinal, run->storage.count, run->storage.values));
-  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_executable_bind(
+  IREE_RETURN_IF_ERROR(iree_xdna_executable_storage_bind(
       run->image, run->entry_ordinal, run->storage.count, run->storage.values,
       run->binding_count, run->resolved_bindings));
   for (uint32_t i = 0; iree_status_is_ok(status) && i < run->storage.count;
@@ -763,7 +764,7 @@ static iree_status_t iree_xdna_run_execute(iree_xdna_run_t* run,
                                         run->context, &queue_info, &run->queue),
                                     "xdna.kernel_queue_create"));
   amdf_xdna_kernel_command_t command;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_executable_query_invocation(
+  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_executable_storage_query_invocation(
       run->image, run->entry_ordinal, run->storage.count, run->storage.values,
       &command));
   for (int32_t invocation_ordinal = 0;

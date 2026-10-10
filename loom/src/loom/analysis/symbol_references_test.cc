@@ -602,7 +602,8 @@ func.def @entry() -> (index) {
   EXPECT_EQ(CountIncoming(table, reader), 1u);
 }
 
-TEST_F(SymbolReferencesTest, KernelReferencesRetainDistinctTargetInterfaces) {
+TEST_F(SymbolReferencesTest,
+       KernelLaunchAndDispatchRetainDistinctTargetInterfaces) {
   ModulePtr module = ParseModule(R"(
 kernel.decl @logical() launch()
 kernel.entry.decl @configured()
@@ -628,7 +629,8 @@ func.def @entry() {
   ASSERT_NE(launch_occurrence, nullptr);
   ASSERT_NE(launch_occurrence->user_op, nullptr);
   EXPECT_EQ(launch_occurrence->user_op->kind, LOOM_OP_KERNEL_LAUNCH);
-  EXPECT_EQ(launch_occurrence->target_interfaces, LOOM_SYMBOL_INTERFACE_KERNEL);
+  EXPECT_EQ(launch_occurrence->target_interfaces,
+            LOOM_SYMBOL_INTERFACE_KERNEL | LOOM_SYMBOL_INTERFACE_PIPELINE);
 
   const loom_symbol_reference_occurrence_t* dispatch_occurrence =
       FindOccurrence(table, entry, configured,

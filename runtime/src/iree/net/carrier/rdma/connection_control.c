@@ -558,13 +558,19 @@ const iree_net_rdma_connection_route_t* iree_net_rdma_connection_control_route(
   return &control->route;
 }
 
-static void iree_net_rdma_connection_control_joined(void* user_data) {
+static void iree_net_rdma_connection_control_joined(void* user_data,
+                                                    iree_status_t status) {
   iree_net_rdma_connection_control_t* control = user_data;
+  if (!iree_status_is_ok(status)) {
+    iree_net_rdma_connection_control_fail(control, status);
+    return;
+  }
   if (--control->pending_joins != 0) {
     return;
   }
   control->state = IREE_NET_RDMA_CONNECTION_CONTROL_STATE_DEACTIVATED;
-  control->deactivated_callback.fn(control->deactivated_callback.user_data);
+  control->deactivated_callback.fn(control->deactivated_callback.user_data,
+                                   iree_ok_status());
 }
 
 static void iree_net_rdma_connection_control_deactivate_complete(
@@ -623,7 +629,7 @@ static void iree_net_rdma_connection_control_deactivate_complete(
   if (control->device_failure) {
     iree_net_rdma_device_failure_deactivate(control->device_failure, callback);
   }
-  iree_net_rdma_connection_control_joined(control);
+  iree_net_rdma_connection_control_joined(control, iree_ok_status());
 }
 
 void iree_net_rdma_connection_control_deactivate(

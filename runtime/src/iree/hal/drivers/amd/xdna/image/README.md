@@ -8,9 +8,9 @@ The compiler owns the device program; the loader establishes its declared
 storage and binding contract.
 
 The image object in this directory is immutable and device-independent. The
-[experimental executable adapter](../../../../../../../../experimental/xdna/executable.h) connects
+[native storage materializer](../executable_storage.h) connects
 it to caller-owned mappings and libamdf memory handles. The
-[runner](../../../../../../../../experimental/xdna/README.md) demonstrates the complete lifecycle.
+[XDNA HAL](../README.md) owns the complete device execution lifecycle.
 The [Loom producer](../../../../../../../../loom/src/loom/target/arch/amd/xdna/aie2p/emit/xdna_product.h)
 and reader share the fixed-width codecs in
 [xdna_executable.h](../../../../../schemas/xdna_executable.h).
@@ -57,25 +57,32 @@ A real caller follows this sequence:
    the declared dynamic relocation fields.
 5. Publish mapped writes through the native cache API, resolve invocation zero,
    and submit its command handle and range through libamdf.
-6. Observe terminal completion, perform required output cache invalidation,
-   and advance to the metadata's continuation ordinal while residency is valid.
+6. Observe terminal completion and perform required output cache invalidation.
+   A consumer with a separate, explicit residency guarantee may then advance to
+   the metadata's continuation ordinal. The current XDNA HAL does not do so.
 7. Rebind or release resources only after their previous device users have
    drained. Keep mappings, backing, logical buffers, and context alive through
    their actual completion frontier.
 
-`iree_hal_amd_xdna_executable_load` and `_bind` allocate no memory and retain no
-resources. They check their supplied contracts before writes. A source I/O
+`iree_hal_amd_xdna_executable_storage_load` and `_bind` allocate no memory and
+retain no resources. They check their supplied contracts before writes. A source I/O
 failure during loading may leave backing partially initialized; that backing
 is not ready for submission. Failure does not promise rollback of caller
 storage. Native submission receives memory handles and byte ranges, with no
 per-launch XRT patch list or ELF decoding.
 
-Invocation zero establishes entry state. The current compiler emits a finite
-protocol `0 -> 1 -> 1`: establishment first, then repeated work using resident
-workers. A self-contained range can express `0 -> 0`. A continuation becomes
-valid only after terminal completion while context, backing, and resident state
-remain intact. Reset, replacement by another entry, or loss of backing requires
-establishment again. The caller owns this ordinal and its completion frontier.
+Invocation zero establishes entry state. The current compiler encodes
+`0 -> 1 -> 1`: establishment first, followed by a smaller continuation for an
+execution environment that can separately prove retained tile state. A
+self-contained range can encode `0 -> 0`. The metadata describes this command
+relationship; it does not provide the residency proof.
+
+libamdf context lifetime and fixed backing do not guarantee application tile
+state across independent submissions. The current XDNA HAL therefore uses
+invocation zero for every dispatch. A persistent service instead remains inside
+one outstanding invocation while CPU, GPU, and NPU participants exchange work
+through shared memory. Its terminal completion means that the service has
+stopped its workers and drained transfers, so the placement can be reused.
 
 Native command retirement alone does not prove arbitrary autonomous tile work
 has ended. The compiled program must establish the required output and worker
@@ -94,7 +101,7 @@ and contains no precompiled bootstrap PDI; family bootstrap belongs to libamdf.
 | [image.h](image.h) | Immutable owner and export lookup. |
 | [aie2p/target.h](aie2p/target.h) | Admitted context identity, geometry, and instruction alignment. |
 | [Shared schema](../../../../../schemas/xdna_executable.h) | Wire constants and fixed-width codecs used by producer and consumer. |
-| [Executable adapter](../../../../../../../../experimental/xdna/executable.h) | Loading, relocation, external binding, and native command resolution. |
+| [Native storage materializer](../executable_storage.h) | Loading, relocation, external binding, and native command resolution. |
 
 Admission validates untrusted file structure once. Indexed consumers use the
 established relationships. Native payload is executable code: these checks are

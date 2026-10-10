@@ -197,6 +197,26 @@ static void hrx_iree_exact_pool_release_reservations(
   }
 }
 
+static void hrx_iree_exact_pool_query_reservation_views(
+    iree_hal_pool_t* base_pool, iree_host_size_t reservation_count,
+    const iree_hal_pool_reservation_t* reservations,
+    iree_hal_pool_reservation_view_t* out_views) {
+  (void)base_pool;
+  for (iree_host_size_t i = 0; i < reservation_count; ++i) {
+    iree_hal_buffer_t* buffer =
+        (iree_hal_buffer_t*)(uintptr_t)reservations[i].block_handle;
+    out_views[i] = (iree_hal_pool_reservation_view_t){
+        .buffer = buffer,
+        .byte_offset =
+            iree_hal_buffer_byte_offset(buffer) + reservations[i].offset,
+        .byte_length = reservations[i].byte_length,
+        .memory = iree_hal_buffer_memory_view(buffer),
+    };
+    out_views[i].memory.offset += reservations[i].offset;
+    out_views[i].memory.binding_offset += reservations[i].offset;
+  }
+}
+
 static iree_status_t hrx_iree_exact_pool_materialize_reservations(
     iree_hal_pool_t* base_pool, iree_host_size_t reservation_count,
     const iree_hal_pool_reservation_request_t* requests,
@@ -273,6 +293,7 @@ static const iree_hal_pool_vtable_t hrx_iree_exact_pool_vtable = {
     .destroy = hrx_iree_exact_pool_destroy,
     .acquire_reservations = hrx_iree_exact_pool_acquire_reservations,
     .release_reservations = hrx_iree_exact_pool_release_reservations,
+    .query_reservation_views = hrx_iree_exact_pool_query_reservation_views,
     .materialize_reservations = hrx_iree_exact_pool_materialize_reservations,
     .query_capabilities = hrx_iree_exact_pool_query_capabilities,
     .query_stats = hrx_iree_exact_pool_query_stats,

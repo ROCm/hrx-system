@@ -42,58 +42,6 @@ static iree_async_axis_t test_queue_axis(uint8_t queue_index) {
                                     /*queue_incarnation=*/0);
 }
 
-TEST(LastSignalTest, ConcurrentPublicationReturnsOneCompleteGeneration) {
-  // Keep every published snapshot valid so returning the caller's initialized
-  // outputs while a writer is active is distinguishable from an empty cache.
-  constexpr uint64_t kGenerationCount = 65536;
-  iree_hal_amdgpu_last_signal_t cache = {};
-  auto publish = [&](uint64_t generation) {
-    iree_hal_amdgpu_last_signal_store(
-        &cache, IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_VALID,
-        test_queue_axis(static_cast<uint8_t>(generation % 16)), generation,
-        generation * 17 + 5);
-  };
-  publish(1);
-
-  std::atomic<bool> reader_ready{false};
-  std::atomic<bool> writer_ready{false};
-  std::thread writer([&] {
-    writer_ready.store(true, std::memory_order_release);
-    while (!reader_ready.load(std::memory_order_acquire)) {
-      std::this_thread::yield();
-    }
-    for (uint64_t generation = 2; generation <= kGenerationCount;
-         ++generation) {
-      publish(generation);
-    }
-  });
-  reader_ready.store(true, std::memory_order_release);
-  while (!writer_ready.load(std::memory_order_acquire)) {
-    std::this_thread::yield();
-  }
-
-  uint64_t invalid_snapshots = 0;
-  uint64_t last_epoch = 0;
-  for (uint64_t i = 0; i < kGenerationCount; ++i) {
-    iree_hal_amdgpu_last_signal_flags_t flags =
-        IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_NONE;
-    iree_async_axis_t axis = 0;
-    uint64_t epoch = 0;
-    uint64_t value = 0;
-    bool valid =
-        iree_hal_amdgpu_last_signal_load(&cache, &flags, &axis, &epoch, &value);
-    if (!valid || epoch == 0 || epoch > kGenerationCount ||
-        epoch < last_epoch ||
-        axis != test_queue_axis(static_cast<uint8_t>(epoch % 16)) ||
-        value != epoch * 17 + 5) {
-      ++invalid_snapshots;
-    }
-    last_epoch = epoch;
-  }
-  writer.join();
-  EXPECT_EQ(invalid_snapshots, 0u);
-}
-
 class FrontierBuilder {
  public:
   iree_async_frontier_t* Build(
@@ -265,20 +213,18 @@ TEST_F(SemaphoreTest, PrivateStreamSignalPublishesExactProducerEpoch) {
       private_semaphore, producer_axis, /*producer_epoch=*/7,
       /*producer_value=*/3);
 
-  iree_hal_amdgpu_last_signal_flags_t flags =
-      IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_NONE;
+  iree_hal_submitted_signal_flags_t flags = IREE_HAL_SUBMITTED_SIGNAL_FLAG_NONE;
   iree_async_axis_t cached_axis = 0;
   uint64_t cached_epoch = 0;
   uint64_t cached_value = 0;
-  EXPECT_TRUE(iree_hal_amdgpu_last_signal_load(
-      iree_hal_amdgpu_semaphore_last_signal(private_semaphore), &flags,
+  EXPECT_TRUE(iree_hal_submitted_signal_load(
+      iree_hal_amdgpu_semaphore_submitted_signal(private_semaphore), &flags,
       &cached_axis, &cached_epoch, &cached_value));
   EXPECT_EQ(cached_axis, producer_axis);
   EXPECT_EQ(cached_epoch, 7u);
   EXPECT_EQ(cached_value, 3u);
-  EXPECT_EQ(flags,
-            IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_VALID |
-                IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT);
+  EXPECT_EQ(flags, IREE_HAL_SUBMITTED_SIGNAL_FLAG_VALID |
+                       IREE_HAL_SUBMITTED_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT);
 
   iree_hal_semaphore_release(private_semaphore);
 }
@@ -302,20 +248,18 @@ TEST_F(SemaphoreTest,
       semaphore_, producer_axis, transitive_frontier, /*producer_epoch=*/7,
       /*producer_value=*/2));
 
-  iree_hal_amdgpu_last_signal_flags_t flags =
-      IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_NONE;
+  iree_hal_submitted_signal_flags_t flags = IREE_HAL_SUBMITTED_SIGNAL_FLAG_NONE;
   iree_async_axis_t cached_axis = 0;
   uint64_t cached_epoch = 0;
   uint64_t cached_value = 0;
-  EXPECT_TRUE(iree_hal_amdgpu_last_signal_load(
-      iree_hal_amdgpu_semaphore_last_signal(semaphore_), &flags, &cached_axis,
-      &cached_epoch, &cached_value));
+  EXPECT_TRUE(iree_hal_submitted_signal_load(
+      iree_hal_amdgpu_semaphore_submitted_signal(semaphore_), &flags,
+      &cached_axis, &cached_epoch, &cached_value));
   EXPECT_EQ(cached_axis, producer_axis);
   EXPECT_EQ(cached_epoch, 7u);
   EXPECT_EQ(cached_value, 2u);
-  EXPECT_EQ(flags,
-            IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_VALID |
-                IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT);
+  EXPECT_EQ(flags, IREE_HAL_SUBMITTED_SIGNAL_FLAG_VALID |
+                       IREE_HAL_SUBMITTED_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT);
 }
 
 TEST_F(SemaphoreTest, PublishSignalClearsExactForIndependentFanIn) {
@@ -335,18 +279,17 @@ TEST_F(SemaphoreTest, PublishSignalClearsExactForIndependentFanIn) {
       semaphore_, second_axis, second_frontier, /*producer_epoch=*/9,
       /*producer_value=*/2));
 
-  iree_hal_amdgpu_last_signal_flags_t flags =
-      IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_NONE;
+  iree_hal_submitted_signal_flags_t flags = IREE_HAL_SUBMITTED_SIGNAL_FLAG_NONE;
   iree_async_axis_t cached_axis = 0;
   uint64_t cached_epoch = 0;
   uint64_t cached_value = 0;
-  EXPECT_TRUE(iree_hal_amdgpu_last_signal_load(
-      iree_hal_amdgpu_semaphore_last_signal(semaphore_), &flags, &cached_axis,
-      &cached_epoch, &cached_value));
+  EXPECT_TRUE(iree_hal_submitted_signal_load(
+      iree_hal_amdgpu_semaphore_submitted_signal(semaphore_), &flags,
+      &cached_axis, &cached_epoch, &cached_value));
   EXPECT_EQ(cached_axis, second_axis);
   EXPECT_EQ(cached_epoch, 9u);
   EXPECT_EQ(cached_value, 2u);
-  EXPECT_EQ(flags, IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_VALID);
+  EXPECT_EQ(flags, IREE_HAL_SUBMITTED_SIGNAL_FLAG_VALID);
 }
 
 TEST_F(SemaphoreTest, OlderWaitDoesNotUseLaterProducerEpoch) {
@@ -444,12 +387,12 @@ TEST_F(SemaphoreTest, ConcurrentPublicationDoesNotUpgradeWaitFrontier) {
 
   uint64_t upgraded_waits = 0;
   for (uint64_t i = 0; i < kPublicationCount; ++i) {
-    iree_hal_amdgpu_last_signal_flags_t flags = 0;
+    iree_hal_submitted_signal_flags_t flags = 0;
     iree_async_axis_t axis = 0;
     uint64_t epoch = 0;
     uint64_t value = 0;
-    EXPECT_TRUE(iree_hal_amdgpu_last_signal_load(
-        iree_hal_amdgpu_semaphore_last_signal(semaphore_), &flags, &axis,
+    EXPECT_TRUE(iree_hal_submitted_signal_load(
+        iree_hal_amdgpu_semaphore_submitted_signal(semaphore_), &flags, &axis,
         &epoch, &value));
     auto resolution = ResolveWait(0, value);
     // A racing publication can make the exact metadata unavailable. It cannot

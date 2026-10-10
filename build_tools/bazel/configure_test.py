@@ -112,6 +112,23 @@ class ConfigureBazelTest(unittest.TestCase):
 
         self.assertIn("build --//libamdf/config:enabled=true", config)
 
+    def test_xdna_driver_rejects_explicitly_disabled_native_provider(self):
+        for options in (
+            ["-DIREE_HAL_DRIVER_XDNA=ON", "-DAMDF_BUILD=OFF"],
+            ["-DIREE_HAL_DRIVER_XDNA=ON", "-DAMDF_FAMILY_XDNA=OFF"],
+        ):
+            with self.subTest(options=options):
+                args = self.configure_bazel.parse_arguments(options)
+                with self.assertRaisesRegex(SystemExit, "conflicts with"):
+                    self.configure_bazel.generate_config(args)
+
+    def test_xdna_driver_resolves_native_provider(self):
+        args = self.configure_bazel.parse_arguments(["-DIREE_HAL_DRIVER_XDNA=ON"])
+        config = self.configure_bazel.generate_config(args)
+
+        self.assertIn("build --//runtime/config/hal:drivers=task,xdna", config)
+        self.assertIn("build --//libamdf/config:enabled=true", config)
+
     def test_libamdf_explicit_disable_is_independent_of_hal_driver(self):
         args = self.configure_bazel.parse_arguments(
             ["-DIREE_HAL_DRIVER_AMDGPU=ON", "-DAMDF_BUILD=OFF"]

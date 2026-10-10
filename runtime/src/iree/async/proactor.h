@@ -139,14 +139,20 @@ iree_async_event_source_callback_null(void) {
   return callback;
 }
 
-// Completion of terminal event-source unregistration. Native monitoring and
-// all queued callbacks have retired and the source has been destroyed before
-// this function runs. Borrowed handle and callback storage may be released.
+// Completion of terminal event-source unregistration. Takes ownership of
+// |status|.
+//
+// An OK status proves that native monitoring and all queued callbacks have
+// retired and the source has been destroyed. The borrowed handle and callback
+// storage may then be released. A failing status means callback admission has
+// stopped but native cleanup or callback retirement could not be proven. The
+// backend retains the source and any proactor state native code may reach; the
+// caller must likewise retain the borrowed handle and callback storage.
 typedef void(IREE_API_PTR* iree_async_event_source_unregistered_fn_t)(
-    void* user_data);
+    void* user_data, iree_status_t status);
 
 typedef struct iree_async_event_source_unregistered_callback_t {
-  // Function invoked after the event source has been destroyed.
+  // Function invoked with the terminal unregistration result.
   iree_async_event_source_unregistered_fn_t fn;
   // Opaque value passed to |fn|.
   void* user_data;
@@ -1351,11 +1357,14 @@ static inline iree_status_t iree_async_proactor_register_event_source(
 // Begins terminal event-source unregistration and stops callback admission.
 //
 // The ordinary event callback will not fire again after this call returns.
-// |callback| fires after all native monitoring and cancellation operations have
-// retired and the event source has been destroyed. The caller must retain the
-// borrowed handle and ordinary callback context until this completion, which
-// may fire inline. The source handle becomes invalid immediately and must not
-// be used or unregistered again. A NULL source completes inline.
+// |callback| fires with OK after all native monitoring and cancellation
+// operations have retired and the event source has been destroyed. A failure
+// closes callback admission but retains the backend ownership graph because
+// native cleanup or callback retirement could not be proven. The caller must
+// retain the borrowed handle and ordinary callback context unless the callback
+// receives OK. The callback takes ownership of its status and may fire inline.
+// The source handle becomes invalid immediately and must not be used or
+// unregistered again. A NULL source completes inline with OK.
 //
 // Deferred completions run from poll() on the polling thread. Proactor
 // destruction also completes any unregistration it owns before returning.
@@ -1374,7 +1383,7 @@ static inline void iree_async_proactor_unregister_event_source(
     iree_async_event_source_unregistered_callback_t callback) {
   if (!event_source) {
     if (callback.fn) {
-      callback.fn(callback.user_data);
+      callback.fn(callback.user_data, iree_ok_status());
     }
     return;
   }

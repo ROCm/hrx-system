@@ -7,7 +7,7 @@
 #include "loom/tooling/execution/hal/runtime.h"
 
 #include "iree/async/proactor_platform.h"
-#include "iree/hal/drivers/task/semaphore.h"
+#include "iree/hal/utils/host_semaphore.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -20,7 +20,7 @@ class HalRuntimeTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_async_proactor_create_platform(
         iree_async_proactor_options_default(), iree_allocator_system(),
         &proactor_));
-    IREE_ASSERT_OK(iree_hal_task_semaphore_create(
+    IREE_ASSERT_OK(iree_hal_host_semaphore_create(
         proactor_, 0, iree_allocator_system(), &semaphore_));
   }
 
@@ -31,7 +31,7 @@ class HalRuntimeTest : public ::testing::Test {
 
   // Owned proactor that outlives the semaphore.
   iree_async_proactor_t* proactor_ = nullptr;
-  // Owned task semaphore using the shared code-only wait contract.
+  // Owned host semaphore using the shared code-only wait contract.
   iree_hal_semaphore_t* semaphore_ = nullptr;
 };
 

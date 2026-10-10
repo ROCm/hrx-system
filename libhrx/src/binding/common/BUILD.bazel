@@ -249,7 +249,6 @@ hrx_cc_test(
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/task:semaphore",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

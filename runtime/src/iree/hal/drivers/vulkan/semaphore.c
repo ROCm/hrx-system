@@ -8,52 +8,6 @@
 
 #include <string.h>
 
-#include "iree/base/internal/atomics.h"
-
-//===----------------------------------------------------------------------===//
-// iree_hal_vulkan_last_signal_t
-//===----------------------------------------------------------------------===//
-
-void iree_hal_vulkan_last_signal_store(
-    iree_hal_vulkan_last_signal_t* cache,
-    iree_hal_vulkan_last_signal_flags_t flags, iree_async_axis_t producer_axis,
-    uint64_t epoch, uint64_t value) {
-  iree_atomic_fetch_add(&cache->sequence, 1, iree_memory_order_relaxed);
-  iree_atomic_thread_fence(iree_memory_order_release);
-  iree_atomic_store(&cache->flags, (int32_t)flags, iree_memory_order_relaxed);
-  iree_atomic_store(&cache->producer_axis, (int64_t)producer_axis,
-                    iree_memory_order_relaxed);
-  iree_atomic_store(&cache->epoch, (int64_t)epoch, iree_memory_order_relaxed);
-  iree_atomic_store(&cache->value, (int64_t)value, iree_memory_order_relaxed);
-  iree_atomic_fetch_add(&cache->sequence, 1, iree_memory_order_release);
-}
-
-bool iree_hal_vulkan_last_signal_load(
-    const iree_hal_vulkan_last_signal_t* cache,
-    iree_hal_vulkan_last_signal_flags_t* out_flags,
-    iree_async_axis_t* out_producer_axis, uint64_t* out_epoch,
-    uint64_t* out_value) {
-  int32_t sequence = 0;
-  do {
-    sequence = iree_atomic_load(&cache->sequence, iree_memory_order_acquire);
-    if (IREE_UNLIKELY(sequence & 1)) {
-      continue;
-    }
-    *out_flags = (iree_hal_vulkan_last_signal_flags_t)iree_atomic_load(
-        &cache->flags, iree_memory_order_relaxed);
-    *out_producer_axis = (iree_async_axis_t)iree_atomic_load(
-        &cache->producer_axis, iree_memory_order_relaxed);
-    *out_epoch =
-        (uint64_t)iree_atomic_load(&cache->epoch, iree_memory_order_relaxed);
-    *out_value =
-        (uint64_t)iree_atomic_load(&cache->value, iree_memory_order_relaxed);
-    iree_atomic_thread_fence(iree_memory_order_acquire);
-  } while (
-      IREE_UNLIKELY(iree_atomic_load(&cache->sequence,
-                                     iree_memory_order_relaxed) != sequence));
-  return (*out_flags & IREE_HAL_VULKAN_LAST_SIGNAL_FLAG_VALID) != 0;
-}
-
 //===----------------------------------------------------------------------===//
 // iree_hal_vulkan_semaphore_t
 //===----------------------------------------------------------------------===//
@@ -81,7 +35,7 @@ typedef struct iree_hal_vulkan_semaphore_t {
   iree_hal_semaphore_flags_t flags;
 
   // Seqlock-protected cache of the most recent queue signal.
-  iree_hal_vulkan_last_signal_t last_signal;
+  iree_hal_submitted_signal_t submitted_signal;
 } iree_hal_vulkan_semaphore_t;
 
 static const iree_hal_semaphore_vtable_t iree_hal_vulkan_semaphore_vtable;
@@ -162,7 +116,8 @@ iree_status_t iree_hal_vulkan_semaphore_create(
     semaphore->logical_device = logical_device;
     semaphore->handle = handle;
     semaphore->flags = flags;
-    memset(&semaphore->last_signal, 0, sizeof(semaphore->last_signal));
+    memset(&semaphore->submitted_signal, 0,
+           sizeof(semaphore->submitted_signal));
     *out_semaphore = iree_hal_semaphore_cast(&semaphore->async);
   } else {
     iree_vkDestroySemaphore(IREE_VULKAN_DEVICE(syms), logical_device, handle,
@@ -217,11 +172,11 @@ iree_status_t iree_hal_vulkan_semaphore_handle(
   return iree_ok_status();
 }
 
-iree_hal_vulkan_last_signal_t* iree_hal_vulkan_semaphore_last_signal(
+iree_hal_submitted_signal_t* iree_hal_vulkan_semaphore_submitted_signal(
     iree_hal_semaphore_t* base_semaphore) {
   iree_hal_vulkan_semaphore_t* semaphore =
       iree_hal_vulkan_semaphore_cast(base_semaphore);
-  return &semaphore->last_signal;
+  return &semaphore->submitted_signal;
 }
 
 bool iree_hal_vulkan_semaphore_publish_signal(
@@ -232,18 +187,18 @@ bool iree_hal_vulkan_semaphore_publish_signal(
   iree_hal_vulkan_semaphore_t* semaphore =
       iree_hal_vulkan_semaphore_cast(base_semaphore);
 
-  iree_hal_vulkan_last_signal_flags_t flags =
-      IREE_HAL_VULKAN_LAST_SIGNAL_FLAG_VALID;
+  iree_hal_submitted_signal_flags_t flags =
+      IREE_HAL_SUBMITTED_SIGNAL_FLAG_VALID;
   bool source_dominates_frontier = false;
   iree_slim_mutex_lock(&semaphore->async.mutex);
   const bool merged = iree_async_frontier_merge_and_test_source_dominance(
       semaphore->async.frontier, semaphore->async.frontier_capacity,
       producer_frontier, &source_dominates_frontier);
   if (merged && source_dominates_frontier) {
-    flags |= IREE_HAL_VULKAN_LAST_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT;
+    flags |= IREE_HAL_SUBMITTED_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT;
   }
-  iree_hal_vulkan_last_signal_store(
-      &semaphore->last_signal, merged ? flags : 0,
+  iree_hal_submitted_signal_store(
+      &semaphore->submitted_signal, merged ? flags : 0,
       merged ? producer_axis : (iree_async_axis_t)0,
       merged ? producer_epoch : 0, merged ? producer_value : 0);
   iree_slim_mutex_unlock(&semaphore->async.mutex);

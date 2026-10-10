@@ -9,8 +9,8 @@
 
 #include "iree/async/semaphore.h"
 #include "iree/base/api.h"
-#include "iree/base/internal/atomics.h"
 #include "iree/hal/api.h"
+#include "iree/hal/utils/submitted_signal.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,103 +18,6 @@ extern "C" {
 
 typedef struct iree_hal_amdgpu_logical_device_t
     iree_hal_amdgpu_logical_device_t;
-
-//===----------------------------------------------------------------------===//
-// iree_hal_amdgpu_last_signal_t
-//===----------------------------------------------------------------------===//
-
-typedef uint8_t iree_hal_amdgpu_last_signal_flags_t;
-enum iree_hal_amdgpu_last_signal_flag_bits_e {
-  IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_NONE = 0u,
-  // The cache contains a producer axis/epoch/value snapshot from at least one
-  // signal submission.
-  IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_VALID = 1u << 0,
-  // The semaphore's post-publish frontier is exactly the producer queue's
-  // frontier at |epoch|. A single barrier on |producer_axis|@|epoch| therefore
-  // implies all transitive dependencies carried by this semaphore signal, even
-  // when the producer frontier contains multiple peer axes.
-  IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT = 1u << 1,
-};
-
-// Seqlock-protected cache of the most recent queue signal on a semaphore.
-// Written by the submission path when queue_execute signals the semaphore,
-// read by the submission path when processing waits (for same-queue FIFO
-// elision and direct producer-epoch cross-queue barriers) and by the
-// host-wait fast path.
-//
-// The seqlock ensures torn snapshots across the payload fields are detected
-// and retried. The payload fields remain atomic because retrying a seqlock does
-// not make concurrent non-atomic C accesses data-race-free. Writers are
-// serialized by the semaphore mutex or the single-producer stream contract and
-// increment the sequence counter to an odd value before the update and to an
-// even value after. Readers retry if the sequence is odd (write in progress) or
-// changed between the start and end of the read.
-typedef struct iree_hal_amdgpu_last_signal_t {
-  // Seqlock sequence counter; odd means a writer is updating payload fields.
-  iree_atomic_int32_t sequence;
-  // Cached signal validity and producer-frontier precision flags.
-  iree_atomic_int32_t flags;
-  // Producer queue axis that submitted the last cached signal.
-  iree_atomic_int64_t producer_axis;
-  // Producer queue epoch associated with the last cached signal.
-  iree_atomic_int64_t epoch;
-  // Semaphore payload value signaled at |producer_axis|/|epoch|.
-  iree_atomic_int64_t value;
-} iree_hal_amdgpu_last_signal_t;
-
-// Stores a new last-signal snapshot. Callers must serialize writers; readers
-// may concurrently load the cache.
-static inline void iree_hal_amdgpu_last_signal_store(
-    iree_hal_amdgpu_last_signal_t* cache,
-    iree_hal_amdgpu_last_signal_flags_t flags, iree_async_axis_t producer_axis,
-    uint64_t epoch, uint64_t value) {
-  // Publish the odd sequence before any payload field. The release fence pairs
-  // with a reader that observes a concurrent payload store and forces its
-  // closing sequence load to observe this write in progress.
-  iree_atomic_fetch_add(&cache->sequence, 1, iree_memory_order_relaxed);
-  iree_atomic_thread_fence(iree_memory_order_release);
-  iree_atomic_store(&cache->flags, (int32_t)flags, iree_memory_order_relaxed);
-  iree_atomic_store(&cache->producer_axis, (int64_t)producer_axis,
-                    iree_memory_order_relaxed);
-  iree_atomic_store(&cache->epoch, (int64_t)epoch, iree_memory_order_relaxed);
-  iree_atomic_store(&cache->value, (int64_t)value, iree_memory_order_relaxed);
-  // Publish the completed payload to readers beginning a new snapshot.
-  iree_atomic_fetch_add(&cache->sequence, 1, iree_memory_order_release);
-}
-
-// Loads the last-signal snapshot. Thread-safe (seqlock reader).
-// Returns true if the cache has been written at least once and remains valid.
-static inline bool iree_hal_amdgpu_last_signal_load(
-    const iree_hal_amdgpu_last_signal_t* cache,
-    iree_hal_amdgpu_last_signal_flags_t* out_flags,
-    iree_async_axis_t* out_producer_axis, uint64_t* out_epoch,
-    uint64_t* out_value) {
-  for (;;) {
-    int32_t sequence =
-        iree_atomic_load(&cache->sequence, iree_memory_order_acquire);
-    // An active writer cannot validate a snapshot, even if its sequence stays
-    // unchanged while the reader retries.
-    if (IREE_UNLIKELY(sequence & 1)) {
-      continue;
-    }
-    *out_flags = (iree_hal_amdgpu_last_signal_flags_t)iree_atomic_load(
-        &cache->flags, iree_memory_order_relaxed);
-    *out_producer_axis = (iree_async_axis_t)iree_atomic_load(
-        &cache->producer_axis, iree_memory_order_relaxed);
-    *out_epoch =
-        (uint64_t)iree_atomic_load(&cache->epoch, iree_memory_order_relaxed);
-    *out_value =
-        (uint64_t)iree_atomic_load(&cache->value, iree_memory_order_relaxed);
-    // Keep payload reads ahead of the closing sequence check. If any read
-    // observed a concurrent writer this fence pairs with the writer's opening
-    // release fence and the closing check must observe its odd sequence.
-    iree_atomic_thread_fence(iree_memory_order_acquire);
-    if (IREE_LIKELY(iree_atomic_load(&cache->sequence,
-                                     iree_memory_order_relaxed) == sequence)) {
-      return (*out_flags & IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_VALID) != 0;
-    }
-  }
-}
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_semaphore_t
@@ -186,16 +89,16 @@ bool iree_hal_amdgpu_semaphore_has_private_stream_semantics(
     iree_hal_semaphore_t* semaphore,
     const iree_hal_amdgpu_logical_device_t* device);
 
-// Returns a pointer to the last_signal cache on an AMDGPU semaphore.
+// Returns the latest submitted-signal metadata on an AMDGPU semaphore.
 // Caller must verify iree_hal_amdgpu_semaphore_isa() first.
-iree_hal_amdgpu_last_signal_t* iree_hal_amdgpu_semaphore_last_signal(
+iree_hal_submitted_signal_t* iree_hal_amdgpu_semaphore_submitted_signal(
     iree_hal_semaphore_t* semaphore);
 
-// Publishes the submission-time frontier and last-signal cache for a signal
+// Publishes the submission-time frontier and submitted-signal metadata
 // from |producer_axis| at (|producer_epoch|, |producer_value|).
 //
 // Merges |producer_frontier| into the semaphore's accumulated frontier under
-// the semaphore mutex, then updates the last-signal cache while still holding
+// the semaphore mutex, then updates the submitted-signal metadata while holding
 // that mutex so PRODUCER_FRONTIER_EXACT reflects the post-merge frontier
 // precisely. Returns false if the frontier merge overflowed capacity; in that
 // case the cache is cleared and callers must fall back to software waits for
@@ -211,7 +114,7 @@ bool iree_hal_amdgpu_semaphore_publish_signal(
 // full semaphore frontier under the async semaphore mutex.
 //
 // Caller must prove iree_hal_amdgpu_semaphore_has_private_stream_semantics()
-// and serialize all signals through |producer_axis|. The last-signal cache is
+// and serialize all signals through |producer_axis|. The submitted metadata is
 // updated as PRODUCER_FRONTIER_EXACT because waiting on the producer queue
 // epoch is sufficient to observe the signaled payload's transitive
 // dependencies.
@@ -219,10 +122,10 @@ void iree_hal_amdgpu_semaphore_publish_private_stream_signal(
     iree_hal_semaphore_t* semaphore, iree_async_axis_t producer_axis,
     uint64_t producer_epoch, uint64_t producer_value);
 
-// Clears the semaphore's last-signal cache.
+// Clears the semaphore's submitted-signal metadata.
 //
 // Caller must verify iree_hal_amdgpu_semaphore_isa() first.
-void iree_hal_amdgpu_semaphore_clear_last_signal(
+void iree_hal_amdgpu_semaphore_clear_submitted_signal(
     iree_hal_semaphore_t* semaphore);
 
 #ifdef __cplusplus

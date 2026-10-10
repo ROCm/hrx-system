@@ -52,6 +52,9 @@ iree_status_t loom_aie2p_xdna_compile_artifact(
     const loom_aie2p_xdna_artifact_request_t* request, bool* out_emitted,
     iree_byte_sequence_t** out_contents);
 
+// Canonical emitter producing complete XDNA ELF artifacts.
+extern const loom_target_emitter_t loom_aie2p_xdna_artifact_emitter;
+
 // Canonical XDNA emission for in-process target environments. Device identity
 // comes from the prepared array target facts; no emission-time target override
 // or intermediate tile artifacts are required.

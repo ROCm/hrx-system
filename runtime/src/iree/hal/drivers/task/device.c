@@ -22,11 +22,11 @@
 #include "iree/hal/drivers/task/executable/environment.h"
 #include "iree/hal/drivers/task/profile.h"
 #include "iree/hal/drivers/task/queue/queue.h"
-#include "iree/hal/drivers/task/semaphore.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
 #include "iree/hal/memory/host_memory_backend.h"
 #include "iree/hal/memory/maintenance_thread.h"
 #include "iree/hal/utils/file_registry.h"
+#include "iree/hal/utils/host_semaphore.h"
 
 // Queue indices are encoded in eight bits of an async frontier axis.
 #define IREE_HAL_TASK_DEVICE_QUEUE_SLOT_COUNT (UINT8_MAX + 1u)
@@ -737,22 +737,14 @@ static iree_status_t iree_hal_task_device_create_semaphore(
   (void)queue_family_affinity;
   (void)flags;
   iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  return iree_hal_task_semaphore_create(device->proactor, initial_value,
+  return iree_hal_host_semaphore_create(device->proactor, initial_value,
                                         device->host_allocator, out_semaphore);
 }
 
 static iree_hal_semaphore_compatibility_t
 iree_hal_task_device_query_semaphore_compatibility(
     iree_hal_device_t* base_device, iree_hal_semaphore_t* semaphore) {
-  if (iree_hal_task_semaphore_isa(semaphore)) {
-    // Fast-path for semaphores related to this device.
-    // TODO(benvanik): ensure the creating devices are compatible as if
-    // independent task systems are used things may not work right (ownership
-    // confusion).
-    return IREE_HAL_SEMAPHORE_COMPATIBILITY_ALL;
-  }
-  // For now we support all semaphore types as we only need wait sources and
-  // all semaphores can be wrapped in those.
+  // Task waits consume the shared asynchronous semaphore protocol.
   return IREE_HAL_SEMAPHORE_COMPATIBILITY_ALL;
 }
 

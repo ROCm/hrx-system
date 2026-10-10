@@ -30,3 +30,22 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+loom_cc_test(
+    name = "iree_hal_test",
+    srcs = ["iree_hal_test.cc"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target:xdna_artifacts",
+    ]),
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amd/xdna",
+        "//loom/binding/c/target/amd/xdna:iree_hal",
+        "//loom/binding/c/target/iree_hal",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

@@ -242,6 +242,8 @@ uint64_t DeviceProfile(const amdf_xdna_endpoint_info_t& endpoint_info) {
   // admits that offset for every unsigned maximum, including an unbounded one.
   for (size_t i = 0; i < binding_accesses.size(); ++i) {
     const uint8_t* binding = metadata + kBindingOffset + i * kBindingSize;
+    // Recipes bind complete logical buffers at offset zero. A zero minimum
+    // admits that use regardless of the unsigned maximum logical offset.
     if (Read16(binding) != 1 || Read16(binding + 2) != 1 ||
         Read16(binding + 4) != binding_accesses[i] ||
         Read16(binding + 6) != 5 || Read64(binding + 8) != kBindingByteLength ||

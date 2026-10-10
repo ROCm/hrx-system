@@ -128,6 +128,80 @@ static void NopCompletion(void* user_data, iree_async_operation_t* operation,
   iree_notification_post(&state->notification, IREE_ALL_WAITERS);
 }
 
+struct ReleaseEntryCompletionState {
+  // Entry whose final reference is released by the completion callback.
+  iree_async_proactor_pool_entry_t* entry = nullptr;
+  // Terminal operation status transferred from the callback.
+  iree_status_t status = iree_ok_status();
+};
+
+static void ReleaseEntryCompletion(void* user_data,
+                                   iree_async_operation_t* operation,
+                                   iree_status_t status,
+                                   iree_async_completion_flags_t flags) {
+  (void)operation;
+  (void)flags;
+  ReleaseEntryCompletionState* state = (ReleaseEntryCompletionState*)user_data;
+  state->status = status;
+  iree_async_proactor_pool_entry_t* entry = state->entry;
+  state->entry = nullptr;
+  iree_async_proactor_pool_entry_release(entry);
+}
+
+struct AllocationLifetimeState {
+  // Number of allocations currently owned by the pool and its runner.
+  iree_atomic_int32_t live_count = IREE_ATOMIC_VAR_INIT(0);
+  // Wakes the test when the final allocation is released.
+  iree_notification_t depleted;
+};
+
+static bool NoLiveAllocations(void* user_data) {
+  AllocationLifetimeState* state = (AllocationLifetimeState*)user_data;
+  return iree_atomic_load(&state->live_count, iree_memory_order_acquire) == 0;
+}
+
+static void ReleaseLiveAllocation(AllocationLifetimeState* state) {
+  int32_t previous_count =
+      iree_atomic_fetch_sub(&state->live_count, 1, iree_memory_order_acq_rel);
+  if (previous_count == 1) {
+    iree_notification_post(&state->depleted, IREE_ALL_WAITERS);
+  }
+}
+
+static iree_status_t AllocationLifetimeCtl(void* self,
+                                           iree_allocator_command_t command,
+                                           const void* params,
+                                           void** inout_ptr) {
+  AllocationLifetimeState* state = (AllocationLifetimeState*)self;
+  void* old_ptr = *inout_ptr;
+  iree_allocator_t system_allocator = iree_allocator_system();
+  iree_status_t status =
+      system_allocator.ctl(system_allocator.self, command, params, inout_ptr);
+  if (!iree_status_is_ok(status)) {
+    return status;
+  }
+
+  if (command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+      command == IREE_ALLOCATOR_COMMAND_CALLOC ||
+      (command == IREE_ALLOCATOR_COMMAND_REALLOC && !old_ptr && *inout_ptr)) {
+    iree_atomic_fetch_add(&state->live_count, 1, iree_memory_order_relaxed);
+  } else if ((command == IREE_ALLOCATOR_COMMAND_FREE && old_ptr) ||
+             (command == IREE_ALLOCATOR_COMMAND_REALLOC && old_ptr &&
+              !*inout_ptr)) {
+    ReleaseLiveAllocation(state);
+  }
+  return iree_ok_status();
+}
+
+static iree_allocator_t AllocationLifetimeAllocator(
+    AllocationLifetimeState* state) {
+  iree_allocator_t allocator = {
+      /*.self=*/state,
+      /*.ctl=*/AllocationLifetimeCtl,
+  };
+  return allocator;
+}
+
 class ProactorPoolTest : public ::testing::Test {
  protected:
   iree_async_proactor_pool_options_t default_options() {
@@ -433,6 +507,62 @@ TEST_F(ProactorPoolTest, AcquiredEntryMakesProgressAfterPoolRelease) {
     EXPECT_EQ(completion.observed_node, node_id);
   }
   iree_notification_deinitialize(&completion.notification);
+}
+
+TEST_F(ProactorPoolTest, FinalEntryReleaseFromCompletionRetiresRunner) {
+  AllocationLifetimeState allocations;
+  iree_notification_initialize(&allocations.depleted);
+  iree_async_proactor_pool_t* pool = nullptr;
+  iree_status_t status = iree_async_proactor_pool_create(
+      1, /*node_ids=*/nullptr, default_options(),
+      AllocationLifetimeAllocator(&allocations), &pool);
+  if (!iree_status_is_ok(status)) {
+    iree_notification_deinitialize(&allocations.depleted);
+    IREE_ASSERT_OK(status);
+  }
+
+  iree_async_proactor_pool_entry_t* entry = nullptr;
+  status = iree_async_proactor_pool_acquire(pool, 0, &entry);
+  if (iree_status_is_unavailable(status)) {
+    iree_status_free(status);
+    iree_async_proactor_pool_release(pool);
+    iree_notification_deinitialize(&allocations.depleted);
+    GTEST_SKIP() << "Platform proactor unavailable";
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_async_proactor_pool_release(pool);
+    iree_notification_deinitialize(&allocations.depleted);
+    IREE_ASSERT_OK(status);
+  }
+
+  iree_async_proactor_t* proactor =
+      iree_async_proactor_pool_entry_proactor(entry);
+  iree_async_proactor_pool_release(pool);
+
+  ReleaseEntryCompletionState completion;
+  completion.entry = entry;
+  iree_async_nop_operation_t nop;
+  iree_async_operation_zero(&nop.base, sizeof(nop));
+  iree_async_operation_initialize(&nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+                                  IREE_ASYNC_OPERATION_FLAG_NONE,
+                                  ReleaseEntryCompletion, &completion);
+
+  status = iree_async_proactor_submit_one(proactor, &nop.base);
+  if (!iree_status_is_ok(status)) {
+    completion.entry = nullptr;
+    iree_async_proactor_pool_entry_release(entry);
+    iree_notification_deinitialize(&allocations.depleted);
+    IREE_ASSERT_OK(status);
+  }
+
+  // The tracked allocator reaches zero only after the callback has returned,
+  // poll has unwound, and the deferred runner and proactor owners have released
+  // all of their storage. This keeps callback state live through teardown
+  // without a wall-clock timeout.
+  EXPECT_TRUE(iree_notification_await(&allocations.depleted, NoLiveAllocations,
+                                      &allocations, iree_infinite_timeout()));
+  IREE_EXPECT_OK(completion.status);
+  iree_notification_deinitialize(&allocations.depleted);
 }
 
 TEST_F(ProactorPoolTest, PoolReleaseStopsAllEntriesBeforeDestroy) {

@@ -127,6 +127,24 @@ IREE_API_EXPORT void iree_hal_pool_advise_asan_reservations(
   }
 }
 
+IREE_API_EXPORT bool iree_hal_pool_query_reservation_views(
+    iree_hal_pool_t* pool, iree_host_size_t reservation_count,
+    const iree_hal_pool_reservation_t* reservations,
+    iree_hal_pool_reservation_view_t* out_views) {
+  IREE_ASSERT_ARGUMENT(pool);
+  IREE_ASSERT_ARGUMENT(reservation_count);
+  IREE_ASSERT_ARGUMENT(reservations);
+  IREE_ASSERT_ARGUMENT(out_views);
+  const iree_hal_pool_vtable_t* vtable =
+      (const iree_hal_pool_vtable_t*)pool->resource.vtable;
+  if (!vtable->query_reservation_views) {
+    return false;
+  }
+  vtable->query_reservation_views(pool, reservation_count, reservations,
+                                  out_views);
+  return true;
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_pool_materialize_reservations(
     iree_hal_pool_t* pool, iree_host_size_t reservation_count,
     const iree_hal_pool_reservation_request_t* requests,

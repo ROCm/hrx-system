@@ -512,7 +512,7 @@ between Bazel and CMake.
 
 | Option | Values | CMake | Bazel portable | Bazel native |
 | --- | --- | --- | --- | --- |
-| `AMDF_BUILD` | `ON`, `OFF` | Enables the portable libamdf shared/static libraries, examples, and tests. Defaults to `OFF`, independently of HAL drivers. | Enables or disables the libamdf package scope. Defaults to `OFF`, independently of HAL drivers. | `--//libamdf/config:enabled=<bool>` |
+| `AMDF_BUILD` | `ON`, `OFF` | Enables the portable libamdf shared/static libraries, examples, and tests. Defaults to `ON` when the XDNA HAL driver requires it and `OFF` otherwise. | Enables or disables the libamdf package scope. The portable XDNA HAL selection enables it automatically. | `--//libamdf/config:enabled=<bool>` |
 | `AMDF_FAMILY_RDNA` | `ON`, `OFF` | Admits RDNA implementation packages to libamdf. | Adds or removes `rdna` from the libamdf implementation-family scope. | `--//libamdf/config:families=<complete-family-list>` |
 | `AMDF_FAMILY_CDNA` | `ON`, `OFF` | Admits CDNA implementation packages to libamdf. | Adds or removes `cdna` from the libamdf implementation-family scope. | `--//libamdf/config:families=<complete-family-list>` |
 | `AMDF_FAMILY_XDNA` | `ON`, `OFF` | Admits XDNA implementation packages to libamdf. | Adds or removes `xdna` from the libamdf implementation-family scope. | `--//libamdf/config:families=<complete-family-list>` |
@@ -523,6 +523,7 @@ between Bazel and CMake.
 | `IREE_HAL_DRIVER_TASK` | `ON`, `OFF` | Builds the task runtime HAL driver. | Adds or removes `task` from the runtime driver registry. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_VULKAN` | `ON`, `OFF` | Builds the Vulkan runtime HAL driver. | Adds or removes `vulkan` from the runtime driver registry and recursive package scope. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_WEBGPU` | `ON`, `OFF` | Builds the WebGPU runtime HAL driver. | Adds or removes `webgpu` from the runtime driver registry and recursive package scope for WebGPU development. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
+| `IREE_HAL_DRIVER_XDNA` | `ON`, `OFF` | Builds the XDNA runtime HAL driver and requires libamdf XDNA support. | Adds or removes `xdna` from the runtime driver registry and enables libamdf when selected. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_DEPENDENCY_MODE` | `pinned`, `package`, `auto` | Selects locked source archives, package discovery, or package-then-pinned dependency resolution. | Writes `--repo_env=IREE_DEPENDENCY_MODE=<mode>`. | `--repo_env=IREE_DEPENDENCY_MODE=<mode>` |
 | `IREE_ROCM_DEPENDENCY_MODE` | `pinned`, `package`, `auto` | Overrides dependency resolution for ROCm header facades; empty uses package mode when `IREE_ROCM_PATH` is set and otherwise inherits `IREE_DEPENDENCY_MODE`. | Writes `--repo_env=IREE_ROCM_DEPENDENCY_MODE=<mode>`. | `--repo_env=IREE_ROCM_DEPENDENCY_MODE=<mode>` |
 | `IREE_ROCM_PATH` | path | Prepends the ROCm or TheRock SDK root to `CMAKE_PREFIX_PATH`, uses it for AMDGPU device tooling, and selects ROCm package header mode by default. | Writes `--repo_env=IREE_ROCM_PATH=<path>` and `--repo_env=IREE_ROCM_DEPENDENCY_MODE=package` unless explicitly overridden. | `--repo_env=IREE_ROCM_PATH=<path>` |
@@ -760,6 +761,7 @@ should usually keep `loom_defaults`.
 | `LOOM_TARGET_SPIRV` | `ON`, `OFF` | Builds Loom SPIR-V target support and production SPIR-V emission. | Adds or removes `spirv` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
 | `LOOM_TARGET_VM` | `ON`, `OFF` | Builds Loom VM compilation and function execution. | Adds or removes `vm` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
 | `LOOM_TARGET_WASM` | `ON`, `OFF` | Builds Loom WebAssembly target support and production Wasm emission. | Adds or removes `wasm` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
+| `LOOM_TARGET_XDNA` | `ON`, `OFF` | Builds Loom XDNA target support and production XDNA emission. | Adds or removes `xdna` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
 | `LOOM_TARGET_X86` | `ON`, `OFF` | Builds Loom x86 target support. | Adds or removes `x86` from the Loom target product set. | `--//loom/config/target:enable=<complete-target-list>` |
 | `LOOM_EXECUTE_IREE_HAL` | `ON`, `OFF` | Builds Loom execution providers that run through IREE HAL when a matching runtime HAL driver is enabled. | Adds or removes `iree_hal` from the Loom execute substrate set. | `--//loom/config/execute:enable=<complete-execute-list>` |
 

@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
@@ -30,6 +31,22 @@ iree_execution_test_suite(
     tools = {
         "loom-opt": "//loom/src/loom/tools/loom-opt",
     },
+)
+
+iree_execution_test_suite(
+    name = "hal_execution_test",
+    data = ["test/hal_execution.loom"],
+    manifests = ["test/hal_execution.test.json"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=libamdf.resource.xdna",
+        "runtime-resource=amd-xdna",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:xdna_hal",
+        "//loom/config/target/arch:vm",
+    ]),
+    tools = {"iree-test-loom": "//loom/src/loom/tools/iree-test-loom"},
 )
 
 loom_check_test(
