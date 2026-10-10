@@ -44,10 +44,12 @@ loom_cc_library(
     name = "model",
     srcs = [
         "model.c",
+        "source.c",
         "state.c",
     ],
     hdrs = [
         "model.h",
+        "source.h",
         "state.h",
     ],
     target_compatible_with = loom_config_compatible_with([
