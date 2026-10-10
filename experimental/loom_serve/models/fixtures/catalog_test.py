@@ -566,7 +566,7 @@ def copy_package(source, directory, kind):
 
 
 def check_startup_failures(server, directory, catalog):
-    """Reject an incomplete package after constructing the other deployments."""
+    """Keep an incomplete registration inspectable while peers serve output."""
     models = catalog["models"]
     cases = [(model, Path(model["source"]) / "control.loom") for model in models]
     cases.append((models[-1], Path("providers/text/advance.loom")))
@@ -858,16 +858,23 @@ def check_dynamic_catalog(server, directory, catalog, workers):
         for model in catalog["models"]
     ]
     log_path = directory / f"dynamic-catalog-{workers}.log"
+    arguments = [
+        "--listen=127.0.0.1:0",
+        f"--workers={workers}",
+        "--model_capacity=12",
+        "--connections=320",
+        "--pool_backing=fixed",
+        "--heartbeat_ms=0",
+    ]
+    if workers == 4:
+        # Process settings are separate from the dynamically registered catalog.
+        settings = directory / "configuration" / "serve flags.txt"
+        settings.write_text(
+            "# Shared process resources\n" + "\n".join(arguments) + "\n"
+        )
+        arguments = [f"--flagfile={settings.relative_to(directory)}"]
     with child_server(
-        [
-            str(server),
-            "--listen=127.0.0.1:0",
-            f"--workers={workers}",
-            "--model_capacity=12",
-            "--connections=320",
-            "--pool_backing=fixed",
-            "--heartbeat_ms=0",
-        ],
+        [str(server), *arguments],
         log_path,
         cwd=directory,
     ) as (process, address):
@@ -1055,17 +1062,23 @@ def check_dynamic_catalog(server, directory, catalog, workers):
 def check_multiple_bindings(server, directory, catalog):
     socket_path = directory / 'serve "local".sock'
     log_path = directory / "multiple-bindings.log"
+    settings = directory / "configuration" / "listeners.flags"
+    settings.write_text(
+        "\n".join(
+            [
+                f"--models={catalog.relative_to(directory)}",
+                "--listen=127.0.0.1:0",
+                f"--listen=unix:{socket_path}",
+                "--workers=1",
+                "--connections=320",
+                "--pool_backing=fixed",
+                "--heartbeat_ms=0",
+            ]
+        )
+        + "\n"
+    )
     with child_server(
-        [
-            str(server),
-            f"--models={catalog.relative_to(directory)}",
-            "--listen=127.0.0.1:0",
-            f"--listen=unix:{socket_path}",
-            "--workers=1",
-            "--connections=320",
-            "--pool_backing=fixed",
-            "--heartbeat_ms=0",
-        ],
+        [str(server), f"--flagfile={settings.relative_to(directory)}"],
         log_path,
         cwd=directory,
     ) as (process, address):

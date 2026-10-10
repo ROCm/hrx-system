@@ -6,6 +6,13 @@ services supply HTTP protocols, admission, memory ownership and observation for
 text, images, embeddings and decisions. Its model-author interfaces are intended
 to change with real models; it is not a general HAL VM module.
 
+Start with the [operator guide](docs/OPERATING.md) to run the shared server with
+zero models, register source packages over HTTP, choose resource bounds and
+observe/drain/remove deployments. One server owns the process resources;
+models and listeners have independent lifetimes. The
+[small source fixtures](models/fixtures/README.md) produce exact results without
+downloading learned weights.
+
 The [model-authoring packet](docs/README.md) walks through reproduction,
 compiler/runtime ownership, a proposed second-model port, and performance
 experiments. Its [agent entry point](docs/AGENT_START.md) gives a first assignment,
@@ -20,9 +27,9 @@ configuration, numerical policy, and model-specific reference checks.
 | Package | Responsibility |
 | --- | --- |
 | [`runtime/`](runtime) | Source JIT, command materialization, VM imports, weight streaming and queue timelines |
-| [`http/`](http) | TCP carrier, bounded request storage and single-owner model routing |
+| [`http/`](http) | TCP/Unix carriers, bounded request storage and the service ownership contract |
 | [`telemetry/`](telemetry) | Typed overwrite streams and lifetime counters, independent of consumer pace |
-| [`serving/`](serving) | Deployment catalogs and multiple source models sharing one device and listener |
+| [`serving/`](serving) | Dynamic deployment catalogs and routing across shared device resources and listeners |
 | [`text/`](text) | Source-defined packed autoregressive residency, chat protocol, admission and retained token scheduling |
 | [`image/`](image) | Source-defined diffusion residency, image request validation, completed-image service and output encoding |
 | [`finite/`](finite) | Bounded source-defined request cohorts and result retirement shared by embeddings and decisions |
@@ -46,11 +53,13 @@ paths relative to its model directory; copying that directory alone is not a
 complete source package.
 The [motif guide](motifs/README.md) describes composition and shape contracts.
 
-For example, the image server is
-`//experimental/loom_serve/image:server`; the text server is
-`//experimental/loom_serve/text:server`. The [shared server](serving/README.md)
-is `//experimental/loom_serve/serving:server`, selecting named text, image,
-embedding and decision deployments with `--models=/path/to/catalog.json`.
+The [shared server](serving/README.md) is
+`//experimental/loom_serve/serving:server`, with optional initial text, image,
+embedding and decision registrations from `--models=/path/to/catalog.json`.
+It can start empty and manage registrations over HTTP. The single-model
+`//experimental/loom_serve/image:server` and
+`//experimental/loom_serve/text:server` remain development tools using the same
+native services.
 Deployment source and asset paths are relative to the process working directory;
 entries inside each source catalog are relative to its model directory.
 The serving JIT currently selects AMDGPU; model-neutral native interfaces do

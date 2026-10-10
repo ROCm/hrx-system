@@ -1,5 +1,9 @@
 # Serving multiple source models
 
+The [operator guide](../docs/OPERATING.md) walks through empty startup, dynamic
+registration, process configuration, observation and removal. This reference
+details the serving and ownership contracts behind that flow.
+
 `//experimental/loom_serve/serving:server` serves named text, image, embedding and
 decision deployments through one logical HTTP server with independently owned
 TCP, IPv6, and Unix-domain listeners. All deployments borrow
@@ -13,19 +17,19 @@ prepared parameter residencies; it does not deduplicate those weights.
 The application owns one [host](../runtime/host.h) with shared IREE task workers
 and asynchronous I/O services. Every catalog borrows the host's shared JIT task
 queue; adding or removing a model neither creates nor joins a compiler pool.
-Finite-vector and image registration drive asynchronous source/JIT preparation
-on that pool and bind shared memory only on the serving owner. Text startup
-constructors still join on the outer application thread. HTTP admission and
-model scheduling run as a cooperative task process:
+Every modality's registration drives asynchronous source/JIT preparation on
+that pool and binds shared memory only on the serving owner. HTTP admission
+and model scheduling run as a cooperative task process:
 bounded serialized turns preserve shared memory-policy ownership, while CPU
 preparation/output and device work proceed independently. Network, task release,
 model frontiers and heartbeat deadlines wake the owner directly. Only the outer
 application caller joins final scheduler release; no task waits for device work.
 Listeners and accepted connections use the host's shared proactor pool. Adding
 a connection or listener creates no private thread. A listener can retire while
-its accepted response streams continue, and one failed bind leaves the other
-listeners and model state intact. Process signals belong to the application,
-not individual listeners.
+its accepted response streams continue. The listener API scopes a failed bind
+to that listener; this executable requires all configured startup bindings to
+succeed before announcing readiness and otherwise unwinds startup. Process
+signals belong to the application, not individual listeners.
 
 The [routing owner](router.h) belongs to this application layer. Modality
 services implement the [HTTP service contract](../http/service.h) without

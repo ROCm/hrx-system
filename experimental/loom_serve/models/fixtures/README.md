@@ -41,11 +41,13 @@ curl --fail --silent --show-error http://127.0.0.1:8080/v1/models
 curl --fail --silent --show-error http://127.0.0.1:8080/v1/status
 ```
 
-Readiness returns `{"status":"ready"}`. Discovery returns `pixels` as image,
-`vectors` as embedding, and `judge` as decision, each with its primary endpoint.
-The first two have `loom.tokenize:true`; `judge` has no tokenizer. Idle status
-reports zero queued/active requests. Status describes scheduler ownership, not
-GPU utilization; queries do not activate weights or wait for model completion.
+Readiness returns `{"status":"ready"}` even while packages are preparing.
+Discovery returns `pixels` as image, `vectors` as embedding, and `judge` as
+decision, each with its primary endpoint. Once preparation completes, the first
+two have `loom.tokenize:true`; `judge` has no tokenizer. Inference and tokenizer
+requests arriving earlier wait within the holding budget. Idle status reports
+zero queued/active requests. Status describes scheduler ownership, not GPU
+utilization; queries do not activate weights or wait for model completion.
 
 ## Exact first results
 
@@ -163,13 +165,20 @@ catalog; it cannot satisfy those paths through the original repository cwd.
 This checks source-package closure without adding a package format or changing
 the server's cwd-relative deployment semantics.
 
-Before serving requests, the workload removes each model's `control.loom` in
-turn, placing that deployment last in the catalog, and separately removes a
-sibling numerical provider. Startup must exit normally with failure, identify
-the deployment and missing file, and never announce readiness. The late control
-failure exercises partial residency teardown after the other three models have
-been constructed. Restoring the files then permits the complete workload below;
-no alternate source directory or precompiled artifact can satisfy a missing leaf.
+The workload removes each model's `control.loom` in turn, placing that deployment
+last in the catalog, and separately removes a sibling numerical provider. The
+server stays ready, exposes that registration as `failed` with the missing-file
+diagnostic, and produces exact output from a peer model. The failed deployment
+remains inspectable through normal shutdown. Restoring the files permits the
+complete workload below; no alternate source directory or precompiled artifact
+can satisfy a missing leaf.
+
+The dynamic catalog starts empty and registers twelve initially drained models.
+Its one-worker run uses inline process options; the four-worker run loads the
+same options through an IREE flag file. A separate flag-file launch combines
+TCP and Unix listeners with spaces and quotes in the socket path. These execute
+the [operator configuration flow](../../docs/OPERATING.md), not a test-only
+configuration parser.
 
 Twenty concurrent client operations share two resident text rows and a
 128-position logical pool. Variable-length conversations run alongside image,

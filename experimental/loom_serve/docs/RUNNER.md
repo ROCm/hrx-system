@@ -44,28 +44,32 @@ directly, rather than reconstructed in host code.
 
 ## Cold residency
 
-`text_initialize` first invokes the source bootstrap, retains its opaque control
-state, and loads the tokenizer with the source-declared terminal marker. It then
-borrows the caller's device owner, creates its JIT, compiles the declared stages,
-checks their layout agreement, indexes parameter plans, records commands, creates the warm VM
-program/native capabilities, and allocates retained rows and MTP state. Each
-stage can have different kernel choices while binding the same model storage.
-No session gets another copy of the weights or code.
+`loom_serve_text_load_create` creates a retained preparation operation borrowing
+the application's device owner. The serving owner advances it through source
+bootstrap, stage compilation, weight planning, binding and initial device
+readiness. Bootstrap and compilation run on the shared host task pool;
+callbacks publish results and wake the owner rather than joining that pool or
+destroying model state. Binding records commands, creates warm VM capabilities
+and allocates retained rows and optional MTP state. Each stage can have different
+kernel choices while binding the same model storage. No session gets another
+copy of the weights or code.
 
 Allocation lengths, initial zero extents, arena views and target/draft origins
 come from the cold source result. Native code retains those result buffers after
 the bootstrap process is gone and through the initialization frontier. Successful
-initialization releases them after one join; partial failure leaves them owned
-until teardown drains accepted work. Workspace extent/alignment comes directly
-from compiler reflection, not a model formula or a source-side estimate.
+initialization releases them after asynchronous ALL readiness; partial failure
+leaves them owned until retirement joins accepted work. Workspace extent and
+alignment come directly from compiler reflection, not a model formula or a
+source-side estimate.
 
-`loom_serve_device_create` establishes one runtime domain from a HAL device
-URI and explicit backing/budget options. Model components borrow its device,
-group, exact queues, execution object and physical pool; the helper does not
-contain a tokenizer, stage catalog or model policy. Text and image constructors
-can share this owner. One host owner serializes calls and residency changes.
-The application destroys models before their device owner; profiling spans the
-whole device lifetime rather than opening overlapping per-model sessions.
+`loom_serve_device_group_create` establishes the application's immutable HAL
+group from device URIs and explicit backing/budget options. Per-device records
+own exact queues, workspace backing and retained-memory admission; model
+components create their own execution timelines over those shared resources.
+This owner contains no tokenizer, stage catalog or model policy. One serving
+owner serializes calls and residency changes. The application retires models
+before their device group; profiling spans the whole group lifetime rather
+than opening overlapping per-model sessions.
 The current JIT still selects AMDGPU explicitly. A different device URI alone
 does not provide a compiler backend or model kernels for that device.
 
@@ -73,11 +77,14 @@ The model catalog includes `config.loom` for fixed specialization bounds.
 The source bootstrap supplies run-dependent overrides to the public compiler
 configuration interface; reusable device helpers still take explicit operands.
 
-The source JIT shares immutable compiler state and uses the standard loomc task
-pool for concurrent native requests. Each worker owns reusable scratch; each
-stage call drains its task queue before returning a complete stage or failure.
-This startup join governs compiler/result lifetime, not GPU inference ordering.
-The pool is independent of session count and idle during warm serving.
+The source JIT shares immutable compiler state and uses the host's loomc task
+sink for concurrent native requests. Each worker owns reusable scratch; stage
+completion retires that stage's work without draining peer compilations.
+Dynamic registration uses `loom_serve_jit_compile_async`, keeping routing and
+already-ready models runnable during preparation. Synchronous CLI constructors
+join the same operation only on their outer application thread. Compiler jobs,
+model scheduling and CPU media work share the host workers, independently of
+session count.
 
 The packed server constructs a bounded Cartesian catalog of token classes and
 independent span classes, including exact terminal sizes for odd residency
@@ -87,9 +94,10 @@ across models; proposal storage follows resident count and verification
 capture follows each compiled span capacity. Shape changes reuse backing;
 elastic row/page growth commits new physical slabs only as capacity is needed.
 
-`text_prepare_weights` delegates cold planning to `loom_serve_weights_create`.
-It resolves all target/MTP parameter sharing before I/O, so each unique tensor
-is loaded once per activation. Each call selects explicit reflected roots from one checkpoint
+`text_bind_weights` constructs the checkpoint plans; the load operation submits
+their cold source policy through `loom_serve_weights_prepare_async`. It resolves
+all target/MTP parameter sharing before I/O, so each unique tensor is loaded once
+per activation. Each call selects explicit reflected roots from one checkpoint
 domain. Distinct domains, such as an immutable base and its LoRA adapter, load
 separately and cannot collide through equal tensor names. Recorded commands
 can bind roots from both domains. The model's [`weights.loom`](../models/qwen/weights.loom)
