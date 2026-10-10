@@ -581,7 +581,9 @@ TEST(DeviceGroup, CreateWithReplacementsPreservesTopology) {
   context.replacements[0] = replacement_a;
   context.replacements[1] = replacement_b;
   iree_hal_device_group_replacement_callback_t replacement_callback = {
-      .fn = ReplaceDeviceWithRetainedMock, .user_data = &context};
+      .fn = ReplaceDeviceWithRetainedMock,
+      .user_data = &context,
+  };
 
   iree_hal_device_group_t* replacement_group = NULL;
   IREE_ASSERT_OK(iree_hal_device_group_create_with_replacements(

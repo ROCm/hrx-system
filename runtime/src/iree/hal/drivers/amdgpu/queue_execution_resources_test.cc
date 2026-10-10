@@ -41,8 +41,10 @@ TEST(QueueExecutionResourcesTest, MapsGfx942InterleavedPartitions) {
   uint32_t mask[2] = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_queue_execution_resource_write_mask(
       &topology,
-      {.count = IREE_ARRAYSIZE(selected_resources),
-       .ordinals = selected_resources},
+      {
+          .count = IREE_ARRAYSIZE(selected_resources),
+          .ordinals = selected_resources,
+      },
       /*out_mask_bit_count=*/64, mask));
   EXPECT_EQ(mask[0], UINT32_C(0x000000FF));
   EXPECT_EQ(mask[1], 0u);
@@ -69,8 +71,10 @@ TEST(QueueExecutionResourcesTest, MapsGfx11WgpResources) {
   uint32_t selected_mask[2] = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_queue_execution_resource_write_mask(
       &topology,
-      {.count = IREE_ARRAYSIZE(selected_resources),
-       .ordinals = selected_resources},
+      {
+          .count = IREE_ARRAYSIZE(selected_resources),
+          .ordinals = selected_resources,
+      },
       /*out_mask_bit_count=*/64, selected_mask));
   EXPECT_EQ(selected_mask[0], UINT32_C(0x00000003));
   EXPECT_EQ(selected_mask[1], UINT32_C(0x000000C0));

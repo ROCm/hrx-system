@@ -95,11 +95,10 @@ static DirectDispatchBlock MakeDirectDispatchBlock() {
 }
 
 static iree_hal_amdgpu_device_kernel_args_t MakeHarvestKernelArgs() {
-  iree_hal_amdgpu_device_kernel_args_t kernel_args =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  kernel_args.kernel_object = 0x12345678ull;
-  kernel_args.setup = 2;
+  iree_hal_amdgpu_device_kernel_args_t kernel_args = {
+      .kernel_object = 0x12345678ull,
+      .setup = 2,
+  };
   kernel_args.workgroup_size[0] = 32;
   kernel_args.workgroup_size[1] = 1;
   kernel_args.workgroup_size[2] = 1;
@@ -140,8 +139,10 @@ TEST(AqlBlockProcessorTimestampTest,
      CommandBufferTimestampInitializesRecordAndPackets) {
   DirectDispatchBlock block = MakeDirectDispatchBlock();
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {.base = packets,
-                                     .mask = IREE_ARRAYSIZE(packets) - 1u};
+  iree_hal_amdgpu_aql_ring_t ring = {
+      .base = packets,
+      .mask = IREE_ARRAYSIZE(packets) - 1u,
+  };
   iree_hal_amdgpu_pm4_ib_slot_t pm4_ib_slots[8] = {};
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
@@ -150,7 +151,8 @@ TEST(AqlBlockProcessorTimestampTest,
 
   iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {
       .base = MakeBaseProcessor(&ring, packet_headers, packet_setups,
-                                kernarg_blocks)};
+                                kernarg_blocks),
+  };
   processor.command_buffer.metadata.record_ordinal = 7;
   processor.command_buffer.metadata.command_buffer_id = 0xCAFEull;
   processor.command_buffer.metadata.block_ordinal = 3;
@@ -199,8 +201,10 @@ TEST(AqlBlockProcessorTimestampTest,
      RejectsMissingCommandBufferTimestampStrategy) {
   DirectDispatchBlock block = MakeDirectDispatchBlock();
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {.base = packets,
-                                     .mask = IREE_ARRAYSIZE(packets) - 1u};
+  iree_hal_amdgpu_aql_ring_t ring = {
+      .base = packets,
+      .mask = IREE_ARRAYSIZE(packets) - 1u,
+  };
   iree_hal_amdgpu_pm4_ib_slot_t pm4_ib_slots[8] = {};
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
@@ -209,7 +213,8 @@ TEST(AqlBlockProcessorTimestampTest,
 
   iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {
       .base = MakeBaseProcessor(&ring, packet_headers, packet_setups,
-                                kernarg_blocks)};
+                                kernarg_blocks),
+  };
   processor.command_buffer.target.record = &record;
   processor.command_buffer.packets.start.packet = &packets[2];
   processor.command_buffer.packets.start.pm4_ib_slot = &pm4_ib_slots[2];
@@ -226,8 +231,10 @@ TEST(AqlBlockProcessorTimestampTest,
      DispatchTimestampPatchesCompletionSignalAndHarvestSource) {
   DirectDispatchBlock block = MakeDirectDispatchBlock();
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {.base = packets,
-                                     .mask = IREE_ARRAYSIZE(packets) - 1u};
+  iree_hal_amdgpu_aql_ring_t ring = {
+      .base = packets,
+      .mask = IREE_ARRAYSIZE(packets) - 1u,
+  };
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[2] = {};
@@ -249,7 +256,8 @@ TEST(AqlBlockProcessorTimestampTest,
 
   iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {
       .base = MakeBaseProcessor(&ring, packet_headers, packet_setups,
-                                kernarg_blocks)};
+                                kernarg_blocks),
+  };
   processor.dispatches.values = &dispatch;
   processor.dispatches.count = 1;
   processor.harvest.kernel_args = &harvest_kernel_args;
@@ -373,8 +381,10 @@ TEST(AqlBlockProcessorTimestampTest,
 TEST(AqlBlockProcessorTimestampTest, RejectsPartialCommandBufferTimestampPlan) {
   DirectDispatchBlock block = MakeDirectDispatchBlock();
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {.base = packets,
-                                     .mask = IREE_ARRAYSIZE(packets) - 1u};
+  iree_hal_amdgpu_aql_ring_t ring = {
+      .base = packets,
+      .mask = IREE_ARRAYSIZE(packets) - 1u,
+  };
   iree_hal_amdgpu_pm4_ib_slot_t pm4_ib_slots[8] = {};
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
@@ -382,7 +392,8 @@ TEST(AqlBlockProcessorTimestampTest, RejectsPartialCommandBufferTimestampPlan) {
 
   iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {
       .base = MakeBaseProcessor(&ring, packet_headers, packet_setups,
-                                kernarg_blocks)};
+                                kernarg_blocks),
+  };
   processor.command_buffer.packets.start.packet = &packets[2];
   processor.command_buffer.packets.start.pm4_ib_slot = &pm4_ib_slots[2];
 
@@ -396,8 +407,10 @@ TEST(AqlBlockProcessorTimestampTest, RejectsPartialCommandBufferTimestampPlan) {
 TEST(AqlBlockProcessorTimestampTest, RejectsOutOfRangeDispatchPacketOrdinal) {
   DirectDispatchBlock block = MakeDirectDispatchBlock();
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {.base = packets,
-                                     .mask = IREE_ARRAYSIZE(packets) - 1u};
+  iree_hal_amdgpu_aql_ring_t ring = {
+      .base = packets,
+      .mask = IREE_ARRAYSIZE(packets) - 1u,
+  };
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[2] = {};
@@ -413,7 +426,8 @@ TEST(AqlBlockProcessorTimestampTest, RejectsOutOfRangeDispatchPacketOrdinal) {
 
   iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {
       .base = MakeBaseProcessor(&ring, packet_headers, packet_setups,
-                                kernarg_blocks)};
+                                kernarg_blocks),
+  };
   processor.dispatches.values = &dispatch;
   processor.dispatches.count = 1;
   processor.harvest.kernel_args = &harvest_kernel_args;

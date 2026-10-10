@@ -21,11 +21,10 @@ constexpr uint64_t kRmwX64KernelObject = 0xC064u;
 static iree_hal_amdgpu_device_kernel_args_t MakeKernelArgs(
     uint64_t kernel_object, uint16_t setup, uint16_t kernarg_size,
     uint16_t kernarg_alignment) {
-  iree_hal_amdgpu_device_kernel_args_t kernel_args =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  kernel_args.kernel_object = kernel_object;
-  kernel_args.setup = setup;
+  iree_hal_amdgpu_device_kernel_args_t kernel_args = {
+      .kernel_object = kernel_object,
+      .setup = setup,
+  };
   kernel_args.workgroup_size[0] = 1;
   kernel_args.workgroup_size[1] = 1;
   kernel_args.workgroup_size[2] = 1;
@@ -61,7 +60,8 @@ static iree_hal_amdgpu_device_kernels_t MakeKernels() {
       .iree_hal_amdgpu_device_atomic_rmw_x64 =
           MakeKernelArgs(kRmwX64KernelObject, 6,
                          IREE_HAL_AMDGPU_DEVICE_ATOMIC_RMW_KERNARG_SIZE,
-                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_RMW_KERNARG_ALIGNMENT)};
+                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_RMW_KERNARG_ALIGNMENT),
+  };
   return kernels;
 }
 
@@ -145,8 +145,9 @@ TEST(AtomicTest, StoreX32NormalizesModeAndClearsPadding) {
   uint16_t setup = 0xBEEFu;
   packet.header = 0xFFFFu;
   packet.setup = 0xA5A5u;
-  iree_hal_amdgpu_device_atomic_store_kernargs_t kernargs = {.reserved =
-                                                                 UINT32_MAX};
+  iree_hal_amdgpu_device_atomic_store_kernargs_t kernargs = {
+      .reserved = UINT32_MAX,
+  };
   const iree_hal_atomic_store_params_t params = {
       .value = 0x89ABCDEFu,
       .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,

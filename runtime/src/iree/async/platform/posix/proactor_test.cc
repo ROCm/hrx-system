@@ -136,10 +136,9 @@ TEST_F(PosixProactorTest, WorkerAffinityAppliesToFileOperations) {
   int cpu = sched_getcpu();
   ASSERT_GE(cpu, 0);
   ASSERT_LT(cpu, CPU_SETSIZE);
-  iree_thread_affinity_t affinity =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-           // differs from list initialization.
-  affinity.id_assigned = 1;
+  iree_thread_affinity_t affinity = {
+      .id_assigned = 1,
+  };
   affinity.id = cpu;
   IREE_ASSERT_OK(CreatePool(UINT32_MAX, affinity));
   IREE_ASSERT_OK(iree_async_proactor_pool_get(pool_, 0, &proactor_));

@@ -22,15 +22,21 @@ static constexpr iree_hal_queue_execution_resource_group_spec_t
 };
 static constexpr iree_hal_queue_execution_resource_spec_t
     kQueueExecutionResources[] = {
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 0,
-         .execution_unit_count = 2},
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 2,
-         .execution_unit_count = 2},
-        {.group_ordinal = 1,
-         .first_execution_unit_ordinal = 6,
-         .execution_unit_count = 1},
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 0,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 2,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 1,
+            .first_execution_unit_ordinal = 6,
+            .execution_unit_count = 1,
+        },
 };
 
 static void ExpectStringViewEq(iree_string_view_t actual,

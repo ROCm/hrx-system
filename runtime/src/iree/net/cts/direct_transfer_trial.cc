@@ -452,7 +452,8 @@ struct Peer {
               return iree_ok_status();
             },
         .build_user_data = this,
-        .completion_callback = {OnMessageSent, this}};
+        .completion_callback = {OnMessageSent, this},
+    };
     iree_status_t status = iree_net_queue_channel_send_command(
         channel, IREE_NET_QUEUE_ID_NONE, &params);
     if (iree_status_is_ok(status)) {
@@ -521,10 +522,9 @@ struct Peer {
                 fragment.length),
             &target, Offset(axis, epoch) + target_offset};
       }
-      iree_net_direct_write_params_t params =
-          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment
-               // conversion differs from list initialization.
-      params.flags = IREE_NET_DIRECT_WRITE_FLAG_NOTIFY;
+      iree_net_direct_write_params_t params = {
+          .flags = IREE_NET_DIRECT_WRITE_FLAG_NOTIFY,
+      };
       params.notification_cookie = (epoch << 1) | axis;
       params.entry_count = entries.size();
       params.entries = entries.data();

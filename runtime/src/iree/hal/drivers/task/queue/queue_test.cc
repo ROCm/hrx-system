@@ -251,12 +251,14 @@ TEST_P(TaskQueueTest, TransfersReleaseBuffersBeforeTerminalSignal) {
         iree_hal_buffer_barrier_t range = {
             .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
             .target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ,
-            .buffer_ref = iree_hal_make_buffer_ref(buffer, 0, length)};
+            .buffer_ref = iree_hal_make_buffer_ref(buffer, 0, length),
+        };
         iree_hal_barrier_t after = {
             .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
             .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
             .buffer_barrier_count = 1,
-            .buffer_barriers = &range};
+            .buffer_barriers = &range,
+        };
         const iree_hal_barrier_list_t list = {1, &after};
         const iree_hal_queue_barriers_t barriers = {nullptr, &list};
         IREE_ASSERT_OK(iree_hal_queue_upload(queue, waits, signals,

@@ -311,7 +311,8 @@ TEST(IrpaBuilderIntegrationTest, BuildsEmbeddedArchiveAtReportedOffset) {
       .key = IREE_SV("embedded"),
       .metadata = iree_const_byte_span_empty(),
       .length = source_contents.size(),
-      .type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE};
+      .type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE,
+  };
   source_entry.storage.file.handle = source_file_handle;
   source_entry.storage.file.offset = 0;
   source_entry.storage.file.minimum_alignment = 256;

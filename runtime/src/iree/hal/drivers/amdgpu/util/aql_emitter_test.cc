@@ -21,12 +21,11 @@ static iree_hsa_signal_t MakeSignal(uint64_t handle) {
 }
 
 static iree_hal_amdgpu_aql_dispatch_params_t MakeExtendedDispatchParams() {
-  iree_hal_amdgpu_aql_dispatch_params_t params =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  params.kernel_object = 0x0102030405060708ull;
-  params.kernarg_address = reinterpret_cast<const void*>(
-      static_cast<uintptr_t>(0x1112131415161718ull));
+  iree_hal_amdgpu_aql_dispatch_params_t params = {
+      .kernel_object = 0x0102030405060708ull,
+      .kernarg_address = reinterpret_cast<const void*>(
+          static_cast<uintptr_t>(0x1112131415161718ull)),
+  };
   params.workgroup_size[0] = 64;
   params.workgroup_size[1] = 2;
   params.workgroup_size[2] = 1;

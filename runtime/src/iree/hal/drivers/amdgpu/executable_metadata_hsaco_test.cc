@@ -490,7 +490,8 @@ TEST(ExecutableMetadataHsacoTest, PreservesParameterRangesWithElfOnlyExports) {
       .kernel_count = 1,
       .kernels = &kernel,
       .elf_kernel_symbol_count = 2,
-      .elf_kernel_symbols = symbols};
+      .elf_kernel_symbols = symbols,
+  };
   auto* metadata = AllocateAndPopulate(&hsaco_metadata, loaded_data);
   ASSERT_EQ(metadata->export_count, 3);
   ASSERT_EQ(metadata->parameter_count, 2);

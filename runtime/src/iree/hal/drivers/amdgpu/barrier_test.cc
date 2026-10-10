@@ -165,8 +165,9 @@ TEST(BarrierTest, QueueBoundaryDefaultsCanBeReplacedIndependently) {
   EXPECT_EQ(native.after.acquire, IREE_HSA_FENCE_SCOPE_NONE);
   EXPECT_EQ(native.after.release, IREE_HSA_FENCE_SCOPE_NONE);
 
-  iree_hal_barrier_t acquire = {.flags =
-                                    IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE};
+  iree_hal_barrier_t acquire = {
+      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+  };
   const iree_hal_barrier_list_t acquire_list = {1, &acquire};
   barriers = {&empty, &acquire_list};
   native = iree_hal_amdgpu_queue_barriers_resolve(&barriers);

@@ -59,12 +59,11 @@ static void MakeScaleAndOffsetBindings(iree_hal_buffer_t* input_buffer,
 // output[i] = input[i] * scale + offset.
 TEST_P(QueueDispatchTest, DispatchWithConstantsAndBindings) {
   const uint32_t input_data[] = {1, 2, 3, 4};
-  iree_hal_buffer_params_t params =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ |
-                 IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET;
+  iree_hal_buffer_params_t params = {
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ |
+               IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+  };
   Ref<iree_hal_buffer_t> input_buffer;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device_allocator_, params, sizeof(input_data), input_buffer.out()));

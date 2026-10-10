@@ -218,8 +218,9 @@ static hsa_status_t HSA_API CaptureSystemEventHandler(
 // A libhsa whose only populated thunk is the system event registration this
 // driver calls; every other entry stays NULL.
 static iree_hal_amdgpu_libhsa_t MakeCapturingLibhsa() {
-  iree_hal_amdgpu_libhsa_t libhsa = {.hsa_amd_register_system_event_handler =
-                                         CaptureSystemEventHandler};
+  iree_hal_amdgpu_libhsa_t libhsa = {
+      .hsa_amd_register_system_event_handler = CaptureSystemEventHandler,
+  };
   return libhsa;
 }
 

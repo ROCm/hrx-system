@@ -30,13 +30,12 @@ static iree_hal_amdgpu_device_kernel_args_t MakeKernelArgs(
     uint32_t private_segment_size, uint32_t group_segment_size) {
   static_assert(IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE ==
                 IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE);
-  iree_hal_amdgpu_device_kernel_args_t kernel_args =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  kernel_args.kernel_object = kernel_object;
-  kernel_args.kernarg_size = IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE;
-  kernel_args.kernarg_alignment = 8;
-  kernel_args.setup = setup;
+  iree_hal_amdgpu_device_kernel_args_t kernel_args = {
+      .kernel_object = kernel_object,
+      .setup = setup,
+      .kernarg_size = IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE,
+      .kernarg_alignment = 8,
+  };
   kernel_args.workgroup_size[0] = workgroup_size_x;
   kernel_args.workgroup_size[1] = 1;
   kernel_args.workgroup_size[2] = 1;
@@ -68,7 +67,8 @@ static iree_hal_amdgpu_device_kernels_t MakeKernels() {
       .iree_hal_amdgpu_device_buffer_copy_block_x16 =
           MakeKernelArgs(kCopyBlockX16KernelObject, 10, 32, 13, 17),
       .iree_hal_amdgpu_device_buffer_copy_block_unaligned_x16 =
-          MakeKernelArgs(kCopyBlockUnalignedX16KernelObject, 11, 32, 14, 18)};
+          MakeKernelArgs(kCopyBlockUnalignedX16KernelObject, 11, 32, 14, 18),
+  };
   return kernels;
 }
 

@@ -310,10 +310,10 @@ class LocalStreamRightsTest : public LocalStreamTest {
   void Fragment(const char* bytes, size_t length, size_t first, size_t count) {
     alignas(cmsghdr) char control[CMSG_SPACE(8 * sizeof(int))] = {};
     iovec buffer = {const_cast<char*>(bytes), length};
-    msghdr message = {};  // NOLINT(iree-cpp-designated-initializer) --
-                          // Assignment sequencing spans intervening work.
-    message.msg_iov = &buffer;
-    message.msg_iovlen = 1;
+    msghdr message = {
+        .msg_iov = &buffer,
+        .msg_iovlen = 1,
+    };
     if (count) {
       message.msg_control = control;
       message.msg_controllen = CMSG_SPACE(count * sizeof(int));

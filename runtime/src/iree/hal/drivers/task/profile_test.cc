@@ -28,7 +28,8 @@ static const iree_hal_queue_family_spec_t kQueueFamilySpec = [] {
       .priority_count = 1,
       .priorities = &kQueuePriority,
       .physical_device_affinity = 1,
-      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH};
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+  };
   return spec;
 }();
 
@@ -413,8 +414,10 @@ static const iree_hal_task_executable_vtable_t kFakeTaskExecutableVTable = {
 class TaskProfileRecorderTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    iree_hal_device_queue_spec_t queues = {.family_count = 1,
-                                           .families = &kQueueFamilySpec};
+    iree_hal_device_queue_spec_t queues = {
+        .family_count = 1,
+        .families = &kQueueFamilySpec,
+    };
     iree_hal_device_spec_params_t spec_params = {.queues = &queues};
     iree_hal_device_spec_t* device_spec = nullptr;
     IREE_ASSERT_OK(iree_hal_device_spec_create(

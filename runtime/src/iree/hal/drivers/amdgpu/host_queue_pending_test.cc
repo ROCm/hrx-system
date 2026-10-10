@@ -338,8 +338,10 @@ static iree_status_t CreateExplicitFixedBlockPool(
   IREE_RETURN_IF_ERROR(iree_hal_pool_allocate_buffer(
       backing_pool, MakeTransientBufferParams(), block_size,
       iree_infinite_timeout(), backing_buffer.out()));
-  iree_hal_fixed_block_pool_options_t options = {.block_size = block_size,
-                                                 .frontier_capacity = 2};
+  iree_hal_fixed_block_pool_options_t options = {
+      .block_size = block_size,
+      .frontier_capacity = 2,
+  };
   IREE_RETURN_IF_ERROR(iree_hal_fixed_block_pool_create_from_buffer(
       backing_buffer, 0, IREE_HAL_WHOLE_BUFFER, &options,
       iree_allocator_system(), out_pool));
@@ -364,8 +366,9 @@ TEST_F(HostQueuePendingTest,
   IREE_ASSERT_OK(CreateExplicitFixedBlockPool(device.base_device(), family,
                                               kByteLength, native_pool.out(),
                                               pool.out()));
-  iree_hal_pool_reservation_request_t request = {.allocation_size =
-                                                     kByteLength};
+  iree_hal_pool_reservation_request_t request = {
+      .allocation_size = kByteLength,
+  };
   request.params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   request.params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   request.params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
@@ -395,14 +398,13 @@ TEST_F(HostQueuePendingTest,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
   Ref<iree_hal_buffer_t> readback;
-  iree_hal_buffer_params_t readback_params =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  readback_params.type =
-      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-  readback_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  readback_params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+  iree_hal_buffer_params_t readback_params = {
+      .usage =
+          IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+              IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+  };
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       device.allocator(), readback_params, kByteLength, readback.out()));
 
@@ -519,7 +521,8 @@ static iree_status_t CreateExplicitTlsfPool(
   options.tlsf_options.initial_block_capacity = 16;
   options.tlsf_options.frontier_capacity = 2;
   iree_hal_passthrough_pool_options_t backing_options = {
-      .epoch_query = iree_hal_pool_epoch_query_null()};
+      .epoch_query = iree_hal_pool_epoch_query_null(),
+  };
   iree_hal_pool_t* backing_pool = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_passthrough_pool_create(
       backing_options, backend.slab_provider, backend.notification,

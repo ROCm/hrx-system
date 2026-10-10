@@ -850,7 +850,8 @@ TEST_F(FramingAdapterTest, SendForwardsToCarrier) {
   SendCompletion completion;
   iree_net_message_endpoint_send_params_t params = {
       .data = iree_async_span_list_make(&span, 1),
-      .completion_callback = completion.callback()};
+      .completion_callback = completion.callback(),
+  };
 
   IREE_ASSERT_OK(iree_net_message_endpoint_send(endpoint_, &params));
   EXPECT_EQ(completion.count, 0);
@@ -875,7 +876,8 @@ TEST_F(FramingAdapterTest, SendMultipleSpans) {
   SendCompletion completion;
   iree_net_message_endpoint_send_params_t params = {
       .data = iree_async_span_list_make(spans, 2),
-      .completion_callback = completion.callback()};
+      .completion_callback = completion.callback(),
+  };
 
   IREE_ASSERT_OK(iree_net_message_endpoint_send(endpoint_, &params));
   EXPECT_EQ(completion.count, 0);
@@ -978,7 +980,8 @@ TEST_F(FramingAdapterTest, SendCarrierError) {
       .generated_prefix = iree_net_send_prefix_from_bytes(
           iree_make_const_byte_span(prefix.data(), prefix.size())),
       .data = iree_async_span_list_make(&span, 1),
-      .completion_callback = completion.callback()};
+      .completion_callback = completion.callback(),
+  };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_net_message_endpoint_send(endpoint_, &params));

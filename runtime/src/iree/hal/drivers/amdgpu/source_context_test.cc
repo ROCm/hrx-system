@@ -137,7 +137,8 @@ TEST(SourceContextTest, TranslatesLoadedCodeObjectDeviceSpans) {
   iree_hal_amdgpu_loaded_code_object_range_t range = {
       .host_pointer = host_storage,
       .device_pointer = 0x1000u,
-      .byte_length = sizeof(host_storage)};
+      .byte_length = sizeof(host_storage),
+  };
   IREE_ASSERT_OK(iree_hal_amdgpu_source_context_set_loaded_code_object_range(
       &context, /*physical_device_ordinal=*/1, range));
 

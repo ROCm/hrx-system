@@ -45,7 +45,8 @@ static bool FindDynamicQueueFamily(
     DynamicQueueFamily family = {
         .ordinal = family_ordinal,
         .identity = iree_hal_device_queue_family(device, family_ordinal),
-        .spec = family_spec};
+        .spec = family_spec,
+    };
     if (!family.identity) {
       return false;
     }

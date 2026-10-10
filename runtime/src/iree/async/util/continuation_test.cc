@@ -236,9 +236,7 @@ TEST_F(ContinuationTest, CancellationReleasesAcceptedRegionAfterCallback) {
   iree_atomic_ref_count_init(&region.base.ref_count);
   region.base.destroy_fn = DestroyTestRegion;
 
-  RegionCancellationContext context =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment follows
-           // default member initialization.
+  RegionCancellationContext context = {};
   context.region = &region;
   iree_async_file_read_operation_t read_op = {};
   iree_async_operation_initialize(

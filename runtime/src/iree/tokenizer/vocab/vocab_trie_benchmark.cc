@@ -72,7 +72,8 @@ static void CreateTestVocabulary(std::vector<std::string>* strings,
     iree_tokenizer_token_t token = {
         .string_offset = static_cast<uint32_t>(string_table->size()),
         .string_length = static_cast<uint16_t>(s.size()),
-        .attributes = IREE_TOKENIZER_TOKEN_ATTR_NONE};
+        .attributes = IREE_TOKENIZER_TOKEN_ATTR_NONE,
+    };
     tokens->push_back(token);
     string_table->insert(string_table->end(), s.begin(), s.end());
   }
@@ -352,7 +353,8 @@ static void CreateLargeVocabulary(int64_t vocab_size,
     iree_tokenizer_token_t token = {
         .string_offset = static_cast<uint32_t>(string_table->size()),
         .string_length = static_cast<uint16_t>(length),
-        .attributes = IREE_TOKENIZER_TOKEN_ATTR_NONE};
+        .attributes = IREE_TOKENIZER_TOKEN_ATTR_NONE,
+    };
     tokens->push_back(token);
 
     for (size_t i = 0; i < length; ++i) {

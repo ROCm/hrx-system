@@ -24,7 +24,8 @@ static const iree_hal_queue_family_spec_t kQueueFamilySpec = [] {
       .physical_device_affinity = 1,
       .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                     IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
-                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC};
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
+  };
   return spec;
 }();
 
@@ -329,8 +330,10 @@ class AtomicTargetValidationTest : public ::testing::Test {
     command_buffer_vtable_.atomic_wait = NoopCommandBufferAtomicWait;
     command_buffer_vtable_.atomic_store = NoopCommandBufferAtomicStore;
     command_buffer_vtable_.atomic_rmw = NoopCommandBufferAtomicRmw;
-    iree_hal_device_queue_spec_t queues = {.family_count = 1,
-                                           .families = &kQueueFamilySpec};
+    iree_hal_device_queue_spec_t queues = {
+        .family_count = 1,
+        .families = &kQueueFamilySpec,
+    };
     iree_hal_device_spec_params_t spec_params = {.queues = &queues};
     iree_hal_device_spec_t* device_spec = nullptr;
     IREE_ASSERT_OK(iree_hal_device_spec_create(

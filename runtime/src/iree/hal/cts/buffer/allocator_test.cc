@@ -148,7 +148,8 @@ TEST_P(AllocatorTest, ImportHostAllocationNullCallback) {
 
   iree_hal_external_buffer_t ext = {
       .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
-      .size = compat_size};
+      .size = compat_size,
+  };
   ext.handle.host_allocation.ptr = host_ptr;
 
   iree_hal_buffer_t* buffer = nullptr;
@@ -204,12 +205,15 @@ TEST_P(AllocatorTest, ImportHostAllocationWithCallback) {
       host_alignment, /*offset=*/0, &host_ptr));
 
   int release_count = 0;
-  iree_hal_buffer_release_callback_t callback = {.fn = CountingReleaseCallback,
-                                                 .user_data = &release_count};
+  iree_hal_buffer_release_callback_t callback = {
+      .fn = CountingReleaseCallback,
+      .user_data = &release_count,
+  };
 
   iree_hal_external_buffer_t ext = {
       .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
-      .size = compat_size};
+      .size = compat_size,
+  };
   ext.handle.host_allocation.ptr = host_ptr;
 
   iree_hal_buffer_t* buffer = nullptr;

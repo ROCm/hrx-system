@@ -106,7 +106,8 @@ class HostQueueHostMemoryTest : public ::testing::Test {
     params.usage = usage;
     iree_hal_external_buffer_t external_buffer = {
         .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
-        .size = data->size()};
+        .size = data->size(),
+    };
     external_buffer.handle.host_allocation.ptr = data->data();
     return iree_hal_allocator_import_buffer(
         iree_hal_device_allocator(device), params, &external_buffer,

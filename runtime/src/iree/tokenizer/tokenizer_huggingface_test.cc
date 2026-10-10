@@ -1057,7 +1057,8 @@ static StatusOr<PairEncodeResult> EncodePair(iree_tokenizer_t* tokenizer,
       .flags = IREE_TOKENIZER_ENCODE_BATCH_ITEM_FLAG_HAS_TEXT_PAIR,
       .output = iree_tokenizer_make_token_output(token_ids.data(), nullptr,
                                                  type_ids.data(), 256),
-      .out_token_count = 0};
+      .out_token_count = 0,
+  };
 
   IREE_RETURN_IF_ERROR(iree_tokenizer_encode_batch(
       tokenizer, &item, 1, IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS,
@@ -1092,7 +1093,8 @@ static StatusOr<PairEncodeDetailedResult> EncodePairDetailed(
       .flags = IREE_TOKENIZER_ENCODE_BATCH_ITEM_FLAG_HAS_TEXT_PAIR,
       .output = iree_tokenizer_make_token_output(
           token_ids.data(), track_offsets ? token_offsets.data() : nullptr,
-          type_ids.data(), output_capacity)};
+          type_ids.data(), output_capacity),
+  };
 
   iree_tokenizer_offset_run_list_t offset_run_list = {
       .capacity = offset_runs.size(),
@@ -1127,7 +1129,8 @@ static StatusOr<std::vector<iree_tokenizer_token_id_t>> EncodeSingle(
       .text = text,
       .output = iree_tokenizer_make_token_output(token_ids.data(), nullptr,
                                                  nullptr, 256),
-      .out_token_count = 0};
+      .out_token_count = 0,
+  };
 
   IREE_RETURN_IF_ERROR(iree_tokenizer_encode_batch(
       tokenizer, &item, 1, IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS,
@@ -1359,7 +1362,8 @@ TEST(PairEncode, PairWithoutAddSpecialTokens) {
       .text_pair = IREE_SV("world"),
       .flags = IREE_TOKENIZER_ENCODE_BATCH_ITEM_FLAG_HAS_TEXT_PAIR,
       .output = iree_tokenizer_make_token_output(token_ids.data(), nullptr,
-                                                 type_ids.data(), 256)};
+                                                 type_ids.data(), 256),
+  };
 
   IREE_ASSERT_OK(iree_tokenizer_encode_batch(
       tokenizer.get(), &item, 1, IREE_TOKENIZER_ENCODE_FLAG_NONE,
@@ -1391,7 +1395,8 @@ TEST(PairEncode, TextPairRequiresFlag) {
       .text = IREE_SV("hello"),
       .text_pair = IREE_SV("world"),
       .output = iree_tokenizer_make_token_output(token_ids.data(), nullptr,
-                                                 nullptr, token_ids.size())};
+                                                 nullptr, token_ids.size()),
+  };
 
   iree_status_t status = iree_tokenizer_encode_batch(
       tokenizer.get(), &item, 1, IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS,
@@ -1416,7 +1421,8 @@ TEST(PairEncode, UnknownItemFlagsRejected) {
       .text = IREE_SV("hello"),
       .flags = 0x80000000u,
       .output = iree_tokenizer_make_token_output(token_ids.data(), nullptr,
-                                                 nullptr, token_ids.size())};
+                                                 nullptr, token_ids.size()),
+  };
 
   iree_status_t status = iree_tokenizer_encode_batch(
       tokenizer.get(), &item, 1, IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS,
@@ -1439,7 +1445,8 @@ TEST(PairEncode, InvalidStateStorageReturnsStatus) {
       .text_pair = IREE_SV("world"),
       .flags = IREE_TOKENIZER_ENCODE_BATCH_ITEM_FLAG_HAS_TEXT_PAIR,
       .output = iree_tokenizer_make_token_output(token_ids.data(), nullptr,
-                                                 nullptr, token_ids.size())};
+                                                 nullptr, token_ids.size()),
+  };
 
   iree_status_t status = iree_tokenizer_encode_batch(
       tokenizer.get(), &item, 1, IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS,

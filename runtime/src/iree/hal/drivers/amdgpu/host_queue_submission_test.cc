@@ -421,7 +421,9 @@ TEST(HostQueueSubmissionUnitTest, PayloadFencesSurroundWorkAndOwnCompletion) {
   queue.aql_ring.mask = 7;
   queue.notification_ring.epoch.signal.handle = 0x1234;
   iree_hal_amdgpu_wait_resolution_t resolution = {
-      .barrier_count = 2, .inline_acquire_scope = IREE_HSA_FENCE_SCOPE_AGENT};
+      .barrier_count = 2,
+      .inline_acquire_scope = IREE_HSA_FENCE_SCOPE_AGENT,
+  };
   resolution.payload_barriers.before.release = IREE_HSA_FENCE_SCOPE_SYSTEM;
   resolution.payload_barriers.after.acquire = IREE_HSA_FENCE_SCOPE_SYSTEM;
 
@@ -786,7 +788,8 @@ TEST_F(HostQueueSubmissionTest, LightweightStatisticsAvoidDeviceTimestamps) {
 
   iree_hal_device_profiling_options_t profiling_options = {
       .flags = IREE_HAL_DEVICE_PROFILING_FLAG_LIGHTWEIGHT_STATISTICS,
-      .sink = NoopProfileSinkAsBase(&sink)};
+      .sink = NoopProfileSinkAsBase(&sink),
+  };
   IREE_ASSERT_OK(iree_hal_device_profiling_begin(test_device.base_device(),
                                                  &profiling_options));
 

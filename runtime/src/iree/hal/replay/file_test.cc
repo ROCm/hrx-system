@@ -62,7 +62,8 @@ TEST(ReplayFileWriterTest, WritesReplayRecordsAndRanges) {
       .payload_type = 10,
       .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER,
       .operation_code = 11,
-      .status_code = (uint32_t)IREE_STATUS_CANCELLED};
+      .status_code = (uint32_t)IREE_STATUS_CANCELLED,
+  };
   iree_hal_replay_file_range_t payload_range =
       iree_hal_replay_file_range_empty();
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
@@ -70,7 +71,8 @@ TEST(ReplayFileWriterTest, WritesReplayRecordsAndRanges) {
 
   iree_hal_replay_file_record_metadata_t empty_metadata = {
       .sequence_ordinal = 43,
-      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_BLOB};
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_BLOB,
+  };
   iree_hal_replay_file_range_t empty_payload_range =
       iree_hal_replay_file_range_empty();
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
@@ -156,7 +158,8 @@ TEST(ReplayFileWriterTest, RejectsAppendAfterClose) {
   IREE_ASSERT_OK(iree_hal_replay_file_writer_close(writer));
 
   iree_hal_replay_file_record_metadata_t metadata = {
-      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_SESSION};
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_SESSION,
+  };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         iree_hal_replay_file_writer_append_record(
                             writer, &metadata, 0, nullptr, nullptr));
@@ -177,10 +180,9 @@ TEST(ReplayFileWriterTest, RejectsInvalidMetadata) {
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
-  iree_hal_replay_file_record_metadata_t metadata =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_NONE;
+  iree_hal_replay_file_record_metadata_t metadata = {
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_NONE,
+  };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_replay_file_writer_append_record(
                             writer, &metadata, 0, nullptr, nullptr));
@@ -378,12 +380,14 @@ TEST(ReplayFileRangeTest, RejectsDigestBytesWithoutDigestType) {
 TEST(ReplayFileReaderTest, QueueBarriersPreserveDefaultAndEmptyLists) {
   const iree_hal_replay_queue_barrier_payload_t operation = {};
   const iree_hal_replay_queue_barriers_footer_t footer = {
-      .payload_length = 0, .before_count = UINT64_MAX, .after_count = 0};
-  iree_hal_replay_file_record_header_t header =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  header.header_length = sizeof(header);
-  header.payload_length = sizeof(operation) + sizeof(footer);
+      .payload_length = 0,
+      .before_count = UINT64_MAX,
+      .after_count = 0,
+  };
+  iree_hal_replay_file_record_header_t header = {
+      .payload_length = sizeof(operation) + sizeof(footer),
+      .header_length = sizeof(header),
+  };
   header.record_length = header.header_length + header.payload_length;
   header.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
   header.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER;
@@ -448,12 +452,11 @@ TEST(ReplayFileReaderTest, RejectsRecipeEffectsWithoutOperations) {
       .before_count = 1,
       .after_count = 0,
   };
-  iree_hal_replay_file_record_header_t header =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  header.header_length = sizeof(header);
-  header.payload_length =
-      sizeof(operation) + footer.payload_length + sizeof(footer);
+  iree_hal_replay_file_record_header_t header = {
+      .payload_length =
+          sizeof(operation) + footer.payload_length + sizeof(footer),
+      .header_length = sizeof(header),
+  };
   header.record_length = header.header_length + header.payload_length;
   header.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
   header.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER;

@@ -398,7 +398,10 @@ static iree_status_t CreateGrowingPool(
 
 static iree_hal_fixed_block_pool_options_t DefaultOptions() {
   iree_hal_fixed_block_pool_options_t options = {
-      .block_size = 256, .blocks_per_slab = 4, .frontier_capacity = 2};
+      .block_size = 256,
+      .blocks_per_slab = 4,
+      .frontier_capacity = 2,
+  };
   return options;
 }
 
@@ -407,7 +410,8 @@ static iree_hal_asan_pool_options_t ShadowOptions() {
       .mode = IREE_HAL_ASAN_POOL_MODE_SHADOW,
       .shadow_granule_size = 8,
       .redzone_size = 16,
-      .backing_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT};
+      .backing_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT,
+  };
   return options;
 }
 

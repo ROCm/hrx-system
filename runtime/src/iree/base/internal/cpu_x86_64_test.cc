@@ -52,7 +52,9 @@ iree_cpu_x86_64_capabilities_t InstructionCapabilities() {
 
 TEST(CpuX86_64Test, UnsupportedLeaves) {
   iree_cpu_x86_64_capabilities_t capabilities = {
-      .enabled_xstate = UINT64_MAX, .permitted_xstate = UINT64_MAX};
+      .enabled_xstate = UINT64_MAX,
+      .permitted_xstate = UINT64_MAX,
+  };
   EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities), 0u);
 }
 

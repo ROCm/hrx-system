@@ -21,7 +21,10 @@ void ExpectBinaryResult(void (*execute)(const Record*, uint64_t*), uint64_t lhs,
     SCOPED_TRACE(static_cast<int>(destination));
     uint64_t values[] = {lhs, rhs, UINT64_C(0xA55AA55AA55AA55A)};
     Record record = {
-        .destination_v8 = destination, .left_v8 = 0, .right_v8 = 1};
+        .destination_v8 = destination,
+        .left_v8 = 0,
+        .right_v8 = 1,
+    };
     execute(&record, values);
     EXPECT_EQ(values[destination], expected);
   }
@@ -64,7 +67,10 @@ void ExpectDivisionAliasing(iree_vm_bytecode_integer_division_failure_t (
     SCOPED_TRACE(static_cast<int>(destination));
     uint64_t values[] = {lhs, rhs};
     Record record = {
-        .destination_v8 = destination, .left_v8 = 0, .right_v8 = 1};
+        .destination_v8 = destination,
+        .left_v8 = 0,
+        .right_v8 = 1,
+    };
     EXPECT_EQ(execute(&record, values),
               IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE);
     EXPECT_EQ(values[destination], expected_result);
@@ -76,13 +82,15 @@ Record MakeBitstreamRecord(uint8_t result_base, uint8_t source_base,
                            uint8_t field_width, uint8_t source_count,
                            uint8_t result_count, uint8_t source_width,
                            uint8_t result_width) {
-  Record record = {.result_base_v8 = result_base,
-                   .source_base_v8 = source_base,
-                   .field_width_u8 = field_width,
-                   .source_count_u8 = source_count,
-                   .result_count_u8 = result_count,
-                   .source_width_u8 = source_width,
-                   .result_width_u8 = result_width};
+  Record record = {
+      .result_base_v8 = result_base,
+      .source_base_v8 = source_base,
+      .field_width_u8 = field_width,
+      .source_count_u8 = source_count,
+      .result_count_u8 = result_count,
+      .source_width_u8 = source_width,
+      .result_width_u8 = result_width,
+  };
   return record;
 }
 
@@ -94,10 +102,12 @@ void ExpectComparisonPredicates(void (*execute)(const Record*, uint64_t*),
        ++predicate) {
     SCOPED_TRACE(static_cast<int>(predicate));
     uint64_t values[] = {lhs, rhs, UINT64_MAX};
-    Record record = {.destination_v8 = 2,
-                     .left_v8 = 0,
-                     .right_v8 = 1,
-                     .predicate_u8 = predicate};
+    Record record = {
+        .destination_v8 = 2,
+        .left_v8 = 0,
+        .right_v8 = 1,
+        .predicate_u8 = predicate,
+    };
     execute(&record, values);
     EXPECT_EQ(values[2], expected[predicate]);
   }
@@ -322,12 +332,11 @@ void CheckCompareRecords() {
 
   for (uint8_t destination = 0; destination < 2; ++destination) {
     uint64_t values[] = {kMax, 1};
-    typename Traits::CompareRecord record =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-             // differs from list initialization.
-    record.destination_v8 = destination;
-    record.left_v8 = 0;
-    record.right_v8 = 1;
+    typename Traits::CompareRecord record = {
+        .destination_v8 = destination,
+        .left_v8 = 0,
+        .right_v8 = 1,
+    };
     record.predicate_u8 = destination == 0
                               ? IREE_VM_BYTECODE_INTEGER_COMPARE_SLT
                               : IREE_VM_BYTECODE_INTEGER_COMPARE_UGT;
@@ -344,13 +353,12 @@ void CheckLeaRecords() {
   constexpr uint64_t kNegativeThree = kMax - 2;
   SCOPED_TRACE(sizeof(UInt) * 8);
   uint64_t lea_values[] = {13, kNegativeThree, UINT64_MAX};
-  typename Traits::LeaRecord lea_record =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  lea_record.destination_v8 = 2;
-  lea_record.base_v8 = 0;
-  lea_record.index_v8 = 1;
-  lea_record.scale_u8 = 255;
+  typename Traits::LeaRecord lea_record = {
+      .destination_v8 = 2,
+      .base_v8 = 0,
+      .index_v8 = 1,
+      .scale_u8 = 255,
+  };
   Traits::kLea(&lea_record, lea_values);
   EXPECT_EQ(lea_values[2], static_cast<UInt>(13 + kNegativeThree * 255));
   lea_values[0] = 11;
@@ -396,7 +404,10 @@ void CheckCeilDivRecords() {
     SCOPED_TRACE(static_cast<int>(test_case.log2));
     uint64_t values[] = {test_case.source};
     typename Traits::CeilDivRecord record = {
-        .destination_v8 = 0, .source_v8 = 0, .log2_u8 = test_case.log2};
+        .destination_v8 = 0,
+        .source_v8 = 0,
+        .log2_u8 = test_case.log2,
+    };
     Traits::kCeilDiv(&record, values);
     EXPECT_EQ(values[0], test_case.expected);
   }

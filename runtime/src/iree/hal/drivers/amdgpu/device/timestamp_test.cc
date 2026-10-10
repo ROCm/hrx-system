@@ -34,11 +34,10 @@ static constexpr KernelTableEntry kKernelTable[] = {
 };
 
 static iree_hal_amdgpu_device_kernel_args_t MakeTimestampKernelArgs() {
-  iree_hal_amdgpu_device_kernel_args_t kernel_args =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  kernel_args.kernel_object = 0x12345678ull;
-  kernel_args.setup = 2;
+  iree_hal_amdgpu_device_kernel_args_t kernel_args = {
+      .kernel_object = 0x12345678ull,
+      .setup = 2,
+  };
   kernel_args.workgroup_size[0] = 32;
   kernel_args.workgroup_size[1] = 1;
   kernel_args.workgroup_size[2] = 1;
@@ -64,7 +63,8 @@ TEST(TimestampTest, MakesRecordHeader) {
       .record_length = sizeof(iree_hal_amdgpu_dispatch_timestamp_record_t),
       .version = IREE_HAL_AMDGPU_TIMESTAMP_RECORD_VERSION_0,
       .type = IREE_HAL_AMDGPU_TIMESTAMP_RECORD_TYPE_DISPATCH,
-      .record_ordinal = 7};
+      .record_ordinal = 7,
+  };
 
   EXPECT_EQ(header.record_length,
             sizeof(iree_hal_amdgpu_dispatch_timestamp_record_t));

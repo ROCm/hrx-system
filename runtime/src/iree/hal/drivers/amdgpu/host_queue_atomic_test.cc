@@ -90,13 +90,13 @@ class HostQueueAtomicTest
       iree_hal_buffer_t** out_buffer) {
     iree_hal_external_buffer_t external_buffer = {
         .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
-        .size = byte_length};
+        .size = byte_length,
+    };
     external_buffer.handle.host_allocation.ptr = host_pointer;
 
-    iree_hal_buffer_params_t params =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+    iree_hal_buffer_params_t params = {
+        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+    };
     params.access = IREE_HAL_MEMORY_ACCESS_ALL;
     params.usage =
         IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
@@ -469,12 +469,14 @@ TEST_F(HostQueueAtomicTest, DirectWaitBeforeStoreOnIndependentQueue) {
       /*minimum_alignment=*/64, release_latch.callback(), buffer.out()));
 
   const iree_hal_barrier_list_t empty = {};
-  iree_hal_barrier_t acquire = {.flags =
-                                    IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE};
+  iree_hal_barrier_t acquire = {
+      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+  };
   const iree_hal_barrier_list_t acquire_list = {1, &acquire};
   const iree_hal_queue_barriers_t wait_barriers = {&empty, &acquire_list};
-  iree_hal_barrier_t release = {.flags =
-                                    IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE};
+  iree_hal_barrier_t release = {
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
   const iree_hal_barrier_list_t release_list = {1, &release};
   const iree_hal_queue_barriers_t store_barriers = {&release_list, &empty};
 

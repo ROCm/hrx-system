@@ -59,7 +59,10 @@ static iree_status_t CapturePacket(
   const TestPayload* payload = reinterpret_cast<const TestPayload*>(
       iree_hal_amdgpu_feedback_packet_const_payload(packet));
   DrainedPacket drained = {
-      .sequence = packet->sequence, .kind = packet->kind, .payload = *payload};
+      .sequence = packet->sequence,
+      .kind = packet->kind,
+      .payload = *payload,
+  };
   state->packets.push_back(drained);
   return iree_ok_status();
 }
@@ -113,7 +116,8 @@ class FeedbackChannelTest : public ::testing::Test {
         .control_memory_pool = control_memory_pool_,
         .ring_memory_pool = ring_memory_pool_,
         .topology = &topology,
-        .minimum_capacity = 4 * 1024};
+        .minimum_capacity = 4 * 1024,
+    };
     IREE_ASSERT_OK(
         iree_hal_amdgpu_feedback_channel_initialize(&params, &channel_));
   }

@@ -56,12 +56,16 @@ static std::vector<uint8_t> MakeReplayFileStorage() {
 
   iree_hal_replay_file_record_metadata_t session_metadata = {
       .sequence_ordinal = 0,
-      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_SESSION};
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_SESSION,
+  };
   IREE_CHECK_OK(iree_hal_replay_file_writer_append_record(
       writer, &session_metadata, 0, nullptr, nullptr));
 
   iree_hal_replay_buffer_object_payload_t buffer_payload = {
-      .allocation_size = 256, .byte_length = 64, .allowed_usage = 0x11};
+      .allocation_size = 256,
+      .byte_length = 64,
+      .allowed_usage = 0x11,
+  };
   iree_const_byte_span_t buffer_payload_span =
       iree_make_const_byte_span(&buffer_payload, sizeof(buffer_payload));
   iree_hal_replay_file_record_metadata_t object_metadata = {
@@ -69,7 +73,8 @@ static std::vector<uint8_t> MakeReplayFileStorage() {
       .object_id = 7,
       .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
       .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_BUFFER_OBJECT,
-      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER};
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER,
+  };
   IREE_CHECK_OK(iree_hal_replay_file_writer_append_record(
       writer, &object_metadata, 1, &buffer_payload_span, nullptr));
 
@@ -140,12 +145,11 @@ static iree_hal_replay_file_record_metadata_t MakeAtomicRecordMetadata(
     uint64_t sequence_ordinal, iree_hal_replay_object_type_t object_type,
     iree_hal_replay_payload_type_t payload_type,
     iree_hal_replay_operation_code_t operation_code) {
-  iree_hal_replay_file_record_metadata_t metadata =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  metadata.sequence_ordinal = sequence_ordinal;
-  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
-  metadata.object_type = object_type;
+  iree_hal_replay_file_record_metadata_t metadata = {
+      .sequence_ordinal = sequence_ordinal,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .object_type = object_type,
+  };
   metadata.object_id =
       object_type == IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE ? 200 : 100;
   metadata.payload_type = payload_type;
@@ -240,9 +244,13 @@ static std::vector<uint8_t> MakeAtomicReplayFileStorage() {
   queue_wait.params.target_error_mode =
       IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE;
   iree_hal_replay_semaphore_timepoint_payload_t queue_wait_wait = {
-      .semaphore_id = 41, .value = 5};
+      .semaphore_id = 41,
+      .value = 5,
+  };
   iree_hal_replay_semaphore_timepoint_payload_t queue_wait_signal = {
-      .semaphore_id = 51, .value = 6};
+      .semaphore_id = 51,
+      .value = 6,
+  };
   AppendQueueAtomicRecord(&builder,
                           MakeAtomicRecordMetadata(
                               3, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
@@ -262,9 +270,13 @@ static std::vector<uint8_t> MakeAtomicReplayFileStorage() {
   queue_store.params.target_error_mode =
       IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE;
   iree_hal_replay_semaphore_timepoint_payload_t queue_store_wait = {
-      .semaphore_id = 42, .value = 7};
+      .semaphore_id = 42,
+      .value = 7,
+  };
   iree_hal_replay_semaphore_timepoint_payload_t queue_store_signal = {
-      .semaphore_id = 52, .value = 8};
+      .semaphore_id = 52,
+      .value = 8,
+  };
   AppendQueueAtomicRecord(
       &builder,
       MakeAtomicRecordMetadata(
@@ -286,9 +298,13 @@ static std::vector<uint8_t> MakeAtomicReplayFileStorage() {
   queue_rmw.params.target_error_mode =
       IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE;
   iree_hal_replay_semaphore_timepoint_payload_t queue_rmw_wait = {
-      .semaphore_id = 43, .value = 9};
+      .semaphore_id = 43,
+      .value = 9,
+  };
   iree_hal_replay_semaphore_timepoint_payload_t queue_rmw_signal = {
-      .semaphore_id = 53, .value = 10};
+      .semaphore_id = 53,
+      .value = 10,
+  };
   AppendQueueAtomicRecord(
       &builder,
       MakeAtomicRecordMetadata(5, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
@@ -391,13 +407,15 @@ static std::vector<uint8_t> MakeScopeReplayFileStorage() {
 
   iree_hal_replay_file_record_metadata_t session_metadata = {
       .sequence_ordinal = 0,
-      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_SESSION};
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_SESSION,
+  };
   IREE_CHECK_OK(iree_hal_replay_file_writer_append_record(
       writer, &session_metadata, 0, nullptr, nullptr));
 
   const char scope_name[] = "execute";
-  iree_hal_replay_scope_payload_t payload = {.name_length =
-                                                 sizeof(scope_name) - 1};
+  iree_hal_replay_scope_payload_t payload = {
+      .name_length = sizeof(scope_name) - 1,
+  };
   iree_const_byte_span_t iovecs[] = {
       iree_make_const_byte_span(&payload, sizeof(payload)),
       iree_make_const_byte_span(scope_name, sizeof(scope_name) - 1),
@@ -406,7 +424,8 @@ static std::vector<uint8_t> MakeScopeReplayFileStorage() {
       .sequence_ordinal = 1,
       .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
       .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_REPLAY_SCOPE,
-      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_REPLAY_SCOPE_BEGIN};
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_REPLAY_SCOPE_BEGIN,
+  };
   IREE_CHECK_OK(iree_hal_replay_file_writer_append_record(
       writer, &begin_metadata, IREE_ARRAYSIZE(iovecs), iovecs, nullptr));
 
@@ -439,16 +458,14 @@ static std::vector<uint8_t> MakeExecutableLoadReplayFileStorage() {
   const char target_key[] = "metadata";
   const uint8_t executable_data[] = {0x00, 0x01, 0x02, 0x03};
   const uint32_t constants[] = {0xABCD1234u};
-  iree_hal_replay_executable_metadata_header_t metadata_header =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  metadata_header.function_count = 1;
+  iree_hal_replay_executable_metadata_header_t metadata_header = {
+      .function_count = 1,
+  };
   const char function_name[] = "main";
   metadata_header.function_name_storage_length = sizeof(function_name) - 1;
-  iree_hal_replay_executable_function_metadata_t function_metadata =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  function_metadata.binding_count = 2;
+  iree_hal_replay_executable_function_metadata_t function_metadata = {
+      .binding_count = 2,
+  };
   function_metadata.workgroup_size[0] = 3;
   function_metadata.workgroup_size[1] = 1;
   function_metadata.workgroup_size[2] = 1;
@@ -464,7 +481,8 @@ static std::vector<uint8_t> MakeExecutableLoadReplayFileStorage() {
       .target_key_length = sizeof(target_key) - 1,
       .executable_metadata_length = sizeof(metadata_header) +
                                     sizeof(function_metadata) +
-                                    sizeof(function_name) - 1};
+                                    sizeof(function_name) - 1,
+  };
   iree_const_byte_span_t iovecs[] = {
       iree_make_const_byte_span(&payload, sizeof(payload)),
       iree_make_const_byte_span(target_family, sizeof(target_family) - 1),
@@ -475,18 +493,16 @@ static std::vector<uint8_t> MakeExecutableLoadReplayFileStorage() {
       iree_make_const_byte_span(&function_metadata, sizeof(function_metadata)),
       iree_make_const_byte_span(function_name, sizeof(function_name) - 1),
   };
-  iree_hal_replay_file_record_metadata_t metadata =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  metadata.sequence_ordinal = 0;
-  metadata.device_id = 1;
-  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
-  metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_LOAD;
-  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE;
-  metadata.object_id = 1;
-  metadata.related_object_id = 2;
-  metadata.operation_code =
-      IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_LOAD_EXECUTABLE;
+  iree_hal_replay_file_record_metadata_t metadata = {
+      .sequence_ordinal = 0,
+      .device_id = 1,
+      .object_id = 1,
+      .related_object_id = 2,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_LOAD,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_LOAD_EXECUTABLE,
+  };
   IREE_CHECK_OK(iree_hal_replay_file_writer_append_record(
       writer, &metadata, IREE_ARRAYSIZE(iovecs), iovecs, nullptr));
 
@@ -507,7 +523,8 @@ static iree_hal_replay_file_record_metadata_t MakeAllocatorOperationMetadata(
       .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
       .payload_type = payload_type,
       .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_ALLOCATOR,
-      .operation_code = operation_code};
+      .operation_code = operation_code,
+  };
   return metadata;
 }
 
@@ -518,11 +535,14 @@ static std::vector<uint8_t> MakeVmmReplayFileStorage() {
       .sequence_ordinal = 0,
       .object_id = 23,
       .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
-      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_PHYSICAL_MEMORY};
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_PHYSICAL_MEMORY,
+  };
   builder.Append(physical_object_metadata, 0, nullptr);
 
   iree_hal_replay_allocator_virtual_memory_reserve_payload_t reserve = {
-      .queue_family_affinity = 3, .size = 4096};
+      .queue_family_affinity = 3,
+      .size = 4096,
+  };
   builder.Append(
       MakeAllocatorOperationMetadata(
           1, IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_RESERVE,
@@ -530,7 +550,8 @@ static std::vector<uint8_t> MakeVmmReplayFileStorage() {
       reserve);
 
   iree_hal_replay_allocator_virtual_memory_release_payload_t release = {
-      .virtual_buffer_id = 17};
+      .virtual_buffer_id = 17,
+  };
   builder.Append(
       MakeAllocatorOperationMetadata(
           2, IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_RELEASE,
@@ -552,7 +573,8 @@ static std::vector<uint8_t> MakeVmmReplayFileStorage() {
       allocate);
 
   iree_hal_replay_allocator_physical_memory_free_payload_t free = {
-      .physical_memory_id = 23};
+      .physical_memory_id = 23,
+  };
   builder.Append(
       MakeAllocatorOperationMetadata(
           4, IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_PHYSICAL_MEMORY_FREE,
@@ -564,7 +586,8 @@ static std::vector<uint8_t> MakeVmmReplayFileStorage() {
       .physical_memory_id = 23,
       .virtual_offset = 128,
       .physical_offset = 256,
-      .size = 1024};
+      .size = 1024,
+  };
   builder.Append(
       MakeAllocatorOperationMetadata(
           5, IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_MAP,
@@ -572,7 +595,10 @@ static std::vector<uint8_t> MakeVmmReplayFileStorage() {
       map);
 
   iree_hal_replay_allocator_virtual_memory_unmap_payload_t unmap = {
-      .virtual_buffer_id = 17, .virtual_offset = 128, .size = 1024};
+      .virtual_buffer_id = 17,
+      .virtual_offset = 128,
+      .size = 1024,
+  };
   builder.Append(
       MakeAllocatorOperationMetadata(
           6, IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP,
@@ -585,7 +611,8 @@ static std::vector<uint8_t> MakeVmmReplayFileStorage() {
       .size = 2048,
       .queue_family_affinity = 9,
       .access_scope = 3,
-      .protection = 5};
+      .protection = 5,
+  };
   builder.Append(
       MakeAllocatorOperationMetadata(
           7, IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT,
@@ -597,7 +624,8 @@ static std::vector<uint8_t> MakeVmmReplayFileStorage() {
       .virtual_offset = 768,
       .size = 512,
       .queue_family_affinity = 11,
-      .advice = 6};
+      .advice = 6,
+  };
   builder.Append(
       MakeAllocatorOperationMetadata(
           8, IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_ADVISE,
@@ -883,7 +911,8 @@ TEST(ReplayDumpTest, EmitsBufferRangeDataRanges) {
       .byte_length = 4,
       .data_length = 4,
       .memory_access = IREE_HAL_MEMORY_ACCESS_WRITE,
-      .map_flags = IREE_HAL_BUFFER_MAP_FLAG_DISCARD};
+      .map_flags = IREE_HAL_BUFFER_MAP_FLAG_DISCARD,
+  };
   const uint8_t data[] = {0x01, 0x02, 0x03, 0x04};
   iree_const_byte_span_t iovecs[2] = {
       iree_make_const_byte_span(&payload, sizeof(payload)),
@@ -894,7 +923,8 @@ TEST(ReplayDumpTest, EmitsBufferRangeDataRanges) {
       .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
       .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_BUFFER_RANGE_DATA,
       .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER,
-      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_FLUSH_RANGE};
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_FLUSH_RANGE,
+  };
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(writer, &metadata, 2,
                                                            iovecs, nullptr));
   IREE_ASSERT_OK(iree_hal_replay_file_writer_close(writer));
@@ -933,10 +963,14 @@ TEST(ReplayDumpTest, EmitsQueueAllocaSemaphoreRanges) {
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
-  iree_hal_replay_queue_alloca_payload_t payload = {.signal_semaphore_count = 1,
-                                                    .request_count = 1};
-  iree_hal_replay_semaphore_timepoint_payload_t signal = {.semaphore_id = 42,
-                                                          .value = 7};
+  iree_hal_replay_queue_alloca_payload_t payload = {
+      .signal_semaphore_count = 1,
+      .request_count = 1,
+  };
+  iree_hal_replay_semaphore_timepoint_payload_t signal = {
+      .semaphore_id = 42,
+      .value = 7,
+  };
   iree_hal_replay_queue_alloca_request_payload_t request = {.buffer_id = 9};
   request.allocation.allocation_size = 4096;
   request.allocation.queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
@@ -953,7 +987,8 @@ TEST(ReplayDumpTest, EmitsQueueAllocaSemaphoreRanges) {
       .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
       .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ALLOCA,
       .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
-      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ALLOCA};
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ALLOCA,
+  };
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
       writer, &metadata, IREE_ARRAYSIZE(iovecs), iovecs, nullptr));
   IREE_ASSERT_OK(iree_hal_replay_file_writer_close(writer));
@@ -1000,29 +1035,38 @@ TEST(ReplayDumpTest, EmitsQueueSubmissionPayloads) {
       .command_buffer_id = 9,
       .wait_semaphore_count = 1,
       .signal_semaphore_count = 1,
-      .binding_count = 1};
-  iree_hal_replay_semaphore_timepoint_payload_t wait = {.semaphore_id = 42,
-                                                        .value = 1};
-  iree_hal_replay_semaphore_timepoint_payload_t signal = {.semaphore_id = 43,
-                                                          .value = 2};
+      .binding_count = 1,
+  };
+  iree_hal_replay_semaphore_timepoint_payload_t wait = {
+      .semaphore_id = 42,
+      .value = 1,
+  };
+  iree_hal_replay_semaphore_timepoint_payload_t signal = {
+      .semaphore_id = 43,
+      .value = 2,
+  };
   iree_hal_replay_buffer_ref_payload_t binding = {
-      .buffer_id = 7, .offset = 64, .length = 128};
+      .buffer_id = 7,
+      .offset = 64,
+      .length = 128,
+  };
   iree_const_byte_span_t iovecs[4] = {
       iree_make_const_byte_span(&payload, sizeof(payload)),
       iree_make_const_byte_span(&wait, sizeof(wait)),
       iree_make_const_byte_span(&signal, sizeof(signal)),
       iree_make_const_byte_span(&binding, sizeof(binding)),
   };
-  iree_hal_replay_file_record_metadata_t metadata =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  metadata.sequence_ordinal = 0;
-  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
-  metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER;
-  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE;
-  metadata.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER;
+  iree_hal_replay_file_record_metadata_t metadata = {
+      .sequence_ordinal = 0,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER,
+  };
   iree_hal_replay_queue_barrier_payload_t barrier_payload = {
-      .wait_semaphore_count = 1, .signal_semaphore_count = 1};
+      .wait_semaphore_count = 1,
+      .signal_semaphore_count = 1,
+  };
   iree_const_byte_span_t barrier_iovecs[] = {
       iree_make_const_byte_span(&barrier_payload, sizeof(barrier_payload)),
       iree_make_const_byte_span(&wait, sizeof(wait)),
@@ -1087,10 +1131,12 @@ TEST(ReplayDumpTest, EmitsExecutionBarrierRanges) {
   iree_hal_replay_command_buffer_execution_barrier_payload_t payload = {
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
-      .memory_barrier_count = 1};
+      .memory_barrier_count = 1,
+  };
   iree_hal_replay_memory_barrier_payload_t memory_barrier = {
       .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
-      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ};
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
+  };
   iree_const_byte_span_t iovecs[2] = {
       iree_make_const_byte_span(&payload, sizeof(payload)),
       iree_make_const_byte_span(&memory_barrier, sizeof(memory_barrier)),
@@ -1102,7 +1148,8 @@ TEST(ReplayDumpTest, EmitsExecutionBarrierRanges) {
           IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_EXECUTION_BARRIER,
       .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER,
       .operation_code =
-          IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_EXECUTION_BARRIER};
+          IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_EXECUTION_BARRIER,
+  };
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(writer, &metadata, 2,
                                                            iovecs, nullptr));
   IREE_ASSERT_OK(iree_hal_replay_file_writer_close(writer));
@@ -1145,20 +1192,18 @@ TEST(ReplayDumpTest, EmitsFilePayloads) {
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
-  iree_hal_replay_file_object_payload_t file_payload =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  file_payload.queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
-  file_payload.file_length = 4096;
-  file_payload.file_device = 10;
-  file_payload.file_inode = 20;
-  file_payload.file_mtime_ns = 30;
-  file_payload.access = IREE_HAL_MEMORY_ACCESS_READ;
-  file_payload.handle_type = IREE_IO_FILE_HANDLE_TYPE_FD;
-  file_payload.reference_type =
-      IREE_HAL_REPLAY_FILE_REFERENCE_TYPE_EXTERNAL_PATH;
-  file_payload.validation_type = IREE_HAL_REPLAY_FILE_VALIDATION_TYPE_IDENTITY;
-  file_payload.digest_type = IREE_HAL_REPLAY_DIGEST_TYPE_NONE;
+  iree_hal_replay_file_object_payload_t file_payload = {
+      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      .file_length = 4096,
+      .file_device = 10,
+      .file_inode = 20,
+      .file_mtime_ns = 30,
+      .access = IREE_HAL_MEMORY_ACCESS_READ,
+      .handle_type = IREE_IO_FILE_HANDLE_TYPE_FD,
+      .reference_type = IREE_HAL_REPLAY_FILE_REFERENCE_TYPE_EXTERNAL_PATH,
+      .validation_type = IREE_HAL_REPLAY_FILE_VALIDATION_TYPE_IDENTITY,
+      .digest_type = IREE_HAL_REPLAY_DIGEST_TYPE_NONE,
+  };
   const char file_reference[] = "/tmp/model.irpa";
   file_payload.reference_length = sizeof(file_reference) - 1;
   iree_const_byte_span_t file_iovecs[2] = {
@@ -1170,7 +1215,8 @@ TEST(ReplayDumpTest, EmitsFilePayloads) {
       .object_id = 7,
       .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
       .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_FILE_OBJECT,
-      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_FILE};
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_FILE,
+  };
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
       writer, &file_metadata, IREE_ARRAYSIZE(file_iovecs), file_iovecs,
       nullptr));
@@ -1232,18 +1278,19 @@ TEST(ReplayDumpTest, EmitsQueueObjectsAndTransferRanges) {
   iree_io_file_handle_release(file_handle);
 
   iree_hal_replay_provisioned_queue_object_payload_t queue_payload = {
-      .family_ordinal = 2, .queue_ordinal = 1};
+      .family_ordinal = 2,
+      .queue_ordinal = 1,
+  };
   iree_const_byte_span_t queue_iovec =
       iree_make_const_byte_span(&queue_payload, sizeof(queue_payload));
-  iree_hal_replay_file_record_metadata_t metadata =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  metadata.sequence_ordinal = 0;
-  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT;
-  metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT;
-  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE;
-  metadata.device_id = 4;
-  metadata.object_id = 9;
+  iree_hal_replay_file_record_metadata_t metadata = {
+      .sequence_ordinal = 0,
+      .device_id = 4,
+      .object_id = 9,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+  };
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
       writer, &metadata, 1, &queue_iovec, nullptr));
 
@@ -1251,7 +1298,8 @@ TEST(ReplayDumpTest, EmitsQueueObjectsAndTransferRanges) {
       .family_ordinal = 3,
       .priority = -2,
       .features = IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH,
-      .execution_resource_count = 2};
+      .execution_resource_count = 2,
+  };
   const uint32_t execution_resources[] = {1, 4};
   const iree_const_byte_span_t dynamic_queue_iovecs[] = {
       iree_make_const_byte_span(&dynamic_queue_payload,
@@ -1270,15 +1318,19 @@ TEST(ReplayDumpTest, EmitsQueueObjectsAndTransferRanges) {
       .wait_semaphore_count = 1,
       .signal_semaphore_count = 1,
       .operation_count = 1,
-      .data_length = 4};
-  iree_hal_replay_semaphore_timepoint_payload_t wait = {.semaphore_id = 42,
-                                                        .value = 1};
-  iree_hal_replay_semaphore_timepoint_payload_t signal = {.semaphore_id = 43,
-                                                          .value = 2};
-  iree_hal_replay_queue_transfer_operation_payload_t operation =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  operation.type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPDATE;
+      .data_length = 4,
+  };
+  iree_hal_replay_semaphore_timepoint_payload_t wait = {
+      .semaphore_id = 42,
+      .value = 1,
+  };
+  iree_hal_replay_semaphore_timepoint_payload_t signal = {
+      .semaphore_id = 43,
+      .value = 2,
+  };
+  iree_hal_replay_queue_transfer_operation_payload_t operation = {
+      .type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPDATE,
+  };
   operation.target_ref.buffer_id = 7;
   operation.target_ref.length = 4;
   operation.data_length = 4;
@@ -1301,11 +1353,10 @@ TEST(ReplayDumpTest, EmitsQueueObjectsAndTransferRanges) {
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
       writer, &metadata, IREE_ARRAYSIZE(iovecs), iovecs, nullptr));
 
-  iree_hal_replay_queue_read_payload_t read_payload =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  read_payload.source_file_id = 8;
-  read_payload.source_offset = 64;
+  iree_hal_replay_queue_read_payload_t read_payload = {
+      .source_file_id = 8,
+      .source_offset = 64,
+  };
   read_payload.target_ref.buffer_id = 7;
   read_payload.target_ref.length = sizeof(data);
   read_payload.captured_data_length = sizeof(data);
@@ -1419,7 +1470,8 @@ TEST(ReplayDumpTest, EmitsCommandBufferTransferRanges) {
       .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_FILL_BUFFER,
       .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER,
       .operation_code =
-          IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_FILL_BUFFER};
+          IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_FILL_BUFFER,
+  };
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
       writer, &fill_metadata, IREE_ARRAYSIZE(fill_iovecs), fill_iovecs,
       nullptr));
@@ -1441,7 +1493,8 @@ TEST(ReplayDumpTest, EmitsCommandBufferTransferRanges) {
       .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_UPDATE_BUFFER,
       .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER,
       .operation_code =
-          IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_UPDATE_BUFFER};
+          IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_UPDATE_BUFFER,
+  };
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
       writer, &update_metadata, IREE_ARRAYSIZE(update_iovecs), update_iovecs,
       nullptr));
@@ -1734,7 +1787,8 @@ TEST(ReplayDumpTest, RejectsReservedVmmPayloadFields) {
       allocate);
 
   iree_hal_replay_allocator_virtual_memory_protect_payload_t protect = {
-      .reserved0 = 1};
+      .reserved0 = 1,
+  };
   expect_rejected(
       IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT,
       IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT, protect);
@@ -1772,7 +1826,8 @@ TEST(ReplayDumpTest, RejectsMalformedAtomicPayloadLayouts) {
 
   ReplayFileBuilder queue_builder(/*capacity=*/4096);
   iree_hal_replay_queue_atomic_wait_payload_t queue_payload = {
-      .wait_semaphore_count = 1};
+      .wait_semaphore_count = 1,
+  };
   queue_builder.Append(MakeAtomicRecordMetadata(
                            0, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
                            IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_WAIT,
@@ -1796,14 +1851,13 @@ TEST(ReplayDumpTest, RejectsMalformedAtomicPayloadLayouts) {
 
 TEST(ReplayDumpTest, QueueBarriersDistinguishDefaultAndExplicitEmpty) {
   ReplayFileBuilder builder(4096);
-  iree_hal_replay_file_record_metadata_t metadata =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
-  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE;
-  metadata.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER;
-  metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER;
-  metadata.record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_QUEUE_BARRIERS;
+  iree_hal_replay_file_record_metadata_t metadata = {
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_QUEUE_BARRIERS,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER,
+  };
   const iree_hal_replay_queue_barrier_payload_t operation = {};
   iree_hal_replay_queue_barriers_footer_t footer = {0, UINT64_MAX, 0};
   iree_const_byte_span_t spans[] = {
@@ -1817,23 +1871,25 @@ TEST(ReplayDumpTest, QueueBarriersDistinguishDefaultAndExplicitEmpty) {
   iree_hal_replay_command_buffer_execution_barrier_payload_t action = {
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
       .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
-      .buffer_barrier_count = 1};
+      .buffer_barrier_count = 1,
+  };
   iree_hal_replay_buffer_barrier_payload_t range = {
       .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-      .target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ};
+      .target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ,
+  };
   range.buffer_ref.buffer_id = 7;
   range.buffer_ref.offset = 6;
   range.buffer_ref.length = 4;
   iree_hal_replay_memory_transition_recipe_payload_t recipe = {
       .effects = IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM,
-      .operation_count = 1};
-  iree_hal_replay_memory_transition_operation_payload_t transition =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  transition.kind = IREE_HAL_MEMORY_TRANSITION_KIND_RANGE;
-  transition.executor = IREE_HAL_MEMORY_TRANSITION_EXECUTOR_QUEUE;
-  transition.operation = IREE_HAL_MEMORY_TRANSITION_OPERATION_RELEASE_TO_SYSTEM;
-  transition.range_granularity = 64;
+      .operation_count = 1,
+  };
+  iree_hal_replay_memory_transition_operation_payload_t transition = {
+      .range_granularity = 64,
+      .kind = IREE_HAL_MEMORY_TRANSITION_KIND_RANGE,
+      .executor = IREE_HAL_MEMORY_TRANSITION_EXECUTOR_QUEUE,
+      .operation = IREE_HAL_MEMORY_TRANSITION_OPERATION_RELEASE_TO_SYSTEM,
+  };
   footer = {
       sizeof(action) + sizeof(range) + sizeof(recipe) + sizeof(transition), 1,
       UINT64_MAX};

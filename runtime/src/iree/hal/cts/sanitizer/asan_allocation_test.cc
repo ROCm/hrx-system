@@ -273,7 +273,8 @@ TEST_P(AsanAllocationTest, ScopedSourcesPreserveNativeSanitizerAdvice) {
     IREE_ASSERT_OK(iree_hal_tlsf_pool_create(
         source, &options, iree_allocator_system(), pool.out()));
     iree_hal_pool_reservation_request_t request = {
-        .allocation_size = kAsanAllocationBufferLength};
+        .allocation_size = kAsanAllocationBufferLength,
+    };
     Ref<iree_hal_buffer_t> buffer;
     SemaphoreList allocated(device(), {0}, {1});
     IREE_ASSERT_OK(
@@ -397,7 +398,8 @@ TEST_P(AsanAllocationTest, QueueDeallocaReleaseReportsAfterSignal) {
       iree_hal_fixed_block_pool_options_t options = {
           .block_size = kAsanAllocationBufferLength,
           .blocks_per_slab = 2,
-          .asan = backend.asan};
+          .asan = backend.asan,
+      };
       IREE_ASSERT_OK(CreateFiniteBlockPool(backend, options,
                                            iree_allocator_system(),
                                            backing_pool.out(), pool.out()));
@@ -477,7 +479,10 @@ TEST_P(AsanAllocationTest, GuardedFiniteAllocaWaitsForInheritedHostUse) {
   for (bool use_tlsf : {false, true}) {
     SCOPED_TRACE(use_tlsf ? "TLSF" : "fixed block");
     iree_hal_fixed_block_pool_options_t source_options = {
-        .block_size = 65536, .blocks_per_slab = 1, .frontier_capacity = 1};
+        .block_size = 65536,
+        .blocks_per_slab = 1,
+        .frontier_capacity = 1,
+    };
     Ref<iree_hal_pool_t> backing_pool;
     Ref<iree_hal_pool_t> source_pool;
     IREE_ASSERT_OK(
@@ -519,7 +524,9 @@ TEST_P(AsanAllocationTest, GuardedFiniteAllocaWaitsForInheritedHostUse) {
           pool.out()));
     } else {
       iree_hal_fixed_block_pool_options_t options = {
-          .block_size = kAsanAllocationBufferLength, .asan = backend.asan};
+          .block_size = kAsanAllocationBufferLength,
+          .asan = backend.asan,
+      };
       IREE_ASSERT_OK(iree_hal_fixed_block_pool_create_from_buffer(
           source, 0, IREE_HAL_WHOLE_BUFFER, &options, iree_allocator_system(),
           pool.out()));

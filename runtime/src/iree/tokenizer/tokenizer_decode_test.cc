@@ -328,7 +328,9 @@ iree_tokenizer_t* BuildWordPieceTokenizer(iree_tokenizer_vocab_t* vocab,
   iree_tokenizer_builder_set_vocab(builder.get(), vocab);
 
   iree_tokenizer_decoder_wordpiece_config_t config = {
-      .prefix = iree_make_cstring_view("##"), .cleanup = cleanup};
+      .prefix = iree_make_cstring_view("##"),
+      .cleanup = cleanup,
+  };
   iree_tokenizer_decoder_t* decoder = nullptr;
   IREE_CHECK_OK(iree_tokenizer_decoder_wordpiece_allocate(
       config, iree_allocator_system(), &decoder));

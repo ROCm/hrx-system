@@ -860,7 +860,8 @@ TEST(ReplayRecorderTest, WrappedImportsAndExportsPreserveNativeBufferViews) {
                                               8, 9, 10, 11, 12, 13, 14, 15};
   iree_hal_external_buffer_t external_buffer = {
       .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
-      .size = sizeof(imported_storage)};
+      .size = sizeof(imported_storage),
+  };
   external_buffer.handle.host_allocation.ptr = imported_storage;
   iree_hal_buffer_t* imported_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_import_buffer(
@@ -1698,7 +1699,8 @@ static iree_status_t RecorderVmmAllocatorReserve(
       .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
       .type =
           IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-      .queue_family_affinity = queue_family_affinity};
+      .queue_family_affinity = queue_family_affinity,
+  };
   IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
       allocator->heap_allocator, params, size, out_virtual_buffer));
   state->virtual_buffer = *out_virtual_buffer;
@@ -1919,7 +1921,8 @@ static iree_hal_buffer_params_t RecorderVmmPhysicalParams() {
       .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
       .queue_family_affinity = kRecorderVmmQueueFamilyAffinity,
-      .min_alignment = 4096};
+      .min_alignment = 4096,
+  };
   return params;
 }
 

@@ -548,8 +548,10 @@ struct ReceivePoolResources {
 static iree_status_t CreateReceivePool(iree_async_proactor_t* proactor,
                                        ReceivePoolResources* out_resources) {
   *out_resources = ReceivePoolResources{};
-  iree_async_slab_options_t slab_options = {.buffer_size = 64 * 1024,
-                                            .buffer_count = 16};
+  iree_async_slab_options_t slab_options = {
+      .buffer_size = 64 * 1024,
+      .buffer_count = 16,
+  };
   iree_status_t status = iree_async_slab_create(
       slab_options, iree_allocator_system(), &out_resources->slab);
   if (iree_status_is_ok(status)) {

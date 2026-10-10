@@ -86,7 +86,10 @@ template <typename Record, typename Execute>
 uint64_t ExecuteConversion(Execute execute, uint8_t selector, uint64_t source) {
   uint64_t values[] = {source, UINT64_C(0xA55AA55AA55AA55A)};
   Record record = {
-      .destination_v8 = 1, .source_v8 = 0, .selector_u8 = selector};
+      .destination_v8 = 1,
+      .source_v8 = 0,
+      .selector_u8 = selector,
+  };
   execute(&record, values);
   return values[1];
 }
@@ -280,7 +283,10 @@ TEST(VMBytecodeInterpreterConversionTest,
     selector_seen[row.selector] = true;
     uint64_t values[] = {row.source, kSentinel};
     iree_vm_bytecode_conversion_float_to_integer_t record = {
-        .destination_v8 = 1, .source_v8 = 0, .selector_u8 = row.selector};
+        .destination_v8 = 1,
+        .source_v8 = 0,
+        .selector_u8 = row.selector,
+    };
     EXPECT_EQ(
         iree_vm_bytecode_execute_conversion_float_to_integer(&record, values),
         row.expected_failure);

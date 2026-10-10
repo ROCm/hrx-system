@@ -156,7 +156,8 @@ class TLSFPoolConcurrencyTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_hal_memory_maintenance_thread_create(
         {}, iree_allocator_system(), &maintenance_));
     iree_hal_passthrough_pool_options_t backing_options = {
-        .epoch_query = {QueryEpoch, this}};
+        .epoch_query = {QueryEpoch, this},
+    };
     IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
         backing_options, provider_, notification_, tracker_, maintenance_,
         iree_allocator_system(), &backing_pool_));

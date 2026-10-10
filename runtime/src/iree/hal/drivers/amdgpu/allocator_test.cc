@@ -1440,7 +1440,9 @@ TEST_F(AllocatorTest, UnifiedMemorySatisfiesDualLocality) {
       host_allocator_, /*byte_length=*/4096, /*min_alignment=*/64,
       /*offset=*/0, &host_ptr));
   iree_hal_external_buffer_t external_buffer = {
-      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION, .size = 4096};
+      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+      .size = 4096,
+  };
   external_buffer.handle.host_allocation.ptr = host_ptr;
   iree_hal_buffer_params_t import_params = {0};
   import_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
@@ -1689,8 +1691,10 @@ TEST_F(AllocatorTest, UnsupportedExternalBufferImportsFailLoud) {
       IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_WIN32,
   };
   for (iree_hal_external_buffer_type_t unsupported_type : unsupported_types) {
-    iree_hal_external_buffer_t external_buffer = {.type = unsupported_type,
-                                                  .size = 4096};
+    iree_hal_external_buffer_t external_buffer = {
+        .type = unsupported_type,
+        .size = 4096,
+    };
 
     iree_hal_buffer_t* buffer = NULL;
     IREE_EXPECT_STATUS_IS(
@@ -1714,20 +1718,22 @@ TEST_F(AllocatorTest, HostAllocationImportUsesFinePoolAtomicContract) {
 
   iree_hal_external_buffer_t external_buffer = {
       .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
-      .size = kAllocationSize};
+      .size = kAllocationSize,
+  };
   external_buffer.handle.host_allocation.ptr = host_ptr;
 
-  iree_hal_buffer_params_t params =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
-  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
-  params.queue_family_affinity = kQueueFamilyAffinity0;
+  iree_hal_buffer_params_t params = {
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+      .queue_family_affinity = kQueueFamilyAffinity0,
+  };
 
   int release_count = 0;
-  iree_hal_buffer_release_callback_t callback = {.fn = CountingReleaseCallback,
-                                                 .user_data = &release_count};
+  iree_hal_buffer_release_callback_t callback = {
+      .fn = CountingReleaseCallback,
+      .user_data = &release_count,
+  };
 
   iree_hal_buffer_t* buffer = nullptr;
   iree_status_t status = iree_hal_allocator_import_buffer(
@@ -1929,7 +1935,8 @@ TEST_F(AllocatorTest, DeviceAllocationImportRejectsUnknownPointer) {
   uint32_t host_storage = 0;
   iree_hal_external_buffer_t external_buffer = {
       .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
-      .size = sizeof(host_storage)};
+      .size = sizeof(host_storage),
+  };
   external_buffer.handle.device_allocation.ptr =
       (uint64_t)(uintptr_t)&host_storage;
 
@@ -1972,13 +1979,16 @@ TEST_F(AllocatorTest, DeviceAllocationImportWrapsHsaAllocation) {
 
   iree_hal_external_buffer_t external_buffer = {
       .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
-      .size = kAllocationSize};
+      .size = kAllocationSize,
+  };
   external_buffer.handle.device_allocation.ptr =
       (uint64_t)(uintptr_t)allocation.ptr();
 
   int release_count = 0;
-  iree_hal_buffer_release_callback_t callback = {.fn = CountingReleaseCallback,
-                                                 .user_data = &release_count};
+  iree_hal_buffer_release_callback_t callback = {
+      .fn = CountingReleaseCallback,
+      .user_data = &release_count,
+  };
 
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_import_buffer(
@@ -2044,7 +2054,8 @@ TEST_F(AllocatorTest, AsanDeviceAllocationImportPublishesShadow) {
 
   iree_hal_external_buffer_t external_buffer = {
       .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
-      .size = kAllocationSize};
+      .size = kAllocationSize,
+  };
   external_buffer.handle.device_allocation.ptr =
       (uint64_t)(uintptr_t)allocation.ptr();
 

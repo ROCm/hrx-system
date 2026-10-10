@@ -97,7 +97,8 @@ TEST(SocketSendCompletionTest, ReportsWriteProgressBeforeSourceRetirement) {
   for (int32_t notification_result :
        {0, static_cast<int32_t>(IREE_IORING_NOTIF_USAGE_ZC_COPIED)}) {
     iree_async_socket_send_operation_t operation = {
-        .send_flags = IREE_ASYNC_SOCKET_SEND_FLAG_REPORT_PROGRESS};
+        .send_flags = IREE_ASYNC_SOCKET_SEND_FLAG_REPORT_PROGRESS,
+    };
     auto primary = MakeCqe(65535, IREE_IORING_CQE_F_MORE);
     auto completion =
         iree_async_io_uring_socket_process_send_cqe(&primary, &operation);
@@ -122,7 +123,8 @@ TEST(SocketSendCompletionTest, ReportsWriteProgressBeforeSourceRetirement) {
 TEST(SocketSendCompletionTest, ProgressOptInStillRetainsFailedPrimary) {
   for (int32_t result : {-EPIPE, -ECANCELED, 0}) {
     iree_async_socket_send_operation_t operation = {
-        .send_flags = IREE_ASYNC_SOCKET_SEND_FLAG_REPORT_PROGRESS};
+        .send_flags = IREE_ASYNC_SOCKET_SEND_FLAG_REPORT_PROGRESS,
+    };
     auto primary = MakeCqe(result, IREE_IORING_CQE_F_MORE);
     auto completion =
         iree_async_io_uring_socket_process_send_cqe(&primary, &operation);
@@ -144,7 +146,8 @@ TEST(SocketSendCompletionTest, ProgressOptInStillRetainsFailedPrimary) {
 
 TEST(SocketSendCompletionTest, ProgressOptInWithoutNotificationIsFinal) {
   iree_async_socket_send_operation_t operation = {
-      .send_flags = IREE_ASYNC_SOCKET_SEND_FLAG_REPORT_PROGRESS};
+      .send_flags = IREE_ASYNC_SOCKET_SEND_FLAG_REPORT_PROGRESS,
+  };
   auto primary = MakeCqe(19, 0);
   auto completion =
       iree_async_io_uring_socket_process_send_cqe(&primary, &operation);
@@ -156,7 +159,8 @@ TEST(SocketSendCompletionTest, ProgressOptInWithoutNotificationIsFinal) {
 
 TEST(SocketSendCompletionTest, DatagramProgressUsesSameRetirementBoundary) {
   iree_async_socket_sendto_operation_t operation = {
-      .send_flags = IREE_ASYNC_SOCKET_SEND_FLAG_REPORT_PROGRESS};
+      .send_flags = IREE_ASYNC_SOCKET_SEND_FLAG_REPORT_PROGRESS,
+  };
   auto primary = MakeCqe(23, IREE_IORING_CQE_F_MORE);
   auto completion =
       iree_async_io_uring_socket_process_sendto_cqe(&primary, &operation);

@@ -19,7 +19,8 @@ static iree_hal_memory_fixed_block_allocator_options_t BenchOptions(
   iree_hal_memory_fixed_block_allocator_options_t options = {
       .block_size = 4096,
       .block_count = static_cast<uint32_t>(block_count),
-      .frontier_capacity = 4};
+      .frontier_capacity = 4,
+  };
   return options;
 }
 

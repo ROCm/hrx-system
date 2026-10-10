@@ -52,7 +52,8 @@ static iree_hal_amdgpu_kernel_descriptor_t MakeDescriptor(
           IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X |
           IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID_MASK |
           (4u << IREE_HAL_AMDGPU_COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE_SHIFT),
-      .kernel_code_properties = kernel_code_properties};
+      .kernel_code_properties = kernel_code_properties,
+  };
   return descriptor;
 }
 

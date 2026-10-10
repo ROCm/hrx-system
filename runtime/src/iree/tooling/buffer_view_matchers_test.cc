@@ -177,7 +177,8 @@ static const iree_hal_buffer_equality_t kApproximateAbsoluteEquality = ([]() {
       .f32_atol = 0.0001f,
       .f64_atol = 0.0001,
       .bf16_atol = 0.01f,
-      .rtol = 0.0};
+      .rtol = 0.0,
+  };
   return equality;
 })();
 
@@ -188,7 +189,8 @@ static const iree_hal_buffer_equality_t kApproximateRelativeEquality = ([]() {
       .f32_atol = 0.0f,
       .f64_atol = 0.0,
       .bf16_atol = 0.0f,
-      .rtol = 0.001};
+      .rtol = 0.001,
+  };
   return equality;
 })();
 
@@ -199,7 +201,8 @@ static const iree_hal_buffer_equality_t kApproximateNumpyEquality = ([]() {
       .f32_atol = 1e-5f,
       .f64_atol = 1e-5,
       .bf16_atol = 1e-5f,
-      .rtol = 1e-5};
+      .rtol = 1e-5,
+  };
   return equality;
 })();
 

@@ -1200,9 +1200,7 @@ TEST(TLSFTest, FinalSizeClassExhaustionDoesNotWrap) {
 }
 
 TEST(TLSFTest, SplitMetadataGrowthFailureDoesNotMutateAllocator) {
-  TestAllocatorState allocator_state =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment follows
-           // default member initialization.
+  TestAllocatorState allocator_state = {};
   allocator_state.base_allocator = iree_allocator_system();
   iree_hal_memory_tlsf_t tlsf;
   auto options = DefaultOptions();

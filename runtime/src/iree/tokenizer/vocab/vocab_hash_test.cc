@@ -23,7 +23,8 @@ std::vector<uint8_t> BuildStringTable(
     iree_tokenizer_token_t token = {
         .string_offset = static_cast<uint32_t>(table.size()),
         .string_length = static_cast<uint16_t>(s.size()),
-        .attributes = IREE_TOKENIZER_TOKEN_ATTR_NONE};
+        .attributes = IREE_TOKENIZER_TOKEN_ATTR_NONE,
+    };
     tokens->push_back(token);
     table.insert(table.end(), s.begin(), s.end());
   }

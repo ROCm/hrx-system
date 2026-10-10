@@ -114,7 +114,8 @@ TEST_F(SlabProviderTest, CapturesAccessBeforeNativeAcquisition) {
     iree_hal_amdgpu_slab_provider_options_t options = {
         .memory_pool = memory_pool,
         .memory_type = properties.memory_type,
-        .supported_usage = properties.supported_usage};
+        .supported_usage = properties.supported_usage,
+    };
     options.access.queue_family_affinity = family_affinity;
     options.access.agent_count = agents.count;
     options.access.agents = agents.values;
@@ -136,13 +137,12 @@ TEST_F(SlabProviderTest, CapturesAccessBeforeNativeAcquisition) {
     values.fill(0xA5A5A5A5u);
     IREE_ASSERT_OK(iree_hsa_memory_copy(IREE_LIBHSA(&libhsa_), slab.base_ptr,
                                         values.data(), sizeof(values)));
-    iree_hal_buffer_params_t params =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    params.type = properties.memory_type;
-    params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
-    params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-    params.queue_family_affinity = family_affinity;
+    iree_hal_buffer_params_t params = {
+        .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+        .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .type = properties.memory_type,
+        .queue_family_affinity = family_affinity,
+    };
     iree::hal::cts::Ref<iree_hal_buffer_t> view;
     IREE_ASSERT_OK(iree_hal_slab_provider_wrap_buffer(
         provider, &slab, 32, 64, params,

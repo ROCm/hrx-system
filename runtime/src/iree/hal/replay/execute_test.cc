@@ -286,7 +286,8 @@ static void AppendImmediateQueueTransferRecord(
       .data_length = 0,
   };
   iree_hal_replay_queue_transfer_operation_payload_t operation = {
-      .type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD};
+      .type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+  };
   operation.source_ref.buffer_id = queue_id + 11;
   operation.source_ref.length = 4;
   const iree_hal_replay_file_record_metadata_t metadata = {
@@ -2134,7 +2135,8 @@ TEST(ReplayExecuteTest, ExecutesRecordedFdBackedQueueWrite) {
       .payload_values = &signal_value,
   };
   iree_hal_barrier_t publication = {
-      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE};
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
   const iree_hal_barrier_list_t publication_list = {1, &publication};
   const iree_hal_queue_barriers_t barriers = {&publication_list, nullptr};
   IREE_ASSERT_OK(iree_hal_queue_write(
@@ -2312,7 +2314,8 @@ TEST(ReplayExecuteTest, ExecutesHostAllocationImportedBufferRecord) {
   };
   iree_hal_external_buffer_t external_buffer = {
       .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
-      .size = sizeof(imported_storage)};
+      .size = sizeof(imported_storage),
+  };
   external_buffer.handle.host_allocation.ptr = imported_storage;
 
   iree_hal_buffer_params_t params = {0};
@@ -2409,14 +2412,15 @@ TEST(ReplayExecuteTest, SkipsFailedUnsupportedImportedBufferRecord) {
   ASSERT_NE(nullptr, allocator);
 
   iree_hal_external_buffer_t external_buffer = {
-      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_FD, .size = 16};
+      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_FD,
+      .size = 16,
+  };
 
-  iree_hal_buffer_params_t params =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  params.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params.usage = IREE_HAL_BUFFER_USAGE_MAPPING;
+  iree_hal_buffer_params_t params = {
+      .usage = IREE_HAL_BUFFER_USAGE_MAPPING,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
+  };
   iree_hal_buffer_t* imported_buffer = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
@@ -2533,12 +2537,12 @@ TEST(ReplayExecuteTest, ExecutesRecordedExactQueueTransfer) {
         .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
         .target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ,
         .buffer_ref = iree_hal_make_buffer_ref(barrier_view, 2, 4),
-        .recipe = &recipe};
-    iree_hal_barrier_t after =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-             // spans intervening work.
-    after.source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER;
-    after.target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST;
+        .recipe = &recipe,
+    };
+    iree_hal_barrier_t after = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+    };
     after.effects.bits = IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM |
                          IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM;
     after.buffer_barrier_count = 1;

@@ -274,7 +274,8 @@ struct TransferPeer {
               return iree_ok_status();
             },
         .build_user_data = &progress,
-        .completion_callback = {OnSend, this}};
+        .completion_callback = {OnSend, this},
+    };
     iree_status_t status =
         iree_net_queue_channel_send_advance(channel, &params);
     const bool accepted = iree_status_is_ok(status);
@@ -371,7 +372,8 @@ struct TransferPeer {
               },
           .build_user_data = &command,
           .payload = iree_async_span_list_make(spans.data(), spans.size()),
-          .completion_callback = {OnSend, this}};
+          .completion_callback = {OnSend, this},
+      };
       iree_status_t status = iree_net_queue_channel_send_command(
           channel, IREE_NET_QUEUE_ID_NONE, &params);
       if (iree_status_is_resource_exhausted(status)) {
@@ -585,8 +587,10 @@ struct TrialSide {
       return std::move(created).status().release();
     }
     proactor = *created;
-    iree_async_slab_options_t slab_options = {.buffer_size = 64 * 1024,
-                                              .buffer_count = 16};
+    iree_async_slab_options_t slab_options = {
+        .buffer_size = 64 * 1024,
+        .buffer_count = 16,
+    };
     IREE_RETURN_IF_ERROR(
         iree_async_slab_create(slab_options, iree_allocator_system(), &slab));
     IREE_RETURN_IF_ERROR(iree_async_proactor_register_slab(

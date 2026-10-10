@@ -40,8 +40,10 @@ class TLSFPoolReservationTest : public ::testing::Test {
     IREE_ASSERT_OK(
         iree_hal_passthrough_pool_create({}, provider_, notification_, tracker_,
                                          maintenance_, allocator_, &native_));
-    iree_hal_slab_cache_options_t options = {.slab = Request(4096, 16),
-                                             .max_count = 4};
+    iree_hal_slab_cache_options_t options = {
+        .slab = Request(4096, 16),
+        .max_count = 4,
+    };
     IREE_ASSERT_OK(
         iree_hal_slab_cache_create(native_, &options, allocator_, &cache_));
   }
@@ -270,8 +272,10 @@ TEST_F(TLSFPoolReservationTest, MixedRollbackPreservesDedicatedParentHistory) {
   iree_hal_buffer_t* backing = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       native_, parent_request.params, 8192, iree_infinite_timeout(), &backing));
-  iree_hal_fixed_block_pool_options_t parent_options = {.block_size = 8192,
-                                                        .frontier_capacity = 2};
+  iree_hal_fixed_block_pool_options_t parent_options = {
+      .block_size = 8192,
+      .frontier_capacity = 2,
+  };
   iree_hal_pool_t* parent = nullptr;
   IREE_ASSERT_OK(iree_hal_fixed_block_pool_create_from_buffer(
       backing, 0, IREE_HAL_WHOLE_BUFFER, &parent_options, allocator_, &parent));
@@ -321,8 +325,10 @@ TEST_F(TLSFPoolReservationTest,
   // A cache returns its complete class extent. Alignment leaves the final byte
   // outside the child's managed range but inside its parent reservation.
   const auto parent_request = Request(8193);
-  iree_hal_slab_cache_options_t parent_options = {.slab = parent_request,
-                                                  .max_count = 1};
+  iree_hal_slab_cache_options_t parent_options = {
+      .slab = parent_request,
+      .max_count = 1,
+  };
   iree_hal_pool_t* parent = nullptr;
   IREE_ASSERT_OK(iree_hal_slab_cache_create(native_, &parent_options,
                                             allocator_, &parent));

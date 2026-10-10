@@ -156,7 +156,8 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     };
     iree_hal_external_buffer_t external_buffer = {
         .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
-        .size = kBufferSize};
+        .size = kBufferSize,
+    };
     external_buffer.handle.host_allocation.ptr = misaligned_ptr;
 
     iree_hal_buffer_params_t buffer_params = configuration.buffer_params;

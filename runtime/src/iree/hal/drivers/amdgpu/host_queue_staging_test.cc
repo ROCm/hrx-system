@@ -613,14 +613,16 @@ TEST_F(HostQueueStagingTest, ConcurrentMultiChunkHostTransfersReuseSlots) {
             value += static_cast<uint8_t>(thread_index * 16 + 1);
           }
           iree_hal_transfer_operation_t upload = {
-              .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD};
+              .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+          };
           upload.upload.source = input.data();
           upload.upload.target_buffer = buffers[thread_index];
           upload.upload.length = input.size();
           IREE_ASSERT_OK(transfer_and_wait(upload));
 
           iree_hal_transfer_operation_t download = {
-              .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD};
+              .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+          };
           download.download.source_buffer = buffers[thread_index];
           download.download.target = output.data();
           download.download.length = output.size();
@@ -918,12 +920,11 @@ TEST_F(HostQueueStagingTest, ShortReadReleasesBuffersBeforeFailure) {
     Ref<iree_hal_file_t> file;
     IREE_ASSERT_OK(ImportNativeFile(test_device.base_device(), path,
                                     IREE_HAL_MEMORY_ACCESS_READ, file.out()));
-    iree_hal_buffer_params_t params =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    params.type = memory_type;
-    params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-    params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+    iree_hal_buffer_params_t params = {
+        .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+        .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .type = memory_type,
+    };
     if (iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_HOST_VISIBLE)) {
       params.usage |= IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
     }
@@ -948,7 +949,8 @@ TEST_F(HostQueueStagingTest, ShortReadReleasesBuffersBeforeFailure) {
         MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
 
     iree_hal_barrier_t after_barrier = {
-        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE};
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
     const iree_hal_barrier_list_t after = {1, &after_barrier};
     const iree_hal_queue_barriers_t barriers = {nullptr, &after};
     IREE_ASSERT_OK(iree_hal_queue_read(
@@ -973,7 +975,8 @@ TEST_F(HostQueueStagingTest, ShortReadReleasesBuffersBeforeFailure) {
               completion->reference_count.set_value(iree_atomic_ref_count_load(
                   &completion->buffer->resource.ref_count));
             },
-        .user_data = &completion};
+        .user_data = &completion,
+    };
     IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
         reinterpret_cast<iree_async_semaphore_t*>(signal_semaphore.get()),
         signal_value, &timepoint));

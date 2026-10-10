@@ -150,7 +150,8 @@ static void LoadArrayAndAssertContents(iree_io_stream_t* stream,
   iree_hal_buffer_params_t buffer_params = {
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
       .access = IREE_HAL_MEMORY_ACCESS_READ,
-      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL};
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+  };
   iree_hal_buffer_view_t* buffer_view = NULL;
   IREE_ASSERT_OK(iree_numpy_npy_load_ndarray(
       stream, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT, buffer_params,
@@ -171,7 +172,8 @@ TEST_F(NumpyIOTest, LoadEmptyFile) {
   iree_hal_buffer_params_t buffer_params = {
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
       .access = IREE_HAL_MEMORY_ACCESS_READ,
-      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL};
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+  };
   iree_hal_buffer_view_t* buffer_view = NULL;
   EXPECT_THAT(Status(iree_numpy_npy_load_ndarray(
                   stream.get(), IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT,
@@ -215,7 +217,8 @@ TEST_F(NumpyIOTest, RejectMalformedHeaderWithoutDictSeparator) {
   iree_hal_buffer_params_t buffer_params = {
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
       .access = IREE_HAL_MEMORY_ACCESS_READ,
-      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL};
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+  };
   iree_hal_buffer_view_t* buffer_view = NULL;
   EXPECT_THAT(Status(iree_numpy_npy_load_ndarray(
                   stream.get(), IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT,
@@ -376,7 +379,8 @@ static void RoundTripArrays(iree_io_stream_t* source_stream,
     iree_hal_buffer_params_t buffer_params = {
         .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
         .access = IREE_HAL_MEMORY_ACCESS_READ,
-        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL};
+        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+    };
     iree_hal_buffer_view_t* buffer_view = NULL;
     IREE_ASSERT_OK(iree_numpy_npy_load_ndarray(
         source_stream, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT, buffer_params,

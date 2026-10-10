@@ -558,7 +558,8 @@ static std::vector<uint8_t> MakeFullFileAtomicReplayStorage(
             .payload_type = payload_type,
             .object_type = object_type,
             .operation_code = operation_code,
-            .status_code = IREE_STATUS_OK};
+            .status_code = IREE_STATUS_OK,
+        };
         return metadata;
       };
 
@@ -1061,7 +1062,8 @@ TEST_F(ReplayAtomicExecutionTest, ReplaysCommandBufferOperations) {
   iree_hal_replay_command_buffer_atomic_wait_payload_t wait_payload = {
       .target_ref = DirectTarget(/*offset=*/8, /*length=*/8),
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
-      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_ATOMIC};
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_ATOMIC,
+  };
   wait_payload.params.value = UINT64_C(0x1020304050607080);
   wait_payload.params.mask = UINT64_C(0xFFEEDDCCBBAA9988);
   wait_payload.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
@@ -1105,7 +1107,8 @@ TEST_F(ReplayAtomicExecutionTest, ReplaysCommandBufferOperations) {
               .reserved0 = 0,
           },
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
-      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE};
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+  };
   store_payload.params.value = UINT64_C(0xAABBCCDD);
   store_payload.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
   store_payload.params.width = IREE_HAL_ATOMIC_WIDTH_32;
@@ -1137,7 +1140,8 @@ TEST_F(ReplayAtomicExecutionTest, ReplaysCommandBufferOperations) {
   iree_hal_replay_command_buffer_atomic_rmw_payload_t rmw_payload = {
       .target_ref = DirectTarget(/*offset=*/32, /*length=*/4),
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
-      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS};
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS,
+  };
   rmw_payload.params.operand = UINT64_C(0x11223344);
   rmw_payload.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
   rmw_payload.params.width = IREE_HAL_ATOMIC_WIDTH_32;
@@ -1174,7 +1178,8 @@ TEST_F(ReplayAtomicExecutionTest, ReplaysQueueOperations) {
   iree_hal_replay_queue_atomic_wait_payload_t wait_payload = {
       .target_ref = DirectTarget(/*offset=*/8, /*length=*/8),
       .wait_semaphore_count = 1,
-      .signal_semaphore_count = 1};
+      .signal_semaphore_count = 1,
+  };
   wait_payload.params.value = UINT64_C(0x1020304050607080);
   wait_payload.params.mask = UINT64_C(0xFFEEDDCCBBAA9988);
   wait_payload.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
@@ -1213,7 +1218,8 @@ TEST_F(ReplayAtomicExecutionTest, ReplaysQueueOperations) {
   iree_hal_replay_queue_atomic_store_payload_t store_payload = {
       .target_ref = DirectTarget(/*offset=*/16, /*length=*/4),
       .wait_semaphore_count = 1,
-      .signal_semaphore_count = 1};
+      .signal_semaphore_count = 1,
+  };
   store_payload.params.value = UINT64_C(0xAABBCCDD);
   store_payload.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
   store_payload.params.width = IREE_HAL_ATOMIC_WIDTH_32;
@@ -1237,7 +1243,8 @@ TEST_F(ReplayAtomicExecutionTest, ReplaysQueueOperations) {
   iree_hal_replay_queue_atomic_rmw_payload_t rmw_payload = {
       .target_ref = DirectTarget(/*offset=*/24, /*length=*/8),
       .wait_semaphore_count = 1,
-      .signal_semaphore_count = 1};
+      .signal_semaphore_count = 1,
+  };
   rmw_payload.params.operand = UINT64_C(0x1122334455667788);
   rmw_payload.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
   rmw_payload.params.width = IREE_HAL_ATOMIC_WIDTH_64;
@@ -1357,7 +1364,8 @@ TEST_F(ReplayAtomicExecutionTest, ReplaysVersionedModesThroughFullFile) {
 TEST_F(ReplayAtomicExecutionTest, TracksPrivateCompletionWithoutWireSignal) {
   OperationRecord record;
   iree_hal_replay_queue_atomic_store_payload_t payload = {
-      .target_ref = DirectTarget(/*offset=*/0, /*length=*/4)};
+      .target_ref = DirectTarget(/*offset=*/0, /*length=*/4),
+  };
   payload.params.value = 1;
   payload.params.width = IREE_HAL_ATOMIC_WIDTH_32;
   record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE,
@@ -1382,7 +1390,8 @@ TEST_F(ReplayAtomicExecutionTest, SubmissionFailureIsNotTracked) {
   queue_.submission_status_code = IREE_STATUS_RESOURCE_EXHAUSTED;
   OperationRecord record;
   iree_hal_replay_queue_atomic_store_payload_t payload = {
-      .target_ref = DirectTarget(/*offset=*/0, /*length=*/4)};
+      .target_ref = DirectTarget(/*offset=*/0, /*length=*/4),
+  };
   payload.params.value = 1;
   payload.params.width = IREE_HAL_ATOMIC_WIDTH_32;
   record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE,
@@ -1399,7 +1408,8 @@ TEST_F(ReplayAtomicExecutionTest, PrivateCompletionWaitFailureIsRetained) {
   OperationRecord record;
   iree_hal_replay_queue_atomic_store_payload_t payload = {
       .target_ref = DirectTarget(/*offset=*/0, /*length=*/4),
-      .signal_semaphore_count = 1};
+      .signal_semaphore_count = 1,
+  };
   payload.params.value = 1;
   payload.params.width = IREE_HAL_ATOMIC_WIDTH_32;
   record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE,
@@ -1426,14 +1436,17 @@ TEST_F(ReplayAtomicExecutionTest,
        TransferStagingIsRetainedAcrossWaitFailureUntilDrain) {
   queue_.fail_private_signal = true;
   OperationRecord record;
-  iree_hal_replay_queue_transfer_payload_t payload = {.operation_count = 1,
-                                                      .data_length = 4};
+  iree_hal_replay_queue_transfer_payload_t payload = {
+      .operation_count = 1,
+      .data_length = 4,
+  };
   record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER,
                IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER, kQueueId, payload);
   iree_hal_replay_queue_transfer_operation_payload_t operation = {
       .type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPLOAD,
       .target_ref = DirectTarget(/*offset=*/0, /*length=*/4),
-      .data_length = 4};
+      .data_length = 4,
+  };
   record.AppendPayload(operation);
   record.AppendPayloadByte(0x10);
   record.AppendPayloadByte(0x20);
@@ -1475,7 +1488,8 @@ TEST_F(ReplayAtomicExecutionTest,
 TEST_F(ReplayAtomicExecutionTest, BufferRangeDataIsNotACompletionBoundary) {
   OperationRecord record;
   iree_hal_replay_queue_atomic_store_payload_t queue_payload = {
-      .target_ref = DirectTarget(/*offset=*/0, /*length=*/4)};
+      .target_ref = DirectTarget(/*offset=*/0, /*length=*/4),
+  };
   queue_payload.params.value = 1;
   queue_payload.params.width = IREE_HAL_ATOMIC_WIDTH_32;
   record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE,
@@ -1489,7 +1503,8 @@ TEST_F(ReplayAtomicExecutionTest, BufferRangeDataIsNotACompletionBoundary) {
       .byte_length = 1,
       .data_length = 1,
       .mapping_mode = IREE_HAL_MAPPING_MODE_SCOPED,
-      .memory_access = IREE_HAL_MEMORY_ACCESS_WRITE};
+      .memory_access = IREE_HAL_MEMORY_ACCESS_WRITE,
+  };
   record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_FLUSH_RANGE,
                IREE_HAL_REPLAY_PAYLOAD_TYPE_BUFFER_RANGE_DATA, kBufferId,
                range_payload);
@@ -1504,7 +1519,8 @@ TEST_F(ReplayAtomicExecutionTest, BufferRangeDataIsNotACompletionBoundary) {
 TEST_F(ReplayAtomicExecutionTest, DeinitializeDrainsPendingCompletionAtEof) {
   OperationRecord record;
   iree_hal_replay_queue_atomic_store_payload_t payload = {
-      .target_ref = DirectTarget(/*offset=*/0, /*length=*/4)};
+      .target_ref = DirectTarget(/*offset=*/0, /*length=*/4),
+  };
   payload.params.value = 1;
   payload.params.width = IREE_HAL_ATOMIC_WIDTH_32;
   record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE,
@@ -1524,7 +1540,8 @@ TEST_F(ReplayAtomicExecutionTest, RejectsMalformedRecords) {
   iree_hal_replay_command_buffer_atomic_store_payload_t command_payload = {
       .target_ref = DirectTarget(/*offset=*/0, /*length=*/4),
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE};
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+  };
   command_payload.params.value = 1;
   command_payload.params.width = IREE_HAL_ATOMIC_WIDTH_32;
   record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_STORE,
@@ -1555,12 +1572,11 @@ TEST_F(ReplayAtomicExecutionTest, RejectsMalformedRecords) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Replay(record));
   EXPECT_EQ(0u, command_buffer_.invocation_count);
 
-  iree_hal_replay_queue_atomic_store_payload_t queue_payload =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  queue_payload.target_ref = DirectTarget(/*offset=*/0, /*length=*/4);
-  queue_payload.wait_semaphore_count = 1;
-  queue_payload.signal_semaphore_count = 1;
+  iree_hal_replay_queue_atomic_store_payload_t queue_payload = {
+      .target_ref = DirectTarget(/*offset=*/0, /*length=*/4),
+      .wait_semaphore_count = 1,
+      .signal_semaphore_count = 1,
+  };
   queue_payload.params.value = 1;
   queue_payload.params.width = IREE_HAL_ATOMIC_WIDTH_32;
 

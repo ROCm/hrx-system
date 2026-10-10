@@ -29,7 +29,8 @@ class ProfileMetadataTest : public ::testing::Test {
     iree_hal_executable_function_info_t function_info = {
         .name = IREE_SV("test_dispatch"),
         .constant_byte_length = 3 * sizeof(uint32_t),
-        .binding_count = 2};
+        .binding_count = 2,
+    };
     function_info.workgroup_size[0] = 8;
     function_info.workgroup_size[1] = 4;
     function_info.workgroup_size[2] = 1;

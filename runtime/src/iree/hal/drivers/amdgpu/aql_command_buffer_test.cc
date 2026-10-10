@@ -28,7 +28,8 @@ static const iree_hal_queue_family_spec_t kQueueFamilySpec = [] {
       .physical_device_affinity = 1,
       .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                     IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
-                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC};
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
+  };
   return spec;
 }();
 
@@ -51,8 +52,10 @@ class AqlCommandBufferTest : public ::testing::Test {
                                                 &profile_metadata_);
     IREE_ASSERT_OK(iree_hal_amdgpu_aql_program_block_pool_initialize(
         block_size_, iree_allocator_system(), &block_pool_));
-    iree_hal_device_queue_spec_t queues = {.family_count = 1,
-                                           .families = &kQueueFamilySpec};
+    iree_hal_device_queue_spec_t queues = {
+        .family_count = 1,
+        .families = &kQueueFamilySpec,
+    };
     iree_hal_device_spec_params_t spec_params = {.queues = &queues};
     iree_hal_device_spec_t* device_spec = nullptr;
     IREE_ASSERT_OK(iree_hal_device_spec_create(

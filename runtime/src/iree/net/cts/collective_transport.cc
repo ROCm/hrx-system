@@ -336,7 +336,8 @@ void CollectiveLink::Pump() {
                 return iree_ok_status();
               },
           .build_user_data = this,
-          .completion_callback = {OnControlSent, this}};
+          .completion_callback = {OnControlSent, this},
+      };
       iree_status_t status =
           iree_net_queue_channel_send_command(channel, 0, &params);
       if (iree_status_is_ok(status)) {
@@ -366,7 +367,8 @@ void CollectiveLink::Pump() {
               return iree_ok_status();
             },
         .build_user_data = this,
-        .completion_callback = {OnControlSent, this}};
+        .completion_callback = {OnControlSent, this},
+    };
     iree_status_t status =
         iree_net_queue_channel_send_advance(channel, &params);
     if (iree_status_is_ok(status)) {
@@ -408,7 +410,8 @@ void CollectiveLink::Send(iree_async_span_t data, uint32_t* pending_sources) {
         .notification_cookie = sequence,
         .entry_count = 1,
         .entries = &entry,
-        .completion_callback = {OnSourceReturned, &source}};
+        .completion_callback = {OnSourceReturned, &source},
+    };
     status = iree_net_direct_endpoint_write(direct, &params);
   } else {
     source.expected_length +=
@@ -424,7 +427,8 @@ void CollectiveLink::Send(iree_async_span_t data, uint32_t* pending_sources) {
             },
         .build_user_data = &sequence,
         .payload = iree_async_span_list_make(&data, 1),
-        .completion_callback = {OnSourceReturned, &source}};
+        .completion_callback = {OnSourceReturned, &source},
+    };
     status = iree_net_queue_channel_send_command(channel, 1, &params);
   }
   if (iree_status_is_ok(status)) {

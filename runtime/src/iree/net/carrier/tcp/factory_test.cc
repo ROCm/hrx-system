@@ -686,8 +686,10 @@ TEST_P(TcpFactoryTest, SessionDeactivationJoinsSilentNativeConnect) {
   SilentPeer peer;
   CreateSilentPeer(&peer);
   iree_async_slab_t* slab = nullptr;
-  iree_async_slab_options_t slab_options = {.buffer_size = 1024,
-                                            .buffer_count = 4};
+  iree_async_slab_options_t slab_options = {
+      .buffer_size = 1024,
+      .buffer_count = 4,
+  };
   IREE_ASSERT_OK(
       iree_async_slab_create(slab_options, iree_allocator_system(), &slab));
   iree_async_region_t* region = nullptr;
@@ -726,7 +728,8 @@ TEST_P(TcpFactoryTest, SessionDeactivationJoinsSilentNativeConnect) {
             iree_net_session_release(session);
             *static_cast<bool*>(user_data) = true;
           },
-      .user_data = &deactivated};
+      .user_data = &deactivated,
+  };
   auto options = iree_net_session_options_default();
   iree_net_session_t* session = nullptr;
   IREE_ASSERT_OK(iree_net_session_connect(
