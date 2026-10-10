@@ -479,6 +479,48 @@ iree_status_t loom_amdgpu_lookup_or_materialize_sgpr_address(
                                     /*offset=*/0, lane_type, out_low_value);
 }
 
+iree_status_t loom_amdgpu_materialize_uniform_sgpr_address(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, loom_value_id_t* out_low_value) {
+  *out_low_value = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t low_value =
+      loom_low_lower_lookup_value(context, source_value);
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_type_t low_type = loom_module_value_type(module, low_value);
+  const uint32_t unit_count = loom_low_register_type_unit_count(low_type);
+  IREE_ASSERT(unit_count == 1 || unit_count == 2);
+  const bool is_sgpr = loom_amdgpu_low_type_is_register_class(
+      context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
+  const bool is_vgpr = loom_amdgpu_low_type_is_register_class(
+      context, low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
+  IREE_ASSERT(is_sgpr || is_vgpr);
+
+  const loom_type_t source_lane_type =
+      loom_low_register_carrier_type_with_unit_count(low_type, 1);
+  loom_value_id_t low_lane = low_value;
+  if (unit_count == 2) {
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_emit_low_slice(context, source_op, low_value, /*offset=*/0,
+                                   source_lane_type, &low_lane));
+  }
+  if (is_sgpr) {
+    *out_low_value = low_lane;
+    return iree_ok_status();
+  }
+
+  loom_type_t sgpr_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_type(context, &sgpr_type));
+  const loom_value_id_t operands[] = {low_lane};
+  loom_op_t* readfirstlane_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_READFIRSTLANE_B32,
+      operands, IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(),
+      &sgpr_type, 1, &readfirstlane_op));
+  *out_low_value =
+      loom_value_slice_get(loom_low_op_results(readfirstlane_op), 0);
+  return iree_ok_status();
+}
+
 iree_status_t loom_amdgpu_materialize_low_native_i1_mask(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_value, loom_value_id_t* out_low_value) {

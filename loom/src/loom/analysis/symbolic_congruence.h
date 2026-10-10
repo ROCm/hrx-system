@@ -53,6 +53,14 @@ bool loom_symbolic_congruence_excludes_difference(
     const loom_symbolic_expr_t* left, const loom_symbolic_expr_t* right,
     int64_t lower, int64_t upper);
 
+// Attempts the same proof using retained single-source congruences from exact
+// affine terms and indexed value ranges for the bounded residual. This does
+// not expand producers or allocate retained storage.
+bool loom_symbolic_congruence_prove_difference_outside_interval(
+    const loom_symbolic_expr_context_t* context,
+    const loom_symbolic_expr_t* left_expression,
+    const loom_symbolic_expr_t* right_expression, int64_t lower, int64_t upper);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

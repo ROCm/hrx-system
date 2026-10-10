@@ -142,6 +142,13 @@ iree_status_t loom_amdgpu_lookup_or_materialize_sgpr_address(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_value, loom_value_id_t* out_low_value);
 
+// Materializes the low 32 bits of a proven subgroup-uniform address scalar in
+// one SGPR. A canonical VGPR producer is projected with readfirstlane without
+// changing its source-value mapping.
+iree_status_t loom_amdgpu_materialize_uniform_sgpr_address(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, loom_value_id_t* out_low_value);
+
 // Projects an i1 predicate to the numeric value zero or one in the requested
 // SGPR or VGPR bank. Native lane masks require a VGPR result; uniform SCC and
 // durable SGPR predicates can be represented in either bank.

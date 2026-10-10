@@ -430,7 +430,8 @@ def iq4xs_gate_up(arrays):
         f"tensor<{input_size}xbf16>, tensor<{len(route_ids)}xi32>, tensor<{len(packed_weights['gate'])}xi8>, tensor<{len(packed_weights['up'])}xi8>, tensor<{len(expected)}xf32>",
     )
     declaration = "kernel.decl @qwen38_iq4xs_gate_up_swiglu() launch(%input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer)\n\n"
-    return declaration + case.finish(expected, 0.00001)
+    benchmark = "check.benchmark<@iq4xs_gate_up_values> @iq4xs_gate_up_latency\n"
+    return declaration + case.finish(expected, 0.00001) + benchmark
 
 
 def pack_q4k(scale, minimum, group_scales, group_minimums, codes):

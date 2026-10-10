@@ -1594,10 +1594,12 @@ iree_status_t loom_view_regions_prove_no_overlap(
     // Periodic placement can separate intervals without fixing their order:
     // complementary banks exchange positions on each iteration. Overlap would
     // require right.begin-left.begin in [1-right.length, left.length-1].
-    *out_no_overlap = loom_symbolic_congruence_excludes_difference(
-        &right_region->begin_byte_offset, &left_region->begin_byte_offset,
-        1 - right_region->byte_length.constant,
-        left_region->byte_length.constant - 1);
+    *out_no_overlap =
+        loom_symbolic_congruence_prove_difference_outside_interval(
+            table->expression_context, &right_region->begin_byte_offset,
+            &left_region->begin_byte_offset,
+            1 - right_region->byte_length.constant,
+            left_region->byte_length.constant - 1);
   }
   return iree_ok_status();
 }

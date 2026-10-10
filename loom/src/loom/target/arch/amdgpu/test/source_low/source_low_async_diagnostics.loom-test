@@ -79,3 +79,54 @@ kernel.def target(@target) @async_gather_dynamic_offset_sum_rejected() {
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   kernel.return
 }
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @async_gather_varying_destination_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %lane_stride = index.constant 4 : offset
+  %bytes = index.constant 512 : offset
+  %dest_offset = index.scale %lane, %lane_stride : index, offset -> offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%dest_offset] : buffer -> view<64x1x4xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="async_gather.dest_offset"}
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @async_gather_wide_destination_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %dest_offset = index.constant 4294967296 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%dest_offset] : buffer -> view<64x1x4xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="async_gather.dest_offset"}
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}

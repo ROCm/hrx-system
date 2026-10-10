@@ -1941,13 +1941,17 @@ typedef struct loom_amdgpu_prefetch_plan_t {
 typedef struct loom_amdgpu_async_gather_plan_t {
   // Source global-like view access transferred into LDS.
   loom_low_source_memory_access_plan_t source;
+  // Destination address terms retained without the unused full memory plan.
+  const loom_low_source_memory_dynamic_term_t* dest_dynamic_terms;
+  // Number of retained destination address terms.
+  uint8_t dest_dynamic_term_count;
   // Retained operand decisions for all source-address alternatives.
   const loom_amdgpu_memory_dynamic_term_plan_t* dynamic_term_plans;
   // Target operand path selected for each source dynamic address term.
   loom_amdgpu_memory_dynamic_index_kind_t
       source_dynamic_term_kinds[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
-  // Static LDS byte offset materialized into M0.
-  uint32_t dest_byte_offset;
+  // Static LDS byte contribution materialized into M0.
+  uint32_t dest_static_byte_offset;
   // Number of bytes moved by the selected async packet.
   uint32_t packet_byte_count;
   // Descriptor row selected for the active descriptor set.

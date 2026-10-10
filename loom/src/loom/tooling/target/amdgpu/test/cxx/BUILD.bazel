@@ -223,6 +223,7 @@ _IQ4XS_GATE_UP_SYNC_CONFIGS = {
     "qwen38.iq4xs.async_staging": "false",
     "qwen38.iq4xs.block_unroll_factor": "2",
     "qwen38.iq4xs.packet_unroll_factor": "4",
+    "qwen38.iq4xs.staging_depth": "1",
     "qwen38.iq4xs.tile_unroll_factor": "1",
 }
 
@@ -230,7 +231,15 @@ _IQ4XS_GATE_UP_ASYNC_CONFIGS = {
     "qwen38.iq4xs.async_staging": "true",
     "qwen38.iq4xs.block_unroll_factor": "2",
     "qwen38.iq4xs.packet_unroll_factor": "4",
+    "qwen38.iq4xs.staging_depth": "1",
     "qwen38.iq4xs.tile_unroll_factor": "1",
+}
+
+_IQ4XS_GATE_UP_BUFFERING_VARIANTS = {
+    "double_buffered": {
+        "configs": {"qwen38.iq4xs.staging_depth": "2"},
+    },
+    "single_buffered": {},
 }
 
 _CONFIGURED_WORKGROUP_STORAGE_VARIANTS = {
@@ -529,21 +538,23 @@ loom_test_module(
 
 loom_test(
     name = "iq4xs_gate_up_test",
-    benchmark_smoke = False,
     case = "iq4xs_gate_up_values",
     configs = _IQ4XS_GATE_UP_SYNC_CONFIGS,
     execution_profiles = _EXECUTION_PROFILES,
     module = ":iq4xs_gate_up_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    variants = _IQ4XS_GATE_UP_BUFFERING_VARIANTS,
 )
 
 loom_test(
-    name = "iq4xs_gate_up_async_compile_test",
-    benchmark_smoke = False,
+    name = "iq4xs_gate_up_async_test",
+    case = "iq4xs_gate_up_values",
     compile_targets = ["//loom/target/amdgpu:gfx942"],
     configs = _IQ4XS_GATE_UP_ASYNC_CONFIGS,
+    execution_profiles = _EXECUTION_PROFILES,
     module = ":iq4xs_gate_up_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    target_compatible_with = _CDNA3_COMPATIBLE_WITH,
+    variants = _IQ4XS_GATE_UP_BUFFERING_VARIANTS,
 )
 
 loom_generated_file_family(

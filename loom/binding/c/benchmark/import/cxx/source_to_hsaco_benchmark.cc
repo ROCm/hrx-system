@@ -372,11 +372,32 @@ constexpr CxxKernel kMxfp4 = {"mxfp_group_dot.cxx", "mxfp4_decode_dot",
                               "gfx1250"};
 constexpr CxxKernel kMxfp8 = {"mxfp_group_dot.cxx", "mxfp8_decode_dot",
                               "gfx1250"};
-constexpr CxxKernel kIq4XsGateUp = {
+constexpr CxxKernel kIq4XsGateUpGfx1151 = {
     "iq4xs_gate_up.cxx",
     "qwen38_iq4xs_gate_up_swiglu",
     "gfx1151",
     "config.def @qwen38.iq4xs.async_staging = 0 : i1\n"
+    "config.def @qwen38.iq4xs.staging_depth = 1 : i32\n"
+    "config.def @qwen38.iq4xs.packet_unroll_factor = 4 : i32\n"
+    "config.def @qwen38.iq4xs.block_unroll_factor = 2 : i32\n"
+    "config.def @qwen38.iq4xs.tile_unroll_factor = 1 : i32\n",
+};
+constexpr CxxKernel kIq4XsGateUpGfx942AsyncSingle = {
+    "iq4xs_gate_up.cxx",
+    "qwen38_iq4xs_gate_up_swiglu",
+    "gfx942",
+    "config.def @qwen38.iq4xs.async_staging = 1 : i1\n"
+    "config.def @qwen38.iq4xs.staging_depth = 1 : i32\n"
+    "config.def @qwen38.iq4xs.packet_unroll_factor = 4 : i32\n"
+    "config.def @qwen38.iq4xs.block_unroll_factor = 2 : i32\n"
+    "config.def @qwen38.iq4xs.tile_unroll_factor = 1 : i32\n",
+};
+constexpr CxxKernel kIq4XsGateUpGfx942AsyncDouble = {
+    "iq4xs_gate_up.cxx",
+    "qwen38_iq4xs_gate_up_swiglu",
+    "gfx942",
+    "config.def @qwen38.iq4xs.async_staging = 1 : i1\n"
+    "config.def @qwen38.iq4xs.staging_depth = 2 : i32\n"
     "config.def @qwen38.iq4xs.packet_unroll_factor = 4 : i32\n"
     "config.def @qwen38.iq4xs.block_unroll_factor = 2 : i32\n"
     "config.def @qwen38.iq4xs.tile_unroll_factor = 1 : i32\n",
@@ -452,7 +473,11 @@ void RegisterCxxJitPhaseBenchmarks(const char* kernel_name,
 [[maybe_unused]] const bool kCxxJitPhasesRegistered = [] {
   RegisterCxxJitPhaseBenchmarks("RmsNorm", &kRmsNorm);
   RegisterCxxJitPhaseBenchmarks("Mxfp8Gfx1250", &kMxfp8);
-  RegisterCxxJitPhaseBenchmarks("Iq4XsGateUpGfx1151", &kIq4XsGateUp);
+  RegisterCxxJitPhaseBenchmarks("Iq4XsGateUpGfx1151", &kIq4XsGateUpGfx1151);
+  RegisterCxxJitPhaseBenchmarks("Iq4XsGateUpGfx942AsyncSingle",
+                                &kIq4XsGateUpGfx942AsyncSingle);
+  RegisterCxxJitPhaseBenchmarks("Iq4XsGateUpGfx942AsyncDouble",
+                                &kIq4XsGateUpGfx942AsyncDouble);
   RegisterCxxJitPhaseBenchmarks("Q4KQ8SwiGluGfx1250", &kQ4KQ8SwiGlu);
   RegisterCxxJitPhaseBenchmarks("ConfiguredWorkgroupStorage",
                                 &kConfiguredWorkgroupStorage);
@@ -471,7 +496,13 @@ BENCHMARK_CAPTURE(SourceToHsaco, Mxfp4Gfx1250, &kMxfp4)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(SourceToHsaco, Mxfp8Gfx1250, &kMxfp8)
     ->Unit(::benchmark::kMicrosecond);
-BENCHMARK_CAPTURE(SourceToHsaco, Iq4XsGateUpGfx1151, &kIq4XsGateUp)
+BENCHMARK_CAPTURE(SourceToHsaco, Iq4XsGateUpGfx1151, &kIq4XsGateUpGfx1151)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(SourceToHsaco, Iq4XsGateUpGfx942AsyncSingle,
+                  &kIq4XsGateUpGfx942AsyncSingle)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(SourceToHsaco, Iq4XsGateUpGfx942AsyncDouble,
+                  &kIq4XsGateUpGfx942AsyncDouble)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(SourceToHsaco, Q4KQ8SwiGluGfx1250, &kQ4KQ8SwiGlu)
     ->Unit(::benchmark::kMicrosecond);
@@ -489,7 +520,16 @@ BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, RmsNorm, &kRmsNorm)
 BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, Mxfp8Gfx1250, &kMxfp8)
     ->Unit(::benchmark::kMicrosecond)
     ->Iterations(1);
-BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, Iq4XsGateUpGfx1151, &kIq4XsGateUp)
+BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, Iq4XsGateUpGfx1151,
+                  &kIq4XsGateUpGfx1151)
+    ->Unit(::benchmark::kMicrosecond)
+    ->Iterations(1);
+BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, Iq4XsGateUpGfx942AsyncSingle,
+                  &kIq4XsGateUpGfx942AsyncSingle)
+    ->Unit(::benchmark::kMicrosecond)
+    ->Iterations(1);
+BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, Iq4XsGateUpGfx942AsyncDouble,
+                  &kIq4XsGateUpGfx942AsyncDouble)
     ->Unit(::benchmark::kMicrosecond)
     ->Iterations(1);
 BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, Q4KQ8SwiGluGfx1250, &kQ4KQ8SwiGlu)
