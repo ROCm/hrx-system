@@ -55,8 +55,10 @@ constexpr uint64_t kKilohertz = 1000ull;
 
 iree_hal_streaming_timestamp_domain_t Domain(uint64_t frequency_hz,
                                              uint32_t valid_bits) {
-  iree_hal_streaming_timestamp_domain_t domain = {.frequency_hz = frequency_hz,
-                                                  .valid_bits = valid_bits};
+  iree_hal_streaming_timestamp_domain_t domain = {
+      .frequency_hz = frequency_hz,
+      .valid_bits = valid_bits,
+  };
   return domain;
 }
 
@@ -160,7 +162,8 @@ iree_hal_queue_family_spec_t QueueFamily(
       .timestamp_valid_bits = timestamp_valid_bits,
       .timestamp_frequency_hz = timestamp_frequency_hz,
       .physical_device_affinity = physical_device_affinity,
-      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH};
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+  };
   return family;
 }
 
@@ -170,7 +173,8 @@ iree_hal_device_timing_spec_t Timing(iree_hal_device_timing_spec_flags_t flags,
   iree_hal_device_timing_spec_t timing = {
       .timestamp_valid_bits = timestamp_valid_bits,
       .timestamp_frequency_hz = timestamp_frequency_hz,
-      .flags = flags};
+      .flags = flags,
+  };
   return timing;
 }
 
@@ -178,8 +182,10 @@ iree_hal_device_timing_spec_t Timing(iree_hal_device_timing_spec_flags_t flags,
 iree_hal_streaming_timestamp_domain_t QueryDomain(
     const iree_hal_queue_family_spec_t* families, iree_host_size_t family_count,
     iree_hal_device_timing_spec_t timing) {
-  iree_hal_device_queue_spec_t queues = {.family_count = family_count,
-                                         .families = families};
+  iree_hal_device_queue_spec_t queues = {
+      .family_count = family_count,
+      .families = families,
+  };
   iree_hal_device_spec_params_t params = {.queues = &queues, .timing = &timing};
   iree_hal_device_spec_t* spec = NULL;
   IREE_EXPECT_OK(
@@ -359,7 +365,8 @@ class CpuStreamingContextTest : public ::testing::Test {
                                      &device_entry_.block_pool);
 
     iree_hal_streaming_context_flags_t context_flags = {
-        .scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO};
+        .scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO,
+    };
     IREE_ASSERT_OK(iree_hal_streaming_context_create(
         &device_entry_, context_flags, iree_allocator_system(), &context_));
   }
@@ -657,7 +664,8 @@ TEST_F(CpuStreamingContextTest, CrossContextWaitOrdersCurrentAndLaterStreams) {
   });
 
   iree_hal_streaming_context_flags_t context_flags = {
-      .scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO};
+      .scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO,
+  };
   IREE_ASSERT_OK(iree_hal_streaming_context_create(
       &device_entry_, context_flags, iree_allocator_system(), &target_context));
   IREE_ASSERT_OK(CreateNonBlockingStream(context_, &source_stream));

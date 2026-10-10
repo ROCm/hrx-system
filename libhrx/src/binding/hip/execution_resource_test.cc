@@ -26,45 +26,69 @@ static constexpr iree_hal_queue_execution_resource_group_spec_t
 };
 static constexpr iree_hal_queue_execution_resource_spec_t
     kVariableExecutionResources[] = {
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 0,
-         .execution_unit_count = 2},
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 2,
-         .execution_unit_count = 4},
-        {.group_ordinal = 1,
-         .first_execution_unit_ordinal = 6,
-         .execution_unit_count = 2},
-        {.group_ordinal = 1,
-         .first_execution_unit_ordinal = 8,
-         .execution_unit_count = 6},
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 0,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 2,
+            .execution_unit_count = 4,
+        },
+        {
+            .group_ordinal = 1,
+            .first_execution_unit_ordinal = 6,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 1,
+            .first_execution_unit_ordinal = 8,
+            .execution_unit_count = 6,
+        },
 };
 static constexpr iree_hal_queue_execution_resource_spec_t
     kUniformExecutionResources[] = {
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 0,
-         .execution_unit_count = 2},
-        {.group_ordinal = 1,
-         .first_execution_unit_ordinal = 2,
-         .execution_unit_count = 2},
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 4,
-         .execution_unit_count = 2},
-        {.group_ordinal = 1,
-         .first_execution_unit_ordinal = 6,
-         .execution_unit_count = 2},
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 8,
-         .execution_unit_count = 2},
-        {.group_ordinal = 1,
-         .first_execution_unit_ordinal = 10,
-         .execution_unit_count = 2},
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 12,
-         .execution_unit_count = 2},
-        {.group_ordinal = 1,
-         .first_execution_unit_ordinal = 14,
-         .execution_unit_count = 2},
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 0,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 1,
+            .first_execution_unit_ordinal = 2,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 4,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 1,
+            .first_execution_unit_ordinal = 6,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 8,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 1,
+            .first_execution_unit_ordinal = 10,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 12,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 1,
+            .first_execution_unit_ordinal = 14,
+            .execution_unit_count = 2,
+        },
 };
 
 static iree_hal_device_spec_t* CreateDeviceSpec() {
@@ -249,8 +273,10 @@ TEST_F(ExecutionResourceTest, CreatesCopyableResourcesFromExactSets) {
   hipDevResource partition_resource;
   IREE_ASSERT_OK(iree_hip_execution_resource_create_sm(
       &device_, variable_queue_family(),
-      {.count = IREE_ARRAYSIZE(partition_ordinals),
-       .ordinals = partition_ordinals},
+      {
+          .count = IREE_ARRAYSIZE(partition_ordinals),
+          .ordinals = partition_ordinals,
+      },
       hipDevSmResourceGroupBackfill, &partition_resource));
   EXPECT_EQ(partition_resource.sm.smCount, 10u);
   EXPECT_EQ(partition_resource.sm.minSmPartitionSize, 10u);
@@ -585,8 +611,10 @@ TEST_F(ExecutionResourceTest,
       &device_, uniform_queue_family(), {.count = 0, .ordinals = nullptr},
       hipDevSmResourceGroupDefault, &full_resource));
 
-  hipDevSmResourceGroupParams group_parameter = {.smCount = 4,
-                                                 .coscheduledSmCount = 4};
+  hipDevSmResourceGroupParams group_parameter = {
+      .smCount = 4,
+      .coscheduledSmCount = 4,
+  };
   const hipDevSmResourceGroupParams expected_parameter = group_parameter;
   hipDevResource partition;
   std::memset(&partition, 0xA5, sizeof(partition));

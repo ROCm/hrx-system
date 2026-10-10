@@ -23,18 +23,26 @@ static constexpr iree_hal_queue_execution_resource_group_spec_t
 };
 static constexpr iree_hal_queue_execution_resource_spec_t
     kExecutionResources[] = {
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 0,
-         .execution_unit_count = 2},
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 2,
-         .execution_unit_count = 2},
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 4,
-         .execution_unit_count = 2},
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 6,
-         .execution_unit_count = 2},
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 0,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 2,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 4,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 6,
+            .execution_unit_count = 2,
+        },
 };
 
 static iree_hal_device_spec_t* CreateDeviceSpec() {
@@ -220,11 +228,15 @@ TEST_F(ExecutionResourceDescriptorTest,
       /*family_ordinal=*/0,
       {.count = IREE_ARRAYSIZE(first_ordinals), .ordinals = first_ordinals});
   const hipDevResource overlap_resource = CreateResource(
-      /*family_ordinal=*/0, {.count = IREE_ARRAYSIZE(overlap_ordinals),
-                             .ordinals = overlap_ordinals});
+      /*family_ordinal=*/0, {
+                                .count = IREE_ARRAYSIZE(overlap_ordinals),
+                                .ordinals = overlap_ordinals,
+                            });
   const hipDevResource other_family_resource = CreateResource(
-      /*family_ordinal=*/1, {.count = IREE_ARRAYSIZE(disjoint_ordinals),
-                             .ordinals = disjoint_ordinals});
+      /*family_ordinal=*/1, {
+                                .count = IREE_ARRAYSIZE(disjoint_ordinals),
+                                .ordinals = disjoint_ordinals,
+                            });
 
   auto expect_invalid_without_publication =
       [&](const hipDevResource& second_resource) {

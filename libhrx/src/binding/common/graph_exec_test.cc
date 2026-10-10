@@ -358,7 +358,8 @@ class GraphExecTest : public ::testing::Test {
                                      &device_entry_.block_pool);
 
     iree_hal_streaming_context_flags_t context_flags = {
-        .scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO};
+        .scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO,
+    };
     IREE_ASSERT_OK(iree_hal_streaming_context_create(
         &device_entry_, context_flags, iree_allocator_system(), &context_));
     IREE_ASSERT_OK(iree_hal_streaming_stream_create(
@@ -629,7 +630,8 @@ TEST_F(GraphExecTest, ExecEventNodeTakesOnlyItsOwnContextsEvent) {
   });
 
   iree_hal_streaming_context_flags_t context_flags = {
-      .scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO};
+      .scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO,
+  };
   IREE_ASSERT_OK(iree_hal_streaming_context_create(
       &device_entry_, context_flags, iree_allocator_system(), &other_context));
 
@@ -721,7 +723,8 @@ TEST_F(GraphExecTest, ChildGraphRecordRefusesALaunchOnAnotherContextsStream) {
   });
 
   iree_hal_streaming_context_flags_t context_flags = {
-      .scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO};
+      .scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO,
+  };
   IREE_ASSERT_OK(iree_hal_streaming_context_create(
       &device_entry_, context_flags, iree_allocator_system(), &other_context));
   IREE_ASSERT_OK(iree_hal_streaming_stream_create(
@@ -840,7 +843,8 @@ TEST_F(GraphExecTest,
       .module = module,
       .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
       .executable = module->executable,
-      .export_ordinal = 0};
+      .export_ordinal = 0,
+  };
 
   const iree_hal_streaming_dispatch_params_t original_dispatch = {
       .grid_dim = {1, 1, 1},

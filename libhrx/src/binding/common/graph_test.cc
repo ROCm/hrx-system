@@ -171,7 +171,8 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
   }
 
   iree_hal_streaming_symbol_t symbol = {
-      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION};
+      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
+  };
   symbol.parameters.buffer_size = kArgumentCount * sizeof(uint32_t);
   symbol.parameters.constant_bytes = kArgumentCount * sizeof(uint32_t);
   symbol.parameters.direct_arg_bytes = kArgumentCount * sizeof(uint32_t);
@@ -180,8 +181,9 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
 
   for (size_t missing_ordinal = 0; missing_ordinal < kArgumentCount;
        ++missing_ordinal) {
-    iree_hal_streaming_graph_t graph = {.host_allocator =
-                                            iree_allocator_system()};
+    iree_hal_streaming_graph_t graph = {
+        .host_allocator = iree_allocator_system(),
+    };
 
     std::array<uint8_t, kArgumentCount * sizeof(uint32_t)> constants = {};
     memset(constants.data(), 0xA5, constants.size());
@@ -251,8 +253,9 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
 }
 
 TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
-  iree_hal_streaming_graph_t graph = {.host_allocator =
-                                          iree_allocator_system()};
+  iree_hal_streaming_graph_t graph = {
+      .host_allocator = iree_allocator_system(),
+  };
 
   std::array<uint8_t, 16> constants = {};
   constants.fill(0x5A);
@@ -277,7 +280,8 @@ TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
   node.attrs.kernel.binding_capacity = binding_storage.size();
 
   iree_hal_streaming_symbol_t symbol = {
-      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION};
+      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
+  };
   symbol.parameters.constant_bytes = constants.size();
   symbol.parameters.direct_arg_bytes = constants.size();
 
@@ -303,8 +307,9 @@ TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
 }
 
 TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
-  iree_hal_streaming_graph_t graph = {.host_allocator =
-                                          iree_allocator_system()};
+  iree_hal_streaming_graph_t graph = {
+      .host_allocator = iree_allocator_system(),
+  };
 
   std::array<uint8_t, 24> constants = {};
   constants.fill(0xA5);
@@ -317,7 +322,8 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
   node.attrs.kernel.constants_capacity = constants.size();
 
   iree_hal_streaming_symbol_t symbol = {
-      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION};
+      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
+  };
   symbol.parameters.constant_bytes = 16;
   symbol.parameters.direct_arg_bytes = 16;
 
@@ -370,7 +376,8 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
                       padded_arguments.size()));
 
   iree_hal_streaming_symbol_t empty_symbol = {
-      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION};
+      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
+  };
   const iree_hal_streaming_dispatch_params_t empty_params = {
       .grid_dim = {},
       .block_dim = {},
@@ -385,8 +392,9 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
 }
 
 TEST(GraphTest, ArgsArrayPackingProducesCompleteNativeAbiImage) {
-  iree_hal_streaming_graph_t graph = {.host_allocator =
-                                          iree_allocator_system()};
+  iree_hal_streaming_graph_t graph = {
+      .host_allocator = iree_allocator_system(),
+  };
 
   constexpr iree_host_size_t kNativeArgumentSize = 52;
   std::array<uint8_t, kNativeArgumentSize> constants;
@@ -435,7 +443,8 @@ TEST(GraphTest, ArgsArrayPackingProducesCompleteNativeAbiImage) {
       .destination_ordinal = 0,
   };
   iree_hal_streaming_symbol_t symbol = {
-      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION};
+      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
+  };
   symbol.parameters.buffer_size = 22;
   symbol.parameters.constant_bytes = 6;
   symbol.parameters.direct_arg_bytes = kNativeArgumentSize;
@@ -482,8 +491,9 @@ TEST(GraphTest, ArgsArrayPackingProducesCompleteNativeAbiImage) {
 }
 
 TEST(GraphTest, ArgsArrayPackingRejectsDuplicateSourceWithoutMutation) {
-  iree_hal_streaming_graph_t graph = {.host_allocator =
-                                          iree_allocator_system()};
+  iree_hal_streaming_graph_t graph = {
+      .host_allocator = iree_allocator_system(),
+  };
 
   std::array<uint8_t, 16> constants;
   constants.fill(0xA5);
@@ -523,7 +533,8 @@ TEST(GraphTest, ArgsArrayPackingRejectsDuplicateSourceWithoutMutation) {
       .destination_ordinal = 0,
   };
   iree_hal_streaming_symbol_t symbol = {
-      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION};
+      .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
+  };
   symbol.parameters.buffer_size = 12;
   symbol.parameters.constant_bytes = 4;
   symbol.parameters.direct_arg_bytes = constants.size();
@@ -632,8 +643,9 @@ struct FailOnAttemptAllocator {
 TEST(GraphTest, NodePublicationIsFailureAtomic) {
   FailOnAttemptAllocator allocator;
   allocator.fail_on_allocation_attempt = 3;
-  iree_hal_streaming_graph_t graph = {.arena_allocator =
-                                          allocator.AsAllocator()};
+  iree_hal_streaming_graph_t graph = {
+      .arena_allocator = allocator.AsAllocator(),
+  };
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -1285,8 +1297,9 @@ void InitializeSingleCopySymbol(uint16_t direct_arg_bytes,
 
 TEST(GraphTest, LaunchUsesInlineArgumentStorageForSmallMetadata) {
   ProbedHostAllocator allocator;
-  iree_hal_streaming_stream_t stream = {.host_allocator =
-                                            allocator.AsAllocator()};
+  iree_hal_streaming_stream_t stream = {
+      .host_allocator = allocator.AsAllocator(),
+  };
   iree_hal_streaming_parameter_op_t operation = {};
   iree_hal_streaming_symbol_t symbol = {};
   InitializeSingleCopySymbol(/*direct_arg_bytes=*/128,
@@ -1310,8 +1323,9 @@ TEST(GraphTest, LaunchUsesInlineArgumentStorageForSmallMetadata) {
 
 TEST(GraphTest, LaunchFreesHeapArgumentStorageAfterPackingFailure) {
   ProbedHostAllocator allocator;
-  iree_hal_streaming_stream_t stream = {.host_allocator =
-                                            allocator.AsAllocator()};
+  iree_hal_streaming_stream_t stream = {
+      .host_allocator = allocator.AsAllocator(),
+  };
   iree_hal_streaming_parameter_op_t operation = {};
   iree_hal_streaming_symbol_t symbol = {};
   InitializeSingleCopySymbol(/*direct_arg_bytes=*/512,
@@ -1337,8 +1351,9 @@ TEST(GraphTest, LaunchFreesHeapArgumentStorageAfterPackingFailure) {
 TEST(GraphTest, LaunchReportsHeapArgumentStorageAllocationFailure) {
   ProbedHostAllocator allocator;
   allocator.fail_allocations = true;
-  iree_hal_streaming_stream_t stream = {.host_allocator =
-                                            allocator.AsAllocator()};
+  iree_hal_streaming_stream_t stream = {
+      .host_allocator = allocator.AsAllocator(),
+  };
   iree_hal_streaming_parameter_op_t operation = {};
   iree_hal_streaming_symbol_t symbol = {};
   InitializeSingleCopySymbol(/*direct_arg_bytes=*/512,

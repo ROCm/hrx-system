@@ -554,8 +554,10 @@ class HipEventTest : public ::testing::Test {
     EXPECT_EQ(hipSuccess, hip_.graph_add_event_record_node(
                               &record_node, graph, /*dependencies=*/nullptr,
                               /*dependency_count=*/0, event));
-    hipHostNodeParams host_params = {.fn = &RanHostFunction,
-                                     .userData = host_node_ran};
+    hipHostNodeParams host_params = {
+        .fn = &RanHostFunction,
+        .userData = host_node_ran,
+    };
     hipGraphNode_t host_node = nullptr;
     EXPECT_EQ(hipSuccess,
               hip_.graph_add_host_node(&host_node, graph, &record_node,
@@ -805,8 +807,10 @@ TEST_F(HipEventTest, EventStaysUsableAfterTheRecordingGraphExecutableIsGone) {
                             &record_node, graph, /*dependencies=*/nullptr,
                             /*dependency_count=*/0, event));
   std::atomic<bool> host_node_ran{false};
-  hipHostNodeParams host_params = {.fn = &RanHostFunction,
-                                   .userData = &host_node_ran};
+  hipHostNodeParams host_params = {
+      .fn = &RanHostFunction,
+      .userData = &host_node_ran,
+  };
   hipGraphNode_t host_node = nullptr;
   ASSERT_EQ(hipSuccess,
             hip_.graph_add_host_node(&host_node, graph, &record_node,
@@ -931,8 +935,10 @@ TEST_F(HipEventTest, GraphEventWaitNodeOnANeverRecordedEventDropsTheWait) {
                                            /*dependencies=*/nullptr,
                                            /*dependency_count=*/0, event));
   std::atomic<bool> host_node_ran{false};
-  hipHostNodeParams host_params = {.fn = &RanHostFunction,
-                                   .userData = &host_node_ran};
+  hipHostNodeParams host_params = {
+      .fn = &RanHostFunction,
+      .userData = &host_node_ran,
+  };
   hipGraphNode_t host_node = nullptr;
   ASSERT_EQ(hipSuccess,
             hip_.graph_add_host_node(&host_node, graph, &wait_node,
@@ -1051,8 +1057,10 @@ TEST_F(HipEventTest, GraphRecordNodeInsideAGraphMarksTheNodePoint) {
   StreamGate gate;
   StreamMarker marker;
   marker.gate = &gate;
-  hipHostNodeParams host_params = {.fn = &MarkerHostFunction,
-                                   .userData = &marker};
+  hipHostNodeParams host_params = {
+      .fn = &MarkerHostFunction,
+      .userData = &marker,
+  };
   hipGraphNode_t host_node = nullptr;
   ASSERT_EQ(hipSuccess,
             hip_.graph_add_host_node(&host_node, graph, &record_node,
@@ -1561,8 +1569,10 @@ TEST_F(HipEventTest, RecordOnAnotherContextsStreamIsRefused) {
   // launch had already submitted.
   hipGraph_t graph = CreateGraph();
   ASSERT_NE(nullptr, graph);
-  hipHostNodeParams host_params = {.fn = &RanHostFunction,
-                                   .userData = &graph_host_node_ran_};
+  hipHostNodeParams host_params = {
+      .fn = &RanHostFunction,
+      .userData = &graph_host_node_ran_,
+  };
   hipGraphNode_t host_node = nullptr;
   ASSERT_EQ(hipSuccess,
             hip_.graph_add_host_node(&host_node, graph,

@@ -2319,9 +2319,11 @@ static_assert(sizeof(HipFatHeader) == 24, "wrapper must be 24 bytes");
 // validation and key projection that production uses.
 static iree_hal_executable_target_t MakeAmdgpuDeviceTarget(
     iree_string_view_t target_key) {
-  iree_hal_executable_target_t target = {.family = IREE_SV("amdgpu"),
-                                         .target_key = target_key,
-                                         .physical_device_affinity = 1};
+  iree_hal_executable_target_t target = {
+      .family = IREE_SV("amdgpu"),
+      .target_key = target_key,
+      .physical_device_affinity = 1,
+  };
   return target;
 }
 
@@ -2362,7 +2364,10 @@ TEST(KpackIntegration, HipkWrapperNoMatchReportsNotFound) {
   auto metadata = MakeMetadata("lib/libhip.so", {path});
 
   HipFatHeader header = {
-      .magic = 0x4b504948u, .version = 1, .binary = metadata.data()};
+      .magic = 0x4b504948u,
+      .version = 1,
+      .binary = metadata.data(),
+  };
 
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx942"));  // not in the archive
@@ -2419,7 +2424,10 @@ TEST(KpackIntegration, HipkResolvedGarbageRejected) {
   auto metadata = MakeMetadata("lib/libhip.so", {path});
 
   HipFatHeader header = {
-      .magic = 0x4b504948u, .version = 1, .binary = metadata.data()};
+      .magic = 0x4b504948u,
+      .version = 1,
+      .binary = metadata.data(),
+  };
 
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
@@ -2448,7 +2456,8 @@ TEST(KpackIntegration, HipkReservedSelectsCoIndex) {
       .magic = 0x4b504948u,
       .version = 1,
       .binary = metadata.data(),
-      .reserved = reinterpret_cast<void*>(static_cast<uintptr_t>(1))};
+      .reserved = reinterpret_cast<void*>(static_cast<uintptr_t>(1)),
+  };
 
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));

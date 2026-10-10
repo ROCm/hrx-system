@@ -21,7 +21,8 @@ static const iree_hal_queue_family_spec_t kQueueFamilySpec = [] {
       .physical_device_affinity = 1,
       .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                     IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
-                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC};
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
+  };
   return spec;
 }();
 
@@ -96,8 +97,10 @@ class GraphBarrierTest : public ::testing::Test {
  protected:
   void SetUp() override {
     memset(&command_buffer_, 0, sizeof(command_buffer_));
-    iree_hal_device_queue_spec_t queues = {.family_count = 1,
-                                           .families = &kQueueFamilySpec};
+    iree_hal_device_queue_spec_t queues = {
+        .family_count = 1,
+        .families = &kQueueFamilySpec,
+    };
     iree_hal_device_spec_params_t spec_params = {.queues = &queues};
     iree_hal_device_spec_t* device_spec = nullptr;
     IREE_ASSERT_OK(iree_hal_device_spec_create(
@@ -260,7 +263,10 @@ TEST(GraphScheduleTest, AdditionalDependencyStaysOnProducerWorkstream) {
   }
 
   hrx_graph_edge_t edge = {
-      .next = nullptr, .from = nodes[0]->get(), .to = nodes[16]->get()};
+      .next = nullptr,
+      .from = nodes[0]->get(),
+      .to = nodes[16]->get(),
+  };
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
   iree_arena_allocator_t arena;

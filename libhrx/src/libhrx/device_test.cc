@@ -165,7 +165,8 @@ class DevicePeerAccessIntegrationTest : public ::testing::Test {
       iree_hal_device_topology_info_t topology_info = {
           .self_edge = iree_hal_topology_query_edge(topology_, i, i).lo,
           .topology_index = i,
-          .topology = topology_};
+          .topology = topology_,
+      };
       IREE_ASSERT_OK(iree_hal_device_assign_topology_info(hal_devices_[i],
                                                           &topology_info));
       devices_[i].type = HRX_ACCELERATOR_GPU;

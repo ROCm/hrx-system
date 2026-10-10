@@ -194,8 +194,10 @@ TEST_F(HipMemoryPoolApiTest, GraphAllocationReleasesSelectedPool) {
   const hipError_t graph_create_result = api_.graph_create(&graph, /*flags=*/0);
   EXPECT_EQ(hipSuccess, graph_create_result);
   if (graph_create_result == hipSuccess) {
-    hipMemAllocNodeParams parameters = {.poolProps = properties,
-                                        .bytesize = 4096};
+    hipMemAllocNodeParams parameters = {
+        .poolProps = properties,
+        .bytesize = 4096,
+    };
     hipGraphNode_t node = nullptr;
     EXPECT_EQ(hipSuccess, api_.graph_add_mem_alloc_node(
                               &node, graph, /*dependencies=*/nullptr,

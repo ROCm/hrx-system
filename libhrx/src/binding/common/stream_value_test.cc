@@ -35,12 +35,11 @@ template <typename Cleanup>
 ScopeExit(Cleanup) -> ScopeExit<Cleanup>;
 
 iree_hal_queue_family_spec_t MakeValueWaitFamily(uint32_t queue_count = 1) {
-  iree_hal_queue_family_spec_t family =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  family.provisioned_queue_count = queue_count;
-  family.physical_device_affinity = UINT64_C(1) << 0;
-  family.role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
+  iree_hal_queue_family_spec_t family = {
+      .provisioned_queue_count = queue_count,
+      .physical_device_affinity = UINT64_C(1) << 0,
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
+  };
   family.zero_compute_atomic_capabilities.operations.device_scope_32 =
       IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
   family.zero_compute_atomic_capabilities.operations.device_scope_64 =
@@ -126,8 +125,9 @@ TEST(StreamQueueCapabilitiesTest, RejectsMissingFamilySpecification) {
 }
 
 TEST(StreamValueTimelineTest, OverflowDoesNotReserveDuplicateValue) {
-  iree_hal_streaming_stream_t stream = {.pending_value =
-                                            IREE_HAL_SEMAPHORE_MAX_VALUE};
+  iree_hal_streaming_stream_t stream = {
+      .pending_value = IREE_HAL_SEMAPHORE_MAX_VALUE,
+  };
   uint64_t wait_value = 17;
   uint64_t signal_value = 23;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -142,29 +142,24 @@ TEST(StreamValueWaitLaneTest, TerminalHoleDoesNotRetireBlockedLane) {
   iree_hal_streaming_context_t context = {};
   iree_slim_mutex_initialize(&context.value_wait_lane_mutex);
 
-  iree_hal_streaming_value_wait_lane_t lane =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  lane.list_state = IREE_HAL_STREAMING_VALUE_WAIT_LANE_LIST_STATE_PENDING;
-  iree_hal_streaming_value_wait_submission_t pending =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  pending.state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED;
-  pending.lane = &lane;
-  iree_hal_streaming_value_wait_submission_t failed_hole =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  failed_hole.state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED;
-  failed_hole.lane = &lane;
-  failed_hole.is_terminal = true;
-  failed_hole.has_failed = true;
-  iree_hal_streaming_value_wait_submission_t completed_hole =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  completed_hole.state =
-      IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED;
-  completed_hole.lane = &lane;
-  completed_hole.is_terminal = true;
+  iree_hal_streaming_value_wait_lane_t lane = {
+      .list_state = IREE_HAL_STREAMING_VALUE_WAIT_LANE_LIST_STATE_PENDING,
+  };
+  iree_hal_streaming_value_wait_submission_t pending = {
+      .lane = &lane,
+      .state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED,
+  };
+  iree_hal_streaming_value_wait_submission_t failed_hole = {
+      .lane = &lane,
+      .state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED,
+      .is_terminal = true,
+      .has_failed = true,
+  };
+  iree_hal_streaming_value_wait_submission_t completed_hole = {
+      .lane = &lane,
+      .state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED,
+      .is_terminal = true,
+  };
   pending.next = &failed_hole;
   failed_hole.prev = &pending;
   failed_hole.next = &completed_hole;
@@ -734,11 +729,10 @@ TEST(StreamValueWaitLaneTest,
       owner_timeline,
       iree_make_status(IREE_STATUS_ABORTED, "independent owner failure"));
 
-  iree_hal_streaming_value_wait_submission_t submission =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  submission.completion_semaphore = lane_completion;
-  submission.state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED;
+  iree_hal_streaming_value_wait_submission_t submission = {
+      .completion_semaphore = lane_completion,
+      .state = IREE_HAL_STREAMING_VALUE_WAIT_SUBMISSION_STATE_PUBLISHED,
+  };
   lane.queue = wait_queue;
   lane.list_state = IREE_HAL_STREAMING_VALUE_WAIT_LANE_LIST_STATE_PENDING;
   lane.submission_head = &submission;

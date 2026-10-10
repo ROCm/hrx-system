@@ -23,18 +23,26 @@ static constexpr iree_hal_queue_execution_resource_group_spec_t
 };
 static constexpr iree_hal_queue_execution_resource_spec_t
     kExecutionResources[] = {
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 0,
-         .execution_unit_count = 2},
-        {.group_ordinal = 0,
-         .first_execution_unit_ordinal = 2,
-         .execution_unit_count = 2},
-        {.group_ordinal = 1,
-         .first_execution_unit_ordinal = 4,
-         .execution_unit_count = 2},
-        {.group_ordinal = 1,
-         .first_execution_unit_ordinal = 6,
-         .execution_unit_count = 2},
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 0,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 0,
+            .first_execution_unit_ordinal = 2,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 1,
+            .first_execution_unit_ordinal = 4,
+            .execution_unit_count = 2,
+        },
+        {
+            .group_ordinal = 1,
+            .first_execution_unit_ordinal = 6,
+            .execution_unit_count = 2,
+        },
 };
 
 static iree_hal_device_spec_t* CreateDeviceSpec() {
@@ -159,8 +167,10 @@ TEST_F(ExecutionResourceTableTest, InternsCanonicalResourceSets) {
       IREE_HAL_STREAMING_EXECUTION_RESOURCE_SET_ID_INVALID;
   IREE_ASSERT_OK(iree_hal_streaming_execution_resource_table_intern(
       &table_, queue_family(),
-      {.count = IREE_ARRAYSIZE(partition_ordinals),
-       .ordinals = partition_ordinals},
+      {
+          .count = IREE_ARRAYSIZE(partition_ordinals),
+          .ordinals = partition_ordinals,
+      },
       &partition_set_id));
   EXPECT_NE(partition_set_id, full_set_id);
 

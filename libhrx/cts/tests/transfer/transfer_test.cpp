@@ -35,7 +35,8 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous_h2d basic", "[transfer][h2d]") {
 
   hrx_buffer_params_t params = {
       .type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
-      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED};
+      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED,
+  };
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().allocator_allocate_buffer(alloc, params, 256, &buf));
@@ -59,7 +60,8 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous_d2h basic", "[transfer][d2h]") {
 
   hrx_buffer_params_t params = {
       .type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
-      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED};
+      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED,
+  };
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().allocator_allocate_buffer(alloc, params, 256, &buf));
@@ -87,7 +89,8 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous h2d then d2h roundtrip",
 
   hrx_buffer_params_t params = {
       .type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
-      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED};
+      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED,
+  };
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().allocator_allocate_buffer(alloc, params, 1024, &buf));
@@ -146,7 +149,8 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous_h2d out of range fails",
 
   hrx_buffer_params_t params = {
       .type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
-      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED};
+      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED,
+  };
 
   hrx_buffer_t buf = nullptr;
   REQUIRE_OK(hrx().allocator_allocate_buffer(alloc, params, 64, &buf));
