@@ -65,8 +65,10 @@ struct NativeState {
   uint64_t waited_sequence = UINT64_MAX;
   // Number of timeline ioctls issued.
   uint32_t wait_count = 0;
-  // Error returned by native submission, or zero for acceptance.
-  int submission_error = 0;
+  // Scripted native submission errors; zero or an exhausted script accepts.
+  std::vector<int> submission_results;
+  // Number of native submission attempts, including rejected interruptions.
+  uint32_t submission_attempt_count = 0;
   // Error returned by native timeline wait, or zero for completion.
   int wait_error = 0;
   // Error from GEM close after the packet's host view is unmapped.
@@ -453,13 +455,59 @@ TEST_F(LinuxXdnaKernelQueueTest,
 }
 
 TEST_F(LinuxXdnaKernelQueueTest, RejectionDoesNotPublishOrConsumeSequence) {
-  native_.submission_error = EBUSY;
+  native_.submission_results = {EBUSY};
   uint64_t sequence = UINT64_MAX;
-  EXPECT_NE(amdf_xdna_umd_kernel_queue_submit(queue_, 0, 32768, 64, &sequence),
-            AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_xdna_umd_kernel_queue_submit(queue_, 0, 32768, 64, &sequence),
+            amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EBUSY));
   EXPECT_EQ(sequence, UINT64_MAX);
+  EXPECT_EQ(native_.submission_attempt_count, 1u);
   EXPECT_EQ(context_.last_native_sequence, 0u);
   EXPECT_EQ(amdf_xdna_umd_kernel_queue_query_progress(queue_), 0u);
+}
+
+TEST_F(LinuxXdnaKernelQueueTest, InterruptedPublicationAcceptsExactlyOnce) {
+  native_.submission_results = {EINTR, EINTR, EINTR, 0};
+  uint64_t sequence = UINT64_MAX;
+  ASSERT_EQ(amdf_xdna_umd_kernel_queue_submit(queue_, 0, 32768, 64, &sequence),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(sequence, 1u);
+  EXPECT_EQ(context_.last_native_sequence, sequence);
+  EXPECT_EQ(native_.submission_attempt_count, 4u);
+  EXPECT_EQ(native_.submission_count, 1u);
+  EXPECT_EQ(native_.accepted_handles, std::vector<uint32_t>({9}));
+  EXPECT_EQ(amdf_xdna_umd_kernel_queue_query_progress(queue_), 0u);
+  ASSERT_EQ(amdf_xdna_umd_kernel_queue_wait(queue_, sequence, &deadline_),
+            AMDF_STATUS_OK);
+  amdf_xdna_umd_kernel_queue_retire_command(queue_, 0);
+}
+
+TEST_F(LinuxXdnaKernelQueueTest,
+       InterruptedPublicationPreservesFollowingRejection) {
+  native_.submission_results = {0, EINTR, EINTR, EIO};
+  uint64_t first = 0;
+  ASSERT_EQ(amdf_xdna_umd_kernel_queue_submit(queue_, 0, 32768, 64, &first),
+            AMDF_STATUS_OK);
+  uint64_t second = UINT64_MAX;
+  EXPECT_EQ(amdf_xdna_umd_kernel_queue_submit(queue_, 1, 65536, 64, &second),
+            amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO));
+  EXPECT_EQ(second, UINT64_MAX);
+  EXPECT_EQ(context_.last_native_sequence, first);
+  EXPECT_EQ(native_.submission_attempt_count, 4u);
+  EXPECT_EQ(native_.submission_count, 1u);
+  EXPECT_EQ(native_.accepted_handles, std::vector<uint32_t>({9}));
+  EXPECT_EQ(amdf_xdna_umd_kernel_queue_query_progress(queue_), 0u);
+  EXPECT_EQ(amdf_xdna_umd_kernel_queue_query_terminal_status(queue_),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_xdna_umd_kernel_queue_submit(queue_, 1, 65536, 64, &second),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(second, first + 1);
+  EXPECT_EQ(native_.submission_attempt_count, 5u);
+  EXPECT_EQ(native_.submission_count, 2u);
+  EXPECT_EQ(native_.accepted_handles, std::vector<uint32_t>({9, 10}));
+  ASSERT_EQ(amdf_xdna_umd_kernel_queue_wait(queue_, second, &deadline_),
+            AMDF_STATUS_OK);
+  amdf_xdna_umd_kernel_queue_retire_command(queue_, 0);
+  amdf_xdna_umd_kernel_queue_retire_command(queue_, 1);
 }
 
 TEST_F(LinuxXdnaKernelQueueTest, WaitFailurePreservesPendingProgress) {
@@ -672,11 +720,16 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
   if (request == DRM_IOCTL_AMDXDNA_EXEC_CMD) {
     auto* submit = static_cast<amdxdna_drm_exec_cmd*>(argument);
     EXPECT_EQ(submit->hwctx, 7u);
+    EXPECT_EQ(submit->type, AMDXDNA_CMD_SUBMIT_EXEC_BUF);
     EXPECT_EQ(submit->cmd_count, 1u);
     EXPECT_EQ(submit->args, 0u);
     EXPECT_EQ(submit->arg_count, 0u);
-    if (native.submission_error != 0) {
-      errno = native.submission_error;
+    const uint32_t attempt = native.submission_attempt_count++;
+    const int error = attempt < native.submission_results.size()
+                          ? native.submission_results[attempt]
+                          : 0;
+    if (error != 0) {
+      errno = error;
       return -1;
     }
     std::memcpy(native.submitted_packet.data(),

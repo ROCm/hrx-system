@@ -145,8 +145,14 @@ static amdf_status_t amdf_linux_xdna_command_submit(
       .arg_count = 0,
   };
   // No operation after native acceptance may turn this into a rejected submit.
-  if (ioctl(device->descriptor, DRM_IOCTL_AMDXDNA_EXEC_CMD, &submit) != 0) {
-    return amdf_linux_error(errno);
+  // EXEC_BUF interruptions precede scheduler admission and sequence assignment.
+  // Restart that interrupted publication, never an accepted command or another
+  // native rejection such as resource exhaustion.
+  while (ioctl(device->descriptor, DRM_IOCTL_AMDXDNA_EXEC_CMD, &submit) != 0) {
+    const int error = errno;
+    if (error != EINTR) {
+      return amdf_linux_error(error);
+    }
   }
   // Zero is the public no-work sentinel. The native first sequence is zero;
   // encode it as one and decode only at the DRM wait boundary. The first-fence

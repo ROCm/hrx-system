@@ -418,13 +418,15 @@ typedef struct amdf_xdna_api_t {
   /// libamdf neither reads, copies nor modifies instruction bytes. The native
   /// provider fills its preallocated transport packet with address and length.
   /// The library performs no allocation, format parsing, lowering, relocation,
-  /// binding resolution, native submission retry, sleep or host wait. Native
-  /// retirement consumes the command result. The caller keeps instruction
-  /// memory live until retirement; libamdf neither retains nor tracks it.
-  /// Native rejection leaves `out_submission` unchanged.
-  /// The caller also keeps memory reachable through opaque device addresses
-  /// live; native command retirement does not prove that user-mode work
-  /// scheduled elsewhere, such as a GPU consumer, has stopped accessing it.
+  /// binding resolution, work replay, resource-exhaustion retry, sleep or host
+  /// wait. An interrupted native publication may restart only when the native
+  /// contract guarantees that no command was accepted. Native retirement
+  /// consumes the command result. The caller keeps instruction memory live
+  /// until retirement; libamdf neither retains nor tracks it. Native rejection
+  /// leaves `out_submission` unchanged. The caller also keeps memory reachable
+  /// through opaque device addresses live; native command retirement does not
+  /// prove that user-mode work scheduled elsewhere, such as a GPU consumer, has
+  /// stopped accessing it.
   ///
   /// A complete command covers the lifetime of the work using its XDNA
   /// placement. Before its controller instructions finish, the program must
