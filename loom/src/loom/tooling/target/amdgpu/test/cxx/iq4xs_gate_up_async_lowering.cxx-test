@@ -1,9 +1,12 @@
+// clang-format off
 // RUN: with-checks emit source-low @qwen38_iq4xs_gate_up_swiglu target=amdgpu:gfx942 output=low
 // INPUT: cxx I=.
 #include "iq4xs_gate_up.cxx"
 
 [[loom::config("qwen38.iq4xs.async_staging")]]
 const bool async_staging = true;
+[[loom::config("qwen38.iq4xs.staging_depth")]]
+const unsigned staging_depth = 1u;
 [[loom::config("qwen38.iq4xs.block_unroll_factor")]]
 const unsigned block_unroll_factor = 2u;
 [[loom::config("qwen38.iq4xs.packet_unroll_factor")]]
@@ -13,11 +16,36 @@ const unsigned tile_unroll_factor = 1u;
 
 // The standalone async-gather lowering golden owns exact packet ordering. This
 // large model check establishes that link-time target/config specialization
-// selects that transport for each of the four wave64 subgroups and eliminates
-// the synchronous global-load-plus-LDS-store sequence.
+// selects one subgroup-relative transport and eliminates the synchronous
+// global-load-plus-LDS-store sequence.
 // ----
 CHECK: low.kernel.def * @qwen38_iq4xs_gate_up_swiglu() asm {
 CHECK: *storage {byte_alignment = 16, byte_length = 1024}*
-CHECK-COUNT-4: *global_load_lds_dword_saddr*
-CHECK-COUNT-4: *s_waitcnt {vmcnt = 0}*
+CHECK-COUNT-1: *global_load_lds_dword_saddr*
+CHECK-COUNT-1: *s_waitcnt {vmcnt = 0}*
+CHECK-NOT: *ds_write*
+
+// ====
+
+// INPUT: cxx I=.
+#include "iq4xs_gate_up.cxx"
+
+[[loom::config("qwen38.iq4xs.async_staging")]]
+const bool async_staging = true;
+[[loom::config("qwen38.iq4xs.staging_depth")]]
+const unsigned staging_depth = 2u;
+[[loom::config("qwen38.iq4xs.block_unroll_factor")]]
+const unsigned block_unroll_factor = 2u;
+[[loom::config("qwen38.iq4xs.packet_unroll_factor")]]
+const unsigned packet_unroll_factor = 4u;
+[[loom::config("qwen38.iq4xs.tile_unroll_factor")]]
+const unsigned tile_unroll_factor = 1u;
+
+// The two-bank schedule preloads one tile, then owns one gather/wait site in
+// the four-tile overlap loop.
+// ----
+CHECK: low.kernel.def * @qwen38_iq4xs_gate_up_swiglu() asm {
+CHECK: *storage {byte_alignment = 16, byte_length = 2048}*
+CHECK-COUNT-2: *global_load_lds_dword_saddr*
+CHECK-COUNT-2: *s_waitcnt {vmcnt = 0}*
 CHECK-NOT: *ds_write*

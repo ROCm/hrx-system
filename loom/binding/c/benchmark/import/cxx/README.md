@@ -147,8 +147,10 @@ public operation that performs them.
 The routed Q4_K/Q8_1 source supplies input size 4096 through an ordinary
 `config.def` and compiles its complete 768-channel kernel for `gfx1250`.
 The IQ4_XS source fixes its production 2,560-element by 640-channel top-10
-geometry in C++ and supplies four scheduling values through ordinary
-`config.def` operations before compiling for `gfx1151`.
+geometry in C++ and supplies its transport, staging depth, and scheduling
+values through ordinary `config.def` operations. The benchmark retains the
+single-buffered synchronous `gfx1151` case and compares single- and
+double-buffered asynchronous `gfx942` specializations.
 `Import`, `SourceToPreparedLow`, and `SourceToHsaco` form cumulative boundaries
 whose differences provide an additive production-path breakdown. Clone-based
 phase probes remain diagnostic controls and are not additive.

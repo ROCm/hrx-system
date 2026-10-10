@@ -3688,7 +3688,7 @@ if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDG
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    iq4xs_gate_up_test_execute_amdgpu_test
+    iq4xs_gate_up_test_double_buffered_execute_amdgpu_test
   CORRECTNESS_ONLY
   MODULE
     "::iq4xs_gate_up_module"
@@ -3697,6 +3697,7 @@ loom_execution_test(
     "--config=qwen38.iq4xs.async_staging=false"
     "--config=qwen38.iq4xs.block_unroll_factor=2"
     "--config=qwen38.iq4xs.packet_unroll_factor=4"
+    "--config=qwen38.iq4xs.staging_depth=2"
     "--config=qwen38.iq4xs.tile_unroll_factor=1"
     "--case=iq4xs_gate_up_values"
   LABELS
@@ -3718,7 +3719,7 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    iq4xs_gate_up_test_execute_amdgpu_access_test
+    iq4xs_gate_up_test_double_buffered_execute_amdgpu_access_test
   CORRECTNESS_ONLY
   MODULE
     "::iq4xs_gate_up_module"
@@ -3729,6 +3730,71 @@ loom_execution_test(
     "--config=qwen38.iq4xs.async_staging=false"
     "--config=qwen38.iq4xs.block_unroll_factor=2"
     "--config=qwen38.iq4xs.packet_unroll_factor=4"
+    "--config=qwen38.iq4xs.staging_depth=2"
+    "--config=qwen38.iq4xs.tile_unroll_factor=1"
+    "--case=iq4xs_gate_up_values"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    iq4xs_gate_up_test_single_buffered_execute_amdgpu_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::iq4xs_gate_up_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=qwen38.iq4xs.async_staging=false"
+    "--config=qwen38.iq4xs.block_unroll_factor=2"
+    "--config=qwen38.iq4xs.packet_unroll_factor=4"
+    "--config=qwen38.iq4xs.staging_depth=1"
+    "--config=qwen38.iq4xs.tile_unroll_factor=1"
+    "--case=iq4xs_gate_up_values"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    iq4xs_gate_up_test_single_buffered_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::iq4xs_gate_up_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--sanitizer-reporting=report-only"
+    "--config=qwen38.iq4xs.async_staging=false"
+    "--config=qwen38.iq4xs.block_unroll_factor=2"
+    "--config=qwen38.iq4xs.packet_unroll_factor=4"
+    "--config=qwen38.iq4xs.staging_depth=1"
     "--config=qwen38.iq4xs.tile_unroll_factor=1"
     "--case=iq4xs_gate_up_values"
   LABELS
@@ -3748,10 +3814,74 @@ loom_execution_test(
 endif()
 endif()
 
-if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_CDNA3_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    iq4xs_gate_up_async_test_double_buffered_execute_amdgpu_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::iq4xs_gate_up_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=qwen38.iq4xs.async_staging=true"
+    "--config=qwen38.iq4xs.block_unroll_factor=2"
+    "--config=qwen38.iq4xs.packet_unroll_factor=4"
+    "--config=qwen38.iq4xs.staging_depth=2"
+    "--config=qwen38.iq4xs.tile_unroll_factor=1"
+    "--case=iq4xs_gate_up_values"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    iq4xs_gate_up_async_test_double_buffered_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::iq4xs_gate_up_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--sanitizer-reporting=report-only"
+    "--config=qwen38.iq4xs.async_staging=true"
+    "--config=qwen38.iq4xs.block_unroll_factor=2"
+    "--config=qwen38.iq4xs.packet_unroll_factor=4"
+    "--config=qwen38.iq4xs.staging_depth=2"
+    "--config=qwen38.iq4xs.tile_unroll_factor=1"
+    "--case=iq4xs_gate_up_values"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
 loom_check_compile_tests(
   NAME
-    "iq4xs_gate_up_async_compile_test"
+    "iq4xs_gate_up_async_test_double_buffered"
   SRC
     "::iq4xs_gate_up_module"
   TARGETS
@@ -3760,6 +3890,86 @@ loom_check_compile_tests(
     "--config=qwen38.iq4xs.async_staging=true"
     "--config=qwen38.iq4xs.block_unroll_factor=2"
     "--config=qwen38.iq4xs.packet_unroll_factor=4"
+    "--config=qwen38.iq4xs.staging_depth=2"
+    "--config=qwen38.iq4xs.tile_unroll_factor=1"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    iq4xs_gate_up_async_test_single_buffered_execute_amdgpu_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::iq4xs_gate_up_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=qwen38.iq4xs.async_staging=true"
+    "--config=qwen38.iq4xs.block_unroll_factor=2"
+    "--config=qwen38.iq4xs.packet_unroll_factor=4"
+    "--config=qwen38.iq4xs.staging_depth=1"
+    "--config=qwen38.iq4xs.tile_unroll_factor=1"
+    "--case=iq4xs_gate_up_values"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    iq4xs_gate_up_async_test_single_buffered_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::iq4xs_gate_up_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--sanitizer-reporting=report-only"
+    "--config=qwen38.iq4xs.async_staging=true"
+    "--config=qwen38.iq4xs.block_unroll_factor=2"
+    "--config=qwen38.iq4xs.packet_unroll_factor=4"
+    "--config=qwen38.iq4xs.staging_depth=1"
+    "--config=qwen38.iq4xs.tile_unroll_factor=1"
+    "--case=iq4xs_gate_up_values"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_check_compile_tests(
+  NAME
+    "iq4xs_gate_up_async_test_single_buffered"
+  SRC
+    "::iq4xs_gate_up_module"
+  TARGETS
+    loom::target::amdgpu::gfx942
+  ARGS
+    "--config=qwen38.iq4xs.async_staging=true"
+    "--config=qwen38.iq4xs.block_unroll_factor=2"
+    "--config=qwen38.iq4xs.packet_unroll_factor=4"
+    "--config=qwen38.iq4xs.staging_depth=1"
     "--config=qwen38.iq4xs.tile_unroll_factor=1"
 )
 endif()
