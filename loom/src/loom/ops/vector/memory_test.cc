@@ -250,7 +250,7 @@ TEST_F(VectorMemoryTest, FragmentFootprintUsesLogicalMatrixShape) {
       IREE_ARRAYSIZE(indices), static_indices, IREE_ARRAYSIZE(static_indices),
       LOOM_VALUE_ID_INVALID, shape[0], shape[1], /*auxiliary=*/nullptr,
       /*auxiliary_count=*/0,
-      /*cache_scope=*/0, /*cache_temporal=*/0,
+      /*cache_scope=*/0, /*cache_temporal=*/0, /*converged=*/false,
       loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
                           loom_dim_pack_static(8), /*encoding_id=*/0),
       LOOM_LOCATION_UNKNOWN, &load));
@@ -323,7 +323,7 @@ TEST_F(VectorMemoryTest, BlockedFragmentFootprintUsesRankThreeShape) {
       LOOM_VECTOR_ROLE_LHS, view, indices, IREE_ARRAYSIZE(indices),
       static_indices, IREE_ARRAYSIZE(static_indices), block_count, rows,
       columns, /*auxiliary=*/nullptr, /*auxiliary_count=*/0,
-      /*cache_scope=*/0, /*cache_temporal=*/0,
+      /*cache_scope=*/0, /*cache_temporal=*/0, /*converged=*/false,
       loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_BF16,
                           loom_dim_pack_static(2), /*encoding_id=*/0),
       LOOM_LOCATION_UNKNOWN, &load));
@@ -372,7 +372,7 @@ TEST_F(VectorMemoryTest, FixedRecordFragmentFootprintUsesRecordGeometry) {
       /*indices=*/nullptr, /*indices_count=*/0, static_indices,
       IREE_ARRAYSIZE(static_indices), LOOM_VALUE_ID_INVALID, rows, columns,
       /*auxiliary=*/nullptr, /*auxiliary_count=*/0,
-      /*cache_scope=*/0, /*cache_temporal=*/0,
+      /*cache_scope=*/0, /*cache_temporal=*/0, /*converged=*/false,
       loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I8,
                           loom_dim_pack_static(32), /*encoding_id=*/0),
       LOOM_LOCATION_UNKNOWN, &load));
@@ -431,7 +431,7 @@ TEST_F(VectorMemoryTest, OpFootprintKindClassifiesMemoryFamilies) {
       IREE_ARRAYSIZE(indices), static_indices, IREE_ARRAYSIZE(static_indices),
       LOOM_VALUE_ID_INVALID, shape[0], shape[1], /*auxiliary=*/nullptr,
       /*auxiliary_count=*/0,
-      /*cache_scope=*/0, /*cache_temporal=*/0,
+      /*cache_scope=*/0, /*cache_temporal=*/0, /*converged=*/false,
       loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
                           loom_dim_pack_static(8), /*encoding_id=*/0),
       LOOM_LOCATION_UNKNOWN, &fragment_load));

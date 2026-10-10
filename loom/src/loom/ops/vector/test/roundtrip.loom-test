@@ -571,6 +571,7 @@ func.def @fragment_memory(%buffer: buffer, %offset: offset, %row: index, %col: i
   %init = vector.fragment.load<init> %c[%row, %col] shape [%m, %n] : view<[%m]x[%n]xf32, %layout> -> vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
   vector.fragment.store<result> %result, %c[%row, %col] shape [%m, %n] {cache_scope = system} : vector<8xf32>, view<[%m]x[%n]xf32, %layout>
+  %converged_rhs = vector.fragment.load<rhs> %b[0, %col] shape [%k, %n] {converged = true} : view<[%k]x[%n]xf16, %layout> -> vector<16xf16>
   func.return
 }
 

@@ -38,6 +38,7 @@
 #include "loom/target/arch/amdgpu/lower/fragment_memory/layout.h"
 #include "loom/target/arch/amdgpu/lower/fragment_memory/packet.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
+#include "loom/target/arch/amdgpu/lower/matrix_fragment.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/source_alloca_layout.h"
 #include "loom/target/arch/amdgpu/lower/source_value_analysis.h"
@@ -96,6 +97,8 @@ typedef struct loom_amdgpu_fragment_memory_source_t {
   loom_attribute_t cache_scope;
   // Optional cache temporal attr on the source op.
   loom_attribute_t cache_temporal;
+  // Whether the source asserts that every subgroup lane executes the access.
+  bool converged;
 } loom_amdgpu_fragment_memory_source_t;
 
 typedef struct loom_amdgpu_fragment_memory_diagnostic_t {
@@ -1231,6 +1234,7 @@ static void loom_amdgpu_fragment_memory_source_from_op(
           loom_vector_fragment_load_static_indices(source_op);
       out_source->dynamic_indices =
           loom_vector_fragment_load_indices(source_op);
+      out_source->converged = loom_vector_fragment_load_converged(source_op);
       return;
     }
   } else if (loom_vector_fragment_store_isa(source_op)) {
@@ -1317,6 +1321,46 @@ static bool loom_amdgpu_fragment_memory_dynamic_base_is_subgroup_uniform(
     }
   }
   return true;
+}
+
+// Selects GLOBAL_LOAD_TR_B128 when every lane executes a uniformly based
+// 16-bit global fragment load whose lanes hold strided elements and whose
+// adjacent lanes hold adjacent elements. Rewrites |address_layout| to the
+// bytes each lane reads.
+static bool loom_amdgpu_fragment_memory_select_transposed_load(
+    const loom_amdgpu_fragment_memory_environment_t* environment,
+    const loom_amdgpu_fragment_memory_source_t* source,
+    loom_low_source_memory_operation_kind_t operation_kind,
+    const loom_amdgpu_fragment_memory_prepared_t* prepared,
+    const loom_amdgpu_matrix_fragment_layout_t* layout,
+    const loom_matrix_fragment_role_layout_t* role_layout,
+    loom_amdgpu_fragment_memory_payload_form_t payload_form,
+    loom_amdgpu_fragment_memory_address_layout_t* address_layout) {
+  if (!source->converged ||
+      operation_kind != LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD ||
+      prepared->source_access.memory_space !=
+          LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL ||
+      payload_form != LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE ||
+      layout->wave_size != 32 || role_layout->element_bit_count != 16 ||
+      loom_amdgpu_matrix_fragment_role_layout_uses_low_subword(role_layout) ||
+      loom_amdgpu_matrix_fragment_role_layout_uses_packed_b16_elements(
+          prepared->role, role_layout) ||
+      !loom_amdgpu_descriptor_set_has_ref(
+          environment->descriptor_set,
+          LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_TR_B128_SADDR) ||
+      !loom_amdgpu_fragment_memory_dynamic_base_is_subgroup_uniform(
+          &prepared->source_access)) {
+    return false;
+  }
+  for (uint8_t axis = 0; axis < prepared->access.view_rank; ++axis) {
+    if (prepared->axis_byte_strides[axis].kind !=
+        LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC) {
+      return false;
+    }
+  }
+  return loom_amdgpu_fragment_memory_transpose_b16x8_address_layout(
+      (uint16_t)prepared->access.static_element_byte_count,
+      role_layout->register_count, address_layout);
 }
 
 static bool loom_amdgpu_fragment_memory_prepare(
@@ -1517,6 +1561,10 @@ static bool loom_amdgpu_fragment_memory_evaluate_prepared(
           diagnostic != NULL ? &diagnostic->constraint_key : NULL)) {
     return false;
   }
+  const bool transposed_load =
+      loom_amdgpu_fragment_memory_select_transposed_load(
+          environment, source, operation_kind, prepared, layout, role_layout,
+          payload_form, &address_layout);
   loom_amdgpu_fragment_memory_packetization_t packetization =
       LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE;
   if (!loom_amdgpu_fragment_memory_select_packetization(
@@ -1639,6 +1687,7 @@ static bool loom_amdgpu_fragment_memory_evaluate_prepared(
         .address_layout = address_layout,
         .payload_form = payload_form,
         .packetization = packetization,
+        .transposed_load = transposed_load,
         .narrowed_result = narrowed_result,
     };
     for (uint8_t axis = 0; axis < prepared->access.view_rank; ++axis) {

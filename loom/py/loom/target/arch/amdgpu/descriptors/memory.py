@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .common import *
 
 _MEMORY_DWORD_VECTOR_WIDTHS = ((32, 1), (64, 2), (96, 3), (128, 4))
@@ -2901,6 +2903,33 @@ def _global_load_overlay(
     )
 
 
+def _global_load_tr_b128_saddr_overlay(
+    *,
+    cache_fields: tuple[tuple[str, int], ...],
+) -> AmdgpuDescriptorOverlay:
+    # Each lane reads 16 contiguous bytes at its own address; the eight lanes
+    # of each lane group then exchange 16-bit elements as an 8x8 transpose, so
+    # the instruction requires EXEC to be all ones. A distinct semantic tag
+    # keeps ordinary 128-bit load selection from choosing it.
+    overlay = _global_load_overlay(
+        descriptor_key="amdgpu.global_load_tr_b128_saddr",
+        instruction_name="GLOBAL_LOAD_TR_B128",
+        mnemonic="global_load_tr_b128",
+        encoding_name="ENC_VGLOBAL",
+        address_field_name="VADDR",
+        data_field_name="VDST",
+        offset_field_name="IOFFSET",
+        offset_bit_width=24,
+        saddr_off=None,
+        width_bits=128,
+        units=4,
+        address_units=1,
+        semantic_tag="memory.load.transpose.b16x8",
+        cache_fields=cache_fields,
+    )
+    return replace(overlay, effects=(*overlay.effects, _CONVERGENT_EFFECT))
+
+
 def _global_load_b16_d16_overlay(
     *,
     descriptor_key: str,
@@ -4378,6 +4407,7 @@ __all__ = (
     "_global_load_lds_overlay",
     "_global_load_lds_overlays",
     "_global_load_overlay",
+    "_global_load_tr_b128_saddr_overlay",
     "_global_memory_overlays",
     "_global_store_b16_overlay",
     "_global_store_overlay",

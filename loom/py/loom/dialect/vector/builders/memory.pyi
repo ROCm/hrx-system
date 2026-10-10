@@ -22,6 +22,7 @@ class VectorMemoryMixin:
         auxiliary: dict[str, ValueRef] = ...,
         cache_scope: str | None = ...,
         cache_temporal: str | None = ...,
+        converged: bool | None = ...,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,

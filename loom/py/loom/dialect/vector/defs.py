@@ -52,6 +52,7 @@ from loom.dialect.scalar.comparison import CmpFPredicate, CmpIPredicate
 from loom.dsl import (
     ANY,
     ATTR_TYPE_ANY,
+    ATTR_TYPE_BOOL,
     ATTR_TYPE_DICT,
     ATTR_TYPE_ENUM,
     ATTR_TYPE_F64,
@@ -1553,6 +1554,17 @@ vector_fragment_load = Op(
             doc="Sorted auxiliary operand keys mapped to auxiliary operand ordinals.",
         ),
         *_indexed_memory_attrs(),
+        AttrDef(
+            "converged",
+            ATTR_TYPE_BOOL,
+            optional=True,
+            doc=(
+                "Whether every lane of the subgroup executes this load together. "
+                "Targets may then use memory packets whose lanes exchange "
+                "loaded data. Results are undefined if only some lanes of a "
+                "subgroup execute a converged load."
+            ),
+        ),
     ],
     traits=[REFINABLE_RESULT_TYPE_REFS],
     effects=[Reads("view")],
@@ -1587,6 +1599,7 @@ vector_fragment_load = Op(
     examples=[
         "%lhs = vector.fragment.load<lhs> %a[%row, %k0] shape [%m, %k] : view<[%M]x[%K]xf16, %layout> -> vector<16xf16>",
         "%rhs = vector.fragment.load<rhs> %b[%k0, %col] shape [%k, %n] using {sparsity = %metadata : vector<1xi32>} : view<[%K]x[%N]xf8E4M3, %storage> -> vector<8xi32>",
+        "%rhs = vector.fragment.load<rhs> %b[%k0, %col] shape [%k, %n] {converged = true} : view<[%K]x[%N]xf16> -> vector<8xf16>",
     ],
 )
 

@@ -369,6 +369,106 @@ bool loom_amdgpu_fragment_memory_select_packetization(
       IREE_SV("fragment_memory.packed_axis_stride"), out_constraint_key);
 }
 
+bool loom_amdgpu_fragment_memory_transpose_b16x8_address_layout(
+    uint16_t element_byte_count, uint16_t register_count,
+    loom_amdgpu_fragment_memory_address_layout_t* address_layout) {
+  enum {
+    kGroupLanes = 8,
+    kWaveLanes = 32,
+    kElementsPerLane = 8,
+  };
+  const loom_amdgpu_fragment_memory_address_layout_t* source = address_layout;
+  if (element_byte_count != 2 ||
+      register_count * source->payload_elements_per_register !=
+          kElementsPerLane ||
+      source->payload_elements_per_register != 2 ||
+      source->payload_registers_per_element != 1) {
+    return false;
+  }
+  // Element e of each lane must sit e * stride bytes after element 0.
+  const uint32_t element_stride = source->packed_element_byte_stride;
+  if (element_stride == 0 || element_stride == element_byte_count) {
+    return false;
+  }
+  for (uint16_t i = 0; i < register_count; ++i) {
+    if ((uint64_t)source->register_byte_offsets[i] !=
+        (uint64_t)source->register_byte_offsets[0] +
+            (uint64_t)i * source->payload_elements_per_register *
+                element_stride) {
+      return false;
+    }
+  }
+  // Eight adjacent lanes must address adjacent elements.
+  for (uint8_t lane = 0; lane < kWaveLanes; ++lane) {
+    const uint8_t group_lane = lane % kGroupLanes;
+    if (loom_amdgpu_fragment_memory_relative_lane_byte_offset(source, lane) !=
+        loom_amdgpu_fragment_memory_relative_lane_byte_offset(
+            source, (uint8_t)(lane - group_lane)) +
+            (uint64_t)group_lane * element_byte_count) {
+      return false;
+    }
+  }
+  // Lane 8g+i reads the eight elements that lanes 8g..8g+7 hold as element i:
+  // its address moves from element i of lane 8g to element 0 of lane 8g+i.
+  // The lane digit below eight moves from element steps to element-stride
+  // steps; higher lane digits are unchanged.
+  loom_amdgpu_fragment_memory_address_layout_t transposed = *source;
+  transposed.lane_term_count = 0;
+  memset(transposed.lane_terms, 0, sizeof(transposed.lane_terms));
+  for (uint8_t i = 0; i < source->lane_term_count; ++i) {
+    const loom_amdgpu_fragment_memory_lane_term_t* term =
+        &source->lane_terms[i];
+    if (term->divisor >= kGroupLanes) {
+      if (transposed.lane_term_count == IREE_ARRAYSIZE(transposed.lane_terms) ||
+          !loom_amdgpu_fragment_memory_append_lane_term(
+              term->divisor, term->modulus, term->byte_stride, &transposed)) {
+        return false;
+      }
+      continue;
+    }
+    if (term->divisor != 1 || term->byte_stride != element_byte_count ||
+        (term->modulus != 0 && term->modulus < kGroupLanes)) {
+      return false;
+    }
+    if (term->modulus != kGroupLanes) {
+      if (transposed.lane_term_count == IREE_ARRAYSIZE(transposed.lane_terms) ||
+          !loom_amdgpu_fragment_memory_append_lane_term(
+              kGroupLanes, term->modulus / kGroupLanes,
+              (uint32_t)kGroupLanes * element_byte_count, &transposed)) {
+        return false;
+      }
+    }
+  }
+  if (transposed.lane_term_count == IREE_ARRAYSIZE(transposed.lane_terms) ||
+      !loom_amdgpu_fragment_memory_append_lane_term(
+          1, kGroupLanes, element_stride, &transposed)) {
+    return false;
+  }
+  for (uint16_t i = 0; i < register_count; ++i) {
+    transposed.register_byte_offsets[i] =
+        source->register_byte_offsets[0] +
+        (uint32_t)i * LOOM_AMDGPU_FRAGMENT_REGISTER_BYTE_COUNT;
+  }
+  transposed.packed_element_byte_stride = element_byte_count;
+  transposed.primary_lane_divisor =
+      loom_amdgpu_fragment_memory_primary_lane_divisor(
+          &transposed, /*runtime_axes=*/NULL, /*view_rank=*/0);
+  transposed.linear_lane_byte_stride =
+      loom_amdgpu_fragment_memory_linear_lane_byte_stride(&transposed);
+  for (uint8_t lane = 0; lane < kWaveLanes; ++lane) {
+    const uint8_t group_lane = lane % kGroupLanes;
+    if (loom_amdgpu_fragment_memory_relative_lane_byte_offset(&transposed,
+                                                              lane) !=
+        loom_amdgpu_fragment_memory_relative_lane_byte_offset(source, lane) -
+            (uint64_t)group_lane * element_byte_count +
+            (uint64_t)group_lane * element_stride) {
+      return false;
+    }
+  }
+  *address_layout = transposed;
+  return true;
+}
+
 bool loom_amdgpu_fragment_memory_source_plan_supports_addressing(
     const loom_low_source_memory_access_plan_t* source,
     const loom_amdgpu_fragment_memory_scalar_base_t* scalar_base,

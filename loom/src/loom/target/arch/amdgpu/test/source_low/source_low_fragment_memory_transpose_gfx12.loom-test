@@ -1,0 +1,246 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1201> @target
+
+// Row-major values [key][dimension] feed the rhs of a probability-value
+// product. Each lane holds eight consecutive keys of one dimension, so the
+// fragment is strided in memory. A converged load fills it with one
+// transposing load per lane.
+kernel.def target(@target) @converged_rhs_row_major() {
+  %unit = index.constant 1 : index
+  %workgroups = index.constant 4 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%probability_buffer: buffer, %value_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %key_origin_raw = index.mul %workgroup, %k : index
+  %key_origin = index.assume %key_origin_raw [range(%key_origin_raw, 0, 48), multiple_of(%key_origin_raw, 16)] : index
+  %subgroup_raw = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup_raw [range(%subgroup_raw, 0, 1)] : index
+  %column_origin_raw = index.mul %subgroup, %n : index
+  %column_origin = index.assume %column_origin_raw [range(%column_origin_raw, 0, 16), multiple_of(%column_origin_raw, 16)] : index
+  %probability_view = buffer.view %probability_buffer[%base] : buffer -> view<16x64xf16>
+  %value_view = buffer.view %value_buffer[%base] : buffer -> view<64x32xf16>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<64x32xf32>
+  %lhs = vector.fragment.load<lhs> %probability_view[0, %key_origin] shape [%m, %k] : view<16x64xf16> -> vector<8xf16>
+  %rhs = vector.fragment.load<rhs> %value_view[%key_origin, %column_origin] shape [%k, %n] {converged = true} : view<64x32xf16> -> vector<8xf16>
+  %zero = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %zero shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<8xf16>, vector<8xf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %out_view[%key_origin, %column_origin] shape [%m, %n] : vector<8xf32>, view<64x32xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @converged_rhs_row_major() asm {
+  %workgroup = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
+  %30 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %probability_view = resource<hal_binding> {extent = 2048, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %value_view = resource<hal_binding> {extent = 4096, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %out_view = resource<hal_binding> {extent = 8192, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %subgroup = v_lshrrev_b32_src0_inline %30, 5
+  %35 = v_and_b32_src0_inline %30, 31
+  %36 = s_lshl_b32_rhs_inline %workgroup, 5
+  %37 = slice %probability_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = slice %probability_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = s_mov_b32 0
+  %40, %41 = s_add_co_u32 %37, %36
+  %42, %43 = s_addc_u32 %38, %39, %41
+  %44 = concat(%40, %42) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %45 = v_and_b32_src0_inline %35, 15
+  %46 = v_lshlrev_b32_src0_inline %45, 7
+  %47 = v_lshrrev_b32_src0_inline %35, 4
+  %48 = v_lshl_add_u32_shift_imm %47, %46, 4
+  %lhs = global_load_b128_saddr %48, %44
+  %51 = s_lshl_b32_rhs_inline %workgroup, 10
+  %52 = slice %value_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %53 = slice %value_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %55, %56 = s_add_co_u32 %52, %51
+  %57, %58 = s_addc_u32 %53, %39, %56
+  %59 = concat(%55, %57) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %60 = v_lshlrev_b32_src0_inline %subgroup, 5
+  %61 = v_and_b32_src0_inline %35, 7
+  %62 = v_lshl_add_u32_shift_imm %61, %60, 6
+  %63 = v_lshrrev_b32_src0_inline %35, 3
+  %64 = v_and_b32_src0_inline %63, 1
+  %65 = v_lshl_add_u32_shift_imm %64, %62, 4
+  %67 = v_lshl_add_u32_shift_imm %47, %65, 9
+  %rhs = global_load_tr_b128_saddr %67, %59
+  %69 = v_mov_b32 0
+  %init = concat(%69, %69, %69, %69, %69, %69, %69, %69) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %78 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %result = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %78
+  %80 = v_and_b32_src0_inline %30, 31
+  %81 = s_lshl_b32_rhs_inline %workgroup, 11
+  %82 = slice %out_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %83 = slice %out_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %84 = s_mov_b32 0
+  %85, %86 = s_add_co_u32 %82, %81
+  %87, %88 = s_addc_u32 %83, %84, %86
+  %89 = concat(%85, %87) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %90 = v_lshlrev_b32_src0_inline %subgroup, 6
+  %91 = v_and_b32_src0_inline %80, 15
+  %92 = v_lshl_add_u32_shift_imm %91, %90, 2
+  %93 = v_lshrrev_b32_src0_inline %80, 4
+  %94 = v_lshl_add_u32_shift_imm %93, %92, 10
+  %95 = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %94, %95, %89
+  %96 = slice %result[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %94, %96, %89 {offset = 128}
+  %97 = slice %result[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %94, %97, %89 {offset = 256}
+  %98 = slice %result[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %94, %98, %89 {offset = 384}
+  %99 = slice %result[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %94, %99, %89 {offset = 512}
+  %100 = slice %result[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %94, %100, %89 {offset = 640}
+  %101 = slice %result[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %94, %101, %89 {offset = 768}
+  %102 = slice %result[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %94, %102, %89 {offset = 896}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1201> @target
+
+// A column-major lhs [k][m] is the same strided case for the lhs role.
+kernel.def target(@target) @converged_lhs_column_major() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16, %lhs_layout>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x8xbf16>
+  %lane = kernel.workitem.id<x> : index
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] {converged = true} : view<16x16xbf16, %lhs_layout> -> vector<8xbf16>
+  vector.store %lhs, %out_view[%lane, 0] : vector<8xbf16>, view<32x8xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @converged_lhs_column_major() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lhs_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %out_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %20 = v_and_b32_src0_inline %lane, 7
+  %21 = v_lshlrev_b32_src0_inline %20, 5
+  %22 = v_lshrrev_b32_src0_inline %lane, 3
+  %23 = v_and_b32_src0_inline %22, 1
+  %24 = v_lshl_add_u32_shift_imm %23, %21, 4
+  %25 = v_lshrrev_b32_src0_inline %lane, 4
+  %26 = v_lshl_add_u32_shift_imm %25, %24, 8
+  %lhs = global_load_tr_b128_saddr %26, %lhs_view
+  %28 = v_lshlrev_b32_src0_inline %lane, 4
+  global_store_b128_saddr %28, %lhs, %out_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1201> @target
+
+// Without the converged assertion the load may run with inactive lanes, so it
+// keeps per-lane 16-bit loads.
+kernel.def target(@target) @rhs_row_major_not_converged() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%rhs_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %k = index.constant 16 : index
+  %n = index.constant 16 : index
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xf16>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x8xf16>
+  %lane = kernel.workitem.id<x> : index
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16> -> vector<8xf16>
+  vector.store %rhs, %out_view[%lane, 0] : vector<8xf16>, view<32x8xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @rhs_row_major_not_converged() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %rhs_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %out_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %19 = v_and_b32_src0_inline %lane, 15
+  %20 = v_lshlrev_b32_src0_inline %19, 1
+  %21 = v_lshrrev_b32_src0_inline %lane, 4
+  %22 = v_lshl_add_u32_shift_imm %21, %20, 8
+  %23 = global_load_d16_b16_saddr %22, %rhs_view
+  %24 = v_bfe_u32_offset_0_width_inline_low16 %23
+  %25 = global_load_d16_b16_saddr %22, %rhs_view {offset = 32}
+  %26 = v_bfe_u32_offset_0_width_inline_low16 %25
+  %27 = v_lshlrev_b32_src0_inline %26, 16
+  %28 = v_or_b32 %24, %27
+  %29 = global_load_d16_b16_saddr %22, %rhs_view {offset = 64}
+  %30 = v_bfe_u32_offset_0_width_inline_low16 %29
+  %31 = global_load_d16_b16_saddr %22, %rhs_view {offset = 96}
+  %32 = v_bfe_u32_offset_0_width_inline_low16 %31
+  %33 = v_lshlrev_b32_src0_inline %32, 16
+  %34 = v_or_b32 %30, %33
+  %35 = global_load_d16_b16_saddr %22, %rhs_view {offset = 128}
+  %36 = v_bfe_u32_offset_0_width_inline_low16 %35
+  %37 = global_load_d16_b16_saddr %22, %rhs_view {offset = 160}
+  %38 = v_bfe_u32_offset_0_width_inline_low16 %37
+  %39 = v_lshlrev_b32_src0_inline %38, 16
+  %40 = v_or_b32 %36, %39
+  %41 = global_load_d16_b16_saddr %22, %rhs_view {offset = 192}
+  %42 = v_bfe_u32_offset_0_width_inline_low16 %41
+  %43 = global_load_d16_b16_saddr %22, %rhs_view {offset = 224}
+  %44 = v_bfe_u32_offset_0_width_inline_low16 %43
+  %45 = v_lshlrev_b32_src0_inline %44, 16
+  %46 = v_or_b32 %42, %45
+  %rhs = concat(%28, %34, %40, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %48 = v_lshlrev_b32_src0_inline %lane, 4
+  global_store_b128_saddr %48, %rhs, %out_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1201> @target
+
+// A converged load whose memory is already contiguous per lane keeps the
+// ordinary 128-bit load.
+kernel.def target(@target) @converged_rhs_column_major() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%rhs_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %k = index.constant 16 : index
+  %n = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xf16, %rhs_layout>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x8xf16>
+  %lane = kernel.workitem.id<x> : index
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] {converged = true} : view<16x16xf16, %rhs_layout> -> vector<8xf16>
+  vector.store %rhs, %out_view[%lane, 0] : vector<8xf16>, view<32x8xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @converged_rhs_column_major() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %rhs_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %out_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %20 = v_and_b32_src0_inline %lane, 15
+  %21 = v_lshlrev_b32_src0_inline %20, 5
+  %22 = v_lshrrev_b32_src0_inline %lane, 4
+  %23 = v_lshl_add_u32_shift_imm %22, %21, 4
+  %rhs = global_load_b128_saddr %23, %rhs_view
+  %25 = v_lshlrev_b32_src0_inline %lane, 4
+  global_store_b128_saddr %25, %rhs, %out_view
+  return
+}

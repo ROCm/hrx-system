@@ -728,10 +728,12 @@ LOOM_DEFINE_ATTR_DICT(loom_vector_fragment_load_auxiliary_names, 1)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_cache_scope, 2, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_cache_temporal, 3, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_fragment_load_static_indices, 4)
+LOOM_DEFINE_ATTR_BOOL(loom_vector_fragment_load_converged, 5)
 enum loom_vector_fragment_load_build_flag_bits_e {
   LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_BLOCKS = 1u << 0,
   LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_CACHE_SCOPE = 1u << 1,
   LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_CACHE_TEMPORAL = 1u << 2,
+  LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_CONVERGED = 1u << 3,
 };
 typedef uint32_t loom_vector_fragment_load_build_flags_t;
 iree_status_t loom_vector_fragment_load_build(
@@ -750,6 +752,7 @@ iree_status_t loom_vector_fragment_load_build(
     iree_host_size_t auxiliary_count,
     loom_optional uint8_t cache_scope,
     loom_optional uint8_t cache_temporal,
+    loom_optional bool converged,
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);

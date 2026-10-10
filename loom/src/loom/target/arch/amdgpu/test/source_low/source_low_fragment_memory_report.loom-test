@@ -792,3 +792,30 @@ CHECK: COMPILE-REPORT: source_low[*] * source_op=vector.fragment.load selection=
 CHECK: COMPILE-REPORT: source_low_memory * packets=3 loads=1 stores=2 *
 CHECK: COMPILE-REPORT: source_low_memory_argument_packet[*] * source_root=input * memory_space=global operation=load packet=amdgpu.global_load_b128_saddr strategy=fp8_identity_e8m0_pk8_f16 storage={element_format:f8e5m2}* packets=1 * source_lanes=16 source_bytes=16 * issued_read_bytes=16 issued_write_bytes=0 issued_read_unknown_widths=0 issued_write_unknown_widths=0 *
 CHECK: COMPILE-REPORT: source_low_memory_argument_packet[*] * source_root=output * memory_space=global operation=store packet=amdgpu.global_store_b128_saddr storage={element_format:f16}* packets=2 * source_lanes=16 source_bytes=32 * issued_read_bytes=0 issued_write_bytes=32 issued_read_unknown_widths=0 issued_write_unknown_widths=0 *
+
+// ====
+
+amdgpu.target<gfx1201> @target
+
+// Each lane reads one row segment; the report describes those reads, which the
+// load then transposes across each group of eight lanes.
+kernel.def target(@target) @report_converged_rhs_transposed_load() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %k = index.constant 16 : index
+  %n = index.constant 16 : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<16x16xf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32x8xf16>
+  %lane = kernel.workitem.id<x> : index
+  %loaded = vector.fragment.load<rhs> %input_view[0, 0] shape [%k, %n] {converged = true} : view<16x16xf16> -> vector<8xf16>
+  vector.store %loaded, %output_view[%lane, 0] : vector<8xf16>, view<32x8xf16>
+  kernel.return
+}
+
+// ----
+CHECK: COMPILE-REPORT: source_low[*] * source_op=vector.fragment.load selection=plan plan_key=transposed_b16_fragment_load *
+CHECK: COMPILE-REPORT: source_low_memory * packets=2 loads=1 stores=1 *
+CHECK: COMPILE-REPORT: source_low_memory_argument_packet[*] * source_root=input * memory_space=global operation=load packet=amdgpu.global_load_tr_b128_saddr strategy=transposed_b16_fragment_load storage={element_format:f16}* packets=1 * source_lanes=8 source_bytes=16 * issued_read_bytes=16 *

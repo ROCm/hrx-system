@@ -1691,6 +1691,9 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_amdgpu_fragment_memory_payload_form_t payload_form;
   // Memory packetization selected from fragment and physical view layouts.
   loom_amdgpu_fragment_memory_packetization_t packetization;
+  // Whether one transposing load packet fills the fragment. |address_layout|
+  // then describes the bytes each lane reads before the lane exchange.
+  bool transposed_load;
   // Result-fragment store epilogue strategy selected from layout and packet
   // facts.
   loom_amdgpu_fragment_memory_epilogue_strategy_t epilogue_strategy;

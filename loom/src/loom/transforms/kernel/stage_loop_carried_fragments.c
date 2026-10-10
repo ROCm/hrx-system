@@ -622,8 +622,8 @@ static iree_status_t loom_stage_loop_carried_fragments_build_fragment_load(
       loom_vector_fragment_fact_row_value(fragment->fact),
       loom_vector_fragment_fact_column_value(fragment->fact),
       /*auxiliary=*/NULL, /*auxiliary_count=*/0, /*cache_scope=*/0,
-      /*cache_temporal=*/0, fragment->payload_type, anchor_op->location,
-      &load_op));
+      /*cache_temporal=*/0, /*converged=*/false, fragment->payload_type,
+      anchor_op->location, &load_op));
   *out_value = loom_vector_fragment_load_result(load_op);
   return iree_ok_status();
 }

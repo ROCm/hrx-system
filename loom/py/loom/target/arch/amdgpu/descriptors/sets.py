@@ -2319,7 +2319,10 @@ def _rdna4_core_overlays(
 
 @cache
 def _gfx12_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
-    return _rdna4_core_overlays()
+    return (
+        *_rdna4_core_overlays(),
+        _global_load_tr_b128_saddr_overlay(cache_fields=_GFX12_VECTOR_CACHE_FIELDS),
+    )
 
 
 def _gfx12_core_overlay_descriptors(

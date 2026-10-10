@@ -629,6 +629,28 @@ static bool loom_amdgpu_fragment_memory_select_packet(
   return false;
 }
 
+static bool loom_amdgpu_fragment_memory_select_transposed_load_packet(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t register_index,
+    loom_amdgpu_fragment_memory_packet_plan_t* out_packet) {
+  *out_packet = (loom_amdgpu_fragment_memory_packet_plan_t){0};
+  const loom_amdgpu_descriptor_ref_t descriptor_ref =
+      LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_TR_B128_SADDR;
+  if (register_index != 0 ||
+      plan->register_count !=
+          LOOM_AMDGPU_FRAGMENT_MEMORY_MAX_PACKET_REGISTERS ||
+      !loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref)) {
+    return false;
+  }
+  *out_packet = (loom_amdgpu_fragment_memory_packet_plan_t){
+      .register_index = register_index,
+      .result_register_count = plan->register_count,
+      .packet_register_count = plan->register_count,
+      .descriptor_ref = descriptor_ref,
+  };
+  return true;
+}
+
 static bool loom_amdgpu_fragment_memory_select_low_subword_packet(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t register_index,
@@ -1175,7 +1197,10 @@ bool loom_amdgpu_fragment_memory_plan_packets(
   for (uint16_t register_index = 0; register_index < plan->register_count;) {
     loom_amdgpu_fragment_memory_packet_plan_t packet = {0};
     const bool selected =
-        load_fp8_to_16bit
+        plan->transposed_load
+            ? loom_amdgpu_fragment_memory_select_transposed_load_packet(
+                  descriptor_set, plan, register_index, &packet)
+        : load_fp8_to_16bit
             ? loom_amdgpu_fragment_memory_select_fp8_to_16bit_load_packet(
                   descriptor_set, layout, plan, register_index, &packet)
         : plan->packetization !=
@@ -1408,6 +1433,9 @@ static iree_string_view_t loom_amdgpu_fragment_memory_packet_strategy_key(
   if (loom_amdgpu_fragment_memory_payload_form_is_load_fp8_to_16bit(
           plan->payload_form)) {
     return loom_amdgpu_fragment_memory_fp8_strategy_key(plan);
+  }
+  if (plan->transposed_load) {
+    return IREE_SV("transposed_b16_fragment_load");
   }
 
   if (plan->packetization ==

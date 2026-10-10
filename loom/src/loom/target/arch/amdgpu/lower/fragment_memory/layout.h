@@ -40,6 +40,16 @@ bool loom_amdgpu_fragment_memory_select_packetization(
     loom_amdgpu_fragment_memory_packetization_t* out_packetization,
     iree_string_view_t* out_constraint_key);
 
+// Rewrites |address_layout| for a transposing 16-bit load in which each lane
+// reads eight contiguous elements and every group of eight lanes exchanges them
+// as an 8x8 transpose: lane 8g+i receives element i of the reads issued by
+// lanes 8g..8g+7. The fragment must hold eight elements per lane at a constant
+// byte stride, and eight adjacent lanes must hold adjacent elements. On success
+// |address_layout| describes the 16 contiguous bytes each lane reads.
+bool loom_amdgpu_fragment_memory_transpose_b16x8_address_layout(
+    uint16_t element_byte_count, uint16_t register_count,
+    loom_amdgpu_fragment_memory_address_layout_t* address_layout);
+
 // Verifies that indexed-address terms outside the scalar base fit U32 VADDR.
 bool loom_amdgpu_fragment_memory_source_plan_supports_addressing(
     const loom_low_source_memory_access_plan_t* source,
