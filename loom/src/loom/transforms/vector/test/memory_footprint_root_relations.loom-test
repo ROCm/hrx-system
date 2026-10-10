@@ -1,0 +1,165 @@
+// RUN: pass vector-memory-footprint
+
+// The selected origin has a loose interval. Its selected arm's end guard
+// proves the access fits; that proof must also bound the allocation check.
+func.def @scalar_selected_end_fits_exact_root(%raw: index) {
+  %origin = index.assume %raw [range(%raw, 0, 31)] : index
+  %begin = index.constant 0 : index
+  %element_count = index.constant 1 : index
+  %view_extent = index.constant 16 : index
+  %candidate_end = index.add %origin, %element_count : index
+  %fits = index.cmp ule, %candidate_end, %view_extent : index
+  %selected_origin = scf.select %fits, %origin, %begin : index
+  %byte_length = index.constant 64 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<private> align(16) %byte_length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<16xf32>
+  %loaded = view.load %view[%selected_origin] : view<16xf32> -> f32
+  test.use %loaded : f32
+  func.return
+}
+
+// ====
+
+func.def @vector_selected_end_fits_exact_root(%raw: index) {
+  %origin = index.assume %raw [range(%raw, 0, 31)] : index
+  %begin = index.constant 0 : index
+  %vector_extent = index.constant 4 : index
+  %view_extent = index.constant 16 : index
+  %candidate_end = index.add %origin, %vector_extent : index
+  %fits = index.cmp ule, %candidate_end, %view_extent : index
+  %selected_origin = scf.select %fits, %origin, %begin : index
+  %byte_length = index.constant 64 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<private> align(16) %byte_length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<16xf32>
+  %loaded = vector.load %view[%selected_origin] : view<16xf32> -> vector<4xf32>
+  test.use %loaded : vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @fragment_selected_end_fits_exact_root(%raw: index) {
+  %origin = index.assume %raw [range(%raw, 0, 7)] : index
+  %begin = index.constant 0 : index
+  %fragment_rows = index.constant 2 : index
+  %fragment_columns = index.constant 8 : index
+  %view_rows = index.constant 4 : index
+  %candidate_end = index.add %origin, %fragment_rows : index
+  %fits = index.cmp ule, %candidate_end, %view_rows : index
+  %selected_origin = scf.select %fits, %origin, %begin : index
+  %byte_length = index.constant 128 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<private> align(16) %byte_length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<4x8xf32>
+  %loaded = vector.fragment.load<init> %view[%selected_origin, 0] shape [%fragment_rows, %fragment_columns] : view<4x8xf32> -> vector<8xf32>
+  test.use %loaded : vector<8xf32>
+  func.return
+}
+
+// ====
+
+func.def @gather_selected_end_fits_exact_root(%raw: index) {
+  %origin = index.assume %raw [range(%raw, 0, 31)] : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %vector_extent = index.constant 4 : index
+  %view_extent = index.constant 16 : index
+  %candidate_end = index.add %origin, %vector_extent : index
+  %fits = index.cmp ule, %candidate_end, %view_extent : index
+  %selected_origin = scf.select %fits, %origin, %begin : index
+  %offsets = vector.iota %selected_origin step %step : vector<4xindex>
+  %byte_length = index.constant 64 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<private> align(16) %byte_length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<16xf32>
+  %loaded = vector.gather %view[%begin][%offsets] : view<16xf32>, vector<4xindex> -> vector<4xf32>
+  test.use %loaded : vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Proving the logical view boundary never proves a smaller allocation fits.
+func.def @scalar_selected_end_rejects_short_root(%raw: index) {
+  %origin = index.assume %raw [range(%raw, 0, 31)] : index
+  %begin = index.constant 0 : index
+  %element_count = index.constant 1 : index
+  %view_extent = index.constant 16 : index
+  %candidate_end = index.add %origin, %element_count : index
+  %fits = index.cmp ule, %candidate_end, %view_extent : index
+  %selected_origin = scf.select %fits, %origin, %begin : index
+  %byte_length = index.constant 60 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<private> align(16) %byte_length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<16xf32>
+  // ERROR@+1: SUBRANGE/026 {op_name="view.load", maximum_access_byte_end="64", root_byte_extent="60"}
+  %loaded = view.load %view[%selected_origin] : view<16xf32> -> f32
+  test.use %loaded : f32
+  func.return
+}
+
+// ====
+
+func.def @vector_selected_end_rejects_offset_root(%raw: index) {
+  %origin = index.assume %raw [range(%raw, 0, 31)] : index
+  %begin = index.constant 0 : index
+  %vector_extent = index.constant 4 : index
+  %view_extent = index.constant 16 : index
+  %candidate_end = index.add %origin, %vector_extent : index
+  %fits = index.cmp ule, %candidate_end, %view_extent : index
+  %selected_origin = scf.select %fits, %origin, %begin : index
+  %byte_length = index.constant 64 : offset
+  %base = index.constant 4 : offset
+  %storage = buffer.alloca<private> align(16) %byte_length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<16xf32>
+  // ERROR@+1: SUBRANGE/026 {op_name="vector.load", maximum_access_byte_end="68", root_byte_extent="64"}
+  %loaded = vector.load %view[%selected_origin] : view<16xf32> -> vector<4xf32>
+  test.use %loaded : vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @gather_selected_end_rejects_short_root(%raw: index) {
+  %origin = index.assume %raw [range(%raw, 0, 31)] : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %vector_extent = index.constant 4 : index
+  %view_extent = index.constant 16 : index
+  %candidate_end = index.add %origin, %vector_extent : index
+  %fits = index.cmp ule, %candidate_end, %view_extent : index
+  %selected_origin = scf.select %fits, %origin, %begin : index
+  %offsets = vector.iota %selected_origin step %step : vector<4xindex>
+  %byte_length = index.constant 60 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<private> align(16) %byte_length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<16xf32>
+  // ERROR@+1: SUBRANGE/026 {op_name="vector.gather", maximum_access_byte_end="64", root_byte_extent="60"}
+  %loaded = vector.gather %view[%begin][%offsets] : view<16xf32>, vector<4xindex> -> vector<4xf32>
+  test.use %loaded : vector<4xf32>
+  func.return
+}
+
+// ====
+
+// The selected value's proof cannot constrain its unselected source.
+func.def @unselected_origin_remains_unproved(%raw: index) {
+  %origin = index.assume %raw [range(%raw, 0, 31)] : index
+  %begin = index.constant 0 : index
+  %vector_extent = index.constant 4 : index
+  %view_extent = index.constant 16 : index
+  %candidate_end = index.add %origin, %vector_extent : index
+  %fits = index.cmp ule, %candidate_end, %view_extent : index
+  %selected_origin = scf.select %fits, %origin, %begin : index
+  %byte_length = index.constant 64 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<private> align(16) %byte_length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<16xf32>
+  %loaded = vector.load %view[%selected_origin] : view<16xf32> -> vector<4xf32>
+  // ERROR@+1: SUBRANGE/010
+  %unselected = vector.load %view[%origin] : view<16xf32> -> vector<4xf32>
+  test.use %loaded, %unselected : vector<4xf32>, vector<4xf32>
+  func.return
+}

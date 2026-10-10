@@ -926,6 +926,10 @@ static iree_status_t loom_vector_memory_footprint_check_direct_axis(
         unit_extent ? IREE_SV("vector_footprint.scalar_axis_upper_bound")
                     : IREE_SV("vector_footprint.full_vector_upper_bound"));
   }
+  // The root allocation check consumes this endpoint, not the symbolic proof.
+  // Retain the proved bound without changing the shared value's ambient facts.
+  (void)loom_value_facts_refine_relation(LOOM_PREDICATE_LE, end_facts,
+                                         proof_bound.facts, &end_facts, NULL);
   *out_exclusive_end_facts = end_facts;
   return iree_ok_status();
 }
@@ -1020,6 +1024,9 @@ static iree_status_t loom_vector_memory_footprint_check_origin_axis(
         LOOM_ERR_SUBRANGE_011,
         IREE_SV("vector_footprint.scalar_axis_upper_bound"));
   }
+  (void)loom_value_facts_refine_relation(LOOM_PREDICATE_LE, exclusive_end.facts,
+                                         bound.facts, &exclusive_end.facts,
+                                         NULL);
   *out_exclusive_end_facts = exclusive_end.facts;
   return iree_ok_status();
 }
@@ -1364,6 +1371,9 @@ static iree_status_t loom_vector_memory_footprint_check_offsets(
     return loom_vector_memory_footprint_fail_linear_span(state, access,
                                                          LOOM_ERR_SUBRANGE_016);
   }
+  (void)loom_value_facts_refine_relation(LOOM_PREDICATE_LE, exclusive_end.facts,
+                                         storage_span.facts,
+                                         &exclusive_end.facts, NULL);
   return loom_vector_memory_footprint_check_root_element_end(
       state, access, &memory_access, exclusive_end.facts);
 }

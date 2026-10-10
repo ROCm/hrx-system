@@ -28,6 +28,7 @@ loom_check_test_suite(
         "memory_footprint_inverse_quotient.loom-test",
         "memory_footprint_quotient.loom-test",
         "memory_footprint_remainder.loom-test",
+        "memory_footprint_root_relations.loom-test",
         "memory_to_scalar.loom-test",
         "packed_memory_consumers.loom-test",
         "reduce_axes_to_scalar.loom-test",
