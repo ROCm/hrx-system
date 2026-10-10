@@ -14,6 +14,7 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
+#include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/packet_hazard_plan_json.h"
 #include "loom/ir/ir.h"
@@ -870,6 +871,43 @@ loom_amdgpu_wait_plan_build_packet_transfer_dependency_links(
       builder, producer_nodes, value_count, consumer_node, UINT32_MAX);
 }
 
+static bool loom_amdgpu_wait_plan_node_is_volatile_memory(
+    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
+  const loom_low_schedule_node_t* node = &builder->schedule->nodes[node_index];
+  return node->descriptor != NULL &&
+         iree_any_bit_set(node->op->instance_flags,
+                          LOOM_MEMORY_ACCESS_FLAG_VOLATILE);
+}
+
+// Vector memory instructions issued by one wave are processed in issue order,
+// so a later VMEM access observes every earlier same-wave VMEM access to the
+// same address without draining vmcnt first. Memory-effect dependencies whose
+// consumer is itself a VMEM-only access therefore need no VMEM counter wait;
+// register reuse and SSA uses of loaded values retain their own waits. Other
+// counters (LDS, SMEM, tensor, async) and program-exit ordering are unchanged.
+// Volatile accesses keep their waits: they must also stay ordered against
+// accesses to different addresses, which hardware does not guarantee.
+static uint32_t loom_amdgpu_wait_plan_drop_same_wave_vmem_ordering(
+    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t producer_node,
+    uint32_t consumer_node, uint32_t counter_mask) {
+  if ((counter_mask & LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM) == 0) {
+    return counter_mask;
+  }
+  if (loom_amdgpu_wait_plan_node_is_volatile_memory(builder, producer_node) ||
+      loom_amdgpu_wait_plan_node_is_volatile_memory(builder, consumer_node)) {
+    return counter_mask;
+  }
+  const loom_amdgpu_wait_frontier_node_t* consumer_memory =
+      &builder->classification.frontier_nodes[consumer_node];
+  const uint32_t consumer_counters = consumer_memory->read_counter_mask |
+                                     consumer_memory->write_counter_mask;
+  if (consumer_counters == 0 ||
+      (consumer_counters & ~LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM) != 0) {
+    return counter_mask;
+  }
+  return counter_mask & ~LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM;
+}
+
 static uint32_t loom_amdgpu_wait_plan_memory_effect_counter_mask(
     const loom_amdgpu_wait_plan_builder_t* builder, uint32_t producer_node,
     uint32_t consumer_node) {
@@ -893,7 +931,8 @@ static uint32_t loom_amdgpu_wait_plan_memory_effect_counter_mask(
                        LOOM_AMDGPU_WAIT_NODE_STATE_DEPENDENCY_WRITE)) {
     counter_mask |= producer_memory->read_counter_mask;
   }
-  return counter_mask;
+  return loom_amdgpu_wait_plan_drop_same_wave_vmem_ordering(
+      builder, producer_node, consumer_node, counter_mask);
 }
 
 static loom_amdgpu_wait_plan_reason_t
@@ -963,6 +1002,8 @@ static iree_status_t loom_amdgpu_wait_plan_visit_memory_completion_edge(
   } else {
     counter_mask = loom_amdgpu_wait_counter_mask(producer->counter_id);
   }
+  counter_mask = loom_amdgpu_wait_plan_drop_same_wave_vmem_ordering(
+      builder, producer->node_index, consumer->node_index, counter_mask);
   if (counter_mask == 0) {
     return iree_ok_status();
   }

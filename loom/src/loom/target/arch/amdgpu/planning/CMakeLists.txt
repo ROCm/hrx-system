@@ -510,6 +510,7 @@ loom_cc_library(
     loom::codegen::low::allocation::storage
     loom::codegen::low::allocation::storage_lease
     loom::codegen::low::descriptors
+    loom::codegen::low::memory_access
     loom::codegen::low::packet
     loom::codegen::low::packet_hazard_plan
     loom::codegen::low::packet_hazard_plan_json

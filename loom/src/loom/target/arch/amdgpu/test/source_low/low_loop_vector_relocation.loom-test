@@ -193,6 +193,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @leased_slice_preserves_
   v_mov_b32 v11, v15
   s_branch .Lbb1
 .Lbb3:
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====

@@ -271,10 +271,11 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @global_store_before_tie
 
 // ----
   global_store_b32 v1, v0, s[0:1] offset:0
-  s_wait_storecnt storecnt(0)
+  s_wait_xcnt xcnt(0)
   buffer_atomic_add_u32 v0, v1, s[4:7], s2 offen offset:0 scope:2 th:1
   s_wait_loadcnt loadcnt(0)
   v_add_u32 v2, v0, v1
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====

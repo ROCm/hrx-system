@@ -36,7 +36,6 @@ low.func.def target<amdgpu.gfx12_5.generic.core>(@target) @reload_wide_address(%
   s_mov_b64_exec_read s[0:1]
   s_wait_xcnt xcnt(0)
   s_mov_b64 exec, -1
-  s_wait_storecnt storecnt(0)
   scratch_load_b32 v0, off, off offset:0 nv:0 scope:0 th:0
   s_wait_loadcnt loadcnt(0)
   v_readfirstlane_b32 s2, v0
@@ -52,6 +51,7 @@ low.func.def target<amdgpu.gfx12_5.generic.core>(@target) @reload_wide_address(%
   v_add_co_ci_u32 v1, s[0:1], v2, v1, s[0:1]
   global_load_b32 v2, v[0:1], off offset:0
   s_wait_loadcnt loadcnt(0)
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
@@ -87,7 +87,6 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) @reload_wide_address(%un
   scratch_store_b64 off, v[0:1], off offset:8 nv:0 scope:0 th:0
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_wait_storecnt storecnt(0)
   scratch_load_b32 v0, off, off offset:0 nv:0 scope:0 th:0
   s_wait_loadcnt loadcnt(0)
   v_readfirstlane_b32 s2, v0
@@ -105,6 +104,7 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) @reload_wide_address(%un
   v_add_co_ci_u32 v1, s[0:1], v2, v1, s[0:1]
   global_load_b32 v0, v[0:1], off offset:0
   s_wait_loadcnt loadcnt(0)
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
@@ -142,7 +142,6 @@ low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) @reload_wide_address(
   s_mov_b64_exec_read s[0:1]
   s_wait_xcnt xcnt(0)
   s_mov_b64 exec, -1
-  s_wait_storecnt storecnt(0)
   scratch_load_b32 v0, off, off offset:0 nv:0 scope:0 th:0
   s_wait_loadcnt loadcnt(0)
   v_readfirstlane_b32 s2, v0
@@ -158,6 +157,7 @@ low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) @reload_wide_address(
   v_add_co_ci_u32 v1, s[0:1], v2, v1, s[0:1]
   global_load_b32 v2, v[0:1], off offset:0
   s_wait_loadcnt loadcnt(0)
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
@@ -195,7 +195,6 @@ low.func.def target<amdgpu.rdna4.gfx1251.core>(@target) @reload_wide_address(%un
   s_mov_b64_exec_read s[0:1]
   s_wait_xcnt xcnt(0)
   s_mov_b64 exec, -1
-  s_wait_storecnt storecnt(0)
   scratch_load_b32 v0, off, off offset:0 nv:0 scope:0 th:0
   s_wait_loadcnt loadcnt(0)
   v_readfirstlane_b32 s2, v0
@@ -211,6 +210,7 @@ low.func.def target<amdgpu.rdna4.gfx1251.core>(@target) @reload_wide_address(%un
   v_add_co_ci_u32 v1, s[0:1], v2, v1, s[0:1]
   global_load_b32 v2, v[0:1], off offset:0
   s_wait_loadcnt loadcnt(0)
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
@@ -248,7 +248,6 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @reload_wide_address(%un
   s_mov_b64_exec_read s[0:1]
   s_wait_xcnt xcnt(0)
   s_mov_b64 exec, -1
-  s_wait_storecnt storecnt(0)
   scratch_load_b32 v0, off, off offset:0 nv:0 scope:0 th:0
   s_wait_loadcnt loadcnt(0)
   v_readfirstlane_b32 s2, v0
@@ -264,6 +263,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @reload_wide_address(%un
   v_add_co_ci_u32 v1, s[0:1], v2, v1, s[0:1]
   global_load_b32 v2, v[0:1], off offset:0
   s_wait_loadcnt loadcnt(0)
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
@@ -299,7 +299,6 @@ low.func.def target<amdgpu.rdna4.core>(@target) @reload_wide_address(%uniform: r
   scratch_store_b64 off, v[0:1], off offset:8 nv:0 scope:0 th:0
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_wait_storecnt storecnt(0)
   scratch_load_b32 v0, off, off offset:0 nv:0 scope:0 th:0
   s_wait_loadcnt loadcnt(0)
   v_readfirstlane_b32 s2, v0
@@ -317,6 +316,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @reload_wide_address(%uniform: r
   v_add_co_ci_u32 v1, s[0:1], v2, v1, s[0:1]
   global_load_b32 v0, v[0:1], off offset:0
   s_wait_loadcnt loadcnt(0)
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
@@ -352,7 +352,6 @@ low.func.def target<amdgpu.rdna4m.core>(@target) @reload_wide_address(%uniform: 
   scratch_store_b64 off, v[0:1], off offset:8 glc:0 slc:0 dlc:0
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s2, v0
@@ -367,6 +366,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) @reload_wide_address(%uniform: 
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
   v_add_co_ci_u32 v1, s[0:1], v2, v1, s[0:1]
   global_load_b32 v0, v[0:1], off offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
@@ -403,7 +403,6 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @reload_wide_address(%uniform:
   scratch_store_b64 off, v[0:1], off offset:8 glc:0 slc:0 dlc:0
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s2, v0
@@ -418,6 +417,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @reload_wide_address(%uniform:
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
   v_add_co_ci_u32 v1, s[0:1], v2, v1, s[0:1]
   global_load_b32 v0, v[0:1], off offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
@@ -454,7 +454,6 @@ low.func.def target<amdgpu.rdna3.core>(@target) @reload_wide_address(%uniform: r
   scratch_store_b64 off, v[0:1], off offset:8 glc:0 slc:0 dlc:0
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s2, v0
@@ -469,6 +468,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @reload_wide_address(%uniform: r
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
   v_add_co_ci_u32 v1, s[0:1], v2, v1, s[0:1]
   global_load_b32 v0, v[0:1], off offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
@@ -505,7 +505,6 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@target) @reload_wide_address(%u
   scratch_store_b64 off, v[0:1], off offset:8 nt:0 sc0:0 sc1:0
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt vmcnt(0) lgkmcnt(15)
   scratch_load_b32 v0, off, off offset:0 nt:0 sc0:0 sc1:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   v_readfirstlane_b32 s2, v0
@@ -556,7 +555,6 @@ low.func.def target<amdgpu.cdna4.core>(@target) @reload_wide_address(%uniform: r
   scratch_store_b64 off, v[0:1], off offset:8 nt:0 sc0:0 sc1:0
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt vmcnt(0) lgkmcnt(15)
   scratch_load_b32 v0, off, off offset:0 nt:0 sc0:0 sc1:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   v_readfirstlane_b32 s2, v0
@@ -607,7 +605,6 @@ low.func.def target<amdgpu.cdna3.core>(@target) @reload_wide_address(%uniform: r
   scratch_store_b64 off, v[0:1], off offset:8 nt:0 sc0:0 sc1:0
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt vmcnt(0) lgkmcnt(15)
   scratch_load_b32 v0, off, off offset:0 nt:0 sc0:0 sc1:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   v_readfirstlane_b32 s2, v0
@@ -658,7 +655,6 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @reload_wide_address(%un
   scratch_store_b64 off, v[0:1], off offset:8 glc:0 slc:0 dlc:0
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s2, v0
@@ -673,6 +669,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @reload_wide_address(%un
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
   v_add_co_ci_u32 v1, s[0:1], v2, v1, s[0:1]
   global_load_b32 v0, v[0:1], off offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
@@ -708,7 +705,6 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_address_pressure(%
   s_mov_b64 exec, s[4:5]
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:16 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s4, v0
@@ -724,7 +720,6 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_address_pressure(%
   s_mov_b64 exec, s[2:3]
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:16 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s2, v0
@@ -749,7 +744,6 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_address_pressure(%
   s_mov_b64 exec, s[2:3]
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:8 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s2, v0
@@ -774,7 +768,6 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_address_pressure(%
   s_mov_b64 exec, s[2:3]
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s2, v0
@@ -799,7 +792,6 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_address_pressure(%
   s_mov_b64 exec, s[2:3]
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:8 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s2, v0
@@ -827,7 +819,6 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_address_pressure(%
   s_mov_b64 exec, s[2:3]
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s2, v0
@@ -892,5 +883,6 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_address_pressure(%
   s_xor_b64 s[0:1], s[0:1], s[4:5]
   v_mov_b32 v0, 0
   global_load_b32 v0, v0, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm

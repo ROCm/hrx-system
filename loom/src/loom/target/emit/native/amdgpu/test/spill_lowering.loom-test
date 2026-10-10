@@ -75,7 +75,6 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @gfx9_4_
   s_mov_b64 exec, s[2:3]
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
-  s_waitcnt vmcnt(0) lgkmcnt(15)
   scratch_load_b32 v0, off, off offset:0 nt:0 sc0:0 sc1:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   v_readfirstlane_b32 s2, v0
@@ -338,7 +337,6 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @later_block_storage_survi
   s_mov_b64 exec, s[4:5]
   s_mov_b64_exec_read s[2:3]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:32 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s4, v0
@@ -357,7 +355,6 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @later_block_storage_survi
   s_mov_b64 exec, s[4:5]
   s_mov_b64_exec_read s[2:3]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:8 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s4, v0
@@ -421,6 +418,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @later_block_storage_survi
   s_mov_b64 exec, s[2:3]
   s_delay_alu instid0(VALU_DEP_1)
   s_xor_b64 s[0:1], s[0:1], s[4:5]
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -493,7 +491,6 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @storage_views_survive_spi
   s_mov_b64 exec, s[4:5]
   s_mov_b64_exec_read s[2:3]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:72 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s4, v0
@@ -512,7 +509,6 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @storage_views_survive_spi
   s_mov_b64 exec, s[4:5]
   s_mov_b64_exec_read s[2:3]
   s_mov_b64 exec, -1
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v0, off, off offset:48 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_readfirstlane_b32 s4, v0
@@ -576,4 +572,5 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @storage_views_survive_spi
   s_mov_b64 exec, s[2:3]
   s_delay_alu instid0(VALU_DEP_1)
   s_xor_b64 s[0:1], s[0:1], s[4:5]
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm

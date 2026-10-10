@@ -244,7 +244,6 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @pack_address_above_reloaded_t
   global_load_b128 v[1:4], v0, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   scratch_store_b128 off, v[1:4], off offset:0 glc:0 slc:0 dlc:0
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b128 v[1:4], off, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_mov_b32 v1, v2
@@ -254,6 +253,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @pack_address_above_reloaded_t
   s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v1, v1, v4
   ds_write_b32 v0, v1 offset:16
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -306,9 +306,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @overlapping_slice_reloads(%bl
 // ----
   scratch_store_b128 off, v[0:3], off offset:0 glc:0 slc:0 dlc:0
   v_add_u32 v0, v4, v4
-  s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_4) | instid1(VALU_DEP_1)
+  s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_3) | instid1(VALU_DEP_1)
   v_add_u32 v0, v4, v0
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b128 v[1:4], off, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_add_u32 v1, v1, v2

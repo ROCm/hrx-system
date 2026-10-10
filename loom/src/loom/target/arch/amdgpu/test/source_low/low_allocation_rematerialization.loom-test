@@ -24,7 +24,6 @@ low.func.def target<amdgpu.rdna3.core>(@target) @rematerialization_budget_falls_
   scratch_store_b32 off, v1, off offset:4 glc:0 slc:0 dlc:0
   global_load_b32 v0, v3, s[0:1] offset:0
   global_load_b32 v1, v3, s[0:1] offset:4
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v4, off, off offset:4 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_add_u32 v2, v2, v4
@@ -32,7 +31,6 @@ low.func.def target<amdgpu.rdna3.core>(@target) @rematerialization_budget_falls_
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
   v_add_u32 v2, v2, v4
   scratch_store_b32 off, v2, off offset:8 glc:0 slc:0 dlc:0
-  s_waitcnt_vscnt vscnt(0)
   scratch_load_b32 v2, off, off offset:0 glc:0 slc:0 dlc:0
   scratch_load_b32 v4, off, off offset:4 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
