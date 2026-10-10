@@ -409,6 +409,79 @@ Destroying the owner is not an implicit drain; it cannot determine which host
 payloads the model borrowed. The JIT and weight integration tests use this same
 owner with actual queues.
 
+## Single-node scope and remote execution
+
+The current executable serves source-defined models on one selected device in
+one node. Its startup creates one application device group, then passes member
+zero to the model registration factory. A model package needs no rank or
+placement description. Neither changing the device URI nor adding another
+group member partitions a model or enables tensor/pipeline parallelism.
+
+The intended extension is one serving authority controlling cooperating local
+and remote HAL devices in that same application group. Remote workers execute
+HAL work; they are not peer HTTP servers negotiating request or session
+ownership. Pipeline parallelism transfers stage outputs between participants;
+tensor parallelism combines sharded work through collectives. A pipeline stage
+may itself use a tensor-parallel subgroup. These are model execution choices,
+not mutually exclusive process-wide serving modes. They can share HAL/net
+communication without expressing every transfer as a collective.
+
+Several existing boundaries already accommodate that direction:
+
+* [`http/service.h`](../http/service.h) exposes an opaque model service with
+  bounded `advance`, readiness notification and accepted-work lifetime. Routing
+  sees requests, capacity hints and counters, not devices, ranks or stage
+  timelines. Serializing a host policy turn does not serialize device execution.
+* [`serving/registry.h`](../serving/registry.h) separates registration,
+  preparation and retirement. A model owner retains accepted asynchronous
+  obligations through cancellation and removal. The application group outlives
+  those owners; a device error does not authorize callback-side destruction.
+* [`runtime/execution.h`](../runtime/execution.h) keeps work and feedback
+  frontiers on their actual execution domain. Dependencies are explicit
+  semaphore edges, never submission order or a device-wide host wait.
+
+The single-device materialization is localized, but has not been generalized:
+
+| Current assumption | Extension boundary |
+| --- | --- |
+| The registration factory receives one device record | Bind a model's required execution and memory resources during preparation; retain the same opaque service lifecycle |
+| The JIT explicitly targets AMDGPU and the parameter loader indexes host-local files | Compile for each actual target profile and resolve asset metadata separately from remote-local parameter payloads |
+| One `runner` module binds every command and feedback slot to one execution | Use the HAL-enabled VM's explicit resources and completion identities; a stage index or returned `i64` alone cannot identify another domain |
+| Model adapters bind commands, storage and completion to one execution | Join the actual producers, transfers and final readers for that invocation without waiting for unrelated work |
+| A service publishes one opaque `capacity_domain` identity | This is a shared-pressure hint, not a multi-pool reservation protocol; multi-resource admission must retain the owners of the capacity it actually borrows |
+
+The proper HAL-in-VM resource model is the extension point for source control.
+The temporary runner imports are not a second distributed HAL API. Automatic
+IR partitioning and a public placement catalog are not prerequisites for the
+single-node package contract, and their API shapes are not established here.
+
+Group membership also implies neither shared physical backing nor coherent
+access. A cross-domain tensor handoff needs the appropriate publication,
+transfer/acquire and completion operations. Sending bytes, receiving them and
+finishing their final device read are different lifetime boundaries. Bounded
+slots carry that ownership: a slow downstream stage exhausts its edge's credit,
+not the server's task workers. Remote participants should exchange tensor
+payloads directly, without routing them through the HTTP coordinator. Likewise,
+remote-local parameter files should supply the executing node, not bounce full
+weights through the coordinator. These are integration requirements, not
+claims about the current executable.
+
+The existing
+[`EmbeddingsCompleteBeforeOtherDeviceRetires`](../models/fixtures/embedding/service_test.cc)
+test gives the relevant single-node witness: a source-JIT model returns exact
+HTTP embedding values while another domain's final GPU reader remains held.
+Trimming preserves that reader's workspace until release. It runs with one and
+four host workers over two logical device handles on one physical GPU. This
+proves independent progress and lifetime ownership, not multi-physical-device
+access, remote transport or a distributed model.
+
+Remote integration can build on that witness in bounded steps: one remotely
+executed weighted model with node-local assets and exact HTTP output; then
+source-authored pipeline and sharded-projection/reduction witnesses.
+Each needs bounded backpressure, partial-submission/cancellation handling and
+final-reader retirement before broader model integration. TCP and RDMA are
+transport choices under those same obligations, not alternative serving ABIs.
+
 ## Extension boundaries
 
 | Desired behavior | Concrete boundary that changes |
@@ -419,7 +492,7 @@ owner with actual queues.
 | Automatic shared prefix cache | Discover compatible endpoints and select bounded retention policy over named/native checkpoints; intermediate message markers need source-rendered token boundaries |
 | Continuous device-owned continuation | Extend the bounded two-epoch handoff to admission/completion rings with credit, cancellation and independently retired output slots |
 | Additional prepared weight formats | Model-specific in-place ownership or bounded scratch, all consuming kernel variants, shared target/auxiliary placement, and startup/inference qualification |
-| NPU/GPU or collective execution | Target packages, actual queue/device domains, shared-memory/coherency contracts, and cross-device completion/ownership |
+| NPU/GPU or collective execution | Target packages, actual queue/device domains, scoped memory pools, and the [cross-domain ownership boundary](#single-node-scope-and-remote-execution) |
 
 The present stage boundary accepts either kernels composed into commands or a
 different implementation with the same model buffer contract. A resident
