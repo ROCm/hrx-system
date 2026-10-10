@@ -251,13 +251,15 @@ class NpuFileChannelTest : public XdnaDeviceFixture,
     ASSERT_NO_FATAL_FAILURE(XdnaDeviceFixture::SetUp());
     amdf_xdna_endpoint_info_t endpoint_info = {
         .type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO,
-        .structure_size = sizeof(endpoint_info)};
+        .structure_size = sizeof(endpoint_info),
+    };
     ASSERT_EQ(xdna_api_->endpoint_query_info(endpoint_, &endpoint_info),
               AMDF_STATUS_OK);
     RecordProperty("amdf_xdna_target", endpoint_info.target_id);
     amdf_xdna_device_info_t device_info = {
         .type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO,
-        .structure_size = sizeof(device_info)};
+        .structure_size = sizeof(device_info),
+    };
     ASSERT_EQ(xdna_api_->device_query_info(device_, &device_info),
               AMDF_STATUS_OK);
     ASSERT_TRUE(FindXdnaKernelQueueFamily(api_, endpoint_, &family_ordinal_));
@@ -305,11 +307,14 @@ class NpuFileChannelTest : public XdnaDeviceFixture,
         shape.backing | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
         AMDF_MEMORY_FLAG_HOST_VISIBLE);
     ASSERT_NE(ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
-    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-                                     .structure_size = sizeof(profile)};
+    amdf_memory_profile_t profile = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+        .structure_size = sizeof(profile),
+    };
     amdf_memory_access_capabilities_t capabilities = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-        .structure_size = sizeof(capabilities)};
+        .structure_size = sizeof(capabilities),
+    };
     ASSERT_EQ(QueryMemoryProfile(ordinal, &profile, &capabilities),
               AMDF_STATUS_OK);
     const auto& geometry = shape.backing == AMDF_MEMORY_PROFILE_ROLE_REGISTER
@@ -317,26 +322,27 @@ class NpuFileChannelTest : public XdnaDeviceFixture,
                                : profile.allocation;
     ASSERT_GT(geometry.byte_length_granularity, 0u);
     for (size_t i = 0; i < buffers_.size(); ++i) {
-      amdf_memory_create_info_t create =
-          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-               // differs from declaration order.
-      create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-      create.structure_size = sizeof(create);
-      create.memory_profile_ordinal = ordinal;
-      create.access_count = 1;
-      create.accesses = &memory_access_;
-      create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-      create.byte_length =
-          (kStorageLength + geometry.byte_length_granularity - 1) /
-          geometry.byte_length_granularity * geometry.byte_length_granularity;
-      create.minimum_alignment = geometry.minimum_alignment;
+      amdf_memory_create_info_t create = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+          .structure_size = sizeof(create),
+          .memory_profile_ordinal = ordinal,
+          .access_count = 1,
+          .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+          .byte_length =
+              (kStorageLength + geometry.byte_length_granularity - 1) /
+              geometry.byte_length_granularity *
+              geometry.byte_length_granularity,
+          .minimum_alignment = geometry.minimum_alignment,
+          .accesses = &memory_access_,
+      };
       if (shape.backing == AMDF_MEMORY_PROFILE_ROLE_REGISTER) {
         amdf_memory_create_info_t host = {
             .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
             .structure_size = sizeof(host),
             .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
             .byte_length = create.byte_length,
-            .minimum_alignment = geometry.registered_host_pointer_alignment};
+            .minimum_alignment = geometry.registered_host_pointer_alignment,
+        };
         ASSERT_NO_FATAL_FAILURE(backing_[i].Create(api_, system_scope_, host));
         ASSERT_EQ(backing_[i].host.cacheability,
                   geometry.registered_host_cacheability);
@@ -354,12 +360,14 @@ class NpuFileChannelTest : public XdnaDeviceFixture,
       const auto device = buffers_[i].DeviceSite(0, family_ordinal_);
       amdf_memory_pair_info_t ingress = {
           .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-          .structure_size = sizeof(ingress)};
+          .structure_size = sizeof(ingress),
+      };
       ASSERT_EQ(api_->memory_query_pair_info(&host, &device, &ingress),
                 AMDF_STATUS_OK);
       amdf_memory_pair_info_t egress = {
           .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-          .structure_size = sizeof(egress)};
+          .structure_size = sizeof(egress),
+      };
       ASSERT_EQ(api_->memory_query_pair_info(&device, &host, &egress),
                 AMDF_STATUS_OK);
       ASSERT_NE(ingress.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE,
@@ -480,7 +488,8 @@ class NpuFileChannelTest : public XdnaDeviceFixture,
         .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
         .structure_size = sizeof(submit),
         .command_count = 1,
-        .commands = &execution_.command};
+        .commands = &execution_.command,
+    };
     uint64_t point = 0;
     ASSERT_EQ(xdna_api_->kernel_queue_submit(execution_.queue, &submit, &point),
               AMDF_STATUS_OK);
@@ -535,7 +544,8 @@ class NpuFileChannelTest : public XdnaDeviceFixture,
     sample->thread_nanoseconds = thread_end - thread_begin;
     amdf_kernel_queue_status_t status = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
-        .structure_size = sizeof(status)};
+        .structure_size = sizeof(status),
+    };
     ASSERT_EQ(api_->kernel_queue_query_status(execution_.queue, &status),
               AMDF_STATUS_OK);
     ASSERT_EQ(status.retired_submission, point);

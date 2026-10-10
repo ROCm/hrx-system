@@ -185,18 +185,17 @@ class CopyDispatchRecipeTest : public AqlDispatchTest {
                         const amdf_memory_profile_site_t& producer,
                         const amdf_memory_profile_site_t& consumer,
                         amdf_memory_pair_info_t* out_pair) {
-    amdf_memory_profile_pair_query_t query =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
-    query.structure_size = sizeof(query);
-    query.memory_profile_ordinal = creation.memory_profile_ordinal;
-    query.required_flags = creation.required_flags;
-    query.access_count = creation.access_count;
-    query.accesses = creation.accesses;
-    query.registered_host_cacheability = creation.registered_host_cacheability;
-    query.producer = producer;
-    query.consumer = consumer;
+    amdf_memory_profile_pair_query_t query = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY,
+        .structure_size = sizeof(query),
+        .memory_profile_ordinal = creation.memory_profile_ordinal,
+        .access_count = creation.access_count,
+        .required_flags = creation.required_flags,
+        .accesses = creation.accesses,
+        .registered_host_cacheability = creation.registered_host_cacheability,
+        .producer = producer,
+        .consumer = consumer,
+    };
     out_pair->type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
     out_pair->structure_size = sizeof(*out_pair);
     ASSERT_EQ(api_->memory_scope_query_pair_info(scope, &query, out_pair),
@@ -408,14 +407,18 @@ void CopyDispatchRecipeTest::RunCoherentHandoff(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
   const amdf_memory_device_access_t read_access = {
       device_,
-      {.access = AMDF_MEMORY_ACCESS_READ,
-       .flags =
-           AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
+      {
+          .access = AMDF_MEMORY_ACCESS_READ,
+          .flags =
+              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+      }};
   const amdf_memory_device_access_t read_write_access = {
       device_,
-      {.access = kReadWrite,
-       .flags =
-           AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
+      {
+          .access = kReadWrite,
+          .flags =
+              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+      }};
   amdf_memory_create_info_t read_creation = {};
   amdf_memory_create_info_t read_write_creation = {};
   ASSERT_NO_FATAL_FAILURE(SelectCreation(read_access, &read_creation));
@@ -781,14 +784,18 @@ void CopyDispatchRecipeTest::RunStagedHandoff(PairQuery query_kind) {
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
   const amdf_memory_device_access_t source_access = {
       device_,
-      {.access = AMDF_MEMORY_ACCESS_READ,
-       .flags =
-           AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
+      {
+          .access = AMDF_MEMORY_ACCESS_READ,
+          .flags =
+              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+      }};
   const amdf_memory_device_access_t readback_access = {
       device_,
-      {.access = kReadWrite,
-       .flags =
-           AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
+      {
+          .access = kReadWrite,
+          .flags =
+              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+      }};
   const amdf_memory_device_access_t local_access = {
       device_,
       {.access = kReadWrite, .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
@@ -853,8 +860,13 @@ void CopyDispatchRecipeTest::RunStagedHandoff(PairQuery query_kind) {
 
   std::array<StagedPayloadSet, 2> payload_sets = {{
       {.payload = {.byte_length = 8192, .payload_byte_offset = 64}},
-      {.payload = {.byte_length = kMaximumByteLength,
-                   .payload_byte_offset = 128}},
+      {
+          .payload =
+              {
+                  .byte_length = kMaximumByteLength,
+                  .payload_byte_offset = 128,
+              },
+      },
   }};
   for (size_t i = 0; i < payload_sets.size(); ++i) {
     auto& staged = payload_sets[i];

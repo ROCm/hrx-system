@@ -346,7 +346,8 @@ TEST_F(KfdTopologyTest, ChangedGenerationReleasesUnpublishedPeerMetadata) {
             --state->live_count;
             const auto system = amdf_allocator_system();
             system.free(system.user_data, pointer);
-          }};
+          },
+  };
   amdf_gpu_kfd_topology_t topology;
   std::memset(&topology, 0xA5, sizeof(topology));
   const amdf_gpu_kfd_topology_t original = topology;
@@ -391,7 +392,8 @@ TEST_F(KfdTopologyTest, FailedSnapshotAllocationsLeaveNoMetadataOrOutput) {
               --state->live_count;
               const auto system = amdf_allocator_system();
               system.free(system.user_data, pointer);
-            }};
+            },
+    };
     auto* const sentinel =
         reinterpret_cast<amdf_gpu_endpoint_profile_t*>(uintptr_t{1});
     amdf_gpu_endpoint_profile_t* profile = sentinel;

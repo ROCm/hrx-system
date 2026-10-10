@@ -224,12 +224,10 @@ TEST_P(LinuxXdnaDeviceTest, MemoryDoesNotDependOnSchedulingContexts) {
     EXPECT_EQ(device->heap.host_pointer, nullptr);
   }
 
-  amdf_xdna_context_create_info_t create_info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  create_info.acceptable_scheduling_modes =
-      AMDF_XDNA_SCHEDULING_MODE_TIME_SLICED;
-  create_info.logical_column_count = 1;
+  amdf_xdna_context_create_info_t create_info = {
+      .logical_column_count = 1,
+      .acceptable_scheduling_modes = AMDF_XDNA_SCHEDULING_MODE_TIME_SLICED,
+  };
   amdf_xdna_umd_context_result_t results[2] = {};
   const size_t context_count = supports_execution ? 2 : 0;
   for (size_t i = 0; i < context_count; ++i) {
@@ -254,7 +252,8 @@ TEST_P(LinuxXdnaDeviceTest, MemoryDoesNotDependOnSchedulingContexts) {
       .required_flags =
           AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
       .byte_length = 4097,
-      .minimum_alignment = 4096};
+      .minimum_alignment = 4096,
+  };
   amdf_xdna_umd_memory_result_t memory_result = {};
   amdf_memory_native_profile_t memory_profile = {};
   ASSERT_EQ(
@@ -275,7 +274,8 @@ TEST_P(LinuxXdnaDeviceTest, MemoryDoesNotDependOnSchedulingContexts) {
   amdf_memory_map_info_t map_info = {
       .byte_offset = 1,
       .byte_length = 4096,
-      .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE};
+      .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+  };
   amdf_xdna_umd_host_mapping_result_t views[2] = {};
   for (size_t i = 0; i < 2; ++i) {
     ASSERT_EQ(amdf_xdna_umd_memory_map(memory, &memory_profile.host_mapping,
@@ -294,8 +294,9 @@ TEST_P(LinuxXdnaDeviceTest, MemoryDoesNotDependOnSchedulingContexts) {
   amdf_xdna_umd_host_mapping_destroy(mappings[0]);
   mappings[0] = nullptr;
   std::cout << "First view destroyed; attachment remains mapped" << std::endl;
-  struct amdxdna_drm_get_bo_info native_info = {.handle =
-                                                    memory->buffer.handle};
+  struct amdxdna_drm_get_bo_info native_info = {
+      .handle = memory->buffer.handle,
+  };
   ASSERT_EQ(
       ioctl(device->descriptor, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &native_info),
       0);
@@ -312,7 +313,8 @@ TEST_P(LinuxXdnaDeviceTest, MemoryDoesNotDependOnSchedulingContexts) {
 
   amdf_memory_export_info_t export_info = {
       .external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD,
-      .byte_length = memory_result.byte_length};
+      .byte_length = memory_result.byte_length,
+  };
   ASSERT_EQ(amdf_xdna_umd_memory_export(memory, &export_info, &external_memory),
             AMDF_STATUS_OK);
   // Native export supplies the payload/release obligation; the public owner
@@ -326,7 +328,8 @@ TEST_P(LinuxXdnaDeviceTest, MemoryDoesNotDependOnSchedulingContexts) {
       amdf_xdna_umd_device_query_memory_profile(device, 1, &import_profile),
       AMDF_STATUS_OK);
   amdf_memory_native_import_info_t import_info = {
-      .device_access = memory_create.device_access};
+      .device_access = memory_create.device_access,
+  };
   amdf_xdna_umd_memory_result_t import_result = {};
   uint32_t release_count = 0;
   amdf_external_memory_t borrowed_external = external_memory;
@@ -367,11 +370,10 @@ TEST_P(LinuxXdnaDeviceTest, NativeMetadataSuppliesArrayGeometry) {
                                   amdf_allocator_system(), &device, &result),
       AMDF_STATUS_OK);
   struct amdxdna_drm_query_aie_metadata metadata = {};
-  struct amdxdna_drm_get_info query =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-           // differs from list initialization.
-  query.param = DRM_AMDXDNA_QUERY_AIE_METADATA;
-  query.buffer_size = sizeof(metadata);
+  struct amdxdna_drm_get_info query = {
+      .param = DRM_AMDXDNA_QUERY_AIE_METADATA,
+      .buffer_size = sizeof(metadata),
+  };
   query.buffer = reinterpret_cast<uintptr_t>(&metadata);
   ASSERT_EQ(ioctl(device->descriptor, DRM_IOCTL_AMDXDNA_GET_INFO, &query), 0);
   EXPECT_EQ(result.tiles.column_count, metadata.cols);

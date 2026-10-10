@@ -45,7 +45,8 @@ class Pm4DeviceLifetimeTest : public UserQueueMemoryTest {
                                  bool* out_matches) override {
     amdf_gpu_endpoint_info_t info = {
         .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
-        .structure_size = sizeof(info)};
+        .structure_size = sizeof(info),
+    };
     const amdf_status_t status = gpu_api_->endpoint_query_info(endpoint, &info);
     if (!amdf_status_is_ok(status)) {
       return status;

@@ -88,7 +88,8 @@ TEST_P(AqlTimestampTest, ConfirmedClockSamplesAreVisibleBeforeReuse) {
   const amdf_memory_site_t output_host = output->HostSite();
   amdf_memory_pair_info_t egress = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-      .structure_size = sizeof(egress)};
+      .structure_size = sizeof(egress),
+  };
   ASSERT_EQ(api_->memory_query_pair_info(&output_device, &output_host, &egress),
             AMDF_STATUS_OK);
   ASSERT_NE(egress.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);

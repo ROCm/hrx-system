@@ -126,7 +126,8 @@ class GpuEndpointTest : public ::testing::Test {
   amdf_gpu_device_create_info_t MakeDeviceCreateInfo() {
     amdf_gpu_device_create_info_t create_info = {
         .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_CREATE_INFO,
-        .structure_size = sizeof(create_info)};
+        .structure_size = sizeof(create_info),
+    };
     return create_info;
   }
 
@@ -168,7 +169,8 @@ TEST_F(GpuEndpointTest, ReturnsQualifiedCachedProfile) {
 
   amdf_gpu_endpoint_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
-      .structure_size = sizeof(info)};
+      .structure_size = sizeof(info),
+  };
   const amdf_status_t status = gpu_api_->endpoint_query_info(endpoint_, &info);
   if (amdf_status_domain(status) == AMDF_STATUS_DOMAIN_API &&
       amdf_status_code(status) == AMDF_STATUS_CODE_UNSUPPORTED) {
@@ -192,7 +194,8 @@ TEST_F(GpuEndpointTest, ReturnsQualifiedCachedProfile) {
 
   amdf_gpu_endpoint_info_t second_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
-      .structure_size = sizeof(second_info)};
+      .structure_size = sizeof(second_info),
+  };
   ASSERT_TRUE(amdf_status_is_ok(
       gpu_api_->endpoint_query_info(endpoint_, &second_info)));
   EXPECT_EQ(std::memcmp(&info, &second_info, sizeof(info)), 0);
@@ -210,10 +213,9 @@ TEST_F(GpuEndpointTest, RejectsMalformedOutputWithoutMutation) {
   EXPECT_EQ(amdf_status_code(gpu_api_->endpoint_query_info(endpoint_, nullptr)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
 
-  amdf_gpu_endpoint_info_t info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  info.structure_size = sizeof(info);
+  amdf_gpu_endpoint_info_t info = {
+      .structure_size = sizeof(info),
+  };
   info.gfx_ip.major = UINT32_MAX;
   EXPECT_EQ(amdf_status_code(gpu_api_->endpoint_query_info(endpoint_, &info)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
@@ -237,7 +239,8 @@ TEST_F(GpuEndpointTest, RejectsXdnaEndpointWithoutMutation) {
 
   amdf_gpu_endpoint_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
-      .structure_size = sizeof(info)};
+      .structure_size = sizeof(info),
+  };
   info.gfx_ip.major = UINT32_MAX;
   const amdf_status_t status = gpu_api_->endpoint_query_info(endpoint_, &info);
 
@@ -325,14 +328,17 @@ TEST_F(GpuEndpointTest, MaterializesProgramIndependentDevice) {
   }
   ASSERT_NE(device_, nullptr);
 
-  amdf_gpu_device_info_t info = {.type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_INFO,
-                                 .structure_size = sizeof(info)};
+  amdf_gpu_device_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_INFO,
+      .structure_size = sizeof(info),
+  };
   ASSERT_TRUE(amdf_status_is_ok(gpu_api_->device_query_info(device_, &info)));
   EXPECT_NE(info.id.words[0] | info.id.words[1], 0u);
   EXPECT_EQ(info.reset_epoch, 1u);
   amdf_gpu_device_info_t second_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_INFO,
-      .structure_size = sizeof(second_info)};
+      .structure_size = sizeof(second_info),
+  };
   ASSERT_TRUE(
       amdf_status_is_ok(gpu_api_->device_query_info(device_, &second_info)));
   EXPECT_EQ(std::memcmp(&info, &second_info, sizeof(info)), 0);
@@ -359,11 +365,10 @@ TEST_F(GpuEndpointTest, RejectsMalformedDeviceInfoWithoutMutation) {
   EXPECT_EQ(amdf_status_code(gpu_api_->device_query_info(nullptr, nullptr)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
 
-  amdf_gpu_device_info_t info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  info.structure_size = sizeof(info);
-  info.reset_epoch = UINT64_MAX;
+  amdf_gpu_device_info_t info = {
+      .structure_size = sizeof(info),
+      .reset_epoch = UINT64_MAX,
+  };
   EXPECT_EQ(amdf_status_code(gpu_api_->device_query_info(device_, &info)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
   EXPECT_EQ(info.reset_epoch, UINT64_MAX);
@@ -389,7 +394,8 @@ TEST_F(GpuEndpointTest, CreatesReclaimableDevicesFromOneEndpoint) {
   }
   amdf_gpu_device_info_t first_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_INFO,
-      .structure_size = sizeof(first_info)};
+      .structure_size = sizeof(first_info),
+  };
   ASSERT_TRUE(
       amdf_status_is_ok(gpu_api_->device_query_info(device_, &first_info)));
   if (!(first_info.features & AMDF_GPU_DEVICE_FEATURE_DEVICE_RECREATION)) {
@@ -400,7 +406,8 @@ TEST_F(GpuEndpointTest, CreatesReclaimableDevicesFromOneEndpoint) {
       gpu_api_->device_create(endpoint_, &create_info, &second_device_)));
   amdf_gpu_device_info_t second_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_INFO,
-      .structure_size = sizeof(second_info)};
+      .structure_size = sizeof(second_info),
+  };
   ASSERT_TRUE(amdf_status_is_ok(
       gpu_api_->device_query_info(second_device_, &second_info)));
   EXPECT_FALSE(amdf_device_id_is_equal(&first_info.id, &second_info.id));

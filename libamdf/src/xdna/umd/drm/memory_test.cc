@@ -277,30 +277,27 @@ TEST(LinuxXdnaMemoryPairTest, DescribesOnlyTheExactLocalXdnaSite) {
 
 TEST(LinuxXdnaHostViewTest, BorrowsIndependentSubrangesWithoutAllocating) {
   alignas(64) uint8_t backing[1024] = {};
-  amdf_xdna_umd_device_t device =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  device.host_allocator = amdf_allocator_system();
+  amdf_xdna_umd_device_t device = {
+      .host_allocator = amdf_allocator_system(),
+  };
   device.host_allocator.allocate = [](void*, uint64_t, uint64_t) -> void* {
     ADD_FAILURE() << "a persistent native host view requires no allocation";
     return nullptr;
   };
   device.cache_line_size = 64;
-  amdf_xdna_umd_memory_t memory =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  memory.device = &device;
+  amdf_xdna_umd_memory_t memory = {
+      .device = &device,
+  };
   memory.buffer.host_pointer = backing;
   memory.source_byte_offset = 17;
   const amdf_host_mapping_capabilities_t capabilities = {
       .supported_access =
           AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
   };
-  amdf_memory_map_info_t request =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  request.byte_length = 64;
-  request.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+  amdf_memory_map_info_t request = {
+      .byte_length = 64,
+      .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+  };
   amdf_xdna_umd_host_mapping_t* mappings[2] = {};
   amdf_xdna_umd_host_mapping_result_t views[2] = {};
   for (size_t i = 0; i < 2; ++i) {
@@ -332,11 +329,10 @@ TEST(LinuxXdnaMemoryProfileTest,
   const amdf_xdna_device_profile_t device_profile = {
       .dma = {.byte_offset = UINT32_C(0x80000000), .address_bit_count = 48},
   };
-  amdf_xdna_umd_device_t device =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  device.page_size = 4096;
-  device.profile = &device_profile;
+  amdf_xdna_umd_device_t device = {
+      .profile = &device_profile,
+      .page_size = 4096,
+  };
   amdf_memory_native_profile_t profile = {};
   ASSERT_EQ(amdf_xdna_umd_device_query_memory_profile(&device, 0, &profile),
             AMDF_STATUS_OK);
@@ -426,11 +422,10 @@ TEST(LinuxXdnaMemoryProfileTest,
 
 TEST(LinuxXdnaMemoryProfileTest, RequiresQualifiedDmaAddressFacts) {
   const amdf_xdna_device_profile_t device_profile = {};
-  amdf_xdna_umd_device_t device =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  device.page_size = 4096;
-  device.profile = &device_profile;
+  amdf_xdna_umd_device_t device = {
+      .profile = &device_profile,
+      .page_size = 4096,
+  };
   amdf_memory_native_profile_t profile;
   std::memset(&profile, 0xA5, sizeof(profile));
   const amdf_memory_native_profile_t original = profile;

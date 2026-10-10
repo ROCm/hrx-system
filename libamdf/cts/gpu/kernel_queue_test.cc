@@ -105,7 +105,8 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
                                  bool* out_matches) override {
     amdf_endpoint_info_t endpoint_info = {
         .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
-        .structure_size = sizeof(endpoint_info)};
+        .structure_size = sizeof(endpoint_info),
+    };
     amdf_status_t status = api_->endpoint_query_info(endpoint, &endpoint_info);
     if (!amdf_status_is_ok(status)) {
       return status;
@@ -114,7 +115,8 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
          ++ordinal) {
       amdf_queue_family_info_t family_info = {
           .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
-          .structure_size = sizeof(family_info)};
+          .structure_size = sizeof(family_info),
+      };
       status = api_->endpoint_query_queue_family_info(endpoint, ordinal,
                                                       &family_info);
       if (!amdf_status_is_ok(status)) {
@@ -143,34 +145,39 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
         .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
         .structure_size = sizeof(create_info),
         .queue_family_ordinal = family_ordinal,
-        .maximum_pending_submission_count = pending_capacity};
+        .maximum_pending_submission_count = pending_capacity,
+    };
     return gpu_api_->kernel_queue_create(device_, &create_info, &queue_);
   }
 
   uint64_t CreateCommandMemory(uint64_t byte_length = kMemoryByteLength) {
     const amdf_memory_device_access_t access = {
         device_,
-        {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
-                   AMDF_MEMORY_ACCESS_EXECUTE,
-         .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
-    amdf_memory_create_info_t create_info =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-    create_info.structure_size = sizeof(create_info);
-    create_info.access_count = 1;
-    create_info.accesses = &access;
-    create_info.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
+        {
+            .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
+                      AMDF_MEMORY_ACCESS_EXECUTE,
+            .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+        }};
+    amdf_memory_create_info_t create_info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+        .structure_size = sizeof(create_info),
+        .access_count = 1,
+        .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+        .accesses = &access,
+    };
     create_info.memory_profile_ordinal = FindMemoryProfileOrdinal(
         system_scope_,
         AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
         create_info.required_flags, access.requirements);
     create_info.byte_length = byte_length;
-    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-                                     .structure_size = sizeof(profile)};
+    amdf_memory_profile_t profile = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+        .structure_size = sizeof(profile),
+    };
     amdf_memory_access_capabilities_t capabilities = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-        .structure_size = sizeof(capabilities)};
+        .structure_size = sizeof(capabilities),
+    };
     const amdf_status_t profile_status =
         QueryMemoryProfile(system_scope_, create_info.memory_profile_ordinal,
                            access.requirements, &profile, &capabilities);
@@ -187,8 +194,10 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
         granularity;
     EXPECT_EQ(api_->memory_create(system_scope_, &create_info, &memory_),
               AMDF_STATUS_OK);
-    amdf_memory_info_t memory_info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
-                                      .structure_size = sizeof(memory_info)};
+    amdf_memory_info_t memory_info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+        .structure_size = sizeof(memory_info),
+    };
     EXPECT_EQ(api_->memory_query_info(memory_, &memory_info), AMDF_STATUS_OK);
     EXPECT_EQ(memory_info.native_allocation_byte_length, native_byte_length);
     EXPECT_EQ(memory_info.source_byte_offset,
@@ -208,13 +217,15 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
         .structure_size = sizeof(map_info),
         .byte_length = byte_length,
-        .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE};
+        .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+    };
     EXPECT_TRUE(
         amdf_status_is_ok(api_->memory_map(memory_, &map_info, &mapping_)));
 
     amdf_host_mapping_info_t mapping_info = {
         .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
-        .structure_size = sizeof(mapping_info)};
+        .structure_size = sizeof(mapping_info),
+    };
     EXPECT_TRUE(amdf_status_is_ok(
         api_->host_mapping_query_info(mapping_, &mapping_info)));
     return mapping_info;
@@ -223,26 +234,30 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
   uint64_t CreateLocalExecutableMemory() {
     const amdf_memory_device_access_t access = {
         device_,
-        {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
-                   AMDF_MEMORY_ACCESS_EXECUTE,
-         .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
-    amdf_memory_create_info_t create_info =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-    create_info.structure_size = sizeof(create_info);
-    create_info.access_count = 1;
-    create_info.accesses = &access;
-    create_info.required_flags = AMDF_MEMORY_FLAG_DEVICE_LOCAL;
+        {
+            .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
+                      AMDF_MEMORY_ACCESS_EXECUTE,
+            .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+        }};
+    amdf_memory_create_info_t create_info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+        .structure_size = sizeof(create_info),
+        .access_count = 1,
+        .required_flags = AMDF_MEMORY_FLAG_DEVICE_LOCAL,
+        .accesses = &access,
+    };
     create_info.memory_profile_ordinal = FindMemoryProfileOrdinal(
         local_scope_, AMDF_MEMORY_PROFILE_ROLE_CREATE,
         create_info.required_flags, access.requirements);
     create_info.byte_length = kMemoryByteLength;
-    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-                                     .structure_size = sizeof(profile)};
+    amdf_memory_profile_t profile = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+        .structure_size = sizeof(profile),
+    };
     amdf_memory_access_capabilities_t capabilities = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-        .structure_size = sizeof(capabilities)};
+        .structure_size = sizeof(capabilities),
+    };
     const amdf_status_t profile_status =
         QueryMemoryProfile(local_scope_, create_info.memory_profile_ordinal,
                            access.requirements, &profile, &capabilities);
@@ -260,13 +275,16 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
     EXPECT_EQ(api_->memory_create(local_scope_, &create_info, &local_memory_),
               AMDF_STATUS_OK);
 
-    amdf_memory_info_t memory_info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
-                                      .structure_size = sizeof(memory_info)};
+    amdf_memory_info_t memory_info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+        .structure_size = sizeof(memory_info),
+    };
     EXPECT_TRUE(amdf_status_is_ok(
         api_->memory_query_info(local_memory_, &memory_info)));
     amdf_memory_access_info_t access_info = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
-        .structure_size = sizeof(access_info)};
+        .structure_size = sizeof(access_info),
+    };
     EXPECT_EQ(api_->memory_query_access_info(local_memory_, 0, &access_info),
               AMDF_STATUS_OK);
     EXPECT_EQ(
@@ -291,7 +309,8 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
     ASSERT_EQ(CreateQueue(family_.ordinal, pending_capacity), AMDF_STATUS_OK);
     amdf_kernel_queue_info_t info = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
-        .structure_size = sizeof(info)};
+        .structure_size = sizeof(info),
+    };
     ASSERT_EQ(api_->kernel_queue_query_info(queue_, &info), AMDF_STATUS_OK);
     ASSERT_NE(info.maximum_pending_submission_count, 0u);
     // Bound the workload independently of a provider's advertised capacity.
@@ -327,16 +346,16 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
                     sizeof(command));
       }
     }
-    amdf_gpu_kernel_command_t command =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-             // spans intervening work.
-    command.memory = memory_;
-    command.byte_length = command_byte_length;
+    amdf_gpu_kernel_command_t command = {
+        .memory = memory_,
+        .byte_length = command_byte_length,
+    };
     amdf_gpu_kernel_queue_submission_info_t submit = {
         .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO,
         .structure_size = sizeof(submit),
         .command_count = 1,
-        .commands = &command};
+        .commands = &command,
+    };
     uint64_t previous_submission = 0;
     for (uint32_t round = 0; round < 3; ++round) {
       const uint32_t expected = 0x13579bdfu + round * 0x1020304u;
@@ -411,13 +430,16 @@ class SdmaKernelQueueTest : public GpuKernelQueueTest {
 };
 
 TEST_F(GpuDeviceFixture, RejectsOutOfRangeFamilyWithoutPublishingQueue) {
-  amdf_endpoint_info_t info = {.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
-                               .structure_size = sizeof(info)};
+  amdf_endpoint_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(api_->endpoint_query_info(endpoint_, &info), AMDF_STATUS_OK);
   amdf_gpu_kernel_queue_create_info_t create_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
       .structure_size = sizeof(create_info),
-      .queue_family_ordinal = info.queue_family_count};
+      .queue_family_ordinal = info.queue_family_count,
+  };
   amdf_kernel_queue_t* output =
       reinterpret_cast<amdf_kernel_queue_t*>(uintptr_t{1});
   EXPECT_EQ(amdf_status_code(
@@ -434,7 +456,8 @@ TEST_F(Pm4KernelQueueTest, ExecutesMaterializedCopyData) {
 
   amdf_kernel_queue_info_t queue_info = {
       .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
-      .structure_size = sizeof(queue_info)};
+      .structure_size = sizeof(queue_info),
+  };
   ASSERT_TRUE(
       amdf_status_is_ok(api_->kernel_queue_query_info(queue_, &queue_info)));
   EXPECT_EQ(queue_info.queue_family_ordinal, family_ordinal);
@@ -461,17 +484,17 @@ TEST_F(Pm4KernelQueueTest, ExecutesMaterializedCopyData) {
   ASSERT_TRUE(amdf_status_is_ok(api_->host_mapping_cache_control(
       mapping_, AMDF_HOST_CACHE_OPERATION_FLUSH, 0, kMemoryByteLength)));
 
-  amdf_gpu_kernel_command_t command_descriptor =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  command_descriptor.memory = memory_;
-  command_descriptor.byte_offset = kCommandByteOffset;
-  command_descriptor.byte_length = sizeof(command);
+  amdf_gpu_kernel_command_t command_descriptor = {
+      .memory = memory_,
+      .byte_offset = kCommandByteOffset,
+      .byte_length = sizeof(command),
+  };
   amdf_gpu_kernel_queue_submission_info_t submission_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO,
       .structure_size = sizeof(submission_info),
       .command_count = 1,
-      .commands = &command_descriptor};
+      .commands = &command_descriptor,
+  };
 
   command_descriptor.byte_length = 0;
   uint64_t invalid_submission = 42;
@@ -495,7 +518,8 @@ TEST_F(Pm4KernelQueueTest, ExecutesMaterializedCopyData) {
 
   amdf_kernel_queue_status_t queue_status = {
       .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
-      .structure_size = sizeof(queue_status)};
+      .structure_size = sizeof(queue_status),
+  };
   ASSERT_EQ(api_->kernel_queue_query_status(queue_, &queue_status),
             AMDF_STATUS_OK);
   EXPECT_EQ(queue_status.retired_submission, 0u);
@@ -564,7 +588,8 @@ TEST_F(SdmaKernelQueueTest, ExecutesMaterializedSdmaCopy) {
 
   amdf_kernel_queue_info_t queue_info = {
       .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
-      .structure_size = sizeof(queue_info)};
+      .structure_size = sizeof(queue_info),
+  };
   ASSERT_TRUE(
       amdf_status_is_ok(api_->kernel_queue_query_info(queue_, &queue_info)));
   EXPECT_EQ(queue_info.queue_family_ordinal, family_ordinal);
@@ -599,7 +624,8 @@ TEST_F(SdmaKernelQueueTest, ExecutesMaterializedSdmaCopy) {
       .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO,
       .structure_size = sizeof(submission_info),
       .command_count = 1,
-      .commands = &command_descriptor};
+      .commands = &command_descriptor,
+  };
   uint64_t submission = 0;
   ASSERT_TRUE(amdf_status_is_ok(
       gpu_api_->kernel_queue_submit(queue_, &submission_info, &submission)));
@@ -667,7 +693,8 @@ TEST_F(Pm4KernelQueueTest, CopiesThroughDeviceLocalExecutableMemory) {
       .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO,
       .structure_size = sizeof(submission_info),
       .command_count = 1,
-      .commands = &command_descriptor};
+      .commands = &command_descriptor,
+  };
   uint64_t submission = 0;
   ASSERT_TRUE(amdf_status_is_ok(
       gpu_api_->kernel_queue_submit(queue_, &submission_info, &submission)));
@@ -744,13 +771,12 @@ TEST_F(Pm4KernelQueueTest, ExecutesDeviceLocalCommandStream) {
       .byte_offset = kCommandByteOffset,
       .byte_length = sizeof(upload_command),
   };
-  amdf_gpu_kernel_queue_submission_info_t submission_info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  submission_info.type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO;
-  submission_info.structure_size = sizeof(submission_info);
-  submission_info.command_count = 1;
-  submission_info.commands = &upload_descriptor;
+  amdf_gpu_kernel_queue_submission_info_t submission_info = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO,
+      .structure_size = sizeof(submission_info),
+      .command_count = 1,
+      .commands = &upload_descriptor,
+  };
   uint64_t upload_submission = 0;
   ASSERT_TRUE(amdf_status_is_ok(gpu_api_->kernel_queue_submit(
       queue_, &submission_info, &upload_submission)));

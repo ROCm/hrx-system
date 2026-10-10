@@ -80,12 +80,15 @@ amdf_status_t FindDmaBufProfile(
     amdf_external_memory_support_flags_t required_external_flags,
     uint32_t* out_ordinal, amdf_memory_profile_t* out_profile) {
   for (uint32_t ordinal = 0; ordinal != UINT32_MAX; ++ordinal) {
-    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-                                     .structure_size = sizeof(profile)};
+    amdf_memory_profile_t profile = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+        .structure_size = sizeof(profile),
+    };
     const amdf_memory_device_access_t access = {device, requirements};
     amdf_memory_access_capabilities_t capabilities = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-        .structure_size = sizeof(capabilities)};
+        .structure_size = sizeof(capabilities),
+    };
     const amdf_status_t status = api->memory_scope_query_device_profile(
         scope, ordinal, 1, &access, &profile, &capabilities);
     if (amdf_status_code(status) == AMDF_STATUS_CODE_OUT_OF_RANGE) {
@@ -116,7 +119,8 @@ amdf_status_t FindQueueFamilyOrdinal(const amdf_api_t* api,
                                      uint32_t* out_ordinal) {
   amdf_endpoint_info_t endpoint_info = {
       .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
-      .structure_size = sizeof(endpoint_info)};
+      .structure_size = sizeof(endpoint_info),
+  };
   amdf_status_t status = api->endpoint_query_info(endpoint, &endpoint_info);
   if (!amdf_status_is_ok(status)) {
     return status;
@@ -125,7 +129,8 @@ amdf_status_t FindQueueFamilyOrdinal(const amdf_api_t* api,
        ++ordinal) {
     amdf_queue_family_info_t family_info = {
         .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
-        .structure_size = sizeof(family_info)};
+        .structure_size = sizeof(family_info),
+    };
     status =
         api->endpoint_query_queue_family_info(endpoint, ordinal, &family_info);
     if (!amdf_status_is_ok(status)) {
@@ -179,7 +184,8 @@ class GpuXdnaMemoryInteropTest : public ::testing::Test {
     for (amdf_memory_scope_t* scope : scopes) {
       amdf_memory_scope_info_t info = {
           .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
-          .structure_size = sizeof(info)};
+          .structure_size = sizeof(info),
+      };
       ASSERT_EQ(api_->memory_scope_query_info(scope, &info), AMDF_STATUS_OK);
       if (info.kind == AMDF_MEMORY_SCOPE_KIND_SYSTEM) {
         system_scope_ = scope;
@@ -221,7 +227,8 @@ class GpuXdnaMemoryInteropTest : public ::testing::Test {
     ASSERT_EQ(status, AMDF_STATUS_OK);
     amdf_gpu_device_info_t capabilities = {
         .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_INFO,
-        .structure_size = sizeof(capabilities)};
+        .structure_size = sizeof(capabilities),
+    };
     ASSERT_EQ(gpu_api_->device_query_info(gpu_device_, &capabilities),
               AMDF_STATUS_OK);
     if ((capabilities.features & RequiredGpuFeatures()) !=
@@ -259,7 +266,8 @@ class GpuXdnaMemoryInteropTest : public ::testing::Test {
     for (uint32_t ordinal = 0;; ++ordinal) {
       amdf_memory_profile_t profile = {
           .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-          .structure_size = sizeof(profile)};
+          .structure_size = sizeof(profile),
+      };
       for (uint32_t i = 0; i < 2; ++i) {
         capabilities[i] = {};
         capabilities[i].type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
@@ -323,7 +331,8 @@ class GpuXdnaMemoryInteropTest : public ::testing::Test {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
         .structure_size = sizeof(map_info),
         .byte_length = byte_length,
-        .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE};
+        .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+    };
     amdf_status_t status = api_->memory_map(memory, &map_info, out_mapping);
     if (!amdf_status_is_ok(status)) {
       return status;
@@ -386,7 +395,8 @@ class GpuXdnaMemoryLifetimeTest : public GpuXdnaMemoryInteropTest {
   amdf_status_t AcquireGpuDevice() override {
     amdf_gpu_device_create_info_t create_info = {
         .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_CREATE_INFO,
-        .structure_size = sizeof(create_info)};
+        .structure_size = sizeof(create_info),
+    };
     return gpu_api_->device_create(gpu_endpoint_, &create_info, &gpu_device_);
   }
 
@@ -445,16 +455,15 @@ void GpuXdnaMemoryInteropTest::ImportGpuSubrangeAndReleaseAllocation() {
       AMDF_STATUS_OK);
   ASSERT_NE(xdna_profile_ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
 
-  amdf_memory_profile_pair_query_t pool_query =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  pool_query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
-  pool_query.structure_size = sizeof(pool_query);
-  pool_query.memory_profile_ordinal = xdna_profile_ordinal;
-  pool_query.access_count = 1;
-  pool_query.accesses = &xdna_access_;
-  pool_query.required_flags = kXdnaRequiredFlags;
-  pool_query.external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_OPAQUE_FD;
+  amdf_memory_profile_pair_query_t pool_query = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY,
+      .structure_size = sizeof(pool_query),
+      .memory_profile_ordinal = xdna_profile_ordinal,
+      .access_count = 1,
+      .required_flags = kXdnaRequiredFlags,
+      .accesses = &xdna_access_,
+      .external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_OPAQUE_FD,
+  };
   for (uint32_t i = 0; i < gpu_profile.external_memory_support_count; ++i) {
     if (gpu_profile.external_memory_support[i].type ==
         pool_query.external_memory_type) {
@@ -474,7 +483,8 @@ void GpuXdnaMemoryInteropTest::ImportGpuSubrangeAndReleaseAllocation() {
             AMDF_STATUS_OK);
   amdf_memory_pair_info_t qualified = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-      .structure_size = sizeof(qualified)};
+      .structure_size = sizeof(qualified),
+  };
   ASSERT_EQ(api_->memory_scope_query_pair_info(system_scope_, &pool_query,
                                                &qualified),
             AMDF_STATUS_OK);
@@ -499,28 +509,29 @@ void GpuXdnaMemoryInteropTest::ImportGpuSubrangeAndReleaseAllocation() {
   EXPECT_EQ(device_only.release.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
   EXPECT_EQ(device_only.acquire.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
 
-  amdf_memory_create_info_t create_info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-  create_info.structure_size = sizeof(create_info);
-  create_info.memory_profile_ordinal = gpu_profile_ordinal;
-  create_info.access_count = 1;
-  create_info.accesses = &gpu_access_;
-  create_info.required_flags = kGpuRequiredFlags;
-  create_info.byte_length = backing_byte_length;
-  create_info.minimum_alignment = page_size;
+  amdf_memory_create_info_t create_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create_info),
+      .memory_profile_ordinal = gpu_profile_ordinal,
+      .access_count = 1,
+      .required_flags = kGpuRequiredFlags,
+      .byte_length = backing_byte_length,
+      .minimum_alignment = page_size,
+      .accesses = &gpu_access_,
+  };
   ASSERT_EQ(api_->memory_create(system_scope_, &create_info, &gpu_memory_),
             AMDF_STATUS_OK);
 
   amdf_memory_info_t gpu_memory_info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
-      .structure_size = sizeof(gpu_memory_info)};
+      .structure_size = sizeof(gpu_memory_info),
+  };
   ASSERT_EQ(api_->memory_query_info(gpu_memory_, &gpu_memory_info),
             AMDF_STATUS_OK);
   amdf_memory_access_info_t gpu_access_info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
-      .structure_size = sizeof(gpu_access_info)};
+      .structure_size = sizeof(gpu_access_info),
+  };
   ASSERT_EQ(api_->memory_query_access_info(gpu_memory_, 0, &gpu_access_info),
             AMDF_STATUS_OK);
   EXPECT_EQ(gpu_memory_info.memory_profile_ordinal, gpu_profile_ordinal);
@@ -556,7 +567,8 @@ void GpuXdnaMemoryInteropTest::ImportGpuSubrangeAndReleaseAllocation() {
       .structure_size = sizeof(export_info),
       .external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_OPAQUE_FD,
       .byte_offset = page_size,
-      .byte_length = page_size};
+      .byte_length = page_size,
+  };
   ASSERT_EQ(api_->memory_export(gpu_memory_, &export_info, &external_memory_),
             AMDF_STATUS_OK);
   ASSERT_EQ(external_memory_.type, AMDF_EXTERNAL_MEMORY_TYPE_OPAQUE_FD);
@@ -573,16 +585,15 @@ void GpuXdnaMemoryInteropTest::ImportGpuSubrangeAndReleaseAllocation() {
       amdf_physical_memory_id_is_equal(&external_memory_.physical_backing_id,
                                        &gpu_memory_info.physical_backing_id));
 
-  amdf_memory_import_info_t import_info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  import_info.type = AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO;
-  import_info.structure_size = sizeof(import_info);
-  import_info.memory_profile_ordinal = xdna_profile_ordinal;
-  import_info.access_count = 1;
-  import_info.accesses = &xdna_access_;
-  import_info.required_flags = kXdnaRequiredFlags;
-  import_info.minimum_alignment = page_size;
+  amdf_memory_import_info_t import_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO,
+      .structure_size = sizeof(import_info),
+      .memory_profile_ordinal = xdna_profile_ordinal,
+      .access_count = 1,
+      .required_flags = kXdnaRequiredFlags,
+      .minimum_alignment = page_size,
+      .accesses = &xdna_access_,
+  };
   external_memory_.provenance.words[0] ^= 1;
   const auto mismatched_transport = external_memory_;
   auto* sentinel = reinterpret_cast<amdf_memory_t*>(uintptr_t{1});
@@ -608,12 +619,14 @@ void GpuXdnaMemoryInteropTest::ImportGpuSubrangeAndReleaseAllocation() {
 
   amdf_memory_info_t xdna_memory_info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
-      .structure_size = sizeof(xdna_memory_info)};
+      .structure_size = sizeof(xdna_memory_info),
+  };
   ASSERT_EQ(api_->memory_query_info(xdna_memory_, &xdna_memory_info),
             AMDF_STATUS_OK);
   amdf_memory_access_info_t xdna_access_info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
-      .structure_size = sizeof(xdna_access_info)};
+      .structure_size = sizeof(xdna_access_info),
+  };
   ASSERT_EQ(api_->memory_query_access_info(xdna_memory_, 0, &xdna_access_info),
             AMDF_STATUS_OK);
   EXPECT_EQ(xdna_memory_info.memory_profile_ordinal, xdna_profile_ordinal);
@@ -644,18 +657,23 @@ void GpuXdnaMemoryInteropTest::ImportGpuSubrangeAndReleaseAllocation() {
                              &xdna_queue_family_ordinal),
       AMDF_STATUS_OK);
 
-  amdf_memory_site_t gpu_site = {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
-                                 .structure_size = sizeof(gpu_site)};
+  amdf_memory_site_t gpu_site = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+      .structure_size = sizeof(gpu_site),
+  };
   gpu_site.value.device.memory = gpu_memory_;
   gpu_site.value.device.queue_family_ordinal = gpu_queue_family_ordinal;
-  amdf_memory_site_t xdna_site = {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
-                                  .structure_size = sizeof(xdna_site)};
+  amdf_memory_site_t xdna_site = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+      .structure_size = sizeof(xdna_site),
+  };
   xdna_site.value.device.memory = xdna_memory_;
   xdna_site.value.device.queue_family_ordinal = xdna_queue_family_ordinal;
 
   amdf_memory_pair_info_t gpu_to_xdna = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-      .structure_size = sizeof(gpu_to_xdna)};
+      .structure_size = sizeof(gpu_to_xdna),
+  };
   ASSERT_EQ(api_->memory_query_pair_info(&gpu_site, &xdna_site, &gpu_to_xdna),
             AMDF_STATUS_OK);
   EXPECT_EQ(gpu_to_xdna.flags, AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE);
@@ -669,7 +687,8 @@ void GpuXdnaMemoryInteropTest::ImportGpuSubrangeAndReleaseAllocation() {
 
   amdf_memory_pair_info_t xdna_to_gpu = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-      .structure_size = sizeof(xdna_to_gpu)};
+      .structure_size = sizeof(xdna_to_gpu),
+  };
   ASSERT_EQ(api_->memory_query_pair_info(&xdna_site, &gpu_site, &xdna_to_gpu),
             AMDF_STATUS_OK);
   EXPECT_EQ(xdna_to_gpu.flags, AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE);
@@ -684,9 +703,11 @@ void GpuXdnaMemoryInteropTest::ImportGpuSubrangeAndReleaseAllocation() {
   amdf_host_mapping_info_t xdna_mapping_info = {};
   ASSERT_EQ(Map(xdna_memory_, page_size, &xdna_mapping_, &xdna_mapping_info),
             AMDF_STATUS_OK);
-  amdf_memory_site_t host_site = {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
-                                  .structure_size = sizeof(host_site),
-                                  .kind = AMDF_MEMORY_SITE_KIND_HOST};
+  amdf_memory_site_t host_site = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+      .structure_size = sizeof(host_site),
+      .kind = AMDF_MEMORY_SITE_KIND_HOST,
+  };
   host_site.value.host_mapping = xdna_mapping_;
   amdf_memory_pair_info_t actual = qualified;
   ASSERT_EQ(api_->memory_query_pair_info(&host_site, &xdna_site, &actual),
@@ -723,7 +744,8 @@ void GpuXdnaMemoryInteropTest::ImportGpuSubrangeAndReleaseAllocation() {
 void GpuXdnaMemoryInteropTest::CheckSurvivingImport() {
   amdf_host_mapping_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
-      .structure_size = sizeof(info)};
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(api_->host_mapping_query_info(xdna_mapping_, &info),
             AMDF_STATUS_OK);
   auto* xdna_bytes = static_cast<uint8_t*>(info.pointer);
@@ -775,8 +797,10 @@ TEST_F(GpuXdnaMemoryInteropTest,
   };
   ASSERT_EQ(api_->memory_create(system_scope_, &create_info, &gpu_memory_),
             AMDF_STATUS_OK);
-  amdf_memory_info_t info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
-                             .structure_size = sizeof(info)};
+  amdf_memory_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(api_->memory_query_info(gpu_memory_, &info), AMDF_STATUS_OK);
   EXPECT_EQ(info.access_count, 2u);
   EXPECT_EQ(info.byte_length, create_info.byte_length);
@@ -785,7 +809,8 @@ TEST_F(GpuXdnaMemoryInteropTest,
   for (uint32_t i = 0; i < 2; ++i) {
     amdf_memory_access_info_t access = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
-        .structure_size = sizeof(access)};
+        .structure_size = sizeof(access),
+    };
     ASSERT_EQ(api_->memory_query_access_info(gpu_memory_, i, &access),
               AMDF_STATUS_OK);
     EXPECT_EQ(access.ordinal, i);
@@ -821,12 +846,16 @@ TEST_F(GpuXdnaMemoryInteropTest,
             AMDF_STATUS_OK);
   EXPECT_EQ(address_after, gpu_address);
 
-  amdf_memory_site_t host_site = {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
-                                  .structure_size = sizeof(host_site),
-                                  .kind = AMDF_MEMORY_SITE_KIND_HOST};
+  amdf_memory_site_t host_site = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+      .structure_size = sizeof(host_site),
+      .kind = AMDF_MEMORY_SITE_KIND_HOST,
+  };
   host_site.value.host_mapping = gpu_mapping_;
-  amdf_memory_site_t device_site = {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
-                                    .structure_size = sizeof(device_site)};
+  amdf_memory_site_t device_site = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+      .structure_size = sizeof(device_site),
+  };
   device_site.value.device.memory = gpu_memory_;
   for (uint32_t ordinal = 0; ordinal < 2; ++ordinal) {
     device_site.value.device.access_ordinal = ordinal;
@@ -838,7 +867,8 @@ TEST_F(GpuXdnaMemoryInteropTest,
         AMDF_STATUS_OK);
     amdf_memory_pair_info_t pair = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-        .structure_size = sizeof(pair)};
+        .structure_size = sizeof(pair),
+    };
     ASSERT_EQ(api_->memory_query_pair_info(&host_site, &device_site, &pair),
               AMDF_STATUS_OK);
     EXPECT_EQ(pair.release.kind, ordinal == 0
@@ -893,17 +923,16 @@ TEST_F(GpuXdnaMemoryInteropTest,
       ASSERT_EQ(role, AMDF_MEMORY_PROFILE_ROLE_REGISTER);
       continue;
     }
-    amdf_memory_profile_pair_query_t query =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
-    query.structure_size = sizeof(query);
-    query.memory_profile_ordinal = profile.ordinal;
-    query.access_count = 2;
-    query.accesses = accesses;
-    query.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-    query.registered_host_cacheability =
-        profile.registration.registered_host_cacheability;
+    amdf_memory_profile_pair_query_t query = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY,
+        .structure_size = sizeof(query),
+        .memory_profile_ordinal = profile.ordinal,
+        .access_count = 2,
+        .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+        .accesses = accesses,
+        .registered_host_cacheability =
+            profile.registration.registered_host_cacheability,
+    };
     std::array<amdf_memory_pair_info_t, 9> qualified = {};
     for (uint32_t producer = 0; producer < 3; ++producer) {
       for (uint32_t consumer = 0; consumer < 3; ++consumer) {
@@ -936,15 +965,14 @@ TEST_F(GpuXdnaMemoryInteropTest,
       caller_pages_.byte_length = length;
     }
     for (uint32_t iteration = 0; iteration < 3; ++iteration) {
-      amdf_memory_create_info_t create =
-          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-               // differs from declaration order.
-      create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-      create.structure_size = sizeof(create);
-      create.memory_profile_ordinal = profile.ordinal;
-      create.access_count = 2;
-      create.accesses = accesses;
-      create.required_flags = query.required_flags;
+      amdf_memory_create_info_t create = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+          .structure_size = sizeof(create),
+          .memory_profile_ordinal = profile.ordinal,
+          .access_count = 2,
+          .required_flags = query.required_flags,
+          .accesses = accesses,
+      };
       create.byte_length = 4099 + iteration * 127;
       create.registered_host_pointer = caller_pages_.pointer == nullptr
                                            ? nullptr
@@ -989,7 +1017,8 @@ TEST_F(GpuXdnaMemoryInteropTest,
         for (uint32_t consumer = 0; consumer < 3; ++consumer) {
           amdf_memory_pair_info_t pair = {
               .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-              .structure_size = sizeof(pair)};
+              .structure_size = sizeof(pair),
+          };
           ASSERT_EQ(
               api_->memory_query_pair_info(&actual_sites[producer],
                                            &actual_sites[consumer], &pair),
@@ -1015,7 +1044,8 @@ TEST_F(GpuXdnaMemoryInteropTest,
                                            &profile, capabilities));
   amdf_gpu_device_info_t gpu_capabilities = {
       .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_INFO,
-      .structure_size = sizeof(gpu_capabilities)};
+      .structure_size = sizeof(gpu_capabilities),
+  };
   ASSERT_EQ(gpu_api_->device_query_info(gpu_device_, &gpu_capabilities),
             AMDF_STATUS_OK);
   if ((gpu_capabilities.features & AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION) ==
@@ -1078,8 +1108,10 @@ TEST_F(GpuXdnaMemoryInteropTest,
             AMDF_STATUS_OK);
   caller_pages_.pointer = static_cast<uint8_t*>(pages);
   caller_pages_.byte_length = reservation_length;
-  amdf_memory_info_t info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
-                             .structure_size = sizeof(info)};
+  amdf_memory_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(api_->memory_query_info(gpu_memory_, &info), AMDF_STATUS_OK);
   EXPECT_EQ(info.access_count, 2u);
   EXPECT_EQ(info.byte_length, create_info.byte_length);
@@ -1123,7 +1155,8 @@ TEST_F(GpuXdnaMemoryInteropTest,
                                            &profile, capabilities));
   amdf_gpu_device_info_t gpu_capabilities = {
       .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_INFO,
-      .structure_size = sizeof(gpu_capabilities)};
+      .structure_size = sizeof(gpu_capabilities),
+  };
   ASSERT_EQ(gpu_api_->device_query_info(gpu_device_, &gpu_capabilities),
             AMDF_STATUS_OK);
   if ((gpu_capabilities.features & AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION) ==
@@ -1294,17 +1327,16 @@ TEST_F(GpuXdnaMemoryInteropTest,
       AMDF_STATUS_OK);
   ASSERT_NE(gpu_profile_ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
 
-  amdf_memory_create_info_t create_info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-  create_info.structure_size = sizeof(create_info);
-  create_info.memory_profile_ordinal = gpu_profile_ordinal;
-  create_info.access_count = 1;
-  create_info.accesses = &gpu_access_;
-  create_info.required_flags =
-      AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_SHAREABLE;
-  create_info.byte_length = page_size;
+  amdf_memory_create_info_t create_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create_info),
+      .memory_profile_ordinal = gpu_profile_ordinal,
+      .access_count = 1,
+      .required_flags =
+          AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_SHAREABLE,
+      .byte_length = page_size,
+      .accesses = &gpu_access_,
+  };
   ASSERT_EQ(api_->memory_create(system_scope_, &create_info, &gpu_memory_),
             AMDF_STATUS_OK);
 
@@ -1312,7 +1344,8 @@ TEST_F(GpuXdnaMemoryInteropTest,
       .type = AMDF_STRUCTURE_TYPE_MEMORY_EXPORT_INFO,
       .structure_size = sizeof(export_info),
       .external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD,
-      .byte_length = page_size};
+      .byte_length = page_size,
+  };
   ASSERT_EQ(api_->memory_export(gpu_memory_, &export_info, &external_memory_),
             AMDF_STATUS_OK);
   ASSERT_TRUE(
@@ -1324,15 +1357,14 @@ TEST_F(GpuXdnaMemoryInteropTest,
   const int descriptor =
       static_cast<int>(external_memory_.payload.file_descriptor);
 
-  amdf_memory_import_info_t import_info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  import_info.type = AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO;
-  import_info.structure_size = sizeof(import_info);
-  import_info.memory_profile_ordinal = xdna_profile_ordinal;
-  import_info.access_count = 1;
-  import_info.accesses = &xdna_access_;
-  import_info.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
+  amdf_memory_import_info_t import_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO,
+      .structure_size = sizeof(import_info),
+      .memory_profile_ordinal = xdna_profile_ordinal,
+      .access_count = 1,
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .accesses = &xdna_access_,
+  };
   auto* const sentinel = reinterpret_cast<amdf_memory_t*>(uintptr_t{1});
   amdf_memory_t* output = sentinel;
   EXPECT_EQ(amdf_status_code(api_->memory_import(system_scope_, &import_info,

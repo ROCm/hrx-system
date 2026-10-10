@@ -23,7 +23,8 @@ void GpuUserQueue::Initialize(
       .producer_mode = producer_mode,
       .required_capabilities = required_capabilities,
       .ring_byte_length = ring_byte_length,
-      .scratch = scratch};
+      .scratch = scratch,
+  };
   ASSERT_EQ(gpu_api->user_queue_create(device, &create, &queue),
             AMDF_STATUS_OK);
   info.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO;

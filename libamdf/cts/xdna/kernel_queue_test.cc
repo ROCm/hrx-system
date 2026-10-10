@@ -120,7 +120,8 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
         AMDF_STATUS_OK);
     amdf_memory_scope_info_t scope_info = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
-        .structure_size = sizeof(scope_info)};
+        .structure_size = sizeof(scope_info),
+    };
     ASSERT_EQ(api_->memory_scope_query_info(scope, &scope_info),
               AMDF_STATUS_OK);
     EXPECT_EQ(scope_info.kind, AMDF_MEMORY_SCOPE_KIND_PRIVATE);
@@ -128,16 +129,20 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
 
     amdf_xdna_device_info_t device_info = {
         .type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO,
-        .structure_size = sizeof(device_info)};
+        .structure_size = sizeof(device_info),
+    };
     ASSERT_EQ(xdna_api_->device_query_info(device_, &device_info),
               AMDF_STATUS_OK);
     instruction_stride_ = device_info.instruction.address_alignment;
     memory_access_.requirements.access |= AMDF_MEMORY_ACCESS_EXECUTE;
-    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-                                     .structure_size = sizeof(profile)};
+    amdf_memory_profile_t profile = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+        .structure_size = sizeof(profile),
+    };
     amdf_memory_access_capabilities_t capabilities = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-        .structure_size = sizeof(capabilities)};
+        .structure_size = sizeof(capabilities),
+    };
     ASSERT_EQ(api_->memory_scope_query_device_profile(
                   scope, 0, 1, &memory_access_, &profile, &capabilities),
               AMDF_STATUS_OK);
@@ -147,19 +152,18 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
               0u);
 
     const uint64_t granularity = profile.allocation.byte_length_granularity;
-    amdf_memory_create_info_t create =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-    create.structure_size = sizeof(create);
-    create.access_count = 1;
-    create.accesses = &memory_access_;
-    create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-    create.byte_length =
-        ((instruction_stride_ + second_range_byte_length + granularity - 1) /
-         granularity) *
-        granularity;
-    create.minimum_alignment = profile.allocation.minimum_alignment;
+    amdf_memory_create_info_t create = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+        .structure_size = sizeof(create),
+        .access_count = 1,
+        .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+        .byte_length = ((instruction_stride_ + second_range_byte_length +
+                         granularity - 1) /
+                        granularity) *
+                       granularity,
+        .minimum_alignment = profile.allocation.minimum_alignment,
+        .accesses = &memory_access_,
+    };
     const auto& geometry = profile.allocation;
     const uint64_t native_granularity = geometry.native_byte_length_granularity;
     ASSERT_GT(native_granularity, 0u);
@@ -172,8 +176,10 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
          native_granularity) *
         native_granularity;
     ASSERT_EQ(api_->memory_create(scope, &create, out_memory), AMDF_STATUS_OK);
-    amdf_memory_info_t info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
-                               .structure_size = sizeof(info)};
+    amdf_memory_info_t info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+        .structure_size = sizeof(info),
+    };
     ASSERT_EQ(api_->memory_query_info(*out_memory, &info), AMDF_STATUS_OK);
     EXPECT_EQ(info.source_byte_offset, geometry.native_byte_length_prefix);
     EXPECT_EQ(info.native_allocation_byte_length, native_byte_length);
@@ -186,17 +192,17 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
         AllocateInstructions(context_, second.size(), &memory_));
     ASSERT_LE(first.size(), instruction_stride_);
 
-    amdf_memory_map_info_t map =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    map.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
-    map.structure_size = sizeof(map);
-    map.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+    amdf_memory_map_info_t map = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
+        .structure_size = sizeof(map),
+        .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+    };
     map.byte_length = instruction_stride_ + second.size();
     ASSERT_EQ(api_->memory_map(memory_, &map, &mapping_), AMDF_STATUS_OK);
     amdf_host_mapping_info_t mapping_info = {
         .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
-        .structure_size = sizeof(mapping_info)};
+        .structure_size = sizeof(mapping_info),
+    };
     ASSERT_EQ(api_->host_mapping_query_info(mapping_, &mapping_info),
               AMDF_STATUS_OK);
     pointer_ = static_cast<uint8_t*>(mapping_info.pointer);
@@ -211,14 +217,16 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
   uint32_t QueryKernelQueueFamily() {
     amdf_endpoint_info_t endpoint_info = {
         .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
-        .structure_size = sizeof(endpoint_info)};
+        .structure_size = sizeof(endpoint_info),
+    };
     EXPECT_TRUE(amdf_status_is_ok(
         api_->endpoint_query_info(endpoint_, &endpoint_info)));
     for (uint32_t ordinal = 0; ordinal < endpoint_info.queue_family_count;
          ++ordinal) {
       amdf_queue_family_info_t family_info = {
           .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
-          .structure_size = sizeof(family_info)};
+          .structure_size = sizeof(family_info),
+      };
       EXPECT_TRUE(amdf_status_is_ok(api_->endpoint_query_queue_family_info(
           endpoint_, ordinal, &family_info)));
       if (family_info.command_type == AMDF_QUEUE_COMMAND_TYPE_XDNA &&
@@ -237,7 +245,8 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
         .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO,
         .structure_size = sizeof(create_info),
         .queue_family_ordinal = QueryKernelQueueFamily(),
-        .maximum_pending_submission_count = capacity};
+        .maximum_pending_submission_count = capacity,
+    };
     ASSERT_NE(create_info.queue_family_ordinal, UINT32_MAX);
     ASSERT_TRUE(amdf_status_is_ok(
         xdna_api_->kernel_queue_create(context_, &create_info, &queue_)));
@@ -246,7 +255,8 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
   void RunPipelinedTransactions(uint32_t capacity) {
     amdf_xdna_endpoint_info_t identity = {
         .type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO,
-        .structure_size = sizeof(identity)};
+        .structure_size = sizeof(identity),
+    };
     ASSERT_EQ(xdna_api_->endpoint_query_info(endpoint_, &identity),
               AMDF_STATUS_OK);
     if (identity.architecture != AMDF_XDNA_ARCHITECTURE_AIE2P) {
@@ -272,21 +282,22 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
     ASSERT_NO_FATAL_FAILURE(CreateQueue(capacity));
     amdf_kernel_queue_info_t info = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
-        .structure_size = sizeof(info)};
+        .structure_size = sizeof(info),
+    };
     ASSERT_EQ(api_->kernel_queue_query_info(queue_, &info), AMDF_STATUS_OK);
     ASSERT_NE(info.maximum_pending_submission_count, 0u);
     const uint32_t command_count =
         std::min(info.maximum_pending_submission_count, uint32_t{4096});
-    amdf_xdna_kernel_command_t command =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-             // spans intervening work.
-    command.memory = memory_;
-    command.byte_length = first.size();
+    amdf_xdna_kernel_command_t command = {
+        .memory = memory_,
+        .byte_length = first.size(),
+    };
     amdf_xdna_kernel_queue_submission_info_t submit = {
         .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
         .structure_size = sizeof(submit),
         .command_count = 1,
-        .commands = &command};
+        .commands = &command,
+    };
     uint64_t previous = 0;
     for (uint32_t round = 0; round < 3; ++round) {
       amdf_status_t status = AMDF_STATUS_OK;
@@ -358,7 +369,8 @@ class XdnaKernelQueueNotificationTest : public XdnaKernelQueueTest {
   void CreateEvent() {
     amdf_kernel_queue_info_t info = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
-        .structure_size = sizeof(info)};
+        .structure_size = sizeof(info),
+    };
     ASSERT_EQ(api_->kernel_queue_query_info(queue_, &info), AMDF_STATUS_OK);
     if ((info.notification_types &
          (UINT64_C(1) << amdf::cts::NativeEventType())) == 0) {
@@ -385,7 +397,8 @@ class XdnaKernelQueueNotificationTest : public XdnaKernelQueueTest {
   void RefreshThroughNotification(uint64_t last) {
     amdf_kernel_queue_status_t checked = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
-        .structure_size = sizeof(checked)};
+        .structure_size = sizeof(checked),
+    };
     ASSERT_EQ(api_->kernel_queue_query_status(queue_, &checked),
               AMDF_STATUS_OK);
     while (checked.retired_submission < last) {
@@ -414,16 +427,16 @@ TEST_F(XdnaKernelQueueNotificationTest,
   if (IsSkipped()) {
     return;
   }
-  amdf_xdna_kernel_command_t command =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  command.memory = memory_;
-  command.byte_length = transaction.size();
+  amdf_xdna_kernel_command_t command = {
+      .memory = memory_,
+      .byte_length = transaction.size(),
+  };
   amdf_xdna_kernel_queue_submission_info_t submit = {
       .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
       .structure_size = sizeof(submit),
       .command_count = 1,
-      .commands = &command};
+      .commands = &command,
+  };
 
   // Notify the first accepted native point before a successor can capture it.
   uint64_t last = 0;
@@ -457,16 +470,16 @@ TEST_F(XdnaKernelQueueNotificationTest,
   if (IsSkipped()) {
     return;
   }
-  amdf_xdna_kernel_command_t command =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  command.memory = memory_;
-  command.byte_length = transaction.size();
+  amdf_xdna_kernel_command_t command = {
+      .memory = memory_,
+      .byte_length = transaction.size(),
+  };
   amdf_xdna_kernel_queue_submission_info_t submit = {
       .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
       .structure_size = sizeof(submit),
       .command_count = 1,
-      .commands = &command};
+      .commands = &command,
+  };
   uint64_t first = 0;
   ASSERT_EQ(xdna_api_->kernel_queue_submit(queue_, &submit, &first),
             AMDF_STATUS_OK);
@@ -492,7 +505,8 @@ TEST_F(XdnaKernelQueueNotificationTest,
   ASSERT_NO_FATAL_FAILURE(ConsumeNotification());
   amdf_kernel_queue_status_t checked = {
       .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
-      .structure_size = sizeof(checked)};
+      .structure_size = sizeof(checked),
+  };
   ASSERT_EQ(api_->kernel_queue_query_status(queue_, &checked), AMDF_STATUS_OK);
   EXPECT_EQ(checked.retired_submission, first);
   ASSERT_NO_FATAL_FAILURE(RefreshThroughNotification(second));
@@ -506,16 +520,16 @@ TEST_F(XdnaKernelQueueTest, SubmitsImmutableRangesAndReacquiresQueue) {
   const auto transaction = MakeNoOpTransaction();
   ASSERT_NO_FATAL_FAILURE(CreateInstructions(transaction, transaction));
   ASSERT_NO_FATAL_FAILURE(CreateQueue());
-  amdf_xdna_kernel_command_t command =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  command.memory = memory_;
-  command.byte_length = MakeNoOpTransaction().size();
+  amdf_xdna_kernel_command_t command = {
+      .memory = memory_,
+      .byte_length = MakeNoOpTransaction().size(),
+  };
   amdf_xdna_kernel_queue_submission_info_t submit = {
       .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
       .structure_size = sizeof(submit),
       .command_count = 1,
-      .commands = &command};
+      .commands = &command,
+  };
 
   uint64_t previous_submission = 0;
   for (uint64_t i = 0; i < 3; ++i) {
@@ -529,7 +543,8 @@ TEST_F(XdnaKernelQueueTest, SubmitsImmutableRangesAndReacquiresQueue) {
     // pressure; checked retirement occurs in the explicit wait below.
     amdf_kernel_queue_status_t status = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
-        .structure_size = sizeof(status)};
+        .structure_size = sizeof(status),
+    };
     ASSERT_EQ(api_->kernel_queue_query_status(queue_, &status), AMDF_STATUS_OK);
     EXPECT_EQ(status.retired_submission, previous_submission);
     EXPECT_EQ(status.terminal_status, AMDF_STATUS_OK);
@@ -576,20 +591,21 @@ TEST_F(XdnaKernelQueueTest, RefreshRetiresBatchesAndReusesPacketStorage) {
   ASSERT_NO_FATAL_FAILURE(CreateQueue(3));
   amdf_kernel_queue_status_t checked = {
       .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
-      .structure_size = sizeof(checked)};
+      .structure_size = sizeof(checked),
+  };
   ASSERT_EQ(api_->kernel_queue_refresh_status(queue_, &checked),
             AMDF_STATUS_OK);
   EXPECT_EQ(checked.retired_submission, 0u);
-  amdf_xdna_kernel_command_t command =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  command.memory = memory_;
-  command.byte_length = transaction.size();
+  amdf_xdna_kernel_command_t command = {
+      .memory = memory_,
+      .byte_length = transaction.size(),
+  };
   amdf_xdna_kernel_queue_submission_info_t submit = {
       .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
       .structure_size = sizeof(submit),
       .command_count = 1,
-      .commands = &command};
+      .commands = &command,
+  };
   uint64_t last = 0;
   for (uint32_t round = 0; round < 3; ++round) {
     for (uint32_t i = 0; i < 3; ++i) {
@@ -634,22 +650,23 @@ TEST_F(XdnaKernelQueueTest, PrivateBackingIsQualifiedByExactContext) {
       .structure_size = sizeof(create),
       .logical_column_count = 1,
       .physical_column_origin = AMDF_XDNA_PHYSICAL_COLUMN_ORIGIN_ANY,
-      .acceptable_scheduling_modes = AMDF_XDNA_SCHEDULING_MODE_TIME_SLICED};
+      .acceptable_scheduling_modes = AMDF_XDNA_SCHEDULING_MODE_TIME_SLICED,
+  };
   ASSERT_EQ(xdna_api_->context_create(device_, &create, &sibling_.context),
             AMDF_STATUS_OK);
   ASSERT_NO_FATAL_FAILURE(AllocateInstructions(
       sibling_.context, transaction.size(), &sibling_.memory));
   EXPECT_NE(memory_, sibling_.memory);
-  amdf_xdna_kernel_command_t command =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  command.memory = sibling_.memory;
-  command.byte_length = MakeNoOpTransaction().size();
+  amdf_xdna_kernel_command_t command = {
+      .memory = sibling_.memory,
+      .byte_length = MakeNoOpTransaction().size(),
+  };
   amdf_xdna_kernel_queue_submission_info_t submit = {
       .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
       .structure_size = sizeof(submit),
       .command_count = 1,
-      .commands = &command};
+      .commands = &command,
+  };
   uint64_t submission = UINT64_MAX;
   EXPECT_EQ(amdf_status_code(
                 xdna_api_->kernel_queue_submit(queue_, &submit, &submission)),
@@ -674,13 +691,15 @@ TEST_F(XdnaKernelQueueTest,
        PreservesApplicationStateWithinSubmissionsAcrossQueueLeases) {
   amdf_xdna_endpoint_info_t identity = {
       .type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO,
-      .structure_size = sizeof(identity)};
+      .structure_size = sizeof(identity),
+  };
   ASSERT_EQ(xdna_api_->endpoint_query_info(endpoint_, &identity),
             AMDF_STATUS_OK);
   ASSERT_EQ(identity.architecture, AMDF_XDNA_ARCHITECTURE_AIE2P);
   amdf_xdna_context_info_t context_info = {
       .type = AMDF_STRUCTURE_TYPE_XDNA_CONTEXT_INFO,
-      .structure_size = sizeof(context_info)};
+      .structure_size = sizeof(context_info),
+  };
   ASSERT_EQ(xdna_api_->context_query_info(context_, &context_info),
             AMDF_STATUS_OK);
   ASSERT_EQ(context_info.row_count, 6u);
@@ -731,16 +750,16 @@ TEST_F(XdnaKernelQueueTest,
   }
   ASSERT_NO_FATAL_FAILURE(CreateInstructions(transaction, transaction));
   ASSERT_NO_FATAL_FAILURE(CreateQueue());
-  amdf_xdna_kernel_command_t command =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  command.memory = memory_;
-  command.byte_length = transaction.size();
+  amdf_xdna_kernel_command_t command = {
+      .memory = memory_,
+      .byte_length = transaction.size(),
+  };
   amdf_xdna_kernel_queue_submission_info_t submit = {
       .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
       .structure_size = sizeof(submit),
       .command_count = 1,
-      .commands = &command};
+      .commands = &command,
+  };
   for (uint32_t generation = 0; generation < 8; ++generation) {
     SCOPED_TRACE(generation);
     if (generation == 4) {

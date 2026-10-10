@@ -46,7 +46,8 @@ class Pm4WaveModeTest : public Pm4DispatchTest {
 
     amdf_gpu_endpoint_info_t endpoint_info = {
         .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
-        .structure_size = sizeof(endpoint_info)};
+        .structure_size = sizeof(endpoint_info),
+    };
     ASSERT_EQ(gpu_api_->endpoint_query_info(endpoint_, &endpoint_info),
               AMDF_STATUS_OK);
     const std::array<const kernels::Kernel*, 2> selected_kernels = {

@@ -33,10 +33,9 @@ TEST(Pm4ProfileTest, CoversThePm4PhysicalTargetFamilies) {
   for (const auto& target : targets) {
     SCOPED_TRACE(::testing::Message()
                  << target[0] << '.' << target[1] << '.' << target[2]);
-    amdf_gpu_endpoint_info_t endpoint =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-             // spans intervening work.
-    endpoint.gfx_ip = {target[0], target[1], target[2]};
+    amdf_gpu_endpoint_info_t endpoint = {
+        .gfx_ip = {target[0], target[1], target[2]},
+    };
     const auto* profile = Pm4CommandProfile::Find(endpoint);
     ASSERT_NE(profile, nullptr);
     EXPECT_EQ(profile->supports_wave64, target[0] != 12 || target[1] != 5);
@@ -56,7 +55,8 @@ TEST(Pm4ProfileTest, DoesNotInferAnEncodingForUnrepresentedFamilies) {
   }};
   for (const auto& target : targets) {
     amdf_gpu_endpoint_info_t endpoint = {
-        .gfx_ip = {target[0], target[1], target[2]}};
+        .gfx_ip = {target[0], target[1], target[2]},
+    };
     EXPECT_EQ(Pm4CommandProfile::Find(endpoint), nullptr);
   }
 }

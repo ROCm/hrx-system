@@ -20,15 +20,16 @@ void CreateStorage(const amdf_api_t* api, amdf_memory_scope_t* scope,
                    uint64_t byte_length, GpuMemory* memory) {
   const amdf_memory_device_access_t attachment = {
       device,
-      {.access = access,
-       .flags =
-           AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
-  amdf_memory_create_info_t create =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-  create.structure_size = sizeof(create);
-  create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
+      {
+          .access = access,
+          .flags =
+              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+      }};
+  amdf_memory_create_info_t create = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create),
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+  };
   create.memory_profile_ordinal = FindGpuMemoryProfileOrdinal(
       api, scope, device,
       AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,

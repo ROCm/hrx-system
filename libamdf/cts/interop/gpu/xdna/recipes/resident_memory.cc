@@ -22,14 +22,18 @@ void FindEndpoint(const amdf_api_t* api, amdf_memory_scope_t* scope,
   endpoint.profile.ordinal = AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
   amdf_memory_scope_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
-      .structure_size = sizeof(info)};
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(api->memory_scope_query_info(scope, &info), AMDF_STATUS_OK);
   for (uint32_t ordinal = 0; ordinal < info.memory_profile_count; ++ordinal) {
-    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-                                     .structure_size = sizeof(profile)};
+    amdf_memory_profile_t profile = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+        .structure_size = sizeof(profile),
+    };
     amdf_memory_access_capabilities_t access = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-        .structure_size = sizeof(access)};
+        .structure_size = sizeof(access),
+    };
     const auto status = api->memory_scope_query_device_profile(
         scope, ordinal, 1, &endpoint.access, &profile, &access);
     if (amdf_status_code(status) == AMDF_STATUS_CODE_UNSUPPORTED) {
@@ -129,14 +133,13 @@ void ResidentBuffer::CreateImported(const amdf_api_t* api,
       RoundUp(minimum_byte_length, plan.byte_length_granularity);
   ASSERT_LE(logical.byte_length,
             plan.destination.profile.import.maximum_byte_length);
-  amdf_memory_create_info_t create =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-  create.structure_size = sizeof(create);
-  create.memory_profile_ordinal = plan.source.profile.ordinal;
-  create.access_count = 1;
-  create.accesses = &plan.source.access;
+  amdf_memory_create_info_t create = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create),
+      .memory_profile_ordinal = plan.source.profile.ordinal,
+      .access_count = 1,
+      .accesses = &plan.source.access,
+  };
   create.required_flags =
       AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_SHAREABLE;
   create.minimum_alignment = std::max(
@@ -160,7 +163,8 @@ void ResidentBuffer::CreateImported(const amdf_api_t* api,
       .structure_size = sizeof(export_info),
       .external_memory_type = plan.source.transport.type,
       .byte_offset = logical.byte_offset,
-      .byte_length = logical.byte_length};
+      .byte_length = logical.byte_length,
+  };
   ASSERT_EQ(api->memory_export(memory.memory, &export_info, &external),
             AMDF_STATUS_OK);
   ASSERT_EQ(external.type, plan.source.transport.type);
@@ -173,22 +177,23 @@ void ResidentBuffer::CreateImported(const amdf_api_t* api,
   ASSERT_TRUE(amdf_physical_memory_id_is_equal(
       &external.physical_backing_id, &memory.info.physical_backing_id));
 
-  amdf_memory_import_info_t import_info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  import_info.type = AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO;
-  import_info.structure_size = sizeof(import_info);
-  import_info.memory_profile_ordinal = plan.destination.profile.ordinal;
-  import_info.access_count = 1;
-  import_info.accesses = &plan.destination.access;
-  import_info.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-  import_info.minimum_alignment = plan.minimum_alignment;
+  amdf_memory_import_info_t import_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO,
+      .structure_size = sizeof(import_info),
+      .memory_profile_ordinal = plan.destination.profile.ordinal,
+      .access_count = 1,
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .minimum_alignment = plan.minimum_alignment,
+      .accesses = &plan.destination.access,
+  };
   ASSERT_EQ(api->memory_import(scope, &import_info, &external, &xdna_import),
             AMDF_STATUS_OK);
   const amdf_external_memory_t empty = {};
   ASSERT_EQ(std::memcmp(&external, &empty, sizeof(empty)), 0);
-  amdf_memory_info_t imported_info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
-                                      .structure_size = sizeof(imported_info)};
+  amdf_memory_info_t imported_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+      .structure_size = sizeof(imported_info),
+  };
   ASSERT_EQ(api->memory_query_info(xdna_import, &imported_info),
             AMDF_STATUS_OK);
   ASSERT_EQ(imported_info.memory_profile_ordinal,
@@ -200,7 +205,8 @@ void ResidentBuffer::CreateImported(const amdf_api_t* api,
       &imported_info.physical_backing_id, &memory.info.physical_backing_id));
   amdf_memory_access_info_t access = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
-      .structure_size = sizeof(access)};
+      .structure_size = sizeof(access),
+  };
   ASSERT_EQ(api->memory_query_access_info(xdna_import, 0, &access),
             AMDF_STATUS_OK);
   const auto& required = plan.destination.access.requirements;
@@ -227,16 +233,19 @@ void ResidentBuffer::QueryImportedPairs(const amdf_api_t* api,
   xdna.value.device.memory = xdna_import;
   xdna.value.device.queue_family_ordinal = xdna_family;
   const std::array sites = {host, gpu, xdna};
-  const amdf_cache_transition_t none = {.kind =
-                                            AMDF_CACHE_TRANSITION_KIND_NONE};
+  const amdf_cache_transition_t none = {
+      .kind = AMDF_CACHE_TRANSITION_KIND_NONE,
+  };
   const amdf_cache_transition_t release = {
       .kind = AMDF_CACHE_TRANSITION_KIND_GLOBAL,
       .executor = AMDF_CACHE_TRANSITION_EXECUTOR_QUEUE,
-      .operation = AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM};
+      .operation = AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM,
+  };
   const amdf_cache_transition_t acquire = {
       .kind = AMDF_CACHE_TRANSITION_KIND_GLOBAL,
       .executor = AMDF_CACHE_TRANSITION_EXECUTOR_QUEUE,
-      .operation = AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM};
+      .operation = AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM,
+  };
   for (size_t i = 0; i < kGpuXdnaJointEdges.size(); ++i) {
     SCOPED_TRACE(i);
     const auto edge = kGpuXdnaJointEdges[i];

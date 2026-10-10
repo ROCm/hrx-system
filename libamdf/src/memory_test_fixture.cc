@@ -334,32 +334,30 @@ void InitializeFakeDevice(uint64_t identity, amdf_instance_t* instance,
 }
 
 amdf_memory_create_info_t MakeMemoryCreateInfo(FakeDevice& device) {
-  amdf_memory_create_info_t info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-  info.structure_size = sizeof(info);
-  info.memory_profile_ordinal = 0;
-  info.access_count = 1;
-  info.accesses = &device.request;
-  info.required_flags =
-      AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_SHAREABLE;
-  info.byte_length = 4096;
-  info.minimum_alignment = 4096;
+  amdf_memory_create_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(info),
+      .memory_profile_ordinal = 0,
+      .access_count = 1,
+      .required_flags =
+          AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_SHAREABLE,
+      .byte_length = 4096,
+      .minimum_alignment = 4096,
+      .accesses = &device.request,
+  };
   return info;
 }
 
 amdf_memory_import_info_t MakeMemoryImportInfo(FakeDevice& device) {
-  amdf_memory_import_info_t info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  info.type = AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO;
-  info.structure_size = sizeof(info);
-  info.memory_profile_ordinal = 2;
-  info.access_count = 1;
-  info.accesses = &device.request;
-  info.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-  info.minimum_alignment = 4096;
+  amdf_memory_import_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO,
+      .structure_size = sizeof(info),
+      .memory_profile_ordinal = 2,
+      .access_count = 1,
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .minimum_alignment = 4096,
+      .accesses = &device.request,
+  };
   return info;
 }
 
@@ -368,14 +366,17 @@ amdf_memory_export_info_t MakeMemoryExportInfo() {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_EXPORT_INFO,
       .structure_size = sizeof(info),
       .external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD,
-      .byte_length = 4096};
+      .byte_length = 4096,
+  };
   return info;
 }
 
 amdf_memory_site_t MakeMemorySite(amdf_memory_t* memory,
                                   uint32_t queue_family_ordinal) {
-  amdf_memory_site_t site = {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
-                             .structure_size = sizeof(site)};
+  amdf_memory_site_t site = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+      .structure_size = sizeof(site),
+  };
   site.value.device.memory = memory;
   site.value.device.queue_family_ordinal = queue_family_ordinal;
   return site;

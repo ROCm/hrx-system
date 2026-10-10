@@ -436,11 +436,10 @@ TEST(KernelTest, PhysicalRevisionSelectsTheInstructionEncodingOverlay) {
   constexpr kernels::Kernel kVariants[] = {{.target = "gfx1250"},
                                            {.target = "gfx1250-a0"}};
   const kernels::KernelSet products = {kVariants};
-  amdf_gpu_endpoint_info_t endpoint =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  endpoint.gfx_ip = {12, 5, 0};
-  endpoint.asic_revision = 0;
+  amdf_gpu_endpoint_info_t endpoint = {
+      .gfx_ip = {12, 5, 0},
+      .asic_revision = 0,
+  };
   const auto* a0 = products.Find(endpoint);
   ASSERT_NE(a0, nullptr);
   EXPECT_STREQ(a0->target, "gfx1250-a0");

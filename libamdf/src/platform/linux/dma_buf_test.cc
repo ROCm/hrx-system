@@ -56,9 +56,7 @@ TEST(DmaBufTest, FailurePreservesCallerStorage) {
 TEST(DmaBufTest, ReleaseCallbackClosesOwnedDescriptor) {
   const int descriptor = memfd_create("amdf-dma-buf-test", MFD_CLOEXEC);
   ASSERT_GE(descriptor, 0);
-  amdf_external_memory_payload_t payload =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment selects the
-           // active union member after zero initialization.
+  amdf_external_memory_payload_t payload = {};
   payload.file_descriptor = descriptor;
   amdf_linux_dma_buf_release(nullptr, AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD,
                              payload);

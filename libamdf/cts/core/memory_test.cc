@@ -34,7 +34,8 @@ class HostMemoryTest : public ::testing::Test {
     for (amdf_memory_scope_t* scope : scopes) {
       amdf_memory_scope_info_t info = {
           .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
-          .structure_size = sizeof(info)};
+          .structure_size = sizeof(info),
+      };
       ASSERT_EQ(api_->memory_scope_query_info(scope, &info), AMDF_STATUS_OK);
       if (info.kind == AMDF_MEMORY_SCOPE_KIND_SYSTEM) {
         scope_ = scope;
@@ -60,7 +61,8 @@ class HostMemoryTest : public ::testing::Test {
          ++ordinal) {
       amdf_memory_profile_t profile = {
           .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-          .structure_size = sizeof(profile)};
+          .structure_size = sizeof(profile),
+      };
       const amdf_status_t status = api_->memory_scope_query_device_profile(
           scope_, ordinal, 0, nullptr, &profile, nullptr);
       if (status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
@@ -82,7 +84,8 @@ class HostMemoryTest : public ::testing::Test {
         .structure_size = sizeof(map_info),
         .byte_offset = offset,
         .byte_length = length,
-        .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE};
+        .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+    };
     amdf_host_mapping_t* mapping = nullptr;
     ASSERT_EQ(api_->memory_map(memory, &map_info, &mapping), AMDF_STATUS_OK);
     mappings_.push_back(mapping);
@@ -111,8 +114,10 @@ TEST_F(HostMemoryTest, ProfileWithoutDevicesDescribesCpuOnlyStorage) {
   amdf_memory_profile_t expected = {};
   ASSERT_NO_FATAL_FAILURE(
       FindProfile(AMDF_MEMORY_PROFILE_ROLE_CREATE, &expected));
-  amdf_memory_profile_t live = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-                                .structure_size = sizeof(live)};
+  amdf_memory_profile_t live = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+      .structure_size = sizeof(live),
+  };
   ASSERT_EQ(api_->memory_scope_query_device_profile(scope_, expected.ordinal, 0,
                                                     nullptr, &live, nullptr),
             AMDF_STATUS_OK);
@@ -135,7 +140,8 @@ TEST_F(HostMemoryTest, AllocatesOneBackingWithoutAnAccelerator) {
       .structure_size = sizeof(create_info),
       .memory_profile_ordinal = profile.ordinal,
       .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
-      .byte_length = profile.allocation.minimum_alignment + 37};
+      .byte_length = profile.allocation.minimum_alignment + 37,
+  };
   const auto& geometry = profile.allocation;
   const uint64_t granularity = geometry.native_byte_length_granularity;
   ASSERT_GT(granularity, 0u);
@@ -151,8 +157,10 @@ TEST_F(HostMemoryTest, AllocatesOneBackingWithoutAnAccelerator) {
   ASSERT_EQ(api_->memory_create(scope_, &create_info, &memory), AMDF_STATUS_OK);
   memories_.push_back(memory);
 
-  amdf_memory_info_t info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
-                             .structure_size = sizeof(info)};
+  amdf_memory_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(api_->memory_query_info(memory, &info), AMDF_STATUS_OK);
   EXPECT_EQ(info.access_count, 0u);
   EXPECT_EQ(info.byte_length, create_info.byte_length);
@@ -175,14 +183,18 @@ TEST_F(HostMemoryTest, AllocatesOneBackingWithoutAnAccelerator) {
   EXPECT_EQ(first.cacheability, AMDF_HOST_CACHEABILITY_WRITE_BACK);
   EXPECT_EQ(first.flush.kind, AMDF_CACHE_TRANSITION_KIND_RANGE);
   EXPECT_EQ(first.invalidate.kind, AMDF_CACHE_TRANSITION_KIND_RANGE);
-  amdf_memory_site_t producer = {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
-                                 .structure_size = sizeof(producer),
-                                 .kind = AMDF_MEMORY_SITE_KIND_HOST};
+  amdf_memory_site_t producer = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+      .structure_size = sizeof(producer),
+      .kind = AMDF_MEMORY_SITE_KIND_HOST,
+  };
   producer.value.host_mapping = mappings_[0];
   amdf_memory_site_t consumer = producer;
   consumer.value.host_mapping = mappings_[1];
-  amdf_memory_pair_info_t pair = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-                                  .structure_size = sizeof(pair)};
+  amdf_memory_pair_info_t pair = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(pair),
+  };
   ASSERT_EQ(api_->memory_query_pair_info(&producer, &consumer, &pair),
             AMDF_STATUS_OK);
   EXPECT_EQ(pair.release.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
@@ -210,15 +222,14 @@ TEST_F(HostMemoryTest, BorrowsCallerStorageWithoutTakingOwnership) {
   ASSERT_NO_FATAL_FAILURE(
       FindProfile(AMDF_MEMORY_PROFILE_ROLE_REGISTER, &profile));
   storage_.assign(4099, 0x42);
-  amdf_memory_create_info_t create_info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-  create_info.structure_size = sizeof(create_info);
-  create_info.memory_profile_ordinal = profile.ordinal;
-  create_info.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-  create_info.registered_host_pointer = storage_.data() + 1;
-  create_info.registered_host_cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK;
+  amdf_memory_create_info_t create_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create_info),
+      .memory_profile_ordinal = profile.ordinal,
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .registered_host_pointer = storage_.data() + 1,
+      .registered_host_cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK,
+  };
   create_info.byte_length = storage_.size() - 2;
   amdf_memory_t* memory = nullptr;
   ASSERT_EQ(api_->memory_create(scope_, &create_info, &memory), AMDF_STATUS_OK);
@@ -244,20 +255,21 @@ TEST_F(HostMemoryTest, QualifiesCpuPairsAndRejectsUnestablishedRegistration) {
       FindProfile(AMDF_MEMORY_PROFILE_ROLE_REGISTER, &profile));
   EXPECT_EQ(profile.registration.registered_host_cacheability,
             AMDF_HOST_CACHEABILITY_WRITE_BACK);
-  amdf_memory_profile_pair_query_t query =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
-  query.structure_size = sizeof(query);
-  query.memory_profile_ordinal = profile.ordinal;
-  query.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-  query.registered_host_cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK;
+  amdf_memory_profile_pair_query_t query = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY,
+      .structure_size = sizeof(query),
+      .memory_profile_ordinal = profile.ordinal,
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .registered_host_cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK,
+  };
   query.producer.kind = AMDF_MEMORY_SITE_KIND_HOST;
   query.producer.value.host_access = AMDF_MEMORY_MAP_FLAG_WRITE;
   query.consumer.kind = AMDF_MEMORY_SITE_KIND_HOST;
   query.consumer.value.host_access = AMDF_MEMORY_MAP_FLAG_READ;
-  amdf_memory_pair_info_t pair = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-                                  .structure_size = sizeof(pair)};
+  amdf_memory_pair_info_t pair = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(pair),
+  };
   ASSERT_EQ(api_->memory_scope_query_pair_info(scope_, &query, &pair),
             AMDF_STATUS_OK);
   EXPECT_EQ(pair.release.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
@@ -275,14 +287,13 @@ TEST_F(HostMemoryTest, QualifiesCpuPairsAndRejectsUnestablishedRegistration) {
     query.registered_host_cacheability = cacheability;
     expect_rejection(AMDF_STATUS_CODE_UNSUPPORTED);
     storage_.resize(4096);
-    amdf_memory_create_info_t create =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-             // differs from list initialization.
-    create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-    create.structure_size = sizeof(create);
-    create.memory_profile_ordinal = profile.ordinal;
-    create.byte_length = storage_.size();
-    create.registered_host_pointer = storage_.data();
+    amdf_memory_create_info_t create = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+        .structure_size = sizeof(create),
+        .memory_profile_ordinal = profile.ordinal,
+        .byte_length = storage_.size(),
+        .registered_host_pointer = storage_.data(),
+    };
     create.registered_host_cacheability = cacheability;
     auto* sentinel = reinterpret_cast<amdf_memory_t*>(uintptr_t{1});
     auto* memory = sentinel;
@@ -305,13 +316,12 @@ TEST_F(HostMemoryTest, RejectsInvalidConstructionWithoutPublishingOutputs) {
   amdf_memory_profile_t profile = {};
   ASSERT_NO_FATAL_FAILURE(
       FindProfile(AMDF_MEMORY_PROFILE_ROLE_CREATE, &profile));
-  amdf_memory_create_info_t create_info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-  create_info.structure_size = sizeof(create_info);
-  create_info.memory_profile_ordinal = profile.ordinal;
-  create_info.byte_length = 4096;
+  amdf_memory_create_info_t create_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create_info),
+      .memory_profile_ordinal = profile.ordinal,
+      .byte_length = 4096,
+  };
   amdf_memory_t* sentinel = reinterpret_cast<amdf_memory_t*>(uintptr_t{1});
   amdf_memory_t* memory = sentinel;
   create_info.access_count = 1;

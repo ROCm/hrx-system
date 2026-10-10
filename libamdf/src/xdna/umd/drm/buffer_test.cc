@@ -134,7 +134,8 @@ TEST(LinuxXdnaBufferTest, CreateFailureLeavesOutputUnchanged) {
       .type = AMDXDNA_BO_DEV,
       .byte_length = 0x2000,
       .device_address = UINT64_C(0x12340000),
-      .host_pointer = reinterpret_cast<void*>(uintptr_t{0x56780000})};
+      .host_pointer = reinterpret_cast<void*>(uintptr_t{0x56780000}),
+  };
   buffer.mapping.base = reinterpret_cast<void*>(uintptr_t{0x9ABC0000});
   buffer.mapping.byte_length = 0x3000;
 
@@ -157,7 +158,8 @@ TEST(LinuxXdnaBufferTest, ImportFailureLeavesOutputUnchanged) {
       .type = AMDXDNA_BO_DEV,
       .byte_length = 0x2000,
       .device_address = UINT64_C(0x12340000),
-      .host_pointer = reinterpret_cast<void*>(uintptr_t{0x56780000})};
+      .host_pointer = reinterpret_cast<void*>(uintptr_t{0x56780000}),
+  };
   buffer.mapping.base = reinterpret_cast<void*>(uintptr_t{0x9ABC0000});
   buffer.mapping.byte_length = 0x3000;
 
@@ -180,7 +182,8 @@ TEST(LinuxXdnaBufferTest, RegistrationFailureLeavesOutputUnchanged) {
       .type = AMDXDNA_BO_DEV,
       .byte_length = 0x2000,
       .device_address = UINT64_C(0x12340000),
-      .host_pointer = reinterpret_cast<void*>(uintptr_t{0x56780000})};
+      .host_pointer = reinterpret_cast<void*>(uintptr_t{0x56780000}),
+  };
   buffer.mapping.base = reinterpret_cast<void*>(uintptr_t{0x9ABC0000});
   buffer.mapping.byte_length = 0x3000;
 

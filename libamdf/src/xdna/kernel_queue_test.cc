@@ -165,7 +165,8 @@ class XdnaKernelQueueTest : public ::testing::Test {
     amdf_xdna_kernel_queue_create_info_t create = {
         .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO,
         .structure_size = sizeof(create),
-        .maximum_pending_submission_count = capacity};
+        .maximum_pending_submission_count = capacity,
+    };
     return amdf_xdna_kernel_queue_create(
         reinterpret_cast<amdf_xdna_context_t*>(&context), &create, &queue);
   }
@@ -185,7 +186,8 @@ class XdnaKernelQueueTest : public ::testing::Test {
         .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
         .structure_size = sizeof(submit),
         .command_count = 1,
-        .commands = &command};
+        .commands = &command,
+    };
     return amdf_xdna_kernel_queue_submit(queue, &submit, out_submission);
   }
 
@@ -201,7 +203,8 @@ class XdnaKernelQueueTest : public ::testing::Test {
   amdf_kernel_queue_status_t Query() {
     amdf_kernel_queue_status_t status = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
-        .structure_size = sizeof(status)};
+        .structure_size = sizeof(status),
+    };
     EXPECT_EQ(amdf_kernel_queue_query_status(queue, &status), AMDF_STATUS_OK);
     return status;
   }
@@ -209,7 +212,8 @@ class XdnaKernelQueueTest : public ::testing::Test {
   amdf_kernel_queue_status_t Refresh() {
     amdf_kernel_queue_status_t status = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
-        .structure_size = sizeof(status)};
+        .structure_size = sizeof(status),
+    };
     EXPECT_EQ(amdf_kernel_queue_refresh_status(queue, &status), AMDF_STATUS_OK);
     return status;
   }
@@ -236,7 +240,8 @@ TEST_P(XdnaKernelQueueCapacityTest, HoldsAnEntirePendingWindow) {
   ASSERT_EQ(CreateQueue(GetParam()), AMDF_STATUS_OK);
   amdf_kernel_queue_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
-      .structure_size = sizeof(info)};
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(amdf_kernel_queue_query_info(queue, &info), AMDF_STATUS_OK);
   ASSERT_GT(info.maximum_pending_submission_count, 1u);
   if (GetParam() != 0) {
@@ -487,7 +492,8 @@ TEST_F(XdnaKernelQueueTest, NotificationResolvesNativePointsWithoutRetirement) {
   ASSERT_EQ(SubmitCommand(&submission), AMDF_STATUS_OK);
   amdf_kernel_queue_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
-      .structure_size = sizeof(info)};
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(amdf_kernel_queue_query_info(queue, &info), AMDF_STATUS_OK);
   ASSERT_NE(info.notification_types & AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD, 0u);
   amdf_native_event_t event = {.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD};
@@ -548,10 +554,9 @@ TEST_F(XdnaKernelQueueTest, NotificationErrorDoesNotRejectAcceptedWork) {
 
 TEST_F(XdnaKernelQueueTest, NotificationRejectsInvalidOrUnsupportedInputs) {
   ASSERT_NO_FATAL_FAILURE(Submit());
-  amdf_native_event_t event =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  event.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+  amdf_native_event_t event = {
+      .type = AMDF_NATIVE_EVENT_TYPE_EVENTFD,
+  };
   event.payload.file_descriptor = 5;
   EXPECT_EQ(amdf_status_code(amdf_kernel_queue_request_notification(
                 nullptr, submission, &event)),
@@ -622,7 +627,8 @@ TEST_F(XdnaKernelQueueTest, RefreshErrorPreservesOutputAndKnownRetirement) {
   amdf_kernel_queue_status_t output = {
       .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
       .structure_size = sizeof(output),
-      .retired_submission = UINT64_MAX};
+      .retired_submission = UINT64_MAX,
+  };
   const auto original = output;
   EXPECT_EQ(amdf_kernel_queue_refresh_status(queue, &output),
             native.refresh_status);
@@ -662,11 +668,10 @@ TEST_F(XdnaKernelQueueTest, RefreshReportsExecutionFailureInSnapshot) {
 
 TEST_F(XdnaKernelQueueTest, RefreshValidatesOutputBeforeNativeObservation) {
   ASSERT_NO_FATAL_FAILURE(Submit());
-  amdf_kernel_queue_status_t output =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  output.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO;
-  output.structure_size = sizeof(output);
+  amdf_kernel_queue_status_t output = {
+      .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
+      .structure_size = sizeof(output),
+  };
   EXPECT_EQ(amdf_status_code(amdf_kernel_queue_refresh_status(queue, &output)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
   output.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;

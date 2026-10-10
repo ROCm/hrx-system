@@ -260,7 +260,8 @@ class GpuFileLatencyTest : public GpuFileIoFixture,
   void OpenClock() {
     amdf_endpoint_info_t endpoint_info = {
         .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
-        .structure_size = sizeof(endpoint_info)};
+        .structure_size = sizeof(endpoint_info),
+    };
     ASSERT_EQ(api_->endpoint_query_info(endpoint_, &endpoint_info),
               AMDF_STATUS_OK);
     ASSERT_EQ(endpoint_info.native_identity.type,
@@ -275,9 +276,7 @@ class GpuFileLatencyTest : public GpuFileIoFixture,
     ASSERT_EQ(major(info.st_rdev), identity.major);
     ASSERT_EQ(minor(info.st_rdev), identity.minor);
     drm_amdgpu_info_device device_info = {};
-    drm_amdgpu_info query =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-             // differs from list initialization.
+    drm_amdgpu_info query = {};
     query.return_pointer = reinterpret_cast<uintptr_t>(&device_info);
     query.return_size = sizeof(device_info);
     query.query = AMDGPU_INFO_DEV_INFO;
@@ -1331,7 +1330,8 @@ class GpuFileDemandTest : public GpuFileLatencyTest {
             .phase_count = profile.phases,
             .file_index = fault == InputFault::kAbsentFile ? 1u : 0u,
             .role = 0,
-            .background_enabled = profile.background ? 1u : 0u};
+            .background_enabled = profile.background ? 1u : 0u,
+        };
         std::memcpy(arguments->host.pointer, &values, sizeof(values));
         GpuCommandQueue* queue = nullptr;
         ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue));

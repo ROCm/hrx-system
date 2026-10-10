@@ -47,7 +47,8 @@ void AqlGeometryTest::RunGeometry(
 
   amdf_gpu_endpoint_info_t endpoint_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
-      .structure_size = sizeof(endpoint_info)};
+      .structure_size = sizeof(endpoint_info),
+  };
   ASSERT_EQ(gpu_api_->endpoint_query_info(endpoint_, &endpoint_info),
             AMDF_STATUS_OK);
   ASSERT_EQ(endpoint_info.compute.wavefront_size, kernel.wavefront_size);

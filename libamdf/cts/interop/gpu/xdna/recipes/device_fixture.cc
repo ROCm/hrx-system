@@ -32,7 +32,8 @@ amdf_status_t GpuXdnaDeviceFixture::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
   *out_matches = false;
   amdf_gpu_endpoint_info_t target = {
       .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
-      .structure_size = sizeof(target)};
+      .structure_size = sizeof(target),
+  };
   auto status = gpu_api_->endpoint_query_info(endpoint, &target);
   if (!amdf_status_is_ok(status)) {
     return status;
@@ -41,8 +42,10 @@ amdf_status_t GpuXdnaDeviceFixture::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
   if (!profile) {
     return AMDF_STATUS_OK;
   }
-  amdf_endpoint_info_t info = {.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
-                               .structure_size = sizeof(info)};
+  amdf_endpoint_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+      .structure_size = sizeof(info),
+  };
   status = api_->endpoint_query_info(endpoint, &info);
   if (!amdf_status_is_ok(status)) {
     return status;
@@ -50,7 +53,8 @@ amdf_status_t GpuXdnaDeviceFixture::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
   for (uint32_t ordinal = 0; ordinal < info.queue_family_count; ++ordinal) {
     amdf_queue_family_info_t family = {
         .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
-        .structure_size = sizeof(family)};
+        .structure_size = sizeof(family),
+    };
     status = api_->endpoint_query_queue_family_info(endpoint, ordinal, &family);
     if (!amdf_status_is_ok(status)) {
       return status;
@@ -132,14 +136,19 @@ void GpuXdnaDeviceFixture::SetUp() {
   ASSERT_TRUE(FindXdnaKernelQueueFamily(api_, xdna_endpoint, &xdna_family_));
   accesses_[0] = {
       xdna_device_,
-      {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-       .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
-       .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_XDNA_DMA}};
-  accesses_[1] = {device_,
-                  {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-                   .flags = AMDF_MEMORY_FLAG_HOST_COHERENT |
-                            AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
-                   .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU}};
+      {
+          .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+          .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+          .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_XDNA_DMA,
+      }};
+  accesses_[1] = {
+      device_,
+      {
+          .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+          .flags =
+              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+          .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
+      }};
   RecordProperty("amdf_xdna_target", xdna_endpoint_info_.target_id);
   RecordProperty("gpu_xdna_publication_mode",
                  publication_mode_ == AMDF_QUEUE_PUBLICATION_MODE_USER
@@ -155,12 +164,15 @@ void GpuXdnaDeviceFixture::FindProfile(
   result->ordinal = AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
   amdf_memory_scope_info_t scope = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
-      .structure_size = sizeof(scope)};
+      .structure_size = sizeof(scope),
+  };
   ASSERT_EQ(api_->memory_scope_query_info(system_scope_, &scope),
             AMDF_STATUS_OK);
   for (uint32_t ordinal = 0; ordinal < scope.memory_profile_count; ++ordinal) {
-    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-                                     .structure_size = sizeof(profile)};
+    amdf_memory_profile_t profile = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+        .structure_size = sizeof(profile),
+    };
     std::array<amdf_memory_access_capabilities_t, 2> capabilities = {};
     for (auto& capability : capabilities) {
       capability.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
@@ -214,16 +226,15 @@ void GpuXdnaDeviceFixture::QueryProfilePairs(
     const amdf_memory_create_info_t& create, uint32_t gpu_ordinal,
     std::span<const GpuXdnaEdge> edges,
     std::span<amdf_memory_pair_info_t> pairs) {
-  amdf_memory_profile_pair_query_t query =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
-  query.structure_size = sizeof(query);
-  query.memory_profile_ordinal = create.memory_profile_ordinal;
-  query.access_count = create.access_count;
-  query.accesses = create.accesses;
-  query.required_flags = create.required_flags;
-  query.registered_host_cacheability = create.registered_host_cacheability;
+  amdf_memory_profile_pair_query_t query = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY,
+      .structure_size = sizeof(query),
+      .memory_profile_ordinal = create.memory_profile_ordinal,
+      .access_count = create.access_count,
+      .required_flags = create.required_flags,
+      .accesses = create.accesses,
+      .registered_host_cacheability = create.registered_host_cacheability,
+  };
   for (size_t i = 0; i < edges.size(); ++i) {
     SCOPED_TRACE(i);
     query.producer = ProfileSite(edges[i].producer, gpu_ordinal);
@@ -240,23 +251,27 @@ void GpuXdnaDeviceFixture::CheckConcretePairs(
     const CtsMappedMemory& memory, uint32_t gpu_ordinal,
     std::span<const GpuXdnaEdge> edges,
     std::span<const amdf_memory_pair_info_t> expected) {
-  const amdf_cache_transition_t none = {.kind =
-                                            AMDF_CACHE_TRANSITION_KIND_NONE};
+  const amdf_cache_transition_t none = {
+      .kind = AMDF_CACHE_TRANSITION_KIND_NONE,
+  };
   const amdf_cache_transition_t release = {
       .kind = AMDF_CACHE_TRANSITION_KIND_GLOBAL,
       .executor = AMDF_CACHE_TRANSITION_EXECUTOR_QUEUE,
-      .operation = AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM};
+      .operation = AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM,
+  };
   const amdf_cache_transition_t acquire = {
       .kind = AMDF_CACHE_TRANSITION_KIND_GLOBAL,
       .executor = AMDF_CACHE_TRANSITION_EXECUTOR_QUEUE,
-      .operation = AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM};
+      .operation = AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM,
+  };
   for (size_t i = 0; i < edges.size(); ++i) {
     SCOPED_TRACE(i);
     const auto producer = ConcreteSite(memory, edges[i].producer, gpu_ordinal);
     const auto consumer = ConcreteSite(memory, edges[i].consumer, gpu_ordinal);
     amdf_memory_pair_info_t pair = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-        .structure_size = sizeof(pair)};
+        .structure_size = sizeof(pair),
+    };
     ASSERT_EQ(api_->memory_query_pair_info(&producer, &consumer, &pair),
               AMDF_STATUS_OK);
     ASSERT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);
@@ -309,7 +324,8 @@ void GpuXdnaDeviceFixture::CheckAccesses(
   for (uint32_t ordinal = 0; ordinal < accesses.size(); ++ordinal) {
     amdf_memory_access_info_t actual = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
-        .structure_size = sizeof(actual)};
+        .structure_size = sizeof(actual),
+    };
     ASSERT_EQ(api_->memory_query_access_info(memory.memory, ordinal, &actual),
               AMDF_STATUS_OK);
     const auto& required = accesses[ordinal].requirements;
@@ -343,18 +359,17 @@ void GpuXdnaDeviceFixture::CreateShaderMemory(
   ASSERT_NE(profile.ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
   const uint64_t granularity = profile.allocation.byte_length_granularity;
   ASSERT_GT(granularity, 0u);
-  amdf_memory_create_info_t create =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-  create.structure_size = sizeof(create);
-  create.memory_profile_ordinal = profile.ordinal;
-  create.access_count = 1;
-  create.accesses = &access;
-  create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-  create.byte_length =
-      (byte_length + granularity - 1) / granularity * granularity;
-  create.minimum_alignment = profile.allocation.minimum_alignment;
+  amdf_memory_create_info_t create = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create),
+      .memory_profile_ordinal = profile.ordinal,
+      .access_count = 1,
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .byte_length =
+          (byte_length + granularity - 1) / granularity * granularity,
+      .minimum_alignment = profile.allocation.minimum_alignment,
+      .accesses = &access,
+  };
   constexpr std::array<GpuXdnaEdge, 1> edges = {
       {{GpuXdnaSite::kHost, GpuXdnaSite::kGpu}}};
   std::array<amdf_memory_pair_info_t, 1> pairs = {};

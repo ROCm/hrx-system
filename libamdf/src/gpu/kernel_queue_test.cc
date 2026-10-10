@@ -108,7 +108,8 @@ class GpuKernelQueueTest
         .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO,
         .structure_size = sizeof(submit),
         .command_count = 1,
-        .commands = &command};
+        .commands = &command,
+    };
     return amdf_gpu_kernel_queue_submit(queue, &submit, out_submission);
   }
 
@@ -123,14 +124,16 @@ class GpuKernelQueueTest
     amdf_gpu_kernel_queue_create_info_t create = {
         .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
         .structure_size = sizeof(create),
-        .maximum_pending_submission_count = capacity};
+        .maximum_pending_submission_count = capacity,
+    };
     return amdf_gpu_kernel_queue_create(&device.base, &create, &queue);
   }
 
   amdf_kernel_queue_status_t Query() {
     amdf_kernel_queue_status_t status = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
-        .structure_size = sizeof(status)};
+        .structure_size = sizeof(status),
+    };
     EXPECT_EQ(amdf_kernel_queue_query_status(queue, &status), AMDF_STATUS_OK);
     return status;
   }
@@ -138,7 +141,8 @@ class GpuKernelQueueTest
   amdf_kernel_queue_status_t Refresh() {
     amdf_kernel_queue_status_t status = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
-        .structure_size = sizeof(status)};
+        .structure_size = sizeof(status),
+    };
     EXPECT_EQ(amdf_kernel_queue_refresh_status(queue, &status), AMDF_STATUS_OK);
     return status;
   }
@@ -170,7 +174,8 @@ TEST_P(GpuKernelQueueTest, QueryDoesNotRetireNativeCompletion) {
 TEST_P(GpuKernelQueueTest, UnsupportedNotificationDoesNotChangeAcceptedWork) {
   amdf_kernel_queue_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
-      .structure_size = sizeof(info)};
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(amdf_kernel_queue_query_info(queue, &info), AMDF_STATUS_OK);
   ASSERT_EQ(info.notification_types, 0u);
   uint64_t submission = 0;
@@ -189,7 +194,8 @@ TEST_P(GpuKernelQueueTest, UnsupportedNotificationDoesNotChangeAcceptedWork) {
 TEST_P(GpuKernelQueueTest, DefaultCapacityAcceptsAnEntirePendingWindow) {
   amdf_kernel_queue_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
-      .structure_size = sizeof(info)};
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(amdf_kernel_queue_query_info(queue, &info), AMDF_STATUS_OK);
   ASSERT_GT(info.maximum_pending_submission_count, 1u);
   uint64_t submission = 0;

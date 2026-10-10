@@ -90,7 +90,8 @@ class AqlTransferTest
     const amdf_memory_site_t target_host = target->HostSite();
     amdf_memory_pair_info_t ingress = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-        .structure_size = sizeof(ingress)};
+        .structure_size = sizeof(ingress),
+    };
     ASSERT_EQ(
         api_->memory_query_pair_info(&source_host, &source_device, &ingress),
         AMDF_STATUS_OK);
@@ -98,7 +99,8 @@ class AqlTransferTest
               0u);
     amdf_memory_pair_info_t egress = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-        .structure_size = sizeof(egress)};
+        .structure_size = sizeof(egress),
+    };
     ASSERT_EQ(
         api_->memory_query_pair_info(&target_device, &target_host, &egress),
         AMDF_STATUS_OK);

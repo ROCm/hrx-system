@@ -121,7 +121,8 @@ class KfdInstanceTest : public ::testing::Test {
             [](void*, void* allocation) {
               const amdf_allocator_t system = amdf_allocator_system();
               system.free(system.user_data, allocation);
-            }};
+            },
+    };
     return amdf_gpu_umd_instance_prepare(&instance_, lifetime, allocator);
   }
 

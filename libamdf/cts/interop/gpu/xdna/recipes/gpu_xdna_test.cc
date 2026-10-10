@@ -186,12 +186,11 @@ class GpuXdnaRecipeTest : public GpuXdnaDeviceFixture {
                                ? profile.registration
                                : profile.allocation;
     ASSERT_GT(geometry.byte_length_granularity, 0u);
-    amdf_memory_create_info_t create =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-             // differs from list initialization.
-    create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-    create.structure_size = sizeof(create);
-    create.memory_profile_ordinal = profile.ordinal;
+    amdf_memory_create_info_t create = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+        .structure_size = sizeof(create),
+        .memory_profile_ordinal = profile.ordinal,
+    };
     create.access_count = accesses_.size();
     create.accesses = accesses_.data();
     create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
@@ -217,14 +216,13 @@ class GpuXdnaRecipeTest : public GpuXdnaDeviceFixture {
     const uint64_t granularity =
         staging_profile.allocation.byte_length_granularity;
     ASSERT_GT(granularity, 0u);
-    amdf_memory_create_info_t staging_create =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    staging_create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-    staging_create.structure_size = sizeof(staging_create);
-    staging_create.memory_profile_ordinal = staging_profile.ordinal;
-    staging_create.access_count = 1;
-    staging_create.accesses = gpu_access.data();
+    amdf_memory_create_info_t staging_create = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+        .structure_size = sizeof(staging_create),
+        .memory_profile_ordinal = staging_profile.ordinal,
+        .access_count = 1,
+        .accesses = gpu_access.data(),
+    };
     staging_create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
     staging_create.byte_length =
         (kStagingByteLength + granularity - 1) / granularity * granularity;
@@ -245,7 +243,8 @@ class GpuXdnaRecipeTest : public GpuXdnaDeviceFixture {
             .structure_size = sizeof(host_create),
             .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
             .byte_length = create.byte_length,
-            .minimum_alignment = geometry.registered_host_pointer_alignment};
+            .minimum_alignment = geometry.registered_host_pointer_alignment,
+        };
         ASSERT_NO_FATAL_FAILURE(
             registered_storage_[i].Create(api_, system_scope_, host_create));
         ASSERT_EQ(registered_storage_[i].host.cacheability,
@@ -508,7 +507,8 @@ class GpuXdnaRecipeTest : public GpuXdnaDeviceFixture {
           .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
           .structure_size = sizeof(submit),
           .command_count = 1,
-          .commands = &execution_.command};
+          .commands = &execution_.command,
+      };
       uint64_t point = 0;
       ASSERT_EQ(
           xdna_api_->kernel_queue_submit(execution_.queue, &submit, &point),
@@ -591,7 +591,8 @@ class GpuXdnaRecipeTest : public GpuXdnaDeviceFixture {
       }
       amdf_kernel_queue_status_t status = {
           .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
-          .structure_size = sizeof(status)};
+          .structure_size = sizeof(status),
+      };
       const auto query_status =
           api_->kernel_queue_query_status(execution_.queue, &status);
       EXPECT_EQ(query_status, AMDF_STATUS_OK);

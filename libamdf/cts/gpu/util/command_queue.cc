@@ -51,12 +51,14 @@ void GpuCommandQueue::Initialize(
       .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
       .structure_size = sizeof(create_queue),
       .queue_family_ordinal = family.ordinal,
-      .maximum_pending_submission_count = 1};
+      .maximum_pending_submission_count = 1,
+  };
   ASSERT_EQ(gpu_api->kernel_queue_create(device, &create_queue, &kernel_queue_),
             AMDF_STATUS_OK);
   amdf_kernel_queue_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
-      .structure_size = sizeof(info)};
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(api->kernel_queue_query_info(kernel_queue_, &info), AMDF_STATUS_OK);
   ASSERT_EQ(info.queue_family_ordinal, family.ordinal);
   ASSERT_EQ(info.command_type, command_type_);
@@ -66,39 +68,43 @@ void GpuCommandQueue::Initialize(
 
   const amdf_memory_device_access_t access = {
       device,
-      {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
-                 AMDF_MEMORY_ACCESS_EXECUTE,
-       .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
-       .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU}};
+      {
+          .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
+                    AMDF_MEMORY_ACCESS_EXECUTE,
+          .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+          .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
+      }};
   const auto ordinal = FindGpuMemoryProfileOrdinal(
       api, system_scope, device,
       AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
       AMDF_MEMORY_FLAG_HOST_VISIBLE, access.requirements);
   ASSERT_NE(ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
-  amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-                                   .structure_size = sizeof(profile)};
+  amdf_memory_profile_t profile = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+      .structure_size = sizeof(profile),
+  };
   amdf_memory_access_capabilities_t capabilities = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-      .structure_size = sizeof(capabilities)};
+      .structure_size = sizeof(capabilities),
+  };
   ASSERT_EQ(api->memory_scope_query_device_profile(
                 system_scope, ordinal, 1, &access, &profile, &capabilities),
             AMDF_STATUS_OK);
   const uint64_t granularity = profile.allocation.byte_length_granularity;
   ASSERT_GT(granularity, 0u);
-  amdf_memory_create_info_t create_memory =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  create_memory.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-  create_memory.structure_size = sizeof(create_memory);
-  create_memory.memory_profile_ordinal = ordinal;
-  create_memory.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-  create_memory.access_count = 1;
-  create_memory.accesses = &access;
   const uint64_t requested_byte_length =
       command_byte_length ? command_byte_length : 4096;
-  create_memory.byte_length =
-      (requested_byte_length + granularity - 1) / granularity * granularity;
-  create_memory.minimum_alignment = profile.allocation.minimum_alignment;
+  amdf_memory_create_info_t create_memory = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create_memory),
+      .memory_profile_ordinal = ordinal,
+      .access_count = 1,
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .byte_length =
+          (requested_byte_length + granularity - 1) / granularity * granularity,
+      .minimum_alignment = profile.allocation.minimum_alignment,
+      .accesses = &access,
+  };
   ASSERT_NO_FATAL_FAILURE(commands_.Create(api, system_scope, create_memory));
   words_ = {reinterpret_cast<uint32_t*>(commands_.host.pointer),
             commands_.host.byte_length / sizeof(uint32_t)};
@@ -125,9 +131,11 @@ void GpuCommandQueue::Publish(const amdf_api_t* api,
                                               AMDF_HOST_CACHE_OPERATION_FLUSH,
                                               byte_offset, byte_length),
               AMDF_STATUS_OK);
-    const amdf_gpu_kernel_command_t command = {.memory = commands_.memory,
-                                               .byte_offset = byte_offset,
-                                               .byte_length = byte_length};
+    const amdf_gpu_kernel_command_t command = {
+        .memory = commands_.memory,
+        .byte_offset = byte_offset,
+        .byte_length = byte_length,
+    };
     ASSERT_NO_FATAL_FAILURE(Submit(gpu_api, command));
   } else {
     const uint64_t index = command_type_ == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
@@ -145,7 +153,8 @@ void GpuCommandQueue::Submit(const amdf_gpu_api_t* gpu_api,
       .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO,
       .structure_size = sizeof(submit),
       .command_count = 1,
-      .commands = &command};
+      .commands = &command,
+  };
   ASSERT_EQ(gpu_api->kernel_queue_submit(kernel_queue_, &submit, &submission_),
             AMDF_STATUS_OK);
 }
@@ -157,7 +166,8 @@ void GpuCommandQueue::WaitRetired(const amdf_api_t* api) {
               AMDF_STATUS_OK);
     amdf_kernel_queue_status_t status = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
-        .structure_size = sizeof(status)};
+        .structure_size = sizeof(status),
+    };
     ASSERT_EQ(api->kernel_queue_query_status(kernel_queue_, &status),
               AMDF_STATUS_OK);
     EXPECT_EQ(status.state, AMDF_QUEUE_STATE_ACTIVE);
@@ -170,7 +180,8 @@ void GpuCommandQueue::WaitRetired(const amdf_api_t* api) {
     ASSERT_NO_FATAL_FAILURE(user_queue_.WaitConsumed(api, index));
     amdf_user_queue_status_t status = {
         .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS,
-        .structure_size = sizeof(status)};
+        .structure_size = sizeof(status),
+    };
     ASSERT_EQ(api->user_queue_query_status(user_queue_.queue, &status),
               AMDF_STATUS_OK);
     EXPECT_EQ(status.state, AMDF_QUEUE_STATE_ACTIVE);

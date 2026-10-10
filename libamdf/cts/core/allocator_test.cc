@@ -91,14 +91,15 @@ const amdf_api_t* QueryApi() {
 
 amdf_instance_create_info_t MakeInstanceCreateInfo(
     RecordingAllocator* allocator) {
-  amdf_instance_create_info_t create_info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  create_info.type = AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-  create_info.structure_size = sizeof(create_info);
-  create_info.host_allocator = allocator->MakeAllocator();
-  create_info.native_lifetime = GetCtsDeviceCache().native_lifetime();
-  return create_info;
+  const amdf_allocator_t host_allocator = allocator->MakeAllocator();
+  const amdf_native_lifetime_t native_lifetime =
+      GetCtsDeviceCache().native_lifetime();
+  return {
+      .type = AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+      .structure_size = sizeof(amdf_instance_create_info_t),
+      .native_lifetime = native_lifetime,
+      .host_allocator = host_allocator,
+  };
 }
 
 TEST(AllocatorTest, RejectsMalformedConfigurationWithoutPublishingInstance) {

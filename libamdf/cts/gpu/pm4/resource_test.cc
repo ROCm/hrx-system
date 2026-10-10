@@ -48,7 +48,8 @@ TEST_F(Pm4DispatchTest, SwitchesBetweenTransformAndLdsKernels) {
 
   amdf_gpu_endpoint_info_t endpoint_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
-      .structure_size = sizeof(endpoint_info)};
+      .structure_size = sizeof(endpoint_info),
+  };
   ASSERT_EQ(gpu_api_->endpoint_query_info(endpoint_, &endpoint_info),
             AMDF_STATUS_OK);
   const auto* selected = kernels::lds_exchange::kKernels.Find(endpoint_info);

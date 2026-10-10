@@ -29,14 +29,13 @@ class XdnaMemoryTest : public XdnaDeviceFixture {
   }
 
   amdf_memory_create_info_t MakeMemoryCreateInfo() {
-    amdf_memory_create_info_t create_info =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-    create_info.structure_size = sizeof(create_info);
-    create_info.access_count = 1;
-    create_info.accesses = &memory_access_;
-    create_info.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
+    amdf_memory_create_info_t create_info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+        .structure_size = sizeof(create_info),
+        .access_count = 1,
+        .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+        .accesses = &memory_access_,
+    };
     create_info.memory_profile_ordinal = FindMemoryProfileOrdinal(
         AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
         create_info.required_flags);
@@ -101,11 +100,14 @@ TEST_F(XdnaMemoryTest, ValidatesCreationArgumentsWithoutNativeAllocation) {
 
 TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
   const amdf_memory_create_info_t create_info = MakeMemoryCreateInfo();
-  amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-                                   .structure_size = sizeof(profile)};
+  amdf_memory_profile_t profile = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+      .structure_size = sizeof(profile),
+  };
   amdf_memory_access_capabilities_t access_capabilities = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-      .structure_size = sizeof(access_capabilities)};
+      .structure_size = sizeof(access_capabilities),
+  };
   ASSERT_EQ(QueryMemoryProfile(create_info.memory_profile_ordinal, &profile,
                                &access_capabilities),
             AMDF_STATUS_OK);
@@ -127,13 +129,16 @@ TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
       << " code=" << amdf_status_code(create_status);
   ASSERT_NE(memory_, nullptr);
 
-  amdf_memory_info_t memory_info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
-                                    .structure_size = sizeof(memory_info)};
+  amdf_memory_info_t memory_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+      .structure_size = sizeof(memory_info),
+  };
   ASSERT_TRUE(
       amdf_status_is_ok(api_->memory_query_info(memory_, &memory_info)));
   amdf_memory_access_info_t access_info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
-      .structure_size = sizeof(access_info)};
+      .structure_size = sizeof(access_info),
+  };
   ASSERT_EQ(api_->memory_query_access_info(memory_, 0, &access_info),
             AMDF_STATUS_OK);
   EXPECT_EQ(memory_info.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
@@ -188,7 +193,8 @@ TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
 
   amdf_xdna_device_info_t device_info = {
       .type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO,
-      .structure_size = sizeof(device_info)};
+      .structure_size = sizeof(device_info),
+  };
   ASSERT_TRUE(
       amdf_status_is_ok(xdna_api_->device_query_info(device_, &device_info)));
   EXPECT_EQ(access_info.reset_epoch, device_info.reset_epoch);
@@ -209,7 +215,8 @@ TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
 
   amdf_memory_info_t second_memory_info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
-      .structure_size = sizeof(second_memory_info)};
+      .structure_size = sizeof(second_memory_info),
+  };
   ASSERT_TRUE(
       amdf_status_is_ok(api_->memory_query_info(memory_, &second_memory_info)));
   EXPECT_EQ(std::memcmp(&memory_info, &second_memory_info, sizeof(memory_info)),
@@ -225,12 +232,11 @@ TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
                         sizeof(invalid_memory_info)),
             0);
 
-  amdf_memory_map_info_t map_info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-           // differs from list initialization.
-  map_info.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
-  map_info.structure_size = sizeof(map_info);
-  map_info.byte_offset = 32;
+  amdf_memory_map_info_t map_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
+      .structure_size = sizeof(map_info),
+      .byte_offset = 32,
+  };
   map_info.byte_length = memory_info.byte_length - map_info.byte_offset;
   map_info.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
   ASSERT_TRUE(
@@ -239,7 +245,8 @@ TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
 
   amdf_host_mapping_info_t mapping_info = {
       .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
-      .structure_size = sizeof(mapping_info)};
+      .structure_size = sizeof(mapping_info),
+  };
   ASSERT_TRUE(amdf_status_is_ok(
       api_->host_mapping_query_info(mapping_, &mapping_info)));
   EXPECT_EQ(mapping_info.flags & map_info.flags, map_info.flags);
@@ -307,7 +314,8 @@ TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
   ASSERT_NE(read_only_mapping, nullptr);
   amdf_host_mapping_info_t read_only_mapping_info = {
       .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
-      .structure_size = sizeof(read_only_mapping_info)};
+      .structure_size = sizeof(read_only_mapping_info),
+  };
   ASSERT_TRUE(amdf_status_is_ok(api_->host_mapping_query_info(
       read_only_mapping, &read_only_mapping_info)));
   EXPECT_TRUE(amdf_status_is_ok(api_->host_mapping_cache_control(
@@ -334,13 +342,12 @@ TEST_F(XdnaMemoryTest, RejectsInvalidMappingRequestsBeforeNativeMapping) {
       api_->memory_create(system_scope_, &create_info, &memory_);
   ASSERT_TRUE(amdf_status_is_ok(create_status));
 
-  amdf_memory_map_info_t map_info =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  map_info.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
-  map_info.structure_size = sizeof(map_info);
-  map_info.byte_length = 1;
-  map_info.flags = AMDF_MEMORY_MAP_FLAG_READ;
+  amdf_memory_map_info_t map_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
+      .structure_size = sizeof(map_info),
+      .byte_length = 1,
+      .flags = AMDF_MEMORY_MAP_FLAG_READ,
+  };
   amdf_host_mapping_t* output =
       reinterpret_cast<amdf_host_mapping_t*>(uintptr_t{1});
   EXPECT_EQ(amdf_status_code(api_->memory_map(nullptr, &map_info, &output)),

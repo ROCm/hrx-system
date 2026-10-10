@@ -12,9 +12,11 @@ namespace {
 
 amdf_endpoint_info_t MakeXdnaEndpointInfo(uint32_t device_id,
                                           uint32_t revision_id) {
-  amdf_endpoint_info_t info = {.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
-                               .structure_size = sizeof(info),
-                               .engine_kind = AMDF_ENGINE_KIND_XDNA};
+  amdf_endpoint_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+      .structure_size = sizeof(info),
+      .engine_kind = AMDF_ENGINE_KIND_XDNA,
+  };
   info.pci.vendor_id = 0x1022u;
   info.pci.device_id = device_id;
   info.pci.revision_id = revision_id;

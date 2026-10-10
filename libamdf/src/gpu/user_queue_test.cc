@@ -134,7 +134,8 @@ class GpuUserQueueTest : public ::testing::Test {
         .structure_size = sizeof(create_info),
         .priority = AMDF_QUEUE_PRIORITY_NORMAL,
         .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
-        .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER};
+        .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
+    };
     create_info.scratch.memory = const_cast<amdf_memory_t*>(&scratch_);
     create_info.scratch.access_ordinal = 1;
     create_info.scratch.byte_offset = 4096;
@@ -169,7 +170,8 @@ TEST_F(GpuUserQueueTest, RetainsQueueAcrossRejectedDestruction) {
 
   amdf_user_queue_info_t queue_info = {
       .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO,
-      .structure_size = sizeof(queue_info)};
+      .structure_size = sizeof(queue_info),
+  };
   ASSERT_EQ(amdf_user_queue_query_info(queue_, &queue_info), AMDF_STATUS_OK);
   EXPECT_TRUE(amdf_queue_id_is_valid(&queue_info.queue_id));
   EXPECT_EQ(queue_info.priority, AMDF_QUEUE_PRIORITY_NORMAL);
@@ -182,7 +184,8 @@ TEST_F(GpuUserQueueTest, RetainsQueueAcrossRejectedDestruction) {
 
   amdf_user_queue_mapping_info_t mapping_info = {
       .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_MAPPING_INFO,
-      .structure_size = sizeof(mapping_info)};
+      .structure_size = sizeof(mapping_info),
+  };
   ASSERT_EQ(amdf_user_queue_mapping_query_info(mapping_, &mapping_info),
             AMDF_STATUS_OK);
   EXPECT_TRUE(
@@ -278,7 +281,8 @@ TEST_F(GpuUserQueueTest, DeviceMappingRetainsExactProducer) {
 
   amdf_user_queue_mapping_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_MAPPING_INFO,
-      .structure_size = sizeof(info)};
+      .structure_size = sizeof(info),
+  };
   ASSERT_EQ(amdf_user_queue_mapping_query_info(mapping_, &info),
             AMDF_STATUS_OK);
   EXPECT_TRUE(
@@ -335,14 +339,17 @@ TEST_F(GpuUserQueueTest, PreservesRequestedRingCapacity) {
         amdf_gpu_user_queue_create(&consumer_.base, &create_info, &queue_),
         AMDF_STATUS_OK);
     EXPECT_EQ(consumer_state_.observed_create.ring_byte_length, capacity);
-    amdf_user_queue_info_t info = {.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO,
-                                   .structure_size = sizeof(info)};
+    amdf_user_queue_info_t info = {
+        .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO,
+        .structure_size = sizeof(info),
+    };
     ASSERT_EQ(amdf_user_queue_query_info(queue_, &info), AMDF_STATUS_OK);
     EXPECT_EQ(info.ring_byte_length, capacity);
     ASSERT_EQ(amdf_user_queue_map(queue_, nullptr, &mapping_), AMDF_STATUS_OK);
     amdf_user_queue_mapping_info_t mapping_info = {
         .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_MAPPING_INFO,
-        .structure_size = sizeof(mapping_info)};
+        .structure_size = sizeof(mapping_info),
+    };
     ASSERT_EQ(amdf_user_queue_mapping_query_info(mapping_, &mapping_info),
               AMDF_STATUS_OK);
     EXPECT_EQ(mapping_info.ring_byte_length, capacity);

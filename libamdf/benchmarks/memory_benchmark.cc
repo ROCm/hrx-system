@@ -95,7 +95,8 @@ class MemoryBenchmark {
     for (auto* scope : scopes) {
       amdf_memory_scope_info_t info = {
           .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
-          .structure_size = sizeof(info)};
+          .structure_size = sizeof(info),
+      };
       CheckStatus(api_->memory_scope_query_info(scope, &info), "scope_info");
       if (info.kind != AMDF_MEMORY_SCOPE_KIND_SYSTEM) {
         continue;
@@ -104,10 +105,12 @@ class MemoryBenchmark {
            ++ordinal) {
         amdf_memory_profile_t profile = {
             .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-            .structure_size = sizeof(profile)};
+            .structure_size = sizeof(profile),
+        };
         amdf_memory_access_capabilities_t capabilities = {
             .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-            .structure_size = sizeof(capabilities)};
+            .structure_size = sizeof(capabilities),
+        };
         const amdf_status_t profile_status =
             api_->memory_scope_query_device_profile(scope, ordinal, 1, &access_,
                                                     &profile, &capabilities);
@@ -237,17 +240,17 @@ class MemoryBenchmark {
     create_info_.byte_length = byte_length;
     CheckStatus(api_->memory_create(scope_, &create_info_, &memory_),
                 "memory_create");
-    amdf_memory_map_info_t map =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    map.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
-    map.structure_size = sizeof(map);
-    map.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
-    map.byte_length = byte_length;
+    amdf_memory_map_info_t map = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
+        .structure_size = sizeof(map),
+        .byte_length = byte_length,
+        .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+    };
     CheckStatus(api_->memory_map(memory_, &map, &mapping_), "memory_map");
     amdf_host_mapping_info_t info = {
         .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
-        .structure_size = sizeof(info)};
+        .structure_size = sizeof(info),
+    };
     CheckStatus(api_->host_mapping_query_info(mapping_, &info), "mapping_info");
     pointer_ = static_cast<uint8_t*>(info.pointer);
     uint64_t address = 0;

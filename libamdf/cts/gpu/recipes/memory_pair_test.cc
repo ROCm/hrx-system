@@ -29,15 +29,14 @@ class MemoryPairRecipeTest : public Pm4CommandTest {
       ASSERT_EQ(api_->memory_query_pair_info(&source, &target, pair),
                 AMDF_STATUS_OK);
     } else {
-      amdf_memory_profile_pair_query_t query =
-          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-               // differs from declaration order.
-      query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
-      query.structure_size = sizeof(query);
-      query.memory_profile_ordinal = memory.creation.memory_profile_ordinal;
-      query.required_flags = memory.creation.required_flags;
-      query.access_count = memory.creation.access_count;
-      query.accesses = memory.creation.accesses;
+      amdf_memory_profile_pair_query_t query = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY,
+          .structure_size = sizeof(query),
+          .memory_profile_ordinal = memory.creation.memory_profile_ordinal,
+          .access_count = memory.creation.access_count,
+          .required_flags = memory.creation.required_flags,
+          .accesses = memory.creation.accesses,
+      };
       query.producer.kind = producer;
       query.consumer.kind = consumer;
       if (producer == AMDF_MEMORY_SITE_KIND_HOST) {

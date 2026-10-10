@@ -32,8 +32,10 @@ void CheckSystemTransition(const amdf_cache_transition_t& transition,
 
 void CheckSystemPair(const amdf_api_t* api, const amdf_memory_site_t& producer,
                      const amdf_memory_site_t& consumer) {
-  amdf_memory_pair_info_t pair = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-                                  .structure_size = sizeof(pair)};
+  amdf_memory_pair_info_t pair = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(pair),
+  };
   ASSERT_EQ(api->memory_query_pair_info(&producer, &consumer, &pair),
             AMDF_STATUS_OK);
   ASSERT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);

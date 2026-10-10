@@ -486,7 +486,8 @@ class ResidentGpuXdnaTest : public GpuXdnaDeviceFixture {
               .structure_size = sizeof(host_create),
               .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
               .byte_length = create.byte_length,
-              .minimum_alignment = geometry.registered_host_pointer_alignment};
+              .minimum_alignment = geometry.registered_host_pointer_alignment,
+          };
           ASSERT_NO_FATAL_FAILURE(
               buffer.registration.Create(api_, system_scope_, host_create));
           ASSERT_EQ(buffer.registration.host.cacheability,
@@ -734,7 +735,8 @@ class ResidentGpuXdnaTest : public GpuXdnaDeviceFixture {
           .payload_word_offset = shape.word_offset,
           .copy_control = sdma_.copy_control,
           .fence_header = sdma_.fence_header,
-          .cache_flags = sdma_.cache_flags};
+          .cache_flags = sdma_.cache_flags,
+      };
       std::memcpy(original_arguments_.data(), &arguments, sizeof(arguments));
     } else if (plan.npu_initiated()) {
       const NpuInitiatedArguments arguments = {
@@ -1031,7 +1033,8 @@ class ResidentGpuXdnaTest : public GpuXdnaDeviceFixture {
           .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
           .structure_size = sizeof(submit),
           .command_count = 1,
-          .commands = &execution_.command};
+          .commands = &execution_.command,
+      };
       npu_submit_status =
           xdna_api_->kernel_queue_submit(execution_.queue, &submit, &npu_point);
       npu_pending_ = amdf_status_is_ok(npu_submit_status);

@@ -78,18 +78,19 @@ class Pm4AtomicStoreTest : public Pm4CommandTest,
     }
     const amdf_memory_device_access_t attachment = {
         device_,
-        {.access = kReadWrite,
-         .flags =
-             AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
-    amdf_memory_create_info_t creation =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-             // spans intervening work.
-    creation.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-    creation.structure_size = sizeof(creation);
-    creation.memory_profile_ordinal = FindMemoryProfileOrdinal(
-        system_scope_,
-        AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
-        AMDF_MEMORY_FLAG_HOST_VISIBLE, attachment.requirements);
+        {
+            .access = kReadWrite,
+            .flags = AMDF_MEMORY_FLAG_HOST_COHERENT |
+                     AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+        }};
+    amdf_memory_create_info_t creation = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+        .structure_size = sizeof(creation),
+        .memory_profile_ordinal = FindMemoryProfileOrdinal(
+            system_scope_,
+            AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
+            AMDF_MEMORY_FLAG_HOST_VISIBLE, attachment.requirements),
+    };
     ASSERT_NE(creation.memory_profile_ordinal,
               AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
     creation.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
@@ -97,11 +98,14 @@ class Pm4AtomicStoreTest : public Pm4CommandTest,
     creation.accesses = &attachment;
     creation.byte_length = kPageByteLength;
     creation.minimum_alignment = kPageByteLength;
-    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
-                                     .structure_size = sizeof(profile)};
+    amdf_memory_profile_t profile = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+        .structure_size = sizeof(profile),
+    };
     amdf_memory_access_capabilities_t capabilities = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-        .structure_size = sizeof(capabilities)};
+        .structure_size = sizeof(capabilities),
+    };
     ASSERT_EQ(
         QueryMemoryProfile(system_scope_, creation.memory_profile_ordinal,
                            attachment.requirements, &profile, &capabilities),
@@ -117,17 +121,15 @@ class Pm4AtomicStoreTest : public Pm4CommandTest,
 
     std::array<amdf_memory_pair_info_t, 2> prospective = {};
     for (size_t direction = 0; direction < prospective.size(); ++direction) {
-      amdf_memory_profile_pair_query_t query =
-          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-               // differs from declaration order.
-      query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
-      query.structure_size = sizeof(query);
-      query.memory_profile_ordinal = creation.memory_profile_ordinal;
-      query.required_flags = creation.required_flags;
-      query.access_count = creation.access_count;
-      query.accesses = creation.accesses;
-      query.registered_host_cacheability =
-          creation.registered_host_cacheability;
+      amdf_memory_profile_pair_query_t query = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY,
+          .structure_size = sizeof(query),
+          .memory_profile_ordinal = creation.memory_profile_ordinal,
+          .access_count = creation.access_count,
+          .required_flags = creation.required_flags,
+          .accesses = creation.accesses,
+          .registered_host_cacheability = creation.registered_host_cacheability,
+      };
       amdf_memory_profile_site_t host = {.kind = AMDF_MEMORY_SITE_KIND_HOST};
       host.value.host_access = direction == 0 ? AMDF_MEMORY_MAP_FLAG_WRITE
                                               : AMDF_MEMORY_MAP_FLAG_READ;
@@ -180,7 +182,8 @@ class Pm4AtomicStoreTest : public Pm4CommandTest,
         const auto& consumer = direction == 0 ? pm4 : host;
         amdf_memory_pair_info_t pair = {
             .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-            .structure_size = sizeof(pair)};
+            .structure_size = sizeof(pair),
+        };
         ASSERT_EQ(api_->memory_query_pair_info(&producer, &consumer, &pair),
                   AMDF_STATUS_OK);
         ASSERT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE,
