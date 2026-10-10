@@ -93,12 +93,16 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
                                                 &service, allocator_);
       if (iree_status_is_ok(status_)) {
         const auto interface = loom_serve_image_service_interface(service);
+        loom_serve_registry_t* registry = nullptr;
+        IREE_ASSERT_OK(loom_serve_registry_create(1, &interface, 0, {},
+                                                  &registry, allocator_));
         status_ = loom_serve_router_run(
-            loom_serve_host_executor(host_), server_, 1, &interface,
+            loom_serve_host_executor(host_), server_, registry,
             {.request_quota = options.pending_capacity,
              .holding_capacity =
                  loom_serve_http_server_connection_capacity(server_) / 2},
             allocator_);
+        IREE_ASSERT_OK(loom_serve_registry_destroy(registry));
       }
       loom_serve_image_service_destroy(service);
     });

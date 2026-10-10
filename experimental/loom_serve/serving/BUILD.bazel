@@ -17,11 +17,14 @@ loom_cc_library(
     srcs = ["router.c"],
     hdrs = ["router.h"],
     deps = [
+        ":configuration",
+        ":registry",
         "//experimental/loom_serve/http:logs",
         "//experimental/loom_serve/http:request",
         "//experimental/loom_serve/http:server",
         "//experimental/loom_serve/http:service",
         "//experimental/loom_serve/http:tokenization",
+        "//experimental/loom_serve/runtime:compilation",
         "//experimental/loom_serve/telemetry:stream",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
@@ -41,6 +44,7 @@ loom_cc_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":registry",
         ":router",
         "//experimental/loom_serve/http:listener",
         "//experimental/loom_serve/http:request",
@@ -76,11 +80,9 @@ loom_cc_binary(
     ]),
     deps = [
         ":configuration",
+        ":finite_registration",
+        ":registry",
         ":router",
-        "//experimental/loom_serve/decision:protocol",
-        "//experimental/loom_serve/embedding:protocol",
-        "//experimental/loom_serve/finite:model",
-        "//experimental/loom_serve/finite:service",
         "//experimental/loom_serve/http:listener",
         "//experimental/loom_serve/http:server",
         "//experimental/loom_serve/image:model",
@@ -100,6 +102,39 @@ loom_cc_binary(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+loom_cc_library(
+    name = "registry",
+    srcs = ["registry.c"],
+    hdrs = ["registry.h"],
+    deps = [
+        ":configuration",
+        "//experimental/loom_serve/http:service",
+        "//experimental/loom_serve/runtime:compilation",
+        "//experimental/loom_serve/telemetry:record",
+        "//experimental/loom_serve/telemetry:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "finite_registration",
+    srcs = ["finite_registration.c"],
+    hdrs = ["finite_registration.h"],
+    deps = [
+        ":configuration",
+        ":registry",
+        "//experimental/loom_serve/decision:protocol",
+        "//experimental/loom_serve/embedding:protocol",
+        "//experimental/loom_serve/finite:model",
+        "//experimental/loom_serve/finite:service",
+        "//experimental/loom_serve/http:service",
+        "//experimental/loom_serve/runtime:compilation",
+        "//experimental/loom_serve/runtime:device",
+        "//experimental/loom_serve/runtime:host",
+        "//runtime/src/iree/base",
     ],
 )
 

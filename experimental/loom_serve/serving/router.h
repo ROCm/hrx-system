@@ -7,7 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_SERVING_ROUTER_H_
 #define EXPERIMENTAL_LOOM_SERVE_SERVING_ROUTER_H_
 
-#include "experimental/loom_serve/http/service.h"
+#include "experimental/loom_serve/serving/registry.h"
 #include "iree/task/executor.h"
 
 #ifdef __cplusplus
@@ -28,12 +28,12 @@ typedef struct loom_serve_router_options_t {
 // X-Loom-Model. A checkpoint request may omit its selector with exactly one
 // service. GET /v1/models lists deployment names and namespaced capabilities;
 // GET /v1/status adds copied scheduler ownership. /healthz and /readyz are
-// model-free: constructors have completed, not necessarily weight activation.
+// model-free: HTTP is available, independently of model preparation/activation.
 // Zero services is valid: model/status lists are empty, work counters are zero,
 // and inference or tokenization requests receive model-not-registered errors.
 // GET /metrics exposes the same copied ownership as Prometheus text gauges
 // and cumulative model-protocol counters without invoking models/devices.
-// Server counters sum the fixed catalog's live-through-return owners, excluding
+// Server counters include current and removed model incarnations, excluding
 // router-handled utilities, observation and rejected routes. If a service has
 // no counters, whole-server totals are unavailable rather than partial.
 // GET /logz polls server diagnostics and current totals. X-Loom-Model instead
@@ -41,6 +41,17 @@ typedef struct loom_serve_router_options_t {
 // previous poll. Each response copies records and reports gaps/current counters
 // without retaining slots or slowing publication. See http/logs.h for cursor
 // rules.
+// POST /v1/models/register takes one catalog model object with optional
+// admission="open" or "drained". A 202 acknowledges server-owned intent;
+// /v1/status reports preparation/failure and copied source diagnostics. Closing
+// the control connection does not cancel the operation. Drained registration
+// stores metadata only; undrain starts preparation. Inference arriving before
+// readiness uses the same bounded holding credit as drained admission.
+// POST /v1/models/unregister takes {"model":"name","mode":"drain"|"abort"};
+// omitted mode is drain. Its 202 seals admission irreversibly, resolves held
+// arrivals with 410, then completes or cancels admitted work before retirement.
+// A name remains reserved until actual resource retirement. Unsupported managed
+// modalities return 501; borrowed application services cannot be unregistered.
 // POST /v1/models/drain and /v1/models/undrain select {"model":"name"} and
 // change admission without evicting weights or discarding retained state.
 // Drain lets every already-admitted request finish, including service queues;
@@ -56,14 +67,15 @@ typedef struct loom_serve_router_options_t {
 // on independent finite CPU tasks. Transport connection credit bounds utility
 // jobs; each retains its request claim until task release, even on
 // cancellation. Shutdown/failure stops admission and drains accepted
-// asynchronous callbacks before detaching their wake targets. Return leaves
-// outstanding claims owned by services; the caller destroys them before the
-// borrowed transport. Failed readiness is not queue retirement: model owners
-// perform the outer device join, never a router callback.
+// asynchronous callbacks before detaching their wake targets. Managed models
+// retire here through nonblocking ownership wakes, independently of readiness
+// success. Borrowed services still belong to the caller and are destroyed
+// before the borrowed transport. The registry survives this call: a platform
+// cleanup failure preserves its resources and factory/device owners for the
+// outer application. No callback destroys a shared queue or device group.
 iree_status_t loom_serve_router_run(iree_task_executor_t* executor,
                                     loom_serve_http_server_t* server,
-                                    iree_host_size_t service_count,
-                                    const loom_serve_http_service_t* services,
+                                    loom_serve_registry_t* registry,
                                     loom_serve_router_options_t options,
                                     iree_allocator_t host_allocator);
 

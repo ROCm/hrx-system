@@ -7,10 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "experimental/loom_serve/decision/protocol.h"
-#include "experimental/loom_serve/embedding/protocol.h"
-#include "experimental/loom_serve/finite/model.h"
-#include "experimental/loom_serve/finite/service.h"
 #include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/service.h"
@@ -18,6 +14,7 @@
 #include "experimental/loom_serve/runtime/host_flags.h"
 #include "experimental/loom_serve/runtime/signals.h"
 #include "experimental/loom_serve/serving/configuration.h"
+#include "experimental/loom_serve/serving/finite_registration.h"
 #include "experimental/loom_serve/serving/router.h"
 #include "experimental/loom_serve/text/schedule.h"
 #include "experimental/loom_serve/text/service.h"
@@ -29,6 +26,9 @@
 
 IREE_FLAG(string, models, "",
           "Optional JSON deployment catalog; omitted starts with no models.");
+IREE_FLAG(int32_t, model_capacity, 32,
+          "Maximum registered models, including drained, failed and removing "
+          "entries.");
 IREE_FLAG_LIST(string, listen,
                "HTTP binding: IPv4 host:port, [IPv6]:port, or unix:path. "
                "Repeat for multiple listeners; default 127.0.0.1:8080.");
@@ -58,13 +58,6 @@ typedef union serving_model_t {
     // Owned HTTP admission borrowing the model and deployment name.
     loom_serve_image_service_t* service;
   } image;
-  // Finite vector deployment sharing source commands across request cohorts.
-  struct {
-    // Owned source-JIT model borrowing the shared device.
-    loom_serve_finite_model_t* model;
-    // Owned batched HTTP admission borrowing the model and route name.
-    loom_serve_finite_service_t* service;
-  } finite;
 } serving_model_t;
 
 static iree_status_t serving_create_text(
@@ -139,29 +132,6 @@ static iree_status_t serving_create_image(
   return iree_ok_status();
 }
 
-static iree_status_t serving_create_finite(
-    loom_serve_device_t* device,
-    const loom_serve_model_configuration_t* configuration,
-    serving_model_t* model, loom_serve_http_service_t* out_service,
-    iree_allocator_t allocator) {
-  const loom_serve_finite_model_options_t options = {
-      .source_directory = configuration->source,
-      .asset_directory = configuration->finite.assets,
-      .options = configuration->finite.options};
-  IREE_RETURN_IF_ERROR(loom_serve_finite_model_create(
-      device, &options, &model->finite.model, allocator));
-  IREE_RETURN_IF_ERROR(loom_serve_finite_service_create(
-      loom_serve_device_host(device), model->finite.model,
-      configuration->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING
-          ? loom_serve_embedding_protocol()
-          : loom_serve_decision_protocol(),
-      configuration->name, configuration->pending_requests,
-      (iree_duration_t)FLAG_heartbeat_ms * 1000000, &model->finite.service,
-      allocator));
-  *out_service = loom_serve_finite_service_interface(model->finite.service);
-  return iree_ok_status();
-}
-
 static iree_status_t serving_ready(loom_serve_http_listener_t* listener,
                                    iree_host_size_t model_count) {
   char storage[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
@@ -186,13 +156,14 @@ static void serving_shutdown_requested(void* user_data,
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
-  if (FLAG_connections < 1 || FLAG_held_requests < -1 ||
-      FLAG_held_requests >= FLAG_connections || FLAG_request_body_bytes < 1 ||
-      FLAG_heartbeat_ms < 0) {
-    fprintf(stderr,
-            "Provide positive connection/body capacities and a nonnegative "
-            "heartbeat interval; held_requests must be -1 or below connection "
-            "capacity.\n");
+  if (FLAG_model_capacity < 1 || FLAG_connections < 1 ||
+      FLAG_held_requests < -1 || FLAG_held_requests >= FLAG_connections ||
+      FLAG_request_body_bytes < 1 || FLAG_heartbeat_ms < 0) {
+    fprintf(
+        stderr,
+        "Provide positive model/connection/body capacities and a nonnegative "
+        "heartbeat interval; held_requests must be -1 or below connection "
+        "capacity.\n");
     return EXIT_FAILURE;
   }
   const iree_allocator_t allocator = iree_allocator_system();
@@ -215,6 +186,11 @@ int main(int argc, char** argv) {
     }
     iree_io_file_contents_free(contents);
   }
+  if (iree_status_is_ok(status) &&
+      configuration.model_count > (iree_host_size_t)FLAG_model_capacity) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "startup catalog exceeds model_capacity");
+  }
   if (iree_status_is_ok(status)) {
     status = iree_async_signal_block_default();
   }
@@ -229,6 +205,9 @@ int main(int argc, char** argv) {
   loom_serve_signals_t* signals = NULL;
   serving_model_t* models = NULL;
   loom_serve_http_service_t* services = NULL;
+  loom_serve_registry_t* registry = NULL;
+  iree_host_size_t service_count = 0;
+  loom_serve_finite_registration_options_t registration_options = {0};
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc_array(
         allocator, listener_count, sizeof(*listeners), (void**)&listeners);
@@ -253,24 +232,48 @@ int main(int argc, char** argv) {
   for (iree_host_size_t i = 0;
        i < configuration.model_count && iree_status_is_ok(status); ++i) {
     const loom_serve_model_configuration_t* entry = &configuration.models[i];
+    if (entry->start_drained && (entry->kind == LOOM_SERVE_MODEL_KIND_TEXT ||
+                                 entry->kind == LOOM_SERVE_MODEL_KIND_IMAGE)) {
+      status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                                "initially drained text/image registration "
+                                "requires an asynchronous modality loader");
+      break;
+    }
     switch (entry->kind) {
       case LOOM_SERVE_MODEL_KIND_TEXT:
-        status = serving_create_text(device, entry, &models[i], &services[i],
-                                     allocator);
+        status = serving_create_text(device, entry, &models[i],
+                                     &services[service_count++], allocator);
         break;
       case LOOM_SERVE_MODEL_KIND_IMAGE:
-        status = serving_create_image(device, entry, &models[i], &services[i],
-                                      allocator);
+        status = serving_create_image(device, entry, &models[i],
+                                      &services[service_count++], allocator);
         break;
       case LOOM_SERVE_MODEL_KIND_EMBEDDING:
       case LOOM_SERVE_MODEL_KIND_DECISION:
-        status = serving_create_finite(device, entry, &models[i], &services[i],
-                                       allocator);
         break;
     }
     status = iree_status_annotate_f(
         status, "creating model '%.*s' from '%.*s'", (int)entry->name.size,
         entry->name.data, (int)entry->source.size, entry->source.data);
+  }
+  if (iree_status_is_ok(status)) {
+    registration_options.device = device;
+    registration_options.heartbeat_interval =
+        (iree_duration_t)FLAG_heartbeat_ms * 1000000;
+    status = loom_serve_registry_create(
+        service_count, services,
+        (iree_host_size_t)FLAG_model_capacity - service_count,
+        loom_serve_finite_registration_factory(&registration_options),
+        &registry, allocator);
+  }
+  for (iree_host_size_t i = 0;
+       i < configuration.model_count && iree_status_is_ok(status); ++i) {
+    loom_serve_model_configuration_t* entry = &configuration.models[i];
+    if (entry->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING ||
+        entry->kind == LOOM_SERVE_MODEL_KIND_DECISION) {
+      iree_host_size_t index = 0;
+      status = loom_serve_registry_register(registry, entry, &index);
+    }
   }
   if (iree_status_is_ok(status)) {
     loom_serve_http_server_options_t options =
@@ -302,8 +305,7 @@ int main(int argc, char** argv) {
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_router_run(
-        loom_serve_host_executor(host), server, configuration.model_count,
-        services,
+        loom_serve_host_executor(host), server, registry,
         (loom_serve_router_options_t){
             .request_quota = (iree_host_size_t)FLAG_connections,
             .holding_capacity = (iree_host_size_t)(FLAG_held_requests < 0
@@ -313,12 +315,13 @@ int main(int argc, char** argv) {
   }
   const iree_status_code_t terminal_code = iree_status_code(status);
   for (iree_host_size_t i = 0; models && i < configuration.model_count; ++i) {
+    if (!configuration.models[i].name.size) {
+      continue;
+    }
     if (configuration.models[i].kind == LOOM_SERVE_MODEL_KIND_TEXT) {
       loom_serve_text_service_destroy(models[i].text.service, terminal_code);
     } else if (configuration.models[i].kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
       loom_serve_image_service_destroy(models[i].image.service);
-    } else {
-      loom_serve_finite_service_destroy(models[i].finite.service);
     }
   }
   loom_serve_signals_destroy(signals);
@@ -328,7 +331,13 @@ int main(int argc, char** argv) {
   }
   iree_allocator_free(allocator, listeners);
   loom_serve_http_server_destroy(server);
+  iree_status_t registry_status = loom_serve_registry_destroy(registry);
+  bool retained_resources = !iree_status_is_ok(registry_status);
+  status = iree_status_join(status, registry_status);
   for (iree_host_size_t i = 0; models && i < configuration.model_count; ++i) {
+    if (!configuration.models[i].name.size) {
+      continue;
+    }
     iree_status_t model_status = iree_ok_status();
     switch (configuration.models[i].kind) {
       case LOOM_SERVE_MODEL_KIND_TEXT:
@@ -339,16 +348,24 @@ int main(int argc, char** argv) {
         break;
       case LOOM_SERVE_MODEL_KIND_EMBEDDING:
       case LOOM_SERVE_MODEL_KIND_DECISION:
-        model_status = loom_serve_finite_model_destroy(models[i].finite.model);
         break;
     }
+    retained_resources |= !iree_status_is_ok(model_status);
     status = iree_status_join(status, model_status);
   }
-  status = iree_status_join(status, loom_serve_device_group_destroy(group));
-  loom_serve_host_release(host);
-  iree_allocator_free(allocator, services);
-  iree_allocator_free(allocator, models);
-  loom_serve_configuration_deinitialize(&configuration);
+  // A failed platform release retains its parents until process exit. It does
+  // not authorize destroying a shared device or invalidating borrowed names.
+  if (!retained_resources) {
+    iree_status_t group_status = loom_serve_device_group_destroy(group);
+    retained_resources = !iree_status_is_ok(group_status);
+    status = iree_status_join(status, group_status);
+  }
+  if (!retained_resources) {
+    loom_serve_host_release(host);
+    iree_allocator_free(allocator, services);
+    iree_allocator_free(allocator, models);
+    loom_serve_configuration_deinitialize(&configuration);
+  }
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

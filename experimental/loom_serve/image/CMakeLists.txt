@@ -136,6 +136,7 @@ loom_cc_test(
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::telemetry::record
     iree::experimental::loom_serve::telemetry::stream
@@ -263,6 +264,7 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::runtime::signals
+    iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
 )
 endif()

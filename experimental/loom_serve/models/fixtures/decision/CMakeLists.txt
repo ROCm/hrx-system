@@ -55,6 +55,7 @@ loom_cc_test(
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::testing::gtest
     iree::testing::gtest_main

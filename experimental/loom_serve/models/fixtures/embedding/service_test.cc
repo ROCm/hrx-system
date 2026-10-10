@@ -24,6 +24,7 @@
 #include "experimental/loom_serve/embedding/protocol.h"
 #include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
+#include "experimental/loom_serve/serving/finite_registration.h"
 #include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
@@ -205,7 +206,7 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
   void CreateService(iree_duration_t heartbeat_interval) {
     IREE_ASSERT_OK(loom_serve_finite_service_create(
         host_, model_, loom_serve_embedding_protocol(), IREE_SV("fixture"), 16,
-        heartbeat_interval, &service_, allocator_));
+        heartbeat_interval, nullptr, &service_, allocator_));
     interface_ = loom_serve_finite_service_interface(service_);
     EXPECT_EQ(interface_.capacity_domain,
               loom_serve_device_residency_cache(device_));
@@ -329,10 +330,74 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
   void StartRouter() {
     interface_.set_observer(interface_.self, {});
     router_ = std::thread([this] {
+      loom_serve_registry_t* registry = nullptr;
+      IREE_ASSERT_OK(loom_serve_registry_create(1, &interface_, 0, {},
+                                                &registry, allocator_));
       status_ = loom_serve_router_run(
-          loom_serve_host_executor(host_), server_, 1, &interface_,
+          loom_serve_host_executor(host_), server_, registry,
           {.request_quota = 16, .holding_capacity = 8}, allocator_);
+      IREE_ASSERT_OK(loom_serve_registry_destroy(registry));
     });
+  }
+
+  void StartManagedRouter(iree_host_size_t capacity = 2) {
+    if (service_) {
+      interface_.set_observer(interface_.self, {});
+    }
+    router_ = std::thread([this, capacity] {
+      const loom_serve_finite_registration_options_t options = {
+          .device = device_, .heartbeat_interval = 1000000};
+      loom_serve_registry_t* registry = nullptr;
+      IREE_ASSERT_OK(loom_serve_registry_create(
+          service_ ? 1 : 0, &interface_, capacity,
+          loom_serve_finite_registration_factory(&options), &registry,
+          allocator_));
+      status_ = loom_serve_router_run(
+          loom_serve_host_executor(host_), server_, registry,
+          {.request_quota = 16, .holding_capacity = 8}, allocator_);
+      EXPECT_TRUE(loom_serve_registry_counters(registry, &retired_counters_));
+      status_ =
+          iree_status_join(status_, loom_serve_registry_destroy(registry));
+    });
+  }
+
+  std::string Declaration(const std::string& name, const std::string& source,
+                          const char* admission = "open") {
+    return "{\"kind\":\"embedding\",\"name\":\"" + name + "\",\"source\":\"" +
+           source + "\",\"assets\":\"" + source +
+           "\",\"options\":{\"batch_units\":64},\"admission\":\"" + admission +
+           "\"}";
+  }
+
+  std::string ModelStatus(const std::string& name) {
+    const std::string listing = Read(Send({}, "/v1/status", "GET"));
+    const size_t begin = listing.find("\"id\":\"" + name + "\"");
+    if (begin == std::string::npos) {
+      return {};
+    }
+    // Exact serialized object boundaries, not a readiness read of native state.
+    const size_t end = listing.find("{\"object\":\"model\"", begin);
+    return listing.substr(begin, end == std::string::npos ? end : end - begin);
+  }
+
+  std::string WaitModel(const std::string& name, const std::string& marker) {
+    for (;;) {
+      std::string state = ModelStatus(name);
+      if (marker.empty() ? state.empty()
+                         : state.find(marker) != std::string::npos) {
+        return state;
+      }
+    }
+  }
+
+  uint64_t CompletedRequests() {
+    const std::string metrics = Read(Send({}, "/metrics", "GET"));
+    const std::string prefix = "\nloom_serve_server_completed_total ";
+    const size_t position = metrics.find(prefix);
+    EXPECT_NE(position, std::string::npos);
+    return position == std::string::npos
+               ? 0
+               : std::stoull(metrics.substr(position + prefix.size()));
   }
 
   // The replacement is ordinary model source and a tiny real checkpoint. Only
@@ -424,7 +489,195 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
   std::thread router_;
   // Router status read after join.
   iree_status_t status_ = iree_ok_status();
+  // Copied after the router joins, including counters from removed
+  // incarnations.
+  loom_serve_telemetry_counters_t retired_counters_ = {};
 };
+
+TEST_P(SourceEmbeddingServiceTest,
+       DynamicWeightedRegistrationOwnsItsOperationAndIncarnation) {
+  const std::string package =
+      iree::testing::MakeTempFilePath("dynamic_weighted");
+  ASSERT_NO_FATAL_FAILURE(WriteWeightedPackage(package));
+  StartManagedRouter();
+  const std::string declaration = Declaration("weighted", package, "drained");
+  const auto registered = Read(Send(declaration, "/v1/models/register"));
+  EXPECT_EQ(registered.find("HTTP/1.1 202"), 0u);
+  EXPECT_NE(registered.find(R"("registration":"registered")"),
+            std::string::npos);
+  EXPECT_NE(registered.find(R"("admission":"drained")"), std::string::npos);
+  EXPECT_EQ(Read(Send(declaration, "/v1/models/register")).find("HTTP/1.1 409"),
+            0u);
+  EXPECT_EQ(Read(Send(Declaration("cold", package + "/absent", "drained"),
+                      "/v1/models/register"))
+                .find("HTTP/1.1 202"),
+            0u);
+  EXPECT_EQ(Read(Send(Declaration("full", package), "/v1/models/register"))
+                .find("HTTP/1.1 429"),
+            0u);
+  EXPECT_NE(ModelStatus("cold").find(R"("registration":"registered")"),
+            std::string::npos);
+  EXPECT_EQ(Read(Send(R"({"model":"cold"})", "/v1/models/unregister"))
+                .find("HTTP/1.1 202"),
+            0u);
+  WaitModel("cold", {});
+
+  const int held = Send(R"({"model":"weighted","input":"a"})");
+  WaitModel("weighted", R"("held_requests":1)");
+  const int tokenizer =
+      Send(R"({"model":"weighted","content":"ab"})", "/tokenize");
+  WaitModel("weighted", R"("held_requests":2)");
+  // The accepted operation belongs to the registry, not this unread response.
+  const int admin = Send(R"({"model":"weighted"})", "/v1/models/undrain");
+  WaitModel("weighted", R"("admission":"open")");
+  const linger reset = {1, 0};
+  ASSERT_EQ(setsockopt(admin, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)), 0);
+  ASSERT_EQ(close(admin), 0);
+  EXPECT_NE(Read(Send(R"({"model":"fixture","input":"a"})"))
+                .find(R"("embedding":[1,1,1,1])"),
+            std::string::npos);
+  EXPECT_NE(Read(held).find(R"("embedding":[2,2,2,2])"), std::string::npos);
+  EXPECT_NE(Read(tokenizer).find(R"({"tokens":[0,1]})"), std::string::npos);
+  const auto ready = WaitModel("weighted", R"("registration":"ready")");
+  EXPECT_NE(ready.find("\"workers\":" + std::to_string(GetParam())),
+            std::string::npos);
+  const uint64_t completed = CompletedRequests();
+  EXPECT_EQ(completed, 2u);
+  EXPECT_NE(Read(Send({}, "/metrics", "GET"))
+                .find("loom_serve_model_completed_total{model=\"weighted\","
+                      "kind=\"embedding\",incarnation=\"1\"} 1\n"),
+            std::string::npos);
+  const std::string logs =
+      Read(Send({}, "/logz", "GET", "X-Loom-Model: weighted\r\n"));
+  const std::string prefix = R"({"event":"cursor","value":")";
+  const size_t cursor_begin = logs.find(prefix);
+  ASSERT_NE(cursor_begin, std::string::npos);
+  const size_t value_begin = cursor_begin + prefix.size();
+  const std::string cursor =
+      logs.substr(value_begin, logs.find('"', value_begin) - value_begin);
+  EXPECT_EQ(Read(Send(R"({"model":"weighted","mode":"drain"})",
+                      "/v1/models/unregister"))
+                .find("HTTP/1.1 202"),
+            0u);
+  WaitModel("weighted", {});
+  EXPECT_EQ(CompletedRequests(), completed);
+  EXPECT_EQ(Read(Send(Declaration("weighted", package), "/v1/models/register"))
+                .find("HTTP/1.1 202"),
+            0u);
+  EXPECT_NE(Read(Send(R"({"model":"weighted","input":"a"})"))
+                .find(R"("embedding":[2,2,2,2])"),
+            std::string::npos);
+  EXPECT_EQ(
+      Read(Send({}, "/logz", "GET",
+                "X-Loom-Model: weighted\r\nX-Loom-Cursor: " + cursor + "\r\n"))
+          .find("HTTP/1.1 409"),
+      0u);
+  EXPECT_EQ(CompletedRequests(), completed + 1);
+  const std::string metrics = Read(Send({}, "/metrics", "GET"));
+  EXPECT_EQ(metrics.find("incarnation=\"1\""), std::string::npos);
+  EXPECT_NE(metrics.find("loom_serve_model_completed_total{model=\"weighted\","
+                         "kind=\"embedding\",incarnation=\"3\"} 1\n"),
+            std::string::npos);
+  EXPECT_EQ(Read(Send(R"({"model":"weighted","mode":"abort"})",
+                      "/v1/models/unregister"))
+                .find("HTTP/1.1 202"),
+            0u);
+  WaitModel("weighted", {});
+}
+
+TEST_P(SourceEmbeddingServiceTest,
+       FailedRegistrationPublishesEvidenceAndReleasesHeldClaims) {
+  const std::string package = iree::testing::MakeTempFilePath("failed_dynamic");
+  ASSERT_NO_FATAL_FAILURE(WriteWeightedPackage(package));
+  {
+    std::filesystem::permissions(package + "/embed.loom",
+                                 std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
+    std::ofstream source(package + "/embed.loom", std::ios::trunc);
+    source << "this is not a source program\n";
+    ASSERT_TRUE(source.good());
+  }
+  StartManagedRouter();
+  StalledStderr stalled;
+  ASSERT_NO_FATAL_FAILURE(stalled.Begin());
+  EXPECT_EQ(Read(Send(Declaration("broken", package, "drained"),
+                      "/v1/models/register"))
+                .find("HTTP/1.1 202"),
+            0u);
+  const int held = Send(R"({"model":"broken","input":"a"})");
+  WaitModel("broken", R"("held_requests":1)");
+  EXPECT_EQ(Read(Send(R"({"model":"broken"})", "/v1/models/undrain"))
+                .find("HTTP/1.1 200"),
+            0u);
+  EXPECT_EQ(Read(held).find("HTTP/1.1 503"), 0u);
+  const auto failed = WaitModel("broken", R"("registration":"failed")");
+  EXPECT_NE(failed.find("embed.loom"), std::string::npos);
+  EXPECT_NE(failed.find(R"("diagnostics":[{)"), std::string::npos);
+  EXPECT_EQ(Read(Send(R"({"model":"broken"})", "/v1/models/undrain"))
+                .find("HTTP/1.1 409"),
+            0u);
+  EXPECT_NE(Read(Send(R"({"model":"fixture","input":"a"})"))
+                .find(R"("embedding":[1,1,1,1])"),
+            std::string::npos);
+  EXPECT_EQ(Read(Send(R"({"model":"broken"})", "/v1/models/unregister"))
+                .find("HTTP/1.1 202"),
+            0u);
+  WaitModel("broken", {});
+}
+
+TEST_P(SourceEmbeddingServiceTest,
+       EmptyServerReusesOneParameterSlabAcrossManagedLifetimes) {
+  const std::string package =
+      iree::testing::MakeTempFilePath("dynamic_pressure");
+  ASSERT_NO_FATAL_FAILURE(WriteWeightedPackage(package));
+  interface_.set_observer(interface_.self, {});
+  loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
+  IREE_ASSERT_OK(
+      loom_serve_finite_model_destroy(std::exchange(model_, nullptr)));
+  IREE_ASSERT_OK(
+      loom_serve_device_group_destroy(std::exchange(group_, nullptr)));
+  const loom_serve_device_options_t options = {
+      .uri = IREE_SV("amdgpu"),
+      .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
+      .slab_size = 2 * 1024 * 1024,
+      .memory_limit = 2 * 1024 * 1024};
+  IREE_ASSERT_OK(
+      loom_serve_device_group_create(host_, 1, &options, &group_, allocator_));
+  device_ = loom_serve_device_group_at(group_, 0);
+  StartManagedRouter();
+  EXPECT_NE(Read(Send({}, "/v1/models", "GET")).find(R"("data":[])"),
+            std::string::npos);
+  for (const char* name : {"first", "second"}) {
+    EXPECT_EQ(Read(Send(Declaration(name, package), "/v1/models/register"))
+                  .find("HTTP/1.1 202"),
+              0u);
+    EXPECT_NE(
+        Read(Send(std::string("{\"model\":\"") + name + "\",\"input\":\"a\"}"))
+            .find(R"("embedding":[2,2,2,2])"),
+        std::string::npos);
+  }
+  EXPECT_EQ(Read(Send(R"({"model":"first"})", "/v1/models/unregister"))
+                .find("HTTP/1.1 202"),
+            0u);
+  WaitModel("first", {});
+  EXPECT_NE(Read(Send(R"({"model":"second","input":"a"})"))
+                .find(R"("embedding":[2,2,2,2])"),
+            std::string::npos);
+  EXPECT_EQ(Read(Send(R"({"model":"second"})", "/v1/models/unregister"))
+                .find("HTTP/1.1 202"),
+            0u);
+  WaitModel("second", {});
+  EXPECT_EQ(CompletedRequests(), 3u);
+  EXPECT_NE(Read(Send({}, "/v1/models", "GET")).find(R"("data":[])"),
+            std::string::npos);
+  loom_serve_http_server_request_stop(server_);
+  router_.join();
+  IREE_ASSERT_OK(status_);
+  const auto memory = loom_serve_device_memory_statistics(device_).retained;
+  EXPECT_EQ(memory.reserved_bytes, 0u);
+  EXPECT_EQ(memory.committed_bytes, 0u);
+  EXPECT_EQ(retired_counters_.completed, 3u);
+}
 
 TEST_P(SourceEmbeddingServiceTest,
        CoalescesRaggedRequestsAndDropsOnlyResetPeer) {

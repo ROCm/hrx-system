@@ -67,6 +67,8 @@ typedef struct loom_serve_finite_configuration_t {
 // admission capacity; the executable supplies their shared device. Paths are
 // interpreted relative to the process working directory.
 typedef struct loom_serve_model_configuration_t {
+  // Allocator owning decoded strings, retained when this declaration is moved.
+  iree_allocator_t allocator;
   // Selects the native modality contract and the configuration union member.
   loom_serve_model_kind_t kind;
   // Owned visible ASCII identifier used in JSON and HTTP header selectors.
@@ -76,6 +78,8 @@ typedef struct loom_serve_model_configuration_t {
   // Bounded host request credit. Text/image exclude the active invocation;
   // finite vector services include all requests in the active cohort.
   iree_host_size_t pending_requests;
+  // Register metadata without preparing the model until admission opens.
+  bool start_drained;
   // Only the member selected by kind is initialized and owned.
   union {
     // Autoregressive text deployment capacity and checkpoint inputs.
@@ -92,9 +96,18 @@ typedef struct loom_serve_configuration_t {
   iree_allocator_t allocator;
   // Number of initialized model records.
   iree_host_size_t model_count;
-  // Owned deployment records in scheduling order.
+  // Owned deployment declarations; discovery order is not a priority contract.
   loom_serve_model_configuration_t* models;
 } loom_serve_configuration_t;
+
+// Parses one complete model object with the catalog's schema. Optional
+// admission="open" (default) or "drained" selects initial admission only.
+// Strings are copied; failure releases partial state and zeros the output.
+iree_status_t loom_serve_model_configuration_initialize(
+    iree_string_view_t json, loom_serve_model_configuration_t* out_model,
+    iree_allocator_t host_allocator);
+void loom_serve_model_configuration_deinitialize(
+    loom_serve_model_configuration_t* model);
 
 // Parses one complete JSON/JSONC {"models":[...]} catalog; the array may be
 // empty. Every model declares kind="text", "image", "embedding" or "decision",

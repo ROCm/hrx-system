@@ -266,6 +266,7 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::runtime::signals
+    iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
 )
 endif()

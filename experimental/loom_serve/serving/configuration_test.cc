@@ -13,6 +13,39 @@
 
 namespace {
 
+TEST(ConfigurationTest, IndividualDeclarationOwnsItsAllocatorAndAdmissionMode) {
+  std::string json =
+      R"({"kind":"embedding","name":"sc\u006fut","source":"model","assets":"assets","admission":"drained"})";
+  loom_serve_model_configuration_t model;
+  IREE_ASSERT_OK(loom_serve_model_configuration_initialize(
+      iree_make_string_view(json.data(), json.size()), &model,
+      iree_allocator_system()));
+  json.assign(json.size(), 'x');
+  EXPECT_EQ(std::string(model.name.data, model.name.size), "scout");
+  EXPECT_TRUE(model.start_drained);
+  EXPECT_EQ(model.pending_requests, 32u);
+  loom_serve_model_configuration_deinitialize(&model);
+  EXPECT_EQ(model.name.data, nullptr);
+  loom_serve_model_configuration_deinitialize(&model);
+}
+
+TEST(ConfigurationTest, AdmissionRejectsUnknownDuplicateAndWronglyTypedValues) {
+  for (const char* field : {R"("admission":"paused")", R"("admission":true)",
+                            R"("admission":"open","admission":"drained")"}) {
+    const std::string json =
+        std::string(
+            R"({"kind":"embedding","name":"scout","source":"model","assets":"assets",)") +
+        field + "}";
+    loom_serve_model_configuration_t model;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          loom_serve_model_configuration_initialize(
+                              iree_make_string_view(json.data(), json.size()),
+                              &model, iree_allocator_system()));
+    EXPECT_EQ(model.name.data, nullptr);
+    loom_serve_model_configuration_deinitialize(&model);
+  }
+}
+
 std::string Model(const std::string& name, const std::string& options = "") {
   return R"({"kind":"text","name":")" + name +
          R"(","source":"models/text","weights":"weights.gguf","tokenizer":"tokenizer.json")" +

@@ -173,14 +173,11 @@ static iree_status_t configuration_image(
   return iree_ok_status();
 }
 
-static iree_status_t configuration_model(void* self, iree_host_size_t index,
-                                         iree_json_value_type_t type,
-                                         iree_string_view_t value) {
-  (void)type;
-  loom_serve_configuration_t* configuration = self;
-  loom_serve_model_configuration_t* model = &configuration->models[index];
-  *model = (loom_serve_model_configuration_t){.pending_requests = 32};
-  configuration->model_count = index + 1;
+static iree_status_t configuration_model_parse(
+    iree_string_view_t value, loom_serve_model_configuration_t* model,
+    iree_allocator_t allocator) {
+  *model = (loom_serve_model_configuration_t){.allocator = allocator,
+                                              .pending_requests = 32};
   configuration_field_t fields[] = {
       {"kind", IREE_JSON_VALUE_TYPE_STRING},
       {"name", IREE_JSON_VALUE_TYPE_STRING},
@@ -221,7 +218,8 @@ static iree_status_t configuration_model(void* self, iree_host_size_t index,
                 (1u << LOOM_SERVE_MODEL_KIND_DECISION)},
       {"options", IREE_JSON_VALUE_TYPE_OBJECT,
        .kinds = (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
-                (1u << LOOM_SERVE_MODEL_KIND_DECISION)}};
+                (1u << LOOM_SERVE_MODEL_KIND_DECISION)},
+      {"admission", IREE_JSON_VALUE_TYPE_STRING}};
   configuration_fields_t context = {IREE_ARRAYSIZE(fields), fields};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
       value, configuration_field_visit, &context));
@@ -248,9 +246,9 @@ static iree_status_t configuration_model(void* self, iree_host_size_t index,
     }
   }
   IREE_RETURN_IF_ERROR(
-      configuration_string(&fields[1], &model->name, configuration->allocator));
-  IREE_RETURN_IF_ERROR(configuration_string(&fields[2], &model->source,
-                                            configuration->allocator));
+      configuration_string(&fields[1], &model->name, allocator));
+  IREE_RETURN_IF_ERROR(
+      configuration_string(&fields[2], &model->source, allocator));
   for (iree_host_size_t i = 0; i < model->name.size; ++i) {
     const uint8_t c = (uint8_t)model->name.data[i];
     if (c < 0x21 || c > 0x7e) {
@@ -261,52 +259,94 @@ static iree_status_t configuration_model(void* self, iree_host_size_t index,
   }
   IREE_RETURN_IF_ERROR(configuration_size(&fields[10], 1, IREE_HOST_SIZE_MAX,
                                           &model->pending_requests));
+  if (fields[21].value.data) {
+    if (iree_string_view_equal(fields[21].value, IREE_SV("drained"))) {
+      model->start_drained = true;
+    } else if (!iree_string_view_equal(fields[21].value, IREE_SV("open"))) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "admission must be open or drained");
+    }
+  }
+  if (model->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
+    return configuration_text(fields, &model->text, allocator);
+  } else if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
+    return configuration_image(fields, &model->image, allocator);
+  }
+  IREE_RETURN_IF_ERROR(
+      configuration_string(&fields[19], &model->finite.assets, allocator));
+  const iree_string_view_t options =
+      fields[20].value.data ? fields[20].value : IREE_SV("{}");
+  char* data = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_clone(
+      allocator, iree_make_const_byte_span(options.data, options.size),
+      (void**)&data));
+  model->finite.options = iree_make_string_view(data, options.size);
+  return iree_ok_status();
+}
+
+void loom_serve_model_configuration_deinitialize(
+    loom_serve_model_configuration_t* model) {
+  const iree_allocator_t allocator = model->allocator;
+  iree_allocator_free(allocator, (void*)model->name.data);
+  iree_allocator_free(allocator, (void*)model->source.data);
+  if (model->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
+    iree_allocator_free(allocator, (void*)model->text.weights.data);
+    iree_allocator_free(allocator, (void*)model->text.tokenizer.data);
+  } else if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
+    iree_allocator_free(allocator, (void*)model->image.checkpoint.data);
+    iree_allocator_free(allocator, (void*)model->image.adapter.data);
+  } else if (model->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING ||
+             model->kind == LOOM_SERVE_MODEL_KIND_DECISION) {
+    iree_allocator_free(allocator, (void*)model->finite.assets.data);
+    iree_allocator_free(allocator, (void*)model->finite.options.data);
+  }
+  memset(model, 0, sizeof(*model));
+}
+
+iree_status_t loom_serve_model_configuration_initialize(
+    iree_string_view_t json, loom_serve_model_configuration_t* out_model,
+    iree_allocator_t host_allocator) {
+  *out_model = (loom_serve_model_configuration_t){0};
+  iree_string_view_t object;
+  IREE_RETURN_IF_ERROR(iree_json_consume_object(&json, &object));
+  IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(&json));
+  if (json.size) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "trailing model JSON");
+  }
+  iree_status_t status =
+      configuration_model_parse(object, out_model, host_allocator);
+  if (!iree_status_is_ok(status)) {
+    loom_serve_model_configuration_deinitialize(out_model);
+  }
+  return status;
+}
+
+static iree_status_t configuration_model(void* self, iree_host_size_t index,
+                                         iree_json_value_type_t type,
+                                         iree_string_view_t value) {
+  loom_serve_configuration_t* configuration = self;
+  if (type != IREE_JSON_VALUE_TYPE_OBJECT) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "model must be an object");
+  }
+  loom_serve_model_configuration_t* model = &configuration->models[index];
+  configuration->model_count = index + 1;
+  IREE_RETURN_IF_ERROR(
+      configuration_model_parse(value, model, configuration->allocator));
   for (iree_host_size_t i = 0; i < index; ++i) {
     if (iree_string_view_equal(configuration->models[i].name, model->name)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "duplicate model name");
     }
   }
-  if (model->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
-    return configuration_text(fields, &model->text, configuration->allocator);
-  } else if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
-    return configuration_image(fields, &model->image, configuration->allocator);
-  }
-  IREE_RETURN_IF_ERROR(configuration_string(&fields[19], &model->finite.assets,
-                                            configuration->allocator));
-  const iree_string_view_t options =
-      fields[20].value.data ? fields[20].value : IREE_SV("{}");
-  char* data = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_clone(
-      configuration->allocator,
-      iree_make_const_byte_span(options.data, options.size), (void**)&data));
-  model->finite.options = iree_make_string_view(data, options.size);
   return iree_ok_status();
 }
 
 void loom_serve_configuration_deinitialize(
     loom_serve_configuration_t* configuration) {
   for (iree_host_size_t i = 0; i < configuration->model_count; ++i) {
-    loom_serve_model_configuration_t* model = &configuration->models[i];
-    iree_allocator_free(configuration->allocator, (void*)model->name.data);
-    iree_allocator_free(configuration->allocator, (void*)model->source.data);
-    if (model->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
-      iree_allocator_free(configuration->allocator,
-                          (void*)model->text.weights.data);
-      iree_allocator_free(configuration->allocator,
-                          (void*)model->text.tokenizer.data);
-    } else if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
-      iree_allocator_free(configuration->allocator,
-                          (void*)model->image.checkpoint.data);
-      iree_allocator_free(configuration->allocator,
-                          (void*)model->image.adapter.data);
-    } else if (model->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING ||
-               model->kind == LOOM_SERVE_MODEL_KIND_DECISION) {
-      iree_allocator_free(configuration->allocator,
-                          (void*)model->finite.assets.data);
-      iree_allocator_free(configuration->allocator,
-                          (void*)model->finite.options.data);
-    }
+    loom_serve_model_configuration_deinitialize(&configuration->models[i]);
   }
   iree_allocator_free(configuration->allocator, configuration->models);
   memset(configuration, 0, sizeof(*configuration));

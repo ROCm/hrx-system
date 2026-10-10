@@ -17,6 +17,8 @@ loom_cc_library(
   SRCS
     "router.c"
   DEPS
+    ::configuration
+    ::registry
     iree::base
     iree::base::internal::json
     iree::base::threading
@@ -25,6 +27,7 @@ loom_cc_library(
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::http::tokenization
+    iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::telemetry::stream
     iree::task
     iree::tokenizer
@@ -40,6 +43,7 @@ loom_cc_test(
   SRCS
     "router_test.cc"
   DEPS
+    ::registry
     ::router
     iree::async
     iree::async::util::proactor_pool
@@ -77,14 +81,12 @@ loom_cc_binary(
     "server.c"
   DEPS
     ::configuration
+    ::finite_registration
+    ::registry
     ::router
     iree::async
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::decision::protocol
-    iree::experimental::loom_serve::embedding::protocol
-    iree::experimental::loom_serve::finite::model
-    iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::image::model
@@ -103,6 +105,45 @@ loom_cc_binary(
     loom::util::stream
 )
 endif()
+
+loom_cc_library(
+  NAME
+    registry
+  HDRS
+    "registry.h"
+  SRCS
+    "registry.c"
+  DEPS
+    ::configuration
+    iree::base
+    iree::experimental::loom_serve::http::service
+    iree::experimental::loom_serve::runtime::compilation
+    iree::experimental::loom_serve::telemetry::record
+    iree::experimental::loom_serve::telemetry::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    finite_registration
+  HDRS
+    "finite_registration.h"
+  SRCS
+    "finite_registration.c"
+  DEPS
+    ::configuration
+    ::registry
+    iree::base
+    iree::experimental::loom_serve::decision::protocol
+    iree::experimental::loom_serve::embedding::protocol
+    iree::experimental::loom_serve::finite::model
+    iree::experimental::loom_serve::finite::service
+    iree::experimental::loom_serve::http::service
+    iree::experimental::loom_serve::runtime::compilation
+    iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::host
+  PUBLIC
+)
 
 loom_cc_test(
   NAME

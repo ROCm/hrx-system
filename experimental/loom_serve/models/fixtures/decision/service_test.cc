@@ -50,7 +50,7 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
     ASSERT_NO_FATAL_FAILURE(CreateModel(FLAG_model_source, &models_[0]));
     IREE_ASSERT_OK(loom_serve_finite_service_create(
         host_, models_[0], loom_serve_decision_protocol(), IREE_SV("decisions"),
-        16, 0, &services_[0], allocator_));
+        16, 0, nullptr, &services_[0], allocator_));
     interfaces_[0] = loom_serve_finite_service_interface(services_[0]);
     EXPECT_EQ(interfaces_[0].capacity_domain,
               loom_serve_device_residency_cache(device_));
@@ -173,13 +173,17 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
     ASSERT_NO_FATAL_FAILURE(CreateModel(FLAG_embedding_source, &models_[1]));
     IREE_ASSERT_OK(loom_serve_finite_service_create(
         host_, models_[1], loom_serve_embedding_protocol(), IREE_SV("vectors"),
-        16, 0, &services_[1], allocator_));
+        16, 0, nullptr, &services_[1], allocator_));
     interfaces_[1] = loom_serve_finite_service_interface(services_[1]);
     interfaces_[0].set_observer(interfaces_[0].self, {});
     router_ = std::thread([this] {
+      loom_serve_registry_t* registry = nullptr;
+      IREE_ASSERT_OK(loom_serve_registry_create(2, interfaces_, 0, {},
+                                                &registry, allocator_));
       status_ = loom_serve_router_run(
-          loom_serve_host_executor(host_), server_, 2, interfaces_,
+          loom_serve_host_executor(host_), server_, registry,
           {.request_quota = 16, .holding_capacity = 8}, allocator_);
+      IREE_ASSERT_OK(loom_serve_registry_destroy(registry));
     });
   }
   // Allocator shared by all test-owned production components.

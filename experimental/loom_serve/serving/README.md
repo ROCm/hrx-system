@@ -13,8 +13,10 @@ prepared parameter residencies; it does not deduplicate those weights.
 The application owns one [host](../runtime/host.h) with shared IREE task workers
 and asynchronous I/O services. Every catalog borrows the host's shared JIT task
 queue; adding or removing a model neither creates nor joins a compiler pool.
-Compilation has an asynchronous completion API; startup constructors join on the application
-thread. HTTP admission and model scheduling run as a cooperative task process:
+Finite-vector registration drives asynchronous source/JIT preparation on that
+pool and binds shared memory only on the serving owner. Text/image startup
+constructors still join on the outer application thread. HTTP admission and
+model scheduling run as a cooperative task process:
 bounded serialized turns preserve shared memory-policy ownership, while CPU
 preparation/output and device work proceed independently. Network, task release,
 model frontiers and heartbeat deadlines wake the owner directly. Only the outer
@@ -44,9 +46,13 @@ The server can start without `--models`, or with an explicit `{"models":[]}`
 catalog. It still owns its configured device and shared task/I/O infrastructure;
 health, model discovery, status, metrics and diagnostic endpoints remain live.
 An empty server publishes empty model/status lists and zero model-work totals.
-Unknown-model inference and tokenization requests return HTTP 404. Catalog models
-are currently constructed at startup; registration and unloading are not HTTP
-operations yet.
+Unknown-model inference and tokenization requests return HTTP 404. Embedding and
+decision packages can be registered and removed over HTTP; startup catalog
+entries use the same asynchronous path. Text/image packages are constructed
+before listeners start. Their constructors still contain outer-thread joins,
+so dynamic registration of those modalities returns 501 rather than running a
+blocking constructor on the shared workers. Their serving and reversible
+admission controls remain available.
 
 The [weight-free three-model catalog](../models/fixtures/README.md) is a complete
 first-output recipe for image, embedding and decision packages. The example
@@ -152,6 +158,56 @@ For a trusted sandbox-local Unix endpoint:
 curl --unix-socket /path/to/loom-serve.sock http://localhost/v1/models
 ~~~
 
+## Registration and removal
+
+`POST /v1/models/register` takes one model object using the catalog schema.
+Optional `admission` is `"open"` by default or `"drained"`. The latter stores
+only registration metadata and a bounded observation ring: it does not create
+the model, read source/assets, reserve model storage or evict another model.
+Opening admission starts preparation. The same setting is accepted on finite
+startup catalog entries; initially drained text/image entries fail explicitly
+until their asynchronous constructors are implemented.
+
+~~~sh
+curl http://127.0.0.1:8080/v1/models/register \
+  -H 'Content-Type: application/json' \
+  -d '{"kind":"embedding","name":"vectors",
+       "source":"experimental/loom_serve/models/fixtures/embedding",
+       "assets":"experimental/loom_serve/models/fixtures/embedding",
+       "admission":"drained","options":{"batch_units":64}}'
+curl http://127.0.0.1:8080/v1/models/undrain \
+  -H 'Content-Type: application/json' -d '{"model":"vectors"}'
+curl http://127.0.0.1:8080/v1/status
+curl http://127.0.0.1:8080/v1/models/unregister \
+  -H 'Content-Type: application/json' -d '{"model":"vectors","mode":"drain"}'
+~~~
+
+Registration/removal return 202 after accepting server-owned intent. Closing
+that connection neither cancels nor rolls back the operation. Discovery gives
+managed entries a monotonic `loom.incarnation` and `loom.registration` phase:
+`registered`, `preparing`, `ready`, `retiring`, `failed`, or `release_failed`.
+Status additionally carries copied compilation evidence and terminal errors.
+Inference arriving before preparation completes waits on ordinary holding
+credit. A failed source/JIT leaves the name inspectable, rejects its held work
+with 503, and leaves peer models serving. Unregistering and registering again
+is an explicit new attempt, with a new identity.
+
+Removal defaults to `mode="drain"`: all already-admitted requests finish,
+including service queues and CPU tokenizer tasks. `mode="abort"` cancels their
+intent; accepted CPU/device work still has to retire. Both seal admission,
+answer held arrivals with 410, and retain the name through actual model resource
+retirement. A request processed after the name disappears receives 404.
+Graceful removal can be explicitly escalated to abort, but cannot be undone by
+undrain. Re-registering an occupied name returns 409. A platform release failure
+retains the model's remaining resources and shared parents; another unregister
+explicitly retries release. No timeout turns graceful removal into cancellation.
+
+`--model_capacity=32` bounds all names, including drained, failed and removing
+registrations. Full registration credit returns 429. Discovery order is not a
+scheduling-priority contract. Management currently uses trusted server-local
+source/asset paths; these endpoints execute source programs and are intended
+for the same trusted connections as process administration.
+
 ## Reversible model admission
 
 `POST /v1/models/drain` and `POST /v1/models/undrain` accept exactly
@@ -171,7 +227,8 @@ curl http://127.0.0.1:8080/v1/models/undrain \
 
 A successful control response acknowledges the gate change, not completion of
 admitted work. Its copied model record and `/v1/status` report `admission` as
-`open`, `draining`, or `drained`, separately from the model's scheduler `phase`.
+`open`, `draining`, `drained`, or `removing`, separately from the model's
+scheduler `phase`.
 `held_requests` counts requests outside admission; `tokenizer_requests` counts
 accepted CPU utilities through final task release. Control and observation
 requests bypass admission. Repeated drain or undrain is idempotent, and losing
@@ -190,8 +247,8 @@ normal bounded admission policy, which can still reject excess work.
 
 Drain itself neither evicts prepared weights nor discards retained KV state.
 It does not freeze background maintenance or make model storage safe to destroy;
-retirement must also join accepted CPU/device borrowers. Registration, removal
-and initially drained startup are not exposed by these operations.
+retirement must also join accepted CPU/device borrowers. Unregister is the
+separate irreversible operation; drain alone never deletes retained state.
 
 ## Requests and retained state
 
@@ -366,20 +423,25 @@ it has the same admission and shutdown availability as the other probes.
 
 The same endpoint also exposes cumulative `loom_serve_model_*_total` counters
 with `model` and `kind` labels, plus `loom_serve_server_*_total` for the whole
-fixed catalog. Fields are `requests`, `completed`, `rejected`, `cancelled`,
-`failed`, `input_tokens`, `output_tokens` and `batches`, with the `/logz` semantics
-below. Values retain unsigned integer precision. Server totals are sums of
-the always-counted service owners, not replayed event history. They include
+server lifetime. Managed models also carry an `incarnation` label on every
+metric, so reusing a name starts distinct series instead of resetting counters
+in the previous registration's series. Fields are `requests`, `completed`,
+`rejected`, `cancelled`, `failed`, `input_tokens`, `output_tokens` and `batches`,
+with the `/logz` semantics below. Values retain unsigned integer precision.
+Server totals are sums of the always-counted service owners plus final totals
+from removed incarnations, not replayed event history. They include
 model-specific controls such as checkpoints but exclude router-owned tokenizer
 utilities, health/observation requests and unknown-route rejections.
 `loom_serve_server_counters_available` is one only when every service publishes
 counters; otherwise server totals are omitted instead of reporting a partial
-sum. Weight deactivation does not reset a service's lifetime counters.
+sum. Weight deactivation does not reset a service's lifetime counters. Removing
+a model preserves server totals; a new model under the same name begins its
+own counters and telemetry incarnation.
 
-`GET /readyz` and `/healthz` return `{"status":"ready"}` after model
-construction and router registration. Readiness means the server can route
-requests; cold weights, capacity waiters and a full model queue do not make the
-entire listener unready. Before registration no application response is served.
+`GET /readyz` and `/healthz` return `{"status":"ready"}` once HTTP routing is
+available, even with zero models or while asynchronous preparation is running.
+Cold weights, capacity waiters, failed packages and full model queues do not
+make the entire listener unready. Per-model readiness is reported in status.
 Once shutdown stops application admission, the router serves no further probes;
 the listener is released after accepted asynchronous callbacks drain. It does
 not promise a final 503 response during wind-down. These endpoints do not
@@ -420,11 +482,18 @@ events include `sequence`, monotonic `time_ns` and a request lifetime ID (zero
 for model-wide events). A `gap` line reports the half-open missed interval
 `[from,to)` for this reader. The `counters` line is a fresh cumulative snapshot,
 not reconstructed from whatever events remain. Server totals use the same
-fixed-catalog owner sum as `/metrics`; a service without counters makes the
+live-plus-retired owner sum as `/metrics`; a service without counters makes the
 server report `counters_available:false`, not invented zero or partial totals.
 The final `cursor.value` is
 passed verbatim as `X-Loom-Cursor` on the next poll. Each poll considers at most
 64 records; polling neither clears records nor adds events to the stream.
+
+Managed registrations own their ring before preparation starts and lend it to
+the ready modality service. Preparation, serving and retirement therefore keep
+one stream identity; failed source packages have an observable history even
+without a published model. Successful unregister destroys that stream only
+after its producers retire. HTTP responses already own copies of their bytes
+and do not retain the stream.
 
 Readers have independent cursors and can pause, disconnect or fall behind
 without holding ring slots or slowing inference. A late reader without a cursor

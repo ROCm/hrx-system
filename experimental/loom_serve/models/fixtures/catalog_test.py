@@ -356,7 +356,9 @@ def running_server(server, directory, catalog, workers):
     ) as (_, address):
         try:
             assert address is not None, log_path.read_text()
-            yield Client(address), events
+            client = Client(address)
+            client.idle()
+            yield client, events
         except BaseException:
             print(log_path.read_text(), flush=True)
             raise
@@ -524,6 +526,8 @@ def run_round(client, iteration, observations):
     metrics = client.request("/metrics")
     for item in status["data"]:
         labels = f'model="{item["id"]}",kind="{item["loom"]["kind"]}"'
+        if "incarnation" in item["loom"]:
+            labels += f',incarnation="{item["loom"]["incarnation"]}"'
         for gauge in ("queued_requests", "active_requests"):
             assert f"loom_serve_model_{gauge}{{{labels}}} 0\n" in metrics
     return {
@@ -587,11 +591,34 @@ def check_startup_failures(server, directory, catalog):
                 log_path,
                 cwd=directory,
             ) as (process, address):
-                assert address is None, log_path.read_text()
-                assert process.wait() == 1, log_path.read_text()
+                if model["kind"] in ("embedding", "decision"):
+                    assert address is not None, log_path.read_text()
+                    client = Client(address)
+                    while True:
+                        listing = client.request("/v1/status")
+                        failed = next(
+                            item["loom"]
+                            for item in listing["data"]
+                            if item["id"] == model["name"]
+                        )
+                        if failed["registration"] == "failed":
+                            break
+                    assert missing.name in failed["error"]["message"], failed
+                    assert failed["error"]["code"] == 5, failed
+                    assert client.request("/readyz") == {"status": "ready"}
+                    # A failed source package does not terminate peer models.
+                    client.text(
+                        "load-failure-peer", [{"role": "user", "content": "ab"}]
+                    )
+                else:
+                    assert address is None, log_path.read_text()
+                    assert process.wait() == 1, log_path.read_text()
             diagnostic = log_path.read_text()
-            assert "NOT_FOUND" in diagnostic and missing.name in diagnostic, diagnostic
-            assert f"creating model '{model['name']}'" in diagnostic, diagnostic
+            if model["kind"] not in ("embedding", "decision"):
+                assert "NOT_FOUND" in diagnostic and missing.name in diagnostic, (
+                    diagnostic
+                )
+                assert f"creating model '{model['name']}'" in diagnostic, diagnostic
             assert (
                 "Sanitizer" not in diagnostic and "runtime error:" not in diagnostic
             ), diagnostic
@@ -745,6 +772,7 @@ def check_multiple_bindings(server, directory, catalog):
     ) as (process, address):
         assert address is not None, log_path.read_text()
         client = Client(address)
+        client.idle()
         expected_models = client.request("/v1/models")
         connection = http.client.HTTPConnection("localhost")
         connection.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -840,12 +868,14 @@ def main():
             ):
                 assert client.request("/readyz") == {"status": "ready"}
                 discovered = client.request("/v1/models")
-                assert [item["id"] for item in discovered["data"]] == [
-                    "pixels",
-                    "vectors",
-                    "judge",
-                    "fixture-text",
-                ]
+                assert sorted(item["id"] for item in discovered["data"]) == sorted(
+                    [
+                        "pixels",
+                        "vectors",
+                        "judge",
+                        "fixture-text",
+                    ]
+                )
                 with stalled_observer(client, arguments.rounds):
                     for iteration in range(arguments.rounds):
                         print(

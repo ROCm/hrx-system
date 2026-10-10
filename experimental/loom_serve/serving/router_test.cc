@@ -15,6 +15,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "experimental/loom_serve/http/listener.h"
@@ -128,6 +129,22 @@ struct ModelService {
                                bool* progress) {
     auto* service = static_cast<ModelService*>(self);
     *progress = false;
+    if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+      std::lock_guard<std::mutex> lock(service->mutex);
+      service->stopping = true;
+      service->condition.notify_all();
+      if (service->waiting && !service->ready) {
+        return iree_ok_status();
+      }
+      *progress = service->waiting || !service->pending.empty();
+      service->waiting = false;
+      service->ready = false;
+      while (!service->pending.empty()) {
+        loom_serve_http_connection_abort(service->pending.front().first);
+        service->pending.pop_front();
+      }
+      return std::exchange(service->result, iree_ok_status());
+    }
     if (service->hold_completion && !service->pending.empty()) {
       std::lock_guard<std::mutex> lock(service->mutex);
       if (!service->waiting) {
@@ -201,6 +218,104 @@ struct ModelService {
   }
 };
 
+// A model dependency with independently controlled service and final device
+// ownership. HTTP admission, the registry, task owner and retirement policy are
+// the production implementations under test.
+struct RegistrationDependency {
+  // Requests reach the same held-completion service used by the routing tests.
+  ModelService service = {.name = "dynamic", .hold_completion = true};
+  // Model-protocol counters supplied by the dependency, not synthesized by
+  // routing.
+  loom_serve_telemetry_counters_t counters = {};
+  // Serializes retirement readiness and wake detachment with the owner.
+  std::mutex mutex;
+  // Outer-test synchronization on actual retirement entry.
+  std::condition_variable condition;
+  // Final device-borrower wake, independent of the service observer.
+  loom_serve_http_observer_t observer = {};
+  // Registry-owned history borrowed by the prepared service.
+  loom_serve_telemetry_stream_t* stream = nullptr;
+  // Retire has been called after all service and utility borrowers completed.
+  bool retiring = false;
+  // The test has returned final model ownership.
+  bool retired = false;
+  // Preparation allocation count, observable without reading owner-only state.
+  std::atomic<unsigned> created{0};
+  // Operation destruction count, independent of name/slot reuse.
+  std::atomic<unsigned> destroyed{0};
+  // Injects one quiescent platform release failure, preserving owned storage.
+  std::atomic<bool> fail_release{false};
+  // Counts final release attempts, not asynchronous ownership polling.
+  std::atomic<unsigned> release_attempts{0};
+
+  struct Operation {
+    // Test-owned model dependency, live beyond the owning registry.
+    RegistrationDependency* dependency;
+  };
+
+  static iree_status_t Prepare(void* self, bool cancel, bool* complete,
+                               loom_serve_http_service_t* service,
+                               loom_serve_compilation_report_t*) {
+    auto* dependency = static_cast<Operation*>(self)->dependency;
+    *complete = true;
+    if (cancel) {
+      return iree_make_status(IREE_STATUS_CANCELLED, "preparation cancelled");
+    }
+    *service = dependency->service.Interface(nullptr, nullptr);
+    service->telemetry.stream = dependency->stream;
+    return iree_ok_status();
+  }
+  static iree_status_t Retire(void* self, bool* complete) {
+    auto* dependency = static_cast<Operation*>(self)->dependency;
+    EXPECT_FALSE(ModelService::IsPending(&dependency->service));
+    EXPECT_TRUE(dependency->service.pending.empty());
+    std::lock_guard<std::mutex> lock(dependency->mutex);
+    dependency->retiring = true;
+    *complete = dependency->retired;
+    if (*complete) {
+      dependency->observer = {};
+      ++dependency->release_attempts;
+      if (dependency->fail_release.exchange(false)) {
+        return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                                "platform release failed");
+      }
+    }
+    dependency->condition.notify_all();
+    return iree_ok_status();
+  }
+  static void Destroy(void* self) {
+    auto* operation = static_cast<Operation*>(self);
+    ++operation->dependency->destroyed;
+    delete operation;
+  }
+  static iree_status_t Create(
+      void* self, const loom_serve_model_configuration_t* configuration,
+      loom_serve_http_observer_t observer,
+      loom_serve_telemetry_stream_t* stream,
+      loom_serve_registration_t* registration, iree_allocator_t) {
+    auto* dependency = static_cast<RegistrationDependency*>(self);
+    dependency->service.name = configuration->name.data;
+    dependency->service.counters = &dependency->counters;
+    dependency->observer = observer;
+    dependency->stream = stream;
+    ++dependency->created;
+    *registration = {.self = new Operation{dependency},
+                     .prepare = Prepare,
+                     .retire = Retire,
+                     .destroy = Destroy};
+    return iree_ok_status();
+  }
+  void WaitRetiring() {
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [this] { return retiring; });
+  }
+  void ReleaseRetirement() {
+    std::lock_guard<std::mutex> lock(mutex);
+    retired = true;
+    observer.wake(observer.user_data);
+  }
+};
+
 class HttpRouterTest : public ::testing::TestWithParam<int> {
  protected:
   void SetUp() override {
@@ -237,10 +352,15 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
           held_.Interface(tokenizer_a_, &a_),
           other_.Interface(nullptr, nullptr),
           escaped_.Interface(nullptr, nullptr)};
+      loom_serve_registry_t* registry = nullptr;
+      IREE_ASSERT_OK(loom_serve_registry_create(
+          IREE_ARRAYSIZE(services), services, managed_capacity_, factory_,
+          &registry, iree_allocator_system()));
       status_ = loom_serve_router_run(
-          executor_, server_, IREE_ARRAYSIZE(services), services,
+          executor_, server_, registry,
           {.request_quota = 4, .holding_capacity = holding_capacity_},
           iree_allocator_system());
+      IREE_ASSERT_OK(loom_serve_registry_destroy(registry));
       returned_.store(true);
     });
   }
@@ -322,6 +442,10 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
   iree_host_size_t connection_capacity_ = 64;
   // Zero-budget cases reject instead of retaining requests behind the gate.
   iree_host_size_t holding_capacity_ = 2;
+  // Managed slots supplied only by registration-lifecycle cases.
+  iree_host_size_t managed_capacity_ = 0;
+  // Model dependency construction, never a replacement for registry behavior.
+  loom_serve_registration_factory_t factory_ = {};
   // HTTP connection owner with no private polling thread.
   loom_serve_http_server_t* server_ = nullptr;
   // Independent binding to the shared connection owner.
@@ -354,6 +478,142 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
   // Expected terminal result; service errors are not hidden by shutdown.
   iree_status_code_t expected_code_ = IREE_STATUS_OK;
 };
+
+class HttpRouterRegistrationTest : public HttpRouterTest {
+ protected:
+  void SetUp() override {
+    managed_capacity_ = 1;
+    factory_ = {.self = &managed_,
+                .kinds = 1u << LOOM_SERVE_MODEL_KIND_EMBEDDING,
+                .create = RegistrationDependency::Create};
+    HttpRouterTest::SetUp();
+  }
+  void Register() {
+    EXPECT_EQ(
+        Read(
+            Send(
+                "POST", "/v1/models/register",
+                R"({"kind":"embedding","name":"dynamic","source":"model","assets":"assets","admission":"drained"})"))
+            .find("HTTP/1.1 202"),
+        0u);
+    EXPECT_EQ(managed_.created.load(), 0u);
+    EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
+    while (Read(Send("GET", "/v1/status")).find(R"("registration":"ready")") ==
+           std::string::npos) {
+    }
+  }
+  // The model alone is a dependency; every control/transport path is
+  // production.
+  RegistrationDependency managed_;
+};
+
+TEST_P(HttpRouterRegistrationTest, EmptyHeaderCannotSelectAnUnusedSlot) {
+  EXPECT_EQ(
+      Read(Send("POST", "/v1/checkpoints/empty", "", "X-Loom-Model: \r\n"))
+          .find("HTTP/1.1 404"),
+      0u);
+  EXPECT_EQ(
+      Read(Send("GET", "/logz", "", "X-Loom-Model: \r\n")).find("HTTP/1.1 404"),
+      0u);
+}
+
+TEST_P(HttpRouterRegistrationTest,
+       GracefulRemovalFinishesAdmittedQueuesBeforeRetirement) {
+  Register();
+  const int first =
+      Send("POST", "/v1/test", R"({"model":"dynamic","value":1})");
+  managed_.service.WaitSubmitted();
+  const int second =
+      Send("POST", "/v1/test", R"({"model":"dynamic","value":2})");
+  managed_.service.WaitAccepted(2);
+  EXPECT_EQ(Control("drain", "dynamic").find("HTTP/1.1 200"), 0u);
+  const int held = Send("POST", "/v1/test", R"({"model":"dynamic","value":3})");
+  WaitHeld("dynamic", 1);
+  EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
+  EXPECT_EQ(Read(held).find("HTTP/1.1 410"), 0u);
+  EXPECT_EQ(managed_.destroyed.load(), 0u);
+  managed_.service.Release();
+  EXPECT_NE(Read(first).find(R"("value":1)"), std::string::npos);
+  managed_.service.WaitSubmitted();
+  managed_.service.Release();
+  EXPECT_NE(Read(second).find(R"("value":2)"), std::string::npos);
+  managed_.WaitRetiring();
+  EXPECT_EQ(managed_.destroyed.load(), 0u);
+  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 409"), 0u);
+  EXPECT_EQ(
+      Read(
+          Send(
+              "POST", "/v1/models/register",
+              R"({"kind":"embedding","name":"dynamic","source":"model","assets":"assets"})"))
+          .find("HTTP/1.1 409"),
+      0u);
+  EXPECT_EQ(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
+      0u);
+  managed_.ReleaseRetirement();
+  while (Read(Send("GET", "/v1/models")).find(R"("id":"dynamic")") !=
+         std::string::npos) {
+  }
+  EXPECT_EQ(managed_.destroyed.load(), 1u);
+}
+
+TEST_P(HttpRouterRegistrationTest,
+       AbortAndServerStopStillWaitForActualModelOwnership) {
+  Register();
+  const int first = Send("POST", "/v1/test", R"({"model":"dynamic"})");
+  managed_.service.WaitSubmitted();
+  const int queued = Send("POST", "/v1/test", R"({"model":"dynamic"})");
+  managed_.service.WaitAccepted(2);
+  Control("drain", "dynamic");
+  const int held = Send("POST", "/v1/test", R"({"model":"dynamic"})");
+  WaitHeld("dynamic", 1);
+  EXPECT_EQ(Read(Send("POST", "/v1/models/unregister",
+                      R"({"model":"dynamic","mode":"abort"})"))
+                .find("HTTP/1.1 202"),
+            0u);
+  managed_.service.WaitStopping();
+  EXPECT_EQ(Read(held).find("HTTP/1.1 410"), 0u);
+  EXPECT_EQ(managed_.destroyed.load(), 0u);
+  EXPECT_EQ(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
+      0u);
+  managed_.service.Release();
+  EXPECT_TRUE(Read(first).empty());
+  EXPECT_TRUE(Read(queued).empty());
+  managed_.WaitRetiring();
+  loom_serve_http_server_request_stop(server_);
+  EXPECT_FALSE(returned_.load());
+  managed_.ReleaseRetirement();
+  owner_.join();
+  EXPECT_EQ(managed_.destroyed.load(), 1u);
+}
+
+TEST_P(HttpRouterRegistrationTest,
+       ReleaseFailureRetainsOwnershipUntilExplicitRetry) {
+  managed_.fail_release = true;
+  Register();
+  EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
+  managed_.WaitRetiring();
+  managed_.ReleaseRetirement();
+  std::string status;
+  do {
+    status = Read(Send("GET", "/v1/status"));
+  } while (status.find(R"("registration":"release_failed")") ==
+           std::string::npos);
+  EXPECT_NE(status.find("platform release failed"), std::string::npos);
+  EXPECT_EQ(managed_.destroyed.load(), 0u);
+  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 409"), 0u);
+  EXPECT_EQ(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
+      0u);
+  EXPECT_EQ(managed_.release_attempts.load(), 1u);
+  EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
+  while (Read(Send("GET", "/v1/models")).find(R"("id":"dynamic")") !=
+         std::string::npos) {
+  }
+  EXPECT_EQ(managed_.release_attempts.load(), 2u);
+  EXPECT_EQ(managed_.destroyed.load(), 1u);
+}
 
 TEST_P(HttpRouterTest, MetricsCopyHeldAndQueuedOwnershipWithEscapedLabels) {
   const int held = Send("POST", "/v1/test", R"({"model":"held"})");
@@ -749,7 +1009,7 @@ TEST_P(HttpRouterTest, RejectsAQuotaThatCouldExcludeEveryControlConnection) {
     // Validation happens before the owner installs any transport observer.
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
-        loom_serve_router_run(executor_, server_, 0, nullptr, options,
+        loom_serve_router_run(executor_, server_, nullptr, options,
                               iree_allocator_system()));
   }
   EXPECT_EQ(Read(Send("GET", "/healthz")).find("HTTP/1.1 200"), 0u);
@@ -936,6 +1196,8 @@ TEST_P(HttpRouterCountersTest, ServerTotalsPreserveIntegerPrecisionAndScope) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterTest, ::testing::Values(1, 4));
+INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterRegistrationTest,
+                         ::testing::Values(1, 4));
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterCountersTest,
                          ::testing::Values(1, 4));
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterTightCapacityTest,

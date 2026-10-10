@@ -48,10 +48,10 @@ typedef struct loom_serve_http_service_snapshot_t {
 // progress is independent; these callbacks never run concurrently. Names are
 // deployment identifiers, not source model identities or checkpoint paths.
 typedef struct loom_serve_http_service_t {
-  // Nonempty visible ASCII name, unique and borrowed through run return. This
+  // Nonempty visible ASCII name, unique and borrowed through retirement. This
   // also fits the checkpoint selector's HTTP header representation.
   iree_string_view_t name;
-  // Borrowed service state, outliving the router and all accepted requests.
+  // Borrowed service state, live through observer detachment and all requests.
   void* self;
   // Installs the owner's nonblocking wake target before the first turn. The
   // owner clears it after all accepted asynchronous callbacks have retired.
@@ -75,7 +75,7 @@ typedef struct loom_serve_http_service_t {
   // STOPPING consumes accepted readiness without launching another model unit.
   iree_status_t (*advance)(void* self, loom_serve_http_service_flags_t flags,
                            bool* out_progress);
-  // Optional immutable input tokenizer, borrowed through router return. Raw
+  // Optional immutable input tokenizer, live through utility task release. Raw
   // utilities use independent CPU states and never call this model's methods.
   const iree_tokenizer_t* tokenizer;
   // Immutable modality name with process lifetime, independent of the model.
@@ -91,7 +91,7 @@ typedef struct loom_serve_http_service_t {
   // NULL means this service has no shared-capacity relationship. The owner
   // outlives the service and every accepted asynchronous obligation.
   const void* capacity_domain;
-  // Optional observation owned by the service and live through router return.
+  // Optional observation owned by the service and live through retirement.
   struct {
     // Bounded immutable-record history; NULL when this service has no stream.
     const loom_serve_telemetry_stream_t* stream;

@@ -115,6 +115,9 @@ struct loom_serve_finite_service_t {
   struct {
     // Bounded typed event storage with independent reader cursors.
     loom_serve_telemetry_stream_t* stream;
+    // The service allocated this stream instead of borrowing its
+    // registration's.
+    bool owns_stream;
     // Cumulative work retained even when every event has been overwritten.
     loom_serve_telemetry_counters_t counters;
   } telemetry;
@@ -765,7 +768,9 @@ void loom_serve_finite_service_destroy(loom_serve_finite_service_t* service) {
   iree_allocator_free(service->allocator, service->cohort);
   iree_allocator_free(service->allocator, service->prepared);
   iree_allocator_free(service->allocator, service->rows);
-  loom_serve_telemetry_stream_destroy(service->telemetry.stream);
+  if (service->telemetry.owns_stream) {
+    loom_serve_telemetry_stream_destroy(service->telemetry.stream);
+  }
   iree_allocator_free(service->allocator, service);
 }
 
@@ -773,6 +778,7 @@ iree_status_t loom_serve_finite_service_create(
     loom_serve_host_t* host, loom_serve_finite_model_t* model,
     const loom_serve_finite_protocol_t* protocol, iree_string_view_t name,
     iree_host_size_t capacity, iree_duration_t heartbeat_interval,
+    loom_serve_telemetry_stream_t* stream,
     loom_serve_finite_service_t** out_service, iree_allocator_t allocator) {
   *out_service = NULL;
   if (!name.size || !capacity || heartbeat_interval < 0 ||
@@ -789,6 +795,8 @@ iree_status_t loom_serve_finite_service_create(
   service->protocol = protocol;
   service->name = name;
   service->capacity = capacity;
+  service->telemetry.stream = stream;
+  service->telemetry.owns_stream = !stream;
   service->executor = loom_serve_host_executor(host);
   iree_slim_mutex_initialize(&service->event.mutex);
   loom_serve_http_timer_initialize(&service->timer);
@@ -814,7 +822,7 @@ iree_status_t loom_serve_finite_service_create(
     status = iree_async_proactor_pool_get(loom_serve_host_proactor_pool(host),
                                           0, &service->proactor);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !stream) {
     status = loom_serve_telemetry_stream_create(128, &service->telemetry.stream,
                                                 allocator);
   }
@@ -823,7 +831,8 @@ iree_status_t loom_serve_finite_service_create(
                                     heartbeat_interval);
     const loom_serve_telemetry_record_t record = {
         .time_ns = iree_time_now(),
-        .event = &LOOM_SERVE_TELEMETRY_STREAM_BEGIN,
+        .event = stream ? &LOOM_SERVE_TELEMETRY_SNAPSHOT
+                        : &LOOM_SERVE_TELEMETRY_STREAM_BEGIN,
         .data.snapshot.phase = "idle"};
     loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
     *out_service = service;

@@ -139,12 +139,19 @@ int main(int argc, char** argv) {
     if (iree_status_is_ok(status)) {
       const loom_serve_http_service_t interface =
           loom_serve_image_service_interface(service);
-      status = loom_serve_router_run(
-          loom_serve_host_executor(host), server, 1, &interface,
-          (loom_serve_router_options_t){
-              .request_quota = options.pending_capacity,
-              .holding_capacity = (iree_host_size_t)FLAG_connections / 2},
+      loom_serve_registry_t* registry = NULL;
+      status = loom_serve_registry_create(
+          1, &interface, 0, (loom_serve_registration_factory_t){0}, &registry,
           allocator);
+      if (iree_status_is_ok(status)) {
+        status = loom_serve_router_run(
+            loom_serve_host_executor(host), server, registry,
+            (loom_serve_router_options_t){
+                .request_quota = options.pending_capacity,
+                .holding_capacity = (iree_host_size_t)FLAG_connections / 2},
+            allocator);
+      }
+      status = iree_status_join(status, loom_serve_registry_destroy(registry));
     }
     loom_serve_image_service_destroy(service);
   }
