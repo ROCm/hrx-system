@@ -332,8 +332,7 @@ iree_status_t loom_serve_configuration_initialize(
   IREE_RETURN_IF_ERROR(iree_json_enumerate_array_typed(
       models.value, configuration_count, &count));
   if (!count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "catalog requires at least one model");
+    return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       host_allocator, count, sizeof(*out_configuration->models),

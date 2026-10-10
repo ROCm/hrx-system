@@ -34,6 +34,14 @@ model-specific C in the executable.
 
 ## Launch
 
+The server can start without `--models`, or with an explicit `{"models":[]}`
+catalog. It still owns its configured device and shared task/I/O infrastructure;
+health, model discovery, status, metrics and diagnostic endpoints remain live.
+An empty server publishes empty model/status lists and zero model-work totals.
+Unknown-model inference and tokenization requests return HTTP 404. Catalog models
+are currently constructed at startup; registration and unloading are not HTTP
+operations yet.
+
 The [weight-free three-model catalog](../models/fixtures/README.md) is a complete
 first-output recipe for image, embedding and decision packages. The example
 below adds real text/image checkpoints; the same executable handles both.

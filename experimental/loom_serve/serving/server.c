@@ -27,7 +27,7 @@
 #include "loom/util/stream.h"
 
 IREE_FLAG(string, models, "",
-          "JSON deployment catalog with named source models.");
+          "Optional JSON deployment catalog; omitted starts with no models.");
 IREE_FLAG_LIST(string, listen,
                "HTTP binding: IPv4 host:port, [IPv6]:port, or unix:path. "
                "Repeat for multiple listeners; default 127.0.0.1:8080.");
@@ -182,11 +182,11 @@ static void serving_shutdown_requested(void* user_data,
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
-  if (!FLAG_models[0] || FLAG_connections < 1 || FLAG_request_body_bytes < 1 ||
+  if (FLAG_connections < 1 || FLAG_request_body_bytes < 1 ||
       FLAG_heartbeat_ms < 0) {
     fprintf(stderr,
-            "Provide --models and positive connection/body "
-            "capacities.\n");
+            "Provide positive connection/body capacities and a nonnegative "
+            "heartbeat interval.\n");
     return EXIT_FAILURE;
   }
   const iree_allocator_t allocator = iree_allocator_system();
@@ -195,17 +195,20 @@ int main(int argc, char** argv) {
   const iree_host_size_t listener_count = bindings.count ? bindings.count : 1;
   const iree_string_view_t* addresses =
       bindings.count ? bindings.values : &default_binding;
-  loom_serve_configuration_t configuration = {0};
-  iree_io_file_contents_t* contents = NULL;
-  iree_status_t status = iree_io_file_contents_read(
-      iree_make_cstring_view(FLAG_models), allocator, &contents);
-  if (iree_status_is_ok(status)) {
-    const iree_const_byte_span_t bytes = contents->const_buffer;
-    status = loom_serve_configuration_initialize(
-        iree_make_string_view((const char*)bytes.data, bytes.data_length),
-        &configuration, allocator);
+  loom_serve_configuration_t configuration = {.allocator = allocator};
+  iree_status_t status = iree_ok_status();
+  if (FLAG_models[0]) {
+    iree_io_file_contents_t* contents = NULL;
+    status = iree_io_file_contents_read(iree_make_cstring_view(FLAG_models),
+                                        allocator, &contents);
+    if (iree_status_is_ok(status)) {
+      const iree_const_byte_span_t bytes = contents->const_buffer;
+      status = loom_serve_configuration_initialize(
+          iree_make_string_view((const char*)bytes.data, bytes.data_length),
+          &configuration, allocator);
+    }
+    iree_io_file_contents_free(contents);
   }
-  iree_io_file_contents_free(contents);
   if (iree_status_is_ok(status)) {
     status = iree_async_signal_block_default();
   }
@@ -224,11 +227,11 @@ int main(int argc, char** argv) {
     status = iree_allocator_malloc_array(
         allocator, listener_count, sizeof(*listeners), (void**)&listeners);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && configuration.model_count) {
     status = iree_allocator_malloc_array(allocator, configuration.model_count,
                                          sizeof(*models), (void**)&models);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && configuration.model_count) {
     status = iree_allocator_malloc_array(allocator, configuration.model_count,
                                          sizeof(*services), (void**)&services);
   }

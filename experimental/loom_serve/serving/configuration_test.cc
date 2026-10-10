@@ -59,6 +59,15 @@ TEST(ConfigurationTest, IndependentModelsOwnDecodedStringsAndOptions) {
   loom_serve_configuration_deinitialize(&configuration);
 }
 
+TEST(ConfigurationTest, EmptyCatalogHasNoModelStorage) {
+  loom_serve_configuration_t configuration;
+  IREE_ASSERT_OK(loom_serve_configuration_initialize(
+      IREE_SV(R"({"models":[]})"), &configuration, iree_allocator_system()));
+  EXPECT_EQ(configuration.model_count, 0u);
+  EXPECT_EQ(configuration.models, nullptr);
+  loom_serve_configuration_deinitialize(&configuration);
+}
+
 TEST(ConfigurationTest, MixedModalitiesKeepDisjointOptionsAndOwnedStrings) {
   std::string json =
       "{\"models\":[" + Image("default-image") + "," + Model("text") + "," +
@@ -151,7 +160,6 @@ TEST(ConfigurationTest,
   for (
       const auto& json :
       {std::string("{}"),
-       std::string(R"({"models":[]})"),
        std::string(R"({"models":[null]})"),
        std::string(R"({"models":[{"kind":"image"}]})"),
        std::string(R"({"models":[{"kind":"audio","name":"x"}]})"),

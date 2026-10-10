@@ -96,8 +96,9 @@ typedef struct loom_serve_configuration_t {
   loom_serve_model_configuration_t* models;
 } loom_serve_configuration_t;
 
-// Parses one complete JSON/JSONC {"models":[...]} catalog. Every model declares
-// kind="text", "image", "embedding" or "decision", name and source. Text
+// Parses one complete JSON/JSONC {"models":[...]} catalog; the array may be
+// empty. Every model declares kind="text", "image", "embedding" or "decision",
+// name and source. Text
 // entries require weights and tokenizer; image entries require a checkpoint
 // directory. Embedding/decision entries require assets and accept a
 // source-owned options object. Unknown/duplicate fields, fields from another

@@ -784,7 +784,9 @@ static void router_advance(router_t* router, bool* out_progress) {
     router->stopping |= !iree_status_is_ok(router->status);
     *out_progress |= progress;
   }
-  router->cursor = (router->cursor + 1) % router->service_count;
+  if (++router->cursor >= router->service_count) {
+    router->cursor = 0;
+  }
   bool pending = router->tokenizations != NULL;
   for (iree_host_size_t i = 0; i < router->service_count; ++i) {
     pending |= router->services[i].is_pending(router->services[i].self);
@@ -837,10 +839,9 @@ iree_status_t loom_serve_http_router_run(
     iree_task_executor_t* executor, loom_serve_http_server_t* server,
     iree_host_size_t service_count, const loom_serve_http_service_t* services,
     iree_host_size_t request_capacity, iree_allocator_t host_allocator) {
-  if (!service_count || !request_capacity) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "router requires services and a positive request quota");
+  if (!request_capacity) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "router requires a positive request quota");
   }
   for (iree_host_size_t i = 0; i < service_count; ++i) {
     bool valid_name = services[i].name.size != 0;
@@ -865,9 +866,11 @@ iree_status_t loom_serve_http_router_run(
                      .services = services,
                      .service_count = service_count,
                      .request_capacity = request_capacity};
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      host_allocator, service_count, sizeof(*router.snapshots),
-      (void**)&router.snapshots));
+  if (service_count) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        host_allocator, service_count, sizeof(*router.snapshots),
+        (void**)&router.snapshots));
+  }
   iree_slim_mutex_initialize(&router.mutex);
   iree_slim_mutex_initialize(&router.retirement.mutex);
   iree_notification_initialize(&router.retirement.notification);

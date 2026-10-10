@@ -108,6 +108,8 @@ typedef struct loom_serve_http_service_t {
 // service. GET /v1/models lists deployment names and namespaced capabilities;
 // GET /v1/status adds copied scheduler ownership. /healthz and /readyz are
 // model-free: constructors have completed, not necessarily weight activation.
+// Zero services is valid: model/status lists are empty, work counters are zero,
+// and inference or tokenization requests receive model-not-registered errors.
 // GET /metrics exposes the same copied ownership as Prometheus text gauges
 // and cumulative model-protocol counters without invoking models/devices.
 // Server counters sum the fixed catalog's live-through-return owners, excluding

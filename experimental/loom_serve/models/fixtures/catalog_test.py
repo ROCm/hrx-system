@@ -610,6 +610,62 @@ def check_startup_failures(server, directory, catalog):
         )
 
 
+def check_empty_server(server, directory):
+    catalog = directory / "empty.json"
+    catalog.write_text('{"models":[]}')
+    for mode, arguments in (
+        ("omitted", []),
+        ("empty", [f"--models={catalog.name}"]),
+    ):
+        log_path = directory / f"{mode}-models.log"
+        with child_server(
+            [
+                str(server),
+                *arguments,
+                "--listen=127.0.0.1:0",
+                "--workers=1",
+                "--pool_backing=fixed",
+            ],
+            log_path,
+            cwd=directory,
+        ) as (_, address):
+            assert address is not None, log_path.read_text()
+            client = Client(address)
+            for target in ("/healthz", "/readyz"):
+                assert client.request(target) == {"status": "ready"}
+            for target in ("/v1/models", "/v1/status"):
+                assert client.request(target) == {"object": "list", "data": []}
+            for target in ("/v1/embeddings", "/tokenize", "/detokenize"):
+                rejected = client.request(target, {"model": "absent"}, status=404)
+                assert rejected == {
+                    "error": {
+                        "message": "model is not registered",
+                        "type": "loom_route_error",
+                    }
+                }
+            observer = LogClient("http://" + address, timeout=None)
+            assert observer.models() == []
+            batch = observer.poll()
+            counters = next(
+                record["values"]
+                for record in batch.records
+                if record["event"] == "counters"
+            )
+            assert counters and all(value == 0 for value in counters.values())
+            metrics = client.request("/metrics").splitlines()
+            assert "loom_serve_server_counters_available 1" in metrics
+            assert not any(line.startswith("loom_serve_model_") for line in metrics)
+            for name in counters:
+                assert f"loom_serve_server_{name}_total 0" in metrics
+        locators = [
+            json.loads(line)
+            for line in log_path.read_text().splitlines()
+            if line.startswith('{"event":"ready"')
+        ]
+        assert locators == [{"event": "ready", "address": address, "models": 0}]
+        print(json.dumps({"event": "empty_server_joined", "catalog": mode}), flush=True)
+
+
 def check_multiple_bindings(server, directory, catalog):
     socket_path = directory / 'serve "local".sock'
     log_path = directory / "multiple-bindings.log"
@@ -678,6 +734,7 @@ def main():
     server = arguments.server.absolute()
     with tempfile.TemporaryDirectory(prefix="loom catalog ") as temporary:
         directory = Path(temporary)
+        check_empty_server(server, directory)
         weights = directory / "text.safetensors"
         header = b'{"bias":{"dtype":"I32","shape":[1],"data_offsets":[0,4]}}'
         header += b" " * (-len(header) % 8)
