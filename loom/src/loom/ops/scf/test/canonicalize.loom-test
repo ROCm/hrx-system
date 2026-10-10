@@ -724,6 +724,29 @@ func.def @if_factors_common_pure_tail(%cond: i1, %a: i32, %b: i32) -> (i32) {
 
 // ====
 
+// Matching dependent operand types refer to the same outer definition. Since
+// each type is valid in both exhaustive branches, the shared extent already
+// dominates the conditional and remains available to the factored tail.
+func.def @if_factors_tail_with_shared_dependent_type(%cond: i1, %extent: index, %a: vector<[%extent]xf32>, %b: vector<[%extent]xf32>) -> (vector<[%extent]xf32>) {
+  %result = scf.if %cond -> (vector<[%extent]xf32>) {
+    %then = test.convergent %a : vector<[%extent]xf32>
+    scf.yield %then : vector<[%extent]xf32>
+  } else {
+    %else = test.convergent %b : vector<[%extent]xf32>
+    scf.yield %else : vector<[%extent]xf32>
+  }
+  func.return %result : vector<[%extent]xf32>
+}
+
+// ----
+func.def @if_factors_tail_with_shared_dependent_type(%cond: i1, %extent: index, %a: vector<[%extent]xf32>, %b: vector<[%extent]xf32>) -> (vector<[%extent]xf32>) {
+  %10 = scf.select %cond, %a, %b : vector<[%extent]xf32>
+  %result = test.convergent %10 : vector<[%extent]xf32>
+  func.return %result : vector<[%extent]xf32>
+}
+
+// ====
+
 // Factoring a segmented tail preserves its independent operand field spans.
 func.def @if_factors_common_segmented_tail(%cond: i1, %a: i32, %b: i32) -> (i32) {
   %result = scf.if %cond -> (i32) {

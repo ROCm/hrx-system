@@ -113,7 +113,6 @@ loom_generated_cc_library(
   DEPS
     iree::base::internal
     iree::base::internal::arena
-    loom::analysis::availability
     loom::error::emitter
     loom::error::error_defs
     loom::ir

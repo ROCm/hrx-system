@@ -8,7 +8,6 @@
 
 #include <string.h>
 
-#include "loom/analysis/availability.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ir/facts.h"
@@ -715,11 +714,9 @@ static bool loom_scf_type_is_storage_root_or_projection(loom_type_t type) {
   }
 }
 
-static iree_status_t loom_scf_region_branch_tail_ops_match(
+static bool loom_scf_region_branch_tail_ops_match(
     loom_rewriter_t* rewriter, const loom_op_t* branch_op,
-    const loom_op_t* reference_tail, const loom_op_t* candidate_tail,
-    const loom_availability_analysis_t* availability, bool* out_match) {
-  *out_match = false;
+    const loom_op_t* reference_tail, const loom_op_t* candidate_tail) {
   if (reference_tail->kind != candidate_tail->kind ||
       reference_tail->instance_flags != candidate_tail->instance_flags ||
       reference_tail->operand_count != candidate_tail->operand_count ||
@@ -727,7 +724,7 @@ static iree_status_t loom_scf_region_branch_tail_ops_match(
                                                  reference_tail) ||
       !loom_scf_region_branch_tail_op_can_factor(rewriter->module,
                                                  candidate_tail)) {
-    return iree_ok_status();
+    return false;
   }
   const loom_op_vtable_t* tail_vtable =
       loom_op_vtable(rewriter->module, reference_tail);
@@ -737,30 +734,23 @@ static iree_status_t loom_scf_region_branch_tail_ops_match(
       memcmp(loom_op_const_operand_segment_counts(reference_tail),
              loom_op_const_operand_segment_counts(candidate_tail),
              (iree_host_size_t)operand_segment_count * sizeof(uint16_t)) != 0) {
-    return iree_ok_status();
+    return false;
   }
   if (!loom_scf_region_branch_tail_result_has_single_yield_use(
           rewriter->module, reference_tail) ||
       !loom_scf_region_branch_tail_result_has_single_yield_use(
           rewriter->module, candidate_tail)) {
-    return iree_ok_status();
+    return false;
   }
   if (!loom_scf_region_branch_tail_attrs_match(reference_tail,
                                                candidate_tail)) {
-    return iree_ok_status();
-  }
-  bool attrs_available = false;
-  IREE_RETURN_IF_ERROR(loom_availability_op_attrs_are_available_before_op(
-      availability, /*moving_root_op=*/NULL, branch_op, reference_tail,
-      &attrs_available));
-  if (!attrs_available) {
-    return iree_ok_status();
+    return false;
   }
 
   loom_value_id_t branch_result = loom_op_const_results(branch_op)[0];
   if (branch_result == LOOM_VALUE_ID_INVALID ||
       branch_result >= rewriter->module->values.count) {
-    return iree_ok_status();
+    return false;
   }
   loom_type_t result_type =
       loom_module_value_type(rewriter->module, branch_result);
@@ -772,7 +762,7 @@ static iree_status_t loom_scf_region_branch_tail_ops_match(
           result_type,
           loom_module_value_type(rewriter->module,
                                  loom_op_const_results(candidate_tail)[0]))) {
-    return iree_ok_status();
+    return false;
   }
 
   const loom_value_id_t* reference_operands =
@@ -784,14 +774,14 @@ static iree_status_t loom_scf_region_branch_tail_ops_match(
         reference_operands[i] >= rewriter->module->values.count ||
         candidate_operands[i] == LOOM_VALUE_ID_INVALID ||
         candidate_operands[i] >= rewriter->module->values.count) {
-      return iree_ok_status();
+      return false;
     }
     loom_type_t reference_type =
         loom_module_value_type(rewriter->module, reference_operands[i]);
     if (!loom_type_equal(
             reference_type,
             loom_module_value_type(rewriter->module, candidate_operands[i]))) {
-      return iree_ok_status();
+      return false;
     }
     // Selecting between distinct storage roots/projections erases the
     // single-root facts needed by later memory lowering. Keep those accesses
@@ -799,18 +789,15 @@ static iree_status_t loom_scf_region_branch_tail_ops_match(
     // branch.
     if (reference_operands[i] != candidate_operands[i] &&
         loom_scf_type_is_storage_root_or_projection(reference_type)) {
-      return iree_ok_status();
-    }
-    bool type_available = false;
-    IREE_RETURN_IF_ERROR(loom_availability_type_is_available_before_op(
-        availability, /*moving_root_op=*/NULL, branch_op, reference_type,
-        &type_available));
-    if (!type_available) {
-      return iree_ok_status();
+      return false;
     }
   }
-  *out_match = true;
-  return iree_ok_status();
+  // Attributes and operand types are identical across every exhaustive branch.
+  // Any SSA value embedded in those shared payloads must therefore dominate
+  // the branch op: a value defined inside one mutually exclusive region cannot
+  // be referenced from another. Verification establishes that invariant at the
+  // public IR boundary, so factoring consumes it without rebuilding dominance.
+  return true;
 }
 
 static iree_status_t loom_scf_region_branch_build_empty_clone(
@@ -945,16 +932,10 @@ static iree_status_t loom_scf_region_branch_factor_common_tail(
     }
   }
 
-  loom_availability_analysis_t availability;
-  IREE_RETURN_IF_ERROR(loom_availability_analysis_initialize(
-      rewriter->module, rewriter->arena, &availability));
   loom_op_t* reference_tail = tail_ops[0];
   for (uint8_t i = 0; i < op->region_count; ++i) {
-    bool tail_ops_match = false;
-    IREE_RETURN_IF_ERROR(loom_scf_region_branch_tail_ops_match(
-        rewriter, op, reference_tail, tail_ops[i], &availability,
-        &tail_ops_match));
-    if (!tail_ops_match) {
+    if (!loom_scf_region_branch_tail_ops_match(rewriter, op, reference_tail,
+                                               tail_ops[i])) {
       return iree_ok_status();
     }
   }
