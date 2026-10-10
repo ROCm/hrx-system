@@ -41,7 +41,7 @@ static iree_status_t loom_low_lower_calculate_block_execution_counts(
     const loom_loop_recurrence_facts_t recurrence =
         loom_value_fact_induction_facts(context->fact_table, context->module,
                                         &region->inductions[i]);
-    if (!recurrence.trip_count_known) {
+    if (recurrence.trip_count_kind != LOOM_LOOP_TRIP_COUNT_EXACT) {
       return iree_ok_status();
     }
     trip_counts[i] = recurrence.trip_count;

@@ -1,0 +1,448 @@
+// RUN: pass canonicalize
+
+// The load may stop the loop before the limit. Inputs above the limit take no
+// iterations, so the header and result retain the full initial [0, 63] envelope.
+func.def @short_circuit_loaded_guard(%input: view<37xi32>, %requested_start: index) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %sample_zero = scalar.constant 0 : i32
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = test.fact_range_lo %before : index -> i64
+    %header_high = test.fact_range_hi %before : index -> i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp ult, %before, %position_limit : index
+    %continue = scf.if %in_range -> (i1) {
+      %sample = view.load %input[%before] : view<37xi32> -> i32
+      %positive = scalar.cmpi sgt, %sample, %sample_zero : i32
+      scf.yield %positive : i1
+    } else {
+      scf.yield %in_range : i1
+    }
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = test.fact_range_lo %result : index -> i64
+  %result_high = test.fact_range_hi %result : index -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @short_circuit_loaded_guard(%input: view<37xi32>, %requested_start: index) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %sample_zero = scalar.constant 0 : i32
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = scalar.constant 0 : i64
+    %header_high = scalar.constant 63 : i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp ult, %before, %position_limit : index
+    %continue = scf.if %in_range -> (i1) {
+      %20 = index.assume %before [lt(%before, 37)] : index
+      %sample = view.load %input[%20] : view<37xi32> -> i32
+      %positive = scalar.cmpi sgt, %sample, %sample_zero : i32
+      scf.yield %positive : i1
+    } else {
+      scf.yield %in_range : i1
+    }
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = scalar.constant 0 : i64
+  %result_high = scalar.constant 63 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+// RUN: pass canonicalize
+
+// Continuing through the false arm requires the inverted guard to be false.
+// Descending updates cannot remove zero-trip inputs below the floor.
+func.def @inverted_descending_guard(%requested_start: index, %keep_going: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_floor = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %stop = scalar.constant false : i1
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = test.fact_range_lo %before : index -> i64
+    %header_high = test.fact_range_hi %before : index -> i64
+    test.use %header_low, %header_high : i64, i64
+    %at_floor = index.cmp sle, %before, %position_floor : index
+    %continue = scf.if %at_floor -> (i1) {
+      scf.yield %stop : i1
+    } else {
+      scf.yield %keep_going : i1
+    }
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.sub %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = test.fact_range_lo %result : index -> i64
+  %result_high = test.fact_range_hi %result : index -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @inverted_descending_guard(%requested_start: index, %keep_going: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_floor = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %stop = scalar.constant false : i1
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = scalar.constant 0 : i64
+    %header_high = scalar.constant 63 : i64
+    test.use %header_low, %header_high : i64, i64
+    %at_floor = index.cmp sle, %before, %position_floor : index
+    %continue = scf.select %at_floor, %stop, %keep_going : i1
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.sub %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = scalar.constant 0 : i64
+  %result_high = scalar.constant 63 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+// RUN: pass canonicalize
+
+// Either conjunct may stop execution, but continuing requires the range guard.
+func.def @conjoined_guard(%requested_start: index, %keep_going: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = test.fact_range_lo %before : index -> i64
+    %header_high = test.fact_range_hi %before : index -> i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp slt, %before, %position_limit : index
+    %continue = scalar.andi %in_range, %keep_going : i1
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = test.fact_range_lo %result : index -> i64
+  %result_high = test.fact_range_hi %result : index -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @conjoined_guard(%requested_start: index, %keep_going: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = scalar.constant 0 : i64
+    %header_high = scalar.constant 63 : i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp slt, %before, %position_limit : index
+    %continue = scalar.andi %in_range, %keep_going : i1
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = scalar.constant 0 : i64
+  %result_high = scalar.constant 63 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+// RUN: pass canonicalize
+
+// Only the first visit requires the guard. The carried bypass becomes true,
+// so using its initial false value to bound later header visits is unsound.
+func.def @disjoined_carried_bypass(%requested_start: index) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %initial_bypass = scalar.constant false : i1
+  %enable_bypass = scalar.constant true : i1
+  %result, %final_bypass = scf.while(%before = %initial : index, %header_bypass = %initial_bypass : i1) -> (index, i1) {
+    %header_low = test.fact_range_lo %before : index -> i64
+    %header_high = test.fact_range_hi %before : index -> i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp slt, %before, %position_limit : index
+    %continue = scalar.ori %in_range, %header_bypass : i1
+    scf.condition %continue, %before, %header_bypass : i1, index, i1
+  } do(%current: index, %bypass: i1) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next, %enable_bypass : index, i1
+  }
+  %result_low = test.fact_range_lo %result : index -> i64
+  %result_high = test.fact_range_hi %result : index -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @disjoined_carried_bypass(%requested_start: index) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %initial_bypass = scalar.constant false : i1
+  %enable_bypass = scalar.constant true : i1
+  %result, %final_bypass = scf.while(%before = %initial : index, %header_bypass = %initial_bypass : i1) -> (index, i1) {
+    %header_low = scalar.constant -9223372036854775808 : i64
+    %header_high = scalar.constant 9223372036854775807 : i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp slt, %before, %position_limit : index
+    %continue = scalar.ori %in_range, %header_bypass : i1
+    scf.condition %continue, %before, %header_bypass : i1, index, i1
+  } do(%current: index, %bypass: i1) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next, %enable_bypass : index, i1
+  }
+  %result_low = scalar.constant -9223372036854775808 : i64
+  %result_high = scalar.constant 9223372036854775807 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+// RUN: pass canonicalize
+
+// The literal false arm makes the selector necessary whenever the loop runs.
+func.def @selected_guard_false_arm(%requested_start: index, %keep_going: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %stop = scalar.constant false : i1
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = test.fact_range_lo %before : index -> i64
+    %header_high = test.fact_range_hi %before : index -> i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp slt, %before, %position_limit : index
+    %continue = scf.select %in_range, %keep_going, %stop : i1
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = test.fact_range_lo %result : index -> i64
+  %result_high = test.fact_range_hi %result : index -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @selected_guard_false_arm(%requested_start: index, %keep_going: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %stop = scalar.constant false : i1
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = scalar.constant 0 : i64
+    %header_high = scalar.constant 63 : i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp slt, %before, %position_limit : index
+    %continue = scf.select %in_range, %keep_going, %stop : i1
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = scalar.constant 0 : i64
+  %result_high = scalar.constant 63 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+// RUN: pass canonicalize
+
+// Both arms can continue. The selector alone cannot bound header visits.
+func.def @selected_unknown_arms(%requested_start: index, %inside_permission: i1, %outside_permission: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = test.fact_range_lo %before : index -> i64
+    %header_high = test.fact_range_hi %before : index -> i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp slt, %before, %position_limit : index
+    %continue = scf.select %in_range, %inside_permission, %outside_permission : i1
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = test.fact_range_lo %result : index -> i64
+  %result_high = test.fact_range_hi %result : index -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @selected_unknown_arms(%requested_start: index, %inside_permission: i1, %outside_permission: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = scalar.constant -9223372036854775808 : i64
+    %header_high = scalar.constant 9223372036854775807 : i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp slt, %before, %position_limit : index
+    %continue = scf.select %in_range, %inside_permission, %outside_permission : i1
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = scalar.constant -9223372036854775808 : i64
+  %result_high = scalar.constant 9223372036854775807 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+// RUN: pass canonicalize
+
+// A true outside arm explicitly bypasses the comparison once it becomes false.
+func.def @selected_true_bypass(%requested_start: index, %inside_permission: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %outside_permission = scalar.constant true : i1
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = test.fact_range_lo %before : index -> i64
+    %header_high = test.fact_range_hi %before : index -> i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp slt, %before, %position_limit : index
+    %continue = scf.select %in_range, %inside_permission, %outside_permission : i1
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = test.fact_range_lo %result : index -> i64
+  %result_high = test.fact_range_hi %result : index -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @selected_true_bypass(%requested_start: index, %inside_permission: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %outside_permission = scalar.constant true : i1
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = scalar.constant -9223372036854775808 : i64
+    %header_high = scalar.constant 9223372036854775807 : i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp slt, %before, %position_limit : index
+    %continue = scf.select %in_range, %inside_permission, %outside_permission : i1
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = scalar.constant -9223372036854775808 : i64
+  %result_high = scalar.constant 9223372036854775807 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+// RUN: pass canonicalize
+
+// The condition is result ordinal one. The independently used first result can
+// be true on the false edge and must not stand in for the selected result.
+func.def @second_if_result_guard(%requested_start: index, %keep_going: i1, %inside_marker: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %outside_marker = scalar.constant true : i1
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = test.fact_range_lo %before : index -> i64
+    %header_high = test.fact_range_hi %before : index -> i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp slt, %before, %position_limit : index
+    %marker, %continue = scf.if %in_range -> (i1, i1) {
+      scf.yield %inside_marker, %keep_going : i1, i1
+    } else {
+      scf.yield %outside_marker, %in_range : i1, i1
+    }
+    test.use %marker : i1
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = test.fact_range_lo %result : index -> i64
+  %result_high = test.fact_range_hi %result : index -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @second_if_result_guard(%requested_start: index, %keep_going: i1, %inside_marker: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %outside_marker = scalar.constant true : i1
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = scalar.constant 0 : i64
+    %header_high = scalar.constant 63 : i64
+    test.use %header_low, %header_high : i64, i64
+    %in_range = index.cmp slt, %before, %position_limit : index
+    %marker = scf.select %in_range, %inside_marker, %outside_marker : i1
+    %continue = scf.select %in_range, %keep_going, %in_range : i1
+    test.use %marker : i1
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = scalar.constant 0 : i64
+  %result_high = scalar.constant 63 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+// RUN: pass canonicalize
+
+// A selected result cannot expose its branch-local comparison as an invariant
+// guard. That comparison's bound changes with the counter on every visit.
+func.def @branch_local_bound_stays_local(%requested_start: index, %enabled: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_step = index.constant 1 : index
+  %stop = scalar.constant false : i1
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = test.fact_range_lo %before : index -> i64
+    %header_high = test.fact_range_hi %before : index -> i64
+    test.use %header_low, %header_high : i64, i64
+    %continue = scf.if %enabled -> (i1) {
+      %changing_limit = index.add %before, %position_step : index
+      %below_limit = index.cmp slt, %before, %changing_limit : index
+      scf.yield %below_limit : i1
+    } else {
+      scf.yield %stop : i1
+    }
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = test.fact_range_lo %result : index -> i64
+  %result_high = test.fact_range_hi %result : index -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @branch_local_bound_stays_local(%requested_start: index, %enabled: i1) -> (i64, i64) {
+  %initial = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_step = index.constant 1 : index
+  %result = scf.while(%before = %initial : index) -> (index) {
+    %header_low = scalar.constant -9223372036854775808 : i64
+    %header_high = scalar.constant 9223372036854775807 : i64
+    test.use %header_low, %header_high : i64, i64
+    scf.condition %enabled, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %position_step : index
+    scf.yield %next : index
+  }
+  %result_low = scalar.constant -9223372036854775808 : i64
+  %result_high = scalar.constant 9223372036854775807 : i64
+  func.return %result_low, %result_high : i64, i64
+}

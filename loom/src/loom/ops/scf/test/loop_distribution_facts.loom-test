@@ -167,8 +167,8 @@ kernel.def target(@device) @for_subgroup_exit() {
   %constant = index.constant 7 : index
   %disabled = scalar.constant false : i1
   %result, %exact_result, %last_flag = scf.for %iv = [%begin to %limit step %step](%counter = %begin : index, %exact = %constant : index, %flag = %disabled : i1) -> (index, index, i1) {
-    %at_first = index.cmp eq, %counter, %begin : index
-    %next = index.add %counter, %step : index
+    %at_first = scalar.constant true : i1
+    %next = index.constant 1 : index
     %body_uniform = scalar.constant true : i1
     test.use %body_uniform : i1
     scf.yield %next, %constant, %at_first : index, index, i1
@@ -502,15 +502,14 @@ kernel.def target(@device) @while_subgroup_exit() {
 } launch(%seed: index, %bound: index) {
   %limit = kernel.subgroup.id : index
   %begin = index.constant 0 : index
-  %step = index.constant 1 : index
   %constant = index.constant 7 : index
   %disabled = scalar.constant false : i1
   %result, %unchanged, %exact_result, %last_flag = scf.while(%counter = %begin : index, %fixed = %seed : index, %exact = %constant : index, %flag = %disabled : i1) -> (index, index, index, i1) {
     %keep_going = index.cmp ult, %counter, %limit : index
     scf.condition %keep_going, %counter, %fixed, %exact, %flag : i1, index, index, index, i1
   } do(%body_counter: index, %body_fixed: index, %body_exact: index, %body_flag: i1) {
-    %at_first = index.cmp eq, %body_counter, %begin : index
-    %next = index.add %body_counter, %step : index
+    %at_first = scalar.constant true : i1
+    %next = index.constant 1 : index
     %body_uniform = scalar.constant true : i1
     test.use %body_uniform : i1
     scf.yield %next, %body_fixed, %constant, %at_first : index, index, index, i1

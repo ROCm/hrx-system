@@ -18,6 +18,7 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/util/fact_cfg.h"
+#include "loom/util/fact_induction.h"
 #include "loom/util/fact_table.h"
 
 namespace loom {
@@ -126,6 +127,41 @@ class FactTableComputeTest : public ::testing::Test {
   const loom_type_t type_ = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_value_id_t inputs_[2];
 };
+
+TEST_F(FactTableComputeTest, InductionStepReadsCurrentFactsAndLiteralBits) {
+  loom_value_fact_induction_t induction = {};
+  induction.step.value = inputs_[0];
+  induction.flags = LOOM_VALUE_FACT_INDUCTION_SUBTRACT_STEP;
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table_, inputs_[0],
+                                              loom_value_facts_make(2, 4, 2)));
+  loom_value_facts_t delta =
+      loom_value_fact_induction_step_facts(&table_, &induction);
+  EXPECT_EQ(delta.range_lo, -4);
+  EXPECT_EQ(delta.range_hi, -2);
+  EXPECT_EQ(delta.known_divisor, 2);
+
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table_, inputs_[0],
+                                              loom_value_facts_exact_i64(3)));
+  delta = loom_value_fact_induction_step_facts(&table_, &induction);
+  EXPECT_EQ(delta.range_lo, -3);
+  EXPECT_EQ(delta.range_hi, -3);
+  induction.flags = LOOM_VALUE_FACT_INDUCTION_NONE;
+  delta = loom_value_fact_induction_step_facts(&table_, &induction);
+  EXPECT_EQ(delta.range_lo, 3);
+  EXPECT_EQ(delta.range_hi, 3);
+
+  induction.flags = LOOM_VALUE_FACT_INDUCTION_SUBTRACT_STEP;
+  induction.step.is_literal = true;
+  induction.step.literal = INT64_MIN;
+  loom_value_fact_table_undefine(&table_, inputs_[0]);
+  delta = loom_value_fact_induction_step_facts(&table_, &induction);
+  EXPECT_EQ(delta.range_lo, INT64_MIN);
+  EXPECT_EQ(delta.range_hi, INT64_MIN);
+
+  induction.step.is_literal = false;
+  EXPECT_TRUE(loom_value_facts_is_unknown(
+      loom_value_fact_induction_step_facts(&table_, &induction)));
+}
 
 TEST_F(FactTableComputeTest, IdentityOnlyMutationReportsChangedFacts) {
   EXPECT_EQ(table_.identities.entries, nullptr);

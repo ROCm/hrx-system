@@ -485,7 +485,7 @@ static bool loom_low_lower_report_loop_region_execution_count(
     }
     const loom_loop_recurrence_facts_t recurrence =
         loom_value_fact_induction_facts(fact_table, context->module, induction);
-    if (!recurrence.trip_count_known ||
+    if (recurrence.trip_count_kind != LOOM_LOOP_TRIP_COUNT_EXACT ||
         (executed_region == condition && recurrence.trip_count == UINT64_MAX)) {
       return false;
     }

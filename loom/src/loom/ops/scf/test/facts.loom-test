@@ -306,16 +306,16 @@ func.def @for_zero_trip_result_is_init() -> (i64) {
 
 // ====
 
-// Arithmetic-carried values widen instead of leaving a stale exact summary when
-// the bounded solver cannot represent the recurrence compactly.
-func.def @for_arithmetic_carried_widens_to_unknown(%n: index) -> (i64, i64) {
-  %lo = index.constant 0 : index
-  %n2 = index.assume %n [range(%n, 0, 4)] : index
-  %step = index.constant 1 : index
-  %c0 = scalar.constant 0 : i64
-  %c1 = scalar.constant 1 : i64
-  %observed = scf.for %iv = [%lo to %n2 step %step](%acc = %c0 : i64) -> (i64) {
-    %next = scalar.addi %acc, %c1 : i64
+// A bounded count retains every possible additive exit instead of publishing
+// either an unbounded interval or the value after the maximum count alone.
+func.def @for_arithmetic_carried_has_bounded_exits(%requested_count: index) -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %count = index.assume %requested_count [range(%requested_count, 0, 4)] : index
+  %iteration_step = index.constant 1 : index
+  %initial_value = scalar.constant 0 : i64
+  %increment = scalar.constant 1 : i64
+  %observed = scf.for %iv = [%begin to %count step %iteration_step](%acc = %initial_value : i64) -> (i64) {
+    %next = scalar.addi %acc, %increment : i64
     scf.yield %next : i64
   }
   %result_lo = test.fact_range_lo %observed : i64 -> i64
@@ -324,9 +324,9 @@ func.def @for_arithmetic_carried_widens_to_unknown(%n: index) -> (i64, i64) {
 }
 
 // ----
-func.def @for_arithmetic_carried_widens_to_unknown(%n: index) -> (i64, i64) {
-  %result_lo = scalar.constant -9223372036854775808 : i64
-  %result_hi = scalar.constant 9223372036854775807 : i64
+func.def @for_arithmetic_carried_has_bounded_exits(%requested_count: index) -> (i64, i64) {
+  %result_lo = scalar.constant 0 : i64
+  %result_hi = scalar.constant 4 : i64
   func.return %result_lo, %result_hi : i64, i64
 }
 

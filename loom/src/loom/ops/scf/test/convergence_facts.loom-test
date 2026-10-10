@@ -108,3 +108,217 @@ func.def @selected_nan_queue(%count: index, %hold: i1) -> (i1) {
   %finite = scalar.isfinitef %out0 : f32
   func.return %finite : i1
 }
+
+// ====
+
+// RUN: pass canonicalize
+
+// A bounded count includes zero iterations. Body rows exclude the terminal
+// decrement, while result rows retain every possible stopping point.
+func.def @bounded_for_remaining_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %first_iteration = index.constant 0 : index
+  %iteration_step = index.constant 1 : index
+  %initial_rows = index.constant 8 : index
+  %row_step = index.constant 1 : index
+  %remaining_rows = scf.for %iteration = [%first_iteration to %count step %iteration_step](%rows = %initial_rows : index) -> (index) {
+    %body_low = test.fact_range_lo %rows : index -> i64
+    %body_high = test.fact_range_hi %rows : index -> i64
+    test.use %body_low, %body_high : i64, i64
+    %next_rows = index.sub %rows, %row_step : index
+    scf.yield %next_rows : index
+  }
+  %result_low = test.fact_range_lo %remaining_rows : index -> i64
+  %result_high = test.fact_range_hi %remaining_rows : index -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @bounded_for_remaining_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %first_iteration = index.constant 0 : index
+  %iteration_step = index.constant 1 : index
+  %initial_rows = index.constant 8 : index
+  %row_step = index.constant 1 : index
+  %remaining_rows = scf.for %iteration = [%first_iteration to %count step %iteration_step](%rows = %initial_rows : index) -> (index) {
+    %body_low = scalar.constant 6 : i64
+    %body_high = scalar.constant 8 : i64
+    test.use %body_low, %body_high : i64, i64
+    %next_rows = index.sub %rows, %row_step : index
+    scf.yield %next_rows : index
+  }
+  %result_low = scalar.constant 5 : i64
+  %result_high = scalar.constant 8 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+// The independent counter bounds a descending scalar companion through the
+// condition/body forwarding tuple without making the exit count exact.
+func.def @bounded_while_remaining_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %first_iteration = index.constant 0 : index
+  %iteration_step = index.constant 1 : index
+  %initial_rows = scalar.constant 8 : i32
+  %row_step = scalar.constant 1 : i32
+  %iteration_end, %remaining_rows = scf.while(%header_iteration = %first_iteration : index, %header_rows = %initial_rows : i32) -> (index, i32) {
+    %header_low = test.fact_range_lo %header_rows : i32 -> i64
+    %header_high = test.fact_range_hi %header_rows : i32 -> i64
+    test.use %header_low, %header_high : i64, i64
+    %has_iteration = index.cmp slt, %header_iteration, %count : index
+    scf.condition %has_iteration, %header_iteration, %header_rows : i1, index, i32
+  } do(%iteration: index, %rows: i32) {
+    %body_low = test.fact_range_lo %rows : i32 -> i64
+    %body_high = test.fact_range_hi %rows : i32 -> i64
+    test.use %body_low, %body_high : i64, i64
+    %next_iteration = index.add %iteration, %iteration_step : index
+    %next_rows = scalar.subi %rows, %row_step : i32
+    scf.yield %next_iteration, %next_rows : index, i32
+  }
+  %result_low = test.fact_range_lo %remaining_rows : i32 -> i64
+  %result_high = test.fact_range_hi %remaining_rows : i32 -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @bounded_while_remaining_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %first_iteration = index.constant 0 : index
+  %iteration_step = index.constant 1 : index
+  %initial_rows = scalar.constant 8 : i32
+  %iteration_end, %remaining_rows = scf.while(%header_iteration = %first_iteration : index, %header_rows = %initial_rows : i32) -> (index, i32) {
+    %header_low = scalar.constant 5 : i64
+    %header_high = scalar.constant 8 : i64
+    test.use %header_low, %header_high : i64, i64
+    %has_iteration = index.cmp slt, %header_iteration, %count : index
+    scf.condition %has_iteration, %header_iteration, %header_rows : i1, index, i32
+  } do(%iteration: index, %rows: i32) {
+    %body_low = scalar.constant 6 : i64
+    %body_high = scalar.constant 8 : i64
+    test.use %body_low, %body_high : i64, i64
+    %next_iteration = index.add %iteration, %iteration_step : index
+    %25 = scalar.constant -1 : i32
+    %next_rows = scalar.addi %rows, %25 : i32
+    scf.yield %next_iteration, %next_rows : index, i32
+  }
+  %result_low = scalar.constant 5 : i64
+  %result_high = scalar.constant 8 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+// Cropping in the condition also executes on the final false evaluation.
+// The bounded countdown limits body executions, not condition evaluations.
+func.def @descending_condition_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %exhausted = index.constant 0 : index
+  %iteration_step = index.constant 1 : index
+  %initial_rows = index.constant 8 : index
+  %row_step = index.constant 1 : index
+  %remaining_end, %rows_end = scf.while(%header_remaining = %count : index, %header_rows = %initial_rows : index) -> (index, index) {
+    %header_low = test.fact_range_lo %header_rows : index -> i64
+    %header_high = test.fact_range_hi %header_rows : index -> i64
+    test.use %header_low, %header_high : i64, i64
+    %has_iteration = index.cmp sgt, %header_remaining, %exhausted : index
+    %forward_rows = index.sub %header_rows, %row_step : index
+    scf.condition %has_iteration, %header_remaining, %forward_rows : i1, index, index
+  } do(%remaining: index, %rows: index) {
+    %body_low = test.fact_range_lo %rows : index -> i64
+    %body_high = test.fact_range_hi %rows : index -> i64
+    test.use %body_low, %body_high : i64, i64
+    %next_remaining = index.sub %remaining, %iteration_step : index
+    scf.yield %next_remaining, %rows : index, index
+  }
+  %result_low = test.fact_range_lo %rows_end : index -> i64
+  %result_high = test.fact_range_hi %rows_end : index -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @descending_condition_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %exhausted = index.constant 0 : index
+  %iteration_step = index.constant 1 : index
+  %initial_rows = index.constant 8 : index
+  %row_step = index.constant 1 : index
+  %remaining_end, %rows_end = scf.while(%header_remaining = %count : index, %header_rows = %initial_rows : index) -> (index, index) {
+    %header_low = scalar.constant 5 : i64
+    %header_high = scalar.constant 8 : i64
+    test.use %header_low, %header_high : i64, i64
+    %has_iteration = index.cmp sgt, %header_remaining, %exhausted : index
+    %forward_rows = index.sub %header_rows, %row_step : index
+    scf.condition %has_iteration, %header_remaining, %forward_rows : i1, index, index
+  } do(%remaining: index, %rows: index) {
+    %body_low = scalar.constant 4 : i64
+    %body_high = scalar.constant 7 : i64
+    test.use %body_low, %body_high : i64, i64
+    %next_remaining = index.sub %remaining, %iteration_step : index
+    scf.yield %next_remaining, %rows : index, index
+  }
+  %result_low = scalar.constant 4 : i64
+  %result_high = scalar.constant 7 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+// An inclusive unsigned guard with the counter on the right still bounds an
+// additive negative step. Zero remains an empty-loop input.
+func.def @reversed_unsigned_countdown_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %minimum_remaining = index.constant 1 : index
+  %counter_delta = index.constant -1 : index
+  %initial_rows = scalar.constant 8 : i32
+  %row_step = scalar.constant 1 : i32
+  %remaining_end, %rows_end = scf.while(%header_remaining = %count : index, %header_rows = %initial_rows : i32) -> (index, i32) {
+    %header_low = test.fact_range_lo %header_rows : i32 -> i64
+    %header_high = test.fact_range_hi %header_rows : i32 -> i64
+    test.use %header_low, %header_high : i64, i64
+    %has_iteration = index.cmp ule, %minimum_remaining, %header_remaining : index
+    scf.condition %has_iteration, %header_remaining, %header_rows : i1, index, i32
+  } do(%remaining: index, %rows: i32) {
+    %body_low = test.fact_range_lo %rows : i32 -> i64
+    %body_high = test.fact_range_hi %rows : i32 -> i64
+    test.use %body_low, %body_high : i64, i64
+    %next_remaining = index.add %remaining, %counter_delta : index
+    %next_rows = scalar.subi %rows, %row_step : i32
+    scf.yield %next_remaining, %next_rows : index, i32
+  }
+  %result_low = test.fact_range_lo %rows_end : i32 -> i64
+  %result_high = test.fact_range_hi %rows_end : i32 -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @reversed_unsigned_countdown_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %minimum_remaining = index.constant 1 : index
+  %counter_delta = index.constant -1 : index
+  %initial_rows = scalar.constant 8 : i32
+  %remaining_end, %rows_end = scf.while(%header_remaining = %count : index, %header_rows = %initial_rows : i32) -> (index, i32) {
+    %header_low = scalar.constant 5 : i64
+    %header_high = scalar.constant 8 : i64
+    test.use %header_low, %header_high : i64, i64
+    %has_iteration = index.cmp ule, %minimum_remaining, %header_remaining : index
+    scf.condition %has_iteration, %header_remaining, %header_rows : i1, index, i32
+  } do(%remaining: index, %rows: i32) {
+    %body_low = scalar.constant 6 : i64
+    %body_high = scalar.constant 8 : i64
+    test.use %body_low, %body_high : i64, i64
+    %next_remaining = index.add %remaining, %counter_delta : index
+    %25 = scalar.constant -1 : i32
+    %next_rows = scalar.addi %rows, %25 : i32
+    scf.yield %next_remaining, %next_rows : index, i32
+  }
+  %result_low = scalar.constant 5 : i64
+  %result_high = scalar.constant 8 : i64
+  func.return %result_low, %result_high : i64, i64
+}

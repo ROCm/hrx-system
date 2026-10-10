@@ -460,9 +460,10 @@ static loom_value_facts_t loom_value_fact_table_refine_cfg_recurrence(
       loom_value_fact_recurrence_set_lookup(&region->recurrences[loop_index],
                                             loom_value_def_index(value));
   loom_loop_recurrence_facts_t recurrence;
-  if (counter.trip_count_known && equation &&
-      loom_value_fact_recurrence_evaluate(table, module, equation,
-                                          counter.trip_count, &recurrence)) {
+  if (counter.trip_count_kind != LOOM_LOOP_TRIP_COUNT_UNKNOWN && equation &&
+      loom_value_fact_recurrence_evaluate(
+          table, module, equation, counter.trip_count, counter.trip_count_kind,
+          &recurrence)) {
     facts = loom_value_fact_recurrence_refine(facts, recurrence.values);
   }
   return facts;
@@ -490,7 +491,8 @@ static iree_status_t loom_value_fact_table_compute_cfg_block_arg(
   const bool exits_at_header =
       header_loop != LOOM_CFG_LOOP_NEST_NONE &&
       region->loops.loops[header_loop].header_index == block_index &&
-      region->inductions[header_loop].exits_at_header;
+      iree_any_bit_set(region->inductions[header_loop].flags,
+                       LOOM_VALUE_FACT_INDUCTION_EXITS_AT_HEADER);
 
   bool has_facts = false;
   loom_value_facts_t control_facts = loom_value_facts_unknown();

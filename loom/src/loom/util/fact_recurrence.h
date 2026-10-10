@@ -86,14 +86,17 @@ loom_value_fact_recurrence_set_lookup(
 }
 
 // Evaluates a retained equation using the current initial/increment facts and
-// an independently proven exact trip count. Literal operands retain their
-// immutable numeric value through a solver reset. Every executed intermediate
-// must fit its source and selected target carrier. Returns false with unknown
-// ranges when that proof is unavailable; the supplied trip count remains known.
-// Output facts contain numeric range/divisibility only, not lane distribution.
+// an independently proven exact or upper-bounded trip count. Literal operands
+// retain their immutable numeric value through a solver reset. Every
+// intermediate must fit its source and selected target carrier. Returns false
+// with unknown ranges when that proof is unavailable; the supplied count kind
+// is preserved. Bounded counts retain all possible header states as the exit
+// envelope. Output facts contain numeric range/divisibility only, not lane
+// distribution.
 bool loom_value_fact_recurrence_evaluate(
     const loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_value_fact_recurrence_t* recurrence, uint64_t trip_count,
+    loom_loop_trip_count_kind_t trip_count_kind,
     loom_loop_recurrence_facts_t* out_facts);
 
 // Refines numeric range/divisibility with a proven recurrence observation while

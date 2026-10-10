@@ -9,6 +9,18 @@
 
 iree_add_all_subdirs()
 
+loom_cc_library(
+  NAME
+    op_defs
+  HDRS
+    "ops.h"
+  TEXTUAL_HDRS
+    "ops.inc"
+  DEPS
+    loom::ops::op_defs
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     builders_test
@@ -114,6 +126,7 @@ loom_generated_cc_library(
     iree::base::internal
     iree::base::internal::arena
     loom::analysis::availability
+    loom::analysis::condition_facts
     loom::error::emitter
     loom::error::error_defs
     loom::ir

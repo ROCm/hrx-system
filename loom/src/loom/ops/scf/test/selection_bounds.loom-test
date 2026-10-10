@@ -1,0 +1,156 @@
+// RUN: pass canonicalize,dce
+
+// Both caps contribute numeric bounds before the padding loop is lowered.
+func.def @padding_after_capped_origin(%origin: index) {
+  %bounded_origin = index.assume %origin [range(%origin, 0, 24)] : index
+  %valid_rows = index.constant 17 : index
+  %panel_rows = index.constant 8 : index
+  %row_step = index.constant 1 : index
+  %inside = index.cmp ult, %bounded_origin, %valid_rows : index
+  %clipped_origin = scf.select %inside, %bounded_origin, %valid_rows : index
+  %remaining_rows = index.sub %valid_rows, %clipped_origin : index
+  %partial = index.cmp ult, %remaining_rows, %panel_rows : index
+  %padding_begin = scf.select %partial, %remaining_rows, %panel_rows : index
+  %begin_minimum = test.fact_range_lo %padding_begin : index -> i64
+  %begin_maximum = test.fact_range_hi %padding_begin : index -> i64
+  test.use %begin_minimum, %begin_maximum : i64, i64
+  scf.for %row = [%padding_begin to %panel_rows step %row_step] {
+    %row_minimum = test.fact_range_lo %row : index -> i64
+    %row_maximum = test.fact_range_hi %row : index -> i64
+    test.use %row_minimum, %row_maximum : i64, i64
+  }
+  func.return
+}
+
+// ----
+func.def @padding_after_capped_origin(%origin: index) {
+  %bounded_origin = index.assume %origin [range(%origin, 0, 24)] : index
+  %valid_rows = index.constant 17 : index
+  %panel_rows = index.constant 8 : index
+  %row_step = index.constant 1 : index
+  %inside = index.cmp ult, %bounded_origin, %valid_rows : index
+  %clipped_origin = scf.select %inside, %bounded_origin, %valid_rows : index
+  %remaining_rows = index.sub %valid_rows, %clipped_origin : index
+  %partial = index.cmp ult, %remaining_rows, %panel_rows : index
+  %padding_begin = scf.select %partial, %remaining_rows, %panel_rows : index
+  %begin_minimum = scalar.constant 0 : i64
+  %begin_maximum = scalar.constant 8 : i64
+  test.use %begin_minimum, %begin_maximum : i64, i64
+  scf.for %row = [%padding_begin to %panel_rows step %row_step] {
+    %row_minimum = scalar.constant 0 : i64
+    %row_maximum = scalar.constant 7 : i64
+    test.use %row_minimum, %row_maximum : i64, i64
+  }
+  func.return
+}
+
+// ====
+// RUN: pass canonicalize,dce
+
+// Reversed comparison and arm orders retain the same numeric cap.
+func.def @offset_cap_reversed(%input: offset) -> (i64, i64) {
+  %source = index.assume %input [range(%input, 0, 31)] : offset
+  %capacity = index.constant 16 : offset
+  %outside = index.cmp ult, %capacity, %source : offset
+  %capped = scf.select %outside, %capacity, %source : offset
+  %minimum = test.fact_range_lo %capped : offset -> i64
+  %maximum = test.fact_range_hi %capped : offset -> i64
+  func.return %minimum, %maximum : i64, i64
+}
+
+// ----
+func.def @offset_cap_reversed(%input: offset) -> (i64, i64) {
+  %minimum = scalar.constant 0 : i64
+  %maximum = scalar.constant 16 : i64
+  func.return %minimum, %maximum : i64, i64
+}
+
+// ====
+// RUN: pass canonicalize,dce
+
+// Only the selected operand receives the unsigned edge's nonnegative range.
+func.def @unsigned_selected_alias(%input: i32) -> (i64, i64, i64, i64) {
+  %source = scalar.assume %input [range(%input, -8, 31)] : i32
+  %alias = scalar.assume %source [] : i32
+  %limit = scalar.constant 8 : i32
+  %fallback = scalar.constant 3 : i32
+  %inside = scalar.cmpi ult, %source, %limit : i32
+  %selected = scf.select %inside, %alias, %fallback : i32
+  %minimum = test.fact_range_lo %selected : i32 -> i64
+  %maximum = test.fact_range_hi %selected : i32 -> i64
+  %source_minimum = test.fact_range_lo %source : i32 -> i64
+  %source_maximum = test.fact_range_hi %source : i32 -> i64
+  func.return %minimum, %maximum, %source_minimum, %source_maximum : i64, i64, i64, i64
+}
+
+// ----
+func.def @unsigned_selected_alias(%input: i32) -> (i64, i64, i64, i64) {
+  %minimum = scalar.constant 0 : i64
+  %maximum = scalar.constant 7 : i64
+  %source_minimum = scalar.constant -8 : i64
+  %source_maximum = scalar.constant 31 : i64
+  func.return %minimum, %maximum, %source_minimum, %source_maximum : i64, i64, i64, i64
+}
+
+// ====
+// RUN: pass canonicalize,dce
+
+// A false-edge selected right operand acquires the reversed strict bound.
+func.def @signed_false_arm(%input: i16) -> (i64, i64) {
+  %source = scalar.assume %input [range(%input, -16, 31)] : i16
+  %threshold = scalar.constant 4 : i16
+  %fallback = scalar.constant 12 : i16
+  %below = scalar.cmpi sge, %threshold, %source : i16
+  %selected = scf.select %below, %fallback, %source : i16
+  %minimum = test.fact_range_lo %selected : i16 -> i64
+  %maximum = test.fact_range_hi %selected : i16 -> i64
+  func.return %minimum, %maximum : i64, i64
+}
+
+// ----
+func.def @signed_false_arm(%input: i16) -> (i64, i64) {
+  %minimum = scalar.constant 5 : i64
+  %maximum = scalar.constant 31 : i64
+  func.return %minimum, %maximum : i64, i64
+}
+
+// ====
+// RUN: pass canonicalize,dce
+
+// A comparison does not refine an unrelated arm with coincident numeric facts.
+func.def @unrelated_selected_value(%compared: index, %input: index) -> (i64, i64) {
+  %source = index.assume %input [range(%input, -8, 31)] : index
+  %limit = index.constant 8 : index
+  %inside = index.cmp ult, %compared, %limit : index
+  %selected = scf.select %inside, %source, %limit : index
+  %minimum = test.fact_range_lo %selected : index -> i64
+  %maximum = test.fact_range_hi %selected : index -> i64
+  func.return %minimum, %maximum : i64, i64
+}
+
+// ----
+func.def @unrelated_selected_value(%compared: index, %input: index) -> (i64, i64) {
+  %minimum = scalar.constant -8 : i64
+  %maximum = scalar.constant 31 : i64
+  func.return %minimum, %maximum : i64, i64
+}
+
+// ====
+// RUN: pass canonicalize,dce
+
+// Signed i1 compares true as -1, even though its numeric facts store 0 and 1.
+func.def @signed_boolean_arm(%input: i1) -> (i64, i64) {
+  %clear = scalar.constant false : i1
+  %negative = scalar.cmpi slt, %input, %clear : i1
+  %selected = scf.select %negative, %input, %clear : i1
+  %minimum = test.fact_range_lo %selected : i1 -> i64
+  %maximum = test.fact_range_hi %selected : i1 -> i64
+  func.return %minimum, %maximum : i64, i64
+}
+
+// ----
+func.def @signed_boolean_arm(%input: i1) -> (i64, i64) {
+  %minimum = scalar.constant 0 : i64
+  %maximum = scalar.constant 1 : i64
+  func.return %minimum, %maximum : i64, i64
+}

@@ -195,7 +195,7 @@ static iree_status_t loom_pipeline_worker_execution_counts(
     const loom_loop_recurrence_facts_t recurrence =
         loom_value_fact_induction_facts(&worker->facts, module,
                                         &structure->inductions[i]);
-    if (!recurrence.trip_count_known) {
+    if (recurrence.trip_count_kind != LOOM_LOOP_TRIP_COUNT_EXACT) {
       return iree_ok_status();
     }
     trip_counts[i] = recurrence.trip_count;

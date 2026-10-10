@@ -2214,7 +2214,8 @@ kernel.def target(@target) @loop_index_madd_guarded_copy(%n: i32) {
   %limit = index.constant 2 : index
   scf.for %i = [%start to %limit step %step] {
     %row = index.madd %workgroup, %limit, %i : index
-    %in_bounds = index.cmp slt, %row, %n_idx : index
+    // Row arithmetic can set the sign bit; unsigned order excludes those rows.
+    %in_bounds = index.cmp ult, %row, %n_idx : index
     scf.if %in_bounds {
       %loaded = view.load %input[%row, %start] : view<[%n_idx]x2xf32> -> f32
       view.store %loaded, %output[%row, %start] : f32, view<[%n_idx]x2xf32>
@@ -2238,7 +2239,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
 ^_bb2:
   %34 = s_mul_i32 %workgroup, %limit
   %row = s_add_u32 %34, %i
-  %in_bounds = s_cmp_lt_i32 %row, %n_idx
+  %in_bounds = s_cmp_lt_u32 %row, %n_idx
   low.cond_br %in_bounds, ^_bb3, ^_bb4 : reg<amdgpu.scc>
 ^_bb3:
   %37 = v_mov_b32 0

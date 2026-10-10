@@ -525,7 +525,7 @@ CHECK-NOT: *test.fact_range_*
 
 // ====
 
-// RUN: with-checks pass canonicalize,dce
+// RUN: pass canonicalize,dce
 
 func.def @inverted_guard() -> (i64, i64) {
   %begin = index.constant 0 : index
@@ -545,9 +545,20 @@ func.def @inverted_guard() -> (i64, i64) {
 }
 
 // ----
-CHECK: %lo = scalar.constant -9223372036854775808 : i64
-CHECK: %hi = scalar.constant 9223372036854775807 : i64
-CHECK-NOT: *test.fact_range_*
+func.def @inverted_guard() -> (i64, i64) {
+  %begin = index.constant 0 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 0 : i64
+  %more = scalar.constant true : i1
+  cfg.cond_br %more, ^exit, ^body
+^body:
+  %next = index.constant 1 : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
 
 // ====
 
@@ -761,4 +772,437 @@ func.def @additive_companion_after_fallback() -> (i64, i64, i64) {
   cfg.br ^header(%counter_next: index, %cursor_next: offset, %decay_next: i64)
 ^exit:
   func.return %cursor_lo, %cursor_hi, %decaying : i64, i64, i64
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+// The header includes the terminal state of every possible bounded execution.
+// Scalar row facts come from the recurrence, independently of any view access.
+func.def @bounded_header_remaining_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %first_iteration = index.constant 0 : index
+  %iteration_step = index.constant 1 : index
+  %initial_rows = scalar.constant 8 : i32
+  %row_step = scalar.constant 1 : i32
+  cfg.br ^header(%first_iteration: index, %initial_rows: i32)
+^header(%iteration: index, %rows: i32):
+  %header_low = test.fact_range_lo %rows : i32 -> i64
+  %header_high = test.fact_range_hi %rows : i32 -> i64
+  test.use %header_low, %header_high : i64, i64
+  %has_iteration = index.cmp slt, %iteration, %count : index
+  cfg.cond_br %has_iteration, ^body, ^exit
+^body:
+  %body_low = test.fact_range_lo %rows : i32 -> i64
+  %body_high = test.fact_range_hi %rows : i32 -> i64
+  test.use %body_low, %body_high : i64, i64
+  %next_iteration = index.add %iteration, %iteration_step : index
+  %next_rows = scalar.subi %rows, %row_step : i32
+  cfg.br ^header(%next_iteration: index, %next_rows: i32)
+^exit:
+  %result_low = test.fact_range_lo %rows : i32 -> i64
+  %result_high = test.fact_range_hi %rows : i32 -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @bounded_header_remaining_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %first_iteration = index.constant 0 : index
+  %iteration_step = index.constant 1 : index
+  %initial_rows = scalar.constant 8 : i32
+  cfg.br ^header(%first_iteration: index, %initial_rows: i32)
+^header(%iteration: index, %rows: i32):
+  %header_low = scalar.constant 5 : i64
+  %header_high = scalar.constant 8 : i64
+  test.use %header_low, %header_high : i64, i64
+  %has_iteration = index.cmp slt, %iteration, %count : index
+  cfg.cond_br %has_iteration, ^body, ^exit
+^body:
+  %body_low = scalar.constant 5 : i64
+  %body_high = scalar.constant 8 : i64
+  test.use %body_low, %body_high : i64, i64
+  %next_iteration = index.add %iteration, %iteration_step : index
+  %21 = scalar.constant -1 : i32
+  %next_rows = scalar.addi %rows, %21 : i32
+  cfg.br ^header(%next_iteration: index, %next_rows: i32)
+^exit:
+  %result_low = scalar.constant 5 : i64
+  %result_high = scalar.constant 8 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+// A strict unsigned countdown bounds a separate descending scalar without
+// relying on an ascending counter or a constant initial iteration count.
+func.def @unsigned_countdown_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %exhausted = index.constant 0 : index
+  %iteration_step = index.constant 1 : index
+  %initial_rows = scalar.constant 8 : i32
+  %row_step = scalar.constant 1 : i32
+  cfg.br ^header(%count: index, %initial_rows: i32)
+^header(%remaining: index, %rows: i32):
+  %header_low = test.fact_range_lo %rows : i32 -> i64
+  %header_high = test.fact_range_hi %rows : i32 -> i64
+  test.use %header_low, %header_high : i64, i64
+  %has_iteration = index.cmp ugt, %remaining, %exhausted : index
+  cfg.cond_br %has_iteration, ^body, ^exit
+^body:
+  %body_low = test.fact_range_lo %rows : i32 -> i64
+  %body_high = test.fact_range_hi %rows : i32 -> i64
+  test.use %body_low, %body_high : i64, i64
+  %next_remaining = index.sub %remaining, %iteration_step : index
+  %next_rows = scalar.subi %rows, %row_step : i32
+  cfg.br ^header(%next_remaining: index, %next_rows: i32)
+^exit:
+  %result_low = test.fact_range_lo %rows : i32 -> i64
+  %result_high = test.fact_range_hi %rows : i32 -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @unsigned_countdown_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %exhausted = index.constant 0 : index
+  %iteration_step = index.constant 1 : index
+  %initial_rows = scalar.constant 8 : i32
+  cfg.br ^header(%count: index, %initial_rows: i32)
+^header(%remaining: index, %rows: i32):
+  %header_low = scalar.constant 5 : i64
+  %header_high = scalar.constant 8 : i64
+  test.use %header_low, %header_high : i64, i64
+  %has_iteration = index.cmp ugt, %remaining, %exhausted : index
+  cfg.cond_br %has_iteration, ^body, ^exit
+^body:
+  %body_low = scalar.constant 5 : i64
+  %body_high = scalar.constant 8 : i64
+  test.use %body_low, %body_high : i64, i64
+  %next_remaining = index.sub %remaining, %iteration_step : index
+  %21 = scalar.constant -1 : i32
+  %next_rows = scalar.addi %rows, %21 : i32
+  cfg.br ^header(%next_remaining: index, %next_rows: i32)
+^exit:
+  %result_low = scalar.constant 5 : i64
+  %result_high = scalar.constant 8 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+// Reversing the inclusive signed guard does not reverse the recurrence. The
+// add of a negative delta retains the same zero-to-three execution envelope.
+func.def @reversed_signed_countdown_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %minimum_remaining = index.constant 1 : index
+  %counter_delta = index.constant -1 : index
+  %initial_rows = scalar.constant 8 : i32
+  %row_step = scalar.constant 1 : i32
+  cfg.br ^header(%count: index, %initial_rows: i32)
+^header(%remaining: index, %rows: i32):
+  %header_low = test.fact_range_lo %rows : i32 -> i64
+  %header_high = test.fact_range_hi %rows : i32 -> i64
+  test.use %header_low, %header_high : i64, i64
+  %has_iteration = index.cmp sle, %minimum_remaining, %remaining : index
+  cfg.cond_br %has_iteration, ^body, ^exit
+^body:
+  %body_low = test.fact_range_lo %rows : i32 -> i64
+  %body_high = test.fact_range_hi %rows : i32 -> i64
+  test.use %body_low, %body_high : i64, i64
+  %next_remaining = index.add %remaining, %counter_delta : index
+  %next_rows = scalar.subi %rows, %row_step : i32
+  cfg.br ^header(%next_remaining: index, %next_rows: i32)
+^exit:
+  %result_low = test.fact_range_lo %rows : i32 -> i64
+  %result_high = test.fact_range_hi %rows : i32 -> i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ----
+func.def @reversed_signed_countdown_rows(%requested_count: index) -> (i64, i64) {
+  %count = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %minimum_remaining = index.constant 1 : index
+  %counter_delta = index.constant -1 : index
+  %initial_rows = scalar.constant 8 : i32
+  cfg.br ^header(%count: index, %initial_rows: i32)
+^header(%remaining: index, %rows: i32):
+  %header_low = scalar.constant 5 : i64
+  %header_high = scalar.constant 8 : i64
+  test.use %header_low, %header_high : i64, i64
+  %has_iteration = index.cmp sle, %minimum_remaining, %remaining : index
+  cfg.cond_br %has_iteration, ^body, ^exit
+^body:
+  %body_low = scalar.constant 5 : i64
+  %body_high = scalar.constant 8 : i64
+  test.use %body_low, %body_high : i64, i64
+  %next_remaining = index.add %remaining, %counter_delta : index
+  %21 = scalar.constant -1 : i32
+  %next_rows = scalar.addi %rows, %21 : i32
+  cfg.br ^header(%next_remaining: index, %next_rows: i32)
+^exit:
+  %result_low = scalar.constant 5 : i64
+  %result_high = scalar.constant 8 : i64
+  func.return %result_low, %result_high : i64, i64
+}
+
+// ====
+
+// RUN: pass canonicalize,dce
+
+// The header permits three backedges, but a loaded value may stop the body
+// before any one of them. Both exit edges preserve the current row count.
+func.def @signed_ascending_data_exit(%input: view<3xi32>) -> (i32, i64, i64) {
+  %first_position = index.constant 0 : index
+  %position_limit = index.constant 3 : index
+  %position_step = index.constant 1 : index
+  %initial_rows = scalar.constant 8 : i32
+  %row_step = scalar.constant 1 : i32
+  %stop_value = scalar.constant 0 : i32
+  cfg.br ^header(%first_position: index, %initial_rows: i32)
+^header(%position: index, %rows: i32):
+  %header_low = test.fact_range_lo %rows : i32 -> i64
+  %header_high = test.fact_range_hi %rows : i32 -> i64
+  test.use %header_low, %header_high : i64, i64
+  %in_range = index.cmp slt, %position, %position_limit : index
+  cfg.cond_br %in_range, ^body, ^stopped
+^body:
+  %sample = view.load %input[%position] : view<3xi32> -> i32
+  %keep_going = scalar.cmpi sgt, %sample, %stop_value : i32
+  cfg.cond_br %keep_going, ^latch, ^stopped
+^latch:
+  %next_position = index.add %position, %position_step : index
+  %next_rows = scalar.subi %rows, %row_step : i32
+  cfg.br ^header(%next_position: index, %next_rows: i32)
+^stopped:
+  cfg.br ^exit(%rows: i32)
+^exit(%stopped_rows: i32):
+  %result_low = test.fact_range_lo %stopped_rows : i32 -> i64
+  %result_high = test.fact_range_hi %stopped_rows : i32 -> i64
+  func.return %stopped_rows, %result_low, %result_high : i32, i64, i64
+}
+
+// ----
+func.def @signed_ascending_data_exit(%input: view<3xi32>) -> (i32, i64, i64) {
+  %first_position = index.constant 0 : index
+  %position_limit = index.constant 3 : index
+  %position_step = index.constant 1 : index
+  %initial_rows = scalar.constant 8 : i32
+  %stop_value = scalar.constant 0 : i32
+  cfg.br ^header(%first_position: index, %initial_rows: i32)
+^header(%position: index, %rows: i32):
+  %header_low = scalar.constant 5 : i64
+  %header_high = scalar.constant 8 : i64
+  test.use %header_low, %header_high : i64, i64
+  %in_range = index.cmp slt, %position, %position_limit : index
+  cfg.cond_br %in_range, ^body, ^stopped
+^body:
+  %sample = view.load %input[%position] : view<3xi32> -> i32
+  %keep_going = scalar.cmpi sgt, %sample, %stop_value : i32
+  cfg.cond_br %keep_going, ^latch, ^stopped
+^latch:
+  %next_position = index.add %position, %position_step : index
+  %24 = scalar.constant -1 : i32
+  %next_rows = scalar.addi %rows, %24 : i32
+  cfg.br ^header(%next_position: index, %next_rows: i32)
+^stopped:
+  cfg.br ^exit(%rows: i32)
+^exit(%stopped_rows: i32):
+  %result_low = scalar.constant 5 : i64
+  %result_high = scalar.constant 8 : i64
+  func.return %stopped_rows, %result_low, %result_high : i32, i64, i64
+}
+
+// ====
+
+// RUN: pass canonicalize,dce
+
+// Runtime seeds above the view extent exit at the header. Its reversed
+// comparison guards the load without narrowing those zero-trip exit values.
+func.def @runtime_unsigned_guarded_exit(%input: view<37xi32>, %requested_start: index) -> (index, i64, i64) {
+  %first_position = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %stop_value = scalar.constant 0 : i32
+  cfg.br ^header(%first_position: index)
+^header(%position: index):
+  %header_low = test.fact_range_lo %position : index -> i64
+  %header_high = test.fact_range_hi %position : index -> i64
+  test.use %header_low, %header_high : i64, i64
+  %at_limit = index.cmp ule, %position_limit, %position : index
+  cfg.cond_br %at_limit, ^stopped, ^body
+^body:
+  %body_low = test.fact_range_lo %position : index -> i64
+  %body_high = test.fact_range_hi %position : index -> i64
+  test.use %body_low, %body_high : i64, i64
+  %sample = view.load %input[%position] : view<37xi32> -> i32
+  %keep_going = scalar.cmpi sgt, %sample, %stop_value : i32
+  cfg.cond_br %keep_going, ^latch, ^stopped
+^latch:
+  %next_position = index.add %position, %position_step : index
+  cfg.br ^header(%next_position: index)
+^stopped:
+  cfg.br ^exit(%position: index)
+^exit(%stopped_position: index):
+  %result_low = test.fact_range_lo %stopped_position : index -> i64
+  %result_high = test.fact_range_hi %stopped_position : index -> i64
+  func.return %stopped_position, %result_low, %result_high : index, i64, i64
+}
+
+// ----
+func.def @runtime_unsigned_guarded_exit(%input: view<37xi32>, %requested_start: index) -> (index, i64, i64) {
+  %first_position = index.assume %requested_start [range(%requested_start, 0, 63)] : index
+  %position_limit = index.constant 37 : index
+  %position_step = index.constant 1 : index
+  %stop_value = scalar.constant 0 : i32
+  cfg.br ^header(%first_position: index)
+^header(%position: index):
+  %header_low = scalar.constant 0 : i64
+  %header_high = scalar.constant 63 : i64
+  test.use %header_low, %header_high : i64, i64
+  %at_limit = index.cmp ule, %position_limit, %position : index
+  cfg.cond_br %at_limit, ^stopped, ^body
+^body:
+  %body_low = scalar.constant 0 : i64
+  %body_high = scalar.constant 63 : i64
+  test.use %body_low, %body_high : i64, i64
+  %sample = view.load %input[%position] : view<37xi32> -> i32
+  %keep_going = scalar.cmpi sgt, %sample, %stop_value : i32
+  cfg.cond_br %keep_going, ^latch, ^stopped
+^latch:
+  %next_position = index.add %position, %position_step : index
+  cfg.br ^header(%next_position: index)
+^stopped:
+  cfg.br ^exit(%position: index)
+^exit(%stopped_position: index):
+  %result_low = scalar.constant 0 : i64
+  %result_high = scalar.constant 63 : i64
+  func.return %stopped_position, %result_low, %result_high : index, i64, i64
+}
+
+// ====
+
+// RUN: pass canonicalize,dce
+
+// The true header edge exits this descending loop. An early data exit keeps
+// the current positive counter rather than the header's terminal zero.
+func.def @signed_descending_data_exit(%input: view<4xi32>) -> (index, i64, i64) {
+  %initial_remaining = index.constant 3 : index
+  %exhausted = index.constant 0 : index
+  %iteration_step = index.constant 1 : index
+  %stop_value = scalar.constant 0 : i32
+  cfg.br ^header(%initial_remaining: index)
+^header(%remaining: index):
+  %header_low = test.fact_range_lo %remaining : index -> i64
+  %header_high = test.fact_range_hi %remaining : index -> i64
+  test.use %header_low, %header_high : i64, i64
+  %is_exhausted = index.cmp sle, %remaining, %exhausted : index
+  cfg.cond_br %is_exhausted, ^stopped, ^body
+^body:
+  %sample = view.load %input[%remaining] : view<4xi32> -> i32
+  %keep_going = scalar.cmpi sgt, %sample, %stop_value : i32
+  cfg.cond_br %keep_going, ^latch, ^stopped
+^latch:
+  %next_remaining = index.sub %remaining, %iteration_step : index
+  cfg.br ^header(%next_remaining: index)
+^stopped:
+  cfg.br ^exit(%remaining: index)
+^exit(%stopped_remaining: index):
+  %result_low = test.fact_range_lo %stopped_remaining : index -> i64
+  %result_high = test.fact_range_hi %stopped_remaining : index -> i64
+  func.return %stopped_remaining, %result_low, %result_high : index, i64, i64
+}
+
+// ----
+func.def @signed_descending_data_exit(%input: view<4xi32>) -> (index, i64, i64) {
+  %initial_remaining = index.constant 3 : index
+  %exhausted = index.constant 0 : index
+  %iteration_step = index.constant 1 : index
+  %stop_value = scalar.constant 0 : i32
+  cfg.br ^header(%initial_remaining: index)
+^header(%remaining: index):
+  %header_low = scalar.constant 0 : i64
+  %header_high = scalar.constant 3 : i64
+  test.use %header_low, %header_high : i64, i64
+  %is_exhausted = index.cmp sle, %remaining, %exhausted : index
+  cfg.cond_br %is_exhausted, ^stopped, ^body
+^body:
+  %sample = view.load %input[%remaining] : view<4xi32> -> i32
+  %keep_going = scalar.cmpi sgt, %sample, %stop_value : i32
+  cfg.cond_br %keep_going, ^latch, ^stopped
+^latch:
+  %next_remaining = index.sub %remaining, %iteration_step : index
+  cfg.br ^header(%next_remaining: index)
+^stopped:
+  cfg.br ^exit(%remaining: index)
+^exit(%stopped_remaining: index):
+  %result_low = scalar.constant 0 : i64
+  %result_high = scalar.constant 3 : i64
+  func.return %stopped_remaining, %result_low, %result_high : index, i64, i64
+}
+
+// ====
+
+// RUN: pass canonicalize,dce
+
+// The reversed unsigned inclusive guard admits a negative additive update
+// without underflow. Body exits and the empty entry share one result owner.
+func.def @unsigned_descending_data_exit(%input: view<4xi32>, %requested_count: index) -> (index, i64, i64) {
+  %initial_remaining = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %minimum_remaining = index.constant 1 : index
+  %counter_delta = index.constant -1 : index
+  %stop_value = scalar.constant 0 : i32
+  cfg.br ^header(%initial_remaining: index)
+^header(%remaining: index):
+  %header_low = test.fact_range_lo %remaining : index -> i64
+  %header_high = test.fact_range_hi %remaining : index -> i64
+  test.use %header_low, %header_high : i64, i64
+  %has_iteration = index.cmp ule, %minimum_remaining, %remaining : index
+  cfg.cond_br %has_iteration, ^body, ^stopped
+^body:
+  %sample = view.load %input[%remaining] : view<4xi32> -> i32
+  %keep_going = scalar.cmpi sgt, %sample, %stop_value : i32
+  cfg.cond_br %keep_going, ^latch, ^stopped
+^latch:
+  %next_remaining = index.add %remaining, %counter_delta : index
+  cfg.br ^header(%next_remaining: index)
+^stopped:
+  cfg.br ^exit(%remaining: index)
+^exit(%stopped_remaining: index):
+  %result_low = test.fact_range_lo %stopped_remaining : index -> i64
+  %result_high = test.fact_range_hi %stopped_remaining : index -> i64
+  func.return %stopped_remaining, %result_low, %result_high : index, i64, i64
+}
+
+// ----
+func.def @unsigned_descending_data_exit(%input: view<4xi32>, %requested_count: index) -> (index, i64, i64) {
+  %initial_remaining = index.assume %requested_count [range(%requested_count, 0, 3)] : index
+  %minimum_remaining = index.constant 1 : index
+  %counter_delta = index.constant -1 : index
+  %stop_value = scalar.constant 0 : i32
+  cfg.br ^header(%initial_remaining: index)
+^header(%remaining: index):
+  %header_low = scalar.constant 0 : i64
+  %header_high = scalar.constant 3 : i64
+  test.use %header_low, %header_high : i64, i64
+  %has_iteration = index.cmp ule, %minimum_remaining, %remaining : index
+  cfg.cond_br %has_iteration, ^body, ^stopped
+^body:
+  %sample = view.load %input[%remaining] : view<4xi32> -> i32
+  %keep_going = scalar.cmpi sgt, %sample, %stop_value : i32
+  cfg.cond_br %keep_going, ^latch, ^stopped
+^latch:
+  %next_remaining = index.add %remaining, %counter_delta : index
+  cfg.br ^header(%next_remaining: index)
+^stopped:
+  cfg.br ^exit(%remaining: index)
+^exit(%stopped_remaining: index):
+  %result_low = scalar.constant 0 : i64
+  %result_high = scalar.constant 3 : i64
+  func.return %stopped_remaining, %result_low, %result_high : index, i64, i64
 }

@@ -788,7 +788,7 @@ TEST_F(GreedyRewriteTest, InductionFactsTrackSemanticAndTopologyEdits) {
           facts, module_, &retained->inductions[i]);
       const auto new_proof = loom_value_fact_induction_facts(
           fresh, module_, &rebuilt->inductions[i]);
-      EXPECT_EQ(old_proof.trip_count_known, new_proof.trip_count_known);
+      EXPECT_EQ(old_proof.trip_count_kind, new_proof.trip_count_kind);
       EXPECT_EQ(old_proof.trip_count, new_proof.trip_count);
     }
     loom_pass_value_fact_owner_deinitialize(&fresh_owner);
@@ -869,7 +869,9 @@ TEST_F(GreedyRewriteTest, InductionFactsTrackSemanticAndTopologyEdits) {
   loom_op_successors(guard)[0] = exit;
   loom_op_successors(guard)[1] = body;
   IREE_ASSERT_OK(loom_rewriter_refresh_cfg_facts(&rewriter, region));
-  check(INT64_MIN, INT64_MAX);
+  // Reversing the successors makes the initially true comparison exit before
+  // any backedge. The refreshed equation retains only the initial value.
+  check(-2, -2);
   loom_op_successors(guard)[0] = body;
   loom_op_successors(guard)[1] = exit;
   IREE_ASSERT_OK(loom_rewriter_refresh_cfg_facts(&rewriter, region));
@@ -1671,9 +1673,10 @@ TEST_P(ConditionInductionFactsRewriteTest, SemanticEditsMatchFreshAnalysis) {
         loom_value_fact_induction_facts(facts, module_, retained);
     const auto fresh_proof =
         loom_value_fact_induction_facts(fresh, module_, rebuilt);
-    EXPECT_EQ(proof.trip_count_known, fresh_proof.trip_count_known);
+    EXPECT_EQ(proof.trip_count_kind, fresh_proof.trip_count_kind);
     EXPECT_EQ(proof.trip_count, fresh_proof.trip_count);
-    EXPECT_EQ(proof.trip_count_known, trips != UINT64_MAX);
+    EXPECT_EQ(proof.trip_count_kind == LOOM_LOOP_TRIP_COUNT_EXACT,
+              trips != UINT64_MAX);
     auto expect_range = [&](loom_value_id_t value, int64_t lo, int64_t hi) {
       const auto actual = loom_value_fact_table_lookup(facts, value);
       EXPECT_EQ(actual.range_lo, lo);

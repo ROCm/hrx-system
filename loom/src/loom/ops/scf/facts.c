@@ -8,6 +8,7 @@
 
 #include "loom/ir/facts.h"
 
+#include "loom/analysis/condition_facts.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
@@ -130,6 +131,55 @@ static iree_status_t loom_scf_lookup_meet_row_facts(
   return iree_ok_status();
 }
 
+static void loom_scf_select_refine_arm_facts(loom_fact_context_t* context,
+                                             const loom_module_t* module,
+                                             const loom_op_t* op,
+                                             loom_value_facts_t arm_facts[2]) {
+  const loom_type_t type =
+      loom_module_value_type(module, loom_scf_select_true_value(op));
+  const loom_scalar_type_t scalar_type = loom_type_element_type(type);
+  if (!loom_type_is_scalar(type) ||
+      !(loom_scalar_type_is_integer(scalar_type) ||
+        scalar_type == LOOM_SCALAR_TYPE_INDEX ||
+        scalar_type == LOOM_SCALAR_TYPE_OFFSET)) {
+    return;
+  }
+  const loom_value_t* condition = loom_module_value(
+      module, loom_value_fact_table_query_identity(
+                  context->table, loom_scf_select_condition(op)));
+  if (loom_value_is_block_arg(condition)) {
+    return;
+  }
+  loom_condition_integer_comparison_t comparison;
+  if (!loom_condition_integer_comparison_describe(
+          module, loom_value_def_op(condition), &comparison)) {
+    return;
+  }
+  const loom_value_id_t lhs_identity =
+      loom_value_fact_table_query_identity(context->table, comparison.lhs);
+  const loom_value_id_t rhs_identity =
+      loom_value_fact_table_query_identity(context->table, comparison.rhs);
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  for (uint16_t i = 0; i < 2; ++i) {
+    const loom_value_id_t arm_identity =
+        loom_value_fact_table_query_identity(context->table, operands[i + 1]);
+    if (arm_identity != lhs_identity && arm_identity != rhs_identity) {
+      continue;
+    }
+    loom_value_facts_t lhs =
+        arm_identity == lhs_identity
+            ? arm_facts[i]
+            : loom_value_fact_table_lookup(context->table, comparison.lhs);
+    loom_value_facts_t rhs =
+        arm_identity == rhs_identity
+            ? arm_facts[i]
+            : loom_value_fact_table_lookup(context->table, comparison.rhs);
+    loom_condition_integer_comparison_refine_facts(&comparison, context, i == 0,
+                                                   &lhs, &rhs);
+    arm_facts[i] = arm_identity == lhs_identity ? lhs : rhs;
+  }
+}
+
 iree_status_t loom_scf_select_facts(loom_fact_context_t* context,
                                     const loom_module_t* module,
                                     const loom_op_t* op,
@@ -144,9 +194,10 @@ iree_status_t loom_scf_select_facts(loom_fact_context_t* context,
     result_facts[0] = operand_facts[1];
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(
-      loom_scf_meet_result_facts(context, module, op, 0, operand_facts[1],
-                                 operand_facts[2], &result_facts[0]));
+  loom_value_facts_t arm_facts[2] = {operand_facts[1], operand_facts[2]};
+  loom_scf_select_refine_arm_facts(context, module, op, arm_facts);
+  IREE_RETURN_IF_ERROR(loom_scf_meet_result_facts(
+      context, module, op, 0, arm_facts[0], arm_facts[1], &result_facts[0]));
   loom_scf_apply_selector_distribution(module, op, 0, operand_facts[0],
                                        &result_facts[0]);
   return iree_ok_status();

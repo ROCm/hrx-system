@@ -6,6 +6,7 @@
 
 #include "loom/analysis/condition_facts.h"
 
+#include <array>
 #include <cstdint>
 
 #include "iree/base/internal/arena.h"
@@ -15,6 +16,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/target/facts.h"
 #include "loom/util/fact_table.h"
 
@@ -41,6 +43,11 @@ class ConditionFactsTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_SCALAR, scalar_vtables,
         (uint16_t)scalar_vtable_count));
+    iree_host_size_t scf_vtable_count = 0;
+    const loom_op_vtable_t* const* scf_vtables =
+        loom_scf_dialect_vtables(&scf_vtable_count);
+    IREE_ASSERT_OK(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_SCF, scf_vtables, (uint16_t)scf_vtable_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
 
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
@@ -342,6 +349,347 @@ TEST_F(ConditionFactsTest, ComparisonCertificateDoesNotDescribeConsequences) {
   EXPECT_FALSE(loom_condition_integer_comparison_describe(
       module_, BuildBoolAnd(loom_index_cmp_result(compare), opaque),
       &comparison));
+}
+
+struct IntegerComparisonCase {
+  // Address predicate and independent concrete-oracle operation.
+  loom_index_cmp_predicate_t index_predicate;
+  // Equivalent fixed-width scalar predicate.
+  loom_scalar_cmpi_predicate_t scalar_predicate;
+};
+
+static constexpr IntegerComparisonCase kIntegerComparisons[] = {
+    {LOOM_INDEX_CMP_PREDICATE_EQ, LOOM_SCALAR_CMPI_PREDICATE_EQ},
+    {LOOM_INDEX_CMP_PREDICATE_NE, LOOM_SCALAR_CMPI_PREDICATE_NE},
+    {LOOM_INDEX_CMP_PREDICATE_SLT, LOOM_SCALAR_CMPI_PREDICATE_SLT},
+    {LOOM_INDEX_CMP_PREDICATE_SLE, LOOM_SCALAR_CMPI_PREDICATE_SLE},
+    {LOOM_INDEX_CMP_PREDICATE_SGT, LOOM_SCALAR_CMPI_PREDICATE_SGT},
+    {LOOM_INDEX_CMP_PREDICATE_SGE, LOOM_SCALAR_CMPI_PREDICATE_SGE},
+    {LOOM_INDEX_CMP_PREDICATE_ULT, LOOM_SCALAR_CMPI_PREDICATE_ULT},
+    {LOOM_INDEX_CMP_PREDICATE_ULE, LOOM_SCALAR_CMPI_PREDICATE_ULE},
+    {LOOM_INDEX_CMP_PREDICATE_UGT, LOOM_SCALAR_CMPI_PREDICATE_UGT},
+    {LOOM_INDEX_CMP_PREDICATE_UGE, LOOM_SCALAR_CMPI_PREDICATE_UGE},
+};
+
+static bool EvaluateIntegerComparison(loom_index_cmp_predicate_t predicate,
+                                      uint32_t bit_count, int64_t left,
+                                      int64_t right) {
+  const uint64_t mask =
+      bit_count == 64 ? UINT64_MAX : (UINT64_C(1) << bit_count) - 1;
+  const uint64_t sign_bit = UINT64_C(1) << (bit_count - 1);
+  const uint64_t left_bits = static_cast<uint64_t>(left) & mask;
+  const uint64_t right_bits = static_cast<uint64_t>(right) & mask;
+  const auto signed_value = [mask, sign_bit](uint64_t bits) {
+    return (bits & sign_bit) ? -static_cast<int64_t>(mask - bits) - 1
+                             : static_cast<int64_t>(bits);
+  };
+  switch (predicate) {
+    case LOOM_INDEX_CMP_PREDICATE_EQ:
+      return left_bits == right_bits;
+    case LOOM_INDEX_CMP_PREDICATE_NE:
+      return left_bits != right_bits;
+    case LOOM_INDEX_CMP_PREDICATE_SLT:
+      return signed_value(left_bits) < signed_value(right_bits);
+    case LOOM_INDEX_CMP_PREDICATE_SLE:
+      return signed_value(left_bits) <= signed_value(right_bits);
+    case LOOM_INDEX_CMP_PREDICATE_SGT:
+      return signed_value(left_bits) > signed_value(right_bits);
+    case LOOM_INDEX_CMP_PREDICATE_SGE:
+      return signed_value(left_bits) >= signed_value(right_bits);
+    case LOOM_INDEX_CMP_PREDICATE_ULT:
+      return left_bits < right_bits;
+    case LOOM_INDEX_CMP_PREDICATE_ULE:
+      return left_bits <= right_bits;
+    case LOOM_INDEX_CMP_PREDICATE_UGT:
+      return left_bits > right_bits;
+    case LOOM_INDEX_CMP_PREDICATE_UGE:
+      return left_bits >= right_bits;
+    default:
+      ADD_FAILURE() << "Invalid integer comparison";
+      return false;
+  }
+}
+
+static void ExpectRefinementContainsConcreteValues(
+    const loom_condition_integer_comparison_t& comparison,
+    const loom_fact_context_t* context,
+    loom_index_cmp_predicate_t oracle_predicate, uint32_t bit_count,
+    int64_t minimum, int64_t maximum) {
+  // The central interval enumerates every integer in [-2,2]. The remaining
+  // intervals add each width's extrema, negative-only and crossing-zero cases.
+  const std::array<int64_t, 7> samples = {minimum,
+                                          minimum < -2 ? -2 : minimum,
+                                          minimum < -1 ? -1 : minimum,
+                                          0,
+                                          1,
+                                          maximum > 2 ? 2 : maximum,
+                                          maximum};
+  constexpr uint8_t intervals[][2] = {{0, 6}, {0, 2}, {2, 4}, {3, 6},
+                                      {3, 3}, {4, 4}, {1, 5}};
+  for (const auto& left_interval : intervals) {
+    for (const auto& right_interval : intervals) {
+      const auto left = loom_value_facts_make(samples[left_interval[0]],
+                                              samples[left_interval[1]], 1);
+      const auto right = loom_value_facts_make(samples[right_interval[0]],
+                                               samples[right_interval[1]], 1);
+      for (bool truth : {false, true}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "width=" << bit_count << ", predicate="
+                     << oracle_predicate << ", truth=" << truth << ", left=["
+                     << left.range_lo << ',' << left.range_hi << "], right=["
+                     << right.range_lo << ',' << right.range_hi << ']');
+        auto refined_left = left;
+        auto refined_right = right;
+        loom_condition_integer_comparison_refine_facts(
+            &comparison, context, truth, &refined_left, &refined_right);
+        for (int64_t a : samples) {
+          for (int64_t b : samples) {
+            if (a < left.range_lo || a > left.range_hi || b < right.range_lo ||
+                b > right.range_hi ||
+                EvaluateIntegerComparison(oracle_predicate, bit_count, a, b) !=
+                    truth) {
+              continue;
+            }
+            EXPECT_LE(refined_left.range_lo, a);
+            EXPECT_GE(refined_left.range_hi, a);
+            EXPECT_LE(refined_right.range_lo, b);
+            EXPECT_GE(refined_right.range_hi, b);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_F(ConditionFactsTest, ScalarRefinementPreservesEveryComparisonOutcome) {
+  for (auto scalar_type :
+       {LOOM_SCALAR_TYPE_I1, LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I16,
+        LOOM_SCALAR_TYPE_I32, LOOM_SCALAR_TYPE_I64}) {
+    const uint32_t bit_count = loom_scalar_type_bitwidth(scalar_type);
+    const int64_t maximum = bit_count == 1 ? 1 : INT64_MAX >> (64 - bit_count);
+    const int64_t minimum = bit_count == 1 ? 0 : -maximum - 1;
+    const auto left = DefineValue(loom_type_scalar(scalar_type));
+    const auto right = DefineValue(loom_type_scalar(scalar_type));
+    for (const auto& operation : kIntegerComparisons) {
+      loom_condition_integer_comparison_t comparison = {};
+      ASSERT_TRUE(loom_condition_integer_comparison_describe(
+          module_, BuildScalarCompare(operation.scalar_predicate, left, right),
+          &comparison));
+      ExpectRefinementContainsConcreteValues(comparison, &fact_table_.context,
+                                             operation.index_predicate,
+                                             bit_count, minimum, maximum);
+    }
+  }
+}
+
+TEST_F(ConditionFactsTest, AddressRefinementPreservesCarrierComparisons) {
+  for (auto scalar_type : {LOOM_SCALAR_TYPE_INDEX, LOOM_SCALAR_TYPE_OFFSET}) {
+    for (uint32_t carrier_width : {0u, 32u, 64u}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "type=" << scalar_type << ", carrier=" << carrier_width);
+      loom_target_facts_t target_facts = {};
+      target_facts.storage.snapshot.index_bitwidth = carrier_width;
+      target_facts.storage.snapshot.offset_bitwidth = carrier_width;
+      fact_table_.context.target_facts =
+          carrier_width ? &target_facts : nullptr;
+      const uint32_t bit_count = carrier_width ? carrier_width : 64;
+      const int64_t maximum =
+          scalar_type == LOOM_SCALAR_TYPE_OFFSET && carrier_width == 32
+              ? UINT32_MAX
+              : INT64_MAX >> (64 - bit_count);
+      const int64_t minimum =
+          scalar_type == LOOM_SCALAR_TYPE_OFFSET ? 0 : -maximum - 1;
+      const auto left = DefineValue(loom_type_scalar(scalar_type));
+      const auto right = DefineValue(loom_type_scalar(scalar_type));
+      for (const auto& operation : kIntegerComparisons) {
+        loom_condition_integer_comparison_t comparison = {};
+        ASSERT_TRUE(loom_condition_integer_comparison_describe(
+            module_, BuildIndexCompare(operation.index_predicate, left, right),
+            &comparison));
+        ExpectRefinementContainsConcreteValues(comparison, &fact_table_.context,
+                                               operation.index_predicate,
+                                               bit_count, minimum, maximum);
+      }
+    }
+  }
+  fact_table_.context.target_facts = nullptr;
+}
+
+TEST_F(ConditionFactsTest, RefinementUsesNumericCopiesWithoutAllocation) {
+  const auto left = DefineIndexValue();
+  const auto right = DefineIndexValue();
+  const auto source = loom_value_facts_make(-16, 31, 1);
+  const auto bound = loom_value_facts_exact_i64(16);
+  DefineFacts(left, source);
+  DefineFacts(right, bound);
+  loom_condition_integer_comparison_t comparison = {};
+  ASSERT_TRUE(loom_condition_integer_comparison_describe(
+      module_, BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_ULT, left, right),
+      &comparison));
+  const auto used_allocation_size = analysis_arena_.used_allocation_size;
+  const auto used_module_size = module_->arena.used_allocation_size;
+  auto refined_left = source;
+  auto refined_right = bound;
+  loom_value_facts_mark_lane_varying(&refined_left);
+  loom_condition_integer_comparison_refine_facts(
+      &comparison, &fact_table_.context, true, &refined_left, &refined_right);
+  EXPECT_EQ(refined_left.range_lo, 0);
+  EXPECT_EQ(refined_left.range_hi, 15);
+  EXPECT_TRUE(loom_value_facts_is_lane_varying(refined_left));
+  EXPECT_TRUE(loom_value_facts_equal(refined_right, bound));
+  EXPECT_TRUE(loom_value_facts_equal(
+      loom_value_fact_table_lookup(&fact_table_, left), source));
+  EXPECT_EQ(analysis_arena_.used_allocation_size, used_allocation_size);
+  EXPECT_EQ(module_->arena.used_allocation_size, used_module_size);
+}
+
+TEST_F(ConditionFactsTest, AddressEdgesDoNotTruncateMathematicalEnvelopes) {
+  loom_target_facts_t target_facts = {};
+  target_facts.storage.snapshot.index_bitwidth = 32;
+  target_facts.storage.snapshot.offset_bitwidth = 32;
+  fact_table_.context.target_facts = &target_facts;
+  for (auto scalar_type : {LOOM_SCALAR_TYPE_INDEX, LOOM_SCALAR_TYPE_OFFSET}) {
+    const auto left = DefineValue(loom_type_scalar(scalar_type));
+    const auto right = DefineValue(loom_type_scalar(scalar_type));
+    for (auto predicate :
+         {LOOM_INDEX_CMP_PREDICATE_SLT, LOOM_INDEX_CMP_PREDICATE_EQ,
+          LOOM_INDEX_CMP_PREDICATE_ULT}) {
+      const int64_t maximum = predicate == LOOM_INDEX_CMP_PREDICATE_SLT
+                                  ? UINT32_MAX
+                                  : INT64_C(1) << 32;
+      const int64_t limit = predicate == LOOM_INDEX_CMP_PREDICATE_EQ ? 0 : 17;
+      const auto source = loom_value_facts_make(0, maximum, 1);
+      const auto bound = loom_value_facts_exact_i64(limit);
+      DefineFacts(left, source);
+      DefineFacts(right, bound);
+      auto* compare = BuildIndexCompare(predicate, left, right);
+      loom_condition_integer_comparison_t comparison = {};
+      ASSERT_TRUE(loom_condition_integer_comparison_describe(module_, compare,
+                                                             &comparison));
+      // The upper source endpoint satisfies the edge in the 32-bit carrier.
+      // Refining with mathematical signed order would discard that value.
+      ASSERT_TRUE(EvaluateIntegerComparison(predicate, 32, maximum, limit));
+      auto refined_left = source;
+      auto refined_right = bound;
+      loom_condition_integer_comparison_refine_facts(
+          &comparison, &fact_table_.context, true, &refined_left,
+          &refined_right);
+      EXPECT_TRUE(loom_value_facts_equal(refined_left, source));
+      EXPECT_TRUE(loom_value_facts_equal(refined_right, bound));
+      ASSERT_TRUE(Query(loom_index_cmp_result(compare)));
+      EXPECT_EQ(condition_facts_.integer_relation_count, 0u);
+    }
+  }
+  fact_table_.context.target_facts = nullptr;
+}
+
+TEST_F(ConditionFactsTest, MathematicalRelationsDoNotProveCarrierComparisons) {
+  for (auto scalar_type : {LOOM_SCALAR_TYPE_INDEX, LOOM_SCALAR_TYPE_OFFSET}) {
+    for (auto predicate :
+         {LOOM_INDEX_CMP_PREDICATE_SLT, LOOM_INDEX_CMP_PREDICATE_ULT,
+          LOOM_INDEX_CMP_PREDICATE_NE}) {
+      const auto left = DefineValue(loom_type_scalar(scalar_type));
+      const auto right = DefineValue(loom_type_scalar(scalar_type));
+      const int64_t upper = predicate == LOOM_INDEX_CMP_PREDICATE_SLT
+                                ? INT64_C(1) << 31
+                                : INT64_C(1) << 32;
+      DefineFacts(left, loom_value_facts_exact_i64(0));
+      DefineFacts(right, loom_value_facts_exact_i64(upper));
+      const auto* compare = BuildIndexCompare(predicate, left, right);
+      condition_facts_.integer_relations[0] = {
+          predicate == LOOM_INDEX_CMP_PREDICATE_NE
+              ? LOOM_SYMBOLIC_INTEGER_RELATION_NE
+              : LOOM_SYMBOLIC_INTEGER_RELATION_LT,
+          {LOOM_CONDITION_INTEGER_OPERAND_VALUE, left, 0},
+          {LOOM_CONDITION_INTEGER_OPERAND_VALUE, right, 0},
+      };
+      condition_facts_.integer_relation_count = 1;
+      // The supplied relation is true mathematically, but the corresponding
+      // comparison is false after interpreting its operands in 32 bits.
+      ASSERT_TRUE(EvaluateIntegerComparison(predicate, 64, 0, upper));
+      ASSERT_FALSE(EvaluateIntegerComparison(predicate, 32, 0, upper));
+      for (uint32_t carrier_width : {0u, 32u, 64u}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "type=" << scalar_type << ", predicate=" << predicate
+                     << ", carrier=" << carrier_width);
+        loom_target_facts_t target_facts = {};
+        target_facts.storage.snapshot.index_bitwidth = carrier_width;
+        target_facts.storage.snapshot.offset_bitwidth = carrier_width;
+        fact_table_.context.target_facts =
+            carrier_width ? &target_facts : nullptr;
+        bool value = false;
+        bool proven = false;
+        // This entry point supplies the flat relations through the ordinary
+        // resolver, including its numeric-refinement and relation callbacks.
+        IREE_ASSERT_OK(loom_condition_fact_set_proves_condition(
+            &condition_query_, &fact_table_, &condition_facts_,
+            loom_index_cmp_result(compare), &value, &proven));
+        EXPECT_EQ(proven, carrier_width != 32);
+        if (proven) {
+          EXPECT_TRUE(value);
+        }
+      }
+    }
+  }
+  fact_table_.context.target_facts = nullptr;
+}
+
+TEST_F(ConditionFactsTest, UnsignedProofRequiresIndependentSignPartition) {
+  for (uint32_t carrier_width : {0u, 32u, 64u}) {
+    loom_target_facts_t target_facts = {};
+    target_facts.storage.snapshot.index_bitwidth = carrier_width;
+    fact_table_.context.target_facts = carrier_width ? &target_facts : nullptr;
+    for (bool both_negative : {false, true}) {
+      const auto left = DefineIndexValue();
+      const auto right = DefineIndexValue();
+      DefineFacts(left, both_negative ? loom_value_facts_make(-4, -1, 1)
+                                      : loom_value_facts_make(-2, 15, 1));
+      DefineFacts(right, both_negative ? loom_value_facts_make(-4, -1, 1)
+                                       : loom_value_facts_exact_i64(16));
+      const auto* signed_compare =
+          BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_SLT, left, right);
+      ASSERT_TRUE(Query(loom_index_cmp_result(signed_compare)));
+      ASSERT_EQ(condition_facts_.integer_relation_count, 1u);
+
+      auto left_facts = loom_value_fact_table_lookup(&fact_table_, left);
+      auto right_facts = loom_value_fact_table_lookup(&fact_table_, right);
+      loom_condition_fact_set_apply_to_value_facts(
+          &condition_facts_, &fact_table_, left, &left_facts);
+      loom_condition_fact_set_apply_to_value_facts(
+          &condition_facts_, &fact_table_, right, &right_facts);
+      for (bool swapped : {false, true}) {
+        SCOPED_TRACE(::testing::Message() << "carrier=" << carrier_width
+                                          << ", both_negative=" << both_negative
+                                          << ", swapped=" << swapped);
+        const auto* unsigned_compare =
+            BuildIndexCompare(swapped ? LOOM_INDEX_CMP_PREDICATE_UGT
+                                      : LOOM_INDEX_CMP_PREDICATE_ULT,
+                              swapped ? right : left, swapped ? left : right);
+        loom_condition_integer_comparison_t comparison = {};
+        ASSERT_TRUE(loom_condition_integer_comparison_describe(
+            module_, unsigned_compare, &comparison));
+        bool value = false;
+        // Numeric edge summaries alone do not establish the unsigned result;
+        // the allowed proof must use the retained relation between operands.
+        EXPECT_FALSE(loom_condition_integer_comparison_evaluate(
+            &comparison, &fact_table_.context,
+            swapped ? &right_facts : &left_facts,
+            swapped ? &left_facts : &right_facts, &value));
+        bool proven = false;
+        IREE_ASSERT_OK(loom_condition_fact_set_proves_condition(
+            &condition_query_, &fact_table_, &condition_facts_,
+            loom_index_cmp_result(unsigned_compare), &value, &proven));
+        // Signed order agrees with unsigned order within a negative partition.
+        // Across zero, proving the unsigned condition may not assume that same
+        // condition to discard the negative values first.
+        EXPECT_EQ(proven, both_negative);
+        if (proven) {
+          EXPECT_TRUE(value);
+        }
+      }
+    }
+  }
+  fact_table_.context.target_facts = nullptr;
 }
 
 TEST_F(ConditionFactsTest, DirectConditionQueryDoesNotAllocateScratch) {
@@ -729,24 +1077,65 @@ TEST_F(ConditionFactsTest, UnsignedBoundMustFitSignedTargetCarrier) {
   target_facts.storage.snapshot.index_bitwidth = 32;
   fact_table_.context.target_facts = &target_facts;
   const loom_value_id_t value = DefineIndexValue();
+  const auto source = loom_value_facts_make(INT32_MIN, INT32_MAX, 1);
+  DefineFacts(value, source);
   for (int64_t bound_value :
        {INT64_C(2147483647), INT64_C(2147483648), INT64_C(4294967296)}) {
     const loom_value_id_t bound = DefineIndexValue();
     DefineFacts(bound, loom_value_facts_exact_i64(bound_value));
     loom_op_t* compare =
         BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_ULT, value, bound);
+    loom_condition_integer_comparison_t comparison = {};
+    ASSERT_TRUE(loom_condition_integer_comparison_describe(module_, compare,
+                                                           &comparison));
+    auto numeric_refined = source;
+    auto numeric_bound = loom_value_facts_exact_i64(bound_value);
+    loom_condition_integer_comparison_refine_facts(
+        &comparison, &fact_table_.context, true, &numeric_refined,
+        &numeric_bound);
     ASSERT_TRUE(Query(loom_index_cmp_result(compare)));
-    loom_value_facts_t refined = loom_value_facts_unknown();
+    auto refined = source;
     loom_condition_fact_set_apply_to_value_facts(&condition_facts_,
                                                  &fact_table_, value, &refined);
     if (bound_value == INT32_MAX) {
       EXPECT_EQ(refined.range_lo, 0);
       EXPECT_EQ(refined.range_hi, INT32_MAX - 1);
     } else {
-      EXPECT_EQ(refined.range_lo, INT64_MIN);
-      EXPECT_EQ(refined.range_hi, INT64_MAX);
+      EXPECT_EQ(refined.range_lo, INT32_MIN);
+      EXPECT_EQ(refined.range_hi, INT32_MAX);
+      EXPECT_EQ(condition_facts_.integer_relation_count, 0u);
     }
+    EXPECT_EQ(numeric_refined.range_lo, refined.range_lo);
+    EXPECT_EQ(numeric_refined.range_hi, refined.range_hi);
+    EXPECT_EQ(numeric_bound.range_lo, bound_value);
+    EXPECT_EQ(numeric_bound.range_hi, bound_value);
   }
+  fact_table_.context.target_facts = nullptr;
+}
+
+TEST_F(ConditionFactsTest, UnknownIndexFactsDoNotAcquireNativeCarrierBounds) {
+  loom_target_facts_t target_facts = {};
+  target_facts.storage.snapshot.index_bitwidth = 32;
+  fact_table_.context.target_facts = &target_facts;
+  const auto left = DefineIndexValue();
+  const auto right = DefineIndexValue();
+  const auto bound = loom_value_facts_exact_i64(16);
+  DefineFacts(right, bound);
+  auto* compare = BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_ULT, left, right);
+  loom_condition_integer_comparison_t comparison = {};
+  ASSERT_TRUE(loom_condition_integer_comparison_describe(module_, compare,
+                                                         &comparison));
+  for (bool truth : {false, true}) {
+    auto refined = loom_value_facts_unknown();
+    auto refined_bound = bound;
+    loom_condition_integer_comparison_refine_facts(
+        &comparison, &fact_table_.context, truth, &refined, &refined_bound);
+    EXPECT_TRUE(loom_value_facts_is_unknown(refined));
+    EXPECT_TRUE(loom_value_facts_equal(refined_bound, bound));
+    ASSERT_TRUE(Query(loom_index_cmp_result(compare), truth));
+    EXPECT_EQ(condition_facts_.integer_relation_count, 0u);
+  }
+  fact_table_.context.target_facts = nullptr;
 }
 
 TEST_F(ConditionFactsTest, ScalarCmpiProducesIntegerRelation) {
@@ -1459,6 +1848,142 @@ TEST_F(ConditionFactsTest, RelationCapacityOverflowIsIncomplete) {
                                             true, &empty_facts, &complete));
   EXPECT_FALSE(complete);
   EXPECT_EQ(empty_facts.integer_relation_count, 0u);
+}
+
+static unsigned DerivedBooleanTruthMask(
+    const loom_condition_derivation_t& derivation, loom_value_id_t value) {
+  unsigned truths = 0;
+  for (iree_host_size_t i = 0; i < derivation.boolean_fact_count; ++i) {
+    const auto& fact = derivation.boolean_facts[i];
+    if (fact.value_id == value) {
+      truths |= fact.value ? 2u : 1u;
+    }
+  }
+  return truths;
+}
+
+TEST_F(ConditionFactsTest, SelectSelectorTruthMatchesAllCompletions) {
+  const auto type = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
+  const auto selector = DefineValue(type);
+  const auto unknown_true = DefineValue(type);
+  const auto unknown_false = DefineValue(type);
+  loom_value_id_t literals[2];
+  for (unsigned truth = 0; truth < 2; ++truth) {
+    loom_op_t* literal = nullptr;
+    IREE_ASSERT_OK(loom_scalar_constant_build(&builder_,
+                                              loom_attr_bool(truth != 0), type,
+                                              LOOM_LOCATION_UNKNOWN, &literal));
+    literals[truth] = loom_scalar_constant_result(literal);
+  }
+  const loom_value_id_t true_arms[] = {literals[0], literals[1], selector,
+                                       unknown_true};
+  const loom_value_id_t false_arms[] = {literals[0], literals[1], selector,
+                                        unknown_false};
+  loom_condition_derivation_t derivation;
+  loom_condition_derivation_initialize(&analysis_arena_, &derivation);
+  for (unsigned true_arm = 0; true_arm < 4; ++true_arm) {
+    for (unsigned false_arm = 0; false_arm < 4; ++false_arm) {
+      loom_op_t* select = nullptr;
+      IREE_ASSERT_OK(loom_scf_select_build(
+          &builder_, selector, true_arms[true_arm], false_arms[false_arm], type,
+          LOOM_LOCATION_UNKNOWN, &select));
+      const auto result = loom_scf_select_result(select);
+      for (bool assumed_truth : {false, true}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "true_arm=" << true_arm << ", false_arm=" << false_arm
+                     << ", assumed_truth=" << assumed_truth);
+        unsigned selector_outcomes = 0;
+        // Enumerate the selector and both independent unknown inputs, rather
+        // than deriving the expected answer with the query's arm rules.
+        for (unsigned assignment = 0; assignment < 8; ++assignment) {
+          const bool condition = (assignment & 1) != 0;
+          const bool true_values[] = {false, true, condition,
+                                      (assignment & 2) != 0};
+          const bool false_values[] = {false, true, condition,
+                                       (assignment & 4) != 0};
+          if ((condition ? true_values[true_arm] : false_values[false_arm]) ==
+              assumed_truth) {
+            selector_outcomes |= condition ? 2u : 1u;
+          }
+        }
+        const bool forced = selector_outcomes == 1u || selector_outcomes == 2u;
+        IREE_ASSERT_OK(loom_condition_facts_query_complete(
+            &condition_query_, /*fact_table=*/nullptr, result, assumed_truth,
+            &derivation));
+        EXPECT_EQ(DerivedBooleanTruthMask(derivation, result),
+                  assumed_truth ? 2u : 1u);
+        EXPECT_EQ(DerivedBooleanTruthMask(derivation, selector),
+                  forced ? selector_outcomes : 0u);
+        EXPECT_EQ(derivation.boolean_fact_count, forced ? 2u : 1u);
+        EXPECT_EQ(derivation.integer_facts.integer_relation_count,
+                  forced ? 2u : 1u);
+        for (iree_host_size_t i = 0;
+             i < derivation.integer_facts.integer_relation_count; ++i) {
+          const auto& fact = derivation.integer_facts.integer_relations[i];
+          EXPECT_EQ(fact.relation, LOOM_SYMBOLIC_INTEGER_RELATION_EQ);
+          ASSERT_EQ(fact.left.kind, LOOM_CONDITION_INTEGER_OPERAND_VALUE);
+          ASSERT_EQ(fact.right.kind, LOOM_CONDITION_INTEGER_OPERAND_CONSTANT);
+          ASSERT_TRUE(fact.right.constant == 0 || fact.right.constant == 1);
+          EXPECT_EQ(DerivedBooleanTruthMask(derivation, fact.left.value_id),
+                    fact.right.constant ? 2u : 1u);
+        }
+      }
+    }
+  }
+}
+
+TEST_F(ConditionFactsTest, StructuralOrIgnoresCarriedNumericFalse) {
+  const auto type = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
+  const auto condition = DefineValue(type);
+  loom_value_id_t carried = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_), type, &carried));
+  DefineFacts(carried, loom_value_facts_exact_i64(0));
+  loom_op_t* literal = nullptr;
+  IREE_ASSERT_OK(loom_scalar_constant_build(
+      &builder_, loom_attr_bool(false), type, LOOM_LOCATION_UNKNOWN, &literal));
+  const auto literal_false = loom_scalar_constant_result(literal);
+  loom_condition_derivation_t derivation;
+  loom_condition_derivation_initialize(&analysis_arena_, &derivation);
+  for (auto other : {carried, literal_false}) {
+    for (bool condition_first : {false, true}) {
+      const auto result = loom_scalar_ori_result(
+          BuildBoolOr(condition_first ? condition : other,
+                      condition_first ? other : condition));
+      IREE_ASSERT_OK(loom_condition_facts_query_complete(
+          &condition_query_, /*fact_table=*/nullptr, result,
+          /*assumed_truth=*/true, &derivation));
+      EXPECT_EQ(DerivedBooleanTruthMask(derivation, condition),
+                other == literal_false ? 2u : 0u);
+      EXPECT_EQ(DerivedBooleanTruthMask(derivation, carried), 0u);
+    }
+  }
+}
+
+TEST_F(ConditionFactsTest, StructuralXorUsesLiteralPolarity) {
+  const auto type = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
+  const auto condition = DefineValue(type);
+  loom_condition_derivation_t derivation;
+  loom_condition_derivation_initialize(&analysis_arena_, &derivation);
+  for (bool literal_truth : {false, true}) {
+    loom_op_t* literal = nullptr;
+    IREE_ASSERT_OK(
+        loom_scalar_constant_build(&builder_, loom_attr_bool(literal_truth),
+                                   type, LOOM_LOCATION_UNKNOWN, &literal));
+    const auto literal_value = loom_scalar_constant_result(literal);
+    for (bool condition_first : {false, true}) {
+      const auto result = loom_scalar_xori_result(
+          BuildBoolXor(condition_first ? condition : literal_value,
+                       condition_first ? literal_value : condition));
+      for (bool assumed_truth : {false, true}) {
+        IREE_ASSERT_OK(loom_condition_facts_query_complete(
+            &condition_query_, /*fact_table=*/nullptr, result, assumed_truth,
+            &derivation));
+        EXPECT_EQ(DerivedBooleanTruthMask(derivation, condition),
+                  assumed_truth != literal_truth ? 2u : 1u);
+      }
+    }
+  }
 }
 
 }  // namespace

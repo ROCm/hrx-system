@@ -19,6 +19,7 @@ loom_check_test_suite(
     "canonicalize_select_extensions.loom-test"
     "canonicalize_speculation.loom-test"
     "combine_extrema.loom-test"
+    "condition_induction.loom-test"
     "convergence_facts.loom-test"
     "dependent_types.loom-test"
     "facts.loom-test"
@@ -27,6 +28,7 @@ loom_check_test_suite(
     "loop_distribution_facts.loom-test"
     "rotation_facts.loom-test"
     "roundtrip.loom-test"
+    "selection_bounds.loom-test"
     "selection_facts.loom-test"
     "verify.loom-test"
 )

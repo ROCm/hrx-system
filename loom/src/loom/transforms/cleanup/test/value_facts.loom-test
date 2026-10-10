@@ -611,11 +611,11 @@ func.def @inferred_domain_retains_refinements(%input: i8) -> (i64, i64, i64) {
 
 // RUN: with-checks pass canonicalize
 
-// Widening the loop-carried byte may discard the recurrence's range, but not
-// the type bounds consumed by an extension inside the loop body.
+// The bounded loop can wrap the carried byte, so an unwrapped additive range
+// is unavailable. Widening retains the type bounds used by the body extension.
 func.def @loop_widening_retains_byte_domain(%n: index) -> (i8, i64, i64) {
   %start = index.constant 0 : index
-  %end = index.assume %n [range(%n, 1, 8)] : index
+  %end = index.assume %n [range(%n, 1, 256)] : index
   %step = index.constant 1 : index
   %initial_byte = scalar.constant 0 : i8
   %increment = scalar.constant 1 : i8

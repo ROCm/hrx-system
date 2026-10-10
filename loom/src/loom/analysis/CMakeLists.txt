@@ -369,6 +369,7 @@ loom_cc_library(
     loom::ops::index::op_defs
     loom::ops::scalar::comparison
     loom::ops::scalar::op_defs
+    loom::ops::scf::op_defs
     loom::util::adaptive_sort
     loom::util::fact_table_api
   PUBLIC
@@ -387,6 +388,7 @@ loom_cc_test(
     loom::ir
     loom::ops::index
     loom::ops::scalar
+    loom::ops::scf
     loom::target::facts
     loom::util::fact_table
 )

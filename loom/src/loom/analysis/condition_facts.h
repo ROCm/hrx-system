@@ -65,6 +65,16 @@ bool loom_condition_integer_comparison_evaluate(
     const loom_fact_context_t* context, const loom_value_facts_t* lhs_facts,
     const loom_value_facts_t* rhs_facts, bool* out_result);
 
+// Refines caller-owned numeric facts for one assumed comparison outcome.
+// Facts retain their mathematical source representation: comparisons whose
+// carrier interpretation cannot be represented by an interval leave them
+// unchanged. Reads no IR, allocates no storage, and does not publish edge-local
+// facts into the ambient fact table.
+void loom_condition_integer_comparison_refine_facts(
+    const loom_condition_integer_comparison_t* comparison,
+    const loom_fact_context_t* context, bool assumed_truth,
+    loom_value_facts_t* lhs_facts, loom_value_facts_t* rhs_facts);
+
 typedef enum loom_condition_integer_operand_kind_e {
   // Operand is an SSA value.
   LOOM_CONDITION_INTEGER_OPERAND_VALUE = 0,
@@ -270,7 +280,9 @@ iree_status_t loom_condition_facts_query(
 // Derives every integer relation and exact Boolean truth implied by assuming
 // |condition_value| evaluates to |assumed_truth|. The returned facts are
 // canonicalized and deduplicated. Allocation failure is the only reason a
-// valid query cannot produce a complete result.
+// valid query cannot produce a complete result. With a NULL fact table,
+// consequences depend only on Boolean structure and immutable literals, not
+// numeric observations that may change across loop iterations.
 iree_status_t loom_condition_facts_query_complete(
     loom_condition_query_t* query, const loom_value_fact_table_t* fact_table,
     loom_value_id_t condition_value, bool assumed_truth,

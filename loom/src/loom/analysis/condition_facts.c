@@ -14,6 +14,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/compare.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/util/adaptive_sort.h"
 
 #define LOOM_CONDITION_QUERY_INITIAL_CAPACITY 16
@@ -416,15 +417,6 @@ static bool loom_condition_value_exact_integer(
   return true;
 }
 
-static bool loom_condition_values_are_non_negative(
-    const loom_value_fact_table_t* fact_table, loom_value_id_t left_value,
-    loom_value_id_t right_value) {
-  return loom_value_facts_is_non_negative(
-             loom_condition_lookup_facts(fact_table, left_value)) &&
-         loom_value_facts_is_non_negative(
-             loom_condition_lookup_facts(fact_table, right_value));
-}
-
 static bool loom_condition_value_is_i1(const loom_module_t* module,
                                        loom_value_id_t value_id) {
   if (!module || value_id >= module->values.count) {
@@ -467,6 +459,29 @@ static bool loom_condition_facts_exact_bool(loom_value_facts_t facts,
   }
   *out_value = value != 0;
   return true;
+}
+
+static bool loom_condition_value_literal_bool(const loom_module_t* module,
+                                              loom_value_id_t value_id,
+                                              bool* out_value) {
+  const loom_value_t* value = loom_module_value(module, value_id);
+  if (loom_value_is_block_arg(value)) {
+    return false;
+  }
+  const loom_op_t* op = loom_value_def_op(value);
+  if (!loom_scalar_constant_isa(op)) {
+    return false;
+  }
+  *out_value = loom_attr_as_i64(loom_scalar_constant_value(op)) != 0;
+  return true;
+}
+
+static bool loom_condition_value_exact_bool(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id, bool* out_value) {
+  return loom_condition_value_literal_bool(module, value_id, out_value) ||
+         loom_condition_facts_exact_bool(
+             loom_condition_lookup_facts(fact_table, value_id), out_value);
 }
 
 static bool loom_condition_index_predicate_relation(
@@ -647,6 +662,71 @@ static bool loom_condition_relation_to_predicate_kind(
   }
 }
 
+// Normalizes carrier order to mathematical order. Unsigned comparisons may
+// additionally establish a nonnegative lower operand on the selected edge.
+static bool loom_condition_integer_comparison_normalize_relation(
+    const loom_condition_integer_comparison_t* comparison,
+    const loom_fact_context_t* context, bool assumed_truth,
+    loom_value_facts_t* lhs_facts, loom_value_facts_t* rhs_facts,
+    loom_symbolic_integer_relation_t* out_relation) {
+  bool unsigned_order = false;
+  if (!loom_condition_integer_comparison_relation(comparison, out_relation,
+                                                  &unsigned_order)) {
+    return false;
+  }
+  if (comparison->kind == LOOM_OP_INDEX_CMP &&
+      !loom_index_cmp_facts_fit_target_carrier(
+          context, comparison->operand_type, comparison->predicate, lhs_facts,
+          rhs_facts) &&
+      !(unsigned_order &&
+        loom_index_value_facts_fit_signed_target_carrier(
+            context, comparison->operand_type, *lhs_facts) &&
+        loom_index_value_facts_fit_signed_target_carrier(
+            context, comparison->operand_type, *rhs_facts))) {
+    return false;
+  }
+  if (!assumed_truth) {
+    *out_relation = loom_symbolic_integer_relation_invert(*out_relation);
+  }
+  if (!unsigned_order ||
+      (loom_value_facts_is_non_negative(*lhs_facts) &&
+       loom_value_facts_is_non_negative(*rhs_facts)) ||
+      (lhs_facts->range_hi < 0 && rhs_facts->range_hi < 0)) {
+    return true;
+  }
+
+  const bool ascending = *out_relation == LOOM_SYMBOLIC_INTEGER_RELATION_LT ||
+                         *out_relation == LOOM_SYMBOLIC_INTEGER_RELATION_LE;
+  loom_value_facts_t* lower = ascending ? lhs_facts : rhs_facts;
+  const loom_value_facts_t upper = ascending ? *rhs_facts : *lhs_facts;
+  if (!loom_value_facts_is_non_negative(upper) ||
+      (comparison->kind == LOOM_OP_INDEX_CMP &&
+       !loom_index_value_facts_fit_signed_target_carrier(
+           context, comparison->operand_type, upper))) {
+    return false;
+  }
+  // With no sign bit in the upper operand, lower <=u upper implies lower >= 0.
+  lower->range_lo = iree_max(lower->range_lo, 0);
+  return true;
+}
+
+void loom_condition_integer_comparison_refine_facts(
+    const loom_condition_integer_comparison_t* comparison,
+    const loom_fact_context_t* context, bool assumed_truth,
+    loom_value_facts_t* lhs_facts, loom_value_facts_t* rhs_facts) {
+  loom_symbolic_integer_relation_t relation;
+  if (!loom_condition_integer_comparison_normalize_relation(
+          comparison, context, assumed_truth, lhs_facts, rhs_facts,
+          &relation)) {
+    return;
+  }
+  uint8_t predicate_kind = 0;
+  if (loom_condition_relation_to_predicate_kind(relation, &predicate_kind)) {
+    (void)loom_value_facts_refine_relation(predicate_kind, *lhs_facts,
+                                           *rhs_facts, lhs_facts, rhs_facts);
+  }
+}
+
 // Derives numeric consequences while the condition owner visits a comparison.
 // Consumers retain and index the resulting dividend relations; they do not
 // search quotient users when querying an address's bounds.
@@ -769,53 +849,30 @@ static iree_status_t loom_condition_facts_query_integer_compare(
       loom_condition_integer_comparison_from_op(module, op);
   const loom_value_id_t left_value = comparison.lhs;
   const loom_value_id_t right_value = comparison.rhs;
-  loom_symbolic_integer_relation_t relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ;
-  bool unsigned_order = false;
-  const bool has_relation = loom_condition_integer_comparison_relation(
-      &comparison, &relation, &unsigned_order);
-  if (!has_relation) {
-    return iree_ok_status();
-  }
-  if (!assumed_truth) {
-    relation = loom_symbolic_integer_relation_invert(relation);
-  }
   loom_value_facts_t left_facts =
       loom_condition_lookup_facts(fact_table, left_value);
   loom_value_facts_t right_facts =
       loom_condition_lookup_facts(fact_table, right_value);
-
-  if (unsigned_order && !loom_condition_values_are_non_negative(
-                            fact_table, left_value, right_value)) {
-    const bool ascending = relation == LOOM_SYMBOLIC_INTEGER_RELATION_LT ||
-                           relation == LOOM_SYMBOLIC_INTEGER_RELATION_LE;
-    const loom_value_id_t lower = ascending ? left_value : right_value;
-    const loom_value_id_t upper = ascending ? right_value : left_value;
-    const loom_value_facts_t upper_facts =
-        loom_condition_lookup_facts(fact_table, upper);
-    if (!loom_value_facts_is_non_negative(upper_facts)) {
-      return iree_ok_status();
-    }
-    // A bound with the carrier's sign bit set admits negative signed values.
-    // Targetless address facts retain their mathematical i64 source domain.
-    if (comparison.kind == LOOM_OP_INDEX_CMP &&
-        !loom_index_value_facts_fit_signed_target_carrier(
-            fact_table ? &fact_table->context : NULL, comparison.operand_type,
-            upper_facts)) {
-      return iree_ok_status();
-    }
-    // On this edge lower <=u upper, where upper has no sign bit. Therefore
-    // lower is nonnegative and the retained signed order is equivalent.
+  const int64_t left_minimum = left_facts.range_lo;
+  const int64_t right_minimum = right_facts.range_lo;
+  loom_symbolic_integer_relation_t relation;
+  if (!loom_condition_integer_comparison_normalize_relation(
+          &comparison, fact_table ? &fact_table->context : NULL, assumed_truth,
+          &left_facts, &right_facts, &relation)) {
+    return iree_ok_status();
+  }
+  if (left_facts.range_lo != left_minimum ||
+      right_facts.range_lo != right_minimum) {
     const loom_condition_integer_relation_t nonnegative = {
         .relation = LOOM_SYMBOLIC_INTEGER_RELATION_GE,
-        .left = loom_condition_value_operand(lower),
+        .left = loom_condition_value_operand(
+            left_facts.range_lo != left_minimum ? left_value : right_value),
         .right = {.kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
                   .value_id = LOOM_VALUE_ID_INVALID,
                   .constant = 0},
     };
     IREE_RETURN_IF_ERROR(loom_condition_fact_set_append_integer_relation(
         facts, out_derivation, nonnegative, out_complete));
-    loom_value_facts_t* lower_facts = ascending ? &left_facts : &right_facts;
-    lower_facts->range_lo = iree_max(lower_facts->range_lo, 0);
   }
 
   const loom_condition_integer_relation_t assertion = {
@@ -874,6 +931,81 @@ static bool loom_condition_boolean_op_has_i1_signature(
          loom_condition_value_is_i1(module, rhs);
 }
 
+// A result outcome can force the selector without exposing branch-local SSA
+// values outside their region. Only immutable literals and the selected edge
+// itself exclude an arm; first-iteration numeric facts are not invariants.
+static bool loom_condition_boolean_arm_can_equal(
+    const loom_module_t* module, loom_value_id_t selector,
+    loom_region_branch_truth_t selected_truth, loom_value_id_t yielded_value,
+    bool requested_truth) {
+  if (yielded_value == selector) {
+    return (selected_truth == LOOM_REGION_BRANCH_TRUTH_TRUE) == requested_truth;
+  }
+  bool literal_truth = false;
+  return !loom_condition_value_literal_bool(module, yielded_value,
+                                            &literal_truth) ||
+         literal_truth == requested_truth;
+}
+
+static iree_status_t loom_condition_query_selection(
+    loom_condition_query_t* query, const loom_op_t* op,
+    const loom_condition_query_frame_t* frame) {
+  const loom_module_t* module = query->module;
+  if (!loom_condition_value_is_i1(module, frame->value_id)) {
+    return iree_ok_status();
+  }
+  loom_value_id_t selector = LOOM_VALUE_ID_INVALID;
+  uint8_t possible_selector_values = 0;
+  if (loom_scf_select_isa(op)) {
+    selector = loom_scf_select_condition(op);
+    possible_selector_values =
+        (loom_condition_boolean_arm_can_equal(
+             module, selector, LOOM_REGION_BRANCH_TRUTH_FALSE,
+             loom_scf_select_false_value(op), frame->assumed_truth)
+             ? 1u
+             : 0u) |
+        (loom_condition_boolean_arm_can_equal(
+             module, selector, LOOM_REGION_BRANCH_TRUTH_TRUE,
+             loom_scf_select_true_value(op), frame->assumed_truth)
+             ? 2u
+             : 0u);
+  } else {
+    const loom_region_branch_t branch =
+        loom_region_branch_cast(module, (loom_op_t*)op);
+    if (!loom_region_branch_isa(branch)) {
+      return iree_ok_status();
+    }
+    selector = loom_region_branch_selector(branch);
+    if (!loom_condition_value_is_i1(module, selector)) {
+      return iree_ok_status();
+    }
+    const uint16_t result_index =
+        loom_value_def_index(loom_module_value(module, frame->value_id));
+    for (uint8_t i = 0; i < op->region_count; ++i) {
+      const loom_region_branch_truth_t truth =
+          loom_region_branch_region_truth(branch, i);
+      const loom_op_t* yield =
+          loom_region_branch_region_terminator(module, branch, i);
+      // Rewriters may expose a region shell before publishing its yield.
+      if (truth == LOOM_REGION_BRANCH_TRUTH_UNKNOWN || !yield) {
+        return iree_ok_status();
+      }
+      const bool selected_truth = truth == LOOM_REGION_BRANCH_TRUTH_TRUE;
+      if (loom_condition_boolean_arm_can_equal(
+              module, selector, truth,
+              loom_op_const_operands(yield)[result_index],
+              frame->assumed_truth)) {
+        possible_selector_values |= selected_truth ? 2u : 1u;
+      }
+    }
+  }
+  if (possible_selector_values == 1u || possible_selector_values == 2u) {
+    return loom_condition_query_push_derivation(query, selector,
+                                                possible_selector_values == 2u);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_condition_facts_process_derivation(
     loom_condition_query_t* query, const loom_value_fact_table_t* fact_table,
     const loom_condition_query_frame_t* frame,
@@ -921,14 +1053,14 @@ static iree_status_t loom_condition_facts_process_derivation(
         return loom_condition_query_push_derivation(query, lhs, true);
       }
       bool exact_truth = false;
-      if (loom_condition_facts_exact_bool(
-              loom_condition_lookup_facts(fact_table, lhs), &exact_truth)) {
+      if (loom_condition_value_exact_bool(module, fact_table, lhs,
+                                          &exact_truth)) {
         return exact_truth
                    ? loom_condition_query_push_derivation(query, rhs, false)
                    : iree_ok_status();
       }
-      if (loom_condition_facts_exact_bool(
-              loom_condition_lookup_facts(fact_table, rhs), &exact_truth)) {
+      if (loom_condition_value_exact_bool(module, fact_table, rhs,
+                                          &exact_truth)) {
         return exact_truth
                    ? loom_condition_query_push_derivation(query, lhs, false)
                    : iree_ok_status();
@@ -948,14 +1080,14 @@ static iree_status_t loom_condition_facts_process_derivation(
         return loom_condition_query_push_derivation(query, lhs, false);
       }
       bool exact_truth = false;
-      if (loom_condition_facts_exact_bool(
-              loom_condition_lookup_facts(fact_table, lhs), &exact_truth)) {
+      if (loom_condition_value_exact_bool(module, fact_table, lhs,
+                                          &exact_truth)) {
         return !exact_truth
                    ? loom_condition_query_push_derivation(query, rhs, true)
                    : iree_ok_status();
       }
-      if (loom_condition_facts_exact_bool(
-              loom_condition_lookup_facts(fact_table, rhs), &exact_truth)) {
+      if (loom_condition_value_exact_bool(module, fact_table, rhs,
+                                          &exact_truth)) {
         return !exact_truth
                    ? loom_condition_query_push_derivation(query, lhs, true)
                    : iree_ok_status();
@@ -970,22 +1102,25 @@ static iree_status_t loom_condition_facts_process_derivation(
         return iree_ok_status();
       }
       bool exact_truth = false;
-      if (loom_condition_facts_exact_bool(
-              loom_condition_lookup_facts(fact_table, lhs), &exact_truth)) {
+      if (loom_condition_value_exact_bool(module, fact_table, lhs,
+                                          &exact_truth)) {
         return loom_condition_query_push_derivation(
             query, rhs, frame->assumed_truth != exact_truth);
       }
-      if (loom_condition_facts_exact_bool(
-              loom_condition_lookup_facts(fact_table, rhs), &exact_truth)) {
+      if (loom_condition_value_exact_bool(module, fact_table, rhs,
+                                          &exact_truth)) {
         return loom_condition_query_push_derivation(
             query, lhs, frame->assumed_truth != exact_truth);
       }
       return iree_ok_status();
     }
-    default:
+    default: {
+      IREE_RETURN_IF_ERROR(
+          loom_condition_query_selection(query, defining_op, frame));
       return loom_condition_facts_query_opaque_boolean(
           module, frame->value_id, frame->assumed_truth, out_facts,
           out_derivation, out_complete);
+    }
   }
 }
 
@@ -1115,21 +1250,23 @@ static bool loom_condition_fact_resolver_proves_integer_comparison(
       .left = loom_condition_value_operand(comparison.lhs),
       .right = loom_condition_value_operand(comparison.rhs),
   };
-  bool unsigned_order = false;
-  if (loom_condition_integer_comparison_relation(
-          &comparison, &relation.relation, &unsigned_order) &&
-      (!unsigned_order || loom_condition_values_are_non_negative(
-                              fact_table, comparison.lhs, comparison.rhs)) &&
-      resolver != NULL && resolver->proves_integer_relation != NULL &&
+  const loom_value_facts_t lhs_facts =
+      loom_condition_edge_value_facts(fact_table, resolver, comparison.lhs);
+  const loom_value_facts_t rhs_facts =
+      loom_condition_edge_value_facts(fact_table, resolver, comparison.rhs);
+  loom_value_facts_t normalized_lhs = lhs_facts;
+  loom_value_facts_t normalized_rhs = rhs_facts;
+  if (loom_condition_integer_comparison_normalize_relation(
+          &comparison, fact_table ? &fact_table->context : NULL, true,
+          &normalized_lhs, &normalized_rhs, &relation.relation) &&
+      normalized_lhs.range_lo == lhs_facts.range_lo &&
+      normalized_rhs.range_lo == rhs_facts.range_lo && resolver != NULL &&
+      resolver->proves_integer_relation != NULL &&
       resolver->proves_integer_relation(resolver->user_data, fact_table,
                                         &relation, out_condition)) {
     return true;
   }
 
-  const loom_value_facts_t lhs_facts =
-      loom_condition_edge_value_facts(fact_table, resolver, comparison.lhs);
-  const loom_value_facts_t rhs_facts =
-      loom_condition_edge_value_facts(fact_table, resolver, comparison.rhs);
   return loom_condition_integer_comparison_evaluate(
       &comparison, fact_table ? &fact_table->context : NULL, &lhs_facts,
       &rhs_facts, out_condition);

@@ -185,16 +185,16 @@ static bool loom_low_lower_realization_loop_domain(
   int64_t initial_value = 0;
   int64_t step = 0;
   int64_t exit_value = 0;
-  if (!recurrence.trip_count_known ||
+  if (recurrence.trip_count_kind != LOOM_LOOP_TRIP_COUNT_EXACT ||
       !loom_value_facts_as_exact_i64(recurrence.exit_value, &exit_value) ||
       !loom_value_facts_as_exact_i64(
           loom_value_fact_recurrence_operand_facts(context->fact_table,
                                                    induction->initial_value),
           &initial_value) ||
       induction->step.value == LOOM_VALUE_ID_INVALID ||
-      !loom_value_facts_as_exact_i64(loom_value_fact_recurrence_operand_facts(
-                                         context->fact_table, induction->step),
-                                     &step) ||
+      !loom_value_facts_as_exact_i64(
+          loom_value_fact_induction_step_facts(context->fact_table, induction),
+          &step) ||
       step <= 0) {
     return false;
   }

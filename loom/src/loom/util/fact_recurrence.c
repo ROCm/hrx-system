@@ -430,13 +430,14 @@ static bool loom_value_fact_recurrence_fits(
 bool loom_value_fact_recurrence_evaluate(
     const loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_value_fact_recurrence_t* recurrence, uint64_t trip_count,
+    loom_loop_trip_count_kind_t trip_count_kind,
     loom_loop_recurrence_facts_t* out_facts) {
   *out_facts = (loom_loop_recurrence_facts_t){
       .values = loom_value_facts_unknown(),
       .body_values = loom_value_facts_unknown(),
       .exit_value = loom_value_facts_unknown(),
       .trip_count = trip_count,
-      .trip_count_known = true,
+      .trip_count_kind = trip_count_kind,
   };
   const loom_scalar_type_t scalar_type =
       loom_type_element_type(loom_module_value_type(module, recurrence->value));
@@ -476,6 +477,10 @@ bool loom_value_fact_recurrence_evaluate(
             table, scalar_type, loom_value_facts_make(lower, upper, 1))) {
       return false;
     }
+  }
+  candidate.trip_count_kind = trip_count_kind;
+  if (trip_count_kind == LOOM_LOOP_TRIP_COUNT_BOUNDED) {
+    candidate.exit_value = candidate.values;
   }
   *out_facts = candidate;
   return true;
