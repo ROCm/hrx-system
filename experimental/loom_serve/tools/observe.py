@@ -23,7 +23,7 @@ import threading
 import time
 from pathlib import Path
 
-from experimental.loom_serve.http.logs import LogClient
+from experimental.loom_serve.http.logs import LogClient, ModelNotFound
 from experimental.loom_serve.tools.system_stats import SystemStats
 
 
@@ -63,13 +63,30 @@ def record_streams(
     local_pid=None,
     log_directory=Path("."),
 ):
-    models = client.models() if models is None else models
+    discover = models is None
+    models = client.models() if discover else list(models)
+    available = {}
+
+    def unavailable(model):
+        previous = client.forget(model)
+        if available.get(model) is not False:
+            log.emit(
+                "observer",
+                {
+                    "event": "model_unavailable",
+                    "model": model,
+                    "previous_cursor": previous,
+                },
+            )
+        available[model] = False
+
     log.emit(
         "observer",
         {
             "event": "observation_begin",
             "url": client.address.geturl(),
             "models": models,
+            "follow_models": discover,
             "observer_host": platform.node(),
             "poll_interval_seconds": interval,
             "local_pid": local_pid,
@@ -86,12 +103,26 @@ def record_streams(
         for model in [None, *models]:
             if stopped.is_set():
                 break
-            batch = client.poll(model)
+            try:
+                batch = client.poll(model)
+            except ModelNotFound:
+                unavailable(model)
+                continue
+            if model is not None and available.get(model) is not True:
+                log.emit("observer", {"event": "model_available"}, stream=batch.stream)
+                available[model] = True
             for record in batch.records:
                 log.emit("server", record, stream=batch.stream)
         if stats is not None and not stopped.is_set():
             log.emit("local_system", stats.sample(local_pid, log_directory))
         stopped.wait(max(0, start + interval - time.monotonic()))
+        if discover and not stopped.is_set():
+            current = client.models()
+            for model in models:
+                if model not in current:
+                    unavailable(model)
+                    del available[model]
+            models = current
     log.emit("observer", {"event": "observation_end"})
 
 
@@ -109,7 +140,7 @@ def main():
     parser.add_argument(
         "--model",
         action="append",
-        help="Observe this model; repeat, or omit to discover all.",
+        help="Follow this model name; repeat, or omit to follow the changing catalog.",
     )
     parser.add_argument(
         "--local-pid",

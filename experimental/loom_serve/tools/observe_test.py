@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest import mock
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.http.logs import LogBatch, LogClient
+from experimental.loom_serve.http.logs import LogBatch, LogClient, ModelNotFound
 from experimental.loom_serve.tools import observe, system_stats
 
 
@@ -140,6 +140,7 @@ class ObserverTest(unittest.TestCase):
         client = mock.Mock(spec=LogClient)
         client.address = urlsplit("http://127.0.0.1:8080")
         client.models.return_value = ["chat", "image"]
+        client.forget.return_value = None
 
         def poll(model):
             return LogBatch(
@@ -179,7 +180,7 @@ class ObserverTest(unittest.TestCase):
         self.assertEqual(records[0]["data"]["event"], "observation_begin")
         self.assertEqual(records[-1]["data"]["event"], "observation_end")
         self.assertEqual(
-            [r["stream"].get("model") for r in records[1:-1]],
+            [r["stream"].get("model") for r in records if r["source"] == "server"],
             [None, None, "chat", "chat", "image", "image"],
         )
 
@@ -196,6 +197,72 @@ class ObserverTest(unittest.TestCase):
             observe.record_streams(client, observe.EventLog(Sink()), threading.Event())
         self.assertEqual(raised.exception.errno, errno.ENOSPC)
         self.assertEqual(client.poll.call_args_list, [mock.call(None)])
+
+    def test_empty_catalog_add_remove_and_same_name_return(self):
+        client, stopped, sink = self.client(), threading.Event(), io.StringIO()
+        client.models.side_effect = [[], ["chat"], [], ["chat"]]
+        client.forget.return_value = "1:1:0"
+        polls = 0
+        original = client.poll.side_effect
+
+        def poll(model):
+            nonlocal polls
+            value = original(model)
+            if model is not None:
+                polls += 1
+                if polls == 2:
+                    stopped.set()
+            return value
+
+        client.poll.side_effect = poll
+        observe.record_streams(client, observe.EventLog(sink), stopped, interval=0)
+        records = [json.loads(line) for line in sink.getvalue().splitlines()]
+        transitions = [
+            r["data"] for r in records if r["data"]["event"].startswith("model_")
+        ]
+        self.assertEqual(
+            transitions,
+            [
+                {"event": "model_available"},
+                {
+                    "event": "model_unavailable",
+                    "model": "chat",
+                    "previous_cursor": "1:1:0",
+                },
+                {"event": "model_available"},
+            ],
+        )
+        self.assertEqual(client.models.call_count, 4)
+        client.forget.assert_called_once_with("chat")
+
+    def test_fixed_selection_waits_for_registration_without_duplicate_absence(self):
+        client, stopped, sink = self.client(), threading.Event(), io.StringIO()
+        polls = 0
+        original = client.poll.side_effect
+
+        def poll(model):
+            nonlocal polls
+            if model is not None:
+                polls += 1
+                if polls <= 2:
+                    raise ModelNotFound(model)
+                stopped.set()
+            return original(model)
+
+        client.poll.side_effect = poll
+        observe.record_streams(
+            client, observe.EventLog(sink), stopped, interval=0, models=["chat"]
+        )
+        records = [json.loads(line) for line in sink.getvalue().splitlines()]
+        self.assertEqual(
+            [
+                r["data"]["event"]
+                for r in records
+                if r["data"]["event"].startswith("model_")
+            ],
+            ["model_unavailable", "model_available"],
+        )
+        client.models.assert_not_called()
 
     def test_failed_source_is_not_silently_replaced_by_empty_data(self):
         client, sink = self.client(), io.StringIO()

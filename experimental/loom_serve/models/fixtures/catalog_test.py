@@ -635,6 +635,79 @@ def check_startup_failures(server, directory, catalog):
         )
 
 
+def check_dynamic_observer(server, directory, catalog):
+    """The shipping observer follows real model registration, not a static list."""
+    declaration = next(
+        model for model in catalog["models"] if model["kind"] == "embedding"
+    )
+    log_path = directory / "dynamic-observer.log"
+    events, stopped = Events(), threading.Event()
+
+    class Sink(io.StringIO):
+        def write(self, line):
+            record = json.loads(line)
+            data, stream = record["data"], record.get("stream", {})
+            if record["source"] == "observer":
+                events.record({**data, **stream})
+            elif data["event"] == "cursor" and "model" in stream:
+                events.record({**data, **stream, "event": "model_cursor"})
+            return super().write(line)
+
+    with child_server(
+        [str(server), "--listen=127.0.0.1:0", "--workers=1", "--pool_backing=fixed"],
+        log_path,
+        cwd=directory,
+    ) as (_, address):
+        assert address is not None, log_path.read_text()
+        client = Client(address)
+        reader = LogClient("http://" + address, timeout=None)
+        sink = Sink()
+
+        def observe():
+            try:
+                record_streams(reader, EventLog(sink), stopped, interval=0.01)
+            finally:
+                events.record(None)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            observer = executor.submit(observe)
+            try:
+                events.wait("observation_begin", models=[])
+                client.request("/v1/models/register", declaration, status=202)
+                first = events.wait("model_available", model="vectors")["identity"]
+                events.wait("model_cursor", model="vectors", identity=first)
+                output = client.request(
+                    "/v1/embeddings",
+                    {"model": "vectors", "input": "ab", "dimensions": 2},
+                )
+                assert output["data"][0]["embedding"] == [3, 2], output
+                client.request(
+                    "/v1/models/unregister", {"model": "vectors"}, status=202
+                )
+                absent = events.wait("model_unavailable", model="vectors")
+                assert absent["previous_cursor"].startswith(first + ":"), absent
+                client.request("/v1/models/register", declaration, status=202)
+                second = (
+                    LogClient("http://" + address, timeout=None)
+                    .poll("vectors")
+                    .stream["identity"]
+                )
+                assert first != second
+                events.wait("model_available", model="vectors", identity=second)
+                events.wait("model_cursor", model="vectors", identity=second)
+                output = client.request(
+                    "/v1/embeddings",
+                    {"model": "vectors", "input": "bx", "dimensions": 2},
+                )
+                assert output["data"][0]["embedding"] == [5, 2], output
+            finally:
+                stopped.set()
+                observer.result()
+        assert set(reader.cursors) == {None, "vectors"}, reader.cursors
+        events.wait("observation_end")
+    print(json.dumps({"event": "dynamic_observer_followed_reincarnation"}), flush=True)
+
+
 def check_empty_server(server, directory):
     catalog = directory / "empty.json"
     catalog.write_text('{"models":[]}')
@@ -857,6 +930,7 @@ def main():
         catalog_path = directory / "configuration" / "models.json"
         catalog_path.parent.mkdir()
         catalog_path.write_text(json.dumps(catalog))
+        check_dynamic_observer(server, directory, catalog)
         check_startup_failures(server, directory, catalog)
         check_multiple_bindings(server, directory, catalog_path)
         for workers in (1, 4):

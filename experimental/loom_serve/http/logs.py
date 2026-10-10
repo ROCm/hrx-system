@@ -26,6 +26,14 @@ class LogBatch:
     records: list
 
 
+class ModelNotFound(RuntimeError):
+    """A selected model disappeared or has not been registered yet."""
+
+    def __init__(self, model):
+        super().__init__(f"GET /logz ({model!r}): HTTP 404: model is not registered")
+        self.model = model
+
+
 class LogClient:
     def __init__(self, url, timeout=10.0):
         address = urlsplit(url)
@@ -77,7 +85,17 @@ class LogClient:
             raise ValueError("/v1/models: duplicate model identifier")
         return models
 
+    def forget(self, model):
+        """Release a no-longer-observed cursor, returning its last position."""
+        return self.cursors.pop(model, None)
+
     def poll(self, model=None):
+        """Copy one batch, or raise ModelNotFound for an absent model selector.
+
+        Absence preserves the last cursor until the caller records it and
+        forgets the model, or attempts to resume a replacement incarnation.
+        A missing server stream remains an endpoint error, not model churn.
+        """
         headers = {} if model is None else {"X-Loom-Model": model}
         previous = self.cursors.get(model)
         if previous is not None:
@@ -87,6 +105,8 @@ class LogClient:
         if reset:
             del headers["X-Loom-Cursor"]
             status, payload = self._get("/logz", headers)
+        if status == 404 and model is not None:
+            raise ModelNotFound(model)
         if status != 200:
             raise RuntimeError(f"GET /logz ({model!r}): HTTP {status}: {payload!r}")
         records = [json.loads(line) for line in payload.splitlines()]

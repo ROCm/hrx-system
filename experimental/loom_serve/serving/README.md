@@ -502,8 +502,13 @@ storage keys. Periodic external pollers can write these JSONL responses to a
 file/stdout without putting that sink on a model worker.
 
 The [observer](../tools/observe.py) owns an independent cursor per deployment
-and writes file/stdout JSONL; it never launches or signals the server. The
-[dashboard](../tools/dashboard.py) displays per-incarnation counter snapshots,
+and writes file/stdout JSONL; it never launches or signals the server. Automatic
+discovery follows catalog changes, including attaching before any model is
+registered. Explicit `--model` selectors follow those names through absence and
+re-registration. Availability transitions and incarnation resets are recorded
+explicitly; forgetting a removed name releases its cursor. Protocol and network
+failures still terminate this observer instead of masquerading as empty streams.
+The [dashboard](../tools/dashboard.py) displays per-incarnation counter snapshots,
 not sums reconstructed from retained events. Gaps therefore lose history but
 not cumulative totals. Shared-device memory is labeled separately from model
 charges and is never added once per model.

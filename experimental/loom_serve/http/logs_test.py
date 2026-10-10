@@ -11,7 +11,7 @@ import json
 import threading
 import unittest
 
-from experimental.loom_serve.http.logs import LogClient
+from experimental.loom_serve.http.logs import LogClient, ModelNotFound
 
 
 def batch(model, records, next_position, *, identity="100:1", oldest=0):
@@ -158,6 +158,34 @@ class LogsTest(unittest.TestCase):
                 with self.subTest(payload=payload[:80]), self.assertRaises(ValueError):
                     client.poll("chat")
                 self.assertEqual(client.cursors["chat"], "100:1:1")
+
+    def test_model_removal_preserves_cursor_until_explicit_forget(self):
+        for refresh in ([], [(409, b"changed incarnation")]):
+            with (
+                self.subTest(refresh=bool(refresh)),
+                endpoint(
+                    [
+                        (200, batch("chat", [], 0)),
+                        *refresh,
+                        (404, b"removed"),
+                        (200, batch("chat", [], 0, identity="100:2")),
+                    ]
+                ) as (client, requests),
+            ):
+                client.poll("chat")
+                with self.assertRaises(ModelNotFound) as missing:
+                    client.poll("chat")
+                self.assertEqual(missing.exception.model, "chat")
+                self.assertEqual(client.forget("chat"), "100:1:0")
+                self.assertNotIn("chat", client.cursors)
+                self.assertEqual(client.poll("chat").stream["identity"], "100:2")
+                self.assertNotIn("X-Loom-Cursor", requests[-1][1])
+
+    def test_missing_server_stream_is_not_model_churn(self):
+        with endpoint([(404, b"no log endpoint")]) as (client, _):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 404") as failure:
+                client.poll()
+            self.assertNotIsInstance(failure.exception, ModelNotFound)
 
     def test_unavailable_observer_is_an_error_not_an_empty_stream(self):
         with endpoint([(501, b"no observer")]) as (client, _):
