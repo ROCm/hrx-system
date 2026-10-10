@@ -200,6 +200,24 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "checkpoint_registry",
+    srcs = ["checkpoint_registry.c"],
+    hdrs = ["checkpoint_registry.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    visibility = [":__pkg__"],
+    deps = [
+        ":chat",
+        ":model",
+        "//experimental/loom_serve/runtime:execution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
     name = "service",
     srcs = ["service.c"],
     hdrs = ["service.h"],
@@ -209,6 +227,7 @@ loom_cc_library(
     ]),
     deps = [
         ":chat",
+        ":checkpoint_registry",
         ":heartbeat",
         ":model",
         ":schedule",

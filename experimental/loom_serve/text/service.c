@@ -12,6 +12,7 @@
 #include "experimental/loom_serve/runtime/host.h"
 #include "experimental/loom_serve/scheduling/packing.h"
 #include "experimental/loom_serve/text/chat.h"
+#include "experimental/loom_serve/text/checkpoint_registry.h"
 #include "experimental/loom_serve/text/heartbeat.h"
 #include "experimental/loom_serve/text/schedule.h"
 #include "experimental/loom_serve/text/session.h"
@@ -39,25 +40,6 @@ typedef enum text_checkpoint_action_e {
   TEXT_CHECKPOINT_RELEASE,
 } text_checkpoint_action_t;
 
-// Explicit local name owns a native endpoint and its source-canonical history.
-// Active branches own independent state; only queued admissions borrow this.
-typedef struct text_checkpoint_t {
-  // Bounded service-local identifier, published only after pin readiness.
-  char name[65];
-  // Owned native immutable state, released before the borrowed model dies.
-  loom_serve_text_checkpoint_t* state;
-  // Owned canonical VM transcript, independent of the originating session.
-  loom_serve_text_chat_completion_t completion;
-  // Exact consumed endpoint, captured with the native pin.
-  iree_host_size_t position;
-  // Exact selected-but-unconsumed token from that endpoint.
-  int32_t token;
-  // Source framing classification for the pending token.
-  loom_serve_text_chat_boundary_t boundary;
-  // Queued readers preventing deletion or reuse of this record.
-  iree_host_size_t pending;
-} text_checkpoint_t;
-
 // A queued request owns no device reservation. The FIFO head may retain an idle
 // slot's host input array; body/name/tool views borrow the immutable HTTP
 // claim.
@@ -71,7 +53,7 @@ typedef struct text_pending_request_t {
   // Validated local session key borrowing the claimed request headers.
   iree_string_view_t name;
   // Borrowed explicit endpoint through admission or queue cancellation.
-  text_checkpoint_t* checkpoint;
+  loom_serve_text_checkpoint_entry_t* checkpoint;
   // Identity and time retained through rejection, cancellation or admission.
   loom_serve_text_receipt_t receipt;
 } text_pending_request_t;
@@ -182,7 +164,7 @@ struct loom_serve_text_service_t {
     // Public identifier borrowing the retained HTTP request.
     iree_string_view_t name;
     // Owned registry record, unpublished while a new pin is pending.
-    text_checkpoint_t* checkpoint;
+    loom_serve_text_checkpoint_entry_t* checkpoint;
   } control;
   // Single-owner observation; CPU jobs never publish into this stream.
   loom_serve_text_telemetry_t telemetry;
@@ -224,15 +206,8 @@ struct loom_serve_text_service_t {
       loom_serve_text_trim_result_t result;
     } trim;
   } pool;
-  // Fixed named endpoint registry, independent of active session row count.
-  struct {
-    // Owned records; live entries retain their native pin and canonical text.
-    text_checkpoint_t* values;
-    // Record count, equal to the native model's configured pin capacity.
-    iree_host_size_t capacity;
-    // Sum of cold native endpoint payloads, updated only at ownership changes.
-    iree_host_size_t host_bytes;
-  } checkpoints;
+  // Named native endpoints and their immutable host continuation state.
+  loom_serve_text_checkpoint_registry_t checkpoints;
   // Shared JSON/SSE serialization scratch, copied into a row packet or carrier.
   iree_string_builder_t scratch;
   // Shared typed tool-call serialization scratch used at generation end.
@@ -477,19 +452,6 @@ static loom_serve_text_session_t* text_session_select(
   return oldest;
 }
 
-static text_checkpoint_t* text_checkpoint_find(
-    loom_serve_text_service_t* service, iree_string_view_t name) {
-  for (iree_host_size_t i = 0; name.size && i < service->checkpoints.capacity;
-       ++i) {
-    text_checkpoint_t* checkpoint = &service->checkpoints.values[i];
-    if (iree_string_view_equal(name,
-                               iree_make_cstring_view(checkpoint->name))) {
-      return checkpoint;
-    }
-  }
-  return NULL;
-}
-
 static iree_status_t text_checkpoint_reply(
     loom_serve_text_service_t* service,
     loom_serve_http_connection_t* connection, loom_serve_text_receipt_t receipt,
@@ -538,16 +500,15 @@ static iree_status_t text_checkpoint_reply(
 
 static iree_status_t text_complete_checkpoint(
     loom_serve_text_service_t* service, loom_serve_http_service_flags_t flags) {
-  text_checkpoint_t* checkpoint = service->control.checkpoint;
+  loom_serve_text_checkpoint_entry_t* checkpoint = service->control.checkpoint;
   const text_checkpoint_action_t action = service->control.action;
   const iree_string_view_t name = service->control.name;
   if (action == TEXT_CHECKPOINT_PIN) {
-    memcpy(checkpoint->name, name.data, name.size);
-    checkpoint->name[name.size] = 0;
+    loom_serve_text_checkpoint_entry_publish(checkpoint, name);
   } else {
     loom_serve_text_checkpoint_complete_suspend(checkpoint->state);
-    service->checkpoints.host_bytes +=
-        loom_serve_text_checkpoint_suspended_bytes(checkpoint->state);
+    loom_serve_text_checkpoint_registry_refresh(&service->checkpoints,
+                                                checkpoint);
     service->pool.trim.pending = true;
   }
   loom_serve_http_connection_t* connection = service->control.connection;
@@ -560,9 +521,8 @@ static iree_status_t text_complete_checkpoint(
     loom_serve_http_connection_abort(connection);
     return iree_ok_status();
   }
-  return text_checkpoint_reply(
-      service, connection, receipt, action, name, checkpoint->position,
-      loom_serve_text_checkpoint_suspended_bytes(checkpoint->state));
+  return text_checkpoint_reply(service, connection, receipt, action, name,
+                               checkpoint->position, checkpoint->host_bytes);
 }
 
 static iree_status_t text_checkpoint_request(
@@ -585,7 +545,8 @@ static iree_status_t text_checkpoint_request(
                          "/v1/checkpoints/NAME/suspend with an empty body; "
                          "NAME is 1-64 ASCII identifier characters"));
   }
-  text_checkpoint_t* checkpoint = text_checkpoint_find(service, name);
+  loom_serve_text_checkpoint_entry_t* checkpoint =
+      loom_serve_text_checkpoint_registry_find(&service->checkpoints, name);
   if (create && checkpoint) {
     return text_reject(service, connection, receipt, 409, "Conflict",
                        iree_make_status(IREE_STATUS_ALREADY_EXISTS,
@@ -632,12 +593,8 @@ static iree_status_t text_checkpoint_request(
           iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                            "pin requires an idle completed session"));
     }
-    for (iree_host_size_t i = 0; i < service->checkpoints.capacity; ++i) {
-      if (!service->checkpoints.values[i].state) {
-        checkpoint = &service->checkpoints.values[i];
-        break;
-      }
-    }
+    checkpoint =
+        loom_serve_text_checkpoint_registry_available(&service->checkpoints);
     if (!checkpoint) {
       return text_reject(
           service, connection, receipt, 503, "Service Unavailable",
@@ -645,8 +602,9 @@ static iree_status_t text_checkpoint_request(
                            "checkpoint capacity exhausted; release a pin or "
                            "configure checkpoint_capacity"));
     }
-    iree_status_t status = loom_serve_text_row_submit_pin(
-        session->row, &checkpoint->state, &service->completion.frontier);
+    iree_status_t status = loom_serve_text_checkpoint_entry_submit_pin(
+        checkpoint, session->row, &session->completion,
+        &service->completion.frontier);
     if (!iree_status_is_ok(status)) {
       loom_serve_text_telemetry_end(&service->telemetry, receipt,
                                     LOOM_SERVE_TELEMETRY_FAILED, 0, status);
@@ -659,13 +617,6 @@ static iree_status_t text_checkpoint_request(
                          iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                           "native pin capacity exhausted"));
     }
-    checkpoint->completion = session->completion;
-    iree_vm_buffer_retain(checkpoint->completion.storage);
-    checkpoint->position = loom_serve_text_row_position(session->row);
-    checkpoint->token = loom_serve_text_row_token(session->row);
-    checkpoint->boundary = loom_serve_text_row_is_eos(session->row)
-                               ? LOOM_SERVE_TEXT_CHAT_BOUNDARY_TERMINATED
-                               : LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN;
     service->control.connection = connection;
     service->control.request = request;
     service->control.receipt = receipt;
@@ -675,8 +626,7 @@ static iree_status_t text_checkpoint_request(
     return text_await_work(service, TEXT_WORK_CHECKPOINT);
   }
   const iree_host_size_t position = checkpoint->position;
-  iree_host_size_t host_bytes =
-      loom_serve_text_checkpoint_suspended_bytes(checkpoint->state);
+  const iree_host_size_t host_bytes = checkpoint->host_bytes;
   if (suspend) {
     if (!loom_serve_text_model_memory_statistics(service->model)
              .reserved_bytes) {
@@ -707,10 +657,8 @@ static iree_status_t text_checkpoint_request(
     service->control.checkpoint = checkpoint;
     return text_await_work(service, TEXT_WORK_CHECKPOINT);
   }
-  service->checkpoints.host_bytes -= host_bytes;
-  loom_serve_text_checkpoint_release(checkpoint->state);
-  loom_serve_text_chat_completion_deinitialize(&checkpoint->completion);
-  memset(checkpoint, 0, sizeof(*checkpoint));
+  loom_serve_text_checkpoint_registry_release(&service->checkpoints,
+                                              checkpoint);
   service->pool.trim.pending = true;
   return text_checkpoint_reply(service, connection, receipt,
                                TEXT_CHECKPOINT_RELEASE, name, position, 0);
@@ -719,13 +667,11 @@ static iree_status_t text_checkpoint_request(
 // Prepares host input without changing retained device state. Rejection leaves
 // the previous checkpoint usable. The selected token belongs to the previous
 // response but has not yet entered KV/recurrent, so it leads a retained append.
-static iree_status_t text_prepare_input(loom_serve_text_service_t* service,
-                                        loom_serve_text_session_t* session,
-                                        const loom_serve_text_chat_t* chat,
-                                        iree_string_view_t name,
-                                        const text_checkpoint_t* pinned,
-                                        iree_host_size_t* out_count,
-                                        iree_host_size_t* out_retained) {
+static iree_status_t text_prepare_input(
+    loom_serve_text_service_t* service, loom_serve_text_session_t* session,
+    const loom_serve_text_chat_t* chat, iree_string_view_t name,
+    const loom_serve_text_checkpoint_entry_t* pinned,
+    iree_host_size_t* out_count, iree_host_size_t* out_retained) {
   const iree_string_view_t prompt = iree_string_builder_view(&chat->prompt);
   const iree_string_view_t checkpoint =
       pinned ? pinned->completion.transcript : session->completion.transcript;
@@ -870,12 +816,11 @@ typedef enum text_admission_result_e {
 // Native ownership knows the source geometry and exact physical slab union;
 // the service only decides which idle histories may yield. Selected history,
 // named endpoints and active reservations remain protected on every denial.
-static iree_status_t text_reclaim_idle(loom_serve_text_service_t* service,
-                                       loom_serve_text_session_t* selected,
-                                       const text_checkpoint_t* checkpoint,
-                                       iree_host_size_t retained,
-                                       iree_host_size_t reservation,
-                                       text_admission_result_t* out_result) {
+static iree_status_t text_reclaim_idle(
+    loom_serve_text_service_t* service, loom_serve_text_session_t* selected,
+    const loom_serve_text_checkpoint_entry_t* checkpoint,
+    iree_host_size_t retained, iree_host_size_t reservation,
+    text_admission_result_t* out_result) {
   *out_result = TEXT_ADMISSION_CAPACITY;
   const loom_serve_text_reserve_mode_t mode =
       checkpoint ? LOOM_SERVE_TEXT_RESERVE_CHECKPOINT
@@ -1029,7 +974,10 @@ static iree_status_t text_admit_request(loom_serve_text_service_t* service,
   const iree_host_size_t reservation = service->pending.prepared.reservation;
   const iree_host_size_t restored_bytes =
       service->pending.prepared.restored_bytes;
-  service->checkpoints.host_bytes -= restored_bytes;
+  if (pending->checkpoint) {
+    loom_serve_text_checkpoint_registry_refresh(&service->checkpoints,
+                                                pending->checkpoint);
+  }
   if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING) ||
       loom_serve_http_connection_failed(pending->connection)) {
     text_reset_session(service, session);
@@ -1127,9 +1075,7 @@ static iree_status_t text_admit_pending(loom_serve_text_service_t* service,
         service->pending.prepared.retained_count;
     const iree_host_size_t reservation = service->pending.prepared.reservation;
     service->pending.prepared.restored_bytes =
-        pending->checkpoint ? loom_serve_text_checkpoint_suspended_bytes(
-                                  pending->checkpoint->state)
-                            : 0;
+        pending->checkpoint ? pending->checkpoint->host_bytes : 0;
     text_admission_result_t admission;
     status = text_reclaim_idle(service, session, pending->checkpoint,
                                retained_count, reservation, &admission);
@@ -1219,7 +1165,7 @@ static iree_status_t text_enqueue(loom_serve_text_service_t* service,
             IREE_STATUS_INVALID_ARGUMENT,
             "X-Loom-Session must be at most 64 ASCII identifier characters"));
   }
-  text_checkpoint_t* checkpoint = NULL;
+  loom_serve_text_checkpoint_entry_t* checkpoint = NULL;
   if (loom_serve_http_request_lookup_header(
           request, IREE_SV("X-Loom-Checkpoint"), &checkpoint_name)) {
     if (!checkpoint_name.size || !text_session_name_valid(checkpoint_name)) {
@@ -1229,7 +1175,8 @@ static iree_status_t text_enqueue(loom_serve_text_service_t* service,
               IREE_STATUS_INVALID_ARGUMENT,
               "X-Loom-Checkpoint requires a nonempty ASCII identifier"));
     }
-    checkpoint = text_checkpoint_find(service, checkpoint_name);
+    checkpoint = loom_serve_text_checkpoint_registry_find(&service->checkpoints,
+                                                          checkpoint_name);
     if (!checkpoint) {
       return text_reject(
           service, connection, receipt, 404, "Not Found",
@@ -1768,14 +1715,9 @@ static iree_status_t text_service_initialize(
   service->cpu.executor = loom_serve_host_executor(host);
   IREE_RETURN_IF_ERROR(iree_async_proactor_pool_get(
       loom_serve_host_proactor_pool(host), 0, &service->completion.proactor));
-  service->checkpoints.capacity =
-      loom_serve_text_model_checkpoint_capacity(service->model);
-  if (service->checkpoints.capacity) {
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-        service->allocator, service->checkpoints.capacity,
-        sizeof(*service->checkpoints.values),
-        (void**)&service->checkpoints.values));
-  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_registry_initialize(
+      loom_serve_text_model_checkpoint_capacity(service->model),
+      &service->checkpoints, service->allocator));
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       service->allocator, service->pending.capacity,
       sizeof(*service->pending.values), (void**)&service->pending.values));
@@ -1822,13 +1764,8 @@ static void text_stop(loom_serve_text_service_t* service,
     loom_serve_http_connection_abort(service->control.connection);
     memset(&service->control, 0, sizeof(service->control));
   }
-  for (iree_host_size_t i = 0;
-       service->checkpoints.values && i < service->checkpoints.capacity; ++i) {
-    if (terminal_code == IREE_STATUS_OK) {
-      loom_serve_text_checkpoint_release(service->checkpoints.values[i].state);
-    }
-    service->checkpoints.values[i].state = NULL;
-  }
+  loom_serve_text_checkpoint_registry_reset(&service->checkpoints,
+                                            terminal_code);
   service->pool.trim.pending = false;
   text_observe(service, terminal_code == IREE_STATUS_OK ? "stopped" : "failed");
 }
@@ -1850,13 +1787,7 @@ void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
   iree_string_builder_deinitialize(&service->tool_calls);
   iree_string_builder_deinitialize(&service->scratch);
   iree_allocator_free(host_allocator, service->pending.values);
-  for (iree_host_size_t i = 0;
-       service->checkpoints.values && i < service->checkpoints.capacity; ++i) {
-    loom_serve_text_chat_completion_deinitialize(
-        &service->checkpoints.values[i].completion);
-  }
-  iree_allocator_free(host_allocator, service->checkpoints.values);
-  service->checkpoints.host_bytes = 0;
+  loom_serve_text_checkpoint_registry_deinitialize(&service->checkpoints);
   loom_serve_text_heartbeat_deinitialize(&service->heartbeat);
   if (service->telemetry.owns_stream) {
     loom_serve_telemetry_stream_destroy(service->telemetry.stream);

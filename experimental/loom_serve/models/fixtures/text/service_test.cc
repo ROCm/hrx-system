@@ -932,6 +932,62 @@ TEST_P(SourceTextServiceTest,
   EXPECT_EQ(Content(Read(Send(next))), Content(continued));
 }
 
+TEST_P(SourceTextServiceTest,
+       SuspendedCheckpointSurvivesRestoreReleaseAndNameReuse) {
+  IREE_ASSERT_OK(loom_serve_text_model_destroy(model_));
+  model_ = nullptr;
+  IREE_ASSERT_OK(loom_serve_device_group_destroy(group_));
+  group_ = nullptr;
+  const loom_serve_device_options_t device_options = {
+      .uri = IREE_SV("amdgpu"), .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC};
+  IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
+                                                &group_, allocator_));
+  device_ = loom_serve_device_group_at(group_, 0);
+  auto options = ModelOptions();
+  IREE_ASSERT_OK(
+      loom_serve_text_model_create(device_, &options, &model_, allocator_));
+  Start();
+  const std::string base = "abxa";
+  const std::string first = Content(Read(
+      Send(Request(Message("user", base), 2), "X-Loom-Session: root\r\n")));
+  ASSERT_EQ(first, Oracle::Complete(base, 2));
+  const std::string history =
+      Message("user", base) + "," + Message("assistant", first);
+  const std::string pinned =
+      Read(Send("", "X-Loom-Session: root\r\n", "/v1/checkpoints/base"));
+  ASSERT_EQ(pinned.find("HTTP/1.1 201"), 0u) << pinned;
+  EXPECT_NE(pinned.find("\"host_snapshot_bytes\":0}"), std::string::npos);
+  std::string snapshot;
+  for (int i = 0; i < 3; ++i) {
+    SCOPED_TRACE(i);
+    const std::string suspended =
+        Read(Send("", "", "/v1/checkpoints/base/suspend"));
+    ASSERT_EQ(suspended.find("HTTP/1.1 200"), 0u) << suspended;
+    EXPECT_NE(suspended.find("\"host_snapshot_bytes\":"), std::string::npos);
+    EXPECT_EQ(suspended.find("\"host_snapshot_bytes\":0}"), std::string::npos);
+    if (i == 0) {
+      snapshot = suspended;
+    }
+    EXPECT_EQ(suspended, snapshot);
+    EXPECT_EQ(Read(Send("", "", "/v1/checkpoints/base/suspend")), snapshot);
+    const std::string response =
+        Read(Send(Request(history + "," + Message("user", "bax")),
+                  "X-Loom-Session: fork\r\nX-Loom-Checkpoint: base\r\n"));
+    EXPECT_EQ(Content(response), Oracle::Complete(base + first + "#bax", 16));
+    EXPECT_NE(response.find("\"cached_tokens\":5"), std::string::npos);
+  }
+  // Release a cold entry, then reuse its public name and native slot. The new
+  // pin has no stale host snapshot even though the preceding one was suspended.
+  EXPECT_EQ(Read(Send("", "", "/v1/checkpoints/base/suspend")), snapshot);
+  const std::string released =
+      Read(Send("", "", "/v1/checkpoints/base", "DELETE"));
+  ASSERT_EQ(released.find("HTTP/1.1 200"), 0u) << released;
+  EXPECT_NE(released.find("\"pinned\":false,\"host_snapshot_bytes\":0}"),
+            std::string::npos);
+  EXPECT_EQ(Read(Send("", "X-Loom-Session: root\r\n", "/v1/checkpoints/base")),
+            pinned);
+}
+
 TEST_P(SourceTextServiceTest, WideSourceEpochsRetainExactHttpHistory) {
   for (size_t capacity : {513u, 1024u, 4097u}) {
     SCOPED_TRACE(capacity);

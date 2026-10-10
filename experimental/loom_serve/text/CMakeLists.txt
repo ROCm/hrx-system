@@ -217,6 +217,24 @@ endif()
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_library(
   NAME
+    checkpoint_registry
+  HDRS
+    "checkpoint_registry.h"
+  SRCS
+    "checkpoint_registry.c"
+  DEPS
+    ::chat
+    ::model
+    iree::base
+    iree::experimental::loom_serve::runtime::execution
+    iree::vm
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_library(
+  NAME
     service
   HDRS
     "service.h"
@@ -224,6 +242,7 @@ loom_cc_library(
     "service.c"
   DEPS
     ::chat
+    ::checkpoint_registry
     ::heartbeat
     ::model
     ::schedule
