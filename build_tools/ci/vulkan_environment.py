@@ -164,11 +164,22 @@ def check_environment(sysfs_drm_path: Path, dri_path: Path) -> None:
                 "PARENT_GPU_DEVICES must identify the job's render node"
             )
     print(f"Selected {selected.path}: DRI_PRIME={selected.dri_prime}", flush=True)
+    native_identity = (
+        f"linux_device:{os.major(selected.device_number)}:"
+        f"{os.minor(selected.device_number)}"
+    )
+    previous = os.environ.get("AMDF_CTS_GPU_NATIVE_IDENTITY")
+    if previous is not None and previous != native_identity:
+        raise RuntimeError(
+            f"AMDF_CTS_GPU_NATIVE_IDENTITY={previous!r} conflicts with "
+            f"the Vulkan allocation {native_identity}"
+        )
     # Later workflow steps receive only a selection verified by the native
     # loader. ci.py carries it into both Bazel test actions and CMake tests.
     if github_env := os.environ.get("GITHUB_ENV"):
         with Path(github_env).open("a") as environment_file:
             environment_file.write(f"DRI_PRIME={selected.dri_prime}\n")
+            environment_file.write(f"AMDF_CTS_GPU_NATIVE_IDENTITY={native_identity}\n")
 
 
 if __name__ == "__main__":

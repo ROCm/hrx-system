@@ -249,7 +249,18 @@ void GpuFileIoResources::CreateRing(GpuMemory* payload, FileIoPath path,
       ring_->parameters.sq_off.user_addr + ring_->control_offset;
   ring_->file = static_cast<int>(
       syscall(__NR_io_uring_setup, submission_entries, &ring_->parameters));
-  ASSERT_GE(ring_->file, 0) << "io_uring_setup: " << std::strerror(errno);
+  if (ring_->file < 0) {
+    const int setup_error = errno;
+    // SQPOLL has a separate native policy check. Admission of the base ring
+    // does not establish permission for this workload's submission strategy.
+    if (setup_error == EPERM || setup_error == EACCES) {
+      GTEST_SKIP() << "execution policy denies io_uring path "
+                   << FileIoPathName(path) << " (setup flags "
+                   << ring_->parameters.flags
+                   << "): " << std::strerror(setup_error);
+    }
+    FAIL() << "io_uring_setup: " << std::strerror(setup_error);
+  }
   ASSERT_EQ(ring_->parameters.sq_entries, submission_entries);
   ASSERT_GE(ring_->parameters.cq_entries, ring_->parameters.sq_entries);
   ASSERT_LE(ring_->parameters.cq_off.cqes +

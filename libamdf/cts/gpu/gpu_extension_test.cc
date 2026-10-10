@@ -111,6 +111,10 @@ class GpuEndpointTest : public ::testing::Test {
     for (uint32_t endpoint_ordinal = 0; endpoint_ordinal < endpoint_count;
          ++endpoint_ordinal) {
       const amdf_endpoint_summary_t& summary = summaries[endpoint_ordinal];
+      if (engine_kind == AMDF_ENGINE_KIND_GPU &&
+          !GetCtsDeviceCache().IsGpuEndpointSelected(summary.id)) {
+        continue;
+      }
       if (summary.engine_kind == engine_kind) {
         status = GetCtsDeviceCache().OpenEndpoint(summary.id, &endpoint_);
         if (amdf_status_is_ok(status) && endpoint_ == nullptr) {

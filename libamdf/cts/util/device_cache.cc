@@ -53,6 +53,67 @@ amdf_status_t CtsDeviceCache::OpenEndpoint(const amdf_endpoint_id_t& id,
   return endpoint.status;
 }
 
+amdf_status_t CtsDeviceCache::ResolveGpuEndpoint(
+    const amdf_endpoint_native_identity_t& native_identity) {
+  amdf_instance_t* instance = nullptr;
+  amdf_status_t status = GetInstance(&instance);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  uint32_t count = 0;
+  status = api_->endpoint_enumerate(instance, 0, nullptr, &count);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  std::vector<amdf_endpoint_summary_t> summaries(count);
+  if (count != 0) {
+    status =
+        api_->endpoint_enumerate(instance, count, summaries.data(), &count);
+  }
+  std::optional<amdf_endpoint_id_t> selected;
+  for (uint32_t i = 0; amdf_status_is_ok(status) && i < count && !selected;
+       ++i) {
+    if (summaries[i].engine_kind != AMDF_ENGINE_KIND_GPU) {
+      continue;
+    }
+    amdf_endpoint_t* endpoint = nullptr;
+    status = OpenEndpoint(summaries[i].id, &endpoint);
+    amdf_endpoint_info_t info = {};
+    info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
+    info.structure_size = sizeof(info);
+    if (amdf_status_is_ok(status)) {
+      status = api_->endpoint_query_info(endpoint, &info);
+    }
+    if (!amdf_status_is_ok(status) ||
+        info.native_identity.type != native_identity.type) {
+      continue;
+    }
+    const auto& actual = info.native_identity.value;
+    const auto& requested = native_identity.value;
+    if ((native_identity.type ==
+             AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE &&
+         actual.linux_device.major == requested.linux_device.major &&
+         actual.linux_device.minor == requested.linux_device.minor) ||
+        (native_identity.type ==
+             AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER &&
+         actual.windows_adapter.luid == requested.windows_adapter.luid &&
+         actual.windows_adapter.physical_adapter_index ==
+             requested.windows_adapter.physical_adapter_index)) {
+      selected = info.id;
+    }
+  }
+  if (amdf_status_is_ok(status)) {
+    if (!selected.has_value()) {
+      status = amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND);
+    } else if (!IsGpuEndpointSelected(*selected)) {
+      status = amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    } else {
+      gpu_endpoint_id_ = *selected;
+    }
+  }
+  return status;
+}
+
 amdf_status_t CtsDeviceCache::GetDevice(amdf_endpoint_t* endpoint,
                                         amdf_engine_kind_t engine_kind,
                                         amdf_device_t** out_device) {

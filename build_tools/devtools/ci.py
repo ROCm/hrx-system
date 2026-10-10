@@ -201,6 +201,7 @@ AMDGPU_DEVICE_VISIBILITY_ENV_VARS = (
     "HIP_VISIBLE_DEVICES",
     "CUDA_VISIBLE_DEVICES",
     "GPU_DEVICE_ORDINAL",
+    "AMDF_CTS_GPU_NATIVE_IDENTITY",
 )
 
 
@@ -227,10 +228,11 @@ def amdgpu_test_env() -> tuple[tuple[str, str], ...]:
 
 
 def vulkan_device_test_env() -> tuple[tuple[str, str], ...]:
-    dri_prime = os.environ.get("DRI_PRIME")
-    if not dri_prime:
-        return ()
-    return (("DRI_PRIME", dri_prime),)
+    return tuple(
+        (name, value)
+        for name in ("DRI_PRIME", "AMDF_CTS_GPU_NATIVE_IDENTITY")
+        if (value := os.environ.get(name))
+    )
 
 
 def cmake_amdgpu_device_binary_options() -> tuple[str, ...]:

@@ -11,11 +11,72 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+from typing import TextIO
+
+
+def select_native_gpu(
+    output: str, topology_path: Path, drm_path: Path, device_path: Path
+) -> str:
+    """Correlates the visible ROCr agent with KFD and its actual render node."""
+    agents = []
+    for block in re.split(r"^Agent \d+\s*$", output, flags=re.MULTILINE)[1:]:
+        fields = dict(
+            re.findall(r"^  ([^:\n]+):[ \t]+([^\n]*?)\s*$", block, re.MULTILINE)
+        )
+        if fields.get("Device Type") == "GPU":
+            agents.append(fields)
+    if len(agents) != 1:
+        raise RuntimeError(
+            f"Native CTS allocation requires one visible ROCr GPU, found {len(agents)}"
+        )
+    agent = agents[0]
+    location = int(agent["BDFID"])
+    uuid = re.fullmatch(r"GPU-([0-9a-fA-F]{16})", agent["Uuid"])
+    if uuid is None and agent["Uuid"] != "GPU-XX":
+        raise RuntimeError(f"Unrecognized ROCr GPU UUID {agent['Uuid']!r}")
+    candidates = []
+    for node in topology_path.iterdir():
+        if int((node / "gpu_id").read_text()) == 0:
+            continue
+        properties = dict(
+            line.split(maxsplit=1)
+            for line in (node / "properties").read_text().splitlines()
+        )
+        if int(properties["location_id"]) != location:
+            continue
+        if uuid and int(properties["unique_id"]) != int(uuid[1], 16):
+            continue
+        candidates.append(properties)
+    if len(candidates) != 1:
+        raise RuntimeError(
+            f"ROCr GPU {agent['Uuid']} at BDFID {location} matches "
+            f"{len(candidates)} KFD nodes; refusing an ambiguous allocation"
+        )
+    minor = int(candidates[0]["drm_render_minor"])
+    name = f"renderD{minor}"
+    major, reported_minor = map(int, (drm_path / name / "dev").read_text().split(":"))
+    node = device_path / name
+    metadata = node.stat()
+    if (
+        reported_minor != minor
+        or not stat.S_ISCHR(metadata.st_mode)
+        or (os.major(metadata.st_rdev), os.minor(metadata.st_rdev)) != (major, minor)
+    ):
+        raise RuntimeError(f"{node} does not match its KFD/DRM device identity")
+    identity = f"linux_device:{major}:{minor}"
+    print(
+        f"Native CTS GPU: {agent['Uuid']}, BDFID {location}, {node}, {identity}",
+        flush=True,
+    )
+    return identity
 
 
 def print_proc_file(path: Path) -> str:
@@ -110,6 +171,7 @@ def run_probe(
     timeout_seconds: float = 30,
     kill_after_seconds: float = 5,
     diagnostic_delay_seconds: float = 25,
+    stdout: TextIO | None = None,
 ) -> int:
     # GNU timeout remains the independent supervisor. Diagnostics cannot delay
     # its TERM/KILL deadlines, even when reading kernel state stalls as well.
@@ -121,6 +183,7 @@ def run_probe(
             *command,
         ],
         start_new_session=True,
+        stdout=stdout,
     )
     try:
         try:
@@ -178,6 +241,7 @@ def handle_termination(signum: int, frame: object) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--diagnose", type=int, metavar="PID")
+    parser.add_argument("--export-libamdf-gpu-selection", action="store_true")
     args = parser.parse_args()
     if args.diagnose is not None:
         diagnose_process(args.diagnose)
@@ -197,9 +261,39 @@ def main() -> int:
     print(f"Checking ROCm hardware on runner {runner_name} (timeout: 30s).", flush=True)
     signal.signal(signal.SIGTERM, handle_termination)
     try:
-        status = run_probe(["rocminfo"], timeout_tool=timeout_tool)
+        if args.export_libamdf_gpu_selection:
+            with tempfile.TemporaryFile(mode="w+") as output_file:
+                status = run_probe(
+                    ["rocminfo"], timeout_tool=timeout_tool, stdout=output_file
+                )
+                output_file.seek(0)
+                output = output_file.read()
+            print(output, end="", flush=True)
+            if status == 0:
+                identity = select_native_gpu(
+                    output,
+                    Path("/sys/class/kfd/kfd/topology/nodes"),
+                    Path("/sys/class/drm"),
+                    Path("/dev/dri"),
+                )
+                previous = os.environ.get("AMDF_CTS_GPU_NATIVE_IDENTITY")
+                if previous is not None and previous != identity:
+                    raise RuntimeError(
+                        f"AMDF_CTS_GPU_NATIVE_IDENTITY={previous!r} conflicts with "
+                        f"the ROCr allocation {identity}"
+                    )
+                if github_env := os.environ.get("GITHUB_ENV"):
+                    with Path(github_env).open("a") as environment_file:
+                        environment_file.write(
+                            f"AMDF_CTS_GPU_NATIVE_IDENTITY={identity}\n"
+                        )
+        else:
+            status = run_probe(["rocminfo"], timeout_tool=timeout_tool)
     except KeyboardInterrupt:
         return 130
+    except (OSError, ValueError, KeyError, RuntimeError) as error:
+        print(f"::error::ROCm native GPU selection failed: {error}", flush=True)
+        return 1
     if status == 124:
         print(f"::error::ROCm hardware probe exceeded 30s on runner {runner_name}.")
     elif status == 137:

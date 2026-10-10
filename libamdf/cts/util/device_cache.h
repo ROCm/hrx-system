@@ -35,6 +35,15 @@ class CtsDeviceCache {
   const std::optional<amdf_endpoint_id_t>& gpu_endpoint_id() const {
     return gpu_endpoint_id_;
   }
+  // Resolves the runner's native allocation through passive endpoint queries.
+  // An existing opaque selection must identify the same endpoint.
+  amdf_status_t ResolveGpuEndpoint(
+      const amdf_endpoint_native_identity_t& native_identity);
+  // Applies primary GPU selection to every fixture that can activate a GPU.
+  bool IsGpuEndpointSelected(const amdf_endpoint_id_t& id) const {
+    return !gpu_endpoint_id_.has_value() ||
+           amdf_endpoint_id_is_equal(&id, &*gpu_endpoint_id_);
+  }
 
   // Explicit second endpoint reserved by the runner for peer GPU corpora.
   void SetGpuPeerEndpointId(amdf_endpoint_id_t id) {

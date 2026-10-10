@@ -200,6 +200,7 @@ class GpuXdnaMemoryInteropTest : public ::testing::Test {
     for (const amdf_endpoint_summary_t& summary : summaries) {
       amdf_endpoint_t** endpoint = nullptr;
       if (summary.engine_kind == AMDF_ENGINE_KIND_GPU &&
+          GetCtsDeviceCache().IsGpuEndpointSelected(summary.id) &&
           gpu_endpoint_ == nullptr) {
         endpoint = &gpu_endpoint_;
       } else if (summary.engine_kind == AMDF_ENGINE_KIND_XDNA &&

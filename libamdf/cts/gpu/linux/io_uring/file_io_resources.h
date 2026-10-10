@@ -57,6 +57,8 @@ class GpuFileIoResources {
   // Retains fixed file/buffer references and enables a restricted native ring.
   // Ordinary host submission has no SQPOLL thread. Entry count is a power of
   // two; backing includes the returned native control and completion layout.
+  // Native policy denial skips this path; callers propagate IsSkipped() before
+  // using the ring. Partial setup remains owned by ReleaseFileIo().
   void CreateRing(GpuMemory* payload, FileIoPath path = FileIoPath::kDevice,
                   uint32_t idle_milliseconds = 1,
                   uint32_t submission_entries = 8);
