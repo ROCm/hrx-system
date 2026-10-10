@@ -10,6 +10,7 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/analysis/condition_facts.h"
+#include "loom/analysis/symbolic_product.h"
 #include "loom/analysis/symbolic_projection.h"
 #include "loom/analysis/symbolic_value.h"
 #include "loom/ir/attribute.h"
@@ -224,6 +225,19 @@ static iree_status_t loom_symbolic_expr_normalize_difference_into_scratch(
         loom_symbolic_expr_lookup_projection(context, right_expression);
     if (left_projection && right_projection &&
         loom_symbolic_projection_equal(left_projection, right_projection)) {
+      *out_linear = true;
+      return iree_ok_status();
+    }
+  }
+
+  if (context->products.count != 0 && left_expression->term_count == 1 &&
+      right_expression->term_count == 1) {
+    int64_t left_coefficient = 0;
+    int64_t right_coefficient = 0;
+    if (loom_symbolic_product_match_terms(
+            context, &left_expression->terms[0], &right_expression->terms[0],
+            &left_coefficient, &right_coefficient) &&
+        left_coefficient == right_coefficient) {
       *out_linear = true;
       return iree_ok_status();
     }
@@ -526,38 +540,47 @@ static iree_status_t loom_symbolic_expr_terms_are_multiple(
         continue;
       }
 
+      int64_t expression_coefficient =
+          expression_terms[expression_index].coefficient;
+      int64_t relation_coefficient = relation_terms[relation_index].coefficient;
+      int64_t product_expression_coefficient = 0;
+      int64_t product_relation_coefficient = 0;
+      bool values_match = loom_symbolic_product_match_terms(
+          context, &expression_terms[expression_index],
+          &relation_terms[relation_index], &product_expression_coefficient,
+          &product_relation_coefficient);
+      if (values_match) {
+        expression_coefficient = product_expression_coefficient;
+        relation_coefficient = product_relation_coefficient;
+      }
       int64_t candidate_multiplier = multiplier;
       if (candidate_multiplier == 0) {
-        if (expression_terms[expression_index].coefficient == INT64_MIN &&
-            relation_terms[relation_index].coefficient == -1) {
+        if (expression_coefficient == INT64_MIN && relation_coefficient == -1) {
           continue;
         }
-        candidate_multiplier = expression_terms[expression_index].coefficient /
-                               relation_terms[relation_index].coefficient;
+        candidate_multiplier = expression_coefficient / relation_coefficient;
         if (candidate_multiplier == 0 ||
             (candidate_multiplier > 0) != positive_multiplier ||
-            expression_terms[expression_index].coefficient %
-                    relation_terms[relation_index].coefficient !=
-                0) {
+            expression_coefficient % relation_coefficient != 0) {
           continue;
         }
       }
       int64_t scaled_coefficient = 0;
-      if (!iree_checked_mul_i64(relation_terms[relation_index].coefficient,
-                                candidate_multiplier, &scaled_coefficient) ||
-          expression_terms[expression_index].coefficient !=
-              scaled_coefficient) {
+      if (!iree_checked_mul_i64(relation_coefficient, candidate_multiplier,
+                                &scaled_coefficient) ||
+          expression_coefficient != scaled_coefficient) {
         continue;
       }
 
-      bool values_match = false;
-      IREE_RETURN_IF_ERROR(loom_symbolic_values_semantically_match(
-          context,
-          loom_symbolic_expr_term_relation_value(
-              &expression_terms[expression_index]),
-          loom_symbolic_expr_term_relation_value(
-              &relation_terms[relation_index]),
-          &values_match));
+      if (!values_match) {
+        IREE_RETURN_IF_ERROR(loom_symbolic_values_semantically_match(
+            context,
+            loom_symbolic_expr_term_relation_value(
+                &expression_terms[expression_index]),
+            loom_symbolic_expr_term_relation_value(
+                &relation_terms[relation_index]),
+            &values_match));
+      }
       if (!values_match) {
         continue;
       }

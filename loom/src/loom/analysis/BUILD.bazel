@@ -1376,6 +1376,7 @@ loom_cc_library(
         "symbolic_congruence.c",
         "symbolic_expr.c",
         "symbolic_expr_proof.c",
+        "symbolic_product.c",
         "symbolic_projection.c",
         "symbolic_quotient.c",
         "symbolic_quotient.h",
@@ -1386,6 +1387,7 @@ loom_cc_library(
         "symbolic_congruence.h",
         "symbolic_expr.h",
         "symbolic_expr_proof.h",
+        "symbolic_product.h",
         "symbolic_projection.h",
     ],
     deps = [
@@ -1553,6 +1555,21 @@ loom_cc_test(
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "symbolic_product_test",
+    srcs = ["symbolic_product_test.cc"],
+    deps = [
+        ":symbolic_expr",
+        ":symbolic_expr_test_fixture",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/target:facts",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

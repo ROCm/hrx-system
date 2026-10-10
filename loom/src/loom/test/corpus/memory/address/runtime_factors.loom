@@ -108,3 +108,69 @@ check.scenario @runtime_factor_values {
   }
   check.return
 }
+
+// Complete packets occupy a runtime number of blocks. The launch guard counts
+// packets while the view capacity multiplies the block count by its row size.
+kernel.def @runtime_block_transfer() {
+  %groups = index.constant 2 : index
+  %lanes = index.constant 32 : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %blocks_input: index, %packets_input: index) {
+  %blocks = index.assume %blocks_input [range(%blocks_input, 0, 7)] : index
+  %packets = index.assume %packets_input [range(%packets_input, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %packet_width = index.constant 16 : index
+  %workgroup_width = index.constant 32 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %packet = index.madd %group, %workgroup_width, %lane : index
+  %packet_count = index.mul %blocks, %packets : index
+  %block_elements = index.mul %packets, %packet_width : index
+  %elements = index.mul %blocks, %block_elements : index
+  %source = buffer.view %input[%base] : buffer -> view<[%elements]xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<[%elements]xi32>
+  %active = index.cmp ult, %packet, %packet_count : index
+  scf.if %active {
+    %position = index.mul %packet, %packet_width : index
+    %values = vector.load %source[%position] : view<[%elements]xi32> -> vector<16xi32>
+    vector.store %values, %destination[%position] : vector<16xi32>, view<[%elements]xi32>
+  }
+  kernel.return
+}
+
+// A flat scalar copy independently computes the active prefix. It shares no
+// packet launch, vector footprint, or dynamically shaped view with the subject.
+func.def @runtime_block_transfer_oracle(%input: buffer, %output: buffer, %blocks_input: index, %packets_input: index) {
+  %blocks = index.assume %blocks_input [range(%blocks_input, 0, 7)] : index
+  %packets = index.assume %packets_input [range(%packets_input, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %packet_width = index.constant 16 : index
+  %packet_count = index.mul %blocks, %packets : index
+  %element_count = index.mul %packet_count, %packet_width : index
+  %source = buffer.view %input[%base] : buffer -> view<896xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<896xi32>
+  scf.for %position = [%c0 to %element_count step %c1] {
+    %value = view.load %source[%position] : view<896xi32> -> i32
+    view.store %value, %destination[%position] : i32, view<896xi32>
+  }
+  func.return
+}
+
+// The two harness domains enumerate every block/packet pair. Both coordinates
+// are runtime arguments, not specialization parameters of the subject.
+check.scenario @runtime_block_transfer_values configure[8](%blocks: index, %configuration_entropy: check.entropy) {
+  check.trial[9](%packets: index, %entropy: check.entropy) {
+    %input_storage = check.generate.iota offset(-311) step(7) : tensor<904xi32>
+    %output_storage = check.generate.fill value(-889275714) : tensor<904xi32>
+    %input = check.tensor.view %input_storage offset(16) : tensor<904xi32> -> tensor<896xi32>
+    %output = check.tensor.view %output_storage offset(16) : tensor<904xi32> -> tensor<896xi32>
+    check.compare<@runtime_block_transfer, @runtime_block_transfer_oracle>(%input, %output, %blocks, %packets) : (tensor<896xi32>, tensor<896xi32>, index, index) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<904xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<904xi32>
+    }
+  }
+  check.return
+}
