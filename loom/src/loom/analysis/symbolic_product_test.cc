@@ -6,6 +6,9 @@
 
 #include "loom/analysis/symbolic_product.h"
 
+#include <utility>
+#include <vector>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/symbolic_expr_proof.h"
@@ -32,6 +35,16 @@ class SymbolicProductTest : public SymbolicExprTest {
                                        LOOM_LOCATION_UNKNOWN, &op));
     ComputeFacts(op);
     return loom_index_mul_result(op);
+  }
+
+  loom_value_id_t ScalarMultiply(loom_value_id_t left, loom_value_id_t right,
+                                 uint8_t flags = 0) {
+    loom_op_t* op;
+    IREE_CHECK_OK(loom_scalar_muli_build(&builder_, flags, left, right,
+                                         loom_module_value_type(module_, left),
+                                         LOOM_LOCATION_UNKNOWN, &op));
+    ComputeFacts(op);
+    return loom_scalar_muli_result(op);
   }
 
   loom_symbolic_expr_t Expand(loom_value_id_t value) {
@@ -150,18 +163,74 @@ TEST_F(SymbolicProductTest, FixedWidthProductsRequireMathematicalNoWrap) {
 }
 
 TEST_F(SymbolicProductTest, ExplicitNoWrapContractPermitsProductProof) {
-  const auto type = loom_type_scalar(LOOM_SCALAR_TYPE_I8);
-  const auto left = DefineBounded(LOOM_SCALAR_TYPE_I8, -128, 127);
-  const auto right = DefineBounded(LOOM_SCALAR_TYPE_I8, -128, 127);
-  loom_op_t* op;
-  IREE_ASSERT_OK(
-      loom_scalar_muli_build(&builder_, LOOM_SCALAR_INTOVERFLOWFLAGS_NSW, left,
-                             right, type, LOOM_LOCATION_UNKNOWN, &op));
-  ComputeFacts(op);
-  const auto result = loom_scalar_muli_result(op);
-  Expand(result);
-  EXPECT_NE(loom_symbolic_expr_lookup_product(&expression_context_, result),
-            nullptr);
+  for (auto type :
+       {LOOM_SCALAR_TYPE_I1, LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I16,
+        LOOM_SCALAR_TYPE_I32, LOOM_SCALAR_TYPE_I64}) {
+    SCOPED_TRACE(type);
+    int64_t lower = 0;
+    int64_t upper = 0;
+    ASSERT_TRUE(loom_value_facts_scalar_type_domain(type, &lower, &upper));
+    const auto left = DefineBounded(type, lower, upper);
+    const auto right = DefineBounded(type, lower, upper);
+    for (uint8_t flags : {uint8_t{0}, uint8_t{LOOM_SCALAR_INTOVERFLOWFLAGS_NUW},
+                          uint8_t{LOOM_SCALAR_INTOVERFLOWFLAGS_NSW},
+                          uint8_t{LOOM_SCALAR_INTOVERFLOWFLAGS_NUW |
+                                  LOOM_SCALAR_INTOVERFLOWFLAGS_NSW}}) {
+      SCOPED_TRACE(flags);
+      const auto result = ScalarMultiply(left, right, flags);
+      Expand(result);
+      EXPECT_EQ(loom_symbolic_expr_lookup_product(&expression_context_,
+                                                  result) != nullptr,
+                type == LOOM_SCALAR_TYPE_I1 ||
+                    (flags & LOOM_SCALAR_INTOVERFLOWFLAGS_NSW) != 0);
+    }
+  }
+}
+
+TEST_F(SymbolicProductTest, ExactSignedEndpointsAreNotSaturatedRanges) {
+  const auto select = DefineBounded(LOOM_SCALAR_TYPE_I64, 0, 1);
+  for (const auto bounds :
+       {std::pair{INT64_MIN, int64_t{0}}, std::pair{int64_t{0}, INT64_MAX}}) {
+    SCOPED_TRACE(::testing::PrintToString(bounds));
+    const auto input =
+        DefineBounded(LOOM_SCALAR_TYPE_I64, bounds.first, bounds.second);
+    const auto left = ScalarMultiply(input, select);
+    const auto right = ScalarMultiply(select, input);
+    ExpectEqual(left, right);
+    EXPECT_NE(loom_symbolic_expr_lookup_product(&expression_context_, left),
+              nullptr);
+  }
+}
+
+TEST_F(SymbolicProductTest, ProductRangeMatchesExhaustiveSmallWidthOracle) {
+  const std::pair<int64_t, int64_t> intervals[] = {
+      {-128, 127}, {-128, -127}, {-16, -1}, {-8, 7},
+      {-1, 1},     {0, 1},       {0, 15},   {15, 16},
+  };
+  for (const auto left_bounds : intervals) {
+    for (const auto right_bounds : intervals) {
+      SCOPED_TRACE(::testing::PrintToString(left_bounds));
+      SCOPED_TRACE(::testing::PrintToString(right_bounds));
+      bool exact = true;
+      for (int64_t left = left_bounds.first; left <= left_bounds.second;
+           ++left) {
+        for (int64_t right = right_bounds.first; right <= right_bounds.second;
+             ++right) {
+          const int64_t product = left * right;
+          exact &= product >= -128 && product <= 127;
+        }
+      }
+      const auto left = DefineBounded(LOOM_SCALAR_TYPE_I8, left_bounds.first,
+                                      left_bounds.second);
+      const auto right = DefineBounded(LOOM_SCALAR_TYPE_I8, right_bounds.first,
+                                       right_bounds.second);
+      const auto result = ScalarMultiply(left, right);
+      Expand(result);
+      EXPECT_EQ(loom_symbolic_expr_lookup_product(&expression_context_,
+                                                  result) != nullptr,
+                exact);
+    }
+  }
 }
 
 TEST_F(SymbolicProductTest, ZeroAddendIsProductButNonzeroAddendIsNot) {
@@ -185,6 +254,182 @@ TEST_F(SymbolicProductTest, ZeroAddendIsProductButNonzeroAddendIsNot) {
       ExpectEqual(product, result);
     }
   }
+}
+
+TEST_F(SymbolicProductTest, ScalarFusedZeroAddendPreservesProducts) {
+  for (auto scalar_type :
+       {LOOM_SCALAR_TYPE_I1, LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I16,
+        LOOM_SCALAR_TYPE_I32, LOOM_SCALAR_TYPE_I64}) {
+    SCOPED_TRACE(scalar_type);
+    const auto type = loom_type_scalar(scalar_type);
+    const auto left = DefineBounded(scalar_type, 0, 1);
+    const auto right = DefineBounded(scalar_type, 0, 1);
+    const auto product = ScalarMultiply(left, right);
+    for (int64_t addend : {0, 1}) {
+      SCOPED_TRACE(addend);
+      loom_op_t* op;
+      IREE_ASSERT_OK(loom_scalar_fmai_build(
+          &builder_, 0, left, right, DefineBounded(scalar_type, addend, addend),
+          type, LOOM_LOCATION_UNKNOWN, &op));
+      ComputeFacts(op);
+      const auto result = loom_scalar_fmai_result(op);
+      Expand(result);
+      EXPECT_EQ(loom_symbolic_expr_lookup_product(&expression_context_,
+                                                  result) != nullptr,
+                addend == 0);
+      if (addend == 0) {
+        ExpectEqual(product, result);
+      }
+    }
+  }
+}
+
+TEST_F(SymbolicProductTest, ExactShiftsAndNegationPreserveFactorIdentity) {
+  for (auto scalar_type : {LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I16,
+                           LOOM_SCALAR_TYPE_I32, LOOM_SCALAR_TYPE_I64}) {
+    SCOPED_TRACE(scalar_type);
+    const auto type = loom_type_scalar(scalar_type);
+    const auto left = DefineBounded(scalar_type, -2, 2);
+    const auto right = DefineBounded(scalar_type, -2, 2);
+    const auto shift = DefineBounded(scalar_type, 2, 2);
+    const auto scale = DefineBounded(scalar_type, -4, -4);
+    loom_op_t* shifted_op;
+    IREE_ASSERT_OK(loom_scalar_shli_build(&builder_, 0, right, shift, type,
+                                          LOOM_LOCATION_UNKNOWN, &shifted_op));
+    ComputeFacts(shifted_op);
+    const auto product =
+        ScalarMultiply(left, loom_scalar_shli_result(shifted_op));
+    loom_op_t* negated_op;
+    IREE_ASSERT_OK(loom_scalar_negi_build(&builder_, product, type,
+                                          LOOM_LOCATION_UNKNOWN, &negated_op));
+    ComputeFacts(negated_op);
+    const auto scaled_product =
+        ScalarMultiply(ScalarMultiply(right, left), scale);
+    ExpectEqual(loom_scalar_negi_result(negated_op), scaled_product);
+  }
+}
+
+TEST_F(SymbolicProductTest, CastsPreserveOnlyNumericProductIdentity) {
+  const struct {
+    // Cast semantics applied to the product.
+    decltype(&loom_scalar_extsi_build) build;
+    // Integer domain of the factors and their product.
+    loom_scalar_type_t input_type;
+    // Integer domain after the cast.
+    loom_scalar_type_t result_type;
+    // Inclusive lower bound of each factor.
+    int64_t lower;
+    // Inclusive upper bound of each factor.
+    int64_t upper;
+    // Whether every product is numerically preserved by the cast.
+    bool preserves_value;
+  } cases[] = {
+      {loom_scalar_extsi_build, LOOM_SCALAR_TYPE_I1, LOOM_SCALAR_TYPE_I32, 0, 1,
+       false},
+      {loom_scalar_extui_build, LOOM_SCALAR_TYPE_I1, LOOM_SCALAR_TYPE_I32, 0, 1,
+       true},
+      {loom_scalar_extsi_build, LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I64, -2,
+       2, true},
+      {loom_scalar_extui_build, LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I64, -2,
+       2, false},
+      {loom_scalar_extui_build, LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I64, 0, 2,
+       true},
+      {loom_scalar_trunci_build, LOOM_SCALAR_TYPE_I32, LOOM_SCALAR_TYPE_I8, -11,
+       11, true},
+      {loom_scalar_trunci_build, LOOM_SCALAR_TYPE_I32, LOOM_SCALAR_TYPE_I8, -12,
+       12, false},
+  };
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.input_type);
+    SCOPED_TRACE(test_case.result_type);
+    SCOPED_TRACE(test_case.lower);
+    const auto left =
+        DefineBounded(test_case.input_type, test_case.lower, test_case.upper);
+    const auto right =
+        DefineBounded(test_case.input_type, test_case.lower, test_case.upper);
+    const auto product = ScalarMultiply(left, right);
+    loom_op_t* cast;
+    IREE_ASSERT_OK(test_case.build(
+        &builder_, product, loom_type_scalar(test_case.input_type),
+        loom_type_scalar(test_case.result_type), LOOM_LOCATION_UNKNOWN, &cast));
+    ComputeFacts(cast);
+    const auto result = loom_op_const_results(cast)[0];
+    const auto expression = Expand(result);
+    ASSERT_EQ(expression.term_count, 1u);
+    EXPECT_EQ(expression.terms[0].value_id,
+              test_case.preserves_value ? product : result);
+    if (test_case.preserves_value) {
+      ExpectEqual(product, result);
+    }
+  }
+}
+
+TEST_F(SymbolicProductTest, UnrepresentableCoefficientRemainsOpaque) {
+  const auto left = DefineBounded(LOOM_SCALAR_TYPE_I64, 0, 1);
+  const auto right = DefineBounded(LOOM_SCALAR_TYPE_I64, 0, 1);
+  const int64_t coefficient = INT64_C(1) << 32;
+  const auto scale =
+      DefineBounded(LOOM_SCALAR_TYPE_I64, coefficient, coefficient);
+  const auto result =
+      ScalarMultiply(ScalarMultiply(left, scale), ScalarMultiply(right, scale),
+                     LOOM_SCALAR_INTOVERFLOWFLAGS_NSW);
+  const auto expression = Expand(result);
+  ASSERT_EQ(expression.term_count, 1u);
+  EXPECT_EQ(expression.terms[0].value_id, result);
+  EXPECT_EQ(loom_symbolic_expr_lookup_product(&expression_context_, result),
+            nullptr);
+}
+
+TEST_F(SymbolicProductTest, OffsetScaleUsesItsIndependentUnsignedCarrier) {
+  const auto index = DefineBounded(LOOM_SCALAR_TYPE_INDEX, 0, 65535);
+  const auto stride = DefineBounded(LOOM_SCALAR_TYPE_OFFSET, 0, 65536);
+  loom_op_t* op;
+  IREE_ASSERT_OK(loom_index_scale_build(
+      &builder_, index, stride, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+      LOOM_LOCATION_UNKNOWN, &op));
+  ComputeFacts(op);
+  const auto result = loom_index_scale_result(op);
+  loom_target_facts_t target = {};
+  fact_table_.context.target_facts = &target;
+  for (uint32_t index_width : {32, 64}) {
+    for (uint32_t offset_width : {32, 64}) {
+      SCOPED_TRACE(index_width);
+      SCOPED_TRACE(offset_width);
+      target.storage.snapshot.index_bitwidth = index_width;
+      target.storage.snapshot.offset_bitwidth = offset_width;
+      for (int64_t upper : {INT64_C(65536), INT64_C(65538)}) {
+        SCOPED_TRACE(upper);
+        DefineFacts(stride, loom_value_facts_make(0, upper, 1));
+        ComputeFacts(op);
+        Expand(result);
+        EXPECT_EQ(loom_symbolic_expr_lookup_product(&expression_context_,
+                                                    result) != nullptr,
+                  offset_width == 64 || upper == 65536);
+      }
+    }
+  }
+  fact_table_.context.target_facts = nullptr;
+}
+
+TEST_F(SymbolicProductTest, GrowthPreservesPreviouslyReturnedProductStorage) {
+  const auto left = DefineBounded(LOOM_SCALAR_TYPE_INDEX, 0, 2);
+  const auto right = DefineBounded(LOOM_SCALAR_TYPE_INDEX, 0, 3);
+  std::vector<loom_value_id_t> values;
+  for (int i = 0; i < 64; ++i) {
+    values.push_back(Multiply(left, right));
+  }
+  const auto first = Expand(values.front());
+  const auto* retained =
+      loom_symbolic_expr_lookup_product(&expression_context_, values.front());
+  ASSERT_NE(retained, nullptr);
+  for (auto value : values) {
+    ExpectEqual(values.front(), value);
+  }
+  EXPECT_EQ(expression_context_.products.count, values.size());
+  ASSERT_EQ(retained->factor_count, 2u);
+  EXPECT_EQ(retained->factors[0], left);
+  EXPECT_EQ(retained->factors[1], right);
+  EXPECT_EQ(Expand(values.front()).terms, first.terms);
 }
 
 TEST_F(SymbolicProductTest, TargetCarrierAndResetBoundProductLifetime) {

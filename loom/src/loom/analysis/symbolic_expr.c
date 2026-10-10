@@ -1271,22 +1271,26 @@ static iree_status_t loom_symbolic_expr_retain_product(
     loom_symbolic_expr_expansion_frame_t* frame,
     const loom_symbolic_expr_t* right_expression,
     loom_symbolic_expr_t* out_expression) {
-  // Wrapped result facts cannot establish exact multiplication. Check the
-  // mathematical range of the expanded inputs before retaining their factors.
-  loom_value_facts_t facts;
-  if (!loom_symbolic_product_range(frame->intermediate_expression.facts,
+  const loom_scalar_type_t scalar_type = loom_type_element_type(
+      loom_module_value_type(context->module, frame->value_id));
+  const uint8_t bit_count = frame->integer_bit_count;
+  // An explicit NSW contract establishes exactness on every defined input,
+  // even when independent input intervals include overflowing combinations.
+  // Otherwise wrapped result facts cannot establish exact multiplication.
+  loom_value_facts_t facts = out_expression->facts;
+  const bool no_signed_wrap =
+      loom_scalar_type_is_integer(scalar_type) && bit_count == 0;
+  if (!no_signed_wrap &&
+      !loom_symbolic_product_range(frame->intermediate_expression.facts,
                                    right_expression->facts, &facts)) {
     return iree_ok_status();
   }
-  const uint8_t bit_count = frame->integer_bit_count;
   if (bit_count != 0 &&
       !(bit_count == 1
             ? loom_value_facts_fit_unsigned_bit_count(facts, 1)
             : loom_value_facts_fit_signed_bit_count(facts, bit_count))) {
     return iree_ok_status();
   }
-  const loom_scalar_type_t scalar_type = loom_type_element_type(
-      loom_module_value_type(context->module, frame->value_id));
   const loom_fact_context_t* fact_context =
       context->fact_table ? &context->fact_table->context : NULL;
   if ((scalar_type == LOOM_SCALAR_TYPE_INDEX &&
@@ -1630,6 +1634,8 @@ iree_status_t loom_symbolic_expr_from_value(
                                  : loom_value_facts_fit_signed_bit_count(
                                        expression.facts, bit_count);
       if (bit_count == 64 &&
+          frames[frame_count - 1].proof_state !=
+              LOOM_SYMBOLIC_EXPR_MEMO_PRODUCT &&
           frames[frame_count - 1].kind !=
               LOOM_SYMBOLIC_EXPR_EXPANSION_IDENTITY &&
           frames[frame_count - 1].kind != LOOM_SYMBOLIC_EXPR_EXPANSION_SELECT &&
