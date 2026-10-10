@@ -98,17 +98,19 @@ TEST(Aie2pArrayProgramTest, ResetsComputeDmaBeforePlannedQueueStarts) {
       .buffer_descriptor_count = 1,
       .credit_lock_index = 0,
   };
-  loom_aie2p_array_plan_t plan = {.family = loom_xdna_npu2_array_family(),
-                                  .channels = &channel,
-                                  .channel_count = 1,
-                                  .worker_plans = &worker_plan,
-                                  .worker_plan_count = 1,
-                                  .channel_slots = &channel_slot,
-                                  .channel_slot_count = 1,
-                                  .locks = locks,
-                                  .lock_count = IREE_ARRAYSIZE(locks),
-                                  .dma_channels = &dma,
-                                  .dma_channel_count = 1};
+  loom_aie2p_array_plan_t plan = {
+      .family = loom_xdna_npu2_array_family(),
+      .channels = &channel,
+      .channel_count = 1,
+      .worker_plans = &worker_plan,
+      .worker_plan_count = 1,
+      .channel_slots = &channel_slot,
+      .channel_slot_count = 1,
+      .locks = locks,
+      .lock_count = IREE_ARRAYSIZE(locks),
+      .dma_channels = &dma,
+      .dma_channel_count = 1,
+  };
 
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
@@ -223,17 +225,19 @@ TEST(Aie2pArrayProgramTest, KeepsDmaServiceCoreReset) {
       .buffer_descriptor_count = 1,
       .credit_lock_index = 0,
   };
-  loom_aie2p_array_plan_t plan = {.family = loom_xdna_npu2_array_family(),
-                                  .channels = &channel,
-                                  .channel_count = 1,
-                                  .worker_plans = &worker_plan,
-                                  .worker_plan_count = 1,
-                                  .channel_slots = &channel_slot,
-                                  .channel_slot_count = 1,
-                                  .locks = locks,
-                                  .lock_count = IREE_ARRAYSIZE(locks),
-                                  .dma_channels = &dma,
-                                  .dma_channel_count = 1};
+  loom_aie2p_array_plan_t plan = {
+      .family = loom_xdna_npu2_array_family(),
+      .channels = &channel,
+      .channel_count = 1,
+      .worker_plans = &worker_plan,
+      .worker_plan_count = 1,
+      .channel_slots = &channel_slot,
+      .channel_slot_count = 1,
+      .locks = locks,
+      .lock_count = IREE_ARRAYSIZE(locks),
+      .dma_channels = &dma,
+      .dma_channel_count = 1,
+  };
 
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
@@ -332,16 +336,15 @@ TEST_P(Aie2pCompletionRouteTest, EmitsSelectedPacketResources) {
       .buffer_descriptor_count = 1,
       .credit_lock_index = UINT32_MAX,
   };
-  loom_aie2p_array_plan_t plan =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  plan.family = loom_xdna_npu2_array_family();
-  plan.bindings = &binding;
-  plan.binding_count = 1;
-  plan.dma_channels = &dma;
-  plan.dma_channel_count = 1;
-  plan.binding_plans = &binding_plan;
-  plan.binding_plan_count = 1;
+  loom_aie2p_array_plan_t plan = {
+      .family = loom_xdna_npu2_array_family(),
+      .bindings = &binding,
+      .binding_count = 1,
+      .dma_channels = &dma,
+      .dma_channel_count = 1,
+      .binding_plans = &binding_plan,
+      .binding_plan_count = 1,
+  };
   plan.completion_routes = &selected.route;
   plan.completion_route_count = 1;
 
@@ -382,21 +385,24 @@ INSTANTIATE_TEST_SUITE_P(
                       /*arbiter=*/0, /*master_select=*/0, /*rule_slot=*/0},
             .master_value = 0xC0000008,
             .rule_address = 0x0003F200,
-            .rule_value = 0x001F0100},
+            .rule_value = 0x001F0100,
+        },
         CompletionRouteCase{
             .route = {/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
                       /*destination_ordinal=*/2, /*packet_id=*/12,
                       /*arbiter=*/2, /*master_select=*/1, /*rule_slot=*/1},
             .master_value = 0xC0000012,
             .rule_address = 0x0003F204,
-            .rule_value = 0x0C1F0112},
+            .rule_value = 0x0C1F0112,
+        },
         CompletionRouteCase{
             .route = {/*coordinate=*/{0, 0}, /*source_ordinal=*/0,
                       /*destination_ordinal=*/2, /*packet_id=*/15,
                       /*arbiter=*/5, /*master_select=*/3, /*rule_slot=*/3},
             .master_value = 0xC0000045,
             .rule_address = 0x0003F20C,
-            .rule_value = 0x0F1F0135}));
+            .rule_value = 0x0F1F0135,
+        }));
 
 }  // namespace
 }  // namespace loom

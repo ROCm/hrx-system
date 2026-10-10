@@ -188,8 +188,10 @@ template.def<@qwen.q4.matmul> public priority(10) @fast(%arg0: i32) -> (i32) {
 
   loom_template_provider_slice_t other = loom_template_provider_catalog_lookup(
       &catalog_,
-      {.module_id = 0,
-       .symbol_id = FindSymbol(module.get(), IREE_SV("other.contract"))});
+      {
+          .module_id = 0,
+          .symbol_id = FindSymbol(module.get(), IREE_SV("other.contract")),
+      });
   ASSERT_EQ(other.count, 1u);
   EXPECT_TRUE(
       iree_string_view_equal(other.providers[0].name, IREE_SV("other")));

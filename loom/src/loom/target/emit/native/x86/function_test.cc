@@ -70,8 +70,10 @@ class FunctionTest : public ::testing::Test {
 
 TEST_F(FunctionTest, EmptyLeafNeedsOnlyReturn) {
   iree_host_size_t block_starts[] = {0, 0};
-  loom_x86_function_t function = {.block_starts = block_starts,
-                                  .block_count = 1};
+  loom_x86_function_t function = {
+      .block_starts = block_starts,
+      .block_count = 1,
+  };
 
   IREE_ASSERT_OK(loom_x86_function_write(&function, nullptr, 0, nullptr,
                                          stream_, &arena_));
@@ -80,9 +82,11 @@ TEST_F(FunctionTest, EmptyLeafNeedsOnlyReturn) {
 
 TEST_F(FunctionTest, DirtyUpperVectorStateCleansBeforeReturn) {
   iree_host_size_t block_starts[] = {0, 0};
-  loom_x86_function_t function = {.block_starts = block_starts,
-                                  .block_count = 1,
-                                  .may_dirty_upper_vector_state = true};
+  loom_x86_function_t function = {
+      .block_starts = block_starts,
+      .block_count = 1,
+      .may_dirty_upper_vector_state = true,
+  };
 
   IREE_ASSERT_OK(loom_x86_function_write(&function, nullptr, 0, nullptr,
                                          stream_, &arena_));
@@ -91,10 +95,12 @@ TEST_F(FunctionTest, DirtyUpperVectorStateCleansBeforeReturn) {
 
 TEST_F(FunctionTest, DirtyUpperVectorStatePreservesWideResult) {
   iree_host_size_t block_starts[] = {0, 0};
-  loom_x86_function_t function = {.block_starts = block_starts,
-                                  .block_count = 1,
-                                  .may_dirty_upper_vector_state = true,
-                                  .has_upper_vector_result = true};
+  loom_x86_function_t function = {
+      .block_starts = block_starts,
+      .block_count = 1,
+      .may_dirty_upper_vector_state = true,
+      .has_upper_vector_result = true,
+  };
 
   IREE_ASSERT_OK(loom_x86_function_write(&function, nullptr, 0, nullptr,
                                          stream_, &arena_));
@@ -114,7 +120,8 @@ TEST_F(FunctionTest, DirtyUpperVectorStateCleansBeforeEligibleCall) {
       .block_count = 1,
       .may_dirty_upper_vector_state = true,
       .upper_vector_call_cleanup_indices = cleanup_indices,
-      .upper_vector_call_cleanup_count = IREE_ARRAYSIZE(cleanup_indices)};
+      .upper_vector_call_cleanup_count = IREE_ARRAYSIZE(cleanup_indices),
+  };
 
   IREE_ASSERT_OK(loom_x86_function_write(&function, nullptr, 0, nullptr,
                                          stream_, &arena_));
@@ -213,11 +220,10 @@ TEST_F(FunctionTest, RestoreStackAndRegistersAfterResultTransport) {
   rbx.inputs[0] = 3;
   loom_x86_encoding_operands_t r12 = {};
   r12.inputs[0] = 12;
-  loom_x86_encoding_operands_t stack =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  stack.result = 4;
-  stack.immediate = 24;
+  loom_x86_encoding_operands_t stack = {
+      .immediate = 24,
+      .result = 4,
+  };
   EXPECT_EQ(Read(),
             Encode(Instruction(LOOM_X86_ENCODING_FORM_PUSH, 0, rbx)) +
                 Encode(Instruction(LOOM_X86_ENCODING_FORM_PUSH, 0, r12)) +
@@ -287,11 +293,10 @@ TEST_F(FunctionTest, BranchesSkipEntryTransportAndPreservation) {
       -static_cast<int64_t>(branch_length + body_length + jump_length);
   loom_x86_encoding_operands_t rbx = {};
   rbx.inputs[0] = 3;
-  loom_x86_encoding_operands_t stack =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  stack.result = 4;
-  stack.immediate = 16;
+  loom_x86_encoding_operands_t stack = {
+      .immediate = 16,
+      .result = 4,
+  };
   EXPECT_EQ(Read(),
             prefix + Encode(Instruction(LOOM_X86_ENCODING_FORM_PUSH, 0, rbx)) +
                 Encode(Instruction(LOOM_X86_ENCODING_FORM_BINARY_IMMEDIATE,
@@ -307,9 +312,11 @@ TEST_F(FunctionTest, BranchesSkipEntryTransportAndPreservation) {
 
 TEST_F(FunctionTest, RealignmentRestoresTheSavedStackPointerBeforePops) {
   iree_host_size_t block_starts[] = {0, 0};
-  loom_x86_function_t function = {.block_starts = block_starts,
-                                  .block_count = 1,
-                                  .saved_registers = 1u << 3};
+  loom_x86_function_t function = {
+      .block_starts = block_starts,
+      .block_count = 1,
+      .saved_registers = 1u << 3,
+  };
   function.stack.allocation_size = 64;
   function.stack.alignment = 64;
   function.stack.realignment.mask = -64;
@@ -322,24 +329,21 @@ TEST_F(FunctionTest, RealignmentRestoresTheSavedStackPointerBeforePops) {
   rbx.inputs[0] = 3;
   loom_x86_encoding_operands_t capture = {.result = 11};
   capture.inputs[0] = 4;
-  loom_x86_encoding_operands_t align =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  align.result = 4;
-  align.immediate = -64;
-  loom_x86_encoding_operands_t allocate =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  allocate.result = 4;
-  allocate.immediate = 64;
+  loom_x86_encoding_operands_t align = {
+      .immediate = -64,
+      .result = 4,
+  };
+  loom_x86_encoding_operands_t allocate = {
+      .immediate = 64,
+      .result = 4,
+  };
   loom_x86_encoding_operands_t save = {};
   save.inputs[0] = 11;
   save.inputs[1] = 4;
   save.immediate = 8;
-  loom_x86_encoding_operands_t restore =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  restore.result = 4;
+  loom_x86_encoding_operands_t restore = {
+      .result = 4,
+  };
   restore.inputs[0] = 4;
   restore.immediate = 8;
   EXPECT_EQ(Read(),
@@ -375,7 +379,8 @@ TEST_F(FunctionTest, SymbolFixupsKeepSectionOffsetsAndTheirOwnNamespace) {
       .instruction_count = IREE_ARRAYSIZE(instructions),
       .symbol_fixup_count = 2,
       .block_starts = block_starts,
-      .block_count = 1};
+      .block_count = 1,
+  };
   function.stack.allocation_size = 8;
   function.stack.alignment = 16;
   const uint32_t symbol_indices[] = {4, 1, 3};
@@ -398,9 +403,11 @@ TEST_F(FunctionTest, SymbolFixupsKeepSectionOffsetsAndTheirOwnNamespace) {
 
 TEST_F(FunctionTest, FramePointerDoesNotSuppressOutgoingStackRealignment) {
   iree_host_size_t block_starts[] = {0, 0};
-  loom_x86_function_t function = {.block_starts = block_starts,
-                                  .block_count = 1,
-                                  .saved_registers = (1u << 3) | (1u << 5)};
+  loom_x86_function_t function = {
+      .block_starts = block_starts,
+      .block_count = 1,
+      .saved_registers = (1u << 3) | (1u << 5),
+  };
   function.stack.allocation_size = 64;
   function.stack.alignment = 32;
   function.stack.has_frame_pointer = true;
@@ -414,16 +421,14 @@ TEST_F(FunctionTest, FramePointerDoesNotSuppressOutgoingStackRealignment) {
   rbp.inputs[0] = 5;
   loom_x86_encoding_operands_t establish = {.result = 5};
   establish.inputs[0] = 4;
-  loom_x86_encoding_operands_t align =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  align.result = 4;
-  align.immediate = -32;
-  loom_x86_encoding_operands_t allocate =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  allocate.result = 4;
-  allocate.immediate = 64;
+  loom_x86_encoding_operands_t align = {
+      .immediate = -32,
+      .result = 4,
+  };
+  loom_x86_encoding_operands_t allocate = {
+      .immediate = 64,
+      .result = 4,
+  };
   loom_x86_encoding_operands_t restore = {.result = 4};
   restore.inputs[0] = 5;
   EXPECT_EQ(Read(),

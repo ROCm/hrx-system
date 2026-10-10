@@ -1055,8 +1055,9 @@ TEST_F(CanonicalizerTest, DriverPreservesExplicitTargetFactsAcrossSideRegions) {
   loom_func_like_t split_func = loom_func_like_cast(module_, split_op);
 
   loom_target_snapshot_t snapshot = {.name = IREE_SVL("target-context-test")};
-  loom_target_export_plan_t export_plan = {.name =
-                                               IREE_SVL("target-context-test")};
+  loom_target_export_plan_t export_plan = {
+      .name = IREE_SVL("target-context-test"),
+  };
   loom_target_config_t config = {.name = IREE_SVL("target-context-test")};
   loom_target_bundle_t bundle = {
       .name = IREE_SVL("target-context-test"),
@@ -1099,7 +1100,9 @@ TEST_F(CanonicalizerTest, DriverPreservesExplicitTargetFactsAcrossSideRegions) {
       /*fact_refinement_policy=*/nullptr, &canonicalizer));
   loom_canonicalizer_result_t result;
   loom_canonicalizer_options_t options = {
-      .target_facts = &target_facts, .seed_facts = {&seed_facts, nullptr, 0}};
+      .target_facts = &target_facts,
+      .seed_facts = {&seed_facts, nullptr, 0},
+  };
   IREE_ASSERT_OK(loom_canonicalizer_run_function(&canonicalizer, split_func,
                                                  &options, &result));
 
@@ -1167,7 +1170,8 @@ TEST_F(CanonicalizerTest, RegionDriverAcceptsSeedFacts) {
       /*fact_refinement_policy=*/nullptr, &canonicalizer));
   loom_canonicalizer_result_t result;
   loom_canonicalizer_options_t options = {
-      .seed_facts = {&seed_facts, &config_arg, 1}};
+      .seed_facts = {&seed_facts, &config_arg, 1},
+  };
   IREE_ASSERT_OK(loom_canonicalizer_run_region(
       &canonicalizer, split_func, config, split_op, &options, &result));
 

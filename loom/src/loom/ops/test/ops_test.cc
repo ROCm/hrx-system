@@ -701,9 +701,11 @@ TEST_F(BuilderTest, ReplaceAllUsesWithUpdatesTypeAttrs) {
   IREE_ASSERT_OK(
       loom_module_intern_string(module_, IREE_SV("shape"), &type_attr_name));
   loom_named_attr_t entries[] = {
-      {.name_id = type_attr_name,
-       .reserved = {},
-       .value = loom_attr_type(vector_type_id)},
+      {
+          .name_id = type_attr_name,
+          .reserved = {},
+          .value = loom_attr_type(vector_type_id),
+      },
   };
   loom_op_t* attrs_op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(

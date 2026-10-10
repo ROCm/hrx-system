@@ -96,7 +96,8 @@ class Q8S32SelectionFixture {
     loomc_amdgpu_profile_options_t profile_options = {
         .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
         .structure_size = sizeof(profile_options),
-        .identifier = loomc_make_cstring_view("gfx1151")};
+        .identifier = loomc_make_cstring_view("gfx1151"),
+    };
     profile_options.identity.target = profile_options.identifier;
     loomc_target_profile_t* raw_profile = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_profile_create_amdgpu(
@@ -305,13 +306,12 @@ class Q8S32SelectionFixture {
     out_module->reset();
     const loomc_string_view_t root =
         loomc_make_cstring_view("q8s32_specialize");
-    loomc_cxx_import_options_t options =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-             // differs from list initialization.
-    options.type = LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS;
-    options.structure_size = sizeof(options);
-    options.source_provider = {ProvideHeader, this};
-    options.roots = role == CxxImportRole::kRoot ? &root : nullptr;
+    loomc_cxx_import_options_t options = {
+        .type = LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS,
+        .structure_size = sizeof(options),
+        .source_provider = {ProvideHeader, this},
+        .roots = role == CxxImportRole::kRoot ? &root : nullptr,
+    };
     options.root_count = role == CxxImportRole::kRoot ? 1 : 0;
     loomc_module_t* raw_module = nullptr;
     loomc_result_t* raw_result = nullptr;

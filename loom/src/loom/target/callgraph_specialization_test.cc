@@ -252,14 +252,14 @@ class TargetCallgraphSpecializationTest : public ::testing::Test {
         loom_target_callgraph_specialization_pass_info();
     std::vector<uint8_t> statistic_storage(
         pass_info->statistic_layout->storage_size, 0);
-    loom_pass_t pass = {};  // NOLINT(iree-cpp-designated-initializer) --
-                            // Assignment sequencing spans intervening work.
-    pass.info = pass_info;
-    pass.module_run = loom_target_callgraph_specialization_run;
-    pass.instance_arena = &pass_arena;
-    pass.arena = &pass_arena;
-    pass.statistic_storage = statistic_storage.data();
-    pass.environment = &pass_environment;
+    loom_pass_t pass = {
+        .info = pass_info,
+        .module_run = loom_target_callgraph_specialization_run,
+        .instance_arena = &pass_arena,
+        .arena = &pass_arena,
+        .statistic_storage = statistic_storage.data(),
+        .environment = &pass_environment,
+    };
     if (collector != nullptr) {
       pass.diagnostic_emitter = {
           .fn = CollectDiagnostic,
@@ -491,10 +491,14 @@ func.def public @explicit_root() -> (index) {
   const TestTargetProfile default_wave32 = MakeTestProfile(32);
   const TestTargetProfile explicit_wave32 = MakeTestProfile(32, true);
   const loom_target_specialization_request_t requests[] = {
-      {.function_name = IREE_SV("default_root"),
-       .target_profile = &default_wave32.base},
-      {.function_name = IREE_SV("explicit_root"),
-       .target_profile = &explicit_wave32.base},
+      {
+          .function_name = IREE_SV("default_root"),
+          .target_profile = &default_wave32.base,
+      },
+      {
+          .function_name = IREE_SV("explicit_root"),
+          .target_profile = &explicit_wave32.base,
+      },
   };
   SpecializationResult specialization =
       Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
@@ -610,8 +614,10 @@ func.def public @host() {
   const TestTargetProfile device_profile = MakeTestProfile(32);
   const loom_target_specialization_request_t requests[] = {
       {.function_name = IREE_SV("host"), .target_profile = &host_profile.base},
-      {.function_name = IREE_SV("device_program"),
-       .target_profile = &device_profile.base},
+      {
+          .function_name = IREE_SV("device_program"),
+          .target_profile = &device_profile.base,
+      },
   };
   SpecializationResult specialization =
       Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));

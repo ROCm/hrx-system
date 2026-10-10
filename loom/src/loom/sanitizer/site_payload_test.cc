@@ -27,7 +27,8 @@ loom_sanitizer_site_payload_t BaselinePayload() {
       .lane_policy = LOOM_SANITIZER_LANE_POLICY_PER_LANE,
       .lineage_role = LOOM_SANITIZER_LINEAGE_ROLE_ORIGINAL,
       .flags = 0,
-      .extension_data = iree_const_byte_span_empty()};
+      .extension_data = iree_const_byte_span_empty(),
+  };
   return payload;
 }
 

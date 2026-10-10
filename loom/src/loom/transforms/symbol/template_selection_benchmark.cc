@@ -230,7 +230,9 @@ class TemplateSelectionFixture {
 
   uint64_t Query() {
     loom_template_selection_query_options_t options = {
-        .mode = LOOM_TEMPLATE_SELECTION_MODE_EARLY, .catalog = &catalog_};
+        .mode = LOOM_TEMPLATE_SELECTION_MODE_EARLY,
+        .catalog = &catalog_,
+    };
     loom_template_selection_query_result_t result = {};
     IREE_CHECK_OK(loom_template_selection_query(
         module_.get(), &options, &block_pool_, &query_arena_, &result));
@@ -298,7 +300,8 @@ class TemplateSelectionFixture {
         },
         nullptr, &pipeline_op));
     loom_pass_program_compile_options_t options = {
-        .registry = loom_pass_builtin_registry()};
+        .registry = loom_pass_builtin_registry(),
+    };
     IREE_CHECK_OK(loom_pass_program_compile_pipeline(
         pipeline_module, pipeline_op, &options, &block_pool_,
         &expansion_program_));

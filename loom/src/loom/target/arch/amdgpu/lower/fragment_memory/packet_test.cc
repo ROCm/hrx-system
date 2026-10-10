@@ -59,17 +59,17 @@ loom_amdgpu_fragment_memory_packet_plan_t Packet(
       .descriptor_ref = descriptor_ref,
       .register_index = register_index,
       .result_register_count = result_register_count,
-      .packet_register_count = packet_register_count};
+      .packet_register_count = packet_register_count,
+  };
   return packet;
 }
 
 TEST(AmdgpuFragmentMemoryPacketTest, NativePacketIsOneContiguousAccess) {
-  loom_amdgpu_fragment_memory_plan_t plan =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  plan.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-  plan.packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE;
-  plan.payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
+  loom_amdgpu_fragment_memory_plan_t plan = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+      .payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE,
+      .packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE,
+  };
   plan.address_layout.payload_elements_per_register = 2;
   plan.address_layout.payload_registers_per_element = 1;
   const auto packet = Packet(LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_B64, 3, 2, 2);
@@ -88,14 +88,13 @@ TEST(AmdgpuFragmentMemoryPacketTest, NativePacketIsOneContiguousAccess) {
 }
 
 TEST(AmdgpuFragmentMemoryPacketTest, PackedB16UsesSeparateElementAddresses) {
-  loom_amdgpu_fragment_memory_plan_t plan =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  plan.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-  plan.packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16;
-  plan.payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
-  plan.packed_b16_high_descriptor_ref =
-      LOOM_AMDGPU_DESCRIPTOR_REF_DS_LOAD_U16_D16_HI;
+  loom_amdgpu_fragment_memory_plan_t plan = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+      .packed_b16_high_descriptor_ref =
+          LOOM_AMDGPU_DESCRIPTOR_REF_DS_LOAD_U16_D16_HI,
+      .payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE,
+      .packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16,
+  };
   const auto packet =
       Packet(LOOM_AMDGPU_DESCRIPTOR_REF_DS_LOAD_U16_D16, 4, 1, 1);
 
@@ -118,13 +117,12 @@ TEST(AmdgpuFragmentMemoryPacketTest, PackedB16UsesSeparateElementAddresses) {
 
 TEST(AmdgpuFragmentMemoryPacketTest,
      PackedResultLoadUsesOneAddressPerResultRegister) {
-  loom_amdgpu_fragment_memory_plan_t plan =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  plan.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-  plan.packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE;
-  plan.payload_form =
-      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT;
+  loom_amdgpu_fragment_memory_plan_t plan = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+      .payload_form =
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT,
+      .packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE,
+  };
   const auto packet = Packet(LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_U16, 5, 2, 1);
 
   loom_amdgpu_fragment_memory_issued_access_t
@@ -142,12 +140,11 @@ TEST(AmdgpuFragmentMemoryPacketTest,
 }
 
 TEST(AmdgpuFragmentMemoryPacketTest, Fp8DecodeRetainsPhysicalLoadWidth) {
-  loom_amdgpu_fragment_memory_plan_t plan =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  plan.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-  plan.packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE;
-  plan.payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_BF16;
+  loom_amdgpu_fragment_memory_plan_t plan = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+      .payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_BF16,
+      .packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE,
+  };
   const auto packet = Packet(LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_B32, 2, 2, 1);
 
   loom_amdgpu_fragment_memory_issued_access_t
@@ -161,12 +158,11 @@ TEST(AmdgpuFragmentMemoryPacketTest, Fp8DecodeRetainsPhysicalLoadWidth) {
 }
 
 TEST(AmdgpuFragmentMemoryPacketTest, ScalarB16PacketAddressesOneElement) {
-  loom_amdgpu_fragment_memory_plan_t plan =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  plan.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE;
-  plan.packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_SCALAR_B16;
-  plan.payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
+  loom_amdgpu_fragment_memory_plan_t plan = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE,
+      .payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE,
+      .packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_SCALAR_B16,
+  };
   plan.address_layout.payload_elements_per_register = 2;
   plan.address_layout.payload_registers_per_element = 1;
   const auto packet = Packet(LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B16, 3, 1, 1);
@@ -185,13 +181,12 @@ TEST(AmdgpuFragmentMemoryPacketTest, ScalarB16PacketAddressesOneElement) {
 
 TEST(AmdgpuFragmentMemoryPacketTest,
      DirectNarrowedStoreAddressesOneElementPerResultRegister) {
-  loom_amdgpu_fragment_memory_plan_t plan =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  plan.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE;
-  plan.packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE;
-  plan.payload_form =
-      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16;
+  loom_amdgpu_fragment_memory_plan_t plan = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE,
+      .payload_form =
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16,
+      .packetization = LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE,
+  };
   plan.address_layout.payload_elements_per_register = 2;
   plan.address_layout.payload_registers_per_element = 1;
   const auto packet = Packet(LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B64, 4, 4, 2);
@@ -274,11 +269,10 @@ TEST(AmdgpuFragmentMemoryPacketTest,
   ASSERT_EQ(choice.strategy,
             LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE);
 
-  loom_amdgpu_fragment_memory_plan_t plan =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  plan.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE;
-  plan.role = LOOM_CONTRACT_OPERAND_ROLE_RESULT;
+  loom_amdgpu_fragment_memory_plan_t plan = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE,
+      .role = LOOM_CONTRACT_OPERAND_ROLE_RESULT,
+  };
   plan.source.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
   plan.view_rank = 2;
   plan.representation_flags = representation->flags;

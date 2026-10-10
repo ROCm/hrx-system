@@ -65,7 +65,8 @@ class AmdgpuOccupancyTargetResourcesTest : public ::testing::Test {
     loom_amdgpu_target_facts_initialize(&facts);
     loom_low_resolved_target_t target = {.target_facts = &facts.base};
     loom_low_storage_layout_space_sizes_t storage_sizes = {
-        .workgroup_bytes = local_memory_bytes};
+        .workgroup_bytes = local_memory_bytes,
+    };
     return loom_amdgpu_occupancy_residency_view(&target, &storage_sizes);
   }
 

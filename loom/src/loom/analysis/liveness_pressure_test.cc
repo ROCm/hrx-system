@@ -65,7 +65,8 @@ class LivenessPressureTest : public ::testing::Test {
         .type_kind = LOOM_TYPE_REGISTER,
         .register_class_id = TEST_LOW_CORE_REG_CLASS_ID_TEST_I32,
         .register_descriptor_set_stable_id =
-            loom_test_low_core_descriptor_set()->stable_id};
+            loom_test_low_core_descriptor_set()->stable_id,
+    };
     return result;
   }
 
@@ -73,7 +74,8 @@ class LivenessPressureTest : public ::testing::Test {
     loom_liveness_value_class_t result = {
         .type_kind = LOOM_TYPE_SCALAR,
         .element_type = type,
-        .register_class_id = LOOM_LOW_REGISTER_CLASS_ID_INVALID};
+        .register_class_id = LOOM_LOW_REGISTER_CLASS_ID_INVALID,
+    };
     return result;
   }
 
@@ -94,7 +96,8 @@ class LivenessPressureTest : public ::testing::Test {
           .start_point = segments.front().start_point,
           .end_point = segments.back().end_point,
           .value_class = value_class,
-          .unit_count = units};
+          .unit_count = units,
+      };
       intervals_.push_back(interval);
       segments_.insert(segments_.end(), segments.begin(), segments.end());
     }
@@ -111,7 +114,8 @@ class LivenessPressureTest : public ::testing::Test {
         .value_interval_indices = indices_.data(),
         .segments = segments_.data(),
         .segment_count = segments_.size(),
-        .value_segment_ranges = ranges_.data()};
+        .value_segment_ranges = ranges_.data(),
+    };
     return analysis;
   }
 
@@ -143,8 +147,9 @@ class LivenessPressureTest : public ::testing::Test {
                          return loom_liveness_value_class_equal(
                              summary.value_class, interval->value_class);
                        })) {
-        loom_liveness_pressure_summary_t summary = {.value_class =
-                                                        interval->value_class};
+        loom_liveness_pressure_summary_t summary = {
+            .value_class = interval->value_class,
+        };
         summaries.push_back(summary);
       }
     }

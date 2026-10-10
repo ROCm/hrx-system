@@ -60,7 +60,8 @@ class ScheduleSourceSuffixTest : public ::testing::Test {
         .producer_event_id = UINT16_MAX,
         .consumer_event_id = UINT16_MAX,
         .value_operand_index = UINT16_MAX,
-        .kind = kind};
+        .kind = kind,
+    };
     IREE_ASSERT_OK(loom_low_schedule_dependency_graph_append(
         &graph_, dependency, &arena_));
   }

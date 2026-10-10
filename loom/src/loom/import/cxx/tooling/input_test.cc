@@ -138,9 +138,11 @@ TEST_F(InputTest, CapturedHeaderMacroSpellingOutlivesSourceOwners) {
   source.replace(source.find("source_capture.h"),
                  std::strlen("source_capture.h"), header_filename);
   IREE_ASSERT_OK(Write(header.path(), header_source));
-  loom_input_request_t request = {.source = View(source),
-                                  .path = IREE_SV("capture.cxx-test"),
-                                  .options = IREE_SV("root=captured_sum")};
+  loom_input_request_t request = {
+      .source = View(source),
+      .path = IREE_SV("capture.cxx-test"),
+      .options = IREE_SV("root=captured_sum"),
+  };
   IREE_ASSERT_OK(Load(request));
   ASSERT_NE(input_.module, nullptr);
   source.assign(source.size(), '?');
@@ -197,9 +199,11 @@ TEST_F(InputTest, HeaderSnapshotsSurviveFrontendAndFilesystemChanges) {
   const std::string original_source = source;
   const std::string map = directory + "=/logical";
   const iree_string_view_t maps[] = {View(map)};
-  loom_input_request_t request = {.source = View(source),
-                                  .path = main.path_view(),
-                                  .options = IREE_SV("root=entry")};
+  loom_input_request_t request = {
+      .source = View(source),
+      .path = main.path_view(),
+      .options = IREE_SV("root=entry"),
+  };
   request.source_path_options.prefix_maps = {IREE_ARRAYSIZE(maps), maps};
   IREE_ASSERT_OK(Load(request));
   ASSERT_NE(input_.module, nullptr);
@@ -246,18 +250,19 @@ TEST_F(InputTest, RemappingCannotMergeSourceIdentities) {
   const std::string header_map = header.path() + "=same";
   const iree_string_view_t maps[] = {IREE_SV("main.cxx-test=same"),
                                      View(header_map)};
-  loom_input_request_t request = {.source = View(source),
-                                  .path = IREE_SV("main.cxx-test")};
+  loom_input_request_t request = {
+      .source = View(source),
+      .path = IREE_SV("main.cxx-test"),
+  };
   request.source_path_options.prefix_maps = {IREE_ARRAYSIZE(maps), maps};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Load(request));
   EXPECT_EQ(input_.module, nullptr);
 }
 
 TEST_F(InputTest, OptionsAndFailuresUseNativeAdmission) {
-  loom_input_request_t request =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  request.path = IREE_SV("source.cxx-test");
+  loom_input_request_t request = {
+      .path = IREE_SV("source.cxx-test"),
+  };
   request.source = IREE_SV(
       "static_assert(sizeof(long) == 4); int entry() { return VALUE; }\n"
       "int unused() { return 9; }\n");

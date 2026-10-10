@@ -147,7 +147,10 @@ TEST_F(OperandDictionaryParseTest, DictionaryScratchEndsBeforeTheNextField) {
   ASSERT_NE(module, nullptr);
   loom_parser_scope_t scope = {};
   loom_parser_t parser = {
-      .module = module, .context = &context_, .scope = &scope};
+      .module = module,
+      .context = &context_,
+      .scope = &scope,
+  };
   parser.definition_scope.pop_at = UINT16_MAX;
   iree_arena_initialize(&pool_, &parser.parser_arena);
   const char* names[] = {"even", "odd"};

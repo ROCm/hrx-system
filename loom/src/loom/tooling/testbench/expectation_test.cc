@@ -102,20 +102,27 @@ class ExpectationTest : public ::testing::Test {
     loom_testbench_expectation_plan_t expectation = {
         .kind = LOOM_TESTBENCH_EXPECTATION_CLOSE,
         .type = loom_type_scalar(scalar_type),
-        .close = close};
+        .close = close,
+    };
     IREE_ASSERT_OK(loom_module_define_value(module, expectation.type,
                                             &expectation.actual_value_id));
     IREE_ASSERT_OK(loom_module_define_value(module, expectation.type,
                                             &expectation.expected_value_id));
-    loom_testbench_case_plan_t case_plan = {.expectations = &expectation,
-                                            .expectation_count = 1};
+    loom_testbench_case_plan_t case_plan = {
+        .expectations = &expectation,
+        .expectation_count = 1,
+    };
     loom_testbench_value_table_t table = {};
     IREE_ASSERT_OK(loom_testbench_value_table_initialize_case(
         module, &case_plan, host_allocator_, &table));
     loom_testbench_value_t actual_value = {
-        .kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR, .scalar = actual};
+        .kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR,
+        .scalar = actual,
+    };
     loom_testbench_value_t expected_value = {
-        .kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR, .scalar = expected};
+        .kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR,
+        .scalar = expected,
+    };
     IREE_ASSERT_OK(loom_testbench_value_table_assign_move(
         &table, expectation.actual_value_id, &actual_value));
     IREE_ASSERT_OK(loom_testbench_value_table_assign_move(
@@ -162,10 +169,9 @@ TEST_F(ExpectationTest, ComparesNarrowScalarsUsingSourceTypes) {
     iree_tooling_value_t actual = {.kind = IREE_TOOLING_VALUE_KIND_RAW_U32};
     actual.storage.u32 = format.one;
     iree_tooling_value_t expected = actual;
-    loom_testbench_close_expectation_plan_t close =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-             // spans intervening work.
-    close.nan_policy = LOOM_CHECK_EXPECT_CLOSE_NAN_DIFFERENT;
+    loom_testbench_close_expectation_plan_t close = {
+        .nan_policy = LOOM_CHECK_EXPECT_CLOSE_NAN_DIFFERENT,
+    };
     ExpectScalarClose(format.type, actual, expected, close, true);
     actual.storage.u32 = format.next;
     ExpectScalarClose(format.type, actual, expected, close, false);
@@ -217,7 +223,8 @@ TEST_F(ExpectationTest, ComparesInfinitiesIndependentlyOfTolerance) {
       loom_testbench_close_expectation_plan_t close = {
           .absolute_tolerance = tolerance,
           .relative_tolerance = tolerance,
-          .nan_policy = LOOM_CHECK_EXPECT_CLOSE_NAN_DIFFERENT};
+          .nan_policy = LOOM_CHECK_EXPECT_CLOSE_NAN_DIFFERENT,
+      };
       ExpectScalarClose(LOOM_SCALAR_TYPE_F64, actual, expected, close,
                         comparison.matched);
     }
@@ -298,13 +305,17 @@ TEST_F(ExpectationTest, ComparesBufferReferencesByLogicalIdentity) {
                                       &block_pool_, nullptr, host_allocator_,
                                       &module));
   loom_testbench_expectation_plan_t expectation = {
-      .kind = LOOM_TESTBENCH_EXPECTATION_EQUAL, .type = loom_type_buffer()};
+      .kind = LOOM_TESTBENCH_EXPECTATION_EQUAL,
+      .type = loom_type_buffer(),
+  };
   IREE_ASSERT_OK(loom_module_define_value(module, expectation.type,
                                           &expectation.actual_value_id));
   IREE_ASSERT_OK(loom_module_define_value(module, expectation.type,
                                           &expectation.expected_value_id));
-  loom_testbench_case_plan_t case_plan = {.expectations = &expectation,
-                                          .expectation_count = 1};
+  loom_testbench_case_plan_t case_plan = {
+      .expectations = &expectation,
+      .expectation_count = 1,
+  };
   loom_testbench_value_table_t table = {};
   IREE_ASSERT_OK(loom_testbench_value_table_initialize_case(
       module, &case_plan, host_allocator_, &table));
@@ -317,12 +328,16 @@ TEST_F(ExpectationTest, ComparesBufferReferencesByLogicalIdentity) {
                      loom_value_id_t expected_allocation,
                      iree_device_size_t expected_offset) {
     loom_testbench_value_table_reset(&table);
-    loom_testbench_value_t actual = {.kind = LOOM_TESTBENCH_VALUE_KIND_BUFFER,
-                                     .buffer = {}};
+    loom_testbench_value_t actual = {
+        .kind = LOOM_TESTBENCH_VALUE_KIND_BUFFER,
+        .buffer = {},
+    };
     loom_testbench_value_set_buffer_reference(actual_allocation, actual_offset,
                                               /*byte_length=*/64, &actual);
-    loom_testbench_value_t expected = {.kind = LOOM_TESTBENCH_VALUE_KIND_BUFFER,
-                                       .buffer = {}};
+    loom_testbench_value_t expected = {
+        .kind = LOOM_TESTBENCH_VALUE_KIND_BUFFER,
+        .buffer = {},
+    };
     loom_testbench_value_set_buffer_reference(
         expected_allocation, expected_offset, /*byte_length=*/64, &expected);
     IREE_ASSERT_OK(loom_testbench_value_table_assign_move(
@@ -485,7 +500,8 @@ check.case @device_event {
       .current_access_kind = IREE_HAL_DEVICE_TSAN_ACCESS_KIND_WRITE,
       .prior_access_kind = IREE_HAL_DEVICE_TSAN_ACCESS_KIND_READ,
       .access_length = 4,
-      .memory_address = 12};
+      .memory_address = 12,
+  };
   iree_hal_device_event_t tsan_event = iree_hal_device_event_default();
   tsan_event.type = IREE_HAL_DEVICE_EVENT_TYPE_TSAN_REPORT;
   tsan_event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
@@ -500,7 +516,8 @@ check.case @device_event {
       .check_kind = IREE_HAL_DEVICE_UBSAN_CHECK_KIND_ASSERTION,
       .site_id = 17,
       .operand0 = 3,
-      .operand1 = 4};
+      .operand1 = 4,
+  };
   iree_hal_device_event_t ubsan_event = iree_hal_device_event_default();
   ubsan_event.type = IREE_HAL_DEVICE_EVENT_TYPE_UBSAN_REPORT;
   ubsan_event.payload =

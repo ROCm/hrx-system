@@ -78,7 +78,8 @@ TEST(JsonSink, SimpleStructuredError) {
       .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
-      .emitter = LOOM_EMITTER_PARSER};
+      .emitter = LOOM_EMITTER_PARSER,
+  };
 
   std::string json = EmitJson(&diagnostic);
   EXPECT_NE(json.find("\"severity\":\"error\""), std::string::npos);
@@ -109,7 +110,8 @@ TEST(JsonSink, ObjectWriterOmitsTrailingNewline) {
       .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
-      .emitter = LOOM_EMITTER_PARSER};
+      .emitter = LOOM_EMITTER_PARSER,
+  };
 
   std::string json = EmitJsonObject(&diagnostic);
   EXPECT_NE(json.find("\"error_id\":\"ERR_PARSE_001\""), std::string::npos);
@@ -126,7 +128,8 @@ TEST(JsonSink, WarningFormat) {
       .severity = LOOM_DIAGNOSTIC_WARNING,
       .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
       .params = params,
-      .param_count = IREE_ARRAYSIZE(params)};
+      .param_count = IREE_ARRAYSIZE(params),
+  };
 
   std::string json = EmitJson(&diagnostic);
   EXPECT_NE(json.find("\"severity\":\"warning\""), std::string::npos);
@@ -157,7 +160,8 @@ TEST(JsonSink, BackendPressureRemarkIsStructured) {
       .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_BACKEND, 3),
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
-      .emitter = LOOM_EMITTER_PASS};
+      .emitter = LOOM_EMITTER_PASS,
+  };
 
   std::string json = EmitJson(&diagnostic);
   EXPECT_NE(json.find("\"severity\":\"remark\""), std::string::npos);
@@ -196,7 +200,8 @@ TEST(JsonSink, StructuredSameType) {
       .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 1),
       .params = params,
       .param_count = 4,
-      .emitter = LOOM_EMITTER_VERIFIER};
+      .emitter = LOOM_EMITTER_VERIFIER,
+  };
 
   std::string json = EmitJson(&diagnostic, {loom_type_format_minimal, nullptr});
 
@@ -237,7 +242,8 @@ TEST(JsonSink, StructuredStructureError) {
       .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 1),
       .params = params,
       .param_count = 3,
-      .emitter = LOOM_EMITTER_VERIFIER};
+      .emitter = LOOM_EMITTER_VERIFIER,
+  };
 
   std::string json = EmitJson(&diagnostic);
 
@@ -263,7 +269,8 @@ TEST(JsonSink, StructuredBytecodeRangeUsesU64Params) {
       .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_BYTECODE, 7),
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
-      .emitter = LOOM_EMITTER_BYTECODE_READER};
+      .emitter = LOOM_EMITTER_BYTECODE_READER,
+  };
 
   std::string json = EmitJson(&diagnostic);
 
@@ -288,7 +295,8 @@ TEST(JsonSink, EscapesSpecialCharacters) {
       .severity = LOOM_DIAGNOSTIC_ERROR,
       .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
       .params = params,
-      .param_count = IREE_ARRAYSIZE(params)};
+      .param_count = IREE_ARRAYSIZE(params),
+  };
 
   std::string json = EmitJson(&diagnostic);
   EXPECT_NE(json.find("line1\\nline2\\ttab\\\"quote\\\\backslash"),
@@ -317,14 +325,13 @@ TEST(JsonSink, SerializesSourceRangesAndHighlights) {
       {5, 18},
   };
 
-  loom_diagnostic_t diagnostic =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
-  diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
-  diagnostic.params = params;
-  diagnostic.param_count = IREE_ARRAYSIZE(params);
-  diagnostic.emitter = LOOM_EMITTER_VERIFIER;
+  loom_diagnostic_t diagnostic = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .emitter = LOOM_EMITTER_VERIFIER,
+  };
   diagnostic.origin.provenance = LOOM_SOURCE_PROVENANCE_PRINTED_IR_FALLBACK;
   diagnostic.origin.filename = IREE_SV("<verifier>");
   diagnostic.origin.source = iree_make_cstring_view(source);
@@ -386,7 +393,8 @@ TEST(JsonSink, SerializesSuccessorFieldRefs) {
       .severity = LOOM_DIAGNOSTIC_ERROR,
       .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 23),
       .params = params,
-      .param_count = IREE_ARRAYSIZE(params)};
+      .param_count = IREE_ARRAYSIZE(params),
+  };
 
   std::string json = EmitJson(&diagnostic);
   EXPECT_NE(json.find("\"param_fields\":{\"successor_index\":{"
@@ -405,14 +413,13 @@ TEST(JsonSink, SerializesClippedSourceExcerpt) {
       .start = 160,
       .end = 163,
   }};
-  loom_diagnostic_t diagnostic =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
-  diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
-  diagnostic.params = params;
-  diagnostic.param_count = IREE_ARRAYSIZE(params);
-  diagnostic.emitter = LOOM_EMITTER_PARSER;
+  loom_diagnostic_t diagnostic = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .emitter = LOOM_EMITTER_PARSER,
+  };
   diagnostic.origin.provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE;
   diagnostic.origin.filename = IREE_SV("model.loom");
   diagnostic.origin.source =
@@ -446,7 +453,8 @@ TEST(JsonSink, SerializesUnavailableSourceProvenance) {
       .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
-      .emitter = LOOM_EMITTER_VERIFIER};
+      .emitter = LOOM_EMITTER_VERIFIER,
+  };
   diagnostic.origin.provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE;
   diagnostic.source_location.provenance =
       LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE;
@@ -472,13 +480,12 @@ TEST(JsonSink, SerializesUnavailableSourceProvenance) {
 
 TEST(JsonSink, SerializesLocationsWithoutInventingExcerpts) {
   loom_diagnostic_param_t params[] = {loom_param_string(IREE_SV("x"))};
-  loom_diagnostic_t diagnostic =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
-  diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
-  diagnostic.params = params;
-  diagnostic.param_count = IREE_ARRAYSIZE(params);
+  loom_diagnostic_t diagnostic = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
   diagnostic.origin.provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE;
   diagnostic.origin.filename = IREE_SV("kernel.cxx");
   diagnostic.origin.start_line = 3;
@@ -487,7 +494,9 @@ TEST(JsonSink, SerializesLocationsWithoutInventingExcerpts) {
   diagnostic.origin.end_column = 34;
   diagnostic.source_location = diagnostic.origin;
   loom_diagnostic_related_location_t related = {
-      .label = IREE_SV("declared here"), .source_location = diagnostic.origin};
+      .label = IREE_SV("declared here"),
+      .source_location = diagnostic.origin,
+  };
   related.source_location.filename = IREE_SV("header.h");
   diagnostic.related_locations = &related;
   diagnostic.related_location_count = 1;
@@ -541,7 +550,8 @@ TEST(JsonSink, SerializesRelatedLocations) {
       .param_count = IREE_ARRAYSIZE(params),
       .emitter = LOOM_EMITTER_VERIFIER,
       .related_locations = related_locations,
-      .related_location_count = IREE_ARRAYSIZE(related_locations)};
+      .related_location_count = IREE_ARRAYSIZE(related_locations),
+  };
 
   std::string json = EmitJson(&diagnostic);
   EXPECT_NE(json.find("\"related_locations\":[{\"label\":\"consumed here\","
@@ -569,7 +579,8 @@ TEST(JsonSink, SerializesOmittedRelatedLocationCount) {
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
       .emitter = LOOM_EMITTER_VERIFIER,
-      .related_location_omitted_count = 5};
+      .related_location_omitted_count = 5,
+  };
 
   std::string json = EmitJson(&diagnostic);
   EXPECT_NE(json.find("\"related_location_omitted_count\":5"),
@@ -588,7 +599,8 @@ TEST(JsonSink, SerializesOmittedHighlightCount) {
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
       .emitter = LOOM_EMITTER_VERIFIER,
-      .highlight_omitted_count = 6};
+      .highlight_omitted_count = 6,
+  };
 
   std::string json = EmitJson(&diagnostic);
   EXPECT_NE(json.find("\"highlight_omitted_count\":6"), std::string::npos)
@@ -616,7 +628,8 @@ TEST(JsonSink, MultipleDiagnostics) {
       .severity = LOOM_DIAGNOSTIC_ERROR,
       .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
       .params = params1,
-      .param_count = IREE_ARRAYSIZE(params1)};
+      .param_count = IREE_ARRAYSIZE(params1),
+  };
   IREE_ASSERT_OK(loom_diagnostic_json_sink(&options, &d1));
 
   loom_diagnostic_param_t params2[] = {
@@ -626,7 +639,8 @@ TEST(JsonSink, MultipleDiagnostics) {
       .severity = LOOM_DIAGNOSTIC_WARNING,
       .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
       .params = params2,
-      .param_count = IREE_ARRAYSIZE(params2)};
+      .param_count = IREE_ARRAYSIZE(params2),
+  };
   IREE_ASSERT_OK(loom_diagnostic_json_sink(&options, &d2));
 
   std::string output(iree_string_builder_buffer(&builder),

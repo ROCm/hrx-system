@@ -47,7 +47,8 @@ SourcePtr Source(const char* name, const char* text) {
   loomc_source_options_t options = {
       .identifier = loomc_make_cstring_view(name),
       .contents = loomc_make_byte_span(text, strlen(text)),
-      .storage = LOOMC_SOURCE_STORAGE_COPY};
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
+  };
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(
       loomc_source_create(&options, loomc_allocator_system(), &source));
@@ -159,7 +160,8 @@ TEST_F(CxxTest, RejectedSourceRetainsBorrowedContentsAndAllowsReuse) {
   const std::string expected = text;
   loomc_source_options_t source_options = {
       .identifier = loomc_make_cstring_view("broken.cpp"),
-      .contents = loomc_make_byte_span(text.data(), text.size())};
+      .contents = loomc_make_byte_span(text.data(), text.size()),
+  };
   loomc_source_t* source = nullptr;
   LOOMC_ASSERT_OK(
       loomc_source_create(&source_options, loomc_allocator_system(), &source));
@@ -214,10 +216,9 @@ TEST_F(CxxTest, RenamedExportsLinkWithTheirTypesAfterSourceRelease) {
       LOOMC_ASSERT_OK(loomc_link_index_builder_create(
           context_.get(), nullptr, loomc_allocator_system(), &builder));
       LinkBuilderPtr builder_owner(builder);
-      loomc_link_index_source_options_t provider =
-          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment
-               // sequencing spans intervening work.
-      provider.role = LOOMC_LINK_PROVIDER_ROLE_LIBRARY;
+      loomc_link_index_source_options_t provider = {
+          .role = LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
+      };
       LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(builder, library,
                                                           &provider, nullptr));
       provider.role = LOOMC_LINK_PROVIDER_ROLE_INPUT;
@@ -240,7 +241,8 @@ TEST_F(CxxTest, RenamedExportsLinkWithTheirTypesAfterSourceRelease) {
       loomc_link_options_t options = {
           .link_index = index,
           .mode = LOOMC_LINK_MODE_LINK,
-          .flags = LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS};
+          .flags = LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS,
+      };
       loomc_module_t* linked = nullptr;
       LOOMC_ASSERT_OK(loomc_link_module(linker, workspace_.get(), &options,
                                         &linked, &result));
@@ -315,17 +317,16 @@ TEST_F(CxxTest, OptionsAndSharedIncludeProviderAcrossWorkers) {
   const auto root = loomc_make_cstring_view("first");
   const loomc_cxx_define_t define = {loomc_make_cstring_view("FACTOR"),
                                      loomc_make_cstring_view("7")};
-  loomc_cxx_import_options_t options =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  options.source_provider = {HeaderCache::Resolve, &cache};
-  options.system_include_paths = &include_path;
-  options.system_include_path_count = 1;
-  options.roots = &root;
-  options.root_count = 1;
-  options.defines = &define;
-  options.define_count = 1;
-  options.flags = LOOMC_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES;
+  loomc_cxx_import_options_t options = {
+      .flags = LOOMC_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES,
+      .source_provider = {HeaderCache::Resolve, &cache},
+      .system_include_paths = &include_path,
+      .system_include_path_count = 1,
+      .defines = &define,
+      .define_count = 1,
+      .roots = &root,
+      .root_count = 1,
+  };
   std::array<ModulePtr, 2> modules;
   std::array<std::thread, 2> workers;
   for (size_t i = 0; i < workers.size(); ++i) {
@@ -371,7 +372,8 @@ TEST_F(CxxTest, HeaderDiagnosticSurvivesProviderDestruction) {
   loomc_cxx_import_options_t options = {
       .source_provider = {HeaderCache::Resolve, &cache},
       .include_paths = &path,
-      .include_path_count = 1};
+      .include_path_count = 1,
+  };
   LOOMC_ASSERT_OK(Import(source.get(), &options));
   source.reset();
   cache.header.reset();
@@ -396,7 +398,8 @@ TEST_F(CxxTest, SourcePathMapperPreservesPhysicalIncludeLookup) {
       .source_provider = {HeaderCache::Resolve, &cache},
       .source_path_mapper = {PrefixSourcePathMapper::Map, &mapper},
       .include_paths = &path,
-      .include_path_count = 1};
+      .include_path_count = 1,
+  };
   LOOMC_ASSERT_OK(Import(source.get(), &options));
   ASSERT_FALSE(loomc_result_succeeded(result_.get()));
   ASSERT_GT(loomc_result_diagnostic_count(result_.get()), 0u);
@@ -415,10 +418,9 @@ TEST_F(CxxTest, SourcePathMapperCannotMergeDistinctSources) {
                        "#include <helper.h>\n"
                        "int entry() { return helper(); }");
   auto path = loomc_make_cstring_view("/headers");
-  loomc_cxx_import_options_t options =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  options.source_provider = {HeaderCache::Resolve, &cache};
+  loomc_cxx_import_options_t options = {
+      .source_provider = {HeaderCache::Resolve, &cache},
+  };
   options.source_path_mapper.fn = [](void*, loomc_string_view_t,
                                      loomc_string_view_t* out_identifier) {
     *out_identifier = loomc_make_cstring_view("merged.cpp");
@@ -434,10 +436,9 @@ TEST_F(CxxTest, SourcePathMapperCannotMergeDistinctSources) {
 
 TEST_F(CxxTest, InvalidOptionsClearOutputs) {
   auto source = Source("unit.cpp", "int value() { return 42; }");
-  loomc_cxx_import_options_t options =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  options.standard = {nullptr, 1};
+  loomc_cxx_import_options_t options = {
+      .standard = {nullptr, 1},
+  };
   LOOMC_ASSERT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
                          Import(source.get(), &options));
   options = {};
@@ -495,11 +496,10 @@ TEST_F(CxxTest, LaunchRangesUseNormalCompilationConfigValidation) {
     ModulePtr config_owner(config);
     ResultPtr config_result(result);
     ExpectSuccess(result);
-    loomc_compile_options_t options =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    options.config_module = config;
-    options.config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
+    loomc_compile_options_t options = {
+        .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+        .config_module = config,
+    };
     LOOMC_ASSERT_OK(loomc_compile_module(compiler, workspace_.get(), passes,
                                          module_.get(), &options,
                                          loomc_allocator_system(), &result));
@@ -587,11 +587,10 @@ TEST_F(CxxTest, ConfigProvidersSpecializeFreshBytecodeAfterImportRelease) {
                                    std::to_string(factor)),
               std::string::npos);
 
-    loomc_compile_options_t options =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    options.config_module = provider;
-    options.config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
+    loomc_compile_options_t options = {
+        .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+        .config_module = provider,
+    };
     LOOMC_ASSERT_OK(loomc_compile_module(compiler, workspace, passes, module,
                                          &options, loomc_allocator_system(),
                                          &result));
@@ -648,8 +647,10 @@ TEST_F(CxxTest, AllocationFailuresLeaveNoPartialOutputs) {
        {"int entry() { return 42; }", "int entry() { return unknown; }"}) {
     auto source = Source("unit.cpp", text);
     auto path = loomc_make_cstring_view("/headers");
-    loomc_cxx_import_options_t options = {.include_paths = &path,
-                                          .include_path_count = 1};
+    loomc_cxx_import_options_t options = {
+        .include_paths = &path,
+        .include_path_count = 1,
+    };
     FailingAllocator baseline = {LOOMC_HOST_SIZE_MAX};
     LOOMC_ASSERT_OK(
         Import(source.get(), &options, {&baseline, FailingAllocator::Control}));

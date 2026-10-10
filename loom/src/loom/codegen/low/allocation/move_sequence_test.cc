@@ -21,7 +21,8 @@ const loom_low_descriptor_set_t* IndependentDescriptorSet() {
   static const loom_low_descriptor_set_t kDescriptorSet = [] {
     loom_low_descriptor_set_t descriptor_set = {
         .reg_classes = kRegClasses,
-        .reg_class_count = IREE_ARRAYSIZE(kRegClasses)};
+        .reg_class_count = IREE_ARRAYSIZE(kRegClasses),
+    };
     return descriptor_set;
   }();
   return &kDescriptorSet;
@@ -93,7 +94,8 @@ const loom_low_descriptor_set_t* ExplicitDescriptorSet() {
         .physical_register_count = IREE_ARRAYSIZE(kPhysicalRegisters),
         .physical_register_atomic_units = kAtomicUnits,
         .physical_register_atomic_unit_count = IREE_ARRAYSIZE(kAtomicUnits),
-        .physical_register_unit_count = 6};
+        .physical_register_unit_count = 6,
+    };
     return descriptor_set;
   }();
   return &kDescriptorSet;
@@ -513,8 +515,9 @@ TEST(LowMoveSequenceTest, ReusesBoundedSolverStorageAcrossIncreasingGroups) {
   loom_low_move_sequence_scratch_t scratch = {};
   IREE_ASSERT_OK(loom_low_move_sequence_scratch_initialize(
       arena.arena(), kCapacity, &scratch));
-  loom_low_move_sequence_options_t options = {.descriptor_set =
-                                                  IndependentDescriptorSet()};
+  loom_low_move_sequence_options_t options = {
+      .descriptor_set = IndependentDescriptorSet(),
+  };
   loom_low_move_t output[kCapacity] = {};
   iree_host_size_t storage_bytes = arena.arena()->used_allocation_size;
   for (uint32_t count = 0; count <= kCapacity; ++count) {
@@ -555,7 +558,8 @@ TEST(LowMoveSequenceTest, ReusesBoundedCycleStorageAcrossClassesAndGroups) {
   TemporaryResolver resolver = {temporaries, IREE_ARRAYSIZE(temporaries)};
   loom_low_move_sequence_options_t options = {
       .descriptor_set = IndependentDescriptorSet(),
-      .resolve_temporary = {ResolveTemporary, &resolver}};
+      .resolve_temporary = {ResolveTemporary, &resolver},
+  };
   loom_low_move_t output[kCapacity + kCapacity / 2] = {};
   iree_host_size_t storage_bytes = 0;
   for (uint32_t count = 2; count <= kCapacity; count += 2) {

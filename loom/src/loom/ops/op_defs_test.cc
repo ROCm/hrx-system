@@ -334,17 +334,14 @@ TEST(DialectTableHelpers, LookupSemanticsByDialectAndIndex) {
 TEST(MemoryAccessHelpers, OperandIndexIsPayload) {
   loom_op_t op = {.operand_count = 5};
 
-  loom_memory_access_vtable_t memory_access =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  memory_access.operation_kind = LOOM_MEMORY_ACCESS_OPERATION_STORE;
-  memory_access.value_operand_index = 3;
-  memory_access.expected_operand_index = LOOM_OPERAND_INDEX_NONE;
-  memory_access.replacement_operand_index = LOOM_OPERAND_INDEX_NONE;
+  loom_memory_access_vtable_t memory_access = {
+      .operation_kind = LOOM_MEMORY_ACCESS_OPERATION_STORE,
+      .value_operand_index = 3,
+      .expected_operand_index = LOOM_OPERAND_INDEX_NONE,
+      .replacement_operand_index = LOOM_OPERAND_INDEX_NONE,
+  };
 
-  loom_op_vtable_t op_vtable =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-           // differs from list initialization.
+  loom_op_vtable_t op_vtable = {};
   op_vtable.fixed_operand_count = op.operand_count;
   op_vtable.memory_access = &memory_access;
 

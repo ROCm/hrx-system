@@ -578,7 +578,10 @@ TEST_F(ParserTest, FunctionTypeScratchAndModulePayloadAreReusedOnInternHits) {
                                       iree_allocator_system(), &module));
   loom_parser_scope_t root_scope = {};
   loom_parser_t parser = {
-      .module = module, .context = &context_, .scope = &root_scope};
+      .module = module,
+      .context = &context_,
+      .scope = &root_scope,
+  };
   parser.definition_scope.pop_at = UINT16_MAX;
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
 
@@ -633,7 +636,10 @@ TEST_F(ParserTest, RegisterTypeRequiresTargetLowDescriptorContext) {
                                       iree_allocator_system(), &module));
   loom_parser_scope_t root_scope = {};
   loom_parser_t parser = {
-      .module = module, .context = &context_, .scope = &root_scope};
+      .module = module,
+      .context = &context_,
+      .scope = &root_scope,
+  };
   parser.definition_scope.pop_at = UINT16_MAX;
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
   loom_tokenizer_initialize(IREE_SV("reg<test.ptr x4>"), IREE_SV("test.loom"),

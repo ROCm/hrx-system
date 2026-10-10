@@ -210,7 +210,9 @@ class VerifyTest : public ::testing::Test {
   loom_module_t* ParseSourceModule(const char* source, const char* filename) {
     DiagnosticCapture parse_capture;
     loom_text_parse_options_t parse_options = {
-        .diagnostic_sink = parse_capture.sink(), .max_errors = 20};
+        .diagnostic_sink = parse_capture.sink(),
+        .max_errors = 20,
+    };
     loom_low_descriptor_text_asm_environment_initialize(
         &low_registry_.registry, &parse_options.low_asm_environment);
     loom_module_t* parsed_module = nullptr;
@@ -276,7 +278,8 @@ class VerifyTest : public ::testing::Test {
     loom_verify_options_t options = {
         .sink = capture->sink(),
         .max_errors = 20,
-        .source_resolver = {loom_source_table_resolve, &resolver_data}};
+        .source_resolver = {loom_source_table_resolve, &resolver_data},
+    };
 
     loom_verify_result_t result = {};
     IREE_EXPECT_OK(loom_verify_module(parsed_module, &options, &result));
@@ -1299,7 +1302,8 @@ TEST_F(VerifyTest, ParsedSourceResolverHighlightsExactResultAndOperandTokens) {
   loom_verify_options_t options = {
       .sink = structured.sink(),
       .max_errors = 20,
-      .source_resolver = {loom_source_table_resolve, &resolver_data}};
+      .source_resolver = {loom_source_table_resolve, &resolver_data},
+  };
 
   loom_verify_result_t result = {};
   IREE_EXPECT_OK(loom_verify_module(parsed_module, &options, &result));
@@ -1371,7 +1375,8 @@ TEST_F(VerifyTest, ParsedUseAfterConsumeReportsRelatedConsumeLocation) {
   loom_verify_options_t options = {
       .sink = structured.sink(),
       .max_errors = 20,
-      .source_resolver = {loom_source_table_resolve, &resolver_data}};
+      .source_resolver = {loom_source_table_resolve, &resolver_data},
+  };
 
   loom_verify_result_t result = {};
   IREE_EXPECT_OK(loom_verify_module(parsed_module, &options, &result));

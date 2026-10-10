@@ -80,12 +80,11 @@ class LowAllocationSearchTest : public ::testing::Test {
 };
 
 loom_liveness_value_class_t RegisterValueClass(uint64_t descriptor_set_id) {
-  loom_liveness_value_class_t value_class =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  value_class.type_kind = LOOM_TYPE_REGISTER;
-  value_class.register_descriptor_set_stable_id = descriptor_set_id;
-  value_class.register_class_id = 0;
+  loom_liveness_value_class_t value_class = {
+      .type_kind = LOOM_TYPE_REGISTER,
+      .register_class_id = 0,
+      .register_descriptor_set_stable_id = descriptor_set_id,
+  };
   return value_class;
 }
 
@@ -93,11 +92,13 @@ loom_liveness_interval_t Interval(loom_value_id_t value_id, uint32_t start,
                                   uint32_t end,
                                   loom_liveness_value_class_t value_class,
                                   uint32_t unit_count) {
-  loom_liveness_interval_t interval = {.value_id = value_id,
-                                       .start_point = start,
-                                       .end_point = end,
-                                       .value_class = value_class,
-                                       .unit_count = unit_count};
+  loom_liveness_interval_t interval = {
+      .value_id = value_id,
+      .start_point = start,
+      .end_point = end,
+      .value_class = value_class,
+      .unit_count = unit_count,
+  };
   return interval;
 }
 
@@ -114,7 +115,8 @@ loom_low_allocation_assignment_t Assignment(
       .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
       .location_base = location_base,
       .location_count = location_count,
-      .unit_point_start = unit_point_start};
+      .unit_point_start = unit_point_start,
+  };
   return assignment;
 }
 
@@ -126,14 +128,18 @@ loom_low_allocation_class_capacity_t Capacity(uint32_t max_units) {
       .alloc_unit_bits = 32,
       .spill_slot_space = LOOM_LOW_SPILL_SLOT_SPACE_UNKNOWN,
       .is_spillable = true,
-      .is_bounded = true};
+      .is_bounded = true,
+  };
   return capacity;
 }
 
 loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_class,
                                         uint64_t stable_id) {
   loom_low_descriptor_set_t descriptor_set = {
-      .stable_id = stable_id, .reg_classes = reg_class, .reg_class_count = 1};
+      .stable_id = stable_id,
+      .reg_classes = reg_class,
+      .reg_class_count = 1,
+  };
   return descriptor_set;
 }
 
@@ -143,23 +149,25 @@ loom_low_reg_class_t RegClass(uint32_t allocatable_count,
       .flags = flags,
       .alloc_unit_bits = 32,
       .allocatable_count = (uint16_t)allocatable_count,
-      .spill_class_id = LOOM_LOW_REG_CLASS_NONE};
+      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+  };
   return reg_class;
 }
 
 loom_low_resolved_target_t ResolvedTarget(
     const loom_low_descriptor_set_t* descriptor_set) {
-  loom_low_resolved_target_t target =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  target.descriptor_set = descriptor_set;
+  loom_low_resolved_target_t target = {
+      .descriptor_set = descriptor_set,
+  };
   target.descriptor_set_key = IREE_SV("test");
   return target;
 }
 
 loom_liveness_block_info_t Block(uint32_t start_point, uint32_t end_point) {
-  loom_liveness_block_info_t block = {.start_point = start_point,
-                                      .end_point = end_point};
+  loom_liveness_block_info_t block = {
+      .start_point = start_point,
+      .end_point = end_point,
+  };
   return block;
 }
 
@@ -182,7 +190,8 @@ loom_low_placement_relation_t LocationRelation(
       .kind = kind,
       .cause = LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY,
       .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_PREFERRED,
-      .priority = priority};
+      .priority = priority,
+  };
   return relation;
 }
 
@@ -218,7 +227,8 @@ uint32_t FindFreeLocationWithPlacement(
       .interval_count = IREE_ARRAYSIZE(intervals),
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .value_interval_indices = interval_indices};
+      .value_interval_indices = interval_indices,
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {{0, 2}, {1, 0}};
   uint32_t unit_end_points[] = {6, 1};
@@ -228,7 +238,8 @@ uint32_t FindFreeLocationWithPlacement(
       .end_points = unit_end_points,
       .point_count = IREE_ARRAYSIZE(unit_end_points),
       .values_with_incomplete_storage_segments = {liveness.value_count,
-                                                  edge_handoff_words}};
+                                                  edge_handoff_words},
+  };
 
   const loom_low_reg_class_t reg_class =
       RegClass(max_units, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
@@ -240,7 +251,8 @@ uint32_t FindFreeLocationWithPlacement(
   loom_low_allocation_target_constraints_t target_constraints = {
       .target = &target,
       .max_assigned_location_end_by_reg_class =
-          max_assigned_location_end_by_reg_class};
+          max_assigned_location_end_by_reg_class,
+  };
 
   const uint32_t counterpart_base =
       physical_descriptor_set
@@ -260,7 +272,8 @@ uint32_t FindFreeLocationWithPlacement(
       .assignments = assignments,
       .assignment_count = IREE_ARRAYSIZE(assignments),
       .assignment_indices_by_value_ordinal =
-          assignment_indices_by_value_ordinal};
+          assignment_indices_by_value_ordinal,
+  };
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_CHECK_OK(loom_low_allocation_active_set_initialize(
@@ -291,29 +304,27 @@ uint32_t FindFreeLocationWithPlacement(
     placement.ranges_by_source_ordinal = source_ranges;
   }
 
-  loom_low_allocation_search_context_t context =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  context.module = module;
-  context.descriptor_set = &descriptor_set;
-  context.liveness = &liveness;
-  context.unit_liveness = &unit_liveness;
-  context.target_constraints = &target_constraints;
-  context.assignment_map = &assignment_map;
-  context.placement = &placement;
-  context.active_set = &active_set;
-  context.storage_leases = &storage_leases;
+  loom_low_allocation_search_context_t context = {
+      .module = module,
+      .descriptor_set = &descriptor_set,
+      .liveness = &liveness,
+      .unit_liveness = &unit_liveness,
+      .target_constraints = &target_constraints,
+      .assignment_map = &assignment_map,
+      .placement = &placement,
+      .active_set = &active_set,
+      .storage_leases = &storage_leases,
+  };
 
   const loom_low_placement_value_ref_t refs[] = {
       {0, LOOM_LOW_PLACEMENT_VALUE_RESULT, 0},
       {1, LOOM_LOW_PLACEMENT_VALUE_RESULT, 0},
   };
-  loom_low_placement_predicate_t predicate =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  predicate.result = 0;
-  predicate.source = 1;
-  predicate.unit_count = 1;
+  loom_low_placement_predicate_t predicate = {
+      .result = 0,
+      .source = 1,
+      .unit_count = 1,
+  };
   const loom_low_placement_clause_t clause = {0, 1, 1,
                                               LOOM_LOW_PLACEMENT_CLAUSE_ANY};
   const loom_low_placement_preference_t preference = {refs, &predicate, &clause,
@@ -399,12 +410,14 @@ uint32_t FindFreeLocationWithStorageLease(
       .interval_count = IREE_ARRAYSIZE(intervals),
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .value_interval_indices = interval_indices};
+      .value_interval_indices = interval_indices,
+  };
   loom_local_value_domain_t value_domain = {
       .module = module,
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED};
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED,
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {
       {0, 2}, {options.unit_count, 0}};
@@ -415,10 +428,12 @@ uint32_t FindFreeLocationWithStorageLease(
       .values = unit_values,
       .end_points = unit_end_points.data(),
       .point_count = unit_end_points.size(),
-      .values_with_incomplete_storage_segments = {
-          liveness.value_count,
-          edge_handoff_words,
-      }};
+      .values_with_incomplete_storage_segments =
+          {
+              liveness.value_count,
+              edge_handoff_words,
+          },
+  };
 
   const loom_low_reg_class_t reg_class =
       RegClass(/*allocatable_count=*/0, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
@@ -426,12 +441,11 @@ uint32_t FindFreeLocationWithStorageLease(
       DescriptorSet(&reg_class, descriptor_set_id);
   const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
   uint32_t max_assigned_location_end_by_reg_class[] = {options.lease_base + 1};
-  loom_low_allocation_target_constraints_t target_constraints =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  target_constraints.target = &target;
-  target_constraints.max_assigned_location_end_by_reg_class =
-      max_assigned_location_end_by_reg_class;
+  loom_low_allocation_target_constraints_t target_constraints = {
+      .target = &target,
+      .max_assigned_location_end_by_reg_class =
+          max_assigned_location_end_by_reg_class,
+  };
   loom_low_allocation_resolved_reserved_range_t reserved = {
       0, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 0,
       options.reserved_prefix};
@@ -452,7 +466,8 @@ uint32_t FindFreeLocationWithStorageLease(
       .assignments = assignments,
       .assignment_count = IREE_ARRAYSIZE(assignments),
       .assignment_indices_by_value_ordinal =
-          assignment_indices_by_value_ordinal};
+          assignment_indices_by_value_ordinal,
+  };
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_CHECK_OK(loom_low_allocation_active_set_initialize(
@@ -477,7 +492,8 @@ uint32_t FindFreeLocationWithStorageLease(
       .nodes = schedule_nodes,
       .node_count = IREE_ARRAYSIZE(schedule_nodes),
       .scheduled_node_indices = scheduled_node_indices,
-      .scheduled_node_count = IREE_ARRAYSIZE(scheduled_node_indices)};
+      .scheduled_node_count = IREE_ARRAYSIZE(scheduled_node_indices),
+  };
   loom_low_storage_lease_record_t lease_records[] = {{}};
   lease_records[0].flags = options.lease_flags;
   lease_records[0].packet_index = 0;
@@ -486,7 +502,8 @@ uint32_t FindFreeLocationWithStorageLease(
   loom_low_storage_lease_table_t lease_table = {
       .schedule = &schedule,
       .records = lease_records,
-      .record_count = IREE_ARRAYSIZE(lease_records)};
+      .record_count = IREE_ARRAYSIZE(lease_records),
+  };
   loom_low_allocation_storage_lease_t lease_instances[] = {{}};
   lease_instances[0].lease_record_index = 0;
   lease_instances[0].value_id = leased_value;
@@ -500,14 +517,13 @@ uint32_t FindFreeLocationWithStorageLease(
   lease_instances[0].location_base = options.lease_base;
   lease_instances[0].location_count = 1;
   uint8_t lease_instance_written[] = {1};
-  loom_low_allocation_storage_lease_state_t storage_leases =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-           // differs from list initialization.
-  storage_leases.lease_table = &lease_table;
-  storage_leases.value_domain = &value_domain;
-  storage_leases.unit_liveness = &unit_liveness;
-  storage_leases.instances = lease_instances;
-  storage_leases.instance_written = lease_instance_written;
+  loom_low_allocation_storage_lease_state_t storage_leases = {
+      .lease_table = &lease_table,
+      .value_domain = &value_domain,
+      .unit_liveness = &unit_liveness,
+      .instances = lease_instances,
+      .instance_written = lease_instance_written,
+  };
   storage_leases.pressure_release_record_count = iree_any_bit_set(
       options.lease_flags, LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE);
 
@@ -676,7 +692,8 @@ TEST_F(LowAllocationSearchTest,
       .value_count = IREE_ARRAYSIZE(value_ids),
       .value_interval_indices = interval_indices,
       .pressure_summaries = pressure_summaries,
-      .pressure_summary_count = IREE_ARRAYSIZE(pressure_summaries)};
+      .pressure_summary_count = IREE_ARRAYSIZE(pressure_summaries),
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {
       {0, 0}, {1, 1}, {5, 8}};
@@ -686,10 +703,12 @@ TEST_F(LowAllocationSearchTest,
       .values = unit_values,
       .end_points = unit_end_points,
       .point_count = IREE_ARRAYSIZE(unit_end_points),
-      .values_with_incomplete_storage_segments = {
-          liveness.value_count,
-          edge_handoff_words,
-      }};
+      .values_with_incomplete_storage_segments =
+          {
+              liveness.value_count,
+              edge_handoff_words,
+          },
+  };
 
   const loom_low_reg_class_t reg_class =
       RegClass(/*allocatable_count=*/8, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
@@ -697,12 +716,11 @@ TEST_F(LowAllocationSearchTest,
       DescriptorSet(&reg_class, descriptor_set_id);
   const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
   uint32_t max_assigned_location_end_by_reg_class[] = {0};
-  loom_low_allocation_target_constraints_t target_constraints =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  target_constraints.target = &target;
-  target_constraints.max_assigned_location_end_by_reg_class =
-      max_assigned_location_end_by_reg_class;
+  loom_low_allocation_target_constraints_t target_constraints = {
+      .target = &target,
+      .max_assigned_location_end_by_reg_class =
+          max_assigned_location_end_by_reg_class,
+  };
 
   const uint32_t assignment_indices_by_value_ordinal[] = {
       UINT32_MAX,
@@ -715,7 +733,8 @@ TEST_F(LowAllocationSearchTest,
       .liveness = &liveness,
       .assignments = assignments,
       .assignment_indices_by_value_ordinal =
-          assignment_indices_by_value_ordinal};
+          assignment_indices_by_value_ordinal,
+  };
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
@@ -975,7 +994,8 @@ TEST_F(LowAllocationSearchTest, FindsFreeLocationAfterActiveAndReservedRanges) {
       .interval_count = IREE_ARRAYSIZE(intervals),
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .value_interval_indices = interval_indices};
+      .value_interval_indices = interval_indices,
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {{0, 2}, {2, 0}};
   uint32_t unit_end_points[] = {6, 6, 10, 10};
@@ -985,7 +1005,8 @@ TEST_F(LowAllocationSearchTest, FindsFreeLocationAfterActiveAndReservedRanges) {
       .end_points = unit_end_points,
       .point_count = IREE_ARRAYSIZE(unit_end_points),
       .values_with_incomplete_storage_segments = {liveness.value_count,
-                                                  edge_handoff_words}};
+                                                  edge_handoff_words},
+  };
 
   const loom_low_reg_class_t reg_class =
       RegClass(/*allocatable_count=*/8, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
@@ -1006,7 +1027,8 @@ TEST_F(LowAllocationSearchTest, FindsFreeLocationAfterActiveAndReservedRanges) {
       .reserved_ranges = reserved_ranges,
       .reserved_range_count = IREE_ARRAYSIZE(reserved_ranges),
       .max_assigned_location_end_by_reg_class =
-          max_assigned_location_end_by_reg_class};
+          max_assigned_location_end_by_reg_class,
+  };
 
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(active_value, /*start=*/0, /*end=*/10, value_class,
@@ -1020,7 +1042,8 @@ TEST_F(LowAllocationSearchTest, FindsFreeLocationAfterActiveAndReservedRanges) {
       .assignments = assignments,
       .assignment_count = IREE_ARRAYSIZE(assignments),
       .assignment_indices_by_value_ordinal =
-          assignment_indices_by_value_ordinal};
+          assignment_indices_by_value_ordinal,
+  };
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
@@ -1101,12 +1124,14 @@ TEST_F(LowAllocationSearchTest,
       .interval_count = IREE_ARRAYSIZE(intervals),
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .value_interval_indices = interval_indices};
+      .value_interval_indices = interval_indices,
+  };
   loom_local_value_domain_t value_domain = {
       .module = module,
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED};
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED,
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {{0, 2}, {2, 0}};
   uint32_t unit_end_points[] = {6, 6, 12, 12};
@@ -1116,7 +1141,8 @@ TEST_F(LowAllocationSearchTest,
       .end_points = unit_end_points,
       .point_count = IREE_ARRAYSIZE(unit_end_points),
       .values_with_incomplete_storage_segments = {liveness.value_count,
-                                                  edge_handoff_words}};
+                                                  edge_handoff_words},
+  };
 
   const loom_low_reg_class_t reg_class =
       RegClass(/*allocatable_count=*/2, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
@@ -1127,7 +1153,8 @@ TEST_F(LowAllocationSearchTest,
   loom_low_allocation_target_constraints_t target_constraints = {
       .target = &target,
       .max_assigned_location_end_by_reg_class =
-          max_assigned_location_end_by_reg_class};
+          max_assigned_location_end_by_reg_class,
+  };
 
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(active_value, /*start=*/0, /*end=*/12, value_class,
@@ -1141,7 +1168,8 @@ TEST_F(LowAllocationSearchTest,
       .assignments = assignments,
       .assignment_count = IREE_ARRAYSIZE(assignments),
       .assignment_indices_by_value_ordinal =
-          assignment_indices_by_value_ordinal};
+          assignment_indices_by_value_ordinal,
+  };
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
@@ -1169,7 +1197,8 @@ TEST_F(LowAllocationSearchTest,
       .nodes = schedule_nodes,
       .node_count = IREE_ARRAYSIZE(schedule_nodes),
       .scheduled_node_indices = scheduled_node_indices,
-      .scheduled_node_count = IREE_ARRAYSIZE(scheduled_node_indices)};
+      .scheduled_node_count = IREE_ARRAYSIZE(scheduled_node_indices),
+  };
   loom_low_storage_lease_record_t lease_records[] = {{}};
   lease_records[0].packet_index = 0;
   lease_records[0].release_scope =
@@ -1178,7 +1207,8 @@ TEST_F(LowAllocationSearchTest,
   loom_low_storage_lease_table_t lease_table = {
       .schedule = &schedule,
       .records = lease_records,
-      .record_count = IREE_ARRAYSIZE(lease_records)};
+      .record_count = IREE_ARRAYSIZE(lease_records),
+  };
   loom_low_allocation_storage_lease_t lease_instances[] = {{}};
   lease_instances[0].lease_record_index = 0;
   lease_instances[0].value_id = leased_value;
@@ -1197,7 +1227,8 @@ TEST_F(LowAllocationSearchTest,
       .value_domain = &value_domain,
       .unit_liveness = &unit_liveness,
       .instances = lease_instances,
-      .instance_written = lease_instance_written};
+      .instance_written = lease_instance_written,
+  };
   loom_low_allocation_spill_plan_traffic_t spill_traffic[] = {
       {},
       {
@@ -1278,7 +1309,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
       .interval_count = IREE_ARRAYSIZE(intervals),
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .value_interval_indices = interval_indices};
+      .value_interval_indices = interval_indices,
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {
       {0, 4}, {2, 0}, {4, 0}};
@@ -1289,7 +1321,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
       .end_points = unit_end_points,
       .point_count = IREE_ARRAYSIZE(unit_end_points),
       .values_with_incomplete_storage_segments = {liveness.value_count,
-                                                  edge_handoff_words}};
+                                                  edge_handoff_words},
+  };
 
   const loom_low_reg_class_t reg_class =
       RegClass(/*allocatable_count=*/4, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
@@ -1300,7 +1333,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   loom_low_allocation_target_constraints_t target_constraints = {
       .target = &target,
       .max_assigned_location_end_by_reg_class =
-          max_assigned_location_end_by_reg_class};
+          max_assigned_location_end_by_reg_class,
+  };
 
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(expensive_value, /*start=*/0, /*end=*/20, value_class,
@@ -1317,7 +1351,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
       .assignments = assignments,
       .assignment_count = IREE_ARRAYSIZE(assignments),
       .assignment_indices_by_value_ordinal =
-          assignment_indices_by_value_ordinal};
+          assignment_indices_by_value_ordinal,
+  };
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
@@ -1417,7 +1452,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
       .interval_count = IREE_ARRAYSIZE(intervals),
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .value_interval_indices = interval_indices};
+      .value_interval_indices = interval_indices,
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {
       {0, 4}, {2, 0}, {4, 0}, {5, 0}};
@@ -1428,7 +1464,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
       .end_points = unit_end_points,
       .point_count = IREE_ARRAYSIZE(unit_end_points),
       .values_with_incomplete_storage_segments = {liveness.value_count,
-                                                  edge_handoff_words}};
+                                                  edge_handoff_words},
+  };
 
   const loom_low_reg_class_t reg_class =
       RegClass(/*allocatable_count=*/4, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
@@ -1439,7 +1476,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
   loom_low_allocation_target_constraints_t target_constraints = {
       .target = &target,
       .max_assigned_location_end_by_reg_class =
-          max_assigned_location_end_by_reg_class};
+          max_assigned_location_end_by_reg_class,
+  };
 
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(expensive_value, /*start=*/0, /*end=*/28, value_class,
@@ -1459,7 +1497,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
       .assignments = assignments,
       .assignment_count = IREE_ARRAYSIZE(assignments),
       .assignment_indices_by_value_ordinal =
-          assignment_indices_by_value_ordinal};
+          assignment_indices_by_value_ordinal,
+  };
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(

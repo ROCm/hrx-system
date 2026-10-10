@@ -26,16 +26,16 @@ loom_low_allocation_assignment_t Assignment(
       .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
       .location_base = location_base,
       .location_count = location_count,
-      .unit_point_start = unit_point_start};
+      .unit_point_start = unit_point_start,
+  };
   return assignment;
 }
 
 loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
                                         iree_host_size_t reg_class_count) {
-  loom_low_descriptor_set_t descriptor_set =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-           // differs from list initialization.
-  descriptor_set.reg_classes = reg_classes;
+  loom_low_descriptor_set_t descriptor_set = {
+      .reg_classes = reg_classes,
+  };
   descriptor_set.reg_class_count = reg_class_count;
   return descriptor_set;
 }
@@ -67,7 +67,8 @@ TEST(LowAllocationActiveUnitTest, FindsAndRemovesIndexedConflicts) {
   uint32_t unit_end_points[] = {10, 10, 10, 10};
   loom_low_allocation_unit_liveness_t unit_liveness = {
       .end_points = unit_end_points,
-      .point_count = IREE_ARRAYSIZE(unit_end_points)};
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   const loom_low_allocation_assignment_t assignments[] = {
       Assignment(/*value_id=*/1, /*descriptor_reg_class_id=*/0,
                  /*start_point=*/0, /*end_point=*/10, /*location_base=*/4,
@@ -157,7 +158,8 @@ TEST(LowAllocationActiveUnitTest, RecyclesEntriesAcrossAssignmentLifetimes) {
   uint32_t unit_end_points[] = {10};
   loom_low_allocation_unit_liveness_t unit_liveness = {
       .end_points = unit_end_points,
-      .point_count = IREE_ARRAYSIZE(unit_end_points)};
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   loom_low_allocation_active_unit_index_t index = {};
   IREE_ASSERT_OK(loom_low_allocation_active_unit_index_initialize(
       &descriptor_set, kAssignmentCount, kUnitCount, &arena, &index));
@@ -459,7 +461,8 @@ TEST(LowAllocationActiveUnitTest, RefinesIndexedConflictByUnitStart) {
   loom_low_allocation_unit_liveness_t unit_liveness = {
       .start_points = unit_start_points,
       .end_points = unit_end_points,
-      .point_count = IREE_ARRAYSIZE(unit_end_points)};
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(/*value_id=*/1, /*descriptor_reg_class_id=*/0,
                  /*start_point=*/0, /*end_point=*/10, /*location_base=*/4,
@@ -613,7 +616,8 @@ TEST(LowAllocationActiveUnitTest, IndexesExplicitRegisterAtomicUnits) {
   uint32_t unit_end_points[] = {10, 10};
   loom_low_allocation_unit_liveness_t unit_liveness = {
       .end_points = unit_end_points,
-      .point_count = IREE_ARRAYSIZE(unit_end_points)};
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+  };
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(/*value_id=*/1, /*descriptor_reg_class_id=*/0,
                  /*start_point=*/0, /*end_point=*/10, /*location_base=*/0,

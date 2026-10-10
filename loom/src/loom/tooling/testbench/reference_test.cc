@@ -164,21 +164,31 @@ class ReferenceTest : public ::testing::Test {
         loom_module_intern_string(module_, accumulator, &accumulator_value));
     IREE_CHECK_OK(loom_module_intern_string(module_, result, &result_value));
     const loom_named_attr_t attrs[] = {
-        {.name_id = lhs_name,
-         .reserved = {},
-         .value = loom_attr_string(lhs_value)},
-        {.name_id = rhs_name,
-         .reserved = {},
-         .value = loom_attr_string(rhs_value)},
-        {.name_id = accumulator_name,
-         .reserved = {},
-         .value = loom_attr_string(accumulator_value)},
-        {.name_id = result_name,
-         .reserved = {},
-         .value = loom_attr_string(result_value)},
-        {.name_id = rhs_transposed_name,
-         .reserved = {},
-         .value = loom_attr_bool(true)},
+        {
+            .name_id = lhs_name,
+            .reserved = {},
+            .value = loom_attr_string(lhs_value),
+        },
+        {
+            .name_id = rhs_name,
+            .reserved = {},
+            .value = loom_attr_string(rhs_value),
+        },
+        {
+            .name_id = accumulator_name,
+            .reserved = {},
+            .value = loom_attr_string(accumulator_value),
+        },
+        {
+            .name_id = result_name,
+            .reserved = {},
+            .value = loom_attr_string(result_value),
+        },
+        {
+            .name_id = rhs_transposed_name,
+            .reserved = {},
+            .value = loom_attr_bool(true),
+        },
     };
     const iree_host_size_t attr_count = rhs_transposed ? 5 : 4;
     loom_attribute_t attr = {};

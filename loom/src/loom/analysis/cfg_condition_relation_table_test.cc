@@ -82,7 +82,8 @@ TEST_F(CfgConditionRelationTableTest, InternsEqualPagesAcrossViews) {
       .set_builder = set_builder_,
       .views = views.data(),
       .view_count = static_cast<uint32_t>(views.size()),
-      .block_count = static_cast<uint32_t>(views.size())};
+      .block_count = static_cast<uint32_t>(views.size()),
+  };
   loom_cfg_condition_relation_table_t table = {};
   IREE_ASSERT_OK(loom_cfg_condition_relation_table_publish(
       &builder, &table, &publication_arena_, &retained_arena_));

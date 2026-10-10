@@ -570,7 +570,9 @@ class PacketPlanFixture {
       std::abort();
     }
     loom_low_verify_options_t verify_options = {
-        .descriptor_registry = &target_registry_.registry, .max_errors = 20};
+        .descriptor_registry = &target_registry_.registry,
+        .max_errors = 20,
+    };
     loom_low_verify_result_t verify_result = {};
     loom_low_verify_scratch_t verify_scratch =
         loom_low_verify_scratch_for_module(module_);
@@ -608,13 +610,12 @@ class PacketPlanFixture {
     }
     loom_low_storage_lease_provider_t storage_lease_provider = {};
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
-    loom_low_emission_frame_options_t frame_options =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    frame_options.descriptor_registry = &target_registry_.registry;
-    frame_options.residency_query = loom_amdgpu_occupancy_residency_view;
-    frame_options.instruction_preferences =
-        loom_amdgpu_placement_instruction_preferences(&resolved_target);
+    loom_low_emission_frame_options_t frame_options = {
+        .descriptor_registry = &target_registry_.registry,
+        .residency_query = loom_amdgpu_occupancy_residency_view,
+        .instruction_preferences =
+            loom_amdgpu_placement_instruction_preferences(&resolved_target),
+    };
     frame_options.schedule_pair_affinities = pair_affinities;
     frame_options.schedule_structural_state_reads = structural_state_reads;
     frame_options.schedule_flags =

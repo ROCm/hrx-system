@@ -50,7 +50,8 @@ class ReferenceTransferTest : public ::testing::Test {
         .minimum_alignment = 64,
         .root_value_id = value,
         .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
-        .origin = origin};
+        .origin = origin,
+    };
     loom_value_facts_t facts;
     IREE_CHECK_OK(loom_value_facts_make_buffer_reference(&facts_.context,
                                                          reference, &facts));
@@ -196,7 +197,8 @@ TEST_F(ReferenceTransferTest, ViewOriginsPreserveCoordinatesAcrossTables) {
       .root_value_id = buffer,
       .buffer_value_id = buffer,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
-      .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, buffer}};
+      .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, buffer},
+  };
   loom_value_facts_t source;
   IREE_ASSERT_OK(loom_value_facts_make_view_reference(
       &facts_.context, source_reference, &source));

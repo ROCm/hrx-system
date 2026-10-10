@@ -750,7 +750,8 @@ TEST(EncodingStorageQueryTest, ValueLayoutKeepsNumericAndSsaAxesSeparate) {
   loom_value_fact_encoding_summary_t summary = {
       .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
       .address_layout = {LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
-                         IREE_ARRAYSIZE(numeric_strides), numeric_strides}};
+                         IREE_ARRAYSIZE(numeric_strides), numeric_strides},
+  };
   loom_value_facts_t facts;
   IREE_ASSERT_OK(
       loom_value_facts_make_encoding_summary(&table.context, summary, &facts));

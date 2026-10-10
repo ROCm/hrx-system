@@ -85,8 +85,10 @@ std::optional<PredicateConstant> float_predicate_constant(
     return std::nullopt;
   }
   const auto value = static_cast<int64_t>(*number);
-  return PredicateConstant{.unsigned_value = static_cast<uint64_t>(value),
-                           .signed_value = value};
+  return PredicateConstant{
+      .unsigned_value = static_cast<uint64_t>(value),
+      .signed_value = value,
+  };
 }
 
 std::optional<PredicateConstant> predicate_constant(
@@ -154,9 +156,7 @@ std::optional<PredicateValue> predicate_value(cxx::TranslationUnit& unit,
   }
   std::reverse(members.begin(), members.end());
 
-  PredicateValue value =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment follows
-           // nontrivial member initialization.
+  PredicateValue value = {};
   value.members = std::move(members);
   value.source = unwrap_expression(expression);
   value.converted = expression;

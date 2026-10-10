@@ -21,11 +21,13 @@ namespace {
 loom_liveness_interval_t MakeInterval(loom_value_id_t value_id,
                                       uint32_t start_point, uint32_t end_point,
                                       loom_liveness_value_class_t value_class) {
-  loom_liveness_interval_t interval = {.value_id = value_id,
-                                       .start_point = start_point,
-                                       .end_point = end_point,
-                                       .value_class = value_class,
-                                       .unit_count = 1};
+  loom_liveness_interval_t interval = {
+      .value_id = value_id,
+      .start_point = start_point,
+      .end_point = end_point,
+      .value_class = value_class,
+      .unit_count = 1,
+  };
   return interval;
 }
 
@@ -42,20 +44,20 @@ loom_low_allocation_assignment_t MakeAssignment(
       .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
       .location_base = location_base,
       .location_count = 1,
-      .unit_point_start = unit_point_start};
+      .unit_point_start = unit_point_start,
+  };
   return assignment;
 }
 
 loom_low_placement_relation_t MakeAliasRelation(
     loom_value_ordinal_t result_ordinal, loom_value_ordinal_t source_ordinal,
     loom_low_placement_relation_flags_t flags) {
-  loom_low_placement_relation_t relation =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-           // differs from list initialization.
-  relation.result_ordinal = result_ordinal;
-  relation.source_ordinal = source_ordinal;
-  relation.unit_count = 1;
-  relation.kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE;
+  loom_low_placement_relation_t relation = {
+      .result_ordinal = result_ordinal,
+      .source_ordinal = source_ordinal,
+      .unit_count = 1,
+      .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE,
+  };
   relation.flags = flags | LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
   return relation;
 }
@@ -762,7 +764,8 @@ TEST_F(AllocationCheckerTest, RejectsReservedLocationOverlap) {
       .descriptor_reg_class_id = 0,
       .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
       .location_base = assignments_[1].location_base,
-      .location_count = 1};
+      .location_count = 1,
+  };
   frame_.allocation.reserved_ranges = &reserved;
   frame_.allocation.reserved_range_count = 1;
   const loom_low_allocation_check_result_t result = Check();

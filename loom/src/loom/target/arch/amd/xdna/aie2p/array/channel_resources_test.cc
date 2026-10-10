@@ -24,7 +24,8 @@ loom_aie2p_array_tile_resources_t MakeResources(uint32_t* bank_cursors) {
   loom_aie2p_array_tile_resources_t resources = {
       .facts = ComputeFacts(),
       .bank_cursors = bank_cursors,
-      .flags = LOOM_AIE2P_ARRAY_TILE_RESOURCE_FLAG_HAS_WORKER};
+      .flags = LOOM_AIE2P_ARRAY_TILE_RESOURCE_FLAG_HAS_WORKER,
+  };
   return resources;
 }
 
@@ -35,7 +36,8 @@ loom_aie2p_array_compute_endpoint_request_t MakeRequest(
       .load_address_base = ComputeFacts()->memory.local_load_base,
       .record_count = 2,
       .record_byte_length = 64,
-      .direction = direction};
+      .direction = direction,
+  };
   return request;
 }
 
@@ -169,7 +171,8 @@ TEST(Aie2pArrayChannelResourcesTest, ShimProposalRetainsExactTransition) {
   loom_aie2p_array_tile_resources_t resources = {
       .facts = ShimFacts(),
       .next_buffer_descriptor = 7,
-      .next_memory_to_stream_channel = 1};
+      .next_memory_to_stream_channel = 1,
+  };
   loom_aie2p_array_shim_endpoint_proposal_t proposal = {};
 
   EXPECT_EQ(loom_aie2p_array_channel_resources_propose_shim(
@@ -192,12 +195,11 @@ TEST(Aie2pArrayChannelResourcesTest, ShimProposalRetainsExactTransition) {
 }
 
 TEST(Aie2pArrayChannelResourcesTest, ShimProposalRejectsWithoutMutation) {
-  loom_aie2p_array_tile_resources_t resources =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  resources.facts = ShimFacts();
-  resources.next_memory_to_stream_channel =
-      ShimFacts()->dma.channel_count_per_direction;
+  loom_aie2p_array_tile_resources_t resources = {
+      .facts = ShimFacts(),
+      .next_memory_to_stream_channel =
+          ShimFacts()->dma.channel_count_per_direction,
+  };
   loom_aie2p_array_shim_endpoint_proposal_t proposal = {};
 
   EXPECT_EQ(loom_aie2p_array_channel_resources_propose_shim(

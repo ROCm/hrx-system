@@ -37,8 +37,9 @@ loom_value_fact_storage_schema_t EncodedSchema(
 }
 
 loom_value_fact_storage_schema_t BlockQuantSchema(uint16_t static_schema_id) {
-  loom_value_fact_storage_schema_t schema = {.static_spec_encoding_id =
-                                                 static_schema_id};
+  loom_value_fact_storage_schema_t schema = {
+      .static_spec_encoding_id = static_schema_id,
+  };
   return schema;
 }
 
@@ -212,7 +213,8 @@ TEST(ContractPreparationTest,
       .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
       .source_payload = BlockQuantPayload(LOOM_CONTRACT_OPERAND_ROLE_RHS,
                                           BlockQuantSchema(9)),
-      .numeric_transform = LOOM_CONTRACT_NUMERIC_TRANSFORM_DECODE_REPACK};
+      .numeric_transform = LOOM_CONTRACT_NUMERIC_TRANSFORM_DECODE_REPACK,
+  };
 
   loom_contract_operand_preparation_t transform = {};
   ASSERT_TRUE(loom_contract_operand_preparation_select(&transform_options,
@@ -354,7 +356,8 @@ TEST(ContractPreparationTest, SamePayloadsFeedCpuAndGpuPreparationFamilies) {
       .availability = LOOM_CONTRACT_PREPARATION_AVAILABILITY_AVAILABLE,
       .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
       .source_payload = rhs,
-      .numeric_transform = LOOM_CONTRACT_NUMERIC_TRANSFORM_NONE};
+      .numeric_transform = LOOM_CONTRACT_NUMERIC_TRANSFORM_NONE,
+  };
 
   loom_contract_operand_preparation_t cpu_preparation = {};
   loom_contract_operand_preparation_t gpu_preparation = {};
@@ -391,7 +394,8 @@ TEST(ContractPreparationTest, RejectsMmt4dPreparationForNonRhsRole) {
       .source_payload = PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_LHS,
                                      LOOM_CONTRACT_NUMERIC_I8),
       .address_layout = StridedLayout(lhs_strides, IREE_ARRAYSIZE(lhs_strides)),
-      .numeric_transform = LOOM_CONTRACT_NUMERIC_TRANSFORM_NONE};
+      .numeric_transform = LOOM_CONTRACT_NUMERIC_TRANSFORM_NONE,
+  };
 
   loom_contract_preparation_diagnostic_t diagnostic = {};
   loom_contract_operand_preparation_t preparation = {};

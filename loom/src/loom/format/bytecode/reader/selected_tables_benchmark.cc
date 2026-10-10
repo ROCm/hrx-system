@@ -59,7 +59,8 @@ static void BM_MaterializeTypeChain(benchmark::State& state) {
     entries[i].entry_length = bytecode.size() - entries[i].entry_offset;
   }
   loom_bytecode_module_metadata_t metadata = {
-      .types = {entries.size(), entries.data()}};
+      .types = {entries.size(), entries.data()},
+  };
 
   loom_context_t context;
   loom_context_initialize(iree_allocator_system(), &context);
@@ -124,7 +125,8 @@ static void BM_MaterializeWideFunction(benchmark::State& state) {
   }
   entries[1].entry_length = bytecode.size() - entries[1].entry_offset;
   loom_bytecode_module_metadata_t metadata = {
-      .types = {IREE_ARRAYSIZE(entries), entries}};
+      .types = {IREE_ARRAYSIZE(entries), entries},
+  };
 
   loom_context_t context;
   loom_context_initialize(iree_allocator_system(), &context);
@@ -192,7 +194,8 @@ static void BM_MaterializeLocationChain(benchmark::State& state) {
     entries[i].entry_length = bytecode.size() - entries[i].entry_offset;
   }
   loom_bytecode_module_metadata_t metadata = {
-      .locations = {entries.size(), entries.data()}};
+      .locations = {entries.size(), entries.data()},
+  };
 
   loom_context_t context;
   loom_context_initialize(iree_allocator_system(), &context);

@@ -185,7 +185,8 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     loom_low_schedule_table_t schedule = {
         .module = module_,
         .function_op = function_op_,
-        .target = ResolvedTarget(descriptor_set)};
+        .target = ResolvedTarget(descriptor_set),
+    };
     IREE_CHECK_OK(loom_low_storage_layout_builder_finish(
         &storage_layout_builder_, &table_arena_,
         &schedule.requirements.storage_layout));
@@ -198,7 +199,8 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     loom_low_allocation_table_t allocation = {
         .module = module_,
         .function_op = function_op_,
-        .target = ResolvedTarget(descriptor_set)};
+        .target = ResolvedTarget(descriptor_set),
+    };
     allocation.physical_extents.ends_by_reg_class = physical_extents_.data();
     allocation.physical_extents.count = physical_extents_.size();
     return allocation;
@@ -236,15 +238,17 @@ TEST_F(AmdgpuNativePreflightTest,
       .descriptor_reg_class_id = agpr_reg_class_id,
       .unit_count = 4,
       .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-      .location_count = 4};
+      .location_count = 4,
+  };
 
   loom_low_allocation_table_t allocation = Allocation(descriptor_set);
   allocation.assignments = &assignment;
   allocation.assignment_count = 1;
 
   DiagnosticEmissionCapture capture;
-  loom_amdgpu_native_preflight_options_t options = {.emitter =
-                                                        capture.emitter()};
+  loom_amdgpu_native_preflight_options_t options = {
+      .emitter = capture.emitter(),
+  };
   loom_amdgpu_native_preflight_t preflight = {};
   IREE_ASSERT_OK(loom_amdgpu_native_preflight_analyze(&schedule, &allocation,
                                                       &options, &preflight));
@@ -310,8 +314,9 @@ TEST_F(AmdgpuNativePreflightTest, StackStorageUnsupportedEmitsDiagnostic) {
   const loom_low_allocation_table_t allocation = Allocation(descriptor_set);
 
   DiagnosticEmissionCapture capture;
-  loom_amdgpu_native_preflight_options_t options = {.emitter =
-                                                        capture.emitter()};
+  loom_amdgpu_native_preflight_options_t options = {
+      .emitter = capture.emitter(),
+  };
   loom_amdgpu_native_preflight_t preflight = {};
   IREE_ASSERT_OK(loom_amdgpu_native_preflight_analyze(&schedule, &allocation,
                                                       &options, &preflight));

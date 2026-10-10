@@ -70,7 +70,8 @@ func.def @entry() {
   func.return loc("logical/source.loom":2:3)
 } loc("logical/source.loom":1:1 to 3:2)
 )"),
-      .path = IREE_SV("/workspace/logical/source.loom")};
+      .path = IREE_SV("/workspace/logical/source.loom"),
+  };
   request.source_path_options.prefix_maps = {IREE_ARRAYSIZE(prefix_maps),
                                              prefix_maps};
   loom_input_module_t input = {};

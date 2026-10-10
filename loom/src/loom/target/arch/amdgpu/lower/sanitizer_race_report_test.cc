@@ -369,7 +369,8 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
     loom_low_verify_options_t options = {
         .descriptor_registry = &low_registry_.registry,
         .emitter = {EmitDiagnosticToStderr, NULL},
-        .max_errors = 20};
+        .max_errors = 20,
+    };
     loom_low_verify_scratch_t scratch =
         loom_low_verify_scratch_for_module(module_);
     loom_low_verify_result_t result = {};

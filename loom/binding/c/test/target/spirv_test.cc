@@ -248,7 +248,8 @@ kernel.def target(@target) @configured() {
   HandlePtr<loomc_compiler_t, loomc_compiler_release> compiler(raw_compiler);
   loomc_target_pipeline_options_t pipeline_options = {
       .kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
-      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG};
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+  };
   loomc_pass_program_t* raw_pass_program = nullptr;
   loomc_result_t* raw_result = nullptr;
   LOOMC_ASSERT_OK(loomc_pass_program_create_from_target_pipeline(
@@ -282,12 +283,14 @@ kernel.def target(@target) @configured() {
       loomc_compile_report_options_t report_options = {
           .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
           .structure_size = sizeof(report_options),
-          .mode = mode};
+          .mode = mode,
+      };
       loomc_emit_options_t emit_options = {
           .next = &report_options,
           .artifact_format =
               loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
-          .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY};
+          .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+      };
       LOOMC_ASSERT_OK(loomc_emit_module(
           target_environment.get(), workspace.get(), clone.get(), &emit_options,
           loomc_allocator_system(), &raw_result));

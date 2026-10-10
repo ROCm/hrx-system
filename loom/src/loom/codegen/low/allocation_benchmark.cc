@@ -579,8 +579,9 @@ class AllocationBenchmark {
     loom_verify_result_t structure = {};
     IREE_CHECK_OK(loom_verify_module(module_, nullptr, &structure));
     Require(structure.error_count == 0, "Generic verification failed");
-    loom_low_verify_options_t low_verify_options = {.descriptor_registry =
-                                                        &registry_.registry};
+    loom_low_verify_options_t low_verify_options = {
+        .descriptor_registry = &registry_.registry,
+    };
     auto scratch = loom_low_verify_scratch_for_module(module_);
     loom_low_verify_result_t low_verified = {};
     IREE_CHECK_OK(loom_low_verify_module(module_, &low_verify_options, &scratch,
@@ -748,7 +749,8 @@ class AllocationBenchmark {
     }
     if (shape == Shape::kLeasedPrefix || shape == Shape::kLeasedAliasTree) {
       loom_low_schedule_options_t schedule_options = {
-          .flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_VALUE_PRODUCER_NODES};
+          .flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_VALUE_PRODUCER_NODES,
+      };
       IREE_CHECK_OK(loom_low_schedule_function(&model_, &schedule_options,
                                                &base_arena_, &schedule_));
       Require(schedule_.error_count == 0, "Scheduling failed");
@@ -838,13 +840,12 @@ class AllocationBenchmark {
       benchmark::DoNotOptimize(unit_liveness.end_points);
       iree_arena_deinitialize(&decision_arena);
     } else {
-      loom_low_allocation_options_t options =
-          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment
-               // sequencing spans intervening work.
-      options.fixed_values = fixed_values_.data();
-      options.fixed_value_count = fixed_values_.size();
-      options.reserved_ranges = reserved_ranges_.data();
-      options.reserved_range_count = reserved_ranges_.size();
+      loom_low_allocation_options_t options = {
+          .fixed_values = fixed_values_.data(),
+          .fixed_value_count = fixed_values_.size(),
+          .reserved_ranges = reserved_ranges_.data(),
+          .reserved_range_count = reserved_ranges_.size(),
+      };
       if (storage_leases_.record_count != 0) {
         options.schedule = &schedule_;
         options.storage_leases = storage_leases_;

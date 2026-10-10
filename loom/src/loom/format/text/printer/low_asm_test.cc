@@ -443,8 +443,7 @@ TEST_F(LowAsmPrinterTest, RejectsTruncatedPacketBeforeReadingAttributes) {
   for (const auto kind : {LOOM_OP_LOW_CONST, LOOM_OP_LOW_OP}) {
     // The public printer can receive unfinished storage. The truncated packet
     // has no attribute allocation, so even its descriptor must not be read.
-    loom_op_t op = {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment
-                        // conversion differs from list initialization.
+    loom_op_t op = {};
     op.kind = kind;
     loom_text_low_asm_statement_t statement = {};
     IREE_EXPECT_STATUS_IS(

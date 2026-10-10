@@ -110,11 +110,10 @@ class SourceToModuleScenario final : public CompileScenario {
       return RequireSucceededResult(result.get(), "Loom source parsing");
     }
 
-    loomc_cxx_import_options_t options =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-             // spans intervening work.
-    options.type = LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS;
-    options.structure_size = sizeof(options);
+    loomc_cxx_import_options_t options = {
+        .type = LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS,
+        .structure_size = sizeof(options),
+    };
     if (header_) {
       options.source_provider = {ProvideSource, this};
     }

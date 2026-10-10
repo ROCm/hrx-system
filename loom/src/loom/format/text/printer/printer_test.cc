@@ -1153,9 +1153,11 @@ TEST_F(PrintOpTest, AttrsOpTypeAttrUsesNamedDynamicDimension) {
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_value_id_t input = def(f32);
   loom_named_attr_t entries[] = {
-      {.name_id = intern("shape"),
-       .reserved = {},
-       .value = loom_attr_type(dynamic_tensor_id)},
+      {
+          .name_id = intern("shape"),
+          .reserved = {},
+          .value = loom_attr_type(dynamic_tensor_id),
+      },
   };
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
@@ -1178,9 +1180,11 @@ TEST_F(PrintOpTest, AttrsOpStringAttrsUseCanonicalEscapes) {
       &value_id));
 
   loom_named_attr_t entries[1] = {
-      {.name_id = label_id,
-       .reserved = {},
-       .value = loom_attr_string(value_id)},
+      {
+          .name_id = label_id,
+          .reserved = {},
+          .value = loom_attr_string(value_id),
+      },
   };
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
@@ -1205,9 +1209,11 @@ TEST_F(PrintOpTest, AttrsOpStringAttrsRejectInvalidUtf8) {
       loom_module_intern_string(module_, IREE_SV("\xFF"), &invalid_id));
 
   loom_named_attr_t entries[1] = {
-      {.name_id = label_id,
-       .reserved = {},
-       .value = loom_attr_string(invalid_id)},
+      {
+          .name_id = label_id,
+          .reserved = {},
+          .value = loom_attr_string(invalid_id),
+      },
   };
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
@@ -1251,9 +1257,11 @@ TEST_F(PrintOpTest, AttrsOpWithNestedDictEntries) {
   loom_named_attr_t entries[3] = {
       {.name_id = phase_id, .reserved = {}, .value = nested_dict},
       {.name_id = axis_id, .reserved = {}, .value = loom_attr_i64(0)},
-      {.name_id = empty_id,
-       .reserved = {},
-       .value = loom_make_canonical_attr_dict(/*entries=*/NULL, /*count=*/0)},
+      {
+          .name_id = empty_id,
+          .reserved = {},
+          .value = loom_make_canonical_attr_dict(/*entries=*/NULL, /*count=*/0),
+      },
   };
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
@@ -1947,7 +1955,8 @@ static constexpr loom_op_vtable_t kPredTestVtable = [] {
       .attr_descriptors = kPredTestAttrDesc,
       .name = kPredTestName,
       .format_elements = kPredTestFormat,
-      .format_element_count = IREE_ARRAYSIZE(kPredTestFormat)};
+      .format_element_count = IREE_ARRAYSIZE(kPredTestFormat),
+  };
   return vtable;
 }();
 
@@ -2223,7 +2232,10 @@ TEST_F(PrintOpTest, TypeWithStaticEncoding) {
       loom_module_intern_string(module_, IREE_SV("block"), &block_id));
 
   loom_named_attr_t param = {
-      .name_id = block_id, .reserved = {}, .value = loom_attr_i64(32)};
+      .name_id = block_id,
+      .reserved = {},
+      .value = loom_attr_i64(32),
+  };
   loom_encoding_t encoding = {
       .name_id = name_id,
       .alias_id = LOOM_STRING_ID_INVALID,

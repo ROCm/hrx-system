@@ -136,9 +136,9 @@ TEST(RewritePatternRegistryTest, AppliesOnlyTheRootedSpanUntilARewrite) {
   const loom_rewrite_pattern_registry_t* registry =
       loom_rewrite_pattern_registry_storage_registry(&storage);
 
-  loom_op_t op = {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment
-                      // sequencing spans intervening work.
-  op.kind = scalar_kind;
+  loom_op_t op = {
+      .kind = scalar_kind,
+  };
   ApplyContext context;
   context.rewrite_tag = kTagTwo;
   bool changed = false;

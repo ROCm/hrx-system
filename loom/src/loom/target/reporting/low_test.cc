@@ -37,16 +37,16 @@ TEST(CompileReportLowMixTest, CountsExecutionBarriersFromInstructionClasses) {
       .descriptor_count = IREE_ARRAYSIZE(descriptors),
       .descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors),
       .effects = &effect,
-      .effect_count = 1};
+      .effect_count = 1,
+  };
   loom_low_schedule_table_t schedule = {};
   loom_low_allocation_table_t allocation = {};
   loom_target_compile_report_static_instruction_mix_t mix = {};
   for (const auto& descriptor : descriptors) {
-    loom_low_schedule_node_t node =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    node.kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;
-    node.descriptor = &descriptor;
+    loom_low_schedule_node_t node = {
+        .descriptor = &descriptor,
+        .kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR,
+    };
     loom_target_compile_report_accumulate_low_node_static_mix(
         &schedule, &allocation, &descriptor_set, &node, &mix);
   }
@@ -87,17 +87,17 @@ TEST(CompileReportLowMixTest, CountsOnlyMemoryAttachedReadWriteEffects) {
       .descriptor_count = IREE_ARRAYSIZE(descriptors),
       .descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors),
       .effects = effects,
-      .effect_count = IREE_ARRAYSIZE(effects)};
+      .effect_count = IREE_ARRAYSIZE(effects),
+  };
   loom_low_schedule_table_t schedule = {};
   loom_low_allocation_table_t allocation = {};
   loom_target_compile_report_static_instruction_mix_t mix = {};
 
   for (const auto& descriptor : descriptors) {
-    loom_low_schedule_node_t node =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    node.kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;
-    node.descriptor = &descriptor;
+    loom_low_schedule_node_t node = {
+        .descriptor = &descriptor,
+        .kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR,
+    };
     loom_target_compile_report_accumulate_low_node_static_mix(
         &schedule, &allocation, &descriptor_set, &node, &mix);
   }
@@ -232,7 +232,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       .reg_classes = reg_classes,
       .reg_class_count = IREE_ARRAYSIZE(reg_classes),
       .schedule_classes = schedule_classes,
-      .schedule_class_count = IREE_ARRAYSIZE(schedule_classes)};
+      .schedule_class_count = IREE_ARRAYSIZE(schedule_classes),
+  };
   descriptor_views[0].schedule_class_id = 0;
   descriptor_views[1].schedule_class_id = 1;
   descriptor_views[2].schedule_class_id = 1;
@@ -599,15 +600,14 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
                           : 0,
       .descriptor_set = &descriptor_set,
   };
-  loom_low_schedule_table_t schedule =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  schedule.module = module;
-  schedule.target = target;
-  schedule.blocks = schedule_blocks;
-  schedule.block_count = IREE_ARRAYSIZE(schedule_blocks);
-  schedule.nodes = schedule_nodes;
-  schedule.node_count = 13;
+  loom_low_schedule_table_t schedule = {
+      .module = module,
+      .target = target,
+      .blocks = schedule_blocks,
+      .block_count = IREE_ARRAYSIZE(schedule_blocks),
+      .nodes = schedule_nodes,
+      .node_count = 13,
+  };
   schedule.dependencies.count = 6;
   schedule.scheduled_node_indices = scheduled_node_indices;
   schedule.scheduled_node_count = IREE_ARRAYSIZE(scheduled_node_indices);
@@ -615,11 +615,10 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   schedule.hazard_gap_count = 2;
   schedule.model_summary_count = 1;
 
-  loom_low_emission_frame_t frame =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  frame.target = target;
-  frame.schedule = schedule;
+  loom_low_emission_frame_t frame = {
+      .target = target,
+      .schedule = schedule,
+  };
   frame.allocation.module = module;
   frame.allocation.target = target;
   frame.allocation.liveness.intervals = liveness_intervals;

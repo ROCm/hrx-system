@@ -120,10 +120,9 @@ class CmdProgramPlanTest : public ::testing::Test {
   }
 
   ModulePtr ParseAndVerify(const char* source) {
-    loom_text_parse_options_t parse_options =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-             // spans intervening work.
-    parse_options.max_errors = 20;
+    loom_text_parse_options_t parse_options = {
+        .max_errors = 20,
+    };
     const loom_low_descriptor_set_provider_t descriptor_set_providers[] = {
         loom_cmd_core_descriptor_set,
     };
@@ -152,10 +151,9 @@ class CmdProgramPlanTest : public ::testing::Test {
       return module_ptr;
     }
 
-    loom_verify_options_t verify_options =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    verify_options.max_errors = 20;
+    loom_verify_options_t verify_options = {
+        .max_errors = 20,
+    };
     verify_options.sink = capture.sink();
     loom_verify_result_t result = {};
     IREE_CHECK_OK(loom_verify_module(module, &verify_options, &result));
@@ -244,7 +242,8 @@ command.program.def public @root() launch() {
   const loom_symbol_ref_t root_ref =
       FindSymbolRef(source_module.get(), IREE_SV("root"));
   loom_link_plan_materialization_t materialization = {
-      .module = source_module.release()};
+      .module = source_module.release(),
+  };
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
   IREE_ASSERT_OK(loom_cmd_program_plan_build_from_materialization(
@@ -283,7 +282,8 @@ command.program.def public @increment_twice() launch(%source: buffer, %scratch: 
       FindSymbolRef(source_module.get(), IREE_SV("increment_then_double")),
   };
   loom_link_plan_materialization_t materialization = {
-      .module = source_module.release()};
+      .module = source_module.release(),
+  };
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
@@ -494,7 +494,8 @@ command.program.def public @root() launch() {
   IREE_ASSERT_OK(loom_link_module_index_allocate(
       &context_, &block_pool_, iree_allocator_system(), &index));
   loom_bytecode_index_options_t index_options = {
-      .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr}};
+      .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+  };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index, iree_make_const_byte_span(bytecode.data(), bytecode.size()),
       IREE_SV("provider.loombc"), &index_options, /*options=*/nullptr,
@@ -781,7 +782,8 @@ command.program.def public @parameterized() launch(%parameters: buffer, %target:
       FindSymbolRef(source_module.get(), IREE_SV("parameterized")),
   };
   loom_link_plan_materialization_t materialization = {
-      .module = source_module.release()};
+      .module = source_module.release(),
+  };
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
@@ -851,7 +853,8 @@ command.program.def public @bodyless() launch(%output: buffer) {
       FindSymbolRef(source_module.get(), IREE_SV("bodyless")),
   };
   loom_link_plan_materialization_t materialization = {
-      .module = source_module.release()};
+      .module = source_module.release(),
+  };
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
@@ -970,7 +973,8 @@ command.program.def public @dynamic_root() launch() {
       FindSymbolRef(source_module.get(), IREE_SV("dynamic_root")),
   };
   loom_link_plan_materialization_t materialization = {
-      .module = source_module.release()};
+      .module = source_module.release(),
+  };
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
@@ -1052,12 +1056,16 @@ low.func.def target<cmd.core> abi(command_program) @moved_binding() {
   ASSERT_NE(module, nullptr);
 
   loom_cmd_program_root_t root = {
-      .function_op = FindSymbol(module.get(), IREE_SV("moved_binding"))};
+      .function_op = FindSymbol(module.get(), IREE_SV("moved_binding")),
+  };
   root.abi_layout.rebindable_binding_count = 1;
   root.transient.binding_index = UINT32_MAX;
   root.launch_counts.binding_index = UINT32_MAX;
   loom_cmd_program_plan_t plan = {
-      .root_module = module.get(), .roots = &root, .root_count = 1};
+      .root_module = module.get(),
+      .roots = &root,
+      .root_count = 1,
+  };
 
   iree_byte_span_t data = iree_byte_span_empty();
   IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 0, &data,

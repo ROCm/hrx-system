@@ -253,7 +253,8 @@ TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
       .workgroup_memory_byte_count = 4096,
       .inserted_load_op_count = 8,
       .inserted_store_op_count = 8,
-      .inserted_barrier_op_count = 2};
+      .inserted_barrier_op_count = 2,
+  };
   IREE_ASSERT_OK(loom_target_compile_report_record_source_low_transform_row(
       &report, &row));
 
@@ -333,7 +334,8 @@ TEST(CompileReportFormatTest, FormatsAndMergesSourceBoundaryProjectionRows) {
       .source_element_type = LOOM_SCALAR_TYPE_F32,
       .source_rank = 2,
       .projected_prefix_rank = 2,
-      .component_count = 16};
+      .component_count = 16,
+  };
   selected.source_dimensions[0] = 4;
   selected.source_dimensions[1] = 4;
   IREE_ASSERT_OK(
@@ -569,16 +571,15 @@ TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
 }
 
 TEST(CompileReportFormatTest, OwnsAndFormatsPipelinePlans) {
-  loom_target_compile_report_pipeline_worker_row_t worker =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  worker.worker_index = 0;
-  worker.group_index = 2;
-  worker.lane = 1;
-  worker.flags = LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_RESIDENT |
-                 LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_FOLDED |
-                 LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_PLACED;
-  worker.entry_name = IREE_SVL("projection");
+  loom_target_compile_report_pipeline_worker_row_t worker = {
+      .worker_index = 0,
+      .group_index = 2,
+      .lane = 1,
+      .flags = LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_RESIDENT |
+               LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_FOLDED |
+               LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_PLACED,
+      .entry_name = IREE_SVL("projection"),
+  };
   worker.placement.rank = 2;
   worker.placement.x = 4;
   worker.placement.y = 3;
@@ -597,11 +598,10 @@ TEST(CompileReportFormatTest, OwnsAndFormatsPipelinePlans) {
   worker.maximum_bank_storage_byte_count = 352;
   worker.bank_storage_capacity_byte_count = 16384;
 
-  loom_target_compile_report_pipeline_channel_row_t channel =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  channel.channel_index = 0;
-  channel.transport = IREE_SVL("external-dma");
+  loom_target_compile_report_pipeline_channel_row_t channel = {
+      .channel_index = 0,
+      .transport = IREE_SVL("external-dma"),
+  };
   channel.sender.owner =
       LOOM_TARGET_COMPILE_REPORT_PIPELINE_ENDPOINT_OWNER_BINDING;
   channel.sender.owner_index = 0;
@@ -731,7 +731,8 @@ TEST(CompileReportFormatTest, PhysicalInventoryOmitsUnavailableChannelFacts) {
       .high_water_byte_count = 131104,
       .capacity_byte_count = 524288,
       .maximum_bank_storage_byte_count = 32,
-      .bank_storage_capacity_byte_count = 65536};
+      .bank_storage_capacity_byte_count = 65536,
+  };
   loom_target_compile_report_pipeline_plan_t plan = {};
   plan.summary.root_name = IREE_SVL("resident");
   plan.summary.realization = IREE_SVL("resident-configuration");
@@ -761,7 +762,8 @@ TEST(CompileReportFormatTest, PhysicalInventoryOmitsUnavailableChannelFacts) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   loom_target_compile_report_format_options_t options = {
-      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS};
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+  };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
   const iree_string_view_t root =

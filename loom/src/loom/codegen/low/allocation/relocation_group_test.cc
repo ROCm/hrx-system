@@ -24,7 +24,8 @@ TEST(LowAllocationRelocationGroupTest, RetainsCoalescedTransportClosure) {
   reg_classes[1].flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
   loom_low_descriptor_set_t descriptors = {
       .reg_classes = reg_classes,
-      .reg_class_count = IREE_ARRAYSIZE(reg_classes)};
+      .reg_class_count = IREE_ARRAYSIZE(reg_classes),
+  };
 
   // Reversed assignment order exercises the value-to-assignment join. Values
   // 0..6 share coalesced subranges; 7 is an edge destination, 8 is a real copy,
@@ -43,25 +44,26 @@ TEST(LowAllocationRelocationGroupTest, RetainsCoalescedTransportClosure) {
     assignment.location_base = bases[i];
     assignment.location_count = counts[i];
   }
-  loom_liveness_analysis_t liveness = {.value_count =
-                                           IREE_ARRAYSIZE(assignments)};
+  loom_liveness_analysis_t liveness = {
+      .value_count = IREE_ARRAYSIZE(assignments),
+  };
   loom_low_allocation_assignment_map_t map = {
       .liveness = &liveness,
       .assignments = assignments,
       .assignment_count = IREE_ARRAYSIZE(assignments),
-      .assignment_indices_by_value_ordinal = indices};
+      .assignment_indices_by_value_ordinal = indices,
+  };
 
   const auto relation = [](uint32_t result, uint32_t source,
                            uint32_t result_offset, uint32_t source_offset,
                            uint32_t count, loom_low_placement_cause_t cause) {
-    loom_low_placement_relation_t row =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-             // differs from list initialization.
-    row.result_ordinal = result;
-    row.source_ordinal = source;
-    row.result_unit_offset = result_offset;
-    row.source_unit_offset = source_offset;
-    row.unit_count = count;
+    loom_low_placement_relation_t row = {
+        .result_ordinal = result,
+        .source_ordinal = source,
+        .result_unit_offset = result_offset,
+        .source_unit_offset = source_offset,
+        .unit_count = count,
+    };
     row.kind = cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE
                    ? LOOM_LOW_PLACEMENT_RELATION_SUBRANGE
                : cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT
@@ -88,7 +90,8 @@ TEST(LowAllocationRelocationGroupTest, RetainsCoalescedTransportClosure) {
   loom_low_placement_table_t placement = {
       .value_count = IREE_ARRAYSIZE(assignments),
       .relations = relations,
-      .relation_count = IREE_ARRAYSIZE(relations)};
+      .relation_count = IREE_ARRAYSIZE(relations),
+  };
   loom_low_allocation_relocation_groups_t groups = {};
   IREE_ASSERT_OK(loom_low_allocation_relocation_groups_initialize(
       &descriptors, &placement, &map, &arena, &groups));

@@ -91,7 +91,8 @@ class FormatSignaturesTest : public ::testing::Test {
 
   void Verify(const loom_module_t* module) {
     loom_verify_options_t options = {
-        .sink = {loom_diagnostic_stderr_sink, nullptr}};
+        .sink = {loom_diagnostic_stderr_sink, nullptr},
+    };
     loom_verify_result_t result = {};
     IREE_ASSERT_OK(loom_verify_module(module, &options, &result));
     ASSERT_EQ(result.error_count, 0u);
@@ -112,7 +113,8 @@ class FormatSignaturesTest : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(Verify(module_));
     std::string text = Print(module_);
     loom_text_parse_options_t options = {
-        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr}};
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+    };
     IREE_ASSERT_OK(loom_text_parse(
         iree_make_string_view(text.data(), text.size()),
         IREE_SV("signatures.loom"), &context_, &pool_, &options, &reparsed_));
@@ -222,7 +224,10 @@ TEST_F(FormatSignaturesTest, TiedAndDuplicateNamedResultsKeepIdentity) {
                          loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                          loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)};
   const loom_tied_result_t tie = {
-      .result_index = 0, .operand_index = 0, .has_type_change = false};
+      .result_index = 0,
+      .operand_index = 0,
+      .has_type_change = false,
+  };
   loom_op_t* declaration = nullptr;
   IREE_ASSERT_OK(loom_test_decl_build(
       &builder_, 0, 0, 0, Symbol("results"), &argument_type, 1, types,
@@ -251,7 +256,10 @@ TEST_F(FormatSignaturesTest, AnonymousTiedResultBindsDependentDimension) {
       index, loom_type_shaped_1d(LOOM_TYPE_TENSOR, LOOM_SCALAR_TYPE_F32,
                                  loom_dim_pack_static(4), 0)};
   const loom_tied_result_t tie = {
-      .result_index = 0, .operand_index = 0, .has_type_change = false};
+      .result_index = 0,
+      .operand_index = 0,
+      .has_type_change = false,
+  };
   loom_op_t* declaration = nullptr;
   IREE_ASSERT_OK(loom_test_decl_build(
       &builder_, 0, 0, 0, Symbol("shape"), &index, 1, types,
@@ -279,7 +287,10 @@ TEST_F(FormatSignaturesTest, NamedTiePreservesTypeChange) {
   const loom_type_t result_type = loom_type_shaped_1d(
       LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(16), 0);
   const loom_tied_result_t tie = {
-      .result_index = 0, .operand_index = 0, .has_type_change = true};
+      .result_index = 0,
+      .operand_index = 0,
+      .has_type_change = true,
+  };
   loom_op_t* declaration = nullptr;
   IREE_ASSERT_OK(loom_test_decl_build(&builder_, 0, 0, 0, Symbol("window"),
                                       &argument_type, 1, &result_type, 1, &tie,

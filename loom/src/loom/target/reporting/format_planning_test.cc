@@ -82,7 +82,8 @@ TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
       .peak_live_values = 16,
       .peak_point = 4,
       .peak_block_name = IREE_SVL("entry"),
-      .peak_operation_name = IREE_SVL("low.op<amdgpu.v_add_u32>")};
+      .peak_operation_name = IREE_SVL("low.op<amdgpu.v_add_u32>"),
+  };
   IREE_ASSERT_OK(
       loom_target_compile_report_record_pressure_row(&report, &pressure));
 
@@ -99,24 +100,24 @@ TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
       .semantic_tag = IREE_SVL("dot.i32.i8"),
       .sample_value_name = IREE_SVL("acc"),
       .live_units = 64,
-      .live_values = 8};
+      .live_values = 8,
+  };
   IREE_ASSERT_OK(
       loom_target_compile_report_record_pressure_origin_row(&report, &origin));
 
-  loom_target_compile_report_schedule_band_row_t band =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  band.flags = LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX;
-  band.function_name = IREE_SVL("branchy");
-  band.block_name = IREE_SVL("body");
-  band.block_index = 2;
-  band.first_packet_index = 17;
-  band.first_scheduled_ordinal = 5;
-  band.node_count = 4;
-  band.origin_kind = LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_LOCAL_MEMORY;
-  band.origin_operation_name = IREE_SVL("low.op<amdgpu.ds_read2_b32>");
-  band.semantic_tag = IREE_SVL("memory.workgroup.load2.u32");
-  band.sample_value_name = IREE_SVL("tile");
+  loom_target_compile_report_schedule_band_row_t band = {
+      .flags = LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX,
+      .function_name = IREE_SVL("branchy"),
+      .block_name = IREE_SVL("body"),
+      .block_index = 2,
+      .first_packet_index = 17,
+      .first_scheduled_ordinal = 5,
+      .node_count = 4,
+      .origin_kind = LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_LOCAL_MEMORY,
+      .origin_operation_name = IREE_SVL("low.op<amdgpu.ds_read2_b32>"),
+      .semantic_tag = IREE_SVL("memory.workgroup.load2.u32"),
+      .sample_value_name = IREE_SVL("tile"),
+  };
   band.static_instruction_mix.descriptor_count = 4;
   band.static_instruction_mix.local_memory_count = 4;
   band.dynamic_instruction_mix.descriptor_count = 8;
@@ -126,21 +127,20 @@ TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
   IREE_ASSERT_OK(
       loom_target_compile_report_record_schedule_band_row(&report, &band));
 
-  loom_target_compile_report_schedule_band_summary_row_t band_summary =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  band_summary.flags = band.flags;
-  band_summary.function_name = band.function_name;
-  band_summary.block_name = band.block_name;
-  band_summary.block_index = band.block_index;
-  band_summary.first_packet_index = band.first_packet_index;
-  band_summary.band_count = 3;
-  band_summary.node_count = 12;
-  band_summary.max_band_node_count = 4;
-  band_summary.origin_kind = band.origin_kind;
-  band_summary.origin_operation_name = band.origin_operation_name;
-  band_summary.semantic_tag = band.semantic_tag;
-  band_summary.sample_value_name = band.sample_value_name;
+  loom_target_compile_report_schedule_band_summary_row_t band_summary = {
+      .flags = band.flags,
+      .function_name = band.function_name,
+      .block_name = band.block_name,
+      .block_index = band.block_index,
+      .first_packet_index = band.first_packet_index,
+      .band_count = 3,
+      .node_count = 12,
+      .max_band_node_count = 4,
+      .origin_kind = band.origin_kind,
+      .origin_operation_name = band.origin_operation_name,
+      .semantic_tag = band.semantic_tag,
+      .sample_value_name = band.sample_value_name,
+  };
   band_summary.static_instruction_mix.descriptor_count = 12;
   band_summary.static_instruction_mix.local_memory_count = 12;
   band_summary.dynamic_instruction_mix.descriptor_count = 24;
@@ -168,7 +168,8 @@ TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
       .store_count = 1,
       .store_bytes = 4,
       .reload_count = 2,
-      .reload_bytes = 8};
+      .reload_bytes = 8,
+  };
   IREE_ASSERT_OK(loom_target_compile_report_record_spill_row(&report, &spill));
 
   loom_target_compile_report_allocation_failure_row_t failure = {
@@ -191,7 +192,8 @@ TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
       .location_count = 1,
       .conflict_value_name = IREE_SVL("leader"),
       .conflict_start_point = 0,
-      .conflict_end_point = 5};
+      .conflict_end_point = 5,
+  };
   IREE_ASSERT_OK(loom_target_compile_report_record_allocation_failure_row(
       &report, &failure));
 
@@ -215,7 +217,8 @@ TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
       .lower_free_unit_count = 13,
       .lower_largest_free_run_unit_count = 6,
       .active_assignment_blocker_count = 47,
-      .active_assignment_blocker_units = 244};
+      .active_assignment_blocker_units = 244,
+  };
   IREE_ASSERT_OK(loom_target_compile_report_record_allocation_high_water_row(
       &report, &high_water));
 
@@ -321,13 +324,15 @@ TEST(CompileReportFormatTest, FormatsWaitPlanningRows) {
       .drained_count = 6,
       .max_drained_count = 4,
       .max_outstanding_before = 6,
-      .max_full_drain_outstanding_before = 6};
+      .max_full_drain_outstanding_before = 6,
+  };
   loom_target_compile_report_record_wait_plan(&report, &wait_plan);
 
   loom_target_compile_report_wait_counter_row_t counter = {
       .function_name = IREE_SVL("branchy"),
       .counter_name = IREE_SVL("vmem_load"),
-      .counter_id = 1};
+      .counter_id = 1,
+  };
   counter.summary.action_count = 3;
   counter.summary.planned_action_count = 3;
   counter.summary.full_drain_count = 1;
@@ -344,7 +349,8 @@ TEST(CompileReportFormatTest, FormatsWaitPlanningRows) {
       .counter_name = counter.counter_name,
       .reason_name = IREE_SVL("amdgpu.ssa_use"),
       .counter_id = 1,
-      .reason_id = 2};
+      .reason_id = 2,
+  };
   reason.summary.action_count = 1;
   reason.summary.planned_action_count = 1;
   reason.summary.partial_wait_count = 1;
@@ -378,7 +384,8 @@ TEST(CompileReportFormatTest, FormatsWaitPlanningRows) {
       .target_count = 2,
       .outstanding_before = 6,
       .outstanding_after = 2,
-      .drained_count = 4};
+      .drained_count = 4,
+  };
   IREE_ASSERT_OK(
       loom_target_compile_report_record_wait_action_row(&report, &action));
 

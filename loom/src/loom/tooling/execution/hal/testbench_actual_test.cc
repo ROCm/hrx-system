@@ -163,8 +163,10 @@ static loom_testbench_value_t F64Value(double value) {
 
 static loom_target_snapshot_t AddressTargetSnapshot(uint32_t index_bitwidth,
                                                     uint32_t offset_bitwidth) {
-  loom_target_snapshot_t snapshot = {.index_bitwidth = index_bitwidth,
-                                     .offset_bitwidth = offset_bitwidth};
+  loom_target_snapshot_t snapshot = {
+      .index_bitwidth = index_bitwidth,
+      .offset_bitwidth = offset_bitwidth,
+  };
   return snapshot;
 }
 
@@ -789,17 +791,17 @@ func.def public pure @device_dynamic(%workgroup_count: index) -> (index, index, 
       loom_run_hal_testbench_select_kernel_launch(case_plan, &kernel_launch));
 
   uint64_t workload_argument_bits[1] = {};
-  loom_run_hal_testbench_context_t context = {.host_allocator =
-                                                  iree_allocator_system()};
-  loom_run_hal_testbench_actual_provider_t provider =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  provider.context = &context;
-  provider.native_module = native_module;
-  provider.kernel_launch = kernel_launch;
-  provider.launch_config_program =
-      LoadLaunchConfigProgram(IREE_SV(kLaunchConfigSource));
-  provider.launch_config_function = loomc_launch_config_function_invalid();
+  loom_run_hal_testbench_context_t context = {
+      .host_allocator = iree_allocator_system(),
+  };
+  loom_run_hal_testbench_actual_provider_t provider = {
+      .context = &context,
+      .native_module = native_module,
+      .kernel_launch = kernel_launch,
+      .launch_config_program =
+          LoadLaunchConfigProgram(IREE_SV(kLaunchConfigSource)),
+      .launch_config_function = loomc_launch_config_function_invalid(),
+  };
   IREE_ASSERT_OK(
       iree_status_from_loomc(loomc_launch_config_program_lookup_function(
           provider.launch_config_program,

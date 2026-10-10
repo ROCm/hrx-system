@@ -826,7 +826,8 @@ class LowKernelEmitter {
             },
         .provider_list = loom_target_environment_low_verify_provider_list(
             &target_environment_),
-        .max_errors = 20};
+        .max_errors = 20,
+    };
     loom_low_verify_result_t verify_result = {};
     loom_low_verify_scratch_t verify_scratch =
         loom_low_verify_scratch_for_module(module_);
@@ -839,18 +840,16 @@ class LowKernelEmitter {
 
     loom_low_storage_lease_provider_t storage_lease_provider = {};
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
-    loom_low_emission_frame_options_t frame_options =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    frame_options.descriptor_registry = &target_registry_.registry;
-    frame_options.function_target_facts = function_target_facts;
-    frame_options.allocation_fixed_values = abi_verify_result.fixed_values;
-    frame_options.allocation_fixed_value_count =
-        abi_verify_result.fixed_value_count;
-    frame_options.allocation_flags =
-        LOOM_LOW_ALLOCATION_FLAG_RETAIN_COALESCED_INCOMING_INDEX |
-        LOOM_LOW_ALLOCATION_FLAG_RETAIN_STORAGE_RELEASE_ACTION_INDEX;
-    frame_options.storage_lease_provider = &storage_lease_provider;
+    loom_low_emission_frame_options_t frame_options = {
+        .descriptor_registry = &target_registry_.registry,
+        .function_target_facts = function_target_facts,
+        .allocation_flags =
+            LOOM_LOW_ALLOCATION_FLAG_RETAIN_COALESCED_INCOMING_INDEX |
+            LOOM_LOW_ALLOCATION_FLAG_RETAIN_STORAGE_RELEASE_ACTION_INDEX,
+        .allocation_fixed_values = abi_verify_result.fixed_values,
+        .allocation_fixed_value_count = abi_verify_result.fixed_value_count,
+        .storage_lease_provider = &storage_lease_provider,
+    };
     loom_low_emission_frame_t frame = {};
     bool frame_accepted = false;
     IREE_RETURN_IF_ERROR(loom_low_emission_frame_build(

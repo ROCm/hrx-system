@@ -90,7 +90,8 @@ TEST_F(RegisterPartsTest, DeferredRequirementsKeepTheirOriginalFacts) {
         .field_ref =
             loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, i),
         .value = i,
-        .mask = 3};
+        .mask = 3,
+    };
     IREE_ASSERT_OK(loom_low_register_parts_require(&parts_, &requirement));
   }
   for (uint32_t i = 0; i < count; ++i) {

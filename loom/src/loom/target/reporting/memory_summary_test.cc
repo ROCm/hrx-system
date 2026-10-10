@@ -77,7 +77,8 @@ static loom_target_compile_report_source_low_memory_row_t MakeMemoryRow(
       .dynamic_stride_bytes = dynamic_stride_bytes,
       .vector_lane_stride_bytes = vector_lane_stride_bytes,
       .source_interval = source_interval,
-      .execution_count_plus_one = 2};
+      .execution_count_plus_one = 2,
+  };
   return row;
 }
 
@@ -788,7 +789,8 @@ TEST(CompileReportFormatTest, KeepsImpreciseSourceLowMemoryIntervalEnvelopes) {
       .begin_min_bytes = 0,
       .begin_max_bytes = 64,
       .end_min_bytes = 4,
-      .end_max_bytes = 68};
+      .end_max_bytes = 68,
+  };
   const loom_target_compile_report_source_low_memory_row_t row = MakeMemoryRow(
       IREE_SVL("vector.load"), /*source_op_kind=*/43, IREE_SVL("load"),
       IREE_SVL("test.load.v1"), /*static_offset_bytes=*/0,
@@ -830,16 +832,18 @@ TEST(CompileReportFormatTest, FormatsSourceLowMemoryIntervals) {
       .issued_read_byte_count = 8,
       .dynamic_stride_bytes = 16,
       .vector_lane_stride_bytes = 4,
-      .source_interval = {
-          .flags = LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
-                   LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE |
-                   LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH,
-          .begin_min_bytes = 4,
-          .begin_max_bytes = 12,
-          .end_min_bytes = 12,
-          .end_max_bytes = 20,
-          .exact_length_bytes = 8,
-      }};
+      .source_interval =
+          {
+              .flags = LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
+                       LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE |
+                       LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH,
+              .begin_min_bytes = 4,
+              .begin_max_bytes = 12,
+              .end_min_bytes = 12,
+              .end_max_bytes = 20,
+              .exact_length_bytes = 8,
+          },
+  };
   IREE_ASSERT_OK(
       loom_target_compile_report_record_source_low_memory_row(&report, &row));
 
@@ -904,7 +908,8 @@ TEST(CompileReportFormatTest, FormatsSourceLowMemorySummaryEconomics) {
 
   loom_target_compile_report_workload_t workload = {
       .flags = LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT,
-      .dispatch_workitem_count = 16};
+      .dispatch_workitem_count = 16,
+  };
   loom_target_compile_report_record_workload(&report, &workload);
 
   const loom_target_compile_report_source_low_memory_row_t load_row =

@@ -61,12 +61,11 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
 };
 
 loom_liveness_value_class_t RegisterValueClass(uint64_t descriptor_set_id) {
-  loom_liveness_value_class_t value_class =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  value_class.type_kind = LOOM_TYPE_REGISTER;
-  value_class.register_descriptor_set_stable_id = descriptor_set_id;
-  value_class.register_class_id = 0;
+  loom_liveness_value_class_t value_class = {
+      .type_kind = LOOM_TYPE_REGISTER,
+      .register_class_id = 0,
+      .register_descriptor_set_stable_id = descriptor_set_id,
+  };
   return value_class;
 }
 
@@ -92,14 +91,16 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .module = module,
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED};
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED,
+  };
   const uint32_t interval_indices[] = {0};
   loom_liveness_analysis_t liveness = {
       .intervals = &interval,
       .interval_count = 1,
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .value_interval_indices = interval_indices};
+      .value_interval_indices = interval_indices,
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {{0, 0}};
   uint32_t unit_start_points[] = {0, 0};
@@ -111,7 +112,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .end_points = unit_end_points,
       .point_count = IREE_ARRAYSIZE(unit_end_points),
       .values_with_incomplete_storage_segments = {liveness.value_count,
-                                                  edge_handoff_words}};
+                                                  edge_handoff_words},
+  };
 
   loom_low_placement_relation_range_t placement_ranges[] = {
       {
@@ -124,19 +126,23 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
       .ranges_by_result_ordinal = placement_ranges,
-      .ranges_by_source_ordinal = placement_ranges};
+      .ranges_by_source_ordinal = placement_ranges,
+  };
 
-  loom_low_reg_class_t reg_class = {.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
-                                    .alloc_unit_bits = 32,
-                                    .allocatable_count = 4,
-                                    .spill_class_id = LOOM_LOW_REG_CLASS_NONE};
-  loom_low_descriptor_set_t descriptor_set = {.stable_id = descriptor_set_id,
-                                              .reg_classes = &reg_class,
-                                              .reg_class_count = 1};
-  loom_low_resolved_target_t target =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  target.descriptor_set = &descriptor_set;
+  loom_low_reg_class_t reg_class = {
+      .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
+      .alloc_unit_bits = 32,
+      .allocatable_count = 4,
+      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+  };
+  loom_low_descriptor_set_t descriptor_set = {
+      .stable_id = descriptor_set_id,
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
+  loom_low_resolved_target_t target = {
+      .descriptor_set = &descriptor_set,
+  };
   target.descriptor_set_key = IREE_SV("test");
   loom_op_t function_op = {};
   loom_low_allocation_target_constraints_t target_constraints = {};
@@ -245,14 +251,16 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .module = module,
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED};
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED,
+  };
   const uint32_t interval_indices[] = {0, 1, 2};
   loom_liveness_analysis_t liveness = {
       .intervals = intervals,
       .interval_count = IREE_ARRAYSIZE(intervals),
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .value_interval_indices = interval_indices};
+      .value_interval_indices = interval_indices,
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {
       {0, 0}, {1, 0}, {2, 5}};
@@ -265,7 +273,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .end_points = unit_end_points,
       .point_count = IREE_ARRAYSIZE(unit_end_points),
       .values_with_incomplete_storage_segments = {liveness.value_count,
-                                                  edge_handoff_words}};
+                                                  edge_handoff_words},
+  };
 
   loom_low_placement_relation_range_t placement_ranges[3] = {};
   loom_low_placement_table_t placement = {
@@ -273,17 +282,17 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
       .ranges_by_result_ordinal = placement_ranges,
-      .ranges_by_source_ordinal = placement_ranges};
+      .ranges_by_source_ordinal = placement_ranges,
+  };
 
-  loom_low_reg_class_t reg_class =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  reg_class.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
-                    LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS;
-  reg_class.physical_atomic_unit_count = 2;
-  reg_class.alloc_unit_bits = 512;
-  reg_class.allocatable_count = 2;
-  reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
+  loom_low_reg_class_t reg_class = {
+      .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+               LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
+      .alloc_unit_bits = 512,
+      .allocatable_count = 2,
+      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      .physical_atomic_unit_count = 2,
+  };
   loom_low_physical_register_t physical_registers[] = {
       {
           .name_string_ref = 0,
@@ -302,18 +311,24 @@ TEST_F(LowAllocationIntervalAssignmentTest,
           .atomic_unit_start = 4,
           .atomic_unit_count = 4,
           .reserved = 0,
-          .view_lookup = {.ordinal_start = 0,
-                          .class_base = 0,
-                          .class_count = 1},
+          .view_lookup =
+              {
+                  .ordinal_start = 0,
+                  .class_base = 0,
+                  .class_count = 1,
+              },
       },
       {
           .name_string_ref = 0,
           .atomic_unit_start = 8,
           .atomic_unit_count = 4,
           .reserved = 0,
-          .view_lookup = {.ordinal_start = 1,
-                          .class_base = 0,
-                          .class_count = 0},
+          .view_lookup =
+              {
+                  .ordinal_start = 1,
+                  .class_base = 0,
+                  .class_count = 0,
+              },
       },
   };
   reg_class.candidate_lookup.register_count = 2;
@@ -341,37 +356,34 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   const uint16_t physical_register_view_unit_candidate_ordinals[] = {1, 0, 0,
                                                                      1};
   const uint16_t allocation_ordinals[] = {0, 1};
-  loom_low_descriptor_set_t descriptor_set =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  descriptor_set.stable_id = descriptor_set_id;
-  descriptor_set.reg_classes = &reg_class;
-  descriptor_set.reg_class_count = 1;
-  descriptor_set.physical_registers = physical_registers;
-  descriptor_set.physical_register_count = IREE_ARRAYSIZE(physical_registers);
-  descriptor_set.physical_register_candidate_ordinals = candidate_ordinals;
-  descriptor_set.physical_register_candidate_ordinal_count =
-      IREE_ARRAYSIZE(candidate_ordinals);
-  descriptor_set.physical_register_candidate_ids = physical_register_candidates;
-  descriptor_set.physical_register_allocation_ordinals = allocation_ordinals;
-  descriptor_set.physical_register_candidate_count =
-      IREE_ARRAYSIZE(physical_register_candidates);
-  descriptor_set.physical_register_atomic_units =
-      physical_register_atomic_units;
-  descriptor_set.physical_register_atomic_unit_count =
-      IREE_ARRAYSIZE(physical_register_atomic_units);
-  descriptor_set.physical_register_view_ordinals = view_ordinals;
-  descriptor_set.physical_register_view_ordinal_count = 1;
-  descriptor_set.physical_register_views = physical_register_views;
-  descriptor_set.physical_register_view_count = 1;
-  descriptor_set.physical_register_view_unit_candidate_ordinals =
-      physical_register_view_unit_candidate_ordinals;
-  descriptor_set.physical_register_view_unit_candidate_ordinal_count =
-      IREE_ARRAYSIZE(physical_register_view_unit_candidate_ordinals);
-  loom_low_resolved_target_t target =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  target.descriptor_set = &descriptor_set;
+  loom_low_descriptor_set_t descriptor_set = {
+      .stable_id = descriptor_set_id,
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+      .physical_registers = physical_registers,
+      .physical_register_count = IREE_ARRAYSIZE(physical_registers),
+      .physical_register_candidate_ids = physical_register_candidates,
+      .physical_register_allocation_ordinals = allocation_ordinals,
+      .physical_register_candidate_count =
+          IREE_ARRAYSIZE(physical_register_candidates),
+      .physical_register_candidate_ordinals = candidate_ordinals,
+      .physical_register_candidate_ordinal_count =
+          IREE_ARRAYSIZE(candidate_ordinals),
+      .physical_register_atomic_units = physical_register_atomic_units,
+      .physical_register_atomic_unit_count =
+          IREE_ARRAYSIZE(physical_register_atomic_units),
+      .physical_register_view_ordinals = view_ordinals,
+      .physical_register_view_ordinal_count = 1,
+      .physical_register_views = physical_register_views,
+      .physical_register_view_count = 1,
+      .physical_register_view_unit_candidate_ordinals =
+          physical_register_view_unit_candidate_ordinals,
+      .physical_register_view_unit_candidate_ordinal_count =
+          IREE_ARRAYSIZE(physical_register_view_unit_candidate_ordinals),
+  };
+  loom_low_resolved_target_t target = {
+      .descriptor_set = &descriptor_set,
+  };
   target.descriptor_set_key = IREE_SV("test");
   loom_op_t function_op = {};
   loom_low_allocation_target_constraints_t target_constraints = {};
@@ -469,7 +481,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .interval_count = IREE_ARRAYSIZE(intervals),
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .value_interval_indices = interval_indices};
+      .value_interval_indices = interval_indices,
+  };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {{0, 0}, {1, 2}};
   uint32_t unit_start_points[] = {0, 0};
@@ -481,7 +494,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .end_points = unit_end_points,
       .point_count = IREE_ARRAYSIZE(unit_end_points),
       .values_with_incomplete_storage_segments = {liveness.value_count,
-                                                  edge_handoff_words}};
+                                                  edge_handoff_words},
+  };
 
   const uint32_t relation_indices_by_source[] = {0};
   loom_low_placement_relation_t relation = {
@@ -491,7 +505,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE,
       .cause = LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT,
       .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD |
-               LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE};
+               LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE,
+  };
   loom_low_placement_relation_range_t ranges_by_result[] = {
       {
           .start = 0,
@@ -512,34 +527,36 @@ TEST_F(LowAllocationIntervalAssignmentTest,
           .count = 0,
       },
   };
-  loom_low_placement_table_t placement =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  placement.module = module;
-  placement.value_ids = value_ids;
-  placement.value_count = IREE_ARRAYSIZE(value_ids);
-  placement.relations = &relation;
-  placement.relation_count = 1;
-  placement.ranges_by_result_ordinal = ranges_by_result;
-  placement.relation_indices_by_source_ordinal = relation_indices_by_source;
-  placement.ranges_by_source_ordinal = ranges_by_source;
+  loom_low_placement_table_t placement = {
+      .module = module,
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .relations = &relation,
+      .relation_count = 1,
+      .ranges_by_result_ordinal = ranges_by_result,
+      .relation_indices_by_source_ordinal = relation_indices_by_source,
+      .ranges_by_source_ordinal = ranges_by_source,
+  };
   const loom_value_ordinal_t tied_origins[] = {0, 0};
   placement.tied_storage_origins_by_value_ordinal = tied_origins;
   const loom_value_ordinal_t storage_order[] = {1, 0};
   placement.storage_value_order = storage_order;
   placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
 
-  loom_low_reg_class_t reg_class = {.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
-                                    .alloc_unit_bits = 32,
-                                    .allocatable_count = 8,
-                                    .spill_class_id = LOOM_LOW_REG_CLASS_NONE};
-  loom_low_descriptor_set_t descriptor_set = {.stable_id = descriptor_set_id,
-                                              .reg_classes = &reg_class,
-                                              .reg_class_count = 1};
-  loom_low_resolved_target_t target =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  target.descriptor_set = &descriptor_set;
+  loom_low_reg_class_t reg_class = {
+      .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
+      .alloc_unit_bits = 32,
+      .allocatable_count = 8,
+      .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+  };
+  loom_low_descriptor_set_t descriptor_set = {
+      .stable_id = descriptor_set_id,
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
+  loom_low_resolved_target_t target = {
+      .descriptor_set = &descriptor_set,
+  };
   target.descriptor_set_key = IREE_SV("test");
   loom_op_t function_op = {};
   loom_low_allocation_target_constraints_t target_constraints = {};
@@ -566,7 +583,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .module = module,
       .value_ids = value_ids,
       .value_count = IREE_ARRAYSIZE(value_ids),
-      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED};
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED,
+  };
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_resolve_fixed_locations(
       &target_constraints, &liveness, &value_domain,
       placement.operand_constraints_by_interval,

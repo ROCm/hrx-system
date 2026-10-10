@@ -148,7 +148,8 @@ TEST_F(MaterializeTest, ClonesOwnedDeclarationArguments) {
             *out_ref = *static_cast<const loom_symbol_ref_t*>(user_data);
             return iree_ok_status();
           },
-          &target_callee)};
+          &target_callee),
+  };
   loom_ir_remap_t remap =
       InitializeRemap(/*allow_unmapped_values=*/false, &options);
   loom_op_t* target_declaration = nullptr;

@@ -34,10 +34,12 @@ class SymbolicCongruenceTest : public ::testing::Test {
     IREE_CHECK_OK(iree_arena_allocate(&arena_, sizeof(*term),
                                       reinterpret_cast<void**>(&term)));
     *term = {1, identity, identity};
-    loom_symbolic_expr_t expression = {.terms = term,
-                                       .term_count = 1,
-                                       .facts = loom_value_facts_unknown(),
-                                       .flags = LOOM_SYMBOLIC_EXPR_FLAG_LINEAR};
+    loom_symbolic_expr_t expression = {
+        .terms = term,
+        .term_count = 1,
+        .facts = loom_value_facts_unknown(),
+        .flags = LOOM_SYMBOLIC_EXPR_FLAG_LINEAR,
+    };
     return expression;
   }
 

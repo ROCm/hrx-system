@@ -99,7 +99,8 @@ class KernelConfigFixture {
     loom_link_plan_materialization_environment_t environment = {
         .context = &context_,
         .block_pool = &block_pool_,
-        .allocator = iree_allocator_system()};
+        .allocator = iree_allocator_system(),
+    };
     loom_link_plan_materialization_t materialization = {};
     CheckStatus(loom_link_plan_materialize(
         plan_, &environment, IREE_SV("projected"), arena, &materialization));
@@ -113,8 +114,10 @@ class KernelConfigFixture {
         .symbol_ordinal = kernel_->ordinal,
         .kind = LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
     };
-    loom_link_plan_options_t options = {.mode = LOOM_LINK_PLAN_LINK,
-                                        .root_facets = {1, &root}};
+    loom_link_plan_options_t options = {
+        .mode = LOOM_LINK_PLAN_LINK,
+        .root_facets = {1, &root},
+    };
     loom_link_plan_t* plan = nullptr;
     CheckStatus(
         loom_link_plan_build(index_, &options, iree_allocator_system(), &plan));
@@ -155,7 +158,8 @@ kernel.def target(@benchmark_target) @benchmark(%element_count: index) {
   loom_module_t* Parse(const std::string& source) {
     loom_text_parse_options_t options = {
         .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
-        .max_errors = 20};
+        .max_errors = 20,
+    };
     loom_module_t* module = nullptr;
     CheckStatus(loom_text_parse(
         iree_make_string_view(source.data(), source.size()),

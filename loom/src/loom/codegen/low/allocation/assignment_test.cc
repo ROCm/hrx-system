@@ -19,7 +19,8 @@ loom_low_allocation_assignment_t Assignment(
       .descriptor_reg_class_id = descriptor_reg_class_id,
       .location_kind = location_kind,
       .location_base = location_base,
-      .location_count = location_count};
+      .location_count = location_count,
+  };
   return assignment;
 }
 

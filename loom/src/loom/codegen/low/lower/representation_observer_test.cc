@@ -536,7 +536,10 @@ TEST_F(LowLowerRepresentationObserverTest,
                                         &add));
   const loom_value_id_t seed = loom_vector_addi_result(add);
   const loom_tied_result_t tied_result = {
-      .result_index = 0, .operand_index = 3, .has_type_change = false};
+      .result_index = 0,
+      .operand_index = 3,
+      .has_type_change = false,
+  };
   loom_op_t* loop = nullptr;
   IREE_ASSERT_OK(
       loom_scf_for_build(&builder, /*build_flags=*/0, lower_bound, upper_bound,

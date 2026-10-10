@@ -66,15 +66,14 @@ class PressureAliasTest : public ::testing::Test {
       rows[i].kind = LOOM_LOW_STORAGE_RELATION_CONTIGUOUS_PART;
     }
     loom_local_value_domain_t domain = {.value_count = IREE_ARRAYSIZE(values)};
-    loom_low_schedule_build_state_t state =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-             // differs from declaration order.
-    state.values = values;
-    state.value_producer_nodes = value_producer_nodes;
-    state.nodes = nodes;
-    state.value_domain = &domain;
-    state.scratch_arena = &arena_;
-    state.storage_relations = {relation_starts, &relations, 2, 2};
+    loom_low_schedule_build_state_t state = {
+        .scratch_arena = &arena_,
+        .value_domain = &domain,
+        .values = values,
+        .value_producer_nodes = value_producer_nodes,
+        .nodes = nodes,
+        .storage_relations = {relation_starts, &relations, 2, 2},
+    };
     loom_low_schedule_pressure_state_t pressure = {};
     IREE_ASSERT_OK(loom_low_schedule_pressure_alias_initialize(
         &state, &pressure.storage_aliases));

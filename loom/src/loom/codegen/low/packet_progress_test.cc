@@ -541,8 +541,10 @@ TEST_F(LowPacketProgressTest,
       .query = SequentialProgressQuery,
       .class_name = SyntheticProgressClassName,
   };
-  loom_low_packet_progress_table_t table = {.schedule = &state_.schedule,
-                                            .record_count = 1};
+  loom_low_packet_progress_table_t table = {
+      .schedule = &state_.schedule,
+      .record_count = 1,
+  };
   failure_index_ = 0;
   IREE_ASSERT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,

@@ -310,12 +310,16 @@ TEST(MemoryAccessTest, AffinePingPongBanksShareOneParityIdentity) {
   constexpr loom_value_id_t kParityValue = 17;
   const int scope = 0;
   const loom_symbolic_term_t terms[2] = {
-      {.coefficient = kStageBytes,
-       .value_id = kParityValue,
-       .relation_value_id = kParityValue},
-      {.coefficient = -kStageBytes,
-       .value_id = kParityValue,
-       .relation_value_id = kParityValue},
+      {
+          .coefficient = kStageBytes,
+          .value_id = kParityValue,
+          .relation_value_id = kParityValue,
+      },
+      {
+          .coefficient = -kStageBytes,
+          .value_id = kParityValue,
+          .relation_value_id = kParityValue,
+      },
   };
   loom_low_memory_relative_interval_t intervals[2] = {};
   loom_low_memory_access_summary_t accesses[2] = {};
@@ -406,20 +410,20 @@ TEST_F(MemoryAccessMapTest,
   periodic.expression.terms = &term;
   periodic.expression.term_count = 1;
   periodic.expression.flags = LOOM_SYMBOLIC_EXPR_FLAG_LINEAR;
-  loom_low_memory_relative_interval_t interval =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  interval.scope = source;
-  interval.storage_id = 2;
-  interval.disjoint_storage_ordinal = 3;
-  interval.origin = periodic.expression;
+  loom_low_memory_relative_interval_t interval = {
+      .scope = source,
+      .storage_id = 2,
+      .disjoint_storage_ordinal = 3,
+      .origin = periodic.expression,
+  };
   interval.origin.facts = loom_value_facts_unknown();
   interval.origin.congruence = &periodic;
   interval.upper = 16;
   loom_low_memory_access_summary_t access = {
       .memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP,
       .source_flags = LOOM_LOW_MEMORY_ACCESS_SOURCE_FLAG_ATOMIC_OBSERVATION,
-      .relative_interval = &interval};
+      .relative_interval = &interval,
+  };
   IREE_ASSERT_OK(
       loom_low_memory_access_map_insert(source, &packets[0], 0, &access));
   interval.lower = 16;

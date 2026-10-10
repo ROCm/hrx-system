@@ -69,7 +69,8 @@ class ProgramPlanFixture {
     CheckStatus(loom_link_module_index_allocate(
         &context_, &block_pool_, iree_allocator_system(), &index_));
     loom_link_module_index_add_options_t add_options = {
-        .provider_name = IREE_SV("command_plan_benchmark")};
+        .provider_name = IREE_SV("command_plan_benchmark"),
+    };
     CheckStatus(loom_link_module_index_add_materialized(
         index_, source_module_, &add_options,
         /*out_provider_ordinal=*/nullptr));
@@ -85,7 +86,8 @@ class ProgramPlanFixture {
     loom_link_plan_options_t options = {
         .mode = LOOM_LINK_PLAN_LINK,
         .root_facets = {1, &root_facet},
-        .dependency_policy = LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS};
+        .dependency_policy = LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS,
+    };
     CheckStatus(loom_link_plan_build(index_, &options, iree_allocator_system(),
                                      &plan_));
   }
@@ -106,7 +108,8 @@ class ProgramPlanFixture {
     loom_link_plan_materialization_environment_t environment = {
         .context = &context_,
         .block_pool = &block_pool_,
-        .allocator = iree_allocator_system()};
+        .allocator = iree_allocator_system(),
+    };
     loom_link_plan_materialization_t materialization = {};
     CheckStatus(loom_link_plan_materialize(plan_, &environment,
                                            IREE_SV("command_plan_benchmark"),
@@ -245,7 +248,8 @@ kernel.def @tiles(%extent: index) {
   loom_module_t* ParseAndVerify(const std::string& source) {
     loom_text_parse_options_t parse_options = {
         .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
-        .max_errors = 20};
+        .max_errors = 20,
+    };
     loom_module_t* module = nullptr;
     CheckStatus(
         loom_text_parse(iree_make_string_view(source.data(), source.size()),

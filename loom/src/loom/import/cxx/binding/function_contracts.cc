@@ -140,9 +140,7 @@ void FunctionContracts::declaration(
       return;
     }
     for (auto projected : project_predicates(unit_, diagnostics_, condition)) {
-      Predicate predicate =
-          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment follows
-               // nontrivial member initialization.
+      Predicate predicate = {};
       predicate.value_count = projected.value_count;
       predicate.predicate = projected.predicate;
       for (size_t index = 0; index < projected.value_count; ++index) {

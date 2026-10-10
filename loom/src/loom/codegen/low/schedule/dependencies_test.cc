@@ -52,7 +52,8 @@ TEST_F(ScheduleDependenciesTest, StableAcrossSegmentBoundaries) {
             LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_EFFECT,
         .kind = LOOM_LOW_SCHEDULE_DEPENDENCY_SSA,
         .separation_source = LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR,
-        .model_quality = 4};
+        .model_quality = 4,
+    };
     IREE_ASSERT_OK(loom_low_schedule_dependency_graph_append(
         &source, dependency, &arena_));
   }

@@ -192,7 +192,8 @@ class FunctionVersionProjectionFixture {
 
     loom_module_size_hints_t hints = {
         .symbol_count =
-            static_cast<iree_host_size_t>(function_count + context_count)};
+            static_cast<iree_host_size_t>(function_count + context_count),
+    };
     IREE_CHECK_OK(loom_module_allocate(
         &context_, IREE_SV("function_version_projection_benchmark"),
         &block_pool_, &hints, iree_allocator_system(), &source_module_));

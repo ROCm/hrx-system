@@ -879,7 +879,8 @@ func.def public @unused_library(%x: i32) -> (i32) {
         .root_symbols = roots,
         .root_symbol_count = IREE_ARRAYSIZE(roots),
         .module_providers = module_providers,
-        .module_provider_count = IREE_ARRAYSIZE(module_providers)};
+        .module_provider_count = IREE_ARRAYSIZE(module_providers),
+    };
 
     LinkerPtr linker = CreateLinker(context.get());
     WorkspacePtr link_workspace = CreateWorkspace();
@@ -957,13 +958,15 @@ func.def public @identity(%x: i32) -> (i32) {
   const loomc_string_view_t roots[] = {
       loomc_make_cstring_view("@caller"),
   };
-  loomc_link_options_t options = {.type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
-                                  .structure_size = sizeof(options),
-                                  .mode = LOOMC_LINK_MODE_LINK,
-                                  .root_symbols = roots,
-                                  .root_symbol_count = IREE_ARRAYSIZE(roots),
-                                  .module_providers = &module_provider,
-                                  .module_provider_count = 1};
+  loomc_link_options_t options = {
+      .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+      .structure_size = sizeof(options),
+      .mode = LOOMC_LINK_MODE_LINK,
+      .root_symbols = roots,
+      .root_symbol_count = IREE_ARRAYSIZE(roots),
+      .module_providers = &module_provider,
+      .module_provider_count = 1,
+  };
 
   LinkerPtr linker = CreateLinker(context.get());
   WorkspacePtr link_workspace = CreateWorkspace();
@@ -1010,12 +1013,11 @@ func.def public @entry(%x: i32) -> (i32) {
       DeserializeModuleFromSource(context.get(), workspace.get(), source.get());
   LinkerPtr linker = CreateLinker(context.get());
 
-  loomc_link_options_t options =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  options.type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS;
-  options.structure_size = sizeof(options);
-  options.module_provider_count = 1;
+  loomc_link_options_t options = {
+      .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+      .structure_size = sizeof(options),
+      .module_provider_count = 1,
+  };
   loomc_module_t* output_module = reinterpret_cast<loomc_module_t*>(1);
   loomc_result_t* result = reinterpret_cast<loomc_result_t*>(1);
   LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,

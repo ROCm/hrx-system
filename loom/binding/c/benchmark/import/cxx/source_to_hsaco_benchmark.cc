@@ -93,7 +93,8 @@ class CxxSourceScenarioBase : public TargetCompileScenario {
     loomc_amdgpu_profile_options_t profile_options = {
         .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
         .structure_size = sizeof(profile_options),
-        .identifier = loomc_make_cstring_view(kernel_.target)};
+        .identifier = loomc_make_cstring_view(kernel_.target),
+    };
     profile_options.identity.target = profile_options.identifier;
     loomc_target_profile_t* raw_profile = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_profile_create_amdgpu(
@@ -140,14 +141,13 @@ class CxxSourceScenarioBase : public TargetCompileScenario {
   iree_status_t ImportSource(WorkspacePtr& workspace, ModulePtr* out_module) {
     out_module->reset();
     const loomc_string_view_t root = loomc_make_cstring_view(kernel_.root);
-    loomc_cxx_import_options_t options =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-             // spans intervening work.
-    options.type = LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS;
-    options.structure_size = sizeof(options);
-    options.flags = LOOMC_CXX_IMPORT_FLAG_APPROXIMATE_FUNCTIONS;
-    options.roots = &root;
-    options.root_count = 1;
+    loomc_cxx_import_options_t options = {
+        .type = LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS,
+        .structure_size = sizeof(options),
+        .flags = LOOMC_CXX_IMPORT_FLAG_APPROXIMATE_FUNCTIONS,
+        .roots = &root,
+        .root_count = 1,
+    };
     if (!include_sources_.empty()) {
       options.source_provider = {ProvideSource, this};
     }

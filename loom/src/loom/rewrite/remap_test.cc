@@ -286,8 +286,10 @@ TEST_F(RemapTest, SharedTypesFollowBindingsInstalledBetweenCalls) {
                                                   &signature));
   for (auto map_kind : {LOOM_IR_REMAP_VALUE_MAP_SPARSE,
                         LOOM_IR_REMAP_VALUE_MAP_SOURCE_INDEXED}) {
-    loom_ir_remap_options_t options = {.allow_unmapped_values = true,
-                                       .value_map_kind = map_kind};
+    loom_ir_remap_options_t options = {
+        .allow_unmapped_values = true,
+        .value_map_kind = map_kind,
+    };
     loom_ir_remap_t remap;
     IREE_ASSERT_OK(loom_ir_remap_initialize(source_, source_, &remap_arena_,
                                             &options, &remap));
@@ -887,8 +889,10 @@ TEST_F(RemapTest, RemapsLocationsAcrossModules) {
   IREE_ASSERT_OK(iree_arena_allocate_array(
       &source_->arena, 1, sizeof(loom_location_id_t), (void**)&fused_children));
   fused_children[0] = file_location_id;
-  loom_location_entry_t fused_entry = {.kind = LOOM_LOCATION_FUSED,
-                                       .flags = LOOM_LOCATION_FLAG_SYNTHETIC};
+  loom_location_entry_t fused_entry = {
+      .kind = LOOM_LOCATION_FUSED,
+      .flags = LOOM_LOCATION_FLAG_SYNTHETIC,
+  };
   fused_entry.fused.count = 1;
   fused_entry.fused.children = fused_children;
   loom_location_id_t fused_location_id = LOOM_LOCATION_UNKNOWN;
@@ -1206,8 +1210,10 @@ TEST_F(RemapTest, SameModuleSymbolsRemapOnlyWhenEnabled) {
   uint16_t source_symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(
       loom_module_add_symbol(source_, source_name_id, &source_symbol_id));
-  const loom_symbol_ref_t source_ref = {.module_id = 0,
-                                        .symbol_id = source_symbol_id};
+  const loom_symbol_ref_t source_ref = {
+      .module_id = 0,
+      .symbol_id = source_symbol_id,
+  };
 
   loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(
@@ -1215,8 +1221,10 @@ TEST_F(RemapTest, SameModuleSymbolsRemapOnlyWhenEnabled) {
   uint16_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(
       loom_module_add_symbol(source_, target_name_id, &target_symbol_id));
-  const loom_symbol_ref_t target_ref = {.module_id = 0,
-                                        .symbol_id = target_symbol_id};
+  const loom_symbol_ref_t target_ref = {
+      .module_id = 0,
+      .symbol_id = target_symbol_id,
+  };
 
   SameModuleSymbolRemap state = {
       .source_ref = source_ref,
@@ -1302,8 +1310,10 @@ TEST_F(RemapTest, CrossModuleSymbolRefsRequirePolicy) {
   uint16_t source_symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(
       loom_module_add_symbol(source_, source_name_id, &source_symbol_id));
-  loom_symbol_ref_t source_ref = {.module_id = 0,
-                                  .symbol_id = source_symbol_id};
+  loom_symbol_ref_t source_ref = {
+      .module_id = 0,
+      .symbol_id = source_symbol_id,
+  };
 
   loom_ir_remap_t strict_remap = InitializeRemap();
   loom_attribute_t target_attr = {};
@@ -1404,7 +1414,8 @@ TEST_F(RemapTest, SharedTypesObserveSymbolPolicyChangesBetweenCalls) {
             *result = {0, policy->target};
             return iree_ok_status();
           },
-          &policy)};
+          &policy),
+  };
   auto remap = InitializeRemap(&options);
   for (auto target : targets) {
     policy.target = target;
@@ -1427,8 +1438,10 @@ TEST_F(RemapTest, CrossModuleSymbolPolicyMustReturnTargetSymbol) {
   uint16_t source_symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(
       loom_module_add_symbol(source_, source_name_id, &source_symbol_id));
-  loom_symbol_ref_t source_ref = {.module_id = 0,
-                                  .symbol_id = source_symbol_id};
+  loom_symbol_ref_t source_ref = {
+      .module_id = 0,
+      .symbol_id = source_symbol_id,
+  };
 
   loom_ir_remap_options_t options = {
       .allow_unmapped_values = {},

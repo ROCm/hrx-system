@@ -65,11 +65,15 @@ TEST(VMModuleBinaryTest,
   function_bytecode.contents =
       iree_make_const_byte_span(function_bytes, sizeof(function_bytes));
   iree_vm_bytecode_v0_function_row_t function_row = {
-      .bytecode_length_u32 = sizeof(function_bytes), .block_count_u32 = 1};
-  loom_vm_program_plan_t plan = {.functions = &function_row,
-                                 .function_count = 1,
-                                 .function_bytecode = &function_bytecode.base,
-                                 .maximum_block_count = 1};
+      .bytecode_length_u32 = sizeof(function_bytes),
+      .block_count_u32 = 1,
+  };
+  loom_vm_program_plan_t plan = {
+      .functions = &function_row,
+      .function_count = 1,
+      .function_bytecode = &function_bytecode.base,
+      .maximum_block_count = 1,
+  };
 
   iree_byte_sequence_t* first_binary = NULL;
   iree_byte_sequence_t* second_binary = NULL;

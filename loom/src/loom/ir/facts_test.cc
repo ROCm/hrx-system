@@ -1806,8 +1806,10 @@ TEST(ElementCountFacts, OverflowDimensionsUseDimensionFacts) {
       loom_dim_pack_dynamic(1),
       loom_dim_pack_static(8),
   };
-  loom_type_t type = {.header = loom_type_make_header(
-                          LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I8, 3, 0)};
+  loom_type_t type = {
+      .header =
+          loom_type_make_header(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I8, 3, 0),
+  };
   type.dims[0] = (uint64_t)(uintptr_t)dimensions;
   loom_value_facts_t facts[2] = {loom_value_facts_unknown(),
                                  loom_value_facts_make(4, 12, 4)};
@@ -1822,7 +1824,8 @@ TEST(ElementCountFacts, OverflowDimensionsUseDimensionFacts) {
 TEST(ElementCountFacts, MalformedInlineRankDegradesSafely) {
   loom_type_t type = {
       .header = loom_type_make_header(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32, 3,
-                                      LOOM_TYPE_FLAG_INLINE_DIMS)};
+                                      LOOM_TYPE_FLAG_INLINE_DIMS),
+  };
   type.dims[0] = loom_dim_pack_static(2);
   type.dims[1] = loom_dim_pack_static(4);
 

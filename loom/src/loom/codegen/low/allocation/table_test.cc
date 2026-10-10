@@ -50,7 +50,8 @@ TEST(LowAllocationTableTest, FindsEdgeCopyGroupsBySourceOrdinal) {
 
   loom_low_allocation_table_t table = {
       .edge_copy_groups = groups,
-      .edge_copy_group_count = IREE_ARRAYSIZE(groups)};
+      .edge_copy_group_count = IREE_ARRAYSIZE(groups),
+  };
 
   EXPECT_EQ(&groups[0],
             loom_low_allocation_find_edge_copy_group_by_source_ordinal(
@@ -73,7 +74,8 @@ TEST(LowAllocationTableTest, FindsPacketMoveGroupsBySourceOrdinal) {
 
   loom_low_allocation_table_t table = {
       .packet_move_groups = groups,
-      .packet_move_group_count = IREE_ARRAYSIZE(groups)};
+      .packet_move_group_count = IREE_ARRAYSIZE(groups),
+  };
 
   EXPECT_EQ(&groups[0],
             loom_low_allocation_find_packet_move_group_by_source_ordinal(

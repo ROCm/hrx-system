@@ -116,11 +116,10 @@ class LowAllocationUnitLivenessTest : public ::testing::Test {
                           uint32_t start_point, uint32_t end_point,
                           const loom_liveness_segment_t* segments = nullptr,
                           uint32_t segment_count = 0) {
-    loom_low_allocation_unit_liveness_t liveness =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-             // spans intervening work.
-    liveness.end_points = &end_point;
-    liveness.point_count = 1;
+    loom_low_allocation_unit_liveness_t liveness = {
+        .end_points = &end_point,
+        .point_count = 1,
+    };
     liveness.storage_segments.entries = segments;
     liveness.clobbers = clobbers;
     loom_low_allocation_assignment_t candidate = {
@@ -130,7 +129,8 @@ class LowAllocationUnitLivenessTest : public ::testing::Test {
         .unit_count = 1,
         .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
         .location_base = location,
-        .location_count = 1};
+        .location_count = 1,
+    };
     candidate.liveness_segments.count = segment_count;
     return loom_low_allocation_unit_liveness_clobber_conflicts(
         &liveness, descriptor_set, &candidate);
@@ -178,10 +178,9 @@ loom_liveness_interval_t RegisterInterval(loom_value_id_t value_id,
                                           uint32_t start_point,
                                           uint32_t end_point,
                                           uint32_t unit_count) {
-  loom_liveness_interval_t interval =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  interval.value_id = value_id;
+  loom_liveness_interval_t interval = {
+      .value_id = value_id,
+  };
   interval.value_class.type_kind = LOOM_TYPE_REGISTER;
   interval.start_point = start_point;
   interval.end_point = end_point;
@@ -196,16 +195,15 @@ loom_liveness_analysis_t Liveness(const loom_value_id_t* value_ids,
                                   iree_host_size_t interval_count,
                                   const loom_liveness_block_info_t* blocks,
                                   iree_host_size_t block_count) {
-  loom_liveness_analysis_t liveness =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  liveness.value_ids = value_ids;
-  liveness.value_count = value_count;
-  liveness.value_interval_indices = value_interval_indices;
-  liveness.intervals = intervals;
-  liveness.interval_count = interval_count;
-  liveness.blocks = blocks;
-  liveness.block_count = block_count;
+  loom_liveness_analysis_t liveness = {
+      .blocks = blocks,
+      .block_count = block_count,
+      .intervals = intervals,
+      .interval_count = interval_count,
+      .value_ids = value_ids,
+      .value_count = value_count,
+      .value_interval_indices = value_interval_indices,
+  };
   return liveness;
 }
 
@@ -263,7 +261,10 @@ TEST_P(LowAllocationUnitLivenessExtentTest, BoundsExtentBeforePointAllocation) {
   iree_arena_initialize(&result_pool, &result_arena);
   loom_low_reg_class_t register_class = {.alloc_unit_bits = 32};
   loom_low_descriptor_set_t descriptors = {
-      .stable_id = 1, .reg_classes = &register_class, .reg_class_count = 1};
+      .stable_id = 1,
+      .reg_classes = &register_class,
+      .reg_class_count = 1,
+  };
   loom_low_resolved_target_t target = {.descriptor_set = &descriptors};
   loom_low_placement_table_t placement = {};
   loom_low_allocation_unit_liveness_t result = {};
@@ -323,19 +324,18 @@ TEST_F(LowAllocationUnitLivenessTest, RetainsImplicitReadsWithoutClobbering) {
     operands[i + 1].unit_count = i == 0 ? 3 : 1;
   }
   loom_low_descriptor_t descriptor = {.operand_count = 3, .result_count = 1};
-  loom_low_descriptor_set_t descriptors =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  descriptors.stable_id = 1;
-  descriptors.reg_classes = classes;
-  descriptors.reg_class_count = 2;
-  descriptors.reg_class_alts = alternatives;
-  descriptors.reg_class_alt_count = 2;
-  descriptors.operands = operands;
-  descriptors.operand_count = 3;
-  descriptors.descriptors = &descriptor;
-  descriptors.descriptor_count = 1;
-  descriptors.descriptor_ordinal_count = 1;
+  loom_low_descriptor_set_t descriptors = {
+      .stable_id = 1,
+      .descriptors = &descriptor,
+      .descriptor_count = 1,
+      .descriptor_ordinal_count = 1,
+      .operands = operands,
+      .operand_count = 3,
+      .reg_classes = classes,
+      .reg_class_count = 2,
+      .reg_class_alts = alternatives,
+      .reg_class_alt_count = 2,
+  };
   loom_low_resolved_target_t target = {.descriptor_set = &descriptors};
   auto* module = AllocateModule();
   loom_builder_t builder;
@@ -370,8 +370,10 @@ TEST_F(LowAllocationUnitLivenessTest, RetainsImplicitReadsWithoutClobbering) {
 TEST_F(LowAllocationUnitLivenessTest,
        ClobbersContinuousLifetimeAtHalfOpenPoints) {
   loom_low_reg_class_t reg_class = {};
-  loom_low_descriptor_set_t descriptors = {.reg_classes = &reg_class,
-                                           .reg_class_count = 1};
+  loom_low_descriptor_set_t descriptors = {
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
   const PhysicalClobber events[] = {
       {0, 0, 4, false},
       {0, 0, 6, true},
@@ -388,8 +390,10 @@ TEST_F(LowAllocationUnitLivenessTest,
 TEST_F(LowAllocationUnitLivenessTest,
        RejectsForbiddenWriteAtPermittedDefinitionPoint) {
   loom_low_reg_class_t reg_class = {};
-  loom_low_descriptor_set_t descriptors = {.reg_classes = &reg_class,
-                                           .reg_class_count = 1};
+  loom_low_descriptor_set_t descriptors = {
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
   const PhysicalClobber events[] = {
       {0, 0, 6, true},
       {0, 0, 6, false},
@@ -403,8 +407,10 @@ TEST_F(LowAllocationUnitLivenessTest,
 TEST_F(LowAllocationUnitLivenessTest,
        MergesClobberHistoryAcrossSparseLifetimeSegments) {
   loom_low_reg_class_t reg_class = {};
-  loom_low_descriptor_set_t descriptors = {.reg_classes = &reg_class,
-                                           .reg_class_count = 1};
+  loom_low_descriptor_set_t descriptors = {
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
   const loom_liveness_segment_t segments[] = {
       {.start_point = 2, .end_point = 4},
       {.start_point = 8, .end_point = 10},
@@ -430,8 +436,10 @@ TEST_F(LowAllocationUnitLivenessTest,
 TEST_F(LowAllocationUnitLivenessTest,
        SeeksAcrossDenseClobbersBetweenSparseLifetimeSegments) {
   loom_low_reg_class_t reg_class = {};
-  loom_low_descriptor_set_t descriptors = {.reg_classes = &reg_class,
-                                           .reg_class_count = 1};
+  loom_low_descriptor_set_t descriptors = {
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
   constexpr uint32_t kGapEnd = 16;
   std::array<PhysicalClobber, kGapEnd> events;
   for (uint32_t point = 1; point <= kGapEnd; ++point) {
@@ -460,8 +468,10 @@ TEST_F(LowAllocationUnitLivenessTest,
 TEST_F(LowAllocationUnitLivenessTest,
        SeeksLongHistoryWithoutSkippingImmediateDefinition) {
   loom_low_reg_class_t reg_class = {};
-  loom_low_descriptor_set_t descriptors = {.reg_classes = &reg_class,
-                                           .reg_class_count = 1};
+  loom_low_descriptor_set_t descriptors = {
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
   std::array<PhysicalClobber, 32> events;
   for (uint32_t point = 0; point < 32; ++point) {
     events[point] = {0, 0, point, point == 24};
@@ -478,7 +488,8 @@ TEST_F(LowAllocationUnitLivenessTest, ChecksEveryExplicitRegisterAtomicUnit) {
       .flags = LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS |
                LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES,
       .allocatable_count = 1,
-      .physical_atomic_unit_count = 2};
+      .physical_atomic_unit_count = 2,
+  };
   loom_low_physical_register_t physical_register = {.atomic_unit_count = 2};
   const uint16_t physical_register_candidate_ids[] = {0};
   const uint16_t physical_register_atomic_units[] = {2, 5};
@@ -493,7 +504,8 @@ TEST_F(LowAllocationUnitLivenessTest, ChecksEveryExplicitRegisterAtomicUnit) {
       .physical_register_atomic_units = physical_register_atomic_units,
       .physical_register_atomic_unit_count =
           IREE_ARRAYSIZE(physical_register_atomic_units),
-      .physical_register_unit_count = 6};
+      .physical_register_unit_count = 6,
+  };
   const PhysicalClobber events[] = {
       {0, 5, 4, false},
   };
@@ -506,8 +518,10 @@ TEST_F(LowAllocationUnitLivenessTest, ChecksEveryExplicitRegisterAtomicUnit) {
 TEST_F(LowAllocationUnitLivenessTest,
        ClobberIndexMatchesExhaustiveReferenceSemantics) {
   loom_low_reg_class_t reg_class = {};
-  loom_low_descriptor_set_t descriptors = {.reg_classes = &reg_class,
-                                           .reg_class_count = 1};
+  loom_low_descriptor_set_t descriptors = {
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
   const loom_liveness_segment_t sparse_segments[] = {
       {.start_point = 1, .end_point = 3},
       {.start_point = 5, .end_point = 7},
@@ -580,26 +594,24 @@ TEST_P(LowAllocationDefinitionLivenessTest, DistinguishesWritesFromTransport) {
   loom_low_reg_class_t register_class = {.alloc_unit_bits = 32};
   const loom_low_reg_class_alt_t alternative = {0, LOOM_LOW_REGISTER_PART_NONE,
                                                 0, 0};
-  loom_low_operand_t operand =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-           // differs from list initialization.
-  operand.role = LOOM_LOW_OPERAND_ROLE_RESULT;
-  operand.reg_class_alt_count = 1;
+  loom_low_operand_t operand = {
+      .role = LOOM_LOW_OPERAND_ROLE_RESULT,
+      .reg_class_alt_count = 1,
+  };
   operand.unit_count = width;
   loom_low_descriptor_t descriptor = {.operand_count = 1, .result_count = 1};
-  loom_low_descriptor_set_t descriptors =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  descriptors.stable_id = 1;
-  descriptors.reg_classes = &register_class;
-  descriptors.reg_class_count = 1;
-  descriptors.reg_class_alts = &alternative;
-  descriptors.reg_class_alt_count = 1;
-  descriptors.operands = &operand;
-  descriptors.operand_count = 1;
-  descriptors.descriptors = &descriptor;
-  descriptors.descriptor_count = 1;
-  descriptors.descriptor_ordinal_count = 1;
+  loom_low_descriptor_set_t descriptors = {
+      .stable_id = 1,
+      .descriptors = &descriptor,
+      .descriptor_count = 1,
+      .descriptor_ordinal_count = 1,
+      .operands = &operand,
+      .operand_count = 1,
+      .reg_classes = &register_class,
+      .reg_class_count = 1,
+      .reg_class_alts = &alternative,
+      .reg_class_alt_count = 1,
+  };
   loom_low_resolved_target_t target = {.descriptor_set = &descriptors};
 
   auto* module = AllocateModule();
@@ -690,9 +702,12 @@ TEST_F(LowAllocationUnitLivenessTest, ExcludesRequiredStorageComponents) {
   AcquireValueDomain(module, values, IREE_ARRAYSIZE(values), &domain);
   const loom_value_ordinal_t roots[] = {1, 1, 2};
   loom_low_placement_table_t placement = {
-      .module = module, .tied_storage_origins_by_value_ordinal = roots};
-  loom_low_allocation_unit_liveness_t unit_liveness = {.tied_storage_placement =
-                                                           &placement};
+      .module = module,
+      .tied_storage_origins_by_value_ordinal = roots,
+  };
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .tied_storage_placement = &placement,
+  };
 
   for (uint32_t ignored = 0; ignored < 2; ++ignored) {
     for (uint32_t value = 0; value < 3; ++value) {
@@ -914,10 +929,12 @@ TEST_F(LowAllocationUnitLivenessTest, QueriesComponentStoragePerUnit) {
       .end_points = ends,
       .point_count = IREE_ARRAYSIZE(ends),
       .values_with_incomplete_storage_segments = {IREE_ARRAYSIZE(value_ids),
-                                                  incomplete_words}};
+                                                  incomplete_words},
+  };
   unit_liveness.storage_segments.entries = segments;
-  loom_low_placement_table_t placement = {.value_count =
-                                              IREE_ARRAYSIZE(value_ids)};
+  loom_low_placement_table_t placement = {
+      .value_count = IREE_ARRAYSIZE(value_ids),
+  };
 
   EXPECT_TRUE(loom_low_allocation_unit_liveness_storage_component_live_at_point(
       &unit_liveness, &liveness, &placement, /*value_ordinal=*/0,
@@ -959,7 +976,8 @@ TEST_F(LowAllocationUnitLivenessTest, PropagatesTiedStorageAcrossOrdinalOrder) {
       .end_points = ends,
       .point_count = IREE_ARRAYSIZE(ends),
       .values_with_incomplete_storage_segments = {IREE_ARRAYSIZE(value_ids),
-                                                  incomplete_words}};
+                                                  incomplete_words},
+  };
 
   loom_low_placement_relation_t relations[3] = {};
   relations[0].result_ordinal = 1;
@@ -986,7 +1004,8 @@ TEST_F(LowAllocationUnitLivenessTest, PropagatesTiedStorageAcrossOrdinalOrder) {
       .ranges_by_result_ordinal = result_ranges,
       .storage_value_order = storage_order,
       .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
-      .tied_storage_origins_by_value_ordinal = tied_origins};
+      .tied_storage_origins_by_value_ordinal = tied_origins,
+  };
 
   RetainAndPropagateStorage(&unit_liveness, &liveness, &placement);
   EXPECT_EQ(ends[3], 40u);
@@ -1049,7 +1068,8 @@ TEST_F(LowAllocationUnitLivenessTest,
       .end_points = ends,
       .point_count = IREE_ARRAYSIZE(ends),
       .values_with_incomplete_storage_segments = {IREE_ARRAYSIZE(value_ids),
-                                                  incomplete_words}};
+                                                  incomplete_words},
+  };
   unit_liveness.storage_segments.entries = segments;
 
   loom_low_placement_relation_t relations[3] = {};
@@ -1073,7 +1093,8 @@ TEST_F(LowAllocationUnitLivenessTest,
       .ranges_by_result_ordinal = result_ranges,
       .storage_value_order = storage_order,
       .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
-      .tied_storage_origins_by_value_ordinal = tied_origins};
+      .tied_storage_origins_by_value_ordinal = tied_origins,
+  };
 
   RetainAndPropagateStorage(&unit_liveness, &liveness, &placement);
   EXPECT_EQ(values[0].acquisition_start_point, 2u);
@@ -1175,7 +1196,8 @@ TEST_F(LowAllocationUnitLivenessTest,
       .end_points = ends,
       .point_count = IREE_ARRAYSIZE(ends),
       .values_with_incomplete_storage_segments = {IREE_ARRAYSIZE(value_ids),
-                                                  incomplete_words}};
+                                                  incomplete_words},
+  };
   unit_liveness.storage_segments.entries = segments;
 
   loom_low_placement_relation_t relations[2] = {};
@@ -1201,7 +1223,8 @@ TEST_F(LowAllocationUnitLivenessTest,
       .ranges_by_result_ordinal = result_ranges,
       .storage_value_order = storage_order,
       .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
-      .tied_storage_origins_by_value_ordinal = tied_origins};
+      .tied_storage_origins_by_value_ordinal = tied_origins,
+  };
 
   RetainAndPropagateStorage(&unit_liveness, &liveness, &placement);
   const loom_liveness_segment_range_t source =
@@ -1412,7 +1435,8 @@ TEST_F(LowAllocationUnitLivenessTest, RetainsSparseTiedStorageReservations) {
       .start_points = starts,
       .end_points = ends,
       .point_count = IREE_ARRAYSIZE(starts),
-      .values_with_incomplete_storage_segments = {6, incomplete}};
+      .values_with_incomplete_storage_segments = {6, incomplete},
+  };
   unit_liveness.storage_segments.entries = storage_segments.data();
   loom_low_placement_relation_t relations[4] = {};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(relations); ++i) {

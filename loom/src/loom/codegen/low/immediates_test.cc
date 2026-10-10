@@ -78,13 +78,17 @@ class LowImmediatesTest : public ::testing::Test {
 TEST_F(LowImmediatesTest, ResolvesSemanticValuesWithoutMutatingSharedInput) {
   for (const auto& value : values_) {
     loom_named_attr_t entries[] = {
-        {.name_id = Intern(IREE_SV("mode")),
-         .reserved = 0,
-         .value = loom_attr_string(Intern(loom_low_descriptor_set_string(
-             &descriptor_set_, value.token_string_ref)))},
-        {.name_id = Intern(IREE_SV("other")),
-         .reserved = 0,
-         .value = loom_attr_string(Intern(IREE_SV("forward")))},
+        {
+            .name_id = Intern(IREE_SV("mode")),
+            .reserved = 0,
+            .value = loom_attr_string(Intern(loom_low_descriptor_set_string(
+                &descriptor_set_, value.token_string_ref))),
+        },
+        {
+            .name_id = Intern(IREE_SV("other")),
+            .reserved = 0,
+            .value = loom_attr_string(Intern(IREE_SV("forward"))),
+        },
     };
     loom_attribute_t original = {};
     IREE_ASSERT_OK(loom_module_make_canonical_attr_dict(
@@ -155,7 +159,10 @@ TEST_F(LowImmediatesTest, PreservesNumericAndUnrecognizedInputForVerification) {
       loom_attr_string(Intern(IREE_SV("unknown"))), loom_attr_bool(true)};
   for (const auto& value : values) {
     loom_named_attr_t entry = {
-        .name_id = Intern(IREE_SV("mode")), .reserved = 0, .value = value};
+        .name_id = Intern(IREE_SV("mode")),
+        .reserved = 0,
+        .value = value,
+    };
     loom_attribute_t attrs = {};
     IREE_ASSERT_OK(loom_module_make_canonical_attr_dict(
         module_, loom_make_named_attr_slice(&entry, 1), &attrs));

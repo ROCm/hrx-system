@@ -30,12 +30,13 @@ TEST(LowPacketTest, ReadsSparseImmediateValuesAndPreservesOmission) {
       &storage.op,
       loom_make_canonical_attr_dict(entries, IREE_ARRAYSIZE(entries)));
   loom_low_schedule_node_t node = {
-      .op = &storage.op, .immediate_presence = (1u << 1) | (1u << 31)};
+      .op = &storage.op,
+      .immediate_presence = (1u << 1) | (1u << 31),
+  };
   loom_low_packet_view_t packet = {.node = &node};
-  loom_low_immediate_t field =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  field.attribute_mask = 1u << 1;
+  loom_low_immediate_t field = {
+      .attribute_mask = 1u << 1,
+  };
   EXPECT_EQ(loom_low_packet_immediate_attr(&packet, &field).i64, 17);
   field.attribute_mask = 1u << 31;
   const loom_attribute_t symbol =
@@ -97,10 +98,9 @@ TEST(LowPacketTest, GetsPacketViewAttrs) {
       &low_op_storage.op,
       loom_make_canonical_attr_dict(named_attrs, IREE_ARRAYSIZE(named_attrs)));
 
-  loom_low_schedule_node_t node =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  node.op = &low_op_storage.op;
+  loom_low_schedule_node_t node = {
+      .op = &low_op_storage.op,
+  };
   loom_low_packet_view_t packet = {.node = &node};
 
   loom_named_attr_slice_t attrs = loom_low_packet_attrs(&packet);
@@ -126,8 +126,10 @@ TEST(LowPacketTest, MapsBlocksAndHazardGapsToPacketIndices) {
   loom_low_schedule_block_t blocks[1] = {};
   blocks[0].block = &block;
   blocks[0].scheduled_node_start = 10;
-  loom_low_schedule_table_t schedule = {.blocks = blocks,
-                                        .block_count = IREE_ARRAYSIZE(blocks)};
+  loom_low_schedule_table_t schedule = {
+      .blocks = blocks,
+      .block_count = IREE_ARRAYSIZE(blocks),
+  };
 
   EXPECT_EQ(loom_low_packet_block_index(&schedule, &block), 0u);
   loom_block_t other_block = {};
@@ -168,21 +170,21 @@ TEST(LowDescriptorTest, IndexesPacketOperandRoles) {
   constraints[1].lhs_operand_index = 0;
   constraints[1].rhs_operand_index = 4;
 
-  loom_low_descriptor_t descriptor =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  descriptor.operand_start = 0;
-  descriptor.result_count = 1;
-  descriptor.operand_count = IREE_ARRAYSIZE(operands);
-  descriptor.minimum_packet_operand_count = 4;
-  descriptor.constraint_start = 0;
-  descriptor.constraint_count = IREE_ARRAYSIZE(constraints);
+  loom_low_descriptor_t descriptor = {
+      .operand_start = 0,
+      .constraint_start = 0,
+      .operand_count = IREE_ARRAYSIZE(operands),
+      .result_count = 1,
+      .minimum_packet_operand_count = 4,
+      .constraint_count = IREE_ARRAYSIZE(constraints),
+  };
 
   loom_low_descriptor_set_t descriptor_set = {
       .operands = operands,
       .operand_count = IREE_ARRAYSIZE(operands),
       .constraints = constraints,
-      .constraint_count = IREE_ARRAYSIZE(constraints)};
+      .constraint_count = IREE_ARRAYSIZE(constraints),
+  };
 
   EXPECT_FALSE(loom_low_descriptor_operand_maps_to_packet_operand(
       &descriptor_set, &descriptor, 0));

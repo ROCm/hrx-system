@@ -92,7 +92,11 @@ static loom_pass_descriptor_t MakeFunctionPassDescriptor(
     loom_function_pass_fn_t function_run,
     loom_pass_create_fn_t create = nullptr) {
   loom_pass_descriptor_t descriptor = {
-      .key = key, .info = info, .function_run = function_run, .create = create};
+      .key = key,
+      .info = info,
+      .function_run = function_run,
+      .create = create,
+  };
   return descriptor;
 }
 
@@ -180,15 +184,15 @@ class LowLowerPassTest : public ::testing::Test {
         loom_codegen_pass_environment_storage_initialize(
             &environment_options, function_versions,
             &codegen_environment_storage);
-    loom_pass_t pass = {};  // NOLINT(iree-cpp-designated-initializer) --
-                            // Assignment sequencing spans intervening work.
-    pass.info = pass_info;
-    pass.module_run = loom_low_source_to_low_run;
-    pass.instance_arena = &instance_arena;
-    pass.arena = &instance_arena;
-    pass.statistic_storage = statistic_storage.data();
-    pass.environment = &environment;
-    pass.value_facts = &value_facts;
+    loom_pass_t pass = {
+        .info = pass_info,
+        .module_run = loom_low_source_to_low_run,
+        .instance_arena = &instance_arena,
+        .arena = &instance_arena,
+        .statistic_storage = statistic_storage.data(),
+        .environment = &environment,
+        .value_facts = &value_facts,
+    };
     if (collector != nullptr) {
       pass.diagnostic_emitter = {
           .fn = CollectDiagnosticEmission,
@@ -215,13 +219,15 @@ class LowLowerPassTest : public ::testing::Test {
         {.value = IREE_SVL("inline")},
     };
     static const loom_pass_option_schema_t kSelectionOptions[] = {
-        {.name = IREE_SVL("rewrite"),
-         .kind = LOOM_PASS_OPTION_SCHEMA_ENUM,
-         .flags = 0,
-         .minimum_uint32 = 0,
-         .maximum_uint32 = 0,
-         .enum_values = kRewriteValues,
-         .enum_value_count = IREE_ARRAYSIZE(kRewriteValues)},
+        {
+            .name = IREE_SVL("rewrite"),
+            .kind = LOOM_PASS_OPTION_SCHEMA_ENUM,
+            .flags = 0,
+            .minimum_uint32 = 0,
+            .maximum_uint32 = 0,
+            .enum_values = kRewriteValues,
+            .enum_value_count = IREE_ARRAYSIZE(kRewriteValues),
+        },
     };
     static const loom_pass_descriptor_t kPassDescriptors[] = {
         {
@@ -348,12 +354,14 @@ class LowLowerPassTest : public ::testing::Test {
         loom_codegen_pass_environment_storage_initialize(
             &environment_options, function_versions,
             &codegen_environment_storage);
-    loom_pass_t pass = {.info = pass_info,
-                        .module_run = loom_inline_callables_run,
-                        .instance_arena = &instance_arena,
-                        .arena = &instance_arena,
-                        .statistic_storage = statistic_storage.data(),
-                        .environment = &environment};
+    loom_pass_t pass = {
+        .info = pass_info,
+        .module_run = loom_inline_callables_run,
+        .instance_arena = &instance_arena,
+        .arena = &instance_arena,
+        .statistic_storage = statistic_storage.data(),
+        .environment = &environment,
+    };
 
     iree_status_t status = loom_inline_callables_create(&pass, options);
     if (iree_status_is_ok(status)) {
@@ -845,7 +853,8 @@ TEST_F(LowLowerPassTest, InvokeNormalizesToDirectLowCallWithPolicyPreserved) {
   EXPECT_EQ(loom_low_func_call_callee(call_op).symbol_id, helper_ref.symbol_id);
 
   loom_target_provider_t direct_provider = {
-      .select_call_policy = loom_target_select_call_policy_direct};
+      .select_call_policy = loom_target_select_call_policy_direct,
+  };
   loom_target_function_version_t entry_version = {};
   entry_version.base.type = &loom_target_function_version_type;
   entry_version.base.function = entry;
@@ -1125,9 +1134,11 @@ TEST_F(LowLowerPassTest, LowCallPolicyIsSelectedPerCallerProvider) {
       "}\n"));
 
   loom_target_provider_t require_inline_provider = {
-      .select_call_policy = loom_target_select_call_policy_require_inline};
+      .select_call_policy = loom_target_select_call_policy_require_inline,
+  };
   loom_target_provider_t direct_provider = {
-      .select_call_policy = loom_target_select_call_policy_direct};
+      .select_call_policy = loom_target_select_call_policy_direct,
+  };
 
   const loom_symbol_ref_t required_caller_ref =
       FindSymbolRef(module.get(), IREE_SV("required_caller"));
@@ -1192,8 +1203,9 @@ TEST_F(LowLowerPassTest, CallPolicyDistinguishesSemanticAndLowStages) {
               "  low.return %result : reg<test.i32>\n"
               "}\n"));
 
-  loom_target_provider_t provider = {.select_call_policy =
-                                         RequireInlineSemanticCalls};
+  loom_target_provider_t provider = {
+      .select_call_policy = RequireInlineSemanticCalls,
+  };
 
   const loom_symbol_ref_t source_caller_ref =
       FindSymbolRef(module.get(), IREE_SV("source_caller"));

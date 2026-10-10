@@ -223,7 +223,8 @@ TEST_F(ValueMaterializerTest, MaterializesNarrowScalarLiterals) {
       .value_sources = sources,
       .value_source_count = IREE_ARRAYSIZE(sources),
       .cartesian_sample_count = 1,
-      .sample_count = 1};
+      .sample_count = 1,
+  };
 
   loom_testbench_value_table_t table = {};
   IREE_ASSERT_OK(loom_testbench_value_table_initialize_case(
@@ -647,7 +648,8 @@ check.case @file_io {
   iree_hal_buffer_params_t buffer_params = {
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
       .access = IREE_HAL_MEMORY_ACCESS_READ,
-      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL};
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+  };
   IREE_ASSERT_OK(iree_numpy_npy_load_ndarray(
       written_stream_, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT, buffer_params,
       device_allocator_, &written_buffer_view));

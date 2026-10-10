@@ -33,10 +33,9 @@ void Diagnostics::emit(const cxx::Token& token,
   if (!sink_.fn || !iree_status_is_ok(status_)) {
     return;
   }
-  loom_source_range_t range =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  range.provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE;
+  loom_source_range_t range = {
+      .provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE,
+  };
   if (token.fileId()) {
     auto first = preprocessor_->tokenStartPosition(token);
     auto last = preprocessor_->tokenEndPosition(token);
@@ -51,13 +50,15 @@ void Diagnostics::emit(const cxx::Token& token,
     range.end_column = last.column;
   }
   loom_diagnostic_param_t parameter = loom_param_string(view(message));
-  loom_diagnostic_t diagnostic = {.severity = severity,
-                                  .error = error,
-                                  .params = &parameter,
-                                  .param_count = 1,
-                                  .emitter = LOOM_EMITTER_PARSER,
-                                  .origin = range,
-                                  .source_location = range};
+  loom_diagnostic_t diagnostic = {
+      .severity = severity,
+      .error = error,
+      .params = &parameter,
+      .param_count = 1,
+      .emitter = LOOM_EMITTER_PARSER,
+      .origin = range,
+      .source_location = range,
+  };
   status_ = sink_.fn(sink_.user_data, &diagnostic);
 }
 

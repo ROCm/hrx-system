@@ -29,7 +29,9 @@ TEST(LowDescriptorsTest, SummarizesOnlyMemoryAttachedEffects) {
   effects[5].width_bits = 64;
   loom_low_descriptor_t descriptor = {.effect_count = IREE_ARRAYSIZE(effects)};
   loom_low_descriptor_set_t descriptor_set = {
-      .effects = effects, .effect_count = IREE_ARRAYSIZE(effects)};
+      .effects = effects,
+      .effect_count = IREE_ARRAYSIZE(effects),
+  };
 
   const loom_low_descriptor_memory_effect_summary_t summary =
       loom_low_descriptor_memory_effect_summary(&descriptor_set, &descriptor);

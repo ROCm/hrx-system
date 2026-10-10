@@ -201,8 +201,8 @@ check.case @device_events {
     DeltaProviderState actual_state = {
         .device_events = device_events,
         .device_event_count = device_event_count,
-        .device_event_sink =
-            loom_testbench_device_event_capture_sink(&capture)};
+        .device_event_sink = loom_testbench_device_event_capture_sink(&capture),
+    };
     loom_testbench_case_execution_options_t options = {};
     loom_testbench_case_execution_options_initialize(&options);
     options.invocation.function_call.invoke = ExecutorTest::InvokeDelta;
@@ -219,9 +219,7 @@ check.case @device_events {
     IREE_EXPECT_OK(
         loom_testbench_run_case_sample(&executor, 0, &sample_result));
 
-    DeviceEventExecutionResult result =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment follows
-             // nontrivial member initialization.
+    DeviceEventExecutionResult result = {};
     result.passed = sample_result.passed;
     result.captured_event_count = sample_result.device_events->count;
     result.dropped_event_count = sample_result.device_events->dropped_count;

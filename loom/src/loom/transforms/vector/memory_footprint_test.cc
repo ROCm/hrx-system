@@ -77,12 +77,12 @@ TEST_F(VectorMemoryFootprintPassTest, PreservesReadOnlyFunctionFacts) {
   loom_pass_value_fact_lifecycle_counts_t counts = {};
   value_facts_.lifecycle_counts = &counts;
 
-  loom_pass_t pass = {};  // NOLINT(iree-cpp-designated-initializer) --
-                          // Assignment sequencing spans intervening work.
-  pass.info = loom_vector_memory_footprint_pass_info();
-  pass.instance_arena = &pass_arena_;
-  pass.arena = &pass_arena_;
-  pass.value_facts = &value_facts_;
+  loom_pass_t pass = {
+      .info = loom_vector_memory_footprint_pass_info(),
+      .instance_arena = &pass_arena_,
+      .arena = &pass_arena_,
+      .value_facts = &value_facts_,
+  };
   ASSERT_NE(pass.info->statistic_layout, nullptr);
   void* statistic_storage = nullptr;
   IREE_ASSERT_OK(iree_arena_allocate(&pass_arena_,

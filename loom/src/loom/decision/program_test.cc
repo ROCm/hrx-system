@@ -167,9 +167,11 @@ TEST(DecisionProgramTest, PreservesSsaIdentityAcrossSignaturePositions) {
   // Values 1 and 2 are aliases of value 0; value 3 is independent.
   loom_value_id_t identities[] = {LOOM_VALUE_ID_INVALID, 0, 0,
                                   LOOM_VALUE_ID_INVALID};
-  loom_value_fact_table_t fact_table = {.entries = entries,
-                                        .count = IREE_ARRAYSIZE(entries),
-                                        .capacity = IREE_ARRAYSIZE(entries)};
+  loom_value_fact_table_t fact_table = {
+      .entries = entries,
+      .count = IREE_ARRAYSIZE(entries),
+      .capacity = IREE_ARRAYSIZE(entries),
+  };
   fact_table.identities.entries = identities;
   fact_table.identities.capacity = IREE_ARRAYSIZE(identities);
   const loom_value_id_t arguments[][2] = {{0, 0}, {0, 1}, {1, 2}, {0, 3}};
@@ -203,17 +205,23 @@ TEST(DecisionProgramTest, ResolutionPolicyControlsHigherUnknownChoice) {
   };
   const loom_decision_program_choice_t choices[] = {
       {
-          .conjunction = {.first_predicate = {},
-                          .first_feature = 0,
-                          .predicate_count = {},
-                          .feature_count = 1},
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 0,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
           .action_ordinal = 3,
       },
       {
-          .conjunction = {.first_predicate = {},
-                          .first_feature = 1,
-                          .predicate_count = {},
-                          .feature_count = 1},
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 1,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
           .action_ordinal = 5,
       },
   };
@@ -270,24 +278,33 @@ TEST(DecisionProgramTest, HardUnknownPreservesEveryPossibleChoice) {
   };
   const loom_decision_program_choice_t choices[] = {
       {
-          .conjunction = {.first_predicate = {},
-                          .first_feature = 1,
-                          .predicate_count = {},
-                          .feature_count = 1},
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 1,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
           .action_ordinal = 0,
       },
       {
-          .conjunction = {.first_predicate = {},
-                          .first_feature = 2,
-                          .predicate_count = {},
-                          .feature_count = 1},
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 2,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
           .action_ordinal = 1,
       },
       {
-          .conjunction = {.first_predicate = {},
-                          .first_feature = 3,
-                          .predicate_count = {},
-                          .feature_count = 1},
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 3,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
           .action_ordinal = 2,
       },
   };
@@ -301,10 +318,13 @@ TEST(DecisionProgramTest, HardUnknownPreservesEveryPossibleChoice) {
       .choices = choices,
       .priority_groups = groups,
       .constants = {},
-      .hard_requirements = {.first_predicate = {},
-                            .first_feature = 0,
-                            .predicate_count = {},
-                            .feature_count = 1},
+      .hard_requirements =
+          {
+              .first_predicate = {},
+              .first_feature = 0,
+              .predicate_count = {},
+              .feature_count = 1,
+          },
       .predicate_count = {},
       .feature_count = 4,
       .constant_count = {},
@@ -350,31 +370,43 @@ TEST(DecisionProgramTest, FullEvaluationCapturesLowerChoiceEvidence) {
   };
   const loom_decision_program_choice_t choices[] = {
       {
-          .conjunction = {.first_predicate = {},
-                          .first_feature = 0,
-                          .predicate_count = {},
-                          .feature_count = 1},
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 0,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
           .action_ordinal = 0,
       },
       {
-          .conjunction = {.first_predicate = {},
-                          .first_feature = 1,
-                          .predicate_count = {},
-                          .feature_count = 1},
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 1,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
           .action_ordinal = 1,
       },
       {
-          .conjunction = {.first_predicate = {},
-                          .first_feature = 2,
-                          .predicate_count = {},
-                          .feature_count = 1},
+          .conjunction =
+              {
+                  .first_predicate = {},
+                  .first_feature = 2,
+                  .predicate_count = {},
+                  .feature_count = 1,
+              },
           .action_ordinal = 2,
       },
       {
-          .conjunction = {.first_predicate = 0,
-                          .first_feature = 2,
-                          .predicate_count = 1,
-                          .feature_count = 1},
+          .conjunction =
+              {
+                  .first_predicate = 0,
+                  .first_feature = 2,
+                  .predicate_count = 1,
+                  .feature_count = 1,
+              },
           .action_ordinal = 3,
       },
   };
@@ -595,10 +627,13 @@ TEST(DecisionProgramTest, RandomRankedSemanticsAgreeWithReference) {
         .choices = choices.data(),
         .priority_groups = groups.data(),
         .constants = {},
-        .hard_requirements = {.first_predicate = {},
-                              .first_feature = 0,
-                              .predicate_count = {},
-                              .feature_count = 1},
+        .hard_requirements =
+            {
+                .first_predicate = {},
+                .first_feature = 0,
+                .predicate_count = {},
+                .feature_count = 1,
+            },
         .predicate_count = {},
         .feature_count = choice_count + 1,
         .constant_count = {},

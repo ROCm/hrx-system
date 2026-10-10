@@ -43,7 +43,8 @@ static loom_sanitizer_site_payload_t MakePayload(
       .lane_policy = LOOM_SANITIZER_LANE_POLICY_ANY_LANE,
       .lineage_role = LOOM_SANITIZER_LINEAGE_ROLE_ORIGINAL,
       .flags = 0x1234u,
-      .extension_data = extension_data};
+      .extension_data = extension_data,
+  };
   return payload;
 }
 

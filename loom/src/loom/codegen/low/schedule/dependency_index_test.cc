@@ -44,7 +44,8 @@ class ScheduleDependencyIndexTest : public ::testing::Test {
         .producer_event_id = UINT16_MAX,
         .consumer_event_id = UINT16_MAX,
         .value_operand_index = operand_index,
-        .kind = kind};
+        .kind = kind,
+    };
     IREE_ASSERT_OK(
         loom_low_schedule_dependency_graph_append(graph, dependency, &arena_));
   }

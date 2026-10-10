@@ -92,8 +92,10 @@ class CallGraphTest : public ::testing::Test {
                             loom_region_entry_block(caller.body),
                             &body_builder);
     body_builder.ip.parent_op = caller.func_op;
-    loom_symbol_ref_t callee_ref = {.module_id = 0,
-                                    .symbol_id = callee_symbol_id};
+    loom_symbol_ref_t callee_ref = {
+        .module_id = 0,
+        .symbol_id = callee_symbol_id,
+    };
     loom_op_t* call_op = NULL;
     switch (kind) {
       case CallKind::kSemantic: {

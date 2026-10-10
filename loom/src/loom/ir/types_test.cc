@@ -302,13 +302,16 @@ TEST(TypesTest, MayReferenceValuesConservativelyClassifiesTypes) {
   loom_register_type_data_t register_data = {42, 4, scalar};
   loom_type_t function_type = {
       .header = loom_type_make_raw_header(LOOM_TYPE_FUNCTION, 0, 0,
-                                          LOOM_TYPE_FLAG_ALL_STATIC)};
+                                          LOOM_TYPE_FLAG_ALL_STATIC),
+  };
   loom_type_t dialect_type = {
       .header = loom_type_make_raw_header(LOOM_TYPE_DIALECT, 0, 0,
-                                          LOOM_TYPE_FLAG_ALL_STATIC)};
+                                          LOOM_TYPE_FLAG_ALL_STATIC),
+  };
   loom_type_t parameterized_type = {
       .header = loom_type_make_raw_header(LOOM_TYPE_PARAMETERIZED, 0, 0,
-                                          LOOM_TYPE_FLAG_ALL_STATIC)};
+                                          LOOM_TYPE_FLAG_ALL_STATIC),
+  };
 
   EXPECT_FALSE(loom_type_may_reference_values(loom_type_none()));
   EXPECT_FALSE(loom_type_may_reference_values(scalar));
@@ -544,7 +547,8 @@ TEST_F(ModuleTypesTest, InvalidKindsPreserveRawIdentityForDiagnostics) {
       .header = loom_type_make_raw_header(
           /*kind=*/static_cast<loom_type_kind_t>(4), /*element_type=*/1,
           /*rank=*/0, /*flags=*/0),
-      .encoding_id = 2};
+      .encoding_id = 2,
+  };
   loom_type_t different = first;
   different.encoding_id = 3;
 

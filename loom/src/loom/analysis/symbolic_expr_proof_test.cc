@@ -94,9 +94,11 @@ static loom_condition_integer_relation_t ValueRelation(
 
 static loom_condition_fact_set_t SingleRelationFacts(
     loom_condition_integer_relation_t* relation) {
-  loom_condition_fact_set_t facts = {.integer_relations = relation,
-                                     .integer_relation_count = 1,
-                                     .integer_relation_capacity = 1};
+  loom_condition_fact_set_t facts = {
+      .integer_relations = relation,
+      .integer_relation_count = 1,
+      .integer_relation_capacity = 1,
+  };
   return facts;
 }
 
@@ -547,14 +549,20 @@ TEST_F(SymbolicExprTest, AffineConditionProofsRespectRelationOrientation) {
         SCOPED_TRACE(orientation);
         loom_condition_integer_relation_t relation = {
             .relation = test_case.relation,
-            .left = {.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-                     .value_id = orientation == 0
-                                     ? loom_index_add_result(shifted_op)
-                                     : right},
-            .right = {.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-                      .value_id = orientation == 0
-                                      ? right
-                                      : loom_index_add_result(shifted_op)},
+            .left =
+                {
+                    .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                    .value_id = orientation == 0
+                                    ? loom_index_add_result(shifted_op)
+                                    : right,
+                },
+            .right =
+                {
+                    .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                    .value_id = orientation == 0
+                                    ? right
+                                    : loom_index_add_result(shifted_op),
+                },
         };
         loom_condition_fact_set_t condition_facts = {
             .integer_relations = &relation,
@@ -619,8 +627,11 @@ TEST_F(SymbolicExprTest, EqualityMatchesOppositeSemanticProducerTerms) {
   loom_condition_integer_relation_t relation = {
       .relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
       .left = {.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE, .value_id = left},
-      .right = {.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-                .value_id = right},
+      .right =
+          {
+              .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+              .value_id = right,
+          },
   };
   loom_condition_fact_set_t condition_facts = {
       .integer_relations = &relation,
@@ -669,10 +680,16 @@ TEST_F(SymbolicExprTest, EqualityMultiplierOverflowDoesNotProveOrder) {
     SCOPED_TRACE(orientation);
     loom_condition_integer_relation_t relation = {
         .relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
-        .left = {.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-                 .value_id = orientation == 0 ? left : right},
-        .right = {.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
-                  .value_id = orientation == 0 ? right : left},
+        .left =
+            {
+                .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                .value_id = orientation == 0 ? left : right,
+            },
+        .right =
+            {
+                .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                .value_id = orientation == 0 ? right : left,
+            },
     };
     loom_condition_fact_set_t condition_facts = {
         .integer_relations = &relation,

@@ -227,7 +227,8 @@ class VMEmissionTest : public ::testing::Test {
           .low_descriptor_registry = &registry_.registry,
           .module = native_module_,
           .scratch_arena = &arena,
-          .allocator = allocations->allocator()};
+          .allocator = allocations->allocator(),
+      };
       status = loom_vm_module_emitter.emit(&request, out_emitted, out_artifact);
       EXPECT_EQ(arena.used_allocation_size, checkpoint.used_allocation_size);
       EXPECT_EQ(arena.total_allocation_size, checkpoint.total_allocation_size);

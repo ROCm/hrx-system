@@ -63,7 +63,9 @@ TEST_F(LowAllocationAssignmentMapTest, LooksUpAssignedLocalValues) {
 
   const loom_value_id_t value_ids[] = {first_value, second_value};
   loom_liveness_analysis_t liveness = {
-      .value_ids = value_ids, .value_count = IREE_ARRAYSIZE(value_ids)};
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+  };
 
   loom_low_allocation_assignment_t assignments[1] = {};
   assignments[0].value_id = second_value;
@@ -78,7 +80,8 @@ TEST_F(LowAllocationAssignmentMapTest, LooksUpAssignedLocalValues) {
       .assignments = assignments,
       .assignment_count = IREE_ARRAYSIZE(assignments),
       .assignment_indices_by_value_ordinal =
-          assignment_indices_by_value_ordinal};
+          assignment_indices_by_value_ordinal,
+  };
 
   loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
   EXPECT_TRUE(loom_low_allocation_assignment_map_value_ordinal_for_value(

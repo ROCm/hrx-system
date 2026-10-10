@@ -101,7 +101,8 @@ TEST_F(FactLayoutTest, NumericTransferDoesNotTransferSsaBindings) {
                                                 loom_value_facts_exact_i64(1)};
   loom_value_fact_encoding_summary_t summary = {
       .address_layout = {LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED, 2,
-                         numeric_strides}};
+                         numeric_strides},
+  };
   loom_value_facts_t facts;
   IREE_ASSERT_OK(
       loom_value_facts_make_encoding_summary(&table_.context, summary, &facts));

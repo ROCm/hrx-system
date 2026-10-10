@@ -61,7 +61,8 @@ class KernelConfigMaterializerTest : public ::testing::Test {
   loom_module_t* Parse(iree_string_view_t source) {
     loom_text_parse_options_t options = {
         .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
-        .max_errors = 20};
+        .max_errors = 20,
+    };
     loom_module_t* module = nullptr;
     IREE_CHECK_OK(loom_text_parse(source, IREE_SV("provider.loom"), &context_,
                                   &block_pool_, &options, &module));
@@ -96,7 +97,8 @@ class KernelConfigMaterializerTest : public ::testing::Test {
   void AddText(loom_link_module_index_t* index, iree_string_view_t source) {
     loom_text_parse_options_t parse_options = {
         .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
-        .max_errors = 20};
+        .max_errors = 20,
+    };
     IREE_CHECK_OK(loom_link_module_index_add_text(
         index, source, IREE_SV("provider.loom"), &parse_options,
         /*options=*/nullptr, /*out_provider_ordinal=*/nullptr));
@@ -131,7 +133,8 @@ class KernelConfigMaterializerTest : public ::testing::Test {
   void VerifyBytecodeRoundTrip(const loom_module_t* module) {
     const std::vector<uint8_t> bytecode = Write(module);
     loom_bytecode_read_options_t options = {
-        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr}};
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+    };
     loom_bytecode_read_result_t result = {};
     loom_module_t* roundtrip_module = nullptr;
     IREE_ASSERT_OK(loom_bytecode_read_module(
@@ -156,7 +159,8 @@ class KernelConfigMaterializerTest : public ::testing::Test {
     const iree_string_view_t roots[] = {root_name};
     loom_link_plan_options_t options = {
         .mode = LOOM_LINK_PLAN_LINK,
-        .root_symbols = {IREE_ARRAYSIZE(roots), roots}};
+        .root_symbols = {IREE_ARRAYSIZE(roots), roots},
+    };
     loom_link_plan_t* plan = nullptr;
     IREE_CHECK_OK(
         loom_link_plan_build(index, &options, iree_allocator_system(), &plan));
@@ -169,8 +173,10 @@ class KernelConfigMaterializerTest : public ::testing::Test {
         .symbol_ordinal = kernel_symbol_ordinal,
         .kind = LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
     };
-    loom_link_plan_options_t options = {.mode = LOOM_LINK_PLAN_LINK,
-                                        .root_facets = {1, &root}};
+    loom_link_plan_options_t options = {
+        .mode = LOOM_LINK_PLAN_LINK,
+        .root_facets = {1, &root},
+    };
     loom_link_plan_t* plan = nullptr;
     IREE_CHECK_OK(
         loom_link_plan_build(index, &options, iree_allocator_system(), &plan));
@@ -349,7 +355,8 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
     loom_link_plan_materialization_environment_t environment = {
         .context = &context_,
         .block_pool = &block_pool_,
-        .allocator = iree_allocator_system()};
+        .allocator = iree_allocator_system(),
+    };
 
     iree_arena_allocator_t configuration_arena;
     iree_arena_initialize(&block_pool_, &configuration_arena);
@@ -570,7 +577,8 @@ kernel.def @dispatch_columns(%count: index) {
     };
     loom_link_plan_options_t plan_options = {
         .mode = LOOM_LINK_PLAN_LINK,
-        .root_facets = {IREE_ARRAYSIZE(roots), roots}};
+        .root_facets = {IREE_ARRAYSIZE(roots), roots},
+    };
     loom_link_plan_t* plan_storage = nullptr;
     IREE_ASSERT_OK(loom_link_plan_build(
         index.get(), &plan_options, iree_allocator_system(), &plan_storage));
@@ -584,7 +592,8 @@ kernel.def @dispatch_columns(%count: index) {
     loom_link_plan_materialization_environment_t environment = {
         .context = &context_,
         .block_pool = &block_pool_,
-        .allocator = iree_allocator_system()};
+        .allocator = iree_allocator_system(),
+    };
     iree_arena_allocator_t materialization_arena;
     iree_arena_initialize(&block_pool_, &materialization_arena);
     loom_link_plan_materialization_t materialization = {};
@@ -701,7 +710,8 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
     loom_link_plan_materialization_environment_t environment = {
         .context = &context_,
         .block_pool = &block_pool_,
-        .allocator = iree_allocator_system()};
+        .allocator = iree_allocator_system(),
+    };
     iree_arena_allocator_t materialization_arena;
     iree_arena_initialize(&block_pool_, &materialization_arena);
     loom_link_plan_materialization_t materialization = {};
@@ -733,7 +743,8 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
 
   IndexPtr index = CreateIndex();
   loom_bytecode_index_options_t index_options = {
-      .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr}};
+      .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+  };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(), iree_make_const_byte_span(bytecode.data(), bytecode.size()),
       IREE_SV("provider.loombc"), &index_options, /*options=*/nullptr,
@@ -797,7 +808,8 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
   loom_link_plan_materialization_environment_t environment = {
       .context = &context_,
       .block_pool = &block_pool_,
-      .allocator = iree_allocator_system()};
+      .allocator = iree_allocator_system(),
+  };
   iree_arena_allocator_t config_materialization_arena;
   iree_arena_initialize(&block_pool_, &config_materialization_arena);
   loom_link_plan_materialization_t materialization = {};
@@ -906,7 +918,8 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
 
   const std::vector<uint8_t> projected_bytecode = Write(projected_module.get());
   loom_bytecode_read_options_t read_options = {
-      .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr}};
+      .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
+  };
   loom_bytecode_read_result_t read_result = {};
   loom_module_t* roundtrip_module = nullptr;
   IREE_ASSERT_OK(loom_bytecode_read_module(

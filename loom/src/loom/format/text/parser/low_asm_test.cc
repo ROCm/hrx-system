@@ -73,8 +73,10 @@ class LowAsmParserTest : public ::testing::Test {
   iree_status_t Parse(const char* source, bool enable_low_asm,
                       loom_module_t** out_module) {
     capture_.Reset();
-    loom_text_parse_options_t options = {.diagnostic_sink = capture_.sink(),
-                                         .max_errors = 100};
+    loom_text_parse_options_t options = {
+        .diagnostic_sink = capture_.sink(),
+        .max_errors = 100,
+    };
     if (enable_low_asm) {
       loom_low_descriptor_text_asm_environment_initialize(
           &low_descriptor_registry_, &options.low_asm_environment);
@@ -283,7 +285,8 @@ TEST_F(LowAsmParserTest, EmbeddedAssemblyOwnsIrAndPreservesModule) {
       .start = source.find('(') + 1,
       .end = source.rfind(")\""),
       .start_line = 2,
-      .start_column = 4};
+      .start_column = 4,
+  };
   loom_op_t* function = nullptr;
   IREE_ASSERT_OK(loom_text_parse_low_assembly(
       range, IREE_SV("test.low.core"), symbol, module, &options, &function));
@@ -334,7 +337,8 @@ TEST_F(LowAsmParserTest, EmbeddedAssemblyEofIsInsideOriginalSource) {
       .start = source.find('(') + 1,
       .end = source.rfind(")\""),
       .start_line = 2,
-      .start_column = 4};
+      .start_column = 4,
+  };
   loom_op_t* function = nullptr;
   IREE_ASSERT_OK(loom_text_parse_low_assembly(
       range, IREE_SV("test.low.core"), symbol, module, &options, &function));

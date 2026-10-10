@@ -68,7 +68,9 @@ static constexpr uint8_t kTestRawPayloadTag = 42;
 static loom_value_fact_uniform_scale_origin_t UniformScaleOrigin(
     loom_value_id_t source_value_id, loom_value_id_t scale_value_id) {
   loom_value_fact_uniform_scale_origin_t origin = {
-      .source_value_id = source_value_id, .scale_value_id = scale_value_id};
+      .source_value_id = source_value_id,
+      .scale_value_id = scale_value_id,
+  };
   return origin;
 }
 
@@ -85,7 +87,9 @@ static loom_value_fact_exact_lane_origin_t ExactLaneOrigin(
 static loom_value_fact_contextual_query_origin_t ContextualQueryOrigin(
     loom_parameterized_attr_kind_t family_kind, loom_attribute_t key) {
   loom_value_fact_contextual_query_origin_t origin = {
-      .family_kind = family_kind, .key = key};
+      .family_kind = family_kind,
+      .key = key,
+  };
   return origin;
 }
 
@@ -1050,12 +1054,14 @@ TEST_F(FactTableTest, VectorIntegerBoundsSummarizeIotas) {
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
 
   loom_value_facts_t facts = loom_value_facts_unknown();
-  IREE_ASSERT_OK(
-      loom_value_facts_make_vector_iota(&table.context,
-                                        {.base = loom_value_facts_make(2, 4, 1),
-                                         .step = loom_value_facts_exact_i64(3),
-                                         .bit_count = 0},
-                                        &facts));
+  IREE_ASSERT_OK(loom_value_facts_make_vector_iota(
+      &table.context,
+      {
+          .base = loom_value_facts_make(2, 4, 1),
+          .step = loom_value_facts_exact_i64(3),
+          .bit_count = 0,
+      },
+      &facts));
   int64_t lower = 0;
   int64_t upper = 0;
   EXPECT_TRUE(loom_value_facts_query_vector_integer_bounds(
@@ -1065,9 +1071,11 @@ TEST_F(FactTableTest, VectorIntegerBoundsSummarizeIotas) {
 
   IREE_ASSERT_OK(loom_value_facts_make_vector_iota(
       &table.context,
-      {.base = loom_value_facts_make(20, 22, 1),
-       .step = loom_value_facts_exact_i64(-4),
-       .bit_count = 0},
+      {
+          .base = loom_value_facts_make(20, 22, 1),
+          .step = loom_value_facts_exact_i64(-4),
+          .bit_count = 0,
+      },
       &facts));
   EXPECT_TRUE(loom_value_facts_query_vector_integer_bounds(
       &table.context, facts, /*maximum_lane_count=*/4, &lower, &upper));
@@ -1083,9 +1091,11 @@ TEST_F(FactTableTest, VectorIntegerBoundsSummarizeIotas) {
 
   IREE_ASSERT_OK(loom_value_facts_make_vector_iota(
       &table.context,
-      {.base = loom_value_facts_exact_i64(INT64_MAX),
-       .step = loom_value_facts_exact_i64(1),
-       .bit_count = 0},
+      {
+          .base = loom_value_facts_exact_i64(INT64_MAX),
+          .step = loom_value_facts_exact_i64(1),
+          .bit_count = 0,
+      },
       &facts));
   EXPECT_FALSE(loom_value_facts_query_vector_integer_bounds(
       &table.context, facts, /*maximum_lane_count=*/2, &lower, &upper));
@@ -1140,7 +1150,8 @@ TEST_F(FactTableTest, EncodingSummaryDenseLayoutRoundTrips) {
 TEST(EncodedOperandSchemaTest, SemanticAbsenceDoesNotImplyScale) {
   loom_value_fact_encoded_operand_schema_t schema = {
       .flags = LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ELEMENT_FORMAT_NONE |
-               LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_AFFINE_NONE};
+               LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_AFFINE_NONE,
+  };
   EXPECT_FALSE(loom_value_fact_encoded_operand_schema_has_scale(schema));
 
   schema.flags |= LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ZERO_SCALE_FALLBACK;
@@ -1541,7 +1552,8 @@ TEST_F(FactTableTest, CrossTableClonesReuseOwnedArrayAndRawPayloads) {
     loom_value_fact_encoding_summary_t summary = {
         .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
         .address_layout = {LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
-                           LOOM_TYPE_MAX_RANK, elements}};
+                           LOOM_TYPE_MAX_RANK, elements},
+    };
     IREE_ASSERT_OK(loom_value_facts_make_encoding_summary(
         &source.context, summary, &original[1]));
     for (size_t i = 0; i < IREE_ARRAYSIZE(original); ++i) {

@@ -86,10 +86,12 @@ TEST(TargetContractQueryEnvironmentTest, DelegatesToAllocator) {
       0,
   };
   loom_target_contract_query_environment_t environment = {
-      .target_state_allocator = {
-          AllocateQueryStateForTest,
-          &state,
-      }};
+      .target_state_allocator =
+          {
+              AllocateQueryStateForTest,
+              &state,
+          },
+  };
 
   void* data = nullptr;
   IREE_ASSERT_OK(loom_target_contract_query_get_or_allocate_target_state(

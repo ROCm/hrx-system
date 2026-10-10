@@ -155,9 +155,12 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @kernel() asm {
       module.get(), IREE_SV("kernel"), &generic_target_facts);
   loom_function_version_t* version_values[] = {&function_version.base};
   loom_function_version_list_t function_versions = {
-      .values = version_values, .count = IREE_ARRAYSIZE(version_values)};
-  loom_spirv_compile_options_t options = {.function_versions =
-                                              &function_versions};
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
+  };
+  loom_spirv_compile_options_t options = {
+      .function_versions = &function_versions,
+  };
 
   loom_spirv_module_binary_t generic_module = {};
   bool generic_emitted = false;
@@ -222,15 +225,14 @@ low.kernel.def target<spirv.logical.core> workgroup_size(1, 1, 1) @loom_kernel()
       .count = IREE_ARRAYSIZE(version_values),
   };
 
-  loom_target_emit_request_t request =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  request.low_descriptor_registry = &low_registry_.registry;
-  request.module = module.get();
-  request.function_versions = &function_versions;
-  request.identifier = IREE_SV("module.spv");
-  request.scratch_arena = &arena_;
-  request.allocator = iree_allocator_system();
+  loom_target_emit_request_t request = {
+      .low_descriptor_registry = &low_registry_.registry,
+      .module = module.get(),
+      .function_versions = &function_versions,
+      .identifier = IREE_SV("module.spv"),
+      .scratch_arena = &arena_,
+      .allocator = iree_allocator_system(),
+  };
   loom_target_emit_artifact_t artifact = {};
   bool emitted = false;
   IREE_ASSERT_OK(loom_spirv_module_emitter.emit(&request, &emitted, &artifact));

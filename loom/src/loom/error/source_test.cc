@@ -365,7 +365,8 @@ TEST_F(SourceStorageTest, LinkMappingRetainsBytesAfterInputTeardown) {
       &sources_,
   };
   loom_linker_options_t options = {
-      .source_callback = {loom_source_storage_project, &projection}};
+      .source_callback = {loom_source_storage_project, &projection},
+  };
   loom_linker_t* linker = nullptr;
   IREE_ASSERT_OK(loom_linker_allocate(&context_, &options, &pool_,
                                       iree_allocator_system(), &linker));
@@ -413,7 +414,8 @@ TEST_F(SourceStorageTest, LinkProjectionBorrowsBytesAndReindexesSources) {
   iree_arena_initialize(&pool_, &arena);
   loom_source_table_projection_t projection = {sources_.table, &arena};
   loom_linker_options_t options = {
-      .source_callback = {loom_source_table_project, &projection}};
+      .source_callback = {loom_source_table_project, &projection},
+  };
   loom_linker_t* linker = nullptr;
   IREE_ASSERT_OK(loom_linker_allocate(&context_, &options, &pool_,
                                       iree_allocator_system(), &linker));

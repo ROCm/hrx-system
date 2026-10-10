@@ -22,15 +22,21 @@ namespace {
 
 static const loom_attr_descriptor_t kParameters[] = {
     {.name = LOOM_BSTRING_REF(5, "block"), .attr_kind = LOOM_ATTR_I64},
-    {.name = LOOM_BSTRING_REF(4, "left"),
-     .attr_kind = LOOM_ATTR_ENCODING,
-     .flags = LOOM_ATTR_OPTIONAL},
-    {.name = LOOM_BSTRING_REF(8, "metadata"),
-     .attr_kind = LOOM_ATTR_DICT,
-     .flags = LOOM_ATTR_OPTIONAL},
-    {.name = LOOM_BSTRING_REF(5, "right"),
-     .attr_kind = LOOM_ATTR_ENCODING,
-     .flags = LOOM_ATTR_OPTIONAL},
+    {
+        .name = LOOM_BSTRING_REF(4, "left"),
+        .attr_kind = LOOM_ATTR_ENCODING,
+        .flags = LOOM_ATTR_OPTIONAL,
+    },
+    {
+        .name = LOOM_BSTRING_REF(8, "metadata"),
+        .attr_kind = LOOM_ATTR_DICT,
+        .flags = LOOM_ATTR_OPTIONAL,
+    },
+    {
+        .name = LOOM_BSTRING_REF(5, "right"),
+        .attr_kind = LOOM_ATTR_ENCODING,
+        .flags = LOOM_ATTR_OPTIONAL,
+    },
 };
 static const loom_encoding_family_descriptor_t kDescriptor = {
     .name = LOOM_BSTRING_REF(12, "test.catalog"),
@@ -43,9 +49,11 @@ static const loom_encoding_vtable_t kVtable = {.descriptor = &kDescriptor};
 
 static const loom_attr_descriptor_t kPayloadParameters[] = {
     {.name = LOOM_BSTRING_REF(7, "element"), .attr_kind = LOOM_ATTR_TYPE},
-    {.name = LOOM_BSTRING_REF(5, "label"),
-     .attr_kind = LOOM_ATTR_STRING,
-     .flags = LOOM_ATTR_OPTIONAL},
+    {
+        .name = LOOM_BSTRING_REF(5, "label"),
+        .attr_kind = LOOM_ATTR_STRING,
+        .flags = LOOM_ATTR_OPTIONAL,
+    },
 };
 static const loom_parameterized_attr_descriptor_t kPayloadDescriptor = {
     .name = LOOM_BSTRING_REF(20, "test.catalog_payload"),
@@ -425,9 +433,11 @@ TEST_F(CatalogTest, TypeAndAttributeMetadataKeepFirstUseOrder) {
       {.name = LOOM_BSTRING_REF(8, "metadata"), .attr_kind = LOOM_ATTR_DICT},
       variants_parameter,
       {.name = LOOM_BSTRING_REF(5, "after"), .attr_kind = LOOM_ATTR_STRING},
-      {.name = LOOM_BSTRING_REF(8, "optional"),
-       .attr_kind = LOOM_ATTR_TYPE,
-       .flags = LOOM_ATTR_OPTIONAL},
+      {
+          .name = LOOM_BSTRING_REF(8, "optional"),
+          .attr_kind = LOOM_ATTR_TYPE,
+          .flags = LOOM_ATTR_OPTIONAL,
+      },
   };
   static const loom_parameterized_type_descriptor_t descriptor = {
       .name = LOOM_BSTRING_REF(17, "test.catalog_type"),

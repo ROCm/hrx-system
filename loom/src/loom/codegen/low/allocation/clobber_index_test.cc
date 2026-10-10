@@ -43,7 +43,8 @@ TEST_F(LowAllocationClobberIndexTest,
   reg_classes[4].flags = LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS;
   loom_low_descriptor_set_t descriptor_set = {
       .reg_classes = reg_classes,
-      .reg_class_count = IREE_ARRAYSIZE(reg_classes)};
+      .reg_class_count = IREE_ARRAYSIZE(reg_classes),
+  };
 
   loom_low_allocation_clobber_builder_t builder;
   loom_low_allocation_clobber_builder_initialize(&scratch_arena_, &builder);
@@ -110,8 +111,10 @@ TEST_F(LowAllocationClobberIndexTest,
 
 TEST_F(LowAllocationClobberIndexTest, OmitsUnusedDefinitionBitmap) {
   loom_low_reg_class_t reg_class = {};
-  loom_low_descriptor_set_t descriptor_set = {.reg_classes = &reg_class,
-                                              .reg_class_count = 1};
+  loom_low_descriptor_set_t descriptor_set = {
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
 
   loom_low_allocation_clobber_builder_t builder;
   loom_low_allocation_clobber_builder_initialize(&scratch_arena_, &builder);

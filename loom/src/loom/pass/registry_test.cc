@@ -47,7 +47,10 @@ iree_status_t NoopFunctionPass(loom_pass_t* pass, loom_module_t* module,
 static loom_pass_descriptor_t MakeFunctionPassDescriptor(
     iree_string_view_t key, loom_pass_info_fn_t info) {
   loom_pass_descriptor_t descriptor = {
-      .key = key, .info = info, .function_run = NoopFunctionPass};
+      .key = key,
+      .info = info,
+      .function_run = NoopFunctionPass,
+  };
   return descriptor;
 }
 

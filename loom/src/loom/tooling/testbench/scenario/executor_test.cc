@@ -628,9 +628,11 @@ TEST_F(ScenarioExecutorTest, ReportsAuthoredExpectationAndReplayIdentity) {
 
   ExecutionTimeline timeline = {};
   TestProfileState target_state = {.timeline = &timeline};
-  TestProfileState oracle_state = {.timeline = &timeline,
-                                   .mismatch_trial_ordinal = 1,
-                                   .inject_mismatch = true};
+  TestProfileState oracle_state = {
+      .timeline = &timeline,
+      .mismatch_trial_ordinal = 1,
+      .inject_mismatch = true,
+  };
   loom_testbench_scenario_execution_options_t execution_options = {};
   loom_testbench_scenario_execution_options_initialize(&execution_options);
   execution_options.target.name = IREE_SV("test-target");

@@ -97,11 +97,13 @@ func.def @helper(%x: i32) -> (i32) {
   const loom_op_t* entry_return = live_call->next_op;
   ASSERT_TRUE(loom_func_return_isa(entry_return));
 
-  loom_module_size_hints_t hints = {.string_count = source->strings.count,
-                                    .type_count = source->types.count,
-                                    .encoding_count = source->encodings.count,
-                                    .source_count = source->sources.count,
-                                    .symbol_count = source->symbols.count};
+  loom_module_size_hints_t hints = {
+      .string_count = source->strings.count,
+      .type_count = source->types.count,
+      .encoding_count = source->encodings.count,
+      .source_count = source->sources.count,
+      .symbol_count = source->symbols.count,
+  };
   loom_module_t* target = nullptr;
   IREE_ASSERT_OK(loom_module_allocate(
       &context_, loom_string_table_get(&source->strings, source->name_id),

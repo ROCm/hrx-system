@@ -263,14 +263,18 @@ func.def @helper(%x: i32) -> (i32) {
   IREE_ASSERT_OK(loom_linker_add_exact_module(
       linker, declaration, loom_linker_selected_symbol_target_list_empty(),
       loom_linker_source_symbol_output_list_empty(),
-      {.count = IREE_ARRAYSIZE(declaration_targets),
-       .values = declaration_targets}));
+      {
+          .count = IREE_ARRAYSIZE(declaration_targets),
+          .values = declaration_targets,
+      }));
   loom_symbol_ref_t definition_targets[2] = {};
   IREE_ASSERT_OK(loom_linker_add_exact_module(
       linker, definition, loom_linker_selected_symbol_target_list_empty(),
       loom_linker_source_symbol_output_list_empty(),
-      {.count = IREE_ARRAYSIZE(definition_targets),
-       .values = definition_targets}));
+      {
+          .count = IREE_ARRAYSIZE(definition_targets),
+          .values = definition_targets,
+      }));
 
   loom_module_t* linked = nullptr;
   IREE_ASSERT_OK(loom_linker_finish(linker, &linked));

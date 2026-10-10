@@ -50,8 +50,10 @@ class LowAllocationSpillPlanTest : public ::testing::Test {
 
 loom_low_allocation_assignment_t Assignment(loom_value_id_t value_id,
                                             uint32_t unit_count) {
-  loom_low_allocation_assignment_t assignment = {.value_id = value_id,
-                                                 .unit_count = unit_count};
+  loom_low_allocation_assignment_t assignment = {
+      .value_id = value_id,
+      .unit_count = unit_count,
+  };
   return assignment;
 }
 

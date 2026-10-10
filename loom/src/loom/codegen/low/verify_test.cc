@@ -94,7 +94,8 @@ class LowVerifyTest : public ::testing::Test {
         .function_versions = function_versions,
         .emitter = capture->emitter(),
         .provider_list = loom_low_verify_provider_list_empty(),
-        .max_errors = 20};
+        .max_errors = 20,
+    };
     loom_low_verify_scratch_t scratch =
         loom_low_verify_scratch_for_module(module);
     IREE_EXPECT_OK(

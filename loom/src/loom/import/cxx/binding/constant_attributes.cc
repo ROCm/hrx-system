@@ -125,7 +125,8 @@ ConstantAttributeResult decode_constant_attribute(
     return selected
                ? ConstantAttributeResult{.value = loom_attr_enum(*selected)}
                : ConstantAttributeResult{
-                     .error = ConstantAttributeError::SourceType};
+                     .error = ConstantAttributeError::SourceType,
+                 };
   } else if (descriptor.attr_kind == LOOM_ATTR_STRING) {
     auto string = constant_string(source_value);
     if (!string) {

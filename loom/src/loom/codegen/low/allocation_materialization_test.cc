@@ -180,7 +180,8 @@ low.func.def target<test.low.core>(@test_target) @stale_slice_plan(%wide: reg<te
       .assignments = assignments,
       .assignment_count = IREE_ARRAYSIZE(assignments),
       .spill_plans = spill_plans,
-      .spill_plan_count = IREE_ARRAYSIZE(spill_plans)};
+      .spill_plan_count = IREE_ARRAYSIZE(spill_plans),
+  };
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
   loom_low_allocation_materialization_result_t result = {};

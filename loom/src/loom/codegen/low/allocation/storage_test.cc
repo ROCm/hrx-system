@@ -15,21 +15,19 @@ namespace {
 loom_low_reg_class_t RegClass(uint16_t alias_set_id,
                               uint16_t allocatable_count = 0,
                               loom_low_reg_class_flags_t flags = 0) {
-  loom_low_reg_class_t reg_class =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  reg_class.alias_set_id = alias_set_id;
-  reg_class.allocatable_count = allocatable_count;
-  reg_class.flags = flags;
+  loom_low_reg_class_t reg_class = {
+      .flags = flags,
+      .allocatable_count = allocatable_count,
+      .alias_set_id = alias_set_id,
+  };
   return reg_class;
 }
 
 loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
                                         iree_host_size_t reg_class_count) {
-  loom_low_descriptor_set_t descriptor_set =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-           // differs from list initialization.
-  descriptor_set.reg_classes = reg_classes;
+  loom_low_descriptor_set_t descriptor_set = {
+      .reg_classes = reg_classes,
+  };
   descriptor_set.reg_class_count = reg_class_count;
   return descriptor_set;
 }
@@ -38,14 +36,13 @@ loom_low_allocation_assignment_t Assignment(
     uint16_t descriptor_reg_class_id,
     loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
     uint32_t location_count) {
-  loom_low_allocation_assignment_t assignment =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  assignment.descriptor_reg_class_id = descriptor_reg_class_id;
-  assignment.location_kind = location_kind;
-  assignment.location_base = location_base;
-  assignment.location_count = location_count;
-  assignment.unit_count = location_count;
+  loom_low_allocation_assignment_t assignment = {
+      .descriptor_reg_class_id = descriptor_reg_class_id,
+      .unit_count = location_count,
+      .location_kind = location_kind,
+      .location_base = location_base,
+      .location_count = location_count,
+  };
   return assignment;
 }
 
@@ -507,7 +504,8 @@ TEST(LowAllocationStorageTest, ResolvesCompletePhysicalCandidateRangeFamily) {
                LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS |
                LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES,
       .allocatable_count = kCandidateCount,
-      .physical_atomic_unit_count = 1};
+      .physical_atomic_unit_count = 1,
+  };
   loom_low_descriptor_set_t descriptor_set = {
       .reg_classes = &reg_class,
       .reg_class_count = 1,
@@ -518,7 +516,8 @@ TEST(LowAllocationStorageTest, ResolvesCompletePhysicalCandidateRangeFamily) {
       .physical_register_candidate_count = kCandidateCount,
       .physical_register_atomic_units = atomic_units,
       .physical_register_atomic_unit_count = kCandidateCount,
-      .physical_register_unit_count = kCandidateCount};
+      .physical_register_unit_count = kCandidateCount,
+  };
 
   for (uint32_t unit_count = 1; unit_count <= kCandidateCount; ++unit_count) {
     bool seen_bases[kCandidateCount] = {};

@@ -361,7 +361,8 @@ class VMSourceCaptureTest : public VMImportsTest {
     loom_input_request_t request = {
         .source = iree_make_string_view(
             reinterpret_cast<const char*>(data[0].data), data[0].size),
-        .path = IREE_SV("admitted.loom")};
+        .path = IREE_SV("admitted.loom"),
+    };
     loom_input_module_t input;
     IREE_ASSERT_OK(loom_input_module_load(&loom_input_text_provider, &request,
                                           &context, &pool,
@@ -391,7 +392,8 @@ class VMSourceCaptureTest : public VMImportsTest {
             IREE_IO_STREAM_MODE_SEEKABLE,
         4096, iree_allocator_system(), &stream));
     loom_bytecode_write_options_t write_options = {
-        .location_mode = LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS};
+        .location_mode = LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS,
+    };
     IREE_ASSERT_OK(loom_bytecode_write_module(input.module, stream,
                                               &write_options, &pool));
     std::vector<uint8_t> serialized(iree_io_stream_length(stream));

@@ -2267,7 +2267,10 @@ TEST_F(ModuleTest, VerifyCanonicalAttrDictRejectsEmptyDictWithNonNullEntries) {
       .value = loom_attr_i64(0),
   }};
   loom_attribute_t attr = {
-      .kind = LOOM_ATTR_DICT, .count = 0, .dict_entries = entries};
+      .kind = LOOM_ATTR_DICT,
+      .count = 0,
+      .dict_entries = entries,
+  };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_module_verify_canonical_attr_dict(module, attr));
@@ -3769,11 +3772,13 @@ TEST_F(ModuleTest, BlockAppendSupportsMoreThanUint16Ops) {
 //===----------------------------------------------------------------------===//
 
 TEST_F(ModuleTest, SizeHints) {
-  loom_module_size_hints_t hints = {.string_count = 50,
-                                    .type_count = 20,
-                                    .encoding_count = 12,
-                                    .source_count = 6,
-                                    .symbol_count = 10};
+  loom_module_size_hints_t hints = {
+      .string_count = 50,
+      .type_count = 20,
+      .encoding_count = 12,
+      .source_count = 6,
+      .symbol_count = 10,
+  };
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
                                       &hints, iree_allocator_system(),
@@ -4084,9 +4089,15 @@ TEST_F(ModuleTest, AddEncodingDifferentParams) {
 
   // Same name, different block size — two distinct entries.
   loom_named_attr_t param32 = {
-      .name_id = block_id, .reserved = {}, .value = loom_attr_i64(32)};
+      .name_id = block_id,
+      .reserved = {},
+      .value = loom_attr_i64(32),
+  };
   loom_named_attr_t param64 = {
-      .name_id = block_id, .reserved = {}, .value = loom_attr_i64(64)};
+      .name_id = block_id,
+      .reserved = {},
+      .value = loom_attr_i64(64),
+  };
 
   loom_encoding_t enc32 = {
       .name_id = name_id,

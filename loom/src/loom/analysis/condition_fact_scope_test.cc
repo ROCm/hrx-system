@@ -126,7 +126,8 @@ TEST(ConditionFactScopeTest, ProjectedFragmentExposesRangeAndRelationFacts) {
   };
   loom_condition_edge_projection_t projection = {
       .source_derivation = Derivation(relations, IREE_ARRAYSIZE(relations)),
-      .visible_integer_relation_count = IREE_ARRAYSIZE(relations)};
+      .visible_integer_relation_count = IREE_ARRAYSIZE(relations),
+  };
   loom_condition_fact_scope_t scope = {};
   loom_condition_fact_scope_initialize_projected(nullptr, &projection, &scope);
 

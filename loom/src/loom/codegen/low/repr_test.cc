@@ -18,7 +18,8 @@ TEST(LowReprTest, StableKeysRoundTripContractLocalOrdinals) {
   };
   loom_low_descriptor_registry_t registry = {
       .descriptor_set_providers = kDescriptorSetProviders,
-      .descriptor_set_provider_count = IREE_ARRAYSIZE(kDescriptorSetProviders)};
+      .descriptor_set_provider_count = IREE_ARRAYSIZE(kDescriptorSetProviders),
+  };
   loom_low_repr_environment_t environment = {};
   loom_low_repr_environment_initialize(&registry, &environment);
 

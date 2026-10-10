@@ -13,10 +13,9 @@ namespace {
 
 static loom_trait_flags_t ProjectEffects(const loom_low_effect_t* effects,
                                          uint16_t effect_count) {
-  loom_low_descriptor_set_t descriptor_set =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-           // differs from list initialization.
-  descriptor_set.effects = effects;
+  loom_low_descriptor_set_t descriptor_set = {
+      .effects = effects,
+  };
   descriptor_set.effect_count = effect_count;
   loom_low_descriptor_t descriptor = {.effect_count = effect_count};
   return loom_low_descriptor_effective_traits(&descriptor_set, &descriptor);
@@ -82,10 +81,9 @@ TEST(LowDescriptorTraitsTest, CounterOrdersWithoutAccessingMemory) {
 }
 
 TEST(LowDescriptorTraitsTest, ExternalResourcesRemainEffectful) {
-  loom_low_effect_t effect =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  effect.kind = LOOM_LOW_EFFECT_KIND_READ;
+  loom_low_effect_t effect = {
+      .kind = LOOM_LOW_EFFECT_KIND_READ,
+  };
   const loom_trait_flags_t read_traits = ProjectEffects(&effect, 1);
   EXPECT_TRUE(iree_all_bits_set(read_traits, LOOM_TRAIT_NON_DETERMINISTIC));
   EXPECT_FALSE(loom_traits_may_access_memory(read_traits));
@@ -140,7 +138,8 @@ TEST(LowDescriptorTraitsTest, SideEffectingTerminatorFlagsCompose) {
   const loom_low_descriptor_set_t descriptor_set = {};
   loom_low_descriptor_t descriptor = {
       .flags = LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
-               LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR};
+               LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR,
+  };
 
   const loom_trait_flags_t traits =
       loom_low_descriptor_effective_traits(&descriptor_set, &descriptor);
@@ -154,7 +153,8 @@ TEST(LowDescriptorTraitsTest, UniqueIdentityIsNotPureAndCannotBeCse) {
   const loom_low_descriptor_set_t descriptor_set = {};
   loom_low_descriptor_t descriptor = {
       .flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE |
-               LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY};
+               LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY,
+  };
 
   const loom_trait_flags_t traits =
       loom_low_descriptor_effective_traits(&descriptor_set, &descriptor);
@@ -165,11 +165,15 @@ TEST(LowDescriptorTraitsTest, UniqueIdentityIsNotPureAndCannotBeCse) {
 }
 
 TEST(LowDescriptorTraitsTest, ImplicitStateResultIsNonDeterministic) {
-  loom_low_operand_t operand = {.role = LOOM_LOW_OPERAND_ROLE_RESULT,
-                                .flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT |
-                                         LOOM_LOW_OPERAND_FLAG_STATE_WRITE};
-  loom_low_descriptor_set_t descriptor_set = {.operands = &operand,
-                                              .operand_count = 1};
+  loom_low_operand_t operand = {
+      .role = LOOM_LOW_OPERAND_ROLE_RESULT,
+      .flags =
+          LOOM_LOW_OPERAND_FLAG_IMPLICIT | LOOM_LOW_OPERAND_FLAG_STATE_WRITE,
+  };
+  loom_low_descriptor_set_t descriptor_set = {
+      .operands = &operand,
+      .operand_count = 1,
+  };
   loom_low_descriptor_t descriptor = {.operand_count = 1, .result_count = 1};
 
   const loom_trait_flags_t traits =
@@ -183,9 +187,13 @@ TEST(LowDescriptorTraitsTest, RematerializationIsPerResult) {
   loom_low_operand_t operands[2] = {};
   operands[0].flags = LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE;
   loom_low_descriptor_set_t descriptor_set = {
-      .operands = operands, .operand_count = IREE_ARRAYSIZE(operands)};
-  loom_low_descriptor_t descriptor = {.operand_count = IREE_ARRAYSIZE(operands),
-                                      .result_count = IREE_ARRAYSIZE(operands)};
+      .operands = operands,
+      .operand_count = IREE_ARRAYSIZE(operands),
+  };
+  loom_low_descriptor_t descriptor = {
+      .operand_count = IREE_ARRAYSIZE(operands),
+      .result_count = IREE_ARRAYSIZE(operands),
+  };
 
   EXPECT_TRUE(loom_low_descriptor_result_can_rematerialize(&descriptor_set,
                                                            &descriptor, 0));

@@ -105,11 +105,13 @@ class TemplateCatalogFixture {
     loom_link_plan_options_t options = {
         .mode = LOOM_LINK_PLAN_LINK,
         .root_symbols = {.count = 1, .values = &root},
-        .unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ERROR};
+        .unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ERROR,
+    };
     loom_link_plan_materialization_environment_t environment = {
         .context = &context_,
         .block_pool = &block_pool_,
-        .allocator = iree_allocator_system()};
+        .allocator = iree_allocator_system(),
+    };
     loom_link_index_materialization_t materialization = {};
     CheckStatus(loom_link_index_materialize(
         index_, &options, &environment, IREE_SV("linked"), &materialization));

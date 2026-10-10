@@ -28,8 +28,10 @@ TEST(LowLowerPolicyRegistryTest, LooksUpPolicyByContractKey) {
 TEST(LowLowerPolicyRegistryTest, LooksUpPolicyForTargetBundle) {
   loom_low_lower_policy_registry_t registry = MakeTestPolicyRegistry();
   loom_target_config_t config = {.contract_set_key = IREE_SV("test.low.core")};
-  loom_target_bundle_t bundle = {.name = IREE_SV("test-low"),
-                                 .config = &config};
+  loom_target_bundle_t bundle = {
+      .name = IREE_SV("test-low"),
+      .config = &config,
+  };
 
   const loom_low_lower_policy_t* policy =
       loom_low_lower_policy_registry_lookup_for_bundle(&registry, &bundle);

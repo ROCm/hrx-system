@@ -296,7 +296,8 @@ TEST_F(VectorMemoryTest, BlockedFragmentFootprintUsesRankThreeShape) {
   };
   loom_type_t view_type = {
       .header = loom_type_make_header(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_BF16,
-                                      /*rank=*/3, /*flags=*/0)};
+                                      /*rank=*/3, /*flags=*/0),
+  };
   view_type.dims[0] = (uint64_t)(uintptr_t)view_dimensions;
   loom_value_id_t view = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_builder_define_block_arg(

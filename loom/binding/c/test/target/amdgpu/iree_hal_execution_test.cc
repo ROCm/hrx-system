@@ -194,7 +194,8 @@ loomc::testing::target::IreeHalKernelExecutionTarget MakeExecutionTarget(
       .target_providers = target_providers,
       .target_provider_count = 1,
       .create_target_environment = CreateAmdgpuTargetEnvironment,
-      .validate_target_profile = ValidateAmdgpuProfile};
+      .validate_target_profile = ValidateAmdgpuProfile,
+  };
   return target;
 }
 
@@ -276,11 +277,10 @@ void RunSparseByteOffsetExecution(
   if (!iree_hal_allocator_supports_virtual_memory(allocator)) {
     GTEST_SKIP() << "live allocator does not support sparse virtual memory";
   }
-  iree_hal_buffer_params_t params =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  iree_hal_buffer_params_t params = {
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+  };
   iree_device_size_t page_size = 0;
   iree_device_size_t recommended_page_size = 0;
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_query_granularity(

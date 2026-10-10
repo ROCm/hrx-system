@@ -37,15 +37,21 @@ static iree_status_t CaptureDiagnostic(void* user_data,
 }
 
 static const loom_attr_descriptor_t kParameters[] = {
-    {.name = LOOM_BSTRING_REF(5, "first"),
-     .attr_kind = LOOM_ATTR_I64,
-     .flags = 0},
-    {.name = LOOM_BSTRING_REF(6, "middle"),
-     .attr_kind = LOOM_ATTR_I64,
-     .flags = LOOM_ATTR_OPTIONAL},
-    {.name = LOOM_BSTRING_REF(4, "last"),
-     .attr_kind = LOOM_ATTR_I64,
-     .flags = 0},
+    {
+        .name = LOOM_BSTRING_REF(5, "first"),
+        .attr_kind = LOOM_ATTR_I64,
+        .flags = 0,
+    },
+    {
+        .name = LOOM_BSTRING_REF(6, "middle"),
+        .attr_kind = LOOM_ATTR_I64,
+        .flags = LOOM_ATTR_OPTIONAL,
+    },
+    {
+        .name = LOOM_BSTRING_REF(4, "last"),
+        .attr_kind = LOOM_ATTR_I64,
+        .flags = 0,
+    },
 };
 static const loom_parameterized_type_descriptor_t kParameterDescriptor = {
     .name = LOOM_BSTRING_REF(15, "wire.parameters"),

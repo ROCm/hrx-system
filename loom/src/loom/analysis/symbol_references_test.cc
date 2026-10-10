@@ -401,8 +401,10 @@ TEST_F(SymbolReferencesTest, SparseRowsSkipUntouchedSegments) {
   loom_builder_initialize(module.get(), &module->arena,
                           loom_module_block(module.get()), &builder);
   loom_op_t* function = nullptr;
-  const loom_symbol_ref_t source = {.module_id = 0,
-                                    .symbol_id = source_symbol_id};
+  const loom_symbol_ref_t source = {
+      .module_id = 0,
+      .symbol_id = source_symbol_id,
+  };
   IREE_ASSERT_OK(loom_test_func_build(&builder, 0, 0, 0, source, nullptr, 0,
                                       nullptr, 0, nullptr, 0, nullptr, 0,
                                       LOOM_LOCATION_UNKNOWN, &function));

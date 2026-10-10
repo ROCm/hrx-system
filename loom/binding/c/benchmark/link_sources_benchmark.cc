@@ -67,7 +67,8 @@ class LinkSourcesFixture {
           .format = LOOMC_SOURCE_FORMAT_TEXT,
           .identifier = loomc_make_cstring_view(identifier.c_str()),
           .contents = loomc_make_byte_span(text.data(), text.size()),
-          .storage = LOOMC_SOURCE_STORAGE_COPY};
+          .storage = LOOMC_SOURCE_STORAGE_COPY,
+      };
       loomc_source_t* source = nullptr;
       IREE_CHECK_OK(to_iree_status(
           loomc_source_create(&options, loom_allocator(), &source)));
@@ -105,7 +106,8 @@ class LinkSourcesFixture {
         .structure_size = sizeof(options),
         .link_index = index_.get(),
         .mode = LOOMC_LINK_MODE_LINK,
-        .flags = LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS};
+        .flags = LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS,
+    };
     loomc_module_t* module = nullptr;
     loomc_result_t* result = nullptr;
     IREE_CHECK_OK(to_iree_status(loomc_link_module(
@@ -119,7 +121,8 @@ class LinkSourcesFixture {
     loomc_module_serialize_options_t options = {
         .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
         .structure_size = sizeof(options),
-        .format = LOOMC_SOURCE_FORMAT_BYTECODE};
+        .format = LOOMC_SOURCE_FORMAT_BYTECODE,
+    };
     loomc_source_t* source = nullptr;
     IREE_CHECK_OK(to_iree_status(loomc_module_serialize_to_source(
         module, &options, loom_allocator(), &source)));

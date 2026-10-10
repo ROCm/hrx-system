@@ -169,7 +169,8 @@ class LinkIndexMaterializerTest : public ::testing::Test {
     loom_link_plan_materialization_environment_t environment = {
         .context = &context_,
         .block_pool = &block_pool_,
-        .allocator = iree_allocator_system()};
+        .allocator = iree_allocator_system(),
+    };
     return loom_link_index_materialize(index, plan_options, &environment,
                                        IREE_SV("linked"), out_materialization);
   }
@@ -187,7 +188,8 @@ class LinkIndexMaterializerTest : public ::testing::Test {
                 .count = IREE_ARRAYSIZE(roots),
                 .values = roots,
             },
-        .unresolved_policy = unresolved_policy};
+        .unresolved_policy = unresolved_policy,
+    };
     return TryMaterializeWithOptions(index, &plan_options, out_materialization);
   }
 

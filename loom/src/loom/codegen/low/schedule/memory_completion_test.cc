@@ -37,7 +37,8 @@ class MemoryCompletionTest : public ::testing::Test {
         .alias_root_id = alias_root_id,
         .alias_group_id = LOOM_LOW_MEMORY_ALIAS_ID_NONE,
         .precision_flags = LOOM_LOW_MEMORY_ACCESS_PRECISION_SPACE |
-                           LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT};
+                           LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT,
+    };
     return access;
   }
 

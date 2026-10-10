@@ -19,7 +19,10 @@ namespace {
 loom_liveness_interval_t Interval(uint32_t start, uint32_t end, uint32_t units,
                                   uint16_t class_id) {
   loom_liveness_interval_t interval = {
-      .start_point = start, .end_point = end, .unit_count = units};
+      .start_point = start,
+      .end_point = end,
+      .unit_count = units,
+  };
   interval.value_class.type_kind = LOOM_TYPE_REGISTER;
   interval.value_class.register_class_id = class_id;
   return interval;
@@ -66,11 +69,11 @@ class LowAllocationScalarPackingTest : public ::testing::Test {
         .value_count = intervals.size(),
         .value_interval_indices = interval_indices.data(),
         .pressure_summaries = summaries_,
-        .pressure_summary_count = IREE_ARRAYSIZE(summaries_)};
-    loom_low_allocation_unit_liveness_t unit_liveness =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-             // differs from list initialization.
-    unit_liveness.values = values.data();
+        .pressure_summary_count = IREE_ARRAYSIZE(summaries_),
+    };
+    loom_low_allocation_unit_liveness_t unit_liveness = {
+        .values = values.data(),
+    };
     unit_liveness.point_count = unit_count;
     const loom_low_placement_table_t placement = {};
     loom_low_allocation_interval_order_t order = {};

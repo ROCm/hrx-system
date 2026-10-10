@@ -511,7 +511,9 @@ TEST_F(XdnaProductTest, LoadsInitializedTileSectionsBeforeActivation) {
   records[3].type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_WRITE32;
   records[3].value.register_write32 = {kActivationAddress, 0};
   loom_aie2p_array_program_t array_program = {
-      .array_records = records, .array_record_count = IREE_ARRAYSIZE(records)};
+      .array_records = records,
+      .array_record_count = IREE_ARRAYSIZE(records),
+  };
 
   const loom_aie2p_xdna_entry_t entry = {
       .name = IREE_SV("entry"),
@@ -759,7 +761,8 @@ TEST_F(XdnaProductTest, RejectsExactSectionHeaderOverflow) {
       .linked_tile = &linked_tile,
   };
   loom_aie2p_program_record_t record = {
-      .type = LOOM_AIE2P_PROGRAM_RECORD_TILE_PROGRAM_LOAD};
+      .type = LOOM_AIE2P_PROGRAM_RECORD_TILE_PROGRAM_LOAD,
+  };
   record.value.tile_program_load.tile_program_index = 0;
   const loom_aie2p_array_program_t program = {
       .array_records = &record,

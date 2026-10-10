@@ -23,7 +23,8 @@ TEST(ScheduleBlockTest, RetainsOwnedRowsWithShiftedNodeIndices) {
   iree_arena_initialize(&pool, &arena);
   const auto* descriptors = loom_test_low_core_descriptor_set();
   loom_low_schedule_options_t options = {
-      .strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL};
+      .strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+  };
 
   // Node indices shift because an earlier block gained an operation. The
   // unchanged block keeps its selected order, including two simultaneous
@@ -81,7 +82,8 @@ TEST(ScheduleBlockTest, RetainsOwnedRowsWithShiftedNodeIndices) {
       .nodes = previous_nodes,
       .scheduled_node_indices = previous_order,
       .pressure_steps = previous_steps,
-      .candidate_decisions = previous_decisions};
+      .candidate_decisions = previous_decisions,
+  };
 
   loom_low_schedule_block_t blocks[2] = {};
   blocks[1].block = &block;
@@ -109,11 +111,10 @@ TEST(ScheduleBlockTest, RetainsOwnedRowsWithShiftedNodeIndices) {
     resources[i].capacity_per_cycle =
         descriptors->resources[i].capacity_per_cycle;
   }
-  loom_low_schedule_build_state_t state =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  state.arena = &arena;
-  state.options = &options;
+  loom_low_schedule_build_state_t state = {
+      .options = &options,
+      .arena = &arena,
+  };
   state.target.descriptor_set = descriptors;
   state.blocks = blocks;
   state.nodes = nodes;
@@ -192,7 +193,8 @@ TEST(ScheduleBlockTest, MergesRoundedClassPeaksWithoutDoubleCountingCliffs) {
       .pool_units = 64,
       .allocation_granularity = 1,
       .member_count = 2,
-      .cliff_count = 2};
+      .cliff_count = 2,
+  };
   loom_target_residency_derived_resource_table_t table = {
       .resources = &resource,
       .resource_count = 1,
@@ -201,7 +203,8 @@ TEST(ScheduleBlockTest, MergesRoundedClassPeaksWithoutDoubleCountingCliffs) {
       .cliffs = cliffs,
       .cliff_count = IREE_ARRAYSIZE(cliffs),
       .member_indices_by_direct_resource = member_indices,
-      .member_ranges_by_direct_resource = ranges};
+      .member_ranges_by_direct_resource = ranges,
+  };
   loom_low_descriptor_set_t descriptors = {.reg_class_count = 2};
   const uint64_t retained_peaks[] = {5, 2, 2, 5, 1, 1};
   loom_low_schedule_table_t previous = {.block_pressure_peaks = retained_peaks};
@@ -212,24 +215,23 @@ TEST(ScheduleBlockTest, MergesRoundedClassPeaksWithoutDoubleCountingCliffs) {
       .best_tier = 4,
       .direct_resources = {direct_names, cliffs, IREE_ARRAYSIZE(cliffs),
                            direct_ranges, 2},
-      .derived_resources = table};
-  loom_low_schedule_options_t options =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  options.strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
+      .derived_resources = table,
+  };
+  loom_low_schedule_options_t options = {
+      .strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+  };
   iree_arena_block_pool_t pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool);
   iree_arena_allocator_t arena;
   iree_arena_initialize(&pool, &arena);
   loom_region_t body = {};
   loom_local_value_domain_t value_domain = {};
-  loom_low_schedule_build_state_t state =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  state.options = &options;
-  state.scratch_arena = &arena;
-  state.body = &body;
-  state.value_domain = &value_domain;
+  loom_low_schedule_build_state_t state = {
+      .options = &options,
+      .scratch_arena = &arena,
+      .body = &body,
+      .value_domain = &value_domain,
+  };
   state.target.descriptor_set = &descriptors;
   state.pressure_cliffs = &residency_model.direct_resources;
   state.pressure_resources = &table;

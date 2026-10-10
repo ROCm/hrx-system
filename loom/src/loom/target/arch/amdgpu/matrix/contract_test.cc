@@ -48,8 +48,9 @@ iree_host_size_t FindDescriptorOrdinal(const char* name) {
 
 loom_amdgpu_matrix_payload_shape_t PayloadShape(
     loom_amdgpu_matrix_numeric_type_t numeric_type) {
-  loom_amdgpu_matrix_payload_shape_t payload_shape = {.numeric_type =
-                                                          numeric_type};
+  loom_amdgpu_matrix_payload_shape_t payload_shape = {
+      .numeric_type = numeric_type,
+  };
   return payload_shape;
 }
 
@@ -64,10 +65,9 @@ loom_amdgpu_matrix_contract_match_request_t MatchRequest(
     loom_amdgpu_matrix_feature_bits_t feature_bits, uint32_t wave_size,
     loom_amdgpu_matrix_contract_flags_t available_flags,
     loom_amdgpu_matrix_contract_flags_t required_flags) {
-  loom_amdgpu_matrix_contract_match_request_t request =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-           // spans intervening work.
-  request.family = family;
+  loom_amdgpu_matrix_contract_match_request_t request = {
+      .family = family,
+  };
   request.tile_shape.block_count = 1;
   request.tile_shape.result_row_count = result_row_count;
   request.tile_shape.result_column_count = result_column_count;

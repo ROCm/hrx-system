@@ -312,9 +312,11 @@ TEST_F(VectorToScalarTest, TargetFragmentLayoutEnablesDistributedMmaFallback) {
   const loom_pass_info_t* pass_info = loom_vector_to_scalar_pass_info();
   std::vector<uint8_t> statistic_storage(
       pass_info->statistic_layout->storage_size, 0);
-  loom_pass_t pass = {.info = pass_info,
-                      .arena = &pass_arena,
-                      .statistic_storage = statistic_storage.data()};
+  loom_pass_t pass = {
+      .info = pass_info,
+      .arena = &pass_arena,
+      .statistic_storage = statistic_storage.data(),
+  };
 
   const loom_vector_mma_to_scalar_options_t empty_options =
       loom_vector_mma_to_scalar_options_empty();
@@ -374,10 +376,12 @@ TEST_F(VectorToScalarTest, HadamardUsesButterflyComplexity) {
   const loom_pass_info_t* pass_info = loom_vector_to_scalar_pass_info();
   std::vector<uint8_t> statistic_storage(
       pass_info->statistic_layout->storage_size, 0);
-  loom_pass_t pass = {.info = pass_info,
-                      .arena = &pass_arena,
-                      .statistic_storage = statistic_storage.data(),
-                      .value_facts = &value_fact_owner};
+  loom_pass_t pass = {
+      .info = pass_info,
+      .arena = &pass_arena,
+      .statistic_storage = statistic_storage.data(),
+      .value_facts = &value_fact_owner,
+  };
 
   IREE_ASSERT_OK(loom_vector_to_scalar_run(&pass, module, function));
   EXPECT_EQ(pass.error_diagnostic_count, 0u);

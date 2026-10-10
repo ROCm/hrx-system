@@ -95,7 +95,9 @@ class FileTest : public ::testing::Test {
                         loom_check_process_mode_t mode,
                         CaseCounts* out_counts) {
     loom_check_process_options_t options = {
-        .mode = mode, .template_root = StringView(template_root)};
+        .mode = mode,
+        .template_root = StringView(template_root),
+    };
     return loom_check_read_and_process(
         StringView(path), &options, &environment_, &context_, &block_pool_,
         iree_allocator_system(), &out_counts->pass_count,
@@ -183,7 +185,9 @@ TEST_F(FileTest, JsonDoesNotSuggestReplacingChecksWithGoldens) {
       "// ----\nCHECK: func.def @wrong() {\n";
   IREE_ASSERT_OK(WriteFile(path.path(), source));
   loom_check_process_options_t options = {
-      .json_enabled = true, .json_output_mode = LOOM_CHECK_JSON_OUTPUT_ALL};
+      .json_enabled = true,
+      .json_output_mode = LOOM_CHECK_JSON_OUTPUT_ALL,
+  };
   CaseCounts counts;
   ::testing::internal::CaptureStdout();
   iree_status_t status = loom_check_read_and_process(

@@ -225,13 +225,11 @@ TEST_F(HalInvocationTest, PreparePlanFromListsRetainsBindings) {
   IREE_ASSERT_OK(iree_hal_allocator_create_heap(
       IREE_SV("hal_invocation_test"), iree_allocator_system(),
       iree_allocator_system(), &allocator));
-  iree_hal_buffer_params_t buffer_params =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
-  buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  buffer_params.usage =
-      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  iree_hal_buffer_params_t buffer_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+  };
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       allocator, buffer_params, /*allocation_size=*/4, &buffer));
@@ -262,13 +260,11 @@ TEST_F(HalInvocationTest, BindingListTotalByteLengthUsesLogicalBufferExtents) {
       IREE_SV("hal_invocation_test"), iree_allocator_system(),
       iree_allocator_system(), &allocator));
 
-  iree_hal_buffer_params_t buffer_params =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
-  buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  buffer_params.usage =
-      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  iree_hal_buffer_params_t buffer_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+  };
   iree_hal_buffer_t* allocation = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       allocator, buffer_params, /*allocation_size=*/256, &allocation));

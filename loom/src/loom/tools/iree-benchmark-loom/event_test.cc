@@ -67,11 +67,15 @@ static iree_string_view_t TryLookupObject(iree_string_view_t object,
 
 TEST(BenchmarkEventSinkTest, EmitsTypedLifecycleEvents) {
   event_collector_t collector = {};
-  iree_benchmark_loom_event_sink_t sink = {.emit = collect_event,
-                                           .user_data = &collector};
-  iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run"),
-                                            .source = IREE_SV("input.loom"),
-                                            .results_path = IREE_SV("-")};
+  iree_benchmark_loom_event_sink_t sink = {
+      .emit = collect_event,
+      .user_data = &collector,
+  };
+  iree_benchmark_loom_run_identity_t run = {
+      .run_id = IREE_SV("run"),
+      .source = IREE_SV("input.loom"),
+      .results_path = IREE_SV("-"),
+  };
   loom_module_t module = {};
   iree_benchmark_loom_work_plan_t work_plan = {};
   iree_benchmark_loom_artifact_bundle_t artifact_bundle = {};
@@ -110,11 +114,14 @@ TEST(BenchmarkEventSinkTest, EmitsTypedLifecycleEvents) {
 
 TEST(BenchmarkEventSinkTest, EmitsTypedOutputRowEvents) {
   event_collector_t collector = {};
-  iree_benchmark_loom_event_sink_t sink = {.emit = collect_event,
-                                           .user_data = &collector};
+  iree_benchmark_loom_event_sink_t sink = {
+      .emit = collect_event,
+      .user_data = &collector,
+  };
   iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run")};
-  iree_benchmark_loom_candidate_identity_t candidate = {.candidate_id =
-                                                            IREE_SV("c0")};
+  iree_benchmark_loom_candidate_identity_t candidate = {
+      .candidate_id = IREE_SV("c0"),
+  };
   loom_module_t module = {};
   loom_testbench_benchmark_plan_t benchmark_plan = {};
   loom_testbench_case_plan_t case_plan = {};
@@ -127,11 +134,13 @@ TEST(BenchmarkEventSinkTest, EmitsTypedOutputRowEvents) {
   iree_benchmark_loom_selected_benchmark_t baseline_selection = {};
   baseline_selection.identity.candidate_id = IREE_SV("c0");
   iree_benchmark_loom_dispatch_comparison_candidate_t baseline = {
-      .selection = &baseline_selection};
+      .selection = &baseline_selection,
+  };
   iree_benchmark_loom_selected_benchmark_t comparison_selection = {};
   comparison_selection.identity.candidate_id = IREE_SV("c1");
   iree_benchmark_loom_dispatch_comparison_candidate_t comparison = {
-      .selection = &comparison_selection};
+      .selection = &comparison_selection,
+  };
 
   IREE_ASSERT_OK(
       iree_benchmark_loom_event_sink_emit_device(&sink, &run, &hal_context));
@@ -189,9 +198,11 @@ TEST(BenchmarkEventSinkTest, EmitsTypedOutputRowEvents) {
 
 TEST(BenchmarkEventSinkTest, PropagatesSinkStatus) {
   iree_benchmark_loom_event_sink_t sink = {.emit = reject_event};
-  iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run"),
-                                            .source = IREE_SV("input.loom"),
-                                            .results_path = IREE_SV("-")};
+  iree_benchmark_loom_run_identity_t run = {
+      .run_id = IREE_SV("run"),
+      .source = IREE_SV("input.loom"),
+      .results_path = IREE_SV("-"),
+  };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
                         iree_benchmark_loom_event_sink_emit_run(
@@ -211,7 +222,8 @@ TEST(BenchmarkEventSinkTest, JsonlAdapterWritesLifecycleRows) {
   iree_benchmark_loom_run_identity_t run = {
       .run_id = IREE_SV("run"),
       .source = IREE_SV("input.loom"),
-      .results_path = output_path.path_view()};
+      .results_path = output_path.path_view(),
+  };
   iree_benchmark_loom_artifact_bundle_t artifact_bundle = {};
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
       &event_sink, &run, /*dry_run=*/false, &kNoSanitizer));

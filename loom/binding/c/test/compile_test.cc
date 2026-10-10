@@ -1072,16 +1072,15 @@ TEST(CompileTest, EmissionNotesUseTheirOwnModuleAndCountOnlyResolvedOmissions) {
     related[6].label = IREE_SV("unknown location");
     related[6].op = unknown_op;
     loom_diagnostic_param_t param = loom_param_string(IREE_SV("x"));
-    loom_diagnostic_emission_t emission =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-             // spans intervening work.
-    emission.module = other_module;
-    emission.op = other_op;
-    emission.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
-    emission.params = &param;
-    emission.param_count = 1;
-    emission.related_ops = related;
-    emission.related_op_count = IREE_ARRAYSIZE(related);
+    loom_diagnostic_emission_t emission = {
+        .module = other_module,
+        .op = other_op,
+        .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+        .params = &param,
+        .param_count = 1,
+        .related_ops = related,
+        .related_op_count = IREE_ARRAYSIZE(related),
+    };
     loomc_result_t* captured = nullptr;
     LOOMC_ASSERT_OK(loomc_result_create(LOOMC_RESULT_STATE_FAILED,
                                         LOOMC_SOURCE_RETENTION_EXACT,

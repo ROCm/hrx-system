@@ -96,7 +96,10 @@ TEST(TargetLaunchTest, ComputesFlatWorkgroupSize) {
   EXPECT_EQ(flat_size, 0u);
 
   loom_target_workgroup_size_t overflowing = {
-      .x = UINT32_MAX, .y = UINT32_MAX, .z = UINT32_MAX};
+      .x = UINT32_MAX,
+      .y = UINT32_MAX,
+      .z = UINT32_MAX,
+  };
   EXPECT_FALSE(
       loom_target_workgroup_size_flat_product_u32(&overflowing, &flat_size));
 }

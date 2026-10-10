@@ -62,32 +62,32 @@ TEST(LowPlacementTest, DefiningTransferPrecedesEarlierCollectedUses) {
   }
   const loom_low_constraint_t constraint = {
       LOOM_LOW_CONSTRAINT_KIND_SAME_REGISTER_ORDINAL, 0, 1, 0};
-  loom_low_descriptor_t descriptor = {.operand_count = 2,
-                                      .minimum_packet_operand_count = 2,
-                                      .constraint_count = 1};
-  loom_low_descriptor_set_t descriptor_set =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  descriptor_set.stable_id = 1;
-  descriptor_set.reg_classes = classes;
-  descriptor_set.reg_class_count = IREE_ARRAYSIZE(classes);
-  descriptor_set.physical_registers = registers;
-  descriptor_set.physical_register_count = IREE_ARRAYSIZE(registers);
-  descriptor_set.physical_register_candidate_ids = candidates;
-  descriptor_set.physical_register_candidate_count = IREE_ARRAYSIZE(candidates);
-  descriptor_set.physical_register_candidate_ordinals = candidate_ordinals;
-  descriptor_set.physical_register_atomic_units = atomic_units;
-  descriptor_set.physical_register_atomic_unit_count =
-      IREE_ARRAYSIZE(atomic_units);
-  descriptor_set.reg_class_alts = alternatives;
-  descriptor_set.reg_class_alt_count = IREE_ARRAYSIZE(alternatives);
-  descriptor_set.operands = operands;
-  descriptor_set.operand_count = IREE_ARRAYSIZE(operands);
-  descriptor_set.descriptors = &descriptor;
-  descriptor_set.descriptor_count = 1;
-  descriptor_set.descriptor_ordinal_count = 1;
-  descriptor_set.constraints = &constraint;
-  descriptor_set.constraint_count = 1;
+  loom_low_descriptor_t descriptor = {
+      .operand_count = 2,
+      .minimum_packet_operand_count = 2,
+      .constraint_count = 1,
+  };
+  loom_low_descriptor_set_t descriptor_set = {
+      .stable_id = 1,
+      .descriptors = &descriptor,
+      .descriptor_count = 1,
+      .descriptor_ordinal_count = 1,
+      .operands = operands,
+      .operand_count = IREE_ARRAYSIZE(operands),
+      .constraints = &constraint,
+      .constraint_count = 1,
+      .reg_classes = classes,
+      .reg_class_count = IREE_ARRAYSIZE(classes),
+      .physical_registers = registers,
+      .physical_register_count = IREE_ARRAYSIZE(registers),
+      .physical_register_candidate_ids = candidates,
+      .physical_register_candidate_count = IREE_ARRAYSIZE(candidates),
+      .physical_register_candidate_ordinals = candidate_ordinals,
+      .physical_register_atomic_units = atomic_units,
+      .physical_register_atomic_unit_count = IREE_ARRAYSIZE(atomic_units),
+      .reg_class_alts = alternatives,
+      .reg_class_alt_count = IREE_ARRAYSIZE(alternatives),
+  };
 
   const loom_low_placement_value_ref_t values[] = {
       {0, LOOM_LOW_PLACEMENT_VALUE_OPERAND, 0},
@@ -280,21 +280,20 @@ TEST(LowPlacementTest, RetainsOperandConstraintsAcrossExactTiesOnly) {
   descriptors[1].operand_start = 2;
   descriptors[1].operand_count = 1;
   descriptors[1].minimum_packet_operand_count = 1;
-  loom_low_descriptor_set_t descriptor_set =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  descriptor_set.stable_id = 1;
-  descriptor_set.reg_classes = classes;
-  descriptor_set.reg_class_count = IREE_ARRAYSIZE(classes);
-  descriptor_set.reg_class_alts = alternatives;
-  descriptor_set.reg_class_alt_count = IREE_ARRAYSIZE(alternatives);
-  descriptor_set.operands = operands;
-  descriptor_set.operand_count = IREE_ARRAYSIZE(operands);
-  descriptor_set.descriptors = descriptors;
-  descriptor_set.descriptor_count = IREE_ARRAYSIZE(descriptors);
-  descriptor_set.descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors);
-  descriptor_set.constraints = &tie_constraint;
-  descriptor_set.constraint_count = 1;
+  loom_low_descriptor_set_t descriptor_set = {
+      .stable_id = 1,
+      .descriptors = descriptors,
+      .descriptor_count = IREE_ARRAYSIZE(descriptors),
+      .descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors),
+      .operands = operands,
+      .operand_count = IREE_ARRAYSIZE(operands),
+      .constraints = &tie_constraint,
+      .constraint_count = 1,
+      .reg_classes = classes,
+      .reg_class_count = IREE_ARRAYSIZE(classes),
+      .reg_class_alts = alternatives,
+      .reg_class_alt_count = IREE_ARRAYSIZE(alternatives),
+  };
 
   const loom_low_placement_value_ref_t values[] = {
       {0, LOOM_LOW_PLACEMENT_VALUE_RESULT, 0},

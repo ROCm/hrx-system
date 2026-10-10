@@ -169,8 +169,10 @@ TEST(TargetSpecificationTest, RejectsMalformedSpecifications) {
 }
 
 TEST(TargetSelectionTest, SelectsBorrowedProfile) {
-  loom_target_provider_t provider = {.profile_type = &kTargetProfileType,
-                                     .select_profile = SelectFakeProfile};
+  loom_target_provider_t provider = {
+      .profile_type = &kTargetProfileType,
+      .select_profile = SelectFakeProfile,
+  };
   const loom_target_provider_t* providers[] = {&provider};
   const loom_target_provider_set_t provider_set =
       loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
@@ -233,10 +235,14 @@ TEST(TargetSelectionTest, RejectsFamilyWithoutNamedProfiles) {
 }
 
 TEST(TargetSelectionTest, RejectsAmbiguousFamilyProvidersAtInitialization) {
-  loom_target_provider_t first_provider = {.profile_type = &kTargetProfileType,
-                                           .select_profile = SelectFakeProfile};
+  loom_target_provider_t first_provider = {
+      .profile_type = &kTargetProfileType,
+      .select_profile = SelectFakeProfile,
+  };
   loom_target_provider_t second_provider = {
-      .profile_type = &kTargetProfileType, .select_profile = SelectFakeProfile};
+      .profile_type = &kTargetProfileType,
+      .select_profile = SelectFakeProfile,
+  };
   const loom_target_provider_t* providers[] = {
       &first_provider,
       &second_provider,
@@ -250,8 +256,10 @@ TEST(TargetSelectionTest, RejectsAmbiguousFamilyProvidersAtInitialization) {
 }
 
 TEST(TargetSelectionTest, RejectsProfileFromAnotherFamily) {
-  loom_target_provider_t provider = {.profile_type = &kTargetProfileType,
-                                     .select_profile = SelectOtherProfile};
+  loom_target_provider_t provider = {
+      .profile_type = &kTargetProfileType,
+      .select_profile = SelectOtherProfile,
+  };
   const loom_target_provider_t* providers[] = {&provider};
   const loom_target_provider_set_t provider_set =
       loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
@@ -275,7 +283,8 @@ TEST(TargetSelectionTest, RejectsProfileFromAnotherFamily) {
 TEST(TargetSelectionTest, TransfersOwnedCpuProfile) {
   loom_target_provider_t provider = {
       .profile_type = &kTargetProfileType,
-      .select_cpu_profile = SelectOwnedFakeCpuProfile};
+      .select_cpu_profile = SelectOwnedFakeCpuProfile,
+  };
   const loom_target_provider_t* providers[] = {&provider};
   const loom_target_provider_set_t provider_set =
       loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
@@ -304,10 +313,12 @@ TEST(TargetSelectionTest, TransfersOwnedCpuProfile) {
 TEST(TargetSelectionTest, ReleasesOwnedCpuProfilesOnAmbiguity) {
   loom_target_provider_t first_provider = {
       .profile_type = &kTargetProfileType,
-      .select_cpu_profile = SelectOwnedFakeCpuProfile};
+      .select_cpu_profile = SelectOwnedFakeCpuProfile,
+  };
   loom_target_provider_t second_provider = {
       .profile_type = &kOtherTargetProfileType,
-      .select_cpu_profile = SelectOwnedOtherCpuProfile};
+      .select_cpu_profile = SelectOwnedOtherCpuProfile,
+  };
   const loom_target_provider_t* providers[] = {
       &first_provider,
       &second_provider,
@@ -335,10 +346,12 @@ TEST(TargetSelectionTest, ReleasesOwnedCpuProfilesOnAmbiguity) {
 TEST(TargetSelectionTest, ReleasesOwnedCpuProfileOnLaterProviderFailure) {
   loom_target_provider_t first_provider = {
       .profile_type = &kTargetProfileType,
-      .select_cpu_profile = SelectOwnedFakeCpuProfile};
+      .select_cpu_profile = SelectOwnedFakeCpuProfile,
+  };
   loom_target_provider_t second_provider = {
       .profile_type = &kOtherTargetProfileType,
-      .select_cpu_profile = FailCpuProfileSelection};
+      .select_cpu_profile = FailCpuProfileSelection,
+  };
   const loom_target_provider_t* providers[] = {
       &first_provider,
       &second_provider,

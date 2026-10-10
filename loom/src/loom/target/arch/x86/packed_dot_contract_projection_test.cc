@@ -65,7 +65,8 @@ bool BuildPackedDotRequest(
               .result_lane_count = result_lane_count,
           },
       .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT,
-      .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED};
+      .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
+  };
   return loom_contract_request_from_matrix_payloads(&options, out_request,
                                                     NULL);
 }

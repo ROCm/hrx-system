@@ -37,10 +37,9 @@ class LowAllocationIntervalOrderTest : public ::testing::Test {
                                                    uint32_t start_point,
                                                    uint32_t end_point,
                                                    uint32_t unit_count) {
-    loom_liveness_interval_t interval =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-             // spans intervening work.
-    interval.value_id = value_id;
+    loom_liveness_interval_t interval = {
+        .value_id = value_id,
+    };
     interval.value_class.type_kind = LOOM_TYPE_REGISTER;
     interval.start_point = start_point;
     interval.end_point = end_point;
@@ -49,10 +48,9 @@ class LowAllocationIntervalOrderTest : public ::testing::Test {
   }
 
   static loom_liveness_interval_t ScalarInterval(loom_value_id_t value_id) {
-    loom_liveness_interval_t interval =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
-             // spans intervening work.
-    interval.value_id = value_id;
+    loom_liveness_interval_t interval = {
+        .value_id = value_id,
+    };
     interval.value_class.type_kind = LOOM_TYPE_SCALAR;
     interval.unit_count = 1;
     return interval;
@@ -95,11 +93,11 @@ class LowAllocationIntervalOrderTest : public ::testing::Test {
         .interval_count = count,
         .value_ids = value_ids.data(),
         .value_count = count,
-        .value_interval_indices = interval_indices.data()};
-    loom_low_allocation_unit_liveness_t unit_liveness =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-             // differs from list initialization.
-    unit_liveness.values = values.data();
+        .value_interval_indices = interval_indices.data(),
+    };
+    loom_low_allocation_unit_liveness_t unit_liveness = {
+        .values = values.data(),
+    };
     unit_liveness.point_count = unit_count;
     return loom_low_allocation_interval_order_build(&descriptor_set_, &liveness,
                                                     &unit_liveness, &placement,
@@ -202,7 +200,8 @@ TEST_F(LowAllocationIntervalOrderTest,
   loom_low_placement_table_t placement = {
       .value_count = IREE_ARRAYSIZE(intervals),
       .storage_value_order = storage_order,
-      .storage_value_order_count = IREE_ARRAYSIZE(storage_order)};
+      .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
+  };
   // Optional-only topology has no tied-origin array; every value owns itself.
   loom_low_allocation_interval_order_t order = {};
   IREE_ASSERT_OK(BuildOrder(intervals, IREE_ARRAYSIZE(intervals),
@@ -230,7 +229,8 @@ TEST_F(LowAllocationIntervalOrderTest,
       .value_count = IREE_ARRAYSIZE(intervals),
       .storage_value_order = storage_order,
       .storage_value_order_count = IREE_ARRAYSIZE(storage_order),
-      .tied_storage_origins_by_value_ordinal = tied_origins};
+      .tied_storage_origins_by_value_ordinal = tied_origins,
+  };
   loom_low_allocation_interval_order_t order = {};
   IREE_ASSERT_OK(BuildOrder(intervals, IREE_ARRAYSIZE(intervals),
                             acquisition_starts, placement, &order));
@@ -276,7 +276,8 @@ TEST_F(LowAllocationIntervalOrderTest,
       .value_count = kIntervalCount,
       .storage_value_order = storage_order,
       .storage_value_order_count = kIntervalCount,
-      .tied_storage_origins_by_value_ordinal = tied_origins};
+      .tied_storage_origins_by_value_ordinal = tied_origins,
+  };
   loom_low_allocation_interval_order_t order = {};
   IREE_ASSERT_OK(BuildOrder(intervals, kIntervalCount, acquisition_starts,
                             placement, &order));

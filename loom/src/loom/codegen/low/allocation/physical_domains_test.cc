@@ -20,7 +20,10 @@ namespace {
 loom_liveness_interval_t Interval(uint16_t class_id, uint32_t start,
                                   uint32_t end) {
   loom_liveness_interval_t interval = {
-      .start_point = start, .end_point = end, .unit_count = 1};
+      .start_point = start,
+      .end_point = end,
+      .unit_count = 1,
+  };
   interval.value_class.type_kind = LOOM_TYPE_REGISTER;
   interval.value_class.register_class_id = class_id;
   return interval;
@@ -29,14 +32,13 @@ loom_liveness_interval_t Interval(uint16_t class_id, uint32_t start,
 loom_low_placement_relation_t Relation(loom_value_ordinal_t source,
                                        loom_value_ordinal_t result,
                                        loom_low_placement_cause_t cause) {
-  loom_low_placement_relation_t relation =
-      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-           // differs from declaration order.
-  relation.source_ordinal = source;
-  relation.result_ordinal = result;
-  relation.unit_count = 1;
-  relation.kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE;
-  relation.cause = cause;
+  loom_low_placement_relation_t relation = {
+      .result_ordinal = result,
+      .source_ordinal = source,
+      .unit_count = 1,
+      .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE,
+      .cause = cause,
+  };
   relation.flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE |
                    (cause == LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT
                         ? LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD
@@ -88,16 +90,17 @@ class LowAllocationPhysicalDomainsTest : public ::testing::Test {
         .interval_count = count,
         .value_ids = value_ids.data(),
         .value_count = count,
-        .value_interval_indices = interval_indices.data()};
+        .value_interval_indices = interval_indices.data(),
+    };
     loom_low_allocation_unit_liveness_t unit_liveness = {
         .values = values.data(),
         .start_points = starts.data(),
         .end_points = ends.data(),
-        .point_count = count};
-    loom_low_placement_table_t placement =
-        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
-             // differs from list initialization.
-    placement.value_ids = value_ids.data();
+        .point_count = count,
+    };
+    loom_low_placement_table_t placement = {
+        .value_ids = value_ids.data(),
+    };
     placement.value_count = count;
     placement.relations = relations.data();
     placement.relation_count = relations.size();
@@ -109,8 +112,10 @@ class LowAllocationPhysicalDomainsTest : public ::testing::Test {
   }
 
   loom_low_allocation_physical_domain_row_t Row(size_t index) const {
-    loom_liveness_analysis_t liveness = {.intervals = intervals_.data(),
-                                         .interval_count = intervals_.size()};
+    loom_liveness_analysis_t liveness = {
+        .intervals = intervals_.data(),
+        .interval_count = intervals_.size(),
+    };
     return loom_low_allocation_physical_domains_for_interval(
         &domains_, &liveness, &intervals_[index]);
   }

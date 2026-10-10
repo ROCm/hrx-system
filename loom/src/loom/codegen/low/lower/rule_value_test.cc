@@ -155,7 +155,9 @@ TEST_F(LowLowerRuleValueTest, ResolvesSourceValueReferencesAndFields) {
   value_refs[2].kind = LOOM_LOW_LOWER_VALUE_REF_RESULT;
   value_refs[2].index = 0;
   loom_low_lower_rule_set_t rule_set = {
-      .value_refs = value_refs, .value_ref_count = IREE_ARRAYSIZE(value_refs)};
+      .value_refs = value_refs,
+      .value_ref_count = IREE_ARRAYSIZE(value_refs),
+  };
 
   EXPECT_EQ(loom_low_lower_rule_source_value(module_, &rule_set, addi_op_, 0),
             arguments_[0]);
@@ -183,7 +185,9 @@ TEST_F(LowLowerRuleValueTest, ResolvesVariadicResultElements) {
   value_refs[1].index = 0;
   value_refs[1].element_index = 1;
   loom_low_lower_rule_set_t rule_set = {
-      .value_refs = value_refs, .value_ref_count = IREE_ARRAYSIZE(value_refs)};
+      .value_refs = value_refs,
+      .value_ref_count = IREE_ARRAYSIZE(value_refs),
+  };
 
   const loom_value_slice_t results =
       loom_scalar_assume_results(variadic_result_op_);
@@ -222,7 +226,9 @@ TEST_F(LowLowerRuleValueTest, ResolvesValuesAcrossSourceGraphNodes) {
       },
   };
   loom_low_lower_rule_set_t rule_set = {
-      .value_refs = value_refs, .value_ref_count = IREE_ARRAYSIZE(value_refs)};
+      .value_refs = value_refs,
+      .value_ref_count = IREE_ARRAYSIZE(value_refs),
+  };
   const loom_op_t* source_nodes[] = {addi_op_, muli_op_};
 
   EXPECT_EQ(loom_low_lower_rule_source_value_from_nodes(
@@ -279,8 +285,10 @@ TEST_F(LowLowerRuleValueTest,
       .source_node_index = 0,
       .index = 0,
   };
-  loom_low_lower_rule_set_t rule_set = {.value_refs = &value_ref,
-                                        .value_ref_count = 1};
+  loom_low_lower_rule_set_t rule_set = {
+      .value_refs = &value_ref,
+      .value_ref_count = 1,
+  };
   loom_value_id_t resolved = LOOM_VALUE_ID_INVALID;
   ASSERT_TRUE(loom_low_lower_rule_resolve_source_value_from_nodes(
       module_, &fact_table_, (loom_target_contract_vector_lane_projection_t){0},
@@ -305,8 +313,10 @@ TEST_F(LowLowerRuleValueTest, ResolvesUniformElementOrigins) {
         .source_node_index = 0,
         .index = 0,
     };
-    loom_low_lower_rule_set_t rule_set = {.value_refs = &value_ref,
-                                          .value_ref_count = 1};
+    loom_low_lower_rule_set_t rule_set = {
+        .value_refs = &value_ref,
+        .value_ref_count = 1,
+    };
     loom_value_id_t resolved = LOOM_VALUE_ID_INVALID;
     ASSERT_TRUE(loom_low_lower_rule_resolve_source_value_from_nodes(
         module_, &fact_table_,

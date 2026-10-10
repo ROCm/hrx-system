@@ -36,7 +36,8 @@ ContextPtr CreateContext() {
   loomc_context_target_options_t target_options = {
       .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
       .structure_size = sizeof(target_options),
-      .target_environment = environment};
+      .target_environment = environment,
+  };
   loomc_context_options_t options = {.next = &target_options};
   loomc_context_t* context = nullptr;
   LOOMC_EXPECT_OK(
@@ -81,7 +82,8 @@ ResultPtr CompileDivisionForGfx1151(loomc_target_environment_t* environment,
   CompilerPtr compiler_owner(compiler);
   loomc_amdgpu_profile_options_t profile_options = {
       .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
-      .structure_size = sizeof(profile_options)};
+      .structure_size = sizeof(profile_options),
+  };
   profile_options.identity.target = loomc_make_cstring_view("gfx1151");
   loomc_target_profile_t* profile = nullptr;
   LOOMC_EXPECT_OK(loomc_target_profile_create_amdgpu(
@@ -92,7 +94,8 @@ ResultPtr CompileDivisionForGfx1151(loomc_target_environment_t* environment,
       .structure_size = sizeof(pipeline_options),
       .kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
       .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
-      .source_to_low_max_errors = 20};
+      .source_to_low_max_errors = 20,
+  };
   loomc_pass_program_t* program = nullptr;
   loomc_result_t* prepared = nullptr;
   LOOMC_EXPECT_OK(loomc_pass_program_create_from_target_pipeline(
@@ -102,12 +105,14 @@ ResultPtr CompileDivisionForGfx1151(loomc_target_environment_t* environment,
   EXPECT_TRUE(loomc_result_succeeded(prepared));
   loomc_target_specialization_t specialization = {
       .function_symbol = loomc_make_cstring_view("divide"),
-      .target_profile = profile};
+      .target_profile = profile,
+  };
   loomc_target_specialization_options_t target_options = {
       .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
       .structure_size = sizeof(target_options),
       .specializations = &specialization,
-      .specialization_count = 1};
+      .specialization_count = 1,
+  };
   loomc_compile_options_t compile_options = {.next = &target_options};
   loomc_result_t* compiled = nullptr;
   LOOMC_EXPECT_OK(loomc_compile_module(compiler, workspace, program, module,
@@ -138,7 +143,8 @@ TEST(CxxAssemblyTest, SourceAndEnvironmentOwnershipSurvivesBothFormats) {
     loomc_source_options_t source_options = {
         .identifier = loomc_make_cstring_view("assembly.cxx"),
         .contents = loomc_make_byte_span(text, sizeof(text) - 1),
-        .storage = LOOMC_SOURCE_STORAGE_COPY};
+        .storage = LOOMC_SOURCE_STORAGE_COPY,
+    };
     loomc_source_t* source = nullptr;
     LOOMC_ASSERT_OK(loomc_source_create(&source_options,
                                         loomc_allocator_system(), &source));
@@ -207,7 +213,8 @@ TEST(CxxDiagnosticTest,
     loomc_source_options_t source_options = {
         .identifier = loomc_make_cstring_view("virtual/division.cxx"),
         .contents = loomc_make_byte_span(text, sizeof(text) - 1),
-        .storage = LOOMC_SOURCE_STORAGE_COPY};
+        .storage = LOOMC_SOURCE_STORAGE_COPY,
+    };
     loomc_source_t* source = nullptr;
     LOOMC_ASSERT_OK(loomc_source_create(&source_options, allocator, &source));
     SourcePtr source_owner(source);
@@ -235,7 +242,8 @@ TEST(CxxDiagnosticTest,
     loomc_context_target_options_t target_context_options = {
         .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
         .structure_size = sizeof(target_context_options),
-        .target_environment = environment};
+        .target_environment = environment,
+    };
     loomc_context_options_t context_options = {.next = &target_context_options};
     loomc_context_t* context = nullptr;
     LOOMC_ASSERT_OK(
@@ -307,10 +315,12 @@ TEST(CxxDiagnosticTest, CompilationSourceRetentionControlsHeaderSnapshots) {
       loomc_context_target_options_t target_context_options = {
           .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
           .structure_size = sizeof(target_context_options),
-          .target_environment = environment};
+          .target_environment = environment,
+      };
       loomc_context_options_t context_options = {
           .next = &target_context_options,
-          .source_retention = source_retention};
+          .source_retention = source_retention,
+      };
       loomc_context_t* context = nullptr;
       LOOMC_ASSERT_OK(
           loomc_context_create(&context_options, allocator, &context));
@@ -323,7 +333,8 @@ TEST(CxxDiagnosticTest, CompilationSourceRetentionControlsHeaderSnapshots) {
           .identifier = loomc_make_cstring_view("/headers/division.h"),
           .contents =
               loomc_make_byte_span(header_text, sizeof(header_text) - 1),
-          .storage = LOOMC_SOURCE_STORAGE_COPY};
+          .storage = LOOMC_SOURCE_STORAGE_COPY,
+      };
       loomc_source_t* header = nullptr;
       LOOMC_ASSERT_OK(loomc_source_create(&header_options, allocator, &header));
       HeaderProvider provider = {SourcePtr(header)};
@@ -332,19 +343,19 @@ TEST(CxxDiagnosticTest, CompilationSourceRetentionControlsHeaderSnapshots) {
       loomc_source_options_t source_options = {
           .identifier = loomc_make_cstring_view("virtual/main.cxx"),
           .contents = loomc_make_byte_span(main_text, sizeof(main_text) - 1),
-          .storage = LOOMC_SOURCE_STORAGE_COPY};
+          .storage = LOOMC_SOURCE_STORAGE_COPY,
+      };
       loomc_source_t* source = nullptr;
       LOOMC_ASSERT_OK(loomc_source_create(&source_options, allocator, &source));
       SourcePtr source_owner(source);
       const loomc_string_view_t include_path =
           loomc_make_cstring_view("/headers");
-      loomc_cxx_import_options_t import_options =
-          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
-               // differs from declaration order.
-      import_options.source_provider = {HeaderProvider::Resolve, &provider};
-      import_options.include_paths = &include_path;
-      import_options.include_path_count = 1;
-      import_options.flags = LOOMC_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES;
+      loomc_cxx_import_options_t import_options = {
+          .flags = LOOMC_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES,
+          .source_provider = {HeaderProvider::Resolve, &provider},
+          .include_paths = &include_path,
+          .include_path_count = 1,
+      };
       loomc_module_t* module = nullptr;
       loomc_result_t* imported = nullptr;
       LOOMC_ASSERT_OK(loomc_module_import_cxx(context, workspace, source,

@@ -29,7 +29,8 @@ static loom_low_source_memory_access_plan_t CoordinateSource(
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
       .root_uniform_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP,
       .root_minimum_alignment = 16,
-      .minimum_alignment = 16};
+      .minimum_alignment = 16,
+  };
   const int64_t strides[] = {x_stride, y_stride, z_stride};
   for (uint8_t axis = 0; axis < 3; ++axis) {
     if (strides[axis] == 0) {

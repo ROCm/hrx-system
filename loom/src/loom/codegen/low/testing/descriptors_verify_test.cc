@@ -1303,8 +1303,9 @@ TEST(LowDescriptorsTest, ResolvesInputLifetimeByClassAndExecutionWidth) {
        /*unit_alignment_log2=*/0, /*late_read_subgroup_size=*/0},
   };
   loom_low_descriptor_set_t set = {.reg_class_alts = alternatives};
-  loom_low_operand_t operand = {.reg_class_alt_count =
-                                    IREE_ARRAYSIZE(alternatives)};
+  loom_low_operand_t operand = {
+      .reg_class_alt_count = IREE_ARRAYSIZE(alternatives),
+  };
   EXPECT_FALSE(loom_low_operand_reads_after_write(&set, &operand, 0, 32));
   EXPECT_TRUE(loom_low_operand_reads_after_write(&set, &operand, 0, 64));
   EXPECT_FALSE(loom_low_operand_reads_after_write(&set, &operand, 1, 64));

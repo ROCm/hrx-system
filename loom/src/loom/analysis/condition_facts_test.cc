@@ -817,7 +817,8 @@ TEST_F(ConditionFactsTest, ScalarIdentityPreservesRangeRefinement) {
       loom_value_fact_table_compute_op(&fact_table_, module_, alias));
   const loom_value_id_t result = loom_op_const_results(alias)[0];
   loom_condition_integer_relation_t relation = {
-      .relation = LOOM_SYMBOLIC_INTEGER_RELATION_LT};
+      .relation = LOOM_SYMBOLIC_INTEGER_RELATION_LT,
+  };
   relation.left.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE;
   relation.left.value_id = input;
   relation.right.kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT;

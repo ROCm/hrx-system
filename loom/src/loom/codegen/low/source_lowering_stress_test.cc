@@ -167,7 +167,8 @@ TEST_F(SourceLoweringStressTest, PreparationDiagnosticStopsBeforeAllocation) {
           .op = function.op,
           .error = LOOM_ERR_STRUCTURE_028,
           .params = params,
-          .param_count = IREE_ARRAYSIZE(params)};
+          .param_count = IREE_ARRAYSIZE(params),
+      };
       return iree_diagnostic_emit(pass->diagnostic_emitter, &emission);
     };
     replaced = true;
