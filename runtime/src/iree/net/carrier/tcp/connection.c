@@ -1623,12 +1623,12 @@ iree_status_t iree_net_tcp_connection_create(
         i + 1 < connection->send_state_count ? i + 1 : IREE_NET_TCP_INDEX_NONE;
   }
 
-  iree_net_tcp_carrier_options_t carrier_options = options->carrier_options;
+  iree_net_stream_carrier_options_t carrier_options = options->carrier_options;
   ++carrier_options.max_send_operations;
   iree_net_carrier_t* carrier = NULL;
-  iree_status_t status =
-      iree_net_tcp_carrier_create(proactor, socket, receive_pool,
-                                  &carrier_options, host_allocator, &carrier);
+  iree_status_t status = iree_net_stream_carrier_create(
+      proactor, socket, receive_pool, &carrier_options, host_allocator,
+      &carrier);
   if (iree_status_is_ok(status)) {
     iree_net_frame_length_callback_t frame_length = {
         .fn = iree_net_tcp_resolve_frame_size,

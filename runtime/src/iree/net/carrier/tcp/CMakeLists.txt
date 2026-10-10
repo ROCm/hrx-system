@@ -11,34 +11,17 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
-    tcp
-  HDRS
-    "carrier.h"
-  SRCS
-    "carrier.c"
-  DEPS
-    iree::async
-    iree::base
-    iree::base::core_headers
-    iree::base::internal
-    iree::base::threading
-    iree::net::carrier
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     connection
   HDRS
     "connection.h"
   SRCS
     "connection.c"
   DEPS
-    ::tcp
     iree::async
     iree::base
     iree::base::core_headers
     iree::base::threading
+    iree::net::carrier::stream
     iree::net::connection
     iree::net::endpoint_lifecycle
     iree::net::framing_adapter
@@ -61,30 +44,6 @@ iree_cc_library(
     iree::base::threading
     iree::net::transport_factory
   PUBLIC
-)
-
-set(_carrier_test_platform_deps "")
-if(CMAKE_SYSTEM_NAME STREQUAL "Android")
-  list(APPEND _carrier_test_platform_deps iree::async::platform::posix)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  list(APPEND _carrier_test_platform_deps iree::async::platform::posix)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-  list(APPEND _carrier_test_platform_deps iree::async::platform::posix)
-endif()
-iree_cc_test(
-  NAME
-    carrier_test
-  SRCS
-    "carrier_test.cc"
-  DEPS
-    ::tcp
-    iree::async
-    iree::async::platform
-    iree::base
-    iree::net::carrier
-    iree::testing::gtest
-    iree::testing::gtest_main
-    ${_carrier_test_platform_deps}
 )
 
 iree_cc_test(

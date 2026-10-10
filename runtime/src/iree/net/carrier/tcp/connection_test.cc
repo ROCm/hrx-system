@@ -686,9 +686,9 @@ TEST(TcpConnectionOptionsTest, Defaults) {
             IREE_NET_TCP_DEFAULT_MAX_ENDPOINT_COUNT);
   EXPECT_EQ(options.max_frame_size, IREE_NET_TCP_DEFAULT_MAX_FRAME_SIZE);
   EXPECT_EQ(options.carrier_options.max_send_operations,
-            IREE_NET_TCP_DEFAULT_MAX_SEND_OPERATIONS);
+            IREE_NET_STREAM_DEFAULT_MAX_SEND_OPERATIONS);
   EXPECT_EQ(options.carrier_options.generated_prefix_capacity,
-            IREE_NET_TCP_DEFAULT_GENERATED_PREFIX_CAPACITY);
+            IREE_NET_STREAM_DEFAULT_GENERATED_PREFIX_CAPACITY);
 }
 
 TEST(TcpConnectionOptionsTest, ReservesInternalActivationSlot) {

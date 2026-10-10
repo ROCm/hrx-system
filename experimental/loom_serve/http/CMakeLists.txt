@@ -162,7 +162,7 @@ loom_cc_library(
     iree::base::threading
     iree::experimental::loom_serve::telemetry::stream
     iree::net::carrier
-    iree::net::carrier::tcp
+    iree::net::carrier::stream
   PUBLIC
 )
 

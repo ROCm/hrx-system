@@ -13,7 +13,7 @@
 #include "iree/async/proactor.h"
 #include "iree/async/socket.h"
 #include "iree/base/api.h"
-#include "iree/net/carrier/tcp/carrier.h"
+#include "iree/net/carrier/stream/carrier.h"
 #include "iree/net/connection.h"
 
 #ifdef __cplusplus
@@ -39,7 +39,7 @@ typedef struct iree_net_tcp_connection_options_t {
   // The connection reserves one additional send operation internally for
   // ACTIVE frames. Small sends use kernel copying by default; bulk sends
   // retain zero-copy when the socket and proactor support it.
-  iree_net_tcp_carrier_options_t carrier_options;
+  iree_net_stream_carrier_options_t carrier_options;
 } iree_net_tcp_connection_options_t;
 
 // Returns default TCP connection options.
@@ -48,7 +48,7 @@ iree_net_tcp_connection_options_default(void) {
   iree_net_tcp_connection_options_t options;
   options.max_endpoint_count = IREE_NET_TCP_DEFAULT_MAX_ENDPOINT_COUNT;
   options.max_frame_size = IREE_NET_TCP_DEFAULT_MAX_FRAME_SIZE;
-  options.carrier_options = iree_net_tcp_carrier_options_default();
+  options.carrier_options = iree_net_stream_carrier_options_default();
   return options;
 }
 

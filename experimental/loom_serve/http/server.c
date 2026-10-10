@@ -13,7 +13,7 @@
 #include "iree/async/proactor_platform.h"
 #include "iree/async/util/proactor_thread.h"
 #include "iree/base/threading/mutex.h"
-#include "iree/net/carrier/tcp/carrier.h"
+#include "iree/net/carrier/stream/carrier.h"
 
 enum {
   HTTP_SEND_CAPACITY = 8,
@@ -201,12 +201,12 @@ static iree_status_t http_connection_create(
     status = iree_async_buffer_pool_create(region, server->allocator, &pool);
   }
   if (iree_status_is_ok(status)) {
-    iree_net_tcp_carrier_options_t options =
-        iree_net_tcp_carrier_options_default();
+    iree_net_stream_carrier_options_t options =
+        iree_net_stream_carrier_options_default();
     options.max_send_operations = HTTP_SEND_CAPACITY;
     status =
-        iree_net_tcp_carrier_create(server->proactor, socket, pool, &options,
-                                    server->allocator, &connection->carrier);
+        iree_net_stream_carrier_create(server->proactor, socket, pool, &options,
+                                       server->allocator, &connection->carrier);
   }
   iree_async_buffer_pool_release(pool);
   iree_async_region_release(region);
