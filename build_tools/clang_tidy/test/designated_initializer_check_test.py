@@ -94,30 +94,32 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
             fixed_source,
         )
         self.assertIn("Config macro_config = MAKE_CONFIG(21);", fixed_source)
-        self.assertIn("Numbers configured = {.first = 20, .second = 21};", fixed_source)
-        self.assertIn("Config sparse = {.flags = 22};", fixed_source)
         self.assertIn(
-            "Numbers evaluated_in_order = {.first = Next(), .second = Next()};",
+            "Numbers configured = {.first = 20, .second = 21,};", fixed_source
+        )
+        self.assertIn("Config sparse = {.flags = 22,};", fixed_source)
+        self.assertIn(
+            "Numbers evaluated_in_order = {.first = Next(), .second = Next(),};",
             fixed_source,
         )
         self.assertIn(
             "Numbers macro_values = {.first = CONFIG_VALUE(40), "
-            ".second = CONFIG_ORDINAL};",
+            ".second = CONFIG_ORDINAL,};",
             fixed_source,
         )
-        self.assertIn("Numbers sized = {.first = sizeof(sized)};", fixed_source)
+        self.assertIn("Numbers sized = {.first = sizeof(sized),};", fixed_source)
         self.assertIn(
-            "WithAnonymous anonymous_setup = {.integer = 42, .tail = 43};",
+            "WithAnonymous anonymous_setup = {.integer = 42, .tail = 43,};",
             fixed_source,
         )
         self.assertIn(
-            "WithAnonymous omitted_anonymous_union = {.tail = 44};", fixed_source
+            "WithAnonymous omitted_anonymous_union = {.tail = 44,};", fixed_source
         )
         self.assertIn(
-            "PointerConfig qualified_pointer = {.pointer = values};", fixed_source
+            "PointerConfig qualified_pointer = {.pointer = values,};", fixed_source
         )
         self.assertIn(
-            "PointerConfig null_pointer = {.pointer = nullptr};", fixed_source
+            "PointerConfig null_pointer = {.pointer = nullptr,};", fixed_source
         )
 
         self.assertIn("/*.ordinal=*/7", fixed_source)
@@ -135,12 +137,12 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn("DerivedConfig base_label = {/*.base=*/{16}", fixed_source)
         self.assertIn("OuterConfig brace_elided = {/*.inner=*/18", fixed_source)
         self.assertIn("Config { /*.ordinal=*/ value }", fixed_source)
-        self.assertIn("Numbers reordered = {.first = 24, .second = 23};", fixed_source)
-        self.assertIn("Numbers reordered_effects = {.second = Next()};", fixed_source)
+        self.assertIn("Numbers reordered = {.first = 24, .second = 23,};", fixed_source)
+        self.assertIn("Numbers reordered_effects = {.second = Next(),};", fixed_source)
         self.assertIn("reordered_effects.first = Next();", fixed_source)
-        self.assertIn("Numbers self_referencing = {.first = 25};", fixed_source)
+        self.assertIn("Numbers self_referencing = {.first = 25,};", fixed_source)
         self.assertIn("aliased.first = 26;", fixed_source)
-        self.assertIn("Numbers observed = {.first = 28};", fixed_source)
+        self.assertIn("Numbers observed = {.first = 28,};", fixed_source)
         self.assertIn("conditional.first = 30;", fixed_source)
         self.assertIn("union_setup.integer = 31;", fixed_source)
         self.assertIn("defaulted.second = 32;", fixed_source)
@@ -160,7 +162,7 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
             fixed_source,
         )
         self.assertIn(
-            "Numbers comment_between_assignments = {.first = 38};", fixed_source
+            "Numbers comment_between_assignments = {.first = 38,};", fixed_source
         )
         self.assertIn("comment_between_assignments.second = 39;", fixed_source)
 
@@ -222,7 +224,9 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn("fold aggregate setup", output)
         self.assertIn("Config labeled_config = {", fixed_source)
         self.assertIn("/*.ordinal=*/1,", fixed_source)
-        self.assertIn("Numbers configured = {.first = 20, .second = 21};", fixed_source)
+        self.assertIn(
+            "Numbers configured = {.first = 20, .second = 21,};", fixed_source
+        )
 
     def test_invalid_boolean_option_is_diagnosed_and_uses_default(self):
         source = clang_tidy_test.source_path(
@@ -252,7 +256,9 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
             output,
         )
         self.assertIn("fold aggregate setup", output)
-        self.assertIn("Numbers configured = {.first = 20, .second = 21};", fixed_source)
+        self.assertIn(
+            "Numbers configured = {.first = 20, .second = 21,};", fixed_source
+        )
 
     def test_check_is_inactive_before_cxx20(self):
         output = clang_tidy_test.run_clang_tidy(

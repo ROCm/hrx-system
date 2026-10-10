@@ -890,7 +890,7 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
       Replacement.append(" = ");
       Replacement.append(Assignments[J].value_text);
     }
-    Replacement.append("}");
+    Replacement.append(",}");
 
     DiagnosticBuilder Diagnostic =
         Check.diag(Initializer->getLBraceLoc(),
