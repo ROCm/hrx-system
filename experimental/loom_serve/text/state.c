@@ -251,53 +251,68 @@ iree_status_t loom_serve_text_state_allocate(
   return status;
 }
 
-iree_status_t loom_serve_text_state_deinitialize(
-    loom_serve_text_state_t* state) {
+void loom_serve_text_state_retire(loom_serve_text_state_t* state,
+                                  void (*wake)(void* user_data),
+                                  void* user_data) {
+  loom_serve_retirement_set_observer(&state->retirement, wake, user_data);
   if (state->rows) {
     for (iree_host_size_t i = 0; i < state->row_count; ++i) {
       loom_serve_snapshot_release(state->rows[i].snapshot);
+      state->rows[i].snapshot = NULL;
       for (iree_host_size_t binding = TEXT_CONTROL; binding <= TEXT_PROGRESS;
            ++binding) {
         if (binding != TEXT_RECURRENT) {
           iree_hal_buffer_release(state->rows[i].buffers[binding]);
         }
+        state->rows[i].buffers[binding] = NULL;
       }
     }
   }
   if (state->recurrent.buffers) {
     for (uint32_t i = 0; i < state->recurrent.pool.capacity; ++i) {
       iree_hal_buffer_release(state->recurrent.buffers[i]);
+      state->recurrent.buffers[i] = NULL;
     }
   }
-  iree_allocator_free(state->allocator, state->recurrent.buffers);
-  loom_serve_block_pool_deinitialize(&state->recurrent.pool);
   if (state->checkpoints.values) {
     for (uint32_t i = 0; i < state->checkpoints.capacity; ++i) {
       loom_serve_snapshot_release(state->checkpoints.values[i].snapshot);
+      state->checkpoints.values[i].snapshot = NULL;
     }
   }
-  loom_serve_block_pool_deinitialize(&state->checkpoints.pool);
-  iree_allocator_free(state->allocator, state->checkpoints.values);
-  iree_allocator_free(state->allocator, state->checkpoints.maps);
-  iree_allocator_free(state->allocator, state->cache.destinations);
-  loom_serve_block_pool_deinitialize(&state->cache.pool);
   iree_hal_buffer_release(state->mtp.next_results);
+  state->mtp.next_results = NULL;
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
     iree_hal_buffer_release(*text_allocation(state, i));
+    *text_allocation(state, i) = NULL;
   }
-  // Failed readiness does not retire borrowed payloads. Final queue ownership
-  // of their device counterparts does, including nested row views.
-  loom_serve_retirement_await(&state->retirement);
-  loom_serve_retirement_deinitialize(&state->retirement);
-  loom_serve_text_storage_deinitialize(&state->storage);
-  iree_allocator_free(state->allocator, state->rows);
-  iree_allocator_free(state->allocator, state->cache.maps);
+}
+
+iree_status_t loom_serve_text_state_deinitialize(
+    loom_serve_text_state_t* state) {
+  IREE_ASSERT(loom_serve_retirement_is_idle(&state->retirement));
   iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
+  for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT &&
+                               iree_status_is_ok(status);
        ++i) {
-    status = iree_status_join(
-        status, loom_serve_virtual_buffer_destroy(state->memory.buffers[i]));
+    status = loom_serve_virtual_buffer_destroy(state->memory.buffers[i]);
+    if (iree_status_is_ok(status)) {
+      state->memory.buffers[i] = NULL;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    loom_serve_retirement_deinitialize(&state->retirement);
+    loom_serve_text_storage_deinitialize(&state->storage);
+    iree_allocator_free(state->allocator, state->recurrent.buffers);
+    loom_serve_block_pool_deinitialize(&state->recurrent.pool);
+    loom_serve_block_pool_deinitialize(&state->checkpoints.pool);
+    iree_allocator_free(state->allocator, state->checkpoints.values);
+    iree_allocator_free(state->allocator, state->checkpoints.maps);
+    iree_allocator_free(state->allocator, state->cache.destinations);
+    loom_serve_block_pool_deinitialize(&state->cache.pool);
+    iree_allocator_free(state->allocator, state->rows);
+    iree_allocator_free(state->allocator, state->cache.maps);
   }
   return status;
 }

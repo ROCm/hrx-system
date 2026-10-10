@@ -804,32 +804,56 @@ iree_status_t loom_serve_text_model_create(
   return status;
 }
 
-iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
+void loom_serve_text_model_retire(loom_serve_text_model_t* model,
+                                  void (*wake)(void* user_data),
+                                  void* user_data) {
+  if (model->execution) {
+    loom_serve_execution_set_retirement_observer(model->execution, wake,
+                                                 user_data);
+  }
+  loom_serve_weights_set_retirement_observer(model->weights, wake, user_data);
+  loom_serve_text_chat_policy_deinitialize(&model->chat_policy);
+  loom_serve_program_destroy(model->program);
+  model->program = NULL;
+  iree_vm_module_release(model->native_module);
+  model->native_module = NULL;
+  for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
+    iree_hal_command_buffer_release(model->stages[i].command);
+    model->stages[i].command = NULL;
+    for (iree_host_size_t j = 0; j < model->stages[i].fixed_buffer_count; ++j) {
+      iree_hal_buffer_release(model->stages[i].fixed_buffers[j]);
+      model->stages[i].fixed_buffers[j] = NULL;
+    }
+  }
+  loom_serve_text_state_retire(&model->state, wake, user_data);
+}
+
+bool loom_serve_text_model_is_retired(loom_serve_text_model_t* model) {
+  return !model || ((!model->execution ||
+                     loom_serve_execution_is_retired(model->execution)) &&
+                    loom_serve_weights_is_retired(model->weights) &&
+                    loom_serve_retirement_is_idle(&model->state.retirement));
+}
+
+iree_status_t loom_serve_text_model_destroy_retired(
+    loom_serve_text_model_t* model) {
   if (!model) {
     return iree_ok_status();
   }
-  iree_status_t status = model->execution
-                             ? loom_serve_execution_drain(model->execution)
-                             : iree_ok_status();
-  loom_serve_text_chat_policy_deinitialize(&model->chat_policy);
-  loom_serve_program_destroy(model->program);
-  iree_vm_module_release(model->native_module);
+  IREE_ASSERT(loom_serve_text_model_is_retired(model));
+  loom_serve_residency_destroy(model->residency);
+  model->residency = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_weights_destroy(model->weights));
+  model->weights = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_text_state_deinitialize(&model->state));
   loom_serve_preparation_destroy(model->preparation);
   for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
-    iree_hal_command_buffer_release(model->stages[i].command);
     loom_serve_jit_stage_destroy(model->stages[i].compiled);
-    for (iree_host_size_t j = 0; j < model->stages[i].fixed_buffer_count; ++j) {
-      iree_hal_buffer_release(model->stages[i].fixed_buffers[j]);
-    }
     iree_allocator_free(model->allocator, model->stages[i].fixed_buffers);
   }
   iree_allocator_free(model->allocator, model->shapes);
   iree_allocator_free(model->allocator, model->stages);
   loom_serve_jit_destroy(model->jit);
-  // State retirement encloses all borrowed host packets and row payloads,
-  // including when the initial execution drain returned a failure.
-  iree_status_t memory_status =
-      loom_serve_text_state_deinitialize(&model->state);
   iree_vm_buffer_release(model->control_state);
   for (iree_host_size_t i = 0; i < TEXT_HOST_BUFFER_COUNT; ++i) {
     iree_vm_buffer_release(model->host.buffers[i]);
@@ -837,19 +861,23 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   iree_vm_environment_free(model->environment);
   iree_allocator_free(model->allocator, model->rows);
   iree_allocator_free(model->allocator, model->checkpoints);
-  loom_serve_residency_destroy(model->residency);
   loom_serve_execution_release(model->execution);
-  loom_serve_weights_await_retirement(model->weights);
-  memory_status = iree_status_join(memory_status,
-                                   loom_serve_weights_destroy(model->weights));
-  // A failed platform unmap/free must not destroy the allocation domain still
-  // owning those handles. The terminal error stops the process's serving run.
-  if (!iree_status_is_ok(memory_status)) {
-    return iree_status_join(status, memory_status);
-  }
   iree_tokenizer_free(model->tokenizer);
   iree_allocator_free(model->allocator, model);
-  return status;
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
+  if (!model) {
+    return iree_ok_status();
+  }
+  loom_serve_text_model_retire(model, NULL, NULL);
+  iree_status_t status = model->execution
+                             ? loom_serve_execution_drain(model->execution)
+                             : iree_ok_status();
+  loom_serve_weights_await_retirement(model->weights);
+  loom_serve_retirement_await(&model->state.retirement);
+  return iree_status_join(status, loom_serve_text_model_destroy_retired(model));
 }
 
 loom_serve_device_t* loom_serve_text_model_device(

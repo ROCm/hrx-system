@@ -456,6 +456,71 @@ TEST_P(SourceTextServiceTest, ChunkingRowsAndForksMatchDenseOracle) {
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 256u);
 }
 
+TEST_P(SourceTextServiceTest, RetirementOwnsAcceptedCheckpointCapture) {
+  IREE_ASSERT_OK(loom_serve_text_model_destroy(model_));
+  model_ = nullptr;
+  IREE_ASSERT_OK(loom_serve_device_group_destroy(group_));
+  group_ = nullptr;
+  const loom_serve_device_options_t device_options = {
+      .uri = IREE_SV("amdgpu"), .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC};
+  IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
+                                                &group_, allocator_));
+  device_ = loom_serve_device_group_at(group_, 0);
+  auto options = ModelOptions();
+  IREE_ASSERT_OK(
+      loom_serve_text_model_create(device_, &options, &model_, allocator_));
+  const std::string prompt = "abxabbaaxbabx";
+  std::vector<int32_t> tokens;
+  for (const char character : prompt) {
+    tokens.push_back(Oracle::Id(character));
+  }
+  auto* row = loom_serve_text_model_row(model_, 0);
+  IREE_ASSERT_OK(
+      loom_serve_text_row_prefill(row, tokens.size(), tokens.data()));
+  Oracle reference;
+  reference.Consume(prompt);
+  EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
+  loom_serve_text_checkpoint_t* checkpoint = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_row_try_pin(row, &checkpoint));
+  ASSERT_NE(checkpoint, nullptr);
+  loom_serve_execution_frontier_t frontier;
+  IREE_ASSERT_OK(
+      loom_serve_text_checkpoint_submit_suspend(checkpoint, &frontier));
+
+  // Retire after acceptance, without completing the capture or resetting its
+  // idle row. Model teardown owns the snapshot and its queued buffer views.
+  iree_notification_t notification;
+  iree_notification_initialize(&notification);
+  loom_serve_text_model_retire(
+      model_,
+      [](void* payload) {
+        iree_notification_post(static_cast<iree_notification_t*>(payload),
+                               IREE_ALL_WAITERS);
+      },
+      &notification);
+  EXPECT_TRUE(iree_notification_await(
+      &notification,
+      [](void* payload) {
+        return loom_serve_text_model_is_retired(
+            static_cast<loom_serve_text_model_t*>(payload));
+      },
+      model_, iree_infinite_timeout()));
+  IREE_ASSERT_OK(loom_serve_text_model_destroy_retired(model_));
+  model_ = nullptr;
+  iree_notification_deinitialize(&notification);
+  const auto memory = loom_serve_device_memory_statistics(device_);
+  EXPECT_EQ(memory.retained.reserved_bytes, 0u);
+  EXPECT_EQ(memory.retained.committed_bytes, 0u);
+
+  // Same host, queues and parameter pool remain available to the replacement.
+  IREE_ASSERT_OK(
+      loom_serve_text_model_create(device_, &options, &model_, allocator_));
+  row = loom_serve_text_model_row(model_, 0);
+  IREE_ASSERT_OK(
+      loom_serve_text_row_prefill(row, tokens.size(), tokens.data()));
+  EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
+}
+
 TEST_P(SourceTextServiceTest,
        HttpRetainsRewindsAndRejectsWithoutLosingHistory) {
   Start();

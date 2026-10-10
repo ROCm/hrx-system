@@ -184,10 +184,17 @@ iree_status_t loom_serve_text_state_allocate(loom_serve_text_state_t* state,
                                              loom_serve_device_t* device,
                                              loom_serve_execution_t* execution);
 
-// The model first drains execution and releases its VM and command references.
-// This releases views, joins actual queue ownership, then frees maps, rows and
-// physical backing. Borrowed model host payloads must outlive this call even
-// when the initial drain failed. Platform unmap/free failure is terminal.
+// Begins irreversible retirement after external row/checkpoint users and
+// cached commands relinquish their references. Releases owned device views
+// without waiting. Host packets and virtual backing remain owned by state.
+// The wake only schedules the serialized owner; it must not reenter state.
+void loom_serve_text_state_retire(loom_serve_text_state_t* state,
+                                  void (*wake)(void* user_data),
+                                  void* user_data);
+
+// Final destruction after the state's retirement scope is idle. Never waits
+// for device work. On platform release failure, remaining handles and host
+// metadata stay intact for owner-side retry; otherwise state is consumed.
 iree_status_t loom_serve_text_state_deinitialize(
     loom_serve_text_state_t* state);
 

@@ -254,8 +254,27 @@ iree_status_t loom_serve_text_model_create(
     loom_serve_device_t* device, const loom_serve_text_options_t* options,
     loom_serve_text_model_t** out_model, iree_allocator_t host_allocator);
 
-// Drains accepted work, releases all residency, and reports terminal failure.
-// Null is accepted. All borrowed row/tokenizer pointers become invalid.
+// Begins irreversible removal after service CPU tasks, waits and external
+// tokenizer borrowers retire. No model, row or checkpoint mutation is allowed
+// afterward. Installs nonblocking wakes before releasing cached VM/command and
+// buffer consumers. Host packets and backing survive actual queue retirement.
+// The wake only schedules the serialized owner, never reenters or tears down.
+void loom_serve_text_model_retire(loom_serve_text_model_t* model,
+                                  void (*wake)(void* user_data),
+                                  void* user_data);
+
+// Query after retire; NULL is retired. True authorizes destroy_retired without
+// any semaphore wait. Failed readiness alone does not satisfy this condition.
+bool loom_serve_text_model_is_retired(loom_serve_text_model_t* model);
+
+// Consumes a retired model on success. A platform release failure preserves
+// remaining handles and metadata for owner-side retry. NULL is accepted.
+iree_status_t loom_serve_text_model_destroy_retired(
+    loom_serve_text_model_t* model);
+
+// Cold outer-owner teardown. Begins retirement and joins actual queue ownership
+// before final destruction; live removal uses the wake/query path. All borrowed
+// row/tokenizer pointers become invalid. NULL is accepted.
 iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model);
 
 // Borrowed shared device owner, including other models' backing and workspace.
