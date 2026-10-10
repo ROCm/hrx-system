@@ -2238,20 +2238,22 @@ TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {
   iree_hal_executable_function_t function;
   ASSERT_NO_FATAL_FAILURE(
       harness.LoadExecutable(fixture, &executable, &function));
-  std::array<iree_hal_buffer_t*, 2> buffers = {};
+  std::array<iree_hal_buffer_t*, 3> buffers = {};
   std::array<iree_hal_semaphore_t*, 2> completions = {};
-  for (size_t i = 0; i < buffers.size(); ++i) {
-    ASSERT_NO_FATAL_FAILURE(harness.MakeBuffer(&buffers[i]));
+  for (auto*& buffer : buffers) {
+    ASSERT_NO_FATAL_FAILURE(harness.MakeBuffer(&buffer));
+  }
+  for (auto*& completion : completions) {
     IREE_ASSERT_OK(iree_hal_semaphore_create(
         harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-        IREE_HAL_SEMAPHORE_FLAG_NONE, &completions[i]));
+        IREE_HAL_SEMAPHORE_FLAG_NONE, &completion));
   }
-  // One instruction aperture, one static DMA catalog, and two caller buffers.
-  EXPECT_EQ(harness.native.memory_create_count, 4u);
+  // One instruction aperture, one static DMA catalog, and three caller buffers.
+  EXPECT_EQ(harness.native.memory_create_count, 5u);
   for (uint64_t iteration = 1; iteration <= 4; ++iteration) {
     harness.native.hold_retirement = true;
     harness.native.flushes.clear();
-    for (size_t i = 0; i < buffers.size(); ++i) {
+    for (size_t i = 0; i < completions.size(); ++i) {
       auto binding =
           iree_hal_make_buffer_ref(buffers[(i + iteration) % 2], 0, 64);
       IREE_ASSERT_OK(iree_hal_queue_dispatch(
@@ -2270,15 +2272,9 @@ TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {
     EXPECT_FALSE(std::equal(first.bytes.begin() + 8, first.bytes.end(),
                             second.bytes.begin() + 8));
     // Both commands are ranges in the persistent instruction aperture.
-    EXPECT_EQ(harness.native.memory_create_count, 4u);
+    EXPECT_EQ(harness.native.memory_create_count, 5u);
     if (iteration > 1) {
-      ASSERT_EQ(harness.native.flushes.size(), 2u);
-      EXPECT_EQ(harness.native.flushes[0].memory, first.memory);
-      EXPECT_EQ(harness.native.flushes[0].offset, first.offset + 8);
-      EXPECT_EQ(harness.native.flushes[0].length, 8u);
-      EXPECT_EQ(harness.native.flushes[1].memory, second.memory);
-      EXPECT_EQ(harness.native.flushes[1].offset, second.offset + 8);
-      EXPECT_EQ(harness.native.flushes[1].length, 8u);
+      EXPECT_TRUE(harness.native.flushes.empty());
     }
     harness.native.hold_retirement = false;
     harness.native.Wake();
@@ -2290,6 +2286,24 @@ TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {
             harness.proactor, iree_infinite_timeout(), nullptr));
         IREE_ASSERT_OK(iree_hal_semaphore_query(completion, &value));
       }
+    }
+  }
+  // A new binding tuple patches one retired manifestation exactly once. Its
+  // next use finds the prepared match even when it is not the available head.
+  for (uint64_t iteration = 5; iteration <= 7; ++iteration) {
+    harness.native.flushes.clear();
+    iree_hal_buffer_t* buffer = iteration == 6 ? buffers[0] : buffers[2];
+    auto binding = iree_hal_make_buffer_ref(buffer, 0, 64);
+    IREE_ASSERT_OK(iree_hal_queue_dispatch(
+        harness.queue, {}, {1, &completions[0], &iteration}, executable,
+        function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
+        {1, &binding}, /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
+    ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(completions[0], iteration));
+    if (iteration == 5) {
+      ASSERT_EQ(harness.native.flushes.size(), 1u);
+      EXPECT_EQ(harness.native.flushes[0].length, 8u);
+    } else {
+      EXPECT_TRUE(harness.native.flushes.empty());
     }
   }
   for (auto* completion : completions) {

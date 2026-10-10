@@ -44,6 +44,13 @@ struct iree_hal_amd_xdna_invocation_t {
   iree_hal_amd_xdna_owned_allocation_t* allocations;
   // Complete views, including borrowed immutable backing from the prototype.
   iree_hal_amd_xdna_executable_storage_t* storage;
+  // Last device addresses published into dynamic relocation fields.
+  struct {
+    // One address per declared function binding.
+    uint64_t* device_addresses;
+    // True after every patched range has been flushed successfully.
+    bool valid;
+  } prepared_bindings;
   // Independent invocation establishing tile state on every submission.
   amdf_xdna_kernel_command_t command;
 };
@@ -181,6 +188,7 @@ static iree_status_t iree_hal_amd_xdna_invocation_create(
   *out_invocation = NULL;
   const uint32_t count = function->record.allocation_use_count;
   iree_host_size_t size = 0, allocations_offset = 0, storage_offset = 0;
+  iree_host_size_t binding_addresses_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amd_xdna_invocation_t), &size,
       IREE_STRUCT_FIELD_ALIGNED(
@@ -190,7 +198,10 @@ static iree_status_t iree_hal_amd_xdna_invocation_create(
       IREE_STRUCT_FIELD_ALIGNED(
           count, iree_hal_amd_xdna_executable_storage_t,
           iree_alignof(iree_hal_amd_xdna_executable_storage_t),
-          &storage_offset)));
+          &storage_offset),
+      IREE_STRUCT_FIELD_ALIGNED(function->record.binding_count, uint64_t,
+                                iree_alignof(uint64_t),
+                                &binding_addresses_offset)));
   iree_hal_amd_xdna_invocation_t* invocation = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(function->host_allocator, size,
                                              (void**)&invocation));
@@ -201,6 +212,9 @@ static iree_status_t iree_hal_amd_xdna_invocation_create(
   invocation->storage =
       (iree_hal_amd_xdna_executable_storage_t*)((uint8_t*)invocation +
                                                 storage_offset);
+  invocation->prepared_bindings.device_addresses =
+      (uint64_t*)((uint8_t*)invocation + binding_addresses_offset);
+  invocation->prepared_bindings.valid = false;
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     const iree_hal_amd_xdna_allocation_plan_t* plan = &function->plans[i];
@@ -563,6 +577,61 @@ void iree_hal_amd_xdna_invocation_release(
   iree_slim_mutex_unlock(&function->pool_mutex);
 }
 
+// Returns true when |invocation| already contains the exact dynamic addresses
+// required by |bindings|. Available manifestations are inspected under the
+// function pool mutex; an acquired manifestation is exclusively caller-owned.
+static bool iree_hal_amd_xdna_invocation_bindings_match(
+    const iree_hal_amd_xdna_invocation_t* invocation,
+    const iree_hal_amd_xdna_executable_binding_t* bindings) {
+  const iree_hal_amd_xdna_function_t* function = invocation->function;
+  if (!invocation->prepared_bindings.valid) {
+    return false;
+  }
+  for (uint32_t i = 0; i < function->record.binding_count; ++i) {
+    if (invocation->prepared_bindings.device_addresses[i] !=
+        bindings[i].device_address) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Acquires an available manifestation, favoring an exact prepared binding
+// match. Stable workloads hit the list head; a mismatch scans only the bounded
+// set of retired manifestations before falling back to repatching the head.
+static iree_hal_amd_xdna_invocation_t*
+iree_hal_amd_xdna_function_acquire_invocation(
+    iree_hal_amd_xdna_function_t* function,
+    const iree_hal_amd_xdna_executable_binding_t* bindings) {
+  iree_slim_mutex_lock(&function->pool_mutex);
+  iree_hal_amd_xdna_invocation_t* invocation = function->available;
+  iree_hal_amd_xdna_invocation_t* previous = NULL;
+  if (function->record.dynamic_relocation_count && invocation &&
+      !iree_hal_amd_xdna_invocation_bindings_match(invocation, bindings)) {
+    iree_hal_amd_xdna_invocation_t* candidate = invocation->next_available;
+    iree_hal_amd_xdna_invocation_t* candidate_previous = invocation;
+    while (candidate &&
+           !iree_hal_amd_xdna_invocation_bindings_match(candidate, bindings)) {
+      candidate_previous = candidate;
+      candidate = candidate->next_available;
+    }
+    if (candidate) {
+      invocation = candidate;
+      previous = candidate_previous;
+    }
+  }
+  if (invocation) {
+    if (previous) {
+      previous->next_available = invocation->next_available;
+    } else {
+      function->available = invocation->next_available;
+    }
+    invocation->next_available = NULL;
+  }
+  iree_slim_mutex_unlock(&function->pool_mutex);
+  return invocation;
+}
+
 iree_status_t iree_hal_amd_xdna_function_prepare(
     iree_hal_amd_xdna_function_t* function,
     iree_hal_amd_xdna_executable_binding_t* bindings,
@@ -571,12 +640,8 @@ iree_status_t iree_hal_amd_xdna_function_prepare(
   *out_invocation = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_xdna_function_resolve_binding_addresses(function, bindings));
-  iree_slim_mutex_lock(&function->pool_mutex);
-  iree_hal_amd_xdna_invocation_t* invocation = function->available;
-  if (invocation) {
-    function->available = invocation->next_available;
-  }
-  iree_slim_mutex_unlock(&function->pool_mutex);
+  iree_hal_amd_xdna_invocation_t* invocation =
+      iree_hal_amd_xdna_function_acquire_invocation(function, bindings);
   if (!invocation) {
     IREE_RETURN_IF_ERROR(
         iree_hal_amd_xdna_invocation_create(function, &invocation));
@@ -585,25 +650,40 @@ iree_status_t iree_hal_amd_xdna_function_prepare(
     function->invocations = invocation;
     iree_slim_mutex_unlock(&function->pool_mutex);
   }
-  iree_hal_amd_xdna_executable_storage_patch(function->image, function->ordinal,
-                                             invocation->storage, bindings);
   iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0;
-       i < function->record.allocation_use_count && iree_status_is_ok(status);
-       ++i) {
-    const iree_hal_amd_xdna_allocation_plan_t* plan = &function->plans[i];
-    if (plan->patches.end) {
-      const iree_hal_amd_xdna_owned_allocation_t* allocation =
-          &invocation->allocations[i];
-      amdf_host_mapping_t* mapping = allocation->command.mapping
-                                         ? allocation->command.mapping
-                                         : allocation->memory.mapping;
-      status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-          function->context->api->host_mapping_cache_control(
-              mapping, AMDF_HOST_CACHE_OPERATION_FLUSH,
-              invocation->storage[i].memory_byte_offset + plan->patches.begin,
-              plan->patches.end - plan->patches.begin),
-          "host_mapping_cache_control(bind)");
+  const bool requires_patch =
+      function->record.dynamic_relocation_count &&
+      !iree_hal_amd_xdna_invocation_bindings_match(invocation, bindings);
+  if (requires_patch) {
+    // The bytes cease to represent the prior tuple as soon as patching begins.
+    // Leave the manifestation invalid unless all cache publication succeeds.
+    invocation->prepared_bindings.valid = false;
+    iree_hal_amd_xdna_executable_storage_patch(
+        function->image, function->ordinal, invocation->storage, bindings);
+    for (uint32_t i = 0;
+         i < function->record.allocation_use_count && iree_status_is_ok(status);
+         ++i) {
+      const iree_hal_amd_xdna_allocation_plan_t* plan = &function->plans[i];
+      if (plan->patches.end) {
+        const iree_hal_amd_xdna_owned_allocation_t* allocation =
+            &invocation->allocations[i];
+        amdf_host_mapping_t* mapping = allocation->command.mapping
+                                           ? allocation->command.mapping
+                                           : allocation->memory.mapping;
+        status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+            function->context->api->host_mapping_cache_control(
+                mapping, AMDF_HOST_CACHE_OPERATION_FLUSH,
+                invocation->storage[i].memory_byte_offset + plan->patches.begin,
+                plan->patches.end - plan->patches.begin),
+            "host_mapping_cache_control(bind)");
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      for (uint32_t i = 0; i < function->record.binding_count; ++i) {
+        invocation->prepared_bindings.device_addresses[i] =
+            bindings[i].device_address;
+      }
+      invocation->prepared_bindings.valid = true;
     }
   }
   if (iree_status_is_ok(status)) {
