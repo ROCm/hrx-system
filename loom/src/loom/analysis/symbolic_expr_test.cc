@@ -1028,6 +1028,99 @@ TEST_F(SymbolicExprTest, WrappedAdditionRetainsOnlyAModularGuarantee) {
       loom_symbolic_congruence_excludes_difference(&wrapped, &original, 1, 1));
 }
 
+TEST_F(SymbolicExprTest,
+       BoundedResidualPreservesCorrelatedPeriodicBankSeparation) {
+  const loom_value_id_t phase = DefineIndexValue();
+  const loom_value_id_t independent_phase = DefineIndexValue();
+  const loom_value_id_t read_residual = DefineIndexValue();
+  const loom_value_id_t destination_residual = DefineIndexValue();
+  const loom_value_id_t unknown_residual = DefineIndexValue();
+  DefineFacts(phase, loom_value_facts_make(0, 4, 1));
+  DefineFacts(independent_phase, loom_value_facts_make(0, 4, 1));
+  DefineFacts(read_residual, loom_value_facts_make(0, 480, 1));
+  DefineFacts(destination_residual, loom_value_facts_make(0, 768, 1));
+
+  loom_op_t* one_op = BuildIndexConstant(1);
+  ComputeFacts(one_op);
+  const loom_value_id_t one = loom_index_constant_result(one_op);
+  loom_op_t* stride_op = BuildIndexConstant(1024);
+  ComputeFacts(stride_op);
+  const loom_value_id_t stride = loom_index_constant_result(stride_op);
+
+  auto build_bank = [&](loom_value_id_t source, bool advance) {
+    if (advance) {
+      loom_op_t* add_op = nullptr;
+      IREE_CHECK_OK(loom_index_add_build(
+          &builder_, source, one, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+          LOOM_LOCATION_UNKNOWN, &add_op));
+      ComputeFacts(add_op);
+      source = loom_index_add_result(add_op);
+    }
+    loom_op_t* mask_op = nullptr;
+    IREE_CHECK_OK(loom_index_andi_build(&builder_, source, one,
+                                        LOOM_LOCATION_UNKNOWN, &mask_op));
+    ComputeFacts(mask_op);
+    return loom_index_andi_result(mask_op);
+  };
+  auto build_address = [&](loom_value_id_t bank, loom_value_id_t residual) {
+    loom_op_t* scale_op = nullptr;
+    IREE_CHECK_OK(loom_index_mul_build(&builder_, bank, stride,
+                                       LOOM_LOCATION_UNKNOWN, &scale_op));
+    ComputeFacts(scale_op);
+    loom_op_t* add_op = nullptr;
+    IREE_CHECK_OK(
+        loom_index_add_build(&builder_, loom_index_mul_result(scale_op),
+                             residual, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                             LOOM_LOCATION_UNKNOWN, &add_op));
+    ComputeFacts(add_op);
+    return loom_index_add_result(add_op);
+  };
+
+  const loom_value_id_t current_bank = build_bank(phase, false);
+  const loom_value_id_t next_bank = build_bank(phase, true);
+  const loom_value_id_t independent_next_bank =
+      build_bank(independent_phase, true);
+  const loom_value_id_t read_address =
+      build_address(current_bank, read_residual);
+  const loom_value_id_t next_address =
+      build_address(next_bank, destination_residual);
+  const loom_value_id_t same_bank_address =
+      build_address(current_bank, destination_residual);
+  const loom_value_id_t independent_address =
+      build_address(independent_next_bank, destination_residual);
+  const loom_value_id_t unknown_address =
+      build_address(next_bank, unknown_residual);
+
+  auto expression = [&](loom_value_id_t value) {
+    loom_symbolic_expr_t result = {};
+    IREE_CHECK_OK(
+        loom_symbolic_expr_from_value(&expression_context_, value, &result));
+    return result;
+  };
+  const loom_symbolic_expr_t read = expression(read_address);
+  const loom_symbolic_expr_t next = expression(next_address);
+  const loom_symbolic_expr_t same = expression(same_bank_address);
+  const loom_symbolic_expr_t independent = expression(independent_address);
+  const loom_symbolic_expr_t unknown = expression(unknown_address);
+
+  // The fully expanded congruence loses the bounded residual identities and
+  // reduces this 2048-byte bank period to their smaller coefficients.
+  EXPECT_FALSE(
+      loom_symbolic_congruence_excludes_difference(&read, &next, -7, 255));
+  EXPECT_TRUE(loom_symbolic_congruence_prove_difference_outside_interval(
+      &expression_context_, &read, &next, -7, 255));
+  EXPECT_FALSE(loom_symbolic_congruence_prove_difference_outside_interval(
+      &expression_context_, &read, &next, -7, 256));
+  EXPECT_FALSE(loom_symbolic_congruence_prove_difference_outside_interval(
+      &expression_context_, &read, &same, -7, 255));
+  EXPECT_FALSE(loom_symbolic_congruence_prove_difference_outside_interval(
+      &expression_context_, &read, &independent, -7, 255));
+  EXPECT_FALSE(loom_symbolic_congruence_prove_difference_outside_interval(
+      &expression_context_, &read, &unknown, -7, 255));
+  EXPECT_FALSE(loom_symbolic_congruence_prove_difference_outside_interval(
+      &expression_context_, &read, &next, INT64_MIN, 255));
+}
+
 class SymbolicExprStorageTest : public SymbolicExprTest {
  protected:
   static iree_status_t Allocate(void* self, iree_allocator_command_t command,
