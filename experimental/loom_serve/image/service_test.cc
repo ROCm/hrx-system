@@ -171,7 +171,8 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   std::thread service([&] {
     service_status = loom_serve_http_router_run(
         loom_serve_host_executor(host), server, 1, &interface,
-        options.pending_capacity, iree_allocator_system());
+        {.request_quota = options.pending_capacity, .holding_capacity = 8},
+        iree_allocator_system());
   });
   uint64_t cursor = 0;
   auto wait_event = [&](const char* event, const char* field) {
@@ -454,8 +455,9 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
   };
   size_t completed_events[2] = {};
   std::thread router([&] {
-    status = loom_serve_http_router_run(loom_serve_host_executor(host), server,
-                                        2, services, 8, allocator);
+    status = loom_serve_http_router_run(
+        loom_serve_host_executor(host), server, 2, services,
+        {.request_quota = 8, .holding_capacity = 8}, allocator);
     for (size_t i = 0; i < 2; ++i) {
       completed_events[i] = generated_events(i);
       // Router return joins callbacks; service destruction releases queued

@@ -146,6 +146,47 @@ For a trusted sandbox-local Unix endpoint:
 curl --unix-socket /path/to/loom-serve.sock http://localhost/v1/models
 ~~~
 
+## Reversible model admission
+
+`POST /v1/models/drain` and `POST /v1/models/undrain` accept exactly
+`{"model":"name"}`. These controls change admission, independently of model
+residency and retained sessions. A drain closes the gate when the serialized
+owner processes it. Every request already accepted by the model, including its
+waiting queue, continues normally. Later inference, checkpoint and tokenizer
+requests wait outside the model until undrain; other models keep running.
+
+~~~sh
+curl http://127.0.0.1:8080/v1/models/drain \
+  -H 'Content-Type: application/json' -d '{"model":"scout"}'
+curl http://127.0.0.1:8080/v1/status
+curl http://127.0.0.1:8080/v1/models/undrain \
+  -H 'Content-Type: application/json' -d '{"model":"scout"}'
+~~~
+
+A successful control response acknowledges the gate change, not completion of
+admitted work. Its copied model record and `/v1/status` report `admission` as
+`open`, `draining`, or `drained`, separately from the model's scheduler `phase`.
+`held_requests` counts requests outside admission; `tokenizer_requests` counts
+accepted CPU utilities through final task release. Control and observation
+requests bypass admission. Repeated drain or undrain is idempotent, and losing
+the control connection does not undo a gate change already processed.
+
+`--held_requests` bounds parked requests across all models. The default is half
+of `--connections`; zero makes arrivals at a closed gate fail immediately.
+The holding bound must be strictly below the transport connection bound. A
+full holding budget returns HTTP 429 instead of consuming the last connection
+slots needed to issue undrain. This isolates holding pressure, not every source
+of transport pressure: incomplete requests and admitted response streams still
+consume the shared connection budget. A reset peer relinquishes its held claim;
+server shutdown cancels held requests without admitting them. Requests released
+by undrain retain arrival order within each model and enter that modality's
+normal bounded admission policy, which can still reject excess work.
+
+Drain itself neither evicts prepared weights nor discards retained KV state.
+It does not freeze background maintenance or make model storage safe to destroy;
+retirement must also join accepted CPU/device borrowers. Registration, removal
+and initially drained startup are not exposed by these operations.
+
 ## Requests and retained state
 
 `POST /tokenize` and `POST /detokenize` use a deployment's already loaded input

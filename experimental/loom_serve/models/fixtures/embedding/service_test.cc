@@ -328,9 +328,9 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
   void StartRouter() {
     interface_.set_observer(interface_.self, {});
     router_ = std::thread([this] {
-      status_ =
-          loom_serve_http_router_run(loom_serve_host_executor(host_), server_,
-                                     1, &interface_, 16, allocator_);
+      status_ = loom_serve_http_router_run(
+          loom_serve_host_executor(host_), server_, 1, &interface_,
+          {.request_quota = 16, .holding_capacity = 8}, allocator_);
     });
   }
 
@@ -638,6 +638,80 @@ TEST_P(SourceEmbeddingServiceTest,
   EXPECT_EQ(
       Read(Send(R"({"model":"fixture","input":"a"})")).find("HTTP/1.1 200"),
       0u);
+}
+
+TEST_P(SourceEmbeddingServiceTest,
+       AdmissionDrainPreservesPreparedWeightsAndResumesHeldHttpRequests) {
+  const std::string package =
+      iree::testing::MakeTempFilePath("drained_weighted_embedding");
+  ASSERT_NO_FATAL_FAILURE(WriteWeightedPackage(package));
+  retained_ = model_;
+  ASSERT_NO_FATAL_FAILURE(CreateModel(package));
+  loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
+  ASSERT_NO_FATAL_FAILURE(CreateService(0));
+  EXPECT_EQ(
+      loom_serve_residency_activity(loom_serve_finite_model_residency(model_))
+          .activations,
+      0u);
+  StartRouter();
+  const auto control = [this](const char* target) {
+    return Read(Send(R"({"model":"fixture"})", target));
+  };
+  EXPECT_NE(control("/v1/models/drain").find(R"("admission":"drained")"),
+            std::string::npos);
+  std::vector<int> clients;
+  for (int i = 0; i < 7; ++i) {
+    clients.push_back(Send(R"({"model":"fixture","input":"a"})"));
+  }
+  const int tokens =
+      Send(R"({"model":"fixture","content":"aba"})", "/tokenize");
+  // The control reply acknowledges the actual owner cutoff; transport
+  // arrivals may precede or follow each other across independent connections.
+  std::string state;
+  do {
+    state = control("/v1/models/drain");
+    ASSERT_EQ(state.find("HTTP/1.1 200"), 0u);
+  } while (state.find(R"("held_requests":8,)") == std::string::npos);
+  EXPECT_NE(state.find(R"("queued_requests":0,"active_requests":0)"),
+            std::string::npos);
+  EXPECT_NE(state.find(R"("tokenizer_requests":0)"), std::string::npos);
+  EXPECT_EQ(
+      Read(Send(R"({"model":"fixture","input":"a"})")).find("HTTP/1.1 429"),
+      0u);
+  EXPECT_NE(Read(Send("", "/metrics", "GET"))
+                .find("loom_serve_server_completed_total 0\n"),
+            std::string::npos);
+  EXPECT_EQ(control("/v1/models/undrain").find("HTTP/1.1 200"), 0u);
+  for (const int client : clients) {
+    const auto response = Read(client);
+    // The fourth oracle component reports the live cohort width. All seven
+    // parked inference requests enter the same model batch on undrain.
+    EXPECT_NE(response.find(R"("embedding":[2,2,2,14])"), std::string::npos)
+        << response;
+  }
+  EXPECT_NE(Read(tokens).find(R"({"tokens":[0,1,0]})"), std::string::npos);
+
+  EXPECT_NE(control("/v1/models/drain").find(R"("admission":"drained")"),
+            std::string::npos);
+  const int resumed = Send(R"({"model":"fixture","input":"a"})");
+  do {
+    state = control("/v1/models/drain");
+    ASSERT_EQ(state.find("HTTP/1.1 200"), 0u);
+  } while (state.find(R"("held_requests":1,)") == std::string::npos);
+  EXPECT_EQ(control("/v1/models/undrain").find("HTTP/1.1 200"), 0u);
+  EXPECT_NE(Read(resumed).find(R"("embedding":[2,2,2,2])"), std::string::npos);
+  EXPECT_NE(Read(Send("", "/metrics", "GET"))
+                .find("loom_serve_server_completed_total 8\n"),
+            std::string::npos);
+  loom_serve_http_server_request_stop(server_);
+  router_.join();
+  IREE_EXPECT_OK(status_);
+  // Reversible admission never evicted/reloaded the in-place prepared
+  // parameter. Applying preparation twice would also change the exact output.
+  EXPECT_EQ(
+      loom_serve_residency_activity(loom_serve_finite_model_residency(model_))
+          .activations,
+      1u);
 }
 
 TEST_P(SourceEmbeddingServiceTest,

@@ -216,6 +216,7 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
     iree_task_topology_deinitialize(&topology);
     IREE_ASSERT_OK(status);
     auto options = loom_serve_http_server_options_default();
+    options.connection_capacity = connection_capacity_;
     IREE_ASSERT_OK(loom_serve_http_server_create(pool_, &options, &server_,
                                                  iree_allocator_system()));
     auto listener_options = loom_serve_http_listener_options_default();
@@ -236,9 +237,10 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
           held_.Interface(tokenizer_a_, &a_),
           other_.Interface(nullptr, nullptr),
           escaped_.Interface(nullptr, nullptr)};
-      status_ = loom_serve_http_router_run(executor_, server_,
-                                           IREE_ARRAYSIZE(services), services,
-                                           4, iree_allocator_system());
+      status_ = loom_serve_http_router_run(
+          executor_, server_, IREE_ARRAYSIZE(services), services,
+          {.request_quota = 4, .holding_capacity = holding_capacity_},
+          iree_allocator_system());
       returned_.store(true);
     });
   }
@@ -298,6 +300,28 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
     EXPECT_EQ(close(client), 0);
     return result;
   }
+  std::string Control(const char* operation, const char* name) {
+    return Read(Send("POST", std::string("/v1/models/") + operation,
+                     std::string("{\"model\":\"") + name + "\"}"));
+  }
+  // Repeated drain is idempotent. Its copied response acknowledges the
+  // serialized owner and observes admission without reading private state.
+  std::string WaitHeld(const char* name, size_t count) {
+    const std::string expected =
+        "\"held_requests\":" + std::to_string(count) + ",";
+    for (;;) {
+      const auto response = Control("drain", name);
+      EXPECT_EQ(response.find("HTTP/1.1 200"), 0u);
+      if (response.find(expected) != std::string::npos ||
+          response.find("HTTP/1.1 200") != 0) {
+        return response;
+      }
+    }
+  }
+  // Tight-capacity cases change this before the production server starts.
+  iree_host_size_t connection_capacity_ = 64;
+  // Zero-budget cases reject instead of retaining requests behind the gate.
+  iree_host_size_t holding_capacity_ = 2;
   // HTTP connection owner with no private polling thread.
   loom_serve_http_server_t* server_ = nullptr;
   // Independent binding to the shared connection owner.
@@ -377,6 +401,20 @@ loom_serve_model_oldest_active_age_seconds{model="b",kind="fixture"} 0
 loom_serve_model_oldest_active_age_seconds{model="held",kind="fixture"} 2.25
 loom_serve_model_oldest_active_age_seconds{model="other",kind="fixture"} 0
 loom_serve_model_oldest_active_age_seconds{model="quoted\"\\name",kind="fixture"} 0
+# HELP loom_serve_model_held_requests Requests held outside model admission.
+# TYPE loom_serve_model_held_requests gauge
+# HELP loom_serve_model_admission_open Whether new requests may enter the model.
+# TYPE loom_serve_model_admission_open gauge
+loom_serve_model_held_requests{model="a",kind="fixture"} 0
+loom_serve_model_admission_open{model="a",kind="fixture"} 1
+loom_serve_model_held_requests{model="b",kind="fixture"} 0
+loom_serve_model_admission_open{model="b",kind="fixture"} 1
+loom_serve_model_held_requests{model="held",kind="fixture"} 0
+loom_serve_model_admission_open{model="held",kind="fixture"} 1
+loom_serve_model_held_requests{model="other",kind="fixture"} 0
+loom_serve_model_admission_open{model="other",kind="fixture"} 1
+loom_serve_model_held_requests{model="quoted\"\\name",kind="fixture"} 0
+loom_serve_model_admission_open{model="quoted\"\\name",kind="fixture"} 1
 # HELP loom_serve_server_counters_available Every model publishes work counters.
 # TYPE loom_serve_server_counters_available gauge
 loom_serve_server_counters_available 0
@@ -464,7 +502,7 @@ TEST_P(HttpRouterTest, RawUtilitiesProgressWhileTheSelectedModelIsHeld) {
   const auto snapshot = Read(Send("GET", "/v1/status"));
   EXPECT_NE(
       snapshot.find(
-          R"({"object":"model","id":"held","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":true,"status":{"phase":"held","queued_requests":0,"active_requests":1,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":2.250000000}}})"),
+          R"({"object":"model","id":"held","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":true,"status":{"phase":"held","queued_requests":0,"active_requests":1,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":2.250000000,"admission":"open","held_requests":0,"tokenizer_requests":)"),
       std::string::npos);
   for (int i = 0; i < 12; ++i) {
     const auto response = Read(clients[i]);
@@ -595,6 +633,128 @@ TEST_P(HttpRouterTest, HeldModelLeavesIndependentRequestsRunnable) {
             std::string::npos);
 }
 
+TEST_P(HttpRouterTest, DrainFinishesAdmittedQueueAndHoldsLaterModelBorrowers) {
+  const int held = Send("POST", "/v1/test", R"({"model":"held"})");
+  held_.WaitSubmitted();
+  const int first = Send("POST", "/v1/test", R"({"model":"b","turn":1})");
+  const int second = Send("POST", "/v1/test", R"({"model":"b","turn":2})");
+  b_.WaitAccepted(2);
+  const auto draining = Control("drain", "b");
+  EXPECT_NE(draining.find(R"("queued_requests":2,"active_requests":0)"),
+            std::string::npos);
+  EXPECT_NE(draining.find(R"("admission":"draining")"), std::string::npos);
+
+  const int later = Send("POST", "/v1/test", R"({"model":"b","turn":3})");
+  const int tokens =
+      Send("POST", "/tokenize", R"({"model":"b","content":"aab"})");
+  EXPECT_NE(WaitHeld("b", 2).find(R"("tokenizer_requests":0)"),
+            std::string::npos);
+  EXPECT_EQ(
+      Read(Send("POST", "/v1/test", R"({"model":"b"})")).find("HTTP/1.1 429"),
+      0u);
+  EXPECT_NE(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("a:/v1/test:"),
+      std::string::npos);
+  const auto metrics = Read(Send("GET", "/metrics"));
+  EXPECT_NE(metrics.find("loom_serve_model_queued_requests{model=\"b\","
+                         "kind=\"fixture\"} 2\n"),
+            std::string::npos);
+  EXPECT_NE(metrics.find("loom_serve_model_held_requests{model=\"b\","
+                         "kind=\"fixture\"} 2\n"),
+            std::string::npos);
+  EXPECT_NE(metrics.find("loom_serve_model_admission_open{model=\"b\","
+                         "kind=\"fixture\"} 0\n"),
+            std::string::npos);
+
+  held_.Release();
+  EXPECT_NE(Read(held).find("held:/v1/test:"), std::string::npos);
+  EXPECT_NE(Read(first).find(R"(b:/v1/test:{"model":"b","turn":1})"),
+            std::string::npos);
+  EXPECT_NE(Read(second).find(R"(b:/v1/test:{"model":"b","turn":2})"),
+            std::string::npos);
+  const auto drained = Control("drain", "b");
+  EXPECT_NE(drained.find(R"("queued_requests":0,"active_requests":0)"),
+            std::string::npos);
+  EXPECT_NE(drained.find(R"("admission":"drained","held_requests":2)"),
+            std::string::npos);
+  {
+    std::lock_guard<std::mutex> lock(b_.mutex);
+    EXPECT_EQ(b_.accepted, 2u);
+  }
+  EXPECT_NE(Control("undrain", "b").find(R"("admission":"open")"),
+            std::string::npos);
+  EXPECT_NE(Read(later).find(R"(b:/v1/test:{"model":"b","turn":3})"),
+            std::string::npos);
+  EXPECT_NE(Read(tokens).find(R"({"tokens":[1,1,0]})"), std::string::npos);
+}
+
+TEST_P(HttpRouterTest, AdmissionControlRejectsInvalidSelectorsWithoutClosing) {
+  for (const auto* operation : {"drain", "undrain"}) {
+    const std::string target = std::string("/v1/models/") + operation;
+    for (const auto* body :
+         {"{}", R"({"model":null})", R"({"model":""})",
+          R"({"model":"a","model":"b"})", R"({"model":"a","extra":true})",
+          R"({"model":"a"} trailing)"}) {
+      SCOPED_TRACE(body);
+      EXPECT_EQ(Read(Send("POST", target, body)).find("HTTP/1.1 400"), 0u);
+    }
+    EXPECT_EQ(
+        Read(Send("GET", target, R"({"model":"a"})")).find("HTTP/1.1 404"), 0u);
+    EXPECT_EQ(Control(operation, "missing").find("HTTP/1.1 404"), 0u);
+  }
+  EXPECT_NE(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("a:/v1/test:"),
+      std::string::npos);
+}
+
+TEST_P(HttpRouterTest, DisconnectedHeldClaimReturnsItsAdmissionCredit) {
+  EXPECT_NE(Control("drain", "a").find(R"("admission":"drained")"),
+            std::string::npos);
+  const int abandoned = Send("POST", "/v1/test", R"({"model":"a"})");
+  WaitHeld("a", 1);
+  const linger reset = {1, 0};
+  EXPECT_EQ(setsockopt(abandoned, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+            0);
+  EXPECT_EQ(close(abandoned), 0);
+  WaitHeld("a", 0);
+  const int first = Send("POST", "/v1/test", R"({"model":"a"})");
+  const int second =
+      Send("POST", "/tokenize", R"({"model":"a","content":"ab"})");
+  WaitHeld("a", 2);
+  EXPECT_EQ(Control("undrain", "a").find("HTTP/1.1 200"), 0u);
+  EXPECT_NE(Read(first).find("a:/v1/test:"), std::string::npos);
+  EXPECT_NE(Read(second).find(R"({"tokens":[0,1]})"), std::string::npos);
+}
+
+TEST_P(HttpRouterTest, ShutdownReleasesHeldClaimsWithoutAdmittingThem) {
+  EXPECT_EQ(Control("drain", "a").find("HTTP/1.1 200"), 0u);
+  const int client = Send("POST", "/v1/test", R"({"model":"a"})");
+  WaitHeld("a", 1);
+  loom_serve_http_server_request_stop(server_);
+  owner_.join();
+  EXPECT_EQ(close(client), 0);
+  EXPECT_EQ(a_.accepted, 0u);
+}
+
+TEST_P(HttpRouterTest, RejectsAQuotaThatCouldExcludeEveryControlConnection) {
+  for (const auto options : {
+           loom_serve_http_router_options_t{.request_quota = 0,
+                                            .holding_capacity = 0},
+           loom_serve_http_router_options_t{
+               .request_quota = 4, .holding_capacity = connection_capacity_},
+           loom_serve_http_router_options_t{
+               .request_quota = 4,
+               .holding_capacity = connection_capacity_ + 1},
+       }) {
+    // Validation happens before the owner installs any transport observer.
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_serve_http_router_run(executor_, server_, 0, nullptr, options,
+                                   iree_allocator_system()));
+  }
+  EXPECT_EQ(Read(Send("GET", "/healthz")).find("HTTP/1.1 200"), 0u);
+}
+
 TEST_P(HttpRouterTest, ShutdownDrainsAcceptedReadinessBeforeDetaching) {
   const int held = Send("POST", "/v1/chat/completions", R"({"model":"held"})");
   held_.WaitSubmitted();
@@ -701,6 +861,53 @@ class HttpRouterCountersTest : public HttpRouterTest {
   loom_serve_telemetry_counters_t counters_[5] = {};
 };
 
+class HttpRouterTightCapacityTest : public HttpRouterTest {
+ protected:
+  void SetUp() override {
+    connection_capacity_ = 3;
+    HttpRouterTest::SetUp();
+  }
+};
+
+TEST_P(HttpRouterTightCapacityTest,
+       FullHoldingBudgetLeavesAnUndrainConnection) {
+  EXPECT_EQ(Control("drain", "a").find("HTTP/1.1 200"), 0u);
+  const int first = Send("POST", "/v1/test", R"({"model":"a"})");
+  WaitHeld("a", 1);
+  const int second =
+      Send("POST", "/tokenize", R"({"model":"a","content":"ab"})");
+  WaitHeld("a", 2);
+  EXPECT_EQ(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 429"),
+      0u);
+  EXPECT_EQ(Control("undrain", "a").find("HTTP/1.1 200"), 0u);
+  EXPECT_NE(Read(first).find("a:/v1/test:"), std::string::npos);
+  EXPECT_NE(Read(second).find(R"({"tokens":[0,1]})"), std::string::npos);
+}
+
+class HttpRouterNoHoldingTest : public HttpRouterTest {
+ protected:
+  void SetUp() override {
+    holding_capacity_ = 0;
+    HttpRouterTest::SetUp();
+  }
+};
+
+TEST_P(HttpRouterNoHoldingTest, ClosedAdmissionRejectsWithoutRetainingClaims) {
+  EXPECT_EQ(Control("drain", "a").find("HTTP/1.1 200"), 0u);
+  EXPECT_EQ(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 429"),
+      0u);
+  EXPECT_EQ(Read(Send("POST", "/tokenize", R"({"model":"a","content":"a"})"))
+                .find("HTTP/1.1 429"),
+            0u);
+  EXPECT_NE(Control("undrain", "a").find(R"("held_requests":0)"),
+            std::string::npos);
+  EXPECT_NE(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("a:/v1/test:"),
+      std::string::npos);
+}
+
 TEST_P(HttpRouterCountersTest, ServerTotalsPreserveIntegerPrecisionAndScope) {
   for (int i = 0; i < 2; ++i) {
     const auto metrics = Read(Send("GET", "/metrics"));
@@ -730,6 +937,10 @@ TEST_P(HttpRouterCountersTest, ServerTotalsPreserveIntegerPrecisionAndScope) {
 
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterTest, ::testing::Values(1, 4));
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterCountersTest,
+                         ::testing::Values(1, 4));
+INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterTightCapacityTest,
+                         ::testing::Values(1, 4));
+INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterNoHoldingTest,
                          ::testing::Values(1, 4));
 
 }  // namespace

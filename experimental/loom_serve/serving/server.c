@@ -33,6 +33,9 @@ IREE_FLAG_LIST(string, listen,
                "Repeat for multiple listeners; default 127.0.0.1:8080.");
 IREE_FLAG(int32_t, connections, 64,
           "Maximum simultaneous HTTP connections across all listeners.");
+IREE_FLAG(int32_t, held_requests, -1,
+          "Requests held behind drained model gates; -1 uses half the "
+          "connection capacity. Must be below connection capacity.");
 IREE_FLAG(int32_t, request_body_bytes, 8 * 1024 * 1024,
           "Maximum HTTP request body bytes per connection.");
 IREE_FLAG(int32_t, heartbeat_ms, 1000,
@@ -182,11 +185,13 @@ static void serving_shutdown_requested(void* user_data,
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
-  if (FLAG_connections < 1 || FLAG_request_body_bytes < 1 ||
+  if (FLAG_connections < 1 || FLAG_held_requests < -1 ||
+      FLAG_held_requests >= FLAG_connections || FLAG_request_body_bytes < 1 ||
       FLAG_heartbeat_ms < 0) {
     fprintf(stderr,
             "Provide positive connection/body capacities and a nonnegative "
-            "heartbeat interval.\n");
+            "heartbeat interval; held_requests must be -1 or below connection "
+            "capacity.\n");
     return EXIT_FAILURE;
   }
   const iree_allocator_t allocator = iree_allocator_system();
@@ -297,7 +302,13 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = loom_serve_http_router_run(
         loom_serve_host_executor(host), server, configuration.model_count,
-        services, (iree_host_size_t)FLAG_connections, allocator);
+        services,
+        (loom_serve_http_router_options_t){
+            .request_quota = (iree_host_size_t)FLAG_connections,
+            .holding_capacity = (iree_host_size_t)(FLAG_held_requests < 0
+                                                       ? FLAG_connections / 2
+                                                       : FLAG_held_requests)},
+        allocator);
   }
   const iree_status_code_t terminal_code = iree_status_code(status);
   for (iree_host_size_t i = 0; models && i < configuration.model_count; ++i) {

@@ -57,6 +57,10 @@ iree_async_proactor_pool_t* loom_serve_http_server_proactor_pool(
 iree_notification_t* loom_serve_http_server_notification(
     loom_serve_http_server_t* server);
 
+// Immutable transport credit across all listeners, including claimed requests.
+iree_host_size_t loom_serve_http_server_connection_capacity(
+    const loom_serve_http_server_t* server);
+
 // Borrowed diagnostic stream, valid until server destruction. Readers use
 // independent cursors and never acquire the transport's mutex. This stream
 // includes routing failures, connection rejection and retired peer failures.

@@ -176,9 +176,9 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
     interfaces_[1] = loom_serve_finite_service_interface(services_[1]);
     interfaces_[0].set_observer(interfaces_[0].self, {});
     router_ = std::thread([this] {
-      status_ =
-          loom_serve_http_router_run(loom_serve_host_executor(host_), server_,
-                                     2, interfaces_, 16, allocator_);
+      status_ = loom_serve_http_router_run(
+          loom_serve_host_executor(host_), server_, 2, interfaces_,
+          {.request_quota = 16, .holding_capacity = 8}, allocator_);
     });
   }
   // Allocator shared by all test-owned production components.
@@ -321,11 +321,11 @@ TEST_P(SourceDecisionServiceTest, SharesRouterWithEmbeddingsAndRawUtilities) {
   const std::string snapshot = Read(Send("", "/v1/status", "GET"));
   EXPECT_NE(
       snapshot.find(
-          R"({"object":"model","id":"decisions","loom":{"kind":"decision","endpoint":"/v1/systemone","tokenize":false,"status":{"phase":"idle","queued_requests":0,"active_requests":0,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":0.000000000}}})"),
+          R"({"object":"model","id":"decisions","loom":{"kind":"decision","endpoint":"/v1/systemone","tokenize":false,"status":{"phase":"idle","queued_requests":0,"active_requests":0,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":0.000000000,"admission":"open","held_requests":0,"tokenizer_requests":0}}})"),
       std::string::npos);
   EXPECT_NE(
       snapshot.find(
-          R"({"object":"model","id":"vectors","loom":{"kind":"embedding","endpoint":"/v1/embeddings","tokenize":true,"status":{"phase":"idle","queued_requests":0,"active_requests":0,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":0.000000000}}})"),
+          R"({"object":"model","id":"vectors","loom":{"kind":"embedding","endpoint":"/v1/embeddings","tokenize":true,"status":{"phase":"idle","queued_requests":0,"active_requests":0,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":0.000000000,"admission":"open","held_requests":0,"tokenizer_requests":0}}})"),
       std::string::npos);
   EXPECT_EQ(Read(Send(R"({"model":"decisions","content":"a"})", "/tokenize"))
                 .find("HTTP/1.1 404"),

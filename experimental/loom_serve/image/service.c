@@ -856,7 +856,11 @@ iree_status_t loom_serve_image_service_run(
       loom_serve_image_service_interface(service);
   const iree_status_t status = loom_serve_http_router_run(
       loom_serve_host_executor(host), server, 1, &interface,
-      options->pending_capacity, host_allocator);
+      (loom_serve_http_router_options_t){
+          .request_quota = options->pending_capacity,
+          .holding_capacity =
+              loom_serve_http_server_connection_capacity(server) / 2},
+      host_allocator);
   loom_serve_image_service_destroy(service);
   return status;
 }

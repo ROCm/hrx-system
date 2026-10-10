@@ -326,6 +326,11 @@ iree_notification_t* loom_serve_http_server_notification(
   return &server->notification;
 }
 
+iree_host_size_t loom_serve_http_server_connection_capacity(
+    const loom_serve_http_server_t* server) {
+  return server->options.connection_capacity;
+}
+
 const loom_serve_telemetry_stream_t* loom_serve_http_server_diagnostics(
     const loom_serve_http_server_t* server) {
   return server->diagnostics;
