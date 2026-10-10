@@ -47,9 +47,12 @@ typedef struct loom_serve_text_service_t loom_serve_text_service_t;
 // Creates host session/admission state around a borrowed model. CPU work shares
 // the host executor; reporting shares its proactor. No per-model thread is
 // created. Capacities match the model. Calls use its one serialized host owner.
+// A non-null stream lends registration history through destruction; NULL
+// creates a service-owned history for a borrowed single-model deployment.
 iree_status_t loom_serve_text_service_create(
     loom_serve_text_model_t* model,
     const loom_serve_text_service_options_t* options,
+    loom_serve_telemetry_stream_t* stream,
     loom_serve_text_service_t** out_service, iree_allocator_t host_allocator);
 
 // Returns borrowed callbacks for the shared owner loop. They take connection

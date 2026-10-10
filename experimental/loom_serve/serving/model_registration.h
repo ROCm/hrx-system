@@ -22,8 +22,8 @@ typedef struct loom_serve_model_registration_options_t {
 } loom_serve_model_registration_options_t;
 
 // The options remain borrowed until the registry is successfully destroyed.
-// Source-defined finite-vector and image adapters share the same task pool,
-// device and registration ownership contract. Text requires its own adapter.
+// Source-defined text, image and finite-vector adapters share the same task
+// pool, device and registration ownership contract.
 loom_serve_registration_factory_t loom_serve_model_registration_factory(
     const loom_serve_model_registration_options_t* options);
 

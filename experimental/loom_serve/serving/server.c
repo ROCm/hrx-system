@@ -14,8 +14,6 @@
 #include "experimental/loom_serve/serving/configuration.h"
 #include "experimental/loom_serve/serving/model_registration.h"
 #include "experimental/loom_serve/serving/router.h"
-#include "experimental/loom_serve/text/schedule.h"
-#include "experimental/loom_serve/text/service.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
@@ -39,57 +37,6 @@ IREE_FLAG(int32_t, request_body_bytes, 8 * 1024 * 1024,
           "Maximum HTTP request body bytes per connection.");
 IREE_FLAG(int32_t, heartbeat_ms, 1000,
           "Per-model JSONL heartbeat interval; zero disables reporting.");
-
-// Startup-only autoregressive ownership; dynamic modalities live in the
-// registry and are not duplicated in this outer application.
-typedef struct serving_text_t {
-  // Owned source-JIT model borrowing the shared device.
-  loom_serve_text_model_t* model;
-  // Owned HTTP sessions borrowing the model and deployment name.
-  loom_serve_text_service_t* service;
-} serving_text_t;
-
-static iree_status_t serving_create_text(
-    loom_serve_device_t* device,
-    const loom_serve_model_configuration_t* configuration,
-    serving_text_t* model, loom_serve_http_service_t* out_service,
-    iree_allocator_t allocator) {
-  const loom_serve_text_configuration_t* text = &configuration->text;
-  loom_serve_packing_shape_t shapes[LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY];
-  const iree_host_size_t shape_count = loom_serve_text_default_shapes(
-      text->rows, text->prefill_capacity, shapes);
-  const loom_serve_text_options_t options = {
-      .source_directory = configuration->source,
-      .prefill_capacity = text->prefill_capacity,
-      .context_capacity = text->context_capacity,
-      .pool_capacity = text->pool_capacity,
-      .epoch_count = shape_count,
-      .epoch_shapes = shapes,
-      .enable_mtp = text->mtp_depth != 0,
-      .kernel_sanitizer = {.type = LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
-                           .structure_size = sizeof(loomc_sanitizer_options_t)},
-      .weights_path = text->weights,
-      .tokenizer_path = text->tokenizer,
-      .row_count = text->rows,
-      .checkpoint_capacity = text->checkpoint_capacity};
-  IREE_RETURN_IF_ERROR(
-      loom_serve_text_model_create(device, &options, &model->model, allocator));
-  const loom_serve_text_service_options_t service_options = {
-      .name = configuration->name,
-      .row_count = text->rows,
-      .chunk_size = text->prefill_capacity,
-      .default_max_tokens = text->max_tokens,
-      .pending_capacity = configuration->pending_requests,
-      .heartbeat_interval = (iree_duration_t)FLAG_heartbeat_ms * 1000000,
-      .schedule_mode = LOOM_SERVE_TEXT_SCHEDULE_PACKED,
-      .packing_mode = LOOM_SERVE_TEXT_PACKING_MIXED,
-      .mtp_depth = text->mtp_depth,
-      .continuation_epochs = text->continuation_epochs};
-  IREE_RETURN_IF_ERROR(loom_serve_text_service_create(
-      model->model, &service_options, &model->service, allocator));
-  *out_service = loom_serve_text_service_interface(model->service);
-  return iree_ok_status();
-}
 
 static iree_status_t serving_ready(loom_serve_http_listener_t* listener,
                                    iree_host_size_t model_count) {
@@ -162,22 +109,11 @@ int main(int argc, char** argv) {
   loom_serve_http_server_t* server = NULL;
   loom_serve_http_listener_t** listeners = NULL;
   loom_serve_signals_t* signals = NULL;
-  serving_text_t* models = NULL;
-  loom_serve_http_service_t* services = NULL;
   loom_serve_registry_t* registry = NULL;
-  iree_host_size_t service_count = 0;
   loom_serve_model_registration_options_t registration_options = {0};
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc_array(
         allocator, listener_count, sizeof(*listeners), (void**)&listeners);
-  }
-  if (iree_status_is_ok(status) && configuration.model_count) {
-    status = iree_allocator_malloc_array(allocator, configuration.model_count,
-                                         sizeof(*models), (void**)&models);
-  }
-  if (iree_status_is_ok(status) && configuration.model_count) {
-    status = iree_allocator_malloc_array(allocator, configuration.model_count,
-                                         sizeof(*services), (void**)&services);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_host_create_from_flags(&host, allocator);
@@ -188,46 +124,20 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     device = loom_serve_device_group_at(group, 0);
   }
-  for (iree_host_size_t i = 0;
-       i < configuration.model_count && iree_status_is_ok(status); ++i) {
-    const loom_serve_model_configuration_t* entry = &configuration.models[i];
-    if (entry->start_drained && entry->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
-      status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                                "initially drained text registration "
-                                "requires an asynchronous modality loader");
-      break;
-    }
-    switch (entry->kind) {
-      case LOOM_SERVE_MODEL_KIND_TEXT:
-        status = serving_create_text(device, entry, &models[i],
-                                     &services[service_count++], allocator);
-        break;
-      case LOOM_SERVE_MODEL_KIND_IMAGE:
-      case LOOM_SERVE_MODEL_KIND_EMBEDDING:
-      case LOOM_SERVE_MODEL_KIND_DECISION:
-        break;
-    }
-    status = iree_status_annotate_f(
-        status, "creating model '%.*s' from '%.*s'", (int)entry->name.size,
-        entry->name.data, (int)entry->source.size, entry->source.data);
-  }
   if (iree_status_is_ok(status)) {
     registration_options.device = device;
     registration_options.heartbeat_interval =
         (iree_duration_t)FLAG_heartbeat_ms * 1000000;
     status = loom_serve_registry_create(
-        service_count, services,
-        (iree_host_size_t)FLAG_model_capacity - service_count,
+        0, NULL, (iree_host_size_t)FLAG_model_capacity,
         loom_serve_model_registration_factory(&registration_options), &registry,
         allocator);
   }
   for (iree_host_size_t i = 0;
        i < configuration.model_count && iree_status_is_ok(status); ++i) {
     loom_serve_model_configuration_t* entry = &configuration.models[i];
-    if (entry->kind != LOOM_SERVE_MODEL_KIND_TEXT) {
-      iree_host_size_t index = 0;
-      status = loom_serve_registry_register(registry, entry, &index);
-    }
+    iree_host_size_t index = 0;
+    status = loom_serve_registry_register(registry, entry, &index);
   }
   if (iree_status_is_ok(status)) {
     loom_serve_http_server_options_t options =
@@ -267,15 +177,6 @@ int main(int argc, char** argv) {
                                                        : FLAG_held_requests)},
         allocator);
   }
-  const iree_status_code_t terminal_code = iree_status_code(status);
-  for (iree_host_size_t i = 0; models && i < configuration.model_count; ++i) {
-    if (!configuration.models[i].name.size) {
-      continue;
-    }
-    if (configuration.models[i].kind == LOOM_SERVE_MODEL_KIND_TEXT) {
-      loom_serve_text_service_destroy(models[i].service, terminal_code);
-    }
-  }
   loom_serve_signals_destroy(signals);
   for (iree_host_size_t i = 0; listeners && i < listener_count; ++i) {
     status = iree_status_join(status,
@@ -286,23 +187,6 @@ int main(int argc, char** argv) {
   iree_status_t registry_status = loom_serve_registry_destroy(registry);
   bool retained_resources = !iree_status_is_ok(registry_status);
   status = iree_status_join(status, registry_status);
-  for (iree_host_size_t i = 0; models && i < configuration.model_count; ++i) {
-    if (!configuration.models[i].name.size) {
-      continue;
-    }
-    iree_status_t model_status = iree_ok_status();
-    switch (configuration.models[i].kind) {
-      case LOOM_SERVE_MODEL_KIND_TEXT:
-        model_status = loom_serve_text_model_destroy(models[i].model);
-        break;
-      case LOOM_SERVE_MODEL_KIND_IMAGE:
-      case LOOM_SERVE_MODEL_KIND_EMBEDDING:
-      case LOOM_SERVE_MODEL_KIND_DECISION:
-        break;
-    }
-    retained_resources |= !iree_status_is_ok(model_status);
-    status = iree_status_join(status, model_status);
-  }
   // A failed platform release retains its parents until process exit. It does
   // not authorize destroying a shared device or invalidating borrowed names.
   if (!retained_resources) {
@@ -312,8 +196,6 @@ int main(int argc, char** argv) {
   }
   if (!retained_resources) {
     loom_serve_host_release(host);
-    iree_allocator_free(allocator, services);
-    iree_allocator_free(allocator, models);
     loom_serve_configuration_deinitialize(&configuration);
   }
   if (!iree_status_is_ok(status)) {

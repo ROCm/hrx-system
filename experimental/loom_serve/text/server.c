@@ -204,8 +204,8 @@ int main(int argc, char** argv) {
           .continuation_epochs = (iree_host_size_t)FLAG_continuation_epochs,
       };
       loom_serve_text_service_t* service = NULL;
-      status = loom_serve_text_service_create(model, &service_options, &service,
-                                              allocator);
+      status = loom_serve_text_service_create(model, &service_options, NULL,
+                                              &service, allocator);
       if (iree_status_is_ok(status)) {
         const loom_serve_http_service_t interface =
             loom_serve_text_service_interface(service);

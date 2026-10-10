@@ -12,6 +12,8 @@
 #include "experimental/loom_serve/finite/service.h"
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/service.h"
+#include "experimental/loom_serve/text/schedule.h"
+#include "experimental/loom_serve/text/service.h"
 
 typedef struct finite_registration_t {
   // Allocator owning this operation, independent of model allocations.
@@ -261,10 +263,148 @@ static iree_status_t image_registration_create(
   return status;
 }
 
+typedef struct text_registration_t {
+  // Allocator owning this operation and its stable shape table.
+  iree_allocator_t allocator;
+  // Borrowed server capabilities and reporting policy.
+  const loom_serve_model_registration_options_t* options;
+  // Immutable declaration retained by the stable registry slot.
+  const loom_serve_model_configuration_t* configuration;
+  // Owner scheduling callback; no destruction occurs on its calling thread.
+  loom_serve_http_observer_t observer;
+  // Registration-wide history retained beyond service retirement.
+  loom_serve_telemetry_stream_t* stream;
+  // Shape inputs borrowed by asynchronous preparation until publication.
+  loom_serve_packing_shape_t shapes[LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY];
+  // Owned preparation operation, transferred on every terminal outcome.
+  loom_serve_text_load_t* load;
+  // Partial or prepared model retained through actual consumer retirement.
+  loom_serve_text_model_t* model;
+  // Service borrowing model state until all protocol claims are resolved.
+  loom_serve_text_service_t* service;
+  // Model consumers have relinquished views with an ownership wake installed.
+  bool retiring;
+} text_registration_t;
+
+static iree_status_t text_registration_prepare(
+    void* self, bool cancel, bool* out_complete,
+    loom_serve_http_service_t* out_service,
+    loom_serve_compilation_report_t* out_report) {
+  text_registration_t* registration = self;
+  iree_status_t status = loom_serve_text_load_advance(
+      registration->load, cancel ? LOOM_SERVE_TEXT_LOAD_FLAG_CANCEL : 0,
+      out_complete);
+  if (!*out_complete) {
+    return status;
+  }
+  *out_report = *loom_serve_text_load_report(registration->load);
+  registration->model = loom_serve_text_load_take_model(registration->load);
+  loom_serve_text_load_destroy(registration->load);
+  registration->load = NULL;
+  if (iree_status_is_ok(status)) {
+    const loom_serve_model_configuration_t* configuration =
+        registration->configuration;
+    const loom_serve_text_configuration_t* text = &configuration->text;
+    const loom_serve_text_service_options_t options = {
+        .name = configuration->name,
+        .row_count = text->rows,
+        .chunk_size = text->prefill_capacity,
+        .default_max_tokens = text->max_tokens,
+        .pending_capacity = configuration->pending_requests,
+        .heartbeat_interval = registration->options->heartbeat_interval,
+        .schedule_mode = LOOM_SERVE_TEXT_SCHEDULE_PACKED,
+        .packing_mode = LOOM_SERVE_TEXT_PACKING_MIXED,
+        .mtp_depth = text->mtp_depth,
+        .continuation_epochs = text->continuation_epochs};
+    status = loom_serve_text_service_create(
+        registration->model, &options, registration->stream,
+        &registration->service, registration->allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_service = loom_serve_text_service_interface(registration->service);
+  }
+  return status;
+}
+
+static iree_status_t text_registration_retire(void* self, bool* out_complete) {
+  text_registration_t* registration = self;
+  *out_complete = true;
+  loom_serve_text_service_destroy(registration->service, IREE_STATUS_OK);
+  registration->service = NULL;
+  if (registration->model && !registration->retiring) {
+    loom_serve_text_model_retire(registration->model,
+                                 registration->observer.wake,
+                                 registration->observer.user_data);
+    registration->retiring = true;
+  }
+  if (!loom_serve_text_model_is_retired(registration->model)) {
+    *out_complete = false;
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_model_destroy_retired(registration->model));
+  registration->model = NULL;
+  return iree_ok_status();
+}
+
+static void text_registration_destroy(void* self) {
+  text_registration_t* registration = self;
+  iree_allocator_free(registration->allocator, registration);
+}
+
+static iree_status_t text_registration_create(
+    void* self, const loom_serve_model_configuration_t* configuration,
+    loom_serve_http_observer_t observer, loom_serve_telemetry_stream_t* stream,
+    loom_serve_registration_t* out_registration, iree_allocator_t allocator) {
+  const loom_serve_model_registration_options_t* options = self;
+  text_registration_t* registration = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(allocator, sizeof(*registration),
+                                             (void**)&registration));
+  registration->allocator = allocator;
+  registration->options = options;
+  registration->configuration = configuration;
+  registration->observer = observer;
+  registration->stream = stream;
+  const loom_serve_text_configuration_t* text = &configuration->text;
+  const iree_host_size_t shape_count = loom_serve_text_default_shapes(
+      text->rows, text->prefill_capacity, registration->shapes);
+  const loom_serve_text_options_t model_options = {
+      .source_directory = configuration->source,
+      .prefill_capacity = text->prefill_capacity,
+      .context_capacity = text->context_capacity,
+      .pool_capacity = text->pool_capacity,
+      .epoch_count = shape_count,
+      .epoch_shapes = registration->shapes,
+      .enable_mtp = text->mtp_depth != 0,
+      .kernel_sanitizer = {.type = LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
+                           .structure_size = sizeof(loomc_sanitizer_options_t)},
+      .weights_path = text->weights,
+      .tokenizer_path = text->tokenizer,
+      .row_count = text->rows,
+      .checkpoint_capacity = text->checkpoint_capacity};
+  iree_status_t status = loom_serve_text_load_create(
+      options->device, &model_options, observer.wake, observer.user_data,
+      &registration->load, allocator);
+  if (iree_status_is_ok(status)) {
+    *out_registration =
+        (loom_serve_registration_t){.self = registration,
+                                    .prepare = text_registration_prepare,
+                                    .retire = text_registration_retire,
+                                    .destroy = text_registration_destroy};
+  } else {
+    iree_allocator_free(allocator, registration);
+  }
+  return status;
+}
+
 static iree_status_t model_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
     loom_serve_http_observer_t observer, loom_serve_telemetry_stream_t* stream,
     loom_serve_registration_t* out_registration, iree_allocator_t allocator) {
+  if (configuration->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
+    return text_registration_create(self, configuration, observer, stream,
+                                    out_registration, allocator);
+  }
   if (configuration->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
     return image_registration_create(self, configuration, observer, stream,
                                      out_registration, allocator);
@@ -279,6 +419,7 @@ loom_serve_registration_factory_t loom_serve_model_registration_factory(
       .self = (void*)options,
       .kinds = (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
                (1u << LOOM_SERVE_MODEL_KIND_DECISION) |
-               (1u << LOOM_SERVE_MODEL_KIND_IMAGE),
+               (1u << LOOM_SERVE_MODEL_KIND_IMAGE) |
+               (1u << LOOM_SERVE_MODEL_KIND_TEXT),
       .create = model_registration_create};
 }

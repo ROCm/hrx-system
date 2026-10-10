@@ -93,12 +93,7 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::runtime::signals
-    iree::experimental::loom_serve::scheduling::packing
-    iree::experimental::loom_serve::text::model
-    iree::experimental::loom_serve::text::schedule
-    iree::experimental::loom_serve::text::service
     iree::io::file_handle
-    loom::binding::c::loomc
     loom::util::json
     loom::util::stream
 )
@@ -142,6 +137,9 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::text::model
+    iree::experimental::loom_serve::text::schedule
+    iree::experimental::loom_serve::text::service
   PUBLIC
 )
 

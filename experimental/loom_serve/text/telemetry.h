@@ -24,8 +24,10 @@ typedef struct loom_serve_text_receipt_t {
 // Updated only on serialized service turns, never by CPU borrowers or
 // callbacks.
 typedef struct loom_serve_text_telemetry_t {
-  // Owned bounded history; consumers never pin or backpressure records.
+  // Bounded history; consumers never pin or backpressure records.
   loom_serve_telemetry_stream_t* stream;
+  // False when the registration lends its history through service retirement.
+  bool owns_stream;
   // Always-on model totals independent of heartbeat interval and readers.
   loom_serve_telemetry_counters_t counters;
   // Monotonic request identity independent of TCP connection identity.
@@ -34,9 +36,11 @@ typedef struct loom_serve_text_telemetry_t {
   iree_status_code_t failure_code;
 } loom_serve_text_telemetry_t;
 
-// Creates the bounded stream and publishes its start. The service destroys
-// stream after retiring its heartbeat and every producer/consumer borrow.
+// Borrows an existing registration stream or creates a private bounded stream
+// when NULL. Only a private stream publishes a start here. The service destroys
+// an owned stream after retiring its heartbeat and all producer/consumer uses.
 iree_status_t loom_serve_text_telemetry_initialize(
+    loom_serve_telemetry_stream_t* stream,
     loom_serve_text_telemetry_t* telemetry, iree_allocator_t allocator);
 
 // Counts a protocol receipt exactly once, before validation and admission.

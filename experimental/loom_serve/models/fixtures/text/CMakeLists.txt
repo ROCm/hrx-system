@@ -53,6 +53,7 @@ loom_cc_test(
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::scheduling::packing
+    iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::text::model

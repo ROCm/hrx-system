@@ -1760,9 +1760,9 @@ static iree_status_t text_complete_epoch(
 }
 
 static iree_status_t text_service_initialize(
-    loom_serve_text_service_t* service) {
+    loom_serve_text_service_t* service, loom_serve_telemetry_stream_t* stream) {
   IREE_RETURN_IF_ERROR(loom_serve_text_telemetry_initialize(
-      &service->telemetry, service->allocator));
+      stream, &service->telemetry, service->allocator));
   loom_serve_host_t* host =
       loom_serve_device_host(loom_serve_text_model_device(service->model));
   service->cpu.executor = loom_serve_host_executor(host);
@@ -1790,14 +1790,13 @@ static iree_status_t text_service_initialize(
   return status;
 }
 
-void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
-                                     iree_status_code_t terminal_code) {
-  if (!service) {
-    return;
-  }
+// Resolves protocol and session lifetimes before the registry snapshots final
+// counters. Accepted CPU/device work has relinquished its service payloads;
+// failed device readiness leaves model storage pinned for actual retirement.
+static void text_stop(loom_serve_text_service_t* service,
+                      iree_status_code_t terminal_code) {
   loom_serve_residency_cancel_admission(
       loom_serve_text_model_residency(service->model));
-  const iree_allocator_t host_allocator = service->allocator;
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
     loom_serve_text_session_t* session = &service->sessions[i];
     if (session->request.connection) {
@@ -1810,15 +1809,10 @@ void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
       text_request_cancel(service, session);
     }
     loom_serve_text_telemetry_session_end(&service->telemetry, session);
-    loom_serve_text_session_deinitialize(session);
   }
-  iree_slim_mutex_deinitialize(&service->completion.mutex);
-  iree_string_builder_deinitialize(&service->tool_calls);
-  iree_string_builder_deinitialize(&service->scratch);
   while (service->pending.count) {
     text_pending_cancel(service, 0);
   }
-  iree_allocator_free(host_allocator, service->pending.values);
   if (service->control.connection) {
     loom_serve_text_telemetry_end(&service->telemetry, service->control.receipt,
                                   service->telemetry.failure_code
@@ -1826,26 +1820,54 @@ void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
                                       : LOOM_SERVE_TELEMETRY_CANCELLED,
                                   0, iree_ok_status());
     loom_serve_http_connection_abort(service->control.connection);
+    memset(&service->control, 0, sizeof(service->control));
   }
   for (iree_host_size_t i = 0;
        service->checkpoints.values && i < service->checkpoints.capacity; ++i) {
     if (terminal_code == IREE_STATUS_OK) {
       loom_serve_text_checkpoint_release(service->checkpoints.values[i].state);
     }
+    service->checkpoints.values[i].state = NULL;
+  }
+  service->pool.trim.pending = false;
+  text_observe(service, terminal_code == IREE_STATUS_OK ? "stopped" : "failed");
+}
+
+void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
+                                     iree_status_code_t terminal_code) {
+  if (!service) {
+    return;
+  }
+  if (service->telemetry.failure_code) {
+    terminal_code = service->telemetry.failure_code;
+  }
+  text_stop(service, terminal_code);
+  const iree_allocator_t host_allocator = service->allocator;
+  for (iree_host_size_t i = 0; i < service->row_count; ++i) {
+    loom_serve_text_session_deinitialize(&service->sessions[i]);
+  }
+  iree_slim_mutex_deinitialize(&service->completion.mutex);
+  iree_string_builder_deinitialize(&service->tool_calls);
+  iree_string_builder_deinitialize(&service->scratch);
+  iree_allocator_free(host_allocator, service->pending.values);
+  for (iree_host_size_t i = 0;
+       service->checkpoints.values && i < service->checkpoints.capacity; ++i) {
     loom_serve_text_chat_completion_deinitialize(
         &service->checkpoints.values[i].completion);
   }
   iree_allocator_free(host_allocator, service->checkpoints.values);
   service->checkpoints.host_bytes = 0;
-  text_observe(service, terminal_code == IREE_STATUS_OK ? "stopped" : "failed");
   loom_serve_text_heartbeat_deinitialize(&service->heartbeat);
-  loom_serve_telemetry_stream_destroy(service->telemetry.stream);
+  if (service->telemetry.owns_stream) {
+    loom_serve_telemetry_stream_destroy(service->telemetry.stream);
+  }
   iree_allocator_free(host_allocator, service);
 }
 
 iree_status_t loom_serve_text_service_create(
     loom_serve_text_model_t* model,
     const loom_serve_text_service_options_t* options,
+    loom_serve_telemetry_stream_t* stream,
     loom_serve_text_service_t** out_service, iree_allocator_t host_allocator) {
   *out_service = NULL;
   loom_serve_text_service_t* service = NULL;
@@ -1877,7 +1899,7 @@ iree_status_t loom_serve_text_service_create(
   iree_slim_mutex_initialize(&service->completion.mutex);
   iree_string_builder_initialize(host_allocator, &service->scratch);
   iree_string_builder_initialize(host_allocator, &service->tool_calls);
-  iree_status_t status = text_service_initialize(service);
+  iree_status_t status = text_service_initialize(service, stream);
   if (iree_status_is_ok(status)) {
     loom_serve_text_heartbeat_configure(
         &service->heartbeat, service->completion.proactor,
@@ -1907,7 +1929,7 @@ static bool text_is_pending(void* self) {
 static bool text_is_active(void* self) {
   const loom_serve_text_service_t* service = self;
   if (service->completion.work != TEXT_WORK_NONE ||
-      service->pool.trim.pending) {
+      service->pool.trim.pending || service->control.connection) {
     return true;
   }
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
@@ -1966,6 +1988,11 @@ static iree_status_t text_advance_work(void* self,
     }
   }
   if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+    *out_progress |= service->pending.count || service->control.connection;
+    for (iree_host_size_t i = 0; i < service->row_count; ++i) {
+      *out_progress |= service->sessions[i].request.connection != NULL;
+    }
+    text_stop(service, service->telemetry.failure_code);
     return iree_ok_status();
   }
   // Release/suspend controls can free capacity for a stalled generation queue.
@@ -2074,16 +2101,33 @@ static loom_serve_http_service_snapshot_t text_snapshot(void* self) {
   const loom_serve_text_heartbeat_snapshot_t state =
       loom_serve_text_heartbeat_read(&service->heartbeat);
   const iree_time_t now = iree_time_now();
+  const bool active_control = service->control.connection &&
+                              service->completion.work == TEXT_WORK_CHECKPOINT;
+  iree_time_t queued_arrival =
+      service->pending.count ? service->pending.values[0].receipt.arrival_time
+                             : IREE_TIME_INFINITE_FUTURE;
+  iree_time_t active_arrival = state.active_rows ? state.oldest_active_arrival
+                                                 : IREE_TIME_INFINITE_FUTURE;
+  if (service->control.connection) {
+    if (active_control) {
+      active_arrival =
+          iree_min(active_arrival, service->control.receipt.arrival_time);
+    } else {
+      queued_arrival =
+          iree_min(queued_arrival, service->control.receipt.arrival_time);
+    }
+  }
   return (loom_serve_http_service_snapshot_t){
       .phase = state.phase,
-      .queued_requests = service->pending.count,
-      .active_requests = state.active_rows,
-      .oldest_queued_age =
-          service->pending.count
-              ? now - service->pending.values[0].receipt.arrival_time
-              : 0,
-      .oldest_active_age =
-          state.active_rows ? now - state.oldest_active_arrival : 0};
+      .queued_requests = service->pending.count +
+                         (service->control.connection && !active_control),
+      .active_requests = state.active_rows + active_control,
+      .oldest_queued_age = queued_arrival == IREE_TIME_INFINITE_FUTURE
+                               ? 0
+                               : now - queued_arrival,
+      .oldest_active_age = active_arrival == IREE_TIME_INFINITE_FUTURE
+                               ? 0
+                               : now - active_arrival};
 }
 
 loom_serve_http_service_t loom_serve_text_service_interface(

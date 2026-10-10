@@ -12,10 +12,15 @@
 #include "experimental/loom_serve/text/schedule.h"
 
 iree_status_t loom_serve_text_telemetry_initialize(
+    loom_serve_telemetry_stream_t* stream,
     loom_serve_text_telemetry_t* telemetry, iree_allocator_t allocator) {
-  *telemetry = (loom_serve_text_telemetry_t){0};
+  *telemetry = (loom_serve_text_telemetry_t){.stream = stream};
+  if (stream) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(
       loom_serve_telemetry_stream_create(256, &telemetry->stream, allocator));
+  telemetry->owns_stream = true;
   const loom_serve_telemetry_record_t begin = {
       .time_ns = iree_time_now(), .event = &LOOM_SERVE_TELEMETRY_STREAM_BEGIN};
   loom_serve_telemetry_stream_append(telemetry->stream, &begin);

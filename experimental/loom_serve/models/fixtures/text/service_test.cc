@@ -20,6 +20,7 @@
 
 #include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
+#include "experimental/loom_serve/serving/model_registration.h"
 #include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
@@ -180,8 +181,8 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
       auto options = ServiceOptions();
       options.chunk_size = chunk_size;
       loom_serve_text_service_t* service = nullptr;
-      status_ = loom_serve_text_service_create(model_, &options, &service,
-                                               allocator_);
+      status_ = loom_serve_text_service_create(model_, &options, nullptr,
+                                               &service, allocator_);
       if (iree_status_is_ok(status_)) {
         const auto interface = loom_serve_text_service_interface(service);
         loom_serve_registry_t* registry = nullptr;
@@ -197,6 +198,52 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
       }
       loom_serve_text_service_destroy(service, iree_status_code(status_));
     });
+  }
+
+  void StartManaged() {
+    IREE_ASSERT_OK(loom_serve_text_model_destroy(model_));
+    model_ = nullptr;
+    service_ = std::thread([this] {
+      const loom_serve_model_registration_options_t options = {
+          .device = device_, .heartbeat_interval = 0};
+      loom_serve_registry_t* registry = nullptr;
+      IREE_ASSERT_OK(loom_serve_registry_create(
+          0, nullptr, 3, loom_serve_model_registration_factory(&options),
+          &registry, allocator_));
+      status_ = loom_serve_router_run(
+          loom_serve_host_executor(host_), server_, registry,
+          {.request_quota = 16, .holding_capacity = 8}, allocator_);
+      status_ =
+          iree_status_join(status_, loom_serve_registry_destroy(registry));
+    });
+  }
+
+  std::string Declaration(const std::string& name, const std::string& source,
+                          const char* admission = "open") {
+    return "{\"kind\":\"text\",\"name\":\"" + name + "\",\"source\":\"" +
+           source + "\",\"weights\":\"" + weights_ + "\",\"tokenizer\":\"" +
+           tokenizer_ +
+           "\",\"rows\":4,\"context_capacity\":96,"
+           "\"pool_capacity\":256,\"prefill_capacity\":32,"
+           "\"checkpoint_capacity\":2,\"mtp_depth\":0,\"admission\":\"" +
+           admission + "\"}";
+  }
+
+  std::string WaitModel(const std::string& name, const std::string& marker) {
+    for (;;) {
+      const auto listing = Read(Send("", "", "/v1/status", "GET"));
+      const size_t begin = listing.find("\"id\":\"" + name + "\"");
+      const size_t end = listing.find("{\"object\":\"model\"", begin);
+      const auto state =
+          begin == std::string::npos
+              ? std::string()
+              : listing.substr(begin,
+                               end == std::string::npos ? end : end - begin);
+      if (marker.empty() ? state.empty()
+                         : state.find(marker) != std::string::npos) {
+        return state;
+      }
+    }
   }
 
   int Send(const std::string& body, const std::string& headers = "",
@@ -297,6 +344,192 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
   // Consumed after joining the application thread.
   iree_status_t status_ = iree_ok_status();
 };
+
+TEST_P(SourceTextServiceTest,
+       DynamicTextAdmissionCheckpointRetirementAndReuse) {
+  StartManaged();
+  EXPECT_NE(Read(Send("", "", "/v1/models", "GET")).find(R"("data":[])"),
+            std::string::npos);
+  loom_serve::testing::StalledStderr stalled;
+  ASSERT_NO_FATAL_FAILURE(stalled.Begin());
+  EXPECT_EQ(Read(Send(Declaration("fixture-text", directory_, "drained"), "",
+                      "/v1/models/register"))
+                .find("HTTP/1.1 202"),
+            0u);
+  const auto declared = WaitModel("fixture-text", R"("admission":"drained")");
+  EXPECT_NE(declared.find(R"("registration":"registered")"), std::string::npos);
+  const auto initial_log =
+      Read(Send("", "X-Loom-Model: fixture-text\r\n", "/logz", "GET"));
+  EXPECT_NE(initial_log.find(R"("event":"stream_begin","sequence":0)"),
+            std::string::npos);
+  const std::string prompt = "abxa";
+  const int held =
+      Send(Request(Message("user", prompt), 2), "X-Loom-Session: retained\r\n");
+  const int tokenizer =
+      Send(R"({"model":"fixture-text","content":"abx"})", "", "/tokenize");
+  WaitModel("fixture-text", R"("held_requests":2)");
+  EXPECT_EQ(Read(Send(R"({"model":"fixture-text"})", "", "/v1/models/undrain"))
+                .find("HTTP/1.1 200"),
+            0u);
+  EXPECT_EQ(Content(Read(held)), Oracle::Complete(prompt, 2));
+  EXPECT_NE(Read(tokenizer).find(R"({"tokens":[0,1,2]})"), std::string::npos);
+  const auto first = WaitModel("fixture-text", R"("registration":"ready")");
+  const auto pinned = Read(
+      Send("", "X-Loom-Model: fixture-text\r\nX-Loom-Session: retained\r\n",
+           "/v1/checkpoints/base"));
+  EXPECT_EQ(pinned.find("HTTP/1.1 201"), 0u) << pinned;
+  EXPECT_EQ(
+      Read(Send(Declaration("peer", directory_), "", "/v1/models/register"))
+          .find("HTTP/1.1 202"),
+      0u);
+  EXPECT_EQ(Read(Send(R"({"model":"fixture-text"})", "", "/v1/models/drain"))
+                .find("HTTP/1.1 200"),
+            0u);
+  const int removed = Send(Request(Message("user", "b")));
+  WaitModel("fixture-text", R"("held_requests":1)");
+  std::string peer = Request(Message("user", "ab"), 2);
+  peer.replace(peer.find("fixture-text"), 12, "peer");
+  EXPECT_EQ(Content(Read(Send(peer))), Oracle::Complete("ab", 2));
+  EXPECT_EQ(Read(Send(R"({"model":"fixture-text","mode":"drain"})", "",
+                      "/v1/models/unregister"))
+                .find("HTTP/1.1 202"),
+            0u);
+  EXPECT_EQ(Read(removed).find("HTTP/1.1 410"), 0u);
+  WaitModel("fixture-text", {});
+  EXPECT_EQ(Read(Send(Declaration("fixture-text", directory_), "",
+                      "/v1/models/register"))
+                .find("HTTP/1.1 202"),
+            0u);
+  EXPECT_EQ(Content(Read(Send(Request(Message("user", prompt), 2)))),
+            Oracle::Complete(prompt, 2));
+  const auto replacement =
+      WaitModel("fixture-text", R"("registration":"ready")");
+  const auto incarnation = [](const std::string& state) {
+    const auto start = state.find("\"incarnation\":");
+    EXPECT_NE(start, std::string::npos);
+    return state.substr(start, state.find(',', start) - start);
+  };
+  EXPECT_NE(incarnation(first), incarnation(replacement));
+  EXPECT_EQ(Read(Send(R"({"model":"fixture-text","mode":"abort"})", "",
+                      "/v1/models/unregister"))
+                .find("HTTP/1.1 202"),
+            0u);
+  WaitModel("fixture-text", {});
+  EXPECT_EQ(Content(Read(Send(peer))), Oracle::Complete("ab", 2));
+}
+
+TEST_P(SourceTextServiceTest, FailedTextSourceLeavesPeerAndDiagnosticsUsable) {
+  const auto package = iree::testing::MakeTempFilePath("failed_text_source");
+  ASSERT_TRUE(std::filesystem::create_directory(package));
+  for (const char* file :
+       {"prepare.loom", "control.loom", "sources.txt", "weights.loom"}) {
+    ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/" + file,
+                                           package + "/" + file));
+  }
+  {
+    std::ofstream source(package + "/advance.loom");
+    source << "this is not a source program\n";
+    ASSERT_TRUE(source.good());
+  }
+  StartManaged();
+  loom_serve::testing::StalledStderr stalled;
+  ASSERT_NO_FATAL_FAILURE(stalled.Begin());
+  EXPECT_EQ(Read(Send(Declaration("fixture-text", directory_), "",
+                      "/v1/models/register"))
+                .find("HTTP/1.1 202"),
+            0u);
+  EXPECT_EQ(Read(Send(Declaration("broken", package, "drained"), "",
+                      "/v1/models/register"))
+                .find("HTTP/1.1 202"),
+            0u);
+  const int held =
+      Send(R"({"model":"broken","content":"ab"})", "", "/tokenize");
+  WaitModel("broken", R"("held_requests":1)");
+  EXPECT_EQ(Read(Send(R"({"model":"broken"})", "", "/v1/models/undrain"))
+                .find("HTTP/1.1 200"),
+            0u);
+  EXPECT_EQ(Read(held).find("HTTP/1.1 503"), 0u);
+  const auto failed = WaitModel("broken", R"("registration":"failed")");
+  EXPECT_NE(failed.find("advance.loom"), std::string::npos);
+  EXPECT_NE(failed.find(R"("diagnostics":[{)"), std::string::npos);
+  EXPECT_EQ(Content(Read(Send(Request(Message("user", "ab"), 2)))),
+            Oracle::Complete("ab", 2));
+  EXPECT_EQ(Read(Send(R"({"model":"broken"})", "", "/v1/models/unregister"))
+                .find("HTTP/1.1 202"),
+            0u);
+  WaitModel("broken", {});
+}
+
+TEST_P(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {
+  auto options = ServiceOptions();
+  loom_serve_text_service_t* service = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_service_create(model_, &options, nullptr,
+                                                &service, allocator_));
+  auto destroy = [](loom_serve_text_service_t* value) {
+    loom_serve_text_service_destroy(value, IREE_STATUS_OK);
+  };
+  std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> owner(service,
+                                                                      destroy);
+  const auto interface = loom_serve_text_service_interface(service);
+  auto* notification = loom_serve_http_server_notification(server_);
+  interface.set_observer(interface.self,
+                         {[](void* payload) {
+                            iree_notification_post(
+                                static_cast<iree_notification_t*>(payload),
+                                IREE_ALL_WAITERS);
+                          },
+                          notification});
+  const auto accept = [&] {
+    for (;;) {
+      const auto ticket = iree_notification_prepare_wait(notification);
+      const loom_serve_http_request_t* request = nullptr;
+      auto* connection = loom_serve_http_server_take_request(server_, &request);
+      if (connection) {
+        iree_notification_cancel_wait(notification);
+        IREE_ASSERT_OK(
+            interface.accept(interface.self, connection, request, 0));
+        return;
+      }
+      iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    }
+  };
+  const int generation =
+      Send(Request(Message("user", "ab")), "X-Loom-Session: first\r\n");
+  ASSERT_NO_FATAL_FAILURE(accept());
+  // CPU completion may already be posted, but only the owner can consume it.
+  // Checkpoint and generation claims queue behind that real accepted borrower.
+  const int control =
+      Send("", "X-Loom-Session: first\r\n", "/v1/checkpoints/base");
+  ASSERT_NO_FATAL_FAILURE(accept());
+  const int queued =
+      Send(Request(Message("user", "ab")), "X-Loom-Session: second\r\n");
+  ASSERT_NO_FATAL_FAILURE(accept());
+  EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 3u);
+  bool complete = false;
+  while (!complete) {
+    const auto ticket = iree_notification_prepare_wait(notification);
+    bool progress = false;
+    IREE_ASSERT_OK(interface.advance(
+        interface.self, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING, &progress));
+    const auto state = interface.snapshot(interface.self);
+    complete = !interface.is_pending(interface.self) &&
+               !state.queued_requests && !state.active_requests;
+    if (complete || progress) {
+      iree_notification_cancel_wait(notification);
+    } else {
+      iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    }
+  }
+  EXPECT_EQ(interface.telemetry.counters->requests, 3u);
+  EXPECT_EQ(interface.telemetry.counters->cancelled, 3u);
+  EXPECT_EQ(interface.telemetry.counters->completed, 0u);
+  EXPECT_TRUE(Read(generation).empty());
+  EXPECT_TRUE(Read(control).empty());
+  EXPECT_TRUE(Read(queued).empty());
+  EXPECT_FALSE(interface.is_active(interface.self));
+}
 
 TEST_P(SourceTextServiceTest, TelemetryWrapDoesNotBlockTextOrChangeCounters) {
   Start();
@@ -819,8 +1052,8 @@ TEST_P(SourceTextServiceTest,
   } readiness{.notification = loom_serve_http_server_notification(server_)};
   auto options = ServiceOptions();
   loom_serve_text_service_t* value = nullptr;
-  IREE_ASSERT_OK(
-      loom_serve_text_service_create(model_, &options, &value, allocator_));
+  IREE_ASSERT_OK(loom_serve_text_service_create(model_, &options, nullptr,
+                                                &value, allocator_));
   auto destroy = [](loom_serve_text_service_t* service) {
     loom_serve_text_service_destroy(service, IREE_STATUS_OK);
   };

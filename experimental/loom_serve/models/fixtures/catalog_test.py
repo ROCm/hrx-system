@@ -590,35 +590,33 @@ def check_startup_failures(server, directory, catalog):
                 ],
                 log_path,
                 cwd=directory,
-            ) as (process, address):
+            ) as (_, address):
+                assert address is not None, log_path.read_text()
+                client = Client(address)
+                while True:
+                    listing = client.request("/v1/status")
+                    failed = next(
+                        item["loom"]
+                        for item in listing["data"]
+                        if item["id"] == model["name"]
+                    )
+                    if failed["registration"] == "failed":
+                        break
+                assert missing.name in failed["error"]["message"], failed
+                assert failed["error"]["code"] == 5, failed
+                assert client.request("/readyz") == {"status": "ready"}
+                # A failed source package does not terminate peer models.
                 if model["kind"] != "text":
-                    assert address is not None, log_path.read_text()
-                    client = Client(address)
-                    while True:
-                        listing = client.request("/v1/status")
-                        failed = next(
-                            item["loom"]
-                            for item in listing["data"]
-                            if item["id"] == model["name"]
-                        )
-                        if failed["registration"] == "failed":
-                            break
-                    assert missing.name in failed["error"]["message"], failed
-                    assert failed["error"]["code"] == 5, failed
-                    assert client.request("/readyz") == {"status": "ready"}
-                    # A failed source package does not terminate peer models.
                     client.text(
                         "load-failure-peer", [{"role": "user", "content": "ab"}]
                     )
                 else:
-                    assert address is None, log_path.read_text()
-                    assert process.wait() == 1, log_path.read_text()
+                    result = client.request(
+                        "/v1/embeddings",
+                        {"model": "vectors", "input": "ab", "dimensions": 2},
+                    )
+                    assert result["data"][0]["embedding"] == [3, 2], result
             diagnostic = log_path.read_text()
-            if model["kind"] == "text":
-                assert "NOT_FOUND" in diagnostic and missing.name in diagnostic, (
-                    diagnostic
-                )
-                assert f"creating model '{model['name']}'" in diagnostic, diagnostic
             assert (
                 "Sanitizer" not in diagnostic and "runtime error:" not in diagnostic
             ), diagnostic
