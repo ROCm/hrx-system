@@ -16,7 +16,9 @@ extern "C" {
 #endif
 
 // Independent socket binding feeding the server's shared connection budget.
-// Owns accept/cancellation storage, never the accepted HTTP connections.
+// Owns accept/cancellation storage, never the accepted HTTP connections. At
+// shared capacity it retains one unadmitted carrier and waits asynchronously;
+// further peers stay in the configured kernel backlog.
 typedef struct loom_serve_http_listener_t loom_serve_http_listener_t;
 
 typedef struct loom_serve_http_listener_options_t {
@@ -55,9 +57,16 @@ iree_status_t loom_serve_http_listener_create(
 const iree_async_address_t* loom_serve_http_listener_address(
     const loom_serve_http_listener_t* listener);
 
+// True while a native capacity wait retains this listener's unadmitted peer.
+// Notification publishes changes; the snapshot takes the listener mutex and
+// borrows no peer state. A stopped listener never reports capacity pressure.
+bool loom_serve_http_listener_is_waiting_for_capacity(
+    loom_serve_http_listener_t* listener);
+
 // Closes admission without waiting or touching accepted connections. Completion
-// retires accept and its cancellation receipt on the shared poll owner. The
-// shared I/O owner must remain capable of accepting the shutdown handoff.
+// joins accept cancellation or the capacity wait's private stop edge on the
+// shared poll owner, releasing any unadmitted peer. The shared I/O owner must
+// remain capable of accepting the shutdown handoff.
 void loom_serve_http_listener_request_stop(
     loom_serve_http_listener_t* listener);
 

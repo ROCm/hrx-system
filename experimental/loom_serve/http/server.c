@@ -48,6 +48,8 @@ struct loom_serve_http_server_t {
   iree_slim_mutex_t mutex;
   // Advisory wakeup for the single application owner.
   iree_notification_t notification;
+  // Monotonic connection-credit publication, serialized by mutex.
+  iree_async_semaphore_t* capacity_semaphore;
   // Application task wake target, with publication joined by the server mutex.
   loom_serve_http_observer_t observer;
   // Retained shared progress owner, outliving all accepted carrier callbacks.
@@ -148,8 +150,10 @@ static void http_connection_send_completed(void* user_data,
   }
 }
 
-void loom_serve_http_server_accept(loom_serve_http_server_t* server,
-                                   iree_net_carrier_t* carrier) {
+bool loom_serve_http_server_try_accept(loom_serve_http_server_t* server,
+                                       iree_net_carrier_t* carrier,
+                                       uint64_t* out_wait_value) {
+  *out_wait_value = 0;
   loom_serve_http_connection_t* connection = NULL;
   iree_slim_mutex_lock(&server->mutex);
   if (!server->stopping) {
@@ -163,23 +167,16 @@ void loom_serve_http_server_accept(loom_serve_http_server_t* server,
       }
     }
     if (!connection) {
-      const loom_serve_telemetry_record_t record = {
-          .time_ns = iree_time_now(),
-          .event = &LOOM_SERVE_TELEMETRY_ERROR,
-          .data.error =
-              {
-                  .code = IREE_STATUS_RESOURCE_EXHAUSTED,
-                  .length = sizeof("HTTP connection capacity exhausted") - 1,
-                  .message = "HTTP connection capacity exhausted",
-              },
-      };
-      loom_serve_telemetry_stream_append(server->diagnostics, &record);
+      *out_wait_value =
+          iree_async_semaphore_query(server->capacity_semaphore) + 1;
+      iree_slim_mutex_unlock(&server->mutex);
+      return false;
     }
   }
   iree_slim_mutex_unlock(&server->mutex);
   if (!connection) {
     iree_net_carrier_release(carrier);
-    return;
+    return true;
   }
 
   iree_status_t status = loom_serve_http_request_parser_create(
@@ -202,6 +199,7 @@ void loom_serve_http_server_accept(loom_serve_http_server_t* server,
   connection->flags &= ~HTTP_CONNECTION_INITIALIZING;
   http_notify_locked(server);
   iree_slim_mutex_unlock(&server->mutex);
+  return true;
 }
 
 static bool http_server_drained(void* user_data) {
@@ -239,6 +237,9 @@ static void http_connection_reclaim(loom_serve_http_connection_t* connection) {
   iree_slim_mutex_lock(&server->mutex);
   memset(connection, 0, sizeof(*connection));
   connection->server = server;
+  IREE_CHECK_OK(iree_async_semaphore_signal(
+      server->capacity_semaphore,
+      iree_async_semaphore_query(server->capacity_semaphore) + 1, NULL));
   iree_slim_mutex_unlock(&server->mutex);
 }
 
@@ -260,6 +261,7 @@ void loom_serve_http_server_destroy(loom_serve_http_server_t* server) {
       http_connection_reclaim(&server->connections[i]);
     }
   }
+  iree_async_semaphore_release(server->capacity_semaphore);
   iree_async_proactor_pool_release(server->proactor_pool);
   loom_serve_telemetry_stream_destroy(server->diagnostics);
   iree_notification_deinitialize(&server->notification);
@@ -294,6 +296,14 @@ iree_status_t loom_serve_http_server_create(
   iree_notification_initialize(&server->notification);
   iree_status_t status = loom_serve_telemetry_stream_create(
       128, &server->diagnostics, host_allocator);
+  if (iree_status_is_ok(status)) {
+    iree_async_proactor_t* proactor = NULL;
+    status = iree_async_proactor_pool_get(proactor_pool, 0, &proactor);
+    if (iree_status_is_ok(status)) {
+      status = iree_async_semaphore_create(proactor, 0, 0, host_allocator,
+                                           &server->capacity_semaphore);
+    }
+  }
   if (iree_status_is_ok(status)) {
     const loom_serve_telemetry_record_t begin = {
         .time_ns = iree_time_now(),
@@ -354,6 +364,11 @@ void loom_serve_http_server_set_observer(loom_serve_http_server_t* server,
 
 void loom_serve_http_server_request_stop(loom_serve_http_server_t* server) {
   iree_slim_mutex_lock(&server->mutex);
+  if (!server->stopping && server->capacity_semaphore) {
+    IREE_CHECK_OK(iree_async_semaphore_signal(
+        server->capacity_semaphore,
+        iree_async_semaphore_query(server->capacity_semaphore) + 1, NULL));
+  }
   server->stopping = true;
   http_notify_locked(server);
   iree_slim_mutex_unlock(&server->mutex);
@@ -364,6 +379,11 @@ bool loom_serve_http_server_is_stopping(loom_serve_http_server_t* server) {
   const bool stopping = server->stopping;
   iree_slim_mutex_unlock(&server->mutex);
   return stopping;
+}
+
+iree_async_semaphore_t* loom_serve_http_server_capacity_semaphore(
+    loom_serve_http_server_t* server) {
+  return server->capacity_semaphore;
 }
 
 loom_serve_http_connection_t* loom_serve_http_server_take_request(

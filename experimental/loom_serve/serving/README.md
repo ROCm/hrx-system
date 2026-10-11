@@ -534,8 +534,13 @@ observers, one below transport capacity. Ordinary active and incomplete network
 requests also use transport credit; these counts are not total connections.
 
 `server.resources.listeners` lists the actual bound addresses, including the
-port assigned for `:0` and `unix:` paths. Every endpoint observes the same
-logical server. `server.resources.devices` lists all logical devices in its
+port assigned for `:0` and `unix:` paths. Each entry's `waiting_for_capacity`
+reports a listener parked on shared connection pressure. It retains at most
+one unadmitted peer while further arrivals stay in the configured kernel
+backlog. An owner-reclaimed slot resumes admission without a client retry;
+stopping a listener cancels this wait without revoking accepted requests.
+Every endpoint observes the same logical server. `server.resources.devices`
+lists all logical devices in its
 single application group with group-local `index`, HAL `id`, `name`, `driver`,
 `backend` and constituent `physical_devices` names/paths/backend ordinals.
 Indices have process lifetime; identity strings are HAL descriptions and need

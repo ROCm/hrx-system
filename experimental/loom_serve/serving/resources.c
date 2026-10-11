@@ -131,7 +131,12 @@ iree_status_t loom_serve_resources_write_json(
       status = loom_json_write_escaped_string(output, address);
     }
     if (iree_status_is_ok(status)) {
-      status = loom_output_stream_write_cstring(output, "}");
+      status = loom_output_stream_write_format(
+          output, ",\"waiting_for_capacity\":%s}",
+          loom_serve_http_listener_is_waiting_for_capacity(
+              resources->listeners[i])
+              ? "true"
+              : "false");
     }
   }
   if (iree_status_is_ok(status)) {

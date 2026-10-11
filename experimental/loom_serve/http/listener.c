@@ -14,7 +14,7 @@
 #include "iree/base/threading/mutex.h"
 
 enum {
-  HTTP_LISTENER_ACCEPT = 1u << 0,
+  HTTP_LISTENER_OPERATION = 1u << 0,
   HTTP_LISTENER_STOP = 1u << 1,
   HTTP_LISTENER_CANCEL = 1u << 2,
 };
@@ -40,16 +40,29 @@ struct loom_serve_http_listener_t {
   iree_net_stream_carrier_options_t send;
   // Joins publication and final callback accesses with retirement queries.
   iree_slim_mutex_t mutex;
-  // Advisory wake for listener retirement, not HTTP/model readiness.
+  // Advisory wake for listener pressure and retirement, not model readiness.
   iree_notification_t notification;
   // Admission has closed, either explicitly or on a terminal accept failure.
   bool stopping;
-  // Accept, stop handoff, and cancellation receipt ownership bits.
+  // Current operation, stop handoff, and cancellation receipt ownership bits.
   uint32_t pending;
   // Owned terminal listener failure, returned by destroy.
   iree_status_t failure;
   // Reused accept operation; cancellation joins before this storage retires.
   iree_async_socket_accept_operation_t accept;
+  // Current accept or capacity wait, selected only by this poll owner.
+  iree_async_operation_t* operation;
+  // One unadmitted peer; further peers remain in the kernel listen backlog.
+  struct {
+    // Owned CREATED carrier until the server consumes it or the listener stops.
+    iree_net_carrier_t* carrier;
+    // Borrowed capacity timeline and owned listener-local stop timeline.
+    iree_async_semaphore_t* semaphores[2];
+    // Next capacity generation and one-shot listener stop value (1).
+    uint64_t values[2];
+    // Reused wait completing on either capacity or this listener's stop.
+    iree_async_semaphore_wait_operation_t wait;
+  } admission;
   // Poll-owner handoff for cancellation without blocking the caller.
   iree_async_nop_operation_t stop;
   // Independent receipt joining any native cancellation key.
@@ -89,47 +102,74 @@ static void http_listener_cancel_retired(void* user_data) {
   iree_slim_mutex_unlock(&listener->mutex);
 }
 
-static void http_listener_accept_completed(
-    void* user_data, iree_async_operation_t* operation, iree_status_t status,
-    iree_async_completion_flags_t flags) {
-  (void)operation;
+static void http_listener_completed(void* user_data,
+                                    iree_async_operation_t* operation,
+                                    iree_status_t status,
+                                    iree_async_completion_flags_t flags) {
   loom_serve_http_listener_t* listener = user_data;
   iree_slim_mutex_lock(&listener->mutex);
   const bool admit =
       !listener->stopping && iree_status_is_ok(status) &&
       !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_CANCELLED);
   iree_slim_mutex_unlock(&listener->mutex);
-  if (admit) {
-    iree_net_carrier_t* carrier = NULL;
-    iree_status_t peer_status = http_listener_create_carrier(
-        listener, listener->accept.accepted_socket, &carrier);
-    if (iree_status_is_ok(peer_status)) {
-      loom_serve_http_server_accept(listener->server, carrier);
-    } else {
-      loom_serve_http_server_record_error(listener->server, peer_status);
-      iree_status_free(peer_status);
+  if (operation == &listener->accept.base) {
+    if (admit) {
+      iree_status_t peer_status = http_listener_create_carrier(
+          listener, listener->accept.accepted_socket,
+          &listener->admission.carrier);
+      if (!iree_status_is_ok(peer_status)) {
+        loom_serve_http_server_record_error(listener->server, peer_status);
+        iree_status_free(peer_status);
+      }
     }
+    iree_async_socket_release(listener->accept.accepted_socket);
+    listener->accept.accepted_socket = NULL;
   }
-  iree_async_socket_release(listener->accept.accepted_socket);
-  listener->accept.accepted_socket = NULL;
+  if (admit && listener->admission.carrier &&
+      loom_serve_http_server_try_accept(listener->server,
+                                        listener->admission.carrier,
+                                        &listener->admission.values[0])) {
+    listener->admission.carrier = NULL;
+  }
 
   iree_slim_mutex_lock(&listener->mutex);
   if (iree_status_is_ok(status) && !listener->stopping) {
-    // Only this poll owner can complete or rearm the accept target.
-    iree_async_operation_initialize(
-        &listener->accept.base, IREE_ASYNC_OPERATION_TYPE_SOCKET_ACCEPT,
-        IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
-        http_listener_accept_completed, listener);
-    status = iree_async_proactor_submit_one(listener->proactor,
-                                            &listener->accept.base);
+    // Pressure parks this listener instead of accepting and resetting peers.
+    // Capacity waits complete through their private stop edge; socket accepts
+    // retain their native cancellation receipt.
+    if (listener->admission.carrier) {
+      iree_async_semaphore_wait_operation_t* wait = &listener->admission.wait;
+      listener->operation = &wait->base;
+      iree_async_operation_initialize(
+          &wait->base, IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT,
+          IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
+          http_listener_completed, listener);
+      wait->semaphores = listener->admission.semaphores;
+      wait->values = listener->admission.values;
+      wait->count = 2;
+      wait->mode = IREE_ASYNC_WAIT_MODE_ANY;
+    } else {
+      listener->operation = &listener->accept.base;
+      iree_async_operation_initialize(
+          listener->operation, IREE_ASYNC_OPERATION_TYPE_SOCKET_ACCEPT,
+          IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
+          http_listener_completed, listener);
+    }
+    status =
+        iree_async_proactor_submit_one(listener->proactor, listener->operation);
   } else {
-    listener->pending &= ~HTTP_LISTENER_ACCEPT;
+    listener->pending &= ~HTTP_LISTENER_OPERATION;
   }
   if (!iree_status_is_ok(status)) {
     loom_serve_http_server_record_error(listener->server, status);
     listener->failure = iree_status_join(listener->failure, status);
     listener->stopping = true;
-    listener->pending &= ~HTTP_LISTENER_ACCEPT;
+    listener->pending &= ~HTTP_LISTENER_OPERATION;
+  }
+  if (!iree_any_bit_set(listener->pending, HTTP_LISTENER_OPERATION)) {
+    // This carrier was never activated or transferred to the HTTP owner.
+    iree_net_carrier_release(listener->admission.carrier);
+    listener->admission.carrier = NULL;
   }
   const bool cancel_pending =
       iree_any_bit_set(listener->pending, HTTP_LISTENER_CANCEL);
@@ -151,15 +191,25 @@ static void http_listener_stop_received(void* user_data,
   IREE_CHECK_OK(status);
   loom_serve_http_listener_t* listener = user_data;
   iree_slim_mutex_lock(&listener->mutex);
-  const bool cancel = iree_any_bit_set(listener->pending, HTTP_LISTENER_ACCEPT);
+  const bool pending =
+      iree_any_bit_set(listener->pending, HTTP_LISTENER_OPERATION);
+  const bool capacity_wait =
+      pending && listener->operation == &listener->admission.wait.base;
+  const bool cancel = pending && !capacity_wait;
   if (cancel) {
     listener->pending |= HTTP_LISTENER_CANCEL;
   }
   iree_slim_mutex_unlock(&listener->mutex);
+  if (capacity_wait) {
+    // Semaphore waits have no native cancellation receipt. A private stop
+    // timeline completes this wait without waking unrelated listeners.
+    IREE_CHECK_OK(iree_async_semaphore_signal(listener->admission.semaphores[1],
+                                              1, NULL));
+  }
   if (cancel) {
-    // This poll owner holds a private live accept and an idle receipt.
+    // This poll owner holds one private live operation and an idle receipt.
     IREE_CHECK_OK(iree_async_proactor_request_cancel(
-        listener->proactor, &listener->accept.base, &listener->cancellation));
+        listener->proactor, listener->operation, &listener->cancellation));
   }
   iree_slim_mutex_lock(&listener->mutex);
   listener->pending &= ~HTTP_LISTENER_STOP;
@@ -192,6 +242,17 @@ bool loom_serve_http_listener_is_stopped(loom_serve_http_listener_t* listener) {
   return stopped;
 }
 
+bool loom_serve_http_listener_is_waiting_for_capacity(
+    loom_serve_http_listener_t* listener) {
+  iree_slim_mutex_lock(&listener->mutex);
+  const bool waiting =
+      !listener->stopping &&
+      iree_any_bit_set(listener->pending, HTTP_LISTENER_OPERATION) &&
+      listener->operation == &listener->admission.wait.base;
+  iree_slim_mutex_unlock(&listener->mutex);
+  return waiting;
+}
+
 iree_notification_t* loom_serve_http_listener_notification(
     loom_serve_http_listener_t* listener) {
   return &listener->notification;
@@ -210,6 +271,7 @@ iree_status_t loom_serve_http_listener_destroy(
   iree_notification_await(&listener->notification, http_listener_stopped,
                           listener, iree_infinite_timeout());
   iree_async_socket_release(listener->socket);
+  iree_async_semaphore_release(listener->admission.semaphores[1]);
   iree_status_t status = listener->failure;
   if (listener->path[0] && remove(listener->path) != 0) {
     status = iree_status_join(
@@ -263,6 +325,9 @@ iree_status_t loom_serve_http_listener_create(
       iree_allocator_malloc(allocator, sizeof(*listener), (void**)&listener));
   listener->allocator = allocator;
   listener->server = server;
+  listener->admission.semaphores[0] =
+      loom_serve_http_server_capacity_semaphore(server);
+  listener->admission.values[1] = 1;
   listener->receive.buffer_size = options->receive_buffer_size;
   listener->receive.buffer_count = options->receive_buffer_count;
   listener->send = options->send;
@@ -277,6 +342,10 @@ iree_status_t loom_serve_http_listener_create(
   if (iree_status_is_ok(status)) {
     listener->proactor =
         iree_async_proactor_pool_entry_proactor(listener->entry);
+    status = iree_async_semaphore_create(listener->proactor, 0, 0, allocator,
+                                         &listener->admission.semaphores[1]);
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_async_socket_create(
         listener->proactor, socket_type,
         is_unix ? IREE_ASYNC_SOCKET_OPTION_NONE
@@ -305,13 +374,14 @@ iree_status_t loom_serve_http_listener_create(
     iree_async_operation_initialize(
         &listener->accept.base, IREE_ASYNC_OPERATION_TYPE_SOCKET_ACCEPT,
         IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
-        http_listener_accept_completed, listener);
+        http_listener_completed, listener);
     listener->accept.listen_socket = listener->socket;
-    listener->pending |= HTTP_LISTENER_ACCEPT;
+    listener->operation = &listener->accept.base;
+    listener->pending |= HTTP_LISTENER_OPERATION;
     status = iree_async_proactor_submit_one(listener->proactor,
                                             &listener->accept.base);
     if (!iree_status_is_ok(status)) {
-      listener->pending &= ~HTTP_LISTENER_ACCEPT;
+      listener->pending &= ~HTTP_LISTENER_OPERATION;
     }
   }
   if (iree_status_is_ok(status)) {

@@ -62,7 +62,13 @@ class ObservationClient {
         proactor_, server_proactor, &carrier_options, iree_allocator_system(),
         &carrier_, &peer_));
     iree_net_carrier_retain(peer_);
-    loom_serve_http_server_accept(server, peer_);
+    uint64_t wait_value = 0;
+    const bool consumed =
+        loom_serve_http_server_try_accept(server, peer_, &wait_value);
+    if (!consumed) {
+      iree_net_carrier_release(peer_);
+    }
+    ASSERT_TRUE(consumed);
     IREE_ASSERT_OK(iree_net_carrier_set_handlers(
         carrier_,
         {[](void* self, iree_async_span_t bytes,
@@ -1477,7 +1483,8 @@ TEST_P(HttpRouterTest, UnrelatedCapacityNeverWaitsForHeldCompletion) {
   const std::string expected =
       "\"server\":{\"worker_count\":" + std::to_string(GetParam()) +
       R"(,"model_capacity":5,"connection_capacity":64,"request_limits":{"header_byte_capacity":16384,"body_byte_capacity":8388608,"header_capacity":64},"held_request_capacity":2,"held_requests":0,"observer_capacity":63,"observers":0,"resources":{"listeners":[{"address":")" +
-      std::string(address.data, address.size) + R"("}],"devices":[]}})";
+      std::string(address.data, address.size) +
+      R"(","waiting_for_capacity":false}],"devices":[]}})";
   EXPECT_NE(state.find(expected), std::string::npos) << state;
   EXPECT_NE(
       state.find(R"("phase":"held","queued_requests":0,"active_requests":1)"),

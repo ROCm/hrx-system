@@ -103,7 +103,7 @@ wrong-modality fields are rejected.
 | `--device` | `amdgpu`; one HAL device URI for all deployments |
 | `--listen` | `127.0.0.1:8080`; repeat for numeric IPv4, `[IPv6]:port` or `unix:path` listeners |
 | `--workers` | `8`; shared CPU task workers for JIT, scheduling and media work, not one thread per connection |
-| `--connections` | `64`; simultaneous connections across all listeners, including SSE and incomplete requests |
+| `--connections` | `64`; admitted connections across all listeners, including SSE, incomplete and draining requests. Each listener may park one additional unadmitted peer; further arrivals stay in its kernel backlog |
 | `--held_requests` | Half the connection limit; requests held outside closed/preparing model admission. Must be smaller than `connections`; zero rejects instead of holding |
 | `--model_capacity` | `32`; all registered names, including drained, failed and retiring entries |
 | `--request_body_bytes` | `8388608`; maximum HTTP body per connection, independent of tokenizer/model limits |

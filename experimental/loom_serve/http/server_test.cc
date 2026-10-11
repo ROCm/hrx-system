@@ -12,6 +12,7 @@
 #include <cerrno>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "experimental/loom_serve/http/listener.h"
@@ -27,7 +28,7 @@ class HttpServerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     IREE_ASSERT_OK(iree_async_proactor_pool_create(
-        1, nullptr, iree_async_proactor_pool_options_default(),
+        2, nullptr, iree_async_proactor_pool_options_default(),
         iree_allocator_system(), &pool_));
     auto options = loom_serve_http_server_options_default();
     options.connection_capacity = 24;
@@ -42,13 +43,18 @@ class HttpServerTest : public ::testing::Test {
     for (auto* listener : additional_listeners_) {
       IREE_EXPECT_OK(loom_serve_http_listener_destroy(listener));
     }
+    while (!held_connections_.empty()) {
+      ReleaseHeld();
+    }
     loom_serve_http_server_destroy(server_);
     iree_async_proactor_pool_release(pool_);
   }
 
-  loom_serve_http_listener_t* Listen(iree_string_view_t address) {
+  loom_serve_http_listener_t* Listen(iree_string_view_t address,
+                                     iree_host_size_t proactor_index = 0) {
     auto options = loom_serve_http_listener_options_default();
     options.address = address;
+    options.proactor_index = proactor_index;
     loom_serve_http_listener_t* listener = nullptr;
     IREE_EXPECT_OK(loom_serve_http_listener_create(server_, &options, &listener,
                                                    iree_allocator_system()));
@@ -110,6 +116,44 @@ class HttpServerTest : public ::testing::Test {
     return result;
   }
 
+  void HoldCapacity() {
+    for (size_t i = 0; i < loom_serve_http_server_connection_capacity(server_);
+         ++i) {
+      const int client = Connect();
+      ASSERT_TRUE(Write(client, "GET /held HTTP/1.1\r\nHost: local\r\n\r\n"));
+      const loom_serve_http_request_t* request = nullptr;
+      auto* connection = Take(&request);
+      ASSERT_NE(connection, nullptr);
+      held_connections_.emplace_back(client, connection);
+    }
+  }
+
+  void ReleaseHeld() {
+    auto [client, connection] = held_connections_.back();
+    held_connections_.pop_back();
+    loom_serve_http_connection_abort(connection);
+    EXPECT_EQ(Read(client), "");
+    EXPECT_EQ(close(client), 0);
+  }
+
+  static void WaitCapacity(loom_serve_http_listener_t* listener) {
+    iree_notification_await(
+        loom_serve_http_listener_notification(listener),
+        [](void* value) {
+          return loom_serve_http_listener_is_waiting_for_capacity(
+              static_cast<loom_serve_http_listener_t*>(value));
+        },
+        listener, iree_infinite_timeout());
+  }
+
+  static void ReadUnadmittedClose(int client) {
+    char byte = 0;
+    const ssize_t count = recv(client, &byte, 1, 0);
+    // Closing an unadmitted socket may reset its unread request bytes.
+    EXPECT_TRUE(count == 0 || (count == -1 && errno == ECONNRESET));
+    EXPECT_EQ(close(client), 0);
+  }
+
   // Shared progress infrastructure used by every binding and connection.
   iree_async_proactor_pool_t* pool_ = nullptr;
   // Initial independently owned TCP binding.
@@ -118,6 +162,8 @@ class HttpServerTest : public ::testing::Test {
   std::vector<loom_serve_http_listener_t*> additional_listeners_;
   // Server under test, retaining shared progress without private workers.
   loom_serve_http_server_t* server_ = nullptr;
+  // Client socket and real application claim held through capacity pressure.
+  std::vector<std::pair<int, loom_serve_http_connection_t*>> held_connections_;
 };
 
 TEST_F(HttpServerTest, FragmentedRequestAndOrderedStreamingResponse) {
@@ -166,39 +212,102 @@ TEST_F(HttpServerTest, ConnectionSlotsRecycleAfterDrain) {
   }
 }
 
-TEST_F(HttpServerTest, CapacityRejectionPublishesDiagnostic) {
-  std::vector<int> clients;
-  std::vector<loom_serve_http_connection_t*> connections;
-  for (int i = 0; i < 24; ++i) {
-    const int client = Connect();
-    ASSERT_TRUE(Write(client, "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n"));
+TEST_F(HttpServerTest, CapacityWaitReturnsTheOriginalRequestAfterRetirement) {
+  HoldCapacity();
+  const int client = Connect();
+  ASSERT_TRUE(Write(client, "GET /waiting HTTP/1.1\r\nHost: local\r\n\r\n"));
+  WaitCapacity(listener_);
+  ReleaseHeld();
+  const loom_serve_http_request_t* request = nullptr;
+  auto* connection = Take(&request);
+  ASSERT_NE(connection, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(request->target, IREE_SV("/waiting")));
+  IREE_ASSERT_OK(loom_serve_http_connection_send(
+      connection,
+      IREE_SV("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nresumed")));
+  loom_serve_http_connection_finish(connection);
+  EXPECT_EQ(Read(client),
+            "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nresumed");
+  EXPECT_EQ(close(client), 0);
+}
+
+TEST_F(HttpServerTest, StoppingACapacityWaitPreservesAcceptedClaimsAndPeers) {
+  HoldCapacity();
+  const int waiting = Connect();
+  ASSERT_TRUE(Write(waiting, "GET /waiting HTTP/1.1\r\nHost: local\r\n\r\n"));
+  WaitCapacity(listener_);
+  IREE_ASSERT_OK(loom_serve_http_listener_destroy(listener_));
+  listener_ = nullptr;
+  ReadUnadmittedClose(waiting);
+  // Already accepted response ownership is independent of this listener.
+  auto [client, connection] = held_connections_.back();
+  held_connections_.pop_back();
+  IREE_ASSERT_OK(loom_serve_http_connection_send(
+      connection,
+      IREE_SV("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nalive")));
+  loom_serve_http_connection_finish(connection);
+  EXPECT_EQ(Read(client), "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nalive");
+  EXPECT_EQ(close(client), 0);
+
+  auto* other = Listen(IREE_SV("127.0.0.1:0"));
+  additional_listeners_.push_back(other);
+  const int peer = Connect(other);
+  ASSERT_TRUE(Write(peer, "GET /peer HTTP/1.1\r\nHost: local\r\n\r\n"));
+  const loom_serve_http_request_t* request = nullptr;
+  connection = Take(&request);
+  ASSERT_NE(connection, nullptr);
+  IREE_ASSERT_OK(loom_serve_http_connection_send(
+      connection, IREE_SV("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\npeer")));
+  loom_serve_http_connection_finish(connection);
+  EXPECT_EQ(Read(peer), "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\npeer");
+  EXPECT_EQ(close(peer), 0);
+}
+
+TEST_F(HttpServerTest, ServerStopWakesCapacityWaitWithoutRevokingClaims) {
+  HoldCapacity();
+  const int waiting = Connect();
+  ASSERT_TRUE(Write(waiting, "GET /waiting HTTP/1.1\r\nHost: local\r\n\r\n"));
+  WaitCapacity(listener_);
+  loom_serve_http_server_request_stop(server_);
+  ReadUnadmittedClose(waiting);
+  auto [client, connection] = held_connections_.back();
+  held_connections_.pop_back();
+  IREE_ASSERT_OK(loom_serve_http_connection_send(
+      connection,
+      IREE_SV("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nalive")));
+  loom_serve_http_connection_finish(connection);
+  EXPECT_EQ(Read(client), "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nalive");
+  EXPECT_EQ(close(client), 0);
+}
+
+TEST_F(HttpServerTest, TcpAndUnixPollOwnersShareReclaimedCapacity) {
+  iree::testing::TempFilePath path("http");
+  const std::string address = "unix:" + path.path();
+  auto* other = Listen(iree_make_cstring_view(address.c_str()), 1);
+  additional_listeners_.push_back(other);
+  HoldCapacity();
+  const int clients[] = {Connect(), Connect(other)};
+  ASSERT_TRUE(Write(clients[0], "GET /tcp HTTP/1.1\r\nHost: local\r\n\r\n"));
+  ASSERT_TRUE(Write(clients[1], "GET /unix HTTP/1.1\r\nHost: local\r\n\r\n"));
+  WaitCapacity(listener_);
+  WaitCapacity(other);
+  ReleaseHeld();
+  bool completed[2] = {};
+  for (int i = 0; i < 2; ++i) {
     const loom_serve_http_request_t* request = nullptr;
     auto* connection = Take(&request);
     ASSERT_NE(connection, nullptr);
-    clients.push_back(client);
-    connections.push_back(connection);
-  }
-  const int rejected = Connect();
-  EXPECT_EQ(Read(rejected), "");
-  ASSERT_EQ(close(rejected), 0);
-
-  const auto* stream = loom_serve_http_server_diagnostics(server_);
-  uint64_t cursor = 0;
-  loom_serve_telemetry_record_t record;
-  ASSERT_EQ(loom_serve_telemetry_stream_read(stream, &cursor, &record),
-            LOOM_SERVE_TELEMETRY_READ_RECORD);
-  EXPECT_EQ(record.event, &LOOM_SERVE_TELEMETRY_STREAM_BEGIN);
-  ASSERT_EQ(loom_serve_telemetry_stream_read(stream, &cursor, &record),
-            LOOM_SERVE_TELEMETRY_READ_RECORD);
-  EXPECT_EQ(record.event, &LOOM_SERVE_TELEMETRY_ERROR);
-  EXPECT_EQ(record.data.error.code, IREE_STATUS_RESOURCE_EXHAUSTED);
-  EXPECT_EQ(std::string(record.data.error.message, record.data.error.length),
-            "HTTP connection capacity exhausted");
-  EXPECT_EQ(record.data.error.truncated, 0u);
-  for (size_t i = 0; i < clients.size(); ++i) {
-    loom_serve_http_connection_abort(connections[i]);
-    EXPECT_EQ(Read(clients[i]), "");
-    ASSERT_EQ(close(clients[i]), 0);
+    const int index =
+        iree_string_view_equal(request->target, IREE_SV("/tcp")) ? 0 : 1;
+    EXPECT_FALSE(completed[index]);
+    completed[index] = true;
+    IREE_ASSERT_OK(loom_serve_http_connection_send(
+        connection,
+        IREE_SV("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\npeer")));
+    loom_serve_http_connection_finish(connection);
+    EXPECT_EQ(Read(clients[index]),
+              "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\npeer");
+    EXPECT_EQ(close(clients[index]), 0);
   }
 }
 

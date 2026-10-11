@@ -9,6 +9,7 @@
 
 #include "experimental/loom_serve/http/request.h"
 #include "experimental/loom_serve/telemetry/stream.h"
+#include "iree/async/semaphore.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/notification.h"
 #include "iree/net/carrier.h"
@@ -102,13 +103,22 @@ void loom_serve_http_server_request_stop(loom_serve_http_server_t* server);
 // True after request_stop, independent of individual listener lifetimes.
 bool loom_serve_http_server_is_stopping(loom_serve_http_server_t* server);
 
-// Transfers a CREATED reliable ordered carrier to HTTP connection ownership.
-// The carrier is either activated or released if admission is closed/full or
-// setup fails. Per-peer failures are recorded without stopping other peers.
-// Its progress comes from this server's pool. Callers join all accept callbacks
-// before destroying the server; concurrent accepts are permitted.
-void loom_serve_http_server_accept(loom_serve_http_server_t* server,
-                                   iree_net_carrier_t* carrier);
+// Borrowed capacity timeline, live until server destruction. Its value advances
+// when the owner reclaims a connection or closes admission. Callers can park an
+// asynchronous wait using the value returned by try_accept without a lost wake.
+iree_async_semaphore_t* loom_serve_http_server_capacity_semaphore(
+    loom_serve_http_server_t* server);
+
+// Tries to transfer a CREATED reliable ordered carrier to HTTP ownership. True
+// consumes it, activating it or releasing it if admission is closed/setup
+// fails. False leaves it caller-owned and sets out_wait_value to the next
+// capacity generation. No request bytes are consumed while waiting. Per-peer
+// failures are recorded without stopping other peers. Callers join all
+// accept/wait callbacks before destroying the server; concurrent accepts are
+// permitted.
+bool loom_serve_http_server_try_accept(loom_serve_http_server_t* server,
+                                       iree_net_carrier_t* carrier,
+                                       uint64_t* out_wait_value);
 
 // Collects retired connections and claims one completed request, or returns
 // null. The request and connection are borrowed until finish or abort. The

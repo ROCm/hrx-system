@@ -1179,7 +1179,9 @@ def check_empty_server(server_command, directory, device, backing):
                 "observer_capacity": 18,
                 "observers": 0,
             }, server
-            assert resources["listeners"] == [{"address": address}], resources
+            assert resources["listeners"] == [
+                {"address": address, "waiting_for_capacity": False}
+            ], resources
             assert len(resources["devices"]) == 1, resources
             actual = resources["devices"][0]
             assert actual["index"] == 0 and actual["driver"] == device, actual
@@ -1636,7 +1638,9 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
         )
         assert before == after, (before, after)
         retired_status = client.request("/v1/status")["server"]
-        assert retired_status["resources"]["listeners"] == [{"address": address}]
+        assert retired_status["resources"]["listeners"] == [
+            {"address": address, "waiting_for_capacity": False}
+        ]
         for device in retired_status["resources"]["devices"]:
             retained = device["memory"]["retained"]
             if retained is not None:
@@ -1706,8 +1710,8 @@ def check_multiple_bindings(server_command, directory, catalog):
         expected_models = client.request("/v1/models")
         resources = client.request("/v1/status")["server"]["resources"]
         assert resources["listeners"] == [
-            {"address": address},
-            {"address": "unix:" + str(socket_path)},
+            {"address": address, "waiting_for_capacity": False},
+            {"address": "unix:" + str(socket_path), "waiting_for_capacity": False},
         ], resources
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
             peer.connect(str(socket_path))
