@@ -68,8 +68,9 @@ iree_status_t loom_serve_text_service_create(
 // Admission owns and physically backs the exact completion high-water, private
 // recurrent writer and partial-tail COW while pinning required parameters.
 // Shared prefixes are counted once. Excess work waits in a bounded FIFO;
-// invalid requests reject before altering retained state. Idle cache yields to
-// admission pressure, but explicit pins remain protected until deletion.
+// invalid requests reject before altering retained state and yield to ready
+// epochs before preparing another input. Idle cache yields to admission
+// pressure, but explicit pins remain protected until deletion.
 // Evicted/cancelled rows and unused completion credit trigger physical trim
 // outside ordinary decoding. Compaction admits its temporary destination union
 // before moving. state_trim events report copy, release

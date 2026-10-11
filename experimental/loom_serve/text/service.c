@@ -1134,7 +1134,8 @@ static void text_complete_retention(loom_serve_text_service_t* service) {
 }
 
 static iree_status_t text_admit_pending(loom_serve_text_service_t* service,
-                                        loom_serve_http_service_flags_t flags) {
+                                        loom_serve_http_service_flags_t flags,
+                                        bool allow_preparation) {
   // Cancellation can leave a completed full-cache exchange without its
   // incoming admission. Settle that excess here, never in terminal teardown's
   // host-only pending removal while device ownership may remain unresolved.
@@ -1150,7 +1151,9 @@ static iree_status_t text_admit_pending(loom_serve_text_service_t* service,
   while (service->pending.count && iree_status_is_ok(status)) {
     text_pending_request_t* pending = &service->pending.values[0];
     if (!service->pending.prepared.session) {
-      text_begin_preparation(service);
+      if (allow_preparation) {
+        text_begin_preparation(service);
+      }
       break;
     }
     loom_serve_text_session_t* session = service->pending.prepared.session;
@@ -1739,6 +1742,7 @@ static iree_status_t text_advance_work(void* self,
                                        bool* out_progress) {
   loom_serve_text_service_t* service = self;
   *out_progress = false;
+  bool yield_preparation = false;
   if (service->cpu.work != TEXT_CPU_WORK_NONE) {
     iree_slim_mutex_lock(&service->completion.mutex);
     if (!service->cpu.ready) {
@@ -1754,6 +1758,9 @@ static iree_status_t text_advance_work(void* self,
     *out_progress = true;
     if (work == TEXT_CPU_WORK_PREPARE) {
       status = text_complete_preparation(service, flags, status);
+      // Rejected/cancelled input leaves no prepared row. Offer already-ready
+      // rows an epoch before another CPU borrower can delay their submission.
+      yield_preparation = !service->pending.prepared.session;
     }
     IREE_RETURN_IF_ERROR(status);
     if (work == TEXT_CPU_WORK_OUTPUT) {
@@ -1835,7 +1842,7 @@ static iree_status_t text_advance_work(void* self,
   // turn. Retry this bounded FIFO even without a service-local admission event.
   const iree_host_size_t pending_count = service->pending.count;
   text_observe(service, "admit");
-  iree_status_t status = text_admit_pending(service, flags);
+  iree_status_t status = text_admit_pending(service, flags, !yield_preparation);
   *out_progress |= pending_count != service->pending.count;
   if (text_has_work(service)) {
     *out_progress = true;
@@ -1865,6 +1872,9 @@ static iree_status_t text_advance_work(void* self,
     if (count) {
       *out_progress = true;
       status = text_submit_epoch(service, shape_index, count, spans);
+    } else if (yield_preparation) {
+      // With no ready device work, rejection never stalls the remaining FIFO.
+      *out_progress |= text_begin_preparation(service);
     }
   }
   if (!text_has_work(service)) {
@@ -1904,7 +1914,7 @@ static iree_status_t text_accept(void* self,
       loom_serve_text_telemetry_begin(&service->telemetry);
   iree_status_t status = text_enqueue(service, connection, request, receipt);
   if (iree_status_is_ok(status) && !text_has_work(service)) {
-    status = text_admit_pending(service, flags);
+    status = text_admit_pending(service, flags, /*allow_preparation=*/true);
   } else if (iree_status_is_ok(status) &&
              service->completion.work == TEXT_WORK_EPOCH &&
              service->cpu.work == TEXT_CPU_WORK_NONE &&

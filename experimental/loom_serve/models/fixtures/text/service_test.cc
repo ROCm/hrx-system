@@ -107,8 +107,11 @@ class StalledClient {
 
   void Send(loom_serve_http_server_t* server, const std::string& body) {
     const auto allocator = iree_allocator_system();
-    IREE_ASSERT_OK(iree_async_proactor_create_platform(
-        iree_async_proactor_options_default(), allocator, &proactor_));
+    auto proactor_options = iree_async_proactor_options_default();
+    proactor_options.threading_mode =
+        IREE_ASYNC_PROACTOR_THREADING_CROSS_THREAD;
+    IREE_ASSERT_OK(iree_async_proactor_create_platform(proactor_options,
+                                                       allocator, &proactor_));
     iree_async_proactor_t* server_proactor = nullptr;
     IREE_ASSERT_OK(iree_async_proactor_pool_get(
         loom_serve_http_server_proactor_pool(server), 0, &server_proactor));
@@ -176,11 +179,11 @@ class StalledClient {
 
  private:
   void Poll() {
-    IREE_ASSERT_OK(
+    IREE_CHECK_OK(
         iree_async_proactor_poll(proactor_, iree_infinite_timeout(), nullptr));
   }
 
-  // Caller-polled client owner, independent of the server's shared pool.
+  // Independent client owner; one thread performs every poll and Close.
   iree_async_proactor_t* proactor_ = nullptr;
   // Owned client half; the HTTP server owns the other half.
   iree_net_carrier_t* carrier_ = nullptr;
@@ -440,6 +443,52 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     }
   }
 
+  void Observe(const loom_serve_http_service_t& interface) {
+    interface.set_observer(interface.self,
+                           {[](void* payload) {
+                              iree_notification_post(
+                                  static_cast<iree_notification_t*>(payload),
+                                  IREE_ALL_WAITERS);
+                            },
+                            loom_serve_http_server_notification(server_)});
+  }
+
+  void Accept(const loom_serve_http_service_t& interface,
+              loom_serve_http_connection_t** out_connection) {
+    auto* notification = loom_serve_http_server_notification(server_);
+    for (;;) {
+      const auto ticket = iree_notification_prepare_wait(notification);
+      const loom_serve_http_request_t* request = nullptr;
+      auto* connection = loom_serve_http_server_take_request(server_, &request);
+      if (connection) {
+        iree_notification_cancel_wait(notification);
+        *out_connection = connection;
+        IREE_ASSERT_OK(
+            interface.accept(interface.self, connection, request, 0));
+        return;
+      }
+      iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    }
+  }
+
+  template <typename Predicate>
+  void AdvanceUntil(const loom_serve_http_service_t& interface, Predicate ready,
+                    loom_serve_http_service_flags_t flags = 0) {
+    auto* notification = loom_serve_http_server_notification(server_);
+    while (!ready()) {
+      const auto ticket = iree_notification_prepare_wait(notification);
+      bool progress = false;
+      IREE_ASSERT_OK(interface.advance(interface.self, flags, &progress));
+      if (ready() || progress) {
+        iree_notification_cancel_wait(notification);
+      } else {
+        iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+    }
+  }
+
   enum class OverlapAction { kComplete, kDisconnect, kStop };
 
   void CheckOutputBackpressure(OverlapAction action) {
@@ -540,51 +589,14 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
         value, destroy);
     const auto interface = loom_serve_text_service_interface(value);
     auto* notification = loom_serve_http_server_notification(server_);
-    interface.set_observer(interface.self,
-                           {[](void* payload) {
-                              iree_notification_post(
-                                  static_cast<iree_notification_t*>(payload),
-                                  IREE_ALL_WAITERS);
-                            },
-                            notification});
-    auto accept = [&](loom_serve_http_connection_t** out_connection) {
-      for (;;) {
-        const auto ticket = iree_notification_prepare_wait(notification);
-        const loom_serve_http_request_t* request = nullptr;
-        auto* connection =
-            loom_serve_http_server_take_request(server_, &request);
-        if (connection) {
-          iree_notification_cancel_wait(notification);
-          *out_connection = connection;
-          IREE_ASSERT_OK(
-              interface.accept(interface.self, connection, request, 0));
-          return;
-        }
-        iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
-                                      IREE_TIME_INFINITE_FUTURE);
-      }
-    };
-    auto advance_until = [&](auto ready,
-                             loom_serve_http_service_flags_t flags) {
-      while (!ready()) {
-        const auto ticket = iree_notification_prepare_wait(notification);
-        bool progress = false;
-        IREE_ASSERT_OK(interface.advance(interface.self, flags, &progress));
-        if (ready() || progress) {
-          iree_notification_cancel_wait(notification);
-        } else {
-          iree_notification_commit_wait(notification, ticket,
-                                        IREE_DURATION_ZERO,
-                                        IREE_TIME_INFINITE_FUTURE);
-        }
-      }
-    };
+    Observe(interface);
     const std::string first_prompt = "abxabbax";
     const int first = Send(Request(Message("user", first_prompt), 4),
                            "X-Loom-Session: first\r\n");
     loom_serve_http_connection_t* connection = nullptr;
-    ASSERT_NO_FATAL_FAILURE(accept(&connection));
-    ASSERT_NO_FATAL_FAILURE(advance_until(
+    ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+        interface,
         [&] {
           return std::string(interface.snapshot(interface.self).phase) ==
                  "execute";
@@ -596,7 +608,7 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     const std::string second_prompt = "baxab";
     const int second = Send(Request(Message("user", second_prompt), 4),
                             "X-Loom-Session: second\r\n");
-    ASSERT_NO_FATAL_FAILURE(accept(&connection));
+    ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
     EXPECT_EQ(interface.telemetry.counters->batches, 0u);
     EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 1u);
     if (action == OverlapAction::kDisconnect) {
@@ -612,7 +624,8 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
           },
           connection, iree_infinite_timeout());
     }
-    ASSERT_NO_FATAL_FAILURE(advance_until(
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+        interface,
         [&] {
           return !interface.is_pending(interface.self) &&
                  !interface.is_active(interface.self) &&
@@ -670,45 +683,7 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
         value, destroy);
     const auto interface = loom_serve_text_service_interface(value);
     auto* notification = loom_serve_http_server_notification(server_);
-    interface.set_observer(interface.self,
-                           {[](void* payload) {
-                              iree_notification_post(
-                                  static_cast<iree_notification_t*>(payload),
-                                  IREE_ALL_WAITERS);
-                            },
-                            notification});
-    auto accept = [&](loom_serve_http_connection_t** out_connection) {
-      for (;;) {
-        const auto ticket = iree_notification_prepare_wait(notification);
-        const loom_serve_http_request_t* request = nullptr;
-        auto* connection =
-            loom_serve_http_server_take_request(server_, &request);
-        if (connection) {
-          iree_notification_cancel_wait(notification);
-          *out_connection = connection;
-          IREE_ASSERT_OK(
-              interface.accept(interface.self, connection, request, 0));
-          return;
-        }
-        iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
-                                      IREE_TIME_INFINITE_FUTURE);
-      }
-    };
-    auto advance_until = [&](auto ready,
-                             loom_serve_http_service_flags_t flags) {
-      while (!ready()) {
-        const auto ticket = iree_notification_prepare_wait(notification);
-        bool progress = false;
-        IREE_ASSERT_OK(interface.advance(interface.self, flags, &progress));
-        if (ready() || progress) {
-          iree_notification_cancel_wait(notification);
-        } else {
-          iree_notification_commit_wait(notification, ticket,
-                                        IREE_DURATION_ZERO,
-                                        IREE_TIME_INFINITE_FUTURE);
-        }
-      }
-    };
+    Observe(interface);
     auto idle = [&] {
       return !interface.is_pending(interface.self) &&
              !interface.is_active(interface.self) &&
@@ -720,14 +695,15 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
       const int client =
           Send(Request(Message("user", "abxa"), 2),
                "X-Loom-Session: conversation" + std::to_string(i) + "\r\n");
-      ASSERT_NO_FATAL_FAILURE(accept(&connection));
-      ASSERT_NO_FATAL_FAILURE(advance_until(idle, 0));
+      ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
+      ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, idle));
       EXPECT_EQ(Content(Read(client)), first);
     }
     const int replacement = Send(Request(Message("user", "bax"), 2),
                                  "X-Loom-Session: replacement\r\n");
-    ASSERT_NO_FATAL_FAILURE(accept(&connection));
-    ASSERT_NO_FATAL_FAILURE(advance_until(
+    ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+        interface,
         [&] {
           return std::string(interface.snapshot(interface.self).phase) ==
                  "retain";
@@ -749,10 +725,10 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
           },
           connection, iree_infinite_timeout());
     }
-    ASSERT_NO_FATAL_FAILURE(
-        advance_until(idle, action == OverlapAction::kStop
-                                ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING
-                                : 0));
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+        interface, idle,
+        action == OverlapAction::kStop ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING
+                                       : 0));
     EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
     if (action == OverlapAction::kStop) {
       EXPECT_TRUE(Read(replacement).empty());
@@ -762,8 +738,8 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
                       "," + Message("user", "b"),
                   2),
           "X-Loom-Session: conversation0\r\n");
-      ASSERT_NO_FATAL_FAILURE(accept(&connection));
-      ASSERT_NO_FATAL_FAILURE(advance_until(idle, 0));
+      ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
+      ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, idle));
       const auto response = Read(resumed);
       EXPECT_EQ(Content(response), Oracle::Complete("abxa" + first + "#b", 2));
       EXPECT_NE(response.find("\"cached_tokens\":5}"), std::string::npos);
@@ -1092,6 +1068,103 @@ TEST_P(SourceTextServiceTest, DisconnectReclaimsStalledOutput) {
 
 TEST_P(SourceTextServiceTest, StoppingRetiresStalledOutput) {
   CheckOutputBackpressure(OverlapAction::kStop);
+}
+
+TEST_P(SourceTextServiceTest, RejectedInputBacklogYieldsToReadyDecode) {
+  const auto options = ServiceOptions();
+  loom_serve_text_service_t* value = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_service_create(model_, &options, nullptr,
+                                                &value, allocator_));
+  auto destroy = [](loom_serve_text_service_t* service) {
+    loom_serve_text_service_destroy(service, IREE_STATUS_OK);
+  };
+  std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
+      value, destroy);
+  const auto interface = loom_serve_text_service_interface(value);
+  Observe(interface);
+
+  StalledClient stalled;
+  ASSERT_NO_FATAL_FAILURE(
+      stalled.Send(server_, Request(Message("user", "abxa"), 4)));
+  loom_serve_http_connection_t* active = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(interface, &active));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+    const auto state = interface.snapshot(interface.self);
+    return state.active_requests == 1 &&
+           !interface.is_pending(interface.self) &&
+           std::string(state.phase) == "idle";
+  }));
+  ASSERT_EQ(interface.telemetry.counters->output_tokens, 1u);
+  ASSERT_FALSE(loom_serve_http_connection_can_send(active));
+
+  // Every malformed/oversized input is claimed before another owner turn. Its
+  // CPU job can publish readiness, but cannot consume the rejection itself.
+  std::vector<int> rejected;
+  for (size_t i = 0; i < options.pending_capacity; ++i) {
+    rejected.push_back(
+        Send(i % 2 ? Request(Message("user", std::string(97, 'a'))) : "{"));
+    loom_serve_http_connection_t* connection = nullptr;
+    ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
+  }
+  EXPECT_EQ(interface.telemetry.counters->rejected, 0u);
+  EXPECT_EQ(interface.snapshot(interface.self).queued_requests,
+            rejected.size());
+
+  // Return actual network credit before allowing the owner to run. There is
+  // now a ready decode alongside the pending CPU rejection, independent of
+  // device speed or callback timing.
+  std::string response;
+  std::thread reader([&] {
+    response = stalled.Read();
+    stalled.Close();
+  });
+  iree_notification_await(
+      loom_serve_http_server_notification(server_),
+      [](void* self) {
+        return loom_serve_http_connection_can_send(
+            static_cast<loom_serve_http_connection_t*>(self));
+      },
+      active, iree_infinite_timeout());
+  EXPECT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+    return std::string(interface.snapshot(interface.self).phase) == "execute";
+  }));
+  EXPECT_LT(interface.telemetry.counters->rejected, rejected.size());
+  EXPECT_GT(interface.snapshot(interface.self).queued_requests, 0u);
+  EXPECT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+    return !interface.is_pending(interface.self) &&
+           !interface.is_active(interface.self) &&
+           !interface.snapshot(interface.self).queued_requests;
+  }));
+  reader.join();
+  EXPECT_EQ(Content(response), Oracle::Complete("abxa", 4));
+  for (const int client : rejected) {
+    EXPECT_EQ(Read(client).find("HTTP/1.1 400"), 0u);
+  }
+  EXPECT_EQ(interface.telemetry.counters->completed, 1u);
+  EXPECT_EQ(interface.telemetry.counters->rejected, rejected.size());
+  EXPECT_EQ(interface.telemetry.counters->cancelled, 0u);
+  EXPECT_EQ(interface.telemetry.counters->failed, 0u);
+  EXPECT_EQ(interface.telemetry.counters->output_tokens, 4u);
+
+  // An idle model has no epoch to yield to. Another complete error backlog
+  // must still drain without relying on a device or a new request to wake it.
+  rejected.clear();
+  for (size_t i = 0; i < options.pending_capacity; ++i) {
+    rejected.push_back(Send("{"));
+    loom_serve_http_connection_t* connection = nullptr;
+    ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
+  }
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+    return !interface.is_pending(interface.self) &&
+           !interface.snapshot(interface.self).queued_requests;
+  }));
+  for (const int client : rejected) {
+    EXPECT_EQ(Read(client).find("HTTP/1.1 400"), 0u);
+  }
+  EXPECT_EQ(interface.telemetry.counters->completed, 1u);
+  EXPECT_EQ(interface.telemetry.counters->rejected,
+            2 * options.pending_capacity);
+  interface.set_observer(interface.self, {});
 }
 
 TEST_P(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {
