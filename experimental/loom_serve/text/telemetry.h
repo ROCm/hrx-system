@@ -70,9 +70,11 @@ void loom_serve_text_telemetry_request_end(
     loom_serve_text_telemetry_t* telemetry, loom_serve_text_session_t* session,
     loom_serve_telemetry_outcome_t outcome);
 
-// Publishes final session totals and clears only its telemetry lifetime.
+// Publishes final session totals and clears its logical identity/accounting.
+// No row or request storage is reached or changed.
 void loom_serve_text_telemetry_session_end(
-    loom_serve_text_telemetry_t* telemetry, loom_serve_text_session_t* session);
+    loom_serve_text_telemetry_t* telemetry,
+    loom_serve_text_session_lifetime_t* lifetime);
 
 // Accounts completed model progress at every lifetime and publishes span/epoch
 // records plus the heartbeat's completed-work snapshot. Model results remain

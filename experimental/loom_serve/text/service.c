@@ -417,11 +417,12 @@ static loom_serve_text_session_t* text_session_select(
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
     loom_serve_text_session_t* session = &service->sessions[i];
     if (name.size &&
-        iree_string_view_equal(name, iree_make_cstring_view(session->name))) {
+        iree_string_view_equal(
+            name, iree_make_cstring_view(session->lifetime.name))) {
       return session;
     }
     if (!session->request.connection &&
-        (!oldest || session->serial < oldest->serial)) {
+        (!oldest || session->lifetime.serial < oldest->lifetime.serial)) {
       oldest = session;
     }
   }
@@ -552,8 +553,9 @@ static iree_status_t text_checkpoint_request(
     }
     loom_serve_text_session_t* session =
         text_session_select(service, session_name);
-    if (!session || !iree_string_view_equal(
-                        session_name, iree_make_cstring_view(session->name))) {
+    if (!session ||
+        !iree_string_view_equal(
+            session_name, iree_make_cstring_view(session->lifetime.name))) {
       return text_reject(
           service, connection, receipt, 404, "Not Found",
           iree_make_status(IREE_STATUS_NOT_FOUND, "session is not retained"));
@@ -657,10 +659,10 @@ static iree_status_t text_prepare_input(
         "request history does not extend the named checkpoint");
   }
   const bool retained =
-      pinned ||
-      (name.size && checkpoint.size &&
-       iree_string_view_equal(name, iree_make_cstring_view(session->name)) &&
-       iree_string_view_starts_with(prompt, checkpoint));
+      pinned || (name.size && checkpoint.size &&
+                 iree_string_view_equal(
+                     name, iree_make_cstring_view(session->lifetime.name)) &&
+                 iree_string_view_starts_with(prompt, checkpoint));
   *out_retained = pinned     ? pinned->position
                   : retained ? loom_serve_text_row_position(session->row)
                              : 0;
@@ -772,11 +774,10 @@ static iree_status_t text_complete_trim(loom_serve_text_service_t* service) {
 
 static void text_reset_session(loom_serve_text_service_t* service,
                                loom_serve_text_session_t* session) {
-  loom_serve_text_telemetry_session_end(&service->telemetry, session);
+  loom_serve_text_telemetry_session_end(&service->telemetry,
+                                        &session->lifetime);
   loom_serve_text_row_reset_retired(session->row);
   service->pool.trim.pending = true;
-  session->name[0] = 0;
-  session->serial = 0;
   loom_serve_text_chat_completion_deinitialize(&session->completion);
 }
 
@@ -847,7 +848,7 @@ static iree_status_t text_reclaim_idle(
       loom_serve_text_session_t* session = &service->sessions[i];
       if (session != selected && !session->request.connection &&
           loom_serve_text_row_position(session->row) &&
-          (!oldest || session->serial < oldest->serial)) {
+          (!oldest || session->lifetime.serial < oldest->lifetime.serial)) {
         oldest = session;
       }
     }
@@ -985,24 +986,25 @@ static iree_status_t text_admit_request(loom_serve_text_service_t* service,
   text_pending_remove(service, 0);
   if (!request.name.size ||
       !iree_string_view_equal(request.name,
-                              iree_make_cstring_view(session->name))) {
-    loom_serve_text_telemetry_session_end(&service->telemetry, session);
+                              iree_make_cstring_view(session->lifetime.name))) {
+    loom_serve_text_telemetry_session_end(&service->telemetry,
+                                          &session->lifetime);
   }
   if (request.name.size) {
-    memcpy(session->name, request.name.data, request.name.size);
+    memcpy(session->lifetime.name, request.name.data, request.name.size);
   }
-  session->name[request.name.size] = 0;
-  session->serial = request.receipt.serial;
-  if (!session->telemetry.id) {
-    session->telemetry.id = session->serial;
+  session->lifetime.name[request.name.size] = 0;
+  session->lifetime.serial = request.receipt.serial;
+  if (!session->lifetime.id) {
+    session->lifetime.id = session->lifetime.serial;
     loom_serve_text_session_record_t value = {
-        .session = session->telemetry.id, .row = session - service->sessions};
-    memcpy(value.name, session->name, sizeof(value.name));
+        .session = session->lifetime.id, .row = session - service->sessions};
+    memcpy(value.name, session->lifetime.name, sizeof(value.name));
     loom_serve_text_record(service->telemetry.stream,
-                           &LOOM_SERVE_TEXT_SESSION_BEGIN, session->serial,
-                           &value, sizeof(value));
+                           &LOOM_SERVE_TEXT_SESSION_BEGIN,
+                           session->lifetime.serial, &value, sizeof(value));
   }
-  ++session->telemetry.counters.requests;
+  ++session->lifetime.counters.requests;
   session->request.counters.requests = 1;
   session->request.connection = request.connection;
   session->request.chat = request.chat;
@@ -1019,7 +1021,7 @@ static iree_status_t text_admit_request(loom_serve_text_service_t* service,
     const loom_serve_text_pool_usage_t pool =
         loom_serve_text_model_pool_usage(service->model);
     const loom_serve_text_admission_record_t value = {
-        .session = session->telemetry.id,
+        .session = session->lifetime.id,
         .row = session - service->sessions,
         .retained_tokens = retained_count,
         .appended_tokens = input_count,
@@ -1031,7 +1033,7 @@ static iree_status_t text_admit_request(loom_serve_text_service_t* service,
         .pool_reserved_tokens = pool.pending,
         .pool_resident_tokens = pool.capacity - pool.available - pool.pending};
     loom_serve_text_record(service->telemetry.stream, &LOOM_SERVE_TEXT_ADMIT,
-                           session->serial, &value, sizeof(value));
+                           session->lifetime.serial, &value, sizeof(value));
   }
   return status;
 }
@@ -1262,8 +1264,8 @@ static iree_status_t text_prepare_ready(loom_serve_text_service_t* service,
         session->request.connection,
         iree_string_builder_view(&session->packet));
     if (!iree_status_is_ok(status)) {
-      loom_serve_text_telemetry_diagnose(&service->telemetry, session->serial,
-                                         status);
+      loom_serve_text_telemetry_diagnose(&service->telemetry,
+                                         session->lifetime.serial, status);
       text_request_cancel(service, session);
       service->pool.trim.pending = true;
       loom_serve_text_row_reset_retired(session->row);
@@ -1405,7 +1407,7 @@ static void text_complete_output(loom_serve_text_service_t* service) {
     if (session->request.diagnostic.code) {
       loom_serve_telemetry_record_t record = {
           .time_ns = iree_time_now(),
-          .request = session->serial,
+          .request = session->lifetime.serial,
           .event = &LOOM_SERVE_TELEMETRY_ERROR,
           .data.error = session->request.diagnostic};
       loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
@@ -1492,7 +1494,8 @@ static void text_stop(loom_serve_text_service_t* service,
       }
       text_request_cancel(service, session);
     }
-    loom_serve_text_telemetry_session_end(&service->telemetry, session);
+    loom_serve_text_telemetry_session_end(&service->telemetry,
+                                          &session->lifetime);
   }
   while (service->pending.count) {
     text_pending_cancel(service, 0);

@@ -260,12 +260,12 @@ void loom_serve_text_telemetry_request_end(
     loom_serve_text_telemetry_t* telemetry, loom_serve_text_session_t* session,
     loom_serve_telemetry_outcome_t outcome) {
   loom_serve_telemetry_count_outcome(&session->request.counters, outcome);
-  loom_serve_telemetry_count_outcome(&session->telemetry.counters, outcome);
+  loom_serve_telemetry_count_outcome(&session->lifetime.counters, outcome);
   const loom_serve_text_receipt_t receipt = {
-      session->serial,
+      session->lifetime.serial,
       session->request.start_time - session->request.queue_duration};
   loom_serve_text_request_record_t value = {
-      .session = session->telemetry.id,
+      .session = session->lifetime.id,
       .counters = session->request.counters,
       .retained_tokens = session->request.retained_count,
       .position = loom_serve_text_row_position(session->row),
@@ -280,25 +280,25 @@ void loom_serve_text_telemetry_request_end(
            strlen(session->request.finish_reason));
   }
   loom_serve_text_record(telemetry->stream, &LOOM_SERVE_TEXT_REQUEST_STATS,
-                         session->serial, &value, sizeof(value));
+                         session->lifetime.serial, &value, sizeof(value));
   loom_serve_text_telemetry_end(telemetry, receipt, outcome,
                                 value.counters.input_tokens, iree_ok_status());
 }
 
 void loom_serve_text_telemetry_session_end(
     loom_serve_text_telemetry_t* telemetry,
-    loom_serve_text_session_t* session) {
-  if (!session->telemetry.id) {
+    loom_serve_text_session_lifetime_t* lifetime) {
+  if (!lifetime->id) {
     return;
   }
   const loom_serve_text_session_end_record_t value = {
-      .session = session->telemetry.id,
-      .counters = session->telemetry.counters,
-      .position = session->telemetry.position,
-      .resident_tokens = session->telemetry.resident_tokens};
+      .session = lifetime->id,
+      .counters = lifetime->counters,
+      .position = lifetime->position,
+      .resident_tokens = lifetime->resident_tokens};
   loom_serve_text_record(telemetry->stream, &LOOM_SERVE_TEXT_SESSION_END, 0,
                          &value, sizeof(value));
-  memset(&session->telemetry, 0, sizeof(session->telemetry));
+  memset(lifetime, 0, sizeof(*lifetime));
 }
 
 void loom_serve_text_telemetry_epoch(
@@ -338,15 +338,15 @@ void loom_serve_text_telemetry_epoch(
     session->request.counters.input_tokens += results[i].consumed_count;
     session->request.counters.output_tokens += results[i].output_count;
     ++session->request.counters.batches;
-    session->telemetry.counters.input_tokens += results[i].consumed_count;
-    session->telemetry.counters.output_tokens += results[i].output_count;
-    ++session->telemetry.counters.batches;
-    session->telemetry.position = loom_serve_text_row_position(session->row);
-    session->telemetry.resident_tokens =
+    session->lifetime.counters.input_tokens += results[i].consumed_count;
+    session->lifetime.counters.output_tokens += results[i].output_count;
+    ++session->lifetime.counters.batches;
+    session->lifetime.position = loom_serve_text_row_position(session->row);
+    session->lifetime.resident_tokens =
         loom_serve_text_row_pool_usage(session->row);
     const loom_serve_text_span_record_t value = {
         .epoch = epoch,
-        .session = session->telemetry.id,
+        .session = session->lifetime.id,
         .row = spans[i].row_index,
         .position = positions[i],
         .tokens = spans[i].token_count,
@@ -358,7 +358,7 @@ void loom_serve_text_telemetry_epoch(
         .prefill = prefill,
         .select = select};
     loom_serve_text_record(telemetry->stream, &LOOM_SERVE_TEXT_SPAN,
-                           session->serial, &value, sizeof(value));
+                           session->lifetime.serial, &value, sizeof(value));
   }
   iree_slim_mutex_lock(&heartbeat->mutex);
   state->completed_epochs += device_epochs;

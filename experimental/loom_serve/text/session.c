@@ -80,9 +80,10 @@ iree_status_t loom_serve_text_session_begin(loom_serve_text_session_t* session,
         "no-cache\r\nConnection: close\r\n\r\n");
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_text_chat_event(
-        model_name, session->serial, IREE_SV("{\"role\":\"assistant\"}"),
-        iree_string_view_empty(), &session->packet);
+    status =
+        loom_serve_text_chat_event(model_name, session->lifetime.serial,
+                                   IREE_SV("{\"role\":\"assistant\"}"),
+                                   iree_string_view_empty(), &session->packet);
   }
   return status;
 }
@@ -104,7 +105,7 @@ static iree_status_t text_emit_text(loom_serve_text_session_t* session,
                               start, end - start)));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(scratch, "}"));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_event(
-      model_name, session->serial, iree_string_builder_view(scratch),
+      model_name, session->lifetime.serial, iree_string_builder_view(scratch),
       iree_string_view_empty(), &session->packet));
   session->request.emitted_length = end;
   return iree_ok_status();
@@ -133,7 +134,7 @@ static iree_status_t text_complete(loom_serve_text_session_t* session,
   iree_string_builder_reset(tool_calls);
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_complete(
       &session->request.chat, iree_string_builder_view(&session->response),
-      session->request.emitted_length, session->serial, tool_calls,
+      session->request.emitted_length, session->lifetime.serial, tool_calls,
       &session->completion));
   IREE_RETURN_IF_ERROR(text_emit_text(session, model_name,
                                       session->completion.text_end, scratch));
@@ -145,7 +146,7 @@ static iree_status_t text_complete(loom_serve_text_session_t* session,
         (int)iree_string_builder_size(tool_calls),
         iree_string_builder_buffer(tool_calls)));
     IREE_RETURN_IF_ERROR(loom_serve_text_chat_event(
-        model_name, session->serial, iree_string_builder_view(scratch),
+        model_name, session->lifetime.serial, iree_string_builder_view(scratch),
         iree_string_view_empty(), &session->packet));
   }
   session->request.finish_reason = tool_count ? "tool_calls"
@@ -153,12 +154,12 @@ static iree_status_t text_complete(loom_serve_text_session_t* session,
                                        ? "stop"
                                        : "length";
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_event(
-      model_name, session->serial, IREE_SV("{}"),
+      model_name, session->lifetime.serial, IREE_SV("{}"),
       iree_make_cstring_view(session->request.finish_reason),
       &session->packet));
   if (session->request.chat.include_usage) {
     IREE_RETURN_IF_ERROR(loom_serve_text_chat_usage(
-        model_name, session->serial,
+        model_name, session->lifetime.serial,
         session->request.retained_count + session->request.input_count,
         session->request.retained_count, session->request.output_count,
         &session->packet));

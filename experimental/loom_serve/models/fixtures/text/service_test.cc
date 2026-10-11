@@ -780,11 +780,30 @@ TEST_P(SourceTextServiceTest, TelemetryWrapDoesNotBlockTextOrChangeCounters) {
       Read(Send(Request(Message("user", "a")), "X-Loom-Session: bad space\r\n"))
           .find("HTTP/1.1 400"),
       0u);
+  // Recycle every row. The retained root's final lifetime includes both turns,
+  // while its old execution slot starts a distinct identity for the newcomer.
+  for (size_t row = 0; row < 4; ++row) {
+    EXPECT_EQ(Content(Read(Send(Request(Message("user", "abxa"), 2),
+                                "X-Loom-Session: replacement" +
+                                    std::to_string(row) + "\r\n"))),
+              Oracle::Complete("abxa", 2));
+    input_tokens += 5;
+    drain();
+  }
   const std::string latest = drain();
   const std::string totals =
-      R"("requests":45,"completed":44,"rejected":1,"cancelled":0,"failed":0,"input_tokens":)" +
-      std::to_string(input_tokens) + R"(,"output_tokens":84,)";
+      R"("requests":49,"completed":48,"rejected":1,"cancelled":0,"failed":0,"input_tokens":)" +
+      std::to_string(input_tokens) + R"(,"output_tokens":92,)";
   EXPECT_NE(latest.find(totals), std::string::npos) << latest;
+  const size_t endpoint = events.find(R"("session":41,"position":9,)");
+  ASSERT_NE(endpoint, std::string::npos) << events;
+  const std::string lifetime =
+      events.substr(endpoint, events.find('\n', endpoint) - endpoint);
+  EXPECT_NE(
+      lifetime.find(
+          R"("counters":{"requests":2,"completed":2,"rejected":0,"cancelled":0,"failed":0,"input_tokens":9,"output_tokens":4,)"),
+      std::string::npos)
+      << lifetime;
   for (const char* event :
        {"prepared", "admit", "epoch", "span", "request_stats", "session_begin",
         "session_end", "checkpoint_pin", "checkpoint_release"}) {

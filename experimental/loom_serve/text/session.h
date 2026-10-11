@@ -23,6 +23,25 @@ typedef enum loom_serve_text_request_phase_e {
   LOOM_SERVE_TEXT_REQUEST_FINISHING,
 } loom_serve_text_request_phase_t;
 
+// Logical identity and accounting owned by the serialized model service. This
+// value contains no row, decoder, request or device borrow. Moving it transfers
+// one lifetime; row reuse alone does not imply a new session lifetime.
+typedef struct loom_serve_text_session_lifetime_t {
+  // Local client cache key; empty means an untagged request.
+  char name[65];
+  // Last admitted request serial, also the idle-session LRU ordering key.
+  uint64_t serial;
+  // ID assigned by the first admitted request; zero before first admission.
+  uint64_t id;
+  // Cumulative work across retained continuations, independent of log
+  // retention.
+  loom_serve_telemetry_counters_t counters;
+  // Last completed endpoint, retained even when replacement resets the row.
+  iree_host_size_t position;
+  // Owned positions at that endpoint, including any shared prefix.
+  iree_host_size_t resident_tokens;
+} loom_serve_text_session_lifetime_t;
+
 // Host continuation and request output owned by one serialized model service.
 // Source VM calls and output decoding may run on a finite CPU job only while
 // that job exclusively borrows this session and the model invocation.
@@ -31,21 +50,8 @@ typedef struct loom_serve_text_session_t {
   iree_allocator_t allocator;
   // Borrowed private device row in the shared model residency.
   loom_serve_text_row_t* row;
-  // Local client cache key; empty means an untagged request.
-  char name[65];
-  // Last admitted request serial, also the idle-row LRU ordering key.
-  uint64_t serial;
-  // Owner-only lifetime accounting, independent of row reuse and log retention.
-  struct {
-    // ID assigned by the first admitted request; zero before first admission.
-    uint64_t id;
-    // Cumulative work across retained continuations.
-    loom_serve_telemetry_counters_t counters;
-    // Last completed endpoint, retained even when replacement resets the row.
-    iree_host_size_t position;
-    // Row-owned positions at that endpoint, including any shared prefix.
-    iree_host_size_t resident_tokens;
-  } telemetry;
+  // Owned logical session currently assigned to this reusable execution row.
+  loom_serve_text_session_lifetime_t lifetime;
   // Canonical completed client history validating the retained raw state.
   loom_serve_text_chat_completion_t completion;
   // Preallocated streaming decoder storage reused between requests.
