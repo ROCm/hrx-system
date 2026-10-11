@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/vm/function.h"
+#include "iree/vm/native_call.h"
 #include "iree/vm/ref.h"
 
 #ifdef __cplusplus
@@ -350,6 +351,19 @@ typedef struct iree_vm_frame_layout_t {
   // Requested power-of-two payload alignment.
   iree_host_size_t storage_alignment;
 } iree_vm_frame_layout_t;
+
+// Returns the linked native scratch requirement for a verified local function.
+// The caller acquires this storage before starting execution.
+IREE_API_EXPORT iree_host_size_t iree_vm_execution_native_scratch_size(
+    const iree_vm_module_execution_t* execution, uint16_t function_ordinal);
+
+// Invokes one linked native entry synchronously using trusted caller banks and
+// sufficient scratch. The verified callsite ordinal belongs to the running
+// function. Fills |call->record| from immutable linkage; no packet, child
+// frame, argument walk or invocation-driver transition is involved.
+IREE_API_EXPORT iree_status_t iree_vm_execution_call_native(
+    const iree_vm_module_execution_t* execution, uint32_t callsite_ordinal,
+    iree_vm_native_call_t* call);
 
 // No-fail payload cleanup invoked exactly once before its frame is removed by
 // normal completion or terminal unwind.

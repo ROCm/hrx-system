@@ -117,12 +117,31 @@ typedef struct iree_vm_program_initializer_t {
   const iree_vm_program_callable_abi_t* callable_abi;
 } iree_vm_program_initializer_t;
 
+// Fully resolved synchronous entry and its immutable caller data.
+typedef struct iree_vm_native_binding_t {
+  // Resolved synchronous entry; cardinalities do not specialize it.
+  iree_vm_native_call_fn_t entry;
+  // Borrowed immutable provider context anchored by the linked module.
+  const void* user_data;
+  // Verified immutable caller record anchored by its linked module.
+  const uint32_t* record;
+} iree_vm_native_binding_t;
+
+typedef struct iree_vm_native_linkage_t {
+  // Module-local bound callsites in declaration order.
+  iree_vm_native_binding_t* bindings;
+  // Maximum native scratch bytes by caller function ordinal.
+  iree_host_size_t* function_scratch_sizes;
+} iree_vm_native_linkage_t;
+
 // Immutable program-local view of one retained generic module.
 struct iree_vm_linked_module_t {
   // Retained immutable module implementation.
   iree_vm_module_t* module;
   // Immutable module-local resolved import target words.
   const uint64_t* import_target_bits;
+  // Optional native callsite linkage; absent without native calls.
+  const iree_vm_native_linkage_t* native;
   // First entry in the program's flat callable mapping array.
   uint32_t callable_base;
   // Max-aligned process-state offset, or UINT32_MAX for no state.
@@ -155,10 +174,10 @@ struct iree_vm_program_t {
   iree_host_size_t process_storage_size;
 };
 
-static_assert(sizeof(void*) != 8 || sizeof(iree_vm_linked_module_t) <= 24,
-              "64-bit linked modules must fit in 24 bytes");
-static_assert(sizeof(void*) != 4 || sizeof(iree_vm_linked_module_t) <= 16,
-              "32-bit linked modules must fit in 16 bytes");
+static_assert(sizeof(void*) != 8 || sizeof(iree_vm_linked_module_t) <= 32,
+              "64-bit linked modules must fit in 32 bytes");
+static_assert(sizeof(void*) != 4 || sizeof(iree_vm_linked_module_t) <= 20,
+              "32-bit linked modules must fit in 20 bytes");
 static_assert(sizeof(void*) != 8 ||
                   sizeof(iree_vm_program_scalar_field_abi_t) <= 16,
               "64-bit scalar field ABIs must fit in 16 bytes");

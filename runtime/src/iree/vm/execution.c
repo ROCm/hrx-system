@@ -8,6 +8,21 @@
 
 #include "iree/vm/invocation_storage.h"
 
+IREE_API_EXPORT iree_host_size_t iree_vm_execution_native_scratch_size(
+    const iree_vm_module_execution_t* execution, uint16_t function_ordinal) {
+  return execution->linked_module->native
+      ->function_scratch_sizes[function_ordinal];
+}
+
+IREE_API_EXPORT iree_status_t iree_vm_execution_call_native(
+    const iree_vm_module_execution_t* execution, uint32_t callsite_ordinal,
+    iree_vm_native_call_t* call) {
+  const iree_vm_native_binding_t* binding =
+      &execution->linked_module->native->bindings[callsite_ordinal];
+  call->record = binding->record;
+  return binding->entry(binding->user_data, call);
+}
+
 static iree_vm_ref_t* iree_vm_call_ref_argument_slot(
     const iree_vm_call_packet_t* call, uint16_t ordinal) {
   return ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT

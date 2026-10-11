@@ -100,6 +100,32 @@ iree_c_embed_data(
 )
 
 iree_c_embed_data(
+    name = "native_call_testdata",
+    testonly = True,
+    srcs = ["testdata/native_calls.vmasm"],
+    c_file_output = "native_call_testdata.c",
+    flatten = True,
+    h_file_output = "native_call_testdata.h",
+    identifier = "iree_vm_bytecode_native_call_testdata",
+)
+
+iree_runtime_cc_test(
+    name = "native_call_test",
+    srcs = ["native_call_test.cc"],
+    deps = [
+        ":disassembler",
+        ":module",
+        ":module_fixture",
+        ":native_call_testdata",
+        ":verifier",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm:test_support",
+    ],
+)
+
+iree_c_embed_data(
     name = "launch_config_testdata",
     testonly = True,
     srcs = ["testdata/launch_config.vmasm"],

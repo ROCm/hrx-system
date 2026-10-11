@@ -290,6 +290,36 @@ static iree_status_t iree_vm_bytecode_map_imports(
   return iree_ok_status();
 }
 
+static iree_status_t iree_vm_bytecode_map_native_calls(
+    iree_const_byte_span_t span,
+    iree_vm_bytecode_native_call_table_t* out_table) {
+  iree_vm_bytecode_cursor_t cursor = {span, 0, "NativeCalls section"};
+  const iree_vm_bytecode_v0_native_calls_header_t* header = NULL;
+  IREE_VM_BYTECODE_CURSOR_TAKE_ARRAY(
+      &cursor, 1, iree_vm_bytecode_v0_native_calls_header_t, &header);
+  IREE_VM_BYTECODE_CURSOR_TAKE_ARRAY(&cursor, header->callsite_count_u32,
+                                     iree_vm_bytecode_v0_native_callsite_row_t,
+                                     &out_table->rows);
+  IREE_VM_BYTECODE_CURSOR_TAKE_REMAINING_ARRAY(
+      &cursor, uint32_t, &out_table->words, &out_table->word_count);
+  out_table->count = header->callsite_count_u32;
+  uint32_t word_offset = 0;
+  for (uint32_t i = 0; i < out_table->count; ++i) {
+    const iree_vm_bytecode_v0_native_callsite_row_t* row = &out_table->rows[i];
+    if (row->word_offset_u32 != word_offset ||
+        row->word_count_u32 > out_table->word_count - word_offset) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "native callsite word ranges are invalid");
+    }
+    word_offset += row->word_count_u32;
+  }
+  if (!out_table->count || word_offset != out_table->word_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "native callsites do not cover their section");
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_vm_bytecode_map_exports(
     iree_const_byte_span_t span, iree_vm_bytecode_export_table_t* out_table) {
   iree_vm_bytecode_cursor_t cursor = {span, 0, "Exports section"};
@@ -596,7 +626,7 @@ iree_status_t iree_vm_bytecode_module_plan_build(
     }
 
     const bool is_known =
-        row->section_type_u16 <= IREE_VM_BYTECODE_SECTION_METADATA;
+        row->section_type_u16 <= IREE_VM_BYTECODE_SECTION_NATIVE_CALLS;
     if (is_known) {
       const uint32_t descriptor =
           iree_vm_bytecode_section_layouts[row->section_type_u16];
@@ -693,6 +723,10 @@ iree_status_t iree_vm_bytecode_module_plan_build(
       IREE_VM_BYTECODE_MAP_SECTION(
           IREE_VM_BYTECODE_SECTION_METADATA,
           iree_vm_bytecode_map_metadata(payload, &out_plan->layout.metadata));
+      IREE_VM_BYTECODE_MAP_SECTION(
+          IREE_VM_BYTECODE_SECTION_NATIVE_CALLS,
+          iree_vm_bytecode_map_native_calls(payload,
+                                            &out_plan->layout.native_calls));
       default:
         break;
     }

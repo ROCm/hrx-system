@@ -960,6 +960,22 @@ static iree_status_t iree_vm_bytecode_verify_exports_against_functions(
   return iree_ok_status();
 }
 
+static iree_status_t iree_vm_bytecode_verify_native_calls(
+    const iree_vm_bytecode_module_layout_t* layout) {
+  for (uint32_t i = 0; i < layout->native_calls.count; ++i) {
+    const iree_vm_bytecode_v0_native_callsite_row_t* row =
+        &layout->native_calls.rows[i];
+    IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record(
+        IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_CALLSITE_ROW, (const uint8_t*)row,
+        layout));
+    if (row->function_ordinal_u16 >= layout->functions.count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "native callsite function is out of range");
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_vm_bytecode_verify_module_layout(
     const iree_vm_bytecode_module_plan_t* plan) {
   const iree_vm_bytecode_module_layout_t* layout = &plan->layout;
@@ -976,6 +992,7 @@ iree_status_t iree_vm_bytecode_verify_module_layout(
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_rodata(layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_presentation(layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_metadata(layout));
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_native_calls(layout));
   IREE_RETURN_IF_ERROR(
       iree_vm_bytecode_verify_exports_against_functions(layout));
   return iree_ok_status();
@@ -1304,6 +1321,13 @@ static bool iree_vm_bytecode_verify_indirect_call(
       direct_ref_move_mask);
 }
 
+static bool iree_vm_bytecode_verify_native_call(
+    const iree_vm_bytecode_instruction_context_t* context, uint32_t ordinal) {
+  return ordinal < context->layout->native_calls.count &&
+         context->layout->native_calls.rows[ordinal].function_ordinal_u16 ==
+             (uint32_t)(context->function - context->layout->functions.rows);
+}
+
 static bool iree_vm_bytecode_verify_instruction(
     const uint8_t* record, uint32_t record_offset, uint8_t record_length,
     const iree_vm_bytecode_instruction_context_t* context) {
@@ -1334,6 +1358,7 @@ static iree_status_t iree_vm_bytecode_verify_function_instructions(
   iree_vm_bytecode_control_flow_t final_control_flow =
       IREE_VM_BYTECODE_CONTROL_FLOW_INVALID;
   bool has_call = false;
+  bool has_native_call = false;
   while (record_offset < bytecode.data_length) {
     const uint8_t opcode = bytecode.data[record_offset];
     const uint16_t descriptor =
@@ -1372,6 +1397,8 @@ static iree_status_t iree_vm_bytecode_verify_function_instructions(
       block_offsets[block_count++] = record_offset;
     }
     has_call |= control_flow == IREE_VM_BYTECODE_CONTROL_FLOW_CALL;
+    has_native_call |=
+        control_flow == IREE_VM_BYTECODE_CONTROL_FLOW_NATIVE_CALL;
     final_control_flow = control_flow;
     record_offset += record_length;
   }
@@ -1395,6 +1422,13 @@ static iree_status_t iree_vm_bytecode_verify_function_instructions(
                             "function %" PRIu32
                             " falls through past its final record",
                             function_ordinal);
+  }
+  if (has_native_call !=
+      iree_any_bit_set(function->flags_u16,
+                       IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_NATIVE_CALL)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "function native call summary does not match its records");
   }
 
   const iree_vm_bytecode_instruction_context_t context = {

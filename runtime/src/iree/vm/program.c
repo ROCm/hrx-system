@@ -636,6 +636,59 @@ static iree_status_t iree_vm_program_select_initializer(
 // Program lifetime and public queries
 //===----------------------------------------------------------------------===//
 
+static iree_status_t iree_vm_program_link_native_calls(
+    iree_vm_program_t* program) {
+  for (uint32_t i = 0; i < program->linked_module_count; ++i) {
+    const iree_vm_linked_module_t* caller = &program->linked_modules[i];
+    if (!caller->native) {
+      continue;
+    }
+    const iree_vm_native_module_t* declarations =
+        caller->module->descriptor->native;
+    for (iree_host_size_t j = 0; j < declarations->callsite_count; ++j) {
+      const iree_vm_native_callsite_t* callsite = &declarations->callsites[j];
+      iree_host_size_t ordinal = 0;
+      const iree_vm_linked_module_t* provider =
+          iree_vm_program_lookup_linked_module(program, callsite->module_name,
+                                               &ordinal);
+      const iree_vm_native_module_t* native =
+          provider ? provider->module->descriptor->native : NULL;
+      iree_host_size_t low = 0;
+      iree_host_size_t high = native ? native->export_count : 0;
+      while (low < high) {
+        const iree_host_size_t middle = low + (high - low) / 2;
+        if (iree_string_view_compare(native->exports[middle].name,
+                                     callsite->export_name) < 0) {
+          low = middle + 1;
+        } else {
+          high = middle;
+        }
+      }
+      if (!native || low == native->export_count ||
+          !iree_string_view_equal(native->exports[low].name,
+                                  callsite->export_name)) {
+        return iree_make_status(
+            IREE_STATUS_NOT_FOUND, "native entry '%.*s.%.*s' is unavailable",
+            (int)callsite->module_name.size, callsite->module_name.data,
+            (int)callsite->export_name.size, callsite->export_name.data);
+      }
+      const iree_vm_native_export_t* target = &native->exports[low];
+      iree_host_size_t scratch_size = 0;
+      IREE_RETURN_IF_ERROR(iree_vm_native_call_verify(
+          target, callsite, program->host_allocator, &scratch_size));
+      iree_host_size_t* function_scratch =
+          &caller->native->function_scratch_sizes[callsite->function_ordinal];
+      *function_scratch = iree_max(*function_scratch, scratch_size);
+      caller->native->bindings[j] = (iree_vm_native_binding_t){
+          .entry = target->entry,
+          .user_data = target->user_data,
+          .record = callsite->record,
+      };
+    }
+  }
+  return iree_ok_status();
+}
+
 static void iree_vm_program_destroy(iree_vm_program_t* program) {
   for (iree_host_size_t i = 0; i < program->linked_module_count; ++i) {
     iree_vm_module_release(program->linked_modules[i].module);
@@ -661,6 +714,9 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
   const iree_host_size_t module_count = modules.libraries.count + 1;
   iree_host_size_t import_count = 0;
   iree_host_size_t callable_count = 0;
+  iree_host_size_t native_module_count = 0;
+  iree_host_size_t native_callsite_count = 0;
+  iree_host_size_t native_function_count = 0;
   iree_vm_module_callable_field_counts_t field_counts = {0};
   for (iree_host_size_t i = 0; i < module_count; ++i) {
     iree_vm_module_t* module =
@@ -672,6 +728,19 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
     }
     const iree_vm_module_callable_field_counts_t module_fields =
         module->descriptor->counts.callable_fields;
+    const iree_vm_native_module_t* native = module->descriptor->native;
+    if (native && native->callsite_count) {
+      ++native_module_count;
+      if (!iree_host_size_checked_add(native_callsite_count,
+                                      native->callsite_count,
+                                      &native_callsite_count) ||
+          !iree_host_size_checked_add(native_function_count,
+                                      module->descriptor->counts.function_count,
+                                      &native_function_count)) {
+        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "native callsite count overflows host size");
+      }
+    }
     if (!iree_host_size_checked_add(import_count,
                                     module->descriptor->counts.import_count,
                                     &import_count) ||
@@ -705,6 +774,9 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
   iree_host_size_t scalar_fields_offset = 0;
   iree_host_size_t ref_fields_offset = 0;
   iree_host_size_t function_fields_offset = 0;
+  iree_host_size_t native_linkage_offset = 0;
+  iree_host_size_t native_bindings_offset = 0;
+  iree_host_size_t native_scratch_sizes_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       iree_sizeof_struct(iree_vm_program_t), &total_size,
       IREE_STRUCT_FIELD_ALIGNED(module_count, iree_vm_linked_module_t,
@@ -730,7 +802,16 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
       IREE_STRUCT_FIELD_ALIGNED(
           field_counts.function_count, iree_vm_program_function_field_abi_t,
           iree_alignof(iree_vm_program_function_field_abi_t),
-          &function_fields_offset)));
+          &function_fields_offset),
+      IREE_STRUCT_FIELD_ALIGNED(native_module_count, iree_vm_native_linkage_t,
+                                iree_alignof(iree_vm_native_linkage_t),
+                                &native_linkage_offset),
+      IREE_STRUCT_FIELD_ALIGNED(native_callsite_count, iree_vm_native_binding_t,
+                                iree_alignof(iree_vm_native_binding_t),
+                                &native_bindings_offset),
+      IREE_STRUCT_FIELD_ALIGNED(native_function_count, iree_host_size_t,
+                                iree_alignof(iree_host_size_t),
+                                &native_scratch_sizes_offset)));
 
   iree_vm_program_t* program = NULL;
   IREE_RETURN_IF_ERROR(
@@ -806,6 +887,14 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
 
   iree_host_size_t import_base = 0;
   iree_host_size_t callable_base = 0;
+  iree_vm_native_linkage_t* native_linkage =
+      (iree_vm_native_linkage_t*)((uint8_t*)program + native_linkage_offset);
+  iree_vm_native_binding_t* native_bindings =
+      (iree_vm_native_binding_t*)((uint8_t*)program + native_bindings_offset);
+  iree_host_size_t* native_scratch_sizes =
+      (iree_host_size_t*)((uint8_t*)program + native_scratch_sizes_offset);
+  memset(native_scratch_sizes, 0,
+         native_function_count * sizeof(*native_scratch_sizes));
   for (iree_host_size_t i = 0; i < module_count && iree_status_is_ok(status);
        ++i) {
     iree_vm_linked_module_t* linked_module = &program->linked_modules[i];
@@ -814,6 +903,16 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
     linked_module->import_target_bits =
         local_import_count ? &import_target_bits[import_base] : NULL;
     linked_module->callable_base = (uint32_t)callable_base;
+    const iree_vm_native_module_t* native =
+        linked_module->module->descriptor->native;
+    if (native && native->callsite_count) {
+      *native_linkage =
+          (iree_vm_native_linkage_t){native_bindings, native_scratch_sizes};
+      linked_module->native = native_linkage++;
+      native_bindings += native->callsite_count;
+      native_scratch_sizes +=
+          linked_module->module->descriptor->counts.function_count;
+    }
     import_base += local_import_count;
     callable_base +=
         linked_module->module->descriptor->counts.callable_type_count;
@@ -825,6 +924,9 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
     iree_vm_program_link_callable_types(program, callable_cursors,
                                         field_storage);
     status = iree_vm_program_resolve_imports(program, import_target_bits);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_program_link_native_calls(program);
   }
   if (iree_status_is_ok(status)) {
     status = iree_vm_program_select_initializer(program);

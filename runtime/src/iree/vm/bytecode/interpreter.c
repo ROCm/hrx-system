@@ -65,9 +65,11 @@
 static bool iree_vm_bytecode_function_is_scalar_leaf(
     const iree_vm_bytecode_v0_function_row_t* function,
     const iree_vm_bytecode_v0_signature_row_t* signature) {
-  return !iree_any_bit_set(function->flags_u16,
-                           IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD |
-                               IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL) &&
+  return !iree_any_bit_set(
+             function->flags_u16,
+             IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD |
+                 IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL |
+                 IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_NATIVE_CALL) &&
          function->local_byte_length_u16 == 0 &&
          function->ref_register_count_u16 == 0 &&
          function->local_ref_count_u32 == 0 &&
@@ -492,6 +494,21 @@ iree_vm_bytecode_dispatch_control_call: {
     state->program_counter = record_data + sizeof(*record);
   }
   return status;
+}
+iree_vm_bytecode_dispatch_control_call_native: {
+  const iree_vm_bytecode_control_call_native_t* record =
+      (const iree_vm_bytecode_control_call_native_t*)record_data;
+  iree_vm_native_call_t call = {
+      .values = values,
+      .refs = refs,
+      .local_bytes = local_bytes,
+      .scratch = (uint8_t*)iree_host_align(
+          (uintptr_t)(local_bytes + function->local_byte_length_u16),
+          iree_max_align_t),
+  };
+  IREE_RETURN_IF_ERROR(iree_vm_execution_call_native(
+      execution, record->callsite_ordinal_u32, &call));
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_control_call_native_t);
 }
 iree_vm_bytecode_dispatch_control_call_indirect: {
   const iree_vm_bytecode_control_call_indirect_t* record =
@@ -1544,8 +1561,23 @@ iree_status_t iree_vm_bytecode_interpreter_start(
                                      &state, out_outcome);
   }
 
-  const iree_vm_bytecode_frame_layout_t layout =
+  iree_vm_bytecode_frame_layout_t layout =
       iree_vm_bytecode_calculate_frame_layout(function);
+  if (iree_any_bit_set(function->flags_u16,
+                       IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_NATIVE_CALL)) {
+    const iree_host_size_t scratch_size = iree_vm_execution_native_scratch_size(
+        &params->execution, params->function_ordinal);
+    // Verified frame extents already fit the host. Only the provider-sized
+    // native tail can overflow or exhaust the invocation stack.
+    const iree_host_size_t scratch_offset =
+        iree_host_align(layout.frame.storage_size, iree_max_align_t);
+    if (!iree_host_size_checked_add(scratch_offset, scratch_size,
+                                    &layout.frame.storage_size)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "native scratch overflows the invocation frame");
+    }
+    layout.frame.storage_alignment = iree_max_align_t;
+  }
   iree_vm_frame_t* frame = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_invocation_push_frame(
       params, layout.frame, iree_vm_bytecode_frame_cleanup, &frame));

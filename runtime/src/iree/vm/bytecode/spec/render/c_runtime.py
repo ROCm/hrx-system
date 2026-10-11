@@ -491,6 +491,8 @@ def _direct_instruction_rule_c(
             f"{related_load(0)}, {related_load(1)})",
             None,
         )
+    if kind == core_rules.RecordRuleKind.NATIVE_CALL:
+        return f"iree_vm_bytecode_verify_native_call(context, {load})", None
     if kind == core_rules.RecordRuleKind.CALL_INDIRECT:
         return (
             "iree_vm_bytecode_verify_indirect_call"

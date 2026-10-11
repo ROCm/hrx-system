@@ -375,6 +375,7 @@ def _instruction_relation(instruction: isa.Instruction):
                 (_InstructionRelationKind.FUNCTION_ADDRESS, rule.fields, 0)
             )
         elif rule.kind in {
+            instruction_rules.RecordRuleKind.NATIVE_CALL,
             instruction_rules.RecordRuleKind.SWITCH_TARGETS,
             instruction_rules.RecordRuleKind.VALUE_REGISTER_RANGE,
             instruction_rules.RecordRuleKind.VALUE_REGISTER_FORMAT_RANGE,

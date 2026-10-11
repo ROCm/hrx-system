@@ -184,6 +184,18 @@ typedef struct iree_vm_bytecode_metadata_table_t {
   iree_host_size_t value_data_length;
 } iree_vm_bytecode_metadata_table_t;
 
+// Mapped native callsite declarations and their packed word records.
+typedef struct iree_vm_bytecode_native_call_table_t {
+  // Native callsite rows in ordinal order.
+  const iree_vm_bytecode_v0_native_callsite_row_t* rows;
+  // Packed immutable callsite word tail.
+  const uint32_t* words;
+  // Number of callsite rows.
+  uint32_t count;
+  // Number of words in the tail.
+  uint32_t word_count;
+} iree_vm_bytecode_native_call_table_t;
+
 // Complete bounded view mapped from one module image.
 typedef struct iree_vm_bytecode_module_layout_t {
   // Canonical image envelope.
@@ -214,6 +226,8 @@ typedef struct iree_vm_bytecode_module_layout_t {
   iree_vm_bytecode_presentation_table_t presentation;
   // Optional typed metadata table.
   iree_vm_bytecode_metadata_table_t metadata;
+  // Synchronous native callsite declarations.
+  iree_vm_bytecode_native_call_table_t native_calls;
 } iree_vm_bytecode_module_layout_t;
 
 // Private construction state at the start of every nonempty process slice.

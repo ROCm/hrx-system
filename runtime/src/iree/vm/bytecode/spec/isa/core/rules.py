@@ -180,6 +180,7 @@ class FieldRule:
 
 
 class RecordRuleKind:
+    NATIVE_CALL = RuleKind("native_call", field_count=1)
     CALL = RuleKind("call", field_count=3)
     CALL_INDIRECT = RuleKind("call_indirect", field_count=3)
     SWITCH_TARGETS = RuleKind("switch_targets", field_count=2)
@@ -217,6 +218,7 @@ CONTROL_CONTRACTS = {
         Suspension.TARGET_DEPENDENT,
         (RecordRuleKind.CALL, RecordRuleKind.CALL_INDIRECT),
     ),
+    ControlFlow.NATIVE_CALL: (0, Suspension.NEVER, (RecordRuleKind.NATIVE_CALL,)),
 }
 CONTROL_RULES = frozenset(
     kind for _, _, kinds in CONTROL_CONTRACTS.values() for kind in kinds

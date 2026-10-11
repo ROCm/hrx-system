@@ -532,6 +532,45 @@ static iree_status_t iree_vm_module_validate_semantics(
       module, scope, module->descriptor->counts.metadata_count);
 }
 
+static iree_status_t iree_vm_module_validate_native(
+    const iree_vm_module_descriptor_t* descriptor) {
+  const iree_vm_native_module_t* native = descriptor->native;
+  if (!native) {
+    return iree_ok_status();
+  }
+  if ((native->export_count && !native->exports) ||
+      (native->callsite_count && !native->callsites) ||
+      native->callsite_count > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "native module directory is invalid");
+  }
+  for (iree_host_size_t i = 0; i < native->export_count; ++i) {
+    const iree_vm_native_export_t* entry = &native->exports[i];
+    IREE_RETURN_IF_ERROR(
+        iree_vm_module_validate_symbol(entry->name, "native export name"));
+    if (!entry->schema || !entry->entry ||
+        (i && iree_string_view_compare(native->exports[i - 1].name,
+                                       entry->name) >= 0)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "native exports require schemas, entries and "
+                              "strictly increasing names");
+    }
+  }
+  for (iree_host_size_t i = 0; i < native->callsite_count; ++i) {
+    const iree_vm_native_callsite_t* callsite = &native->callsites[i];
+    IREE_RETURN_IF_ERROR(iree_vm_module_validate_symbol(
+        callsite->module_name, "native target module name"));
+    IREE_RETURN_IF_ERROR(iree_vm_module_validate_symbol(
+        callsite->export_name, "native target export name"));
+    if (callsite->function_ordinal >= descriptor->counts.function_count ||
+        callsite->storage.value_count > IREE_VM_NATIVE_CALL_LOCAL_VALUE) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "native callsite function/storage is invalid");
+    }
+  }
+  return iree_ok_status();
+}
+
 IREE_API_EXPORT iree_status_t
 iree_vm_module_initialize(const iree_vm_module_vtable_t* vtable,
                           const iree_vm_module_descriptor_t* descriptor,
@@ -544,6 +583,7 @@ iree_vm_module_initialize(const iree_vm_module_vtable_t* vtable,
   out_module->descriptor = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_module_validate_vtable(vtable));
   IREE_RETURN_IF_ERROR(iree_vm_module_validate_descriptor(descriptor));
+  IREE_RETURN_IF_ERROR(iree_vm_module_validate_native(descriptor));
 
   out_module->vtable = vtable;
   out_module->descriptor = descriptor;

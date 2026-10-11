@@ -278,13 +278,35 @@ def build_sections(specification: Specification) -> tuple[SectionText, ...]:
             ),
         ),
     )
-    return sections
+    return sections + (
+        SectionText(
+            section["native_calls"],
+            (
+                GrammarRun(
+                    "native_callsite", RecordRunCount(records.NATIVE_CALLSITE_ROW)
+                ),
+            ),
+            (
+                *_header_and_rows(
+                    records.NATIVE_CALLS_HEADER,
+                    "callsite_count_u32",
+                    records.NATIVE_CALLSITE_ROW,
+                ),
+                RecordLayout(records.NATIVE_CALL_WORD, RemainingLayoutCount()),
+            ),
+        ),
+    )
 
 
 def build_derived_fields() -> tuple[DerivedField, ...]:
     """Builds record fields mechanically derived during assembly."""
 
     return (
+        RecordCountDerivation(
+            records.NATIVE_CALLS_HEADER,
+            "callsite_count_u32",
+            records.NATIVE_CALLSITE_ROW,
+        ),
         RecordCountDerivation(
             records.IMAGE_HEADER,
             "section_count_u16",

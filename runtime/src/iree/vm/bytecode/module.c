@@ -190,6 +190,7 @@ static iree_status_t iree_vm_bytecode_module_create_from_plan(
   iree_host_size_t ref_types_offset = 0;
   iree_host_size_t rodata_roots_offset = 0;
   iree_host_size_t rodata_copy_offset = 0;
+  iree_host_size_t native_callsites_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       iree_sizeof_struct(iree_vm_bytecode_image_t), &total_size,
       IREE_STRUCT_FIELD(module_name.size, char, &name_offset),
@@ -200,7 +201,10 @@ static iree_status_t iree_vm_bytecode_module_create_from_plan(
                                 iree_alignof(iree_vm_buffer_t),
                                 &rodata_roots_offset),
       IREE_STRUCT_FIELD_ALIGNED(plan->rodata_storage.copy_length, uint8_t,
-                                iree_max_align_t, &rodata_copy_offset)));
+                                iree_max_align_t, &rodata_copy_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          plan->layout.native_calls.count, iree_vm_native_callsite_t,
+          iree_alignof(iree_vm_native_callsite_t), &native_callsites_offset)));
 
   const iree_host_size_t slab_alignment =
       iree_max(iree_max_align_t, plan->rodata_storage.copy_alignment);
@@ -247,6 +251,39 @@ static iree_status_t iree_vm_bytecode_module_create_from_plan(
           : 0;
   image->descriptor.counts.callable_fields = plan->callable_fields;
   image->descriptor.process_storage_size = plan->process_layout.total_size;
+  image->descriptor.native = NULL;
+  if (plan->layout.native_calls.count) {
+    iree_vm_native_callsite_t* callsites =
+        (iree_vm_native_callsite_t*)((uint8_t*)image + native_callsites_offset);
+    image->native = (iree_vm_native_module_t){
+        .callsites = callsites,
+        .callsite_count = plan->layout.native_calls.count,
+    };
+    image->descriptor.native = &image->native;
+    for (uint32_t i = 0; i < plan->layout.native_calls.count; ++i) {
+      const iree_vm_bytecode_v0_native_callsite_row_t* row =
+          &plan->layout.native_calls.rows[i];
+      const iree_vm_bytecode_v0_function_row_t* function =
+          &plan->layout.functions.rows[row->function_ordinal_u16];
+      callsites[i] = (iree_vm_native_callsite_t){
+          .module_name = iree_vm_bytecode_string_at(&plan->layout.strings,
+                                                    row->module_name_u16),
+          .export_name = iree_vm_bytecode_string_at(&plan->layout.strings,
+                                                    row->export_name_u16),
+          .version = row->version_u32,
+          .function_ordinal = row->function_ordinal_u16,
+          .record = plan->layout.native_calls.words + row->word_offset_u32,
+          .word_count = row->word_count_u32,
+          .storage =
+              {
+                  .value_count = function->value_register_count_u16,
+                  .ref_count = function->ref_register_count_u16 +
+                               function->local_ref_count_u32,
+                  .local_byte_length = function->local_byte_length_u16,
+              },
+      };
+    }
+  }
 
   iree_status_t status = iree_vm_bytecode_module_resolve_ref_types(
       environment, &image->layout, image->resolved_ref_types);

@@ -157,6 +157,58 @@ REQUIREMENT_ROW = _record(
     ),
 )
 
+NATIVE_CALLS_HEADER = _record(
+    "native_calls_header",
+    "Counts synchronous native callsites.",
+    "The rows precede a packed word tail in callsite ordinal order.",
+    (
+        _field(
+            "callsite_count_u32", U32, "Number of callsite rows.", FieldRule.ANY_BITS
+        ),
+    ),
+)
+
+NATIVE_CALLSITE_ROW = _record(
+    "native_callsite_row",
+    "Names a required native entry and its immutable operand record.",
+    "Word ranges partition the tail in row order. The provider verifies the record at linking.",
+    (
+        _field(
+            "function_ordinal_u16", U16, "Caller function ordinal.", FieldRule.ANY_BITS
+        ),
+        _field(
+            "module_name_u16",
+            U16,
+            "Required target module name.",
+            FieldRuleUse(FieldRule.ORDINAL, data=OrdinalDomain.STRING_NONEMPTY),
+        ),
+        _field(
+            "export_name_u16",
+            U16,
+            "Required native export name.",
+            FieldRuleUse(FieldRule.ORDINAL, data=OrdinalDomain.STRING_NONEMPTY),
+        ),
+        _field("zero_padding_u16", U16, "Canonical zero padding.", FieldRule.ZERO),
+        _field("version_u32", U32, "Exact native schema version.", FieldRule.ANY_BITS),
+        _field(
+            "word_offset_u32",
+            U32,
+            "First word in the section tail.",
+            FieldRule.ANY_BITS,
+        ),
+        _field(
+            "word_count_u32", U32, "Complete record word count.", FieldRule.ANY_BITS
+        ),
+    ),
+)
+
+NATIVE_CALL_WORD = _record(
+    "native_call_word",
+    "One immutable native callsite word.",
+    "Provider schemas assign selector, count and child-offset semantics at linking.",
+    (_field("value_u32", U32, "Record word.", FieldRule.ANY_BITS),),
+)
+
 STRINGS_HEADER = _record(
     "strings_header",
     "Counts the module's length-delimited UTF-8 strings.",
@@ -525,7 +577,7 @@ FUNCTION_ROW = _record(
             "flags_u16",
             U16,
             "Function behavior flags.",
-            FieldRuleUse(FieldRule.ALLOWED_BITS, values=(3,)),
+            FieldRuleUse(FieldRule.ALLOWED_BITS, values=(7,)),
         ),
         _field(
             "bytecode_offset_u32",

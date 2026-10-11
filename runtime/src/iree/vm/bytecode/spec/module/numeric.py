@@ -90,6 +90,7 @@ FUNCTION_FLAG = _table(
     (
         ("may_yield", 1 << 0, "The function may yield."),
         ("has_call", 1 << 1, "The function contains a direct or indirect call."),
+        ("has_native_call", 1 << 2, "The function contains a synchronous native call."),
     ),
     "Statically derived bytecode function behavior flags.",
 )

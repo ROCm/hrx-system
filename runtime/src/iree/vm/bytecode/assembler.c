@@ -1673,6 +1673,7 @@ iree_vm_bytecode_assembler_parse_function_body(
   uint32_t block_count = 0;
   uint8_t final_control_flow = IREE_VM_BYTECODE_ASSEMBLER_CONTROL_SEQUENTIAL;
   bool has_call = false;
+  bool has_native_call = false;
   while (!iree_vm_bytecode_assembler_try_char(assembler, '}')) {
     iree_string_view_t block_name;
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_sigil_name(
@@ -1711,6 +1712,8 @@ iree_vm_bytecode_assembler_parse_function_body(
       }
       is_first_instruction = false;
       has_call |= control_flow == IREE_VM_BYTECODE_ASSEMBLER_CONTROL_CALL;
+      has_native_call |=
+          control_flow == IREE_VM_BYTECODE_ASSEMBLER_CONTROL_NATIVE_CALL;
       final_control_flow = control_flow;
     }
     if (is_first_instruction) {
@@ -1735,6 +1738,13 @@ iree_vm_bytecode_assembler_parse_function_body(
                                    IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL)) {
     return iree_vm_bytecode_assembler_error(
         assembler, "function call summary does not match its instructions");
+  }
+  if (has_native_call !=
+      iree_any_bit_set(function_flags,
+                       IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_NATIVE_CALL)) {
+    return iree_vm_bytecode_assembler_error(
+        assembler,
+        "function native call summary does not match its instructions");
   }
 
   const uint64_t values[5] = {

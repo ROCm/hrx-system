@@ -24,6 +24,7 @@ iree_runtime_cc_library(
         "invocation.c",
         "invocation_storage.h",
         "module.c",
+        "native_call.c",
         "process.c",
         "process_storage.h",
         "program.c",
@@ -41,6 +42,7 @@ iree_runtime_cc_library(
         "function.h",
         "invocation.h",
         "module.h",
+        "native_call.h",
         "process.h",
         "program.h",
         "ref.h",
@@ -144,6 +146,16 @@ iree_runtime_cc_test(
     srcs = ["module_test.cc"],
     deps = [
         ":module_test_provider",
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "native_call_test",
+    srcs = ["native_call_test.cc"],
+    deps = [
         ":vm",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

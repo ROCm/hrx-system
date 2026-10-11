@@ -20,6 +20,7 @@ iree_cc_library(
     "function.h"
     "invocation.h"
     "module.h"
+    "native_call.h"
     "process.h"
     "program.h"
     "ref.h"
@@ -34,6 +35,7 @@ iree_cc_library(
     "invocation.c"
     "invocation_storage.h"
     "module.c"
+    "native_call.c"
     "process.c"
     "process_storage.h"
     "program.c"
@@ -154,6 +156,17 @@ iree_cc_test(
     "module_test.cc"
   DEPS
     ::module_test_provider
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    native_call_test
+  SRCS
+    "native_call_test.cc"
+  DEPS
     ::vm
     iree::testing::gtest
     iree::testing::gtest_main

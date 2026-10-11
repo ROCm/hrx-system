@@ -40,6 +40,39 @@ iree_c_embed_data(
 
 iree_c_embed_data(
   NAME
+    native_call_testdata
+  SRCS
+    "testdata/native_calls.vmasm"
+  C_FILE_OUTPUT
+    "native_call_testdata.c"
+  H_FILE_OUTPUT
+    "native_call_testdata.h"
+  IDENTIFIER
+    "iree_vm_bytecode_native_call_testdata"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    native_call_test
+  SRCS
+    "native_call_test.cc"
+  DEPS
+    ::disassembler
+    ::module
+    ::module_fixture
+    ::native_call_testdata
+    ::verifier
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::test_support
+)
+
+iree_c_embed_data(
+  NAME
     launch_config_testdata
   SRCS
     "testdata/launch_config.vmasm"

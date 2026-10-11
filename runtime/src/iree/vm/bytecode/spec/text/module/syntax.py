@@ -132,6 +132,41 @@ def build_grammars(specification: Specification) -> tuple[RecordGrammar, ...]:
 
     return (
         _grammar(
+            "native_callsite",
+            records.NATIVE_CALLSITE_ROW,
+            "native_callsite function(@",
+            _symbol(
+                records.NATIVE_CALLSITE_ROW,
+                "function_ordinal_u16",
+                SymbolDomain.FUNCTION,
+            ),
+            ") module(@",
+            _symbol(
+                records.NATIVE_CALLSITE_ROW, "module_name_u16", SymbolDomain.STRING
+            ),
+            ") export(@",
+            _symbol(
+                records.NATIVE_CALLSITE_ROW, "export_name_u16", SymbolDomain.STRING
+            ),
+            ") version(",
+            _scalar(records.NATIVE_CALLSITE_ROW, "version_u32"),
+            ") ",
+            _body(
+                "native_word",
+                records.NATIVE_CALL_WORD,
+                records.NATIVE_CALLSITE_ROW,
+                base_field_name="word_offset_u32",
+                count_field_name="word_count_u32",
+            ),
+        ),
+        _grammar(
+            "native_word",
+            records.NATIVE_CALL_WORD,
+            "word ",
+            _scalar(records.NATIVE_CALL_WORD, "value_u32", ScalarRadix.HEXADECIMAL),
+            keyword="word",
+        ),
+        _grammar(
             "requirement",
             records.REQUIREMENT_ROW,
             "require page(",

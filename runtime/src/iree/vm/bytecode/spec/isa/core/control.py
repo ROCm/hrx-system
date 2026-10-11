@@ -742,6 +742,50 @@ CONTROL_FAIL = Instruction(
     ),
 )
 
+CONTROL_CALL_NATIVE = Instruction(
+    opcode=0x0F,
+    mnemonic="control.call.native",
+    since=CORE_0,
+    family=CONTROL_FAMILY,
+    summary="Synchronously invokes a linked structured native entry.",
+    fields=(
+        _padding(element_count=3),
+        _field(
+            "callsite_ordinal_u32",
+            U32,
+            "Module-local callsite ordinal.",
+            FieldRole.IMMEDIATE,
+            FieldRule.ANY_BITS,
+        ),
+    ),
+    semantics=None,
+    behavior="Borrows the caller banks and preallocated scratch without a child-call packet or driver transition.",
+    success=(
+        "The entry publishes results after native input use and execution advances eight bytes.",
+    ),
+    assembly="control.call.native {callsite_ordinal = 3}",
+    pseudocode="status = native_calls[callsite_ordinal_u32](caller_storage, scratch);",
+    control_flow=ControlFlow.NATIVE_CALL,
+    rules=(
+        RecordRule(
+            RecordRuleKind.NATIVE_CALL,
+            ("callsite_ordinal_u32",),
+            summary="The callsite exists and belongs to this function.",
+        ),
+    ),
+    state_effects=(StateEffect(StateAccess.UNKNOWN, StateResource.ANY),),
+    failures=(
+        FailureCase(
+            "provider status",
+            "Dynamic admission or native execution fails.",
+            "The invocation unwinds; no module retirement is performed.",
+        ),
+    ),
+    ownership=(
+        "Input owners stay in caller slots. Result replacement occurs only after all input use.",
+    ),
+)
+
 CONTROL_INSTRUCTIONS = (
     CONTROL_BLOCK,
     CONTROL_RETURN,
@@ -757,4 +801,5 @@ CONTROL_INSTRUCTIONS = (
     CONTROL_CALL_INDIRECT,
     CONTROL_ASSERT,
     CONTROL_FAIL,
+    CONTROL_CALL_NATIVE,
 )

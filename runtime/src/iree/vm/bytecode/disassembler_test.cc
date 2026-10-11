@@ -134,7 +134,7 @@ TEST_F(DisassemblerModuleTest, RejectsUnsupportedPresentationBeforeWriting) {
       reinterpret_cast<iree_vm_bytecode_v0_section_directory_row_t*>(header +
                                                                      1);
   sections[header->section_count_u16 - 1].section_type_u16 =
-      IREE_VM_BYTECODE_SECTION_METADATA + 1;
+      IREE_VM_BYTECODE_SECTION_NATIVE_CALLS + 1;
 
   CountingSink sink;
   iree_vm_bytecode_disassembler_write_callback_t callback = {CountWrites,

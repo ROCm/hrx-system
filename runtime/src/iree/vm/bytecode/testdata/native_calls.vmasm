@@ -1,0 +1,73 @@
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @run = "run"
+    string @failure = "failure"
+    string @native = "native.test"
+    string @replace = "replace"
+    string @fail = "fail"
+    string @vm = "vm"
+    string @buffer = "buffer"
+  }
+  section ref_types alignment(8) {
+    namespace @refs name(@vm) {
+      ref_type @buffer_type name(@buffer)
+    }
+  }
+  section signatures alignment(8) {
+    signature @signature (i64, ref(@buffer_type)) -> (i64, ref(@buffer_type))
+  }
+  section callable_types alignment(8) {
+    callable @callable flags([]) depth(0) : @signature
+  }
+  section exports alignment(8) {
+    export @failure_export name(@failure) : @callable = @failure_function
+    export @run_export name(@run) : @callable = @run_function
+  }
+  section functions alignment(8) {
+    func @run_function : @callable flags([has_native_call]) frame(local_bytes = 8, value_registers = 2, ref_registers = 1, function_registers = 0, local_refs = 1, local_functions = 0) {
+    ^bb0:
+      control.block
+      stack.store.i64 #v0, %v0.x1
+      %v1 = constant.s16 11
+      ref.stack.store.move %r0, #r0
+      control.call.native {callsite_ordinal = 0}
+      %r0 = ref.stack.load.move #r0
+      control.return
+    }
+    func @failure_function : @callable flags([has_native_call]) frame(local_bytes = 8, value_registers = 2, ref_registers = 1, function_registers = 0, local_refs = 1, local_functions = 0) {
+    ^bb0:
+      control.block
+      stack.store.i64 #v0, %v0.x1
+      %v1 = constant.s16 11
+      ref.stack.store.move %r0, #r0
+      control.call.native {callsite_ordinal = 1}
+      control.call.native {callsite_ordinal = 2}
+      %r0 = ref.stack.load.move #r0
+      control.return
+    }
+  }
+  section native_calls alignment(8) {
+    native_callsite function(@run_function) module(@native) export(@replace) version(0) {
+      word 0x80000000
+      word 0x00000001
+      word 0x00000000
+      word 0x00000001
+      word 0x00000002
+      word 0x00000006
+      word 0x00000000
+      word 0x00000001
+    }
+    native_callsite function(@failure_function) module(@native) export(@replace) version(0) {
+      word 0x80000000
+      word 0x00000001
+      word 0x00000000
+      word 0x00000001
+      word 0x00000002
+      word 0x00000006
+      word 0x00000000
+      word 0x00000001
+    }
+    native_callsite function(@failure_function) module(@native) export(@fail) version(0) {
+    }
+  }
+}

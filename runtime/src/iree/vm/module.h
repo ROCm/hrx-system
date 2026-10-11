@@ -12,6 +12,7 @@
 
 #include "iree/base/api.h"
 #include "iree/vm/execution.h"
+#include "iree/vm/native_call.h"
 #include "iree/vm/ref.h"
 #include "iree/vm/scalar.h"
 
@@ -236,6 +237,9 @@ typedef struct iree_vm_module_descriptor_t {
   iree_vm_module_counts_t counts;
   // Max-aligned opaque bytes required in every process.
   iree_host_size_t process_storage_size;
+  // Optional immutable synchronous-native exports and callsite declarations.
+  // These are separate from ordinary callable imports/exports.
+  const iree_vm_native_module_t* native;
 } iree_vm_module_descriptor_t;
 
 //===----------------------------------------------------------------------===//

@@ -25,6 +25,7 @@ enum iree_vm_bytecode_control_flow_e {
   IREE_VM_BYTECODE_CONTROL_FLOW_SWITCH = 7,
   IREE_VM_BYTECODE_CONTROL_FLOW_CALL = 8,
   IREE_VM_BYTECODE_CONTROL_FLOW_FAIL = 9,
+  IREE_VM_BYTECODE_CONTROL_FLOW_NATIVE_CALL = 10,
 };
 typedef uint8_t iree_vm_bytecode_control_flow_t;
 

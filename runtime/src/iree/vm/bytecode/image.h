@@ -29,6 +29,8 @@ typedef struct iree_vm_bytecode_image_t {
   iree_vm_bytecode_module_storage_t storage;
   // Generic immutable module descriptor.
   iree_vm_module_descriptor_t descriptor;
+  // Optional native callsite directory pointing into the coallocated tail.
+  iree_vm_native_module_t native;
   // Complete verified mapped image layout.
   iree_vm_bytecode_module_layout_t layout;
   // Exact opaque per-process storage layout.

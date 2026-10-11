@@ -48,6 +48,7 @@ class ControlFlow(enum.Enum):
     CONDITIONAL_BRANCH = "conditional_branch"
     SWITCH = "switch"
     CALL = "call"
+    NATIVE_CALL = "native_call"
     FAIL = "fail"
 
 

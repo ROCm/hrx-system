@@ -766,6 +766,30 @@ METADATA = _section(
     required_flags=1,
 )
 
+NATIVE_CALLS = _section(
+    "native_calls",
+    0x000E,
+    "Declares synchronous native callsites independently of ordinary imports.",
+    "A nonempty row array precedes a word tail partitioned exactly in row order. "
+    "Each row names a caller function and a required module/native-export pair "
+    "with an exact schema version. Program linking verifies selectors, nested "
+    "ranges and scratch requirements against the provider before execution. "
+    "Native calls cannot suspend, reenter VM execution, or retain operand views. "
+    "They are not first-class function values.",
+    (
+        module_records.NATIVE_CALLS_HEADER,
+        module_records.NATIVE_CALLSITE_ROW,
+        module_records.NATIVE_CALL_WORD,
+    ),
+    (
+        _constraint(
+            "extent",
+            "Rows and word ranges consume the section exactly; caller functions exist.",
+            _ref(module_records.NATIVE_CALLSITE_ROW),
+        ),
+    ),
+)
+
 SECTIONS = (
     REQUIREMENTS,
     STRINGS,
@@ -780,6 +804,7 @@ SECTIONS = (
     RODATA,
     PRESENTATION,
     METADATA,
+    NATIVE_CALLS,
 )
 
 MODULE_CONSTRAINTS = (
@@ -896,9 +921,10 @@ _LIFECYCLE_CONTRACT = (
     "ownership path but relies on its compiler producer for canonical section and "
     "instruction semantics. It is valid only when that producer is part of the trusted "
     "computing base; files, caches, network data, and other externally supplied images "
-    "require verified creation. Only the module name, flat resolved-type handles, and "
-    "rodata root objects need variable allocation tails; declarations and instructions "
-    "remain mapped and require no decoded-table copies. Structural verification proves "
+    "require verified creation. The module name, flat resolved-type handles, rodata "
+    "root objects and native callsite declarations need variable allocation tails. "
+    "Ordinary declarations, native operand records and instructions remain mapped. "
+    "Structural verification proves "
     "bytes, versions, ordinals, extents, declarations, instruction records, and exact "
     "control targets. It deliberately does not build a call graph, propagate may-yield, "
     "prove reachability or POD definite assignment, or compute ref-ownership dataflow. "
