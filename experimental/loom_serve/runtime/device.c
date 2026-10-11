@@ -196,8 +196,14 @@ static iree_status_t loom_serve_device_initialize(
   IREE_RETURN_IF_ERROR(
       iree_hal_slab_pool_create(group->handle, scope, &storage_options,
                                 group->allocator, &device->storage_pool));
+  iree_hal_asan_pool_options_t asan_options = {0};
+  const iree_hal_device_sanitizer_spec_t* sanitizer =
+      iree_hal_device_spec_sanitizer(iree_hal_device_spec(device->handle));
+  if (iree_any_bit_set(sanitizer->flags, IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN)) {
+    asan_options = sanitizer->asan.pool_options;
+  }
   IREE_RETURN_IF_ERROR(loom_serve_workspace_create(
-      group->handle, device->dispatch, device->transfer, &device->workspace,
+      group->handle, device->storage_pool, &asan_options, &device->workspace,
       group->allocator));
   if (options->backing == LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
     IREE_RETURN_IF_ERROR(loom_serve_memory_pool_create(

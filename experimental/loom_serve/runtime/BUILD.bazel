@@ -160,6 +160,24 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "workspace_test",
+    srcs = ["workspace_test.cc"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_task",
+    ]),
+    deps = [
+        ":device",
+        ":execution",
+        ":host",
+        ":workspace",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "device",
     srcs = ["device.c"],

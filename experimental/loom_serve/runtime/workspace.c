@@ -50,13 +50,13 @@ struct loom_serve_workspace_scope_t {
 };
 
 struct loom_serve_workspace_t {
-  // Ownership shared by the device and its independent execution domains.
+  // Ownership shared by resource bindings and independent execution domains.
   iree_atomic_ref_count_t ref_count;
   // Allocation policy for this owner and cold generation metadata.
   iree_allocator_t allocator;
   // Retained group enclosing native owners and captured memory scopes.
   iree_hal_device_group_t* group;
-  // Immutable allocation-shaping policy of the dispatch device.
+  // Immutable allocation-shaping policy selected for all consumers.
   iree_hal_asan_pool_options_t asan;
   // Owned native backing source shared by all geometry generations.
   iree_hal_pool_t* backing_pool;
@@ -177,9 +177,9 @@ void loom_serve_workspace_release(loom_serve_workspace_t* workspace) {
 }
 
 iree_status_t loom_serve_workspace_create(
-    iree_hal_device_group_t* group, iree_hal_queue_t* dispatch_queue,
-    iree_hal_queue_t* transfer_queue, loom_serve_workspace_t** out_workspace,
-    iree_allocator_t host_allocator) {
+    iree_hal_device_group_t* group, iree_hal_pool_t* backing_pool,
+    const iree_hal_asan_pool_options_t* asan_options,
+    loom_serve_workspace_t** out_workspace, iree_allocator_t host_allocator) {
   *out_workspace = NULL;
   loom_serve_workspace_t* workspace = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*workspace),
@@ -189,36 +189,11 @@ iree_status_t loom_serve_workspace_create(
   workspace->allocator = host_allocator;
   workspace->group = group;
   iree_hal_device_group_retain(workspace->group);
-  const iree_hal_queue_family_t* dispatch_family =
-      iree_hal_queue_family(dispatch_queue);
-  const iree_hal_queue_family_t* transfer_family =
-      iree_hal_queue_family(transfer_queue);
-  iree_hal_device_t* device = iree_hal_queue_family_device(dispatch_family);
-  const iree_hal_device_sanitizer_spec_t* sanitizer =
-      iree_hal_device_spec_sanitizer(iree_hal_device_spec(device));
-  if (iree_any_bit_set(sanitizer->flags, IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN)) {
-    workspace->asan = sanitizer->asan.pool_options;
-  }
-  const iree_hal_pool_family_access_t families[] = {
-      {.family = dispatch_family,
-       .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER},
-      {.family = transfer_family, .usage = IREE_HAL_BUFFER_USAGE_TRANSFER},
-  };
-  const iree_hal_pool_scope_t scope = {
-      .family_count = dispatch_family == transfer_family ? 1 : 2,
-      .families = families,
-  };
-  const iree_hal_slab_pool_options_t options = {
-      .trace_name = IREE_SVL("loom_serve_workspace_backing"),
-  };
-  iree_status_t status = iree_hal_slab_pool_create(
-      group, scope, &options, host_allocator, &workspace->backing_pool);
-  if (iree_status_is_ok(status)) {
-    *out_workspace = workspace;
-  } else {
-    loom_serve_workspace_release(workspace);
-  }
-  return status;
+  workspace->asan = *asan_options;
+  workspace->backing_pool = backing_pool;
+  iree_hal_pool_retain(workspace->backing_pool);
+  *out_workspace = workspace;
+  return iree_ok_status();
 }
 
 iree_status_t loom_serve_workspace_reserve(loom_serve_workspace_t* workspace,

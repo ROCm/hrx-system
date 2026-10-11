@@ -20,14 +20,16 @@ extern "C" {
 // still use them.
 typedef struct loom_serve_workspace_t loom_serve_workspace_t;
 
-// Retains the sealed group and qualifies storage/transfer on the dispatch
-// family plus transfer on the transfer family. Both queues belong to the
-// group. No public host mapping or physical backing is acquired at creation.
-// Dispatch-device sanitizer policy also applies to suballocated workspaces.
+// Retains the sealed group and an already qualified backing pool. The caller
+// selects the pool's complete access scope and a sanitizer policy compatible
+// with all of its consumers. The policy is copied and HAL qualifies it when
+// constructing child allocators. No physical backing is acquired at creation.
+// Sharing the workspace across execution domains establishes neither ordering
+// nor visibility; each consumer must satisfy the backing pool's contract.
 iree_status_t loom_serve_workspace_create(
-    iree_hal_device_group_t* group, iree_hal_queue_t* dispatch_queue,
-    iree_hal_queue_t* transfer_queue, loom_serve_workspace_t** out_workspace,
-    iree_allocator_t host_allocator);
+    iree_hal_device_group_t* group, iree_hal_pool_t* backing_pool,
+    const iree_hal_asan_pool_options_t* asan_options,
+    loom_serve_workspace_t** out_workspace, iree_allocator_t host_allocator);
 void loom_serve_workspace_retain(loom_serve_workspace_t* workspace);
 // Final outer application teardown, after model consumers have retired. Joins
 // any remaining queue allocation bookkeeping before releasing its source pools.

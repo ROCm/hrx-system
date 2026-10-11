@@ -60,10 +60,6 @@ class ControlTest
         SelectQueue(device_, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
     ASSERT_NE(dispatch, nullptr);
     ASSERT_NE(transfer, nullptr);
-    IREE_ASSERT_OK(loom_serve_workspace_create(group_, dispatch, transfer,
-                                               &workspace_, allocator_));
-    IREE_ASSERT_OK(loom_serve_execution_create(dispatch, transfer, workspace_,
-                                               allocator_, &execution_));
     const auto* family = iree_hal_queue_family(dispatch);
     const auto* transfer_family = iree_hal_queue_family(transfer);
     const iree_hal_pool_family_access_t families[] = {
@@ -80,6 +76,17 @@ class ControlTest
     const iree_hal_slab_pool_options_t pool_options = {};
     IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &pool_options,
                                              allocator_, &storage_pool_));
+    iree_hal_asan_pool_options_t asan_options = {};
+    const auto* sanitizer =
+        iree_hal_device_spec_sanitizer(iree_hal_device_spec(device_));
+    if (iree_any_bit_set(sanitizer->flags,
+                         IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN)) {
+      asan_options = sanitizer->asan.pool_options;
+    }
+    IREE_ASSERT_OK(loom_serve_workspace_create(
+        group_, storage_pool_, &asan_options, &workspace_, allocator_));
+    IREE_ASSERT_OK(loom_serve_execution_create(dispatch, transfer, workspace_,
+                                               allocator_, &execution_));
     directory_ =
         std::filesystem::path(FLAG_control_sources).parent_path().string();
     IREE_ASSERT_OK(loom_serve_jit_create(

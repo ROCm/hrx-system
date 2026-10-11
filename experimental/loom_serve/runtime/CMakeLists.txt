@@ -175,6 +175,24 @@ loom_cc_library(
   PUBLIC
 )
 
+if(IREE_HAL_DRIVER_TASK)
+loom_cc_test(
+  NAME
+    workspace_test
+  SRCS
+    "workspace_test.cc"
+  DEPS
+    ::device
+    ::execution
+    ::host
+    ::workspace
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
 set(_device_platform_copts "")
 if(IREE_HAL_DRIVER_TASK)
   list(APPEND _device_platform_copts "-DLOOM_SERVE_DRIVER_TASK=1")

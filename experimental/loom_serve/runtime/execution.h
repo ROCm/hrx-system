@@ -21,9 +21,11 @@ extern "C" {
 // Completion values belong to this object and the method's named timeline.
 typedef struct loom_serve_execution_t loom_serve_execution_t;
 
-// Retains the device, both exact queues and the shared workspace. Queues must
-// use the workspace's device memory domain. The device must belong to a live
-// device group whose lifetime encloses the execution domain and all its work.
+// Retains the device, both exact queues and the shared workspace. Both queues
+// belong to the same device and must be admitted by the workspace's backing
+// scope. Other execution domains may use different devices in that scope.
+// The device must belong to the workspace's live group, whose lifetime
+// encloses the execution domain and all its work.
 iree_status_t loom_serve_execution_create(
     iree_hal_queue_t* dispatch_queue, iree_hal_queue_t* transfer_queue,
     loom_serve_workspace_t* workspace, iree_allocator_t host_allocator,
