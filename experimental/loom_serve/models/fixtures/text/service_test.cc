@@ -10,7 +10,6 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -1852,13 +1851,8 @@ TEST_P(ElasticTextServiceTest, EndpointAliasesShareOneSuspendedPayload) {
 
 TEST_P(SourceTextServiceTest,
        CancelledQueuedRequestReturnsClaimAndSessionName) {
-  struct Readiness {
-    // CPU preparation has released its borrow of the request and model VM.
-    std::atomic<bool> released{false};
-    // Shared wake channel for transport and this explicit outer test owner.
-    iree_notification_t* notification;
-  } readiness{.notification = loom_serve_http_server_notification(server_)};
   auto options = ServiceOptions();
+  options.heartbeat_interval = iree_make_duration_ms(1);
   loom_serve_text_service_t* value = nullptr;
   IREE_ASSERT_OK(loom_serve_text_service_create(model_, &options, nullptr,
                                                 &value, allocator_));
@@ -1870,15 +1864,23 @@ TEST_P(SourceTextServiceTest,
   auto interface = loom_serve_text_service_interface(value);
   EXPECT_EQ(interface.capacity_domain,
             loom_serve_device_residency_cache(device_));
-  interface.set_observer(interface.self,
-                         {[](void* self) {
-                            auto* readiness = static_cast<Readiness*>(self);
-                            readiness->released.store(true);
-                            iree_notification_post(readiness->notification,
-                                                   IREE_ALL_WAITERS);
-                          },
-                          &readiness});
+  Observe(interface);
   auto* notification = loom_serve_http_server_notification(server_);
+  uint64_t cursor = 0;
+  uint64_t reported_queued = UINT64_MAX;
+  auto read_snapshots = [&] {
+    const uint64_t head =
+        loom_serve_telemetry_stream_head(interface.telemetry.stream);
+    while (cursor < head) {
+      loom_serve_telemetry_record_t record;
+      ASSERT_EQ(loom_serve_telemetry_stream_read(interface.telemetry.stream,
+                                                 &cursor, &record),
+                LOOM_SERVE_TELEMETRY_READ_RECORD);
+      if (record.event == &LOOM_SERVE_TELEMETRY_SNAPSHOT) {
+        reported_queued = record.data.snapshot.queued;
+      }
+    }
+  };
   struct Claim {
     // Actual HTTP claim held through service admission or cancellation.
     loom_serve_http_connection_t* connection = nullptr;
@@ -1925,6 +1927,10 @@ TEST_P(SourceTextServiceTest,
         EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 3u);
         bool progress = false;
         IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
+        // The first heartbeat precedes borrower collection. It must include
+        // arrivals after preparation began, not just the initial FIFO head.
+        read_snapshots();
+        EXPECT_EQ(reported_queued, 3u);
         EXPECT_TRUE(progress);
         EXPECT_GE(interface.telemetry.counters->cancelled, 2u);
         if (GetParam() == 1) {
@@ -1933,14 +1939,14 @@ TEST_P(SourceTextServiceTest,
           EXPECT_TRUE(interface.is_pending(interface.self));
         }
       });
-  iree_notification_await(
-      notification,
-      [](void* self) { return static_cast<Readiness*>(self)->released.load(); },
-      &readiness, iree_infinite_timeout());
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
-    return !interface.is_pending(interface.self) &&
+    read_snapshots();
+    return reported_queued == 0 &&
            !interface.snapshot(interface.self).queued_requests;
   }));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      interface, [&] { return !interface.is_pending(interface.self); },
+      LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
   const auto cancelled = interface.snapshot(interface.self);
   EXPECT_EQ(cancelled.queued_requests, 0u);
   EXPECT_EQ(cancelled.oldest_queued_age, 0);

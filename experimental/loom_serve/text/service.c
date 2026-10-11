@@ -289,11 +289,7 @@ static void text_observe(loom_serve_text_service_t* service,
     state->phase_start = iree_time_now();
   }
   state->active_rows = active;
-  state->queued_requests = service->pending.count;
   state->oldest_active_arrival = oldest_active_arrival;
-  state->oldest_queued_arrival =
-      service->pending.count ? service->pending.values[0].receipt.arrival_time
-                             : 0;
   state->pool.capacity = pool.capacity;
   state->pool.reserved = pool.pending;
   state->pool.resident = pool.capacity - pool.available - pool.pending;
@@ -727,6 +723,17 @@ static iree_status_t text_prepare_input(
   return iree_ok_status();
 }
 
+// Queue ownership changes independently of model phases and CPU/device loans.
+// Publication reads only owner-managed entries, never borrowed row/VM state.
+static void text_pending_observe(loom_serve_text_service_t* service) {
+  iree_slim_mutex_lock(&service->heartbeat.mutex);
+  service->heartbeat.snapshot.queued_requests = service->pending.count;
+  service->heartbeat.snapshot.oldest_queued_arrival =
+      service->pending.count ? service->pending.values[0].receipt.arrival_time
+                             : 0;
+  iree_slim_mutex_unlock(&service->heartbeat.mutex);
+}
+
 // Removal transfers no resources: the caller first releases the queued chat
 // and connection, or transfers both into an admitted request.
 static void text_pending_remove(loom_serve_text_service_t* service,
@@ -742,6 +749,7 @@ static void text_pending_remove(loom_serve_text_service_t* service,
   --service->pending.count;
   memmove(service->pending.values + index, service->pending.values + index + 1,
           (service->pending.count - index) * sizeof(*service->pending.values));
+  text_pending_observe(service);
 }
 
 static void text_pending_cancel(loom_serve_text_service_t* service,
@@ -1325,6 +1333,7 @@ static iree_status_t text_enqueue(loom_serve_text_service_t* service,
       .checkpoint = checkpoint,
       .receipt = receipt,
   };
+  text_pending_observe(service);
   return iree_ok_status();
 }
 
