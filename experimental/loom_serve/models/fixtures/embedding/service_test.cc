@@ -594,15 +594,9 @@ TEST_P(SourceEmbeddingServiceTest,
 }
 
 TEST_P(SourceEmbeddingServiceTest,
-       UnsupportedScratchAlignmentRetiresManagedRequests) {
-  iree_hal_pool_capabilities_t capabilities;
-  iree_hal_pool_query_capabilities(loom_serve_device_storage_pool(device_),
-                                   &capabilities);
-  ASSERT_GT(capabilities.max_allocation_alignment, 0u);
-  ASSERT_LT(capabilities.max_allocation_alignment, uint64_t{1} << 62);
-  const uint64_t alignment = capabilities.max_allocation_alignment * 2;
+       InvalidFeedbackAfterExecutionRetiresManagedRequests) {
   const std::string package =
-      iree::testing::MakeTempFilePath("unsupported_alignment");
+      iree::testing::MakeTempFilePath("invalid_feedback");
   ASSERT_TRUE(std::filesystem::create_directory(package));
   for (const char* file : {"config.loom", "control.loom", "embed.loom",
                            "prepare.loom", "sources.txt", "tokenizer.json"}) {
@@ -610,16 +604,21 @@ TEST_P(SourceEmbeddingServiceTest,
                                            package + "/" + file));
   }
   {
-    const std::string path = package + "/embed.loom";
+    const std::string path = package + "/control.loom";
     std::ifstream input(path);
     ASSERT_TRUE(input.good());
     std::string source((std::istreambuf_iterator<char>(input)), {});
-    const std::string original = "buffer.alloca<global> align(16)";
+    const std::string original =
+        "  %done = func.call @feedback(%slot, %output, %offset, "
+        "%feedback_bytes)";
     const size_t position = source.find(original);
     ASSERT_NE(position, std::string::npos);
-    source.replace(
-        position, original.size(),
-        "buffer.alloca<global> align(" + std::to_string(alignment) + ")");
+    // The command has already been accepted when the source exceeds its
+    // declared 1024-byte host destination. No invalid transfer is submitted.
+    source.replace(position, original.size(),
+                   "  %oversized = scalar.constant 4096 : i64\n"
+                   "  %done = func.call @feedback(%slot, %output, %offset, "
+                   "%oversized)");
     input.close();
     std::filesystem::permissions(path, std::filesystem::perms::owner_write,
                                  std::filesystem::perm_options::add);
@@ -644,12 +643,12 @@ TEST_P(SourceEmbeddingServiceTest,
                 .find("HTTP/1.1 200"),
             0u);
 
-  // The real reflected requirement is rejected, not weakened to fit this
-  // backend. Its terminal error drains even an unrelated held registration.
+  // The runner rejects feedback after accepting real command work. Its
+  // terminal error drains even an unrelated held registration.
   // Join the owner directly: polling HTTP after terminal shutdown would wait
   // on a consumer that has already retired.
   router_.join();
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         std::exchange(status_, iree_ok_status()));
   EXPECT_TRUE(Read(broken).empty());
   EXPECT_TRUE(Read(cold).empty());

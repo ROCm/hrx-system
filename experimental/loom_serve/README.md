@@ -68,13 +68,14 @@ the source still needs to lower for the chosen target. The retained-text fixture
 runs through the same source-JIT, command, pooled-state and HTTP path on AMDGPU
 and x86 CPU. Its [CPU recipe](models/fixtures/text/README.md) uses
 `--device=task --pool_backing=fixed`; GPU model kernels are not thereby CPU ports.
-Vulkan source image and unweighted embedding fixtures execute through the same
-recorder, source JIT and HTTP lifecycle with one or four shared workers. Weighted
-Vulkan execution still requires native pools that honor the command's reflected
-parameter alignment: the current provider advertises only its native minimum
-(16 bytes on the tested device), while parameter roots require at least 256.
-The runner preserves that requirement and reports the allocation error rather
-than weakening it. XDNA execution requires native command-buffer execution and
+Vulkan source image and weighted embedding fixtures execute through the same
+recorder, source JIT and HTTP lifecycle with one or four shared workers and
+fixed-backed pools. Native pools honor reflected parameter and transient
+alignment; the runner preserves those requirements. The weighted fixture covers
+checkpoint loading, in-place preparation, dynamic registration, exact HTTP
+results and retirement. This establishes the generic execution path, not
+portability of target-specific model kernels or elastic Vulkan backing.
+XDNA execution requires native command-buffer execution and
 file import/queue-read support. These are native backend contracts, not
 alternate serving runners. Full serving coverage runs with
 `build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve/...`.
