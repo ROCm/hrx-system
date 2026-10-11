@@ -119,6 +119,21 @@ and required retained state; sharing a budget permits idle parameter eviction
 and reload, not automatic KV paging to disk. Two registrations of the same
 weights currently create separate parameter residencies.
 
+An operator can release idle shared backing without unregistering models:
+
+```sh
+curl http://127.0.0.1:8080/v1/devices/trim \
+  -H 'Content-Type: application/json' -d '{"device":0,"target_bytes":0}'
+```
+
+`device` is the index published in `/v1/status` under `server.resources.devices`.
+The one-shot target covers reported workspace plus elastic retained commitment;
+it does not change a budget. Trim releases idle workspace first, then eligible
+unpinned weights. Accepted work, pinned weights and retained conversations stay
+protected. HTTP 200 reports the requested target and the actual device resource
+record, even when protected memory prevents reaching that target. Fixed weights
+are not reclaimable. Subsequent requests reload evicted weights without re-JIT.
+
 Text `rows` limits simultaneously resident sessions (1–16), `context_capacity`
 limits each logical context, and `pool_capacity` limits shared physical token
 slots. Short sessions grow by pages instead of reserving their entire logical

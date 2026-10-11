@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-// Borrowed application resources published through management observation.
+// Borrowed application resources available to management operations.
 // The view and every referenced owner remain live through the router's join.
 // Membership is immutable during routing; models can independently come and go.
 typedef struct loom_serve_resources_t {
@@ -37,6 +37,25 @@ typedef struct loom_serve_resources_t {
 // allocation bytes.
 iree_status_t loom_serve_resources_write_json(
     const loom_serve_resources_t* resources, loom_output_stream_t* output);
+
+// Parses exactly {"device": <index>, "target_bytes": <unsigned integer>} and
+// resolves the device index against immutable membership. Performs no mutation.
+// Outputs are valid only on success and through this resource view's lifetime.
+iree_status_t loom_serve_resources_parse_trim(
+    const loom_serve_resources_t* resources, iree_string_view_t value,
+    iree_host_size_t* out_device_index, uint64_t* out_target_bytes);
+
+// Executes a validated trim request on the serialized serving owner and writes
+// {"target_bytes": ..., "device": <resource object>} with current accounting.
+// Releases eligible idle workspace and unpinned parameters without waiting for
+// live work, evicting mutable state, or changing the configured budget. The
+// target may remain unreachable. Output is copied and retains no model borrow.
+// A platform failure may leave partially released backing: the caller must stop
+// admission and drain accepted work, not retry inference against that backing.
+iree_status_t loom_serve_resources_trim(const loom_serve_resources_t* resources,
+                                        iree_host_size_t device_index,
+                                        uint64_t target_bytes,
+                                        loom_output_stream_t* output);
 
 #ifdef __cplusplus
 }  // extern "C"

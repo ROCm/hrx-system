@@ -344,6 +344,34 @@ calls are synchronous cold capacity transitions on the owner, so releasing a
 large model can still incur native allocation-management latency. The operation
 does not imply a zero-cost swap or release of retained session memory.
 
+## Trimming shared memory
+
+`POST /v1/devices/trim` accepts exactly `{"device":0,"target_bytes":0}`. Both
+fields are unsigned integers; `device` selects the immutable index published in
+`/v1/status` under `server.resources.devices`. The one-shot target is the sum
+of reported workspace and elastic retained commitment, not a changed budget or
+a whole-device VRAM limit. Missing, repeated, unknown or invalid fields and
+unpublished device indices return 400 before changing memory ownership.
+
+The operation releases eligible idle workspace first and then unpinned parameter
+groups in LRU order. It neither closes model admission nor waits for live work.
+Execution pins, explicit weight pins, retained KV/recurrent state and checkpoints
+survive. Fixed parameter backing cannot be released this way. A busy or retained
+allocation can leave memory above the target; this is still successful trim.
+
+HTTP 200 returns `{"target_bytes":0,"device":{...}}`, where `device` has the
+same identity and memory schema as the status resource record. Accounting is
+observed after trim; workspace values remain independent atomic observations.
+Losing the HTTP response does not undo released backing. Later inference reloads
+evicted parameters on its ordinary timeline without recompilation or registration
+changes. The endpoint is identical over TCP and Unix listeners and works before
+any model is registered.
+
+Native unmap/free calls are synchronous cold owner work, not device completion
+waits. A platform failure can leave partially released backing; it terminates
+the response and starts ordinary server draining. It is not converted into a
+request-local error that would permit new inference against that backing.
+
 ## Requests and retained state
 
 `POST /tokenize` and `POST /detokenize` use a deployment's already loaded input

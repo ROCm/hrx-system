@@ -1162,6 +1162,37 @@ static iree_status_t router_register(router_t* router,
   return router_control(router, index, connection, 202);
 }
 
+static iree_status_t router_trim(router_t* router,
+                                 loom_serve_http_connection_t* connection,
+                                 const loom_serve_http_request_t* request) {
+  iree_host_size_t device_index = 0;
+  uint64_t target_bytes = 0;
+  iree_status_t status = loom_serve_resources_parse_trim(
+      &router->resources, request->body, &device_index, &target_bytes);
+  if (!iree_status_is_ok(status)) {
+    return router_management_error(router, connection, status);
+  }
+  iree_string_builder_reset(&router->output);
+  status = iree_string_builder_append_cstring(
+      &router->output,
+      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+      "Cache-Control: no-store\r\nConnection: close\r\n\r\n");
+  if (iree_status_is_ok(status)) {
+    loom_output_stream_t output;
+    loom_output_stream_for_builder(&router->output, &output);
+    status = loom_serve_resources_trim(&router->resources, device_index,
+                                       target_bytes, &output);
+  }
+  if (iree_status_is_ok(status)) {
+    router_send(router, connection, iree_string_builder_view(&router->output));
+  } else {
+    // A partial physical release is terminal for shared backing, not just this
+    // request. Propagate to ordinary owner draining before admitting more work.
+    loom_serve_http_connection_abort(connection);
+  }
+  return status;
+}
+
 static iree_status_t router_inspect(router_t* router,
                                     loom_serve_http_connection_t* connection,
                                     const loom_serve_http_request_t* request,
@@ -1361,6 +1392,10 @@ static iree_status_t router_accept(router_t* router,
   if (post &&
       iree_string_view_equal(request->target, IREE_SV("/v1/models/register"))) {
     return router_register(router, connection, request);
+  }
+  if (post &&
+      iree_string_view_equal(request->target, IREE_SV("/v1/devices/trim"))) {
+    return router_trim(router, connection, request);
   }
   iree_string_view_t name;
   loom_serve_removal_t removal = LOOM_SERVE_REMOVAL_DRAIN;

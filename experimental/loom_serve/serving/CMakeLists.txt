@@ -49,6 +49,7 @@ loom_cc_library(
   DEPS
     iree::async
     iree::base
+    iree::base::internal::json
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::storage::memory

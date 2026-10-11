@@ -1708,6 +1708,19 @@ TEST_P(HttpRouterTest, AdmissionControlRejectsInvalidSelectorsWithoutClosing) {
       std::string::npos);
 }
 
+TEST_P(HttpRouterTest, TrimCannotSelectAnExternallyOwnedDevice) {
+  for (const auto* body : {"{}", R"({"device":0,"target_bytes":0})",
+                           R"({"device":0,"target_bytes":-1})"}) {
+    SCOPED_TRACE(body);
+    EXPECT_EQ(Read(Send("POST", "/v1/devices/trim", body)).find("HTTP/1.1 400"),
+              0u);
+  }
+  EXPECT_EQ(Read(Send("GET", "/v1/devices/trim", "")).find("HTTP/1.1 404"), 0u);
+  EXPECT_NE(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("a:/v1/test:"),
+      std::string::npos);
+}
+
 TEST_P(HttpRouterTest, DisconnectedHeldClaimReturnsItsAdmissionCredit) {
   EXPECT_NE(Control("drain", "a").find(R"("admission":"drained")"),
             std::string::npos);

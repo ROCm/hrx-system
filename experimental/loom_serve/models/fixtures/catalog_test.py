@@ -856,6 +856,109 @@ def check_parameter_residency(client, backing, workers):
         assert snapshot(model)["incarnation"] == identity
 
 
+def check_device_trim(client, backing, workers):
+    """Release eligible shared backing while a retained continuation is held."""
+    selector = {"model": "fixture-text"}
+    root = [{"role": "user", "content": "abxa"}]
+    seed = client.text("trim-root", root, 2)
+    client.checkpoint("trim-prefix", "POST", "trim-root", status=201)
+    history = root + [
+        {"role": "assistant", "content": seed["text"]},
+        {"role": "user", "content": "xx"},
+    ]
+    client.idle()
+
+    def snapshot():
+        state = next(
+            item["loom"]
+            for item in client.request("/v1/status")["data"]
+            if item["id"] == "fixture-text"
+        )
+        assert "error" not in state, state
+        return state
+
+    before = snapshot()
+    client.request("/v1/models/pin", selector)
+    client.request("/v1/models/drain", selector)
+    with ThreadPoolExecutor(max_workers=1) as clients:
+        continuation = clients.submit(
+            client.text, "trim-root", history, checkpoint="trim-prefix"
+        )
+        try:
+            wait_status(
+                urlsplit("http://" + client.address),
+                model="fixture-text",
+                held_requests=1,
+            )
+            pinned = client.request(
+                "/v1/devices/trim", {"device": 0, "target_bytes": 0}
+            )
+            assert pinned["target_bytes"] == pinned["device"]["index"] == 0, pinned
+            assert snapshot()["parameters"] == before["parameters"]
+            unpinned = client.request("/v1/models/unpin", selector)["loom"]
+            assert unpinned["parameters"] == before["parameters"], unpinned
+            trimmed = client.request(
+                "/v1/devices/trim", {"device": 0, "target_bytes": 0}
+            )
+            cold = snapshot()
+            assert cold["incarnation"] == before["incarnation"], cold
+            assert cold["compilation"] == before["compilation"], cold
+            assert cold["status"]["admission"] == "drained", cold
+            assert cold["status"]["held_requests"] == 1, cold
+            memory_pinned = pinned["device"]["memory"]["retained"]
+            memory_cold = trimmed["device"]["memory"]["retained"]
+            if backing == "elastic":
+                released = before["parameters"]["committed_bytes"]
+                assert released > 0, before
+                assert not cold["parameters"]["active"], cold
+                assert cold["parameters"]["committed_bytes"] == 0, cold
+                assert memory_pinned["reserved_bytes"] == memory_cold["reserved_bytes"]
+                assert (
+                    memory_pinned["committed_bytes"] - memory_cold["committed_bytes"]
+                    == released
+                ), (memory_pinned, memory_cold)
+                assert (
+                    memory_cold["released_bytes"] - memory_pinned["released_bytes"]
+                    == released
+                ), (memory_pinned, memory_cold)
+                # The target is deliberately unreachable: retained KV survives.
+                assert memory_cold["committed_bytes"] > trimmed["target_bytes"], trimmed
+            else:
+                assert memory_pinned is memory_cold is None
+                assert cold["parameters"] == before["parameters"], cold
+            client.request("/v1/devices/trim", {"device": 0, "target_bytes": 0})
+            assert snapshot()["parameters"] == cold["parameters"]
+            assert not continuation.done()
+        finally:
+            client.request("/v1/models/undrain", selector)
+        resumed = continuation.result()
+    assert resumed["usage"]["prompt_tokens_details"]["cached_tokens"] == 5, resumed
+    client.idle()
+    after = snapshot()
+    assert after["incarnation"] == before["incarnation"], after
+    assert after["compilation"] == before["compilation"], after
+    assert after["parameters"]["activations"] == (
+        before["parameters"]["activations"] + (backing == "elastic")
+    ), after
+    client.checkpoint("trim-prefix", "DELETE")
+    print(
+        json.dumps(
+            {
+                "event": "device_trim_resumed",
+                "workers": workers,
+                "backing": backing,
+                "pinned": pinned,
+                "trimmed": trimmed,
+                "cached_tokens": 5,
+                "outputs_verified": True,
+                "incarnation_preserved": True,
+                "compilation_preserved": True,
+            }
+        ),
+        flush=True,
+    )
+
+
 def copy_package(source, directory, kind):
     """Relocate a fixture with numerical providers outside its model directory.
 
@@ -1105,6 +1208,18 @@ def check_empty_server(server_command, directory, device, backing):
                 "budget_limit": 0,
                 "reservation_count": 0,
             }, memory
+            for target in (0, 2**64 - 1):
+                assert client.request(
+                    "/v1/devices/trim", {"device": 0, "target_bytes": target}
+                ) == {"target_bytes": target, "device": actual}
+            for value in (
+                {},
+                {"device": 1, "target_bytes": 0},
+                {"device": 0, "target_bytes": -1},
+                {"device": 0, "target_bytes": 1.5},
+                {"device": 0, "target_bytes": 2**64},
+            ):
+                client.request("/v1/devices/trim", value, status=400)
             for target in ("/v1/embeddings", "/tokenize", "/detokenize"):
                 rejected = client.request(target, {"model": "absent"}, status=404)
                 assert rejected == {
@@ -1609,6 +1724,29 @@ def check_multiple_bindings(server_command, directory, catalog):
             assert {
                 key: value for key, value in tcp_device.items() if key != "memory"
             } == {key: value for key, value in unix_device.items() if key != "memory"}
+        connection = http.client.HTTPConnection("localhost")
+        connection.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            connection.sock.connect(str(socket_path))
+            connection.request(
+                "POST",
+                "/v1/devices/trim",
+                json.dumps({"device": 0, "target_bytes": 0}),
+                {"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            assert response.status == 200
+            trimmed = json.loads(response.read())
+        finally:
+            connection.close()
+        assert trimmed["target_bytes"] == trimmed["device"]["index"] == 0, trimmed
+        assert [
+            (item["id"], item["loom"]["incarnation"])
+            for item in client.request("/v1/models")["data"]
+        ] == [
+            (item["id"], item["loom"]["incarnation"])
+            for item in expected_models["data"]
+        ]
         for model in expected_models["data"]:
             name = model["id"]
             headers = {"X-Loom-Model": name}
@@ -1779,6 +1917,7 @@ def main():
                             flush=True,
                         )
                 check_parameter_residency(client, arguments.pool_backing, workers)
+                check_device_trim(client, arguments.pool_backing, workers)
             print(
                 json.dumps(
                     {
