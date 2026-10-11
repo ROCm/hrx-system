@@ -34,7 +34,9 @@ loom_cc_test(
   NAME
     service_test
   SRCS
+    "oracle.h"
     "service_test.cc"
+    "stalled_client.h"
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/control.loom"
@@ -81,7 +83,9 @@ loom_cc_test(
   NAME
     service_vulkan_test
   SRCS
+    "oracle.h"
     "service_test.cc"
+    "stalled_client.h"
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/control.loom"
@@ -129,7 +133,9 @@ loom_cc_test(
   NAME
     service_cpu_test
   SRCS
+    "oracle.h"
     "service_test.cc"
+    "stalled_client.h"
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/control.loom"

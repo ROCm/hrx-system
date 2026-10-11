@@ -47,7 +47,11 @@ py_test(
 [
     loom_cc_test(
         name = name,
-        srcs = ["service_test.cc"],
+        srcs = [
+            "oracle.h",
+            "service_test.cc",
+            "stalled_client.h",
+        ],
         args = [
             "--model_source=$(rootpath :prepare.loom)",
             "--test_device=" + device,
