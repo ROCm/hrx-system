@@ -20,10 +20,11 @@ state and canonical checkpoints without naming a model.
 
 | Component | Receives and owns | Does not infer |
 | --- | --- | --- |
-| [`device`](../runtime/device.h) | HAL device URI, async I/O services, device/group, exact queues, execution timelines, physical pool and profiling | Compiler target support, logical model state or request lifetimes |
+| [`device`](../runtime/device.h) | HAL device URIs, application group, exact queue defaults, per-device admission and profiling | Compiler target support, logical model state or request lifetimes |
 | [`jit`](../runtime/jit.h) | Source catalog, configuration, live device profile; compiled command images and native entries | Session identity, cache lifetime, chat semantics |
 | [`command`](../runtime/command.h) | Compiler-produced parameter/binding requirements, executable reflection; reusable HAL command recording | Model graph from buffer contents or filenames |
 | [`execution`](../runtime/execution.h) | Exact dispatch/transfer queues and explicit work/feedback timelines | Ordering from FIFO submission or alias inspection |
+| [`workspace`](../runtime/workspace.h) | Qualified backing pool, slab geometry and raw allocation captures across execution domains | Shared access from group membership, implicit visibility or final-reader dependencies |
 | [`module`](../runtime/module.h) | Indexed prepared commands, typed execute imports and registered host feedback spans | Per-session VM state, model stages, or a general HAL instruction set |
 | [`program`](../runtime/program.h) | Source-JIT bytecode, linked libraries, one process and serialized invocation | Model geometry or the lifetime of asynchronously borrowed host payloads |
 | [`preparation`](../runtime/preparation.h) | Cold source declarations of commands, configuration and checkpoint domains, copied independently of the bootstrap process | Model geometry, stage semantics, or GPU allocation |
@@ -70,8 +71,24 @@ This owner contains no tokenizer, stage catalog or model policy. One serving
 owner serializes calls and residency changes. The application retires models
 before their device group; profiling spans the whole group lifetime rather
 than opening overlapping per-model sessions.
-The current JIT still selects AMDGPU explicitly. A different device URI alone
-does not provide a compiler backend or model kernels for that device.
+The JIT selects an exact loader/profile pair from HAL device facts through
+LoomC's linked CPU, AMDGPU, SPIR-V and XDNA providers. CPU task devices use the
+application executor, not a private worker pool. Native source text HTTP is
+exercised on CPU as well as AMDGPU; that does not make every model's device
+math portable. Vulkan logical-parameter reflection and XDNA reusable-command
+and file APIs still need backend support before this runner can use those
+paths end-to-end. A device URI alone cannot supply missing compiler operations,
+model kernels or native capabilities.
+
+The default record's workspace retains its already qualified storage source.
+`loom_serve_workspace_create` also accepts a wider explicitly scoped source,
+independent of any single device record. Executions retain that shared owner
+while keeping separate timelines. Allocation captures retain their original
+pool generation through actual queue/caller retirement; an older live escape
+does not prevent maintenance from collecting later retired captures and idle
+generations. Queue-ordered private transients remain HAL allocations, not a
+second serving allocator. Cross-domain accesses require their own publication,
+ordering and final-reader edges.
 
 The model catalog includes `config.loom` for fixed specialization bounds.
 The source bootstrap supplies run-dependent overrides to the public compiler
@@ -89,7 +106,7 @@ session count.
 The packed server constructs a bounded Cartesian catalog of token classes and
 independent span classes, including exact terminal sizes for odd residency
 counts. Explicit `--epoch` lists replace it for experiments. Shapes borrow
-their reflected private workspace from one execution-owned HAL pool shared
+their reflected private workspace from the shared workspace's HAL pools
 across models; proposal storage follows resident count and verification
 capture follows each compiled span capacity. Shape changes reuse backing;
 elastic row/page growth commits new physical slabs only as capacity is needed.
@@ -445,7 +462,7 @@ The single-device materialization is localized, but has not been generalized:
 | Current assumption | Extension boundary |
 | --- | --- |
 | The registration factory receives one device record | Bind a model's required execution and memory resources during preparation; retain the same opaque service lifecycle |
-| The JIT explicitly targets AMDGPU and the parameter loader indexes host-local files | Compile for each actual target profile and resolve asset metadata separately from remote-local parameter payloads |
+| Each JIT catalog binds one exact queue/profile pair and the parameter loader indexes host-local files | Bind each compiled product to its actual execution resource and resolve asset metadata separately from remote-local parameter payloads |
 | One `runner` module binds every command and feedback slot to one execution | Use the HAL-enabled VM's explicit resources and completion identities; a stage index or returned `i64` alone cannot identify another domain |
 | Model adapters bind commands, storage and completion to one execution | Join the actual producers, transfers and final readers for that invocation without waiting for unrelated work |
 | A service publishes one opaque `capacity_domain` identity | This is a shared-pressure hint, not a multi-pool reservation protocol; multi-resource admission must retain the owners of the capacity it actually borrows |
@@ -474,6 +491,14 @@ Trimming preserves that reader's workspace until release. It runs with one and
 four host workers over two logical device handles on one physical GPU. This
 proves independent progress and lifetime ownership, not multi-physical-device
 access, remote transport or a distributed model.
+
+[`workspace_test`](../runtime/workspace_test.cc) exercises a shared scoped pool
+across two CPU devices on the same application executor. Three timelines share
+one slab: a held cross-device final reader keeps its inputs alive while an
+independent timeline finishes, followed by exact output and trim to zero. The
+test checks the native contract's empty cache effects instead of inferring
+coherence from shared RAM. This establishes the native resource boundary;
+source-directed multi-execution models still need the HAL-enabled VM contract.
 
 Remote integration can build on that witness in bounded steps: one remotely
 executed weighted model with node-local assets and exact HTTP output; then

@@ -166,10 +166,14 @@ an odd channel tail and an untouched output row. Capacity constrains the body;
 it does not become the amount of work executed.
 
 An authored target contract fixes algorithmic requirements such as subgroup
-width. `loomc_target_profile_create_amdgpu_iree_hal` supplies the actual device
-facts for native specialization. The Q4/Q5/Q8 wave32 entries explicitly name
-that width because it also changes their command launch counts. Replacing those
-queries with guessed host constants would split one contract into two.
+width. `loomc_target_select_iree_hal` pairs the actual HAL loader target with
+the compiler profile through linked target-family providers. Source target
+declarations receive those facts during native specialization. The Q4/Q5/Q8
+wave32 entries explicitly require that width because it also changes their
+command launch counts. Replacing those queries with guessed host constants
+would split one contract into two. A target-specific motif still needs an
+implementation for each supported architecture; generic source control alone
+does not supply that math.
 
 For large slabs, logical dimensions can remain bounded indices while byte
 origins use `offset`. A row starting beyond 4 GiB must retain that full origin
@@ -199,16 +203,17 @@ per-file declarations and reachable definitions before device execution. That
 is part of the first real-weight component witness, alongside native code and
 numerical checks.
 
-The real embedding sequence in [`jit.c`](../runtime/jit.c) is:
+The source compilation sequence in [`jit.c`](../runtime/jit.c) is:
 
 1. Create the target environment, context, prepared compiler and pipeline;
-   obtain the live HAL profile and freeze the source index. A standard
-   `loomc_task_pool_t` supplies physical-core workers, each with a reusable
-   `loomc_workspace_t`. The runner requests up to eight with
-   `loomc_task_pool_options_t.max_worker_count`; processor affinity and topology
-   may provide fewer. Product construction uses separate caller scratch.
-2. Call `loomc_cmd_program_product_build` with the root and configuration. Its
-   request sink takes ownership of reachable native source requests.
+   select the exact live HAL loader/profile pair and freeze the source index.
+   The application supplies a `loomc_task_pool_t` adapter over its existing
+   IREE executor. `--workers` controls that shared budget, including model
+   scheduling, native CPU execution and media work. Each catalog owns reusable
+   `loomc_workspace_t` scratch per worker and separate product scratch.
+2. Submit `loom_serve_jit_compile_async` with the root and configuration.
+   Product construction calls `loomc_cmd_program_product_build` on a shared
+   worker; its request sink takes ownership of reachable native requests.
 3. Submit each request through a `loomc_task_queue_t` on that shared pool.
    Its binding/root ordinals and product requirements supply the native
    specialization records. Each task deserializes, compiles, and emits from the
@@ -216,9 +221,10 @@ The real embedding sequence in [`jit.c`](../runtime/jit.c) is:
    profile and product are immutable and shared; mutable scratch is selected by
    the task's mutually exclusive worker ordinal.
 4. Each task loads its executable through the selected queue family and resolves
-   its disjoint requirement slots. Drain the stage's queue before binding those
-   entries in command-local order or releasing partial results after a failure.
-   The worker population and scratch survive for subsequent stages.
+   its disjoint requirement slots. The final native request's retirement binds
+   entries in command-local order and publishes the stage completion, including
+   cleanup after failure. No shared worker waits for the task queue or another
+   catalog. The workers and scratch survive for subsequent stages.
 5. Allocate/load fixed parameter roots. `loom_serve_jit_stage_record` creates
    reusable commands retaining those buffers and executables.
 6. JIT the VM source, transfer its image to the trusted in-process VM loader,
@@ -229,8 +235,11 @@ index or compiler workspace remaining alive. A compile failure returns source
 diagnostics and releases partial state; it never substitutes a stale artifact.
 The [task-pool embedding example](../../../loom/binding/c/example/jit_task_pool.c)
 shows the public ownership protocol without a model dependency. In this runner,
-stage calls remain synchronous; their native kernel requests compile in parallel.
-No task queue or compiler work is introduced into the serving epoch path.
+each catalog has at most one accepted stage compilation at a time, while its
+native requests and other catalogs run concurrently. The synchronous
+`loom_serve_jit_compile` wrapper joins the same operation only on an outer CLI
+thread. Dynamic registration uses the asynchronous form. No task queue or
+compiler work is introduced into the serving epoch path.
 
 The text materializer validates shared parameter placement across independently
 compiled roots before assigning one weight slab. Auxiliary MTP roots either
