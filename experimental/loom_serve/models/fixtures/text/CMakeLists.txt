@@ -44,6 +44,7 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/weights.loom"
   DEPS
     iree::async
+    iree::async::platform
     iree::base
     iree::base::threading
     iree::base::tooling::flags
@@ -60,6 +61,8 @@ loom_cc_test(
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule
     iree::experimental::loom_serve::text::service
+    iree::net::carrier
+    iree::net::carrier::loopback
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
@@ -88,6 +91,7 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/weights.loom"
   DEPS
     iree::async
+    iree::async::platform
     iree::base
     iree::base::threading
     iree::base::tooling::flags
@@ -104,6 +108,8 @@ loom_cc_test(
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule
     iree::experimental::loom_serve::text::service
+    iree::net::carrier
+    iree::net::carrier::loopback
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
@@ -133,6 +139,7 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/weights.loom"
   DEPS
     iree::async
+    iree::async::platform
     iree::base
     iree::base::threading
     iree::base::tooling::flags
@@ -149,6 +156,8 @@ loom_cc_test(
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule
     iree::experimental::loom_serve::text::service
+    iree::net::carrier
+    iree::net::carrier::loopback
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file

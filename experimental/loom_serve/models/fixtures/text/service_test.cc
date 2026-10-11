@@ -17,6 +17,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "experimental/loom_serve/http/listener.h"
@@ -25,7 +26,9 @@
 #include "experimental/loom_serve/serving/router.h"
 #include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/async/proactor.h"
+#include "iree/async/proactor_platform.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/net/carrier/loopback/carrier.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
@@ -94,6 +97,97 @@ class Oracle {
   uint32_t sum_ = 0;
   // Number of consumed inputs, excluding a pending prediction.
   uint32_t position_ = 0;
+};
+
+// A real carrier with one response credit. Only this client's progress is
+// controlled by the test; HTTP and model work use the shared server workers.
+class StalledClient {
+ public:
+  ~StalledClient() { Close(); }
+
+  void Send(loom_serve_http_server_t* server, const std::string& body) {
+    const auto allocator = iree_allocator_system();
+    IREE_ASSERT_OK(iree_async_proactor_create_platform(
+        iree_async_proactor_options_default(), allocator, &proactor_));
+    iree_async_proactor_t* server_proactor = nullptr;
+    IREE_ASSERT_OK(iree_async_proactor_pool_get(
+        loom_serve_http_server_proactor_pool(server), 0, &server_proactor));
+    auto options = iree_net_loopback_carrier_options_default();
+    options.max_send_operations = 1;
+    iree_net_carrier_t* peer = nullptr;
+    IREE_ASSERT_OK(iree_net_loopback_carrier_create_pair(
+        proactor_, server_proactor, &options, allocator, &carrier_, &peer));
+    loom_serve_http_server_accept(server, peer);
+    IREE_ASSERT_OK(iree_net_carrier_set_handlers(
+        carrier_, {[](void* self, iree_async_span_t bytes,
+                      iree_async_buffer_lease_t*) -> iree_status_t {
+                     auto* client = static_cast<StalledClient*>(self);
+                     client->response_.append(reinterpret_cast<const char*>(
+                                                  iree_async_span_ptr(bytes)),
+                                              bytes.length);
+                     return iree_ok_status();
+                   },
+                   [](void* self, iree_status_t status) {
+                     // Loopback reports peer deactivation as terminal
+                     // UNAVAILABLE.
+                     IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE, status);
+                     static_cast<StalledClient*>(self)->departed_ = true;
+                   },
+                   this}));
+    IREE_ASSERT_OK(iree_net_carrier_activate(carrier_));
+    const std::string request =
+        "POST /v1/chat/completions HTTP/1.1\r\nHost: local\r\n"
+        "Content-Type: application/json\r\nX-Loom-Session: stalled\r\n"
+        "Content-Length: " +
+        std::to_string(body.size()) + "\r\n\r\n" + body;
+    const iree_net_send_params_t params = {
+        .generated_prefix = iree_net_send_prefix_from_bytes(
+            iree_make_const_byte_span(request.data(), request.size())),
+        .completion_callback = {
+            [](void*, iree_status_t status, iree_host_size_t) {
+              IREE_EXPECT_OK(status);
+            },
+            nullptr}};
+    IREE_ASSERT_OK(iree_net_carrier_send(carrier_, &params));
+  }
+
+  std::string Read() {
+    while (!departed_) {
+      Poll();
+    }
+    return response_;
+  }
+
+  void Close() {
+    if (carrier_) {
+      bool drained = false;
+      iree_net_carrier_deactivate(
+          carrier_, [](void* self) { *static_cast<bool*>(self) = true; },
+          &drained);
+      while (!drained) {
+        Poll();
+      }
+      iree_net_carrier_release(carrier_);
+      carrier_ = nullptr;
+    }
+    iree_async_proactor_release(proactor_);
+    proactor_ = nullptr;
+  }
+
+ private:
+  void Poll() {
+    IREE_ASSERT_OK(
+        iree_async_proactor_poll(proactor_, iree_infinite_timeout(), nullptr));
+  }
+
+  // Caller-polled client owner, independent of the server's shared pool.
+  iree_async_proactor_t* proactor_ = nullptr;
+  // Owned client half; the HTTP server owns the other half.
+  iree_net_carrier_t* carrier_ = nullptr;
+  // Bytes delivered while this client is explicitly polled.
+  std::string response_;
+  // Published only by this client's poll owner after server deactivation.
+  bool departed_ = false;
 };
 
 class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
@@ -347,6 +441,92 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
   }
 
   enum class OverlapAction { kComplete, kDisconnect, kStop };
+
+  void CheckOutputBackpressure(OverlapAction action) {
+    Start();
+    StalledClient stalled;
+    ASSERT_NO_FATAL_FAILURE(
+        stalled.Send(server_, Request(Message("user", "abxa"), 4)));
+    const std::string held_state =
+        R"("phase":"idle","queued_requests":0,"active_requests":1)";
+    WaitModel("fixture-text", held_state);
+    auto expect_counts = [&](uint64_t completed, uint64_t cancelled,
+                             uint64_t outputs) {
+      const std::string metrics = Read(Send("", "", "/metrics", "GET"));
+      for (const auto& [name, value] :
+           std::vector<std::pair<std::string, uint64_t>>{
+               {"completed", completed},
+               {"cancelled", cancelled},
+               {"failed", 0},
+               {"output_tokens", outputs}}) {
+        EXPECT_NE(metrics.find("\nloom_serve_server_" + name + "_total " +
+                               std::to_string(value) + "\n"),
+                  std::string::npos)
+            << metrics;
+      }
+    };
+    // The initial SSE header occupies the single carrier slot. The model can
+    // still fill its one row packet, but cannot generate unbounded output.
+    expect_counts(0, 0, 1);
+    const std::string prompt = "baxab";
+    const std::string first = Content(Read(
+        Send(Request(Message("user", prompt), 2), "X-Loom-Session: peer\r\n")));
+    EXPECT_EQ(first, Oracle::Complete(prompt, 2));
+    const std::string followup = Read(Send(
+        Request(Message("user", prompt) + "," + Message("assistant", first) +
+                    "," + Message("user", "b"),
+                2),
+        "X-Loom-Session: peer\r\n"));
+    EXPECT_EQ(Content(followup), Oracle::Complete(prompt + first + "#b", 2));
+    EXPECT_NE(followup.find(R"("cached_tokens":6)"), std::string::npos);
+    EXPECT_EQ(Content(Read(Send(Request(Message("user", "abxa"), 2),
+                                "X-Loom-Session: third\r\n"))),
+              Oracle::Complete("abxa", 2));
+    WaitModel("fixture-text", held_state);
+    // All six new outputs belong to the independent TCP peers. The held row
+    // has not advanced while they execute, retire and retain their histories.
+    expect_counts(3, 0, 7);
+
+    if (action == OverlapAction::kStop) {
+      loom_serve_http_server_request_stop(server_);
+      service_.join();
+      IREE_EXPECT_OK(status_);
+      status_ = iree_ok_status();
+      ASSERT_NO_FATAL_FAILURE(stalled.Close());
+      // The service releases unused reservations; the outer model owner still
+      // owns consumed row storage until its own retirement.
+      EXPECT_EQ(loom_serve_text_model_pool_usage(model_).pending, 0u);
+      IREE_ASSERT_OK(loom_serve_text_model_destroy(model_));
+      model_ = nullptr;
+      return;
+    }
+    std::string continuation;
+    if (action == OverlapAction::kComplete) {
+      const std::string response = Content(stalled.Read());
+      EXPECT_EQ(response, Oracle::Complete("abxa", 4));
+      continuation = Message("user", "abxa") + "," +
+                     Message("assistant", response) + "," +
+                     Message("user", "b");
+    }
+    ASSERT_NO_FATAL_FAILURE(stalled.Close());
+    WaitModel("fixture-text",
+              R"("phase":"idle","queued_requests":0,"active_requests":0)");
+    expect_counts(action == OverlapAction::kComplete ? 4 : 3,
+                  action == OverlapAction::kDisconnect ? 1 : 0,
+                  action == OverlapAction::kComplete ? 10 : 7);
+    const bool retained = action == OverlapAction::kComplete;
+    const std::string response =
+        Read(Send(Request(retained ? continuation : Message("user", "abxa"), 2),
+                  "X-Loom-Session: stalled\r\n"));
+    EXPECT_EQ(
+        Content(response),
+        Oracle::Complete(
+            retained ? "abxa" + Oracle::Complete("abxa", 4) + "#b" : "abxa",
+            2));
+    EXPECT_NE(response.find(retained ? R"("cached_tokens":7)"
+                                     : R"("cached_tokens":0)"),
+              std::string::npos);
+  }
 
   void CheckPreparationOverlap(OverlapAction action) {
     auto options = ServiceOptions();
@@ -900,6 +1080,18 @@ TEST_P(SourceTextServiceTest, DisconnectRetiresOverlappingPreparation) {
 
 TEST_P(SourceTextServiceTest, StoppingRetiresOverlappingPreparation) {
   CheckPreparationOverlap(OverlapAction::kStop);
+}
+
+TEST_P(SourceTextServiceTest, StalledOutputPreservesPeerProgressAndResumes) {
+  CheckOutputBackpressure(OverlapAction::kComplete);
+}
+
+TEST_P(SourceTextServiceTest, DisconnectReclaimsStalledOutput) {
+  CheckOutputBackpressure(OverlapAction::kDisconnect);
+}
+
+TEST_P(SourceTextServiceTest, StoppingRetiresStalledOutput) {
+  CheckOutputBackpressure(OverlapAction::kStop);
 }
 
 TEST_P(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {
