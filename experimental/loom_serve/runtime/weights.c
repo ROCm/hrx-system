@@ -552,13 +552,15 @@ static iree_status_t weight_enumerate(void* user_data, iree_host_size_t i,
 }
 
 static iree_status_t weight_stream(loom_serve_weights_t* weights) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   const iree_allocator_t allocator = weights->allocator;
   const iree_host_size_t span_count = weights->span_count;
   weight_span_t* spans = weights->spans;
   iree_hal_device_t* device = weights->device;
   weight_group_t* groups = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      allocator, span_count, sizeof(*groups), (void**)&groups));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_allocator_malloc_array(allocator, span_count, sizeof(*groups),
+                                      (void**)&groups));
   iree_io_parameter_gather_t* gathers = NULL;
   iree_status_t status = iree_allocator_malloc_array(
       allocator, span_count, sizeof(*gathers), (void**)&gathers);
@@ -673,6 +675,7 @@ static iree_status_t weight_stream(loom_serve_weights_t* weights) {
   iree_allocator_free(allocator, views);
   iree_allocator_free(allocator, gathers);
   iree_allocator_free(allocator, groups);
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
@@ -760,6 +763,9 @@ iree_status_t loom_serve_weights_activate(loom_serve_weights_t* weights,
   if (weights->active) {
     return iree_ok_status();
   }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0,
+                                   (int64_t)weights->statistics.reserved_bytes);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < weights->storage_count && iree_status_is_ok(status); ++i) {
@@ -783,6 +789,7 @@ iree_status_t loom_serve_weights_activate(loom_serve_weights_t* weights,
     weights->active = true;
     ++weights->activity.activations;
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
@@ -801,6 +808,9 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "fixed parameter backing cannot deactivate");
   }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(
+      z0, (int64_t)weights->statistics.committed_bytes);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < weights->storage_count && iree_status_is_ok(status); ++i) {
@@ -818,6 +828,7 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights) {
     }
     weights->activation.count = 0;
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 

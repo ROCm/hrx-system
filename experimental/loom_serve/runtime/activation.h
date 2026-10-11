@@ -44,10 +44,12 @@ iree_status_t loom_serve_activation_create(
     void (*wake)(void* user_data), void* user_data,
     loom_serve_activation_t** out_activation, iree_allocator_t allocator);
 
-// Attempts FIFO admission or consumes readiness without waiting. WAITING needs
-// another owner activity/capacity change, not a polling timer. LOADING owes a
-// wake. COMPLETE transfers terminal status and permits destruction. The next
-// pressure event may evict successfully warmed parameters; this is not pinning.
+// Attempts FIFO admission or consumes readiness without waiting for device
+// completion. Initial admission can synchronously allocate/map native backing.
+// WAITING needs another owner activity/capacity change, not a polling timer.
+// LOADING owes a wake. COMPLETE transfers terminal status and permits
+// destruction. The next pressure event may evict successfully warmed
+// parameters; this is not pinning.
 iree_status_t loom_serve_activation_advance(
     loom_serve_activation_t* activation, loom_serve_activation_flags_t flags,
     loom_serve_activation_phase_t* out_phase);

@@ -116,7 +116,9 @@ iree_status_t loom_serve_weights_prepare(
 // Commits storage and streams/prepares directly into final roots through four
 // independent queue lanes, importing readiness into the consuming execution
 // domain. An already active plan is unchanged. Success means submission, not
-// completion; consuming commands use that same domain. No host wait occurs.
+// completion; consuming commands use that same domain. Native backing
+// allocation and mapping are synchronous cold operations and can block the
+// caller. Submitted I/O and preparation never wait for device completion here.
 // The caller pins backing until consuming work retires. Failure is terminal,
 // preserving backing and accepted I/O ownership until final plan destruction.
 iree_status_t loom_serve_weights_activate(loom_serve_weights_t* weights,

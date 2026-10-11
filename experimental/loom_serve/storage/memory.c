@@ -268,19 +268,23 @@ static iree_status_t memory_publish_legacy_amdgpu_mappings(
   if (!pool->legacy_amdgpu_mappings_pending) {
     return iree_ok_status();
   }
+  IREE_TRACE_ZONE_BEGIN(z0);
   iree_hal_buffer_t* publication = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_pool_allocate_buffer(
-      pool->storage_pool,
-      iree_hal_make_pool_reservation_request(64 * 1024 * 1024, 0),
-      iree_infinite_timeout(), &publication));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_pool_allocate_buffer(
+              pool->storage_pool,
+              iree_hal_make_pool_reservation_request(64 * 1024 * 1024, 0),
+              iree_infinite_timeout(), &publication));
   iree_hal_buffer_release(publication);
   pool->legacy_amdgpu_mappings_pending = false;
+  IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
 
 iree_status_t loom_serve_memory_pool_try_commit(
     loom_serve_memory_pool_t* pool, iree_host_size_t range_count,
     const loom_serve_memory_range_t* ranges, bool* out_admitted) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   *out_admitted = false;
   uint64_t additional_bytes = 0;
   for (iree_host_size_t r = 0; r < range_count; ++r) {
@@ -295,6 +299,7 @@ iree_status_t loom_serve_memory_pool_try_commit(
       }
     }
   }
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)additional_bytes);
   bool admitted = false;
   iree_status_t status =
       loom_serve_memory_pool_prepare(pool, additional_bytes, &admitted);
@@ -319,6 +324,7 @@ iree_status_t loom_serve_memory_pool_try_commit(
   status =
       iree_status_join(status, memory_publish_legacy_amdgpu_mappings(pool));
   *out_admitted = iree_status_is_ok(status) && admitted;
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
@@ -354,6 +360,7 @@ void loom_serve_virtual_buffer_keep(loom_serve_virtual_buffer_t* buffer,
 
 iree_status_t loom_serve_virtual_buffer_trim(
     loom_serve_virtual_buffer_t* buffer) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < buffer->slab_count && iree_status_is_ok(status); ++i) {
@@ -361,6 +368,7 @@ iree_status_t loom_serve_virtual_buffer_trim(
       status = memory_slab_release(buffer, i);
     }
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
