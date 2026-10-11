@@ -1550,9 +1550,14 @@ static void router_advance(router_t* router, bool* out_progress) {
       router->stopping |= !iree_status_is_ok(router->status);
       *out_progress |= progress;
     }
-    *out_progress |= loom_serve_registry_advance(
-        router->registry, index,
-        (loom_serve_http_observer_t){router_wake, router});
+    bool progress = false;
+    router->status = iree_status_join(
+        router->status,
+        loom_serve_registry_advance(
+            router->registry, index,
+            (loom_serve_http_observer_t){router_wake, router}, &progress));
+    router->stopping |= !iree_status_is_ok(router->status);
+    *out_progress |= progress;
   }
   if (++router->cursor >= router->capacity) {
     router->cursor = 0;

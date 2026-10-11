@@ -54,7 +54,7 @@ class ActivationTest : public ::testing::TestWithParam<uint32_t> {
   }
 
   void TearDown() override {
-    if (gate_) {
+    if (gate_ && expected_code_ == IREE_STATUS_OK) {
       IREE_EXPECT_OK(iree_hal_semaphore_signal(gate_, 2, nullptr));
     }
     if (activation_) {
@@ -70,7 +70,8 @@ class ActivationTest : public ::testing::TestWithParam<uint32_t> {
       loom_serve_activation_destroy(activation_);
     }
     if (execution_) {
-      IREE_EXPECT_OK(loom_serve_execution_drain(execution_));
+      IREE_EXPECT_STATUS_IS(expected_code_,
+                            loom_serve_execution_drain(execution_));
     }
     loom_serve_residency_destroy(residency_);
     loom_serve_execution_release(execution_);
@@ -99,6 +100,8 @@ class ActivationTest : public ::testing::TestWithParam<uint32_t> {
   std::condition_variable condition_;
   // The warmup operation has requested an owner turn.
   bool ready_ = false;
+  // Expected native timeline result after explicit dependency failure.
+  iree_status_code_t expected_code_ = IREE_STATUS_OK;
 };
 
 TEST_P(ActivationTest, UnstartedCancellationHasNoCallbackOrActivation) {
@@ -126,6 +129,22 @@ TEST_P(ActivationTest, SubmittedCancellationJoinsRealReadinessPublication) {
   IREE_ASSERT_OK(loom_serve_activation_advance(
       activation_, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &phase_));
   EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_COMPLETE);
+}
+
+TEST_P(ActivationTest, FailedReadinessJoinsTheCallbackAndPreservesFailure) {
+  IREE_ASSERT_OK(loom_serve_activation_advance(activation_, 0, &phase_));
+  EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_LOADING);
+  expected_code_ = IREE_STATUS_DATA_LOSS;
+  iree_hal_semaphore_fail(
+      gate_, iree_make_status(expected_code_, "parameter predecessor failed"));
+  AwaitWake();
+  IREE_EXPECT_STATUS_IS(expected_code_,
+                        loom_serve_activation_advance(activation_, 0, &phase_));
+  EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_COMPLETE);
+  // Final advance joins the proactor publication before storage is released;
+  // the failed native execution remains owned until ordinary owner draining.
+  loom_serve_activation_destroy(activation_);
+  activation_ = nullptr;
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, ActivationTest, ::testing::Values(1u, 4u));

@@ -52,6 +52,13 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
 // This is the configured budget, not currently available backing.
 uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool);
 
+// Clones the first failure from the shared reclaimer, or returns OK. Such a
+// failure may have partially released another owner's backing; it is not
+// scoped to the caller requesting capacity. The serialized owner stops new
+// work and drains all consumers before cleanup. Querying does not clear it.
+iree_status_t loom_serve_memory_pool_query_status(
+    const loom_serve_memory_pool_t* pool);
+
 // Cold pressure policy, independent of logical storage geometry. The callback
 // may trim eligible reservations toward target_bytes of total commitment; it
 // returns a status only for an actual platform/IO failure. An unreachable

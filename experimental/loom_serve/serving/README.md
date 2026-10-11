@@ -277,6 +277,15 @@ idempotent; undrain and the opposite parameter operation return 409 while an
 operation is pending. Unregister withdraws waiting admission or joins accepted
 activation before retiring resources. No task worker blocks on device readiness.
 
+An accepted native parameter transition failure ends shared serving through the
+same stop-and-drain path as an inference device failure. Preparation errors
+remain model-local unless the factory reports a shared reclamation failure:
+making room for a model can partially release another model's backing. The
+physical pool retains the first failed reclaimer status; the native factory
+reports it without inferring failure scope from a status code. Every accepted
+borrower still retires on its ordinary owner before destruction. No callback
+destroys a queue or pool.
+
 Warmup is not permanent pinning: subsequent pressure may evict idle weights.
 A model whose complete parameters exceed the configured physical pool budget
 fails preparation instead of indefinitely blocking the admission queue. A

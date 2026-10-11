@@ -321,13 +321,16 @@ static void registry_record_error(loom_serve_registered_model_t* model,
   loom_serve_telemetry_stream_append(model->stream, &record);
 }
 
-bool loom_serve_registry_advance(loom_serve_registry_t* registry,
-                                 iree_host_size_t index,
-                                 loom_serve_http_observer_t observer) {
+iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
+                                          iree_host_size_t index,
+                                          loom_serve_http_observer_t observer,
+                                          bool* out_progress) {
+  *out_progress = false;
   loom_serve_registered_model_t* model = &registry->models[index];
   if (!model->incarnation) {
-    return false;
+    return iree_ok_status();
   }
+  iree_status_t terminal_status = iree_ok_status();
   bool progress = false;
   const loom_serve_registration_phase_t previous_phase = model->phase;
   if (model->phase == LOOM_SERVE_REGISTRATION_DECLARED && !model->removal &&
@@ -357,6 +360,14 @@ bool loom_serve_registry_advance(loom_serve_registry_t* registry,
         model->status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                                          "registration cannot pin parameters");
       }
+      if (iree_status_is_ok(model->status) &&
+          model->parameter_operation ==
+              LOOM_SERVE_PARAMETER_OPERATION_WAITING &&
+          !model->registration.activate) {
+        model->status =
+            iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                             "registration cannot activate parameters");
+      }
       if (iree_status_is_ok(model->status)) {
         if (model->registration.set_pinned) {
           model->registration.set_pinned(model->registration.self,
@@ -368,6 +379,10 @@ bool loom_serve_registry_advance(loom_serve_registry_t* registry,
       } else {
         model->parameter_operation = LOOM_SERVE_PARAMETER_OPERATION_NONE;
         registry_record_error(model, model->status);
+        if (registry->factory.query_status) {
+          terminal_status =
+              registry->factory.query_status(registry->factory.self);
+        }
         model->phase = LOOM_SERVE_REGISTRATION_RETIRING;
       }
       progress = true;
@@ -383,14 +398,9 @@ bool loom_serve_registry_advance(loom_serve_registry_t* registry,
         (!snapshot.queued_requests && !snapshot.active_requests &&
          !model->service.is_active(model->service.self))) {
       loom_serve_activation_phase_t phase = LOOM_SERVE_ACTIVATION_COMPLETE;
-      model->status =
-          model->registration.activate
-              ? model->registration.activate(
-                    model->registration.self,
-                    model->removal ? LOOM_SERVE_ACTIVATION_FLAG_CANCEL : 0,
-                    &phase)
-              : iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                                 "registration cannot activate parameters");
+      model->status = model->registration.activate(
+          model->registration.self,
+          model->removal ? LOOM_SERVE_ACTIVATION_FLAG_CANCEL : 0, &phase);
       const loom_serve_parameter_operation_t operation =
           phase == LOOM_SERVE_ACTIVATION_COMPLETE
               ? LOOM_SERVE_PARAMETER_OPERATION_NONE
@@ -401,6 +411,7 @@ bool loom_serve_registry_advance(loom_serve_registry_t* registry,
       model->parameter_operation = operation;
       if (!iree_status_is_ok(model->status)) {
         registry_record_error(model, model->status);
+        terminal_status = iree_status_clone(model->status);
       }
     }
   }
@@ -429,6 +440,7 @@ bool loom_serve_registry_advance(loom_serve_registry_t* registry,
       model->parameter_operation = LOOM_SERVE_PARAMETER_OPERATION_NONE;
       if (!iree_status_is_ok(model->status)) {
         registry_record_error(model, model->status);
+        terminal_status = iree_status_clone(model->status);
       }
       progress = true;
     }
@@ -469,7 +481,8 @@ bool loom_serve_registry_advance(loom_serve_registry_t* registry,
     --registry->count;
     progress = true;
   }
-  return progress;
+  *out_progress = progress;
+  return terminal_status;
 }
 
 bool loom_serve_registry_pending(const loom_serve_registered_model_t* model) {

@@ -274,6 +274,49 @@ TEST_F(MemoryTest, RecommittedSlabsPublishEveryWordOfTheNewGeneration) {
             kGenerationCount * 2 * kSlabSize);
 }
 
+TEST_F(MemoryTest, FailedReclamationRetainsSharedFailureAndRemainingOwnership) {
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_create(pool, kSlabSize, 256,
+                                                  &statistics[0], &first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_create(pool, kSlabSize, 256,
+                                                  &statistics[1], &second));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, 256));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(second, 0, 256));
+  RoundTrip(loom_serve_virtual_buffer_handle(first), 0, 0x12345678);
+  RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x87654321);
+  bool admitted = true;
+  IREE_ASSERT_OK(
+      loom_serve_memory_pool_prepare(pool, 4 * kSlabSize, &admitted));
+  EXPECT_FALSE(admitted);
+  IREE_EXPECT_OK(loom_serve_memory_pool_query_status(pool));
+
+  // The dependency releases real native backing before reporting a subsequent
+  // failure. The requested capacity would now fit, but cannot be admitted.
+  loom_serve_memory_pool_set_reclaimer(
+      pool, {first, [](void* self, uint64_t) -> iree_status_t {
+               auto* buffer = static_cast<loom_serve_virtual_buffer_t*>(self);
+               loom_serve_virtual_buffer_begin_trim(buffer);
+               IREE_RETURN_IF_ERROR(loom_serve_virtual_buffer_trim(buffer));
+               return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                                       "reclamation failed after release");
+             }});
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      loom_serve_memory_pool_prepare(pool, 2 * kSlabSize, &admitted));
+  EXPECT_FALSE(admitted);
+  EXPECT_EQ(statistics[0].committed_bytes, 0u);
+  EXPECT_EQ(statistics[1].committed_bytes, kSlabSize);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).reserved_bytes,
+            2 * kSlabSize);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes, kSlabSize);
+  loom_serve_memory_pool_set_reclaimer(pool, {});
+  for (int i = 0; i < 2; ++i) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                          loom_serve_memory_pool_query_status(pool));
+  }
+  // No new device work follows shared failure. TearDown drains accepted work
+  // and releases the remaining ownership through the ordinary native path.
+}
+
 TEST_F(MemoryTest, DeviceTrimPreservesLiveWorkspaceAndMutableState) {
   IREE_ASSERT_OK(loom_serve_virtual_buffer_create(pool, kSlabSize, 256,
                                                   &statistics[0], &first));

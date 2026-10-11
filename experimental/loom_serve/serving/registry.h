@@ -47,13 +47,15 @@ typedef struct loom_serve_registration_t {
   // Advances explicit warmup after admitted service activity has retired.
   // Capacity waiting owns no device work; submitted readiness owes an owner
   // wake. Cancellation withdraws admission or joins accepted work. Terminal
-  // failure preserves model resources until normal retirement. Paired with
-  // parameters; no model handle escapes the adapter.
+  // failure preserves model resources until normal retirement and terminates
+  // shared serving: admission may already have reclaimed another model's
+  // backing. Paired with parameters; no model handle escapes the adapter.
   iree_status_t (*activate)(void* self, loom_serve_activation_flags_t flags,
                             loom_serve_activation_phase_t* out_phase);
   // Releases reloadable parameter storage after admitted service activity has
   // retired. Preserves programs and mutable state. Paired with parameters and
   // called only when its snapshot reports elastic backing. No execution wait.
+  // Failure terminates shared serving through normal owner draining.
   iree_status_t (*deactivate)(void* self);
   // Frees the operation after successful retirement; no model resources remain.
   void (*destroy)(void* self);
@@ -73,6 +75,12 @@ typedef struct loom_serve_registration_factory_t {
                           loom_serve_telemetry_stream_t* stream,
                           loom_serve_registration_t* out_registration,
                           iree_allocator_t allocator);
+  // Optional shared-resource failure query after preparation fails. Returns
+  // owned terminal failure if preparation disturbed shared backing, otherwise
+  // OK so source/package errors remain local. Never guesses from status codes,
+  // clears failure, waits or releases ownership. The factory owns this evidence
+  // independently of any model that may have failed before service publication.
+  iree_status_t (*query_status)(void* self);
 } loom_serve_registration_factory_t;
 
 typedef enum loom_serve_registration_phase_e {
@@ -210,12 +218,16 @@ iree_status_t loom_serve_registry_set_pinned(
 loom_serve_http_service_flags_t loom_serve_registry_service_flags(
     const loom_serve_registered_model_t* model);
 
-// Advances one lifecycle after the router advances its ready service. Ordinary
-// source/load errors are retained in the slot, not returned as server failure.
-// true denotes actual progress; false waits for an installed ownership wake.
-bool loom_serve_registry_advance(loom_serve_registry_t* registry,
-                                 iree_host_size_t index,
-                                 loom_serve_http_observer_t observer);
+// Advances one lifecycle after the router advances its ready service. Package
+// errors remain in the slot unless the factory reports shared-resource failure.
+// Accepted native parameter-operation errors terminate the serving owner, which
+// must stop admission and drain every accepted borrower before releasing
+// models. Reports actual progress; otherwise waits for an installed ownership
+// wake.
+iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
+                                          iree_host_size_t index,
+                                          loom_serve_http_observer_t observer,
+                                          bool* out_progress);
 bool loom_serve_registry_pending(const loom_serve_registered_model_t* model);
 const char* loom_serve_registry_phase(
     const loom_serve_registered_model_t* model);

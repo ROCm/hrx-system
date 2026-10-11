@@ -12,6 +12,7 @@
 #include "experimental/loom_serve/finite/service.h"
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/service.h"
+#include "experimental/loom_serve/storage/memory.h"
 #include "experimental/loom_serve/text/schedule.h"
 #include "experimental/loom_serve/text/service.h"
 
@@ -548,6 +549,13 @@ static iree_status_t model_registration_create(
                                     out_registration, allocator);
 }
 
+static iree_status_t model_registration_query_status(void* self) {
+  const loom_serve_model_registration_options_t* options = self;
+  loom_serve_memory_pool_t* pool =
+      loom_serve_device_memory_pool(options->device);
+  return pool ? loom_serve_memory_pool_query_status(pool) : iree_ok_status();
+}
+
 loom_serve_registration_factory_t loom_serve_model_registration_factory(
     const loom_serve_model_registration_options_t* options) {
   return (loom_serve_registration_factory_t){
@@ -556,5 +564,6 @@ loom_serve_registration_factory_t loom_serve_model_registration_factory(
                (1u << LOOM_SERVE_MODEL_KIND_DECISION) |
                (1u << LOOM_SERVE_MODEL_KIND_IMAGE) |
                (1u << LOOM_SERVE_MODEL_KIND_TEXT),
-      .create = model_registration_create};
+      .create = model_registration_create,
+      .query_status = model_registration_query_status};
 }

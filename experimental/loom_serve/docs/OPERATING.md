@@ -190,8 +190,8 @@ operator's catalog or management client.
 ## Observe, drain, activate, deactivate and remove
 
 `GET /v1/status` distinguishes registration, admission and scheduler phase.
-A `failed` registration includes its error and remains inspectable; other
-models keep serving. `/healthz` and `/readyz` remain successful in that case.
+A source/package failure remains inspectable on its `failed` registration;
+other models keep serving. `/healthz` and `/readyz` remain successful in that case.
 Correcting the package and explicitly unregistering/re-registering starts a
 new attempt and incarnation; there is no silent model substitution.
 
@@ -326,8 +326,16 @@ accepted loading before releasing resources. Undrain and opposite operations
 return 409 while a parameter operation is pending. A successful warmup does not
 pin weights indefinitely: later pool pressure may evict idle parameters.
 
+Failures in accepted native activation/deactivation, or shared backing
+reclamation during preparation, stop server admission and drain all accepted
+work before returning the error. Reclamation can have partially released
+another model's weights, so these failures cannot be isolated to the requesting
+model. Callback threads only publish completion; they never tear down shared
+queues or pools. Invalid control requests and isolated source/package errors
+do not trigger this shared shutdown.
+
 The name remains occupied until removal completes; a second registration
-returns 409 during that interval. A platform release failure reports
+returns 409 during that interval. A final, quiescent release failure reports
 `release_failed` and retains its resources; another unregister explicitly
 retries release. Restarting the entire process is not part of normal swapping.
 SIGINT/SIGTERM stops application admission and joins accepted asynchronous work

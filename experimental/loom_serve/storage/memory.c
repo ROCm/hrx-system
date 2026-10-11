@@ -25,6 +25,8 @@ struct loom_serve_memory_pool_t {
   loom_serve_memory_statistics_t statistics;
   // Borrowed owner of cold capacity reclamation, separate from slab mechanics.
   loom_serve_memory_reclaimer_t reclaimer;
+  // Owned first reclamation failure; shared backing may be partially released.
+  iree_status_t reclamation_status;
   // The legacy ROCr backend needs a native mapping publication after VMM edits.
   bool legacy_amdgpu_mapping_publication;
   // New mappings cannot be admitted until the cold publication succeeds.
@@ -103,6 +105,7 @@ void loom_serve_memory_pool_destroy(loom_serve_memory_pool_t* pool) {
   }
   IREE_ASSERT(!pool->statistics.reserved_bytes &&
               !pool->statistics.committed_bytes);
+  iree_status_free(pool->reclamation_status);
   iree_hal_allocator_release(pool->device_allocator);
   iree_allocator_free(pool->host_allocator, pool);
 }
@@ -114,6 +117,11 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
 
 uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool) {
   return pool->limit_bytes;
+}
+
+iree_status_t loom_serve_memory_pool_query_status(
+    const loom_serve_memory_pool_t* pool) {
+  return iree_status_clone(pool->reclamation_status);
 }
 
 void loom_serve_memory_pool_set_reclaimer(
@@ -130,8 +138,14 @@ iree_status_t loom_serve_memory_pool_prepare(loom_serve_memory_pool_t* pool,
   }
   const uint64_t target_bytes = pool->limit_bytes - additional_bytes;
   if (pool->statistics.committed_bytes > target_bytes && pool->reclaimer.fn) {
-    IREE_RETURN_IF_ERROR(
-        pool->reclaimer.fn(pool->reclaimer.user_data, target_bytes));
+    iree_status_t status =
+        pool->reclaimer.fn(pool->reclaimer.user_data, target_bytes);
+    if (!iree_status_is_ok(status)) {
+      if (iree_status_is_ok(pool->reclamation_status)) {
+        pool->reclamation_status = iree_status_clone(status);
+      }
+      return status;
+    }
   }
   *out_admitted = pool->statistics.committed_bytes <= target_bytes;
   return iree_ok_status();

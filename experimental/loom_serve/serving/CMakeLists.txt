@@ -81,7 +81,9 @@ loom_cc_test(
   NAME
     router_test
   SRCS
+    "router_registration_test.cc"
     "router_test.cc"
+    "router_test_fixture.h"
   DEPS
     ::registry
     ::router
@@ -184,6 +186,7 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::runtime::residency
+    iree::experimental::loom_serve::storage::memory
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule
     iree::experimental::loom_serve::text::service
