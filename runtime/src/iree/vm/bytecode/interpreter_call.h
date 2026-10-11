@@ -14,6 +14,14 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Executes one verified synchronous native call. Keeping the borrowed call view
+// in this frame prevents native-only spills from entering the shared
+// dispatcher.
+IREE_ATTRIBUTE_NOINLINE iree_status_t iree_vm_bytecode_call_native(
+    const iree_vm_module_execution_t* execution,
+    const iree_vm_bytecode_v0_function_row_t* function,
+    const iree_vm_bytecode_execution_state_t* state, uint32_t callsite_ordinal);
+
 // Publishes one verified direct child call after validating dynamic arguments.
 // Failure occurs before ref mutation or provider entry. Success parks |state|
 // until the iterative invocation driver completes the requested child.

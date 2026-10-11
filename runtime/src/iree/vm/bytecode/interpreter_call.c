@@ -6,6 +6,22 @@
 
 #include "iree/vm/bytecode/interpreter_call.h"
 
+iree_status_t iree_vm_bytecode_call_native(
+    const iree_vm_module_execution_t* execution,
+    const iree_vm_bytecode_v0_function_row_t* function,
+    const iree_vm_bytecode_execution_state_t* state,
+    uint32_t callsite_ordinal) {
+  iree_vm_native_call_t call = {
+      .values = state->values,
+      .refs = state->refs,
+      .local_bytes = state->local_bytes,
+      .scratch = (uint8_t*)iree_host_align(
+          (uintptr_t)(state->local_bytes + function->local_byte_length_u16),
+          iree_max_align_t),
+  };
+  return iree_vm_execution_call_native(execution, callsite_ordinal, &call);
+}
+
 void iree_vm_bytecode_call_cleanup_completed(
     iree_vm_bytecode_execution_state_t* state) {
   const iree_vm_bytecode_call_cleanup_t cleanup = state->pending_call_cleanup;

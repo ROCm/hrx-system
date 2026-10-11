@@ -498,16 +498,8 @@ iree_vm_bytecode_dispatch_control_call: {
 iree_vm_bytecode_dispatch_control_call_native: {
   const iree_vm_bytecode_control_call_native_t* record =
       (const iree_vm_bytecode_control_call_native_t*)record_data;
-  iree_vm_native_call_t call = {
-      .values = values,
-      .refs = refs,
-      .local_bytes = local_bytes,
-      .scratch = (uint8_t*)iree_host_align(
-          (uintptr_t)(local_bytes + function->local_byte_length_u16),
-          iree_max_align_t),
-  };
-  IREE_RETURN_IF_ERROR(iree_vm_execution_call_native(
-      execution, record->callsite_ordinal_u32, &call));
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_call_native(
+      execution, function, state, record->callsite_ordinal_u32));
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_control_call_native_t);
 }
 iree_vm_bytecode_dispatch_control_call_indirect: {
@@ -1534,33 +1526,15 @@ iree_vm_bytecode_dispatch_invalid:
 #undef IREE_VM_BYTECODE_DISPATCH_SWITCH_CASE
 #endif  // computed goto dispatch
 
-iree_status_t iree_vm_bytecode_interpreter_start(
-    iree_vm_module_t* module,
+// Isolates durable-frame setup from scalar leaf entry so native scratch and
+// framed-call temporaries do not extend scalar register or stack lifetimes.
+static IREE_ATTRIBUTE_NOINLINE iree_status_t
+iree_vm_bytecode_interpreter_start_framed(
+    const iree_vm_bytecode_image_t* image,
+    const iree_vm_bytecode_v0_function_row_t* function,
+    const iree_vm_bytecode_v0_signature_row_t* signature,
     const iree_vm_module_function_start_params_t* params,
     iree_vm_execution_outcome_t* out_outcome) {
-  const iree_vm_bytecode_image_t* image =
-      iree_vm_bytecode_image_from_module_const(module);
-  const iree_vm_bytecode_v0_function_row_t* function =
-      &image->layout.functions.rows[params->function_ordinal];
-  const iree_vm_bytecode_v0_signature_row_t* signature =
-      iree_vm_bytecode_function_signature(&image->layout, function);
-  const uint8_t* program_counter =
-      image->layout.functions.bytecode_data + function->bytecode_offset_u32;
-
-  if (IREE_LIKELY(
-          iree_vm_bytecode_function_is_scalar_leaf(function, signature))) {
-    iree_vm_bytecode_execution_state_t state = {
-        .call = params->call,
-        .program_counter = program_counter,
-        .values = params->call.value_results.direct,
-    };
-    iree_vm_bytecode_frame_copy_direct_values(
-        state.values, params->call.value_arguments.direct,
-        signature->argument_value_count_u16);
-    return iree_vm_bytecode_dispatch(image, function, &params->execution,
-                                     &state, out_outcome);
-  }
-
   iree_vm_bytecode_frame_layout_t layout =
       iree_vm_bytecode_calculate_frame_layout(function);
   if (iree_any_bit_set(function->flags_u16,
@@ -1581,6 +1555,8 @@ iree_status_t iree_vm_bytecode_interpreter_start(
   iree_vm_frame_t* frame = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_invocation_push_frame(
       params, layout.frame, iree_vm_bytecode_frame_cleanup, &frame));
+  const uint8_t* program_counter =
+      image->layout.functions.bytecode_data + function->bytecode_offset_u32;
   iree_vm_bytecode_execution_state_t* state =
       iree_vm_bytecode_map_execution_state(frame, layout, params->call,
                                            program_counter);
@@ -1592,6 +1568,34 @@ iree_status_t iree_vm_bytecode_interpreter_start(
     iree_vm_invocation_pop_frame(params->execution.invocation, frame);
   }
   return status;
+}
+
+iree_status_t iree_vm_bytecode_interpreter_start(
+    iree_vm_module_t* module,
+    const iree_vm_module_function_start_params_t* params,
+    iree_vm_execution_outcome_t* out_outcome) {
+  const iree_vm_bytecode_image_t* image =
+      iree_vm_bytecode_image_from_module_const(module);
+  const iree_vm_bytecode_v0_function_row_t* function =
+      &image->layout.functions.rows[params->function_ordinal];
+  const iree_vm_bytecode_v0_signature_row_t* signature =
+      iree_vm_bytecode_function_signature(&image->layout, function);
+  if (IREE_LIKELY(
+          iree_vm_bytecode_function_is_scalar_leaf(function, signature))) {
+    iree_vm_bytecode_execution_state_t state = {
+        .call = params->call,
+        .program_counter = image->layout.functions.bytecode_data +
+                           function->bytecode_offset_u32,
+        .values = params->call.value_results.direct,
+    };
+    iree_vm_bytecode_frame_copy_direct_values(
+        state.values, params->call.value_arguments.direct,
+        signature->argument_value_count_u16);
+    return iree_vm_bytecode_dispatch(image, function, &params->execution,
+                                     &state, out_outcome);
+  }
+  return iree_vm_bytecode_interpreter_start_framed(image, function, signature,
+                                                   params, out_outcome);
 }
 
 iree_status_t iree_vm_bytecode_interpreter_resume(
