@@ -225,7 +225,18 @@ static iree_status_t loom_vm_program_collect(
           loom_string_table_get(&module->strings, import_module);
       entry->import.symbol_name = loom_string_table_get(
           &module->strings, loom_func_like_import_symbol(function));
+      if (loom_func_like_abi(function) == LOOM_TARGET_ABI_VM_NATIVE) {
+        status = loom_vm_native_call_template_build(
+            module, loom_low_func_decl_abi_layout(op), entry->argument_count,
+            entry->results.count, plan_arena, &entry->native);
+      }
     } else {
+      if (loom_func_like_abi(function) == LOOM_TARGET_ABI_VM_NATIVE) {
+        status =
+            iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "vm_native ABI requires an import declaration");
+        continue;
+      }
       if (definition_count == (uint32_t)UINT16_MAX + 1) {
         status =
             iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -268,13 +279,15 @@ static iree_status_t loom_vm_program_collect(
   for (uint32_t i = 0; i < count; ++i) {
     functions[i].signature.fields = descriptors;
     functions[i].signature.registers = registers;
-    functions[i].call_contract = (loom_low_call_contract_t){
-        .arguments = registers,
-        .argument_count = functions[i].argument_count,
-        .results = registers + functions[i].argument_count,
-        .result_count = functions[i].results.count,
-        .clobbers = {functions[i].call_clobbers, 2},
-    };
+    if (!functions[i].native) {
+      functions[i].call_contract = (loom_low_call_contract_t){
+          .arguments = registers,
+          .argument_count = functions[i].argument_count,
+          .results = registers + functions[i].argument_count,
+          .result_count = functions[i].results.count,
+          .clobbers = {functions[i].call_clobbers, 2},
+      };
+    }
     descriptors += functions[i].argument_count + functions[i].results.count;
     registers += functions[i].argument_count + functions[i].results.count;
   }
@@ -283,6 +296,7 @@ static iree_status_t loom_vm_program_collect(
       .bindings_by_symbol = bindings_by_symbol,
       .count = count,
       .definition_count = definition_count,
+      .native_calls = {.arena = plan_arena},
       .rodata = {.ordinals_by_symbol = ordinals_by_symbol,
                  .symbols = rodata_symbols,
                  .symbol_count = rodata_count,
@@ -394,9 +408,15 @@ static iree_status_t loom_vm_program_build_metadata(
   loom_vm_program_callable_t** imports = exports + program->count;
   uint32_t export_count = 0;
   uint32_t import_count = 0;
+  uint32_t ordinary_count = 0;
+  uint32_t native_count = 0;
   for (uint32_t i = 0; i < program->count; ++i) {
     loom_vm_program_callable_t* entry = &program->values[i];
-    sorted[i] = entry;
+    if (entry->native) {
+      ++native_count;
+      continue;
+    }
+    sorted[ordinary_count++] = entry;
     if (entry->target_kind ==
         IREE_VM_BYTECODE_CONTROL_CALL_TARGET_REQUIRED_IMPORT) {
       imports[import_count++] = entry;
@@ -405,9 +425,9 @@ static iree_status_t loom_vm_program_build_metadata(
     }
   }
 
-  qsort(sorted, program->count, sizeof(*sorted), loom_vm_signature_compare);
+  qsort(sorted, ordinary_count, sizeof(*sorted), loom_vm_signature_compare);
   uint32_t callable_count = 0;
-  for (uint32_t i = 0; i < program->count; ++i) {
+  for (uint32_t i = 0; i < ordinary_count; ++i) {
     loom_vm_program_callable_t* entry = sorted[i];
     if (!callable_count ||
         loom_vm_signature_compare(&sorted[callable_count - 1], &entry)) {
@@ -446,9 +466,9 @@ static iree_status_t loom_vm_program_build_metadata(
       ++planned_import_group_count;
     }
   }
-  const uint64_t string_capacity = (uint64_t)export_count + references.count +
-                                   references.group_count + import_count +
-                                   planned_import_group_count;
+  const uint64_t string_capacity =
+      (uint64_t)export_count + references.count + references.group_count +
+      import_count + planned_import_group_count + 2 * native_count;
   if (string_capacity > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "VM string count exceeds the u16 ordinal space");
@@ -524,6 +544,15 @@ static iree_status_t loom_vm_program_build_metadata(
         .callable_type_ordinal_u16 = entry->callable_ordinal,
     };
     strings[string_count++] = entry->import.symbol_name;
+  }
+  for (uint32_t i = 0; i < program->count; ++i) {
+    loom_vm_program_callable_t* entry = &program->values[i];
+    if (entry->native) {
+      entry->native->module_name = (uint16_t)string_count;
+      strings[string_count++] = entry->import.module_name;
+      entry->native->export_name = (uint16_t)string_count;
+      strings[string_count++] = entry->import.symbol_name;
+    }
   }
   IREE_ASSERT_EQ(string_count, string_capacity);
   uint32_t string_byte_length = 0;
@@ -644,8 +673,8 @@ static iree_status_t loom_vm_program_build_functions(
     bool function_accepted = false;
     status = loom_vm_function_plan_write(
         module, entry->function, entry->function_version, descriptor_registry,
-        diagnostic_emitter, &entry->signature, program, scratch_arena, stream,
-        &function_accepted, &row);
+        diagnostic_emitter, &entry->signature, entry->ordinal, program,
+        scratch_arena, stream, &function_accepted, &row);
     iree_arena_reset(scratch_arena);
     if (iree_status_is_ok(status) && function_accepted &&
         row.bytecode_length_u32 > UINT32_MAX - (uint32_t)offset) {
@@ -733,6 +762,8 @@ iree_status_t loom_vm_program_plan_build(
   }
   if (iree_status_is_ok(status) && functions_accepted) {
     *out_accepted = true;
+    out_plan->native_calls = program.native_calls.head;
+    out_plan->native_call_count = program.native_calls.count;
   } else {
     loom_vm_program_plan_deinitialize(out_plan);
   }

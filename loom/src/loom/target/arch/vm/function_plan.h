@@ -15,6 +15,7 @@
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/op_defs.h"
+#include "loom/target/arch/vm/native_call_plan.h"
 #include "loom/target/function_version.h"
 
 #ifdef __cplusplus
@@ -65,6 +66,8 @@ typedef struct loom_vm_program_callable_t {
   loom_low_call_contract_t call_contract;
   // Value and reference prefixes overwritten by argument/result transport.
   loom_low_call_clobber_t call_clobbers[2];
+  // Structured synchronous native ABI, or NULL for ordinary VM callables.
+  loom_vm_native_call_template_t* native;
 } loom_vm_program_callable_t;
 
 // Compiler-owned state shared across function planning. This representation
@@ -80,6 +83,8 @@ typedef struct loom_vm_program_build_t {
   uint32_t count;
   // Number of local definitions, retaining their collected ordinal space.
   uint32_t definition_count;
+  // Physical native callsites retained across per-function scratch resets.
+  loom_vm_native_call_plan_t native_calls;
   // Read-only payloads retained for the program's data section.
   struct {
     // Symbol-indexed data ordinals; UINT16_MAX marks an unreferenced payload.
@@ -122,15 +127,15 @@ typedef struct loom_vm_program_build_t {
 // append their referenced payload once to its read-only data plan. All frame
 // and instruction-planning scratch belongs to |arena| and can be reset when
 // this call returns; only the stream bytes, scalar row fields, and
-// program-owned rodata references survive. Structured frame rejection returns
-// OK with |out_accepted| false. Infrastructure and stream failures return a
-// status and also leave |out_accepted| false.
+// program-owned rodata references and native callsites survive. Structured
+// frame rejection returns OK with |out_accepted| false. Infrastructure and
+// stream failures return a status and also leave |out_accepted| false.
 iree_status_t loom_vm_function_plan_write(
     loom_module_t* module, loom_func_like_t function,
     const loom_target_function_version_t* function_version,
     const loom_low_descriptor_registry_t* descriptor_registry,
     iree_diagnostic_emitter_t diagnostic_emitter,
-    const loom_vm_function_signature_t* signature,
+    const loom_vm_function_signature_t* signature, uint16_t function_ordinal,
     loom_vm_program_build_t* program, iree_arena_allocator_t* arena,
     iree_io_stream_t* stream, bool* out_accepted,
     iree_vm_bytecode_v0_function_row_t* out_row);

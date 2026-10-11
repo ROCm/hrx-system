@@ -118,6 +118,11 @@ ExportAbiKind = EnumDef(
             8,
             doc="Spatial-array program materialization ABI.",
         ),
+        EnumCase(
+            "vm_native",
+            9,
+            doc="Synchronous VM native entry with a static aggregate record.",
+        ),
     ],
     doc="Callable or package ABI used by an export plan.",
     c_type="loom_target_abi_kind_t",

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/vm/bytecode/wire/core.h"
+#include "iree/vm/native_call.h"
 #include "loom/analysis/storage_layout.h"
 #include "loom/codegen/low/allocation/move_sequence.h"
 #include "loom/codegen/low/frame.h"
@@ -494,6 +495,8 @@ typedef struct loom_vm_call_bank_t {
 typedef struct loom_vm_call_scratch_t {
   // Reusable source-ordered physical locations, partitioned by register bank.
   loom_vm_call_bank_t banks[2];
+  // Largest ordinary transport prefixes, finalized before native selectors.
+  uint16_t register_counts[2];
   // Invocation storage shared by calls, returns, entry, and ordinary traffic.
   loom_vm_function_storage_t storage;
 } loom_vm_call_scratch_t;
@@ -513,6 +516,9 @@ static iree_status_t loom_vm_function_plan_calls(
     const loom_vm_program_callable_t* binding =
         functions
             ->bindings_by_symbol[loom_low_func_call_callee(node->op).symbol_id];
+    if (binding->native) {
+      continue;
+    }
     const iree_vm_bytecode_v0_signature_row_t* signature =
         &binding->signature.row;
     const uint32_t argument_overflow =
@@ -556,6 +562,8 @@ static iree_status_t loom_vm_function_plan_calls(
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         arena, location_count, sizeof(*locations), (void**)&locations));
     for (uint16_t bank = 0; bank < 2; ++bank) {
+      scratch->register_counts[bank] =
+          iree_min(16, iree_max(max_arguments[bank], max_results[bank]));
       scratch->banks[bank].arguments = locations;
       locations += max_arguments[bank];
       scratch->banks[bank].results = locations;
@@ -563,6 +571,50 @@ static iree_status_t loom_vm_function_plan_calls(
     }
   }
   return iree_ok_status();
+}
+
+// Structured entries borrow the allocator's final locations. Only the final
+// selector words are patched; no ABI permutation, argument packet, or input
+// ownership transfer is emitted.
+static iree_status_t loom_vm_function_native_call(
+    const loom_low_emission_frame_t* frame,
+    const loom_low_schedule_node_t* node,
+    const loom_vm_native_call_template_t* call_template,
+    const loom_vm_function_storage_t* storage, uint16_t function_ordinal,
+    loom_vm_native_call_plan_t* plan, iree_io_stream_t* stream,
+    iree_vm_bytecode_v0_function_row_t* out_row) {
+  uint32_t ordinal = 0;
+  uint32_t* words = NULL;
+  IREE_RETURN_IF_ERROR(loom_vm_native_call_plan_append(
+      plan, call_template, function_ordinal, &ordinal, &words));
+  const loom_value_ordinal_t* arguments =
+      loom_low_schedule_node_const_operand_ordinals(node);
+  const loom_value_ordinal_t* results =
+      loom_low_schedule_node_const_result_ordinals(node);
+  for (uint32_t i = 0; i < call_template->operand_count; ++i) {
+    const loom_value_ordinal_t value = i < node->operand_count
+                                           ? arguments[i]
+                                           : results[i - node->operand_count];
+    const loom_low_allocation_assignment_t* assignment =
+        loom_low_allocation_assignment_for_value_ordinal(&frame->allocation,
+                                                         value, NULL);
+    uint32_t selector = assignment->location_base;
+    if (assignment->location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE) {
+      selector = storage->binding_locations[selector];
+      if (assignment->descriptor_reg_class_id == VM_CORE_REG_CLASS_ID_REF) {
+        selector += out_row->ref_register_count_u16;
+      } else {
+        selector |= IREE_VM_NATIVE_CALL_LOCAL_VALUE;
+      }
+    }
+    words[call_template->operand_offsets[i]] = selector;
+  }
+  out_row->flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_NATIVE_CALL;
+  const iree_vm_bytecode_control_call_native_t instruction = {
+      .opcode = IREE_VM_BYTECODE_OPCODE_CONTROL_CALL_NATIVE,
+      .callsite_ordinal_u32 = ordinal,
+  };
+  return iree_io_stream_write(stream, sizeof(instruction), &instruction);
 }
 
 // Captures each allocated location once while partitioning logical operands
@@ -608,12 +660,6 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_call(
       loom_low_allocation_find_call_moves_by_source_ordinal(
           &frame->allocation, node->source_ordinal);
   out_row->flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
-  out_row->value_register_count_u16 = iree_max(
-      out_row->value_register_count_u16,
-      iree_min(16, iree_max(values->argument_count, values->result_count)));
-  out_row->ref_register_count_u16 = iree_max(
-      out_row->ref_register_count_u16,
-      iree_min(16, iree_max(refs->argument_count, refs->result_count)));
   iree_status_t status = iree_ok_status();
   for (uint16_t i = 16; i < values->argument_count && iree_status_is_ok(status);
        ++i) {
@@ -868,7 +914,7 @@ iree_status_t loom_vm_function_plan_write(
     const loom_target_function_version_t* function_version,
     const loom_low_descriptor_registry_t* descriptor_registry,
     iree_diagnostic_emitter_t diagnostic_emitter,
-    const loom_vm_function_signature_t* signature,
+    const loom_vm_function_signature_t* signature, uint16_t function_ordinal,
     loom_vm_program_build_t* functions, iree_arena_allocator_t* arena,
     iree_io_stream_t* stream, bool* out_accepted,
     iree_vm_bytecode_v0_function_row_t* out_row) {
@@ -1025,6 +1071,12 @@ iree_status_t loom_vm_function_plan_write(
                             signature->row.result_ref_count_u16)),
       frame.allocation.physical_extents
           .ends_by_reg_class[VM_CORE_REG_CLASS_ID_REF]);
+  out_row->value_register_count_u16 =
+      iree_max(out_row->value_register_count_u16,
+               call_scratch.register_counts[VM_CORE_REG_CLASS_ID_VALUE]);
+  out_row->ref_register_count_u16 =
+      iree_max(out_row->ref_register_count_u16,
+               call_scratch.register_counts[VM_CORE_REG_CLASS_ID_REF]);
   out_row->block_count_u32 = (uint32_t)frame.schedule.block_count;
   loom_low_move_sequence_scratch_t return_scratch = {0};
   IREE_RETURN_IF_ERROR(loom_low_move_sequence_scratch_initialize(
@@ -1082,8 +1134,16 @@ iree_status_t loom_vm_function_plan_write(
       if (node->descriptor) {
         status = loom_vm_function_packet(&frame, node, functions, stream);
       } else if (loom_low_func_call_isa(node->op)) {
-        status = loom_vm_function_call(&frame, node, functions, &call_scratch,
-                                       stream, out_row);
+        const loom_vm_program_callable_t* binding =
+            functions->bindings_by_symbol[loom_low_func_call_callee(node->op)
+                                              .symbol_id];
+        status = binding->native
+                     ? loom_vm_function_native_call(
+                           &frame, node, binding->native, &call_scratch.storage,
+                           function_ordinal, &functions->native_calls, stream,
+                           out_row)
+                     : loom_vm_function_call(&frame, node, functions,
+                                             &call_scratch, stream, out_row);
       } else if (loom_low_storage_reserve_isa(node->op) ||
                  loom_low_storage_view_isa(node->op)) {
         // Storage layout is already fixed by the shared scheduler.

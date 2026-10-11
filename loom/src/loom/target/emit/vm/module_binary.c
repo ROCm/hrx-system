@@ -225,6 +225,35 @@ static iree_status_t loom_vm_program_write_rodata(
   return status;
 }
 
+static iree_status_t loom_vm_program_write_native_calls(
+    const loom_vm_program_plan_t* plan, iree_io_stream_pos_t base_offset,
+    iree_io_stream_t* stream,
+    iree_vm_bytecode_v0_section_directory_row_t* row) {
+  iree_io_stream_pos_t start = 0;
+  IREE_RETURN_IF_ERROR(loom_vm_section_begin(
+      stream, base_offset, IREE_VM_BYTECODE_SECTION_NATIVE_CALLS, row, &start));
+  const iree_vm_bytecode_v0_native_calls_header_t header = {
+      .callsite_count_u32 = plan->native_call_count,
+  };
+  IREE_RETURN_IF_ERROR(iree_io_stream_write(stream, sizeof(header), &header));
+  iree_status_t status = iree_ok_status();
+  for (const loom_vm_native_callsite_plan_t* callsite = plan->native_calls;
+       callsite && iree_status_is_ok(status); callsite = callsite->next) {
+    status =
+        iree_io_stream_write(stream, sizeof(callsite->row), &callsite->row);
+  }
+  for (const loom_vm_native_callsite_plan_t* callsite = plan->native_calls;
+       callsite && iree_status_is_ok(status); callsite = callsite->next) {
+    status = iree_io_stream_write(
+        stream, callsite->row.word_count_u32 * sizeof(uint32_t),
+        callsite->words);
+  }
+  if (iree_status_is_ok(status)) {
+    row->byte_length_u64 = base_offset + iree_io_stream_offset(stream) - start;
+  }
+  return status;
+}
+
 static iree_status_t loom_vm_program_write_prefix(
     const loom_vm_program_plan_t* plan, uint16_t section_count,
     iree_io_stream_t* stream,
@@ -278,32 +307,37 @@ iree_status_t loom_vm_program_emit_binary(const loom_vm_program_plan_t* plan,
       (plan->string_count != 0) + (plan->reference_count != 0) +
       2 * (plan->signature_count != 0) + (plan->import_count != 0) +
       (plan->export_count != 0) + (plan->function_count != 0) +
-      plan->has_rodata_section;
+      plan->has_rodata_section + (plan->native_call_count != 0);
   iree_io_stream_t* prefix_stream = NULL;
   IREE_RETURN_IF_ERROR(iree_io_vec_stream_create(
       IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE, 32 * 1024,
       allocator, &prefix_stream));
 
-  iree_vm_bytecode_v0_section_directory_row_t directory[8] = {0};
+  iree_vm_bytecode_v0_section_directory_row_t directory[9] = {0};
   uint16_t section = 0;
   iree_status_t status = loom_vm_program_write_prefix(
       plan, section_count, prefix_stream, directory, &section);
 
   iree_io_stream_t* suffix_stream = NULL;
-  if (iree_status_is_ok(status) && plan->has_rodata_section) {
+  if (iree_status_is_ok(status) &&
+      (plan->has_rodata_section || plan->native_call_count)) {
     iree_io_stream_pos_t suffix_base = 0;
-    iree_io_stream_t* rodata_stream = prefix_stream;
+    iree_io_stream_t* stream = prefix_stream;
     if (plan->function_count != 0) {
       suffix_base = iree_io_stream_offset(prefix_stream) +
                     iree_byte_sequence_length(plan->function_bytecode);
       status = iree_io_vec_stream_create(
           IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE,
           32 * 1024, allocator, &suffix_stream);
-      rodata_stream = suffix_stream;
+      stream = suffix_stream;
     }
-    if (iree_status_is_ok(status)) {
-      status = loom_vm_program_write_rodata(plan, suffix_base, rodata_stream,
+    if (iree_status_is_ok(status) && plan->has_rodata_section) {
+      status = loom_vm_program_write_rodata(plan, suffix_base, stream,
                                             &directory[section++]);
+    }
+    if (iree_status_is_ok(status) && plan->native_call_count) {
+      status = loom_vm_program_write_native_calls(plan, suffix_base, stream,
+                                                  &directory[section++]);
     }
   }
   if (iree_status_is_ok(status)) {

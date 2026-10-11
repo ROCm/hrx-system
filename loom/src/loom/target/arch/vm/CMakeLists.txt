@@ -77,15 +77,34 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    native_call_plan
+  HDRS
+    "native_call_plan.h"
+  SRCS
+    "native_call_plan.c"
+  DEPS
+    ::program
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     function_plan
   HDRS
     "function_plan.h"
   SRCS
     "function_plan.c"
   DEPS
+    ::native_call_plan
     iree::base
     iree::base::internal::arena
     iree::io::stream
+    iree::vm
     iree::vm::bytecode::wire
     loom::analysis::storage_layout
     loom::codegen::low::allocation::call
@@ -105,6 +124,24 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    native_call_plan_test
+  SRCS
+    "native_call_plan_test.cc"
+  DEPS
+    ::native_call_plan
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     program_build
@@ -114,6 +151,7 @@ loom_cc_library(
     "program_build.c"
   DEPS
     ::function_plan
+    ::native_call_plan
     ::program
     ::reference_plan
     iree::base
@@ -217,6 +255,7 @@ loom_check_test_suite(
     "test/imports.loom-test"
     "test/math_contraction.loom-test"
     "test/math_policy.loom-test"
+    "test/native_calls.loom-test"
     "test/native_references.loom-test"
     "test/scalar.loom-test"
     "test/source_low/callable_policy.loom-test"
@@ -270,6 +309,7 @@ loom_check_compile_tests(
     "test/imports.loom-test"
     "test/math_contraction.loom-test"
     "test/math_policy.loom-test"
+    "test/native_calls.loom-test"
     "test/native_references.loom-test"
     "test/scalar.loom-test"
     "test/source_low/callable_policy.loom-test"

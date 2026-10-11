@@ -55,6 +55,7 @@ typedef enum loom_target_abi_kind_e {
   LOOM_TARGET_ABI_COMMAND_PROGRAM = 6,
   LOOM_TARGET_ABI_VM_FUNCTION = 7,
   LOOM_TARGET_ABI_ARRAY_PROGRAM = 8,
+  LOOM_TARGET_ABI_VM_NATIVE = 9,
 } loom_target_abi_kind_e;
 
 typedef uint8_t loom_target_linkage_t;
@@ -121,6 +122,8 @@ static inline iree_string_view_t loom_target_abi_kind_name(
       return IREE_SV("vm_function");
     case LOOM_TARGET_ABI_ARRAY_PROGRAM:
       return IREE_SV("array_program");
+    case LOOM_TARGET_ABI_VM_NATIVE:
+      return IREE_SV("vm_native");
     case LOOM_TARGET_ABI_UNKNOWN:
       return IREE_SV("unknown");
   }

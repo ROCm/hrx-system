@@ -25,6 +25,17 @@ typedef struct loom_vm_rodata_plan_t {
   uint32_t alignment;
 } loom_vm_rodata_plan_t;
 
+// One finalized structured native callsite. Rows and payloads are emitted in
+// list order; the retained offsets already partition the complete word tail.
+typedef struct loom_vm_native_callsite_plan_t {
+  // Next callsite in function/instruction order, or NULL at the end.
+  struct loom_vm_native_callsite_plan_t* next;
+  // Final caller, import identity, version, and word extent.
+  iree_vm_bytecode_v0_native_callsite_row_t row;
+  // Immutable physical selector/count/offset words.
+  const uint32_t* words;
+} loom_vm_native_callsite_plan_t;
+
 // Immutable physical VM program produced by target planning.
 //
 // Every ordinal, row, bytecode displacement, physical extent, and format
@@ -62,6 +73,11 @@ typedef struct loom_vm_program_plan_t {
   const iree_vm_bytecode_v0_import_entry_row_t* imports;
   // Number of entries in |imports|.
   uint32_t import_count;
+
+  // Structured native callsites in instruction emission order.
+  const loom_vm_native_callsite_plan_t* native_calls;
+  // Number of entries in |native_calls|.
+  uint32_t native_call_count;
 
   // Public export rows sorted by export name.
   const iree_vm_bytecode_v0_export_row_t* exports;

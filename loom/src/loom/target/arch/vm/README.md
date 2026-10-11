@@ -148,6 +148,39 @@ through the call ABI; a native failure unwinds reference arguments normally.
 An explicit import alias is needed only when its external symbol differs from
 the local symbol.
 
+### Structured synchronous native entries
+
+A Low import with `abi(vm_native)` names a synchronous provider entry rather
+than an ordinary VM callable. Its `abi_layout` states a static aggregate record
+and the positions occupied by its logical argument and result selectors:
+
+```loom
+low.func.decl import(native, "sum", module = "host") target<vm.core> abi(vm_native) abi_layout({arguments = [3, 4], record = [2, 3, 0, 0, 0], results = [2], version = 0}) @sum(%a: reg<vm.value : i64>, %b: reg<vm.value : i64>) -> (reg<vm.value : i64>)
+```
+
+Here the provider's record has a two-word range header, a result selector, and
+two input selectors in the range payload. `record` contains u32 literal words
+and zero selector placeholders. `arguments` and `results` index those words in
+logical signature order; each placeholder is distinct. `version` selects the
+exact provider schema. This layout is a public calling convention, independent
+of physical register assignment. Source dialect legalization can construct it
+from static operand segments without introducing a provider export per shape.
+
+The shared scheduler and allocator retain the normal SSA lifetimes, with no
+fixed ABI-register prefixes or native clobbers. Final emission patches each
+placeholder from those allocation facts, including direct selectors for spilled
+values and references. The module carries `control.call.native` instructions
+and immutable records, not ordinary import signatures or argument packets.
+
+At program linking, the provider schema verifies range layout, selector bounds,
+and result distinctness, and computes invocation scratch. Execution borrows the
+caller frame directly. Entries cannot suspend or reenter the VM; all input use
+precedes result publication, so dying inputs and new outputs may share storage.
+Native asynchronous APIs retain their own work-lifetime contracts. The VM
+neither tracks nor waits for their completion. The
+[native call contract](../../../../../../runtime/src/iree/vm/native_call.h)
+defines the provider and ownership boundary.
+
 `func.location` materializes an immutable source value as a normal VM buffer.
 Its semantic nodes retain file ranges, source field ranges, optional original
 text, and fused/tagged/opaque provenance even when debug locations are stripped.

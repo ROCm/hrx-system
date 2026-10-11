@@ -1,0 +1,81 @@
+// RUN: emit vm-dis
+
+vm.target<core> @vm
+
+// Independent and nested ranges are static ABI data. The imported native
+// symbol is shared across shapes; no ordinary callable signature is emitted.
+low.func.decl import(native, "aggregate", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({arguments = [0, 6, 7, 10], record = [0, 2, 6, 1, 8, 0, 0, 0, 1, 10, 0], results = [5], version = 1}) @aggregate(%owner: reg<vm.ref : buffer>, %a: reg<vm.value : i64>, %b: reg<vm.value : i64>, %c: reg<vm.value : i64>) -> (reg<vm.value : i64>)
+
+low.func.decl import(native, "aggregate", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({arguments = [0], record = [0, 0, 6, 0, 6, 0], results = [5], version = 1}) @empty(%owner: reg<vm.ref : buffer>) -> (reg<vm.value : i64>)
+
+low.func.def public target<vm.core>(@vm) @run(%owner: reg<vm.ref : buffer>, %a: reg<vm.value : i64>, %b: reg<vm.value : i64>, %c: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %first = low.func.call @aggregate(%owner, %a, %b, %c) : (reg<vm.ref : buffer>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i64>)
+  %second = low.func.call @empty(%owner) : (reg<vm.ref : buffer>) -> (reg<vm.value : i64>)
+  return %first, %second
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "run"
+    string @string1 = "vm"
+    string @string2 = "buffer"
+    string @string3 = "host"
+    string @string4 = "aggregate"
+    string @string5 = "host"
+    string @string6 = "aggregate"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (ref(@ref_type0), i64, i64, i64) -> (i64, i64)
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([has_native_call]) frame(local_bytes = 0, value_registers = 3, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call.native {callsite_ordinal = 0}
+      control.call.native {callsite_ordinal = 1}
+      control.return
+    }
+  }
+
+  section native_calls alignment(8) {
+    native_callsite function(@function0) module(@string3) export(@string4) version(1) {
+      word 0x00000000
+      word 0x00000002
+      word 0x00000006
+      word 0x00000001
+      word 0x00000008
+      word 0x00000000
+      word 0x00000000
+      word 0x00000001
+      word 0x00000001
+      word 0x0000000A
+      word 0x00000002
+    }
+    native_callsite function(@function0) module(@string5) export(@string6) version(1) {
+      word 0x00000000
+      word 0x00000000
+      word 0x00000006
+      word 0x00000000
+      word 0x00000006
+      word 0x00000001
+    }
+  }
+
+}
