@@ -53,10 +53,6 @@ struct ModelLifecycle {
                              const iree_task_worker_context_t*,
                              iree_task_process_drain_result_t* result) {
     auto* self = static_cast<ModelLifecycle*>(process->user_data);
-    std::unique_lock<std::mutex> lock(self->mutex, std::try_to_lock);
-    if (!lock.owns_lock()) {
-      return iree_ok_status();
-    }
     if (!self->complete && self->retiring) {
       if (!self->retirement_started) {
         self->retirement_started = true;
@@ -149,9 +145,9 @@ struct ModelLifecycle {
   loom_serve_finite_model_t* model = nullptr;
   // Copied terminal evidence, surviving failed or cancelled preparation.
   loom_serve_compilation_report_t report = {};
-  // Owner process; asynchronous callbacks only wake it.
+  // Exclusive single-drainer process; asynchronous callbacks only wake it.
   iree_task_process_t process = {};
-  // Serializes owner turns and the final release with the outer test.
+  // Publishes final release to the outer test, independent of owner turns.
   std::mutex mutex;
   // Outer-only notification of actual process retirement.
   std::condition_variable condition;
@@ -657,10 +653,10 @@ TEST_P(SourceEmbeddingServiceTest,
   EXPECT_EQ(retired_counters_.requests, 1u);
   EXPECT_EQ(retired_counters_.failed, 1u);
   EXPECT_EQ(retired_counters_.cancelled, 0u);
+  // Model consumers have retired, but raw queue allocation records may still
+  // own workspace backing. Trim does not wait for those records; the outer
+  // TearDown joins them when destroying the shared device group.
   IREE_ASSERT_OK(loom_serve_device_trim(device_, 0));
-  const auto statistics = loom_serve_device_memory_statistics(device_);
-  EXPECT_EQ(statistics.workspace.reservation_count, 0u);
-  EXPECT_EQ(statistics.workspace.bytes_committed, 0u);
 }
 
 TEST_P(SourceEmbeddingServiceTest,

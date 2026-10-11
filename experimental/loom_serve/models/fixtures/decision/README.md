@@ -2,8 +2,8 @@
 
 This package exercises the [SystemOne adapter](../../../decision/README.md)
 and [finite model ABI](../../../finite/README.md). It compiles ordinary Loom
-VM preparation/control and two portable GPU kernels. No downloaded model,
-native canned answer or model-specific C is involved.
+VM preparation/control and two native kernels on x86 CPU, AMDGPU and Vulkan.
+No downloaded model, native canned answer or model-specific C is involved.
 
 Catalog entry:
 
@@ -27,7 +27,7 @@ no tokenizer and reports zero input and output tokens.
 For each option, source preparation adds the raw JSON byte lengths of state,
 instructions and criterion to the first byte of a choice ID (or the zero-based
 implicit score/noul ordinal). An absent noul criterion contributes zero bytes;
-choice null contributes its four literal bytes. The first GPU kernel computes:
+choice null contributes its four literal bytes. The first kernel computes:
 
 ```
 weight = 1 + ((seed + cohort_question_count) & 3)
@@ -42,26 +42,30 @@ pass the packed-dispatch test. These values have no semantic/calibration meaning
 
 ## Verification
 
-On supported AMDGPU and Vulkan runners using the repository's execution policy:
+On supported x86 CPU, AMDGPU and Vulkan runners using the repository's execution
+policy:
 
 ```sh
 iree-bazel-test --config=asan \
   //experimental/loom_serve/decision:protocol_test \
+  //experimental/loom_serve/models/fixtures/decision:service_cpu_test \
   //experimental/loom_serve/models/fixtures/decision:service_test \
   //experimental/loom_serve/models/fixtures/decision:service_vulkan_test
 ```
 
-The actual GPU/HTTP cases run with one and four task workers. They cover a
-four-question cohort spanning three requests, independent peer reset,
-choice/score/noul results, reversed storage, deterministic ties, source capacity
-rejection followed by valid work, and shared routing alongside another source
-embedding model and raw tokenization. CPU protocol tests cover escaped IDs,
-structured criteria, normalized-result validation and exact confidence formulas.
-Non-dyadic probabilities are compared numerically against the GPU division
-contract, not against one backend's decimal rounding. Exactly representable
-cohort results retain exact wire checks. The source uses the selected device
-target; a server using `--device=vulkan --pool_backing=fixed` needs no package
-edits.
+The actual native-device/HTTP cases run with one and four shared task workers.
+They cover a four-question cohort spanning three requests, independent peer
+reset, choice/score/noul results, reversed storage, deterministic ties, source
+capacity rejection followed by valid work, and shared routing alongside another
+source embedding model and raw tokenization. CPU protocol tests cover escaped
+IDs, structured criteria, normalized-result validation and exact confidence
+formulas. Non-dyadic probabilities are compared numerically against the
+floating-point division contract, not against one backend's decimal rounding.
+Exactly representable cohort results retain exact wire checks. The source uses
+the selected device target; a server using `--device=task --pool_backing=fixed` or
+`--device=vulkan --pool_backing=fixed` needs no package edits. CPU device kernels
+are JIT-compiled to native x86 and share the application executor with model
+preparation and scheduling.
 
 A real decision port supplies its own source formatter, parameter declarations,
 backbone/head kernels and numerical evidence. This fixture proves the serving

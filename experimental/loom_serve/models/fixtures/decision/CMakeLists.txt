@@ -114,4 +114,45 @@ loom_cc_test(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_X86 AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    service_cpu_test
+  SRCS
+    "service_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/config.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/control.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/decide.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/sources.txt"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
+    "iree::experimental::loom_serve::models::fixtures::embedding::sources"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::internal::json
+    iree::base::threading
+    iree::base::tooling::flags
+    iree::experimental::loom_serve::decision::protocol
+    iree::experimental::loom_serve::embedding::protocol
+    iree::experimental::loom_serve::finite::model
+    iree::experimental::loom_serve::finite::service
+    iree::experimental::loom_serve::http::listener
+    iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::serving::registry
+    iree::experimental::loom_serve::serving::router
+    iree::testing::gtest
+    iree::testing::gtest_main
+  ARGS
+    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom}}"
+    "--embedding_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
+    "--test_device=task"
+  LABELS
+
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

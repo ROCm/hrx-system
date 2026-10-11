@@ -1,9 +1,10 @@
 # Deterministic source embedding model
 
 This package implements the [finite-vector ABI](../../../finite/model.h) using
-real VM preparation and GPU commands. It needs no downloaded model. Its purpose
-is to expose batching, row association and ownership errors through normal HTTP
-requests; its numbers have no neural meaning.
+real VM preparation and native device commands on x86 CPU, AMDGPU and Vulkan.
+It needs no downloaded model. Its purpose is to expose batching, row association
+and ownership errors through normal HTTP requests; its numbers have no neural
+meaning.
 
 The tokenizer recognizes `a`, `b` and `x` as IDs 0, 1 and 2. Source preparation
 accepts text or token IDs, 1–31 tokens per input, and dimensions 2 or 4 (default
@@ -42,13 +43,18 @@ directory):
 }
 ```
 
-On a supported AMDGPU runner, using the repository's normal build/execution
-policy:
+On an x86 CPU runner, using the repository's normal build/execution policy:
 
 ```sh
 iree-bazel-run //experimental/loom_serve/serving:server -- \
-  --models=/path/to/models.json --listen=127.0.0.1:8080
+  --models=/path/to/models.json --listen=127.0.0.1:8080 \
+  --device=task --pool_backing=fixed
 ```
+
+`--device=amdgpu` or `--device=vulkan` runs the identical source through that
+backend. Each compiler target and HAL driver must be enabled in the build.
+The CPU task device shares the server workers; device kernels compile to native
+x86 code while request/control programs execute in the VM.
 
 `POST /v1/embeddings` with
 `{"model":"vectors","input":["a","bbb"],"dimensions":2}` returns vectors
@@ -61,13 +67,16 @@ through the package's tokenizer without activating its model commands.
 
 ```sh
 iree-bazel-test --config=asan \
-  //experimental/loom_serve/models/fixtures/embedding:service_test
+  //experimental/loom_serve/models/fixtures/embedding:service_cpu_test \
+  //experimental/loom_serve/models/fixtures/embedding:service_test \
+  //experimental/loom_serve/models/fixtures/embedding:service_vulkan_test
 ```
 
 The tests cover ragged cross-request coalescing, distinct output dimensions,
 reversed physical rows, reset peers, source-capacity splitting, input errors,
 float/base64 responses, raw tokenizer utilities and heartbeat shutdown. They run
-with one and four shared workers.
+with one and four shared workers. CPU and Vulkan cover fixed-backed model
+storage; AMDGPU additionally covers elastic group-backed admission.
 
 `variants/` supplies a checkpoint-backed scaling head and its weight policy.
 The test writes a separate source directory and a tiny safetensors checkpoint

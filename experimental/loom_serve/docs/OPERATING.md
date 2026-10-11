@@ -7,13 +7,16 @@ and residency lifetimes; adding a compatible source package does not require
 rebuilding the executable. The single-model text/image tools are useful for
 model development, but are not required to operate this server.
 
-The demonstrated deployment is Linux with ROCr and an AMD gfx11 GPU. The CLI
-currently selects one AMDGPU device; the device-group foundation is not yet a
-multi-device placement interface. [Fresh-machine setup](README.md#fresh-machine-prerequisites)
-covers compiler targets, runtime dependencies and device access. Qwen and Krea
-are learned-model examples; the embedding and decision fixtures establish their
-serving contracts, not useful learned predictions. Model-specific shape and
-hardware requirements still apply.
+The learned-model deployments use Linux with ROCr and an AMD gfx11 GPU. The CLI
+selects one HAL device with `--device`; source text, embedding and decision
+fixtures also run on x86 CPU and Vulkan, and the image fixture runs on Vulkan.
+CPU and Vulkan use `--pool_backing=fixed`. The device-group foundation is not
+yet a multi-device placement interface.
+[Fresh-machine setup](README.md#fresh-machine-prerequisites) covers compiler
+targets, runtime dependencies and device access. Qwen and Krea are learned-model
+examples; the embedding and decision fixtures establish their serving contracts,
+not useful learned predictions. Model-specific shape and hardware requirements
+still apply.
 
 ## First output, starting with no models
 
@@ -25,6 +28,12 @@ build_tools/bin/iree-bazel-run --config=opt \
   --device=amdgpu --listen=127.0.0.1:8080 \
   --workers=8 --connections=64 --held_requests=32 --model_capacity=32
 ```
+
+For a download-free x86 CPU first output, use the same command with
+`--device=task --pool_backing=fixed`. The embedding registration below executes
+the package's native JIT kernels on the shared task workers. It needs no GPU or
+checkpoint. The image fixture's workitem lowering is not yet supported on CPU;
+the [fixture guide](../models/fixtures/README.md) distinguishes its GPU path.
 
 Managed build and hardware-runner policies apply. A separate execution host
 needs the built executable, its runtime libraries and the source/asset closure;
@@ -57,7 +66,7 @@ curl --fail --silent --show-error http://127.0.0.1:8080/v1/status
 HTTP 202 acknowledges registration intent, not successful compilation. This
 drained registration holds metadata only: it has not read model files or
 allocated model storage. Status shows `loom.registration:"registered"` and
-`loom.status.admission:"drained"`. Open it and request actual GPU output:
+`loom.status.admission:"drained"`. Open it and request actual device output:
 
 ```sh
 curl --fail --silent --show-error http://127.0.0.1:8080/v1/models/undrain \
@@ -70,7 +79,7 @@ curl --fail --silent --show-error http://127.0.0.1:8080/v1/embeddings \
 The model progresses through `preparing` to `ready`. Inference arriving during
 preparation waits within the holding budget, so a client need not guess a JIT
 delay. Result indices 0 and 1 contain `[1,1]` and `[6,3]`, with four input tokens.
-This is deterministic arithmetic through the normal VM/GPU/HTTP path, not a
+This is deterministic arithmetic through the normal VM/device/HTTP path, not a
 language embedding. The [fixture catalog](../models/fixtures/README.md) adds
 image and decision results; the [tiny text package](../models/fixtures/text/README.md)
 adds pooled sessions and checkpoints without a model download.
