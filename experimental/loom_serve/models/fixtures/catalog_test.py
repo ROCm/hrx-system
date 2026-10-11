@@ -689,6 +689,18 @@ def check_parameter_residency(client, backing, workers):
             assert cold["compilation"] == before["compilation"], cold
             assert cold["status"]["admission"] == "drained", cold
             assert cold["status"]["held_requests"] == 1, cold
+            inventory_headers = {"X-Loom-Model": "fixture-text"}
+            requests = client.request("/v1/requests", headers=inventory_headers)
+            assert requests["incarnation"] == before["incarnation"], requests
+            assert requests["held_requests"] == 1, requests
+            assert requests["data"] == [], requests
+            sessions = client.request("/v1/sessions", headers=inventory_headers)
+            retained = [
+                entry for entry in sessions["data"] if entry["name"] == "residency-root"
+            ]
+            assert len(retained) == 1 and retained[0]["request"] is None, sessions
+            assert retained[0]["position"] == 5, retained
+            assert retained[0]["counters"]["completed"] == 1, retained
             memory_cold = retained_memory()
             if backing == "elastic":
                 assert not parameters["active"], cold
@@ -1579,6 +1591,42 @@ def check_multiple_bindings(server_command, directory, catalog):
             assert {
                 key: value for key, value in tcp_device.items() if key != "memory"
             } == {key: value for key, value in unix_device.items() if key != "memory"}
+        for model in expected_models["data"]:
+            name = model["id"]
+            headers = {"X-Loom-Model": name}
+            for target in ("/v1/requests", "/v1/sessions"):
+                expected_status = (
+                    501
+                    if target == "/v1/sessions" and model["loom"]["kind"] != "text"
+                    else 200
+                )
+                tcp_inventory = client.request(
+                    target, headers=headers, status=expected_status
+                )
+                connection = http.client.HTTPConnection("localhost")
+                connection.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                try:
+                    connection.sock.connect(str(socket_path))
+                    connection.request("GET", target, headers=headers)
+                    response = connection.getresponse()
+                    assert response.status == expected_status
+                    unix_inventory = json.loads(response.read())
+                finally:
+                    connection.close()
+                # Captures are distinct owner turns; identity and empty
+                # ownership agree, not the monotonic capture timestamp.
+                assert {
+                    key: value
+                    for key, value in tcp_inventory.items()
+                    if key != "time_ns"
+                } == {
+                    key: value
+                    for key, value in unix_inventory.items()
+                    if key != "time_ns"
+                }, (tcp_inventory, unix_inventory)
+                if expected_status == 200:
+                    assert tcp_inventory["data"] == []
+                    assert tcp_inventory["next_offset"] is None
         observation_connection = http.client.HTTPConnection("localhost")
         observation_connection.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         observation_connection.sock.connect(str(socket_path))

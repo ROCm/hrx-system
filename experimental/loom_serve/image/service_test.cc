@@ -251,7 +251,8 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   EXPECT_NE(active.find("\"completed\":0"), std::string::npos);
 
   for (const std::string target :
-       {"/healthz", "/readyz", "/v1/status", "/metrics"}) {
+       {"/healthz", "/readyz", "/v1/status", "/metrics", "/v1/requests",
+        "/v1/sessions"}) {
     const int probe = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     EXPECT_GE(probe, 0);
     EXPECT_EQ(
@@ -259,7 +260,8 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
                 address->length),
         0);
     const std::string probe_request =
-        "GET " + target + " HTTP/1.1\r\nHost: local\r\n\r\n";
+        "GET " + target +
+        " HTTP/1.1\r\nHost: local\r\nX-Loom-Model: image-witness\r\n\r\n";
     EXPECT_EQ(
         send(probe, probe_request.data(), probe_request.size(), MSG_NOSIGNAL),
         static_cast<ssize_t>(probe_request.size()));
@@ -275,6 +277,16 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
         EXPECT_GT(std::strtod(response.c_str() + offset + key.size(), nullptr),
                   0.0);
       }
+    } else if (target == "/v1/requests") {
+      EXPECT_EQ(response.find("HTTP/1.1 200"), 0u);
+      EXPECT_NE(response.find(
+                    R"("data":[{"id":2,"phase":"generating","session":null,)"),
+                std::string::npos)
+          << response;
+      EXPECT_NE(response.find(R"("next_offset":null)"), std::string::npos);
+      EXPECT_EQ(response.find("heartbeat witness"), std::string::npos);
+    } else if (target == "/v1/sessions") {
+      EXPECT_EQ(response.find("HTTP/1.1 501"), 0u);
     } else if (target == "/metrics") {
       EXPECT_NE(response.find("loom_serve_model_active_requests{"
                               "model=\"image-witness\",kind=\"image\"} 1\n"),

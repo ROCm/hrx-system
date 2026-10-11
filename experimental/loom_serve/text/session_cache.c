@@ -8,6 +8,34 @@
 
 #include <string.h>
 
+bool loom_serve_text_session_cache_inspect(
+    const loom_serve_text_session_cache_t* cache, iree_host_size_t row_count,
+    const loom_serve_text_session_t* rows, iree_host_size_t index,
+    loom_serve_http_session_snapshot_t* out_snapshot) {
+  const loom_serve_text_session_lifetime_t* lifetime = NULL;
+  *out_snapshot = (loom_serve_http_session_snapshot_t){0};
+  if (index < row_count) {
+    const loom_serve_text_session_t* row = &rows[index];
+    lifetime = &row->lifetime;
+    out_snapshot->storage = "row";
+    if (row->request.connection) {
+      out_snapshot->request = lifetime->serial;
+      out_snapshot->reserved_tokens = row->request.reserved_tokens;
+    }
+  } else if (cache->entries && index - row_count <= cache->capacity) {
+    lifetime = &cache->entries[index - row_count].lifetime;
+    out_snapshot->storage = "cache";
+  } else {
+    return false;
+  }
+  out_snapshot->id = lifetime->id;
+  out_snapshot->name = iree_make_cstring_view(lifetime->name);
+  out_snapshot->position = lifetime->position;
+  out_snapshot->resident_tokens = lifetime->resident_tokens;
+  out_snapshot->counters = lifetime->counters;
+  return true;
+}
+
 iree_status_t loom_serve_text_session_cache_initialize(
     iree_host_size_t capacity, loom_serve_text_session_cache_t* cache,
     iree_allocator_t allocator) {

@@ -209,6 +209,7 @@ loom_cc_library(
     ::chat
     ::model
     iree::base
+    iree::experimental::loom_serve::http::inspection
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::telemetry::record
     iree::tokenizer

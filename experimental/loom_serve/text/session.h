@@ -7,6 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_TEXT_SESSION_H_
 #define EXPERIMENTAL_LOOM_SERVE_TEXT_SESSION_H_
 
+#include "experimental/loom_serve/http/inspection.h"
 #include "experimental/loom_serve/http/server.h"
 #include "experimental/loom_serve/telemetry/record.h"
 #include "experimental/loom_serve/text/chat.h"
@@ -100,6 +101,12 @@ typedef struct loom_serve_text_session_t {
     loom_serve_telemetry_diagnostic_t diagnostic;
   } request;
 } loom_serve_text_session_t;
+
+// Copies only owner-published work and immutable admission metadata. Safe on
+// the serialized owner while a CPU task borrows the row's response storage;
+// request phase/output buffers are deliberately excluded. ID zero means idle.
+loom_serve_http_request_snapshot_t loom_serve_text_session_request_snapshot(
+    const loom_serve_text_session_t* session);
 
 // Allocates reusable host tokens, decoder storage and response builders. The
 // borrowed row and tokenizer outlive the session. No device storage is

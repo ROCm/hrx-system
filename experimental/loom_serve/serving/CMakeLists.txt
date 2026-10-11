@@ -23,6 +23,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::json
     iree::base::threading
+    iree::experimental::loom_serve::http::inspection
     iree::experimental::loom_serve::http::logs
     iree::experimental::loom_serve::http::request
     iree::experimental::loom_serve::http::server

@@ -64,6 +64,17 @@ void loom_serve_text_session_deinitialize(loom_serve_text_session_t* session) {
   memset(session, 0, sizeof(*session));
 }
 
+loom_serve_http_request_snapshot_t loom_serve_text_session_request_snapshot(
+    const loom_serve_text_session_t* session) {
+  return (loom_serve_http_request_snapshot_t){
+      .id = session->request.connection ? session->lifetime.serial : 0,
+      .session = session->lifetime.id,
+      .phase = "active",
+      .arrival_time =
+          session->request.start_time - session->request.queue_duration,
+      .counters = session->request.counters};
+}
+
 iree_status_t loom_serve_text_session_begin(loom_serve_text_session_t* session,
                                             const iree_tokenizer_t* tokenizer,
                                             iree_string_view_t model_name) {

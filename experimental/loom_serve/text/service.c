@@ -1978,6 +1978,39 @@ static loom_serve_http_service_snapshot_t text_snapshot(void* self) {
                                : now - active_arrival};
 }
 
+static bool text_request_at(void* self, iree_host_size_t index,
+                            loom_serve_http_request_snapshot_t* out_snapshot) {
+  const loom_serve_text_service_t* service = self;
+  if (index < service->pending.count) {
+    const text_pending_request_t* pending = &service->pending.values[index];
+    *out_snapshot = (loom_serve_http_request_snapshot_t){
+        .id = pending->receipt.serial,
+        .phase = "queued",
+        .arrival_time = pending->receipt.arrival_time,
+        .counters = {.requests = 1}};
+  } else if (index - service->pending.count < service->row_count) {
+    *out_snapshot = loom_serve_text_session_request_snapshot(
+        &service->sessions[index - service->pending.count]);
+  } else if (index - service->pending.count == service->row_count) {
+    *out_snapshot = (loom_serve_http_request_snapshot_t){
+        .id = service->control.connection ? service->control.receipt.serial : 0,
+        .phase = "control",
+        .arrival_time = service->control.receipt.arrival_time,
+        .counters = {.requests = 1}};
+  } else {
+    return false;
+  }
+  return true;
+}
+
+static bool text_session_at(void* self, iree_host_size_t index,
+                            loom_serve_http_session_snapshot_t* out_snapshot) {
+  const loom_serve_text_service_t* service = self;
+  return loom_serve_text_session_cache_inspect(
+      &service->cache, service->row_count, service->sessions, index,
+      out_snapshot);
+}
+
 loom_serve_http_service_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service) {
   return (loom_serve_http_service_t){
@@ -1992,6 +2025,8 @@ loom_serve_http_service_t loom_serve_text_service_interface(
       .kind = "text",
       .endpoint = "/v1/chat/completions",
       .snapshot = text_snapshot,
+      .inspection = {.request_at = text_request_at,
+                     .session_at = text_session_at},
       .telemetry = {service->telemetry.stream, &service->telemetry.counters},
       .capacity_domain = loom_serve_residency_cache(
           loom_serve_text_model_residency(service->model))};

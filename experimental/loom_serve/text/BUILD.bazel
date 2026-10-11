@@ -192,6 +192,7 @@ loom_cc_library(
     deps = [
         ":chat",
         ":model",
+        "//experimental/loom_serve/http:inspection",
         "//experimental/loom_serve/http:server",
         "//experimental/loom_serve/telemetry:record",
         "//loom/src/loom/util:json",

@@ -1159,6 +1159,100 @@ static iree_status_t router_register(router_t* router,
   return router_control(router, index, connection, 202);
 }
 
+static iree_status_t router_inspect(router_t* router,
+                                    loom_serve_http_connection_t* connection,
+                                    const loom_serve_http_request_t* request,
+                                    loom_serve_http_inspection_kind_t kind) {
+  iree_string_view_t name;
+  if (!loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Model"),
+                                             &name) ||
+      !name.size || request->body.size) {
+    return router_reject(
+        router, connection, 400, "Bad Request",
+        IREE_SV("inspection requires X-Loom-Model and no body"),
+        &router->output);
+  }
+  iree_host_size_t offset = 0;
+  iree_string_view_t offset_value;
+  if (loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Offset"),
+                                            &offset_value) &&
+      !loom_serve_http_inspection_offset(offset_value, &offset)) {
+    return router_reject(
+        router, connection, 400, "Bad Request",
+        IREE_SV("X-Loom-Offset must be an unsigned decimal index"),
+        &router->output);
+  }
+  loom_serve_registered_model_t* model = NULL;
+  for (iree_host_size_t i = 0; i < router->capacity; ++i) {
+    loom_serve_registered_model_t* candidate = router_model_at(router, i);
+    if (iree_string_view_equal(name, candidate->service.name)) {
+      model = candidate;
+      break;
+    }
+  }
+  if (!model) {
+    return router_reject(router, connection, 404, "Not Found",
+                         IREE_SV("model is not registered"), &router->output);
+  }
+  if (model->phase != LOOM_SERVE_REGISTRATION_READY) {
+    return router_reject(
+        router, connection, 409, "Conflict",
+        IREE_SV("model has no live service; inspect /v1/status"),
+        &router->output);
+  }
+  const loom_serve_http_inspection_t* inspection = &model->service.inspection;
+  if (kind == LOOM_SERVE_HTTP_INSPECT_REQUESTS ? !inspection->request_at
+                                               : !inspection->session_at) {
+    return router_reject(
+        router, connection, 501, "Not Implemented",
+        IREE_SV("model service does not expose this inventory"),
+        &router->output);
+  }
+  iree_string_builder_t* output = &router->output;
+  iree_string_builder_reset(output);
+  const iree_time_t now = iree_time_now();
+  iree_status_t status = iree_string_builder_append_cstring(
+      output,
+      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+      "Cache-Control: no-store\r\nConnection: close\r\n\r\n"
+      "{\"object\":\"list\",\"model\":");
+  if (iree_status_is_ok(status)) {
+    status = router_quote(output, name);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_format(
+        output,
+        ",\"incarnation\":%" PRIu64 ",\"time_ns\":%" PRId64
+        ",\"offset\":%zu,\"held_requests\":%zu,\"tokenizer_requests\":%zu",
+        model->incarnation, now, offset, model->held_count,
+        model->tokenizer_count);
+  }
+  if (iree_status_is_ok(status)) {
+    if (model->service.telemetry.stream) {
+      const loom_serve_telemetry_identity_t identity =
+          loom_serve_telemetry_stream_identity(model->service.telemetry.stream);
+      status = iree_string_builder_append_format(
+          output, ",\"identity\":\"%" PRIu64 ":%" PRIu64 "\"",
+          identity.created_ns, identity.ordinal);
+    } else {
+      status = iree_string_builder_append_cstring(output, ",\"identity\":null");
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_http_inspection_format(inspection, model->service.self,
+                                               kind, offset, now, output);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(output, "}");
+  }
+  if (iree_status_is_ok(status)) {
+    router_send(router, connection, iree_string_builder_view(output));
+  } else {
+    loom_serve_http_connection_abort(connection);
+  }
+  return status;
+}
+
 static iree_status_t router_accept(router_t* router,
                                    loom_serve_http_connection_t* connection,
                                    const loom_serve_http_request_t* request) {
@@ -1166,6 +1260,14 @@ static iree_status_t router_accept(router_t* router,
       loom_serve_registry_count(router->registry);
   iree_string_builder_t* output = &router->output;
   const bool get = iree_string_view_equal(request->method, IREE_SV("GET"));
+  if (get && iree_string_view_equal(request->target, IREE_SV("/v1/requests"))) {
+    return router_inspect(router, connection, request,
+                          LOOM_SERVE_HTTP_INSPECT_REQUESTS);
+  }
+  if (get && iree_string_view_equal(request->target, IREE_SV("/v1/sessions"))) {
+    return router_inspect(router, connection, request,
+                          LOOM_SERVE_HTTP_INSPECT_SESSIONS);
+  }
   if (get &&
       (iree_string_view_equal(request->target, IREE_SV("/logz")) ||
        iree_string_view_equal(request->target, IREE_SV("/logz/stream")))) {

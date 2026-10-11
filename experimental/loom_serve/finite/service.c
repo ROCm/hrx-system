@@ -499,6 +499,31 @@ static void finite_heartbeat(loom_serve_finite_service_t* service) {
   loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
 }
 
+static bool finite_request_at(
+    void* self, iree_host_size_t index,
+    loom_serve_http_request_snapshot_t* out_snapshot) {
+  const loom_serve_finite_service_t* service = self;
+  const finite_job_t* job = NULL;
+  const char* phase = "queued";
+  if (index < service->pending_count) {
+    job = service->pending[index];
+  } else if (index - service->pending_count < service->cohort_count) {
+    job = service->cohort[index - service->pending_count];
+    phase = finite_phases[service->phase];
+  } else {
+    return false;
+  }
+  *out_snapshot = (loom_serve_http_request_snapshot_t){
+      .id = job->id,
+      .phase = phase,
+      .arrival_time = job->arrival_time,
+      .counters = {.requests = 1,
+                   .input_tokens = job->input_tokens,
+                   .batches = index >= service->pending_count &&
+                              service->phase == FINITE_ENCODING}};
+  return true;
+}
+
 static void finite_cancel_peers(loom_serve_finite_service_t* service) {
   iree_host_size_t retained = 0;
   for (iree_host_size_t i = 0; i < service->pending_count; ++i) {
@@ -744,6 +769,7 @@ loom_serve_http_service_t loom_serve_finite_service_interface(
       .kind = service->protocol->name,
       .endpoint = service->protocol->endpoint,
       .snapshot = finite_snapshot,
+      .inspection = {.request_at = finite_request_at},
       .capacity_domain = loom_serve_residency_cache(
           loom_serve_finite_model_residency(service->model)),
       .telemetry = {.stream = service->telemetry.stream,

@@ -225,6 +225,37 @@ run separately from inference. Ctrl-C stops the selected client, not the server.
 The [observation contract](../serving/README.md#operational-discovery) describes
 counter scope, gaps, incarnation changes and unmeasured quantities.
 
+Current requests and retained text sessions are available without replaying log
+history:
+
+```sh
+curl --fail --silent --show-error http://127.0.0.1:8080/v1/requests \
+  -H 'X-Loom-Model: vectors'
+curl --fail --silent --show-error http://127.0.0.1:8080/v1/sessions \
+  -H 'X-Loom-Model: scout'
+```
+
+Each page examines at most 64 owner slots. Pass a non-null `next_offset` back as
+`X-Loom-Offset` until it becomes null; empty pages may still have a next offset.
+These are live captures, not a frozen multi-page snapshot. A client deduplicates
+IDs and restarts its scan if the model `incarnation` or telemetry `identity`
+changes, including across server restarts. Request IDs match that model telemetry
+stream. `held_requests` and `tokenizer_requests` report router-owned work
+separately from the model-admitted `data` entries.
+
+Session IDs survive movement between `storage:"row"` and `storage:"cache"`.
+`request:null` means an idle retained history. Positions and counters describe
+last completed owner-published work, not in-flight device state. Referenced
+`resident_tokens` include shared prefixes and must not be summed as unique
+physical memory; `reserved_tokens` is the active completion bound, not a count
+of additional resident tokens. Explicit checkpoints remain separate from session
+lifetimes. Responses contain no prompts, generated text or tool contents.
+
+Inspection never opens admission or loads a cold registration. An unprepared or
+retiring registration returns 409; an absent name returns 404. A service without
+the requested capability returns 501, including session inspection on stateless
+image/embedding/decision services. The same endpoints work on Unix listeners.
+
 Drain is reversible: accepted work finishes, new work waits within the holding
 budget, and control/observation routes remain available. It does not unload
 weights or delete sessions. Unregister is irreversible: it seals admission,

@@ -101,10 +101,34 @@ loom_cc_library(
     name = "service",
     hdrs = ["service.h"],
     deps = [
+        ":inspection",
         ":server",
         "//experimental/loom_serve/telemetry:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_library(
+    name = "inspection",
+    srcs = ["inspection.c"],
+    hdrs = ["inspection.h"],
+    deps = [
+        "//experimental/loom_serve/telemetry:record",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "inspection_test",
+    srcs = ["inspection_test.cc"],
+    deps = [
+        ":inspection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

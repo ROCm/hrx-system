@@ -7,6 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_HTTP_SERVICE_H_
 #define EXPERIMENTAL_LOOM_SERVE_HTTP_SERVICE_H_
 
+#include "experimental/loom_serve/http/inspection.h"
 #include "experimental/loom_serve/http/server.h"
 #include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/tokenizer/tokenizer.h"
@@ -86,6 +87,9 @@ typedef struct loom_serve_http_service_t {
   // Copies published ownership on the serialized owner without invoking model
   // work or reading state still borrowed by a CPU/device task.
   loom_serve_http_service_snapshot_t (*snapshot)(void* self);
+  // Optional bounded metadata queries on the same serialized owner. No task
+  // payload or model borrow escapes into an observation response.
+  loom_serve_http_inspection_t inspection;
   // Borrowed shared-capacity owner identity, never dereferenced by the router.
   // Only equal non-NULL identities can provide SHARED_ACTIVITY to each other;
   // NULL means this service has no shared-capacity relationship. The owner

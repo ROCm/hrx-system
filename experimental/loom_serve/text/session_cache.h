@@ -35,6 +35,14 @@ typedef struct loom_serve_text_session_cache_t {
   iree_host_size_t count;
 } loom_serve_text_session_cache_t;
 
+// Inspects owner-only logical metadata across reusable rows followed by the
+// detached cache, including its exchange slot. False marks the table end; ID
+// zero marks an empty/unpublished slot. No native row or checkpoint is queried.
+bool loom_serve_text_session_cache_inspect(
+    const loom_serve_text_session_cache_t* cache, iree_host_size_t row_count,
+    const loom_serve_text_session_t* rows, iree_host_size_t index,
+    loom_serve_http_session_snapshot_t* out_snapshot);
+
 // Allocates host records only. Zero disables automatic retention. The caller
 // reserves capacity+1 native endpoints when enabled and bounds capacity before
 // calling. Partial initialization may be reset and deinitialized.

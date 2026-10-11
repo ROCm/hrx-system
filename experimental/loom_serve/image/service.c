@@ -46,6 +46,9 @@ typedef enum image_phase_e {
   IMAGE_PHASE_ENCODING,
 } image_phase_t;
 
+static const char* const image_phases[] = {"idle", "preparing", "waiting",
+                                           "generating", "encoding"};
+
 enum { IMAGE_EVENT_CPU = 1u << 0, IMAGE_EVENT_DEVICE = 1u << 1 };
 
 struct loom_serve_image_service_t {
@@ -624,10 +627,8 @@ static iree_status_t image_accept(void* self,
 static loom_serve_http_service_snapshot_t image_snapshot(void* self) {
   const loom_serve_image_service_t* service = self;
   const iree_time_t now = iree_time_now();
-  static const char* const phases[] = {"idle", "preparing", "waiting",
-                                       "generating", "encoding"};
   return (loom_serve_http_service_snapshot_t){
-      .phase = phases[service->phase],
+      .phase = image_phases[service->phase],
       .queued_requests = service->pending_count,
       .active_requests = service->active ? 1 : 0,
       .oldest_queued_age = service->pending_count
@@ -635,6 +636,29 @@ static loom_serve_http_service_snapshot_t image_snapshot(void* self) {
                                : 0,
       .oldest_active_age =
           service->active ? now - service->job.arrival_time : 0};
+}
+
+static bool image_request_at(void* self, iree_host_size_t index,
+                             loom_serve_http_request_snapshot_t* out_snapshot) {
+  const loom_serve_image_service_t* service = self;
+  const image_job_t* job = NULL;
+  const char* phase = "queued";
+  if (index < service->pending_count) {
+    job = &service->pending[index].job;
+  } else if (index == service->pending_count && service->active) {
+    job = &service->job;
+    phase = image_phases[service->phase];
+  } else {
+    return false;
+  }
+  *out_snapshot = (loom_serve_http_request_snapshot_t){
+      .id = job->id,
+      .phase = phase,
+      .arrival_time = job->arrival_time,
+      .counters = {.requests = 1,
+                   .batches = index == service->pending_count &&
+                              service->phase == IMAGE_PHASE_ENCODING}};
+  return true;
 }
 
 // Heartbeat work is a scheduler turn, woken by an asynchronous timer. These
@@ -766,6 +790,7 @@ loom_serve_http_service_t loom_serve_image_service_interface(
       .kind = "image",
       .endpoint = "/v1/images/generations",
       .snapshot = image_snapshot,
+      .inspection = {.request_at = image_request_at},
       .telemetry = {service->telemetry.stream, &service->telemetry.counters},
       .capacity_domain = service->generator.capacity_domain};
 }

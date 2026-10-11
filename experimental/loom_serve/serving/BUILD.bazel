@@ -20,6 +20,7 @@ loom_cc_library(
         ":configuration",
         ":registry",
         ":resources",
+        "//experimental/loom_serve/http:inspection",
         "//experimental/loom_serve/http:logs",
         "//experimental/loom_serve/http:request",
         "//experimental/loom_serve/http:server",

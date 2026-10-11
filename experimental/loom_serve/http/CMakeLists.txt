@@ -102,11 +102,39 @@ loom_cc_library(
   HDRS
     "service.h"
   DEPS
+    ::inspection
     ::server
     iree::base
     iree::experimental::loom_serve::telemetry::stream
     iree::tokenizer
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    inspection
+  HDRS
+    "inspection.h"
+  SRCS
+    "inspection.c"
+  DEPS
+    iree::base
+    iree::experimental::loom_serve::telemetry::record
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    inspection_test
+  SRCS
+    "inspection_test.cc"
+  DEPS
+    ::inspection
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

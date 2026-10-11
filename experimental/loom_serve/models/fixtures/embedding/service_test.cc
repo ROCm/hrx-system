@@ -766,9 +766,32 @@ TEST_P(SourceEmbeddingServiceTest,
   Accept();
   const int bad = Send(R"({"model":"fixture","input":"a","dimensions":3})");
   Accept();
+  for (iree_host_size_t i = 0; i < 4; ++i) {
+    loom_serve_http_request_snapshot_t snapshot = {};
+    ASSERT_TRUE(
+        interface_.inspection.request_at(interface_.self, i, &snapshot));
+    EXPECT_EQ(snapshot.id, i + 1);
+    EXPECT_STREQ(snapshot.phase, "queued");
+    EXPECT_EQ(snapshot.counters.requests, 1u);
+    EXPECT_EQ(snapshot.counters.input_tokens, 0u);
+  }
   EXPECT_TRUE(Step());  // All independent requests prepared.
+  // The executor may still own prepared packets; only immutable receipt and
+  // owner-published progress are inspected before that release is consumed.
+  loom_serve_http_request_snapshot_t preparing = {};
+  ASSERT_TRUE(interface_.inspection.request_at(interface_.self, 0, &preparing));
+  EXPECT_EQ(preparing.id, 1u);
+  EXPECT_STREQ(preparing.phase, "preparing");
   EXPECT_TRUE(Step());  // Rejection collected; valid cohort constructed.
   EXPECT_TRUE(Step());  // One command submitted, with compact feedback.
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    loom_serve_http_request_snapshot_t snapshot = {};
+    ASSERT_TRUE(
+        interface_.inspection.request_at(interface_.self, i, &snapshot));
+    EXPECT_EQ(snapshot.id, i + 1);
+    EXPECT_STREQ(snapshot.phase, "running");
+    EXPECT_EQ(snapshot.counters.input_tokens, 0u);
+  }
   const linger reset = {1, 0};
   ASSERT_EQ(setsockopt(b, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)), 0);
   ASSERT_EQ(close(b), 0);

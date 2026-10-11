@@ -105,7 +105,9 @@ class StalledClient {
  public:
   ~StalledClient() { Close(); }
 
-  void Send(loom_serve_http_server_t* server, const std::string& body) {
+  void Send(loom_serve_http_server_t* server, const std::string& body,
+            const char* target = "/v1/chat/completions",
+            const char* method = "POST") {
     const auto allocator = iree_allocator_system();
     auto proactor_options = iree_async_proactor_options_default();
     proactor_options.threading_mode =
@@ -117,10 +119,10 @@ class StalledClient {
         loom_serve_http_server_proactor_pool(server), 0, &server_proactor));
     auto options = iree_net_loopback_carrier_options_default();
     options.max_send_operations = 1;
-    iree_net_carrier_t* peer = nullptr;
     IREE_ASSERT_OK(iree_net_loopback_carrier_create_pair(
-        proactor_, server_proactor, &options, allocator, &carrier_, &peer));
-    loom_serve_http_server_accept(server, peer);
+        proactor_, server_proactor, &options, allocator, &carrier_, &peer_));
+    iree_net_carrier_retain(peer_);
+    loom_serve_http_server_accept(server, peer_);
     IREE_ASSERT_OK(iree_net_carrier_set_handlers(
         carrier_, {[](void* self, iree_async_span_t bytes,
                       iree_async_buffer_lease_t*) -> iree_status_t {
@@ -139,8 +141,10 @@ class StalledClient {
                    this}));
     IREE_ASSERT_OK(iree_net_carrier_activate(carrier_));
     const std::string request =
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: local\r\n"
+        std::string(method) + " " + target +
+        " HTTP/1.1\r\nHost: local\r\n"
         "Content-Type: application/json\r\nX-Loom-Session: stalled\r\n"
+        "X-Loom-Model: fixture-text\r\n"
         "Content-Length: " +
         std::to_string(body.size()) + "\r\n\r\n" + body;
     const iree_net_send_params_t params = {
@@ -161,6 +165,13 @@ class StalledClient {
     return response_;
   }
 
+  void WaitResponse() {
+    while (iree_net_carrier_state(peer_) != IREE_NET_CARRIER_STATE_ACTIVE ||
+           iree_net_carrier_query_send_budget(peer_).slots != 0) {
+      std::this_thread::yield();
+    }
+  }
+
   void Close() {
     if (carrier_) {
       bool drained = false;
@@ -173,6 +184,8 @@ class StalledClient {
       iree_net_carrier_release(carrier_);
       carrier_ = nullptr;
     }
+    iree_net_carrier_release(peer_);
+    peer_ = nullptr;
     iree_async_proactor_release(proactor_);
     proactor_ = nullptr;
   }
@@ -187,6 +200,8 @@ class StalledClient {
   iree_async_proactor_t* proactor_ = nullptr;
   // Owned client half; the HTTP server owns the other half.
   iree_net_carrier_t* carrier_ = nullptr;
+  // Retained server half for querying actual carrier credit, not model state.
+  iree_net_carrier_t* peer_ = nullptr;
   // Bytes delivered while this client is explicitly polled.
   std::string response_;
   // Published only by this client's poll owner after server deactivation.
@@ -517,6 +532,17 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     // The initial SSE header occupies the single carrier slot. The model can
     // still fill its one row packet, but cannot generate unbounded output.
     expect_counts(0, 0, 1);
+    const auto active =
+        Read(Send("", "X-Loom-Model: fixture-text\r\n", "/v1/requests", "GET"));
+    EXPECT_NE(active.find(R"("data":[{"id":1,"phase":"active","session":1,)"),
+              std::string::npos)
+        << active;
+    EXPECT_NE(active.find(R"("output_tokens":1,)"), std::string::npos);
+    const auto sessions =
+        Read(Send("", "X-Loom-Model: fixture-text\r\n", "/v1/sessions", "GET"));
+    EXPECT_NE(sessions.find(R"("name":"stalled","request":1,"storage":"row",)"),
+              std::string::npos)
+        << sessions;
     const std::string prompt = "baxab";
     const std::string first = Content(Read(
         Send(Request(Message("user", prompt), 2), "X-Loom-Session: peer\r\n")));
@@ -611,6 +637,28 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
     EXPECT_EQ(interface.telemetry.counters->batches, 0u);
     EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 1u);
+    // Metadata stays owner-readable while preparation borrows the second
+    // prompt and the device still owns the first epoch's rows.
+    loom_serve_http_request_snapshot_t queued_snapshot = {};
+    ASSERT_TRUE(
+        interface.inspection.request_at(interface.self, 0, &queued_snapshot));
+    EXPECT_EQ(queued_snapshot.id, 2u);
+    EXPECT_STREQ(queued_snapshot.phase, "queued");
+    uint64_t active_requests = 0;
+    for (iree_host_size_t i = 1;; ++i) {
+      loom_serve_http_request_snapshot_t snapshot = {};
+      if (!interface.inspection.request_at(interface.self, i, &snapshot)) {
+        break;
+      }
+      if (!snapshot.id) {
+        continue;
+      }
+      ++active_requests;
+      EXPECT_EQ(snapshot.id, 1u);
+      EXPECT_EQ(snapshot.session, 1u);
+      EXPECT_EQ(snapshot.counters.batches, 0u);
+    }
+    EXPECT_EQ(active_requests, 1u);
     if (action == OverlapAction::kDisconnect) {
       const linger reset = {1, 0};
       ASSERT_EQ(
@@ -965,6 +1013,93 @@ TEST_P(SourceTextServiceTest, IdleCacheExchangesFullRowsAndSharesExplicitPins) {
 
 TEST_P(SourceTextServiceTest, CancelledRowExchangePreservesDetachedHistory) {
   CheckRetentionCancellation(OverlapAction::kDisconnect);
+}
+
+TEST_P(SourceTextServiceTest, InventoryTracksRetainedLifetimesAcrossRowReuse) {
+  StartManaged();
+  const std::string headers = "X-Loom-Model: fixture-text\r\n";
+  const auto inspect = [&](const char* target, const std::string& extra = "") {
+    return Read(Send("", headers + extra, target, "GET"));
+  };
+  EXPECT_EQ(inspect("/v1/sessions").find("HTTP/1.1 404"), 0u);
+  auto declaration = Declaration("fixture-text", directory_, "drained");
+  declaration.pop_back();
+  declaration += ",\"session_cache_capacity\":64}";
+  ASSERT_EQ(
+      Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
+      0u);
+  EXPECT_EQ(inspect("/v1/sessions").find("HTTP/1.1 409"), 0u);
+  ASSERT_EQ(Read(Send(R"({"model":"fixture-text"})", "", "/v1/models/undrain"))
+                .find("HTTP/1.1 200"),
+            0u);
+  std::string initial;
+  for (size_t i = 0; i < 6; ++i) {
+    const auto reply =
+        Read(Send(Request(Message("user", "abxa"), 2),
+                  "X-Loom-Session: conversation" + std::to_string(i) + "\r\n"));
+    EXPECT_EQ(Content(reply), Oracle::Complete("abxa", 2));
+    if (!i) {
+      initial = inspect("/v1/sessions");
+    }
+  }
+  EXPECT_NE(
+      initial.find(
+          R"("id":1,"name":"conversation0","request":null,"storage":"row",)"),
+      std::string::npos)
+      << initial;
+  const auto retained = inspect("/v1/sessions");
+  EXPECT_NE(
+      retained.find(
+          R"("id":1,"name":"conversation0","request":null,"storage":"cache",)"),
+      std::string::npos)
+      << retained;
+  EXPECT_NE(
+      retained.find(R"("position":5,"resident_tokens":8,"reserved_tokens":0,)"),
+      std::string::npos)
+      << retained;
+  EXPECT_NE(retained.find(R"("next_offset":64)"), std::string::npos);
+  EXPECT_NE(inspect("/v1/sessions", "X-Loom-Offset: 64\r\n")
+                .find(R"("data":[],"next_offset":null)"),
+            std::string::npos);
+  EXPECT_NE(inspect("/v1/requests").find(R"("data":[],"next_offset":null)"),
+            std::string::npos);
+  for (const char* value : {"-1", "+1", "1x", "18446744073709551616"}) {
+    EXPECT_EQ(
+        inspect("/v1/sessions", std::string("X-Loom-Offset: ") + value + "\r\n")
+            .find("HTTP/1.1 400"),
+        0u);
+  }
+  EXPECT_EQ(Read(Send("", "", "/v1/requests", "GET")).find("HTTP/1.1 400"), 0u);
+  EXPECT_EQ(
+      Read(Send("{}", headers, "/v1/requests", "GET")).find("HTTP/1.1 400"),
+      0u);
+  EXPECT_EQ(retained.find("abxa"), std::string::npos);
+  StalledClient inspector;
+  ASSERT_NO_FATAL_FAILURE(inspector.Send(server_, "", "/v1/sessions", "GET"));
+  inspector.WaitResponse();
+  // Copied HTTP bytes may outlive the entire registration. The inspector has
+  // not polled its carrier and therefore has not consumed the pending send.
+  ASSERT_EQ(
+      Read(Send(R"({"model":"fixture-text"})", "", "/v1/models/unregister"))
+          .find("HTTP/1.1 202"),
+      0u);
+  WaitModel("fixture-text", {});
+  EXPECT_EQ(inspect("/v1/sessions").find("HTTP/1.1 404"), 0u);
+  ASSERT_EQ(Read(Send(Declaration("fixture-text", directory_), "",
+                      "/v1/models/register"))
+                .find("HTTP/1.1 202"),
+            0u);
+  WaitModel("fixture-text", R"("registration":"ready")");
+  const auto replacement = inspect("/v1/sessions");
+  EXPECT_NE(replacement.find(R"("incarnation":2,)"), std::string::npos)
+      << replacement;
+  EXPECT_NE(replacement.find(R"("data":[],"next_offset":null)"),
+            std::string::npos);
+  const auto old_inventory = inspector.Read();
+  EXPECT_NE(old_inventory.find(R"("incarnation":1,)"), std::string::npos);
+  EXPECT_NE(old_inventory.find(R"("name":"conversation0",)"),
+            std::string::npos);
+  EXPECT_EQ(old_inventory.find(R"("incarnation":2,)"), std::string::npos);
 }
 
 TEST_P(SourceTextServiceTest, ShutdownRetiresAcceptedRowExchange) {
