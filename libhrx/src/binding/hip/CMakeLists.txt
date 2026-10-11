@@ -358,6 +358,24 @@ iree_cc_library(
 )
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    spirv_linker_compiler_test
+  SRCS
+    "spirv_linker_compiler_test.cc"
+  DEPS
+    ::spirv_linker_compiler
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  LABELS
+    "manual"
+    "rocm-comgr-advisory"
+)
+endif()
+
 iree_cc_library(
   NAME
     error_state

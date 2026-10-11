@@ -109,6 +109,7 @@ jobs:
       HRX_COMPOSED_INSTALL_DIR: ${{ github.workspace }}/build/linux/install/composed
       HRX_PACKAGE_SMOKE_BUILD_DIR: ${{ github.workspace }}/build/linux/build/package-smoke
       HRX_PACKAGE_OUTPUT_DIR: ${{ github.workspace }}/build/linux/dist
+      HRX_COMGR_CANARY_LOG: ${{ github.workspace }}/build/linux/comgr-canary.log
       HRX_BUILD_TYPE: RelWithDebInfo
       HRX_BUILD_LOOM: "false"
       HRX_SANITIZER: ${{ matrix.sanitizer }}
@@ -189,12 +190,59 @@ jobs:
             build/linux/dist/hrx-rocm-buildenv-linux-x86_64-env.sh
           if-no-files-found: error
 
+      # The newest ROCm nightly currently crashes inside COMGR while compiling
+      # valid SPIR-V. Keep exercising the exact compiler boundary without
+      # pinning the rest of ROCm. A recovered default nightly deliberately
+      # fails the following reporting step so this exception cannot go stale.
+      - name: Run ROCm COMGR compatibility canary
+        id: comgr_canary
+        if: ${{ matrix.sanitizer == 'none' }}
+        continue-on-error: true
+        env:
+          HRX_CTEST_LABEL_REGEX: "^rocm-comgr-advisory$"
+          HRX_CTEST_LABEL_EXCLUDE_REGEX: ""
+          HRX_CTEST_PARALLELISM: "1"
+        run: |
+          export LD_LIBRARY_PATH="${HRX_ROCM_ROOT}/lib:${HRX_ROCM_ROOT}/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH:-}"
+          python3 build_tools/ci/ci_core_linux.py test >"${HRX_COMGR_CANARY_LOG}" 2>&1
+
+      - name: Report ROCm COMGR compatibility
+        if: ${{ always() && matrix.sanitizer == 'none' && steps.comgr_canary.outcome != 'skipped' }}
+        env:
+          HRX_COMGR_CANARY_OUTCOME: ${{ steps.comgr_canary.outcome }}
+        run: |
+          known_crash_pattern='spirv_linker_compiler_test .*([Bb]us error\*\*\*Exception:|[Ss]egmentation fault\*\*\*Exception:|\*\*\*Exception: *(SegFault|[Bb]us error|[Ss]egmentation fault))'
+          if [[ -f "${HRX_COMGR_CANARY_LOG}" ]]; then
+            cat "${HRX_COMGR_CANARY_LOG}"
+          fi
+          if [[ "${HRX_COMGR_CANARY_OUTCOME}" == "failure" ]] && \
+              grep -Eq "${known_crash_pattern}" "${HRX_COMGR_CANARY_LOG}"; then
+            echo "::warning title=ROCm COMGR compatibility regression::The newest ROCm compiler artifact still crashes while compiling valid SPIR-V. Required ROCr and HAL coverage remains enabled."
+            echo "### ROCm COMGR compatibility: known failure" >> "${GITHUB_STEP_SUMMARY}"
+            echo "The newest compiler artifact still fails the isolated SPIR-V compile-and-link canary. The rest of ROCm remains unpinned." >> "${GITHUB_STEP_SUMMARY}"
+          elif [[ "${HRX_COMGR_CANARY_OUTCOME}" == "failure" ]]; then
+            echo "::error title=Unexpected ROCm COMGR canary failure::The compiler canary failed without the qualified COMGR crash signature."
+            exit 1
+          elif [[ "${HRX_COMGR_CANARY_OUTCOME}" == "success" && -z "${HRX_RUN_ID}" ]]; then
+            echo "::error title=ROCm COMGR compatibility recovered::The newest ROCm compiler artifact passes. Remove the advisory exception and restore the HIP linker execution case to required coverage."
+            echo "### ROCm COMGR compatibility: recovered" >> "${GITHUB_STEP_SUMMARY}"
+            echo "The default ROCm nightly now passes. Remove the advisory exception before restoring green CI." >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          elif [[ "${HRX_COMGR_CANARY_OUTCOME}" == "success" ]]; then
+            echo "::notice title=ROCm COMGR compatibility passed::The explicitly selected ROCm compiler artifact passes the SPIR-V compile-and-link canary."
+          else
+            echo "::error title=ROCm COMGR canary did not complete::Unexpected outcome: ${HRX_COMGR_CANARY_OUTCOME}"
+            exit 1
+          fi
+
       - name: Upload failed test results
-        if: ${{ always() && steps.core_tests.outcome == 'failure' }}
+        if: ${{ always() && (steps.core_tests.outcome == 'failure' || steps.comgr_canary.outcome == 'failure') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ctest-results-core-linux-${{ matrix.sanitizer }}-attempt-${{ github.run_attempt }}
-          path: build/linux/**/Testing/Temporary/
+          path: |
+            build/linux/**/Testing/Temporary/
+            ${{ env.HRX_COMGR_CANARY_LOG }}
           if-no-files-found: warn
           retention-days: 7
 
@@ -291,6 +339,8 @@ jobs:
       - name: Run installed GPU tests
         id: core_tests
         if: ${{ steps.rocm_environment.outcome == 'success' }}
+        env:
+          GTEST_FILTER: "-HipModuleLibraryExecutionTest.LinkerOwnsDataAndFileInputsThroughExecutableLaunch"
         run: |
           "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py test
 

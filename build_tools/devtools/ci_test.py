@@ -1172,6 +1172,30 @@ class CiTest(unittest.TestCase):
                 ):
                     self.assertNotIn(f"{variable_name}:", block)
 
+    def test_libhrx_comgr_regression_remains_a_visible_recovery_canary(self):
+        workflow_path = ".github/workflows/ci_libhrx.yml"
+        host_block = self.workflow_job_block(workflow_path, "cmake_linux")
+        self.assertIn("id: comgr_canary", host_block)
+        self.assertIn('HRX_CTEST_LABEL_REGEX: "^rocm-comgr-advisory$"', host_block)
+        self.assertIn("continue-on-error: true", host_block)
+        self.assertIn('export LD_LIBRARY_PATH="${HRX_ROCM_ROOT}/lib:', host_block)
+        self.assertIn("HRX_COMGR_CANARY_LOG", host_block)
+        self.assertIn("known_crash_pattern=", host_block)
+        self.assertIn("Unexpected ROCm COMGR canary failure", host_block)
+        self.assertIn('[[ "${HRX_COMGR_CANARY_OUTCOME}" == "failure" ]]', host_block)
+        self.assertIn(
+            '[[ "${HRX_COMGR_CANARY_OUTCOME}" == "success" && -z "${HRX_RUN_ID}" ]]',
+            host_block,
+        )
+        self.assertIn("exit 1", host_block)
+
+        gpu_block = self.workflow_job_block(workflow_path, "cmake_linux_gfx942")
+        self.assertIn(
+            'GTEST_FILTER: "-HipModuleLibraryExecutionTest.'
+            'LinkerOwnsDataAndFileInputsThroughExecutableLaunch"',
+            gpu_block,
+        )
+
     def test_fetch_toolchain_uses_owned_ci_entry_point(self):
         script = Path(".github/scripts/fetch_rocm_toolchain.sh").read_text()
         self.assertIn(

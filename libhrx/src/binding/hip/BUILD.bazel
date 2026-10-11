@@ -278,6 +278,22 @@ hrx_cc_library(
     ],
 )
 
+hrx_cc_test(
+    name = "spirv_linker_compiler_test",
+    srcs = ["spirv_linker_compiler_test.cc"],
+    tags = [
+        "manual",
+        "rocm-comgr-advisory",
+    ],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":spirv_linker_compiler",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 hrx_cc_library(
     name = "error_state",
     srcs = ["error_state.c"],
