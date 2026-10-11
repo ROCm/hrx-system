@@ -366,6 +366,124 @@ static void ExpectNativeBindingRange(iree_hal_buffer_t* root,
   EXPECT_EQ(packet_offset, view_resource.offset);
 }
 
+TEST_P(BdaSpirvTest, OwnedPoolHonorsOveralignedDeviceAddresses) {
+  constexpr uint64_t kDeviceAddressInterface =
+      UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
+  std::array<iree_hal_pool_family_access_t, 2> families = {};
+  families[0].family = iree_hal_queue_family(transfer_queue_);
+  families[0].usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  families[0].interfaces = kDeviceAddressInterface;
+  families[1].family = iree_hal_queue_family(dispatch_queue_);
+  families[1].usage = IREE_HAL_BUFFER_USAGE_STORAGE;
+  families[1].interfaces = kDeviceAddressInterface;
+  iree_hal_pool_scope_t scope = {};
+  scope.family_count = families[0].family == families[1].family ? 1 : 2;
+  if (scope.family_count == 1) {
+    families[0].usage |= families[1].usage;
+  }
+  scope.families = families.data();
+
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  Ref<iree_hal_pool_t> source;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(
+      device_group_, scope, &options, iree_allocator_system(), source.out()));
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(source, &capabilities);
+  ASSERT_GE(capabilities.max_allocation_alignment, 4096u);
+
+  const iree_hal_memory_site_t site = {
+      IREE_HAL_MEMORY_SITE_PROGRAM,
+      iree_hal_queue_family(dispatch_queue_),
+  };
+  iree_hal_memory_scope_t memory_scope;
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(device_group_, site,
+                                                            &memory_scope));
+  iree_hal_buffer_native_binding_slot_t address_slot;
+  IREE_ASSERT_OK(iree_hal_pool_resolve_binding(
+      source, memory_scope, IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+      &address_slot));
+
+  iree_device_size_t native_alignment = 0;
+  {
+    Ref<iree_hal_buffer_t> buffer;
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        source, iree_hal_make_pool_reservation_request(4, 1),
+        iree_infinite_timeout(), buffer.out()));
+    const auto memory = iree_hal_buffer_memory_view(buffer);
+    ASSERT_NE(memory.backing, nullptr);
+    native_alignment = memory.backing->allocation_alignment;
+    ASSERT_TRUE(iree_device_size_is_power_of_two(native_alignment));
+  }
+
+  const std::array<uint32_t, 5> input = {11, 22, 33, 44, 55};
+  for (iree_device_size_t alignment : {256u, 4096u}) {
+    SCOPED_TRACE(alignment);
+    Ref<iree_hal_buffer_t> buffer;
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        source,
+        iree_hal_make_pool_reservation_request(sizeof(input), alignment),
+        iree_infinite_timeout(), buffer.out()));
+    const auto memory = iree_hal_buffer_memory_view(buffer);
+    ASSERT_NE(memory.backing, nullptr);
+    EXPECT_GE(memory.backing->allocation_alignment, alignment);
+    const uint64_t address =
+        iree_hal_buffer_native_binding(buffer, address_slot).device_address;
+    ASSERT_NE(address, 0u);
+    EXPECT_EQ(address % alignment, 0u);
+    const uint64_t raw_address =
+        iree_hal_vulkan_buffer_native(buffer)
+            ->bindings[IREE_HAL_VULKAN_BUFFER_BINDING_DEVICE_ADDRESS]
+            .device_address;
+    EXPECT_LT(memory.binding_offset, alignment);
+    EXPECT_EQ(address, raw_address + memory.binding_offset);
+
+    Ref<iree_hal_buffer_t> view;
+    IREE_ASSERT_OK(
+        iree_hal_buffer_subspan(buffer, sizeof(uint32_t), 3 * sizeof(uint32_t),
+                                iree_allocator_system(), view.out()));
+    const auto view_memory = iree_hal_buffer_memory_view(view);
+    EXPECT_EQ(view_memory.binding_offset,
+              memory.binding_offset + sizeof(uint32_t));
+    EXPECT_EQ(iree_hal_buffer_native_binding(view, address_slot).device_address,
+              address + sizeof(uint32_t));
+
+    SemaphoreList uploaded(device_, {0}, {1});
+    IREE_ASSERT_OK(iree_hal_queue_upload(
+        transfer_queue_, iree_hal_semaphore_list_empty(), uploaded,
+        input.data(), buffer, 0, sizeof(input), /*barriers=*/NULL));
+    std::array<uint32_t, 3> output = {};
+    SemaphoreList downloaded(device_, {0}, {1});
+    IREE_ASSERT_OK(iree_hal_queue_download(transfer_queue_, uploaded,
+                                           downloaded, view, 0, output.data(),
+                                           sizeof(output), /*barriers=*/NULL));
+    IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+        downloaded, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    EXPECT_THAT(output, ContainerEq(std::array<uint32_t, 3>{22, 33, 44}));
+  }
+
+  Ref<iree_hal_buffer_t> invalid_buffer;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_pool_allocate_buffer(
+          source, iree_hal_make_pool_reservation_request(4, 3),
+          iree_infinite_timeout(), invalid_buffer.out()));
+  ASSERT_LE(native_alignment, IREE_DEVICE_SIZE_MAX / 2);
+  const iree_device_size_t overflow_alignment =
+      std::max<iree_device_size_t>(256, native_alignment * 2);
+  ASSERT_LE(overflow_alignment, capabilities.max_allocation_alignment);
+  const iree_device_size_t allocation_granule =
+      std::max<iree_device_size_t>(4, native_alignment);
+  const iree_device_size_t overflow_size =
+      IREE_DEVICE_SIZE_MAX & ~(allocation_granule - 1);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_hal_pool_allocate_buffer(
+                            source,
+                            iree_hal_make_pool_reservation_request(
+                                overflow_size, overflow_alignment),
+                            iree_infinite_timeout(), invalid_buffer.out()));
+}
+
 TEST_P(BdaSpirvTest, PrepareRejectsDescriptorDecoratedBdaSpirv) {
   iree_hal_executable_t* decorated_executable = nullptr;
   IREE_EXPECT_STATUS_IS(

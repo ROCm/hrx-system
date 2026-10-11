@@ -142,7 +142,7 @@ TEST_P(BdaDispatchValidationTest, QueueDispatchRejectsGrantsFromAnotherGroup) {
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(source, &capabilities);
   const iree_device_size_t min_alignment =
-      capabilities.max_allocation_alignment;
+      iree_min((iree_device_size_t)256, capabilities.max_allocation_alignment);
   Ref<iree_hal_buffer_t> foreign_buffer;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       source, iree_hal_make_pool_reservation_request(32, min_alignment),

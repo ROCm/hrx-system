@@ -168,7 +168,7 @@ TEST_P(VulkanSlabPoolTest, CapturesExactFamiliesWithoutAllocatingBacking) {
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(source, &capabilities);
   const iree_device_size_t min_alignment =
-      capabilities.max_allocation_alignment;
+      iree_min((iree_device_size_t)256, capabilities.max_allocation_alignment);
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       source,
       iree_hal_make_pool_reservation_request(sizeof(uint32_t), min_alignment),
@@ -308,10 +308,16 @@ TEST_P(VulkanSlabPoolTest, RequiredAndPreferredHostGrants) {
       const auto host = iree_hal_pool_query_host_access(source);
       EXPECT_EQ(host.access, access);
       EXPECT_EQ(host.modes, modes);
+      iree_hal_pool_capabilities_t capabilities;
+      iree_hal_pool_query_capabilities(source, &capabilities);
+      ASSERT_GE(capabilities.max_allocation_alignment, 256u);
       Ref<iree_hal_buffer_t> buffer;
       IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-          source, iree_hal_make_pool_reservation_request(sizeof(uint32_t), 0),
+          source, iree_hal_make_pool_reservation_request(sizeof(uint32_t), 256),
           iree_infinite_timeout(), buffer.out()));
+      const auto memory = iree_hal_buffer_memory_view(buffer);
+      ASSERT_NE(memory.backing, nullptr);
+      EXPECT_GE(memory.backing->allocation_alignment, 256u);
       const uint32_t value = 0x1234ABCD;
       SemaphoreList filled(device_, {0}, {1});
       IREE_ASSERT_OK(iree_hal_queue_fill(
@@ -435,15 +441,20 @@ TEST_P(VulkanSlabPoolTest, ImportsHostStorageThroughSelectedNativeRoute) {
   }
   IREE_ASSERT_OK(create_status);
 
-  iree_hal_pool_capabilities_t capabilities;
-  iree_hal_pool_query_capabilities(source, &capabilities);
-  const iree_device_size_t allocation_size =
-      std::max<iree_device_size_t>(capabilities.max_allocation_alignment, 4096);
+  iree_hal_pool_import_requirements_t requirements;
+  ASSERT_TRUE(iree_hal_pool_query_import_requirements(
+      source, import_class.storage_class, &requirements));
+  const iree_device_size_t allocation_size = iree_device_align(
+      std::max<iree_device_size_t>(requirements.min_byte_length, 4096),
+      requirements.byte_length_alignment);
+  const iree_device_size_t allocation_alignment =
+      std::max<iree_device_size_t>(requirements.base_alignment, 4096);
   ASSERT_LE(allocation_size, IREE_HOST_SIZE_MAX);
+  ASSERT_LE(allocation_alignment, IREE_HOST_SIZE_MAX);
   ImportedHostAllocation allocation;
   IREE_ASSERT_OK(iree_allocator_malloc_aligned(
       iree_allocator_system(), static_cast<iree_host_size_t>(allocation_size),
-      static_cast<iree_host_size_t>(allocation_size), /*offset=*/0,
+      static_cast<iree_host_size_t>(allocation_alignment), /*offset=*/0,
       &allocation.pointer));
   std::memset(allocation.pointer, 0, static_cast<size_t>(allocation_size));
 
@@ -509,9 +520,9 @@ TEST_P(VulkanSlabPoolTest, NativeOnlyAndHostOnlyDoNotGrantQueueOperations) {
   const auto address =
       iree_hal_buffer_native_binding(buffer, slot).device_address;
   EXPECT_NE(address, 0u);
-  iree_hal_pool_capabilities_t capabilities;
-  iree_hal_pool_query_capabilities(source, &capabilities);
-  EXPECT_EQ(address % capabilities.max_allocation_alignment, 0u);
+  const auto memory = iree_hal_buffer_memory_view(buffer);
+  ASSERT_NE(memory.backing, nullptr);
+  EXPECT_EQ(address % memory.backing->allocation_alignment, 0u);
   const uint32_t value = 42;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_PERMISSION_DENIED,
@@ -638,7 +649,8 @@ TEST_P(VulkanSlabPoolTest, SharedBackingAcrossFamiliesAndAllocationPolicies) {
   iree_hal_slab_cache_options_t cache_options;
   iree_hal_slab_cache_options_initialize(&cache_options);
   cache_options.slab.allocation_size = 65536;
-  cache_options.slab.min_alignment = capabilities.max_allocation_alignment;
+  cache_options.slab.min_alignment =
+      iree_min((iree_device_size_t)4096, capabilities.max_allocation_alignment);
   Ref<iree_hal_pool_t> cache;
   IREE_ASSERT_OK(iree_hal_slab_cache_create(
       source, &cache_options, iree_allocator_system(), cache.out()));

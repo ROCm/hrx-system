@@ -289,7 +289,8 @@ iree_status_t iree_hal_vulkan_sparse_buffer_create_bound_sync(
     iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
     iree_hal_memory_access_t allowed_access,
     iree_hal_buffer_usage_t allowed_usage, iree_device_size_t allocation_size,
-    iree_device_size_t byte_length, VkBuffer handle,
+    iree_device_size_t byte_length, VkBuffer handle, VkDeviceSize handle_length,
+    VkDeviceSize handle_offset, VkDeviceAddress device_address,
     VkMemoryRequirements memory_requirements, uint32_t memory_type_index,
     VkDeviceSize max_allocation_size,
     VkMemoryAllocateFlags memory_allocate_flags,
@@ -334,19 +335,14 @@ iree_status_t iree_hal_vulkan_sparse_buffer_create_bound_sync(
     buffer->syms = *syms;
     buffer->logical_device = logical_device;
     iree_hal_vulkan_buffer_initialize_bindings(
-        &buffer->base, VK_NULL_HANDLE, handle, allocation_size,
-        /*device_address=*/0, /*handle_offset=*/0, &buffer->native);
+        &buffer->base, VK_NULL_HANDLE, handle, handle_length, device_address,
+        handle_offset, &buffer->native);
     buffer->flags = IREE_HAL_VULKAN_SPARSE_BUFFER_FLAG_NONE;
     buffer->memory_requirements = memory_requirements;
 
     status = iree_hal_vulkan_sparse_buffer_commit_sync(
         buffer, sparse_binding_queue, placement, memory_requirements,
         memory_type_index, max_allocation_size, memory_allocate_flags);
-    if (iree_status_is_ok(status)) {
-      buffer->native.bindings[IREE_HAL_VULKAN_BUFFER_BINDING_DEVICE_ADDRESS]
-          .device_address = iree_hal_vulkan_sparse_buffer_query_device_address(
-          &buffer->syms, buffer->logical_device, handle);
-    }
   }
 
   if (iree_status_is_ok(status)) {

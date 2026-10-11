@@ -70,7 +70,12 @@ void iree_hal_vulkan_buffer_initialize_bindings(
     VkDeviceSize handle_length, VkDeviceAddress device_address,
     VkDeviceSize handle_offset, iree_hal_vulkan_buffer_native_t* native);
 
-// Wraps a bound Vulkan buffer allocation in an iree_hal_buffer_t.
+// Wraps an owned byte range within a bound Vulkan buffer.
+//
+// The returned HAL buffer owns |handle| and |device_memory|. |handle_length|
+// is the complete native resource extent, while |handle_offset| selects the
+// first logical byte exposed by the HAL allocation. |device_memory_offset|
+// selects that same logical byte within |device_memory| for host mappings.
 iree_status_t iree_hal_vulkan_buffer_create(
     const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
     iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
@@ -79,7 +84,8 @@ iree_status_t iree_hal_vulkan_buffer_create(
     iree_device_size_t byte_length, VkMemoryPropertyFlags memory_property_flags,
     VkDeviceSize non_coherent_atom_size, VkDeviceMemory device_memory,
     VkDeviceSize device_memory_offset, VkDeviceSize device_memory_size,
-    VkBuffer handle, VkDeviceAddress device_address,
+    VkBuffer handle, VkDeviceSize handle_length, VkDeviceSize handle_offset,
+    VkDeviceAddress device_address,
     iree_hal_buffer_release_callback_t release_callback,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
 

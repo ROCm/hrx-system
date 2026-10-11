@@ -976,6 +976,16 @@ static VkDeviceAddress iree_hal_vulkan_allocator_query_device_address(
                                        &address_info);
 }
 
+// Returns the offset of the first |alignment|-aligned address in |handle|.
+// A zero address denotes a resource without the device-address interface; its
+// native buffer coordinate starts at zero and already satisfies any alignment.
+static VkDeviceSize iree_hal_vulkan_allocator_aligned_handle_offset(
+    VkDeviceAddress device_address, iree_device_size_t alignment) {
+  return device_address
+             ? (VkDeviceSize)(-device_address & ((uint64_t)alignment - 1))
+             : 0;
+}
+
 static iree_status_t iree_hal_vulkan_allocator_make_buffer_params_status(
     const iree_hal_vulkan_buffer_spec_t* params) {
 #if IREE_STATUS_MODE
@@ -1009,8 +1019,29 @@ iree_hal_vulkan_allocator_allocate_direct_buffer_with_memory_type_bits(
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)byte_length);
 
-  iree_status_t status =
-      iree_hal_vulkan_allocator_align_allocation_size(&allocation_size);
+  const iree_device_size_t min_alignment =
+      params->min_alignment ? params->min_alignment : 1;
+  iree_status_t status = iree_ok_status();
+  if (!iree_device_size_is_power_of_two(min_alignment)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "requested Vulkan buffer alignment %" PRIu64
+                              " is not a power-of-two",
+                              (uint64_t)params->min_alignment);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_vulkan_allocator_align_allocation_size(&allocation_size);
+  }
+  if (iree_status_is_ok(status) &&
+      iree_hal_vulkan_allocator_uses_buffer_device_address(allocator,
+                                                           params->usage) &&
+      !iree_device_size_checked_add(allocation_size, min_alignment - 1,
+                                    &allocation_size)) {
+    status = iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Vulkan buffer allocation size overflows while reserving %" PRIu64
+        "-byte device address alignment",
+        (uint64_t)min_alignment);
+  }
 
   bool use_sparse_allocation = false;
   if (iree_status_is_ok(status)) {
@@ -1111,6 +1142,17 @@ iree_hal_vulkan_allocator_allocate_direct_buffer_with_memory_type_bits(
                                      device_memory, /*memoryOffset=*/0);
   }
 
+  VkDeviceAddress device_address = 0;
+  VkDeviceSize handle_offset = 0;
+  iree_device_size_t logical_allocation_size = 0;
+  if (iree_status_is_ok(status)) {
+    device_address = iree_hal_vulkan_allocator_query_device_address(
+        allocator, compat_params.usage, handle);
+    handle_offset = iree_hal_vulkan_allocator_aligned_handle_offset(
+        device_address, min_alignment);
+    logical_allocation_size = allocation_size - handle_offset;
+  }
+
   iree_hal_buffer_t* buffer = NULL;
 #if IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_ALLOCATION_TRACKING
   VkBuffer trace_handle = VK_NULL_HANDLE;
@@ -1126,7 +1168,8 @@ iree_hal_vulkan_allocator_allocate_direct_buffer_with_memory_type_bits(
           &allocator->syms, allocator->logical_device,
           allocator->sparse_binding_queue, buffer_placement,
           memory_placement.memory_type, compat_params.access,
-          compat_params.usage, allocation_size, byte_length, handle,
+          compat_params.usage, logical_allocation_size, byte_length, handle,
+          (VkDeviceSize)allocation_size, handle_offset, device_address,
           memory_requirements, memory_placement.memory_type_index,
           max_allocation_size,
           iree_hal_vulkan_allocator_memory_allocate_flags(allocator,
@@ -1142,13 +1185,12 @@ iree_hal_vulkan_allocator_allocate_direct_buffer_with_memory_type_bits(
       status = iree_hal_vulkan_buffer_create(
           &allocator->syms, allocator->logical_device, buffer_placement,
           memory_placement.memory_type, compat_params.access,
-          compat_params.usage, allocation_size, byte_length,
+          compat_params.usage, logical_allocation_size, byte_length,
           memory_placement.memory_property_flags,
           allocator->properties2.properties.limits.nonCoherentAtomSize,
-          device_memory, /*device_memory_offset=*/0, memory_requirements.size,
-          handle,
-          iree_hal_vulkan_allocator_query_device_address(
-              allocator, compat_params.usage, handle),
+          device_memory, /*device_memory_offset=*/handle_offset,
+          memory_requirements.size, handle, (VkDeviceSize)allocation_size,
+          handle_offset, device_address,
           iree_hal_buffer_release_callback_null(), allocator->host_allocator,
           &buffer);
       if (iree_status_is_ok(status)) {
@@ -1465,7 +1507,7 @@ iree_hal_vulkan_allocator_import_buffer_with_memory_type_bits(
         memory_placement.memory_property_flags,
         allocator->properties2.properties.limits.nonCoherentAtomSize,
         device_memory, /*device_memory_offset=*/0, memory_requirements.size,
-        handle,
+        handle, (VkDeviceSize)allocation_size, /*handle_offset=*/0,
         iree_hal_vulkan_allocator_query_device_address(
             allocator, compat_params.usage, handle),
         release_callback, allocator->host_allocator, &buffer);
