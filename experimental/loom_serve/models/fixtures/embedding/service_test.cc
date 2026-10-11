@@ -1029,6 +1029,71 @@ TEST_P(SourceEmbeddingServiceTest,
 }
 
 TEST_P(SourceEmbeddingServiceTest,
+       InputLimitsRejectOnlyTheirRequestsAndPreserveFullCapacity) {
+  std::string long_ids = "[0";
+  for (size_t i = 1; i < 32; ++i) {
+    long_ids += ",0";
+  }
+  long_ids += "]";
+  std::string many_rows = "[\"a\"";
+  for (size_t i = 1; i < 65; ++i) {
+    many_rows += ",\"a\"";
+  }
+  many_rows += "]";
+  const std::string costly_row = "\"" + std::string(22, 'a') + "\"";
+  const std::string invalid_inputs[] = {
+      "\"" + std::string(32, 'b') + "\"",
+      "\"" + std::string(4096, 'a') + "\"",
+      long_ids,
+      "[3]",
+      many_rows,
+      "[" + costly_row + "," + costly_row + "," + costly_row + "]",
+  };
+  std::vector<int> rejected;
+  for (const auto& input : invalid_inputs) {
+    rejected.push_back(Send("{\"model\":\"fixture\",\"input\":" + input + "}"));
+    Accept();
+  }
+  // Every row fits individually, and these two consume the entire 64-unit
+  // cohort. Rejected preparation must retain neither units nor device rows.
+  const int valid =
+      Send("{\"model\":\"fixture\",\"input\":[\"" + std::string(31, 'b') +
+           "\",\"" + std::string(31, 'a') + "\"]}");
+  Accept();
+  Drain();
+  for (size_t i = 0; i < rejected.size(); ++i) {
+    SCOPED_TRACE(i);
+    const auto response = Read(rejected[i]);
+    EXPECT_EQ(response.find("HTTP/1.1 400"), 0u);
+    EXPECT_NE(response.find("fixture requires"), std::string::npos);
+  }
+  const auto response = Read(valid);
+  EXPECT_EQ(response.find("HTTP/1.1 200"), 0u);
+  EXPECT_NE(response.find(R"("index":0,"embedding":[62,31,2,2])"),
+            std::string::npos);
+  EXPECT_NE(response.find(R"("index":1,"embedding":[31,31,1,2])"),
+            std::string::npos);
+  EXPECT_NE(response.find(R"("prompt_tokens":62,"total_tokens":62)"),
+            std::string::npos);
+  EXPECT_FALSE(interface_.is_pending(interface_.self));
+
+  const int next = Send(R"({"model":"fixture","input":[0]})");
+  Accept();
+  Drain();
+  const auto next_response = Read(next);
+  EXPECT_EQ(next_response.find("HTTP/1.1 200"), 0u);
+  EXPECT_NE(next_response.find(R"("embedding":[1,1,1,1])"), std::string::npos);
+  const auto& counters = *interface_.telemetry.counters;
+  EXPECT_EQ(counters.requests, 8u);
+  EXPECT_EQ(counters.completed, 2u);
+  EXPECT_EQ(counters.rejected, 6u);
+  EXPECT_EQ(counters.cancelled, 0u);
+  EXPECT_EQ(counters.failed, 0u);
+  EXPECT_EQ(counters.input_tokens, 63u);
+  EXPECT_EQ(counters.batches, 2u);
+}
+
+TEST_P(SourceEmbeddingServiceTest,
        SharedRouterServesUtilitiesAndBothEncodings) {
   interface_.set_observer(interface_.self, {});
   loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
