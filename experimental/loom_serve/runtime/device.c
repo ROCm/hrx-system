@@ -126,8 +126,8 @@ static iree_status_t loom_serve_device_group_initialize(
       } else
 #endif  // LOOM_SERVE_DRIVER_TASK
       {
-        status = iree_hal_driver_registry_try_create(
-            registry, name, group->allocator, &drivers[driver_index].handle);
+        status = iree_hal_driver_registry_acquire_driver(
+            registry, name, &drivers[driver_index].handle);
       }
       if (iree_status_is_ok(status)) {
         ++driver_count;
