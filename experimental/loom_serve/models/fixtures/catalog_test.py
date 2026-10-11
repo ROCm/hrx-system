@@ -218,6 +218,15 @@ def check_png(encoded, prompt, seed):
     assert zlib.decompress(compressed) == expected
 
 
+def check_decision(result):
+    # The single-question input gives true/false weights of 2 and 1.
+    answer = result["answers"]["truth"]
+    assert set(answer) == {"type", "noul"}, result
+    assert answer["type"] == "noul", result
+    # Vulkan F32 division permits 2.5 ULP; at 2/3, one ULP is 2^-24.
+    assert abs(answer["noul"] - 2 / 3) <= 2.5 * 2**-24, result
+
+
 class Client:
     def __init__(self, address):
         self.address = address
@@ -338,12 +347,12 @@ class Client:
 
 
 @contextlib.contextmanager
-def running_server(server, directory, catalog, workers):
+def running_server(server_command, directory, catalog, workers):
     events = Events()
     log_path = catalog.parent / f"server-{workers}.log"
     with child_server(
         [
-            str(server),
+            *server_command,
             f"--models={catalog.relative_to(directory)}",
             "--listen=127.0.0.1:0",
             f"--workers={workers}",
@@ -466,9 +475,7 @@ def run_round(client, iteration, observations):
                 },
             },
         )
-        assert result["answers"]["truth"] == {"type": "noul", "noul": 0.666666687}, (
-            result
-        )
+        check_decision(result)
 
     def utilities():
         assert client.request("/tokenize", {"model": "vectors", "content": "abxa"}) == {
@@ -535,7 +542,7 @@ def run_round(client, iteration, observations):
         "concurrent_clients": len(operations),
         "resident_rows": 2,
         "pool_positions": 128,
-        "exact_outputs": True,
+        "outputs_verified": True,
         "whole_pool_reused": True,
     }
 
@@ -565,7 +572,7 @@ def copy_package(source, directory, kind):
     return package.relative_to(directory)
 
 
-def check_startup_failures(server, directory, catalog):
+def check_startup_failures(server_command, directory, catalog):
     """Keep an incomplete registration inspectable while peers serve output."""
     models = catalog["models"]
     cases = [(model, Path(model["source"]) / "control.loom") for model in models]
@@ -582,7 +589,7 @@ def check_startup_failures(server, directory, catalog):
         try:
             with child_server(
                 [
-                    str(server),
+                    *server_command,
                     f"--models={catalog_path.relative_to(directory)}",
                     "--listen=127.0.0.1:0",
                     "--workers=1",
@@ -635,7 +642,7 @@ def check_startup_failures(server, directory, catalog):
         )
 
 
-def check_dynamic_observer(server, directory, catalog):
+def check_dynamic_observer(server_command, directory, catalog):
     """The shipping observer follows real model registration, not a static list."""
     declaration = next(
         model for model in catalog["models"] if model["kind"] == "embedding"
@@ -654,7 +661,12 @@ def check_dynamic_observer(server, directory, catalog):
             return super().write(line)
 
     with child_server(
-        [str(server), "--listen=127.0.0.1:0", "--workers=1", "--pool_backing=fixed"],
+        [
+            *server_command,
+            "--listen=127.0.0.1:0",
+            "--workers=1",
+            "--pool_backing=fixed",
+        ],
         log_path,
         cwd=directory,
     ) as (_, address):
@@ -708,7 +720,7 @@ def check_dynamic_observer(server, directory, catalog):
     print(json.dumps({"event": "dynamic_observer_followed_reincarnation"}), flush=True)
 
 
-def check_empty_server(server, directory):
+def check_empty_server(server_command, directory):
     catalog = directory / "empty.json"
     catalog.write_text('{"models":[]}')
     for mode, arguments in (
@@ -718,7 +730,7 @@ def check_empty_server(server, directory):
         log_path = directory / f"{mode}-models.log"
         with child_server(
             [
-                str(server),
+                *server_command,
                 *arguments,
                 "--listen=127.0.0.1:0",
                 "--workers=1",
@@ -804,7 +816,10 @@ def check_sporadic_connections(process, client, model, workers):
             )
             assert [item["embedding"] for item in vectors["data"]] == [[3, 2], [6, 3]]
             current_threads = thread_snapshot(process)
-            assert current_threads["userspace"] == expected_threads["userspace"], (
+            assert (
+                current_threads["userspace"].keys()
+                == expected_threads["userspace"].keys()
+            ), (
                 expected_threads,
                 current_threads,
             )
@@ -828,7 +843,9 @@ def check_sporadic_connections(process, client, model, workers):
             assert client.request("/readyz") == {"status": "ready"}
         assert completed == 256
         current_threads = thread_snapshot(process)
-        assert current_threads["userspace"] == expected_threads["userspace"], (
+        assert (
+            current_threads["userspace"].keys() == expected_threads["userspace"].keys()
+        ), (
             expected_threads,
             current_threads,
         )
@@ -850,7 +867,7 @@ def check_sporadic_connections(process, client, model, workers):
             peer.close()
 
 
-def check_dynamic_catalog(server, directory, catalog, workers):
+def check_dynamic_catalog(server_command, directory, catalog, workers):
     """Twelve real model owners share workers, clients and retirement accounting."""
     declarations = [
         {**model, "name": f"{model['kind']}-{index}", "admission": "drained"}
@@ -874,7 +891,7 @@ def check_dynamic_catalog(server, directory, catalog, workers):
         )
         arguments = [f"--flagfile={settings.relative_to(directory)}"]
     with child_server(
-        [str(server), *arguments],
+        [*server_command, *arguments],
         log_path,
         cwd=directory,
     ) as (process, address):
@@ -897,8 +914,14 @@ def check_dynamic_catalog(server, directory, catalog, workers):
             and item["loom"]["status"]["admission"] == "drained"
             for item in registered
         ), registered
-        for declaration in declarations:
-            client.request("/v1/models/undrain", {"model": declaration["name"]})
+        registered_threads = thread_snapshot(process)
+        assert (
+            registered_threads["userspace"].keys()
+            == initial_threads["userspace"].keys()
+        ), (
+            initial_threads,
+            registered_threads,
+        )
 
         def infer(declaration, iteration):
             model = declaration["name"]
@@ -944,12 +967,33 @@ def check_dynamic_catalog(server, directory, catalog, workers):
                         },
                     },
                 )
-                assert result["answers"]["truth"] == {
-                    "type": "noul",
-                    "noul": 0.666666687,
-                }, result
+                check_decision(result)
             else:
                 raise AssertionError(kind)
+
+        # Activate the shared device queue with one real request before checking
+        # model-count scaling. Vulkan starts its queue completion thread lazily.
+        # Names may change during native initialization; identities must remain.
+        first = next(item for item in declarations if item["kind"] == "embedding")
+        client.request("/v1/models/undrain", {"model": first["name"]})
+        infer(first, 0)
+        wait_status(
+            urlsplit("http://" + address),
+            model=first["name"],
+            phase="idle",
+            queued_requests=0,
+            active_requests=0,
+        )
+        activated_threads = thread_snapshot(process)
+        assert (
+            initial_threads["userspace"].keys() <= activated_threads["userspace"].keys()
+        ), (
+            initial_threads,
+            activated_threads,
+        )
+        for declaration in declarations:
+            if declaration is not first:
+                client.request("/v1/models/undrain", {"model": declaration["name"]})
 
         with ThreadPoolExecutor(max_workers=12) as executor:
             work = [
@@ -959,8 +1003,11 @@ def check_dynamic_catalog(server, directory, catalog, workers):
                 future.result()
             client.idle()
             loaded_threads = thread_snapshot(process)
-            assert loaded_threads["userspace"] == initial_threads["userspace"], (
-                initial_threads,
+            assert (
+                loaded_threads["userspace"].keys()
+                == activated_threads["userspace"].keys()
+            ), (
+                activated_threads,
                 loaded_threads,
             )
             check_sporadic_connections(process, client, "embedding-0", workers)
@@ -1009,9 +1056,9 @@ def check_dynamic_catalog(server, directory, catalog, workers):
             for record in reader.poll().records
             if record["event"] == "counters"
         )
-        # Twelve initial requests, eight peers, four replacements and two
-        # embedding probes while incomplete transport requests remain parked.
-        assert before["requests"] == before["completed"] == 26, before
+        # One activation request, twelve initial requests, eight peers, four
+        # replacements and two embedding probes while transport requests park.
+        assert before["requests"] == before["completed"] == 27, before
         for index, declaration in enumerate(declarations):
             client.request(
                 "/v1/models/unregister",
@@ -1035,8 +1082,10 @@ def check_dynamic_catalog(server, directory, catalog, workers):
         )
         assert before == after, (before, after)
         final_threads = thread_snapshot(process)
-        assert final_threads["userspace"] == initial_threads["userspace"], (
-            initial_threads,
+        assert (
+            final_threads["userspace"].keys() == activated_threads["userspace"].keys()
+        ), (
+            activated_threads,
             final_threads,
         )
         assert client.request("/healthz") == {"status": "ready"}
@@ -1048,18 +1097,27 @@ def check_dynamic_catalog(server, directory, catalog, workers):
                     "workers": workers,
                     "userspace_threads": len(final_threads["userspace"]),
                     "kernel_io_workers": len(final_threads["kernel_io"]),
+                    "activation_added_userspace_threads": len(
+                        activated_threads["userspace"]
+                    )
+                    - len(initial_threads["userspace"]),
                     "added_userspace_threads": 0,
                     "completed_requests": after["completed"],
-                    "exact_outputs": True,
+                    "outputs_verified": True,
                     "retired_counters_preserved": True,
-                    "thread_samples": [initial_threads, loaded_threads, final_threads],
+                    "thread_samples": [
+                        initial_threads,
+                        activated_threads,
+                        loaded_threads,
+                        final_threads,
+                    ],
                 }
             ),
             flush=True,
         )
 
 
-def check_multiple_bindings(server, directory, catalog):
+def check_multiple_bindings(server_command, directory, catalog):
     socket_path = directory / 'serve "local".sock'
     log_path = directory / "multiple-bindings.log"
     settings = directory / "configuration" / "listeners.flags"
@@ -1078,7 +1136,7 @@ def check_multiple_bindings(server, directory, catalog):
         + "\n"
     )
     with child_server(
-        [str(server), f"--flagfile={settings.relative_to(directory)}"],
+        [*server_command, f"--flagfile={settings.relative_to(directory)}"],
         log_path,
         cwd=directory,
     ) as (process, address):
@@ -1131,12 +1189,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", type=Path, required=True)
     parser.add_argument("--catalog", type=Path, required=True)
+    parser.add_argument("--device", default="amdgpu")
     parser.add_argument("--rounds", type=int, default=4, choices=range(1, 17))
     arguments = parser.parse_args()
-    server = arguments.server.absolute()
+    server_command = [str(arguments.server.absolute()), f"--device={arguments.device}"]
     with tempfile.TemporaryDirectory(prefix="loom catalog ") as temporary:
         directory = Path(temporary)
-        check_empty_server(server, directory)
+        check_empty_server(server_command, directory)
         weights = directory / "text.safetensors"
         header = b'{"bias":{"dtype":"I32","shape":[1],"data_offsets":[0,4]}}'
         header += b" " * (-len(header) % 8)
@@ -1171,12 +1230,12 @@ def main():
         catalog_path = directory / "configuration" / "models.json"
         catalog_path.parent.mkdir()
         catalog_path.write_text(json.dumps(catalog))
-        check_dynamic_observer(server, directory, catalog)
-        check_startup_failures(server, directory, catalog)
-        check_multiple_bindings(server, directory, catalog_path)
+        check_dynamic_observer(server_command, directory, catalog)
+        check_startup_failures(server_command, directory, catalog)
+        check_multiple_bindings(server_command, directory, catalog_path)
         for workers in (1, 4):
-            check_dynamic_catalog(server, directory, catalog, workers)
-            with running_server(server, directory, catalog_path, workers) as (
+            check_dynamic_catalog(server_command, directory, catalog, workers)
+            with running_server(server_command, directory, catalog_path, workers) as (
                 client,
                 observations,
             ):

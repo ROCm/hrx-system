@@ -18,36 +18,54 @@ loom_cc_library(
     deps = ["//runtime/src/iree/testing:gtest"],
 )
 
-py_test(
-    name = "catalog_test",
-    size = "medium",
-    srcs = ["catalog_test.py"],
-    args = [
-        "--server=$(rootpath //experimental/loom_serve/serving:server)",
-        "--catalog=$(rootpath :catalog.json)",
-    ],
-    data = [
-        "catalog.json",
-        "//experimental/loom_serve/models/fixtures/decision:sources",
-        "//experimental/loom_serve/models/fixtures/embedding:sources",
-        "//experimental/loom_serve/models/fixtures/image:sources",
-        "//experimental/loom_serve/models/fixtures/text:sources",
-        "//experimental/loom_serve/serving:server",
-    ],
-    tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
-        "resource_group:" + GPU_DEVICE_RESOURCE_GROUP,
-    ],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/target/arch:vm",
-        "//loom/config/execute:amdgpu_hal",
-    ]) + select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
-    deps = [
-        "//experimental/loom_serve/http:logs_client",
-        "//experimental/loom_serve/testing:http",
-        "//experimental/loom_serve/tools:observe_lib",
-    ],
-)
+[
+    py_test(
+        name = name,
+        size = "medium",
+        srcs = ["catalog_test.py"],
+        args = [
+            "--server=$(rootpath //experimental/loom_serve/serving:server)",
+            "--catalog=$(rootpath :catalog.json)",
+            "--device=" + device,
+        ],
+        data = [
+            "catalog.json",
+            "//experimental/loom_serve/models/fixtures/decision:sources",
+            "//experimental/loom_serve/models/fixtures/embedding:sources",
+            "//experimental/loom_serve/models/fixtures/image:sources",
+            "//experimental/loom_serve/models/fixtures/text:sources",
+            "//experimental/loom_serve/serving:server",
+        ],
+        main = "catalog_test.py",
+        tags = [
+            "iree-run-requirement=" + requirement,
+            "resource_group:" + GPU_DEVICE_RESOURCE_GROUP,
+        ],
+        target_compatible_with = loom_config_compatible_with([
+            "//loom/config/target/arch:vm",
+            capability,
+        ]) + select({
+            "@platforms//os:linux": [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        }),
+        deps = [
+            "//experimental/loom_serve/http:logs_client",
+            "//experimental/loom_serve/testing:http",
+            "//experimental/loom_serve/tools:observe_lib",
+        ],
+    )
+    for name, device, capability, requirement in [
+        (
+            "catalog_test",
+            "amdgpu",
+            "//loom/config/execute:amdgpu_hal",
+            "runtime.resource.amd_gpu",
+        ),
+        (
+            "catalog_vulkan_test",
+            "vulkan",
+            "//loom/config/execute:spirv_vulkan_hal",
+            "vulkan.resource.device",
+        ),
+    ]
+]

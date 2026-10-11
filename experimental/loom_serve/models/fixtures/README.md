@@ -33,6 +33,13 @@ catalog paths. No compiler CLI, generated model binaries or downloaded weights
 are required by the running process. One worker intentionally exercises shared
 CPU scheduling; it is not the recommended configuration for measuring speed.
 
+The same catalog also runs on Vulkan: enable the SPIR-V compiler and Vulkan HAL,
+then add `--device=vulkan --pool_backing=fixed` to the command above. No source
+package edits are needed. The complete image-containing catalog requires a GPU;
+the separate
+[CPU recipe](../../docs/OPERATING.md#first-output-starting-with-no-models) runs
+text, embedding and decision packages on native x86.
+
 The `ready` event announces the listening address. In another terminal:
 
 ```sh
@@ -49,7 +56,7 @@ requests arriving earlier wait within the holding budget. Idle status reports
 zero queued/active requests. Status describes scheduler ownership, not GPU
 utilization; queries do not activate weights or wait for model completion.
 
-## Exact first results
+## Independently checkable first results
 
 The following commands are independent and may overlap. Requests to the same
 finite-vector model can coalesce; the chosen two-dimensional embedding result
@@ -80,13 +87,14 @@ Expected results:
 | Tokenize | `{"tokens":[0,1,0]}` |
 | Detokenize | `{"content":"bab"}` |
 | Embeddings | Input indices 0/1 contain `[1,1]` / `[6,3]`; prompt/total usage is 4 |
-| Decision | `truth` is `{"type":"noul","noul":0.666666687}` for this single-question cohort; token usage is zero |
+| Decision | `truth` has type `noul` and probability approximately 2/3 for this single-question cohort; token usage is zero |
 | Image | `data[0].b64_json` decodes to a 7×5 RGB PNG. R/G are 255; B alternates 0/255 by row-major pixel index |
 
 The decision fixture intentionally changes its probabilities with cohort size.
-Its [oracle](decision/README.md) defines the exact calculation; another concurrent
-decision request can therefore change this example's expected number. The image
-changes red with seed parity and green with prompt-token parity. These are
+Its [oracle](decision/README.md) defines the calculation and floating-point
+precision contract; another concurrent decision request can therefore change
+this example's expected number. The image changes red with seed parity and
+green with prompt-token parity. These are
 request-dependent GPU results, not fixed HTTP strings. SIGINT/SIGTERM stops
 admission and drains accepted work before model and device destruction.
 
@@ -196,8 +204,17 @@ round. No model download or production test hook is involved.
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve/models/fixtures:catalog_test
+  //experimental/loom_serve/models/fixtures:catalog_test \
+  //experimental/loom_serve/models/fixtures:catalog_vulkan_test
 ```
+
+Both backend targets run the same workload, including twelve dynamic models and
+256 parked clients. The first real embedding request activates native queue
+machinery; its thread cost is recorded separately. Loading the remaining models,
+parking clients and replacing model registrations must add no userspace threads.
+Non-dyadic decision probabilities use a numeric bound for F32 division rather
+than a backend-specific decimal string. Text, embedding and image results retain
+their exact oracles.
 
 This is a bounded logical-ownership workload, not a latency assertion or a
 particular interleaving/batch-size requirement. Fixed backing isolates it from
