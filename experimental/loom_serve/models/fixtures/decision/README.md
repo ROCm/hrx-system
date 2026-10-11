@@ -2,8 +2,8 @@
 
 This package exercises the [SystemOne adapter](../../../decision/README.md)
 and [finite model ABI](../../../finite/README.md). It compiles ordinary Loom
-VM preparation/control and two GPU kernels. No downloaded model, native canned
-answer or model-specific C is involved.
+VM preparation/control and two portable GPU kernels. No downloaded model,
+native canned answer or model-specific C is involved.
 
 Catalog entry:
 
@@ -42,12 +42,13 @@ pass the packed-dispatch test. These values have no semantic/calibration meaning
 
 ## Verification
 
-On a supported AMDGPU runner using the repository's normal execution policy:
+On supported AMDGPU and Vulkan runners using the repository's execution policy:
 
 ```sh
 iree-bazel-test --config=asan \
   //experimental/loom_serve/decision:protocol_test \
-  //experimental/loom_serve/models/fixtures/decision:service_test
+  //experimental/loom_serve/models/fixtures/decision:service_test \
+  //experimental/loom_serve/models/fixtures/decision:service_vulkan_test
 ```
 
 The actual GPU/HTTP cases run with one and four task workers. They cover a
@@ -56,6 +57,11 @@ choice/score/noul results, reversed storage, deterministic ties, source capacity
 rejection followed by valid work, and shared routing alongside another source
 embedding model and raw tokenization. CPU protocol tests cover escaped IDs,
 structured criteria, normalized-result validation and exact confidence formulas.
+Non-dyadic probabilities are compared numerically against the GPU division
+contract, not against one backend's decimal rounding. Exactly representable
+cohort results retain exact wire checks. The source uses the selected device
+target; a server using `--device=vulkan --pool_backing=fixed` needs no package
+edits.
 
 A real decision port supplies its own source formatter, parameter declarations,
 backbone/head kernels and numerical evidence. This fixture proves the serving

@@ -65,12 +65,12 @@ entries inside each source catalog are relative to its model directory.
 The serving JIT selects the exact compiler profile and loader target from HAL
 device facts. Linked providers cover AMDGPU, Vulkan/SPIR-V, x86 CPU and XDNA;
 the source still needs to lower for the chosen target. The retained-text fixture
-runs through the same source-JIT, command, pooled-state and HTTP path on AMDGPU
-and x86 CPU. Its [CPU recipe](models/fixtures/text/README.md) uses
+runs through the same source-JIT, command, pooled-state and HTTP path on AMDGPU,
+Vulkan and x86 CPU. Its [CPU recipe](models/fixtures/text/README.md) uses
 `--device=task --pool_backing=fixed`; GPU model kernels are not thereby CPU ports.
-Vulkan source image and weighted embedding fixtures execute through the same
-recorder, source JIT and HTTP lifecycle with one or four shared workers and
-fixed-backed pools. Native pools honor reflected parameter and transient
+Vulkan source image, decision and weighted embedding fixtures execute through
+the same recorder, source JIT and HTTP lifecycle with one or four shared workers
+and fixed-backed pools. Native pools honor reflected parameter and transient
 alignment; the runner preserves those requirements. The weighted fixture covers
 checkpoint loading, in-place preparation, dynamic registration, exact HTTP
 results and retirement. This establishes the generic execution path, not

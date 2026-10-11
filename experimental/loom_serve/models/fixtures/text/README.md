@@ -96,8 +96,9 @@ build_tools/bin/iree-bazel-run --config=opt \
 ```
 
 The CPU task device shares the server's worker pool and JITs native x86 code;
-it does not interpret the device kernels in the VM. `--device=amdgpu` runs the
-same source on AMDGPU. Each backend must be enabled in the build configuration.
+it does not interpret the device kernels in the VM. `--device=amdgpu` or
+`--device=vulkan` runs the same source on the corresponding GPU backend with
+fixed backing. Each backend must be enabled in the build configuration.
 Repository build and hardware-runner policy still applies. A separate runner
 needs the exact built server, its runtime closure, these sources and the tiny
 checkpoint. No compiler CLI runs in the server.
@@ -141,16 +142,17 @@ The shared server accepts the same package alongside [catalog.json](../catalog.j
 build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/models/fixtures/text:request_test \
   //experimental/loom_serve/models/fixtures/text:service_cpu_test \
-  //experimental/loom_serve/models/fixtures/text:service_test
+  //experimental/loom_serve/models/fixtures/text:service_test \
+  //experimental/loom_serve/models/fixtures/text:service_vulkan_test
 ```
 
-The native CPU and AMDGPU service tests use one and four shared workers. They
-compare full and chunked input, row identities, simultaneous branch writers, pinned prefixes,
-final pool credit, HTTP rewind/continuation, input rejection recovery, EOS
+The native CPU, AMDGPU and Vulkan service tests use one and four shared workers.
+They compare full and chunked input, row identities, simultaneous branch writers,
+pinned prefixes, final pool credit, HTTP rewind/continuation, input rejection recovery, EOS
 framing, queued cancellation and changed checkpoint weights against independent
 dense arithmetic. Elastic virtual-memory cases run separately on AMDGPU; the
-CPU suite exercises fixed-backed logical pooling. The CPU-only request test
-exercises source framing, exact token IDs and rejection before any device or
-checkpoint is needed.
+CPU and Vulkan suites exercise fixed-backed logical pooling. The CPU-only
+request test exercises source framing, exact token IDs and rejection before any
+device or checkpoint is needed.
 Exact output, not compilation alone, establishes the boundary. Real Qwen
 remains the numerical/performance reference for its architecture.

@@ -73,6 +73,51 @@ loom_cc_test(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    service_vulkan_test
+  SRCS
+    "service_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/advance.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/control.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/sources.txt"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/tokenizer.json"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/weights.loom"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::base::tooling::flags
+    iree::experimental::loom_serve::http::listener
+    iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::models::fixtures::stalled_stderr
+    iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::scheduling::packing
+    iree::experimental::loom_serve::serving::model_registration
+    iree::experimental::loom_serve::serving::registry
+    iree::experimental::loom_serve::serving::router
+    iree::experimental::loom_serve::telemetry::stream
+    iree::experimental::loom_serve::text::model
+    iree::experimental::loom_serve::text::schedule
+    iree::experimental::loom_serve::text::service
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  ARGS
+    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom}}"
+    "--test_device=vulkan"
+    "--gtest_filter=Workers/SourceTextServiceTest.*"
+  LABELS
+    "iree-run-requirement=vulkan.resource.device"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_X86 AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME

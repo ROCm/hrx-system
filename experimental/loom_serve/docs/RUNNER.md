@@ -74,10 +74,10 @@ than opening overlapping per-model sessions.
 The JIT selects an exact loader/profile pair from HAL device facts through
 LoomC's linked CPU, AMDGPU, SPIR-V and XDNA providers. CPU task devices use the
 application executor, not a private worker pool. Native source text HTTP is
-exercised on CPU as well as AMDGPU; that does not make every model's device
-math portable. Vulkan source image and weighted embedding fixtures exercise
-logical-parameter reflection, aligned native storage, in-place preparation and
-HTTP retirement with fixed backing. XDNA reusable-command and file APIs still
+exercised on CPU, AMDGPU and Vulkan; that does not make every model's device
+math portable. Vulkan source image, decision and weighted embedding fixtures
+exercise logical-parameter reflection, aligned native storage, in-place
+preparation and HTTP retirement with fixed backing. XDNA reusable-command and file APIs still
 need backend support before this runner can use that path end-to-end. A device
 URI alone cannot supply missing compiler operations, model kernels or native
 capabilities.

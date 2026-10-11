@@ -18,6 +18,7 @@
 #include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
+#include "iree/base/internal/json.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -25,6 +26,8 @@
 IREE_FLAG(string, model_source, "", "Deterministic decision bootstrap source.");
 IREE_FLAG(string, embedding_source, "",
           "Independent embedding bootstrap source.");
+IREE_FLAG(string, test_device, "amdgpu",
+          "HAL device executing the source-defined decision fixture.");
 
 namespace {
 
@@ -43,7 +46,8 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
   void SetUp() override {
     iree_notification_initialize(&notification_);
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
-    const loom_serve_device_options_t options = {.uri = IREE_SV("amdgpu")};
+    const loom_serve_device_options_t options = {
+        .uri = iree_make_cstring_view(FLAG_test_device)};
     IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &options, &group_,
                                                   allocator_));
     device_ = loom_serve_device_group_at(group_, 0);
@@ -217,6 +221,24 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
 const char* const kNoul =
     R"({"model":"decisions","state":"a","questions":{"truth":{"type":"noul","instructions":"???","criteria":{"false":"","true":"x"}}}})";
 
+void CheckSingleNoulResponse(const std::string& response) {
+  SCOPED_TRACE(response);
+  ASSERT_EQ(response.find("HTTP/1.1 200"), 0u);
+  const size_t separator = response.find("\r\n\r\n");
+  ASSERT_NE(separator, std::string::npos);
+  iree_string_view_t value = iree_make_string_view(
+      response.data() + separator + 4, response.size() - separator - 4);
+  for (const char* key : {"answers", "truth", "noul"}) {
+    IREE_ASSERT_OK(iree_json_lookup_object_value(
+        value, iree_make_cstring_view(key), &value));
+  }
+  double probability = 0;
+  IREE_ASSERT_OK(iree_json_parse_double(value, &probability));
+  // Vulkan F32 division permits 2.5 ULP error for normal divisors. At 2/3,
+  // one ULP is 2^-24. Exact dyadic cohort probabilities remain wire-checked.
+  EXPECT_NEAR(probability, 2.0 / 3.0, 2.5 * 0x1p-24);
+}
+
 TEST_P(SourceDecisionServiceTest, PacksQuestionsAndRetainsResultsAcrossReset) {
   const int a = Send(R"({"model":"decisions","state":"a","questions":{
     "route":{"type":"choice","instructions":"???","criteria":{"z":null,"x":null}},
@@ -262,7 +284,7 @@ TEST_P(SourceDecisionServiceTest, PacksQuestionsAndRetainsResultsAcrossReset) {
   Drain();
   // A single-question cohort produces a different exact oracle distribution.
   // The earlier .75 requires all four questions in one device cohort.
-  EXPECT_NE(Read(next).find(R"("noul":0.666666687)"), std::string::npos);
+  CheckSingleNoulResponse(Read(next));
 }
 
 TEST_P(SourceDecisionServiceTest,
@@ -319,7 +341,7 @@ TEST_P(SourceDecisionServiceTest, SharesRouterWithEmbeddingsAndRawUtilities) {
           R"({"object":"model","id":"vectors","loom":{"kind":"embedding","endpoint":"/v1/embeddings","tokenize":true}})"),
       std::string::npos);
   EXPECT_NE(Read(tokenize).find(R"({"tokens":[0,1,0]})"), std::string::npos);
-  EXPECT_NE(Read(decision).find(R"("noul":0.666666687)"), std::string::npos);
+  CheckSingleNoulResponse(Read(decision));
   const std::string vectors = Read(embedding);
   EXPECT_NE(vectors.find(R"("embedding":[1,1])"), std::string::npos);
   EXPECT_NE(vectors.find(R"("embedding":[6,3])"), std::string::npos);

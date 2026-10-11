@@ -97,6 +97,14 @@ py_test(
             [],
         ),
         (
+            "service_vulkan_test",
+            "vulkan",
+            ["//loom/config/execute:spirv_vulkan_hal"],
+            GPU_DEVICE_RESOURCE_GROUP,
+            ["iree-run-requirement=vulkan.resource.device"],
+            ["--gtest_filter=Workers/SourceTextServiceTest.*"],
+        ),
+        (
             "service_cpu_test",
             "task",
             [

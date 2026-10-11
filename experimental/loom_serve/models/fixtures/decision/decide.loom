@@ -1,5 +1,5 @@
 config.decl @fixture.units : %value: index where [range(%value, 1, 256)]
-amdgpu.target<gfx11-generic> @fixture_target {subgroup_size = 32}
+target.decl @fixture_target
 
 kernel.def target(@fixture_target) @weights() {
   %units = config.get @fixture.units : index
