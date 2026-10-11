@@ -176,27 +176,27 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count =
   %28 = v_lshrrev_b32_src0_inline %22, 4
   %29 = v_lshl_add_u32_shift_imm %28, %27, 1
   %30 = global_load_d16_b16_saddr %29, %base_view
-  %31 = v_bfe_u32_offset_0_width_16_low16 %30
+  %31 = v_bfe_u32_offset_0_width_inline_low16 %30
   %32 = global_load_d16_b16_saddr %29, %base_view {offset = 4}
-  %33 = v_bfe_u32_offset_0_width_16_low16 %32
+  %33 = v_bfe_u32_offset_0_width_inline_low16 %32
   %34 = v_lshlrev_b32_src0_inline %33, 16
   %35 = v_or_b32 %31, %34
   %36 = global_load_d16_b16_saddr %29, %base_view {offset = 8}
-  %37 = v_bfe_u32_offset_0_width_16_low16 %36
+  %37 = v_bfe_u32_offset_0_width_inline_low16 %36
   %38 = global_load_d16_b16_saddr %29, %base_view {offset = 12}
-  %39 = v_bfe_u32_offset_0_width_16_low16 %38
+  %39 = v_bfe_u32_offset_0_width_inline_low16 %38
   %40 = v_lshlrev_b32_src0_inline %39, 16
   %41 = v_or_b32 %37, %40
   %42 = global_load_d16_b16_saddr %29, %base_view {offset = 16}
-  %43 = v_bfe_u32_offset_0_width_16_low16 %42
+  %43 = v_bfe_u32_offset_0_width_inline_low16 %42
   %44 = global_load_d16_b16_saddr %29, %base_view {offset = 20}
-  %45 = v_bfe_u32_offset_0_width_16_low16 %44
+  %45 = v_bfe_u32_offset_0_width_inline_low16 %44
   %46 = v_lshlrev_b32_src0_inline %45, 16
   %47 = v_or_b32 %43, %46
   %48 = global_load_d16_b16_saddr %29, %base_view {offset = 24}
-  %49 = v_bfe_u32_offset_0_width_16_low16 %48
+  %49 = v_bfe_u32_offset_0_width_inline_low16 %48
   %50 = global_load_d16_b16_saddr %29, %base_view {offset = 28}
-  %51 = v_bfe_u32_offset_0_width_16_low16 %50
+  %51 = v_bfe_u32_offset_0_width_inline_low16 %50
   %52 = v_lshlrev_b32_src0_inline %51, 16
   %53 = v_or_b32 %49, %52
   %56 = v_lshlrev_b32_src0_inline %35, 16
@@ -335,15 +335,15 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1
   %36 = v_lshrrev_b32_src0_inline %29, 4
   %37 = v_lshl_add_u32_shift_imm %36, %35, 1
   %38 = global_load_d16_b16_saddr %37, %input_view
-  %39 = v_bfe_u32_offset_0_width_16_low16 %38
+  %39 = v_bfe_u32_offset_0_width_inline_low16 %38
   %40 = global_load_d16_b16_saddr %37, %input_view {offset = 8}
-  %41 = v_bfe_u32_offset_0_width_16_low16 %40
+  %41 = v_bfe_u32_offset_0_width_inline_low16 %40
   %42 = v_lshlrev_b32_src0_inline %41, 16
   %43 = v_or_b32 %39, %42
   %44 = global_load_d16_b16_saddr %37, %input_view {offset = 16}
-  %45 = v_bfe_u32_offset_0_width_16_low16 %44
+  %45 = v_bfe_u32_offset_0_width_inline_low16 %44
   %46 = global_load_d16_b16_saddr %37, %input_view {offset = 24}
-  %47 = v_bfe_u32_offset_0_width_16_low16 %46
+  %47 = v_bfe_u32_offset_0_width_inline_low16 %46
   %48 = v_lshlrev_b32_src0_inline %47, 16
   %49 = v_or_b32 %45, %48
   %52 = v_cvt_f32_f16 %43
@@ -362,14 +362,14 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1
   %71 = v_add_f32 %117, %117
   %74 = v_add_f32 %118, %118
   %77 = v_cvt_f16_f32 %65
-  %78 = v_bfe_u32_offset_0_width_16_low16 %77
+  %78 = v_bfe_u32_offset_0_width_inline_low16 %77
   %80 = v_cvt_f16_f32 %68
-  %81 = v_bfe_u32_offset_0_width_16_low16 %80
+  %81 = v_bfe_u32_offset_0_width_inline_low16 %80
   %82 = v_lshl_add_u32_shift_imm %81, %78, 16
   %84 = v_cvt_f16_f32 %71
-  %85 = v_bfe_u32_offset_0_width_16_low16 %84
+  %85 = v_bfe_u32_offset_0_width_inline_low16 %84
   %87 = v_cvt_f16_f32 %74
-  %88 = v_bfe_u32_offset_0_width_16_low16 %87
+  %88 = v_bfe_u32_offset_0_width_inline_low16 %87
   %89 = v_lshl_add_u32_shift_imm %88, %85, 16
   %92 = v_cvt_f32_f16 %82
   %94 = v_lshrrev_b32_src0_inline %82, 16
