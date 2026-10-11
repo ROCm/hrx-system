@@ -537,7 +537,9 @@ typedef struct amdf_memory_create_info_t {
   /// keeps this address range backed by the same live pages through
   /// `memory_destroy`. A failed native detach can leave registrations live;
   /// that error does not authorize recycling the source. Registration does
-  /// not take ownership.
+  /// not take ownership. Construction may maintain every CPU cache line
+  /// intersecting this logical range; the caller excludes concurrent access
+  /// to those lines until construction returns, including through aliases.
   void* registered_host_pointer;
   /// Caller-ordered consumers, consumed during the call and not retained.
   /// Devices must be unique and belong to the scope's instance. NULL at zero

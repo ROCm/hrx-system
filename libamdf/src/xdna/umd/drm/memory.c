@@ -209,6 +209,11 @@ amdf_status_t amdf_xdna_umd_memory_prepare_private(
         memory, 0, create_info->byte_length, &dma_address);
   }
   if (amdf_status_is_ok(status)) {
+    // The first device writer must not race dirty allocation-origin CPU lines.
+    // Release only this private range, not other live allocations in the heap.
+    amdf_linux_host_cache_transfer(memory->buffer.host_pointer,
+                                   create_info->byte_length,
+                                   device->cache_line_size);
     *out_result = (amdf_xdna_umd_memory_result_t){
         .flags = profile->guaranteed_flags,
         .byte_length = create_info->byte_length,
@@ -439,19 +444,25 @@ amdf_status_t amdf_xdna_umd_memory_prepare(
       memory->physical_backing_id = info.physical_backing_id;
     }
   }
+  const uint64_t byte_length =
+      registers_host ? create_info->byte_length : native_byte_length;
   uint64_t dma_address = 0;
   if (amdf_status_is_ok(status)) {
     status = amdf_linux_xdna_memory_translate_dma_address(
-        memory, source_byte_offset,
-        registers_host ? create_info->byte_length : native_byte_length,
-        &dma_address);
+        memory, source_byte_offset, byte_length, &dma_address);
   }
   if (amdf_status_is_ok(status)) {
+    // Native allocation and writable page pinning can leave dirty CPU lines
+    // even without application stores. Release them before a first NPU writer;
+    // a later CLFLUSH-based acquire could otherwise overwrite its output.
+    // Registration owns only its logical range and intersecting cache lines.
+    amdf_linux_host_cache_transfer(
+        (uint8_t*)memory->buffer.host_pointer + source_byte_offset, byte_length,
+        device->cache_line_size);
     const amdf_xdna_umd_memory_result_t result = {
         .flags = profile->guaranteed_flags | create_info->required_flags,
         .source_byte_offset = source_byte_offset,
-        .byte_length =
-            registers_host ? create_info->byte_length : native_byte_length,
+        .byte_length = byte_length,
         .alignment = alignment,
         .native_allocation_byte_length = native_byte_length,
         .native_allocation_granularity = device->page_size,

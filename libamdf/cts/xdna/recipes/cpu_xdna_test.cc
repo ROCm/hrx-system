@@ -48,6 +48,8 @@ void CheckTransition(const amdf_cache_transition_t& actual,
 
 class CpuXdnaRecipeTest : public XdnaDeviceFixture {
  protected:
+  enum class RegisteredContents { kUntouched, kHostWritten };
+
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(XdnaDeviceFixture::SetUp());
     amdf_xdna_endpoint_info_t endpoint_info = {
@@ -101,7 +103,9 @@ class CpuXdnaRecipeTest : public XdnaDeviceFixture {
     }
   }
 
-  void CreateBindings(amdf_memory_profile_roles_t role) {
+  void CreateBindings(
+      amdf_memory_profile_roles_t role,
+      RegisteredContents registered_contents = RegisteredContents::kUntouched) {
     const uint32_t ordinal =
         FindMemoryProfileOrdinal(role | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
                                  AMDF_MEMORY_FLAG_HOST_VISIBLE);
@@ -145,6 +149,10 @@ class CpuXdnaRecipeTest : public XdnaDeviceFixture {
         };
         ASSERT_NO_FATAL_FAILURE(
             registered_storage_[i].Create(api_, system_scope_, host_create));
+        if (i == 2 && registered_contents == RegisteredContents::kHostWritten) {
+          const auto bytes = registered_storage_[i].bytes();
+          std::fill(bytes.begin(), bytes.end(), 0xA5);
+        }
         ASSERT_EQ(registered_storage_[i].host.cacheability,
                   geometry.registered_host_cacheability);
         create.registered_host_pointer = registered_storage_[i].host.pointer;
@@ -192,8 +200,7 @@ class CpuXdnaRecipeTest : public XdnaDeviceFixture {
     ASSERT_EQ(pair->atomic_reach.scope_64, AMDF_ATOMIC_SCOPE_NONE);
   }
 
-  void RunRoundTrips(amdf_memory_profile_roles_t role) {
-    ASSERT_NO_FATAL_FAILURE(CreateBindings(role));
+  void PrepareExecution() {
     std::vector<uint8_t> image_storage(executable_.allocation_byte_length());
     executable_.Load(image_storage);
     ASSERT_TRUE(executable_.Bind(image_storage, binding_addresses_));
@@ -201,6 +208,80 @@ class CpuXdnaRecipeTest : public XdnaDeviceFixture {
         execution_.Prepare(api_, xdna_api_, device_, family_ordinal_, 1,
                            executable_.ResolveInvocation(image_storage),
                            executable_.allocation_alignment()));
+  }
+
+  void RunFirstDeviceWriter(
+      amdf_memory_profile_roles_t role,
+      RegisteredContents registered_contents = RegisteredContents::kUntouched) {
+    ASSERT_NO_FATAL_FAILURE(CreateBindings(role, registered_contents));
+    ASSERT_NO_FATAL_FAILURE(PrepareExecution());
+    constexpr size_t kPayloadByteLength = kValues.size() * sizeof(uint32_t);
+    std::array<uint8_t, kPayloadByteLength> expected;
+    for (size_t i = 0; i < kValues.size(); ++i) {
+      const uint32_t lhs = static_cast<uint32_t>(i + 17);
+      const uint32_t rhs = static_cast<uint32_t>(i * 3 + 11);
+      const size_t offset = i * sizeof(uint32_t);
+      StoreU32(bindings_[0].bytes(), kBindingByteOffset + offset, lhs);
+      StoreU32(bindings_[1].bytes(), kBindingByteOffset + offset, rhs);
+      StoreU32(expected, offset, lhs * rhs);
+    }
+    // No CPU access or cache operation touches output after construction.
+    // Initial contents, if any, were written before registration.
+    for (size_t ordinal : {0u, 1u}) {
+      ASSERT_EQ(api_->host_mapping_cache_control(
+                    bindings_[ordinal].mapping,
+                    ingress_[ordinal].release.host_operation,
+                    kBindingByteOffset, kPayloadByteLength),
+                AMDF_STATUS_OK);
+    }
+    ASSERT_EQ(
+        api_->host_mapping_cache_control(
+            execution_.instructions.mapping, AMDF_HOST_CACHE_OPERATION_FLUSH, 0,
+            execution_.instructions.host.byte_length),
+        AMDF_STATUS_OK);
+    amdf_xdna_kernel_queue_submission_info_t submit = {
+        .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
+        .structure_size = sizeof(submit),
+        .command_count = 1,
+        .commands = &execution_.command,
+    };
+    uint64_t point = 0;
+    ASSERT_EQ(xdna_api_->kernel_queue_submit(execution_.queue, &submit, &point),
+              AMDF_STATUS_OK);
+    ASSERT_EQ(api_->kernel_queue_wait(execution_.queue, point,
+                                      AMDF_TIMEOUT_INFINITE, 0),
+              AMDF_STATUS_OK);
+    const bool has_initial_contents =
+        registered_contents == RegisteredContents::kHostWritten;
+    ASSERT_EQ(api_->host_mapping_cache_control(
+                  bindings_[2].mapping, egress_[2].acquire.host_operation,
+                  has_initial_contents ? 0 : kBindingByteOffset,
+                  has_initial_contents ? bindings_[2].host.byte_length
+                                       : kPayloadByteLength),
+              AMDF_STATUS_OK);
+    const auto output =
+        bindings_[2].bytes().subspan(kBindingByteOffset, kPayloadByteLength);
+    const auto mismatch =
+        std::mismatch(output.begin(), output.end(), expected.begin());
+    if (mismatch.first != output.end()) {
+      EXPECT_EQ(*mismatch.first, *mismatch.second)
+          << "output byte " << std::distance(output.begin(), mismatch.first);
+    }
+    if (has_initial_contents) {
+      const auto bytes = bindings_[2].bytes();
+      const auto prefix = bytes.first(kBindingByteOffset);
+      const auto suffix =
+          bytes.subspan(kBindingByteOffset + kPayloadByteLength);
+      EXPECT_TRUE(std::all_of(prefix.begin(), prefix.end(),
+                              [](uint8_t value) { return value == 0xA5; }));
+      EXPECT_TRUE(std::all_of(suffix.begin(), suffix.end(),
+                              [](uint8_t value) { return value == 0xA5; }));
+    }
+  }
+
+  void RunRoundTrips(amdf_memory_profile_roles_t role) {
+    ASSERT_NO_FATAL_FAILURE(CreateBindings(role));
+    ASSERT_NO_FATAL_FAILURE(PrepareExecution());
     const auto commands = execution_.instructions.bytes();
     const std::vector<uint8_t> original_commands(commands.begin(),
                                                  commands.end());
@@ -322,6 +403,19 @@ TEST_F(CpuXdnaRecipeTest, AllocatedRoundTrip) {
 
 TEST_F(CpuXdnaRecipeTest, RegisteredRoundTrip) {
   RunRoundTrips(AMDF_MEMORY_PROFILE_ROLE_REGISTER);
+}
+
+TEST_F(CpuXdnaRecipeTest, AllocatedFirstDeviceWriter) {
+  RunFirstDeviceWriter(AMDF_MEMORY_PROFILE_ROLE_CREATE);
+}
+
+TEST_F(CpuXdnaRecipeTest, RegisteredFirstDeviceWriter) {
+  RunFirstDeviceWriter(AMDF_MEMORY_PROFILE_ROLE_REGISTER);
+}
+
+TEST_F(CpuXdnaRecipeTest, RegisteredDirtyFirstDeviceWriter) {
+  RunFirstDeviceWriter(AMDF_MEMORY_PROFILE_ROLE_REGISTER,
+                       RegisteredContents::kHostWritten);
 }
 
 }  // namespace

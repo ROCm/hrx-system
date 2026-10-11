@@ -583,6 +583,24 @@ operations, or establish that no cache maintenance is needed. Atomic support
 includes the relevant operation, width, and participating domains, not merely
 a property saying that memory supports atomics.
 
+New output storage is ready for a first device writer when `memory_create`
+returns. A caller can allocate or register a range, let the NPU overwrite it,
+wait for completion, and acquire it for CPU reading without first clearing,
+reading or flushing the output. Construction accounts for CPU cache effects
+of allocation and page pinning. On Linux XDNA this includes a one-time cache
+release: even untouched application storage can have dirty CPU lines, and a
+post-execution CLFLUSH-based acquisition would write those lines back over the
+NPU's result. This preparation cost belongs to construction, not submission.
+
+Registration requires exclusive access to the intersecting cache lines during
+the call, including aliases and neighboring bytes on boundary lines. Initial
+preparation preserves caller data; it does not clear the range. After
+construction, CPU writes require the normal release before device use, and
+device writes require completion followed by the normal CPU acquisition.
+Import is different: an external owner supplies existing backing and remains
+responsible for its transport's publication and synchronization protocol.
+Import does not silently flush an arbitrary foreign mapping.
+
 A CPU mapping reports its CPU cacheability and the flush/invalidate operations
 available through that mapping. Those are mechanisms, not requirements for
 every consumer. Ordinary write-back pages can be coherent with a GPU and still

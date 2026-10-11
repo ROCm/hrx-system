@@ -209,10 +209,20 @@ typedef struct amdf_api_t {
   /// properties, mapping and residency are established before publication.
   /// No device is implicitly activated and no access is deferred to first use.
   ///
+  /// Preparation establishes initial cache readiness for a first device
+  /// writer. An output-only range needs no preparatory host access, clear or
+  /// cache operation solely because its storage is new. This cold operation
+  /// may perform cache maintenance proportional to the constructed range;
+  /// later CPU writes still require the queried release before device access,
+  /// and device writes require completion and the queried host acquisition.
+  ///
   /// Registered pages remain caller-owned and backed by the same live pages
   /// through memory release. A native release failure can leave registrations
   /// live and does not permit recycling those pages. If they came from a host
   /// mapping, that mapping and its backing obey the same requirement.
+  /// During registration the caller excludes other access to every cache line
+  /// intersecting the logical range, including through aliases. Initial cache
+  /// preparation preserves contents; it does not initialize caller storage.
   /// Construction performs no command inspection, queue submission or
   /// device-wide synchronization. Failure leaves out_memory unchanged and
   /// creates no public cleanup owner.
@@ -228,7 +238,9 @@ typedef struct amdf_api_t {
   /// references, consumes and zeros inout_external_memory, and publishes one
   /// memory handle. Every failure leaves both caller values byte-for-byte
   /// unchanged. This cold operation performs no queue submission or
-  /// device-wide wait.
+  /// device-wide wait. Import does not release a foreign producer's cache
+  /// ownership: the caller completes the external transport's publication and
+  /// synchronization protocol before native use.
   amdf_status_t(AMDF_CALL* memory_import)(
       amdf_memory_scope_t* scope, const amdf_memory_import_info_t* import_info,
       amdf_external_memory_t* inout_external_memory,

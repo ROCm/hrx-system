@@ -98,6 +98,13 @@ backing; the caller releases views before destroying their owner. Cache
 operations translate the view range to the backing once, then apply its
 established recipe.
 
+Memory construction also establishes initial cache readiness for a device
+writer. A noncoherent provider may release dirty allocation or registration
+cache lines once, with work proportional to the constructed range. Neither
+creating a public host view nor submitting the first command defers or repeats
+that preparation. Caller writes after construction still need the explicit
+visibility recipe; import retains the external producer's ownership protocol.
+
 ## Synchronization is path-specific
 
 Kernel publication and retirement use atomic ownership state. A competing

@@ -13,12 +13,23 @@ borrows the cached device and owns its context, queue and memory resources.
 Process and instance native lifetimes are separate invocations of the same
 dynamic executable.
 
-Each case performs eight generations of sixteen unsigned 32-bit products.
+The round-trip cases perform eight generations of sixteen unsigned 32-bit
+products.
 Inputs change between generations, output words start with the complement of
 the expected result, and every byte outside the logical payload is guarded.
 The oracle checks both inputs, the output, allocation-granularity padding and
 the complete command owner. Repeated submissions retain the same bound command
 bytes and independently queried DMA addresses.
+
+`AllocatedFirstDeviceWriter` and `RegisteredFirstDeviceWriter` leave output
+payload untouched on the CPU until the first completed NPU overwrite. Only
+inputs and commands are published before submission; output is acquired once
+after native completion and checked against sixteen nonzero products.
+`RegisteredDirtyFirstDeviceWriter` writes old contents before registration,
+then follows that same first-use path without a caller output flush and checks
+that neighboring caller contents survived registration and execution. These
+cases exercise initial cache readiness independently of the guarded round-trip
+tests, whose output initialization already requires a CPU release.
 
 The case queries both directional memory edges before execution. CPU
 publication uses the mapping's exact flush recipe; CPU acquisition uses its

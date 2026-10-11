@@ -86,6 +86,9 @@ amdf_status_t amdf_xdna_umd_memory_prepare_private(
 // progress remains in that slot on failure for explicit destruction. Failure
 // before metadata allocation leaves the slot NULL. Only success publishes
 // complete properties to `out_result`; no rollback occurs inside preparation.
+// Native allocation/pinning cache effects are retired before a first device
+// writer can use the published range. Registration has exclusive caller-owned
+// cache lines during preparation; subsequent visibility remains explicit.
 amdf_status_t amdf_xdna_umd_memory_prepare(
     amdf_xdna_umd_device_t* device, const amdf_memory_native_profile_t* profile,
     const amdf_memory_native_create_info_t* create_info,
