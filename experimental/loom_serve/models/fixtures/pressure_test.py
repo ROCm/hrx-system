@@ -218,17 +218,41 @@ def check(server, source, directory, workers, memory_bytes, pinned):
             assert cached_tokens(resumed) == (0 if memory_bytes == 4194304 else 5), (
                 resumed
             )
+        # Removal owns pinned state as well as the service. A peer submitted
+        # immediately after accepted unregister must complete without waiting
+        # for a client-side polling loop to observe final model destruction.
+        status, response = completion(address, "alpha", messages, "removing")
+        assert status == 200, response
+        assert output(response) == oracle("abxa"), response
+        control(
+            address,
+            "POST",
+            "/v1/checkpoints/removal",
+            201,
+            session="removing",
+            headers={"X-Loom-Model": "alpha"},
+        )
+        control(
+            address,
+            "POST",
+            "/v1/models/unregister",
+            202,
+            body=json.dumps({"model": "alpha", "mode": "drain"}),
+            headers={"Content-Type": "application/json"},
+        )
+        status, response = completion(address, "beta", messages, "replacement")
+        assert status == 200, response
+        assert output(response) == oracle("abxa"), response
         # Joined removal retires cache callbacks as well as physical storage.
         # The shared server and its pool remain available afterward.
-        for model in ("alpha", "beta"):
-            control(
-                address,
-                "POST",
-                "/v1/models/unregister",
-                202,
-                body=json.dumps({"model": model, "mode": "drain"}),
-                headers={"Content-Type": "application/json"},
-            )
+        control(
+            address,
+            "POST",
+            "/v1/models/unregister",
+            202,
+            body=json.dumps({"model": "beta", "mode": "drain"}),
+            headers={"Content-Type": "application/json"},
+        )
         while True:
             final = control(address, "GET", "/v1/status", 200)
             if not final["data"]:

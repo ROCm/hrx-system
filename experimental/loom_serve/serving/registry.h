@@ -100,8 +100,8 @@ typedef enum loom_serve_parameter_operation_e {
 // Stable owner-only slot. Empty service.name marks an unused slot. A slot is
 // reused only after every held claim, tokenizer task and model borrower
 // retires. Service callbacks exist only while phase is READY. Other phases
-// expose just immutable route metadata and copied counters, never model
-// pointers.
+// expose just immutable route/capacity-domain metadata and copied counters,
+// never model pointers. The opaque capacity owner survives native retirement.
 typedef struct loom_serve_registered_model_t {
   // Borrowed ready interface or metadata-only description for an owned model.
   loom_serve_http_service_t service;

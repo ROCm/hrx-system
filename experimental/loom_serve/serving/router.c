@@ -408,11 +408,16 @@ static loom_serve_http_service_flags_t router_service_flags(
   }
   for (iree_host_size_t i = 0; i < router->capacity; ++i) {
     const loom_serve_registered_model_t* model = router_model_at(router, i);
-    if (i != selected && model->phase == LOOM_SERVE_REGISTRATION_READY &&
-        model->service.capacity_domain == capacity_domain &&
-        (model->service.is_active(model->service.self) ||
-         model->parameter_operation ==
-             LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING)) {
+    if (i == selected || model->service.capacity_domain != capacity_domain) {
+      continue;
+    }
+    // Retirement still owns backing after service callbacks are gone. Its
+    // ownership wake may release capacity; a quiescent failed release cannot.
+    if (model->phase == LOOM_SERVE_REGISTRATION_RETIRING ||
+        (model->phase == LOOM_SERVE_REGISTRATION_READY &&
+         (model->service.is_active(model->service.self) ||
+          model->parameter_operation ==
+              LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING))) {
       return LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY;
     }
   }

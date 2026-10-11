@@ -287,6 +287,7 @@ static void registry_release_service(loom_serve_registered_model_t* model) {
       .name = model->service.name,
       .kind = model->service.kind,
       .endpoint = model->service.endpoint,
+      .capacity_domain = model->service.capacity_domain,
       .telemetry = {.stream = model->stream, .counters = &model->counters}};
 }
 
