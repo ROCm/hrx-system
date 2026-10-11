@@ -221,7 +221,7 @@ only when requested. Instrumented device timings explain kernel costs;
 throughput comparisons run with profiling off.
 
 The packed server generates its JIT catalog automatically: power-of-two token
-classes starting at 32 up to `--prefill_capacity`, crossed with span classes
+classes starting at four up to `--prefill_capacity`, crossed with span classes
 1/2/4/8/16 up to `--rows`. Each axis includes its exact terminal capacity,
 including non-power-of-two configurations. Repeated `--epoch=tokens:spans`
 options replace this catalog for controlled experiments. Startup specializes

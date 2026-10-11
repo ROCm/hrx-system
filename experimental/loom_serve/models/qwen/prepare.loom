@@ -316,7 +316,12 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
     %fits = scalar.cmpi ule, %tokens, %capacity : i64
     %fits32 = scalar.extui %fits : i1 to i32
     func.call @require(%fits32, %capacity_error) : (i32, buffer) -> ()
-    %target = func.call @declare_stage(%epoch_root, %tokens, %spans, %capacity, %one64, %context, %pool, %one32, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, buffer) -> (i32)
+    // Four-row dense math also uses the quantized attention-value projection.
+    // Its runtime token bound is the shared workspace capacity, not the grid.
+    %four64 = scalar.constant 4 : i64
+    %four_tokens = scalar.cmpi eq, %tokens, %four64 : i64
+    %value_capacity = scf.select %four_tokens, %capacity, %one64 : i64
+    %target = func.call @declare_stage(%epoch_root, %tokens, %spans, %capacity, %value_capacity, %context, %pool, %one32, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, buffer) -> (i32)
     %larger = scalar.cmpi ugt, %tokens, %previous : i64
     %next = scf.select %larger, %tokens, %previous : i64
     scf.yield %next : i64

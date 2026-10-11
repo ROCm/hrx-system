@@ -215,7 +215,8 @@ TEST_F(PrepareTest, DeclaresCompleteProductionCatalogAndOpaqueState) {
       };
       for (const auto& shape : shapes) {
         expected.push_back({"qwen38_epoch", shape.token_capacity,
-                            shape.span_capacity, 512, 1, 1});
+                            shape.span_capacity, 512,
+                            shape.token_capacity == 4 ? 512u : 1u, 1});
       }
       if (mtp) {
         expected.push_back({"qwen38_mtp_propose", 32, rows, 512, 512, 5});

@@ -30,11 +30,11 @@ typedef enum loom_serve_text_packing_mode_e {
   LOOM_SERVE_TEXT_PACKING_SEPARATE,
 } loom_serve_text_packing_mode_t;
 
-// Fourteen token classes through 262144 and five span classes through 16.
-enum { LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY = 70 };
+// Seventeen token classes through 262144 and five span classes through 16.
+enum { LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY = 85 };
 
 // Cold catalog construction for validated row_count in [1, 16] and maximum
-// token capacity in [1, 262144]. Token classes start at 32; span classes at
+// token capacity in [1, 262144]. Token classes start at four; span classes at
 // one. Each axis doubles and includes its exact terminal capacity, including
 // odd counts. Shapes with more spans than tokens are omitted. Writes at most
 // DEFAULT_SHAPE_CAPACITY entries and returns the nonzero count.

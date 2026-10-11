@@ -10,7 +10,7 @@ iree_host_size_t loom_serve_text_default_shapes(
     iree_host_size_t row_count, iree_host_size_t token_capacity,
     loom_serve_packing_shape_t* shapes) {
   iree_host_size_t count = 0;
-  for (iree_host_size_t tokens = iree_min(32, token_capacity);;
+  for (iree_host_size_t tokens = iree_min(4, token_capacity);;
        tokens = iree_min(tokens * 2, token_capacity)) {
     for (iree_host_size_t spans = 1;; spans = iree_min(spans * 2, row_count)) {
       if (spans <= tokens) {
