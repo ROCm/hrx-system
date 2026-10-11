@@ -264,14 +264,6 @@ iree_status_t iree_hal_command_buffer_barrier_validation(
   for (iree_host_size_t i = 0; i < barrier->buffer_barrier_count; ++i) {
     const iree_hal_buffer_barrier_t* range = &barrier->buffer_barriers[i];
     const iree_hal_buffer_ref_t ref = range->buffer_ref;
-    if (ref.buffer) {
-      IREE_RETURN_IF_ERROR(
-          iree_hal_buffer_validate_range(ref.buffer, ref.offset, ref.length));
-    } else if (ref.length != IREE_HAL_WHOLE_BUFFER &&
-               ref.offset > IREE_DEVICE_SIZE_MAX - ref.length) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "barrier range overflows");
-    }
     const uint32_t effects = range->recipe ? range->recipe->effects.bits : 0;
     const iree_hal_buffer_binding_requirements_t requirements = {
         .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
@@ -281,9 +273,6 @@ iree_status_t iree_hal_command_buffer_barrier_validation(
                   ((effects & IREE_HAL_MEMORY_EFFECT_HOST_INVALIDATE)
                        ? IREE_HAL_MEMORY_ACCESS_READ
                        : 0),
-        .max_byte_offset = ref.length == IREE_HAL_WHOLE_BUFFER
-                               ? ref.offset
-                               : ref.offset + ref.length,
     };
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_buffer_requirements(
         command_buffer, validation_state, ref, requirements));
