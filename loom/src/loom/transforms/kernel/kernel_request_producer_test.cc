@@ -7,6 +7,7 @@
 #include "loom/transforms/kernel/kernel_request_producer.h"
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "iree/io/vec_stream.h"
@@ -80,7 +81,7 @@ static iree_status_t RejectRequest(void* user_data,
   return iree_make_status(IREE_STATUS_ABORTED, "request sink stopped");
 }
 
-class KernelRequestProducerTest : public ::testing::Test {
+class KernelRequestProducerTest : public ::testing::TestWithParam<bool> {
  protected:
   void SetUp() override {
     iree_arena_block_pool_initialize(32 * 1024, iree_allocator_system(),
@@ -96,7 +97,8 @@ class KernelRequestProducerTest : public ::testing::Test {
   }
 
   ModulePtr ParseSource() {
-    const iree_string_view_t source = IREE_SV(R"(
+    const std::string source =
+        std::string(R"(
 template.decl @request.schedule(%size: index)
 
 template.def<@request.schedule> priority(10) @large(%size: index) where [ge(%size, 128)] {
@@ -107,21 +109,25 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   template.return
 }
 
-kernel.def @classified() {
+)") +
+        (GetParam() ? "target.decl @device\nkernel.def target(@device) "
+                    : "kernel.def ") +
+        R"(@classified() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%size: index) {
   template.apply<@request.schedule>(%size) : (index)
   kernel.return
 }
-)");
+)";
     loom_text_parse_options_t parse_options = {};
     parse_options.diagnostic_sink.fn = loom_diagnostic_stderr_sink;
     parse_options.max_errors = 20;
     loom_module_t* module = nullptr;
-    IREE_CHECK_OK(
-        loom_text_parse(source, IREE_SV("kernel_request_producer_test.loom"),
-                        &context_, &block_pool_, &parse_options, &module));
+    IREE_CHECK_OK(loom_text_parse(iree_make_cstring_view(source.c_str()),
+                                  IREE_SV("kernel_request_producer_test.loom"),
+                                  &context_, &block_pool_, &parse_options,
+                                  &module));
     ModulePtr module_ptr(module);
     Verify(module);
     return module_ptr;
@@ -264,7 +270,7 @@ kernel.def @classified() {
   loom_context_t context_ = {};
 };
 
-TEST_F(KernelRequestProducerTest,
+TEST_P(KernelRequestProducerTest,
        PublishesBytecodeBackedClassesWithIndependentOwnership) {
   ModulePtr source_module = ParseSource();
   ASSERT_NE(source_module, nullptr);
@@ -318,6 +324,12 @@ TEST_F(KernelRequestProducerTest,
         loom_kernel_def_isa(request.product.module->symbols
                                 .entries[request.product.kernel.symbol_id]
                                 .defining_op));
+    const auto kernel = loom_func_like_cast(
+        request.product.module, request.product.module->symbols
+                                    .entries[request.product.kernel.symbol_id]
+                                    .defining_op);
+    EXPECT_EQ(loom_symbol_ref_is_valid(loom_func_like_target(kernel)),
+              GetParam());
     Verify(request.product.module);
   }
   EXPECT_NE(capture.requests[0].class_ordinal,
@@ -329,7 +341,7 @@ TEST_F(KernelRequestProducerTest,
   }
 }
 
-TEST_F(KernelRequestProducerTest, StopsAfterSinkFailureBeforeMaterialization) {
+TEST_P(KernelRequestProducerTest, StopsAfterSinkFailureBeforeMaterialization) {
   ModulePtr source_module = ParseSource();
   ASSERT_NE(source_module, nullptr);
   IndexPtr index = CreateIndex();
@@ -365,6 +377,9 @@ TEST_F(KernelRequestProducerTest, StopsAfterSinkFailureBeforeMaterialization) {
 
   iree_arena_deinitialize(&scratch_arena);
 }
+
+INSTANTIATE_TEST_SUITE_P(TargetDeclaration, KernelRequestProducerTest,
+                         ::testing::Bool());
 
 }  // namespace
 }  // namespace loom

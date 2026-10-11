@@ -90,8 +90,10 @@ static iree_status_t loom_kernel_request_resolve_target(
       symbol_facts, module, out_target->witness, &base_facts));
   const loom_target_symbol_facts_t* target_facts =
       loom_target_symbol_facts_cast(base_facts);
-  IREE_ASSERT(target_facts != NULL);
-  out_target->facts = target_facts->projection;
+  // A target declaration carries identity but no device facts until the
+  // consumer specializes the published request. Keep its witness so template
+  // classification can preserve unresolved target-dependent alternatives.
+  out_target->facts = target_facts ? target_facts->projection : NULL;
   return iree_ok_status();
 }
 
