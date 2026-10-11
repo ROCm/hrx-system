@@ -12,6 +12,9 @@ selects one HAL device with `--device`; source text, embedding and decision
 fixtures also run on x86 CPU and Vulkan, and the image fixture runs on Vulkan.
 CPU and Vulkan use `--pool_backing=fixed`. The device-group foundation is not
 yet a multi-device placement interface.
+The [resident embedding fixture](../models/fixtures/embedding/README.md#verification)
+also exercises actual XDNA HTTP execution with a target-specific source variant;
+the ordinary command-based catalog is not an NPU deployment recipe.
 [Fresh-machine setup](README.md#fresh-machine-prerequisites) covers compiler
 targets, runtime dependencies and device access. Qwen and Krea are learned-model
 examples; the embedding and decision fixtures establish their serving contracts,

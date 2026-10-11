@@ -41,6 +41,7 @@ filegroup(
             "variants/direct.loom",
             "variants/policy.loom",
             "variants/weights.loom",
+            "variants/xdna.loom",
             ":sources",
         ],
         resource_group = resource_group,
@@ -93,6 +94,20 @@ filegroup(
             GPU_DEVICE_RESOURCE_GROUP,
             ["iree-run-requirement=vulkan.resource.device"],
             ["--gtest_filter=Workers/SourceEmbeddingServiceTest.*"],
+        ),
+        (
+            "service_xdna_test",
+            "xdna",
+            ["//loom/config/execute:xdna_hal"],
+            GPU_DEVICE_RESOURCE_GROUP,
+            [
+                "iree-run-requirement=libamdf.resource.xdna",
+                "runtime-resource=amd-xdna",
+            ],
+            [
+                "--direct_stage_source=$(rootpath :variants/xdna.loom)",
+                "--gtest_filter=*DirectDispatch*",
+            ],
         ),
         (
             "service_cpu_test",

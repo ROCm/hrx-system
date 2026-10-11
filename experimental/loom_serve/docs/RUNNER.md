@@ -81,9 +81,11 @@ in-place preparation and HTTP retirement with fixed backing. The image fixture
 runs on AMDGPU and Vulkan; its non-unit workgroups require `kernel.workitem.id`
 lowering before native CPU execution. Buffer-only native stages can also bypass
 command recording and use `queue_dispatch`, including resident array programs.
-The direct embedding fixture exercises that path on CPU, AMDGPU and Vulkan;
-it is not evidence of a learned model running on XDNA. A device URI alone cannot
-supply missing compiler operations, model kernels or native capabilities.
+The direct embedding fixture exercises that path on CPU, AMDGPU and Vulkan,
+and its resident-array variant runs through the XDNA HAL. It has no checkpoint
+parameters and is not evidence of a learned model running on XDNA. A device URI
+alone cannot supply missing compiler operations, model kernels or native
+capabilities.
 
 The default record's workspace retains its already qualified storage source.
 `loom_serve_workspace_create` also accepts a wider explicitly scoped source,

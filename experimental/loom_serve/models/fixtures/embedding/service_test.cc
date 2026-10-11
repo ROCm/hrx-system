@@ -36,6 +36,8 @@ IREE_FLAG(string, model_source, "",
           "Deterministic embedding bootstrap source.");
 IREE_FLAG(string, test_device, "amdgpu",
           "HAL device executing the source-defined embedding fixture.");
+IREE_FLAG(string, direct_stage_source, "",
+          "Resident source replacing the command fixture at construction.");
 
 namespace {
 
@@ -180,8 +182,12 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
     device_ = loom_serve_device_group_at(group_, DeviceCount() - 1);
     const std::string source = FLAG_model_source;
     directory_ = source.substr(0, source.find_last_of('/'));
-    ASSERT_NO_FATAL_FAILURE(CreateModel(directory_));
-    ASSERT_NO_FATAL_FAILURE(CreateService(0));
+    if (FLAG_direct_stage_source[0]) {
+      ASSERT_NO_FATAL_FAILURE(UseDirectPackage());
+    } else {
+      ASSERT_NO_FATAL_FAILURE(CreateModel(directory_));
+      ASSERT_NO_FATAL_FAILURE(CreateService(0));
+    }
     auto options = loom_serve_http_server_options_default();
     IREE_ASSERT_OK(loom_serve_http_server_create(
         loom_serve_host_proactor_pool(host_), &options, &server_, allocator_));
@@ -525,8 +531,10 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
       ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/" + file,
                                              target + "/" + file));
     }
-    ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/variants/direct.loom",
-                                           target + "/direct.loom"));
+    const std::string stage = FLAG_direct_stage_source[0]
+                                  ? FLAG_direct_stage_source
+                                  : directory_ + "/variants/direct.loom";
+    ASSERT_TRUE(std::filesystem::copy_file(stage, target + "/direct.loom"));
     std::ifstream input(directory_ + "/prepare.loom");
     ASSERT_TRUE(input.good());
     std::string prepare((std::istreambuf_iterator<char>(input)), {});
@@ -549,8 +557,10 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
     manifest << "config.loom\ndirect.loom\n";
     manifest.close();
     ASSERT_TRUE(manifest.good());
-    interface_.set_observer(interface_.self, {});
-    loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
+    if (service_) {
+      interface_.set_observer(interface_.self, {});
+      loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
+    }
     IREE_ASSERT_OK(
         loom_serve_finite_model_destroy(std::exchange(model_, nullptr)));
     ASSERT_NO_FATAL_FAILURE(CreateModel(target));
@@ -949,16 +959,19 @@ TEST_P(SourceEmbeddingServiceTest, DirectDispatchReturnsCompactRaggedVectors) {
   Accept();
   Drain();
   const std::string first = Read(a);
+  SCOPED_TRACE(first);
   EXPECT_EQ(first.find("HTTP/1.1 200"), 0u);
   EXPECT_NE(first.find(R"("index":0,"embedding":[1,1,1,3])"),
             std::string::npos);
   EXPECT_NE(first.find(R"("index":1,"embedding":[6,3,2,3])"),
             std::string::npos);
-  EXPECT_NE(Read(b).find(R"("embedding":[4,2])"), std::string::npos);
+  const std::string second = Read(b);
+  EXPECT_NE(second.find(R"("embedding":[4,2])"), std::string::npos) << second;
   const int next = Send(R"({"model":"fixture","input":[1]})");
   Accept();
   Drain();
-  EXPECT_NE(Read(next).find(R"("embedding":[2,1,2,1])"), std::string::npos);
+  const std::string last = Read(next);
+  EXPECT_NE(last.find(R"("embedding":[2,1,2,1])"), std::string::npos) << last;
 }
 
 TEST_P(SourceEmbeddingServiceTest, DirectDispatchRetiresCancelledCohort) {

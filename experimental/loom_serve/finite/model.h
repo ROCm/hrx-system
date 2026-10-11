@@ -20,6 +20,10 @@ extern "C" {
 // serialized by its service; independent requests are data, not VM processes.
 typedef struct loom_serve_finite_model_t loom_serve_finite_model_t;
 
+// Base alignment guaranteed for the source program's device input/output
+// packets. Interior records retain their source-defined alignment.
+#define LOOM_SERVE_FINITE_BUFFER_ALIGNMENT 16
+
 typedef struct loom_serve_finite_model_options_t {
   // Source package directory, borrowed through load completion.
   iree_string_view_t source_directory;
@@ -89,10 +93,10 @@ iree_status_t loom_serve_finite_load_destroy(loom_serve_finite_load_t* load);
 // State is immutable across requests. Positive units bound cohort work/storage;
 // equal tags permit batching. Ranges contain [offset, length] i64 pairs into
 // concatenated prepared bytes, in request order. Both stage kinds have two
-// dynamic byte-aligned roots (input/output). Commands additionally have
-// compiler-reflected private workspace; direct stages use their compiled launch
-// configuration without a command buffer or runner workspace.
-// Source code has no stronger base-alignment promise for the external roots.
+// dynamic roots (input/output) aligned to LOOM_SERVE_FINITE_BUFFER_ALIGNMENT.
+// Commands additionally have compiler-reflected private workspace; direct
+// stages use their compiled launch configuration without a command buffer or
+// runner workspace.
 // Weighted command stages share exactly the same fixed parameter placement.
 // Direct stages have no checkpoint parameters. Source run uses the same runner
 // execute_2/feedback imports for both kinds; only compact final vectors cross

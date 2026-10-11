@@ -478,9 +478,9 @@ concrete caller with a different ownership flow. The shared substrate is:
    Activation streams/prepares payloads before consumption. Deactivation at a
    retired cut releases physical backing without invalidating recorded roots.
 3. It allocates model input, output and persistent-state buffers. The finite
-   and image adapters supply external input/output byte packets without a
-   stronger base-alignment promise. Their allocation requests therefore use
-   byte alignment, rather than a device-specific convention. Parameter roots
+   adapter guarantees 16-byte input/output packet bases, including for resident
+   DMA programs; interior record alignment remains source-owned. The image
+   adapter supplies byte-aligned external packets. Parameter roots
    and command-private transients retain their exact reflected alignment
    requirements; an incompatible backing pool is an error. It records the
    stages with `loom_serve_jit_stage_record`; recorded commands retain their

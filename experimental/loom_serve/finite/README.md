@@ -98,7 +98,8 @@ answer/confidence statistics from final probabilities. Nonfinite values or a
 result width inconsistent with the request are model failures, not an excuse
 for native truncation or normalization.
 
-Input/output roots borrow the device's shared queue pool only while executing.
+Input/output roots have 16-byte-aligned bases and borrow the device's shared
+queue pool only while executing. Interior record alignment remains source-owned.
 The input retires after work. Output retirement imports the feedback frontier
 onto the work timeline before `queue_dealloca`, so reuse follows the final
 reader rather than queue submission order. Private command workspace can retire
@@ -131,8 +132,11 @@ through the same service.
 The embedding fixture's [direct variant](../models/fixtures/embedding/variants/direct.loom)
 fuses the same ragged computation into one native dispatch on CPU, AMDGPU and
 Vulkan. Its HTTP checks cover compact row ordering, repeated requests,
-cancellation and retirement with one/four workers. This proves the generic
-direct-stage ownership path, not a learned embedding or XDNA execution.
+cancellation and retirement with one/four workers. Its
+[XDNA variant](../models/fixtures/embedding/variants/xdna.loom) executes the same
+HTTP contract with a resident array program and DMA/channel packet transport.
+These prove direct-stage ownership, including untouched first output, not
+learned embedding quality or checkpoint-backed resident stages.
 
 A real embedding port must still supply its source package, checkpoint policy,
 input/task policy, numerical oracle and shape coverage. Target-family selection

@@ -69,7 +69,8 @@ through the package's tokenizer without activating its model commands.
 iree-bazel-test --config=asan \
   //experimental/loom_serve/models/fixtures/embedding:service_cpu_test \
   //experimental/loom_serve/models/fixtures/embedding:service_test \
-  //experimental/loom_serve/models/fixtures/embedding:service_vulkan_test
+  //experimental/loom_serve/models/fixtures/embedding:service_vulkan_test \
+  //experimental/loom_serve/models/fixtures/embedding:service_xdna_test
 ```
 
 The tests cover ragged cross-request coalescing, distinct output dimensions,
@@ -96,7 +97,17 @@ requests and cancellation, and verify retirement before reuse on CPU, AMDGPU
 and Vulkan. The compiled launch companion supplies the grid; the server submits
 through `queue_dispatch` without constructing a command buffer or workspace.
 
+The [XDNA variant](variants/xdna.loom) uses a resident array program: one strand
+DMA-transfers the input packet into local storage and the completed output back;
+another consumes and publishes those packets through channels. Cohort lengths
+and compact result positions remain runtime data. The same HTTP checks run on
+the XDNA HAL with one/four shared workers, including the first result from
+untouched output storage. There is no preparatory host read, clear or warmup.
+The test selects this source at package construction; the ordinary command
+package above is not an XDNA package. It requires the XDNA compiler target,
+XDNA HAL and a supported physical NPU.
+
 This direct variant has no checkpoint parameters. The weighted command variant
 above separately proves the existing weight-loading contract; combining the
 two requires explicit source-owned native parameter placement. Neither fixture
-establishes learned-model quality or NPU execution.
+establishes learned-model quality.
