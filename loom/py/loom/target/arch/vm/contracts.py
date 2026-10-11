@@ -966,6 +966,7 @@ def _view_cases():
                     static_byte_offset_maximum=0 if zero_static else 2**63 - 1,
                     dynamic_term_count=None if dynamic else 0,
                     dynamic_term_count_minimum=1 if dynamic else 0,
+                    reuse_view_base=dynamic,
                 )
                 emits = []
                 coordinate = ValueRef.source_memory_dynamic_byte_offset()

@@ -576,6 +576,11 @@ typedef uint8_t loom_low_lower_source_memory_flags_t;
 // Accept any advisory source cache policy.
 #define LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_CACHE_POLICY_ANY \
   ((loom_low_lower_source_memory_flags_t)1u << 3)
+// Reuse a complete SSA view-base offset instead of reconstructing multiple
+// canonical terms. Static projections and range constraints then describe the
+// residual displacement not already embedded in that SSA value.
+#define LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_REUSE_VIEW_BASE \
+  ((loom_low_lower_source_memory_flags_t)1u << 4)
 
 // Converts a fixed-width canonical integer term to the address carrier.
 // Symbolic analysis preserves signed numeric values (zero/one for i1), even
@@ -691,8 +696,8 @@ typedef struct loom_low_lower_source_memory_t {
   // Required unsigned width of the complete byte offset, or zero if
   // unconstrained.
   uint8_t byte_offset_unsigned_bit_count;
-  // Required unsigned width excluding the static bias, or zero if
-  // unconstrained.
+  // Required unsigned width excluding the selected recipe's displacement,
+  // or zero if unconstrained. A retained view base includes its own bias.
   uint8_t dynamic_offset_unsigned_bit_count;
   // One-based dynamic byte-offset materializer row, or zero when unused.
   uint8_t byte_offset_materializer_ordinal;
@@ -721,9 +726,9 @@ static_assert(sizeof(loom_low_lower_source_memory_t) == 24,
 typedef struct loom_low_lower_source_memory_shape_t {
   // Required byte stride between adjacent vector lanes.
   int64_t vector_lane_byte_stride;
-  // Minimum accepted static byte offset from the storage root.
+  // Minimum displacement accepted by the selected address recipe.
   int64_t static_byte_offset_minimum;
-  // Maximum accepted static byte offset from the storage root.
+  // Maximum displacement accepted by the selected address recipe.
   int64_t static_byte_offset_maximum;
   // Required byte stride for each dynamic address term unless ANY is set.
   int64_t dynamic_byte_stride;

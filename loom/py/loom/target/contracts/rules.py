@@ -246,7 +246,7 @@ class DescriptorRule:
             )
             defined_temporaries.update(produced_temporaries)
         self._validate_related_results()
-        self._validate_source_memory_index_preservation()
+        self._validate_source_memory_preservation()
         self._validate_per_lane_sequence()
 
     def _validate_related_results(self) -> None:
@@ -312,7 +312,7 @@ class DescriptorRule:
                         "internal nor bound by the emit program"
                     )
 
-    def _validate_source_memory_index_preservation(self) -> None:
+    def _validate_source_memory_preservation(self) -> None:
         source_memories = tuple(
             emit.source_memory
             for emit in self.emit
@@ -321,6 +321,31 @@ class DescriptorRule:
         )
         if not source_memories:
             return
+        if any(memory.reuse_view_base for memory in source_memories):
+            # One rule shares its materialized offsets across emit rows. Every
+            # row must use the same dynamic/static decomposition.
+            if not all(memory.reuse_view_base for memory in source_memories):
+                raise ValueError(
+                    f"{self.source_op.name}: memory emits must agree on view-base reuse"
+                )
+            offset_used = False
+            for emit in self.emit:
+                if not isinstance(emit, EmitDescriptorOp):
+                    continue
+                for value_ref in emit.operands.values():
+                    if value_ref.kind == SourceValueKind.SOURCE_MEMORY_ADDRESS:
+                        raise ValueError(
+                            f"{self.source_op.name}: view-base reuse requires "
+                            "byte-offset materialization"
+                        )
+                    offset_used |= value_ref.kind in (
+                        SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET,
+                        SourceValueKind.SOURCE_MEMORY_BYTE_OFFSET,
+                    )
+            if not offset_used:
+                raise ValueError(
+                    f"{self.source_op.name}: view-base reuse requires a byte offset"
+                )
         memory_access = next(
             (
                 interface

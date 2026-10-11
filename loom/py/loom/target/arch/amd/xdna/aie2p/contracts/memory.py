@@ -239,6 +239,7 @@ def _memory_constraint(
         ),
         dynamic_byte_stride=1 if unscaled else 0,
         allow_dynamic_stride_values=dynamic and not unscaled,
+        reuse_view_base=dynamic and not unscaled,
         byte_offset_unsigned_bit_count=32,
         cache_policy_build_flags=None,
     )

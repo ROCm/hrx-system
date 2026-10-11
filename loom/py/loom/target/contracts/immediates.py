@@ -1302,6 +1302,7 @@ class SourceMemoryProject:
 
     @classmethod
     def static_byte_offset(cls) -> Self:
+        """Projects the residual displacement of the selected memory recipe."""
         return cls(kind=SourceMemoryProjectKind.STATIC_BYTE_OFFSET)
 
     @classmethod

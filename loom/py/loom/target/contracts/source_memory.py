@@ -219,9 +219,13 @@ class SourceMemoryConstraint:
     dynamic_byte_stride: int | None = 0
     allow_dynamic_stride_values: bool = False
     preserve_source_index: bool = False
+    # Reuse complete multi-term view bases; static constraints and projections
+    # describe only the residual displacement outside the retained SSA value.
+    reuse_view_base: bool = False
     # Unsigned width of the complete byte offset, or zero if unconstrained.
     byte_offset_unsigned_bit_count: int = 0
-    # Unsigned width excluding the static bias, or zero if unconstrained.
+    # Unsigned width excluding the selected recipe's displacement, or zero if
+    # unconstrained. A retained view base includes its own bias.
     dynamic_offset_unsigned_bit_count: int = 0
     # Diagnostic emitted only when the minimum-alignment predicate rejects.
     alignment_diagnostic: GuardDiagnostic | None = None
@@ -253,6 +257,7 @@ class SourceMemoryConstraint:
         dynamic_byte_stride: int | None = 0,
         allow_dynamic_stride_values: bool = False,
         preserve_source_index: bool = False,
+        reuse_view_base: bool = False,
         byte_offset_unsigned_bit_count: int = 0,
         dynamic_offset_unsigned_bit_count: int = 0,
         alignment_diagnostic: GuardDiagnostic | None = None,
@@ -295,6 +300,7 @@ class SourceMemoryConstraint:
             allow_dynamic_stride_values,
         )
         object.__setattr__(self, "preserve_source_index", preserve_source_index)
+        object.__setattr__(self, "reuse_view_base", reuse_view_base)
         object.__setattr__(
             self,
             "byte_offset_unsigned_bit_count",
@@ -422,6 +428,15 @@ class SourceMemoryConstraint:
                 raise ValueError(
                     "source-index preservation requires zero dynamic view-base terms"
                 )
+        if self.reuse_view_base and (
+            dynamic_term_count is not None
+            or self.dynamic_term_count_minimum == 0
+            or self.dynamic_view_base_term_count is not None
+            or self.preserve_source_index
+        ):
+            raise ValueError(
+                "view-base reuse requires unrestricted dynamic terms and view bases"
+            )
         if self.cache_policy_build_flags is not None and not (
             0 <= self.cache_policy_build_flags <= _U32_MAX
         ):

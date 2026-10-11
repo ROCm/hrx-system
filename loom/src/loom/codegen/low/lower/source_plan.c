@@ -422,6 +422,7 @@ static void loom_low_lower_mark_reused_source_memory_realizations(
 
 static void loom_low_lower_mark_source_memory_access_storage_demands(
     loom_low_lower_context_t* context,
+    const loom_low_lower_source_memory_t* source_memory,
     const loom_low_lower_source_memory_address_materializer_t*
         address_materializer,
     const loom_low_source_memory_access_plan_t* access) {
@@ -443,6 +444,11 @@ static void loom_low_lower_mark_source_memory_access_storage_demands(
           context, access->dynamic_view_base_value_id);
       first_canonical_term = access->dynamic_view_base_term_count;
     }
+  } else if (loom_low_lower_rule_source_memory_reuses_view_base(source_memory,
+                                                                access)) {
+    loom_low_lower_mark_value_storage_required(
+        context, access->dynamic_view_base_value_id);
+    first_canonical_term = access->dynamic_view_base_term_count;
   } else if (
       loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
           access)) {
@@ -536,7 +542,8 @@ static void loom_low_lower_mark_rule_storage_demands(
                       rule_set, source_memory)
                 : NULL;
     loom_low_lower_mark_source_memory_access_storage_demands(
-        context, address_materializer, selected_plan->source_memory_access);
+        context, source_memory, address_materializer,
+        selected_plan->source_memory_access);
   }
   if (uses_dynamic_byte_offset) {
     IREE_ASSERT(selected_plan->source_memory_access != NULL);

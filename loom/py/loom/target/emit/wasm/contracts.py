@@ -1239,6 +1239,7 @@ def _view_carrier_rules() -> Iterable[DescriptorRule]:
                     dynamic_term_count_minimum=1 if dynamic else 0,
                     dynamic_view_base_term_count=None,
                     allow_dynamic_stride_values=dynamic,
+                    reuse_view_base=dynamic,
                     byte_offset_unsigned_bit_count=32,
                     # The complete root-relative byte offset must fit Wasm's
                     # u32 address space, but an affine dynamic contribution
@@ -1393,6 +1394,7 @@ def _memory_rule(
         dynamic_term_count_minimum=1 if dynamic else 0,
         dynamic_view_base_term_count=None,
         allow_dynamic_stride_values=dynamic,
+        reuse_view_base=dynamic,
         byte_offset_unsigned_bit_count=32,
         dynamic_offset_unsigned_bit_count=(
             32 if address_form is _MemoryAddressForm.DYNAMIC_IMMEDIATE else 0

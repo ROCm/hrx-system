@@ -10,6 +10,7 @@ import pytest
 
 from loom.dialect.vector import defs as vector
 from loom.target.contracts import (
+    DescriptorRule,
     EmitDescriptorOp,
     SourceMemoryAddressMaterializer,
     SourceMemoryByteOffsetMaterializer,
@@ -17,6 +18,7 @@ from loom.target.contracts import (
     SourceMemoryIntegerConversion,
     SourceMemoryOperation,
     ValueRef,
+    Vector,
 )
 from loom.target.low_descriptors import DescriptorOpKind, Immediate, ImmediateKind
 from loom.target.test.descriptors import (
@@ -38,6 +40,7 @@ def _validate(
     index_ref=None,
     multiply_add=None,
     static_bias=None,
+    reuse_view_base=False,
 ):
     if index_ref is None:
         index_ref = ValueRef.source_memory_dynamic_byte_offset()
@@ -57,6 +60,7 @@ def _validate(
             static_byte_offset=0,
             dynamic_term_count=None,
             dynamic_term_count_minimum=1,
+            reuse_view_base=reuse_view_base,
         ),
         source_memory_byte_offset_materializer=SourceMemoryByteOffsetMaterializer(
             constant=TEST_LOW_CONST_I32_DESCRIPTOR,
@@ -70,6 +74,25 @@ def _validate(
         ),
     )
     emit.validate(vector.vector_load, descriptors, set())
+    return emit
+
+
+def test_view_base_reuse_preserves_one_decomposition_across_memory_emits():
+    emit = _validate((), reuse_view_base=True)
+    rule = DescriptorRule(
+        source_op=vector.vector_load,
+        descriptor=emit.descriptor,
+        emit=(emit,),
+    )
+    rule.validate(TEST_LOW_CORE_DESCRIPTOR_SET)
+    unrelated = replace(
+        emit,
+        results={"dst": ValueRef.temporary("other")},
+        result_types={"dst": Vector("i32", lanes=4)},
+        source_memory=replace(emit.source_memory, reuse_view_base=False),
+    )
+    with pytest.raises(ValueError, match="must agree on view-base reuse"):
+        replace(rule, emit=(unrelated, emit)).validate(TEST_LOW_CORE_DESCRIPTOR_SET)
 
 
 def test_complete_byte_offset_validates_fused_arithmetic_descriptors():

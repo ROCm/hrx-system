@@ -1,0 +1,35 @@
+// RUN: emit source-low target=vm:core output=low
+
+// Scalar and atomic field accesses share the same complete source address.
+func.def @exchange_fields(%buffer: buffer, %row_input: index, %column_input: index) -> (i32) {
+  %row = index.assume %row_input [range(%row_input, 0, 7)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 3)] : index
+  %row_stride = index.constant 64 : offset
+  %column_stride = index.constant 8 : offset
+  %header = index.constant 32 : offset
+  %row_bytes = index.scale %row, %row_stride : index, offset -> offset
+  %column_bytes = index.scale %column, %column_stride : index, offset -> offset
+  %row_base = index.add %row_bytes, %header : offset
+  %base = index.add %row_base, %column_bytes : offset
+  %aligned = buffer.assume.alignment %buffer {minimum_alignment = 4} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<2xi32>
+  %first = view.load %view[0] : view<2xi32> -> i32
+  %second = view.atomic.rmw<addi> %first, %view[1] {ordering = relaxed, scope = device} : i32, view<2xi32> -> i32
+  func.return %second : i32
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @exchange_fields(%view: reg<vm.ref : buffer>, %row: reg<vm.value : i64>, %column: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+  %row_stride = constant.i64 64
+  %column_stride = constant.i64 8
+  %header = constant.i64 32
+  %row_bytes = integer.mul.i64 %row, %row_stride
+  %column_bytes = integer.mul.i64 %column, %column_stride
+  %row_base = integer.add.i64 %row_bytes, %header
+  %base = integer.add.i64 %row_base, %column_bytes
+  %first = buffer.load %view, %base, %base, 0, "i32.x1" : reg<vm.value : i32>
+  %29 = constant.i64 4
+  %30 = integer.add.i64 %base, %29
+  %second = buffer.atomic.rmw %view, %30, %first, "i32", "add.integer", "relaxed", "device" : reg<vm.value : i32>
+  return %second
+}

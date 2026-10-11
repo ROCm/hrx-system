@@ -386,14 +386,14 @@ loom_low_source_memory_access_single_dynamic_term(
 
 // Returns true when the complete dynamic byte offset is already materialized
 // by dynamic_view_base_value_id. This is only exact when all dynamic terms come
-// from the view base and the view base contributed no extracted static addend.
+// from the view base and that SSA value contains no extracted static addend.
 static inline bool
 loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
     const loom_low_source_memory_access_plan_t* plan) {
   return plan->dynamic_term_count != 0 &&
          plan->dynamic_term_count == plan->dynamic_view_base_term_count &&
          plan->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID &&
-         plan->static_view_base_byte_offset == 0;
+         plan->dynamic_view_base_value_static_byte_offset == 0;
 }
 
 // Returns true when |value_id| names a block argument in |module|. Targets use

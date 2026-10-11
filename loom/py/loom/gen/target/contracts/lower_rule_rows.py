@@ -289,6 +289,8 @@ def source_memory_row(
         flags.append("LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_STRIDE_VALUES")
     if constraint.preserve_source_index:
         flags.append("LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_PRESERVE_SOURCE_INDEX")
+    if constraint.reuse_view_base:
+        flags.append("LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_REUSE_VIEW_BASE")
     if constraint.cache_policy_build_flags is None:
         flags.append("LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_CACHE_POLICY_ANY")
     if flags:

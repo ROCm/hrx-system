@@ -1,0 +1,84 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+// The retained view base carries a bias larger than the immediate range of
+// the memory recipe. Only the field offset remains in its displacement.
+func.def @exchange_fields(%buffer: buffer, %row_input: index, %column_input: index) -> (i32) {
+  %row = index.assume %row_input [range(%row_input, 0, 7)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 3)] : index
+  %row_stride = index.constant 64 : offset
+  %column_stride = index.constant 8 : offset
+  %header = index.constant 32768 : offset
+  %row_bytes = index.scale %row, %row_stride : index, offset -> offset
+  %column_bytes = index.scale %column, %column_stride : index, offset -> offset
+  %row_base = index.add %row_bytes, %header : offset
+  %base = index.add %row_base, %column_bytes : offset
+  %view = buffer.view %buffer[%base] : buffer -> view<2xi32>
+  %first = view.load %view[0] : view<2xi32> -> i32
+  %second = view.load %view[1] : view<2xi32> -> i32
+  view.store %first, %view[1] : i32, view<2xi32>
+  func.return %second : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exchange_fields(%row: reg<aie2p.er>, %column: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %row_stride = mov.short 64
+  %column_stride = mov.short 8
+  %header = mov.i32 32768
+  %row_bytes = mul %row, %row_stride
+  %column_bytes = mul %column, %column_stride
+  %row_base = add.rr %row_bytes, %header
+  %base = add.rr %row_base, %column_bytes
+  %27 = mov.address-index %base
+  %first = lda.i32.index %view, %27
+  %29 = add.address-index.immediate %base, 4
+  %second = lda.i32.index %view, %29
+  st.i32.index %first, %view, %29
+  return %second
+}
+
+// ====
+
+// A multi-instruction vector copy shares one retained base; each chunk adds
+// its own displacement, independently of the embedded header contribution.
+func.def @copy_chunks(%source_storage: buffer, %destination_storage: buffer, %row_input: index, %column_input: index) {
+  %source = buffer.assume.alignment %source_storage {minimum_alignment = 32} : buffer
+  %destination = buffer.assume.alignment %destination_storage {minimum_alignment = 32} : buffer
+  %row = index.assume %row_input [range(%row_input, 0, 7)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 3)] : index
+  %row_stride = index.constant 256 : offset
+  %column_stride = index.constant 64 : offset
+  %header = index.constant 64 : offset
+  %row_bytes = index.scale %row, %row_stride : index, offset -> offset
+  %column_bytes = index.scale %column, %column_stride : index, offset -> offset
+  %row_base = index.add %row_bytes, %header : offset
+  %base = index.add %row_base, %column_bytes : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<32xi32>
+  %destination_view = buffer.view %destination[%base] : buffer -> view<32xi32>
+  %values = vector.load %source_view[8] : view<32xi32> -> vector<16xi32>
+  vector.store %values, %destination_view[8] : vector<16xi32>, view<32xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_chunks(%row: reg<aie2p.er>, %column: reg<aie2p.er>) asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %destination_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %row_stride = mov.short 256
+  %column_stride = mov.short 64
+  %row_bytes = mul %row, %row_stride
+  %column_bytes = mul %column, %column_stride
+  %row_base = add.rr %row_bytes, %column_stride
+  %base = add.rr %row_base, %column_bytes
+  %33 = add.address-index.immediate %base, 32
+  %34 = vlda.256.i32x8.index %source_view, %33
+  %39 = mov.static-byte-offset 64
+  %40 = add.rr %base, %39
+  %41 = mov.address-index %40
+  %42 = vlda.256.i32x8.index %source_view, %41
+  vst.256.i32x8.index %34, %destination_view, %33
+  %48 = add.rr %base, %39
+  %49 = mov.address-index %48
+  vst.256.i32x8.index %42, %destination_view, %49
+  return
+}

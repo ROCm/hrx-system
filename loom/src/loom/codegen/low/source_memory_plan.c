@@ -951,12 +951,13 @@ static bool loom_low_source_memory_access_add_view_region_expression_terms(
 }
 
 static bool loom_low_source_memory_access_add_view_region_byte_offset(
-    const loom_value_fact_table_t* fact_table,
+    const loom_symbolic_expr_context_t* expression_context,
     const loom_vector_memory_access_t* vector_access,
     const loom_view_region_t* view_region,
     loom_low_source_memory_access_plan_t* plan,
     loom_low_source_memory_access_diagnostic_t* diagnostic,
     int64_t* inout_static_byte_offset) {
+  const loom_value_fact_table_t* fact_table = expression_context->fact_table;
   if (!loom_symbolic_expr_is_linear(&view_region->begin_byte_offset)) {
     diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_BASE;
@@ -1051,6 +1052,24 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
     plan->dynamic_view_base_value_id = view_region->begin_value_id;
     plan->dynamic_view_base_value_static_byte_offset =
         plan->static_view_base_byte_offset;
+    // Prefer the exact constant-free prefix retained by symbolic analysis.
+    // A neighboring access may reuse the complete SSA expression, keeping
+    // this prefix live even when this access uses scaled indexed addressing.
+    // Preserve the coordinate type: a numerically equal integer prefix may
+    // bypass a required conversion to the target's offset carrier.
+    loom_symbolic_expr_summary_t summary = {0};
+    if (plan->static_view_base_byte_offset != 0 &&
+        loom_symbolic_expr_context_try_lookup_summary(
+            expression_context, view_region->begin_value_id, &summary) &&
+        summary.materialized_dynamic_value_id != LOOM_VALUE_ID_INVALID &&
+        loom_type_equal(
+            loom_module_value_type(expression_context->module,
+                                   summary.materialized_dynamic_value_id),
+            loom_module_value_type(expression_context->module,
+                                   view_region->begin_value_id))) {
+      plan->dynamic_view_base_value_id = summary.materialized_dynamic_value_id;
+      plan->dynamic_view_base_value_static_byte_offset = 0;
+    }
   } else if (dynamic_view_base_count == 1 &&
              plan->dynamic_terms[dynamic_view_base_begin].byte_stride == 1) {
     plan->dynamic_view_base_value_id =
@@ -1091,8 +1110,8 @@ static bool loom_low_source_memory_access_add_view_base_byte_offset(
     view_base_access = &base_vector_access;
   }
   if (!loom_low_source_memory_access_add_view_region_byte_offset(
-          fact_table, view_base_access, view_region, plan, diagnostic,
-          inout_static_byte_offset)) {
+          view_regions->expression_context, view_base_access, view_region, plan,
+          diagnostic, inout_static_byte_offset)) {
     return false;
   }
 

@@ -546,10 +546,12 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_descriptor_result_type(
       context, constant_descriptor.descriptor, 0, &offset_type));
 
-  if (loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
-          source_memory_access) &&
-      loom_low_lower_source_value_has_low_mapping(
-          context, source_memory_access->dynamic_view_base_value_id)) {
+  if (loom_low_lower_rule_source_memory_reuses_view_base(
+          source_memory, source_memory_access) ||
+      (loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
+           source_memory_access) &&
+       loom_low_lower_source_value_has_low_mapping(
+           context, source_memory_access->dynamic_view_base_value_id))) {
     return loom_low_lower_rule_source_memory_lookup_byte_offset(
         context, rule_set, materializer,
         source_memory_access->dynamic_view_base_value_id, offset_type,
@@ -623,7 +625,9 @@ loom_low_lower_rule_materialize_source_memory_complete_byte_offset(
   const loom_low_lower_source_memory_byte_offset_materializer_t* materializer =
       loom_low_lower_rule_set_source_memory_byte_offset_materializer(
           rule_set, source_memory);
-  const int64_t static_byte_offset = source_memory_access->static_byte_offset;
+  const int64_t static_byte_offset =
+      loom_low_lower_rule_source_memory_static_byte_offset(
+          source_memory, source_memory_access);
   const loom_low_source_memory_dynamic_term_t* term =
       &source_memory_access->dynamic_terms[0];
   const bool term_requires_multiply =

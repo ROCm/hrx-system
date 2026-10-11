@@ -111,6 +111,7 @@ loom_check_test_suite(
     "test/source_low/memory_scalar_narrow.loom-test"
     "test/source_low/memory_signed_terms.loom-test"
     "test/source_low/memory_subview.loom-test"
+    "test/source_low/memory_view_base.loom-test"
     "test/source_low/memory_wide_carriers.loom-test"
     "test/source_low/nested_view_selection.loom-test"
     "test/source_low/numeric_bit_operations.loom-test"

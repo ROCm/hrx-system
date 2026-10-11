@@ -1,0 +1,71 @@
+// RUN: emit source-low target=x86:avx2 output=low
+
+// Adjacent fields share the complete source address, including its header.
+// Field indices remain displacements from that address.
+func.def @exchange_fields(%buffer: buffer, %row_input: index, %column_input: index) -> (i32) {
+  %row = index.assume %row_input [range(%row_input, 0, 7)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 3)] : index
+  %row_stride = index.constant 64 : offset
+  %column_stride = index.constant 8 : offset
+  %header = index.constant 32 : offset
+  %row_bytes = index.scale %row, %row_stride : index, offset -> offset
+  %column_bytes = index.scale %column, %column_stride : index, offset -> offset
+  %row_base = index.add %row_bytes, %header : offset
+  %base = index.add %row_base, %column_bytes : offset
+  %view = buffer.view %buffer[%base] : buffer -> view<2xi32>
+  %first = view.load %view[0] : view<2xi32> -> i32
+  %second = view.load %view[1] : view<2xi32> -> i32
+  view.store %first, %view[1] : i32, view<2xi32>
+  func.return %second : i32
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @exchange_fields(%buffer: reg<x86.gpr64>, %row: reg<x86.gpr64>, %column: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %row_stride = mov.imm64 64
+  %21 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
+  %row_bytes = imul.gpr64 %21, %row_stride
+  %column_bytes = lea.scale %column {disp32 = 0, scale = 8}
+  %row_base = lea.disp %row_bytes {disp32 = 32}
+  %base = lea %row_base, %column_bytes
+  %first = mov.load.indexed.gpr32 %buffer, %base {disp32 = 0, scale = 1}
+  %second = mov.load.indexed.gpr32 %buffer, %base {disp32 = 4, scale = 1}
+  mov.store.indexed.gpr32 %first, %buffer, %base {disp32 = 4, scale = 1}
+  return %second
+}
+
+// ====
+
+// The embedded bias exceeds U32. Narrow dynamic terms do not authorize a
+// 32-bit carrier for the retained complete address.
+func.def @copy_wide_vector(%source: buffer, %destination: buffer, %row_input: index, %column_input: index) {
+  %row = index.assume %row_input [range(%row_input, -1, 7)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 3)] : index
+  %row_stride = index.constant 128 : offset
+  %column_stride = index.constant 32 : offset
+  %header = index.constant 4294967424 : offset
+  %row_bytes = index.scale %row, %row_stride : index, offset -> offset
+  %column_bytes = index.scale %column, %column_stride : index, offset -> offset
+  %row_base = index.add %row_bytes, %header : offset
+  %base = index.add %row_base, %column_bytes : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<16xi32>
+  %destination_view = buffer.view %destination[%base] : buffer -> view<16xi32>
+  %values = vector.load %source_view[4] : view<16xi32> -> vector<8xi32>
+  vector.store %values, %destination_view[4] : vector<8xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @copy_wide_vector(%source: reg<x86.gpr64>, %destination: reg<x86.gpr64>, %row: reg<x86.gpr64>, %column: reg<x86.gpr64>) asm {
+  %row_stride = mov.imm64 128
+  %column_stride = mov.imm64 32
+  %header = mov.imm64 4294967424
+  %23 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
+  %row_bytes = imul.gpr64 %23, %row_stride
+  %25 = copy %column : reg<x86.gpr64> -> reg<x86.gpr64>
+  %column_bytes = imul.gpr64 %25, %column_stride
+  %row_base = lea %row_bytes, %header
+  %base = lea %row_base, %column_bytes
+  %values = vmovdqu32.load.indexed.ymm %source, %base {disp32 = 16, scale = 1}
+  vmovdqu32.store.indexed.ymm %values, %destination, %base {disp32 = 16, scale = 1}
+  return
+}

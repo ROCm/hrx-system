@@ -67,16 +67,14 @@ func.def @scalar_materialized_view_base_suffix_i32(%input: buffer, %output: buff
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_materialized_view_base_suffix_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %base_aligned: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
-  %bias = OpConstant.offset64 4
-  %biased_base = OpIAdd.offset64 %base_aligned, %bias
-  %18 = OpConstant.offset64 8
-  %19 = OpIAdd.offset64 %biased_base, %18
-  %20 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %19
-  %loaded = OpLoad.storage_buffer.i32 %20
-  %22 = OpConstant.offset64 12
-  %23 = OpIAdd.offset64 %biased_base, %22
-  %24 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %23
-  OpStore.storage_buffer.i32 %24, %loaded
+  %16 = OpConstant.offset64 12
+  %17 = OpIAdd.offset64 %base_aligned, %16
+  %18 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %17
+  %loaded = OpLoad.storage_buffer.i32 %18
+  %20 = OpConstant.offset64 16
+  %21 = OpIAdd.offset64 %base_aligned, %20
+  %22 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %21
+  OpStore.storage_buffer.i32 %22, %loaded
   return %loaded
 }
 

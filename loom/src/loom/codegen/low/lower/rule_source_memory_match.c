@@ -206,8 +206,9 @@ static bool loom_low_lower_rule_source_memory_byte_offset_matches(
   if (dynamic_bit_count == 0) {
     return true;
   }
-  const loom_value_facts_t bias =
-      loom_value_facts_exact_i64(access->static_byte_offset);
+  const loom_value_facts_t bias = loom_value_facts_exact_i64(
+      loom_low_lower_rule_source_memory_static_byte_offset(source_memory,
+                                                           access));
   loom_value_facts_subi(&byte_facts, &bias, &byte_facts);
   return loom_value_facts_fit_unsigned_bit_count(byte_facts, dynamic_bit_count);
 }
@@ -424,10 +425,11 @@ loom_low_lower_rule_source_memory_rejection_reason(
       access->minimum_alignment < source_memory->minimum_alignment) {
     return LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_MINIMUM_ALIGNMENT;
   }
-  if (access->static_byte_offset <
-          source_memory_shape->static_byte_offset_minimum ||
-      access->static_byte_offset >
-          source_memory_shape->static_byte_offset_maximum) {
+  const int64_t static_byte_offset =
+      loom_low_lower_rule_source_memory_static_byte_offset(source_memory,
+                                                           access);
+  if (static_byte_offset < source_memory_shape->static_byte_offset_minimum ||
+      static_byte_offset > source_memory_shape->static_byte_offset_maximum) {
     return LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_STATIC_OFFSET;
   }
   if (!iree_any_bit_set(source_memory->flags,

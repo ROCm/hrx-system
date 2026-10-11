@@ -120,6 +120,67 @@ TEST(LowLowerSourceMemoryMatchTest, SelectsExactRejectionReason) {
             100 + LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_LAYOUT);
 }
 
+TEST(LowLowerSourceMemoryMatchTest, MatchesResidualOfRetainedViewBase) {
+  loom_low_lower_source_memory_t constraint = {};
+  constraint.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
+  constraint.root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ANY;
+  constraint.address_layout = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY;
+  constraint.dynamic_term_count =
+      LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_TERM_COUNT_ANY;
+  constraint.dynamic_term_count_minimum = 1;
+  constraint.dynamic_view_base_term_count =
+      LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_VIEW_BASE_TERM_COUNT_ANY;
+  constraint.memory_space_mask = LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL;
+  constraint.element_byte_count = 4;
+  constraint.vector_lane_count = 1;
+  constraint.flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_REUSE_VIEW_BASE;
+  loom_low_lower_source_memory_shape_t shape = {};
+  shape.static_byte_offset_maximum = 16;
+
+  loom_low_source_memory_access_plan_t access = {};
+  access.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
+  access.root_value_id = 0;
+  access.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;
+  access.element_byte_count = 4;
+  access.vector_lane_count = 1;
+  access.static_byte_offset = 4100;
+  access.dynamic_term_count = 2;
+  access.dynamic_view_base_term_count = 2;
+  access.dynamic_view_base_value_id = 1;
+  access.dynamic_view_base_value_static_byte_offset = 4096;
+
+  loom_low_lower_rule_match_context_t context = {};
+  loom_low_lower_source_memory_diagnostics_t diagnostics = {};
+  uint16_t diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
+  EXPECT_TRUE(loom_low_lower_rule_source_memory_matches(
+      &context, &constraint, &shape, &diagnostics, &access, 0,
+      &diagnostic_index));
+  EXPECT_EQ(loom_low_lower_rule_source_memory_static_byte_offset(&constraint,
+                                                                 &access),
+            4);
+  EXPECT_EQ(access.static_byte_offset, 4100);
+
+  // A dynamic access index prevents replacing the whole dynamic offset with
+  // the retained view base. The complete canonical displacement must match.
+  access.dynamic_term_count = 3;
+  EXPECT_FALSE(loom_low_lower_rule_source_memory_matches(
+      &context, &constraint, &shape, &diagnostics, &access, 0,
+      &diagnostic_index));
+  access.dynamic_term_count = 2;
+  constraint.flags = 0;
+  EXPECT_FALSE(loom_low_lower_rule_source_memory_matches(
+      &context, &constraint, &shape, &diagnostics, &access, 0,
+      &diagnostic_index));
+
+  // A single scaled term remains available to native indexed addressing.
+  constraint.flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_REUSE_VIEW_BASE;
+  access.dynamic_term_count = 1;
+  access.dynamic_view_base_term_count = 1;
+  EXPECT_FALSE(loom_low_lower_rule_source_memory_matches(
+      &context, &constraint, &shape, &diagnostics, &access, 0,
+      &diagnostic_index));
+}
+
 TEST(LowLowerRuleSelectionTest, RanksActionableFailuresBeforeDepth) {
   loom_low_lower_rule_failure_t diagnostic_failure = {};
   diagnostic_failure.has_source_op_span = true;

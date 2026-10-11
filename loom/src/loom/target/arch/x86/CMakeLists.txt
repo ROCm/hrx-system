@@ -262,6 +262,7 @@ loom_check_test_suite(
     "test/source_low/memory_signed_terms.loom-test"
     "test/source_low/memory_subview.loom-test"
     "test/source_low/memory_tiled_channel.loom-test"
+    "test/source_low/memory_view_base.loom-test"
     "test/source_low/memory_wide_carriers.loom-test"
     "test/source_low/memory_wide_offsets.loom-test"
     "test/source_low/memory_word.loom-test"

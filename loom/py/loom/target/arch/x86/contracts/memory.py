@@ -177,6 +177,7 @@ def _source_memory_constraint(
             else 0
         ),
         preserve_source_index=addressing is _MemoryAddressing.PRESERVE_SOURCE_INDEX,
+        reuse_view_base=addressing is _MemoryAddressing.MATERIALIZE_BYTE_OFFSET,
         diagnostic=diagnostic,
     )
 
@@ -431,6 +432,7 @@ def _full_width_memory_rules(
             dynamic_term_count_minimum=1 if dynamic else 0,
             dynamic_view_base_term_count=None,
             allow_dynamic_stride_values=dynamic,
+            reuse_view_base=dynamic,
             diagnostic=diagnostic,
         )
         static_offset = ValueRef.temporary("static_byte_offset")
@@ -527,6 +529,7 @@ def _view_carrier_constraint(
         dynamic_term_count_minimum=1 if dynamic else 0,
         dynamic_view_base_term_count=None,
         allow_dynamic_stride_values=dynamic,
+        reuse_view_base=dynamic,
         diagnostic=diagnostic,
     )
 

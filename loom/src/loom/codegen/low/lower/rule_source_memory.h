@@ -20,6 +20,32 @@ extern "C" {
 typedef struct loom_low_lower_rule_match_context_t
     loom_low_lower_rule_match_context_t;
 
+// Selects the producer-retained complete byte offset when this recipe accepts
+// it and it replaces a multi-term reconstruction. Single canonical terms keep
+// their native scale/displacement opportunities. Canonical analysis and memory
+// effects are independent of this materialization choice.
+static inline bool loom_low_lower_rule_source_memory_reuses_view_base(
+    const loom_low_lower_source_memory_t* source_memory,
+    const loom_low_source_memory_access_plan_t* access) {
+  return iree_any_bit_set(source_memory->flags,
+                          LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_REUSE_VIEW_BASE) &&
+         access->dynamic_term_count > 1 &&
+         access->dynamic_term_count == access->dynamic_view_base_term_count &&
+         access->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID;
+}
+
+// Returns the displacement consumed by the selected recipe. The canonical
+// static offset remains unchanged for address facts and memory effects.
+static inline int64_t loom_low_lower_rule_source_memory_static_byte_offset(
+    const loom_low_lower_source_memory_t* source_memory,
+    const loom_low_source_memory_access_plan_t* access) {
+  return access->static_byte_offset -
+         (loom_low_lower_rule_source_memory_reuses_view_base(source_memory,
+                                                             access)
+              ? access->dynamic_view_base_value_static_byte_offset
+              : 0);
+}
+
 typedef struct loom_low_lower_rule_source_memory_state_t {
   // Source op whose canonical access is retained in this state.
   const loom_op_t* source_op;
@@ -92,9 +118,10 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_dynamic_term(
     const loom_low_source_memory_access_plan_t* source_memory_access,
     uint8_t term_ordinal, loom_value_id_t* out_value_id);
 
-// Materializes the canonical dynamic byte offset selected by a source-memory
-// plan in the descriptor-declared carrier. Wider source terms are projected
-// before arithmetic; the selected memory contract owns the address range proof.
+// Materializes the recipe's dynamic byte offset in its declared carrier. When
+// reusing a complete view base this includes its embedded static contribution;
+// static_byte_offset above returns the matching residual displacement. Wider
+// source terms are projected before arithmetic; matching owns the range proof.
 iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,

@@ -299,9 +299,9 @@ func.def target(@target) @spirv_offset_addressing(%base: buffer, %row: offset) -
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_offset_addressing(%base_aligned: reg<spirv.ptr.storage_buffer>, %row_aligned: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
-  %column = OpConstant.offset64 4
-  %byte_offset = OpIAdd.offset64 %row_aligned, %column
-  %14 = OpPtrAccessChain.storage_buffer.i32.byte_offset %base_aligned, %byte_offset
+  %12 = OpConstant.offset64 4
+  %13 = OpIAdd.offset64 %row_aligned, %12
+  %14 = OpPtrAccessChain.storage_buffer.i32.byte_offset %base_aligned, %13
   %loaded = OpLoad.storage_buffer.i32 %14
   return %loaded
 }

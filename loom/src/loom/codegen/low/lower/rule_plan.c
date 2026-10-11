@@ -14,6 +14,7 @@
 #include "loom/codegen/low/lower/module_state.h"
 #include "loom/codegen/low/lower/rule_descriptor.h"
 #include "loom/codegen/low/lower/rule_match.h"
+#include "loom/codegen/low/lower/rule_source_memory.h"
 #include "loom/codegen/low/lower/rule_value.h"
 #include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
@@ -388,6 +389,12 @@ static iree_status_t loom_low_lower_rule_build_attrs(
     loom_named_attr_t* attrs,
     loom_low_lower_read_only_attributes_t* read_only_attributes) {
   const loom_attribute_t* source_attrs = loom_op_const_attrs(source_op);
+  const int64_t static_byte_offset =
+      emit->source_memory_ordinal != 0
+          ? loom_low_lower_rule_source_memory_static_byte_offset(
+                &rule_set->source_memories[emit->source_memory_ordinal - 1],
+                source_memory_access)
+          : 0;
   for (uint16_t i = 0; i < emit->attr_copy_count; ++i) {
     uint16_t attr_copy_index =
         (uint16_t)(emit->payload.descriptor.attr_copy_start + i);
@@ -887,23 +894,22 @@ static iree_status_t loom_low_lower_rule_build_attrs(
         break;
       }
       case LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_STATIC_BYTE_OFFSET:
-        attrs[i].value =
-            loom_attr_i64(source_memory_access->static_byte_offset);
+        attrs[i].value = loom_attr_i64(static_byte_offset);
         break;
       case LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_STATIC_BYTE_OFFSET_PLUS_LITERAL: {
-        attrs[i].value = loom_attr_i64(
-            source_memory_access->static_byte_offset + attr_copy->literal_i64);
+        attrs[i].value =
+            loom_attr_i64(static_byte_offset + attr_copy->literal_i64);
         break;
       }
       case LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT:
         IREE_ASSERT_GT(attr_copy->literal_i64, 0);
-        attrs[i].value = loom_attr_i64(
-            source_memory_access->static_byte_offset / attr_copy->literal_i64);
+        attrs[i].value =
+            loom_attr_i64(static_byte_offset / attr_copy->literal_i64);
         break;
       case LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER:
         IREE_ASSERT_GT(attr_copy->literal_i64, 0);
-        attrs[i].value = loom_attr_i64(
-            source_memory_access->static_byte_offset % attr_copy->literal_i64);
+        attrs[i].value =
+            loom_attr_i64(static_byte_offset % attr_copy->literal_i64);
         break;
       case LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_DYNAMIC_BYTE_STRIDE:
         attrs[i].value = loom_attr_i64(

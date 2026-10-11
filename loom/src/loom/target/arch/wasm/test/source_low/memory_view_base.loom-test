@@ -1,0 +1,36 @@
+// RUN: emit source-low target=wasm:simd128 output=low
+
+// Adjacent fields share the complete source address, including its header.
+// Field indices remain displacements from that address.
+func.def @exchange_fields(%buffer: buffer, %row_input: index, %column_input: index) -> (i32) {
+  %row = index.assume %row_input [range(%row_input, 0, 7)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 3)] : index
+  %row_stride = index.constant 64 : offset
+  %column_stride = index.constant 8 : offset
+  %header = index.constant 32 : offset
+  %row_bytes = index.scale %row, %row_stride : index, offset -> offset
+  %column_bytes = index.scale %column, %column_stride : index, offset -> offset
+  %row_base = index.add %row_bytes, %header : offset
+  %base = index.add %row_base, %column_bytes : offset
+  %view = buffer.view %buffer[%base] : buffer -> view<2xi32>
+  %first = view.load %view[0] : view<2xi32> -> i32
+  %second = view.load %view[1] : view<2xi32> -> i32
+  view.store %first, %view[1] : i32, view<2xi32>
+  func.return %second : i32
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @exchange_fields(%buffer: reg<wasm.i32>, %row: reg<wasm.i32>, %column: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %row_stride = i32.const 64
+  %column_stride = i32.const 8
+  %header = i32.const 32
+  %row_bytes = i32.mul %row, %row_stride
+  %column_bytes = i32.mul %column, %column_stride
+  %row_base = i32.add %row_bytes, %header
+  %base = i32.add %row_base, %column_bytes
+  %27 = i32.add %buffer, %base
+  %first = i32.load %27
+  %second = i32.load %27 {offset = 4}
+  i32.store %27, %first {offset = 4}
+  return %second
+}
