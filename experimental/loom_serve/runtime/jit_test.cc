@@ -668,8 +668,12 @@ TEST_P(JitTest, UnequalPrivateWorkspacesPreservePoolPolicyAndOutput) {
   IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, 0));
   const auto trimmed =
       loom_serve_device_memory_statistics(device_owner_).workspace;
-  EXPECT_EQ(trimmed.bytes_committed, 0u);
-  EXPECT_EQ(trimmed.bytes_quarantined, 0u);
+  // Completed consumers do not imply retirement of every raw queue capture.
+  // Nonwaiting trim may retain backing until those captures retire; final
+  // group teardown joins them independently of model work.
+  EXPECT_EQ(trimmed.reservation_count, 0u);
+  EXPECT_LE(trimmed.bytes_committed, shared.bytes_committed);
+  EXPECT_LE(trimmed.bytes_quarantined, quarantine_limit);
   if (quarantine_limit) {
     EXPECT_GT(trimmed.quarantine_eviction_count, 0u);
   }
@@ -772,12 +776,14 @@ TEST_P(JitTest, IndependentModelCompletesWhileSharedWorkspaceGrows) {
     EXPECT_EQ(held_.output[i], 105 + i);
   }
   IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, 0));
-  const auto retired =
+  const auto trimmed =
       loom_serve_device_memory_statistics(device_owner_).workspace;
-  EXPECT_EQ(retired.bytes_committed, 0u);
-  EXPECT_EQ(retired.reservation_count, 0u);
-  EXPECT_EQ(retired.reserve_count, 2u);
-  EXPECT_EQ(retired.release_count, 2u);
+  // The model has retired, but a raw allocation capture can still preserve an
+  // older pool generation. Trim must neither wait for it nor grow backing.
+  EXPECT_LE(trimmed.bytes_committed, live.bytes_committed);
+  EXPECT_EQ(trimmed.reservation_count, 0u);
+  EXPECT_EQ(trimmed.reserve_count, 2u);
+  EXPECT_EQ(trimmed.release_count, 2u);
 }
 
 TEST_P(JitTest, RetiredModelDoesNotJoinRawQueueAllocationCaptures) {
