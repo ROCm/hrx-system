@@ -7,7 +7,12 @@
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
+#include "iree/base/internal/path.h"
 #include "iree/hal/drivers/init.h"
+#if defined(LOOM_SERVE_DRIVER_TASK)
+#include "iree/hal/drivers/task/driver.h"
+#include "iree/hal/drivers/task/executable/loaders/registration/init.h"
+#endif
 #include "iree/tooling/device_util.h"
 
 struct loom_serve_device_t {
@@ -59,6 +64,35 @@ static iree_hal_queue_t* loom_serve_device_select_queue(
   return NULL;
 }
 
+#if defined(LOOM_SERVE_DRIVER_TASK)
+// CPU queues participate in the same worker budget as JIT and model services.
+// The driver retains the supplied executor, loaders and allocation policy.
+static iree_status_t loom_serve_task_driver_create(
+    loom_serve_host_t* host, iree_hal_driver_t** out_driver,
+    iree_allocator_t allocator) {
+  iree_hal_executable_loader_t* loaders[8] = {NULL};
+  iree_host_size_t loader_count = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_create_all_available_executable_loaders(
+      IREE_ARRAYSIZE(loaders), &loader_count, loaders, allocator));
+  iree_hal_allocator_t* device_allocator = NULL;
+  iree_status_t status =
+      iree_hal_allocator_create_heap(allocator, &device_allocator);
+  if (iree_status_is_ok(status)) {
+    iree_hal_task_device_params_t params;
+    iree_hal_task_device_params_initialize(&params);
+    iree_task_executor_t* executor = loom_serve_host_executor(host);
+    status = iree_hal_task_driver_create(
+        IREE_SV("task"), &params, 1, &executor, loader_count, loaders,
+        device_allocator, allocator, out_driver);
+  }
+  iree_hal_allocator_release(device_allocator);
+  for (iree_host_size_t i = 0; i < loader_count; ++i) {
+    iree_hal_executable_loader_release(loaders[i]);
+  }
+  return status;
+}
+#endif  // LOOM_SERVE_DRIVER_TASK
+
 static iree_status_t loom_serve_device_group_initialize(
     loom_serve_device_group_t* group,
     const loom_serve_device_options_t* options) {
@@ -66,15 +100,51 @@ static iree_status_t loom_serve_device_group_initialize(
   IREE_RETURN_IF_ERROR(
       iree_hal_driver_registry_allocate(group->allocator, &registry));
   iree_status_t status = iree_hal_register_all_available_drivers(registry);
+  // One driver per URI scheme during cold group construction. Several device
+  // handles may share a driver context; repeated factory calls need not do so.
+  struct {
+    // Scheme borrowed from caller options through this function.
+    iree_string_view_t name;
+    // Owned driver retained until all group handles have been constructed.
+    iree_hal_driver_t* handle;
+  } drivers[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
+  iree_host_size_t driver_count = 0;
   for (iree_host_size_t i = 0;
        i < group->device_count && iree_status_is_ok(status); ++i) {
+    const iree_string_view_t name = iree_uri_schema(options[i].uri);
+    iree_host_size_t driver_index = 0;
+    while (driver_index < driver_count &&
+           !iree_string_view_equal(name, drivers[driver_index].name)) {
+      ++driver_index;
+    }
+    if (driver_index == driver_count) {
+      drivers[driver_index].name = name;
+#if defined(LOOM_SERVE_DRIVER_TASK)
+      if (iree_string_view_equal(name, IREE_SV("task"))) {
+        status = loom_serve_task_driver_create(
+            group->host, &drivers[driver_index].handle, group->allocator);
+      } else
+#endif  // LOOM_SERVE_DRIVER_TASK
+      {
+        status = iree_hal_driver_registry_try_create(
+            registry, name, group->allocator, &drivers[driver_index].handle);
+      }
+      if (iree_status_is_ok(status)) {
+        ++driver_count;
+      }
+    }
     iree_hal_device_create_params_t params =
         iree_hal_device_create_params_default();
     params.proactor_pool = loom_serve_host_proactor_pool(group->host);
     params.event_sink = iree_hal_device_event_sink_stderr();
-    status =
-        iree_hal_create_device(registry, options[i].uri, &params,
-                               group->allocator, &group->devices[i].handle);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_driver_create_device_by_uri(
+          drivers[driver_index].handle, options[i].uri, &params,
+          group->allocator, &group->devices[i].handle);
+    }
+  }
+  for (iree_host_size_t i = 0; i < driver_count; ++i) {
+    iree_hal_driver_release(drivers[i].handle);
   }
   iree_hal_driver_registry_free(registry);
   IREE_RETURN_IF_ERROR(status);

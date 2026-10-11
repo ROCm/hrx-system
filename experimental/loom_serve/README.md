@@ -1,7 +1,7 @@
 # Loom model server experiment
 
 This experimental server JIT-compiles portable model source into VM control,
-command programs, and GPU executables using the public Loom C API. Shared native
+command programs, and device executables using the public Loom C API. Shared native
 services supply HTTP protocols, admission, memory ownership and observation for
 text, images, embeddings and decisions. Its model-author interfaces are intended
 to change with real models; it is not a general HAL VM module.
@@ -62,8 +62,16 @@ It can start empty and manage registrations over HTTP. The single-model
 native services.
 Deployment source and asset paths are relative to the process working directory;
 entries inside each source catalog are relative to its model directory.
-The serving JIT currently selects AMDGPU; model-neutral native interfaces do
-not yet provide CPU or NPU model execution. Full serving coverage runs with
+The serving JIT selects the exact compiler profile and loader target from HAL
+device facts. Linked providers cover AMDGPU, Vulkan/SPIR-V, x86 CPU and XDNA;
+the source still needs to lower for the chosen target. The retained-text fixture
+runs through the same source-JIT, command, pooled-state and HTTP path on AMDGPU
+and x86 CPU. Its [CPU recipe](models/fixtures/text/README.md) uses
+`--device=task --pool_backing=fixed`; GPU model kernels are not thereby CPU ports.
+Vulkan execution requires logical parameter reflection in the SPIR-V artifact
+and loader. XDNA execution requires native command-buffer execution and file
+import/queue-read support. These are native backend contracts, not alternate
+serving runners. Full serving coverage runs with
 `build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve/...`.
 
 ## Shared execution
@@ -76,7 +84,10 @@ selection, workspace, retained-memory budgets and residency caches. Group
 membership establishes neither execution ordering nor cross-device coherence.
 All model work and borrowed I/O retire before the application destroys the group;
 an outstanding virtual reservation rejects destruction before any device is torn
-down. Single-device tools use the same owner with one record.
+down. Single-device tools use the same owner with one record. Driver creation
+is shared across records with the same URI scheme. CPU task devices use the
+application executor: `--workers` bounds CPU inference, compilation and service
+work together rather than creating an independent pool for each device.
 
 `runtime/command.c` combines a parsed portable command program with loaded executable
 reflection. Recording retains fixed buffers and code. Rebindable slots include

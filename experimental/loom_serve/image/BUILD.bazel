@@ -164,7 +164,6 @@ loom_cc_binary(
     srcs = ["model_check.c"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
         ":model",
@@ -183,7 +182,6 @@ loom_cc_library(
     hdrs = ["model.h"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
         ":generator",
@@ -218,7 +216,6 @@ loom_cc_binary(
     srcs = ["generate.c"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
         ":model",
@@ -237,7 +234,6 @@ loom_cc_binary(
     srcs = ["server.c"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
         ":model",

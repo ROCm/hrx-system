@@ -1,5 +1,5 @@
 config.decl @fixture.units : %value: index where [range(%value, 1, 256)]
-amdgpu.target<gfx11-generic> @weighted_target {subgroup_size = 32}
+target.decl @weighted_target
 kernel.decl @pool() launch(%input: buffer, %hidden: buffer)
 kernel.decl @project() launch(%input: buffer, %hidden: buffer, %output: buffer)
 

@@ -29,6 +29,8 @@
 #include "iree/testing/temp_file.h"
 
 IREE_FLAG(string, model_source, "", "Deterministic text bootstrap source.");
+IREE_FLAG(string, test_device, "amdgpu",
+          "HAL device URI for the source model.");
 
 namespace {
 
@@ -96,8 +98,8 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
  protected:
   void SetUp() override {
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
-    const loom_serve_device_options_t device_options = {.uri =
-                                                            IREE_SV("amdgpu")};
+    const loom_serve_device_options_t device_options = {
+        .uri = iree_make_cstring_view(FLAG_test_device)};
     IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
                                                   &group_, allocator_));
     device_ = loom_serve_device_group_at(group_, 0);
@@ -833,13 +835,16 @@ TEST_P(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
   EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
 }
 
-TEST_P(SourceTextServiceTest, RetirementOwnsAcceptedCheckpointCapture) {
+class ElasticTextServiceTest : public SourceTextServiceTest {};
+
+TEST_P(ElasticTextServiceTest, RetirementOwnsAcceptedCheckpointCapture) {
   IREE_ASSERT_OK(loom_serve_text_model_destroy(model_));
   model_ = nullptr;
   IREE_ASSERT_OK(loom_serve_device_group_destroy(group_));
   group_ = nullptr;
   const loom_serve_device_options_t device_options = {
-      .uri = IREE_SV("amdgpu"), .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC};
+      .uri = iree_make_cstring_view(FLAG_test_device),
+      .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC};
   IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
                                                 &group_, allocator_));
   device_ = loom_serve_device_group_at(group_, 0);
@@ -965,14 +970,15 @@ TEST_P(SourceTextServiceTest,
   EXPECT_EQ(Content(Read(Send(next))), Content(continued));
 }
 
-TEST_P(SourceTextServiceTest,
+TEST_P(ElasticTextServiceTest,
        SuspendedCheckpointSurvivesRestoreReleaseAndNameReuse) {
   IREE_ASSERT_OK(loom_serve_text_model_destroy(model_));
   model_ = nullptr;
   IREE_ASSERT_OK(loom_serve_device_group_destroy(group_));
   group_ = nullptr;
   const loom_serve_device_options_t device_options = {
-      .uri = IREE_SV("amdgpu"), .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC};
+      .uri = iree_make_cstring_view(FLAG_test_device),
+      .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC};
   IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
                                                 &group_, allocator_));
   device_ = loom_serve_device_group_at(group_, 0);
@@ -1221,6 +1227,8 @@ TEST_P(SourceTextServiceTest,
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, SourceTextServiceTest,
+                         ::testing::Values(1, 4));
+INSTANTIATE_TEST_SUITE_P(Workers, ElasticTextServiceTest,
                          ::testing::Values(1, 4));
 
 }  // namespace

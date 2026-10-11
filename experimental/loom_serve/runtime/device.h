@@ -45,11 +45,13 @@ typedef struct loom_serve_device_options_t {
   uint64_t memory_limit;
 } loom_serve_device_options_t;
 
-// Creates every requested HAL device, seals one group, then constructs each
-// record's pools and selects its first provisioned dispatch/transfer queues.
+// Creates each driver once and every requested HAL device, seals one group,
+// then constructs each record's pools and selects its first provisioned
+// dispatch/transfer queues.
 // Missing roles fail creation. device_count must be nonzero and within the HAL
 // topology limit; options are borrowed only during creation. This establishes
 // runtime ownership, not compiler support or cross-device tensor access.
+// CPU task devices share the host executor instead of creating private workers.
 // Retains host through all device and asynchronous service lifetimes. Failure
 // returns no group and releases partial state, including earlier devices.
 iree_status_t loom_serve_device_group_create(

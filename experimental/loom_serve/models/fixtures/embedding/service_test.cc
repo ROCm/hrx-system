@@ -34,6 +34,8 @@
 
 IREE_FLAG(string, model_source, "",
           "Deterministic embedding bootstrap source.");
+IREE_FLAG(string, test_device, "amdgpu",
+          "HAL device executing the source-defined embedding fixture.");
 
 namespace {
 
@@ -174,8 +176,9 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
   void SetUp() override {
     iree_notification_initialize(&notification_);
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
-    const loom_serve_device_options_t device_options[] = {
-        {.uri = IREE_SV("amdgpu")}, {.uri = IREE_SV("amdgpu")}};
+    const auto uri = iree_make_cstring_view(FLAG_test_device);
+    const loom_serve_device_options_t device_options[] = {{.uri = uri},
+                                                          {.uri = uri}};
     IREE_ASSERT_OK(loom_serve_device_group_create(
         host_, DeviceCount(), device_options, &group_, allocator_));
     device_ = loom_serve_device_group_at(group_, DeviceCount() - 1);
@@ -625,7 +628,10 @@ TEST_P(SourceEmbeddingServiceTest,
   WaitModel("broken", {});
 }
 
-TEST_P(SourceEmbeddingServiceTest,
+// Virtual backing is a separate device capability from source execution.
+class ElasticEmbeddingServiceTest : public SourceEmbeddingServiceTest {};
+
+TEST_P(ElasticEmbeddingServiceTest,
        EmptyServerReusesOneParameterSlabAcrossManagedLifetimes) {
   const std::string package =
       iree::testing::MakeTempFilePath("dynamic_pressure");
@@ -1053,7 +1059,7 @@ TEST_P(SourceEmbeddingServiceTest,
   }
 }
 
-TEST_P(SourceEmbeddingServiceTest,
+TEST_P(ElasticEmbeddingServiceTest,
        ExternalWeightedPackageRetainsPreparedCohortUnderPressure) {
   const std::string package =
       iree::testing::MakeTempFilePath("weighted_embedding");
@@ -1306,6 +1312,9 @@ INSTANTIATE_TEST_SUITE_P(Workers, GroupEmbeddingServiceTest,
                          ::testing::Values(1u, 4u));
 
 INSTANTIATE_TEST_SUITE_P(Workers, SourceEmbeddingServiceTest,
+                         ::testing::Values(1u, 4u));
+
+INSTANTIATE_TEST_SUITE_P(Workers, ElasticEmbeddingServiceTest,
                          ::testing::Values(1u, 4u));
 
 }  // namespace

@@ -1,7 +1,7 @@
 # A tiny retained-text model
 
 This package implements the same pooled autoregressive ABI as Qwen, with two
-tiny GPU kernels and a real four-byte checkpoint parameter. It uses ordinary
+tiny device kernels and a real four-byte checkpoint parameter. It uses ordinary
 source-JIT VM programs, page ownership, recurrent slots, named checkpoints and
 HTTP streaming. There is no native mock model or canned response path.
 
@@ -92,9 +92,12 @@ build_tools/bin/iree-bazel-run --config=opt \
   --tokenizer=experimental/loom_serve/models/fixtures/text/tokenizer.json \
   --rows=4 --context_capacity=96 --pool_capacity=256 \
   --prefill_capacity=32 --checkpoint_capacity=2 --max_tokens=16 \
-  --pool_backing=fixed --workers=1 --port=8080
+  --device=task --pool_backing=fixed --workers=1 --port=8080
 ```
 
+The CPU task device shares the server's worker pool and JITs native x86 code;
+it does not interpret the device kernels in the VM. `--device=amdgpu` runs the
+same source on AMDGPU. Each backend must be enabled in the build configuration.
 Repository build and hardware-runner policy still applies. A separate runner
 needs the exact built server, its runtime closure, these sources and the tiny
 checkpoint. No compiler CLI runs in the server.
@@ -137,14 +140,17 @@ The shared server accepts the same package alongside [catalog.json](../catalog.j
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/models/fixtures/text:request_test \
+  //experimental/loom_serve/models/fixtures/text:service_cpu_test \
   //experimental/loom_serve/models/fixtures/text:service_test
 ```
 
-The qualified AMDGPU test uses one and four shared workers. It compares full
-and chunked input, row identities, simultaneous branch writers, pinned prefixes,
+The native CPU and AMDGPU service tests use one and four shared workers. They
+compare full and chunked input, row identities, simultaneous branch writers, pinned prefixes,
 final pool credit, HTTP rewind/continuation, input rejection recovery, EOS
 framing, queued cancellation and changed checkpoint weights against independent
-dense arithmetic. The CPU-only request test exercises source framing, exact
-token IDs and rejection before any device or checkpoint is needed.
+dense arithmetic. Elastic virtual-memory cases run separately on AMDGPU; the
+CPU suite exercises fixed-backed logical pooling. The CPU-only request test
+exercises source framing, exact token IDs and rejection before any device or
+checkpoint is needed.
 Exact output, not compilation alone, establishes the boundary. Real Qwen
 remains the numerical/performance reference for its architecture.

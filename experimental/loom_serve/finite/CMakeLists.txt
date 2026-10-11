@@ -50,7 +50,7 @@ loom_cc_library(
   PUBLIC
 )
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     model

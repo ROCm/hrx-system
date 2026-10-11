@@ -6,14 +6,14 @@
 
 #include "experimental/loom_serve/runtime/jit.h"
 
+#include "experimental/loom_serve/runtime/target.h"
 #include "iree/base/internal/path.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "iree/io/file_contents.h"
 #include "loomc/iree.h"
-#include "loomc/target/amdgpu/base.h"
-#include "loomc/target/amdgpu/iree_hal.h"
 #include "loomc/target/cmd/program.h"
+#include "loomc/target/configured.h"
 #include "loomc/target/vm.h"
 #include "loomc/task_pool.h"
 
@@ -43,7 +43,9 @@ struct loom_serve_jit_t {
   iree_hal_queue_t* dispatch;
   // Exact executable target borrowed from device.
   const iree_hal_executable_target_t* target;
-  // Model-wide AMDGPU compiler state.
+  // Process-lifetime format name paired with the selected HAL loader.
+  iree_string_view_t artifact_format;
+  // Model-wide compiler state specialized to immutable device facts.
   jit_compiler_t kernel;
   // Frozen source providers, shared across all shape specializations.
   loomc_link_index_t* index;
@@ -81,8 +83,10 @@ static void jit_compiler_deinitialize(jit_compiler_t* compiler) {
 }
 
 static iree_status_t jit_compiler_initialize(
-    const loomc_sanitizer_options_t* sanitizer, iree_allocator_t allocator,
-    loom_serve_compilation_report_t* report, jit_compiler_t* compiler) {
+    const loomc_sanitizer_options_t* sanitizer,
+    loomc_target_control_flow_lowering_t control_flow_lowering,
+    iree_allocator_t allocator, loom_serve_compilation_report_t* report,
+    jit_compiler_t* compiler) {
   const loomc_allocator_t ca = loomc_allocator_from_iree(allocator);
   const loomc_context_target_options_t target_options = {
       .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
@@ -96,7 +100,8 @@ static iree_status_t jit_compiler_initialize(
   IREE_RETURN_IF_ERROR(iree_status_from_loomc(
       loomc_compiler_create(compiler->context, NULL, ca, &compiler->compiler)));
   loomc_result_t* result = NULL;
-  const loomc_target_pipeline_options_t pipeline_options = {.next = sanitizer};
+  const loomc_target_pipeline_options_t pipeline_options = {
+      .next = sanitizer, .control_flow_lowering = control_flow_lowering};
   const loomc_status_t status = loomc_pass_program_create_from_target_pipeline(
       compiler->context, &pipeline_options, ca, &compiler->pipeline, &result);
   return loom_serve_compilation_result(status, result, report);
@@ -231,21 +236,18 @@ iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
   iree_hal_queue_retain(dispatch);
   const loomc_allocator_t ca = loomc_allocator_from_iree(host_allocator);
   iree_status_t status = iree_status_from_loomc(
-      loomc_target_environment_create_amdgpu(ca, &jit->kernel.environment));
+      loomc_target_environment_create_configured(ca, &jit->kernel.environment));
+  loom_serve_target_t target = {0};
   if (iree_status_is_ok(status)) {
-    status = jit_compiler_initialize(sanitizer, host_allocator, report,
-                                     &jit->kernel);
+    status = loom_serve_target_select(jit->kernel.environment, device, affinity,
+                                      report, &target, host_allocator);
+    jit->kernel.profile = target.selection.target_profile;
+    jit->target = target.selection.executable_target;
+    jit->artifact_format = target.artifact_format;
   }
   if (iree_status_is_ok(status)) {
-    const loomc_amdgpu_iree_hal_target_options_t options = {
-        .device = device, .physical_device_affinity = affinity};
-    loomc_iree_hal_target_selection_t selection = {0};
-    loomc_result_t* result = NULL;
-    const loomc_status_t operation = loomc_target_select_amdgpu_iree_hal(
-        jit->kernel.environment, &options, ca, &selection, &result);
-    jit->kernel.profile = selection.target_profile;
-    jit->target = selection.executable_target;
-    status = loom_serve_compilation_result(operation, result, report);
+    status = jit_compiler_initialize(sanitizer, target.control_flow_lowering,
+                                     host_allocator, report, &jit->kernel);
   }
   if (iree_status_is_ok(status)) {
     status = jit_index_sources(jit, source_directory);
@@ -380,8 +382,7 @@ static iree_status_t jit_load_request(loom_serve_jit_t* jit,
   iree_const_byte_span_t image;
   iree_status_t status = jit_emit(
       &jit->kernel, workspace, loomc_request_source(request), root_count,
-      specializations, IREE_SV(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
-      jit->allocator, report, &image);
+      specializations, jit->artifact_format, jit->allocator, report, &image);
   iree_allocator_free(jit->allocator, specializations);
   iree_hal_executable_t* executable = NULL;
   if (iree_status_is_ok(status)) {
@@ -780,7 +781,9 @@ iree_status_t loom_serve_jit_compile_vm(iree_string_view_t source_path,
   iree_status_t status = iree_status_from_loomc(
       loomc_target_environment_create_vm(ca, &compiler.environment));
   if (iree_status_is_ok(status)) {
-    status = jit_compiler_initialize(NULL, host_allocator, report, &compiler);
+    status =
+        jit_compiler_initialize(NULL, LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+                                host_allocator, report, &compiler);
   }
   if (iree_status_is_ok(status)) {
     status = iree_status_from_loomc(loomc_target_profile_select(

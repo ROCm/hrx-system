@@ -29,6 +29,9 @@ typedef struct loom_serve_jit_stage_t loom_serve_jit_stage_t;
 // indexed once. The selected queue family and device are retained until
 // destruction. host supplies the shared compiler sink and worker ordinals;
 // it outlives this catalog and every compilation completion.
+// Compilation uses the linked backend selected from immutable HAL device
+// facts, including its exact loader target and queue affinity. Source target
+// declarations are specialized to that profile at each command's kernel roots.
 // report receives copied evidence even on failure and outlives the catalog.
 // Only the serialized compilation owner accesses it between completions.
 iree_status_t loom_serve_jit_create(iree_hal_device_t* device,

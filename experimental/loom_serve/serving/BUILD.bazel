@@ -76,7 +76,6 @@ loom_cc_binary(
     srcs = ["server.c"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
         ":configuration",

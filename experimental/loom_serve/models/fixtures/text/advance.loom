@@ -1,31 +1,34 @@
 config.decl @fixture.context : %value: index where [range(%value, 1, 262144)]
 config.decl @fixture.rows : %value: index where [range(%value, 1, 16)]
 config.decl @fixture.tokens : %value: index where [range(%value, 1, 262144)]
-amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
+target.decl @target
 
 // Logical positions resolve through the native row-major page map. The opaque
 // row record supplies the byte origin of this model's pooled history plane.
+// Admission bounds positions by context and pages by blocks; these facts also
+// hold when the helper remains a callable function instead of being inlined.
 func.def @history_offset(%origins: buffer, %row: index, %position: index, %blocks: index, %rows: index) -> (offset) {
   %zero = index.constant 0 : offset
   %four = index.constant 4 : index
   %word = index.constant 4 : offset
   %map_origin = index.constant 512 : offset
   %bounded_row = index.assume %row [range(%row, 0, 15)] : index
+  %bounded_position = index.assume %position [range(%position, 0, 262143)] : index
   %records = buffer.view %origins[%zero] : buffer -> view<16x4xi64>
   %base64 = view.load %records[%bounded_row, 2] : view<16x4xi64> -> i64
   %base_positive = scalar.assume %base64 [range(%base64, 0, 9223372036854775807)] : i64
   %base = index.cast %base_positive : i64 to offset
-  %page_value = index.div %position, %four : index
+  %page_value = index.div %bounded_position, %four : index
   %one = index.constant 1 : index
   %last = index.sub %blocks, %one : index
-  %page = index.assume %page_value [range(%page_value, 0, %last)] : index
+  %page = index.assume %page_value [range(%page_value, 0, %last), lt(%page_value, %blocks)] : index
   %mapped_row = index.assume %bounded_row [lt(%bounded_row, %rows)] : index
   %map = buffer.view %origins[%map_origin] : buffer -> view<[%rows]x[%blocks]xi32>
   %physical32 = view.load %map[%mapped_row, %page] : view<[%rows]x[%blocks]xi32> -> i32
   %bounded_physical = scalar.assume %physical32 [range(%physical32, 0, 1048575)] : i32
   %physical = index.cast %bounded_physical : i32 to index
   %block_position = index.mul %physical, %four : index
-  %within_page = index.rem %position, %four : index
+  %within_page = index.rem %bounded_position, %four : index
   %slot = index.add %block_position, %within_page : index
   %bytes = index.scale %slot, %word : index, offset -> offset
   %address = index.add %base, %bytes : offset

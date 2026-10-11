@@ -175,9 +175,21 @@ loom_cc_library(
   PUBLIC
 )
 
+set(_device_platform_copts "")
+if(IREE_HAL_DRIVER_TASK)
+  list(APPEND _device_platform_copts "-DLOOM_SERVE_DRIVER_TASK=1")
+endif()
+set(_device_platform_deps "")
+if(IREE_HAL_DRIVER_TASK)
+  list(APPEND _device_platform_deps iree::hal::drivers::task::driver)
+  list(APPEND _device_platform_deps iree::hal::drivers::task::executable::loader)
+  list(APPEND _device_platform_deps iree::hal::drivers::task::executable::loaders::registration)
+endif()
 loom_cc_library(
   NAME
     device
+  COPTS
+    ${_device_platform_copts}
   HDRS
     "device.h"
   SRCS
@@ -190,11 +202,13 @@ loom_cc_library(
     iree::async
     iree::async::util::proactor_pool
     iree::base
+    iree::base::internal::path
     iree::base::threading
     iree::experimental::loom_serve::storage::memory
     iree::hal
     iree::hal::drivers
     iree::tooling::device_util
+    ${_device_platform_deps}
   PUBLIC
 )
 
@@ -223,6 +237,23 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
 )
+
+if(IREE_HAL_DRIVER_TASK)
+loom_cc_test(
+  NAME
+    device_cpu_test
+  SRCS
+    "device_cpu_test.cc"
+  DEPS
+    ::device
+    ::host
+    iree::base
+    iree::hal
+    iree::task
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
 loom_cc_test(
@@ -278,6 +309,46 @@ loom_cc_library(
   PUBLIC
 )
 
+set(_target_platform_copts "")
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+  list(APPEND _target_platform_copts "-DLOOM_SERVE_TARGET_AMDGPU=1")
+endif()
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN)
+  list(APPEND _target_platform_copts "-DLOOM_SERVE_TARGET_SPIRV=1")
+endif()
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA)
+  list(APPEND _target_platform_copts "-DLOOM_SERVE_TARGET_XDNA=1")
+endif()
+set(_target_platform_deps "")
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+  list(APPEND _target_platform_deps loom::binding::c::target::amdgpu::iree_hal)
+endif()
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN)
+  list(APPEND _target_platform_deps loom::binding::c::target::spirv::iree_hal)
+endif()
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA)
+  list(APPEND _target_platform_deps loom::binding::c::target::amd::xdna::iree_hal)
+endif()
+loom_cc_library(
+  NAME
+    target
+  COPTS
+    ${_target_platform_copts}
+  HDRS
+    "target.h"
+  SRCS
+    "target.c"
+  DEPS
+    ::compilation
+    iree::base
+    iree::hal
+    loom::binding::c::loomc
+    loom::binding::c::target::cpu::iree_hal
+    loom::binding::c::target::iree_hal
+    ${_target_platform_deps}
+  PUBLIC
+)
+
 loom_cc_library(
   NAME
     jit
@@ -289,15 +360,15 @@ loom_cc_library(
     ::command
     ::compilation
     ::host
+    ::target
     iree::base
     iree::base::internal::path
     iree::base::threading
     iree::hal
     iree::io::file_handle
     loom::binding::c::loomc
-    loom::binding::c::target::amdgpu
-    loom::binding::c::target::amdgpu::iree_hal
     loom::binding::c::target::cmd
+    loom::binding::c::target::configured
     loom::binding::c::target::vm
     loom::binding::c::task_pool
     loom::target::arch::cmd::program

@@ -1,6 +1,6 @@
 
 config.decl @fixture.units : %value: index where [range(%value, 1, 256)]
-amdgpu.target<gfx11-generic> @fixture_target {subgroup_size = 32}
+target.decl @fixture_target
 
 // One workgroup per row. This intentionally simple device oracle exercises
 // ragged sequences and real command workspace, not model performance.

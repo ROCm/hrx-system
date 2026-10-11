@@ -174,7 +174,7 @@ loom_cc_binary(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_binary(
   NAME
     model_check
@@ -192,7 +192,7 @@ loom_cc_binary(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     model
@@ -229,7 +229,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_binary(
   NAME
     generate
@@ -247,7 +247,7 @@ loom_cc_binary(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_binary(
   NAME
     server

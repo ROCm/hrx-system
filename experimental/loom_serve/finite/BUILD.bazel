@@ -54,7 +54,6 @@ loom_cc_library(
     hdrs = ["model.h"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
         "//experimental/loom_serve/runtime:compilation",

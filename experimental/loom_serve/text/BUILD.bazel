@@ -54,7 +54,6 @@ loom_cc_library(
     ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
         ":chat",
@@ -189,7 +188,6 @@ loom_cc_library(
     hdrs = ["session.h"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
         ":chat",
@@ -209,7 +207,6 @@ loom_cc_library(
     hdrs = ["checkpoint_registry.h"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     visibility = [":__pkg__"],
     deps = [
@@ -227,7 +224,6 @@ loom_cc_library(
     hdrs = ["epoch.h"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     visibility = [":__pkg__"],
     deps = [
@@ -259,7 +255,6 @@ loom_cc_library(
     hdrs = ["service.h"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
         ":chat",
@@ -297,7 +292,6 @@ loom_cc_binary(
     srcs = ["server.c"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
         ":flags",
@@ -321,7 +315,6 @@ loom_cc_binary(
     srcs = ["generate.c"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
         ":chat",
@@ -353,7 +346,6 @@ loom_cc_binary(
     srcs = ["epoch_check.cc"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
         ":chat",

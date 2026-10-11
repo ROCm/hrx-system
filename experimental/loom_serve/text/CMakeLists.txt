@@ -43,7 +43,7 @@ loom_cc_library(
   PUBLIC
 )
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     model
@@ -197,7 +197,7 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     session
@@ -218,7 +218,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     checkpoint_registry
@@ -236,7 +236,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     epoch
@@ -269,7 +269,7 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     service
@@ -309,7 +309,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_binary(
   NAME
     server
@@ -332,7 +332,7 @@ loom_cc_binary(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_binary(
   NAME
     generate
@@ -363,7 +363,7 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_binary(
   NAME
     epoch_check
