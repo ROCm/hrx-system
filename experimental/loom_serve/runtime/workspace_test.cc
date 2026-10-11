@@ -7,6 +7,8 @@
 #include "experimental/loom_serve/runtime/workspace.h"
 
 #include <array>
+#include <memory>
+#include <vector>
 
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/execution.h"
@@ -285,6 +287,122 @@ TEST_P(WorkspaceTest, ReleasedExecutionPreservesPendingRawAllocationOwnership) {
   EXPECT_EQ(retired.bytes_committed, 0u);
   EXPECT_EQ(retired.reserve_count, 2u);
   EXPECT_EQ(retired.release_count, 2u);
+}
+
+TEST_P(WorkspaceTest, LiveEscapeDoesNotRetainRetiredGeneration) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  const uint32_t pattern = 0x2468ACE0;
+  const iree_hal_transfer_operation_t fill = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+      .fill = {.target_buffer = producer_.buffer,
+               .length = sizeof(producer_.output),
+               .pattern = &pattern,
+               .pattern_length = sizeof(pattern)}};
+  uint64_t value = 0;
+  IREE_ASSERT_OK(
+      loom_serve_execution_transfer(producer_.execution, 1, &fill, &value));
+
+  // A model's escaping input/output is allocated before its private command
+  // transients. Geometry may grow while that escape remains live.
+  IREE_ASSERT_OK(loom_serve_workspace_reserve(workspace_, 2 * kSlabBytes, 16));
+  const auto request = iree_hal_make_pool_reservation_request(64, 16);
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_execution_alloca(producer_.execution, &request, &buffer));
+  std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
+      transient(buffer, &iree_hal_buffer_release);
+  IREE_ASSERT_OK(loom_serve_execution_dealloca(producer_.execution,
+                                               transient.get(), &value));
+  transient.reset();
+  IREE_ASSERT_OK(loom_serve_execution_wait(producer_.execution, value));
+
+  // Moving to a third geometry makes the middle generation entirely idle.
+  // Its raw captures must retire independently of the earlier live escape.
+  IREE_ASSERT_OK(loom_serve_workspace_reserve(workspace_, 4 * kSlabBytes, 16));
+  IREE_ASSERT_OK(CompleteIndependentWork());
+  const auto live = loom_serve_workspace_statistics(workspace_);
+  EXPECT_EQ(live.reservation_count, 1u);
+  EXPECT_EQ(live.slab_count, 2u);
+  EXPECT_EQ(live.bytes_committed, 5 * kSlabBytes);
+
+  IREE_ASSERT_OK(DownloadAndRelease(producer_));
+  IREE_ASSERT_OK(loom_serve_execution_drain(producer_.execution));
+  for (uint32_t actual : producer_.output) {
+    EXPECT_EQ(actual, pattern);
+  }
+  loom_serve_workspace_trim(workspace_);
+  const auto retired = loom_serve_workspace_statistics(workspace_);
+  EXPECT_EQ(retired.reservation_count, 0u);
+  EXPECT_EQ(retired.bytes_committed, 0u);
+  EXPECT_EQ(retired.reserve_count, 3u);
+  EXPECT_EQ(retired.release_count, 3u);
+}
+
+TEST_P(WorkspaceTest, CaptureCompactionPreservesLiveRootsAcrossRingWrap) {
+  // Retire a prefix so the following full-ring compaction wraps physically.
+  IREE_ASSERT_OK(Allocate(producer_));
+  uint64_t value = 0;
+  IREE_ASSERT_OK(loom_serve_execution_dealloca(producer_.execution,
+                                               producer_.buffer, &value));
+  iree_hal_buffer_release(producer_.buffer);
+  producer_.buffer = nullptr;
+  IREE_ASSERT_OK(loom_serve_execution_wait(producer_.execution, value));
+  IREE_ASSERT_OK(Allocate(producer_));
+
+  // Interleave long-lived values with retired command-private allocations on
+  // the same execution. The oldest live root cannot hide the completed ones.
+  using Buffer =
+      std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>;
+  std::vector<Buffer> buffers;
+  const auto request = iree_hal_make_pool_reservation_request(64, 16);
+  for (uint32_t i = 0; i < 32; ++i) {
+    iree_hal_buffer_t* buffer = nullptr;
+    IREE_ASSERT_OK(
+        loom_serve_execution_alloca(producer_.execution, &request, &buffer));
+    buffers.emplace_back(buffer, &iree_hal_buffer_release);
+    const uint32_t pattern = i + 1;
+    const iree_hal_transfer_operation_t fill = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+        .fill = {.target_buffer = buffer,
+                 .length = 64,
+                 .pattern = &pattern,
+                 .pattern_length = sizeof(pattern)}};
+    IREE_ASSERT_OK(
+        loom_serve_execution_transfer(producer_.execution, 1, &fill, &value));
+    if (!(i % 2)) {
+      IREE_ASSERT_OK(
+          loom_serve_execution_dealloca(producer_.execution, buffer, &value));
+      buffers.back().reset();
+    }
+    IREE_ASSERT_OK(loom_serve_execution_wait(producer_.execution, value));
+  }
+  EXPECT_EQ(loom_serve_workspace_statistics(workspace_).reservation_count, 17u);
+  for (size_t i = 1; i < buffers.size(); i += 2) {
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download = {.source_buffer = buffers[i].get(),
+                     .target = &consumer_.output[i / 2],
+                     .length = sizeof(uint32_t)}};
+    IREE_ASSERT_OK(loom_serve_execution_transfer(producer_.execution, 1,
+                                                 &download, &value));
+    IREE_ASSERT_OK(loom_serve_execution_dealloca(producer_.execution,
+                                                 buffers[i].get(), &value));
+    buffers[i].reset();
+  }
+  IREE_ASSERT_OK(loom_serve_execution_dealloca(producer_.execution,
+                                               producer_.buffer, &value));
+  iree_hal_buffer_release(producer_.buffer);
+  producer_.buffer = nullptr;
+  IREE_ASSERT_OK(loom_serve_execution_drain(producer_.execution));
+  for (size_t i = 0; i < consumer_.output.size(); ++i) {
+    EXPECT_EQ(consumer_.output[i], 2 * (i + 1));
+  }
+  loom_serve_workspace_trim(workspace_);
+  const auto retired = loom_serve_workspace_statistics(workspace_);
+  EXPECT_EQ(retired.reservation_count, 0u);
+  EXPECT_EQ(retired.bytes_committed, 0u);
+  EXPECT_EQ(retired.reserve_count, 34u);
+  EXPECT_EQ(retired.release_count, 34u);
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, WorkspaceTest, ::testing::Values(1, 4));
