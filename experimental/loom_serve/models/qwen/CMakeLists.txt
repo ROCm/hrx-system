@@ -580,7 +580,7 @@ loom_cc_test(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_TASK)
 loom_cc_test(
   NAME
     prepare_test
@@ -591,6 +591,8 @@ loom_cc_test(
   DEPS
     iree::base
     iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::runtime::input
     iree::experimental::loom_serve::runtime::preparation
     iree::experimental::loom_serve::scheduling::packing

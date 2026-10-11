@@ -189,9 +189,11 @@ loom_cc_test(
     data = ["prepare.loom"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
+        "//runtime/config/hal:driver_task",
     ]),
     deps = [
+        "//experimental/loom_serve/runtime:device",
+        "//experimental/loom_serve/runtime:host",
         "//experimental/loom_serve/runtime:input",
         "//experimental/loom_serve/runtime:preparation",
         "//experimental/loom_serve/scheduling:packing",

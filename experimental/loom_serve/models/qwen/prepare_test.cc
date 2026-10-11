@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "experimental/loom_serve/runtime/device.h"
+#include "experimental/loom_serve/runtime/host.h"
 #include "experimental/loom_serve/runtime/input.h"
 #include "experimental/loom_serve/runtime/preparation.h"
 #include "experimental/loom_serve/text/model.h"
@@ -337,7 +339,34 @@ TEST_F(PrepareTest, SourceRejectsTokenShapesBeyondItsPacketCapacity) {
   }
 }
 
-TEST(PrepareModelTest, InvalidPoolAndMissingTokenizerRetireSourceResults) {
+class PrepareModelTest : public ::testing::TestWithParam<uint32_t> {
+ protected:
+  void SetUp() override {
+    IREE_ASSERT_OK(
+        loom_serve_host_create(GetParam(), &host_, iree_allocator_system()));
+    const loom_serve_device_options_t options = {.uri = IREE_SV("task")};
+    IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &options, &group_,
+                                                  iree_allocator_system()));
+    device_ = loom_serve_device_group_at(group_, 0);
+  }
+
+  void TearDown() override {
+    IREE_EXPECT_OK(loom_serve_text_model_destroy(model_));
+    IREE_EXPECT_OK(loom_serve_device_group_destroy(group_));
+    loom_serve_host_release(host_);
+  }
+
+  // Shared workers outlive asynchronous preparation and its device owner.
+  loom_serve_host_t* host_ = nullptr;
+  // Real CPU execution owner used even when source preparation rejects input.
+  loom_serve_device_group_t* group_ = nullptr;
+  // Borrowed device record enclosed by the group lifetime.
+  loom_serve_device_t* device_ = nullptr;
+  // Any unexpectedly accepted model is still retired before its owner.
+  loom_serve_text_model_t* model_ = nullptr;
+};
+
+TEST_P(PrepareModelTest, InvalidPoolAndMissingTokenizerRetireSourceResults) {
   const std::string source = FLAG_prepare_source;
   const std::string directory = source.substr(0, source.find_last_of('/'));
   const loom_serve_packing_shape_t shapes[] = {{32, 1}, {128, 3}};
@@ -353,24 +382,25 @@ TEST(PrepareModelTest, InvalidPoolAndMissingTokenizerRetireSourceResults) {
       .tokenizer_path = IREE_SV("missing-qwen-tokenizer.json"),
       .row_count = 3,
   };
-  loom_serve_text_model_t* model = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        loom_serve_text_model_create(nullptr, &options, &model,
+                        loom_serve_text_model_create(device_, &options, &model_,
                                                      iree_allocator_system()));
-  EXPECT_EQ(model, nullptr);
+  ASSERT_EQ(model_, nullptr);
   auto invalid = options;
   invalid.pool_capacity = 65;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_serve_text_model_create(nullptr, &invalid, &model,
+                        loom_serve_text_model_create(device_, &invalid, &model_,
                                                      iree_allocator_system()));
-  EXPECT_EQ(model, nullptr);
+  ASSERT_EQ(model_, nullptr);
   invalid = options;
   invalid.pool_capacity = 0;
   invalid.checkpoint_capacity = 1;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_serve_text_model_create(nullptr, &invalid, &model,
+                        loom_serve_text_model_create(device_, &invalid, &model_,
                                                      iree_allocator_system()));
-  EXPECT_EQ(model, nullptr);
+  ASSERT_EQ(model_, nullptr);
 }
+
+INSTANTIATE_TEST_SUITE_P(Workers, PrepareModelTest, ::testing::Values(1, 4));
 
 }  // namespace
