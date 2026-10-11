@@ -881,19 +881,7 @@ static iree_status_t iree_async_proactor_io_uring_execute_semaphore_wait(
       (iree_async_semaphore_wait_operation_t*)base_operation;
 
   // Check for immediate satisfaction before allocating a tracker.
-  bool all_satisfied = true;
-  for (iree_host_size_t i = 0; i < wait_op->count; ++i) {
-    uint64_t current = iree_async_semaphore_query(wait_op->semaphores[i]);
-    if (current >= wait_op->values[i]) {
-      if (wait_op->mode == IREE_ASYNC_WAIT_MODE_ANY) {
-        wait_op->satisfied_index = i;
-        return iree_ok_status();
-      }
-    } else {
-      all_satisfied = false;
-    }
-  }
-  if (all_satisfied) {
+  if (iree_async_semaphore_wait_is_satisfied(wait_op)) {
     return iree_ok_status();
   }
 

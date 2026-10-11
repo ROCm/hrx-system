@@ -60,6 +60,13 @@ typedef struct iree_async_semaphore_wait_completion_t {
   iree_status_t status;
 } iree_async_semaphore_wait_completion_t;
 
+// Tests a validated wait for immediate successful completion without allocating
+// a tracker. Writes |operation->satisfied_index| for a satisfied ANY wait.
+// Pending or failed waits return false and must register timepoints so failure
+// propagation and retirement use the normal tracker path.
+bool iree_async_semaphore_wait_is_satisfied(
+    iree_async_semaphore_wait_operation_t* operation);
+
 // Allocates and initializes a tracker for |operation|. On success, associates
 // the tracker through |context|, retains each referenced semaphore, and
 // transfers the operation's LINKED continuation to it. Registration has not

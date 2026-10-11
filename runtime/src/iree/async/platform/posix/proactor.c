@@ -1071,24 +1071,7 @@ static void iree_async_proactor_posix_commit_semaphore_wait(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Check for immediate satisfaction before allocating a tracker.
-  bool immediately_satisfied = false;
-  bool all_satisfied = true;
-  for (iree_host_size_t i = 0; i < wait_op->count; ++i) {
-    uint64_t current = iree_async_semaphore_query(wait_op->semaphores[i]);
-    if (current >= wait_op->values[i]) {
-      if (wait_op->mode == IREE_ASYNC_WAIT_MODE_ANY) {
-        wait_op->satisfied_index = i;
-        immediately_satisfied = true;
-        break;
-      }
-    } else {
-      all_satisfied = false;
-    }
-  }
-  if (!immediately_satisfied && all_satisfied) {
-    immediately_satisfied = true;
-  }
-  if (immediately_satisfied) {
+  if (iree_async_semaphore_wait_is_satisfied(wait_op)) {
     IREE_TRACE_ZONE_END(z0);
     iree_async_proactor_posix_publish_completion(
         proactor, &wait_op->base, iree_ok_status(),

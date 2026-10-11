@@ -35,10 +35,7 @@ typedef struct iree_async_semaphore_wait_tracker_t
 //   Mode   generic | io_uring | IOCP | kqueue
 //   ──────────────────────────────────────────
 //   ALL    yes     | yes      | yes  | yes
-//   ANY    yes     | futex*   | yes  | yes
-//
-//   * io_uring uses futex_waitv (5.16+) for efficient multi-wait when
-//     available; falls back to per-semaphore polling otherwise.
+//   ANY    yes     | yes      | yes  | yes
 //
 // Wait modes:
 //   IREE_ASYNC_WAIT_MODE_ALL: Completes when ALL semaphores reach their

@@ -106,6 +106,30 @@ struct iree_async_semaphore_wait_tracker_t {
   iree_async_semaphore_wait_timepoint_t timepoints[];
 };
 
+bool iree_async_semaphore_wait_is_satisfied(
+    iree_async_semaphore_wait_operation_t* operation) {
+  bool all_satisfied = true;
+  for (iree_host_size_t i = 0; i < operation->count; ++i) {
+    iree_async_semaphore_t* semaphore = operation->semaphores[i];
+    if (iree_async_semaphore_query_status(semaphore) != IREE_STATUS_OK) {
+      return false;
+    }
+    // Timepoints use the shared timeline. A backend query may encode a racing
+    // failure as a high sentinel, which would incorrectly satisfy this wait.
+    uint64_t current = (uint64_t)iree_atomic_load(&semaphore->timeline_value,
+                                                  iree_memory_order_acquire);
+    if (current >= operation->values[i]) {
+      if (operation->mode == IREE_ASYNC_WAIT_MODE_ANY) {
+        operation->satisfied_index = i;
+        return true;
+      }
+    } else {
+      all_satisfied = false;
+    }
+  }
+  return all_satisfied;
+}
+
 void iree_async_semaphore_wait_context_initialize(
     iree_async_semaphore_wait_context_t* out_context) {
   iree_slim_mutex_initialize(&out_context->association_mutex);

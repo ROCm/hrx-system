@@ -718,6 +718,27 @@ TEST_P(SemaphoreAsyncTest, WaitSemaphoreAlreadyFailed) {
   iree_async_semaphore_release(semaphore);
 }
 
+// A reached timeline does not erase a failure published before submission.
+TEST_P(SemaphoreAsyncTest, WaitSatisfiedSemaphoreAlreadyFailed) {
+  iree_async_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_async_semaphore_create(
+      proactor_, 10, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
+      iree_allocator_system(), &semaphore));
+  iree_async_semaphore_fail(
+      semaphore, iree_make_status(IREE_STATUS_ABORTED, "reached then failed"));
+  uint64_t target_value = 10;
+  for (auto mode : {IREE_ASYNC_WAIT_MODE_ALL, IREE_ASYNC_WAIT_MODE_ANY}) {
+    CompletionTracker completion;
+    iree_async_semaphore_wait_operation_t wait;
+    InitWaitOp(&wait, &semaphore, &target_value, mode,
+               CompletionTracker::Callback, &completion);
+    IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait.base));
+    PollUntilCondition([&] { return completion.call_count == 1; });
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, completion.ConsumeStatus());
+  }
+  iree_async_semaphore_release(semaphore);
+}
+
 // Submit wait, cancel, completes with CANCELLED.
 TEST_P(SemaphoreAsyncTest, WaitCancellation) {
   iree_async_semaphore_t* semaphore = nullptr;
