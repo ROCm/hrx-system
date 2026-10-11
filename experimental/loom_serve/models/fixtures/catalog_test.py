@@ -878,6 +878,21 @@ def check_device_trim(client, backing, workers):
         return state
 
     before = snapshot()
+    workspace_before = client.idle()["server"]["resources"]["devices"][0]["memory"][
+        "workspace"
+    ]
+    counter_names = (
+        "reserve_count",
+        "release_count",
+        "reuse_count",
+        "reuse_miss_count",
+        "fresh_count",
+        "exhausted_count",
+        "over_budget_count",
+        "wait_count",
+        "quarantine_eviction_count",
+    )
+    assert workspace_before["reserve_count"] > 0, workspace_before
     client.request("/v1/models/pin", selector)
     client.request("/v1/models/drain", selector)
     with ThreadPoolExecutor(max_workers=1) as clients:
@@ -907,6 +922,14 @@ def check_device_trim(client, backing, workers):
             assert cold["status"]["held_requests"] == 1, cold
             memory_pinned = pinned["device"]["memory"]["retained"]
             memory_cold = trimmed["device"]["memory"]["retained"]
+            workspace_cold = trimmed["device"]["memory"]["workspace"]
+            # Counter ownership is the device, not a trim generation or model.
+            for name in counter_names:
+                assert workspace_cold[name] >= workspace_before[name], (
+                    name,
+                    workspace_before,
+                    workspace_cold,
+                )
             if backing == "elastic":
                 released = before["parameters"]["committed_bytes"]
                 assert released > 0, before
@@ -941,6 +964,17 @@ def check_device_trim(client, backing, workers):
         before["parameters"]["activations"] + (backing == "elastic")
     ), after
     client.checkpoint("trim-prefix", "DELETE")
+    vectors = client.request(
+        "/v1/embeddings", {"model": "vectors", "input": "ab", "dimensions": 2}
+    )
+    assert vectors["data"][0]["embedding"] == [3, 2], vectors
+    workspace_after = client.idle()["server"]["resources"]["devices"][0]["memory"][
+        "workspace"
+    ]
+    assert workspace_after["reserve_count"] > workspace_cold["reserve_count"], (
+        workspace_cold,
+        workspace_after,
+    )
     print(
         json.dumps(
             {
@@ -953,6 +987,7 @@ def check_device_trim(client, backing, workers):
                 "outputs_verified": True,
                 "incarnation_preserved": True,
                 "compilation_preserved": True,
+                "workspace_after": workspace_after,
             }
         ),
         flush=True,
@@ -1209,6 +1244,16 @@ def check_empty_server(server_command, directory, device, backing):
                 "quarantined_bytes": 0,
                 "budget_limit": 0,
                 "reservation_count": 0,
+                "slab_count": 0,
+                "reserve_count": 0,
+                "release_count": 0,
+                "reuse_count": 0,
+                "reuse_miss_count": 0,
+                "fresh_count": 0,
+                "exhausted_count": 0,
+                "over_budget_count": 0,
+                "wait_count": 0,
+                "quarantine_eviction_count": 0,
             }, memory
             for target in (0, 2**64 - 1):
                 assert client.request(

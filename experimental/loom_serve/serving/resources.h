@@ -32,9 +32,12 @@ typedef struct loom_serve_resources_t {
 // never waits for devices, polls hardware or changes residency. Retained pool
 // accounting is null for fixed backing; an elastic limit is null when
 // unbounded. Workspace values are independent atomic observations, not a
-// coherent total. These values exclude fixed buffers, loader/driver storage and
-// hidden padding; they cannot be interpreted as device-wide usage or available
-// allocation bytes.
+// coherent total. Workspace acquisition/release counters accumulate across
+// models and retired pool generations for the device owner's lifetime.
+// wait_count counts reservations needing a reuse prerequisite, not host waits
+// or elapsed time. These values exclude fixed buffers, loader/driver storage
+// and hidden padding; they cannot be interpreted as device-wide usage or
+// available allocation bytes.
 iree_status_t loom_serve_resources_write_json(
     const loom_serve_resources_t* resources, loom_output_stream_t* output);
 

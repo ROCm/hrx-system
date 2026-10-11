@@ -58,7 +58,7 @@ TEST_F(ResourcesTest, EveryRecordOfOneCpuGroupIsPublishedWithoutModelWork) {
   const loom_serve_resources_t resources = {.device_group = group_};
   EXPECT_EQ(
       Write(resources),
-      R"({"listeners":[],"devices":[{"index":0,"id":"task","name":"task","driver":"task","backend":"task","physical_devices":[{"ordinal":0,"name":"task","path":"task"}],"memory":{"backing":"fixed","retained":null,"workspace":{"reserved_bytes":0,"committed_bytes":0,"free_bytes":0,"quarantined_bytes":0,"budget_limit":0,"reservation_count":0}}},{"index":1,"id":"task","name":"task","driver":"task","backend":"task","physical_devices":[{"ordinal":0,"name":"task","path":"task"}],"memory":{"backing":"fixed","retained":null,"workspace":{"reserved_bytes":0,"committed_bytes":0,"free_bytes":0,"quarantined_bytes":0,"budget_limit":0,"reservation_count":0}}}]})");
+      R"({"listeners":[],"devices":[{"index":0,"id":"task","name":"task","driver":"task","backend":"task","physical_devices":[{"ordinal":0,"name":"task","path":"task"}],"memory":{"backing":"fixed","retained":null,"workspace":{"reserved_bytes":0,"committed_bytes":0,"free_bytes":0,"quarantined_bytes":0,"budget_limit":0,"reservation_count":0,"slab_count":0,"reserve_count":0,"release_count":0,"reuse_count":0,"reuse_miss_count":0,"fresh_count":0,"exhausted_count":0,"over_budget_count":0,"wait_count":0,"quarantine_eviction_count":0}}},{"index":1,"id":"task","name":"task","driver":"task","backend":"task","physical_devices":[{"ordinal":0,"name":"task","path":"task"}],"memory":{"backing":"fixed","retained":null,"workspace":{"reserved_bytes":0,"committed_bytes":0,"free_bytes":0,"quarantined_bytes":0,"budget_limit":0,"reservation_count":0,"slab_count":0,"reserve_count":0,"release_count":0,"reuse_count":0,"reuse_miss_count":0,"fresh_count":0,"exhausted_count":0,"over_budget_count":0,"wait_count":0,"quarantine_eviction_count":0}}}]})");
 }
 
 TEST_F(ResourcesTest, TrimRequiresExplicitDeviceAndIntegerTarget) {
@@ -145,7 +145,7 @@ TEST_F(ResourcesTest, TrimReportsSelectedResourceWithoutModelOwnership) {
   auto value = iree_string_builder_view(&output_);
   EXPECT_EQ(
       std::string(value.data, value.size),
-      R"({"target_bytes":18446744073709551615,"device":{"index":1,"id":"task","name":"task","driver":"task","backend":"task","physical_devices":[{"ordinal":0,"name":"task","path":"task"}],"memory":{"backing":"fixed","retained":null,"workspace":{"reserved_bytes":0,"committed_bytes":0,"free_bytes":0,"quarantined_bytes":0,"budget_limit":0,"reservation_count":0}}}})");
+      R"({"target_bytes":18446744073709551615,"device":{"index":1,"id":"task","name":"task","driver":"task","backend":"task","physical_devices":[{"ordinal":0,"name":"task","path":"task"}],"memory":{"backing":"fixed","retained":null,"workspace":{"reserved_bytes":0,"committed_bytes":0,"free_bytes":0,"quarantined_bytes":0,"budget_limit":0,"reservation_count":0,"slab_count":0,"reserve_count":0,"release_count":0,"reuse_count":0,"reuse_miss_count":0,"fresh_count":0,"exhausted_count":0,"over_budget_count":0,"wait_count":0,"quarantine_eviction_count":0}}}})");
 }
 
 }  // namespace

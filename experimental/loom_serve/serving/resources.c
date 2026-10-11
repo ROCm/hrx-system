@@ -76,10 +76,20 @@ static iree_status_t resources_write_memory(const loom_serve_device_t* device,
       ",\"workspace\":{\"reserved_bytes\":%" PRIu64
       ",\"committed_bytes\":%" PRIu64 ",\"free_bytes\":%" PRIu64
       ",\"quarantined_bytes\":%" PRIu64 ",\"budget_limit\":%" PRIu64
-      ",\"reservation_count\":%" PRIu32 "}}",
+      ",\"reservation_count\":%" PRIu32 ",\"slab_count\":%" PRIu32
+      ",\"reserve_count\":%" PRIu64 ",\"release_count\":%" PRIu64
+      ",\"reuse_count\":%" PRIu64 ",\"reuse_miss_count\":%" PRIu64
+      ",\"fresh_count\":%" PRIu64 ",\"exhausted_count\":%" PRIu64
+      ",\"over_budget_count\":%" PRIu64 ",\"wait_count\":%" PRIu64
+      ",\"quarantine_eviction_count\":%" PRIu64 "}}",
       memory.workspace.bytes_reserved, memory.workspace.bytes_committed,
       memory.workspace.bytes_free, memory.workspace.bytes_quarantined,
-      memory.workspace.budget_limit, memory.workspace.reservation_count);
+      memory.workspace.budget_limit, memory.workspace.reservation_count,
+      memory.workspace.slab_count, memory.workspace.reserve_count,
+      memory.workspace.release_count, memory.workspace.reuse_count,
+      memory.workspace.reuse_miss_count, memory.workspace.fresh_count,
+      memory.workspace.exhausted_count, memory.workspace.over_budget_count,
+      memory.workspace.wait_count, memory.workspace.quarantine_eviction_count);
 }
 
 static iree_status_t resources_write_device(loom_serve_device_t* device,

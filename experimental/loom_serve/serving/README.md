@@ -563,8 +563,18 @@ workspace. `backing` is `fixed` or `elastic`. Elastic `retained` contains
 `peak_bytes` and cumulative `released_bytes`, across all models on that owner.
 Fixed `retained` is null, not zero usage. Workspace fields report
 `reserved_bytes`, `committed_bytes`, `free_bytes`, `quarantined_bytes`,
-`budget_limit` (zero for unbounded) and `reservation_count` using the HAL's
-atomic pool observations. They can change independently during a snapshot;
+`budget_limit` (zero for unbounded), `reservation_count` and `slab_count` using
+the HAL's atomic pool observations. The cumulative `reserve_count`,
+`release_count`, `reuse_count`, `reuse_miss_count`, `fresh_count`,
+`exhausted_count`, `over_budget_count`, `wait_count` and
+`quarantine_eviction_count` cover all workspace consumers and retired pool
+generations for this device owner's lifetime. Trimming memory or unloading a
+model does not reset them. `wait_count` counts successful reservations with an
+additional memory-reuse prerequisite; it is neither a count of blocked host
+threads nor a wait duration. Its delta distinguishes dependency-producing reuse
+from frontier-dominated reuse and fresh allocation. An exhausted acquisition
+attempt can be followed by growth and successful acquisition, so exhaustion is
+not a failed-request count. Values can change independently during a snapshot;
 free bytes are not a promise of immediately admissible allocations.
 Neither scope includes all fixed buffers, loader/driver storage or hidden
 physical padding, so their sum is not VRAM usage. Observation neither waits for
