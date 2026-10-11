@@ -743,11 +743,14 @@ TEST(SignedDivisorMagicTest, ExactAcrossWidthsAndSignedBoundaries) {
         const int64_t minimum = SignedValueAtWidth(sign_bit, bit_width);
         const int64_t maximum = SignedValueAtWidth(sign_bit - 1, bit_width);
         for (int64_t numerator :
-             {minimum, minimum + 1, divisor, divisor + 1, INT64_C(-1),
-              INT64_C(0), INT64_C(1), maximum - 1, maximum}) {
+             {minimum, minimum + 1, divisor, INT64_C(-1), INT64_C(0),
+              INT64_C(1), maximum - 1, maximum}) {
           if (numerator >= minimum && numerator <= maximum) {
             check_numerator(numerator);
           }
+        }
+        if (divisor < maximum) {
+          check_numerator(divisor + 1);
         }
         for (uint32_t sample = 0; sample < 64; ++sample) {
           random ^= random << 13;
