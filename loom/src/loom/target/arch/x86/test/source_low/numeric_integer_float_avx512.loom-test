@@ -1,0 +1,114 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_integer_float.loom-test
+// RUN: emit source-low target=x86:avx512 output=low
+
+func.def @convert_boolean(%input: i1) -> (f32, f64, f32, f64) {
+  %signed32 = scalar.sitofp %input : i1 to f32
+  %signed64 = scalar.sitofp %input : i1 to f64
+  %unsigned32 = scalar.uitofp %input : i1 to f32
+  %unsigned64 = scalar.uitofp %input : i1 to f64
+  func.return %signed32, %signed64, %unsigned32, %unsigned64 : f32, f64, f32, f64
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (i1) -> (f32, f64, f32, f64)}) @convert_boolean(%input: reg<x86.gpr32>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
+  %14 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %15 = shl.imm.gpr32 %14 {shift = 31}
+  %16 = sar.imm.gpr32 %15 {shift = 31}
+  %17 = vxorps.zero.xmm
+  %signed32 = vcvtsi2ss.xmm.gpr32 %17, %16
+  %19 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %20 = shl.imm.gpr32 %19 {shift = 31}
+  %21 = sar.imm.gpr32 %20 {shift = 31}
+  %signed64 = vcvtsi2sd.xmm.gpr32 %17, %21
+  %24 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %25 = and.imm.gpr32 %24 {imm32 = 1}
+  %unsigned32 = vcvtsi2ss.xmm.gpr32 %17, %25
+  %28 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %29 = and.imm.gpr32 %28 {imm32 = 1}
+  %unsigned64 = vcvtsi2sd.xmm.gpr32 %17, %29
+  return %signed32, %signed64, %unsigned32, %unsigned64
+}
+
+// ====
+
+func.def @convert_byte(%input: i8) -> (f32, f64, f32, f64) {
+  %signed32 = scalar.sitofp %input : i8 to f32
+  %signed64 = scalar.sitofp %input : i8 to f64
+  %unsigned32 = scalar.uitofp %input : i8 to f32
+  %unsigned64 = scalar.uitofp %input : i8 to f64
+  func.return %signed32, %signed64, %unsigned32, %unsigned64 : f32, f64, f32, f64
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (i8) -> (f32, f64, f32, f64)}) @convert_byte(%input: reg<x86.gpr32>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
+  %14 = movsx.i8.gpr32 %input
+  %15 = vxorps.zero.xmm
+  %signed32 = vcvtsi2ss.xmm.gpr32 %15, %14
+  %signed64 = vcvtsi2sd.xmm.gpr32 %15, %14
+  %20 = movzx.u8.gpr32 %input
+  %unsigned32 = vcvtsi2ss.xmm.gpr32 %15, %20
+  %unsigned64 = vcvtsi2sd.xmm.gpr32 %15, %20
+  return %signed32, %signed64, %unsigned32, %unsigned64
+}
+
+// ====
+
+func.def @convert_halfword(%input: i16) -> (f32, f64, f32, f64) {
+  %signed32 = scalar.sitofp %input : i16 to f32
+  %signed64 = scalar.sitofp %input : i16 to f64
+  %unsigned32 = scalar.uitofp %input : i16 to f32
+  %unsigned64 = scalar.uitofp %input : i16 to f64
+  func.return %signed32, %signed64, %unsigned32, %unsigned64 : f32, f64, f32, f64
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (i16) -> (f32, f64, f32, f64)}) @convert_halfword(%input: reg<x86.gpr32>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
+  %14 = movsx.i16.gpr32 %input
+  %15 = vxorps.zero.xmm
+  %signed32 = vcvtsi2ss.xmm.gpr32 %15, %14
+  %signed64 = vcvtsi2sd.xmm.gpr32 %15, %14
+  %20 = movzx.u16.gpr32 %input
+  %unsigned32 = vcvtsi2ss.xmm.gpr32 %15, %20
+  %unsigned64 = vcvtsi2sd.xmm.gpr32 %15, %20
+  return %signed32, %signed64, %unsigned32, %unsigned64
+}
+
+// ====
+
+func.def @convert_word(%input: i32) -> (f32, f64, f32, f64) {
+  %signed32 = scalar.sitofp %input : i32 to f32
+  %signed64 = scalar.sitofp %input : i32 to f64
+  %unsigned32 = scalar.uitofp %input : i32 to f32
+  %unsigned64 = scalar.uitofp %input : i32 to f64
+  func.return %signed32, %signed64, %unsigned32, %unsigned64 : f32, f64, f32, f64
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (i32) -> (f32, f64, f32, f64)}) @convert_word(%input: reg<x86.gpr32>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
+  %14 = vxorps.zero.xmm
+  %signed32 = vcvtsi2ss.xmm.gpr32 %14, %input
+  %signed64 = vcvtsi2sd.xmm.gpr32 %14, %input
+  %unsigned32 = vcvtusi2ss.xmm.gpr32 %14, %input
+  %unsigned64 = vcvtusi2sd.xmm.gpr32 %14, %input
+  return %signed32, %signed64, %unsigned32, %unsigned64
+}
+
+// ====
+
+func.def @convert_wide(%input: i64) -> (f32, f64, f32, f64) {
+  %signed32 = scalar.sitofp %input : i64 to f32
+  %signed64 = scalar.sitofp %input : i64 to f64
+  %unsigned32 = scalar.uitofp %input : i64 to f32
+  %unsigned64 = scalar.uitofp %input : i64 to f64
+  func.return %signed32, %signed64, %unsigned32, %unsigned64 : f32, f64, f32, f64
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (i64) -> (f32, f64, f32, f64)}) @convert_wide(%input: reg<x86.gpr64>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
+  %14 = vxorps.zero.xmm
+  %signed32 = vcvtsi2ss.xmm.gpr64 %14, %input
+  %signed64 = vcvtsi2sd.xmm.gpr64 %14, %input
+  %unsigned32 = vcvtusi2ss.xmm.gpr64 %14, %input
+  %unsigned64 = vcvtusi2sd.xmm.gpr64 %14, %input
+  return %signed32, %signed64, %unsigned32, %unsigned64
+}

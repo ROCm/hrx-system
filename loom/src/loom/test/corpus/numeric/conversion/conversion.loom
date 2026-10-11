@@ -262,3 +262,123 @@ check.scenario @float_to_integer_values {
   }
   check.return
 }
+
+// Scalar conversions expose all integer widths through buffer results. The
+// input crosses the invocation boundary, so neither target nor oracle can
+// constant-fold the conversions from the trial recipe.
+func.def @scalar_integer_float_observations(%wide: i64, %output32: buffer, %output64: buffer) {
+  %base = index.constant 0 : offset
+  %singles = buffer.view %output32[%base] : buffer -> view<10xf32>
+  %doubles = buffer.view %output64[%base] : buffer -> view<10xf64>
+  %word = scalar.trunci %wide : i64 to i32
+  %half = scalar.trunci %word : i32 to i16
+  %byte = scalar.trunci %word : i32 to i8
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %low_bit = scalar.andi %word, %c1 : i32
+  %boolean = scalar.cmpi ne, %low_bit, %c0 : i32
+  %s1_32 = scalar.sitofp %boolean : i1 to f32
+  view.store %s1_32, %singles[0] : f32, view<10xf32>
+  %u1_32 = scalar.uitofp %boolean : i1 to f32
+  view.store %u1_32, %singles[1] : f32, view<10xf32>
+  %s8_32 = scalar.sitofp %byte : i8 to f32
+  view.store %s8_32, %singles[2] : f32, view<10xf32>
+  %u8_32 = scalar.uitofp %byte : i8 to f32
+  view.store %u8_32, %singles[3] : f32, view<10xf32>
+  %s16_32 = scalar.sitofp %half : i16 to f32
+  view.store %s16_32, %singles[4] : f32, view<10xf32>
+  %u16_32 = scalar.uitofp %half : i16 to f32
+  view.store %u16_32, %singles[5] : f32, view<10xf32>
+  %s32_32 = scalar.sitofp %word : i32 to f32
+  view.store %s32_32, %singles[6] : f32, view<10xf32>
+  %u32_32 = scalar.uitofp %word : i32 to f32
+  view.store %u32_32, %singles[7] : f32, view<10xf32>
+  %s64_32 = scalar.sitofp %wide : i64 to f32
+  view.store %s64_32, %singles[8] : f32, view<10xf32>
+  %u64_32 = scalar.uitofp %wide : i64 to f32
+  view.store %u64_32, %singles[9] : f32, view<10xf32>
+  %s1_64 = scalar.sitofp %boolean : i1 to f64
+  view.store %s1_64, %doubles[0] : f64, view<10xf64>
+  %u1_64 = scalar.uitofp %boolean : i1 to f64
+  view.store %u1_64, %doubles[1] : f64, view<10xf64>
+  %s8_64 = scalar.sitofp %byte : i8 to f64
+  view.store %s8_64, %doubles[2] : f64, view<10xf64>
+  %u8_64 = scalar.uitofp %byte : i8 to f64
+  view.store %u8_64, %doubles[3] : f64, view<10xf64>
+  %s16_64 = scalar.sitofp %half : i16 to f64
+  view.store %s16_64, %doubles[4] : f64, view<10xf64>
+  %u16_64 = scalar.uitofp %half : i16 to f64
+  view.store %u16_64, %doubles[5] : f64, view<10xf64>
+  %s32_64 = scalar.sitofp %word : i32 to f64
+  view.store %s32_64, %doubles[6] : f64, view<10xf64>
+  %u32_64 = scalar.uitofp %word : i32 to f64
+  view.store %u32_64, %doubles[7] : f64, view<10xf64>
+  %s64_64 = scalar.sitofp %wide : i64 to f64
+  view.store %s64_64, %doubles[8] : f64, view<10xf64>
+  %u64_64 = scalar.uitofp %wide : i64 to f64
+  view.store %u64_64, %doubles[9] : f64, view<10xf64>
+  func.return
+}
+
+// Seven neighbors of every power of two and the first two rounding midpoints
+// for each destination precision. Negating repeats those edges for signed
+// inputs; wrapped zero neighbors also include UINT64_MAX.
+func.def @integer_float_rounding_input(%ordinal: index) -> (i64) {
+  %ordinal64 = index.cast %ordinal : index to i64
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %neighbor_radius = scalar.constant 3 : i64
+  %exponent_shift = scalar.constant 6 : i64
+  %neighbor_count = scalar.constant 7 : i64
+  %f32_precision = scalar.constant 24 : i64
+  %f64_precision = scalar.constant 53 : i64
+  %exponent_mask = scalar.constant 63 : i64
+  %positive_count = scalar.constant 2240 : i64
+  %negative = scalar.cmpi uge, %ordinal64, %positive_count : i64
+  %sample = scalar.remui %ordinal64, %positive_count : i64
+  %neighbor = scalar.remui %sample, %neighbor_count : i64
+  %delta = scalar.subi %neighbor, %neighbor_radius : i64
+  %bucket = scalar.divui %sample, %neighbor_count : i64
+  %exponent = scalar.andi %bucket, %exponent_mask : i64
+  %phase = scalar.shrui %bucket, %exponent_shift : i64
+  %is_power = scalar.cmpi eq, %phase, %c0 : i64
+  %is_single = scalar.cmpi ult, %phase, %neighbor_radius : i64
+  %precision = scf.select %is_single, %f32_precision, %f64_precision : i64
+  %has_fraction = scalar.cmpi uge, %exponent, %precision : i64
+  %shift_value = scalar.subi %exponent, %precision : i64
+  %shift = scf.select %has_fraction, %shift_value, %c0 : i64
+  %half_ulp = scalar.shli %c1, %shift : i64
+  %odd_bit = scalar.andi %phase, %c1 : i64
+  %odd = scalar.cmpi eq, %odd_bit, %c0 : i64
+  %multiplier = scf.select %odd, %neighbor_radius, %c1 : i64
+  %midpoint_offset = scalar.muli %half_ulp, %multiplier : i64
+  %offset = scf.select %is_power, %c0, %midpoint_offset : i64
+  %power = scalar.shli %c1, %exponent : i64
+  %midpoint = scalar.addi %power, %offset : i64
+  %positive = scalar.addi %midpoint, %delta : i64
+  %negated = scalar.subi %c0, %positive : i64
+  %value = scf.select %negative, %negated, %positive : i64
+  func.return %value : i64
+}
+
+check.scenario @scalar_integer_float_values {
+  check.trial[4480](%trial: index, %entropy: check.entropy) {
+    %input = check.generate<@integer_float_rounding_input>(%trial) : (index) -> (i64)
+    %singles = check.generate.fill value(-123.0) : tensor<10xf32>
+    %doubles = check.generate.fill value(-123.0) : tensor<10xf64>
+    check.compare<@scalar_integer_float_observations>(%input, %singles, %doubles) : (i64, tensor<10xf32>, tensor<10xf64>) -> () {
+      check.expect.bitwise actual(%singles) expected(%singles) : tensor<10xf32>
+      check.expect.bitwise actual(%doubles) expected(%doubles) : tensor<10xf64>
+    }
+  }
+  check.trial[1024](%trial: index, %entropy: check.entropy) {
+    %input = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %singles = check.generate.fill value(-123.0) : tensor<10xf32>
+    %doubles = check.generate.fill value(-123.0) : tensor<10xf64>
+    check.compare<@scalar_integer_float_observations>(%input, %singles, %doubles) : (i64, tensor<10xf32>, tensor<10xf64>) -> () {
+      check.expect.bitwise actual(%singles) expected(%singles) : tensor<10xf32>
+      check.expect.bitwise actual(%doubles) expected(%doubles) : tensor<10xf64>
+    }
+  }
+  check.return
+}

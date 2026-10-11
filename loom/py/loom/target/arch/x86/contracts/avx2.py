@@ -24,6 +24,7 @@ from loom.target.arch.x86.contracts.floating_reduction import (
     avx2_float_dot_rules,
     avx2_float_reduction_rules,
 )
+from loom.target.arch.x86.contracts.integer_float import avx2_integer_float_rules
 from loom.target.arch.x86.contracts.integer_reduction import (
     avx2_integer_reduction_rules,
 )
@@ -82,6 +83,7 @@ def _memory_rules() -> tuple[DescriptorRule, ...]:
 def _cases() -> Sequence[ContractCase]:
     return (
         *avx2_scalar_float_rules(_descriptor),
+        *avx2_integer_float_rules(_descriptor),
         *x86_float_narrowing_rules(_descriptor),
         *avx2_vector_construction_rules(_descriptor),
         *avx2_predicate_rules(_descriptor),

@@ -86,6 +86,7 @@ _X86_TASK_HARDWARE_PROFILE = loom_execution_profile(
         ("scalar_loop", "//loom/src/loom/test/corpus/control:loop/scalar_state.loom", "scalar_loop_state_values"),
         ("scalar_arithmetic", "//loom/src/loom/test/corpus/numeric:integer/scalar_observations.loom", "scalar_i32_arithmetic_values"),
         ("scalar_bitfield", "//loom/src/loom/test/corpus/numeric:integer/scalar_observations.loom", "scalar_i32_bitfield_values"),
+        ("scalar_integer_float", "//loom/src/loom/test/corpus/numeric:conversion/conversion.loom", "scalar_integer_float_values"),
         ("uniform_word_shifts", "//loom/src/loom/test/corpus/numeric:vector/integer_bitwise.loom", "uniform_word_shift_values"),
         ("uniform_dword_shifts", "//loom/src/loom/test/corpus/numeric:vector/integer_bitwise.loom", "uniform_dword_shift_values"),
         ("uniform_qword_shifts", "//loom/src/loom/test/corpus/numeric:vector/integer_bitwise.loom", "uniform_qword_shift_values"),

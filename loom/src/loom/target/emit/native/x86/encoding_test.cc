@@ -97,6 +97,34 @@ TEST(EncodingTest, VectorRegisterPrefixesAndBehaviors) {
                        {0x62, 0xf6, 0x6d, 0x48, 0xb8, 0xcb});
 }
 
+TEST(EncodingTest, IntegerToScalarFloat) {
+  loom_x86_encoding_operands_t operands = {};
+  operands.result = 1;
+  operands.inputs[0] = 2;
+  operands.inputs[1] = 11;
+  // VEX conversions read r11d/r11 with independent XMM upper-bit passthrough.
+  ExpectVectorEncoding(0x8210, 0x092a, operands,
+                       {0xc4, 0xc1, 0x6a, 0x2a, 0xcb});
+  ExpectVectorEncoding(0x8210, 0x192a, operands,
+                       {0xc4, 0xc1, 0xea, 0x2a, 0xcb});
+  ExpectVectorEncoding(0x8210, 0x0d2a, operands,
+                       {0xc4, 0xc1, 0x6b, 0x2a, 0xcb});
+  ExpectVectorEncoding(0x8210, 0x1d2a, operands,
+                       {0xc4, 0xc1, 0xeb, 0x2a, 0xcb});
+  // EVEX unsigned conversions extend both destination and passthrough to
+  // xmm17/xmm18 without treating the GPR source as a high SIMD register.
+  operands.result = 17;
+  operands.inputs[0] = 18;
+  ExpectVectorEncoding(0x8210, 0x297b, operands,
+                       {0x62, 0xc1, 0x6e, 0x00, 0x7b, 0xcb});
+  ExpectVectorEncoding(0x8210, 0x397b, operands,
+                       {0x62, 0xc1, 0xee, 0x00, 0x7b, 0xcb});
+  ExpectVectorEncoding(0x8210, 0x2d7b, operands,
+                       {0x62, 0xc1, 0x6f, 0x00, 0x7b, 0xcb});
+  ExpectVectorEncoding(0x8210, 0x3d7b, operands,
+                       {0x62, 0xc1, 0xef, 0x00, 0x7b, 0xcb});
+}
+
 TEST(EncodingTest, EvexNdsMemoryBroadcastAndMaskModifiers) {
   // These bytes agree with independent LLVM and GNU assembler outputs.
   constexpr uint16_t kUnaryMerge = VectorRecipe(
@@ -306,14 +334,17 @@ TEST(EncodingTest, ScalarFloatMemoryHasExactReferenceBytes) {
                          {0xc4, 0x41, vex_byte, 0x10, 0x48, 0x10});
     operands.inputs[1] = 10;
     operands.scale = 2;
-    ExpectVectorEncoding(0xc1a0, prefix | 0x0110, operands,
+    operands.has_index = true;
+    ExpectVectorEncoding(0xc1c0, prefix | 0x0110, operands,
                          {0xc4, 0x01, vex_byte, 0x10, 0x4c, 0x90, 0x10});
     operands.inputs[0] = 9;
     operands.inputs[1] = 8;
     operands.inputs[2] = 10;
+    operands.has_index = false;
     ExpectVectorEncoding(0xd2c1, prefix | 0x0111, operands,
                          {0xc4, 0x41, vex_byte, 0x11, 0x48, 0x10});
-    ExpectVectorEncoding(0xd2b1, prefix | 0x0111, operands,
+    operands.has_index = true;
+    ExpectVectorEncoding(0xd2c1, prefix | 0x0111, operands,
                          {0xc4, 0x01, vex_byte, 0x11, 0x4c, 0x90, 0x10});
   }
 }

@@ -92,6 +92,7 @@ from .common import (
     _xmm_operand,
     _xmm_result,
 )
+from .integer_float import integer_float_descriptors
 from .memory import memory_descriptors
 from .scalar import (
     X86_SCALAR_DESCRIPTOR_SET,
@@ -1277,6 +1278,7 @@ X86_AVX2_VECTOR_DESCRIPTORS = _X86_AVX2_VECTOR_DESCRIPTORS
 X86_AVX2_DESCRIPTORS = (
     *X86_SCALAR_PREFIX_DESCRIPTORS,
     *X86_AVX2_VECTOR_DESCRIPTORS,
+    *integer_float_descriptors(unsigned=False),
     *X86_SCALAR_SUFFIX_DESCRIPTORS,
 )
 

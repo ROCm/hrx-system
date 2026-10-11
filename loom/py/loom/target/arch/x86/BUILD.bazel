@@ -40,6 +40,7 @@ iree_py_library(
 iree_py_library(
     name = "native_vector",
     srcs = [
+        "native_conversion.py",
         "native_vector.py",
         "vector_encoding.py",
     ],
@@ -71,6 +72,7 @@ iree_py_library(
         "descriptors/common.py",
         "descriptors/composite.py",
         "descriptors/encoding.py",
+        "descriptors/integer_float.py",
         "descriptors/memory.py",
         "descriptors/packed_dot.py",
         "descriptors/scalar.py",

@@ -1,0 +1,47 @@
+func.def @convert_boolean(%input: i1) -> (f32, f64, f32, f64) {
+  %signed32 = scalar.sitofp %input : i1 to f32
+  %signed64 = scalar.sitofp %input : i1 to f64
+  %unsigned32 = scalar.uitofp %input : i1 to f32
+  %unsigned64 = scalar.uitofp %input : i1 to f64
+  func.return %signed32, %signed64, %unsigned32, %unsigned64 : f32, f64, f32, f64
+}
+
+// ====
+
+func.def @convert_byte(%input: i8) -> (f32, f64, f32, f64) {
+  %signed32 = scalar.sitofp %input : i8 to f32
+  %signed64 = scalar.sitofp %input : i8 to f64
+  %unsigned32 = scalar.uitofp %input : i8 to f32
+  %unsigned64 = scalar.uitofp %input : i8 to f64
+  func.return %signed32, %signed64, %unsigned32, %unsigned64 : f32, f64, f32, f64
+}
+
+// ====
+
+func.def @convert_halfword(%input: i16) -> (f32, f64, f32, f64) {
+  %signed32 = scalar.sitofp %input : i16 to f32
+  %signed64 = scalar.sitofp %input : i16 to f64
+  %unsigned32 = scalar.uitofp %input : i16 to f32
+  %unsigned64 = scalar.uitofp %input : i16 to f64
+  func.return %signed32, %signed64, %unsigned32, %unsigned64 : f32, f64, f32, f64
+}
+
+// ====
+
+func.def @convert_word(%input: i32) -> (f32, f64, f32, f64) {
+  %signed32 = scalar.sitofp %input : i32 to f32
+  %signed64 = scalar.sitofp %input : i32 to f64
+  %unsigned32 = scalar.uitofp %input : i32 to f32
+  %unsigned64 = scalar.uitofp %input : i32 to f64
+  func.return %signed32, %signed64, %unsigned32, %unsigned64 : f32, f64, f32, f64
+}
+
+// ====
+
+func.def @convert_wide(%input: i64) -> (f32, f64, f32, f64) {
+  %signed32 = scalar.sitofp %input : i64 to f32
+  %signed64 = scalar.sitofp %input : i64 to f64
+  %unsigned32 = scalar.uitofp %input : i64 to f32
+  %unsigned64 = scalar.uitofp %input : i64 to f64
+  func.return %signed32, %signed64, %unsigned32, %unsigned64 : f32, f64, f32, f64
+}

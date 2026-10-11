@@ -25,6 +25,7 @@ iree_py_library(
     "floating_extrema.py"
     "floating_reduction.py"
     "integer_division.py"
+    "integer_float.py"
     "integer_reduction.py"
     "lane_movement.py"
     "memory.py"

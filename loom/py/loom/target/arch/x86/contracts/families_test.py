@@ -76,6 +76,102 @@ def _static_index_range(rule: DescriptorRule) -> tuple[int, int]:
     return guard.minimum, guard.maximum
 
 
+def test_scalar_integer_to_float_family_coverage_and_native_overrides() -> None:
+    operations = (scalar_conversion.scalar_sitofp, scalar_conversion.scalar_uitofp)
+    base_rules = {
+        (
+            case.source_op,
+            _value_type_guard(case, "input"),
+            _value_type_guard(case, "result"),
+        ): case
+        for case in X86_AVX2_CONTRACT_FRAGMENT.cases
+        if isinstance(case, DescriptorRule) and case.source_op in operations
+    }
+    assert set(base_rules) == {
+        (operation, Scalar(f"i{width}"), Scalar(f"f{float_width}"))
+        for operation in operations
+        for width in (1, 8, 16, 32, 64)
+        for float_width in (32, 64)
+    }
+    native_rules = {
+        (
+            case.source_op,
+            _value_type_guard(case, "input"),
+            _value_type_guard(case, "result"),
+        ): case
+        for case in X86_AVX512_CONTRACT_FRAGMENT.cases
+        if isinstance(case, DescriptorRule) and case.source_op in operations
+    }
+    assert set(native_rules) == {
+        (
+            scalar_conversion.scalar_uitofp,
+            Scalar(f"i{width}"),
+            Scalar(f"f{float_width}"),
+        )
+        for width in (32, 64)
+        for float_width in (32, 64)
+    }
+    for key, rule in native_rules.items():
+        assert rule.priority > base_rules[key].priority
+        assert len(rule.emit) == 2
+        assert rule.emit[0].descriptor.key == "x86.avx2.vxorps.zero.xmm"
+        assert rule.emit[1].operands == {
+            "passthrough": ValueRef.temporary("passthrough"),
+            "input": ValueRef.operand("input"),
+        }
+    for float_width in (32, 64):
+        unsigned32 = base_rules[
+            (scalar_conversion.scalar_uitofp, Scalar("i32"), Scalar(f"f{float_width}"))
+        ]
+        assert unsigned32.emit[0].descriptor.key == "x86.scalar.movzx.gpr64.gpr32"
+        assert unsigned32.emit[0].result_types == {"dst": Scalar("i64")}
+        unsigned64 = base_rules[
+            (scalar_conversion.scalar_uitofp, Scalar("i64"), Scalar(f"f{float_width}"))
+        ]
+        assert [step.descriptor.mnemonic for step in unsigned64.emit] == [
+            "vxorps",
+            "vcvtsi2ss" if float_width == 32 else "vcvtsi2sd",
+            "shr",
+            "and",
+            "or",
+            "vcvtsi2ss" if float_width == 32 else "vcvtsi2sd",
+            "vaddss" if float_width == 32 else "vaddsd",
+            "vmovq",
+            "vblendvpd",
+        ]
+        assert unsigned64.emit[2].immediates == {"shift": 1}
+        assert unsigned64.emit[3].immediates == {"imm32": 1}
+
+
+def test_scalar_integer_to_float_native_encoding_family() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in X86_AVX512_CORE_DESCRIPTOR_SET.descriptors
+        if descriptor.mnemonic in ("vcvtsi2ss", "vcvtsi2sd", "vcvtusi2ss", "vcvtusi2sd")
+    }
+    assert len(descriptors) == 8
+    for unsigned in (False, True):
+        for width in (32, 64):
+            for float_width in (32, 64):
+                feature = "avx512" if unsigned else "avx2"
+                mnemonic = ("vcvtusi2" if unsigned else "vcvtsi2") + (
+                    "ss" if float_width == 32 else "sd"
+                )
+                descriptor = descriptors[f"x86.{feature}.{mnemonic}.xmm.gpr{width}"]
+                # ModRM.reg = result, VEX/EVEX.vvvv = passthrough, ModRM.rm = GPR.
+                assert descriptor.encoding_format_id == 0x8210
+                expected = (0x7B if unsigned else 0x2A) | 0x100
+                expected |= (2 if float_width == 32 else 3) << 10
+                expected |= int(width == 64) << 12
+                expected |= int(unsigned) << 13
+                assert descriptor.encoding_id == expected
+                assert [operand.field_name for operand in descriptor.operands] == [
+                    "dst",
+                    "passthrough",
+                    "input",
+                ]
+
+
 def test_scalar_signed_narrow_extensions_use_native_carriers() -> None:
     rules = tuple(
         case

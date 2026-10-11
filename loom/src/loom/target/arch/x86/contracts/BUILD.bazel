@@ -76,6 +76,7 @@ loom_target_contract_cc_libraries(
     contract_deps = ["//loom/src/loom/target:contract"],
     lower_rule_deps = [
         "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/vector",
     ],
 )

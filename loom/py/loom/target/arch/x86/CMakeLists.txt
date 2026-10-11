@@ -44,6 +44,7 @@ iree_py_library(
   NAME
     native_vector
   SRCS
+    "native_conversion.py"
     "native_vector.py"
     "vector_encoding.py"
   DEPS
@@ -75,6 +76,7 @@ iree_py_library(
     "descriptors/common.py"
     "descriptors/composite.py"
     "descriptors/encoding.py"
+    "descriptors/integer_float.py"
     "descriptors/memory.py"
     "descriptors/packed_dot.py"
     "descriptors/scalar.py"

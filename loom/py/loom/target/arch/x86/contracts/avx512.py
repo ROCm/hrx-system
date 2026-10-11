@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.target.arch.x86.contracts.avx512_predicate import (
     avx512_predicate_rules,
@@ -21,6 +22,7 @@ from loom.target.arch.x86.contracts.floating_reduction import (
     avx512_float_dot_rules,
     avx512_float_reduction_rules,
 )
+from loom.target.arch.x86.contracts.integer_float import avx512_integer_float_rules
 from loom.target.arch.x86.contracts.integer_reduction import (
     avx512_integer_reduction_rules,
 )
@@ -67,6 +69,7 @@ def _memory_rules() -> tuple[DescriptorRule, ...]:
 
 def _cases() -> Sequence[ContractCase]:
     return (
+        *avx512_integer_float_rules(_descriptor),
         *avx512_vector_construction_rules(_descriptor),
         *avx512_predicate_rules(_descriptor),
         *avx512_vector_arithmetic_rules(_descriptor),
@@ -81,6 +84,7 @@ def _cases() -> Sequence[ContractCase]:
 
 
 X86_AVX512_CONTRACT_DIALECT_OPS = {
+    "scalar": ALL_SCALAR_OPS,
     "vector": ALL_VECTOR_OPS,
 }
 
