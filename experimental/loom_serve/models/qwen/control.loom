@@ -48,11 +48,12 @@ func.def @encode_plan(%plan: buffer, %inputs: buffer, %count: index, %first: ind
   %descriptors = buffer.view %metadata[%descriptor_origin] : buffer -> view<64x5xi32>
   %selections = buffer.view %metadata[%selection_origin] : buffer -> view<64xi32>
   %options = buffer.view %metadata[%options_origin] : buffer -> view<64x2xi32>
+  %span_count = index.assume %count [range(%count, 1, 16)] : index
   %zero32 = scalar.constant 0 : i32
   %one32 = scalar.constant 1 : i32
   %two32 = scalar.constant 2 : i32
   %absent = scalar.constant -1 : i32
-  %token_count, %output_count = scf.for %i = [%zero to %count step %one](%cursor = %zero32 : i32, %outputs = %zero32 : i32) -> (i32, i32) {
+  %token_count, %output_count = scf.for %i = [%zero to %span_count step %one](%cursor = %zero32 : i32, %outputs = %zero32 : i32) -> (i32, i32) {
     %record_value = index.add %first, %i : index
     %record = index.assume %record_value [range(%record_value, 0, 31)] : index
     %length = view.load %requests[%record, 0] : view<32x8xi32> -> i32
