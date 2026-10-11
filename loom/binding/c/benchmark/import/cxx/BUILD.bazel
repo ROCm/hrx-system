@@ -40,6 +40,7 @@ iree_c_embed_data(
         "//loom/src/loom/tooling/target/amdgpu/test/cxx:nvfp4_matrix.h",
         "//loom/src/loom/tooling/target/amdgpu/test/cxx:nvfp4_matrix_providers.cxx",
         "//loom/src/loom/tooling/target/amdgpu/test/cxx:q4k_q8_swiglu.cxx",
+        "//loom/src/loom/tooling/target/amdgpu/test/cxx:specializing_model_library.cxx",
     ],
     c_file_output = "kernels.c",
     flatten = True,

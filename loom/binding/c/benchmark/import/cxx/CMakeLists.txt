@@ -25,6 +25,7 @@ iree_c_embed_data(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/cxx/nvfp4_matrix.h"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/cxx/nvfp4_matrix_providers.cxx"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/cxx/q4k_q8_swiglu.cxx"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/cxx/specializing_model_library.cxx"
   C_FILE_OUTPUT
     "kernels.c"
   H_FILE_OUTPUT
