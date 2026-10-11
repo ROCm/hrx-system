@@ -28,6 +28,17 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "input",
+    srcs = ["input.c"],
+    hdrs = ["input.h"],
+    deps = [
+        ":chat",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
     name = "storage",
     srcs = ["storage.c"],
     hdrs = ["storage.h"],
@@ -278,6 +289,7 @@ loom_cc_library(
         ":checkpoint_registry",
         ":epoch",
         ":heartbeat",
+        ":input",
         ":model",
         ":schedule",
         ":session",

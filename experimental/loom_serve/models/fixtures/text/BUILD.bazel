@@ -80,6 +80,8 @@ py_test(
             "//experimental/loom_serve/serving:registry",
             "//experimental/loom_serve/serving:router",
             "//experimental/loom_serve/telemetry:stream",
+            "//experimental/loom_serve/text:chat",
+            "//experimental/loom_serve/text:input",
             "//experimental/loom_serve/text:model",
             "//experimental/loom_serve/text:schedule",
             "//experimental/loom_serve/text:service",

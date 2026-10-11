@@ -15,6 +15,7 @@
 #include "experimental/loom_serve/text/checkpoint_registry.h"
 #include "experimental/loom_serve/text/epoch.h"
 #include "experimental/loom_serve/text/heartbeat.h"
+#include "experimental/loom_serve/text/input.h"
 #include "experimental/loom_serve/text/schedule.h"
 #include "experimental/loom_serve/text/session.h"
 #include "experimental/loom_serve/text/session_cache.h"
@@ -58,6 +59,8 @@ typedef struct text_pending_request_t {
   iree_string_view_t body;
   // Canonical prompt/tool descriptors; null policy means not yet rendered.
   loom_serve_text_chat_t chat;
+  // Compact prepared tokens independent of any reusable execution row.
+  loom_serve_text_input_t input;
   // Validated local session key borrowing the claimed request headers.
   iree_string_view_t name;
   // Borrowed explicit endpoint through admission or queue cancellation.
@@ -661,66 +664,34 @@ static iree_status_t text_checkpoint_request(
                                TEXT_CHECKPOINT_RELEASE, name, position, 0);
 }
 
-// Prepares host input without changing retained device state. Rejection leaves
-// the previous checkpoint usable. The selected token belongs to the previous
-// response but has not yet entered KV/recurrent, so it leads a retained append.
-static iree_status_t text_prepare_input(
-    loom_serve_text_service_t* service, loom_serve_text_session_t* session,
-    const loom_serve_text_chat_t* chat, iree_string_view_t name,
+// Resolves the exact completed frontier without acquiring native ownership.
+// The selected row and cache remain borrowed through CPU preparation/readiness.
+static loom_serve_text_input_prefix_t text_input_prefix(
+    loom_serve_text_session_t* session, iree_string_view_t name,
     const loom_serve_text_checkpoint_entry_t* pinned,
-    const loom_serve_text_session_cache_entry_t* cached,
-    iree_host_size_t* out_count, iree_host_size_t* out_retained) {
-  const iree_string_view_t prompt = iree_string_builder_view(&chat->prompt);
+    const loom_serve_text_session_cache_entry_t* cached) {
   const loom_serve_text_checkpoint_entry_t* endpoint = pinned ? pinned
                                                        : cached
                                                            ? &cached->endpoint
                                                            : NULL;
-  const iree_string_view_t checkpoint = endpoint
-                                            ? endpoint->completion.transcript
-                                            : session->completion.transcript;
-  if (pinned && !iree_string_view_starts_with(prompt, checkpoint)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "request history does not extend the named checkpoint");
+  if (endpoint) {
+    return (loom_serve_text_input_prefix_t){.completion = &endpoint->completion,
+                                            .position = endpoint->position,
+                                            .token = endpoint->token,
+                                            .boundary = endpoint->boundary};
   }
-  const bool retained =
-      pinned ||
-      (name.size && checkpoint.size &&
-       (cached || iree_string_view_equal(
-                      name, iree_make_cstring_view(session->lifetime.name))) &&
-       iree_string_view_starts_with(prompt, checkpoint));
-  *out_retained = retained
-                      ? (endpoint ? endpoint->position
-                                  : loom_serve_text_row_position(session->row))
-                      : 0;
-  iree_string_view_t input = prompt;
-  loom_serve_text_chat_boundary_t boundary =
-      LOOM_SERVE_TEXT_CHAT_BOUNDARY_FRESH;
-  if (retained) {
-    session->tokens[0] =
-        endpoint ? endpoint->token : loom_serve_text_row_token(session->row);
-    boundary = endpoint ? endpoint->boundary
-               : loom_serve_text_row_is_eos(session->row)
-                   ? LOOM_SERVE_TEXT_CHAT_BOUNDARY_TERMINATED
-                   : LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN;
-    input =
-        iree_string_view_substr(prompt, checkpoint.size, IREE_HOST_SIZE_MAX);
+  if (name.size && session->completion.storage &&
+      iree_string_view_equal(name,
+                             iree_make_cstring_view(session->lifetime.name))) {
+    return (loom_serve_text_input_prefix_t){
+        .completion = &session->completion,
+        .position = loom_serve_text_row_position(session->row),
+        .token = loom_serve_text_row_token(session->row),
+        .boundary = loom_serve_text_row_is_eos(session->row)
+                        ? LOOM_SERVE_TEXT_CHAT_BOUNDARY_TERMINATED
+                        : LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN};
   }
-  const iree_host_size_t prefix_count = retained ? 1 : 0;
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_prepare_input(
-      chat->policy, input, LOOM_SERVE_TEXT_CHAT_INPUT_RENDERED, boundary,
-      service->scheduling.context_capacity - prefix_count,
-      session->tokens + prefix_count, out_count, service->allocator));
-  *out_count += prefix_count;
-  if (*out_count + chat->max_tokens - 1 >
-      service->scheduling.context_capacity - *out_retained) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "request input and output exceed remaining %zu-token context; compact "
-        "history or lower max_tokens",
-        service->scheduling.context_capacity);
-  }
-  return iree_ok_status();
+  return (loom_serve_text_input_prefix_t){0};
 }
 
 // Queue ownership changes independently of model phases and CPU/device loans.
@@ -738,6 +709,8 @@ static void text_pending_observe(loom_serve_text_service_t* service) {
 // and connection, or transfers both into an admitted request.
 static void text_pending_remove(loom_serve_text_service_t* service,
                                 iree_host_size_t index) {
+  loom_serve_text_input_deinitialize(&service->pending.values[index].input,
+                                     service->allocator);
   if (!index) {
     loom_serve_residency_cancel_admission(
         loom_serve_text_model_residency(service->model));
@@ -940,14 +913,20 @@ static iree_status_t text_prepare_admission(
   loom_serve_text_session_t* session = service->pending.prepared.session;
   text_pending_request_t* pending = &service->pending.values[0];
   const iree_time_t start = iree_time_now();
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_initialize(
-      loom_serve_text_model_chat_policy(service->model), service->name,
-      pending->body, service->default_max_tokens, service->allocator,
-      &pending->chat));
-  iree_host_size_t input_count = 0, retained_count = 0;
-  IREE_RETURN_IF_ERROR(text_prepare_input(
-      service, session, &pending->chat, pending->name, pending->checkpoint,
-      service->pending.prepared.cached, &input_count, &retained_count));
+  if (!pending->chat.policy) {
+    IREE_RETURN_IF_ERROR(loom_serve_text_chat_initialize(
+        loom_serve_text_model_chat_policy(service->model), service->name,
+        pending->body, service->default_max_tokens, service->allocator,
+        &pending->chat));
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_input_prepare(
+      &pending->chat,
+      text_input_prefix(session, pending->name, pending->checkpoint,
+                        service->pending.prepared.cached),
+      pending->checkpoint != NULL, service->scheduling.context_capacity,
+      session->tokens, &pending->input, service->allocator));
+  const iree_host_size_t input_count = pending->input.count;
+  const iree_host_size_t retained_count = pending->input.retained_count;
   const iree_host_size_t reservation = loom_serve_text_request_reservation(
       service->scheduling.context_capacity, retained_count + input_count,
       pending->chat.max_tokens, service->mtp_depth,
@@ -1048,6 +1027,8 @@ static iree_status_t text_admit_request(loom_serve_text_service_t* service,
     return iree_ok_status();
   }
   const text_pending_request_t request = *pending;
+  memcpy(session->tokens, pending->input.tokens,
+         input_count * sizeof(*session->tokens));
   const iree_duration_t prepare_duration = service->pending.prepared.duration;
   loom_serve_text_session_cache_entry_t* cached =
       service->pending.prepared.cached;

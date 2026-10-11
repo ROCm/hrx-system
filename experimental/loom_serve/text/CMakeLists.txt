@@ -29,6 +29,20 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    input
+  HDRS
+    "input.h"
+  SRCS
+    "input.c"
+  DEPS
+    ::chat
+    iree::base
+    iree::vm
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     storage
   HDRS
     "storage.h"
@@ -301,6 +315,7 @@ loom_cc_library(
     ::checkpoint_registry
     ::epoch
     ::heartbeat
+    ::input
     ::model
     ::schedule
     ::session

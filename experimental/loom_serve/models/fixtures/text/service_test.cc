@@ -27,6 +27,7 @@
 #include "experimental/loom_serve/serving/model_registration.h"
 #include "experimental/loom_serve/serving/router.h"
 #include "experimental/loom_serve/telemetry/stream.h"
+#include "experimental/loom_serve/text/input.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -657,6 +658,68 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
   // Consumed after joining the application thread.
   iree_status_t status_ = iree_ok_status();
 };
+
+TEST_P(SourceTextServiceTest,
+       PreparedInputSurvivesScratchReuseAndHistoryEviction) {
+  const auto* policy = loom_serve_text_model_chat_policy(model_);
+  const std::string first_body = Request(Message("user", "a"), 4);
+  const std::string next_body =
+      Request(Message("user", "a") + "," + Message("assistant", "b") + "," +
+                  Message("user", "x"),
+              4);
+  loom_serve_text_chat_t first = {}, next = {};
+  IREE_ASSERT_OK(loom_serve_text_chat_initialize(
+      policy, policy->name, iree_make_cstring_view(first_body.c_str()), 4,
+      allocator_, &first));
+  IREE_ASSERT_OK(loom_serve_text_chat_initialize(
+      policy, policy->name, iree_make_cstring_view(next_body.c_str()), 4,
+      allocator_, &next));
+  iree_string_builder_t tools;
+  iree_string_builder_initialize(allocator_, &tools);
+  loom_serve_text_chat_completion_t completion = {};
+  IREE_ASSERT_OK(loom_serve_text_chat_complete(&first, IREE_SV("b"), 0, 1,
+                                               &tools, &completion));
+  const loom_serve_text_input_prefix_t prefix = {
+      .completion = &completion,
+      .position = 1,
+      .token = Oracle::Id('b'),
+      .boundary = LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN};
+  loom_serve_text_input_t input = {};
+  int32_t scratch[96];
+  IREE_ASSERT_OK(loom_serve_text_input_prepare(&next, prefix, true,
+                                               IREE_ARRAYSIZE(scratch), scratch,
+                                               &input, allocator_));
+  EXPECT_EQ(input.retained_count, 1u);
+  EXPECT_EQ(std::vector<int32_t>(input.tokens, input.tokens + input.count),
+            (std::vector<int32_t>{1, 3, 2}));
+  const int32_t* prepared = input.tokens;
+  std::fill(std::begin(scratch), std::end(scratch), -7);
+  IREE_ASSERT_OK(loom_serve_text_input_prepare(&next, prefix, true,
+                                               IREE_ARRAYSIZE(scratch), scratch,
+                                               &input, allocator_));
+  EXPECT_EQ(input.tokens, prepared);
+  EXPECT_TRUE(std::all_of(std::begin(scratch), std::end(scratch),
+                          [](int32_t value) { return value == -7; }));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_text_input_prepare(&next, {}, true, IREE_ARRAYSIZE(scratch),
+                                    scratch, &input, allocator_));
+  EXPECT_EQ(input.tokens, prepared);
+  loom_serve_text_chat_completion_deinitialize(&completion);
+  // Eviction releases native history independently. The prepared input's host
+  // identity remains valid, but its suffix cannot be replayed as a fresh row.
+  EXPECT_NE(input.history, nullptr);
+  IREE_ASSERT_OK(loom_serve_text_input_prepare(
+      &next, {}, false, IREE_ARRAYSIZE(scratch), scratch, &input, allocator_));
+  EXPECT_EQ(input.retained_count, 0u);
+  EXPECT_EQ(input.history, nullptr);
+  EXPECT_EQ(std::vector<int32_t>(input.tokens, input.tokens + input.count),
+            (std::vector<int32_t>{0, 1, 3, 2}));
+  loom_serve_text_input_deinitialize(&input, allocator_);
+  loom_serve_text_chat_deinitialize(&next);
+  loom_serve_text_chat_deinitialize(&first);
+  iree_string_builder_deinitialize(&tools);
+}
 
 TEST_P(SourceTextServiceTest,
        DynamicTextAdmissionCheckpointRetirementAndReuse) {
