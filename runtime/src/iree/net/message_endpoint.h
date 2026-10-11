@@ -101,8 +101,15 @@ typedef struct iree_net_message_endpoint_callbacks_t {
   // Function invoked when the endpoint reports a transport error.
   iree_net_message_endpoint_error_fn_t on_error;
 
-  // Opaque user data passed to both callbacks in this bundle.
+  // Opaque user data passed to every callback in this bundle.
   void* user_data;
+
+  // Optional notification that shared send capacity may have become available
+  // without a send completion on this endpoint (for example, another endpoint
+  // returned a connection slot). Invoked on the proactor with no transport
+  // locks held. This is advisory; the callback queries budget before sending.
+  // Endpoint deactivation joins these callbacks along with message delivery.
+  void (*on_capacity)(void* user_data);
 } iree_net_message_endpoint_callbacks_t;
 
 // Parameters for send operations.
@@ -317,9 +324,11 @@ static inline iree_status_t iree_net_message_endpoint_send(
 // Queries send budget for backpressure management.
 //
 // Returns both byte budget and operation slot budget. When either reaches
-// zero, the endpoint is backpressured. A later send completion indicates that
-// callers may query the budget and attempt admission again. This is an
-// advisory snapshot; send remains the authoritative admission check.
+// zero, the endpoint is backpressured. A later send completion or on_capacity
+// callback indicates that callers may query the budget and attempt admission
+// again. Shared-capacity endpoints notify on_capacity when a different owner
+// returns capacity; dedicated endpoints use their own send completions.
+// This is an advisory snapshot; send remains the authoritative admission check.
 static inline iree_net_carrier_send_budget_t
 iree_net_message_endpoint_query_send_budget(
     iree_net_message_endpoint_t endpoint) {

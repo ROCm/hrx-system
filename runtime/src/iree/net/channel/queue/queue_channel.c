@@ -190,6 +190,11 @@ static void iree_net_queue_channel_on_error(void* user_data,
   channel->callbacks.on_error(channel->callbacks.user_data, status);
 }
 
+static void iree_net_queue_channel_on_capacity(void* user_data) {
+  iree_net_queue_channel_t* channel = user_data;
+  channel->callbacks.on_capacity(channel->callbacks.user_data);
+}
+
 iree_status_t iree_net_queue_channel_allocate(
     iree_net_message_endpoint_t endpoint,
     iree_net_queue_channel_callbacks_t callbacks,
@@ -229,11 +234,15 @@ void iree_net_queue_channel_free(iree_net_queue_channel_t* channel) {
 void iree_net_queue_channel_attach(iree_net_queue_channel_t* channel) {
   IREE_ASSERT_ARGUMENT(channel);
   iree_net_message_endpoint_set_callbacks(
-      channel->endpoint, (iree_net_message_endpoint_callbacks_t){
-                             .on_message = iree_net_queue_channel_on_message,
-                             .on_error = iree_net_queue_channel_on_error,
-                             .user_data = channel,
-                         });
+      channel->endpoint,
+      (iree_net_message_endpoint_callbacks_t){
+          .on_message = iree_net_queue_channel_on_message,
+          .on_error = iree_net_queue_channel_on_error,
+          .user_data = channel,
+          .on_capacity = channel->callbacks.on_capacity
+                             ? iree_net_queue_channel_on_capacity
+                             : NULL,
+      });
 }
 
 iree_net_carrier_send_budget_t iree_net_queue_channel_query_send_budget(

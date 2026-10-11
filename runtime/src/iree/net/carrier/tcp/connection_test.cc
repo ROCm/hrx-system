@@ -64,6 +64,9 @@ struct MessageResult {
   // Fixture flag proving callback affinity to proactor polling.
   bool* is_polling = nullptr;
 
+  // Notifications that a sibling endpoint returned shared send capacity.
+  int capacity_count = 0;
+
   // Payloads observed in callback order.
   std::vector<std::string> messages;
 
@@ -331,6 +334,12 @@ static void EndpointReady(void* user_data, iree_status_t status,
   result->status_code = iree_status_code(status);
   result->endpoint = endpoint;
   iree_status_free(status);
+}
+
+static void CapacityAvailable(void* user_data) {
+  auto* result = static_cast<MessageResult*>(user_data);
+  EXPECT_TRUE(*result->is_polling);
+  ++result->capacity_count;
 }
 
 static iree_status_t MessageReceived(void* user_data,
@@ -697,6 +706,49 @@ TEST(TcpConnectionOptionsTest, ReservesInternalActivationSlot) {
   options.carrier_options.max_send_operations = UINT32_MAX - 1u;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         iree_net_tcp_connection_options_validate(&options));
+}
+
+TEST_F(TcpConnectionTest, SiblingSendReturnsSharedCapacity) {
+  auto options = iree_net_tcp_connection_options_default();
+  options.carrier_options.max_send_operations = 1;
+  CreateConnectionPair(options, options, 4096, 4, iree_allocator_system());
+  auto first = OpenEndpoint(client_connection_);
+  auto first_peer = OpenEndpoint(server_connection_);
+  auto second = OpenEndpoint(client_connection_);
+  auto second_peer = OpenEndpoint(server_connection_);
+  ActivateEndpoint(first, CreateMessageResult());
+  auto* first_messages = CreateMessageResult();
+  ActivateEndpoint(first_peer, first_messages);
+  auto* second_messages = CreateMessageResult();
+  ActivateEndpoint(second, second_messages);
+  iree_net_message_endpoint_set_callbacks(
+      second,
+      {MessageReceived, EndpointError, second_messages, CapacityAvailable});
+  auto* peer_messages = CreateMessageResult();
+  ActivateEndpoint(second_peer, peer_messages);
+
+  SendResult first_sent;
+  first_sent.is_polling = &is_polling_;
+  IREE_ASSERT_OK(SendMessage(first, iree_async_span_list_empty(), &first_sent,
+                             iree_make_const_byte_span("first", 5)));
+  EXPECT_EQ(iree_net_message_endpoint_query_send_budget(second).slots, 0u);
+  // No send on the second endpoint owns a completion that could wake it.
+  // Returning the first endpoint's connection slot must publish that edge.
+  PollUntil([&] { return second_messages->capacity_count != 0; });
+  EXPECT_EQ(first_sent.callback_count, 1);
+  EXPECT_GT(iree_net_message_endpoint_query_send_budget(second).slots, 0u);
+  SendResult second_sent;
+  second_sent.is_polling = &is_polling_;
+  IREE_ASSERT_OK(SendMessage(second, iree_async_span_list_empty(), &second_sent,
+                             iree_make_const_byte_span("second", 6)));
+  PollUntil([&] {
+    return second_sent.callback_count == 1 &&
+           first_messages->messages.size() == 1 &&
+           peer_messages->messages.size() == 1;
+  });
+  EXPECT_EQ(second_sent.status_code, IREE_STATUS_OK);
+  EXPECT_EQ(first_messages->messages[0], "first");
+  EXPECT_EQ(peer_messages->messages[0], "second");
 }
 
 TEST_F(TcpConnectionTest, GeneratedPrefixSlabAvoidsSendTimeAllocation) {

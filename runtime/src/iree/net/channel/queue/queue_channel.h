@@ -195,13 +195,15 @@ typedef struct iree_net_queue_channel_callbacks_t {
   iree_net_queue_channel_error_fn_t on_error;
   // Opaque pointer passed to every callback.
   void* user_data;
+  // Optional progress edge when another endpoint returns shared send capacity.
+  void (*on_capacity)(void* user_data);
 } iree_net_queue_channel_callbacks_t;
 
 // Allocates a queue channel over |endpoint| without changing its callbacks.
 //
-// The endpoint and callback user data must outlive the channel. All callbacks
-// are required. Call iree_net_queue_channel_attach to perform protocol
-// handoff.
+// The endpoint and callback user data must outlive the channel. COMMAND,
+// ADVANCE and error callbacks are required. Call iree_net_queue_channel_attach
+// to perform protocol handoff.
 IREE_API_EXPORT iree_status_t iree_net_queue_channel_allocate(
     iree_net_message_endpoint_t endpoint,
     iree_net_queue_channel_callbacks_t callbacks,

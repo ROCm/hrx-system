@@ -438,11 +438,41 @@ static iree_net_tcp_send_completion_t iree_net_tcp_claim_send_completion_locked(
   return completion;
 }
 
+// A send on one ordinal can exhaust the connection-wide DATA slots. Its
+// completion belongs to that ordinal; siblings need a separate progress edge.
+// The completing endpoint's lifecycle hold keeps the connection alive here.
+static void iree_net_tcp_notify_sibling_capacity(
+    iree_net_tcp_endpoint_t* completed_endpoint) {
+  iree_net_tcp_connection_t* connection = completed_endpoint->connection;
+  for (uint32_t i = 0; i < connection->base.max_endpoint_count; ++i) {
+    iree_net_tcp_endpoint_t* endpoint = &connection->endpoints[i];
+    if (endpoint == completed_endpoint) {
+      continue;
+    }
+    iree_net_message_endpoint_callbacks_t callbacks = {0};
+    iree_slim_mutex_lock(&connection->mutex);
+    if (connection->state == IREE_NET_TCP_CONNECTION_STATE_OPEN &&
+        iree_status_is_ok(connection->terminal_status) &&
+        (endpoint->phase == IREE_NET_TCP_ENDPOINT_PHASE_ACTIVATING ||
+         endpoint->phase == IREE_NET_TCP_ENDPOINT_PHASE_ACTIVE) &&
+        endpoint->callbacks.on_capacity &&
+        iree_net_endpoint_lifecycle_try_begin_operation(&endpoint->lifecycle)) {
+      callbacks = endpoint->callbacks;
+    }
+    iree_slim_mutex_unlock(&connection->mutex);
+    if (callbacks.on_capacity) {
+      callbacks.on_capacity(callbacks.user_data);
+      iree_net_endpoint_lifecycle_end_operation(&endpoint->lifecycle);
+    }
+  }
+}
+
 static void iree_net_tcp_invoke_send_completion(
     iree_net_tcp_send_completion_t completion, iree_status_t status,
     iree_host_size_t bytes_transferred) {
   completion.callback.fn(completion.callback.user_data, status,
                          bytes_transferred);
+  iree_net_tcp_notify_sibling_capacity(completion.endpoint);
   iree_net_endpoint_lifecycle_end_operation(&completion.endpoint->lifecycle);
 }
 
