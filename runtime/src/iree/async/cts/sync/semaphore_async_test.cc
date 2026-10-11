@@ -21,6 +21,7 @@
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/operations/semaphore.h"
 #include "iree/async/semaphore.h"
+#include "iree/base/threading/mutex.h"
 
 namespace iree::async::cts {
 
@@ -56,6 +57,68 @@ class SemaphoreAsyncTest : public CtsTestBase<> {
     operation->count = 1;
     operation->mode = mode;
     operation->satisfied_index = 0;
+  }
+
+  // Races registration, satisfaction, and poll-thread retirement. The signaler
+  // waits for an actual registered timepoint so every iteration exercises the
+  // deferred path, including completion before registration returns.
+  void CheckRegistrationRace(iree_async_wait_mode_t mode,
+                             iree_host_size_t count) {
+    constexpr int kIterationCount = 4096;
+    iree_async_semaphore_t* semaphores[2] = {};
+    for (auto& semaphore : semaphores) {
+      IREE_ASSERT_OK(iree_async_semaphore_create(
+          proactor_, 0, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
+          iree_allocator_system(), &semaphore));
+    }
+    CompletionTracker completion;
+    std::atomic<int> retired{0};
+    std::thread submitter([&] {
+      for (int iteration = 1; iteration <= kIterationCount; ++iteration) {
+        uint64_t values[] = {static_cast<uint64_t>(iteration),
+                             mode == IREE_ASYNC_WAIT_MODE_ALL ? 0 : UINT64_MAX};
+        iree_async_semaphore_wait_operation_t operation = {};
+        iree_async_operation_initialize(
+            &operation.base, IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT,
+            IREE_ASYNC_OPERATION_FLAG_NONE, CompletionTracker::Callback,
+            &completion);
+        operation.semaphores = semaphores;
+        operation.values = values;
+        operation.count = count;
+        operation.mode = mode;
+        IREE_CHECK_OK(
+            iree_async_proactor_submit_one(proactor_, &operation.base));
+        while (retired.load(std::memory_order_acquire) < iteration) {
+          std::this_thread::yield();
+        }
+      }
+    });
+    std::thread signaler([&] {
+      for (int iteration = 1; iteration <= kIterationCount; ++iteration) {
+        for (;;) {
+          iree_slim_mutex_lock(&semaphores[0]->mutex);
+          const bool registered = semaphores[0]->timepoints_head != nullptr;
+          iree_slim_mutex_unlock(&semaphores[0]->mutex);
+          if (registered) {
+            break;
+          }
+          std::this_thread::yield();
+        }
+        IREE_CHECK_OK(
+            iree_async_semaphore_signal(semaphores[0], iteration, nullptr));
+      }
+    });
+    for (int iteration = 1; iteration <= kIterationCount; ++iteration) {
+      PollUntil(/*min_completions=*/1);
+      EXPECT_EQ(completion.call_count, iteration);
+      IREE_EXPECT_OK(completion.ConsumeStatus());
+      retired.store(iteration, std::memory_order_release);
+    }
+    submitter.join();
+    signaler.join();
+    for (auto* semaphore : semaphores) {
+      iree_async_semaphore_release(semaphore);
+    }
   }
 };
 
@@ -759,6 +822,18 @@ TEST_P(SemaphoreAsyncTest, WaitSignalCancelRace) {
 
     iree_async_semaphore_release(semaphore);
   }
+}
+
+TEST_P(SemaphoreAsyncTest, WaitAllSingleRegistrationRace) {
+  CheckRegistrationRace(IREE_ASYNC_WAIT_MODE_ALL, 1);
+}
+
+TEST_P(SemaphoreAsyncTest, WaitAllMixedRegistrationRace) {
+  CheckRegistrationRace(IREE_ASYNC_WAIT_MODE_ALL, 2);
+}
+
+TEST_P(SemaphoreAsyncTest, WaitAnyRegistrationRace) {
+  CheckRegistrationRace(IREE_ASYNC_WAIT_MODE_ANY, 2);
 }
 
 //===----------------------------------------------------------------------===//

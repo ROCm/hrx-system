@@ -29,9 +29,8 @@ enum {
   IREE_ASYNC_SEMAPHORE_WAIT_ACTIVE_COUNT_SHIFT = 2,
 };
 
-static int32_t iree_async_semaphore_wait_active_count(int64_t lifecycle_state) {
-  return (int32_t)((uint64_t)lifecycle_state >>
-                   IREE_ASYNC_SEMAPHORE_WAIT_ACTIVE_COUNT_SHIFT);
+static int64_t iree_async_semaphore_wait_active_count(int64_t lifecycle_state) {
+  return lifecycle_state >> IREE_ASYNC_SEMAPHORE_WAIT_ACTIVE_COUNT_SHIFT;
 }
 
 static int32_t iree_async_semaphore_wait_queue_state(int64_t lifecycle_state) {
@@ -58,8 +57,8 @@ typedef struct iree_async_semaphore_wait_timepoint_t {
   iree_host_size_t index;
 } iree_async_semaphore_wait_timepoint_t;
 
-// Tracks a pending proactor semaphore wait until all timepoint callbacks have
-// returned. Heap-allocated per wait operation and freed during finalization.
+// Tracks a pending proactor semaphore wait until registration and all timepoint
+// callbacks have returned. Freed during poll-thread finalization.
 struct iree_async_semaphore_wait_tracker_t {
   // Intrusive link used by the backend completion queue.
   iree_atomic_slist_entry_t slist_entry;
@@ -83,8 +82,8 @@ struct iree_async_semaphore_wait_tracker_t {
   // Published by |registration_complete| before the tracker can be enqueued.
   iree_host_size_t registered_count;
 
-  // Active timepoint count and queue ownership/requeue handshake state.
-  // Combining them makes callback release and requeue request one transition.
+  // Active registration/timepoint count and queue ownership/requeue state.
+  // Combining them makes final borrower release and requeue one transition.
   iree_atomic_int64_t lifecycle_state;
 
   // Set after registration and |registered_count| publication are complete.
@@ -182,20 +181,25 @@ static void iree_async_semaphore_wait_tracker_publish_completion(
   iree_async_semaphore_wait_tracker_try_enqueue(tracker);
 }
 
-// Releases a callback's ownership unit while atomically publishing any requeue
+// Releases a borrower's ownership unit while atomically publishing any requeue
 // intent. A poll thread observing zero may immediately free the tracker, so no
 // tracker access is permitted after the lifecycle transition unless this
-// callback acquired queue ownership and still needs to push the entry.
-static void iree_async_semaphore_wait_tracker_release_callback(
+// borrower acquired queue ownership and still needs to push the entry.
+static void iree_async_semaphore_wait_tracker_release_borrower(
     iree_async_semaphore_wait_tracker_t* tracker) {
-  const bool is_enqueueable =
-      iree_atomic_load(&tracker->registration_complete,
-                       iree_memory_order_acquire) &&
-      iree_atomic_load(&tracker->completion_state, iree_memory_order_acquire) ==
-          IREE_ASYNC_SEMAPHORE_WAIT_COMPLETION_STATE_PUBLISHED;
   while (true) {
     int64_t lifecycle_state =
         iree_atomic_load(&tracker->lifecycle_state, iree_memory_order_acquire);
+    // Every publisher owns a borrow until after publication. Sampling after
+    // the lifecycle expectation ensures its release either precedes these
+    // reads or invalidates our CAS. A stale false value must never survive a
+    // retry and strand the final borrower after the poll thread goes idle.
+    const bool is_enqueueable =
+        iree_atomic_load(&tracker->registration_complete,
+                         iree_memory_order_acquire) &&
+        iree_atomic_load(&tracker->completion_state,
+                         iree_memory_order_acquire) ==
+            IREE_ASYNC_SEMAPHORE_WAIT_COMPLETION_STATE_PUBLISHED;
     IREE_ASSERT(iree_async_semaphore_wait_active_count(lifecycle_state) > 0);
     int64_t desired_state =
         lifecycle_state -
@@ -257,7 +261,7 @@ static void iree_async_semaphore_wait_tracker_timepoint_callback(
   }
 
   // No tracker access is permitted after this release.
-  iree_async_semaphore_wait_tracker_release_callback(tracker);
+  iree_async_semaphore_wait_tracker_release_borrower(tracker);
 }
 
 iree_status_t iree_async_semaphore_wait_tracker_create(
@@ -296,10 +300,10 @@ iree_status_t iree_async_semaphore_wait_tracker_create(
   tracker->completion_status = iree_ok_status();
   tracker->continuation_head = operation->base.linked_next;
   operation->base.linked_next = NULL;
-  iree_atomic_store(
-      &tracker->lifecycle_state,
-      (int64_t)operation->count << IREE_ASYNC_SEMAPHORE_WAIT_ACTIVE_COUNT_SHIFT,
-      iree_memory_order_release);
+  iree_atomic_store(&tracker->lifecycle_state,
+                    ((int64_t)operation->count + 1)
+                        << IREE_ASYNC_SEMAPHORE_WAIT_ACTIVE_COUNT_SHIFT,
+                    iree_memory_order_release);
   iree_atomic_store(&tracker->registration_complete, 0,
                     iree_memory_order_release);
   iree_atomic_store(&tracker->completion_state,
@@ -352,8 +356,7 @@ void iree_async_semaphore_wait_tracker_register_timepoints(
   }
 
   // Slots not registered with a semaphore have no callback to release their
-  // ownership units. Registration is not yet published, so no poll thread can
-  // observe a transient zero while this thread continues touching the tracker.
+  // ownership units. The registrar still owns its own unit through publication.
   iree_host_size_t unregistered_count =
       tracker->count - tracker->registered_count;
   if (unregistered_count > 0) {
@@ -365,7 +368,10 @@ void iree_async_semaphore_wait_tracker_register_timepoints(
 
   iree_atomic_store(&tracker->registration_complete, 1,
                     iree_memory_order_release);
-  iree_async_semaphore_wait_tracker_try_enqueue(tracker);
+  // Publication may let a callback enqueue the tracker immediately. Keep the
+  // registrar's unit until this final transition so polling cannot free it
+  // while registration is still accessing it. No access follows this release.
+  iree_async_semaphore_wait_tracker_release_borrower(tracker);
 }
 
 void iree_async_semaphore_wait_context_request_cancellation(
