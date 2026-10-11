@@ -80,6 +80,7 @@ TEST(ConfigurationTest, IndependentModelsOwnDecodedStringsAndOptions) {
   EXPECT_EQ(a.text.rows, 4u);
   EXPECT_EQ(a.text.context_capacity, 16384u);
   EXPECT_EQ(a.text.mtp_depth, 0u);
+  EXPECT_EQ(a.text.session_cache_capacity, 0u);
   EXPECT_EQ(b.text.rows, 8u);
   EXPECT_EQ(b.text.context_capacity, 262144u);
   EXPECT_EQ(b.text.pool_capacity, 4096u);
@@ -99,6 +100,29 @@ TEST(ConfigurationTest, EmptyCatalogHasNoModelStorage) {
   EXPECT_EQ(configuration.model_count, 0u);
   EXPECT_EQ(configuration.models, nullptr);
   loom_serve_configuration_deinitialize(&configuration);
+}
+
+TEST(ConfigurationTest, AutomaticCacheAndExplicitPinsHaveIndependentQuotas) {
+  loom_serve_model_configuration_t model;
+  const auto json = Model(
+      "cached", ",\"checkpoint_capacity\":3,\"session_cache_capacity\":24");
+  IREE_ASSERT_OK(loom_serve_model_configuration_initialize(
+      iree_make_cstring_view(json.c_str()), &model, iree_allocator_system()));
+  EXPECT_EQ(model.text.checkpoint_capacity, 3u);
+  EXPECT_EQ(model.text.session_cache_capacity, 24u);
+  loom_serve_model_configuration_deinitialize(&model);
+  for (const char* options :
+       {",\"session_cache_capacity\":-1",
+        ",\"session_cache_capacity\":2147483647",
+        ",\"checkpoint_capacity\":2147483647,\"session_cache_capacity\":1",
+        ",\"checkpoint_capacity\":18446744073709551615"}) {
+    const auto invalid = Model("cached", options);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          loom_serve_model_configuration_initialize(
+                              iree_make_cstring_view(invalid.c_str()), &model,
+                              iree_allocator_system()));
+    loom_serve_model_configuration_deinitialize(&model);
+  }
 }
 
 TEST(ConfigurationTest, MixedModalitiesKeepDisjointOptionsAndOwnedStrings) {

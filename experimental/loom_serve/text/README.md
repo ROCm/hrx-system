@@ -383,11 +383,41 @@ The native real-model witness is
 --pool_capacity=65536 --context_capacity=1024 --prefill_capacity=128
 --epoch=64:4 --epoch=128:8 --mtp`, with normal model/weights/tokenizer flags.
 
+### Idle sessions beyond execution capacity
+
+A routed text model can set `session_cache_capacity` to retain idle conversations
+beyond its `rows` execution slots. The default is zero. With 16 rows and a cache
+capacity of 16, up to 32 named conversations can retain their endpoints when the
+shared token/physical memory budget fits them. `context_capacity` still bounds
+each conversation; it does not reserve a full context slab per session.
+
+Only recycling an idle named row pays endpoint capture. Its pooled KV and
+recurrent state remain shared; source-defined draft carry is copied on the model
+timeline. Normal resident continuations keep their existing path. Full-cache
+exchange uses one temporary endpoint while the incoming history is admitted;
+this is not another execution row. `X-Loom-Session` resumes either resident or
+cached history after canonical validation. A different history replays. Invalid
+input and denied admission preserve the selected incoming continuation.
+
+This is an explicit memory/throughput tradeoff: recurrent endpoints can be much
+larger than their KV prefix. Source initialization includes cache capacity plus
+one exchange endpoint separately from `checkpoint_capacity`; fixed backing
+allocates the declared extents, while elastic backing commits touched storage.
+LRU automatic histories yield to admission pressure. Explicit pins remain
+protected. `text_memory.session_cache` reports configured `capacity` and owned
+`endpoints`, including at most one temporary exchange. Cached-token usage in the
+HTTP response and `admit.retained_tokens` report actual reuse, not assumed hits.
+
 ### Named HTTP checkpoints
 
 With nonzero `--checkpoint_capacity`, an empty-body
 `POST /v1/checkpoints/NAME` carrying `X-Loom-Session: SESSION` pins that idle,
 completed session. The `201` JSON receipt reports its consumed token position.
+The routed server uses the equivalent catalog `checkpoint_capacity` field.
+Detached sessions are pinnable too: each explicit name retains the same immutable
+endpoint without copying KV, recurrence or carry. Automatic and explicit owners
+release independently; the last owner returns endpoint storage. Suspension/wake
+changes the shared endpoint's placement, not its logical contents.
 Names use 1–64 ASCII letters, digits, underscores, dots or hyphens. They are
 process/model-local identifiers, not content hashes or authentication tokens.
 An absent/evicted session returns `404`; a busy session or duplicate name
@@ -448,8 +478,9 @@ pages and shared partial tail. It can tentatively retain the selected row's
 private IDs for reuse, but changes no contents until the entire physical union
 is admitted. Denial releases only tentative references, preserving both owners.
 Physical restore refusal also returns `503` without replacing the destination
-continuation. Heartbeat `checkpoint_host_bytes` accounts for cold payloads
-separately from the device pool. Admission events report `restored_bytes` when
+continuation. Heartbeat `checkpoint_host_bytes` counts each native cold payload
+once even when multiple automatic/explicit owners retain it, separately from the
+device pool. Admission events report `restored_bytes` when
 a cold endpoint is warmed. Native metadata does not constitute disk persistence.
 
 `models/qwen:check_checkpoints` exercises the actual HTTP summary/rewind,

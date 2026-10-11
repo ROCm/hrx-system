@@ -19,7 +19,7 @@ typedef struct loom_serve_text_service_options_t {
   // Borrowed deployment route name, outliving the service. Source identity and
   // chat policy remain owned by the model, independently of this HTTP name.
   iree_string_view_t name;
-  // Number of retained rows, matching the model residency.
+  // Number of reusable execution rows, matching the model residency.
   iree_host_size_t row_count;
   // Maximum known input tokens admitted from one row in an epoch.
   iree_host_size_t chunk_size;
@@ -27,6 +27,10 @@ typedef struct loom_serve_text_service_options_t {
   iree_host_size_t default_max_tokens;
   // Positive bound on claimed requests waiting without a model row.
   iree_host_size_t pending_capacity;
+  // Detached idle endpoints retained beyond execution rows; zero disables.
+  // The model reserves this many plus one exchange endpoint in addition to
+  // explicit pin capacity. Automatic entries yield to admission pressure.
+  iree_host_size_t session_cache_capacity;
   // Reporting interval in nanoseconds; zero disables periodic heartbeats.
   iree_duration_t heartbeat_interval;
   // Execution choice; the planner and HTTP lifecycle are shared by all modes.
@@ -73,8 +77,14 @@ iree_status_t loom_serve_text_service_create(
 // X-Loom-Session selects retained state, not a durable session. Active or
 // queued named sessions reject overlapping requests. X-Loom-Checkpoint selects
 // an explicit pinned endpoint only after full canonical-history validation.
+// With session_cache_capacity, completed named histories detach only when their
+// row must be recycled. They resume automatically without a checkpoint header,
+// preserving session accounting. LRU eviction yields to the shared pool budget;
+// explicit pins and the prepared admission borrower remain protected.
 // POST/DELETE /v1/checkpoints/NAME pin an idle completed X-Loom-Session or
 // release that pin. Deletion refuses while queued requests borrow the endpoint.
+// A detached session shares its immutable endpoint with a new explicit pin;
+// deleting that pin does not discard automatic or other explicit ownership.
 // POST /v1/checkpoints/NAME/suspend explicitly parks the pin in DRAM on elastic
 // backing without changing live branches or queued identity. Wake admission
 // includes missing prefix pages and preserves the selected row until its

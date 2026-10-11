@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -476,6 +477,121 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     interface.set_observer(interface.self, {});
   }
 
+  void CheckRetentionCancellation(OverlapAction action) {
+    auto options = ServiceOptions();
+    options.session_cache_capacity = 1;
+    loom_serve_text_service_t* value = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_service_create(model_, &options, nullptr,
+                                                  &value, allocator_));
+    auto destroy = [](loom_serve_text_service_t* service) {
+      loom_serve_text_service_destroy(service, IREE_STATUS_OK);
+    };
+    std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
+        value, destroy);
+    const auto interface = loom_serve_text_service_interface(value);
+    auto* notification = loom_serve_http_server_notification(server_);
+    interface.set_observer(interface.self,
+                           {[](void* payload) {
+                              iree_notification_post(
+                                  static_cast<iree_notification_t*>(payload),
+                                  IREE_ALL_WAITERS);
+                            },
+                            notification});
+    auto accept = [&](loom_serve_http_connection_t** out_connection) {
+      for (;;) {
+        const auto ticket = iree_notification_prepare_wait(notification);
+        const loom_serve_http_request_t* request = nullptr;
+        auto* connection =
+            loom_serve_http_server_take_request(server_, &request);
+        if (connection) {
+          iree_notification_cancel_wait(notification);
+          *out_connection = connection;
+          IREE_ASSERT_OK(
+              interface.accept(interface.self, connection, request, 0));
+          return;
+        }
+        iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+    };
+    auto advance_until = [&](auto ready,
+                             loom_serve_http_service_flags_t flags) {
+      while (!ready()) {
+        const auto ticket = iree_notification_prepare_wait(notification);
+        bool progress = false;
+        IREE_ASSERT_OK(interface.advance(interface.self, flags, &progress));
+        if (ready() || progress) {
+          iree_notification_cancel_wait(notification);
+        } else {
+          iree_notification_commit_wait(notification, ticket,
+                                        IREE_DURATION_ZERO,
+                                        IREE_TIME_INFINITE_FUTURE);
+        }
+      }
+    };
+    auto idle = [&] {
+      return !interface.is_pending(interface.self) &&
+             !interface.is_active(interface.self) &&
+             !interface.snapshot(interface.self).queued_requests;
+    };
+    loom_serve_http_connection_t* connection = nullptr;
+    const auto first = Oracle::Complete("abxa", 2);
+    for (size_t i = 0; i < 4; ++i) {
+      const int client =
+          Send(Request(Message("user", "abxa"), 2),
+               "X-Loom-Session: conversation" + std::to_string(i) + "\r\n");
+      ASSERT_NO_FATAL_FAILURE(accept(&connection));
+      ASSERT_NO_FATAL_FAILURE(advance_until(idle, 0));
+      EXPECT_EQ(Content(Read(client)), first);
+    }
+    const int replacement = Send(Request(Message("user", "bax"), 2),
+                                 "X-Loom-Session: replacement\r\n");
+    ASSERT_NO_FATAL_FAILURE(accept(&connection));
+    ASSERT_NO_FATAL_FAILURE(advance_until(
+        [&] {
+          return std::string(interface.snapshot(interface.self).phase) ==
+                 "retain";
+        },
+        0));
+    // Pin submission has accepted ownership, even if hardware has already
+    // signaled it. Cancellation happens before the owner consumes readiness.
+    if (action == OverlapAction::kDisconnect) {
+      const linger reset = {1, 0};
+      ASSERT_EQ(
+          setsockopt(replacement, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+          0);
+      ASSERT_EQ(close(replacement), 0);
+      iree_notification_await(
+          notification,
+          [](void* self) {
+            return loom_serve_http_connection_failed(
+                static_cast<loom_serve_http_connection_t*>(self));
+          },
+          connection, iree_infinite_timeout());
+    }
+    ASSERT_NO_FATAL_FAILURE(
+        advance_until(idle, action == OverlapAction::kStop
+                                ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING
+                                : 0));
+    EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
+    if (action == OverlapAction::kStop) {
+      EXPECT_TRUE(Read(replacement).empty());
+    } else {
+      const int resumed = Send(
+          Request(Message("user", "abxa") + "," + Message("assistant", first) +
+                      "," + Message("user", "b"),
+                  2),
+          "X-Loom-Session: conversation0\r\n");
+      ASSERT_NO_FATAL_FAILURE(accept(&connection));
+      ASSERT_NO_FATAL_FAILURE(advance_until(idle, 0));
+      const auto response = Read(resumed);
+      EXPECT_EQ(Content(response), Oracle::Complete("abxa" + first + "#b", 2));
+      EXPECT_NE(response.find("\"cached_tokens\":5}"), std::string::npos);
+      EXPECT_EQ(interface.telemetry.counters->completed, 5u);
+    }
+    interface.set_observer(interface.self, {});
+  }
+
   // Shared allocator for all production owners.
   const iree_allocator_t allocator_ = iree_allocator_system();
   // Host geometry buckets share one command in the source bootstrap.
@@ -617,6 +733,161 @@ TEST_P(SourceTextServiceTest, FailedTextSourceLeavesPeerAndDiagnosticsUsable) {
                 .find("HTTP/1.1 202"),
             0u);
   WaitModel("broken", {});
+}
+
+TEST_P(SourceTextServiceTest, IdleCacheExchangesFullRowsAndSharesExplicitPins) {
+  StartManaged();
+  std::string declaration = Declaration("fixture-text", directory_);
+  declaration.pop_back();
+  declaration += ",\"session_cache_capacity\":2}";
+  ASSERT_EQ(
+      Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
+      0u);
+  std::vector<std::string> prompts, replies;
+  for (size_t i = 0; i < 6; ++i) {
+    prompts.push_back("abxa" + std::string(i, 'b'));
+    replies.push_back(Content(Read(
+        Send(Request(Message("user", prompts.back()), 2),
+             "X-Loom-Session: conversation" + std::to_string(i) + "\r\n"))));
+    EXPECT_EQ(replies.back(), Oracle::Complete(prompts.back(), 2));
+  }
+  // The first conversation no longer has a row. Both explicit names retain its
+  // existing immutable endpoint, independently of automatic cache ownership.
+  for (const char* name : {"one", "two"}) {
+    const auto pinned = Read(Send("", "X-Loom-Session: conversation0\r\n",
+                                  std::string("/v1/checkpoints/") + name));
+    ASSERT_EQ(pinned.find("HTTP/1.1 201"), 0u) << pinned;
+  }
+  EXPECT_EQ(Read(Send("", "X-Loom-Session: conversation1\r\n",
+                      "/v1/checkpoints/full"))
+                .find("HTTP/1.1 503"),
+            0u);
+  EXPECT_EQ(
+      Read(Send("", "", "/v1/checkpoints/one", "DELETE")).find("HTTP/1.1 200"),
+      0u);
+  for (size_t i = 0; i < 6; ++i) {
+    const auto response =
+        Read(Send(Request(Message("user", prompts[i]) + "," +
+                              Message("assistant", replies[i]) + "," +
+                              Message("user", "b"),
+                          2),
+                  "X-Loom-Session: conversation" + std::to_string(i) + "\r\n"));
+    EXPECT_EQ(Content(response),
+              Oracle::Complete(prompts[i] + replies[i] + "#b", 2));
+    EXPECT_NE(response.find("\"cached_tokens\":" +
+                            std::to_string(prompts[i].size() + 1) + "}"),
+              std::string::npos)
+        << response;
+  }
+  // The automatic owner has been consumed and the resumed row has advanced.
+  // The surviving explicit alias still represents the original endpoint.
+  const auto rewind = Read(Send(
+      Request(Message("user", prompts[0]) + "," +
+                  Message("assistant", replies[0]) + "," + Message("user", "x"),
+              2),
+      "X-Loom-Checkpoint: two\r\n"));
+  EXPECT_EQ(Content(rewind),
+            Oracle::Complete(prompts[0] + replies[0] + "#x", 2));
+  EXPECT_NE(rewind.find("\"cached_tokens\":5}"), std::string::npos);
+  EXPECT_EQ(
+      Read(Send("", "", "/v1/checkpoints/two", "DELETE")).find("HTTP/1.1 200"),
+      0u);
+  EXPECT_EQ(Read(Send(R"({"model":"fixture-text","mode":"drain"})", "",
+                      "/v1/models/unregister"))
+                .find("HTTP/1.1 202"),
+            0u);
+  WaitModel("fixture-text", {});
+  // All automatic and explicit ownership retires with the registration.
+  EXPECT_EQ(
+      Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
+      0u);
+  const auto fresh = Read(Send(Request(Message("user", "abxa"), 2),
+                               "X-Loom-Session: conversation0\r\n"));
+  EXPECT_EQ(Content(fresh), Oracle::Complete("abxa", 2));
+  EXPECT_NE(fresh.find("\"cached_tokens\":0}"), std::string::npos);
+}
+
+TEST_P(SourceTextServiceTest, CancelledRowExchangePreservesDetachedHistory) {
+  CheckRetentionCancellation(OverlapAction::kDisconnect);
+}
+
+TEST_P(SourceTextServiceTest, ShutdownRetiresAcceptedRowExchange) {
+  CheckRetentionCancellation(OverlapAction::kStop);
+}
+
+TEST_P(SourceTextServiceTest, IdleCacheEvictsLruButPreservesRejectedHistory) {
+  StartManaged();
+  std::string declaration = Declaration("fixture-text", directory_);
+  declaration.pop_back();
+  declaration += ",\"session_cache_capacity\":1}";
+  ASSERT_EQ(
+      Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
+      0u);
+  const auto first = Oracle::Complete("abxa", 2);
+  for (size_t i = 0; i < 6; ++i) {
+    EXPECT_EQ(Content(Read(Send(Request(Message("user", "abxa"), 2),
+                                "X-Loom-Session: conversation" +
+                                    std::to_string(i) + "\r\n"))),
+              first);
+  }
+  EXPECT_EQ(Read(Send("", "X-Loom-Session: conversation0\r\n",
+                      "/v1/checkpoints/evicted"))
+                .find("HTTP/1.1 404"),
+            0u);
+  const auto history =
+      Message("user", "abxa") + "," + Message("assistant", first);
+  EXPECT_EQ(Read(Send(Request(history + "," + Message("user", "?"), 2),
+                      "X-Loom-Session: conversation1\r\n"))
+                .find("HTTP/1.1 400"),
+            0u);
+  EXPECT_EQ(Read(Send("", "X-Loom-Session: conversation1\r\n",
+                      "/v1/checkpoints/retained"))
+                .find("HTTP/1.1 201"),
+            0u);
+  const auto continued =
+      Read(Send(Request(history + "," + Message("user", "b"), 2),
+                "X-Loom-Session: conversation1\r\n"));
+  EXPECT_EQ(Content(continued), Oracle::Complete("abxa" + first + "#b", 2));
+  EXPECT_NE(continued.find("\"cached_tokens\":5}"), std::string::npos);
+  // A changed automatic history is an ordinary replay, not an explicit-pin
+  // validation error. The independent explicit endpoint remains usable.
+  const auto changed = Read(Send(Request(Message("user", "baxx"), 2),
+                                 "X-Loom-Session: conversation2\r\n"));
+  EXPECT_EQ(Content(changed), Oracle::Complete("baxx", 2));
+  EXPECT_NE(changed.find("\"cached_tokens\":0}"), std::string::npos);
+  const auto rewind =
+      Read(Send(Request(history + "," + Message("user", "x"), 2),
+                "X-Loom-Checkpoint: retained\r\n"));
+  EXPECT_EQ(Content(rewind), Oracle::Complete("abxa" + first + "#x", 2));
+  EXPECT_NE(rewind.find("\"cached_tokens\":5}"), std::string::npos);
+}
+
+TEST_P(SourceTextServiceTest, IdleCacheYieldsLogicalBlocksToAdmission) {
+  StartManaged();
+  std::string declaration = Declaration("fixture-text", directory_);
+  const auto pool = declaration.find("\"pool_capacity\":256");
+  ASSERT_NE(pool, std::string::npos);
+  declaration.replace(pool, strlen("\"pool_capacity\":256"),
+                      "\"pool_capacity\":32");
+  declaration.pop_back();
+  declaration += ",\"session_cache_capacity\":2}";
+  ASSERT_EQ(
+      Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
+      0u);
+  const auto first = Oracle::Complete("abxa", 2);
+  for (size_t i = 0; i < 6; ++i) {
+    EXPECT_EQ(Content(Read(Send(Request(Message("user", "abxa"), 2),
+                                "X-Loom-Session: conversation" +
+                                    std::to_string(i) + "\r\n"))),
+              first);
+  }
+  const auto replay = Read(
+      Send(Request(Message("user", "abxa") + "," + Message("assistant", first) +
+                       "," + Message("user", "b"),
+                   2),
+           "X-Loom-Session: conversation0\r\n"));
+  EXPECT_EQ(Content(replay), Oracle::Complete("abxa" + first + "#b", 2));
+  EXPECT_NE(replay.find("\"cached_tokens\":0}"), std::string::npos);
 }
 
 TEST_P(SourceTextServiceTest, PreparationOverlapsAcceptedEpoch) {
@@ -1298,6 +1569,50 @@ TEST_P(SourceTextServiceTest,
       Content(Read(Send(Request(Message("user", prompt)))));
   EXPECT_EQ(actual, Oracle::Complete(prompt, 16, 7));
   EXPECT_NE(actual, Oracle::Complete(prompt, 16, 2));
+}
+
+TEST_P(ElasticTextServiceTest, EndpointAliasesShareOneSuspendedPayload) {
+  IREE_ASSERT_OK(loom_serve_text_model_destroy(model_));
+  model_ = nullptr;
+  IREE_ASSERT_OK(loom_serve_device_group_destroy(group_));
+  group_ = nullptr;
+  const loom_serve_device_options_t device_options = {
+      .uri = iree_make_cstring_view(FLAG_test_device),
+      .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC};
+  IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
+                                                &group_, allocator_));
+  device_ = loom_serve_device_group_at(group_, 0);
+  auto options = ModelOptions();
+  IREE_ASSERT_OK(
+      loom_serve_text_model_create(device_, &options, &model_, allocator_));
+  auto* source = loom_serve_text_model_row(model_, 0);
+  auto* target = loom_serve_text_model_row(model_, 1);
+  const std::vector<int32_t> tokens = {0, 1, 2, 0};
+  IREE_ASSERT_OK(
+      loom_serve_text_row_prefill(source, tokens.size(), tokens.data()));
+  const auto prediction = loom_serve_text_row_token(source);
+  // Repeat after the final release to exercise actual endpoint slot reuse.
+  for (size_t iteration = 0; iteration < 3; ++iteration) {
+    loom_serve_text_checkpoint_t* endpoint = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_row_try_pin(source, &endpoint));
+    ASSERT_NE(endpoint, nullptr);
+    loom_serve_text_checkpoint_retain(endpoint);
+    IREE_ASSERT_OK(loom_serve_text_checkpoint_suspend(endpoint));
+    const auto bytes = loom_serve_text_checkpoint_suspended_bytes(endpoint);
+    ASSERT_GT(bytes, 0u);
+    EXPECT_EQ(loom_serve_text_model_checkpoint_suspended_bytes(model_), bytes);
+    loom_serve_text_checkpoint_release(endpoint);
+    EXPECT_EQ(loom_serve_text_model_checkpoint_suspended_bytes(model_), bytes);
+    bool restored = false;
+    IREE_ASSERT_OK(
+        loom_serve_text_row_try_restore(target, endpoint, &restored));
+    ASSERT_TRUE(restored);
+    EXPECT_EQ(loom_serve_text_row_position(target), tokens.size());
+    EXPECT_EQ(loom_serve_text_row_token(target), prediction);
+    EXPECT_EQ(loom_serve_text_model_checkpoint_suspended_bytes(model_), 0u);
+    loom_serve_text_checkpoint_release(endpoint);
+    IREE_ASSERT_OK(loom_serve_text_row_reset(target));
+  }
 }
 
 TEST_P(SourceTextServiceTest,

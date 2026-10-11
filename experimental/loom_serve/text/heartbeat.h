@@ -39,9 +39,17 @@ typedef struct loom_serve_text_heartbeat_snapshot_t {
     iree_host_size_t capacity;
     // Additional positions reserved for active completion, including tail COW.
     iree_host_size_t reserved;
-    // Unique resident positions, including idle rows and explicit pins.
+    // Unique resident positions, including idle rows, cached endpoints and
+    // pins.
     iree_host_size_t resident;
   } pool;
+  // Idle endpoint retention, independent of active row capacity.
+  struct {
+    // Configured detached endpoint bound.
+    iree_host_size_t capacity;
+    // Retained endpoints, including at most one temporary admission exchange.
+    iree_host_size_t endpoints;
+  } session_cache;
   // Host payload owned by explicitly suspended endpoints, not device backing.
   iree_host_size_t checkpoint_host_bytes;
   // Elastic mutable-state backing; weights and transient workspace are

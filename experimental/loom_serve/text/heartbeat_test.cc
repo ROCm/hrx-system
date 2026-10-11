@@ -119,6 +119,7 @@ class TextHeartbeatTest : public ::testing::Test {
 TEST_F(TextHeartbeatTest, TimerReadinessPublishesCopiedCounters) {
   Configure(iree_make_duration_ms(1));
   heartbeat_.snapshot.prefill_tokens = 42;
+  heartbeat_.snapshot.session_cache = {24, 17};
   counters_.input_tokens = 42;
   heartbeat_.snapshot.weight_activity = {2, 1, 64, 32, 4};
   heartbeat_.snapshot.device_memory.workspace.bytes_committed = 1234;
@@ -131,6 +132,8 @@ TEST_F(TextHeartbeatTest, TimerReadinessPublishesCopiedCounters) {
   const std::string first = ReadRecords(&cursor);
   EXPECT_NE(first.find("\"prefill_tokens\":42"), std::string::npos);
   EXPECT_NE(first.find("\"input_tokens\":42"), std::string::npos);
+  EXPECT_NE(first.find("\"session_cache\":{\"capacity\":24,\"endpoints\":17}"),
+            std::string::npos);
   EXPECT_NE(
       first.find("\"activations\":2,\"deactivations\":1,\"read_bytes\":64"),
       std::string::npos);

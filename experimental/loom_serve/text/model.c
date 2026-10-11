@@ -184,7 +184,9 @@ struct loom_serve_text_row_t {
 struct loom_serve_text_checkpoint_t {
   // Borrowed model, outliving this handle.
   loom_serve_text_model_t* model;
-  // Borrowed endpoint storage owned until release by this handle.
+  // Serialized handle owners; the last release returns the native endpoint.
+  iree_host_size_t references;
+  // Endpoint storage owned until the last handle release.
   loom_serve_text_state_checkpoint_t* state;
   // Whether the exact endpoint selected an unconsumed prediction.
   bool has_prediction;
@@ -1127,6 +1129,7 @@ iree_status_t loom_serve_text_row_submit_pin(
   loom_serve_text_checkpoint_t* checkpoint = &row->model->checkpoints[index];
   *checkpoint =
       (loom_serve_text_checkpoint_t){.model = row->model,
+                                     .references = 1,
                                      .state = state,
                                      .has_prediction = row->has_prediction,
                                      .token = row->transfer.token};
@@ -1269,9 +1272,16 @@ void loom_serve_text_row_release_reservation(loom_serve_text_row_t* row) {
   loom_serve_residency_release(row->model->residency);
 }
 
+void loom_serve_text_checkpoint_retain(
+    loom_serve_text_checkpoint_t* checkpoint) {
+  if (checkpoint) {
+    ++checkpoint->references;
+  }
+}
+
 void loom_serve_text_checkpoint_release(
     loom_serve_text_checkpoint_t* checkpoint) {
-  if (!checkpoint) {
+  if (!checkpoint || --checkpoint->references) {
     return;
   }
   loom_serve_text_state_checkpoint_release(checkpoint->state);
@@ -1310,6 +1320,18 @@ iree_status_t loom_serve_text_checkpoint_suspend(
 iree_host_size_t loom_serve_text_checkpoint_suspended_bytes(
     const loom_serve_text_checkpoint_t* checkpoint) {
   return loom_serve_snapshot_size(checkpoint->state->snapshot);
+}
+
+iree_host_size_t loom_serve_text_model_checkpoint_suspended_bytes(
+    const loom_serve_text_model_t* model) {
+  iree_host_size_t bytes = 0;
+  for (iree_host_size_t i = 0; i < model->state.checkpoints.capacity; ++i) {
+    const loom_serve_text_checkpoint_t* checkpoint = &model->checkpoints[i];
+    if (checkpoint->references) {
+      bytes += loom_serve_text_checkpoint_suspended_bytes(checkpoint);
+    }
+  }
+  return bytes;
 }
 
 static iree_status_t text_invoke(loom_serve_text_model_t* model,

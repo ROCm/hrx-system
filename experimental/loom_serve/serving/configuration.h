@@ -25,7 +25,7 @@ typedef struct loom_serve_text_configuration_t {
   iree_string_view_t weights;
   // Owned tokenizer JSON file path.
   iree_string_view_t tokenizer;
-  // Maximum simultaneous retained rows for this model.
+  // Maximum simultaneous execution rows for this model.
   iree_host_size_t rows;
   // Logical context ceiling per row, not eagerly committed storage.
   iree_host_size_t context_capacity;
@@ -35,6 +35,9 @@ typedef struct loom_serve_text_configuration_t {
   iree_host_size_t prefill_capacity;
   // Explicit pinned endpoint slots, independent of active rows.
   iree_host_size_t checkpoint_capacity;
+  // Evictable idle endpoints retained beyond execution rows; zero disables.
+  // Native storage includes one additional endpoint for an admission exchange.
+  iree_host_size_t session_cache_capacity;
   // Default output limit when a request omits max_tokens.
   iree_host_size_t max_tokens;
   // Speculative proposal depth, zero or three.

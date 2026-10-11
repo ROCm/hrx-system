@@ -62,6 +62,13 @@ typedef struct text_memory_record_t {
   uint64_t resident;
   // Explicitly suspended endpoint payload.
   uint64_t checkpoint_host_bytes;
+  // Detached idle endpoints, independent of active execution rows.
+  struct {
+    // Configured retained endpoint bound.
+    uint64_t capacity;
+    // Owned endpoints, including one possible pending admission exchange.
+    uint64_t endpoints;
+  } session_cache;
   // Model mutable-state backing excluding weights/workspace.
   loom_serve_memory_statistics_t state;
   // Independently reclaimable model parameter backing.
@@ -147,6 +154,8 @@ static iree_status_t text_memory_format(
       output,
       ",\"pool\":{\"capacity_tokens\":%" PRIu64 ",\"reserved_tokens\":%" PRIu64
       ",\"resident_tokens\":%" PRIu64 "},\"checkpoint_host_bytes\":%" PRIu64
+      ",\"session_cache\":{\"capacity\":%" PRIu64 ",\"endpoints\":%" PRIu64
+      "}"
       ",\"elastic_state\":{\"reserved_bytes\":%" PRIu64
       ",\"committed_bytes\":%" PRIu64 ",\"peak_bytes\":%" PRIu64
       ",\"released_bytes\":%" PRIu64
@@ -155,7 +164,8 @@ static iree_status_t text_memory_format(
       ",\"committed_bytes\":%" PRIu64 ",\"peak_bytes\":%" PRIu64
       ",\"released_bytes\":%" PRIu64 "}",
       value.capacity, value.reserved, value.resident,
-      value.checkpoint_host_bytes, value.state.reserved_bytes,
+      value.checkpoint_host_bytes, value.session_cache.capacity,
+      value.session_cache.endpoints, value.state.reserved_bytes,
       value.state.committed_bytes, value.state.peak_bytes,
       value.state.released_bytes, value.weights.reserved_bytes,
       value.weights.committed_bytes, value.weights.peak_bytes,
@@ -223,6 +233,8 @@ static void text_heartbeat_report(loom_serve_text_heartbeat_t* heartbeat) {
       .reserved = state.pool.reserved,
       .resident = state.pool.resident,
       .checkpoint_host_bytes = state.checkpoint_host_bytes,
+      .session_cache = {state.session_cache.capacity,
+                        state.session_cache.endpoints},
       .state = state.state_memory,
       .weights = state.weight_memory};
   memset(&record.data, 0, sizeof(record.data));

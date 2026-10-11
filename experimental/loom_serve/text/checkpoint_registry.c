@@ -33,7 +33,6 @@ void loom_serve_text_checkpoint_registry_reset(
     loom_serve_text_chat_completion_deinitialize(&entry->completion);
     memset(entry, 0, sizeof(*entry));
   }
-  registry->host_bytes = 0;
 }
 
 void loom_serve_text_checkpoint_registry_deinitialize(
@@ -88,18 +87,21 @@ void loom_serve_text_checkpoint_entry_publish(
   entry->name[name.size] = 0;
 }
 
-void loom_serve_text_checkpoint_registry_refresh(
-    loom_serve_text_checkpoint_registry_t* registry,
-    loom_serve_text_checkpoint_entry_t* entry) {
-  registry->host_bytes -= entry->host_bytes;
-  entry->host_bytes = loom_serve_text_checkpoint_suspended_bytes(entry->state);
-  registry->host_bytes += entry->host_bytes;
+void loom_serve_text_checkpoint_entry_retain(
+    const loom_serve_text_checkpoint_entry_t* source,
+    loom_serve_text_checkpoint_entry_t* target) {
+  *target =
+      (loom_serve_text_checkpoint_entry_t){.state = source->state,
+                                           .completion = source->completion,
+                                           .position = source->position,
+                                           .token = source->token,
+                                           .boundary = source->boundary};
+  loom_serve_text_checkpoint_retain(target->state);
+  iree_vm_buffer_retain(target->completion.storage);
 }
 
-void loom_serve_text_checkpoint_registry_release(
-    loom_serve_text_checkpoint_registry_t* registry,
+void loom_serve_text_checkpoint_entry_release(
     loom_serve_text_checkpoint_entry_t* entry) {
-  registry->host_bytes -= entry->host_bytes;
   loom_serve_text_checkpoint_release(entry->state);
   loom_serve_text_chat_completion_deinitialize(&entry->completion);
   memset(entry, 0, sizeof(*entry));

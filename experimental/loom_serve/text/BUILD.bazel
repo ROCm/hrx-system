@@ -250,6 +250,22 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "session_cache",
+    srcs = ["session_cache.c"],
+    hdrs = ["session_cache.h"],
+    visibility = [":__pkg__"],
+    deps = [
+        ":chat",
+        ":checkpoint_registry",
+        ":model",
+        ":session",
+        ":telemetry",
+        "//experimental/loom_serve/runtime:execution",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "service",
     srcs = ["service.c"],
     hdrs = ["service.h"],
@@ -264,6 +280,7 @@ loom_cc_library(
         ":model",
         ":schedule",
         ":session",
+        ":session_cache",
         ":telemetry",
         "//experimental/loom_serve/http:request",
         "//experimental/loom_serve/http:server",

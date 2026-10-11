@@ -269,6 +269,24 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
+loom_cc_library(
+  NAME
+    session_cache
+  HDRS
+    "session_cache.h"
+  SRCS
+    "session_cache.c"
+  DEPS
+    ::chat
+    ::checkpoint_registry
+    ::model
+    ::session
+    ::telemetry
+    iree::base
+    iree::experimental::loom_serve::runtime::execution
+  PUBLIC
+)
+
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
@@ -285,6 +303,7 @@ loom_cc_library(
     ::model
     ::schedule
     ::session
+    ::session_cache
     ::telemetry
     iree::async
     iree::async::util::proactor_pool

@@ -359,7 +359,8 @@ const loom_serve_text_chat_policy_t* loom_serve_text_model_chat_policy(
     const loom_serve_text_model_t* model);
 iree_host_size_t loom_serve_text_model_context_capacity(
     const loom_serve_text_model_t* model);
-// Number of explicit endpoint handles reserved at model creation.
+// Number of distinct native endpoints reserved at model creation. Several
+// logical owners may retain one endpoint without consuming additional slots.
 iree_host_size_t loom_serve_text_model_checkpoint_capacity(
     const loom_serve_text_model_t* model);
 // Copies logical page ownership at the single owner's completed-stage boundary,
@@ -497,9 +498,15 @@ iree_status_t loom_serve_text_row_try_restore(
     loom_serve_text_row_t* row, const loom_serve_text_checkpoint_t* checkpoint,
     bool* out_restored);
 
-// Drops this endpoint's references at the serialized completed-call boundary.
-// No automatic history keeps them alive; live branches retain their own refs.
-// Null is accepted. The handle becomes invalid and may immediately be reused.
+// Shares a ready immutable endpoint at the serialized completed-call boundary.
+// No device transfer occurs. Aliases share physical suspension/wake state, not
+// mutable row advancement. Each owner releases once; null is accepted.
+void loom_serve_text_checkpoint_retain(
+    loom_serve_text_checkpoint_t* checkpoint);
+
+// Drops one handle owner at the serialized completed-call boundary. The last
+// release returns endpoint storage; live row branches retain independent refs.
+// Null is accepted. The last release invalidates the reusable handle.
 void loom_serve_text_checkpoint_release(
     loom_serve_text_checkpoint_t* checkpoint);
 
@@ -527,6 +534,12 @@ iree_status_t loom_serve_text_checkpoint_suspend(
 // restore or release destroys the image. Resident endpoints report zero.
 iree_host_size_t loom_serve_text_checkpoint_suspended_bytes(
     const loom_serve_text_checkpoint_t* checkpoint);
+
+// Total host snapshot payload across unique native endpoints, independent of
+// the number of names/owners retaining each handle. Cold observation query at
+// the serialized completed-call boundary; walks the fixed endpoint table.
+iree_host_size_t loom_serve_text_model_checkpoint_suspended_bytes(
+    const loom_serve_text_model_t* model);
 
 // Captures an idle row's retained private/target/draft state into one DRAM
 // image, then returns its physical block IDs. Host frontier, pending prediction

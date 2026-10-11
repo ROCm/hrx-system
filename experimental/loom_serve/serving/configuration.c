@@ -136,8 +136,16 @@ static iree_status_t configuration_text(const configuration_field_t* fields,
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "prefill capacity exceeds context capacity");
   }
-  IREE_RETURN_IF_ERROR(configuration_size(&fields[9], 0, IREE_HOST_SIZE_MAX,
-                                          &text->checkpoint_capacity));
+  IREE_RETURN_IF_ERROR(
+      configuration_size(&fields[9], 0, INT32_MAX, &text->checkpoint_capacity));
+  IREE_RETURN_IF_ERROR(configuration_size(&fields[22], 0, INT32_MAX - 1,
+                                          &text->session_cache_capacity));
+  if (text->session_cache_capacity &&
+      text->checkpoint_capacity >
+          INT32_MAX - text->session_cache_capacity - 1) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "combined endpoint capacity exceeds INT32_MAX");
+  }
   IREE_RETURN_IF_ERROR(
       configuration_size(&fields[11], 1, 16384, &text->max_tokens));
   IREE_RETURN_IF_ERROR(configuration_size(&fields[12], 0, 3, &text->mtp_depth));
@@ -219,7 +227,9 @@ static iree_status_t configuration_model_parse(
       {"options", IREE_JSON_VALUE_TYPE_OBJECT,
        .kinds = (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
                 (1u << LOOM_SERVE_MODEL_KIND_DECISION)},
-      {"admission", IREE_JSON_VALUE_TYPE_STRING}};
+      {"admission", IREE_JSON_VALUE_TYPE_STRING},
+      {"session_cache_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)}};
   configuration_fields_t context = {IREE_ARRAYSIZE(fields), fields};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
       value, configuration_field_visit, &context));

@@ -32,8 +32,6 @@ typedef struct loom_serve_text_checkpoint_entry_t {
   loom_serve_text_chat_boundary_t boundary;
   // Queued admission borrowers; deletion requires this count to be zero.
   iree_host_size_t pending;
-  // Host snapshot bytes at the last successfully completed ownership change.
-  iree_host_size_t host_bytes;
 } loom_serve_text_checkpoint_entry_t;
 
 // Fixed host records over the model's native pin capacity. This is not a second
@@ -45,8 +43,6 @@ typedef struct loom_serve_text_checkpoint_registry_t {
   loom_serve_text_checkpoint_entry_t* entries;
   // Number of allocated records, independent of resident session rows.
   iree_host_size_t capacity;
-  // Sum of the completed host snapshot byte counts in entries.
-  iree_host_size_t host_bytes;
 } loom_serve_text_checkpoint_registry_t;
 
 // Allocates host records only. A zero capacity disables named endpoints.
@@ -91,16 +87,15 @@ iree_status_t loom_serve_text_checkpoint_entry_submit_pin(
 void loom_serve_text_checkpoint_entry_publish(
     loom_serve_text_checkpoint_entry_t* entry, iree_string_view_t name);
 
-// Updates accounting after successful native suspend or restore completion.
-// No native query is permitted before that readiness boundary.
-void loom_serve_text_checkpoint_registry_refresh(
-    loom_serve_text_checkpoint_registry_t* registry,
-    loom_serve_text_checkpoint_entry_t* entry);
+// Retains a ready endpoint and its canonical history in an available record.
+// Names and queued borrowers are independent; no device work is submitted.
+void loom_serve_text_checkpoint_entry_retain(
+    const loom_serve_text_checkpoint_entry_t* source,
+    loom_serve_text_checkpoint_entry_t* target);
 
 // Drops an unborrowed entry at a completed model boundary. Live branches keep
 // their independent references. The record becomes available immediately.
-void loom_serve_text_checkpoint_registry_release(
-    loom_serve_text_checkpoint_registry_t* registry,
+void loom_serve_text_checkpoint_entry_release(
     loom_serve_text_checkpoint_entry_t* entry);
 
 #ifdef __cplusplus

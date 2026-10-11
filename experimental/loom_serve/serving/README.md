@@ -77,7 +77,8 @@ Create a JSON or JSONC catalog, for example:
       "prefill_capacity": 128,
       "mtp_depth": 3,
       "continuation_epochs": 2,
-      "checkpoint_capacity": 2
+      "checkpoint_capacity": 2,
+      "session_cache_capacity": 8
     },
     {
       "kind": "text",
