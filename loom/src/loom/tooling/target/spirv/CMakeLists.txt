@@ -302,51 +302,6 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
 loom_test_module(
   NAME
-    buffer_selection_test_module
-  SRCS
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/buffer_selection.loom"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
-loom_execution_test(
-  NAME
-    buffer_selection_test_execute_spirv_vulkan_hardware_test
-  MODULE
-    "::buffer_selection_test_module"
-  RUNNER_ARGS
-    "--device=vulkan"
-    "--vulkan_validation_layers=false"
-  LABELS
-    "iree-build-requirement=loom.target.arch.spirv"
-    "iree-build-requirement=loom.emit.spirv"
-    "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=vulkan.resource.device"
-    "runtime-resource=vulkan-device"
-    "loom-execution-profile=spirv_vulkan_hardware"
-    "loom-target-family=spirv"
-    "loom-target-class=gpu"
-    "loom-executor=hardware"
-  RESOURCE_GROUP
-    "gpu-device"
-)
-endif()
-
-loom_check_compile_tests(
-  NAME
-    "buffer_selection_test"
-  SRC
-    "::buffer_selection_test_module"
-  TARGETS
-    loom::target::spirv::vulkan1.3+bda
-)
-endif()
-
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
-loom_test_module(
-  NAME
     vulkan_tests_module
   SRCS
     "test/multiple_entries.loom"

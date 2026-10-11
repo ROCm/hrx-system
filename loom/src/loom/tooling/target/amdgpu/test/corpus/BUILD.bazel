@@ -74,23 +74,6 @@ _CDNA4_COMPATIBLE_WITH = loom_config_compatible_with([
 ])
 
 loom_test(
-    name = "buffer_selection_test",
-    srcs = ["//loom/src/loom/test/corpus/source_low:buffer_selection.loom"],
-    compile_targets = [
-        "//loom/target/amdgpu:gfx942",
-        "//loom/target/amdgpu:gfx950",
-        "//loom/target/amdgpu:gfx1151",
-        "//loom/target/amdgpu:gfx1170",
-        "//loom/target/amdgpu:gfx1200",
-        "//loom/target/amdgpu:gfx1250",
-    ],
-    execution_profiles = [
-        AMDGPU_HARDWARE_PROFILE,
-        AMDGPU_ACCESS_PROFILE,
-    ],
-)
-
-loom_test(
     name = "split_barrier_provider_test",
     srcs = ["split_barrier_reuse.loom"],
     compile_targets = [

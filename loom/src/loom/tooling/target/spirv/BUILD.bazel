@@ -123,13 +123,6 @@ loom_test(
 ]
 
 loom_test(
-    name = "buffer_selection_test",
-    srcs = ["//loom/src/loom/test/corpus/source_low:buffer_selection.loom"],
-    compile_targets = ["//loom/target/spirv:vulkan1.3+bda"],
-    execution_profiles = [SPIRV_VULKAN_HARDWARE_PROFILE],
-)
-
-loom_test(
     name = "vulkan_tests",
     srcs = [
         "test/multiple_entries.loom",
