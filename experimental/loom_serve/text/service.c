@@ -759,11 +759,13 @@ static void text_pending_cancel(loom_serve_text_service_t* service,
 
 static void text_pending_cancel_failed(loom_serve_text_service_t* service,
                                        bool* out_progress) {
-  // Only a prepared head can be borrowed by CPU preparation or a native
-  // admission/cache operation. Tails own no model state and can retire while
-  // that loan remains outstanding; removing them never moves the head.
-  const iree_host_size_t first =
-      service->pending.prepared.session && text_has_work(service) ? 1 : 0;
+  // Preparation, reservation and cache retention borrow the head until their
+  // owner consumes readiness. Epoch/output work owns admitted rows instead;
+  // it cannot delay cancellation of an independently prepared idle row.
+  const bool head_borrowed = service->cpu.work == TEXT_CPU_WORK_PREPARE ||
+                             service->completion.work == TEXT_WORK_RESERVE ||
+                             service->completion.work == TEXT_WORK_RETAIN;
+  const iree_host_size_t first = head_borrowed ? 1 : 0;
   for (iree_host_size_t i = first; i < service->pending.count;) {
     if (loom_serve_http_connection_failed(
             service->pending.values[i].connection)) {
