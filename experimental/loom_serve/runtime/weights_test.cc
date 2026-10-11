@@ -11,6 +11,7 @@
 #include <fstream>
 #include <mutex>
 
+#include "experimental/loom_serve/runtime/activation.h"
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/execution.h"
 #include "experimental/loom_serve/runtime/residency.h"
@@ -232,6 +233,27 @@ struct Activation {
   unsigned released = 0;
   // Joined status transferred to the outer owner.
   iree_status_t status = iree_ok_status();
+};
+
+// Outer owner notification for explicit warmup. Advance joins the production
+// callback's last access before this notification or the operation can die.
+struct ActivationWake {
+  static void Notify(void* user_data) {
+    auto* self = static_cast<ActivationWake*>(user_data);
+    std::lock_guard<std::mutex> lock(self->mutex);
+    self->ready = true;
+    self->condition.notify_one();
+  }
+  void Await() {
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [this] { return ready; });
+  }
+  // Protects readiness publication to the outer owner.
+  std::mutex mutex;
+  // Outer-thread wait only; the one task worker remains available.
+  std::condition_variable condition;
+  // The production warmup callback has requested an owner turn.
+  bool ready = false;
 };
 
 class WeightsTest : public ::testing::TestWithParam<bool> {
@@ -763,6 +785,124 @@ TEST_P(WeightsTest, ImpossibleParameterGroupCannotJoinPressureAdmission) {
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   ASSERT_NO_FATAL_FAILURE(Run(0, 90));
   loom_serve_residency_release(residencies_[0]);
+}
+
+TEST_P(WeightsTest, ExplicitActivationCancellationJoinsAcceptedReadiness) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, path_.path()));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  iree_hal_semaphore_t* gate = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate));
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(
+      loom_serve_execution_barrier(execution_, {1, &gate, &gate_value}));
+  ActivationWake wake;
+  loom_serve_activation_t* activation = nullptr;
+  IREE_ASSERT_OK(loom_serve_activation_create(
+      residencies_[0],
+      loom_serve_host_proactor_pool(loom_serve_device_host(device_owner_)),
+      ActivationWake::Notify, &wake, &activation, allocator_));
+  loom_serve_activation_phase_t phase;
+  IREE_ASSERT_OK(loom_serve_activation_advance(activation, 0, &phase));
+  EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_LOADING);
+  IREE_ASSERT_OK(loom_serve_activation_advance(
+      activation, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &phase));
+  EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_LOADING);
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
+      loom_serve_device_residency_cache(device_owner_), 0));
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
+            GetParam() ? kSlabBytes : 0u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, gate_value, nullptr));
+  wake.Await();
+  IREE_ASSERT_OK(loom_serve_activation_advance(
+      activation, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &phase));
+  EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_COMPLETE);
+  loom_serve_activation_destroy(activation);
+  iree_hal_semaphore_release(gate);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations, 1u);
+  // Warmup owns no persistent pin after completion.
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
+      loom_serve_device_residency_cache(device_owner_), 0));
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
+}
+
+TEST_P(WeightsTest, CancelledWarmupWithdrawsCapacityInterestWithoutLoading) {
+  if (!GetParam()) {
+    // Fixed allocations have no serving-imposed physical ceiling.
+    return;
+  }
+  for (uint32_t i = 0; i < 3; ++i) {
+    IREE_ASSERT_OK(Compile(i, "raw"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, path_.path()));
+  }
+  IREE_ASSERT_OK(Register(0, 0, 2));
+  IREE_ASSERT_OK(Register(1, 2, 1));
+  IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
+  IREE_ASSERT_OK(loom_serve_residency_await(residencies_[0]));
+  ActivationWake wake;
+  loom_serve_activation_t* activation = nullptr;
+  IREE_ASSERT_OK(loom_serve_activation_create(
+      residencies_[1],
+      loom_serve_host_proactor_pool(loom_serve_device_host(device_owner_)),
+      ActivationWake::Notify, &wake, &activation, allocator_));
+  loom_serve_activation_phase_t phase;
+  IREE_ASSERT_OK(loom_serve_activation_advance(activation, 0, &phase));
+  EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_WAITING);
+  EXPECT_EQ(loom_serve_weights_activity(plans_[2]).activations, 0u);
+  loom_serve_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
+  IREE_ASSERT_OK(loom_serve_activation_advance(
+      activation, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &phase));
+  EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_COMPLETE);
+  loom_serve_activation_destroy(activation);
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_serve_residency_release(residencies_[0]);
+  loom_serve_residency_release(residencies_[0]);
+  // A new operation can now reclaim the unpinned peer and finish normally.
+  IREE_ASSERT_OK(loom_serve_activation_create(
+      residencies_[1],
+      loom_serve_host_proactor_pool(loom_serve_device_host(device_owner_)),
+      ActivationWake::Notify, &wake, &activation, allocator_));
+  IREE_ASSERT_OK(loom_serve_activation_advance(activation, 0, &phase));
+  EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_LOADING);
+  wake.Await();
+  IREE_ASSERT_OK(loom_serve_activation_advance(activation, 0, &phase));
+  EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_COMPLETE);
+  loom_serve_activation_destroy(activation);
+  IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[1]));
+  ASSERT_NO_FATAL_FAILURE(Run(2, 90));
+  loom_serve_residency_release(residencies_[1]);
+}
+
+TEST_P(WeightsTest, RejectedWarmupKeepsAcceptedLoadsProtectedUntilRetirement) {
+  IREE_ASSERT_OK(Compile(0, "partial"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, path_.path()));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  ActivationWake wake;
+  loom_serve_activation_t* activation = nullptr;
+  IREE_ASSERT_OK(loom_serve_activation_create(
+      residencies_[0],
+      loom_serve_host_proactor_pool(loom_serve_device_host(device_owner_)),
+      ActivationWake::Notify, &wake, &activation, allocator_));
+  loom_serve_activation_phase_t phase;
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        loom_serve_activation_advance(activation, 0, &phase));
+  EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_COMPLETE);
+  loom_serve_activation_destroy(activation);
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
+      loom_serve_device_residency_cache(device_owner_), 0));
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
+            GetParam() ? kSlabBytes : 0u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        loom_serve_weights_await(plans_[0]));
 }
 
 TEST_P(WeightsTest, CheckpointGroupsAdmitAtomicallyAndRetentionPinsNest) {

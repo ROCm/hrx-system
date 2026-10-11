@@ -104,6 +104,12 @@ iree_status_t loom_serve_residency_acquire(loom_serve_residency_t* residency);
 // the model timeline asynchronously. Failure preserves the pin until teardown.
 iree_status_t loom_serve_residency_await(loom_serve_residency_t* residency);
 
+// Captures the borrowed execution frontier after accepted activation. A caller
+// owning a pin may join this through a proactor instead of blocking in await.
+// The residency and its execution must outlive that asynchronous wait.
+loom_serve_execution_frontier_t loom_serve_residency_frontier(
+    const loom_serve_residency_t* residency);
+
 // Releases one owned pin after consumption has retired. No allocation or wait.
 void loom_serve_residency_release(loom_serve_residency_t* residency);
 

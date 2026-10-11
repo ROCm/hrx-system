@@ -567,6 +567,23 @@ endif()
 
 loom_cc_library(
   NAME
+    activation
+  HDRS
+    "activation.h"
+  SRCS
+    "activation.c"
+  DEPS
+    ::execution
+    ::residency
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     residency
   HDRS
     "residency.h"
@@ -579,6 +596,25 @@ loom_cc_library(
     iree::experimental::loom_serve::storage::memory
   PUBLIC
 )
+
+if(IREE_HAL_DRIVER_TASK)
+loom_cc_test(
+  NAME
+    activation_test
+  SRCS
+    "activation_test.cc"
+  DEPS
+    ::activation
+    ::device
+    ::execution
+    ::host
+    ::residency
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
 
 loom_cc_library(
   NAME
@@ -654,6 +690,7 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/weights/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/weights/stages.loom"
   DEPS
+    ::activation
     ::device
     ::execution
     ::jit

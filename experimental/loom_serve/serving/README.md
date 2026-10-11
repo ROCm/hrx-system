@@ -167,8 +167,8 @@ curl --unix-socket /path/to/loom-serve.sock http://localhost/v1/models
 Optional `admission` is `"open"` by default or `"drained"`. The latter stores
 only registration metadata and a bounded observation ring: it does not create
 the model, read source/assets, reserve model storage or evict another model.
-Opening admission starts preparation. The same setting is accepted for every
-modality in startup catalogs.
+Opening admission or requesting explicit activation starts preparation. The
+same setting is accepted for every modality in startup catalogs.
 
 ~~~sh
 curl http://127.0.0.1:8080/v1/models/register \
@@ -252,7 +252,35 @@ It does not freeze background maintenance or make model storage safe to destroy;
 retirement must also join accepted CPU/device borrowers. Unregister is the
 separate irreversible operation; drain alone never deletes retained state.
 
-## Releasing idle parameters
+## Warming and releasing parameters
+
+`POST /v1/models/activate` accepts exactly `{"model":"name"}` for a healthy
+managed registration with closed admission. It prepares a metadata-only model,
+waits for any already-admitted work, and loads its parameters on the ordinary
+model timeline. Both fixed and elastic backing support activation. No dummy
+inference is performed; request counters and retained sessions are unchanged.
+The 202 response accepts server-owned intent, not completed loading. A client
+can disconnect without cancelling it.
+
+~~~sh
+curl http://127.0.0.1:8080/v1/models/activate \
+  -H 'Content-Type: application/json' -d '{"model":"scout"}'
+curl http://127.0.0.1:8080/v1/status
+~~~
+
+Status reports `loom.parameter_operation` as `waiting`, `activating`,
+`deactivating` or `idle`. `waiting` includes source preparation, admitted work
+and physical capacity; `activating` means a parameter-readiness wait has been
+submitted. After activation reaches `idle`, check for `loom.error` before
+undraining. Admission remains closed throughout. Repeated activation is
+idempotent; undrain and the opposite parameter operation return 409 while an
+operation is pending. Unregister withdraws waiting admission or joins accepted
+activation before retiring resources. No task worker blocks on device readiness.
+
+Warmup is not permanent pinning: subsequent pressure may evict idle weights.
+A model whose complete parameters exceed the configured physical pool budget
+fails preparation instead of indefinitely blocking the admission queue. A
+temporary shortage waits for other work or explicit model/state release.
 
 `POST /v1/models/deactivate` accepts exactly `{"model":"name"}` after
 admission is closed. Its 202 response accepts a registration-owned operation:
@@ -269,12 +297,13 @@ curl http://127.0.0.1:8080/v1/models/deactivate \
 curl http://127.0.0.1:8080/v1/status
 ~~~
 
-The selected model's `loom.parameters.deactivating` becomes false when the
+The selected model's `loom.parameter_operation` becomes `idle` when the
 operation finishes. On success, `active` is false and `committed_bytes` is zero;
 its parameter address reservation remains intact. Requests arriving behind the
 drain stay held. Once deactivation finishes, undrain opens admission and the next
 inference activates weights on its ordinary device timeline, without recompiling
 programs or re-registering the model. Undrain alone does not load weights.
+Explicit activation can instead reload them before opening admission.
 
 Deactivation requires elastic backing. Fixed-backed prepared models, open
 admission, preparing/failed/removing registrations, and borrowed services return
@@ -444,14 +473,15 @@ Unmeasured device times and whole-device memory totals are not reported as zero.
 
 Ready managed source models also expose a copied `loom.parameters` object.
 `active` means all weight-plan activations have been enqueued, not that their
-device work has completed. `backing` is `fixed` or `elastic`; `deactivating`
-reports an accepted explicit release waiting for admitted model work. Cumulative
-`activations` and `deactivations` count weight-plan transitions (a model can own
-several plans). Elastic backing additionally reports parameter-only
-`reserved_bytes` and `committed_bytes`. Fixed backing omits those accounting
-fields instead of presenting its allocated memory as zero. Neither these bytes
-nor these counters include the model's retained mutable state. Cache pressure
-can also release idle weights, so `active` is not an admission or pinning flag.
+device work has completed. `backing` is `fixed` or `elastic`. The separate
+`loom.parameter_operation` reports explicit residency intent even before a
+model finishes preparation. Cumulative `activations` and `deactivations` count
+weight-plan transitions (a model can own several plans). Elastic backing reports
+parameter-only `reserved_bytes` and `committed_bytes`. Fixed backing omits those
+accounting fields instead of presenting its allocated memory as zero. Neither
+these bytes nor these counters include the model's retained mutable state.
+Cache pressure can also release idle weights, so `active` is not an admission
+or pinning flag.
 
 `GET /metrics` exposes scheduler ownership gauges and request counters in
 [Prometheus text 0.0.4 format](https://prometheus.io/docs/instrumenting/exposition_formats/).

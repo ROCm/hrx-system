@@ -255,6 +255,21 @@ struct RegistrationDependency {
       .activity = {.activations = 1}};
   // Injects an explicit native parameter release failure after quiescence.
   std::atomic<bool> fail_deactivation{false};
+  // Optional shared pressure domain, configured before factory publication.
+  const void* capacity_domain = nullptr;
+  // Independently controlled parameter-readiness dependency.
+  struct {
+    // An accepted warmup still borrows the model until readiness is consumed.
+    bool submitted = false;
+    // The test has published terminal readiness.
+    bool ready = false;
+    // Unregister has requested cancellation while the callback is outstanding.
+    bool cancelling = false;
+    // Number of accepted operations, not repeated owner polls.
+    unsigned starts = 0;
+    // Terminal readiness result transferred to the production registry.
+    iree_status_t status = iree_ok_status();
+  } activation;
 
   struct Operation {
     // Test-owned model dependency, live beyond the owning registry.
@@ -269,7 +284,8 @@ struct RegistrationDependency {
     if (cancel) {
       return iree_make_status(IREE_STATUS_CANCELLED, "preparation cancelled");
     }
-    *service = dependency->service.Interface(nullptr, nullptr);
+    *service =
+        dependency->service.Interface(nullptr, dependency->capacity_domain);
     service->telemetry.stream = dependency->stream;
     return iree_ok_status();
   }
@@ -278,6 +294,7 @@ struct RegistrationDependency {
     EXPECT_FALSE(ModelService::IsPending(&dependency->service));
     EXPECT_TRUE(dependency->service.pending.empty());
     std::lock_guard<std::mutex> lock(dependency->mutex);
+    EXPECT_FALSE(dependency->activation.submitted);
     dependency->retiring = true;
     *complete = dependency->retired;
     if (*complete) {
@@ -313,6 +330,38 @@ struct RegistrationDependency {
     parameters.memory.committed_bytes = 0;
     return iree_ok_status();
   }
+  static iree_status_t Activate(void* self, loom_serve_activation_flags_t flags,
+                                loom_serve_activation_phase_t* phase) {
+    auto* dependency = static_cast<Operation*>(self)->dependency;
+    std::lock_guard<std::mutex> lock(dependency->mutex);
+    auto& activation = dependency->activation;
+    const bool cancel =
+        iree_any_bit_set(flags, LOOM_SERVE_ACTIVATION_FLAG_CANCEL);
+    if (!activation.submitted && cancel) {
+      *phase = LOOM_SERVE_ACTIVATION_COMPLETE;
+      return iree_ok_status();
+    }
+    if (!activation.submitted) {
+      activation.submitted = true;
+      ++activation.starts;
+    }
+    activation.cancelling |= cancel;
+    dependency->condition.notify_all();
+    if (!activation.ready) {
+      *phase = LOOM_SERVE_ACTIVATION_LOADING;
+      return iree_ok_status();
+    }
+    activation.submitted = false;
+    activation.ready = false;
+    *phase = LOOM_SERVE_ACTIVATION_COMPLETE;
+    if (iree_status_is_ok(activation.status)) {
+      auto& parameters = dependency->parameters;
+      parameters.activity.activations += !parameters.active;
+      parameters.active = true;
+      parameters.memory.committed_bytes = parameters.memory.reserved_bytes;
+    }
+    return std::exchange(activation.status, iree_ok_status());
+  }
   static iree_status_t Create(
       void* self, const loom_serve_model_configuration_t* configuration,
       loom_serve_http_observer_t observer,
@@ -330,6 +379,7 @@ struct RegistrationDependency {
                      .prepare = Prepare,
                      .retire = Retire,
                      .parameters = Parameters,
+                     .activate = Activate,
                      .deactivate = Deactivate,
                      .destroy = Destroy};
     return iree_ok_status();
@@ -337,6 +387,21 @@ struct RegistrationDependency {
   void WaitRetiring() {
     std::unique_lock<std::mutex> lock(mutex);
     condition.wait(lock, [this] { return retiring; });
+  }
+  void WaitActivating() {
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [this] { return activation.submitted; });
+  }
+  void WaitActivationCancellation() {
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [this] { return activation.cancelling; });
+  }
+  void ReleaseActivation(iree_status_t status = iree_ok_status()) {
+    std::lock_guard<std::mutex> lock(mutex);
+    EXPECT_TRUE(activation.submitted);
+    activation.ready = true;
+    activation.status = status;
+    observer.wake(observer.user_data);
   }
   void ReleaseRetirement() {
     std::lock_guard<std::mutex> lock(mutex);
@@ -517,7 +582,7 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
                 .create = RegistrationDependency::Create};
     HttpRouterTest::SetUp();
   }
-  void Register() {
+  void Declare() {
     EXPECT_EQ(
         Read(
             Send(
@@ -526,6 +591,9 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
             .find("HTTP/1.1 202"),
         0u);
     EXPECT_EQ(managed_.created.load(), 0u);
+  }
+  void Register() {
+    Declare();
     EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
     while (Read(Send("GET", "/v1/status")).find(R"("registration":"ready")") ==
            std::string::npos) {
@@ -539,10 +607,133 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
            std::string::npos) {
     }
   }
+  std::string WaitParameterOperation(const char* phase) {
+    const std::string expected =
+        std::string("\"parameter_operation\":\"") + phase + "\"";
+    for (;;) {
+      const auto state = Read(Send("GET", "/v1/status"));
+      if (state.find(expected) != std::string::npos) {
+        return state;
+      }
+    }
+  }
   // The model alone is a dependency; every control/transport path is
   // production.
   RegistrationDependency managed_;
 };
+
+TEST_P(HttpRouterRegistrationTest,
+       DrainedActivationSurvivesDisconnectAndPreservesPeerProgress) {
+  {
+    std::lock_guard<std::mutex> lock(managed_.mutex);
+    managed_.parameters.active = false;
+    managed_.parameters.memory.committed_bytes = 0;
+    managed_.capacity_domain = &a_;
+  }
+  Declare();
+  const int operation =
+      Send("POST", "/v1/models/activate", R"({"model":"dynamic"})");
+  managed_.WaitActivating();
+  EXPECT_EQ(close(operation), 0);
+  EXPECT_EQ(managed_.created.load(), 1u);
+  EXPECT_EQ(Control("activate", "dynamic").find("HTTP/1.1 202"), 0u);
+  EXPECT_EQ(Control("deactivate", "dynamic").find("HTTP/1.1 409"), 0u);
+  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 409"), 0u);
+  const int request = Send("POST", "/v1/test", R"({"model":"dynamic"})");
+  WaitHeld("dynamic", 1);
+  const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
+  b_.WaitAccepted(1);
+  // This peer treats accepted activation as releasable shared pressure. It
+  // remains queued, while independent requests and health still complete.
+  EXPECT_NE(Control("drain", "b").find(R"("queued_requests":1)"),
+            std::string::npos);
+  EXPECT_EQ(Read(Send("GET", "/healthz")).find("HTTP/1.1 200"), 0u);
+  EXPECT_EQ(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
+      0u);
+  EXPECT_NE(
+      WaitParameterOperation("activating").find(R"("admission":"drained")"),
+      std::string::npos);
+  managed_.ReleaseActivation();
+  const auto ready = WaitParameterOperation("idle");
+  EXPECT_NE(ready.find(R"("active":true,"backing":"elastic")"),
+            std::string::npos);
+  EXPECT_NE(ready.find(R"("held_requests":1)"), std::string::npos);
+  EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
+  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
+  managed_.service.WaitSubmitted();
+  managed_.service.Release();
+  EXPECT_EQ(Read(request).find("HTTP/1.1 200"), 0u);
+  {
+    std::lock_guard<std::mutex> lock(managed_.mutex);
+    EXPECT_EQ(managed_.activation.starts, 1u);
+  }
+  Remove();
+}
+
+TEST_P(HttpRouterRegistrationTest, UnregisterJoinsAcceptedActivationFirst) {
+  Declare();
+  EXPECT_EQ(Control("activate", "dynamic").find("HTTP/1.1 202"), 0u);
+  managed_.WaitActivating();
+  EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
+  managed_.WaitActivationCancellation();
+  {
+    std::lock_guard<std::mutex> lock(managed_.mutex);
+    EXPECT_FALSE(managed_.retiring);
+  }
+  EXPECT_EQ(managed_.destroyed.load(), 0u);
+  EXPECT_EQ(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
+      0u);
+  loom_serve_http_server_request_stop(server_);
+  EXPECT_FALSE(returned_.load());
+  managed_.ReleaseActivation();
+  managed_.WaitRetiring();
+  managed_.ReleaseRetirement();
+  owner_.join();
+  EXPECT_EQ(managed_.destroyed.load(), 1u);
+}
+
+TEST_P(HttpRouterRegistrationTest,
+       RemovalWithdrawsWarmupBeforeAdmittedWorkEnds) {
+  Register();
+  EXPECT_EQ(Control("activate", "dynamic").find("HTTP/1.1 409"), 0u);
+  const int request = Send("POST", "/v1/test", R"({"model":"dynamic"})");
+  managed_.service.WaitSubmitted();
+  Control("drain", "dynamic");
+  EXPECT_EQ(Control("activate", "dynamic").find("HTTP/1.1 202"), 0u);
+  WaitParameterOperation("waiting");
+  EXPECT_EQ(Read(Send("POST", "/v1/models/unregister",
+                      R"({"model":"dynamic","mode":"abort"})"))
+                .find("HTTP/1.1 202"),
+            0u);
+  managed_.service.WaitStopping();
+  {
+    std::lock_guard<std::mutex> lock(managed_.mutex);
+    EXPECT_EQ(managed_.activation.starts, 0u);
+  }
+  managed_.service.Release();
+  EXPECT_TRUE(Read(request).empty());
+  Remove();
+}
+
+TEST_P(HttpRouterRegistrationTest, ActivationFailureRetainsTheClosedOwner) {
+  Declare();
+  EXPECT_EQ(Control("activate", "dynamic").find("HTTP/1.1 202"), 0u);
+  managed_.WaitActivating();
+  managed_.ReleaseActivation(
+      iree_make_status(IREE_STATUS_UNAVAILABLE, "parameter read failed"));
+  const auto state = WaitParameterOperation("idle");
+  EXPECT_NE(state.find("parameter read failed"), std::string::npos);
+  EXPECT_NE(state.find(R"("admission":"drained")"), std::string::npos);
+  EXPECT_EQ(Control("activate", "dynamic").find("HTTP/1.1 409"), 0u);
+  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 409"), 0u);
+  EXPECT_EQ(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
+      0u);
+  EXPECT_EQ(managed_.destroyed.load(), 0u);
+  Remove();
+}
 
 TEST_P(HttpRouterRegistrationTest,
        DeactivationFinishesAdmittedWorkAndSurvivesClientDisconnect) {
@@ -559,7 +750,8 @@ TEST_P(HttpRouterRegistrationTest,
   WaitHeld("dynamic", 1);
   const int operation =
       Send("POST", "/v1/models/deactivate", R"({"model":"dynamic"})");
-  while (Read(Send("GET", "/v1/status")).find(R"("deactivating":true)") ==
+  while (Read(Send("GET", "/v1/status"))
+             .find(R"("parameter_operation":"deactivating")") ==
          std::string::npos) {
   }
   EXPECT_EQ(close(operation), 0);
@@ -572,16 +764,16 @@ TEST_P(HttpRouterRegistrationTest,
   EXPECT_NE(Read(first).find(R"("value":1)"), std::string::npos);
   managed_.service.WaitSubmitted();
   const auto waiting = Read(Send("GET", "/v1/status"));
-  EXPECT_NE(waiting.find(R"("deactivating":true)"), std::string::npos);
+  EXPECT_NE(waiting.find(R"("parameter_operation":"deactivating")"),
+            std::string::npos);
   EXPECT_NE(waiting.find(R"("deactivations":0)"), std::string::npos);
   managed_.service.Release();
   EXPECT_NE(Read(second).find(R"("value":2)"), std::string::npos);
   std::string cold;
   do {
     cold = Read(Send("GET", "/v1/status"));
-  } while (
-      cold.find(R"("active":false,"backing":"elastic","deactivating":false)") ==
-      std::string::npos);
+  } while (cold.find(R"("active":false,"backing":"elastic")") ==
+           std::string::npos);
   EXPECT_NE(cold.find(R"("committed_bytes":0)"), std::string::npos);
   EXPECT_NE(cold.find(R"("deactivations":1)"), std::string::npos);
   EXPECT_NE(cold.find(R"("held_requests":1)"), std::string::npos);
@@ -625,7 +817,7 @@ TEST_P(HttpRouterRegistrationTest, DeactivationFailureRetainsTheClosedOwner) {
   do {
     state = Read(Send("GET", "/v1/status"));
   } while (state.find("parameter release failed") == std::string::npos);
-  EXPECT_NE(state.find(R"("deactivating":false)"), std::string::npos);
+  EXPECT_NE(state.find(R"("parameter_operation":"idle")"), std::string::npos);
   EXPECT_NE(state.find(R"("admission":"drained")"), std::string::npos);
   EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 409"), 0u);
   EXPECT_EQ(Control("deactivate", "dynamic").find("HTTP/1.1 409"), 0u);
@@ -648,7 +840,7 @@ TEST_P(HttpRouterRegistrationTest, RemovalSupersedesPendingDeactivation) {
             0u);
   managed_.service.WaitStopping();
   const auto state = Read(Send("GET", "/v1/status"));
-  EXPECT_NE(state.find(R"("deactivating":false)"), std::string::npos);
+  EXPECT_NE(state.find(R"("parameter_operation":"idle")"), std::string::npos);
   EXPECT_NE(state.find(R"("deactivations":0)"), std::string::npos);
   managed_.service.Release();
   EXPECT_TRUE(Read(request).empty());
@@ -666,18 +858,20 @@ TEST_P(HttpRouterRegistrationTest, EmptyHeaderCannotSelectAnUnusedSlot) {
 }
 
 TEST_P(HttpRouterRegistrationTest,
-       DeactivationValidatesItsSelectorAndOwnership) {
-  for (const char* body :
-       {R"({})", R"({"model":""})", R"({"model":"dynamic","extra":true})",
-        R"({"model":"dynamic","model":"a"})"}) {
-    EXPECT_EQ(
-        Read(Send("POST", "/v1/models/deactivate", body)).find("HTTP/1.1 400"),
-        0u);
+       ParameterOperationsValidateTheirSelectorAndOwnership) {
+  for (const auto* operation : {"activate", "deactivate"}) {
+    for (const char* body :
+         {R"({})", R"({"model":""})", R"({"model":"dynamic","extra":true})",
+          R"({"model":"dynamic","model":"a"})"}) {
+      EXPECT_EQ(Read(Send("POST", std::string("/v1/models/") + operation, body))
+                    .find("HTTP/1.1 400"),
+                0u);
+    }
+    EXPECT_EQ(Control(operation, "absent").find("HTTP/1.1 404"), 0u);
+    EXPECT_EQ(Control("drain", "a").find("HTTP/1.1 200"), 0u);
+    EXPECT_EQ(Control(operation, "a").find("HTTP/1.1 409"), 0u);
+    EXPECT_EQ(Control("undrain", "a").find("HTTP/1.1 200"), 0u);
   }
-  EXPECT_EQ(Control("deactivate", "absent").find("HTTP/1.1 404"), 0u);
-  EXPECT_EQ(Control("drain", "a").find("HTTP/1.1 200"), 0u);
-  EXPECT_EQ(Control("deactivate", "a").find("HTTP/1.1 409"), 0u);
-  EXPECT_EQ(Control("undrain", "a").find("HTTP/1.1 200"), 0u);
 }
 
 TEST_P(HttpRouterRegistrationTest,

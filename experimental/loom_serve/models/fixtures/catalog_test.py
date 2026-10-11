@@ -309,6 +309,24 @@ class Client:
             "/v1/checkpoints/" + name, method=method, headers=headers, status=status
         )
 
+    def wait_activation(self, name):
+        while True:
+            state = next(
+                item["loom"]
+                for item in self.request("/v1/status")["data"]
+                if item["id"] == name
+            )
+            assert "error" not in state, state
+            if state["parameter_operation"] == "idle":
+                assert state["registration"] == "ready", state
+                assert state["status"]["admission"] == "drained", state
+                assert state["parameters"]["active"], state
+                return state
+
+    def activate(self, name):
+        self.request("/v1/models/activate", {"model": name}, status=202)
+        return self.wait_activation(name)
+
     def reset_peer(self, session):
         connection = http.client.HTTPConnection(self.address)
         try:
@@ -590,7 +608,7 @@ def check_parameter_residency(client, backing, workers):
             )
             while True:
                 cold = snapshot()
-                if not cold["parameters"]["deactivating"]:
+                if cold["parameter_operation"] == "idle":
                     break
             parameters = cold["parameters"]
             assert cold["incarnation"] == before["incarnation"], cold
@@ -608,7 +626,7 @@ def check_parameter_residency(client, backing, workers):
                 # Repeating the operation cannot discard retained state or
                 # count another physical release of already-inactive weights.
                 client.request("/v1/models/deactivate", selector, status=202)
-                while snapshot()["parameters"]["deactivating"]:
+                while snapshot()["parameter_operation"] != "idle":
                     pass
                 assert snapshot()["parameters"] == parameters
             else:
@@ -620,6 +638,20 @@ def check_parameter_residency(client, backing, workers):
                 {"model": "vectors", "input": "ab", "dimensions": 2},
             )
             assert peer["data"][0]["embedding"] == [3, 2], peer
+            assert not continuation.done()
+            warmed = client.activate("fixture-text")
+            assert warmed["incarnation"] == before["incarnation"], warmed
+            assert warmed["compilation"] == before["compilation"], warmed
+            assert warmed["status"]["held_requests"] == 1, warmed
+            assert warmed["parameters"]["activations"] == (
+                before["parameters"]["activations"] + (backing == "elastic")
+            ), warmed
+            if backing == "elastic":
+                assert (
+                    warmed["parameters"]["committed_bytes"]
+                    == (before["parameters"]["committed_bytes"])
+                ), warmed
+            assert client.activate("fixture-text")["parameters"] == warmed["parameters"]
             assert not continuation.done()
         finally:
             client.request("/v1/models/undrain", selector)
@@ -650,6 +682,7 @@ def check_parameter_residency(client, backing, workers):
                 "backing": backing,
                 "before": before["parameters"],
                 "cold": cold["parameters"],
+                "warmed": warmed["parameters"],
                 "after": after["parameters"],
                 "cached_tokens": resumed["usage"]["prompt_tokens_details"][
                     "cached_tokens"
@@ -695,12 +728,15 @@ def check_parameter_residency(client, backing, workers):
             status=202 if backing == "elastic" else 409,
         )
         while True:
-            parameters = snapshot(model)["parameters"]
-            if not parameters["deactivating"]:
+            state = snapshot(model)
+            parameters = state["parameters"]
+            if state["parameter_operation"] == "idle":
                 break
         if backing == "elastic":
             assert not parameters["active"], parameters
             assert parameters["committed_bytes"] == 0, parameters
+        warmed = client.activate(model)
+        assert warmed["incarnation"] == identity, warmed
         client.request("/v1/models/undrain", selector)
         result = client.request(target, {**selector, **payload})
         if model == "vectors":
@@ -1088,6 +1124,36 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
         ), (
             initial_threads,
             registered_threads,
+        )
+
+        # Preparation and parameter I/O need no inference or open admission.
+        # Submit all twelve intents before awaiting any individual completion.
+        for declaration in declarations:
+            client.request(
+                "/v1/models/activate", {"model": declaration["name"]}, status=202
+            )
+        for declaration in declarations:
+            warmed = client.wait_activation(declaration["name"])
+            assert warmed["incarnation"] == identities[declaration["name"]], warmed
+        reader = LogClient("http://" + address, timeout=None)
+        warm_counters = next(
+            record["values"]
+            for record in reader.poll().records
+            if record["event"] == "counters"
+        )
+        assert warm_counters["requests"] == warm_counters["batches"] == 0, warm_counters
+        print(
+            json.dumps(
+                {
+                    "event": "drained_catalog_activated",
+                    "models": len(declarations),
+                    "workers": workers,
+                    "inference_requests": warm_counters["requests"],
+                    "inference_batches": warm_counters["batches"],
+                    "all_admission_closed": True,
+                }
+            ),
+            flush=True,
         )
 
         def infer(declaration, iteration):

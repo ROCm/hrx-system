@@ -105,6 +105,7 @@ loom_cc_library(
     deps = [
         ":configuration",
         "//experimental/loom_serve/http:service",
+        "//experimental/loom_serve/runtime:activation",
         "//experimental/loom_serve/runtime:compilation",
         "//experimental/loom_serve/runtime:residency",
         "//experimental/loom_serve/telemetry:record",
@@ -127,6 +128,7 @@ loom_cc_library(
         "//experimental/loom_serve/http:service",
         "//experimental/loom_serve/image:model",
         "//experimental/loom_serve/image:service",
+        "//experimental/loom_serve/runtime:activation",
         "//experimental/loom_serve/runtime:compilation",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:host",

@@ -200,7 +200,10 @@ iree_status_t loom_serve_registry_remove(loom_serve_registered_model_t* model,
         "service lifetime belongs to its application, not this registry");
   }
   model->closed = true;
-  model->deactivating = false;
+  if (model->parameter_operation ==
+      LOOM_SERVE_PARAMETER_OPERATION_DEACTIVATING) {
+    model->parameter_operation = LOOM_SERVE_PARAMETER_OPERATION_NONE;
+  }
   if (mode > model->removal) {
     model->removal = mode;
   }
@@ -213,7 +216,9 @@ iree_status_t loom_serve_registry_remove(loom_serve_registered_model_t* model,
 iree_status_t loom_serve_registry_deactivate(
     loom_serve_registered_model_t* model) {
   if (!model->incarnation || !model->closed || model->removal ||
-      !iree_status_is_ok(model->status)) {
+      !iree_status_is_ok(model->status) ||
+      model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_WAITING ||
+      model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "deactivation requires a healthy, drained managed registration");
@@ -232,7 +237,31 @@ iree_status_t loom_serve_registry_deactivate(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "fixed parameter backing cannot deactivate");
   }
-  model->deactivating = true;
+  model->parameter_operation = LOOM_SERVE_PARAMETER_OPERATION_DEACTIVATING;
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_registry_activate(
+    loom_serve_registered_model_t* model) {
+  if (!model->incarnation || !model->closed || model->removal ||
+      !iree_status_is_ok(model->status) ||
+      model->parameter_operation ==
+          LOOM_SERVE_PARAMETER_OPERATION_DEACTIVATING) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "activation requires a healthy, drained managed registration without "
+        "pending deactivation");
+  }
+  if (model->phase != LOOM_SERVE_REGISTRATION_DECLARED &&
+      model->phase != LOOM_SERVE_REGISTRATION_PREPARING &&
+      (model->phase != LOOM_SERVE_REGISTRATION_READY ||
+       !model->registration.activate)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "registration cannot activate parameters");
+  }
+  if (model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_NONE) {
+    model->parameter_operation = LOOM_SERVE_PARAMETER_OPERATION_WAITING;
+  }
   return iree_ok_status();
 }
 
@@ -278,7 +307,9 @@ bool loom_serve_registry_advance(loom_serve_registry_t* registry,
   }
   bool progress = false;
   const loom_serve_registration_phase_t previous_phase = model->phase;
-  if (model->phase == LOOM_SERVE_REGISTRATION_DECLARED && !model->closed) {
+  if (model->phase == LOOM_SERVE_REGISTRATION_DECLARED && !model->removal &&
+      (!model->closed ||
+       model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_WAITING)) {
     model->status = registry->factory.create(
         registry->factory.self, &model->configuration, observer, model->stream,
         &model->registration, registry->allocator);
@@ -286,6 +317,7 @@ bool loom_serve_registry_advance(loom_serve_registry_t* registry,
                        ? LOOM_SERVE_REGISTRATION_PREPARING
                        : LOOM_SERVE_REGISTRATION_FAILED;
     if (!iree_status_is_ok(model->status)) {
+      model->parameter_operation = LOOM_SERVE_PARAMETER_OPERATION_NONE;
       registry_record_error(model, model->status);
     }
     progress = true;
@@ -302,13 +334,46 @@ bool loom_serve_registry_advance(loom_serve_registry_t* registry,
         service.set_observer(service.self, observer);
         model->phase = LOOM_SERVE_REGISTRATION_READY;
       } else {
+        model->parameter_operation = LOOM_SERVE_PARAMETER_OPERATION_NONE;
         registry_record_error(model, model->status);
         model->phase = LOOM_SERVE_REGISTRATION_RETIRING;
       }
       progress = true;
     }
   }
-  if (model->phase == LOOM_SERVE_REGISTRATION_READY && model->removal) {
+  if (model->phase == LOOM_SERVE_REGISTRATION_READY &&
+      (model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_WAITING ||
+       model->parameter_operation ==
+           LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING)) {
+    const loom_serve_http_service_snapshot_t snapshot =
+        model->service.snapshot(model->service.self);
+    if (model->removal ||
+        (!snapshot.queued_requests && !snapshot.active_requests &&
+         !model->service.is_active(model->service.self))) {
+      loom_serve_activation_phase_t phase = LOOM_SERVE_ACTIVATION_COMPLETE;
+      model->status =
+          model->registration.activate
+              ? model->registration.activate(
+                    model->registration.self,
+                    model->removal ? LOOM_SERVE_ACTIVATION_FLAG_CANCEL : 0,
+                    &phase)
+              : iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                                 "registration cannot activate parameters");
+      const loom_serve_parameter_operation_t operation =
+          phase == LOOM_SERVE_ACTIVATION_COMPLETE
+              ? LOOM_SERVE_PARAMETER_OPERATION_NONE
+          : phase == LOOM_SERVE_ACTIVATION_LOADING
+              ? LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING
+              : LOOM_SERVE_PARAMETER_OPERATION_WAITING;
+      progress |= operation != model->parameter_operation;
+      model->parameter_operation = operation;
+      if (!iree_status_is_ok(model->status)) {
+        registry_record_error(model, model->status);
+      }
+    }
+  }
+  if (model->phase == LOOM_SERVE_REGISTRATION_READY && model->removal &&
+      model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_NONE) {
     const loom_serve_http_service_snapshot_t snapshot =
         model->service.snapshot(model->service.self);
     if (!snapshot.queued_requests && !snapshot.active_requests &&
@@ -321,13 +386,15 @@ bool loom_serve_registry_advance(loom_serve_registry_t* registry,
       progress = true;
     }
   }
-  if (model->phase == LOOM_SERVE_REGISTRATION_READY && model->deactivating) {
+  if (model->phase == LOOM_SERVE_REGISTRATION_READY &&
+      model->parameter_operation ==
+          LOOM_SERVE_PARAMETER_OPERATION_DEACTIVATING) {
     const loom_serve_http_service_snapshot_t snapshot =
         model->service.snapshot(model->service.self);
     if (!snapshot.queued_requests && !snapshot.active_requests &&
         !model->service.is_active(model->service.self)) {
       model->status = model->registration.deactivate(model->registration.self);
-      model->deactivating = false;
+      model->parameter_operation = LOOM_SERVE_PARAMETER_OPERATION_NONE;
       if (!iree_status_is_ok(model->status)) {
         registry_record_error(model, model->status);
       }
@@ -374,7 +441,8 @@ bool loom_serve_registry_advance(loom_serve_registry_t* registry,
 }
 
 bool loom_serve_registry_pending(const loom_serve_registered_model_t* model) {
-  return model->phase == LOOM_SERVE_REGISTRATION_PREPARING ||
+  return model->parameter_operation != LOOM_SERVE_PARAMETER_OPERATION_NONE ||
+         model->phase == LOOM_SERVE_REGISTRATION_PREPARING ||
          model->phase == LOOM_SERVE_REGISTRATION_RETIRING ||
          (model->phase == LOOM_SERVE_REGISTRATION_READY &&
           model->service.is_pending(model->service.self));

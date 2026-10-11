@@ -111,6 +111,7 @@ loom_cc_library(
     ::configuration
     iree::base
     iree::experimental::loom_serve::http::service
+    iree::experimental::loom_serve::runtime::activation
     iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::telemetry::record
@@ -136,6 +137,7 @@ loom_cc_library(
     iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::image::model
     iree::experimental::loom_serve::image::service
+    iree::experimental::loom_serve::runtime::activation
     iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::host

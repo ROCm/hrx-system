@@ -507,6 +507,20 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "activation",
+    srcs = ["activation.c"],
+    hdrs = ["activation.h"],
+    deps = [
+        ":execution",
+        ":residency",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+loom_cc_library(
     name = "residency",
     srcs = ["residency.c"],
     hdrs = ["residency.h"],
@@ -515,6 +529,25 @@ loom_cc_library(
         ":weights",
         "//experimental/loom_serve/storage:memory",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "activation_test",
+    srcs = ["activation_test.cc"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_task",
+    ]),
+    deps = [
+        ":activation",
+        ":device",
+        ":execution",
+        ":host",
+        ":residency",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -589,6 +622,7 @@ loom_cc_test(
         "//loom/config/execute:amdgpu_hal",
     ]),
     deps = [
+        ":activation",
         ":device",
         ":execution",
         ":jit",

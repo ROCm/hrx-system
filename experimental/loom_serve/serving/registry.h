@@ -8,6 +8,7 @@
 #define EXPERIMENTAL_LOOM_SERVE_SERVING_REGISTRY_H_
 
 #include "experimental/loom_serve/http/service.h"
+#include "experimental/loom_serve/runtime/activation.h"
 #include "experimental/loom_serve/runtime/compilation.h"
 #include "experimental/loom_serve/runtime/residency.h"
 #include "experimental/loom_serve/serving/configuration.h"
@@ -39,6 +40,13 @@ typedef struct loom_serve_registration_t {
   // before retire. The adapter owns its actual parameter groups; neither the
   // registry nor the HTTP client gains a borrowed model or pool handle.
   loom_serve_residency_snapshot_t (*parameters)(void* self);
+  // Advances explicit warmup after admitted service activity has retired.
+  // Capacity waiting owns no device work; submitted readiness owes an owner
+  // wake. Cancellation withdraws admission or joins accepted work. Terminal
+  // failure preserves model resources until normal retirement. Paired with
+  // parameters; no model handle escapes the adapter.
+  iree_status_t (*activate)(void* self, loom_serve_activation_flags_t flags,
+                            loom_serve_activation_phase_t* out_phase);
   // Releases reloadable parameter storage after admitted service activity has
   // retired. Preserves programs and mutable state. Paired with parameters and
   // called only when its snapshot reports elastic backing. No execution wait.
@@ -53,8 +61,8 @@ typedef struct loom_serve_registration_factory_t {
   // Supported configuration kinds as bit positions; zero disables management.
   uint32_t kinds;
   // Allocates an unstarted operation; performs no source I/O, model allocation
-  // or submission. Failure returns no operation. Invoked only after admission
-  // opens, never for metadata-only registration.
+  // or submission. Failure returns no operation. Invoked after admission opens
+  // or explicit activation, never for metadata-only registration alone.
   iree_status_t (*create)(void* self,
                           const loom_serve_model_configuration_t* configuration,
                           loom_serve_http_observer_t observer,
@@ -78,6 +86,17 @@ typedef enum loom_serve_removal_e {
   LOOM_SERVE_REMOVAL_ABORT,
 } loom_serve_removal_t;
 
+typedef enum loom_serve_parameter_operation_e {
+  LOOM_SERVE_PARAMETER_OPERATION_NONE = 0,
+  // Explicit warmup waiting for preparation, admitted work or physical
+  // capacity.
+  LOOM_SERVE_PARAMETER_OPERATION_WAITING,
+  // Warmup has submitted its asynchronous parameter-readiness wait.
+  LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING,
+  // Release waiting for admitted model work to retire.
+  LOOM_SERVE_PARAMETER_OPERATION_DEACTIVATING,
+} loom_serve_parameter_operation_t;
+
 // Stable owner-only slot. Empty service.name marks an unused slot. A slot is
 // reused only after every held claim, tokenizer task and model borrower
 // retires. Service callbacks exist only while phase is READY. Other phases
@@ -88,7 +107,8 @@ typedef struct loom_serve_registered_model_t {
   loom_serve_http_service_t service;
   // Owned declaration for managed entries; empty name denotes borrowed service.
   loom_serve_model_configuration_t configuration;
-  // Owned modality operation, created lazily when admission first opens.
+  // Owned modality operation, created lazily by admission or explicit
+  // activation.
   loom_serve_registration_t registration;
   // Preparation/publication/retirement state, independent of admission.
   loom_serve_registration_phase_t phase;
@@ -96,9 +116,9 @@ typedef struct loom_serve_registered_model_t {
   loom_serve_removal_t removal;
   // Reversible admission gate, not a residency or cancellation flag.
   bool closed;
-  // Accepted parameter deactivation waiting for this service's admitted work.
-  // Independent of the initiating connection; terminal removal supersedes it.
-  bool deactivating;
+  // Mutually exclusive residency intent, independent of its HTTP connection.
+  // Removal withdraws waiting admission and joins submitted activation first.
+  loom_serve_parameter_operation_t parameter_operation;
   // Requests parked outside service admission on transport-owned storage.
   iree_host_size_t held_count;
   // Independent tokenizer processes still borrowing the model.
@@ -161,6 +181,13 @@ iree_status_t loom_serve_registry_remove(loom_serve_registered_model_t* model,
 // without waiting for live device work or unrelated services. Physical unmap
 // and free remain native synchronous capacity transitions on that owner.
 iree_status_t loom_serve_registry_deactivate(
+    loom_serve_registered_model_t* model);
+
+// Warms a healthy managed registration while leaving admission closed. Declared
+// models first prepare; ready models finish admitted work before activation.
+// Duplicates are idempotent. Opposite operations conflict; removal cancels the
+// intent but still joins accepted readiness before model retirement.
+iree_status_t loom_serve_registry_activate(
     loom_serve_registered_model_t* model);
 
 // Returns STOPPING only for abort or after graceful admitted work has finished.

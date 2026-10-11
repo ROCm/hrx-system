@@ -162,7 +162,7 @@ well as cold/warm VM programs, tokenizer assets and weights. Runtime
 registration does not rewrite the startup catalog; persistence is the
 operator's catalog or management client.
 
-## Observe, drain, deactivate and remove
+## Observe, drain, activate, deactivate and remove
 
 `GET /v1/status` distinguishes registration, admission and scheduler phase.
 A `failed` registration includes its error and remains inspectable; other
@@ -223,14 +223,32 @@ curl --fail --silent --show-error http://127.0.0.1:8080/v1/models/deactivate \
 curl --fail --silent --show-error http://127.0.0.1:8080/v1/status
 ```
 
-The 202 response accepts intent; inspect that model's `loom.parameters` until
-`deactivating` is false, check for `loom.error`, and confirm `active:false` and
-`committed_bytes:0`. Undrain then allows ordinary inference to reload the same
+The 202 response accepts intent; wait for `loom.parameter_operation:"idle"`,
+check for `loom.error`, and confirm `active:false` and `committed_bytes:0` in
+`loom.parameters`. Undrain then allows ordinary inference to reload the same
 weight plans on demand. Undrain while deactivation is pending returns 409.
 Prepared fixed-backed models reject deactivation with 409; a metadata-only
 drained registration is already cold and succeeds without preparing a model.
 Parameter accounting excludes retained session state, and native slab release
 can still take time even though no task worker waits for model execution.
+
+To load weights before reopening admission, use explicit activation. This also
+prepares a newly registered drained model without sending an inference request,
+and supports fixed or elastic backing:
+
+```sh
+curl --fail --silent --show-error http://127.0.0.1:8080/v1/models/activate \
+  -H 'Content-Type: application/json' -d '{"model":"scout"}'
+curl --fail --silent --show-error http://127.0.0.1:8080/v1/status
+```
+
+The 202 response accepts intent. That model's `loom.parameter_operation` moves
+from `waiting` (preparation, admitted work or capacity) to `activating` (device
+readiness), then `idle`. Check `loom.error` before undraining. The operation
+survives client disconnect; unregister cancels capacity interest or joins
+accepted loading before releasing resources. Undrain and opposite operations
+return 409 while a parameter operation is pending. A successful warmup does not
+pin weights indefinitely: later pool pressure may evict idle parameters.
 
 The name remains occupied until removal completes; a second registration
 returns 409 during that interval. A platform release failure reports

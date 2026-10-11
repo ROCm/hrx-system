@@ -350,6 +350,11 @@ iree_status_t loom_serve_residency_await(loom_serve_residency_t* residency) {
   return status;
 }
 
+loom_serve_execution_frontier_t loom_serve_residency_frontier(
+    const loom_serve_residency_t* residency) {
+  return loom_serve_execution_frontier(residency->execution);
+}
+
 void loom_serve_residency_release(loom_serve_residency_t* residency) {
   IREE_ASSERT(residency->pin_count);
   if (!--residency->pin_count) {

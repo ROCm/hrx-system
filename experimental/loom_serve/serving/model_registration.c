@@ -15,6 +15,31 @@
 #include "experimental/loom_serve/text/schedule.h"
 #include "experimental/loom_serve/text/service.h"
 
+// The adapter owns the native parameter group and its temporary readiness
+// operation. Neither the registry nor its management connection borrows either.
+static iree_status_t registration_activate(
+    loom_serve_activation_t** operation, loom_serve_residency_t* residency,
+    loom_serve_host_t* host, loom_serve_http_observer_t observer,
+    loom_serve_activation_flags_t flags,
+    loom_serve_activation_phase_t* out_phase, iree_allocator_t allocator) {
+  *out_phase = LOOM_SERVE_ACTIVATION_COMPLETE;
+  if (!*operation) {
+    if (iree_any_bit_set(flags, LOOM_SERVE_ACTIVATION_FLAG_CANCEL)) {
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(loom_serve_activation_create(
+        residency, loom_serve_host_proactor_pool(host), observer.wake,
+        observer.user_data, operation, allocator));
+  }
+  iree_status_t status =
+      loom_serve_activation_advance(*operation, flags, out_phase);
+  if (*out_phase == LOOM_SERVE_ACTIVATION_COMPLETE) {
+    loom_serve_activation_destroy(*operation);
+    *operation = NULL;
+  }
+  return status;
+}
+
 typedef struct finite_registration_t {
   // Allocator owning this operation, independent of model allocations.
   iree_allocator_t allocator;
@@ -32,6 +57,8 @@ typedef struct finite_registration_t {
   loom_serve_finite_model_t* model;
   // Owned HTTP service, destroyed only after external borrowers retire.
   loom_serve_finite_service_t* service;
+  // Explicit warmup, joined before service/model retirement.
+  loom_serve_activation_t* activation;
   // Model consumers have been relinquished with an ownership wake installed.
   bool retiring;
 } finite_registration_t;
@@ -118,6 +145,17 @@ static iree_status_t finite_registration_deactivate(void* self) {
       loom_serve_finite_model_residency(registration->model));
 }
 
+static iree_status_t finite_registration_activate(
+    void* self, loom_serve_activation_flags_t flags,
+    loom_serve_activation_phase_t* out_phase) {
+  finite_registration_t* registration = self;
+  return registration_activate(
+      &registration->activation,
+      loom_serve_finite_model_residency(registration->model),
+      loom_serve_device_host(registration->options->device),
+      registration->observer, flags, out_phase, registration->allocator);
+}
+
 static iree_status_t finite_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
     loom_serve_http_observer_t observer, loom_serve_telemetry_stream_t* stream,
@@ -144,6 +182,7 @@ static iree_status_t finite_registration_create(
         .prepare = finite_registration_prepare,
         .retire = finite_registration_retire,
         .parameters = finite_registration_parameters,
+        .activate = finite_registration_activate,
         .deactivate = finite_registration_deactivate,
         .destroy = finite_registration_destroy};
   } else {
@@ -169,6 +208,8 @@ typedef struct image_registration_t {
   loom_serve_image_model_t* model;
   // Owned HTTP service, destroyed after CPU and external borrowers retire.
   loom_serve_image_service_t* service;
+  // Explicit warmup, joined before service/model retirement.
+  loom_serve_activation_t* activation;
   // Model consumers have been relinquished with an ownership wake installed.
   bool retiring;
 } image_registration_t;
@@ -255,6 +296,17 @@ static iree_status_t image_registration_deactivate(void* self) {
   return loom_serve_image_model_deactivate(registration->model);
 }
 
+static iree_status_t image_registration_activate(
+    void* self, loom_serve_activation_flags_t flags,
+    loom_serve_activation_phase_t* out_phase) {
+  image_registration_t* registration = self;
+  return registration_activate(
+      &registration->activation,
+      loom_serve_image_model_residency(registration->model),
+      loom_serve_device_host(registration->options->device),
+      registration->observer, flags, out_phase, registration->allocator);
+}
+
 static iree_status_t image_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
     loom_serve_http_observer_t observer, loom_serve_telemetry_stream_t* stream,
@@ -284,6 +336,7 @@ static iree_status_t image_registration_create(
                                     .prepare = image_registration_prepare,
                                     .retire = image_registration_retire,
                                     .parameters = image_registration_parameters,
+                                    .activate = image_registration_activate,
                                     .deactivate = image_registration_deactivate,
                                     .destroy = image_registration_destroy};
   } else {
@@ -311,6 +364,8 @@ typedef struct text_registration_t {
   loom_serve_text_model_t* model;
   // Service borrowing model state until all protocol claims are resolved.
   loom_serve_text_service_t* service;
+  // Explicit warmup, joined before service/model retirement.
+  loom_serve_activation_t* activation;
   // Model consumers have relinquished views with an ownership wake installed.
   bool retiring;
 } text_registration_t;
@@ -394,6 +449,17 @@ static iree_status_t text_registration_deactivate(void* self) {
   return loom_serve_text_model_deactivate(registration->model);
 }
 
+static iree_status_t text_registration_activate(
+    void* self, loom_serve_activation_flags_t flags,
+    loom_serve_activation_phase_t* out_phase) {
+  text_registration_t* registration = self;
+  return registration_activate(
+      &registration->activation,
+      loom_serve_text_model_residency(registration->model),
+      loom_serve_device_host(registration->options->device),
+      registration->observer, flags, out_phase, registration->allocator);
+}
+
 static iree_status_t text_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
     loom_serve_http_observer_t observer, loom_serve_telemetry_stream_t* stream,
@@ -436,6 +502,7 @@ static iree_status_t text_registration_create(
                                     .prepare = text_registration_prepare,
                                     .retire = text_registration_retire,
                                     .parameters = text_registration_parameters,
+                                    .activate = text_registration_activate,
                                     .deactivate = text_registration_deactivate,
                                     .destroy = text_registration_destroy};
   } else {
