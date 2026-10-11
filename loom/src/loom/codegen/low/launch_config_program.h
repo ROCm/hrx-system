@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/kernel_launch_config.h"
 #include "loom/ir/function_version.h"
 #include "loom/ir/module.h"
 #include "loom/pass/environment.h"
@@ -30,7 +31,9 @@ typedef struct loom_kernel_launch_config_program_entry_t
 // The product owns a separate pure host module. Source-to-low captures each
 // selected kernel's residual launch computation while exact specialization and
 // target facts are available. Finalization joins the final lowered entry's
-// workgroup-storage requirement and terminates each host function.
+// workgroup-storage requirement and terminates each residual host function.
+// Native producers with a complete launch contract append a finished constant
+// function directly; they need no later storage-layout observation.
 typedef struct loom_kernel_launch_config_program_t {
   // Pass capability embedded for source-to-low observation.
   loom_pass_environment_capability_t capability;
@@ -38,13 +41,13 @@ typedef struct loom_kernel_launch_config_program_t {
   // Host launch-config module under construction.
   loom_module_t* module;
 
-  // Entries in capture order.
+  // Residual entries awaiting final storage layout, in capture order.
   loom_kernel_launch_config_program_entry_t* entry_head;
 
   // Last entry in capture order.
   loom_kernel_launch_config_program_entry_t* entry_tail;
 
-  // Number of captured kernel entries.
+  // Number of launch functions, including completed constant functions.
   iree_host_size_t entry_count;
 } loom_kernel_launch_config_program_t;
 
@@ -80,6 +83,15 @@ iree_status_t loom_kernel_launch_config_program_capture(
     loom_function_version_t* version_handle,
     const loom_target_facts_t* target_facts,
     const loom_value_fact_table_t* source_facts);
+
+// Appends a complete constant launch contract owned by a native producer.
+//
+// |export_name| is the selected executable export. Every field of |config| is
+// concrete, including final workgroup storage; fields fit the signed index
+// domain. No lowered-function lookup or final storage-layout join is required.
+iree_status_t loom_kernel_launch_config_program_capture_static(
+    loom_kernel_launch_config_program_t* program,
+    iree_string_view_t export_name, const loom_kernel_launch_config_t* config);
 
 // Completes all captured functions from their final lowered entry products.
 //

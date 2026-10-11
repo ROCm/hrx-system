@@ -385,6 +385,67 @@ iree_status_t loom_kernel_launch_config_program_capture(
   return status;
 }
 
+iree_status_t loom_kernel_launch_config_program_capture_static(
+    loom_kernel_launch_config_program_t* program,
+    iree_string_view_t export_name, const loom_kernel_launch_config_t* config) {
+  loom_module_t* module = program->module;
+  loom_string_id_t name = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(module, export_name, &name));
+  loom_symbol_id_t symbol = LOOM_SYMBOL_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_add_symbol(module, name, &symbol));
+  loom_type_t result_types[LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT];
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(result_types); ++i) {
+    result_types[i] = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  }
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
+  loom_op_t* function = NULL;
+  IREE_RETURN_IF_ERROR(loom_func_def_build(
+      &builder,
+      LOOM_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY |
+          LOOM_FUNC_DEF_BUILD_FLAG_HAS_PURITY,
+      LOOM_FUNC_VISIBILITY_PUBLIC, /*retain=*/0, /*cc=*/0,
+      LOOM_FUNC_PURITY_PURE, /*temperature=*/0, /*inline_policy=*/0,
+      loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
+      LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(),
+      (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol},
+      /*arg_types=*/NULL, /*arg_count=*/0, result_types,
+      IREE_ARRAYSIZE(result_types), /*tied_results=*/NULL,
+      /*tied_result_count=*/0, /*predicates=*/NULL, /*predicates_count=*/0,
+      LOOM_LOCATION_UNKNOWN, &function));
+  loom_builder_enter_region(&builder, function, loom_func_def_body(function));
+  const int64_t values[LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT] = {
+      config->workgroup_count.x,
+      config->workgroup_count.y,
+      config->workgroup_count.z,
+      config->workgroup_size.x,
+      config->workgroup_size.y,
+      config->workgroup_size.z,
+      config->workgroup_cluster_size.x,
+      config->workgroup_cluster_size.y,
+      config->workgroup_cluster_size.z,
+      config->subgroup_size,
+      (int64_t)config->workgroup_storage_bytes,
+  };
+  loom_value_id_t results[LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT];
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(results) && iree_status_is_ok(status); ++i) {
+    status = loom_kernel_launch_config_build_constant(
+        &builder, values[i], LOOM_LOCATION_UNKNOWN, &results[i]);
+  }
+  loom_op_t* return_op = NULL;
+  if (iree_status_is_ok(status)) {
+    status = loom_func_return_build(&builder, results, IREE_ARRAYSIZE(results),
+                                    LOOM_LOCATION_UNKNOWN, &return_op);
+  }
+  if (iree_status_is_ok(status)) {
+    ++program->entry_count;
+  }
+  return status;
+}
+
 static iree_status_t loom_kernel_launch_config_resolve_low_function(
     const loom_kernel_launch_config_program_t* program,
     const loom_module_t* lowered_module,

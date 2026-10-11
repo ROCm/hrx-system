@@ -609,6 +609,7 @@ loom_cc_library(
     loom::analysis::source_storage_packing
     loom::analysis::storage_geometry
     loom::codegen::low::builder
+    loom::codegen::low::launch_config_program
     loom::ir
     loom::ops::buffer
     loom::ops::channel

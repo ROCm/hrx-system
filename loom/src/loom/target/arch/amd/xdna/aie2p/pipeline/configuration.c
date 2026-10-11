@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/codegen/low/launch_config_program.h"
 #include "loom/ir/intern_table.h"
 #include "loom/ir/structural_hash.h"
 #include "loom/ops/channel/ops.h"
@@ -619,6 +620,25 @@ iree_status_t loom_aie2p_native_emit_configuration(
       loom_aie2p_worker_symbol(&context->code, &invoke_symbol));
   const loom_symbol_ref_t entry_symbol =
       loom_func_like_callee(realization->function);
+  loom_kernel_launch_config_program_t* launch_program =
+      loom_kernel_launch_config_program_from_pass(context->pass);
+  if (launch_program) {
+    // One invocation owns the entire spatial array. Tile storage and worker
+    // distribution are in the executable, not HAL workgroup-local storage.
+    const loom_kernel_launch_config_t launch_config = {
+        .workgroup_count = {1, 1, 1},
+        .workgroup_size = {1, 1, 1},
+        .workgroup_cluster_size = {1, 1, 1},
+        .subgroup_size = 1,
+        .workgroup_storage_bytes = 0,
+    };
+    IREE_RETURN_IF_ERROR(loom_kernel_launch_config_program_capture_static(
+        launch_program,
+        loom_string_table_get(
+            &module->strings,
+            module->symbols.entries[entry_symbol.symbol_id].name_id),
+        &launch_config));
+  }
   const uint8_t visibility = loom_func_like_visibility(realization->function);
   const uint8_t retain =
       iree_any_bit_set(module->symbols.entries[entry_symbol.symbol_id].flags,

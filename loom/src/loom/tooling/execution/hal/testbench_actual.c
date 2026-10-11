@@ -686,8 +686,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
       .target_profile = provider->selected_target_profile,
       .config = provider->compilation->config,
       .emit_options = &emit_options,
-      .artifact_flags =
-          is_pipeline ? 0 : LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
   };
   if (iree_status_is_ok(status)) {
     status = iree_status_from_loomc(loomc_compile_artifact(
@@ -717,27 +716,21 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
     return status;
   }
   if (provider->artifacts.executable == NULL ||
-      (!is_pipeline && provider->artifacts.launch_config == NULL)) {
+      provider->artifacts.launch_config == NULL) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
-        is_pipeline
-            ? "compiler did not return a pipeline executable artifact"
-            : "compiler did not return executable and launch-config artifacts");
+        "compiler did not return executable and launch-config artifacts");
   }
 
-  if (!is_pipeline) {
-    status = iree_status_from_loomc(loomc_launch_config_program_load(
-        provider->artifacts.launch_config,
-        loomc_allocator_from_iree(provider->context->host_allocator),
-        &provider->launch_config_program));
-    if (iree_status_is_ok(status)) {
-      status =
-          iree_status_from_loomc(loomc_launch_config_program_lookup_function(
-              provider->launch_config_program,
-              loomc_string_view_from_iree(
-                  provider->invocation_options.function_name),
-              &provider->launch_config_function));
-    }
+  status = iree_status_from_loomc(loomc_launch_config_program_load(
+      provider->artifacts.launch_config,
+      loomc_allocator_from_iree(provider->context->host_allocator),
+      &provider->launch_config_program));
+  if (iree_status_is_ok(status)) {
+    status = iree_status_from_loomc(loomc_launch_config_program_lookup_function(
+        provider->launch_config_program,
+        loomc_string_view_from_iree(provider->invocation_options.function_name),
+        &provider->launch_config_function));
   }
   if (iree_status_is_ok(status) && provider->invocation->workload_count != 0) {
     status = iree_allocator_malloc_array(
@@ -983,14 +976,6 @@ static iree_status_t loom_run_hal_testbench_evaluate_launch_config(
   if (workload_count != provider->invocation->workload_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HAL invocation workload count mismatch");
-  }
-  if (loom_run_hal_testbench_invocation_is_pipeline(provider->invocation)) {
-    // Array-program distribution is part of the compiled executable. One HAL
-    // dispatch invokes the complete array program.
-    out_options->workgroup_count[0] = 1;
-    out_options->workgroup_count[1] = 1;
-    out_options->workgroup_count[2] = 1;
-    return iree_ok_status();
   }
   IREE_ASSERT(provider->launch_config_program != NULL);
   loomc_launch_config_t config = {

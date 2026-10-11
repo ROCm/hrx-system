@@ -513,6 +513,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/analysis:storage_geometry",
         "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:launch_config_program",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/buffer",
