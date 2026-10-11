@@ -293,6 +293,31 @@ TEST(EncodingTest, VectorMemoryDisplacementsAndCanonicalSib) {
                        {0xc4, 0xc1, 0x7a, 0x6f, 0x0c, 0x24});
 }
 
+TEST(EncodingTest, ScalarFloatMemoryHasExactReferenceBytes) {
+  // VEX.128 VMOVSS and VMOVSD use the same addressing forms, with F3/F2
+  // mandatory prefixes and reserved vvvv. Values stay in XMM registers.
+  for (uint16_t prefix : {0x0800, 0x0c00}) {
+    const uint8_t vex_byte = prefix == 0x0800 ? 0x7a : 0x7b;
+    loom_x86_encoding_operands_t operands = {};
+    operands.result = 9;
+    operands.inputs[0] = 8;
+    operands.immediate = 16;
+    ExpectVectorEncoding(0xc1c0, prefix | 0x0110, operands,
+                         {0xc4, 0x41, vex_byte, 0x10, 0x48, 0x10});
+    operands.inputs[1] = 10;
+    operands.scale = 2;
+    ExpectVectorEncoding(0xc1a0, prefix | 0x0110, operands,
+                         {0xc4, 0x01, vex_byte, 0x10, 0x4c, 0x90, 0x10});
+    operands.inputs[0] = 9;
+    operands.inputs[1] = 8;
+    operands.inputs[2] = 10;
+    ExpectVectorEncoding(0xd2c1, prefix | 0x0111, operands,
+                         {0xc4, 0x41, vex_byte, 0x11, 0x48, 0x10});
+    ExpectVectorEncoding(0xd2b1, prefix | 0x0111, operands,
+                         {0xc4, 0x01, vex_byte, 0x11, 0x4c, 0x90, 0x10});
+  }
+}
+
 TEST(EncodingTest, EveryVectorRecipeHasExactReferenceBytes) {
   struct Reference {
     uint16_t encoding_format_id;

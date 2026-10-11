@@ -1,0 +1,143 @@
+// RUN: emit source-low target=x86:avx2 output=low
+
+func.def @copy_float_static(%input: buffer, %output: buffer) {
+  %base = index.constant 1 : offset
+  %source32 = buffer.view %input[%base] : buffer -> view<8xf32, align(1)>
+  %source64 = buffer.view %input[%base] : buffer -> view<8xf64, align(1)>
+  %destination32 = buffer.view %output[%base] : buffer -> view<8xf32, align(1)>
+  %destination64 = buffer.view %output[%base] : buffer -> view<8xf64, align(1)>
+  %value32 = view.load %source32[1] : view<8xf32, align(1)> -> f32
+  %value64 = view.load %source64[2] : view<8xf64, align(1)> -> f64
+  view.store %value32, %destination32[1] : f32, view<8xf32, align(1)>
+  view.store %value64, %destination64[2] : f64, view<8xf64, align(1)>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @copy_float_static(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %value32 = vmovss.load.xmm %input {disp32 = 5}
+  %value64 = vmovsd.load.xmm %input {disp32 = 17}
+  vmovss.store.xmm %value32, %output {disp32 = 5}
+  vmovsd.store.xmm %value64, %output {disp32 = 17}
+  return
+}
+
+// ====
+
+func.def @copy_float_indexed(%input: buffer, %output: buffer, %element: index) {
+  %position = index.assume %element [range(%element, 0, 7)] : index
+  %base = index.constant 0 : offset
+  %source32 = buffer.view %input[%base] : buffer -> view<8xf32, align(1)>
+  %source64 = buffer.view %input[%base] : buffer -> view<8xf64, align(1)>
+  %destination32 = buffer.view %output[%base] : buffer -> view<8xf32, align(1)>
+  %destination64 = buffer.view %output[%base] : buffer -> view<8xf64, align(1)>
+  %value32 = view.load %source32[%position] : view<8xf32, align(1)> -> f32
+  %value64 = view.load %source64[%position] : view<8xf64, align(1)> -> f64
+  view.store %value32, %destination32[%position] : f32, view<8xf32, align(1)>
+  view.store %value64, %destination64[%position] : f64, view<8xf64, align(1)>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @copy_float_indexed(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %position: reg<x86.gpr64>) asm {
+  %value32 = vmovss.load.indexed.xmm %input, %position {disp32 = 0, scale = 4}
+  %value64 = vmovsd.load.indexed.xmm %input, %position {disp32 = 0, scale = 8}
+  vmovss.store.indexed.xmm %value32, %output, %position {disp32 = 0, scale = 4}
+  vmovsd.store.indexed.xmm %value64, %output, %position {disp32 = 0, scale = 8}
+  return
+}
+
+// ====
+
+func.def @copy_float_factored(%input: buffer, %output: buffer, %element: index) {
+  %position = index.assume %element [range(%element, 0, 7)] : index
+  %base = index.constant 0 : offset
+  %layout = encoding.layout.strided [8] : encoding<layout>
+  %source32 = buffer.view %input[%base] : buffer -> view<8xf32, %layout, align(1)>
+  %source64 = buffer.view %input[%base] : buffer -> view<8xf64, %layout, align(1)>
+  %destination32 = buffer.view %output[%base] : buffer -> view<8xf32, %layout, align(1)>
+  %destination64 = buffer.view %output[%base] : buffer -> view<8xf64, %layout, align(1)>
+  %value32 = view.load %source32[%position] : view<8xf32, %layout, align(1)> -> f32
+  %value64 = view.load %source64[%position] : view<8xf64, %layout, align(1)> -> f64
+  view.store %value32, %destination32[%position] : f32, view<8xf32, %layout, align(1)>
+  view.store %value64, %destination64[%position] : f64, view<8xf64, %layout, align(1)>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @copy_float_factored(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %position: reg<x86.gpr64>) asm {
+  %15 = lea.scale %position {disp32 = 0, scale = 8}
+  %value32 = vmovss.load.indexed.xmm %input, %15 {disp32 = 0, scale = 4}
+  %value64 = vmovsd.load.indexed.xmm %input, %15 {disp32 = 0, scale = 8}
+  vmovss.store.indexed.xmm %value32, %output, %15 {disp32 = 0, scale = 4}
+  vmovsd.store.indexed.xmm %value64, %output, %15 {disp32 = 0, scale = 8}
+  return
+}
+
+// ====
+
+func.def @copy_float_dynamic_origin(%input: buffer, %output: buffer, %origin: offset, %element: index) {
+  %position = index.assume %element [range(%element, 0, 7)] : index
+  %source32 = buffer.view %input[%origin] : buffer -> view<8xf32, align(1)>
+  %source64 = buffer.view %input[%origin] : buffer -> view<8xf64, align(1)>
+  %destination32 = buffer.view %output[%origin] : buffer -> view<8xf32, align(1)>
+  %destination64 = buffer.view %output[%origin] : buffer -> view<8xf64, align(1)>
+  %value32 = view.load<volatile> %source32[%position] : view<8xf32, align(1)> -> f32
+  %value64 = view.load<volatile> %source64[%position] : view<8xf64, align(1)> -> f64
+  view.store<volatile> %value32, %destination32[%position] : f32, view<8xf32, align(1)>
+  view.store<volatile> %value64, %destination64[%position] : f64, view<8xf64, align(1)>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @copy_float_dynamic_origin(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %origin: reg<x86.gpr64>, %position: reg<x86.gpr64>) asm {
+  %15 = mov.imm64 4
+  %16 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
+  %17 = imul.gpr64 %16, %15
+  %18 = copy %origin : reg<x86.gpr64> -> reg<x86.gpr64>
+  %19 = add.gpr64 %18, %17
+  %value32 = vmovss.load.indexed.xmm<volatile> %input, %19 {disp32 = 0, scale = 1}
+  %21 = mov.imm64 8
+  %22 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
+  %23 = imul.gpr64 %22, %21
+  %24 = copy %origin : reg<x86.gpr64> -> reg<x86.gpr64>
+  %25 = add.gpr64 %24, %23
+  %value64 = vmovsd.load.indexed.xmm<volatile> %input, %25 {disp32 = 0, scale = 1}
+  %28 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
+  %29 = imul.gpr64 %28, %15
+  %30 = copy %origin : reg<x86.gpr64> -> reg<x86.gpr64>
+  %31 = add.gpr64 %30, %29
+  vmovss.store.indexed.xmm<volatile> %value32, %output, %31 {disp32 = 0, scale = 1}
+  %33 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
+  %34 = imul.gpr64 %33, %21
+  %35 = copy %origin : reg<x86.gpr64> -> reg<x86.gpr64>
+  %36 = add.gpr64 %35, %34
+  vmovsd.store.indexed.xmm<volatile> %value64, %output, %36 {disp32 = 0, scale = 1}
+  return
+}
+
+// ====
+
+func.def @copy_float_full_width(%input: buffer, %output: buffer) {
+  %base = index.constant 1099511627784 : offset
+  %source32 = buffer.view %input[%base] : buffer -> view<8xf32, align(1)>
+  %source64 = buffer.view %input[%base] : buffer -> view<8xf64, align(1)>
+  %destination32 = buffer.view %output[%base] : buffer -> view<8xf32, align(1)>
+  %destination64 = buffer.view %output[%base] : buffer -> view<8xf64, align(1)>
+  %value32 = view.load %source32[1] : view<8xf32, align(1)> -> f32
+  %value64 = view.load %source64[2] : view<8xf64, align(1)> -> f64
+  view.store %value32, %destination32[1] : f32, view<8xf32, align(1)>
+  view.store %value64, %destination64[2] : f64, view<8xf64, align(1)>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @copy_float_full_width(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %11 = mov.imm64 1099511627788
+  %value32 = vmovss.load.indexed.xmm %input, %11 {disp32 = 0, scale = 1}
+  %13 = mov.imm64 1099511627800
+  %value64 = vmovsd.load.indexed.xmm %input, %13 {disp32 = 0, scale = 1}
+  vmovss.store.indexed.xmm %value32, %output, %11 {disp32 = 0, scale = 1}
+  vmovsd.store.indexed.xmm %value64, %output, %13 {disp32 = 0, scale = 1}
+  return
+}

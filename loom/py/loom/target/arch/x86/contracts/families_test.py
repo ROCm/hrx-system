@@ -4,10 +4,13 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+from dataclasses import replace
+
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.scalar import math as scalar_math
 from loom.dialect.vector import defs as vector
+from loom.dialect.view import defs as view
 from loom.target.arch.x86.contracts.avx2 import X86_AVX2_CONTRACT_FRAGMENT
 from loom.target.arch.x86.contracts.avx512 import X86_AVX512_CONTRACT_FRAGMENT
 from loom.target.arch.x86.contracts.scalar import X86_SCALAR_CONTRACT_FRAGMENT
@@ -188,6 +191,44 @@ def test_uniform_shift_rules_cover_native_types_widths_and_count_forms() -> None
             )
         assert actual == expected
         assert len(rules) == len(expected)
+
+
+def test_scalar_float_memory_matches_integer_addressing_family() -> None:
+    for source_op, field in ((view.view_load, "result"), (view.view_store, "value")):
+        for float_type, integer_type, mnemonic in (
+            ("f32", "i32", "vmovss"),
+            ("f64", "i64", "vmovsd"),
+        ):
+            float_rules = tuple(
+                case
+                for case in X86_AVX2_CONTRACT_FRAGMENT.cases
+                if isinstance(case, DescriptorRule)
+                and case.source_op is source_op
+                and _value_type_guard(case, field) == Scalar(float_type)
+            )
+            integer_rules = tuple(
+                case
+                for case in X86_SCALAR_CONTRACT_FRAGMENT.cases
+                if isinstance(case, DescriptorRule)
+                and case.source_op is source_op
+                and _value_type_guard(case, field) == Scalar(integer_type)
+            )
+            # Static, direct, three factored scales, preserved source index,
+            # materialized byte offset, and two full-width displacement forms.
+            assert len(float_rules) == len(integer_rules) == 9
+            for float_rule, integer_rule in zip(
+                float_rules, integer_rules, strict=True
+            ):
+                assert replace(float_rule.emit[-1].source_memory, diagnostic=None) == (
+                    replace(integer_rule.emit[-1].source_memory, diagnostic=None)
+                )
+                assert float_rule.descriptor.mnemonic == mnemonic
+                assert len(float_rule.emit) == len(integer_rule.emit)
+                for descriptors in (
+                    X86_AVX2_DESCRIPTOR_SET,
+                    X86_AVX512_CORE_DESCRIPTOR_SET,
+                ):
+                    assert float_rule.descriptor in descriptors.descriptors
 
 
 def test_avx2_scalar_float_arithmetic_covers_f32_and_f64() -> None:

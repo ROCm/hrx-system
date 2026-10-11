@@ -10,11 +10,16 @@ func.def @subview_scalar_strided(%input: buffer, %output: buffer) -> (f32) {
   %destination = buffer.view %output_aligned[%output_base] : buffer -> view<4x8xf32, %layout>
   %source_crop = view.subview %source[1, 2] : view<4x8xf32, %layout> -> view<2x3xf32, %layout>
   %destination_crop = view.subview %destination[1, 1] : view<4x8xf32, %layout> -> view<2x4xf32, %layout>
-  // ERROR@+1: TARGET/002 {field_name="result"}
   %value = view.load %source_crop[1, 1] : view<2x3xf32, %layout> -> f32
-  // ERROR@+1: TARGET/002 {field_name="value"}
   view.store %value, %destination_crop[1, 2] : f32, view<2x4xf32, %layout>
   func.return %value : f32
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, buffer) -> (f32)}) @subview_scalar_strided(%input_aligned: reg<x86.gpr64>, %output_aligned: reg<x86.gpr64>) -> (reg<x86.xmm>) asm {
+  %value = vmovss.load.xmm %input_aligned {disp32 = 84}
+  vmovss.store.xmm %value, %output_aligned {disp32 = 88}
+  return %value
 }
 
 // ====

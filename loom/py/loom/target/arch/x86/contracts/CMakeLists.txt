@@ -135,6 +135,7 @@ iree_py_test(
     loom::py::loom::target::arch::x86::contracts::contracts
     loom::py::loom::dialect::scalar::scalar
     loom::py::loom::dialect::vector::vector
+    loom::py::loom::dialect::view::view
     loom::py::loom::target::arch::x86::descriptors
     loom::py::loom::target::arch::x86::vector_families
     loom::py::loom::target::contracts::contracts

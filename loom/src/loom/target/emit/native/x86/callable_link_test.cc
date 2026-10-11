@@ -57,6 +57,8 @@ extern "C" void write_exact_avx2_lanes(uint8_t* byte_output,
 extern "C" void add_constant_i32x4(const int32_t* input, int32_t* output);
 extern "C" void reverse_i8x32_lanes(const uint8_t* input, uint8_t* output);
 extern "C" void spill_i8x32(const uint8_t* input, uint8_t* output);
+extern "C" void copy_scalar_floats(const uint8_t* input, uint32_t* output32,
+                                   uint64_t* output64, uint64_t index);
 extern "C" void write_mixed_results(const int32_t* input,
                                     int32_t* vector_output,
                                     uint64_t* scalar_output);
@@ -313,6 +315,31 @@ TEST(NativeCallableTest, Avx2VectorFunctionUsesOrdinaryCLinkage) {
   EXPECT_EQ(exact_qwords,
             (std::array<int64_t, 4>{INT64_C(0x0123456789abcdef), -2,
                                     INT64_C(0x0123456789abcdef), -2}));
+}
+
+TEST(NativeCallableTest, ScalarFloatMemoryPreservesBitsAndExactWidths) {
+  const std::array<uint64_t, 8> patterns = {0,
+                                            UINT64_MAX,
+                                            UINT64_C(0x8000000000000000),
+                                            UINT64_C(0x7ff800007fc00001),
+                                            UINT64_C(0x0000000100000001),
+                                            UINT64_C(0x7ff000007f800000),
+                                            UINT64_C(0x3ff000003f800000),
+                                            UINT64_C(0xfff00000ff800000)};
+  std::array<uint8_t, sizeof(patterns) + 1> input;
+  input[0] = 0xcc;
+  std::memcpy(input.data() + 1, patterns.data(), sizeof(patterns));
+  for (uint64_t index = 0; index < patterns.size(); ++index) {
+    std::array<uint32_t, 3> output32 = {0x12345678, 0, 0x87654321};
+    std::array<uint64_t, 3> output64 = {0x12345678, 0, 0x87654321};
+    copy_scalar_floats(input.data(), output32.data(), output64.data(), index);
+    uint32_t expected32;
+    std::memcpy(&expected32, input.data() + 1 + 4 * index, sizeof(expected32));
+    EXPECT_EQ(output32,
+              (std::array<uint32_t, 3>{0x12345678, expected32, 0x87654321}));
+    EXPECT_EQ(output64, (std::array<uint64_t, 3>{0x12345678, patterns[index],
+                                                 0x87654321}));
+  }
 }
 
 TEST(NativeCallableTest, MixedPrivateResultsOverflowIndependentBanks) {

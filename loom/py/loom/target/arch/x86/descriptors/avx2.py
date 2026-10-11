@@ -1235,19 +1235,26 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         vector_instructions=native.VECTOR_MEMORY,
         vector_prefix=VectorEncodingPrefix.VEX,
     ),
-    *memory_descriptors(
-        key_prefix="x86.avx2",
-        load_mnemonic="vmovsd",
-        store_mnemonic="vmovsd",
-        register_class=_REG_XMM,
-        register_suffix="xmm",
-        semantic_type="v64",
-        width_bits=64,
-        load_schedule_class=_SCHEDULE_MEMORY_LOAD_XMM,
-        store_schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
-        assembly_suffix=".xmm",
-        vector_instructions=native.XMM_QWORD_MEMORY,
-        vector_prefix=VectorEncodingPrefix.VEX,
+    *(
+        descriptor
+        for mnemonic, width_bits, instructions in (
+            ("vmovss", 32, native.XMM_DWORD_MEMORY),
+            ("vmovsd", 64, native.XMM_QWORD_MEMORY),
+        )
+        for descriptor in memory_descriptors(
+            key_prefix="x86.avx2",
+            load_mnemonic=mnemonic,
+            store_mnemonic=mnemonic,
+            register_class=_REG_XMM,
+            register_suffix="xmm",
+            semantic_type=f"v{width_bits}",
+            width_bits=width_bits,
+            load_schedule_class=_SCHEDULE_MEMORY_LOAD_XMM,
+            store_schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
+            assembly_suffix=".xmm",
+            vector_instructions=instructions,
+            vector_prefix=VectorEncodingPrefix.VEX,
+        )
     ),
     *memory_descriptors(
         key_prefix="x86.avx2",

@@ -688,7 +688,9 @@ def _scalar_memory_family_rules(
     value_type: TypePattern,
     element_byte_count: int,
     register_suffix: str,
+    descriptor_key_prefix: str,
     load_mnemonic: str,
+    store_mnemonic: str,
     diagnostic: GuardDiagnostic,
     transport: _MemoryValueTransport | None = None,
     priority: int = 0,
@@ -702,7 +704,7 @@ def _scalar_memory_family_rules(
     )
     operations = (
         (view.view_load, SourceMemoryOperation.LOAD, load_mnemonic),
-        (view.view_store, SourceMemoryOperation.STORE, "mov"),
+        (view.view_store, SourceMemoryOperation.STORE, store_mnemonic),
     )
     for addressings in addressing_groups:
         for source_op, operation, mnemonic in operations:
@@ -715,7 +717,7 @@ def _scalar_memory_family_rules(
                     lane_count=1,
                     addressing=addressing,
                     descriptor_key=_memory_descriptor_key(
-                        f"x86.scalar.{mnemonic}",
+                        f"{descriptor_key_prefix}.{mnemonic}",
                         operation,
                         addressing=addressing,
                         register_suffix=register_suffix,
@@ -736,7 +738,7 @@ def _scalar_memory_family_rules(
                 element_byte_count=element_byte_count,
                 lane_count=1,
                 descriptor_key=_memory_descriptor_key(
-                    f"x86.scalar.{mnemonic}",
+                    f"{descriptor_key_prefix}.{mnemonic}",
                     operation,
                     addressing=_MemoryAddressing.MATERIALIZE_BYTE_OFFSET,
                     register_suffix=register_suffix,
@@ -770,7 +772,35 @@ def x86_scalar_memory_rules(
             value_type=value_type,
             element_byte_count=element_byte_count,
             register_suffix=register_suffix,
+            descriptor_key_prefix="x86.scalar",
             load_mnemonic=load_mnemonic,
+            store_mnemonic="mov",
+            diagnostic=diagnostic,
+        )
+    )
+
+
+def x86_scalar_float_memory_rules(
+    descriptor_lookup: _DescriptorLookup,
+    *,
+    diagnostic: GuardDiagnostic,
+) -> tuple[DescriptorRule, ...]:
+    """Transfers scalar F32/F64 values directly through their XMM carriers."""
+
+    return tuple(
+        rule
+        for value_type, element_byte_count, mnemonic in (
+            (Scalar("f32"), 4, "vmovss"),
+            (Scalar("f64"), 8, "vmovsd"),
+        )
+        for rule in _scalar_memory_family_rules(
+            descriptor_lookup,
+            value_type=value_type,
+            element_byte_count=element_byte_count,
+            register_suffix="xmm",
+            descriptor_key_prefix="x86.avx2",
+            load_mnemonic=mnemonic,
+            store_mnemonic=mnemonic,
             diagnostic=diagnostic,
         )
     )
@@ -790,7 +820,9 @@ def x86_scalar_xmm_word_memory_rules(
         value_type=value_type,
         element_byte_count=2,
         register_suffix="u16.gpr32",
+        descriptor_key_prefix="x86.scalar",
         load_mnemonic="movzx",
+        store_mnemonic="mov",
         diagnostic=diagnostic,
         transport=_MemoryValueTransport(
             memory_type=_I16,

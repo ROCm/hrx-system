@@ -35,6 +35,14 @@ func.def public @write_exact_avx2_lanes(%byte_output: buffer, %word_output: buff
   func.return
 }
 
+low.func.def public target<x86.avx2.core> abi(object_function) @copy_scalar_floats(%input: reg<x86.gpr64>, %output32: reg<x86.gpr64>, %output64: reg<x86.gpr64>, %index: reg<x86.gpr64>) asm {
+  %value32 = vmovss.load.indexed.xmm %input, %index {disp32 = 1, scale = 4}
+  %value64 = vmovsd.load.indexed.xmm %input, %index {disp32 = 1, scale = 8}
+  vmovss.store.xmm %value32, %output32 {disp32 = 4}
+  vmovsd.store.xmm %value64, %output64 {disp32 = 8}
+  return
+}
+
 low.func.def public target<x86.avx2.core> abi(object_function) @add_i32x4(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
   %lhs_vector = vmovdqu32.load.xmm %lhs {disp32 = 0}
   %rhs_vector = vmovdqu32.load.xmm %rhs {disp32 = 0}
