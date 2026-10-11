@@ -227,6 +227,73 @@ def check_decision(result):
     assert abs(answer["noul"] - 2 / 3) <= 2.5 * 2**-24, result
 
 
+class TelemetryObservation:
+    """A real SSE reader checking contiguous batches, not a model dependency."""
+
+    def __init__(self, response):
+        self.response = response
+        self.identity = None
+        self.position = 0
+        self.cursor = None
+        self.counters = None
+
+    def read(self):
+        fields, records = {}, []
+        while True:
+            line = self.response.readline()
+            assert line, "telemetry ended without a stream_end event"
+            if line == b"\n":
+                break
+            key, value = line.decode().rstrip("\n").split(": ", 1)
+            if key == "data":
+                records.append(json.loads(value))
+            else:
+                assert key not in fields, (key, fields)
+                fields[key] = value
+        if fields["event"] == "stream_end":
+            assert records == [
+                {"identity": self.identity, "reason": "model_unregistered"}
+            ], records
+            assert self.response.read() == b""
+            return False
+        assert fields["event"] == "telemetry", fields
+        header, footer = records[0], records[-1]
+        assert header["event"] == "stream" and footer["event"] == "cursor", records
+        if self.identity is None:
+            self.identity = header["identity"]
+        assert self.identity == header["identity"], header
+        for record in records[1:-1]:
+            if record["event"] == "counters":
+                self.counters = record["values"]
+            else:
+                assert record["event"] != "gap", record
+                assert record["sequence"] == self.position, record
+                self.position += 1
+        self.cursor = fields["id"]
+        assert self.cursor == footer["value"] == f"{self.identity}:{self.position}"
+        assert footer["next"] == self.position, footer
+        return True
+
+    def completed(self, count):
+        while self.counters is None or self.counters["completed"] < count:
+            assert self.read(), "model retired before its request completed"
+        assert self.counters["completed"] == count, self.counters
+
+
+@contextlib.contextmanager
+def telemetry_observation(connection, model):
+    try:
+        connection.request("GET", "/logz/stream", headers={"X-Loom-Model": model})
+        response = connection.getresponse()
+        assert response.status == 200, response.status
+        assert response.getheader("Content-Type") == "text/event-stream"
+        observer = TelemetryObservation(response)
+        assert observer.read()
+        yield observer
+    finally:
+        connection.close()
+
+
 class Client:
     def __init__(self, address):
         self.address = address
@@ -1087,11 +1154,14 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
             "# Shared process resources\n" + "\n".join(arguments) + "\n"
         )
         arguments = [f"--flagfile={settings.relative_to(directory)}"]
-    with child_server(
-        [*server_command, *arguments],
-        log_path,
-        cwd=directory,
-    ) as (process, address):
+    with (
+        child_server(
+            [*server_command, *arguments],
+            log_path,
+            cwd=directory,
+        ) as (process, address),
+        contextlib.ExitStack() as observations,
+    ):
         assert address is not None, log_path.read_text()
         client = Client(address)
         initial_threads = thread_snapshot(process)
@@ -1208,8 +1278,13 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
         # model-count scaling. Vulkan starts its queue completion thread lazily.
         # Names may change during native initialization; identities must remain.
         first = next(item for item in declarations if item["kind"] == "embedding")
+        observer = observations.enter_context(
+            telemetry_observation(http.client.HTTPConnection(address), first["name"])
+        )
+        assert observer.counters["requests"] == observer.counters["completed"] == 0
         client.request("/v1/models/undrain", {"model": first["name"]})
         infer(first, 0)
+        observer.completed(1)
         wait_status(
             urlsplit("http://" + address),
             model=first["name"],
@@ -1235,6 +1310,7 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
             for future in work:
                 future.result()
             client.idle()
+            observer.completed(2)
             loaded_threads = thread_snapshot(process)
             assert (
                 loaded_threads["userspace"].keys()
@@ -1266,6 +1342,10 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
                 ), discovered
                 if {item["id"] for item in discovered} == peers:
                     break
+            # Retirement has already reclaimed the model; a lagging observer
+            # owns only copied output and its connection, not that model/ring.
+            while observer.read():
+                pass
             for declaration in declarations[:4]:
                 client.request(
                     "/v1/models/register",
@@ -1338,6 +1418,7 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
                     "completed_requests": after["completed"],
                     "outputs_verified": True,
                     "retired_counters_preserved": True,
+                    "sse_model_lifetime_verified": True,
                     "thread_samples": [
                         initial_threads,
                         activated_threads,
@@ -1376,25 +1457,34 @@ def check_multiple_bindings(server_command, directory, catalog):
         client = Client(address)
         client.idle()
         expected_models = client.request("/v1/models")
+        observation_connection = http.client.HTTPConnection("localhost")
+        observation_connection.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        observation_connection.sock.connect(str(socket_path))
         connection = http.client.HTTPConnection("localhost")
         connection.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            connection.sock.connect(str(socket_path))
-            connection.request(
-                "POST",
-                "/v1/embeddings",
-                json.dumps(
-                    {"model": "vectors", "input": ["a", "bbb"], "dimensions": 2}
-                ),
-                {"Content-Type": "application/json"},
-            )
-            response = connection.getresponse()
-            assert response.status == 200
-            result = json.loads(response.read())
-            assert [entry["embedding"] for entry in result["data"]] == [[1, 1], [6, 3]]
-            assert result["usage"]["prompt_tokens"] == 4
-        finally:
-            connection.close()
+        with telemetry_observation(observation_connection, "vectors") as observer:
+            try:
+                connection.sock.connect(str(socket_path))
+                connection.request(
+                    "POST",
+                    "/v1/embeddings",
+                    json.dumps(
+                        {"model": "vectors", "input": ["a", "bbb"], "dimensions": 2}
+                    ),
+                    {"Content-Type": "application/json"},
+                )
+                response = connection.getresponse()
+                assert response.status == 200
+                result = json.loads(response.read())
+                assert [entry["embedding"] for entry in result["data"]] == [
+                    [1, 1],
+                    [6, 3],
+                ]
+                assert result["usage"]["prompt_tokens"] == 4
+                observer.completed(1)
+                assert observer.counters["input_tokens"] == 4, observer.counters
+            finally:
+                connection.close()
         # The request submitted over Unix belongs to the same model observed
         # over TCP, not a second independently constructed deployment.
         wait_counters(

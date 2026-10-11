@@ -122,4 +122,97 @@ TEST_F(LogsTest, DiagnosticOnlyScopeDoesNotInventCounters) {
             std::string::npos);
 }
 
+TEST_F(LogsTest, SsePreservesJsonRecordsAndOpaqueResumeBoundary) {
+  const loom_serve_telemetry_record_t record = {
+      .time_ns = 12,
+      .request = 7,
+      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
+  for (int i = 0; i < 80; ++i) {
+    loom_serve_telemetry_stream_append(stream_, &record);
+  }
+  uint64_t position = 0;
+  IREE_ASSERT_OK(loom_serve_http_logs_resume(stream_, IREE_SV(""), &position));
+  IREE_ASSERT_OK(loom_serve_http_logs_format(
+      stream_, nullptr, IREE_SV("fixture"),
+      LOOM_SERVE_HTTP_LOGS_FLAG_SSE | LOOM_SERVE_HTTP_LOGS_FLAG_HEADERS,
+      &position, &output_));
+  EXPECT_EQ(position, 64u);
+  const auto first = Output();
+  EXPECT_EQ(
+      first.find("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"), 0u);
+  EXPECT_NE(first.find("\r\n\r\nevent: telemetry\ndata: {\"event\":\"stream\""),
+            std::string::npos);
+  EXPECT_NE(first.find("data: {\"event\":\"request_begin\",\"sequence\":63,"),
+            std::string::npos);
+  EXPECT_EQ(first.find("\"sequence\":64,"), std::string::npos);
+  const std::string boundary = "id: " + prefix_ + "64\n\n";
+  EXPECT_EQ(first.substr(first.size() - boundary.size()), boundary);
+  const auto resume = prefix_ + "64";
+  uint64_t resumed = 0;
+  IREE_ASSERT_OK(loom_serve_http_logs_resume(
+      stream_, iree_make_cstring_view(resume.c_str()), &resumed));
+  IREE_ASSERT_OK(loom_serve_http_logs_format(
+      stream_, &counters_, IREE_SV("fixture"), LOOM_SERVE_HTTP_LOGS_FLAG_SSE,
+      &resumed, &output_));
+  EXPECT_EQ(resumed, 80u);
+  EXPECT_EQ(Output().find("event: telemetry\ndata: "), 0u);
+  EXPECT_EQ(Output().find("HTTP/1.1"), std::string::npos);
+  EXPECT_NE(Output().find("\"sequence\":64,"), std::string::npos);
+  EXPECT_EQ(Output().find("\"sequence\":63,"), std::string::npos);
+  EXPECT_NE(Output().find("data: {\"event\":\"counters\","), std::string::npos);
+  EXPECT_NE(Output().find("id: " + prefix_ + "80\n\n"), std::string::npos);
+}
+
+TEST_F(LogsTest, SseReportsOverwriteWithoutChangingAnotherReader) {
+  const loom_serve_telemetry_record_t record = {
+      .time_ns = 12, .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
+  for (int i = 0; i < 140; ++i) {
+    loom_serve_telemetry_stream_append(stream_, &record);
+  }
+  uint64_t slow = 0;
+  IREE_ASSERT_OK(loom_serve_http_logs_format(
+      stream_, nullptr, IREE_SV("fixture"), LOOM_SERVE_HTTP_LOGS_FLAG_SSE,
+      &slow, &output_));
+  EXPECT_EQ(slow, 75u);
+  EXPECT_NE(Output().find("data: {\"event\":\"gap\",\"from\":0,\"to\":12}\n"),
+            std::string::npos);
+  EXPECT_NE(Output().find("id: " + prefix_ + "75\n\n"), std::string::npos);
+  uint64_t fast = 139;
+  IREE_ASSERT_OK(loom_serve_http_logs_format(
+      stream_, nullptr, IREE_SV("fixture"), LOOM_SERVE_HTTP_LOGS_FLAG_SSE,
+      &fast, &output_));
+  EXPECT_EQ(fast, 140u);
+  EXPECT_EQ(slow, 75u);
+  EXPECT_EQ(Output().find("\"event\":\"gap\""), std::string::npos);
+  EXPECT_NE(Output().find("\"sequence\":139,"), std::string::npos);
+}
+
+TEST_F(LogsTest, FailedBatchFormattingPreservesTheReaderPosition) {
+  const loom_serve_telemetry_record_t record = {
+      .time_ns = 12, .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
+  for (int i = 0; i < 16; ++i) {
+    loom_serve_telemetry_stream_append(stream_, &record);
+  }
+  char storage[512];
+  iree_string_builder_t limited;
+  iree_string_builder_initialize_with_storage(storage, sizeof(storage),
+                                              &limited);
+  uint64_t position = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_serve_http_logs_format(stream_, nullptr, IREE_SV("fixture"),
+                                  LOOM_SERVE_HTTP_LOGS_FLAG_SSE, &position,
+                                  &limited));
+  const auto partial = iree_string_builder_view(&limited);
+  EXPECT_NE(std::string(partial.data, partial.size).find("\"sequence\":0,"),
+            std::string::npos);
+  EXPECT_EQ(position, 0u);
+  iree_string_builder_deinitialize(&limited);
+  IREE_ASSERT_OK(loom_serve_http_logs_format(
+      stream_, nullptr, IREE_SV("fixture"), LOOM_SERVE_HTTP_LOGS_FLAG_SSE,
+      &position, &output_));
+  EXPECT_EQ(position, 16u);
+  EXPECT_NE(Output().find("\"sequence\":0,"), std::string::npos);
+}
+
 }  // namespace

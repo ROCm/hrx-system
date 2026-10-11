@@ -50,6 +50,25 @@ typedef struct router_held_request_t {
   iree_host_size_t service_index;
 } router_held_request_t;
 
+typedef struct router_log_reader_t {
+  // Retained transport claim; NULL marks an available observation slot.
+  loom_serve_http_connection_t* connection;
+  // Selector borrowed from the retained request, never model storage.
+  iree_string_view_t model;
+  // Stable registry slot, or router capacity for the server stream.
+  iree_host_size_t service_index;
+  // Original stream lifetime, compared before borrowing current storage.
+  loom_serve_telemetry_identity_t identity;
+  // Next absolute record position; send admission never retains a ring slot.
+  uint64_t position;
+  // The initial HTTP headers and telemetry batch have been copied to transport.
+  bool started;
+  // Whether the last emitted snapshot had complete counter ownership.
+  bool counters_available;
+  // Last emitted owner snapshot; unchanged counters do not sustain a send loop.
+  loom_serve_telemetry_counters_t counters;
+} router_log_reader_t;
+
 typedef struct router_t {
   // Allocator for independently owned utility jobs and routing output.
   iree_allocator_t allocator;
@@ -72,6 +91,17 @@ typedef struct router_t {
     // Claims retained by closed gates.
     iree_host_size_t count;
   } held;
+  // Live observation claims, independent of model and stream lifetimes.
+  struct {
+    // Fixed slots; entries never retain rendered output or producer storage.
+    router_log_reader_t* values;
+    // Transport capacity minus one, shared with held claims for control credit.
+    iree_host_size_t capacity;
+    // Occupied observation slots, including backpressured peers.
+    iree_host_size_t count;
+    // Rotating formatting priority under the ordinary per-turn request quota.
+    iree_host_size_t cursor;
+  } logs;
   // Rotating service priority, changed only by the exclusive turn owner.
   iree_host_size_t cursor;
   // Cooperative process returning workers between bounded owner turns.
@@ -755,6 +785,9 @@ static iree_status_t router_metrics(router_t* router) {
 static iree_status_t router_logs(router_t* router,
                                  loom_serve_http_connection_t* connection,
                                  const loom_serve_http_request_t* request) {
+  const bool streaming =
+      iree_string_view_equal(request->target, IREE_SV("/logz/stream"));
+  iree_host_size_t service_index = router->capacity;
   const loom_serve_telemetry_stream_t* stream =
       loom_serve_http_server_diagnostics(router->server);
   const loom_serve_telemetry_counters_t* counters = NULL;
@@ -769,6 +802,7 @@ static iree_status_t router_logs(router_t* router,
       if (candidate->name.size &&
           iree_string_view_equal(name, candidate->name)) {
         service = candidate;
+        service_index = i;
         break;
       }
     }
@@ -789,8 +823,22 @@ static iree_status_t router_logs(router_t* router,
   iree_string_view_t cursor;
   loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Cursor"),
                                         &cursor);
-  iree_status_t status =
-      loom_serve_http_logs(stream, counters, name, cursor, &router->output);
+  if (streaming) {
+    iree_string_view_t previous;
+    loom_serve_http_request_lookup_header(request, IREE_SV("Last-Event-ID"),
+                                          &previous);
+    if (cursor.size && previous.size &&
+        !iree_string_view_equal(cursor, previous)) {
+      return router_reject(router, connection, 400, "Bad Request",
+                           IREE_SV("conflicting telemetry resume cursors"),
+                           &router->output);
+    }
+    if (previous.size) {
+      cursor = previous;
+    }
+  }
+  uint64_t position = 0;
+  iree_status_t status = loom_serve_http_logs_resume(stream, cursor, &position);
   if (iree_status_is_invalid_argument(status) ||
       iree_status_is_failed_precondition(status)) {
     const bool stale = iree_status_is_failed_precondition(status);
@@ -802,10 +850,148 @@ static iree_status_t router_logs(router_t* router,
     iree_status_free(status);
     return response_status;
   }
+  if (streaming) {
+    if (router->logs.count + router->held.count == router->logs.capacity) {
+      return router_reject(router, connection, 429, "Too Many Requests",
+                           IREE_SV("observation and holding capacity is full"),
+                           &router->output);
+    }
+    for (iree_host_size_t i = 0; i < router->logs.capacity; ++i) {
+      if (!router->logs.values[i].connection) {
+        router->logs.values[i] = (router_log_reader_t){
+            .connection = connection,
+            .model = name,
+            .service_index = service_index,
+            .identity = loom_serve_telemetry_stream_identity(stream),
+            .position = position};
+        ++router->logs.count;
+        break;
+      }
+    }
+    return iree_ok_status();
+  }
+  status = loom_serve_http_logs_format(stream, counters, name,
+                                       LOOM_SERVE_HTTP_LOGS_FLAG_HEADERS,
+                                       &position, &router->output);
   if (iree_status_is_ok(status)) {
     router_send(router, connection, iree_string_builder_view(&router->output));
   } else {
     loom_serve_http_connection_abort(connection);
+  }
+  return status;
+}
+
+// Observation never owns a model or stream across turns. Native removal may
+// reclaim and reuse the recorded registry slot while this peer has no credit.
+static iree_status_t router_logs_advance(router_t* router, bool* out_progress) {
+  if (!router->logs.count) {
+    return iree_ok_status();
+  }
+  loom_serve_telemetry_counters_t total;
+  const bool total_available =
+      loom_serve_registry_counters(router->registry, &total);
+  const iree_host_size_t start = router->logs.cursor;
+  iree_host_size_t quota = router->request_capacity;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < router->logs.capacity && iree_status_is_ok(status); ++i) {
+    const iree_host_size_t index = (start + i) % router->logs.capacity;
+    router_log_reader_t* reader = &router->logs.values[index];
+    if (!reader->connection) {
+      continue;
+    }
+    if (router->stopping ||
+        loom_serve_http_connection_failed(reader->connection)) {
+      loom_serve_http_connection_abort(reader->connection);
+      reader->connection = NULL;
+      --router->logs.count;
+      *out_progress = true;
+      continue;
+    }
+    if (!quota || !loom_serve_http_connection_can_send(reader->connection)) {
+      continue;
+    }
+    const loom_serve_telemetry_stream_t* stream =
+        loom_serve_http_server_diagnostics(router->server);
+    const loom_serve_telemetry_counters_t* counters =
+        total_available ? &total : NULL;
+    if (reader->service_index < router->capacity) {
+      const loom_serve_http_service_t* service =
+          &router_model_at(router, reader->service_index)->service;
+      stream = service->telemetry.stream;
+      counters = service->telemetry.counters;
+    }
+    const loom_serve_telemetry_identity_t identity =
+        stream ? loom_serve_telemetry_stream_identity(stream)
+               : (loom_serve_telemetry_identity_t){0};
+    const bool ended = identity.created_ns != reader->identity.created_ns ||
+                       identity.ordinal != reader->identity.ordinal;
+    const bool counters_changed =
+        !ended &&
+        (reader->counters_available != (counters != NULL) ||
+         (counters && memcmp(&reader->counters, counters, sizeof(*counters))));
+    if (!ended && reader->started && !counters_changed &&
+        reader->position == loom_serve_telemetry_stream_head(stream)) {
+      continue;
+    }
+    // Charge formatting attempts, including a concurrent busy read that emits
+    // no bytes. Other readers retain rotating priority on the next wake.
+    --quota;
+    router->logs.cursor = (index + 1) % router->logs.capacity;
+    if (ended) {
+      iree_string_builder_reset(&router->output);
+      status = iree_string_builder_append_format(
+          &router->output,
+          "%sevent: stream_end\ndata: {\"identity\":\"%" PRIu64 ":%" PRIu64
+          "\",\"reason\":\"model_unregistered\"}\n\n",
+          reader->started
+              ? ""
+              : "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/event-stream\r\nCache-Control: no-store\r\n"
+                "Connection: close\r\n\r\n",
+          reader->identity.created_ns, reader->identity.ordinal);
+    } else {
+      const uint64_t previous_position = reader->position;
+      status = loom_serve_http_logs_format(
+          stream, counters, reader->model,
+          LOOM_SERVE_HTTP_LOGS_FLAG_SSE |
+              (reader->started ? 0 : LOOM_SERVE_HTTP_LOGS_FLAG_HEADERS),
+          &reader->position, &router->output);
+      if (iree_status_is_ok(status)) {
+        // Concurrent overwrite can make a read attempt busy without advancing
+        // its cursor. The producer's publication wake retries it, not an empty
+        // send/completion cycle.
+        if (reader->started && !counters_changed &&
+            reader->position == previous_position) {
+          continue;
+        }
+        reader->counters_available = counters != NULL;
+        if (counters) {
+          reader->counters = *counters;
+        }
+        reader->started = true;
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      iree_status_t send_status = loom_serve_http_connection_send(
+          reader->connection, iree_string_builder_view(&router->output));
+      if (!iree_status_is_ok(send_status)) {
+        loom_serve_http_server_record_error(router->server, send_status);
+        iree_status_free(send_status);
+        loom_serve_http_connection_abort(reader->connection);
+        reader->connection = NULL;
+      } else if (ended) {
+        loom_serve_http_connection_finish(reader->connection);
+        reader->connection = NULL;
+      }
+    } else {
+      loom_serve_http_connection_abort(reader->connection);
+      reader->connection = NULL;
+    }
+    if (!reader->connection) {
+      --router->logs.count;
+    }
+    *out_progress = true;
   }
   return status;
 }
@@ -949,7 +1135,9 @@ static iree_status_t router_accept(router_t* router,
       loom_serve_registry_count(router->registry);
   iree_string_builder_t* output = &router->output;
   const bool get = iree_string_view_equal(request->method, IREE_SV("GET"));
-  if (get && iree_string_view_equal(request->target, IREE_SV("/logz"))) {
+  if (get &&
+      (iree_string_view_equal(request->target, IREE_SV("/logz")) ||
+       iree_string_view_equal(request->target, IREE_SV("/logz/stream")))) {
     return router_logs(router, connection, request);
   }
   if (get && iree_string_view_equal(request->target, IREE_SV("/metrics"))) {
@@ -1108,7 +1296,8 @@ static iree_status_t router_accept(router_t* router,
       }
       if (state->closed || state->held_count ||
           state->phase != LOOM_SERVE_REGISTRATION_READY) {
-        if (router->held.count == router->held.capacity) {
+        if (router->held.count == router->held.capacity ||
+            router->held.count + router->logs.count == router->logs.capacity) {
           return router_reject(
               router, connection, 429, "Too Many Requests",
               IREE_SV("model admission holding capacity is full"), output);
@@ -1175,10 +1364,14 @@ static void router_advance(router_t* router, bool* out_progress) {
   if (++router->cursor >= router->capacity) {
     router->cursor = 0;
   }
+  router->status = iree_status_join(router->status,
+                                    router_logs_advance(router, out_progress));
+  router->stopping |= !iree_status_is_ok(router->status);
   if (router->stopping) {
     router_held_collect(router, out_progress);
   }
-  bool pending = router->tokenizations != NULL || router->held.count != 0;
+  bool pending = router->tokenizations != NULL || router->held.count != 0 ||
+                 router->logs.count != 0;
   for (iree_host_size_t i = 0; i < router->capacity; ++i) {
     loom_serve_registered_model_t* model = router_model_at(router, i);
     if (router->stopping && model->incarnation &&
@@ -1251,20 +1444,29 @@ iree_status_t loom_serve_router_run(iree_task_executor_t* executor,
                             "router requires a positive request quota and "
                             "holding capacity below transport capacity");
   }
-  router_t router = {.allocator = host_allocator,
-                     .executor = executor,
-                     .server = server,
-                     .registry = registry,
-                     .capacity = loom_serve_registry_capacity(registry),
-                     .request_capacity = options.request_quota,
-                     .held = {.capacity = options.holding_capacity}};
+  router_t router = {
+      .allocator = host_allocator,
+      .executor = executor,
+      .server = server,
+      .registry = registry,
+      .capacity = loom_serve_registry_capacity(registry),
+      .request_capacity = options.request_quota,
+      .held = {.capacity = options.holding_capacity},
+      .logs = {.capacity =
+                   loom_serve_http_server_connection_capacity(server) - 1}};
   iree_status_t status = iree_ok_status();
   if (iree_status_is_ok(status) && options.holding_capacity) {
     status = iree_allocator_malloc_array(
         host_allocator, options.holding_capacity, sizeof(*router.held.values),
         (void**)&router.held.values);
   }
+  if (iree_status_is_ok(status) && router.logs.capacity) {
+    status = iree_allocator_malloc_array(host_allocator, router.logs.capacity,
+                                         sizeof(*router.logs.values),
+                                         (void**)&router.logs.values);
+  }
   if (!iree_status_is_ok(status)) {
+    iree_allocator_free(host_allocator, router.logs.values);
     iree_allocator_free(host_allocator, router.held.values);
     return status;
   }
@@ -1290,6 +1492,7 @@ iree_status_t loom_serve_router_run(iree_task_executor_t* executor,
   iree_notification_await(&router.retirement.notification, router_is_released,
                           &router, iree_infinite_timeout());
   iree_string_builder_deinitialize(&router.output);
+  iree_allocator_free(host_allocator, router.logs.values);
   iree_allocator_free(host_allocator, router.held.values);
   iree_notification_deinitialize(&router.retirement.notification);
   iree_slim_mutex_deinitialize(&router.retirement.mutex);

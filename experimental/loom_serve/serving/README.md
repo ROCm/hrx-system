@@ -586,8 +586,49 @@ Positions/identities are experimental native-lifetime values, not durable log
 storage keys. Periodic external pollers can write these JSONL responses to a
 file/stdout without putting that sink on a model worker.
 
+`GET /logz/stream` keeps the connection open and sends those same bounded
+batches as server-sent events. Each `event: telemetry` contains the JSONL batch
+as multiple `data:` lines; joining the lines with newlines yields the `/logz`
+record schema. Its `id:` is the next opaque cursor. `Last-Event-ID` resumes a
+reader, or `X-Loom-Cursor` supplies its initial cursor. Conflicting nonempty
+values return 400. Selection and cursor errors are reported before sending 200.
+
+~~~sh
+curl --no-buffer --fail --silent --show-error \
+  http://127.0.0.1:8080/logz/stream -H 'X-Loom-Model: vectors'
+# Resume with the previous event's id, copied verbatim:
+curl --no-buffer --fail --silent --show-error \
+  http://127.0.0.1:8080/logz/stream -H 'X-Loom-Model: vectors' \
+  -H 'Last-Event-ID: <previous-event-id>'
+~~~
+
+The initial telemetry event supplies current metadata/counters. Later events need
+new records or changed counters; there are no empty keepalive events or private
+polling threads. Model heartbeat records, when enabled, also flow here. Each
+reader formats only when its carrier has send credit. A stalled reader retains
+no model, ring slot or pending rendered batch in the router; it may miss records
+and subsequently receive a gap. Counters remain current even after gaps.
+
+Unregister/replacement emits `event: stream_end` with JSON data containing the
+old `identity` and `reason: "model_unregistered"`, then closes the stream once
+accepted bytes drain. Removal itself never waits for that observer. The terminal
+event does not promise an unread tail was preserved; removal before the first
+telemetry batch may produce only that terminal event. A stopped server or failed
+peer cancels observation immediately; EOF alone is not a completed-model marker.
+Consumers end that subscription on `stream_end` and explicitly choose whether
+to observe a new incarnation. TCP and Unix listeners have identical semantics.
+
+Held inference and live observers together may claim at most `--connections - 1`
+connections; further permanent claims return 429. This preserves one control
+credit from those claims, not from arbitrary active inference or unframed socket
+traffic. A one-connection server supports finite polling but not live observation.
+Each owner turn formats at most one batch per eligible reader and at most the
+router's request quota in total, with rotating reader priority. Native model
+work advances before observation formatting.
+
 The [observer](../tools/observe.py) owns an independent cursor per deployment
-and writes file/stdout JSONL; it never launches or signals the server. Automatic
+and uses finite polling to write file/stdout JSONL; it never launches or signals
+the server. Automatic
 discovery follows catalog changes, including attaching before any model is
 registered. Explicit `--model` selectors follow those names through absence and
 re-registration. Availability transitions and incarnation resets are recorded

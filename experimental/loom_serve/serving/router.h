@@ -16,7 +16,8 @@ extern "C" {
 
 typedef struct loom_serve_router_options_t {
   // Positive per-turn limit on new transport claims and, independently, on
-  // previously held claims released into model admission.
+  // previously held claims released into model admission and telemetry batches
+  // formatted for live observers.
   iree_host_size_t request_quota;
   // Global requests parked behind closed model admission gates. Must be below
   // transport connection capacity so holding alone cannot exclude control.
@@ -40,7 +41,13 @@ typedef struct loom_serve_router_options_t {
 // selects a model service's stream; X-Loom-Cursor resumes that reader's
 // previous poll. Each response copies records and reports gaps/current counters
 // without retaining slots or slowing publication. See http/logs.h for cursor
-// rules.
+// rules. GET /logz/stream carries the same bounded batches as SSE telemetry
+// events, with the next cursor as id; Last-Event-ID resumes a connection.
+// Each reader owns only a transport claim and copied identity/counters. Model
+// removal never waits for observers; stream_end reports that lifetime's end
+// once transport credit permits. Held requests plus observers remain below
+// transport capacity, preserving one credit for other arrivals. Excess long-
+// lived claims receive 429. Idle observers schedule no periodic work.
 // POST /v1/models/register takes one catalog model object with optional
 // admission="open" or "drained". A 202 acknowledges server-owned intent;
 // /v1/status reports preparation/failure and copied source diagnostics. Closing

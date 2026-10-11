@@ -70,7 +70,9 @@ const loom_serve_telemetry_stream_t* loom_serve_http_server_diagnostics(
 // Copies a borrowed error into the bounded diagnostic history, without
 // formatting, allocation or I/O. The transport mutex serializes network and
 // application producers; slow readers never delay them. Status ownership is
-// unchanged, including when callers also propagate the error normally.
+// unchanged, including when callers also propagate the error normally. A
+// publication wakes the installed application observer so live diagnostic
+// readers progress independently of request/model activity.
 void loom_serve_http_server_record_error(loom_serve_http_server_t* server,
                                          iree_status_t status);
 

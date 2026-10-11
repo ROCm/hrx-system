@@ -178,10 +178,21 @@ curl --fail --silent --show-error http://127.0.0.1:8080/logz \
 ```
 
 Metrics provide cumulative counters and current ownership gauges. `/logz` is
-bounded JSONL polling with independent cursors, not a subscription that can
-block producers. Overwritten history is reported as gaps; counters still count.
-The optional observer can attach before any models are registered and follow
-their lifetimes:
+bounded JSONL polling with independent cursors. `/logz/stream` sends the same
+records and counter snapshots continuously as SSE, over TCP or Unix sockets:
+
+```sh
+curl --no-buffer --fail --silent --show-error http://127.0.0.1:8080/logz/stream \
+  -H 'X-Loom-Model: vectors'
+curl --unix-socket /path/to/loom-serve.sock --no-buffer \
+  http://localhost/logz/stream
+```
+
+Each telemetry event's `id` can be resumed with `Last-Event-ID`. Slow readers
+never block producers or model removal. Overwritten history is reported as
+gaps; counters still count. A removed model emits `stream_end` and closes its
+observation connection when send credit permits. The optional polling observer
+can attach before any models are registered and follow their lifetimes:
 
 ```sh
 build_tools/bin/iree-bazel-run //experimental/loom_serve/tools:observe -- \

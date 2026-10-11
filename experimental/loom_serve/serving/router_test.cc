@@ -20,12 +20,127 @@
 
 #include "experimental/loom_serve/http/listener.h"
 #include "iree/async/proactor.h"
+#include "iree/async/proactor_platform.h"
+#include "iree/net/carrier/loopback/carrier.h"
 #include "iree/task/topology.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 
 namespace {
+
+// A real carrier with one send credit. Only the client's progress is paused;
+// the server continues on its shared proactor and task workers.
+class ObservationClient {
+ public:
+  ~ObservationClient() {
+    if (carrier_) {
+      bool drained = false;
+      iree_net_carrier_deactivate(
+          carrier_, [](void* self) { *static_cast<bool*>(self) = true; },
+          &drained);
+      while (!drained) {
+        Poll();
+      }
+      iree_net_carrier_release(carrier_);
+    }
+    iree_net_carrier_release(peer_);
+    iree_async_proactor_release(proactor_);
+  }
+
+  void Open(loom_serve_http_server_t* server, const std::string& headers = "") {
+    auto options = iree_async_proactor_options_default();
+    options.threading_mode = IREE_ASYNC_PROACTOR_THREADING_CROSS_THREAD;
+    IREE_ASSERT_OK(iree_async_proactor_create_platform(
+        options, iree_allocator_system(), &proactor_));
+    iree_async_proactor_t* server_proactor = nullptr;
+    IREE_ASSERT_OK(iree_async_proactor_pool_get(
+        loom_serve_http_server_proactor_pool(server), 0, &server_proactor));
+    auto carrier_options = iree_net_loopback_carrier_options_default();
+    carrier_options.max_send_operations = 1;
+    IREE_ASSERT_OK(iree_net_loopback_carrier_create_pair(
+        proactor_, server_proactor, &carrier_options, iree_allocator_system(),
+        &carrier_, &peer_));
+    iree_net_carrier_retain(peer_);
+    loom_serve_http_server_accept(server, peer_);
+    IREE_ASSERT_OK(iree_net_carrier_set_handlers(
+        carrier_,
+        {[](void* self, iree_async_span_t bytes,
+            iree_async_buffer_lease_t*) -> iree_status_t {
+           static_cast<ObservationClient*>(self)->received_.append(
+               reinterpret_cast<const char*>(iree_async_span_ptr(bytes)),
+               bytes.length);
+           return iree_ok_status();
+         },
+         [](void* self, iree_status_t status) {
+           IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE, status);
+           static_cast<ObservationClient*>(self)->departed_ = true;
+         },
+         this}));
+    IREE_ASSERT_OK(iree_net_carrier_activate(carrier_));
+    const std::string request =
+        "GET /logz/stream HTTP/1.1\r\nHost: local\r\n" + headers + "\r\n";
+    const iree_net_send_params_t params = {
+        .generated_prefix = iree_net_send_prefix_from_bytes(
+            iree_make_const_byte_span(request.data(), request.size())),
+        .completion_callback = {
+            [](void*, iree_status_t status, iree_host_size_t) {
+              IREE_EXPECT_OK(status);
+            },
+            nullptr}};
+    IREE_ASSERT_OK(iree_net_carrier_send(carrier_, &params));
+  }
+
+  void WaitCredit(bool available) {
+    while (iree_net_carrier_state(peer_) != IREE_NET_CARRIER_STATE_ACTIVE ||
+           (iree_net_carrier_query_send_budget(peer_).slots != 0) !=
+               available) {
+      std::this_thread::yield();
+    }
+  }
+  std::string Frame() {
+    while (received_.find("\n\n") == std::string::npos && !departed_) {
+      Poll();
+    }
+    const auto end = received_.find("\n\n");
+    EXPECT_NE(end, std::string::npos);
+    if (end == std::string::npos) {
+      return {};
+    }
+    auto frame = received_.substr(0, end + 2);
+    received_.erase(0, end + 2);
+    return frame;
+  }
+  void Join() {
+    while (!departed_) {
+      Poll();
+    }
+  }
+  static std::string Cursor(const std::string& frame) {
+    const auto start = frame.find("\nid: ");
+    EXPECT_NE(start, std::string::npos);
+    if (start == std::string::npos) {
+      return {};
+    }
+    return frame.substr(start + 5, frame.find('\n', start + 1) - start - 5);
+  }
+
+ private:
+  void Poll() {
+    IREE_CHECK_OK(
+        iree_async_proactor_poll(proactor_, iree_infinite_timeout(), nullptr));
+  }
+  // Only the test thread polls this client owner.
+  iree_async_proactor_t* proactor_ = nullptr;
+  // Owned client endpoint, deactivated before releasing the proactor.
+  iree_net_carrier_t* carrier_ = nullptr;
+  // Retained endpoint for observing actual credit, not HTTP/model ownership.
+  iree_net_carrier_t* peer_ = nullptr;
+  // Received bytes not yet consumed as complete SSE frames.
+  std::string received_;
+  // Peer retirement publication on the client poll owner.
+  bool departed_ = false;
+};
 
 // The dependency is a bounded model service. Routing, HTTP claims, copied
 // output, task scheduling, readiness and shutdown use production
@@ -621,6 +736,112 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
   // production.
   RegistrationDependency managed_;
 };
+
+TEST_P(HttpRouterRegistrationTest, StalledObserverDoesNotRetainRemovedModel) {
+  Register();
+  ObservationClient observer;
+  observer.Open(server_, "X-Loom-Model: dynamic\r\n");
+  observer.WaitCredit(false);
+  // The first response is already copied, but its only send credit remains
+  // occupied throughout native model retirement and independent peer output.
+  Remove();
+  EXPECT_EQ(managed_.destroyed.load(), 1u);
+  EXPECT_EQ(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
+      0u);
+  EXPECT_EQ(Read(Send("GET", "/logz/stream", "", "X-Loom-Model: dynamic\r\n"))
+                .find("HTTP/1.1 404"),
+            0u);
+  // Reuse the registration slot before returning the old reader's credit.
+  EXPECT_EQ(
+      Read(
+          Send(
+              "POST", "/v1/models/register",
+              R"({"kind":"embedding","name":"dynamic","source":"model","assets":"assets","admission":"drained"})"))
+          .find("HTTP/1.1 202"),
+      0u);
+  const auto first = observer.Frame();
+  const auto cursor = ObservationClient::Cursor(first);
+  EXPECT_NE(first.find("\"model\":\"dynamic\""), std::string::npos);
+  const auto ended = observer.Frame();
+  EXPECT_EQ(ended.find("event: stream_end\n"), 0u);
+  EXPECT_NE(ended.find("\"reason\":\"model_unregistered\""), std::string::npos);
+  observer.Join();
+  // The replacement registration never accepts the old incarnation's cursor.
+  EXPECT_EQ(
+      Read(Send("GET", "/logz/stream", "",
+                "X-Loom-Model: dynamic\r\nLast-Event-ID: " + cursor + "\r\n"))
+          .find("HTTP/1.1 409"),
+      0u);
+  EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
+}
+
+TEST_P(HttpRouterTest,
+       LiveReadersResumeAndYieldToPeersWhenTheirRingOverwrites) {
+  ObservationClient slow;
+  slow.Open(server_);
+  const auto initial = slow.Frame();
+  const auto cursor = ObservationClient::Cursor(initial);
+  EXPECT_NE(initial.find("Content-Type: text/event-stream\r\n"),
+            std::string::npos);
+  slow.WaitCredit(true);
+  // An independent diagnostic publisher, not an inference completion, must
+  // wake an otherwise idle owner. This error has one explicit diagnostic sink.
+  iree_status_t error =
+      iree_make_status(IREE_STATUS_UNAVAILABLE, "stream probe");
+  loom_serve_http_server_record_error(server_, error);
+  slow.WaitCredit(false);
+  const auto* stream = loom_serve_http_server_diagnostics(server_);
+  for (size_t i = 0; i < loom_serve_telemetry_stream_capacity(stream) + 8;
+       ++i) {
+    loom_serve_http_server_record_error(server_, error);
+  }
+  iree_status_free(error);
+  EXPECT_EQ(
+      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
+      0u);
+  ObservationClient resumed;
+  resumed.Open(server_, "Last-Event-ID: " + cursor + "\r\n");
+  EXPECT_NE(resumed.Frame().find("\"event\":\"gap\""), std::string::npos);
+  EXPECT_NE(slow.Frame().find("stream probe"), std::string::npos);
+  EXPECT_NE(slow.Frame().find("\"event\":\"gap\""), std::string::npos);
+  EXPECT_EQ(Read(Send("GET", "/logz/stream", "", "Last-Event-ID: bad\r\n"))
+                .find("HTTP/1.1 400"),
+            0u);
+  EXPECT_EQ(Read(Send("GET", "/logz/stream", "",
+                      "Last-Event-ID: " + cursor +
+                          "\r\nX-Loom-Cursor: different\r\n"))
+                .find("HTTP/1.1 400"),
+            0u);
+  EXPECT_EQ(Read(Send("GET", "/logz/stream", "", "X-Loom-Model: a\r\n"))
+                .find("HTTP/1.1 501"),
+            0u);
+  // Shutdown cancels both claimed streams without waiting for their credit.
+  loom_serve_http_server_request_stop(server_);
+  owner_.join();
+  slow.Join();
+  resumed.Join();
+}
+
+TEST_P(HttpRouterTest, IdleObserverDoesNotProduceCompletionDrivenEmptyFrames) {
+  ObservationClient observer;
+  observer.Open(server_);
+  const auto first = observer.Frame();
+  observer.WaitCredit(true);
+  EXPECT_EQ(Read(Send("GET", "/healthz")).find("HTTP/1.1 200"), 0u);
+  ObservationClient resumed;
+  resumed.Open(server_,
+               "X-Loom-Cursor: " + ObservationClient::Cursor(first) + "\r\n");
+  EXPECT_EQ(ObservationClient::Cursor(resumed.Frame()),
+            ObservationClient::Cursor(first));
+  resumed.WaitCredit(true);
+  observer.WaitCredit(true);
+  // No additional publication is needed to release either reader.
+  loom_serve_http_server_request_stop(server_);
+  owner_.join();
+  observer.Join();
+  resumed.Join();
+}
 
 TEST_P(HttpRouterRegistrationTest,
        DrainedActivationSurvivesDisconnectAndPreservesPeerProgress) {
@@ -1500,6 +1721,25 @@ TEST_P(HttpRouterTightCapacityTest,
   EXPECT_EQ(Control("undrain", "a").find("HTTP/1.1 200"), 0u);
   EXPECT_NE(Read(first).find("a:/v1/test:"), std::string::npos);
   EXPECT_NE(Read(second).find(R"({"tokens":[0,1]})"), std::string::npos);
+}
+
+TEST_P(HttpRouterTightCapacityTest, ObservationAndHoldingShareControlCredit) {
+  EXPECT_EQ(Control("drain", "a").find("HTTP/1.1 200"), 0u);
+  const int held = Send("POST", "/v1/test", R"({"model":"a"})");
+  WaitHeld("a", 1);
+  {
+    ObservationClient observer;
+    observer.Open(server_);
+    observer.WaitCredit(false);
+    EXPECT_EQ(Read(Send("GET", "/logz/stream")).find("HTTP/1.1 429"), 0u);
+    EXPECT_EQ(
+        Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 429"),
+        0u);
+    EXPECT_EQ(Control("undrain", "a").find("HTTP/1.1 200"), 0u);
+    EXPECT_NE(Read(held).find("a:/v1/test:"), std::string::npos);
+    // Client departure returns observation ownership independently of shutdown.
+  }
+  EXPECT_EQ(Read(Send("GET", "/healthz")).find("HTTP/1.1 200"), 0u);
 }
 
 class HttpRouterNoHoldingTest : public HttpRouterTest {

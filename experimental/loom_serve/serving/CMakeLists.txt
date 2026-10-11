@@ -47,11 +47,14 @@ loom_cc_test(
     ::registry
     ::router
     iree::async
+    iree::async::platform
     iree::async::util::proactor_pool
     iree::base
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::request
     iree::experimental::loom_serve::http::server
+    iree::net::carrier
+    iree::net::carrier::loopback
     iree::task
     iree::testing::gtest
     iree::testing::gtest_main

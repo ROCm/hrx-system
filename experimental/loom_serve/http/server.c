@@ -223,6 +223,7 @@ void loom_serve_http_server_record_error(loom_serve_http_server_t* server,
   loom_serve_telemetry_diagnostic_capture(status, &record.data.error);
   iree_slim_mutex_lock(&server->mutex);
   loom_serve_telemetry_stream_append(server->diagnostics, &record);
+  http_notify_locked(server);
   iree_slim_mutex_unlock(&server->mutex);
 }
 
