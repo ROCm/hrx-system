@@ -10,6 +10,9 @@
 #include "iree/base/api.h"
 #include "iree/hal/buffer.h"
 #include "iree/hal/buffer_view.h"
+#include "iree/hal/command_buffer.h"
+#include "iree/hal/device_group.h"
+#include "iree/hal/pool.h"
 #include "iree/vm/environment.h"
 #include "iree/vm/variant.h"
 
@@ -24,8 +27,18 @@ enum iree_hal_module_type_ordinal_e {
   IREE_HAL_MODULE_TYPE_BUFFER = 0,
   // Exact HAL buffer view, retaining its buffer and shape/element metadata.
   IREE_HAL_MODULE_TYPE_BUFFER_VIEW = 1,
+  // Device group and its immutable topology.
+  IREE_HAL_MODULE_TYPE_DEVICE_GROUP = 2,
+  // Queue with an owning device-group anchor.
+  IREE_HAL_MODULE_TYPE_QUEUE = 3,
+  // Command buffer with an owning device-group anchor.
+  IREE_HAL_MODULE_TYPE_COMMAND_BUFFER = 4,
+  // Semaphore with an owning device-group anchor.
+  IREE_HAL_MODULE_TYPE_SEMAPHORE = 5,
+  // Pool with an owning device-group anchor.
+  IREE_HAL_MODULE_TYPE_POOL = 6,
   // Number of HAL types known by this consumer API version.
-  IREE_HAL_MODULE_TYPE_COUNT = 2,
+  IREE_HAL_MODULE_TYPE_COUNT = 7,
 };
 typedef uint32_t iree_hal_module_type_ordinal_t;
 
@@ -38,6 +51,16 @@ typedef struct iree_hal_module_types_t {
   iree_vm_ref_type_t buffer;
   // Canonical descriptor for an actual iree_hal_buffer_view_t pointer.
   iree_vm_ref_type_t buffer_view;
+  // Canonical descriptor for an iree_hal_vm_device_group_t wrapper.
+  iree_vm_ref_type_t device_group;
+  // Canonical descriptor for an iree_hal_vm_queue_t wrapper.
+  iree_vm_ref_type_t queue;
+  // Canonical descriptor for an iree_hal_vm_command_buffer_t wrapper.
+  iree_vm_ref_type_t command_buffer;
+  // Canonical descriptor for an iree_hal_vm_semaphore_t wrapper.
+  iree_vm_ref_type_t semaphore;
+  // Canonical descriptor for an iree_hal_vm_pool_t wrapper.
+  iree_vm_ref_type_t pool;
 } iree_hal_module_types_t;
 
 static_assert(offsetof(iree_hal_module_types_t, buffer) ==
@@ -56,9 +79,8 @@ static_assert(sizeof(iree_hal_module_types_t) ==
 // registration fails even for the same provider. Failure leaves |out_table|
 // untouched. Matches iree_vm_ref_type_table_register_fn_t.
 //
-// Objects share their existing HAL intrusive owner count with VM references;
-// there is no wrapper allocation or second owner count. Final buffer release
-// follows HAL recycling, and final view release destroys the view normally.
+// Buffers and views share their HAL intrusive owner count with VM references.
+// Other handles use the cold wrappers below to anchor their native parents.
 IREE_API_EXPORT iree_status_t
 iree_hal_module_register_types(iree_vm_environment_t* environment,
                                const iree_vm_ref_type_table_t** out_table);
@@ -82,10 +104,25 @@ static inline iree_status_t iree_hal_module_types_resolve(
       iree_vm_ref_type_storage_at(table->types, IREE_HAL_MODULE_TYPE_BUFFER),
       iree_vm_ref_type_storage_at(table->types,
                                   IREE_HAL_MODULE_TYPE_BUFFER_VIEW),
+      iree_vm_ref_type_storage_at(table->types,
+                                  IREE_HAL_MODULE_TYPE_DEVICE_GROUP),
+      iree_vm_ref_type_storage_at(table->types, IREE_HAL_MODULE_TYPE_QUEUE),
+      iree_vm_ref_type_storage_at(table->types,
+                                  IREE_HAL_MODULE_TYPE_COMMAND_BUFFER),
+      iree_vm_ref_type_storage_at(table->types, IREE_HAL_MODULE_TYPE_SEMAPHORE),
+      iree_vm_ref_type_storage_at(table->types, IREE_HAL_MODULE_TYPE_POOL),
   };
   if (!iree_string_view_equal(types.buffer->type_name, IREE_SV("buffer")) ||
       !iree_string_view_equal(types.buffer_view->type_name,
-                              IREE_SV("buffer_view"))) {
+                              IREE_SV("buffer_view")) ||
+      !iree_string_view_equal(types.device_group->type_name,
+                              IREE_SV("device_group")) ||
+      !iree_string_view_equal(types.queue->type_name, IREE_SV("queue")) ||
+      !iree_string_view_equal(types.command_buffer->type_name,
+                              IREE_SV("command_buffer")) ||
+      !iree_string_view_equal(types.semaphore->type_name,
+                              IREE_SV("semaphore")) ||
+      !iree_string_view_equal(types.pool->type_name, IREE_SV("pool"))) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "HAL type ordinal mismatch");
   }
@@ -97,6 +134,53 @@ IREE_VM_DEFINE_TYPE_ADAPTERS(iree_hal_buffer, iree_hal_module_types_t, buffer,
                              iree_hal_buffer_t)
 IREE_VM_DEFINE_TYPE_ADAPTERS(iree_hal_buffer_view, iree_hal_module_types_t,
                              buffer_view, iree_hal_buffer_view_t)
+
+// Cold handles own both the native resource and its parent group. The native
+// object is released before the group, so finalizers may access their device.
+// These wrappers only protect object ownership: callers still retain pools,
+// backing storage and other borrowed native state through pending work.
+// Wrapping retains inputs and leaves |out_ref| untouched on failure. The native
+// resource must belong to |group|. Neither input may be null. The returned ref
+// owns the wrapper and uses this library's canonical registered type table.
+#define IREE_HAL_VM_DECLARE_GROUP_RESOURCE(name)                            \
+  typedef struct iree_hal_vm_##name##_t {                                   \
+    /* Offset-zero VM owner count. */                                       \
+    iree_vm_ref_object_t object;                                            \
+    /* Owned native resource, released before the group. */                 \
+    iree_hal_##name##_t* name;                                              \
+    /* Owned parent group anchoring native devices and queue families. */   \
+    iree_hal_device_group_t* group;                                         \
+    /* Allocator used to free this cold wrapper. */                         \
+    iree_allocator_t host_allocator;                                        \
+  } iree_hal_vm_##name##_t;                                                 \
+  IREE_API_EXPORT iree_status_t iree_hal_vm_##name##_wrap(                  \
+      iree_hal_device_group_t* group, iree_hal_##name##_t* name,            \
+      iree_allocator_t host_allocator, iree_vm_ref_t* out_ref);             \
+  IREE_VM_DEFINE_TYPE_ADAPTERS(iree_hal_vm_##name, iree_hal_module_types_t, \
+                               name, iree_hal_vm_##name##_t)
+
+IREE_HAL_VM_DECLARE_GROUP_RESOURCE(queue)
+IREE_HAL_VM_DECLARE_GROUP_RESOURCE(command_buffer)
+IREE_HAL_VM_DECLARE_GROUP_RESOURCE(semaphore)
+IREE_HAL_VM_DECLARE_GROUP_RESOURCE(pool)
+#undef IREE_HAL_VM_DECLARE_GROUP_RESOURCE
+
+typedef struct iree_hal_vm_device_group_t {
+  // Offset-zero VM owner count.
+  iree_vm_ref_object_t object;
+  // Owned native group, released through the native HAL API.
+  iree_hal_device_group_t* group;
+  // Allocator used to free this cold wrapper.
+  iree_allocator_t host_allocator;
+} iree_hal_vm_device_group_t;
+
+// Wraps and retains a non-null group. Failure leaves |out_ref| untouched.
+IREE_API_EXPORT iree_status_t iree_hal_vm_device_group_wrap(
+    iree_hal_device_group_t* group, iree_allocator_t host_allocator,
+    iree_vm_ref_t* out_ref);
+
+IREE_VM_DEFINE_TYPE_ADAPTERS(iree_hal_vm_device_group, iree_hal_module_types_t,
+                             device_group, iree_hal_vm_device_group_t)
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -25,6 +25,25 @@ iree_cc_library(
 
 iree_cc_test(
   NAME
+    ownership_test
+  SRCS
+    "ownership_test.cc"
+  DEPS
+    ::types
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::hal::drivers::task::device
+    iree::hal::memory::passthrough_pool
+    iree::task
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+)
+
+iree_cc_test(
+  NAME
     types_test
   SRCS
     "types_test.cc"

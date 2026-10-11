@@ -1,0 +1,59 @@
+// RUN: emit vm-dis
+
+vm.target<core> @vm
+
+// Parent-anchored HAL handles keep their canonical identity through ordinary
+// source-to-low legalization, allocation and bytecode serialization.
+func.def public target(@vm) @reverse(%group: hal.device_group, %queue: hal.queue, %commands: hal.command_buffer, %timeline: hal.semaphore, %pool: hal.pool) -> (hal.pool, hal.semaphore, hal.command_buffer, hal.queue, hal.device_group) {
+  func.return %pool, %timeline, %commands, %queue, %group : hal.pool, hal.semaphore, hal.command_buffer, hal.queue, hal.device_group
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "reverse"
+    string @string1 = "hal"
+    string @string2 = "command_buffer"
+    string @string3 = "device_group"
+    string @string4 = "pool"
+    string @string5 = "queue"
+    string @string6 = "semaphore"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+      ref_type @ref_type1 name(@string3)
+      ref_type @ref_type2 name(@string4)
+      ref_type @ref_type3 name(@string5)
+      ref_type @ref_type4 name(@string6)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (ref(@ref_type1), ref(@ref_type3), ref(@ref_type0), ref(@ref_type4), ref(@ref_type2)) -> (ref(@ref_type2), ref(@ref_type4), ref(@ref_type0), ref(@ref_type3), ref(@ref_type1))
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 6, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      %r5 = ref.retain %r4
+      %r4 = ref.retain %r0
+      %r0 = ref.retain %r5
+      %r5 = ref.retain %r3
+      %r3 = ref.retain %r1
+      %r1 = ref.retain %r5
+      control.return
+    }
+  }
+
+}

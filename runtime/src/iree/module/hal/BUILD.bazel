@@ -25,6 +25,24 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
+    name = "ownership_test",
+    srcs = ["ownership_test.cc"],
+    deps = [
+        ":types",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/task:device",
+        "//runtime/src/iree/hal/memory:passthrough_pool",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "types_test",
     srcs = ["types_test.cc"],
     deps = [

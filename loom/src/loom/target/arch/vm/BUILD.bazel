@@ -243,6 +243,7 @@ loom_check_test_suite(
         "test/calls.loom-test",
         "test/effects.loom-test",
         "test/emission.loom-test",
+        "test/hal_handles.loom-test",
         "test/imports.loom-test",
         "test/math_contraction.loom-test",
         "test/math_policy.loom-test",

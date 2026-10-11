@@ -45,9 +45,10 @@ struct Provider {
   // Complete provider table, borrowed by its environment.
   iree_vm_ref_type_table_t table = {};
   // Immutable descriptors after registration.
-  std::array<iree_vm_ref_type_descriptor_t, 3> descriptors = {};
+  std::array<iree_vm_ref_type_descriptor_t, IREE_HAL_MODULE_TYPE_COUNT + 1>
+      descriptors = {};
   // Dense append-order type handles.
-  std::array<iree_vm_ref_type_t, 3> types = {};
+  std::array<iree_vm_ref_type_t, IREE_HAL_MODULE_TYPE_COUNT + 1> types = {};
 
   Provider(iree_string_view_t namespace_name,
            std::initializer_list<iree_string_view_t> names) {
@@ -65,8 +66,11 @@ struct Provider {
 };
 
 TEST(HALModuleTypesTest, ResolvesKnownPrefixFromNewerProvider) {
-  Provider provider(IREE_SV("hal"), {IREE_SV("buffer"), IREE_SV("buffer_view"),
-                                     IREE_SV("device")});
+  Provider provider(
+      IREE_SV("hal"),
+      {IREE_SV("buffer"), IREE_SV("buffer_view"), IREE_SV("device_group"),
+       IREE_SV("queue"), IREE_SV("command_buffer"), IREE_SV("semaphore"),
+       IREE_SV("pool"), IREE_SV("device")});
   iree_vm_environment_t* environment = nullptr;
   IREE_ASSERT_OK(
       iree_vm_environment_allocate(iree_allocator_system(), &environment));
@@ -78,13 +82,20 @@ TEST(HALModuleTypesTest, ResolvesKnownPrefixFromNewerProvider) {
       &types));
   EXPECT_EQ(types.buffer, provider.types[0]);
   EXPECT_EQ(types.buffer_view, provider.types[1]);
+  EXPECT_EQ(types.device_group, provider.types[2]);
+  EXPECT_EQ(types.queue, provider.types[3]);
+  EXPECT_EQ(types.command_buffer, provider.types[4]);
+  EXPECT_EQ(types.semaphore, provider.types[5]);
+  EXPECT_EQ(types.pool, provider.types[6]);
   iree_vm_environment_free(environment);
 }
 
 TEST(HALModuleTypesTest, RejectsIncompatiblePrefixesWithoutPublishing) {
   Provider short_prefix(IREE_SV("hal"), {IREE_SV("buffer")});
-  Provider reordered(IREE_SV("hal"),
-                     {IREE_SV("buffer_view"), IREE_SV("buffer")});
+  Provider reordered(IREE_SV("hal"), {IREE_SV("buffer_view"), IREE_SV("buffer"),
+                                      IREE_SV("device_group"), IREE_SV("queue"),
+                                      IREE_SV("command_buffer"),
+                                      IREE_SV("semaphore"), IREE_SV("pool")});
   Provider other(IREE_SV("other"), {IREE_SV("buffer"), IREE_SV("buffer_view")});
   for (auto* provider : {&short_prefix, &reordered, &other}) {
     iree_vm_environment_t* environment = nullptr;
