@@ -48,7 +48,7 @@ class CompileReportScalarizationEvent:
 
     @property
     def net_op_growth(self) -> int:
-        """Returns the immediate operation-count delta of the rewrite."""
+        """Returns the operation-count delta across the source rewrite lineage."""
         return self.created_op_count - self.erased_op_count
 
 
@@ -239,7 +239,7 @@ def append_scalarization_show_text(lines: list[str], view: dict[str, object]) ->
         (
             f"  {row['function']} {row['source_op']}: "
             f"{row['created_op_count']} created, {row['erased_op_count']} erased "
-            f"({int(row['net_op_growth']):+d} net) via "
+            f"({int(row['net_op_growth']):+d} net), rooted at "
             f"{row['legalizer']}/{row['legalizer_strategy']}"
         )
         for row in _rows(view.get("rows", []))
@@ -293,13 +293,15 @@ def suggest_scalarization(
                 suggestion_id="vector.eliminate_scalarization",
                 entry_name=event.function,
                 action=(
-                    f"{event.source_op} in {event.function} expanded into "
-                    f"{event.created_op_count} operations while erasing "
-                    f"{event.erased_op_count} ({event.net_op_growth:+d} net). "
-                    "Add or select a target-vector lowering, recompile until "
-                    "scalarized=false, then compare final code size, register "
-                    "pressure, spills, instruction count, and measured runtime "
-                    "with the workload held fixed."
+                    f"The rewrite rooted at {event.source_op} in "
+                    f"{event.function} created {event.created_op_count} "
+                    f"operations and erased {event.erased_op_count} "
+                    f"({event.net_op_growth:+d} net) while expanding vector "
+                    "semantics into scalar lanes. Keep the rewrite lineage "
+                    "vector-native, recompile until scalarized=false, then "
+                    "compare final code size, register pressure, spills, "
+                    "instruction count, and measured runtime with the workload "
+                    "held fixed."
                 ),
                 evidence=tuple(
                     CompileReportSuggestionEvidence(f"{path}.{field}", value)

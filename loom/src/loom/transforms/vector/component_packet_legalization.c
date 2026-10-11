@@ -754,6 +754,8 @@ static iree_status_t loom_vector_component_materialize(
 
   loom_rewriter_t* rewriter = plan->context->rewriter;
   loom_builder_t* builder = &rewriter->builder;
+  const bool observe_operation_creation =
+      rewriter->operation_creation.callback.fn != NULL;
   loom_builder_set_before(builder,
                           plan->records[component->last_member_index].op);
   const loom_value_id_t value_checkpoint =
@@ -772,6 +774,9 @@ static iree_status_t loom_vector_component_materialize(
     while (member_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
       loom_vector_component_record_t* record = &plan->records[member_index];
       loom_op_t* source_op = record->op;
+      if (observe_operation_creation) {
+        loom_rewriter_set_operation_creation_source(rewriter, source_op);
+      }
       const uint64_t created_op_count_before = rewriter->created_op_count;
       const loom_value_id_t* source_operands =
           loom_op_const_operands(source_op);
@@ -842,6 +847,9 @@ static iree_status_t loom_vector_component_materialize(
   while (member_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
     loom_vector_component_record_t* record = &plan->records[member_index];
     if (record->escapes) {
+      if (observe_operation_creation) {
+        loom_rewriter_set_operation_creation_source(rewriter, record->op);
+      }
       const uint64_t created_op_count_before = rewriter->created_op_count;
       loom_op_t* concat_op = NULL;
       const loom_value_id_t source_result =
@@ -872,6 +880,9 @@ static iree_status_t loom_vector_component_materialize(
       ++escape_index;
     }
     member_index = record->next_member_index;
+  }
+  if (observe_operation_creation) {
+    loom_rewriter_set_operation_creation_source(rewriter, NULL);
   }
 
   member_index = component->last_member_index;

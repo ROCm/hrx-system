@@ -197,6 +197,22 @@ CHECK: COMPILE-REPORT: target_legalization[0] function=packetizes_generated_oper
 
 // RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
 
+// Static partial reduction first builds result-shaped vector combines. The
+// unsupported i64 combine is scalarized on a later greedy visit, but remains
+// owned by the authored reduction report row.
+func.def @attributes_descendant_scalarization_to_source_reduction(%values: vector<2x3xi64>, %init: vector<3xi64>) -> (vector<3xi64>) {
+  %result = vector.reduce.axes<addi> %values, %init axes [0] : vector<2x3xi64>, vector<3xi64>
+  func.return %result : vector<3xi64>
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=1 target_rewritten=1 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1 *
+CHECK: COMPILE-REPORT: target_legalization[0] function=attributes_descendant_scalarization_to_source_reduction source_op=vector.reduce.axes * action=rewritten * legalizer=aie2p strategy=target * scalarized=true * created_ops=36 erased_ops=13
+
+// ====
+
+// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
+
 // Unsupported i64 arithmetic and extrema retain their scalar reference path,
 // while the target-native bitwise operations require no legalization row.
 func.def @i64_combining_reference_fallback(%lhs: vector<4xi64>, %rhs: vector<4xi64>) -> (vector<4xi64>, vector<4xi64>, vector<4xi64>, vector<4xi64>, vector<4xi64>, vector<4xi64>, vector<4xi64>, vector<4xi64>, vector<4xi64>) {
@@ -242,7 +258,8 @@ func.def @integer_partial_reduction_family(%values: vector<2x2xi32>, %init: vect
 }
 
 // ----
-CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=9 scalarized=0 target_rewritten=9 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=9 *
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=9 scalarized=1 target_rewritten=9 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=9 *
+CHECK: COMPILE-REPORT: target_legalization[*] function=integer_partial_reduction_family source_op=vector.reduce.axes * action=rewritten * legalizer=aie2p strategy=target * scalarized=true * created_ops=26 erased_ops=11
 CHECK: COMPILE-REPORT: target_legalization[*] function=integer_partial_reduction_family source_op=vector.reduce.axes * action=rewritten * legalizer=aie2p strategy=target * scalarized=false * created_ops=5 erased_ops=1
 
 // ====
@@ -260,7 +277,8 @@ func.def @float_partial_reduction_family(%values: vector<2x2xf32>, %init: vector
 }
 
 // ----
-CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=6 scalarized=0 target_rewritten=6 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=6 *
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=6 scalarized=1 target_rewritten=6 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=6 *
+CHECK: COMPILE-REPORT: target_legalization[*] function=float_partial_reduction_family source_op=vector.reduce.axes * action=rewritten * legalizer=aie2p strategy=target * scalarized=true * created_ops=34 erased_ops=11
 CHECK: COMPILE-REPORT: target_legalization[*] function=float_partial_reduction_family source_op=vector.reduce.axes * action=rewritten * legalizer=aie2p strategy=target * scalarized=false * created_ops=5 erased_ops=1
 
 // ====
@@ -286,5 +304,6 @@ func.def @partial_reduction_element_types(%i1_values: vector<2x2xi1>, %i1_init: 
 }
 
 // ----
-CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=11 scalarized=0 target_rewritten=11 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=11 *
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=11 scalarized=1 target_rewritten=11 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=11 *
+CHECK: COMPILE-REPORT: target_legalization[*] function=partial_reduction_element_types source_op=vector.reduce.axes * action=rewritten * legalizer=aie2p strategy=target * scalarized=true * created_ops=14 erased_ops=5
 CHECK: COMPILE-REPORT: target_legalization[*] function=partial_reduction_element_types source_op=vector.reduce.axes * action=rewritten * legalizer=aie2p strategy=target * scalarized=false * created_ops=5 erased_ops=1

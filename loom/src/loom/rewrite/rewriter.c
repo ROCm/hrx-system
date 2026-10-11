@@ -178,6 +178,12 @@ static iree_status_t loom_rewriter_on_op_finalized(void* user_data,
     IREE_RETURN_IF_ERROR(
         loom_rewriter_add_parent_summary_ops_to_worklist(rewriter, op));
   }
+  if (rewriter->operation_creation.source != NULL &&
+      rewriter->operation_creation.callback.fn != NULL) {
+    IREE_RETURN_IF_ERROR(rewriter->operation_creation.callback.fn(
+        rewriter->operation_creation.callback.user_data,
+        rewriter->operation_creation.source, op));
+  }
   const loom_op_vtable_t* vtable = loom_op_vtable(rewriter->module, op);
   if (!loom_rewriter_nested_region_summary_is_ready(rewriter, op, vtable)) {
     return iree_ok_status();
@@ -320,6 +326,17 @@ void loom_rewriter_deinitialize(loom_rewriter_t* rewriter) {
   // The worklist array itself is arena-allocated — freed when the
   // pass arena is deinitialized.
   memset(rewriter, 0, sizeof(*rewriter));
+}
+
+void loom_rewriter_set_operation_creation_callback(
+    loom_rewriter_t* rewriter,
+    loom_rewriter_operation_creation_callback_t callback) {
+  rewriter->operation_creation.callback = callback;
+}
+
+void loom_rewriter_set_operation_creation_source(loom_rewriter_t* rewriter,
+                                                 const loom_op_t* source_op) {
+  rewriter->operation_creation.source = source_op;
 }
 
 iree_status_t loom_rewriter_enable_worklist(loom_rewriter_t* rewriter) {

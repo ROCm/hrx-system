@@ -1852,7 +1852,7 @@ typedef struct loom_target_compile_report_legalization_row_t {
   loom_target_compile_report_legalization_policy_t policy;
   // Legalization decision recorded for this source operation.
   loom_target_compile_report_legalization_action_t action;
-  // Whether the rewrite expanded vector semantics into scalar lane operations.
+  // Whether the source rewrite lineage expanded into scalar lane operations.
   bool scalarized;
   // Terminal outcome after applying the selected legalization action.
   loom_target_compile_report_legalization_outcome_t legalization_outcome;
@@ -1870,9 +1870,9 @@ typedef struct loom_target_compile_report_legalization_row_t {
   uint32_t missing_feature_bits;
   // Value fact categories missing for the selected rule.
   uint32_t missing_fact_bits;
-  // Operations created by the deciding legalizer.
+  // Operations created by the deciding rewrite and generated descendants.
   uint64_t created_op_count;
-  // Operations erased by the deciding legalizer.
+  // Operations erased by the deciding rewrite and generated descendants.
   uint64_t erased_op_count;
 } loom_target_compile_report_legalization_row_t;
 

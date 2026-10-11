@@ -104,9 +104,9 @@ func.def target(@test_target) @vector_bf16_signs(%bf16_magnitude: vector<3xbf16>
 }
 
 // ----
-CHECK: COMPILE-REPORT: target_legalization[*] function=vector_fp8_signs source_op=vector.absf * action=rewritten * legalizer=math strategy=reference * scalarized=false *
-CHECK: COMPILE-REPORT: target_legalization[*] function=vector_fp8_signs source_op=vector.negf * action=rewritten * legalizer=math strategy=reference * scalarized=false *
-CHECK: COMPILE-REPORT: target_legalization[*] function=vector_fp8_signs source_op=vector.copysignf * action=rewritten * legalizer=math strategy=reference * scalarized=false *
-CHECK: COMPILE-REPORT: target_legalization[*] function=vector_bf16_signs source_op=vector.absf * action=rewritten * legalizer=math strategy=reference * scalarized=false *
-CHECK: COMPILE-REPORT: target_legalization[*] function=vector_bf16_signs source_op=vector.negf * action=rewritten * legalizer=math strategy=reference * scalarized=false *
-CHECK: COMPILE-REPORT: target_legalization[*] function=vector_bf16_signs source_op=vector.copysignf * action=rewritten * legalizer=math strategy=reference * scalarized=false *
+CHECK: COMPILE-REPORT: target_legalization[*] function=vector_fp8_signs source_op=vector.absf * action=rewritten * legalizer=math strategy=reference * scalarized=true *
+CHECK: COMPILE-REPORT: target_legalization[*] function=vector_fp8_signs source_op=vector.negf * action=rewritten * legalizer=math strategy=reference * scalarized=true *
+CHECK: COMPILE-REPORT: target_legalization[*] function=vector_fp8_signs source_op=vector.copysignf * action=rewritten * legalizer=math strategy=reference * scalarized=true *
+CHECK: COMPILE-REPORT: target_legalization[*] function=vector_bf16_signs source_op=vector.absf * action=rewritten * legalizer=math strategy=reference * scalarized=true *
+CHECK: COMPILE-REPORT: target_legalization[*] function=vector_bf16_signs source_op=vector.negf * action=rewritten * legalizer=math strategy=reference * scalarized=true *
+CHECK: COMPILE-REPORT: target_legalization[*] function=vector_bf16_signs source_op=vector.copysignf * action=rewritten * legalizer=math strategy=reference * scalarized=true *

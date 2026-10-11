@@ -122,11 +122,13 @@ def test_show_and_suggest_expose_only_explicit_scalarization() -> None:
     text = format_compile_report_show_text(show)
     assert "Scalar lane expansion" in text
     assert "vector.gather: 81 created, 1 erased (+80 net)" in text
+    assert "rooted at vector/reference" in text
 
     (suggestion,) = suggest_scalarization(document)
     assert suggestion.suggestion_id == "vector.eliminate_scalarization"
     assert suggestion.entry_name == "gather_decode_dot"
-    assert "81 operations" in suggestion.action
+    assert "rewrite rooted at vector.gather" in suggestion.action
+    assert "created 81 operations" in suggestion.action
     evidence = {fact.path: fact.value for fact in suggestion.evidence}
     assert evidence["target_legalization.rows[0].scalarized"] is True
     assert evidence["target_legalization.rows[0].created_op_count"] == 81

@@ -58,14 +58,16 @@ CHECK: COMPILE-REPORT: target_legalization[*] * source_op=vector.reduce.axes mod
 
 test.target<low_core> @test_target
 
+// The source rewrite preserves a vector-shaped result. Generated combining
+// operations stay in its report lineage when later visits scalarize them.
 func.def target(@test_target) @records_static_partial_reduce_axes_vector_rewrite(%values: vector<2x3xi32>, %init: vector<3xi32>) -> (vector<3xi32>) {
   %result = vector.reduce.axes<addi> %values, %init axes [0] : vector<2x3xi32>, vector<3xi32>
   func.return %result : vector<3xi32>
 }
 
 // ----
-CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=0 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1 *
-CHECK: COMPILE-REPORT: target_legalization[*] function=records_static_partial_reduce_axes_vector_rewrite source_op=vector.reduce.axes * action=rewritten outcome=reference-fallback * legalizer=vector strategy=reference * scalarized=false *
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1 *
+CHECK: COMPILE-REPORT: target_legalization[*] function=records_static_partial_reduce_axes_vector_rewrite source_op=vector.reduce.axes * action=rewritten outcome=reference-fallback * legalizer=vector strategy=reference * scalarized=true *
 
 // ====
 // RUN: with-checks compile-report target-legalize

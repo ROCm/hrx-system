@@ -90,6 +90,17 @@ typedef struct loom_rewriter_pending_exact_relations_callback_t {
   iree_status_t (*fn)(void* user_data, loom_rewriter_t* rewriter);
 } loom_rewriter_pending_exact_relations_callback_t;
 
+// Observes operations created while rewriting an explicit source operation.
+// The callback is a cold accounting surface; ordinary rewriting leaves it
+// unset, so finalization takes only a disabled observer branch.
+typedef struct loom_rewriter_operation_creation_callback_t {
+  // Callback state borrowed for the active rewrite run.
+  void* user_data;
+  // Optional creation observer receiving the immediate rewrite source.
+  iree_status_t (*fn)(void* user_data, const loom_op_t* source_op,
+                      loom_op_t* created_op);
+} loom_rewriter_operation_creation_callback_t;
+
 typedef struct loom_rewriter_cfg_region_t loom_rewriter_cfg_region_t;
 
 struct loom_rewriter_t {
@@ -115,6 +126,14 @@ struct loom_rewriter_t {
 
   // Number of successful vector-to-scalar rewrites.
   uint64_t scalarized_op_count;
+
+  // Creation provenance active during a rewrite callback.
+  struct {
+    // Optional observer for creations with an explicit rewrite source.
+    loom_rewriter_operation_creation_callback_t callback;
+    // Immediate operation responsible for creations in the active callback.
+    const loom_op_t* source;
+  } operation_creation;
 
   // Central policy for optional SSA display names created during rewrites.
   loom_rewriter_name_policy_flags_t name_policy;
@@ -167,6 +186,16 @@ void loom_rewriter_initialize(loom_rewriter_t* rewriter, loom_module_t* module,
                               iree_arena_allocator_t* arena);
 
 void loom_rewriter_deinitialize(loom_rewriter_t* rewriter);
+
+// Installs an optional cold observer for operation creation provenance.
+void loom_rewriter_set_operation_creation_callback(
+    loom_rewriter_t* rewriter,
+    loom_rewriter_operation_creation_callback_t callback);
+
+// Sets the immediate source operation for subsequently finalized operations.
+// Passes and batched transforms clear the source after the rewrite callback.
+void loom_rewriter_set_operation_creation_source(loom_rewriter_t* rewriter,
+                                                 const loom_op_t* source_op);
 
 // Queries the retained target preference after the caller has established that
 // multiply and add both permit contraction. Does not resolve target context.

@@ -178,5 +178,5 @@ func.def target(@target) @insufficient_partial_index_bound(%table: vector<4xi8>,
 }
 
 // ----
-CHECK: COMPILE-REPORT: target_legalization[*] function=insufficient_partial_index_bound source_op=vector.table.lookup * action=rewritten outcome=reference-fallback * strategy=reference * erased_ops=1
+CHECK: COMPILE-REPORT: target_legalization[*] function=insufficient_partial_index_bound source_op=vector.table.lookup * action=rewritten outcome=reference-fallback * strategy=reference * scalarized=true * created_ops=46 erased_ops=6
 CHECK-NOT: *plan_key=amdgpu.table_lookup.strategy.packed_i8*
