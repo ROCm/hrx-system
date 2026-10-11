@@ -78,6 +78,8 @@ typedef struct router_t {
   loom_serve_http_server_t* server;
   // Borrowed stable registration table; this process serializes its mutation.
   loom_serve_registry_t* registry;
+  // Immutable borrowed resource view, outliving the outer routing call.
+  loom_serve_resources_t resources;
   // Number of stable slots, including vacant registration credit.
   iree_host_size_t capacity;
   // Maximum claims per turn, independent of model batch sizes.
@@ -526,6 +528,30 @@ static iree_status_t router_describe_service(
         admission->tokenizer_count));
   }
   return iree_string_builder_append_cstring(output, "}}");
+}
+
+static iree_status_t router_describe_server(const router_t* router,
+                                            iree_string_builder_t* output) {
+  const loom_serve_http_request_limits_t limits =
+      loom_serve_http_server_request_limits(router->server);
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      output,
+      "{\"worker_count\":%zu,\"model_capacity\":%zu,"
+      "\"connection_capacity\":%zu,\"request_limits\":{"
+      "\"header_byte_capacity\":%zu,\"body_byte_capacity\":%zu,"
+      "\"header_capacity\":%zu},\"held_request_capacity\":%zu,"
+      "\"held_requests\":%zu,\"observer_capacity\":%zu,\"observers\":%zu,"
+      "\"resources\":",
+      iree_task_executor_worker_count(router->executor), router->capacity,
+      loom_serve_http_server_connection_capacity(router->server),
+      limits.header_byte_capacity, limits.body_byte_capacity,
+      limits.header_capacity, router->held.capacity, router->held.count,
+      router->logs.capacity, router->logs.count));
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(output, &stream);
+  IREE_RETURN_IF_ERROR(
+      loom_serve_resources_write_json(&router->resources, &stream));
+  return iree_string_builder_append_cstring(output, "}");
 }
 
 // Prometheus labels preserve UTF-8 and escape only backslash, quote and LF.
@@ -1181,7 +1207,16 @@ static iree_status_t router_accept(router_t* router,
       }
     }
     if (iree_status_is_ok(status)) {
-      status = iree_string_builder_append_cstring(output, "]}");
+      status = iree_string_builder_append_cstring(output, "]");
+    }
+    if (iree_status_is_ok(status) && include_status) {
+      status = iree_string_builder_append_cstring(output, ",\"server\":");
+      if (iree_status_is_ok(status)) {
+        status = router_describe_server(router, output);
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_string_builder_append_cstring(output, "}");
     }
     if (iree_status_is_ok(status)) {
       router_send(router, connection, iree_string_builder_view(output));
@@ -1449,6 +1484,7 @@ iree_status_t loom_serve_router_run(iree_task_executor_t* executor,
       .executor = executor,
       .server = server,
       .registry = registry,
+      .resources = options.resources,
       .capacity = loom_serve_registry_capacity(registry),
       .request_capacity = options.request_quota,
       .held = {.capacity = options.holding_capacity},

@@ -8,6 +8,7 @@
 #define EXPERIMENTAL_LOOM_SERVE_SERVING_ROUTER_H_
 
 #include "experimental/loom_serve/serving/registry.h"
+#include "experimental/loom_serve/serving/resources.h"
 #include "iree/task/executor.h"
 
 #ifdef __cplusplus
@@ -23,12 +24,16 @@ typedef struct loom_serve_router_options_t {
   // transport connection capacity so holding alone cannot exclude control.
   // Zero makes every such arrival an immediate overload rejection.
   iree_host_size_t holding_capacity;
+  // Application resources borrowed until the outer routing call returns.
+  loom_serve_resources_t resources;
 } loom_serve_router_options_t;
 
 // Routes JSON request bodies by their model field and checkpoint operations by
 // X-Loom-Model. A checkpoint request may omit its selector with exactly one
 // service. GET /v1/models lists deployment names and namespaced capabilities;
-// GET /v1/status adds copied scheduler ownership. /healthz and /readyz are
+// GET /v1/status adds copied scheduler ownership and a server object containing
+// actual worker/admission/framing bounds and published resources. No hardware
+// polling or device synchronization is performed. /healthz and /readyz are
 // model-free: HTTP is available, independently of model preparation/activation.
 // Zero services is valid: model/status lists are empty, work counters are zero,
 // and inference or tokenization requests receive model-not-registered errors.

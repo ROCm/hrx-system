@@ -567,7 +567,9 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
           &registry, iree_allocator_system()));
       status_ = loom_serve_router_run(
           executor_, server_, registry,
-          {.request_quota = 4, .holding_capacity = holding_capacity_},
+          {.request_quota = 4,
+           .holding_capacity = holding_capacity_,
+           .resources = {.listener_count = 1, .listeners = &listener_}},
           iree_allocator_system());
       IREE_ASSERT_OK(loom_serve_registry_destroy(registry));
       returned_.store(true);
@@ -1316,6 +1318,16 @@ TEST_P(HttpRouterTest, UnrelatedCapacityNeverWaitsForHeldCompletion) {
                 .find(std::string(escaped_.name) + ":/v1/test:"),
             std::string::npos);
   const auto state = Read(Send("GET", "/v1/status"));
+  char storage[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
+  iree_string_view_t address;
+  IREE_EXPECT_OK(
+      iree_async_address_format(loom_serve_http_listener_address(listener_),
+                                sizeof(storage), storage, &address));
+  const std::string expected =
+      "\"server\":{\"worker_count\":" + std::to_string(GetParam()) +
+      R"(,"model_capacity":5,"connection_capacity":64,"request_limits":{"header_byte_capacity":16384,"body_byte_capacity":8388608,"header_capacity":64},"held_request_capacity":2,"held_requests":0,"observer_capacity":63,"observers":0,"resources":{"listeners":[{"address":")" +
+      std::string(address.data, address.size) + R"("}],"devices":[]}})";
+  EXPECT_NE(state.find(expected), std::string::npos) << state;
   EXPECT_NE(
       state.find(R"("phase":"held","queued_requests":0,"active_requests":1)"),
       std::string::npos);
@@ -1731,6 +1743,11 @@ TEST_P(HttpRouterTightCapacityTest, ObservationAndHoldingShareControlCredit) {
     ObservationClient observer;
     observer.Open(server_);
     observer.WaitCredit(false);
+    const auto status = Read(Send("GET", "/v1/status"));
+    EXPECT_NE(
+        status.find(R"("held_requests":1,"observer_capacity":2,"observers":1)"),
+        std::string::npos)
+        << status;
     EXPECT_EQ(Read(Send("GET", "/logz/stream")).find("HTTP/1.1 429"), 0u);
     EXPECT_EQ(
         Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 429"),

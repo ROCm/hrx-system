@@ -61,6 +61,10 @@ iree_notification_t* loom_serve_http_server_notification(
 iree_host_size_t loom_serve_http_server_connection_capacity(
     const loom_serve_http_server_t* server);
 
+// Immutable framing limits applied independently to every accepted connection.
+loom_serve_http_request_limits_t loom_serve_http_server_request_limits(
+    const loom_serve_http_server_t* server);
+
 // Borrowed diagnostic stream, valid until server destruction. Readers use
 // independent cursors and never acquire the transport's mutex. This stream
 // includes routing failures, connection rejection and retired peer failures.

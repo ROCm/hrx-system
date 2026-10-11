@@ -19,6 +19,7 @@ loom_cc_library(
   DEPS
     ::configuration
     ::registry
+    ::resources
     iree::base
     iree::base::internal::json
     iree::base::threading
@@ -36,6 +37,42 @@ loom_cc_library(
     loom::util::stream
   PUBLIC
 )
+
+loom_cc_library(
+  NAME
+    resources
+  HDRS
+    "resources.h"
+  SRCS
+    "resources.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::experimental::loom_serve::http::listener
+    iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::storage::memory
+    iree::hal
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+if(IREE_HAL_DRIVER_TASK)
+loom_cc_test(
+  NAME
+    resources_test
+  SRCS
+    "resources_test.cc"
+  DEPS
+    ::resources
+    iree::base
+    iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::host
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::util::stream
+)
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(

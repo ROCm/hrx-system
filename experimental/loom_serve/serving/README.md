@@ -432,7 +432,8 @@ the registered native modality and loaded tokenizer, not checkpoint identity,
 quality, or support for every optional request field. Primary endpoints exclude
 the raw utilities and text checkpoint controls documented above.
 
-`GET /v1/status` returns the same list with a copied `loom.status` object:
+`GET /v1/status` returns the same `object`/`data` list with a copied
+`loom.status` object on each model:
 
 ~~~json
 {
@@ -470,6 +471,38 @@ latency distributions. Heartbeats publish ages from the same receipt timestamps.
 Snapshots neither activate a model nor wait for CPU/device completion, and
 transport copies the response so a slow status peer retains no model buffers.
 Unmeasured device times and whole-device memory totals are not reported as zero.
+
+The response also includes a top-level `server` object, even with zero models.
+`worker_count` is the actual provisioned task-worker count, not the requested
+maximum. `model_capacity`, `connection_capacity`, `held_request_capacity` and
+`request_limits` expose the configured registration, transport, admission and
+framing bounds. `held_requests` and `observers` are current router-owned claims.
+`observer_capacity` is the combined ceiling for held requests plus live log
+observers, one below transport capacity. Ordinary active and incomplete network
+requests also use transport credit; these counts are not total connections.
+
+`server.resources.listeners` lists the actual bound addresses, including the
+port assigned for `:0` and `unix:` paths. Every endpoint observes the same
+logical server. `server.resources.devices` lists all logical devices in its
+single application group with group-local `index`, HAL `id`, `name`, `driver`,
+`backend` and constituent `physical_devices` names/paths/backend ordinals.
+Indices have process lifetime; identity strings are HAL descriptions and need
+not be unique. This is an inventory, not model placement or a cross-device
+visibility guarantee. Embedded routers can publish no devices/listeners when
+their caller owns work externally or connects only in-process carriers.
+
+Each device's `memory` separates retained model backing from shared command
+workspace. `backing` is `fixed` or `elastic`. Elastic `retained` contains
+`limit_bytes` (null for unbounded), `reserved_bytes`, `committed_bytes`,
+`peak_bytes` and cumulative `released_bytes`, across all models on that owner.
+Fixed `retained` is null, not zero usage. Workspace fields report
+`reserved_bytes`, `committed_bytes`, `free_bytes`, `quarantined_bytes`,
+`budget_limit` (zero for unbounded) and `reservation_count` using the HAL's
+atomic pool observations. They can change independently during a snapshot;
+free bytes are not a promise of immediately admissible allocations.
+Neither scope includes all fixed buffers, loader/driver storage or hidden
+physical padding, so their sum is not VRAM usage. Observation neither waits for
+device work nor invokes hardware telemetry queries, residency changes or trim.
 
 Ready managed source models also expose a copied `loom.parameters` object.
 `active` means all weight-plan activations have been enqueued, not that their

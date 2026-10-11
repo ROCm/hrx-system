@@ -170,6 +170,15 @@ models keep serving. `/healthz` and `/readyz` remain successful in that case.
 Correcting the package and explicitly unregistering/re-registering starts a
 new attempt and incarnation; there is no silent model substitution.
 
+The same response's `server` object discovers actual worker and admission
+limits, bound TCP/Unix addresses, HAL device identities and shared pool memory
+accounting without knowing launch flags. It is available before any model is
+registered. `server.resources.devices[].memory` separates elastic retained
+backing from command workspace; fixed retained accounting is null, not zero.
+These are serving-managed pools, not whole-device VRAM totals or immediately
+available allocation bytes. See the [status contract](../serving/README.md#operational-discovery)
+for the fields and ownership scopes.
+
 ```sh
 curl --fail --silent --show-error http://127.0.0.1:8080/v1/status
 curl --fail --silent --show-error http://127.0.0.1:8080/metrics

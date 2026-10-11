@@ -652,7 +652,14 @@ def check_parameter_residency(client, backing, workers):
         assert "error" not in state, state
         return state
 
+    def retained_memory():
+        devices = client.request("/v1/status")["server"]["resources"]["devices"]
+        assert len(devices) == 1, devices
+        assert devices[0]["memory"]["backing"] == backing, devices
+        return devices[0]["memory"]["retained"]
+
     before = snapshot()
+    memory_before = retained_memory()
     assert before["parameters"]["active"], before
     assert before["parameters"]["backing"] == backing, before
     selector = {"model": "fixture-text"}
@@ -682,11 +689,23 @@ def check_parameter_residency(client, backing, workers):
             assert cold["compilation"] == before["compilation"], cold
             assert cold["status"]["admission"] == "drained", cold
             assert cold["status"]["held_requests"] == 1, cold
+            memory_cold = retained_memory()
             if backing == "elastic":
                 assert not parameters["active"], cold
                 assert parameters["committed_bytes"] == 0, cold
                 assert before["parameters"]["committed_bytes"] > 0, before
                 assert parameters["reserved_bytes"] > 0, cold
+                assert memory_before["limit_bytes"] is None, memory_before
+                assert memory_cold["reserved_bytes"] == memory_before["reserved_bytes"]
+                released = before["parameters"]["committed_bytes"]
+                assert (
+                    memory_before["committed_bytes"] - memory_cold["committed_bytes"]
+                    == released
+                ), (memory_before, memory_cold)
+                assert (
+                    memory_cold["released_bytes"] - memory_before["released_bytes"]
+                    == released
+                ), (memory_before, memory_cold)
                 assert parameters["deactivations"] == (
                     before["parameters"]["deactivations"] + 1
                 ), cold
@@ -697,6 +716,7 @@ def check_parameter_residency(client, backing, workers):
                     pass
                 assert snapshot()["parameters"] == parameters
             else:
+                assert memory_cold is memory_before is None
                 assert parameters == before["parameters"], cold
                 assert "committed_bytes" not in parameters, cold
                 assert "reserved_bytes" not in parameters, cold
@@ -707,6 +727,7 @@ def check_parameter_residency(client, backing, workers):
             assert peer["data"][0]["embedding"] == [3, 2], peer
             assert not continuation.done()
             warmed = client.activate("fixture-text")
+            memory_warmed = retained_memory()
             assert warmed["incarnation"] == before["incarnation"], warmed
             assert warmed["compilation"] == before["compilation"], warmed
             assert warmed["status"]["held_requests"] == 1, warmed
@@ -714,6 +735,9 @@ def check_parameter_residency(client, backing, workers):
                 before["parameters"]["activations"] + (backing == "elastic")
             ), warmed
             if backing == "elastic":
+                assert (
+                    memory_warmed["committed_bytes"] == memory_before["committed_bytes"]
+                ), (memory_before, memory_warmed)
                 assert (
                     warmed["parameters"]["committed_bytes"]
                     == (before["parameters"]["committed_bytes"])
@@ -757,6 +781,11 @@ def check_parameter_residency(client, backing, workers):
                 "outputs_verified": True,
                 "incarnation_preserved": True,
                 "compilation_preserved": True,
+                "shared_retained_memory": {
+                    "before": memory_before,
+                    "cold": memory_cold,
+                    "warmed": memory_warmed,
+                },
             }
         ),
         flush=True,
@@ -986,7 +1015,7 @@ def check_dynamic_observer(server_command, directory, catalog):
     print(json.dumps({"event": "dynamic_observer_followed_reincarnation"}), flush=True)
 
 
-def check_empty_server(server_command, directory):
+def check_empty_server(server_command, directory, device, backing):
     catalog = directory / "empty.json"
     catalog.write_text('{"models":[]}')
     for mode, arguments in (
@@ -994,12 +1023,20 @@ def check_empty_server(server_command, directory):
         ("empty", [f"--models={catalog.name}"]),
     ):
         log_path = directory / f"{mode}-models.log"
+        memory_limit = (
+            16 * 1024 * 1024 if mode == "empty" and backing == "elastic" else 0
+        )
         with child_server(
             [
                 *server_command,
                 *arguments,
                 "--listen=127.0.0.1:0",
                 "--workers=1",
+                "--connections=19",
+                "--held_requests=7",
+                "--model_capacity=9",
+                "--request_body_bytes=65536",
+                f"--memory_bytes={memory_limit}",
             ],
             log_path,
             cwd=directory,
@@ -1008,8 +1045,54 @@ def check_empty_server(server_command, directory):
             client = Client(address)
             for target in ("/healthz", "/readyz"):
                 assert client.request(target) == {"status": "ready"}
-            for target in ("/v1/models", "/v1/status"):
-                assert client.request(target) == {"object": "list", "data": []}
+            assert client.request("/v1/models") == {"object": "list", "data": []}
+            status = client.request("/v1/status")
+            server = status.pop("server")
+            assert status == {"object": "list", "data": []}, status
+            resources = server.pop("resources")
+            assert server == {
+                "worker_count": 1,
+                "model_capacity": 9,
+                "connection_capacity": 19,
+                "request_limits": {
+                    "header_byte_capacity": 16384,
+                    "body_byte_capacity": 65536,
+                    "header_capacity": 64,
+                },
+                "held_request_capacity": 7,
+                "held_requests": 0,
+                "observer_capacity": 18,
+                "observers": 0,
+            }, server
+            assert resources["listeners"] == [{"address": address}], resources
+            assert len(resources["devices"]) == 1, resources
+            actual = resources["devices"][0]
+            assert actual["index"] == 0 and actual["driver"] == device, actual
+            assert actual["id"] and actual["name"] and actual["backend"], actual
+            assert actual["physical_devices"], actual
+            for physical in actual["physical_devices"]:
+                assert physical["ordinal"] >= 0 and physical["name"], physical
+            memory = actual["memory"]
+            assert memory["backing"] == backing, memory
+            assert memory["retained"] == (
+                {
+                    "limit_bytes": memory_limit or None,
+                    "reserved_bytes": 0,
+                    "committed_bytes": 0,
+                    "peak_bytes": 0,
+                    "released_bytes": 0,
+                }
+                if backing == "elastic"
+                else None
+            ), memory
+            assert memory["workspace"] == {
+                "reserved_bytes": 0,
+                "committed_bytes": 0,
+                "free_bytes": 0,
+                "quarantined_bytes": 0,
+                "budget_limit": 0,
+                "reservation_count": 0,
+            }, memory
             for target in ("/v1/embeddings", "/tokenize", "/detokenize"):
                 rejected = client.request(target, {"model": "absent"}, status=404)
                 assert rejected == {
@@ -1038,7 +1121,16 @@ def check_empty_server(server_command, directory):
             if line.startswith('{"event":"ready"')
         ]
         assert locators == [{"event": "ready", "address": address, "models": 0}]
-        print(json.dumps({"event": "empty_server_joined", "catalog": mode}), flush=True)
+        print(
+            json.dumps(
+                {
+                    "event": "empty_server_joined",
+                    "catalog": mode,
+                    "resources": resources,
+                }
+            ),
+            flush=True,
+        )
 
 
 def thread_snapshot(process):
@@ -1166,6 +1258,10 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
         client = Client(address)
         initial_threads = thread_snapshot(process)
         assert client.request("/v1/models")["data"] == []
+        initial_status = client.request("/v1/status")["server"]
+        assert initial_status["worker_count"] == workers, initial_status
+        assert initial_status["model_capacity"] == 12, initial_status
+        assert initial_status["connection_capacity"] == 320, initial_status
         for declaration in declarations:
             client.request("/v1/models/register", declaration, status=202)
         client.request(
@@ -1394,6 +1490,12 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
             if record["event"] == "counters"
         )
         assert before == after, (before, after)
+        retired_status = client.request("/v1/status")["server"]
+        assert retired_status["resources"]["listeners"] == [{"address": address}]
+        for device in retired_status["resources"]["devices"]:
+            retained = device["memory"]["retained"]
+            if retained is not None:
+                assert retained["reserved_bytes"] == retained["committed_bytes"] == 0
         final_threads = thread_snapshot(process)
         assert (
             final_threads["userspace"].keys() == activated_threads["userspace"].keys()
@@ -1457,6 +1559,26 @@ def check_multiple_bindings(server_command, directory, catalog):
         client = Client(address)
         client.idle()
         expected_models = client.request("/v1/models")
+        resources = client.request("/v1/status")["server"]["resources"]
+        assert resources["listeners"] == [
+            {"address": address},
+            {"address": "unix:" + str(socket_path)},
+        ], resources
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+            peer.connect(str(socket_path))
+            peer.sendall(b"GET /v1/status HTTP/1.1\r\nHost: local\r\n\r\n")
+            with http.client.HTTPResponse(peer) as response:
+                response.begin()
+                assert response.status == 200
+                unix_resources = json.loads(response.read())["server"]["resources"]
+        assert unix_resources["listeners"] == resources["listeners"]
+        for tcp_device, unix_device in zip(
+            resources["devices"], unix_resources["devices"], strict=True
+        ):
+            # Atomic workspace observations may change between owner turns.
+            assert {
+                key: value for key, value in tcp_device.items() if key != "memory"
+            } == {key: value for key, value in unix_device.items() if key != "memory"}
         observation_connection = http.client.HTTPConnection("localhost")
         observation_connection.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         observation_connection.sock.connect(str(socket_path))
@@ -1522,7 +1644,9 @@ def main():
     ]
     with tempfile.TemporaryDirectory(prefix="loom catalog ") as temporary:
         directory = Path(temporary)
-        check_empty_server(server_command, directory)
+        check_empty_server(
+            server_command, directory, arguments.device, arguments.pool_backing
+        )
         weights = directory / "text.safetensors"
         header = b'{"bias":{"dtype":"I32","shape":[1],"data_offsets":[0,4]}}'
         header += b" " * (-len(header) % 8)

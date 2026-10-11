@@ -121,6 +121,10 @@ class HttpServerTest : public ::testing::Test {
 };
 
 TEST_F(HttpServerTest, FragmentedRequestAndOrderedStreamingResponse) {
+  const auto limits = loom_serve_http_server_request_limits(server_);
+  EXPECT_EQ(limits.header_byte_capacity, 16384u);
+  EXPECT_EQ(limits.body_byte_capacity, 2 * 1024 * 1024u);
+  EXPECT_EQ(limits.header_capacity, 64u);
   int client = Connect();
   ASSERT_TRUE(Write(
       client, "POST /v1/chat/completions HTTP/1.1\r\nHost: local\r\nContent-"));

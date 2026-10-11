@@ -332,6 +332,11 @@ iree_host_size_t loom_serve_http_server_connection_capacity(
   return server->options.connection_capacity;
 }
 
+loom_serve_http_request_limits_t loom_serve_http_server_request_limits(
+    const loom_serve_http_server_t* server) {
+  return server->options.request_limits;
+}
+
 const loom_serve_telemetry_stream_t* loom_serve_http_server_diagnostics(
     const loom_serve_http_server_t* server) {
   return server->diagnostics;

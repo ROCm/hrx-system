@@ -172,6 +172,9 @@ int main(int argc, char** argv) {
         loom_serve_host_executor(host), server, registry,
         (loom_serve_router_options_t){
             .request_quota = (iree_host_size_t)FLAG_connections,
+            .resources = {.device_group = group,
+                          .listener_count = listener_count,
+                          .listeners = listeners},
             .holding_capacity = (iree_host_size_t)(FLAG_held_requests < 0
                                                        ? FLAG_connections / 2
                                                        : FLAG_held_requests)},

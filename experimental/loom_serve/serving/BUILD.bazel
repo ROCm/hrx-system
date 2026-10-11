@@ -19,6 +19,7 @@ loom_cc_library(
     deps = [
         ":configuration",
         ":registry",
+        ":resources",
         "//experimental/loom_serve/http:logs",
         "//experimental/loom_serve/http:request",
         "//experimental/loom_serve/http:server",
@@ -34,6 +35,39 @@ loom_cc_library(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/task",
         "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_library(
+    name = "resources",
+    srcs = ["resources.c"],
+    hdrs = ["resources.h"],
+    deps = [
+        "//experimental/loom_serve/http:listener",
+        "//experimental/loom_serve/runtime:device",
+        "//experimental/loom_serve/storage:memory",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_test(
+    name = "resources_test",
+    srcs = ["resources_test.cc"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_task",
+    ]),
+    deps = [
+        ":resources",
+        "//experimental/loom_serve/runtime:device",
+        "//experimental/loom_serve/runtime:host",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
