@@ -41,6 +41,46 @@ loom_cc_test(
 )
 endif()
 
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_IMPORT_CXX AND LOOM_IMPORT_CXX_EMBED_INCLUDES)
+iree_c_embed_data(
+  NAME
+    cxx_model_library_sources
+  SRCS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/cxx/iq4xs_gate_up.cxx"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/cxx/nvfp4_matrix.cxx"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/cxx/nvfp4_matrix.h"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/cxx/nvfp4_matrix_providers.cxx"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/cxx/q4k_q8_swiglu.cxx"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/cxx/specializing_model_library.cxx"
+  C_FILE_OUTPUT
+    "cxx_model_library_sources.c"
+  H_FILE_OUTPUT
+    "cxx_model_library_sources.h"
+  IDENTIFIER
+    "loomc_cxx_model_library_sources"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_IMPORT_CXX AND LOOM_IMPORT_CXX_EMBED_INCLUDES)
+loom_cc_test(
+  NAME
+    cxx_model_library_test
+  SRCS
+    "cxx_model_library_test.cc"
+  DEPS
+    ::cxx_model_library_sources
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::import::cxx
+    loom::binding::c::loomc
+    loom::binding::c::target::amdgpu
+    loom::binding::c::test::test_util
+)
+endif()
+
 if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME

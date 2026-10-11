@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//build_tools/sanitizer:suppressions.bzl", "rocm_suppressions")
 load("//loom/build_tools/amdgpu:descriptor_sets.bzl", "loom_amdgpu_selected_descriptor_set_defines")
 load(
@@ -49,6 +50,45 @@ loom_cc_test(
         "//loom/config/import/cxx:embed_includes_enabled",
     ]),
     deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/import/cxx",
+        "//loom/binding/c/target/amdgpu",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_c_embed_data(
+    name = "cxx_model_library_sources",
+    testonly = True,
+    srcs = [
+        "//loom/src/loom/tooling/target/amdgpu/test/cxx:iq4xs_gate_up.cxx",
+        "//loom/src/loom/tooling/target/amdgpu/test/cxx:nvfp4_matrix.cxx",
+        "//loom/src/loom/tooling/target/amdgpu/test/cxx:nvfp4_matrix.h",
+        "//loom/src/loom/tooling/target/amdgpu/test/cxx:nvfp4_matrix_providers.cxx",
+        "//loom/src/loom/tooling/target/amdgpu/test/cxx:q4k_q8_swiglu.cxx",
+        "//loom/src/loom/tooling/target/amdgpu/test/cxx:specializing_model_library.cxx",
+    ],
+    c_file_output = "cxx_model_library_sources.c",
+    flatten = True,
+    h_file_output = "cxx_model_library_sources.h",
+    identifier = "loomc_cxx_model_library_sources",
+    target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH + loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/import/cxx:embed_includes_enabled",
+    ]),
+)
+
+loom_cc_test(
+    name = "cxx_model_library_test",
+    srcs = ["cxx_model_library_test.cc"],
+    target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH + loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/import/cxx:embed_includes_enabled",
+    ]),
+    deps = [
+        ":cxx_model_library_sources",
         "//loom/binding/c:loomc",
         "//loom/binding/c/import/cxx",
         "//loom/binding/c/target/amdgpu",

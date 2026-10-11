@@ -26,6 +26,7 @@ exports_files([
     "q8s32_specialization.h",
     "q8s32_specialization_providers.loom",
     "q8s32_specialization_providers.cxx",
+    "specializing_model_library.cxx",
 ])
 
 _AMDGPU_EXECUTION_PROFILE = amdgpu_execution_profile(
