@@ -23,8 +23,9 @@ those keys to the same canonical handles used by native signatures.
 
 References preserve the original object pointer, buffer range and access rights,
 and view shape, element type and encoding. VM and HAL owners share the existing
-intrusive count. The final VM buffer owner follows HAL recycling; the final view
-owner destroys the view and releases its buffer. No wrapper object is allocated.
+intrusive count. The final VM buffer owner invokes HAL buffer destruction; the
+final view owner destroys the view and releases its buffer. No wrapper object is
+allocated.
 The Core VM `buffer` remains a separate CPU byte-storage type.
 
 Device groups, queues, command buffers, semaphores and pools use cold wrapper

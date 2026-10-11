@@ -7,7 +7,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/task/device.h"
-#include "iree/hal/memory/passthrough_pool.h"
+#include "iree/hal/slab_pool.h"
 #include "iree/module/hal/types.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -25,9 +25,8 @@ class HALModuleOwnershipTest : public ::testing::TestWithParam<int> {
         options, &topology, iree_allocator_system(), &executor_);
     iree_task_topology_deinitialize(&topology);
     IREE_ASSERT_OK(status);
-    IREE_ASSERT_OK(iree_hal_allocator_create_heap(
-        IREE_SV("ownership"), iree_allocator_system(), iree_allocator_system(),
-        &allocator_));
+    IREE_ASSERT_OK(
+        iree_hal_allocator_create_heap(iree_allocator_system(), &allocator_));
     IREE_ASSERT_OK(iree_async_proactor_pool_create(
         1, nullptr, iree_async_proactor_pool_options_default(),
         iree_allocator_system(), &progress_));
@@ -103,16 +102,19 @@ class HALModuleOwnershipTest : public ::testing::TestWithParam<int> {
         return status;
       }
       case IREE_HAL_MODULE_TYPE_POOL: {
-        iree_hal_queue_pool_backend_t backend = {};
-        IREE_RETURN_IF_ERROR(iree_hal_device_query_queue_pool_backend(
-            device, iree_hal_queue_family(queue), &backend));
-        iree_hal_passthrough_pool_options_t options = {};
-        options.epoch_query = backend.epoch_query;
+        const iree_hal_pool_family_access_t family = {
+            /*.family=*/iree_hal_queue_family(queue),
+            /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
+        };
+        const iree_hal_pool_scope_t scope = {
+            /*.family_count=*/1,
+            /*.families=*/&family,
+        };
+        iree_hal_slab_pool_options_t options;
+        iree_hal_slab_pool_options_initialize(&options);
         iree_hal_pool_t* pool = nullptr;
-        IREE_RETURN_IF_ERROR(iree_hal_passthrough_pool_create(
-            options, backend.slab_provider, backend.notification,
-            backend.frontier_tracker, backend.maintenance,
-            iree_allocator_system(), &pool));
+        IREE_RETURN_IF_ERROR(iree_hal_slab_pool_create(
+            group_, scope, &options, iree_allocator_system(), &pool));
         iree_status_t status =
             iree_hal_vm_pool_wrap(group_, pool, allocator, &ref_);
         iree_hal_pool_release(pool);

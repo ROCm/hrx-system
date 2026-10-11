@@ -35,7 +35,6 @@ iree_cc_test(
     iree::base
     iree::hal
     iree::hal::drivers::task::device
-    iree::hal::memory::passthrough_pool
     iree::task
     iree::testing::gtest
     iree::testing::gtest_main
