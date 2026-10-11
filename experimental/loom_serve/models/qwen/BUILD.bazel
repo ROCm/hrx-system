@@ -7,7 +7,7 @@
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_test", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
-load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE", "amdgpu_execution_profile")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -26,6 +26,36 @@ filegroup(
         "programs/qwen38/*.loom",
     ]),
     visibility = ["//visibility:public"],
+)
+
+loom_test(
+    name = "output_projection_test",
+    srcs = [
+        "kernels/qwen38/output_projection.loom",
+        "tests/output_projection.loom",
+        "//experimental/loom_serve/motifs/ggml:sources",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "ggml.linear_q6k_q8_1_x4.output_capacity": "248320",
+        "ggml.linear_q6k_q8_1_x4.token_capacity": "512",
+        "ggml.quantize_q8_1_x4.group_capacity": "69632",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        amdgpu_execution_profile(
+            name = "amdgpu_access_trap",
+            runner_args = [
+                "--sanitizer=access",
+                "--sanitizer-reporting=trap",
+            ],
+            tags = ["notsan"],
+        ),
+    ],
+    variants = {
+        "m32": {"case": "@output_projection_m32_case"},
+        "m8": {"case": "@output_projection_m8_case"},
+    },
 )
 
 loom_test(
