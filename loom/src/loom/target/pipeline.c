@@ -400,6 +400,25 @@ static iree_status_t loom_target_pipeline_build_source_unroll_before_bank_sroa(
   return loom_target_pipeline_build_cleanup_if_changed(builder);
 }
 
+// Motion consumes structured loop entry and effect facts before CFG conversion
+// erases those boundaries, including when lexical workers are still inline.
+static iree_status_t loom_target_pipeline_build_source_cfg_lowering(
+    loom_builder_t* builder) {
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_run(builder, IREE_SV("licm")));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_run(builder, IREE_SV("scf-to-cfg")));
+  return loom_target_pipeline_build_run(builder, IREE_SV("cfg-simplify"));
+}
+
+static iree_status_t loom_target_pipeline_build_structured_source_finalization(
+    loom_builder_t* builder, void* user_data) {
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_view_root_selection_decomposition(builder,
+                                                                   user_data));
+  return loom_target_pipeline_build_run(builder, IREE_SV("licm"));
+}
+
 static iree_status_t
 loom_target_pipeline_build_cfg_source_finalization_after_bank_sroa(
     loom_builder_t* builder, void* user_data) {
@@ -413,10 +432,7 @@ loom_target_pipeline_build_cfg_source_finalization_after_bank_sroa(
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_view_root_selection_decomposition(builder,
                                                                    NULL));
-  IREE_RETURN_IF_ERROR(
-      loom_target_pipeline_build_run(builder, IREE_SV("scf-to-cfg")));
-  IREE_RETURN_IF_ERROR(
-      loom_target_pipeline_build_run(builder, IREE_SV("cfg-simplify")));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_source_cfg_lowering(builder));
   // This is the final source canonicalization boundary before lowering. Run it
   // even when CFG simplification made no change because canonicalization may
   // have independent pending work, such as propagating callee purity.
@@ -600,9 +616,7 @@ static iree_status_t loom_target_pipeline_build_lexical_worker_body(
                                                                 user_data));
   if (control_flow_lowering == LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG) {
     IREE_RETURN_IF_ERROR(
-        loom_target_pipeline_build_run(builder, IREE_SV("scf-to-cfg")));
-    IREE_RETURN_IF_ERROR(
-        loom_target_pipeline_build_run(builder, IREE_SV("cfg-simplify")));
+        loom_target_pipeline_build_source_cfg_lowering(builder));
   }
   return loom_target_pipeline_build_cleanup(builder);
 }
@@ -739,7 +753,7 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
       LOOM_TARGET_CONTROL_FLOW_LOWERING_STRUCTURED_LOW) {
     IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
         builder, IREE_SV("source"),
-        loom_target_pipeline_build_view_root_selection_decomposition, user_data,
+        loom_target_pipeline_build_structured_source_finalization, user_data,
         &for_op));
   }
   IREE_RETURN_IF_ERROR(

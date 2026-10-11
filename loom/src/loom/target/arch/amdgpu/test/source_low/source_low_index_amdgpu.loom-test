@@ -254,14 +254,14 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %block_begin = s_mov_b32 0
   %block_end = s_mov_b32 12
   %block_step = s_mov_b32 4
+  %36 = s_mov_b32 15
   low.br ^_bb1(%block_begin: reg<amdgpu.sgpr>)
 ^_bb1(%block_base: reg<amdgpu.sgpr>):
-  %36 = s_cmp_lt_i32 %block_base, %block_end
-  low.cond_br %36, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %37 = s_cmp_lt_i32 %block_base, %block_end
+  low.cond_br %37, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
   %lane_group = v_lshrrev_b32_src0_inline %lane, 4
-  %38 = s_mov_b32 15
-  %lane_offset = v_and_b32 %38, %lane
+  %lane_offset = v_and_b32 %36, %lane
   %block = v_add_u32 %block_base, %lane_group
   %linear = v_mad_u32_u24_src1_lit %block, %lane_offset, 105
   %42 = v_lshlrev_b32_src0_inline %linear, 2

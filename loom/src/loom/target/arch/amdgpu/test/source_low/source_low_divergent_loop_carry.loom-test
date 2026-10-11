@@ -128,17 +128,17 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @while_c
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %c0 = s_mov_b32 0
   %c1 = s_mov_b32 1
-  %31 = v_mov_b32 0
-  low.br ^_bb1(%c0: reg<amdgpu.sgpr>, %31: reg<amdgpu.vgpr>)
+  %31 = v_mov_b32_copy %limit
+  %less = v_cmp_lt_i32 %lane, %31
+  %selected = v_cndmask_b32_src0_lit_src1_inline %less {imm32 = 0, true_value = 1}
+  %34 = v_mov_b32 1
+  %next_order = v_sub_nc_u32 %34, %selected
+  %36 = v_mov_b32 0
+  low.br ^_bb1(%c0: reg<amdgpu.sgpr>, %36: reg<amdgpu.vgpr>)
 ^_bb1(%i: reg<amdgpu.sgpr>, %order: reg<amdgpu.vgpr>):
   %keep_going = s_cmp_lt_i32 %i, %iteration_count
   low.cond_br %keep_going, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %33 = v_mov_b32_copy %limit
-  %less = v_cmp_lt_i32 %lane, %33
-  %selected = v_cndmask_b32_src0_lit_src1_inline %less {imm32 = 0, true_value = 1}
-  %36 = v_mov_b32 1
-  %next_order = v_sub_nc_u32 %36, %selected
   %next_i = s_add_u32 %i, %c1
   low.br ^_bb1(%next_i: reg<amdgpu.sgpr>, %next_order: reg<amdgpu.vgpr>)
 ^_bb3:

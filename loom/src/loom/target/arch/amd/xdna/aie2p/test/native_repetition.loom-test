@@ -58,43 +58,43 @@ pipeline.def<kernel> public retain target(@device) @strided_ingress() run(%input
 
 // ----
 low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_1() asm {
-  %303 = mov.short 0
-  %304 = mov.short 64
+  %303 = mov.short 64
+  %304 = mov.short 0
   %305 = mov.short 1
   %payload = mov.local-address 458752
   %width = mov.short 2
-  low.br ^_bb1(%303: reg<aie2p.er>, %303: reg<aie2p.er>)
+  low.br ^_bb1(%304: reg<aie2p.er>, %304: reg<aie2p.er>)
 ^_bb1(%record: reg<aie2p.er>, %read: reg<aie2p.er>):
-  %309 = lt %record, %304
-  low.cond_br %309, ^_bb2, ^_bb9 : reg<aie2p.er>
+  %310 = lt %record, %303
+  low.cond_br %310, ^_bb2, ^_bb9 : reg<aie2p.er>
 ^_bb2:
   %166 = mov.i32 -1
   acq %166, 49
-  %310 = mov.short 16
-  %311 = mov.short 48
-  %312 = add.rr %read, %310
-  %313 = eq %312, %311
-  %314 = copy %313 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %315 = sel.nez %303, %312, %314
-  low.br ^_bb3(%303: reg<aie2p.er>)
+  %311 = mov.short 16
+  %312 = mov.short 48
+  %313 = add.rr %read, %311
+  %314 = eq %313, %312
+  %315 = copy %314 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %316 = sel.nez %304, %313, %315
+  low.br ^_bb3(%304: reg<aie2p.er>)
 ^_bb3(%row: reg<aie2p.er>):
-  %316 = lt %row, %width
-  low.cond_br %316, ^_bb4, ^_bb8 : reg<aie2p.er>
+  %317 = lt %row, %width
+  low.cond_br %317, ^_bb4, ^_bb8 : reg<aie2p.er>
 ^_bb4:
-  low.br ^_bb5(%303: reg<aie2p.er>)
+  low.br ^_bb5(%304: reg<aie2p.er>)
 ^_bb5(%column: reg<aie2p.er>):
-  %317 = lt %column, %width
-  low.cond_br %317, ^_bb6, ^_bb7 : reg<aie2p.er>
+  %318 = lt %column, %width
+  low.cond_br %318, ^_bb6, ^_bb7 : reg<aie2p.er>
 ^_bb6:
-  %318 = copy %column : reg<aie2p.er> -> reg<aie2p.er>
-  %319 = mac %318, %row, %width
-  %320 = mov.i32 2
-  %321 = lshl %319, %320
-  %322 = add.rr %read, %321
-  %323 = mov.address-index %322
-  %value = lda.i32.index %payload, %323
+  %319 = copy %column : reg<aie2p.er> -> reg<aie2p.er>
+  %320 = mac %319, %row, %width
+  %321 = mov.i32 2
+  %322 = lshl %320, %321
+  %323 = add.rr %read, %322
+  %324 = mov.address-index %323
+  %value = lda.i32.index %payload, %324
   %scaled = lshl %value, %305
-  %329 = add.rr %read, %321
+  %329 = add.rr %read, %322
   %330 = mov.address-index %329
   st.i32.index %scaled, %payload, %330
   %331 = add.rr %column, %305
@@ -138,7 +138,7 @@ low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_1() asm {
   %144 = mov.ss
   rel %136, 48
   %343 = add.rr %record, %305
-  low.br ^_bb1(%343: reg<aie2p.er>, %315: reg<aie2p.er>)
+  low.br ^_bb1(%343: reg<aie2p.er>, %316: reg<aie2p.er>)
 ^_bb9:
   %124 = mov.i32 1
   rel %124, 50
@@ -399,36 +399,36 @@ pipeline.def<kernel> public retain target(@device) @retained_input() run(%input_
 
 // ----
 low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_1() asm {
-  %275 = mov.short 0
-  %276 = mov.short 256
+  %275 = mov.short 256
+  %276 = mov.short 0
   %277 = mov.short 1
   %payload = mov.local-address 458752
   %width = mov.short 2
-  low.br ^_bb1(%275: reg<aie2p.er>)
+  low.br ^_bb1(%276: reg<aie2p.er>)
 ^_bb1(%record: reg<aie2p.er>):
-  %280 = lt %record, %276
-  low.cond_br %280, ^_bb2, ^_bb9 : reg<aie2p.er>
+  %281 = lt %record, %275
+  low.cond_br %281, ^_bb2, ^_bb9 : reg<aie2p.er>
 ^_bb2:
   %148 = mov.i32 -1
   acq %148, 49
-  low.br ^_bb3(%275: reg<aie2p.er>)
+  low.br ^_bb3(%276: reg<aie2p.er>)
 ^_bb3(%row: reg<aie2p.er>):
-  %281 = lt %row, %width
-  low.cond_br %281, ^_bb4, ^_bb8 : reg<aie2p.er>
+  %282 = lt %row, %width
+  low.cond_br %282, ^_bb4, ^_bb8 : reg<aie2p.er>
 ^_bb4:
-  low.br ^_bb5(%275: reg<aie2p.er>)
+  low.br ^_bb5(%276: reg<aie2p.er>)
 ^_bb5(%column: reg<aie2p.er>):
-  %282 = lt %column, %width
-  low.cond_br %282, ^_bb6, ^_bb7 : reg<aie2p.er>
+  %283 = lt %column, %width
+  low.cond_br %283, ^_bb6, ^_bb7 : reg<aie2p.er>
 ^_bb6:
-  %283 = copy %column : reg<aie2p.er> -> reg<aie2p.er>
-  %284 = mac %283, %row, %width
-  %285 = mov.i32 2
-  %286 = lshl %284, %285
-  %287 = mov.address-index %286
-  %value = lda.i32.index %payload, %287
+  %284 = copy %column : reg<aie2p.er> -> reg<aie2p.er>
+  %285 = mac %284, %row, %width
+  %286 = mov.i32 2
+  %287 = lshl %285, %286
+  %288 = mov.address-index %287
+  %value = lda.i32.index %payload, %288
   %scaled = lshl %value, %277
-  st.i32.index %scaled, %payload, %287
+  st.i32.index %scaled, %payload, %288
   %294 = add.rr %column, %277
   low.br ^_bb5(%294: reg<aie2p.er>)
 ^_bb7:

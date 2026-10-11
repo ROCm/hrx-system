@@ -50,9 +50,9 @@ kernel.def target(@target) @vector_float_rounding_snapshot() {
                OpName %loaded "loaded"
                OpName %initial "initial"
                OpName %replacement "replacement"
+               OpName %product "product"
                OpName %iteration "iteration"
                OpName %accumulator "accumulator"
-               OpName %product "product"
                OpName %next "next"
                OpName %total "total"
                OpModuleProcessed "iree.vulkan.bda.v1[vector_float_rounding_snapshot].root=0,32"
@@ -152,28 +152,28 @@ kernel.def target(@target) @vector_float_rounding_snapshot() {
          %69 = OpLoad %float %68 Aligned 4
     %initial = OpCompositeConstruct %v4float %60 %63 %66 %69
                OpStore %42 %replacement Aligned 4
-         %73 = OpSLessThan %bool %begin %count
-         %74 = OpISub %int %count %begin
-         %75 = OpULessThan %bool %step %74
-         %76 = OpISub %int %count %step
-         %77 = OpSelect %int %75 %76 %begin
-               OpBranch %78
-         %78 = OpLabel
-  %iteration = OpPhi %int %begin %5 %82 %81
-%accumulator = OpPhi %v4float %initial %5 %next %81
-         %87 = OpPhi %bool %73 %5 %83 %81
-               OpLoopMerge %80 %81 None
-               OpBranchConditional %87 %79 %80
-         %79 = OpLabel
     %product = OpFMul %v4float %loaded %loaded
-       %next = OpFAdd %v4float %product %accumulator
-               OpBranch %81
-         %81 = OpLabel
-         %83 = OpSLessThan %bool %iteration %77
-         %82 = OpIAdd %int %iteration %step
-               OpBranch %78
+         %74 = OpSLessThan %bool %begin %count
+         %75 = OpISub %int %count %begin
+         %76 = OpULessThan %bool %step %75
+         %77 = OpISub %int %count %step
+         %78 = OpSelect %int %76 %77 %begin
+               OpBranch %79
+         %79 = OpLabel
+  %iteration = OpPhi %int %begin %5 %83 %82
+%accumulator = OpPhi %v4float %initial %5 %next %82
+         %88 = OpPhi %bool %74 %5 %84 %82
+               OpLoopMerge %81 %82 None
+               OpBranchConditional %88 %80 %81
          %80 = OpLabel
-      %total = OpPhi %v4float %accumulator %78
+       %next = OpFAdd %v4float %product %accumulator
+               OpBranch %82
+         %82 = OpLabel
+         %84 = OpSLessThan %bool %iteration %78
+         %83 = OpIAdd %int %iteration %step
+               OpBranch %79
+         %81 = OpLabel
+      %total = OpPhi %v4float %accumulator %79
          %90 = OpCompositeExtract %float %total 0
          %91 = OpCompositeExtract %float %total 1
          %92 = OpCompositeExtract %float %total 2

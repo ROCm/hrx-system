@@ -64,8 +64,8 @@ func.def target(@target) @for_without_iter_args(%lo: index, %hi: index, %step: i
 
 // ----
 low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @for_without_iter_args(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %output: reg<wasm.i32>) asm {
+  %sum = i32x4.add %lhs, %rhs
   low.scf.for signed [%lo to %hi step %step] do(%iv: reg<wasm.i32>) {
-    %sum = i32x4.add %lhs, %rhs
     v128.store %output, %sum
   }
   return

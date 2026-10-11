@@ -164,14 +164,14 @@ func.def target(@target) @expert_bitmask_walk(%expert_mask: i32) -> (i32) {
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @expert_bitmask_walk(%expert_mask: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %c0 = s_mov_b32 0
+  %20 = s_mov_b32 4294967295
   %final_mask, %expert_sum = low.scf.while(%before_mask = %expert_mask : reg<amdgpu.sgpr>, %before_sum = %c0 : reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) {
     %has_expert = s_cmp_lg_i32 %before_mask, %c0
     low.scf.condition %has_expert, %before_mask, %before_sum : reg<amdgpu.scc>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
   } do(%mask: reg<amdgpu.sgpr>, %sum: reg<amdgpu.sgpr>) {
     %expert = s_ctz_i32_b32 %mask
     %next_sum = s_add_u32 %sum, %expert
-    %29 = s_mov_b32 4294967295
-    %mask_without_lowest_bit = s_add_u32 %mask, %29
+    %mask_without_lowest_bit = s_add_u32 %mask, %20
     %next_mask = s_and_b32 %mask, %mask_without_lowest_bit
     low.scf.yield %next_mask, %next_sum : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
   }

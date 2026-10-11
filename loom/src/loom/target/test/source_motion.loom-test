@@ -1,0 +1,65 @@
+// RUN: emit source-low output=low
+
+// The default CFG path moves invariant arithmetic before the loop while the
+// loop-carried recurrence remains in the body.
+test.target<low_core> @target
+
+func.def target(@target) @invariant_recurrence(%count: index, %lhs: i32, %rhs: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %result = scf.for %position = [%begin to %count step %step](%total = %initial : i32) -> (i32) {
+    %product = scalar.muli %lhs, %rhs : i32
+    %next = scalar.addi %total, %product : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<test.low.core>(@target) abi(object_function) @invariant_recurrence(%count: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %begin = test.const.i32 0
+  %step = test.const.i32 1
+  %product = test.mul.i32 %lhs, %rhs
+  low.br ^_bb1(%begin: reg<test.i32>, %begin: reg<test.i32>)
+^_bb1(%position: reg<test.i32>, %total: reg<test.i32>):
+  %28 = test.cmp.slt.i32 %position, %count
+  low.cond_br %28, ^_bb2, ^_bb3 : reg<test.i32>
+^_bb2:
+  %next = test.add.i32 %total, %product
+  %30 = test.add.i32 %position, %step
+  low.br ^_bb1(%30: reg<test.i32>, %next: reg<test.i32>)
+^_bb3:
+  return %total
+}
+
+// ====
+// RUN: emit source-low output=low control-flow=structured-low
+
+// Structured-Low consumers receive the same motion before their loop regions
+// become Low operations.
+test.target<low_core> @target
+
+func.def target(@target) @invariant_recurrence(%count: index, %lhs: i32, %rhs: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %result = scf.for %position = [%begin to %count step %step](%total = %initial : i32) -> (i32) {
+    %product = scalar.muli %lhs, %rhs : i32
+    %next = scalar.addi %total, %product : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<test.low.core>(@target) abi(object_function) @invariant_recurrence(%count: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %begin = test.const.i32 0
+  %step = test.const.i32 1
+  %product = test.mul.i32 %lhs, %rhs
+  %result = low.scf.for signed [%begin to %count step %step] iter_args(%begin: reg<test.i32>) -> (reg<test.i32>) do(%position: reg<test.i32>, %total: reg<test.i32>) {
+    %next = test.add.i32 %total, %product
+    low.scf.yield %next : reg<test.i32>
+  }
+  return %result
+}

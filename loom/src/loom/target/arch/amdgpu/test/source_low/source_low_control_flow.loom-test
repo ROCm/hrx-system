@@ -2335,21 +2335,21 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@wave64_target) abi_layout({con
   %77 = v_mov_b32 0
   %seed_f16 = global_load_d16_b16_saddr %77, %src0_view
   %seed = v_cvt_f32_f16 %seed_f16
+  %80 = s_mov_b32 15
   low.br ^_bb1(%c0: reg<amdgpu.sgpr>, %seed: reg<amdgpu.vgpr>)
 ^_bb1(%kk: reg<amdgpu.sgpr>, %outer_acc: reg<amdgpu.vgpr>):
-  %80 = s_cmp_lt_i32 %kk, %k_extent
-  low.cond_br %80, ^_bb2, ^_bb5 : reg<amdgpu.scc>
+  %81 = s_cmp_lt_i32 %kk, %k_extent
+  low.cond_br %81, ^_bb2, ^_bb5 : reg<amdgpu.scc>
 ^_bb2:
-  %83 = s_mov_b64_exec_read
+  %84 = s_mov_b64_exec_read
   low.br ^_bb3(%lane: reg<amdgpu.vgpr>, %outer_acc: reg<amdgpu.vgpr>)
 ^_bb3(%i: reg<amdgpu.vgpr>, %inner_acc: reg<amdgpu.vgpr>):
-  %81 = v_mov_b32 256
-  %82 = v_cmp_lt_i32 %i, %81
-  %84, %85 = s_and_saveexec_b64 %82
-  low.cond_br %85, ^_bb4, ^_bb6 : reg<amdgpu.scc>
+  %82 = v_mov_b32 256
+  %83 = v_cmp_lt_i32 %i, %82
+  %85, %86 = s_and_saveexec_b64 %83
+  low.cond_br %86, ^_bb4, ^_bb6 : reg<amdgpu.scc>
 ^_bb4:
-  %86 = s_mov_b32 15
-  %rhs_k_inner = v_and_b32 %86, %i
+  %rhs_k_inner = v_and_b32 %80, %i
   %rhs_col_inner = v_lshrrev_b32_src0_inline %i, 4
   %89 = v_mov_b32_copy %kk
   %90 = v_add_u32 %rhs_k_inner, %89
@@ -2364,7 +2364,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@wave64_target) abi_layout({con
   global_store_b32_saddr %97, %outer_acc, %dst_view
   return
 ^_bb6:
-  s_mov_b64_exec %83
+  s_mov_b64_exec %84
   %96 = s_add_u32 %kk, %k_tile_size
   low.br ^_bb1(%96: reg<amdgpu.sgpr>, %inner_acc: reg<amdgpu.vgpr>)
 }
