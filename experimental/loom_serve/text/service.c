@@ -759,7 +759,12 @@ static void text_pending_cancel(loom_serve_text_service_t* service,
 
 static void text_pending_cancel_failed(loom_serve_text_service_t* service,
                                        bool* out_progress) {
-  for (iree_host_size_t i = 0; i < service->pending.count;) {
+  // Only a prepared head can be borrowed by CPU preparation or a native
+  // admission/cache operation. Tails own no model state and can retire while
+  // that loan remains outstanding; removing them never moves the head.
+  const iree_host_size_t first =
+      service->pending.prepared.session && text_has_work(service) ? 1 : 0;
+  for (iree_host_size_t i = first; i < service->pending.count;) {
     if (loom_serve_http_connection_failed(
             service->pending.values[i].connection)) {
       text_pending_cancel(service, i);
@@ -1759,6 +1764,7 @@ static iree_status_t text_advance_work(void* self,
                                        bool* out_progress) {
   loom_serve_text_service_t* service = self;
   *out_progress = false;
+  text_pending_cancel_failed(service, out_progress);
   bool yield_preparation = false;
   if (service->cpu.work != TEXT_CPU_WORK_NONE) {
     iree_slim_mutex_lock(&service->completion.mutex);
@@ -1854,7 +1860,14 @@ static iree_status_t text_advance_work(void* self,
       return iree_ok_status();
     }
   }
-  text_pending_cancel_failed(service, out_progress);
+  // Collection may have returned the protected head's last loan. Retire it
+  // before another reservation without rescanning the unborrowed tails.
+  if (service->pending.prepared.session &&
+      loom_serve_http_connection_failed(
+          service->pending.values[0].connection)) {
+    text_pending_cancel(service, 0);
+    *out_progress = true;
+  }
   // Another model may have completed requests or maintenance since the last
   // turn. Retry this bounded FIFO even without a service-local admission event.
   const iree_host_size_t pending_count = service->pending.count;

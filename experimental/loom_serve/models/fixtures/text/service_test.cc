@@ -23,6 +23,7 @@
 #include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
 #include "experimental/loom_serve/models/fixtures/text/oracle.h"
+#include "experimental/loom_serve/models/fixtures/text/owner_turn.h"
 #include "experimental/loom_serve/models/fixtures/text/stalled_client.h"
 #include "experimental/loom_serve/serving/model_registration.h"
 #include "experimental/loom_serve/serving/router.h"
@@ -1877,46 +1878,69 @@ TEST_P(SourceTextServiceTest,
                                                    IREE_ALL_WAITERS);
                           },
                           &readiness});
-  const int client =
-      Send(Request(Message("user", "abx")), "X-Loom-Session: reusable\r\n");
   auto* notification = loom_serve_http_server_notification(server_);
-  loom_serve_http_connection_t* connection = nullptr;
-  // accept may launch CPU preparation immediately. The next owner turn is
-  // withheld until peer failure and CPU release, before device admission.
-  while (!connection) {
-    const auto ticket = iree_notification_prepare_wait(notification);
+  struct Claim {
+    // Actual HTTP claim held through service admission or cancellation.
+    loom_serve_http_connection_t* connection = nullptr;
+    // Immutable request storage borrowed from that claim.
     const loom_serve_http_request_t* request = nullptr;
-    connection = loom_serve_http_server_take_request(server_, &request);
-    if (connection) {
-      iree_notification_cancel_wait(notification);
-      IREE_ASSERT_OK(interface.accept(interface.self, connection, request, 0));
-    } else {
-      iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
-                                    IREE_TIME_INFINITE_FUTURE);
+  } claims[3];
+  for (size_t i = 0; i < IREE_ARRAYSIZE(claims); ++i) {
+    const std::string name = i ? "tail" + std::to_string(i) : "reusable";
+    const int client = Send(Request(Message("user", "abx")),
+                            "X-Loom-Session: " + name + "\r\n");
+    auto& claim = claims[i];
+    while (!claim.connection) {
+      const auto ticket = iree_notification_prepare_wait(notification);
+      claim.connection =
+          loom_serve_http_server_take_request(server_, &claim.request);
+      if (claim.connection) {
+        iree_notification_cancel_wait(notification);
+      } else {
+        iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
     }
+    const linger reset = {1, 0};
+    ASSERT_EQ(setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+              0);
+    ASSERT_EQ(close(client), 0);
+    iree_notification_await(
+        notification,
+        [](void* self) {
+          return loom_serve_http_connection_failed(
+              static_cast<loom_serve_http_connection_t*>(self));
+        },
+        claim.connection, iree_infinite_timeout());
   }
-  const auto queued = interface.snapshot(interface.self);
-  EXPECT_EQ(queued.queued_requests, 1u);
-  EXPECT_GE(queued.oldest_queued_age, 0);
-  EXPECT_EQ(queued.oldest_active_age, 0);
-  const linger reset = {1, 0};
-  ASSERT_EQ(setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
-            0);
-  ASSERT_EQ(close(client), 0);
-  iree_notification_await(
-      notification,
-      [](void* self) {
-        return loom_serve_http_connection_failed(
-            static_cast<loom_serve_http_connection_t*>(self));
-      },
-      connection, iree_infinite_timeout());
+  // Failure can arrive after the router claims a request but before the model
+  // accepts it. A single-worker turn cannot run the preparation it just queued:
+  // that borrowed head must survive, while both unborrowed tails retire now.
+  loom_serve::testing::text::OwnerTurn::Run(
+      loom_serve_host_executor(host_), [&] {
+        for (const auto& claim : claims) {
+          IREE_ASSERT_OK(interface.accept(interface.self, claim.connection,
+                                          claim.request, 0));
+        }
+        EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 3u);
+        bool progress = false;
+        IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
+        EXPECT_TRUE(progress);
+        EXPECT_GE(interface.telemetry.counters->cancelled, 2u);
+        if (GetParam() == 1) {
+          EXPECT_EQ(interface.telemetry.counters->cancelled, 2u);
+          EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 1u);
+          EXPECT_TRUE(interface.is_pending(interface.self));
+        }
+      });
   iree_notification_await(
       notification,
       [](void* self) { return static_cast<Readiness*>(self)->released.load(); },
       &readiness, iree_infinite_timeout());
-  bool progress = false;
-  IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
-  EXPECT_TRUE(progress);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+    return !interface.is_pending(interface.self) &&
+           !interface.snapshot(interface.self).queued_requests;
+  }));
   const auto cancelled = interface.snapshot(interface.self);
   EXPECT_EQ(cancelled.queued_requests, 0u);
   EXPECT_EQ(cancelled.oldest_queued_age, 0);
@@ -1926,8 +1950,8 @@ TEST_P(SourceTextServiceTest,
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 256u);
   interface.set_observer(interface.self, {});
   const auto counters = *interface.telemetry.counters;
-  EXPECT_EQ(counters.requests, 1u);
-  EXPECT_EQ(counters.cancelled, 1u);
+  EXPECT_EQ(counters.requests, 3u);
+  EXPECT_EQ(counters.cancelled, 3u);
   EXPECT_EQ(counters.completed + counters.rejected + counters.failed, 0u);
   EXPECT_EQ(counters.input_tokens + counters.output_tokens + counters.batches,
             0u);

@@ -49,6 +49,7 @@ py_test(
         name = name,
         srcs = [
             "oracle.h",
+            "owner_turn.h",
             "service_test.cc",
             "stalled_client.h",
         ],
@@ -89,6 +90,7 @@ py_test(
             "//runtime/src/iree/base/tooling:flags",
             "//runtime/src/iree/net:carrier",
             "//runtime/src/iree/net/carrier/loopback",
+            "//runtime/src/iree/task",
             "//runtime/src/iree/testing:gtest",
             "//runtime/src/iree/testing:gtest_main",
             "//runtime/src/iree/testing:temp_file",

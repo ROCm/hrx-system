@@ -35,6 +35,7 @@ loom_cc_test(
     service_test
   SRCS
     "oracle.h"
+    "owner_turn.h"
     "service_test.cc"
     "stalled_client.h"
   DATA
@@ -65,6 +66,7 @@ loom_cc_test(
     iree::experimental::loom_serve::text::service
     iree::net::carrier
     iree::net::carrier::loopback
+    iree::task
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
@@ -84,6 +86,7 @@ loom_cc_test(
     service_vulkan_test
   SRCS
     "oracle.h"
+    "owner_turn.h"
     "service_test.cc"
     "stalled_client.h"
   DATA
@@ -114,6 +117,7 @@ loom_cc_test(
     iree::experimental::loom_serve::text::service
     iree::net::carrier
     iree::net::carrier::loopback
+    iree::task
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
@@ -134,6 +138,7 @@ loom_cc_test(
     service_cpu_test
   SRCS
     "oracle.h"
+    "owner_turn.h"
     "service_test.cc"
     "stalled_client.h"
   DATA
@@ -164,6 +169,7 @@ loom_cc_test(
     iree::experimental::loom_serve::text::service
     iree::net::carrier
     iree::net::carrier::loopback
+    iree::task
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
