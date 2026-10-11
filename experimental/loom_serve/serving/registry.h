@@ -40,6 +40,10 @@ typedef struct loom_serve_registration_t {
   // before retire. The adapter owns its actual parameter groups; neither the
   // registry nor the HTTP client gains a borrowed model or pool handle.
   loom_serve_residency_snapshot_t (*parameters)(void* self);
+  // Optional weight-only eviction policy. Applied on successful preparation
+  // and ready policy changes, without allocation, submission or waiting.
+  // Unpinning preserves operation-owned protection and all mutable state.
+  void (*set_pinned)(void* self, bool pinned);
   // Advances explicit warmup after admitted service activity has retired.
   // Capacity waiting owns no device work; submitted readiness owes an owner
   // wake. Cancellation withdraws admission or joins accepted work. Terminal
@@ -116,6 +120,10 @@ typedef struct loom_serve_registered_model_t {
   loom_serve_removal_t removal;
   // Reversible admission gate, not a residency or cancellation flag.
   bool closed;
+  // Persistent weight-only retention, applied by the adapter after preparation.
+  // Does not activate parameters, retain sessions or promise admission
+  // progress.
+  bool pinned;
   // Mutually exclusive residency intent, independent of its HTTP connection.
   // Removal withdraws waiting admission and joins submitted activation first.
   loom_serve_parameter_operation_t parameter_operation;
@@ -176,7 +184,7 @@ iree_status_t loom_serve_registry_remove(loom_serve_registered_model_t* model,
 
 // Requests parameter deactivation while preserving the prepared model and its
 // retained sessions/checkpoints. Requires closed admission and a healthy ready
-// elastic residency; an unprepared metadata-only registration is already cold.
+// unpinned elastic residency; an unpinned metadata-only declaration is cold.
 // Repeated requests are idempotent. Advance completes after admitted work,
 // without waiting for live device work or unrelated services. Physical unmap
 // and free remain native synchronous capacity transitions on that owner.
@@ -189,6 +197,13 @@ iree_status_t loom_serve_registry_deactivate(
 // intent but still joins accepted readiness before model retirement.
 iree_status_t loom_serve_registry_activate(
     loom_serve_registered_model_t* model);
+
+// Changes idempotent parameter-eviction policy on a healthy managed model,
+// including metadata-only declarations. Does not load, allocate, alter
+// admission or cancel accepted work. Pinning conflicts with deactivation;
+// unregister discards policy only with the model's normal resource retirement.
+iree_status_t loom_serve_registry_set_pinned(
+    loom_serve_registered_model_t* model, bool pinned);
 
 // Returns STOPPING only for abort or after graceful admitted work has finished.
 // The router still owns held claims and external tokenizer lifetimes.

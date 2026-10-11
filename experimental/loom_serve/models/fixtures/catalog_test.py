@@ -1295,6 +1295,17 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
             "/v1/models/deactivate", {"model": declarations[0]["name"]}, status=202
         )
         assert client.request("/v1/status")["data"] == registered
+        # Retention policy can precede native preparation and does not warm or
+        # open any modality. Every declared model uses the same owner contract.
+        for declaration in declarations:
+            pinned = client.request("/v1/models/pin", {"model": declaration["name"]})[
+                "loom"
+            ]
+            assert pinned["parameter_pinned"], pinned
+            assert pinned["registration"] == "registered", pinned
+            assert pinned["parameter_operation"] == "idle", pinned
+            assert "parameters" not in pinned, pinned
+            assert "compilation" not in pinned, pinned
         registered_threads = thread_snapshot(process)
         assert (
             registered_threads["userspace"].keys()
@@ -1313,6 +1324,12 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
         for declaration in declarations:
             warmed = client.wait_activation(declaration["name"])
             assert warmed["incarnation"] == identities[declaration["name"]], warmed
+            assert warmed["parameter_pinned"], warmed
+            selector = {"model": declaration["name"]}
+            client.request("/v1/models/deactivate", selector, status=409)
+            unpinned = client.request("/v1/models/unpin", selector)["loom"]
+            assert not unpinned["parameter_pinned"], unpinned
+            assert unpinned["parameters"] == warmed["parameters"], unpinned
         reader = LogClient("http://" + address, timeout=None)
         warm_counters = next(
             record["values"]
@@ -1464,6 +1481,7 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
             for item in replaced:
                 if item["id"] not in peers:
                     assert item["loom"]["incarnation"] != identities[item["id"]]
+                    assert not item["loom"]["parameter_pinned"], item
             work = [
                 executor.submit(infer, declaration, 2)
                 for declaration in declarations[:4]

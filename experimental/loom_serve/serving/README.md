@@ -282,6 +282,30 @@ A model whose complete parameters exceed the configured physical pool budget
 fails preparation instead of indefinitely blocking the admission queue. A
 temporary shortage waits for other work or explicit model/state release.
 
+`POST /v1/models/pin` and `/v1/models/unpin` accept exactly `{"model":"name"}`
+and return 200 after changing weight-eviction policy. The idempotent policy
+appears as `loom.parameter_pinned`, including for metadata-only declarations.
+Pinning does not prepare a model, load weights, reserve capacity, close admission,
+or pin any sessions/checkpoints. To retain a warm model, pin its declaration
+before activation:
+
+~~~sh
+curl http://127.0.0.1:8080/v1/models/pin \
+  -H 'Content-Type: application/json' -d '{"model":"scout"}'
+curl http://127.0.0.1:8080/v1/models/activate \
+  -H 'Content-Type: application/json' -d '{"model":"scout"}'
+~~~
+
+Pin/unpin also works with open admission and accepted inference. Unpin restores
+LRU eligibility without unloading immediately or removing accepted work's own
+protection. A pinned model cannot deactivate; unpin first. Pinning conflicts
+with already-accepted deactivation. Unregister still retires a pinned model
+normally; a replacement registration starts unpinned. An idle permanent pin is
+not work that promises to release capacity: peer requests can still receive
+capacity errors, and explicit warmup may wait for an operator to unpin/remove
+models. Both fixed and elastic backing retain the policy; fixed backing remains
+non-evictable regardless of policy.
+
 `POST /v1/models/deactivate` accepts exactly `{"model":"name"}` after
 admission is closed. Its 202 response accepts a registration-owned operation:
 already-admitted inference finishes, then reloadable parameter backing is

@@ -93,7 +93,7 @@ def oracle(text):
     return result
 
 
-def check(server, source, directory, workers, memory_bytes, pinned):
+def check(server, source, directory, workers, memory_bytes, retention):
     configuration = directory / "models.json"
     weights = directory / "weights.safetensors"
     header = b'{"bias":{"dtype":"I32","shape":[1],"data_offsets":[0,4]}}'
@@ -153,7 +153,18 @@ def check(server, source, directory, workers, memory_bytes, pinned):
             assert first_status == 200, first
             assert output(first) == oracle("abxa"), first
         wait_status(address, model="alpha", active_requests=0)
-        if pinned:
+        if retention == "parameters":
+            for _ in range(2):
+                state = control(
+                    address,
+                    "POST",
+                    "/v1/models/pin",
+                    200,
+                    body=json.dumps({"model": "alpha"}),
+                    headers={"Content-Type": "application/json"},
+                )
+                assert state["loom"]["parameter_pinned"], state
+        elif retention == "checkpoint":
             # The oldest history has detached from its execution row. The
             # explicit pin shares its native state, not a second byte copy.
             control(
@@ -177,11 +188,11 @@ def check(server, source, directory, workers, memory_bytes, pinned):
             "before": memory_before,
             "after": memory_after,
             "peer_status": second_status,
-            "pinned": pinned,
+            "retention": retention,
         }
         print(json.dumps(result), flush=True)
         assert memory_after["peak_bytes"] <= memory_bytes, result
-        expected = 503 if pinned and memory_bytes == 4194304 else 200
+        expected = 503 if retention != "none" and memory_bytes == 4194304 else 200
         assert second_status == expected, second
         if expected == 200:
             assert output(second) == oracle("abxa"), second
@@ -190,7 +201,40 @@ def check(server, source, directory, workers, memory_bytes, pinned):
             {"role": "assistant", "content": output(first)},
             {"role": "user", "content": "b"},
         ]
-        if pinned:
+        if retention == "parameters":
+            alpha = next(
+                item["loom"] for item in after["data"] if item["id"] == "alpha"
+            )
+            alpha_before = next(
+                item["loom"] for item in before["data"] if item["id"] == "alpha"
+            )
+            assert alpha["parameters"] == alpha_before["parameters"], alpha
+            sessions = control(
+                address,
+                "GET",
+                "/v1/sessions",
+                200,
+                headers={"X-Loom-Model": "alpha"},
+            )
+            # Weight pinning is not a session pin: capacity pressure can discard
+            # all idle histories while the parameters remain resident.
+            assert bool(sessions["data"]) == (memory_bytes == 8388608), sessions
+            for _ in range(2):
+                unpinned = control(
+                    address,
+                    "POST",
+                    "/v1/models/unpin",
+                    200,
+                    body=json.dumps({"model": "alpha"}),
+                    headers={"Content-Type": "application/json"},
+                )["loom"]
+                assert not unpinned["parameter_pinned"], unpinned
+                assert unpinned["parameters"] == alpha["parameters"], unpinned
+                assert unpinned["incarnation"] == alpha["incarnation"], unpinned
+            second_status, second = completion(address, "beta", messages, "peer")
+            assert second_status == 200, second
+            assert output(second) == oracle("abxa"), second
+        if retention == "checkpoint":
             # A pin must survive failed peer pressure even after all automatic
             # owners release their references. Deletion then unblocks the peer.
             resumed_status, resumed = completion(
@@ -235,6 +279,14 @@ def check(server, source, directory, workers, memory_bytes, pinned):
         control(
             address,
             "POST",
+            "/v1/models/pin",
+            200,
+            body=json.dumps({"model": "alpha"}),
+            headers={"Content-Type": "application/json"},
+        )
+        control(
+            address,
+            "POST",
             "/v1/models/unregister",
             202,
             body=json.dumps({"model": "alpha", "mode": "drain"}),
@@ -275,13 +327,15 @@ def main():
         root = Path(temporary)
         for workers in (1, 4):
             for memory_bytes in (8388608, 4194304):
-                for pinned in (False, True):
-                    directory = root / f"{workers}-{memory_bytes}-{pinned}"
+                for retention in ("none", "checkpoint", "parameters"):
+                    directory = root / f"{workers}-{memory_bytes}-{retention}"
                     directory.mkdir()
                     try:
-                        check(server, source, directory, workers, memory_bytes, pinned)
+                        check(
+                            server, source, directory, workers, memory_bytes, retention
+                        )
                     except AssertionError as error:
-                        failures.append((workers, memory_bytes, pinned, str(error)))
+                        failures.append((workers, memory_bytes, retention, str(error)))
     assert not failures, failures
 
 

@@ -787,6 +787,34 @@ TEST_P(WeightsTest, ImpossibleParameterGroupCannotJoinPressureAdmission) {
   loom_serve_residency_release(residencies_[0]);
 }
 
+TEST_P(WeightsTest, PersistentPinningOnlyChangesParameterEvictionEligibility) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, path_.path()));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  auto* residency = residencies_[0];
+  auto* cache = loom_serve_device_residency_cache(device_owner_);
+  loom_serve_residency_set_pinned(residency, true);
+  loom_serve_residency_set_pinned(residency, true);
+  EXPECT_FALSE(loom_serve_residency_snapshot(residency).active);
+  EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations, 0u);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(cache, 0));
+  EXPECT_TRUE(loom_serve_residency_snapshot(residency).active);
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
+            GetParam() ? kSlabBytes : 0u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_serve_residency_deactivate(residency));
+  loom_serve_residency_set_pinned(residency, false);
+  loom_serve_residency_set_pinned(residency, false);
+  EXPECT_TRUE(loom_serve_residency_snapshot(residency).active);
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(cache, 0));
+  EXPECT_EQ(loom_serve_residency_snapshot(residency).active, !GetParam());
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations,
+            GetParam() ? 2u : 1u);
+}
+
 TEST_P(WeightsTest, ExplicitActivationCancellationJoinsAcceptedReadiness) {
   IREE_ASSERT_OK(Compile(0, "target"));
   const auto root = Root(0, 0);
@@ -808,6 +836,9 @@ TEST_P(WeightsTest, ExplicitActivationCancellationJoinsAcceptedReadiness) {
   loom_serve_activation_phase_t phase;
   IREE_ASSERT_OK(loom_serve_activation_advance(activation, 0, &phase));
   EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_LOADING);
+  // Removing administrative retention cannot release accepted native work.
+  loom_serve_residency_set_pinned(residencies_[0], true);
+  loom_serve_residency_set_pinned(residencies_[0], false);
   IREE_ASSERT_OK(loom_serve_activation_advance(
       activation, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &phase));
   EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_LOADING);

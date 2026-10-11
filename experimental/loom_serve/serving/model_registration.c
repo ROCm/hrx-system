@@ -139,6 +139,12 @@ static loom_serve_residency_snapshot_t finite_registration_parameters(
       loom_serve_finite_model_residency(registration->model));
 }
 
+static void finite_registration_set_pinned(void* self, bool pinned) {
+  finite_registration_t* registration = self;
+  loom_serve_residency_set_pinned(
+      loom_serve_finite_model_residency(registration->model), pinned);
+}
+
 static iree_status_t finite_registration_deactivate(void* self) {
   finite_registration_t* registration = self;
   return loom_serve_residency_deactivate(
@@ -182,6 +188,7 @@ static iree_status_t finite_registration_create(
         .prepare = finite_registration_prepare,
         .retire = finite_registration_retire,
         .parameters = finite_registration_parameters,
+        .set_pinned = finite_registration_set_pinned,
         .activate = finite_registration_activate,
         .deactivate = finite_registration_deactivate,
         .destroy = finite_registration_destroy};
@@ -291,6 +298,12 @@ static loom_serve_residency_snapshot_t image_registration_parameters(
       loom_serve_image_model_residency(registration->model));
 }
 
+static void image_registration_set_pinned(void* self, bool pinned) {
+  image_registration_t* registration = self;
+  loom_serve_residency_set_pinned(
+      loom_serve_image_model_residency(registration->model), pinned);
+}
+
 static iree_status_t image_registration_deactivate(void* self) {
   image_registration_t* registration = self;
   return loom_serve_image_model_deactivate(registration->model);
@@ -336,6 +349,7 @@ static iree_status_t image_registration_create(
                                     .prepare = image_registration_prepare,
                                     .retire = image_registration_retire,
                                     .parameters = image_registration_parameters,
+                                    .set_pinned = image_registration_set_pinned,
                                     .activate = image_registration_activate,
                                     .deactivate = image_registration_deactivate,
                                     .destroy = image_registration_destroy};
@@ -444,6 +458,12 @@ static loom_serve_residency_snapshot_t text_registration_parameters(
       loom_serve_text_model_residency(registration->model));
 }
 
+static void text_registration_set_pinned(void* self, bool pinned) {
+  text_registration_t* registration = self;
+  loom_serve_residency_set_pinned(
+      loom_serve_text_model_residency(registration->model), pinned);
+}
+
 static iree_status_t text_registration_deactivate(void* self) {
   text_registration_t* registration = self;
   return loom_serve_text_model_deactivate(registration->model);
@@ -502,6 +522,7 @@ static iree_status_t text_registration_create(
                                     .prepare = text_registration_prepare,
                                     .retire = text_registration_retire,
                                     .parameters = text_registration_parameters,
+                                    .set_pinned = text_registration_set_pinned,
                                     .activate = text_registration_activate,
                                     .deactivate = text_registration_deactivate,
                                     .destroy = text_registration_destroy};

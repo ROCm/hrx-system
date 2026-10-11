@@ -484,8 +484,11 @@ static iree_status_t router_describe_service(
       output, ",\"tokenize\":%s", service->tokenizer ? "true" : "false"));
   if (admission->incarnation) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        output, ",\"incarnation\":%" PRIu64 ",\"registration\":\"%s\"",
-        admission->incarnation, loom_serve_registry_phase(admission)));
+        output,
+        ",\"incarnation\":%" PRIu64
+        ",\"registration\":\"%s\",\"parameter_pinned\":%s",
+        admission->incarnation, loom_serve_registry_phase(admission),
+        admission->pinned ? "true" : "false"));
     if (!iree_status_is_ok(admission->status)) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           output, ",\"error\":{\"code\":%d,\"message\":",
@@ -1344,6 +1347,10 @@ static iree_status_t router_accept(router_t* router,
       iree_string_view_equal(request->target, IREE_SV("/v1/models/deactivate"));
   const bool activate =
       iree_string_view_equal(request->target, IREE_SV("/v1/models/activate"));
+  const bool pin =
+      iree_string_view_equal(request->target, IREE_SV("/v1/models/pin"));
+  const bool unpin =
+      iree_string_view_equal(request->target, IREE_SV("/v1/models/unpin"));
   const bool post = iree_string_view_equal(request->method, IREE_SV("POST"));
   if ((!checkpoint && !post) ||
       (checkpoint && !post &&
@@ -1375,9 +1382,11 @@ static iree_status_t router_accept(router_t* router,
       }
     }
   } else {
-    iree_status_t status = router_model(
-        request, drain || undrain || unregister || deactivate || activate,
-        unregister ? &removal : NULL, output);
+    iree_status_t status =
+        router_model(request,
+                     drain || undrain || unregister || deactivate || activate ||
+                         pin || unpin,
+                     unregister ? &removal : NULL, output);
     if (!iree_status_is_ok(status)) {
       if (!iree_status_is_invalid_argument(status) &&
           !iree_status_is_out_of_range(status)) {
@@ -1402,6 +1411,13 @@ static iree_status_t router_accept(router_t* router,
           return router_management_error(router, connection, status);
         }
         return router_control(router, i, connection, 202);
+      }
+      if (pin || unpin) {
+        iree_status_t status = loom_serve_registry_set_pinned(state, pin);
+        if (!iree_status_is_ok(status)) {
+          return router_management_error(router, connection, status);
+        }
+        return router_control(router, i, connection, 200);
       }
       if (deactivate || activate) {
         iree_status_t status = activate ? loom_serve_registry_activate(state)

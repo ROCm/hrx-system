@@ -36,6 +36,8 @@ struct loom_serve_residency_t {
   loom_serve_residency_t* next;
   // Accepted consumers and explicit retention owners excluding eviction.
   iree_host_size_t pin_count;
+  // Persistent weight-only retention, independent of accepted operation pins.
+  bool pinned;
   // Every checkpoint domain has enqueued readiness on the model timeline.
   bool active;
   // Borrowed model idle-cache owner, independent of parameter pins.
@@ -56,6 +58,11 @@ struct loom_serve_residency_t {
 loom_serve_residency_cache_t* loom_serve_residency_cache(
     const loom_serve_residency_t* residency) {
   return residency->cache;
+}
+
+void loom_serve_residency_set_pinned(loom_serve_residency_t* residency,
+                                     bool pinned) {
+  residency->pinned = pinned;
 }
 
 void loom_serve_residency_set_reclaimer(
@@ -142,7 +149,7 @@ static void residency_append(loom_serve_residency_t* residency) {
 
 iree_status_t loom_serve_residency_deactivate(
     loom_serve_residency_t* residency) {
-  if (residency->pin_count || !residency->cache->pool) {
+  if (residency->pin_count || residency->pinned || !residency->cache->pool) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "deactivation requires unpinned elastic residency");
   }
@@ -168,7 +175,7 @@ iree_status_t loom_serve_residency_cache_trim(
        loom_serve_memory_pool_statistics(cache->pool).committed_bytes >
            target_bytes;
        entry = entry->next) {
-    if (!entry->pin_count &&
+    if (!entry->pin_count && !entry->pinned &&
         loom_serve_residency_statistics(entry).committed_bytes) {
       status = loom_serve_residency_deactivate(entry);
     }
@@ -182,7 +189,7 @@ static iree_status_t residency_reclaim(void* user_data, uint64_t target_bytes) {
       loom_serve_memory_pool_statistics(cache->pool).committed_bytes;
   for (loom_serve_residency_t* entry = cache->oldest;
        entry && remaining > target_bytes; entry = entry->next) {
-    if (!entry->pin_count) {
+    if (!entry->pin_count && !entry->pinned) {
       remaining -= loom_serve_residency_statistics(entry).committed_bytes;
     }
   }

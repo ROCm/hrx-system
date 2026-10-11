@@ -216,12 +216,12 @@ iree_status_t loom_serve_registry_remove(loom_serve_registered_model_t* model,
 iree_status_t loom_serve_registry_deactivate(
     loom_serve_registered_model_t* model) {
   if (!model->incarnation || !model->closed || model->removal ||
-      !iree_status_is_ok(model->status) ||
+      model->pinned || !iree_status_is_ok(model->status) ||
       model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_WAITING ||
       model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "deactivation requires a healthy, drained managed registration");
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "deactivation requires a healthy, drained, "
+                            "unpinned managed registration");
   }
   if (model->phase == LOOM_SERVE_REGISTRATION_DECLARED) {
     return iree_ok_status();
@@ -238,6 +238,28 @@ iree_status_t loom_serve_registry_deactivate(
                             "fixed parameter backing cannot deactivate");
   }
   model->parameter_operation = LOOM_SERVE_PARAMETER_OPERATION_DEACTIVATING;
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_registry_set_pinned(
+    loom_serve_registered_model_t* model, bool pinned) {
+  if (!model->incarnation || model->removal ||
+      !iree_status_is_ok(model->status) ||
+      (pinned && model->parameter_operation ==
+                     LOOM_SERVE_PARAMETER_OPERATION_DEACTIVATING)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "pinning requires a healthy managed registration without pending "
+        "deactivation");
+  }
+  if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
+    if (!model->registration.set_pinned) {
+      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                              "registration cannot pin parameters");
+    }
+    model->registration.set_pinned(model->registration.self, pinned);
+  }
+  model->pinned = pinned;
   return iree_ok_status();
 }
 
@@ -330,7 +352,16 @@ bool loom_serve_registry_advance(loom_serve_registry_t* registry,
         model->registration.self, model->removal != LOOM_SERVE_REMOVAL_NONE,
         &complete, &service, &model->compilation);
     if (complete) {
+      if (iree_status_is_ok(model->status) && model->pinned &&
+          !model->registration.set_pinned) {
+        model->status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                                         "registration cannot pin parameters");
+      }
       if (iree_status_is_ok(model->status)) {
+        if (model->registration.set_pinned) {
+          model->registration.set_pinned(model->registration.self,
+                                         model->pinned);
+        }
         model->service = service;
         service.set_observer(service.self, observer);
         model->phase = LOOM_SERVE_REGISTRATION_READY;

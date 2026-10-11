@@ -389,6 +389,10 @@ struct RegistrationDependency {
       .activity = {.activations = 1}};
   // Injects an explicit native parameter release failure after quiescence.
   std::atomic<bool> fail_deactivation{false};
+  // Eviction policy supplied by the real registry, independent of readiness.
+  std::atomic<bool> pinned{false};
+  // Adapter capability configured before factory publication.
+  bool supports_pinning = true;
   // Optional shared pressure domain, configured before factory publication.
   const void* capacity_domain = nullptr;
   // Independently controlled parameter-readiness dependency.
@@ -450,6 +454,9 @@ struct RegistrationDependency {
   static loom_serve_residency_snapshot_t Parameters(void* self) {
     return static_cast<Operation*>(self)->dependency->parameters;
   }
+  static void SetPinned(void* self, bool pinned) {
+    static_cast<Operation*>(self)->dependency->pinned = pinned;
+  }
   static iree_status_t Deactivate(void* self) {
     auto* dependency = static_cast<Operation*>(self)->dependency;
     EXPECT_FALSE(ModelService::IsPending(&dependency->service));
@@ -509,13 +516,15 @@ struct RegistrationDependency {
     dependency->observer = observer;
     dependency->stream = stream;
     ++dependency->created;
-    *registration = {.self = new Operation{dependency},
-                     .prepare = Prepare,
-                     .retire = Retire,
-                     .parameters = Parameters,
-                     .activate = Activate,
-                     .deactivate = Deactivate,
-                     .destroy = Destroy};
+    *registration = {
+        .self = new Operation{dependency},
+        .prepare = Prepare,
+        .retire = Retire,
+        .parameters = Parameters,
+        .set_pinned = dependency->supports_pinning ? SetPinned : nullptr,
+        .activate = Activate,
+        .deactivate = Deactivate,
+        .destroy = Destroy};
     return iree_ok_status();
   }
   void WaitRetiring() {
@@ -913,10 +922,42 @@ TEST_P(HttpRouterRegistrationTest,
   Remove();
 }
 
+TEST_P(HttpRouterRegistrationTest, PinningDoesNotPrepareOrActivateAModel) {
+  Declare();
+  for (int i = 0; i < 2; ++i) {
+    const auto pinned = Control("pin", "dynamic");
+    EXPECT_EQ(pinned.find("HTTP/1.1 200"), 0u);
+    EXPECT_NE(pinned.find(R"("parameter_pinned":true)"), std::string::npos);
+    EXPECT_NE(pinned.find(R"("registration":"registered")"), std::string::npos);
+    EXPECT_EQ(managed_.created.load(), 0u);
+  }
+  EXPECT_EQ(Control("deactivate", "dynamic").find("HTTP/1.1 409"), 0u);
+  EXPECT_NE(Control("unpin", "dynamic").find(R"("parameter_pinned":false)"),
+            std::string::npos);
+  EXPECT_EQ(managed_.created.load(), 0u);
+  EXPECT_EQ(Control("pin", "dynamic").find("HTTP/1.1 200"), 0u);
+  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
+  while (Read(Send("GET", "/v1/status")).find(R"("registration":"ready")") ==
+         std::string::npos) {
+  }
+  EXPECT_TRUE(managed_.pinned.load());
+  EXPECT_EQ(Control("unpin", "dynamic").find("HTTP/1.1 200"), 0u);
+  EXPECT_FALSE(managed_.pinned.load());
+  EXPECT_EQ(Control("pin", "dynamic").find("HTTP/1.1 200"), 0u);
+  EXPECT_TRUE(managed_.pinned.load());
+  EXPECT_EQ(Control("drain", "dynamic").find("HTTP/1.1 200"), 0u);
+  EXPECT_EQ(Control("deactivate", "dynamic").find("HTTP/1.1 409"), 0u);
+  Remove();
+}
+
 TEST_P(HttpRouterRegistrationTest, UnregisterJoinsAcceptedActivationFirst) {
   Declare();
+  EXPECT_EQ(Control("pin", "dynamic").find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(Control("activate", "dynamic").find("HTTP/1.1 202"), 0u);
   managed_.WaitActivating();
+  EXPECT_TRUE(managed_.pinned.load());
+  EXPECT_EQ(Control("unpin", "dynamic").find("HTTP/1.1 200"), 0u);
+  EXPECT_EQ(Control("pin", "dynamic").find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
   managed_.WaitActivationCancellation();
   {
@@ -934,6 +975,38 @@ TEST_P(HttpRouterRegistrationTest, UnregisterJoinsAcceptedActivationFirst) {
   managed_.ReleaseRetirement();
   owner_.join();
   EXPECT_EQ(managed_.destroyed.load(), 1u);
+}
+
+TEST_P(HttpRouterRegistrationTest,
+       UnsupportedDeclaredPinRetiresWithoutPublishing) {
+  {
+    std::lock_guard<std::mutex> lock(managed_.mutex);
+    managed_.supports_pinning = false;
+  }
+  Declare();
+  EXPECT_EQ(Control("pin", "dynamic").find("HTTP/1.1 200"), 0u);
+  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
+  managed_.WaitRetiring();
+  const auto state = Read(Send("GET", "/v1/status"));
+  EXPECT_NE(state.find("registration cannot pin parameters"),
+            std::string::npos);
+  EXPECT_NE(state.find(R"("registration":"retiring")"), std::string::npos);
+  EXPECT_EQ(Control("pin", "dynamic").find("HTTP/1.1 409"), 0u);
+  EXPECT_EQ(Control("unpin", "dynamic").find("HTTP/1.1 409"), 0u);
+  Remove();
+}
+
+TEST_P(HttpRouterRegistrationTest, UnsupportedReadyPinKeepsTheModelUsable) {
+  {
+    std::lock_guard<std::mutex> lock(managed_.mutex);
+    managed_.supports_pinning = false;
+  }
+  Register();
+  EXPECT_EQ(Control("pin", "dynamic").find("HTTP/1.1 501"), 0u);
+  EXPECT_EQ(Control("unpin", "dynamic").find("HTTP/1.1 501"), 0u);
+  EXPECT_EQ(Control("drain", "dynamic").find("HTTP/1.1 200"), 0u);
+  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
+  Remove();
 }
 
 TEST_P(HttpRouterRegistrationTest,
@@ -999,6 +1072,7 @@ TEST_P(HttpRouterRegistrationTest,
   EXPECT_EQ(close(operation), 0);
   EXPECT_EQ(Control("deactivate", "dynamic").find("HTTP/1.1 202"), 0u);
   EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 409"), 0u);
+  EXPECT_EQ(Control("pin", "dynamic").find("HTTP/1.1 409"), 0u);
   EXPECT_EQ(
       Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
       0u);
@@ -1101,7 +1175,7 @@ TEST_P(HttpRouterRegistrationTest, EmptyHeaderCannotSelectAnUnusedSlot) {
 
 TEST_P(HttpRouterRegistrationTest,
        ParameterOperationsValidateTheirSelectorAndOwnership) {
-  for (const auto* operation : {"activate", "deactivate"}) {
+  for (const auto* operation : {"activate", "deactivate", "pin", "unpin"}) {
     for (const char* body :
          {R"({})", R"({"model":""})", R"({"model":"dynamic","extra":true})",
           R"({"model":"dynamic","model":"a"})"}) {

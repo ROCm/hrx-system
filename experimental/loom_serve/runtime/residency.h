@@ -59,6 +59,14 @@ void loom_serve_residency_destroy(loom_serve_residency_t* residency);
 loom_serve_residency_cache_t* loom_serve_residency_cache(
     const loom_serve_residency_t* residency);
 
+// Sets persistent parameter retention independently of operation-owned pins.
+// Applies to current and subsequent activations without loading or unloading.
+// Unpinning restores eviction eligibility only after all accepted consumers
+// retire. Mutable state and its reclamation policy remain independent. Called
+// on the serialized owner; destruction discards this policy with the residency.
+void loom_serve_residency_set_pinned(loom_serve_residency_t* residency,
+                                     bool pinned);
+
 // Optional model-owned idle history, distinct from parameter pinning. Callbacks
 // run on the shared host owner inside a physical-capacity request. They never
 // allocate, submit device work, wait, or recurse into admission. The owner
