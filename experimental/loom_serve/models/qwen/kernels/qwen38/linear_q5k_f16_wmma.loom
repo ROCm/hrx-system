@@ -1,7 +1,11 @@
 template.decl @ggml.q5k.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
+
 template.decl @qwen38.dense_q5k_f16_wmma.x128.body(%token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %input: buffer, %weight: buffer, %output: buffer)
+
 template.decl @qwen38.dense_q5k_f16_wmma.x128.direct.body(%token_count_data: buffer, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %workitem0: index, %subgroup0: index, %input: buffer, %weight: buffer, %output: buffer)
+
 template.decl @qwen38.dense_q5k_f16_wmma.x64.body(%weight_channels: index, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %input: buffer, %weight: buffer, %output: buffer)
+
 template.decl @qwen38.dense_q5k_f16_wmma.c64t32.body(%weight_channels: index, %complete_channels: i1, %output_size0: index, %input: buffer, %weight: buffer, %output: buffer)
 
 // Qwen3.8 dense raw-Q5_K prefill projection experiment.
@@ -9,12 +13,11 @@ template.decl @qwen38.dense_q5k_f16_wmma.c64t32.body(%weight_channels: index, %c
 // Four- and eight-wave schedules reuse one 64x32 weight tile across 64 or 128
 // tokens. Both consume the original GGUF Q5_K bytes and F32 activations
 // without a persistent repack.
-
-kernel.decl @ggml_q5k_f32_reference(%input_size$5: index) launch(%input_size$6: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_q5k_f32_reference(%input_capacity: index) launch(%input_size: index, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @ggml_q5k_fix_differential_headers() launch(%weight: buffer)
 
-kernel.decl @ggml_linear_q5k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count$1: index, %input_size$1: index, %output_size$1: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q5k_q8_1_x4(%token_capacity: index, %input_capacity: index, %output_capacity: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
 
 amdgpu.target<gfx11-generic> @qwen38_dense_gfx11_wave64 {subgroup_size = 64}
 

@@ -1,7 +1,11 @@
 template.decl @ggml.q6k.f16_vector4(%weight: buffer, %weight_row_byte_base: offset, %q6_block: index, %q6_group: index, %packet: index) -> (vector<4xf16>)
+
 template.decl @qwen38.dense.signed_weight_f16_vector4(%format: index, %weight: buffer, %row_byte_base: offset, %quant_block: index, %quant_group: index, %packet: index) -> (vector<4xf16>)
+
 template.decl @qwen38.dense_q6k_f16_wmma.body(%weight_format: index, %weight_macro_block_byte_count: index, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %input: buffer, %weight: buffer, %output: buffer)
+
 template.decl @qwen38.dense_q6k_f16_wmma.c64t32.body(%epilogue: index, %token_count_data: buffer, %input_size0: index, %output_size0: index, %input: buffer, %weight: buffer, %output: buffer)
+
 template.decl @qwen38.dense_q6k_f16_wmma.c64t32.epilogue(%epilogue: index, %token_count: index, %output_size: index, %token_origin0: index, %token_origin1: index, %channel_origin: index, %subgroup: index, %lane: index, %metadata_stage: buffer, %output: buffer, %result0: vector<4xf32>, %result1: vector<4xf32>)
 
 // Qwen3.8 dense raw-Q6_K/Q8_0 prefill projection experiment.
@@ -10,10 +14,9 @@ template.decl @qwen38.dense_q6k_f16_wmma.c64t32.epilogue(%epilogue: index, %toke
 // consume the original GGUF bytes and F32 activations without a persistent
 // repack. Q6_K and Q8_0 share the signed scaled-weight contraction body; value
 // facts select the format-specific decoder before native lowering.
+kernel.decl @ggml_quantize_q8_1_x4_f32(%token_capacity: index, %input_capacity: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
-kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count$1: index, %input_size$1: index, %input: buffer, %output: buffer)
-
-kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count$1: index, %input_size$1: index, %output_size$1: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q6k_q8_1_x4(%token_capacity: index, %input_capacity: index, %output_capacity: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @ggml_linear_q8_0_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 
@@ -884,7 +887,7 @@ check.case public @qwen38_mtp_projection_8_case {
   %expected = check.generate.fill value(-17.0) : tensor<8x5120xf32>
   kernel.launch @qwen38_linear_q8_0_f32_reference[%tokens, %hidden, %channels](%tokens, %hidden, %channels, %input, %weight, %expected) : [index, index, index](index, index, index, tensor<8x10240xf32>, tensor<5120x320x34xi8>, tensor<8x5120xf32>)
   kernel.launch @qwen38_linear_q8_0_f16_wmma_x128[%tokens, %hidden, %channels](%control, %hidden, %channels, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<8x10240xf32>, tensor<5120x320x34xi8>, tensor<8x5120xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.005) rtol(0.001) nan(same) : tensor<8x5120xf32>
+  check.expect.close actual(%actual) expected(%expected) atol(0.0050000000000000001) rtol(0.001) nan(same) : tensor<8x5120xf32>
   check.return
 }
 
@@ -903,7 +906,7 @@ check.case public @qwen38_mtp_projection_512_case {
   %expected = check.generate.fill value(-17.0) : tensor<512x5120xf32>
   kernel.launch @qwen38_linear_q8_0_f32_reference[%tokens, %hidden, %channels](%tokens, %hidden, %channels, %input, %weight, %expected) : [index, index, index](index, index, index, tensor<512x10240xf32>, tensor<5120x320x34xi8>, tensor<512x5120xf32>)
   kernel.launch @qwen38_linear_q8_0_f16_wmma_x128[%tokens, %hidden, %channels](%control, %hidden, %channels, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<512x10240xf32>, tensor<5120x320x34xi8>, tensor<512x5120xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.005) rtol(0.001) nan(same) : tensor<512x5120xf32>
+  check.expect.close actual(%actual) expected(%expected) atol(0.0050000000000000001) rtol(0.001) nan(same) : tensor<512x5120xf32>
   check.return
 }
 

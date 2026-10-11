@@ -1,5 +1,7 @@
 template.decl @ggml.q5k.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
+
 template.decl @qwen38.dense_q5k_f16_wmma.wave32_x128.compute(%input_is_f16: i1, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %workitem: index, %subgroup: index, %input: buffer, %weight: buffer) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>)
+
 template.decl @qwen38.dense_q5k_f16_wmma.wave32_x128.publish(%result00: vector<8xf32>, %result01: vector<8xf32>, %result10: vector<8xf32>, %result11: vector<8xf32>, %token_count: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %subgroup_count: index, %subgroup: index, %lane: index, %output: buffer)
 
 // Exact-Q5_K wave32 tiled contraction.
@@ -9,7 +11,6 @@ template.decl @qwen38.dense_q5k_f16_wmma.wave32_x128.publish(%result00: vector<8
 // into the same operand stream. Sixteen wave32 subgroups share a 128-channel
 // by 128-token workgroup tile. Global acquisition runs one quantization group
 // ahead of LDS publication and matrix consumption.
-
 func.decl @qwen38_q5k_codes_f32_vector4(%weight: buffer, %row_byte_base: offset, %q5_block: index, %q5_group: index, %packet: index) -> (vector<4xf32>)
 
 kernel.decl @qwen38_linear_q5k_f16_wmma_x128(%token_count0: index, %input_size0: index, %output_size0: index) launch(%token_count_data: buffer, %input_size1: index, %output_size1: index, %input: buffer, %weight: buffer, %output: buffer)

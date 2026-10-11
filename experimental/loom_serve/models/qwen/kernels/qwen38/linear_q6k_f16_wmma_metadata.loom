@@ -8,7 +8,6 @@ template.decl @qwen38.dense_q6k_f16_wmma.metadata.body(%weight_format: index, %w
 // same F16 WMMA operand stream. Global codes and activations are acquired one
 // K32 group ahead of LDS publication and matrix consumption; metadata scaling
 // stays with the consumer so it observes the current block's shared table.
-
 kernel.decl @qwen38_linear_q6k_f16_wmma_x128(%token_count0: index, %input_size0: index, %output_size0: index) launch(%token_count_data: buffer, %input_size1: index, %output_size1: index, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @qwen38_residual_add_f32_prefill(%token_count: index) launch(%token_count1: index, %lhs: buffer, %rhs: buffer, %output: buffer)
@@ -563,7 +562,6 @@ template.def<@qwen38.dense_q6k_f16_wmma.metadata.body> device @qwen38_dense_q6k_
 // Workload token counts may be zero so a command program can select exactly one
 // schedule without rerecording. token_count_data always carries the nonzero
 // logical token count used for body bounds.
-
 kernel.def target(@qwen38_q6k_metadata_gfx11_wave64) export("qwen38_linear_q6k_f16_wmma_metadata_x128") @qwen38_linear_q6k_f16_wmma_metadata_x128(%token_count0: index, %input_size0: index, %output_size0: index) {
   %token_count = index.assume %token_count0 [range(%token_count0, 0, 512)] : index
   %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), multiple_of(%input_size0, 256)] : index
@@ -870,7 +868,6 @@ kernel.def target(@qwen38_q6k_metadata_gfx11_wave64) export("qwen38_linear_q6k_f
   template.apply<@qwen38.dense_q6k_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c128, %c256, %c8, %c1024, %c16, %workitem, %subgroup, %lane, %input, %weight, %residual) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
-
 
 // Rotates the WMMA operands so the native result is token-major and can be
 // written directly. Eight waves share one 64-channel by 128-token tile and one
