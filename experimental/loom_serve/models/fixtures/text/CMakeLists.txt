@@ -56,6 +56,7 @@ loom_cc_test(
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    iree::experimental::loom_serve::telemetry::stream
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule
     iree::experimental::loom_serve::text::service
@@ -99,6 +100,7 @@ loom_cc_test(
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    iree::experimental::loom_serve::telemetry::stream
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule
     iree::experimental::loom_serve::text::service

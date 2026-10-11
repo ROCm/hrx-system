@@ -22,6 +22,7 @@
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
 #include "experimental/loom_serve/serving/model_registration.h"
 #include "experimental/loom_serve/serving/router.h"
+#include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -344,6 +345,137 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     }
   }
 
+  enum class OverlapAction { kComplete, kDisconnect, kStop };
+
+  void CheckPreparationOverlap(OverlapAction action) {
+    auto options = ServiceOptions();
+    loom_serve_text_service_t* value = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_service_create(model_, &options, nullptr,
+                                                  &value, allocator_));
+    auto destroy = [](loom_serve_text_service_t* service) {
+      loom_serve_text_service_destroy(service, IREE_STATUS_OK);
+    };
+    std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
+        value, destroy);
+    const auto interface = loom_serve_text_service_interface(value);
+    auto* notification = loom_serve_http_server_notification(server_);
+    interface.set_observer(interface.self,
+                           {[](void* payload) {
+                              iree_notification_post(
+                                  static_cast<iree_notification_t*>(payload),
+                                  IREE_ALL_WAITERS);
+                            },
+                            notification});
+    auto accept = [&](loom_serve_http_connection_t** out_connection) {
+      for (;;) {
+        const auto ticket = iree_notification_prepare_wait(notification);
+        const loom_serve_http_request_t* request = nullptr;
+        auto* connection =
+            loom_serve_http_server_take_request(server_, &request);
+        if (connection) {
+          iree_notification_cancel_wait(notification);
+          *out_connection = connection;
+          IREE_ASSERT_OK(
+              interface.accept(interface.self, connection, request, 0));
+          return;
+        }
+        iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+    };
+    auto advance_until = [&](auto ready,
+                             loom_serve_http_service_flags_t flags) {
+      while (!ready()) {
+        const auto ticket = iree_notification_prepare_wait(notification);
+        bool progress = false;
+        IREE_ASSERT_OK(interface.advance(interface.self, flags, &progress));
+        if (ready() || progress) {
+          iree_notification_cancel_wait(notification);
+        } else {
+          iree_notification_commit_wait(notification, ticket,
+                                        IREE_DURATION_ZERO,
+                                        IREE_TIME_INFINITE_FUTURE);
+        }
+      }
+    };
+    const std::string first_prompt = "abxabbax";
+    const int first = Send(Request(Message("user", first_prompt), 4),
+                           "X-Loom-Session: first\r\n");
+    loom_serve_http_connection_t* connection = nullptr;
+    ASSERT_NO_FATAL_FAILURE(accept(&connection));
+    ASSERT_NO_FATAL_FAILURE(advance_until(
+        [&] {
+          return std::string(interface.snapshot(interface.self).phase) ==
+                 "execute";
+        },
+        0));
+    // Keep the first accepted epoch owned even if the hardware has already
+    // signaled readiness. The second prompt must acquire a separate CPU borrow
+    // before the owner consumes that epoch; no timing or queue FIFO is assumed.
+    const std::string second_prompt = "baxab";
+    const int second = Send(Request(Message("user", second_prompt), 4),
+                            "X-Loom-Session: second\r\n");
+    ASSERT_NO_FATAL_FAILURE(accept(&connection));
+    EXPECT_EQ(interface.telemetry.counters->batches, 0u);
+    EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 1u);
+    if (action == OverlapAction::kDisconnect) {
+      const linger reset = {1, 0};
+      ASSERT_EQ(
+          setsockopt(second, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)), 0);
+      ASSERT_EQ(close(second), 0);
+      iree_notification_await(
+          notification,
+          [](void* self) {
+            return loom_serve_http_connection_failed(
+                static_cast<loom_serve_http_connection_t*>(self));
+          },
+          connection, iree_infinite_timeout());
+    }
+    ASSERT_NO_FATAL_FAILURE(advance_until(
+        [&] {
+          return !interface.is_pending(interface.self) &&
+                 !interface.is_active(interface.self) &&
+                 !interface.snapshot(interface.self).queued_requests;
+        },
+        action == OverlapAction::kStop ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING
+                                       : 0));
+    EXPECT_EQ(interface.telemetry.counters->requests, 2u);
+    if (action == OverlapAction::kStop) {
+      EXPECT_EQ(interface.telemetry.counters->cancelled, 2u);
+      EXPECT_EQ(Read(first).find("data: [DONE]"), std::string::npos);
+      EXPECT_TRUE(Read(second).empty());
+    } else {
+      EXPECT_EQ(Content(Read(first)), Oracle::Complete(first_prompt, 4));
+      EXPECT_EQ(interface.telemetry.counters->completed,
+                action == OverlapAction::kComplete ? 2u : 1u);
+      if (action == OverlapAction::kDisconnect) {
+        EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
+      } else {
+        EXPECT_EQ(Content(Read(second)), Oracle::Complete(second_prompt, 4));
+        uint64_t cursor = 0;
+        uint64_t prepared = UINT64_MAX, first_epoch = UINT64_MAX;
+        const auto head =
+            loom_serve_telemetry_stream_head(interface.telemetry.stream);
+        while (cursor < head) {
+          loom_serve_telemetry_record_t record;
+          ASSERT_EQ(loom_serve_telemetry_stream_read(interface.telemetry.stream,
+                                                     &cursor, &record),
+                    LOOM_SERVE_TELEMETRY_READ_RECORD);
+          if (std::string(record.event->name) == "prepared" &&
+              record.request == 2) {
+            prepared = cursor;
+          }
+          if (std::string(record.event->name) == "epoch") {
+            first_epoch = std::min(first_epoch, cursor);
+          }
+        }
+        ASSERT_NE(first_epoch, UINT64_MAX);
+        EXPECT_LT(prepared, first_epoch);
+      }
+    }
+    interface.set_observer(interface.self, {});
+  }
+
   // Shared allocator for all production owners.
   const iree_allocator_t allocator_ = iree_allocator_system();
   // Host geometry buckets share one command in the source bootstrap.
@@ -485,6 +617,18 @@ TEST_P(SourceTextServiceTest, FailedTextSourceLeavesPeerAndDiagnosticsUsable) {
                 .find("HTTP/1.1 202"),
             0u);
   WaitModel("broken", {});
+}
+
+TEST_P(SourceTextServiceTest, PreparationOverlapsAcceptedEpoch) {
+  CheckPreparationOverlap(OverlapAction::kComplete);
+}
+
+TEST_P(SourceTextServiceTest, DisconnectRetiresOverlappingPreparation) {
+  CheckPreparationOverlap(OverlapAction::kDisconnect);
+}
+
+TEST_P(SourceTextServiceTest, StoppingRetiresOverlappingPreparation) {
+  CheckPreparationOverlap(OverlapAction::kStop);
 }
 
 TEST_P(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {

@@ -368,6 +368,16 @@ is pending. Shutdown requests timer cancellation on the poll owner and joins
 both terminal completion and the cancellation receipt. Reporting creates no
 per-model thread and never counts as activity that can relieve memory pressure.
 
+Input preparation can overlap an already-submitted epoch: the FIFO head borrows
+one idle row's host input/history while device work owns other rows and its
+transfer buffers. CPU release and device readiness have independent completion
+slots. The owner consumes CPU release before publishing device results or
+invoking the model again, preserving the single-VM-call contract regardless of
+which operation finishes first. The prepared request acquires device capacity
+only at the normal retired epoch boundary. This does not force smaller cohorts
+or change the policy of collecting ready admissions before dispatch. Output
+translation still completes before the next epoch submission.
+
 The native real-model witness is
 `models/qwen:epoch_check --checkpoints --checkpoint_capacity=1
 --pool_capacity=65536 --context_capacity=1024 --prefill_capacity=128
