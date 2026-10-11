@@ -207,6 +207,21 @@ iree_status_t loom_serve_residency_create(
     iree_host_size_t weight_count, loom_serve_weights_t* const* weights,
     loom_serve_residency_t** out_residency, iree_allocator_t host_allocator) {
   *out_residency = NULL;
+  if (cache->pool) {
+    uint64_t remaining = loom_serve_memory_pool_limit(cache->pool);
+    for (iree_host_size_t i = 0; i < weight_count; ++i) {
+      const uint64_t required =
+          loom_serve_weights_statistics(weights[i]).reserved_bytes;
+      if (required > remaining) {
+        return iree_make_status(
+            IREE_STATUS_RESOURCE_EXHAUSTED,
+            "model parameters exceed the physical pool budget of %" PRIu64
+            " bytes",
+            loom_serve_memory_pool_limit(cache->pool));
+      }
+      remaining -= required;
+    }
+  }
   loom_serve_residency_t* residency = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       host_allocator, sizeof(*residency) + weight_count * sizeof(*weights),

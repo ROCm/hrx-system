@@ -112,6 +112,10 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
   return pool->statistics;
 }
 
+uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool) {
+  return pool->limit_bytes;
+}
+
 void loom_serve_memory_pool_set_reclaimer(
     loom_serve_memory_pool_t* pool, loom_serve_memory_reclaimer_t reclaimer) {
   pool->reclaimer = reclaimer;

@@ -742,6 +742,29 @@ TEST_P(WeightsTest, AdmissionUsesRecencyOnlyAmongUnpinnedGroups) {
             2 * kSlabBytes);
 }
 
+TEST_P(WeightsTest, ImpossibleParameterGroupCannotJoinPressureAdmission) {
+  for (uint32_t i = 0; i < 3; ++i) {
+    IREE_ASSERT_OK(Compile(i, "raw"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, path_.path()));
+  }
+  if (!GetParam()) {
+    IREE_ASSERT_OK(Register(0, 0, 3));
+    return;
+  }
+  EXPECT_EQ(loom_serve_memory_pool_limit(pool_), 2 * kSlabBytes);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Register(0, 0, 3));
+  EXPECT_EQ(residencies_[0], nullptr);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
+  // Rejection does not poison the shared admission queue or borrowed plans.
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  loom_serve_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 90));
+  loom_serve_residency_release(residencies_[0]);
+}
+
 TEST_P(WeightsTest, CheckpointGroupsAdmitAtomicallyAndRetentionPinsNest) {
   WriteCheckpoint(adapter_path_.path(), 100);
   IREE_ASSERT_OK(Compile(0, "raw"));

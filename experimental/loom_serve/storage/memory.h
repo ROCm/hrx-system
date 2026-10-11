@@ -48,6 +48,10 @@ void loom_serve_memory_pool_destroy(loom_serve_memory_pool_t* pool);
 loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
     const loom_serve_memory_pool_t* pool);
 
+// Immutable physical commitment ceiling in bytes; UINT64_MAX is unbounded.
+// This is the configured budget, not currently available backing.
+uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool);
+
 // Cold pressure policy, independent of logical storage geometry. The callback
 // may trim eligible reservations toward target_bytes of total commitment; it
 // returns a status only for an actual platform/IO failure. An unreachable

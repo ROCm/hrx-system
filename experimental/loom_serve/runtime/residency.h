@@ -41,7 +41,9 @@ iree_status_t loom_serve_residency_cache_trim(
 // it. Borrows the model's execution domain for activation dependencies and
 // synchronous outer-thread error retirement; the shared cache never waits on
 // unrelated model timelines. All calls on the cache and registered models are
-// serialized by their shared host owner.
+// serialized by their shared host owner. A group's complete physical parameter
+// footprint must fit the configured pool budget, independent of current usage;
+// impossible groups fail before joining admission or claiming storage.
 iree_status_t loom_serve_residency_create(
     loom_serve_residency_cache_t* cache, loom_serve_execution_t* execution,
     iree_host_size_t weight_count, loom_serve_weights_t* const* weights,
