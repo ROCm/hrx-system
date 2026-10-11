@@ -16,6 +16,8 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_async_semaphore_t iree_async_semaphore_t;
+typedef struct iree_async_semaphore_wait_tracker_t
+    iree_async_semaphore_wait_tracker_t;
 
 //===----------------------------------------------------------------------===//
 // Semaphore wait
@@ -63,12 +65,15 @@ typedef struct iree_async_semaphore_t iree_async_semaphore_t;
 //   wait.mode = IREE_ASYNC_WAIT_MODE_ALL;
 //   iree_async_proactor_submit_one(proactor, &wait.base);
 typedef struct iree_async_semaphore_wait_operation_t {
+  // Common operation state, including independent completion queue linkage.
   iree_async_operation_t base;
 
-  // Parallel arrays: semaphores[i] must reach values[i].
+  // Semaphores that must reach the corresponding entries in |values|.
   // Points to trailing slab data or caller-managed storage.
   iree_async_semaphore_t** semaphores;
+  // Required timeline values in the same order as |semaphores|.
   uint64_t* values;
+  // Number of entries in both arrays.
   iree_host_size_t count;
 
   // Whether to wait for ALL or ANY.
@@ -77,6 +82,12 @@ typedef struct iree_async_semaphore_wait_operation_t {
   // Result (for ANY mode): index of the first semaphore that was satisfied.
   // For ALL mode, this field is not meaningful.
   iree_host_size_t satisfied_index;
+
+  // Proactor-owned association for deferred waits, protected by the wait
+  // context mutex. NULL before registration and after tracker retirement.
+  // Separate from base.next, which may link an already completed wait into
+  // its pending callback queue while cancellation is still permitted.
+  iree_async_semaphore_wait_tracker_t* tracker;
 } iree_async_semaphore_wait_operation_t;
 
 // Computes the total allocation size for a wait operation with |count|
@@ -102,6 +113,7 @@ static inline void iree_async_semaphore_wait_operation_initialize(
   operation->count = count;
   operation->mode = mode;
   operation->satisfied_index = 0;
+  operation->tracker = NULL;
 }
 
 //===----------------------------------------------------------------------===//

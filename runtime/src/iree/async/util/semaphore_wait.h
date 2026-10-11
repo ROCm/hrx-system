@@ -19,9 +19,6 @@
 extern "C" {
 #endif  // __cplusplus
 
-typedef struct iree_async_semaphore_wait_tracker_t
-    iree_async_semaphore_wait_tracker_t;
-
 // Serializes the association between a semaphore wait operation and its
 // tracker. One context is embedded in each proactor and shared by its waits.
 typedef struct iree_async_semaphore_wait_context_t {

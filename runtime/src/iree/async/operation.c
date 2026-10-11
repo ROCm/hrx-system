@@ -104,6 +104,12 @@ void iree_async_operation_acquire_resources(iree_async_operation_t* operation) {
       ((iree_async_handle_poll_operation_t*)operation)->result_events =
           IREE_ASYNC_POLL_EVENT_NONE;
       return;
+    case IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT:
+      // Establish the association before acceptance permits cancellation,
+      // including waits deferred behind linked predecessors. Mark acquisition
+      // so later continuation dispatch cannot reset a live association.
+      ((iree_async_semaphore_wait_operation_t*)operation)->tracker = NULL;
+      break;
     case IREE_ASYNC_OPERATION_TYPE_NOTIFICATION_WAIT: {
       iree_async_notification_wait_operation_t* notification_wait =
           (iree_async_notification_wait_operation_t*)operation;

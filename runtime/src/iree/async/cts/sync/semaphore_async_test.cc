@@ -752,6 +752,52 @@ TEST_P(SemaphoreAsyncTest, WaitCancellation) {
   iree_async_semaphore_release(semaphore);
 }
 
+// Cancellation of a satisfied wait may arrive while its completion is queued.
+// Neighboring completions and reuse must retain their own execution state.
+TEST_P(SemaphoreAsyncTest, CancelSatisfiedWaitsBeforeCompletionDelivery) {
+  iree_async_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_async_semaphore_create(
+      proactor_, 10, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
+      iree_allocator_system(), &semaphore));
+  uint64_t target_value = 10;
+  CompletionTracker completions[3];
+  iree_async_semaphore_wait_operation_t waits[3];
+  iree_async_operation_t* operations[3];
+  for (size_t i = 0; i < IREE_ARRAYSIZE(waits); ++i) {
+    InitWaitOp(&waits[i], &semaphore, &target_value, IREE_ASYNC_WAIT_MODE_ALL,
+               CompletionTracker::Callback, &completions[i]);
+    operations[i] = &waits[i].base;
+  }
+  for (int iteration = 0; iteration < 3; ++iteration) {
+    // Reuse the same operation storage for pending waits between the two
+    // immediately satisfied generations, without clearing backend state.
+    target_value = iteration == 1 ? 20 : 10;
+    IREE_ASSERT_OK(iree_async_proactor_submit(
+        proactor_, iree_async_operation_list_make(operations,
+                                                  IREE_ARRAYSIZE(operations))));
+    for (auto* operation : operations) {
+      IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, operation));
+    }
+    PollUntilCondition([&] {
+      for (const auto& completion : completions) {
+        if (completion.call_count != iteration + 1) {
+          return false;
+        }
+      }
+      return true;
+    });
+    for (auto& completion : completions) {
+      if (iteration == 1) {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                              completion.ConsumeStatus());
+      } else {
+        IREE_EXPECT_OK(completion.ConsumeStatus());
+      }
+    }
+  }
+  iree_async_semaphore_release(semaphore);
+}
+
 // Cancellation may race both terminal satisfaction and poll-thread
 // finalization. The operation remains live until both racing calls return.
 TEST_P(SemaphoreAsyncTest, WaitSignalCancelRace) {

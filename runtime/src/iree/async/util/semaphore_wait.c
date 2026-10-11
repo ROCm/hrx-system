@@ -320,7 +320,7 @@ iree_status_t iree_async_semaphore_wait_tracker_allocate(
 
   // Publish the fully initialized tracker to concurrent cancellation last.
   iree_slim_mutex_lock(&context->association_mutex);
-  operation->base.next = (iree_async_operation_t*)tracker;
+  operation->tracker = tracker;
   iree_slim_mutex_unlock(&context->association_mutex);
 
   *out_tracker = tracker;
@@ -378,8 +378,7 @@ void iree_async_semaphore_wait_context_request_cancellation(
     iree_async_semaphore_wait_context_t* context,
     iree_async_semaphore_wait_operation_t* operation) {
   iree_slim_mutex_lock(&context->association_mutex);
-  iree_async_semaphore_wait_tracker_t* tracker =
-      (iree_async_semaphore_wait_tracker_t*)operation->base.next;
+  iree_async_semaphore_wait_tracker_t* tracker = operation->tracker;
   if (tracker) {
     iree_async_semaphore_wait_tracker_publish_completion(
         tracker,
@@ -444,7 +443,7 @@ void iree_async_semaphore_wait_tracker_finalize(
   }
 
   iree_slim_mutex_lock(&tracker->context->association_mutex);
-  operation->base.next = NULL;
+  operation->tracker = NULL;
   iree_slim_mutex_unlock(&tracker->context->association_mutex);
   out_completion->operation = operation;
   out_completion->continuation_head = tracker->continuation_head;
