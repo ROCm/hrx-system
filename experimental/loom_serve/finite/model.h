@@ -83,15 +83,20 @@ iree_status_t loom_serve_finite_load_destroy(loom_serve_finite_load_t* load);
 //   prepare_batch(state, stage_tags, ranges, bytes: buffer) ->
 //     (stage: i32, payload, result_plan: buffer)
 //   run(stage: i32, feedback_bytes: i64, input, output: hal.buffer)
-// Cold prepare imports declare commands, configuration and parameter domains.
+// Cold prepare imports declare command or direct-dispatch stages and their
+// configuration. Command stages can also declare checkpoint parameter domains.
 // Tokenizer asset is relative to asset_root; empty omits tokenization support.
 // State is immutable across requests. Positive units bound cohort work/storage;
 // equal tags permit batching. Ranges contain [offset, length] i64 pairs into
-// concatenated prepared bytes, in request order. Commands have two dynamic
-// byte-aligned roots (input/output) plus compiler-reflected private workspace.
+// concatenated prepared bytes, in request order. Both stage kinds have two
+// dynamic byte-aligned roots (input/output). Commands additionally have
+// compiler-reflected private workspace; direct stages use their compiled launch
+// configuration without a command buffer or runner workspace.
 // Source code has no stronger base-alignment promise for the external roots.
-// Every stage shares exactly the same fixed parameter placement. Source run
-// uses runner execute_2/feedback; only compact final vectors cross to the host.
+// Weighted command stages share exactly the same fixed parameter placement.
+// Direct stages have no checkpoint parameters. Source run uses the same runner
+// execute_2/feedback imports for both kinds; only compact final vectors cross
+// to the host.
 // The cold outer-application constructor drives the same asynchronous load and
 // joins it outside the shared worker pool. Creation indexes weights without
 // loading them. The shared device outlives this model. Failure releases partial

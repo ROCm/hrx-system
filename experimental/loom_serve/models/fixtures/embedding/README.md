@@ -86,3 +86,17 @@ prepared while admission waits; after the pin releases, the source's scaling
 head produces doubled vectors through the HTTP endpoint. The test exercises
 real checkpoint indexing, loading, LRU eviction and compact feedback, not a
 native canned response or mock model vtable.
+
+The independent [direct variant](variants/direct.loom) performs the same pooling
+and compact output in one buffer-only native entry. Its source preparation uses
+`prepare.dispatch("resident_embed", tag)` instead of `prepare.stage`; the warm
+`control.loom`, request framing and result plan are unchanged. The HTTP tests
+construct this package from the ordinary fixture, exercise repeated ragged
+requests and cancellation, and verify retirement before reuse on CPU, AMDGPU
+and Vulkan. The compiled launch companion supplies the grid; the server submits
+through `queue_dispatch` without constructing a command buffer or workspace.
+
+This direct variant has no checkpoint parameters. The weighted command variant
+above separately proves the existing weight-loading contract; combining the
+two requires explicit source-owned native parameter placement. Neither fixture
+establishes learned-model quality or NPU execution.

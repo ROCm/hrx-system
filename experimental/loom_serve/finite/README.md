@@ -3,7 +3,7 @@
 This experimental runner hosts computations whose final result is one or more
 small F32 vectors: an embedding is a final vector, while a decision model can
 produce question probabilities. The native runner owns source JIT, shared
-parameter residency, command submission and result lifetime. The source owns
+parameter residency, stage submission and result lifetime. The source owns
 tokenization/task framing, model shapes, pooling, normalization and learned
 heads. It does not require a decode loop, KV reservation or VM process per
 request. The HTTP consumers are [embeddings](../embedding/protocol.h) and
@@ -21,8 +21,10 @@ alongside an image model on the same listener.
 
 `prepare.loom` exports `prepare(asset_root, options)`. Both inputs are owned VM
 byte buffers; `options` contains the catalog's model-owned JSON object. The
-existing `prepare` imports declare command roots, specialization configuration,
-checkpoint domains and preparation policies. The result contains:
+existing `prepare` imports declare command roots with `prepare.stage` or native
+entries with `prepare.dispatch`, plus specialization configuration. Command
+stages can also declare checkpoint domains and preparation policies. The result
+contains:
 
 * A positive additive batch-unit limit.
 * Maximum upload, physical device-output and compact host-feedback byte counts.
@@ -30,9 +32,13 @@ checkpoint domains and preparation policies. The result contains:
 * A nonempty source name and an opaque source state buffer.
 
 Device kernels and command programs come from the ordinary `sources.txt`
-catalog. Every retained stage uses the same fixed parameter layout. The cold
+catalog. Weighted command stages use the same fixed parameter layout. The cold
 loader validates this before sharing checkpoint storage. It indexes weights
 without activating them; admission later streams them into their final storage.
+Direct stages currently accept only input/output buffers, without checkpoint
+domains. Native argument reflection cannot supply checkpoint tensor names,
+placement or lengths; weighted native entries require a source-owned placement
+contract before they can use this loader.
 
 `control.loom` exports three functions, resolved once in one shared VM process:
 
@@ -59,7 +65,7 @@ to collect hypothetical arrivals.
 
 Batch preparation receives LE i64 `[offset, length]` pairs indexing concatenated
 prepared bytes in stable request order. It receives stage tags from cold
-declarations, so command-bucket choice stays in source. A denied residency
+declarations, so stage selection stays in source. A denied residency
 admission retains the prepared cohort without repeating source preparation.
 
 ## Compact results and physical storage
@@ -76,14 +82,20 @@ Rows are contiguous in original request order. Their physical output locations
 can be scattered or reordered. The native model boundary checks this external
 plan once against storage capacities and protocol row counts; the encoder then
 uses trusted row views. Physical output and live feedback extents are separate:
-commands may need padded binding storage without downloading the padding.
+stages may need padded binding storage without downloading the padding.
 
-The current command ABI has two dynamic roots (input/output) and a
-compiler-reflected private workspace. `run` uses the runner's `execute_2` and
-`feedback` imports. Normalization, dimensional projection and other neural math
-execute in kernels. The CPU formats final vectors and computes the decision
-protocol's answer/confidence statistics from final probabilities. Nonfinite values or
-a result width inconsistent with the request are model failures, not an excuse
+Both stage kinds have two dynamic roots (input/output). Commands additionally
+have compiler-reflected private workspace. Direct native entries instead use
+their compiled launch-config companion and HAL logical-parameter reflection,
+submitting through `queue_dispatch` without a command buffer or invented host
+workspace. A resident array program uses this same path; source owns its
+device-local storage. Both kinds use the runner's `execute_2` and `feedback`
+imports with the same model timelines and retirement rules.
+
+Normalization, dimensional projection and other neural math execute in kernels.
+The CPU formats final vectors and computes the decision protocol's
+answer/confidence statistics from final probabilities. Nonfinite values or a
+result width inconsistent with the request are model failures, not an excuse
 for native truncation or normalization.
 
 Input/output roots borrow the device's shared queue pool only while executing.
@@ -115,6 +127,12 @@ admission behind another pinned residency. These are ABI and ownership tests,
 not model-quality or throughput measurements. The decision source fixture adds
 variable question/option counts, exact typed answers and a mixed-model HTTP gate
 through the same service.
+
+The embedding fixture's [direct variant](../models/fixtures/embedding/variants/direct.loom)
+fuses the same ragged computation into one native dispatch on CPU, AMDGPU and
+Vulkan. Its HTTP checks cover compact row ordering, repeated requests,
+cancellation and retirement with one/four workers. This proves the generic
+direct-stage ownership path, not a learned embedding or XDNA execution.
 
 A real embedding port must still supply its source package, checkpoint policy,
 input/task policy, numerical oracle and shape coverage. Target-family selection
