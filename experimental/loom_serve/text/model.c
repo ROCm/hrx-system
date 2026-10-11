@@ -735,6 +735,12 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
           const loom_serve_preparation_stage_t* declaration =
               loom_serve_preparation_stage(model->source.preparation,
                                            load->index++);
+          if (declaration->kind != LOOM_SERVE_PREPARATION_STAGE_COMMAND) {
+            status = iree_make_status(
+                IREE_STATUS_UNIMPLEMENTED,
+                "text stages require command parameter reflection");
+            break;
+          }
           status = loom_serve_jit_compile_async(model->jit, declaration->root,
                                                 &declaration->config,
                                                 text_load_compiled, load);

@@ -7,7 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_LOOM_SERVE_RUNTIME_MODULE_H_
 #define IREE_EXPERIMENTAL_LOOM_SERVE_RUNTIME_MODULE_H_
 
-#include "experimental/loom_serve/runtime/execution.h"
+#include "experimental/loom_serve/runtime/dispatch.h"
 #include "iree/module/hal/types.h"
 #include "iree/vm/module.h"
 #include "loom/target/arch/cmd/program.h"
@@ -18,12 +18,15 @@ extern "C" {
 
 // A prepared stage selected by its index in one model residency.
 typedef struct loom_serve_stage_t {
-  // Reusable commands retained by the module.
+  // Reusable commands retained by the module; NULL for a direct stage.
   iree_hal_command_buffer_t* command_buffer;
   // Exact number of model-provided buffers, excluding private workspace.
   uint16_t binding_count;
   // Compiler-owned private binding, inserted by the runner when nonempty.
   loom_cmd_program_transient_requirement_t transient;
+  // Retained native stage, mutually exclusive with command_buffer. Direct
+  // stages have no compiler-planned global transient workspace.
+  loom_serve_dispatch_t* dispatch;
 } loom_serve_stage_t;
 
 // Cold capabilities shared by every invocation of one model program.

@@ -107,6 +107,14 @@ iree_status_t loom_serve_execution_execute(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t bindings, uint64_t* out_value);
 
+// Enqueues a buffer-only native stage without a command buffer. The executable
+// belongs to the exact dispatch queue family. HAL captures bindings and retains
+// the executable and buffers until terminal completion; no host wait occurs.
+iree_status_t loom_serve_execution_dispatch(
+    loom_serve_execution_t* execution, iree_hal_executable_t* executable,
+    iree_hal_executable_function_t function, iree_hal_dispatch_config_t config,
+    iree_hal_buffer_ref_list_t bindings, uint64_t* out_value);
+
 // Enqueues transfers on the same dependency chain. Host payload memory remains
 // borrowed through completion of the returned value, including error cleanup.
 iree_status_t loom_serve_execution_transfer(

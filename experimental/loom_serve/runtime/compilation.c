@@ -117,7 +117,8 @@ iree_status_t loom_serve_compilation_write(
     loom_output_stream_t* output) {
   const uint64_t count =
       report->severities[0] + report->severities[1] + report->severities[2];
-  if (!count && !report->commands) {
+  if (!count && !report->commands && !report->kernels &&
+      !report->reused_kernels) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(

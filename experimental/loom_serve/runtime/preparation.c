@@ -104,7 +104,8 @@ static iree_status_t preparation_string_argument(
 }
 
 static iree_status_t preparation_add_stage(
-    loom_serve_preparation_t* preparation, const iree_vm_call_packet_t* call) {
+    loom_serve_preparation_t* preparation, const iree_vm_call_packet_t* call,
+    loom_serve_preparation_stage_kind_t kind) {
   iree_string_view_t root = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(preparation_string_argument(call, 0, &root));
   if (!root.size || preparation->stage_count == INT32_MAX) {
@@ -120,6 +121,7 @@ static iree_status_t preparation_add_stage(
   const iree_host_size_t index = preparation->stage_count++;
   preparation_stage_t* stage = &preparation->stages[index];
   *stage = (preparation_stage_t){0};
+  stage->declaration.kind = kind;
   stage->declaration.tag = (int64_t)iree_vm_call_value_argument_load(call, 0);
   stage->declaration.config.flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
   IREE_RETURN_IF_ERROR(preparation_copy_string(root, preparation->allocator,
@@ -158,6 +160,11 @@ static iree_status_t preparation_add_config(
 static iree_status_t preparation_add_parameter(
     loom_serve_preparation_t* preparation, preparation_stage_t* stage,
     const iree_vm_call_packet_t* call) {
+  if (stage->declaration.kind != LOOM_SERVE_PREPARATION_STAGE_COMMAND) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter placement requires a command reflection contract");
+  }
   iree_string_view_t directory = iree_string_view_empty();
   iree_string_view_t path = iree_string_view_empty();
   iree_string_view_t policy = iree_string_view_empty();
@@ -202,8 +209,11 @@ static iree_status_t preparation_module_start(
       ((preparation_module_t*)base)->preparation;
   const iree_vm_call_packet_t* call = &params->call;
   iree_status_t status = iree_ok_status();
-  if (params->function_ordinal == 0) {
-    status = preparation_add_stage(preparation, call);
+  if (params->function_ordinal == 0 || params->function_ordinal == 4) {
+    status = preparation_add_stage(preparation, call,
+                                   params->function_ordinal == 4
+                                       ? LOOM_SERVE_PREPARATION_STAGE_DISPATCH
+                                       : LOOM_SERVE_PREPARATION_STAGE_COMMAND);
   } else {
     const uint32_t index = (uint32_t)iree_vm_call_value_argument_load(call, 0);
     if (index >= preparation->stage_count) {
@@ -274,6 +284,9 @@ static const iree_vm_module_export_declaration_t preparation_exports[] = {
     {.export_name = IREE_SVL("config_i64"),
      .callable_type_ordinal = 1,
      .function_ordinal = 1},
+    {.export_name = IREE_SVL("dispatch"),
+     .callable_type_ordinal = 0,
+     .function_ordinal = 4},
     {.export_name = IREE_SVL("parameter"),
      .callable_type_ordinal = 3,
      .function_ordinal = 3},
@@ -352,9 +365,9 @@ iree_status_t loom_serve_preparation_create(
         .name = IREE_SVL("prepare"),
         .flags = IREE_VM_MODULE_FLAG_LINKABLE,
         .ref_types = {&module->buffer_type, 1},
-        .counts = {.function_count = 4,
+        .counts = {.function_count = 5,
                    .callable_type_count = 4,
-                   .export_count = 4,
+                   .export_count = 5,
                    .callable_fields = {.value_count = 7, .ref_count = 7}},
     };
     if (iree_status_is_ok(status)) {

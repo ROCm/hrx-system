@@ -9,6 +9,7 @@
 
 #include "experimental/loom_serve/runtime/command.h"
 #include "experimental/loom_serve/runtime/compilation.h"
+#include "experimental/loom_serve/runtime/dispatch.h"
 #include "experimental/loom_serve/runtime/host.h"
 #include "loomc/config.h"
 #include "loomc/sanitizer.h"
@@ -73,6 +74,15 @@ iree_status_t loom_serve_jit_compile_async(
     const loomc_config_options_t* config,
     loom_serve_jit_completion_fn_t completion, void* user_data);
 
+// Compiles a kernel root and its zero-argument launch configuration for direct
+// queue submission. Uses the same catalog, exact-input cache, shared workers
+// and completion contract as command compilation. The entry takes only buffer
+// arguments. Model values belong in specialization or device input packets.
+iree_status_t loom_serve_jit_compile_dispatch_async(
+    loom_serve_jit_t* jit, iree_string_view_t root,
+    const loomc_config_options_t* config,
+    loom_serve_jit_completion_fn_t completion, void* user_data);
+
 // Specializes the unique exported definition of a command root and all
 // reachable kernels. Declarations may precede its definition in the source
 // catalog. Missing definitions and duplicate exports fail before compilation.
@@ -88,6 +98,11 @@ iree_status_t loom_serve_jit_compile(loom_serve_jit_t* jit,
                                      loom_serve_jit_stage_t** out_stage);
 void loom_serve_jit_stage_destroy(loom_serve_jit_stage_t* stage);
 const loom_cmd_program_t* loom_serve_jit_stage_program(
+    const loom_serve_jit_stage_t* stage);
+
+// Borrows the direct stage, or NULL for a command stage. Conversely,
+// stage_program returns NULL for a direct stage. Retain before releasing stage.
+loom_serve_dispatch_t* loom_serve_jit_stage_dispatch(
     const loom_serve_jit_stage_t* stage);
 
 // Records the compiled stage after the model has allocated its fixed parameter

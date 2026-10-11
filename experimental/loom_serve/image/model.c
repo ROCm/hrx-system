@@ -796,6 +796,12 @@ iree_status_t loom_serve_image_load_advance(loom_serve_image_load_t* load,
         if (load->index < model->stages.count) {
           const loom_serve_preparation_stage_t* declaration =
               loom_serve_preparation_stage(model->preparation, load->index++);
+          if (declaration->kind != LOOM_SERVE_PREPARATION_STAGE_COMMAND) {
+            status = iree_make_status(
+                IREE_STATUS_UNIMPLEMENTED,
+                "image stages require command parameter reflection");
+            break;
+          }
           iree_slim_mutex_lock(&load->event.mutex);
           load->event.pending = true;
           iree_slim_mutex_unlock(&load->event.mutex);

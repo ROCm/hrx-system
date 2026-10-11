@@ -368,13 +368,24 @@ static iree_status_t finite_check_layouts(loom_serve_finite_model_t* model) {
   const loom_cmd_program_t* canonical =
       loom_serve_jit_stage_program(model->stages.values[0].compiled);
   const iree_host_size_t binding_count = 3;
-  const uint32_t roots = canonical->requirements.fixed_buffer_count;
+  const uint32_t roots =
+      canonical ? canonical->requirements.fixed_buffer_count : 0;
   for (uint32_t i = 0; i < model->stages.count; ++i) {
     const finite_model_stage_t* stage = &model->stages.values[i];
     const loom_cmd_program_t* program =
         loom_serve_jit_stage_program(stage->compiled);
     const loom_serve_preparation_stage_t* declaration =
         loom_serve_preparation_stage(model->preparation, i);
+    if (!program) {
+      if (roots || declaration->parameter_count ||
+          loom_serve_dispatch_binding_count(
+              loom_serve_jit_stage_dispatch(stage->compiled)) != 2) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "direct finite stage requires input and output buffers");
+      }
+      continue;
+    }
     if (program->requirements.rebindable_binding_count != binding_count ||
         program->requirements.transient.binding_index != 2 ||
         program->requirements.fixed_buffer_count != roots ||
@@ -402,7 +413,7 @@ static iree_status_t finite_check_layouts(loom_serve_finite_model_t* model) {
             "stage %u must declare the same ordered checkpoint domains", i);
       }
     }
-    if (!i) {
+    if (!i || !canonical) {
       continue;
     }
     if (canonical->parameters.count != program->parameters.count) {
@@ -458,12 +469,15 @@ static iree_status_t finite_create_control(loom_serve_finite_model_t* model,
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       allocator, model->stages.count, sizeof(*stages), (void**)&stages));
   for (uint32_t i = 0; i < model->stages.count; ++i) {
+    const loom_cmd_program_t* program =
+        loom_serve_jit_stage_program(model->stages.values[i].compiled);
     stages[i] = (loom_serve_stage_t){
         .command_buffer = model->stages.values[i].command,
         .binding_count = 2,
-        .transient =
-            loom_serve_jit_stage_program(model->stages.values[i].compiled)
-                ->requirements.transient,
+        .transient = program ? program->requirements.transient
+                             : (loom_cmd_program_transient_requirement_t){0},
+        .dispatch =
+            loom_serve_jit_stage_dispatch(model->stages.values[i].compiled),
     };
     iree_unaligned_store_le_u64(
         tags.data + i * sizeof(int64_t),
@@ -526,7 +540,7 @@ static iree_status_t finite_model_bind(loom_serve_finite_model_t* model) {
       loom_serve_device_create_execution(model->owner, &model->execution));
   const loom_cmd_program_t* program =
       loom_serve_jit_stage_program(model->stages.values[0].compiled);
-  const uint32_t roots = program->requirements.fixed_buffer_count;
+  const uint32_t roots = program ? program->requirements.fixed_buffer_count : 0;
   if (roots) {
     IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
         allocator, roots, sizeof(*model->weights.values),
@@ -563,9 +577,11 @@ static iree_status_t finite_model_link(
       allocator));
   for (uint32_t i = 0; i < model->stages.count; ++i) {
     finite_model_stage_t* stage = &model->stages.values[i];
-    IREE_RETURN_IF_ERROR(loom_serve_jit_stage_record(
-        stage->compiled, iree_hal_queue_family(dispatch), command_mode,
-        model->weights.values, &stage->command));
+    if (loom_serve_jit_stage_program(stage->compiled)) {
+      IREE_RETURN_IF_ERROR(loom_serve_jit_stage_record(
+          stage->compiled, iree_hal_queue_family(dispatch), command_mode,
+          model->weights.values, &stage->command));
+    }
   }
   // Register maximum cohort geometry without committing any backing. Roots
   // are external byte packets with no stronger alignment promise. The control
@@ -762,9 +778,13 @@ iree_status_t loom_serve_finite_load_advance(
           iree_slim_mutex_lock(&load->event.mutex);
           load->event.pending = true;
           iree_slim_mutex_unlock(&load->event.mutex);
-          status = loom_serve_jit_compile_async(model->jit, declaration->root,
-                                                &declaration->config,
-                                                finite_load_compiled, load);
+          status = declaration->kind == LOOM_SERVE_PREPARATION_STAGE_DISPATCH
+                       ? loom_serve_jit_compile_dispatch_async(
+                             model->jit, declaration->root,
+                             &declaration->config, finite_load_compiled, load)
+                       : loom_serve_jit_compile_async(
+                             model->jit, declaration->root,
+                             &declaration->config, finite_load_compiled, load);
           submitted = iree_status_is_ok(status);
         } else {
           status = finite_model_bind(model);

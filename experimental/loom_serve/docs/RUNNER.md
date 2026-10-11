@@ -79,10 +79,11 @@ math portable. Source decision and weighted embedding fixtures also run on CPU
 and Vulkan, exercising logical-parameter reflection, aligned native storage,
 in-place preparation and HTTP retirement with fixed backing. The image fixture
 runs on AMDGPU and Vulkan; its non-unit workgroups require `kernel.workitem.id`
-lowering before native CPU execution. XDNA reusable-command and file APIs still
-need backend support before this runner can use that path end-to-end. A device
-URI alone cannot supply missing compiler operations, model kernels or native
-capabilities.
+lowering before native CPU execution. Buffer-only native stages can also bypass
+command recording and use `queue_dispatch`, including resident array programs.
+The direct embedding fixture exercises that path on CPU, AMDGPU and Vulkan;
+it is not evidence of a learned model running on XDNA. A device URI alone cannot
+supply missing compiler operations, model kernels or native capabilities.
 
 The default record's workspace retains its already qualified storage source.
 `loom_serve_workspace_create` also accepts a wider explicitly scoped source,
@@ -101,10 +102,12 @@ configuration interface; reusable device helpers still take explicit operands.
 The source JIT shares immutable compiler state and uses the host's loomc task
 sink for concurrent native requests. Each worker owns reusable scratch; stage
 completion retires that stage's work without draining peer compilations.
-Exact native input reuse spans command stages in the same catalog. Cached
-executables belong to its fixed compiler/target/loader domain; recorded commands
-retain independent references. Failed native inputs remain retryable, and warm
-execution performs no cache lookup.
+Exact native input reuse spans command stages in the same catalog. Direct
+stages also cache their linked, specialized native inputs and compiled launch
+contracts. Cached executables belong to the catalog's fixed
+compiler/target/loader domain; prepared stages retain independent references.
+Failed native inputs remain retryable, and warm execution performs no cache
+lookup.
 Dynamic registration uses `loom_serve_jit_compile_async`, keeping routing and
 already-ready models runnable during preparation. Synchronous CLI constructors
 join the same operation only on their outer application thread. Compiler jobs,
@@ -391,13 +394,32 @@ consumption, not by speculative inputs generated after the prompt tail.
 
 ## Queues, failure, and reclaim
 
-`runner.execute_N(i32 stage, N hal.buffer)` selects one retained command by its
-residency-local index and checks its exact binding count. The complete arity
-family through the configured capacity is available even when an optional
+`runner.execute_N(i32 stage, N hal.buffer)` selects one retained command or direct
+dispatch by its residency-local index and checks its exact binding count. The
+complete arity family through the configured capacity is available even when an optional
 source branch has no loaded stages. The native call enqueues and returns an
 accepted submission value; it does not wait for GPU completion or yield the VM.
 That value belongs to one execution object and named timeline, not a global
 event namespace.
+
+Cold source declares a command with `prepare.stage(root, tag)` or a direct
+native entry with `prepare.dispatch(root, tag)`. Both accept the same config
+bindings. A direct stage JITs its executable and launch-config companion from
+one compilation; the zero-argument companion supplies source-specialized
+geometry. HAL reflection maps logical buffer arguments to native binding
+ordinals. Static workgroup size remains in the executable, not an optional
+queue override. No command buffer is created, and no host workspace is
+invented for a resident program's device-local storage. Upload, dispatch and
+feedback use the same execution frontiers and resource-retirement rules as
+command stages.
+
+The finite adapter currently accepts direct stages with exactly two arguments:
+the source-packed input and output buffers. It rejects parameter declarations
+on direct stages because native argument reflection does not describe
+checkpoint tensor names, placement or lengths. Weighted direct stages need
+that source-owned placement contract before they can use the existing shared
+weight residency machinery. Text and image adapters still require command
+reflection and reject direct declarations during preparation.
 
 `runner.feedback(i32 slot, hal.buffer source, i64 offset, i64 length)` downloads
 into host storage registered during model creation. The module copies the span

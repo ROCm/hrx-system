@@ -93,8 +93,12 @@ struct Compilation {
     auto* self = static_cast<Compilation*>(process->user_data);
     loom_serve_execution_release(self->retired_execution);
     self->retired_execution = nullptr;
-    auto status = loom_serve_jit_compile_async(self->jit, self->root,
-                                               self->config, Complete, self);
+    auto status =
+        self->direct_dispatch
+            ? loom_serve_jit_compile_dispatch_async(
+                  self->jit, self->root, self->config, Complete, self)
+            : loom_serve_jit_compile_async(self->jit, self->root, self->config,
+                                           Complete, self);
     if (!iree_status_is_ok(status)) {
       Complete(self, status, nullptr);
     }
@@ -144,6 +148,8 @@ struct Compilation {
   loom_serve_execution_t* retired_execution = nullptr;
   // Exercises worker-side retirement at the actual final compilation callback.
   bool retire_catalog = false;
+  // Requests a native executable instead of a reusable command program.
+  bool direct_dispatch = false;
   // Borrowed source root retained through Await.
   iree_string_view_t root = {};
   // Borrowed specialization retained through Await.
@@ -209,6 +215,9 @@ class JitTest : public ::testing::TestWithParam<int> {
     iree_vm_environment_free(environment_);
     for (auto* command : commands_) {
       iree_hal_command_buffer_release(command);
+    }
+    for (auto* dispatch : dispatches_) {
+      loom_serve_dispatch_release(dispatch);
     }
     iree_hal_buffer_release(buffer_);
     loom_serve_jit_destroy(jit_);
@@ -328,6 +337,8 @@ class JitTest : public ::testing::TestWithParam<int> {
   loom_serve_jit_t* jit_ = nullptr;
   // Independently prepared variants retaining executable ownership.
   std::array<iree_hal_command_buffer_t*, 2> commands_ = {};
+  // Direct stages retaining executables after source/catalog retirement.
+  std::array<loom_serve_dispatch_t*, 2> dispatches_ = {};
   // Compiler requirements retained independently of the stage/compiler.
   std::array<loom_cmd_program_transient_requirement_t, 2> transients_ = {};
   // Device state shared across the variants.
@@ -543,6 +554,68 @@ TEST_P(JitTest, InvalidConfigurationLeavesCompilerReusable) {
   IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Compile("99", 0));
   ASSERT_EQ(commands_[0], nullptr);
   IREE_ASSERT_OK(Compile("3", 0));
+}
+
+TEST_P(JitTest, DirectStagesReuseExactInputsAndOutliveCatalog) {
+  const loomc_config_binding_t binding = {
+      loomc_make_cstring_view("increment.delta"), loomc_make_cstring_view("7")};
+  for (size_t i = 0; i < 3; ++i) {
+    const loomc_config_options_t config = {
+        i == 2 ? &binding : nullptr,
+        i == 2 ? 1u : 0u,
+        {},
+        LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED};
+    Compilation job;
+    job.jit = jit_;
+    job.root = IREE_SV("increment_0");
+    job.config = &config;
+    job.direct_dispatch = true;
+    if (i == 2) {
+      job.retire_catalog = true;
+      jit_ = nullptr;
+    }
+    job.Start(loom_serve_host_executor(loom_serve_device_host(device_owner_)));
+    loom_serve_jit_stage_t* stage = nullptr;
+    IREE_ASSERT_OK(job.Await(&stage));
+    EXPECT_EQ(loom_serve_jit_stage_program(stage), nullptr);
+    auto* dispatch = loom_serve_jit_stage_dispatch(stage);
+    if (i == 1) {
+      EXPECT_EQ(dispatch, dispatches_[0]);
+    } else {
+      dispatches_[i / 2] = dispatch;
+      loom_serve_dispatch_retain(dispatch);
+    }
+    loom_serve_jit_stage_destroy(stage);
+  }
+  EXPECT_EQ(compilation_.commands, 0u);
+  EXPECT_EQ(compilation_.kernels, 2u);
+  EXPECT_EQ(compilation_.reused_kernels, 1u);
+  EXPECT_EQ(compilation_.entries, 3u);
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      loom_serve_device_storage_pool(device_owner_),
+      iree_hal_make_pool_reservation_request(sizeof(input_), 0),
+      iree_infinite_timeout(), &buffer_));
+  iree_hal_transfer_operation_t upload = {};
+  upload.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+  upload.upload = {input_.data(), buffer_, 0, sizeof(input_)};
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_serve_execution_transfer(execution_, 1, &upload, &completion));
+  const iree_hal_buffer_binding_t argument = {buffer_, 0, sizeof(input_)};
+  iree_hal_buffer_ref_t scratch;
+  for (auto* dispatch : dispatches_) {
+    IREE_ASSERT_OK(loom_serve_dispatch_issue(
+        dispatch, execution_, {1, &argument}, &scratch, &completion));
+  }
+  iree_hal_transfer_operation_t download = {};
+  download.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+  download.download = {buffer_, 0, output_.data(), sizeof(output_)};
+  IREE_ASSERT_OK(
+      loom_serve_execution_feedback(execution_, 1, &download, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
+  for (size_t i = 0; i < output_.size(); ++i) {
+    EXPECT_EQ(output_[i], i ? 100 : 112);
+  }
 }
 
 TEST_P(JitTest, InvalidRootLeavesCompilerReusable) {

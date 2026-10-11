@@ -321,8 +321,8 @@ joining accepted work before the host recycles payloads. The
 
 ## Image and audio entry points
 
-The reusable embedding accepts command programs and buffer bindings, not text
-tokens. [`jit_test.cc`](../runtime/jit_test.cc) exercises it without a tokenizer, chat
+The reusable runner accepts command programs or direct native stages and buffer
+bindings, not text tokens. [`jit_test.cc`](../runtime/jit_test.cc) exercises it without a tokenizer, chat
 request, KV cache, or Qwen adapter. That is the smaller starting point for an
 image or audio port. The [Krea image port](../models/krea/README.md) adds
 real checkpoint and adapter evidence: one source-JIT command now composes

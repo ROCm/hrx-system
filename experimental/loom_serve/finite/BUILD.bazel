@@ -58,6 +58,7 @@ loom_cc_library(
     deps = [
         "//experimental/loom_serve/runtime:compilation",
         "//experimental/loom_serve/runtime:device",
+        "//experimental/loom_serve/runtime:dispatch",
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:host",
         "//experimental/loom_serve/runtime:input",

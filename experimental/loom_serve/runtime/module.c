@@ -22,9 +22,9 @@ typedef struct loom_serve_module_t {
   iree_vm_ref_type_t buffer_type;
   // Retained external execution capability, shared with the host's I/O path.
   loom_serve_execution_t* execution;
-  // Number of retained commands, independent of the export arity family.
+  // Number of retained stages, independent of the export arity family.
   iree_host_size_t stage_count;
-  // Owned stage array with retained commands.
+  // Owned stage array with retained command buffers or direct executables.
   loom_serve_stage_t* stages;
   // Copied descriptors borrowing stable host feedback storage.
   iree_byte_span_t* feedback;
@@ -48,6 +48,7 @@ static void loom_serve_module_destroy(iree_vm_module_t* base) {
   if (module->stages) {
     for (iree_host_size_t i = 0; i < module->stage_count; ++i) {
       iree_hal_command_buffer_release(module->stages[i].command_buffer);
+      loom_serve_dispatch_release(module->stages[i].dispatch);
     }
   }
   loom_serve_execution_release(module->execution);
@@ -84,7 +85,7 @@ static iree_status_t loom_serve_module_execute(
     iree_vm_ref_t ref = iree_vm_ref_null();
     iree_vm_call_ref_argument_load_borrow(&params->call, i, &ref);
     // The linked callable signature establishes the exact HAL object type.
-    // Null is a legal VM reference but cannot satisfy a command binding.
+    // Null is a legal VM reference but cannot satisfy a stage binding.
     iree_hal_buffer_t* buffer = (iree_hal_buffer_t*)ref.object;
     if (!buffer) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -110,11 +111,20 @@ static iree_status_t loom_serve_module_execute(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_execution_execute(
-        module->execution, stage->command_buffer,
-        (iree_hal_buffer_binding_table_t){stage->binding_count + has_workspace,
-                                          bindings},
-        out_value);
+    const iree_hal_buffer_binding_table_t table = {
+        stage->binding_count + has_workspace, bindings};
+    if (stage->dispatch) {
+      iree_hal_buffer_ref_t* scratch =
+          (iree_hal_buffer_ref_t*)((uint8_t*)params->execution.process_storage +
+                                   module->descriptor.process_storage_size -
+                                   stage->binding_count *
+                                       sizeof(iree_hal_buffer_ref_t));
+      status = loom_serve_dispatch_issue(stage->dispatch, module->execution,
+                                         table, scratch, out_value);
+    } else {
+      status = loom_serve_execution_execute(
+          module->execution, stage->command_buffer, table, out_value);
+    }
   }
   if (workspace) {
     status = iree_status_join(
@@ -261,7 +271,8 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
                  .callable_type_count = export_count},
   };
   module->descriptor.process_storage_size =
-      (options.binding_capacity + 1) * sizeof(iree_hal_buffer_binding_t);
+      (options.binding_capacity + 1) * sizeof(iree_hal_buffer_binding_t) +
+      options.binding_capacity * sizeof(iree_hal_buffer_ref_t);
   iree_status_t status = iree_allocator_clone(
       host_allocator,
       iree_make_const_byte_span(options.stages.values,
@@ -270,6 +281,7 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < options.stages.count; ++i) {
       iree_hal_command_buffer_retain(module->stages[i].command_buffer);
+      loom_serve_dispatch_retain(module->stages[i].dispatch);
     }
     module->stage_count = options.stages.count;
     status = iree_allocator_malloc(host_allocator, export_count * 16,

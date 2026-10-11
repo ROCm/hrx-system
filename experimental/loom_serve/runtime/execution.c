@@ -268,6 +268,33 @@ iree_status_t loom_serve_execution_execute(
   return status;
 }
 
+iree_status_t loom_serve_execution_dispatch(
+    loom_serve_execution_t* execution, iree_hal_executable_t* executable,
+    iree_hal_executable_function_t function, iree_hal_dispatch_config_t config,
+    iree_hal_buffer_ref_list_t bindings, uint64_t* out_value) {
+  iree_slim_mutex_lock(&execution->mutex);
+  if (execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
+    iree_slim_mutex_unlock(&execution->mutex);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "execution timeline is exhausted");
+  }
+  uint64_t next_value = execution->work.submitted_value + 1;
+  const iree_hal_semaphore_list_t waits = {1, &execution->work.semaphore,
+                                           &execution->work.submitted_value};
+  const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
+                                             &next_value};
+  iree_status_t status = iree_hal_queue_dispatch(
+      execution->dispatch_queue, waits, signals, executable, function, config,
+      iree_const_byte_span_empty(), bindings, NULL,
+      IREE_HAL_DISPATCH_FLAG_NONE);
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = next_value;
+    *out_value = next_value;
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  return status;
+}
+
 iree_status_t loom_serve_execution_transfer(
     loom_serve_execution_t* execution, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations, uint64_t* out_value) {

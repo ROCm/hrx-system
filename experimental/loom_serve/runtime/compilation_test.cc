@@ -28,6 +28,18 @@ std::string Format(const loom_serve_compilation_report_t& report) {
 
 TEST(CompilationTest, EmptyReportHasNoOutput) { EXPECT_EQ(Format({}), ""); }
 
+TEST(CompilationTest, DirectStageWorkHasNoCommandProduct) {
+  EXPECT_EQ(Format({.kernels = 1,
+                    .reused_kernels = 2,
+                    .entries = 3,
+                    .workers = 1,
+                    .duration_ns = 456}),
+            "{\"event\":\"compilation\",\"commands\":0,\"kernels\":1,"
+            "\"reused_kernels\":2,\"entries\":3,\"workers\":1,"
+            "\"duration_ns\":456,\"notes\":0,\"warnings\":0,\"errors\":0,"
+            "\"omitted_diagnostics\":0,\"diagnostics\":[]}\n");
+}
+
 TEST(CompilationTest, OwnedDiagnosticAndWorkHaveExactJson) {
   const loom_serve_compilation_report_t report = {
       .severities = {0, 1, 0},

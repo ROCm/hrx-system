@@ -14,6 +14,8 @@
 #include "iree/base/threading/notification.h"
 #include "iree/io/file_contents.h"
 #include "loomc/iree.h"
+#include "loomc/launch_config.h"
+#include "loomc/link.h"
 #include "loomc/target/cmd/program.h"
 #include "loomc/target/configured.h"
 #include "loomc/target/vm.h"
@@ -42,6 +44,8 @@ typedef struct jit_native_t {
   iree_const_byte_span_t key;
   // Owned successfully loaded executable, or NULL until task completion.
   iree_hal_executable_t* executable;
+  // Retained direct-stage launch and binding contract, or NULL for commands.
+  loom_serve_dispatch_t* dispatch;
   // Number of native roots in request order.
   iree_host_size_t root_count;
   // Executable-local functions in request root order, not parent slot order.
@@ -65,6 +69,8 @@ struct loom_serve_jit_t {
   jit_compiler_t kernel;
   // Frozen source providers, shared across all shape specializations.
   loomc_link_index_t* index;
+  // Immutable linker for direct kernel roots in the shared source catalog.
+  loomc_linker_t* linker;
   // Cold-only native reuse, scoped to this catalog's fixed compiler and loader.
   struct {
     // Stable native entries sorted by their exact keys.
@@ -88,6 +94,8 @@ struct loom_serve_jit_t {
 struct loom_serve_jit_stage_t {
   // Allocation policy used for owned bytes and entry storage.
   iree_allocator_t allocator;
+  // Direct native stage, mutually exclusive with the portable command image.
+  loom_serve_dispatch_t* dispatch;
   // Owned contiguous portable command image.
   iree_const_byte_span_t image;
   // Parsed program borrowing image.
@@ -225,6 +233,7 @@ static iree_status_t jit_initialize_compilation(loom_serve_jit_t* jit,
 
 static void jit_native_destroy(iree_allocator_t allocator,
                                jit_native_t* native) {
+  loom_serve_dispatch_release(native->dispatch);
   iree_hal_executable_release(native->executable);
   iree_allocator_free(allocator, (void*)native->key.data);
   iree_allocator_free(allocator, native);
@@ -258,6 +267,7 @@ void loom_serve_jit_destroy(loom_serve_jit_t* jit) {
   }
   iree_allocator_free(jit->allocator, jit->natives.values);
   loomc_link_index_release(jit->index);
+  loomc_linker_release(jit->linker);
   jit_compiler_deinitialize(&jit->kernel);
   iree_hal_queue_release(jit->dispatch);
   iree_hal_device_release(jit->device);
@@ -302,6 +312,10 @@ iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
   }
   if (iree_status_is_ok(status)) {
     status = jit_index_sources(jit, source_directory);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_status_from_loomc(
+        loomc_linker_create(jit->kernel.context, NULL, ca, &jit->linker));
   }
   if (iree_status_is_ok(status)) {
     status = jit_initialize_compilation(jit, host);
@@ -573,6 +587,7 @@ void loom_serve_jit_stage_destroy(loom_serve_jit_stage_t* stage) {
   if (!stage) {
     return;
   }
+  loom_serve_dispatch_release(stage->dispatch);
   for (iree_host_size_t i = 0; i < stage->entry_count; ++i) {
     iree_hal_executable_release(stage->entries[i].executable);
   }
@@ -597,7 +612,7 @@ static iree_status_t jit_lookup_root(loom_serve_jit_t* jit,
                               LOOMC_LINK_SYMBOL_FLAG_EXPORT)) {
       if (found) {
         return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
-                                "command root @%.*s has multiple exported "
+                                "stage root @%.*s has multiple exported "
                                 "definitions",
                                 (int)root.size, root.data);
       }
@@ -609,7 +624,7 @@ static iree_status_t jit_lookup_root(loom_serve_jit_t* jit,
   }
   if (!found) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "command root @%.*s has no exported definition",
+                            "stage root @%.*s has no exported definition",
                             (int)root.size, root.data);
   }
   return iree_ok_status();
@@ -624,6 +639,10 @@ typedef struct jit_job_t {
   loom_serve_jit_t* jit;
   // Command symbol borrowed through completion.
   iree_string_view_t root;
+  // Selects the native kernel product instead of a portable command product.
+  bool direct_dispatch;
+  // Borrowed cached native contract after successful direct compilation.
+  loom_serve_dispatch_t* dispatch;
   // Specialization bindings borrowed through completion.
   const loomc_config_options_t* config;
   // Completion receiving owned result and status after all requests retire.
@@ -657,6 +676,12 @@ static iree_status_t jit_job_bind(jit_job_t* job,
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(jit->allocator, sizeof(*stage), (void**)&stage));
   stage->allocator = jit->allocator;
+  if (job->direct_dispatch) {
+    stage->dispatch = job->dispatch;
+    loom_serve_dispatch_retain(stage->dispatch);
+    *out_stage = stage;
+    return iree_ok_status();
+  }
   loomc_byte_span_t image;
   iree_status_t status = iree_status_from_loomc(loomc_byte_sequence_clone(
       job->program.artifact.contents, loomc_allocator_from_iree(jit->allocator),
@@ -737,10 +762,11 @@ static void jit_job_release(jit_job_t* job) {
   }
   iree_allocator_free(jit->allocator, job->requirements);
   loomc_product_release(job->product);
-  ++jit->report->commands;
+  jit->report->commands += !job->direct_dispatch;
   jit->report->kernels += job->request_count;
   jit->report->reused_kernels += job->reused_count;
-  jit->report->entries += stage ? stage->entry_count : 0;
+  jit->report->entries +=
+      stage ? (stage->dispatch ? 1 : stage->entry_count) : 0;
   jit->report->workers =
       iree_max(jit->report->workers, jit->compilation.workspace_count);
   jit->report->duration_ns += iree_time_now() - job->start;
@@ -797,12 +823,209 @@ static iree_status_t jit_submit_request(jit_job_t* job,
   return status;
 }
 
+// Cold compiler/HAL boundary: launch facts come from the same compilation as
+// the executable, never from source inspection or an assumed workgroup count.
+static iree_status_t jit_load_dispatch(jit_job_t* job, loomc_module_t* module,
+                                       jit_native_t* native) {
+  loom_serve_jit_t* jit = job->jit;
+  const loomc_allocator_t allocator = loomc_allocator_from_iree(jit->allocator);
+  const loomc_string_view_t root = loomc_string_view_from_iree(job->root);
+  const loomc_emit_options_t emit_options = {
+      .artifact_format = loomc_string_view_from_iree(jit->artifact_format),
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+  };
+  const loomc_compile_artifact_options_t options = {
+      .roots = &root,
+      .root_count = 1,
+      .target_profile = jit->kernel.profile,
+      .config = job->config,
+      .emit_options = &emit_options,
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
+  };
+  loomc_result_t* result = NULL;
+  ++job->request_count;
+  const loomc_status_t operation = loomc_compile_artifact(
+      jit->kernel.compiler, jit->kernel.workspace, jit->kernel.pipeline, module,
+      &options, allocator, &result);
+  loomc_result_retain(result);
+  iree_status_t status =
+      loom_serve_compilation_result(operation, result, jit->report);
+  loomc_launch_config_program_t* launch = NULL;
+  iree_hal_executable_t* executable = NULL;
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < loomc_result_artifact_count(result);
+       ++i) {
+    const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
+    if (artifact->kind == LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG) {
+      status = iree_status_from_loomc(
+          loomc_launch_config_program_load(artifact, allocator, &launch));
+    } else if (artifact->kind == LOOMC_ARTIFACT_KIND_EXECUTABLE) {
+      loomc_byte_span_t image = loomc_byte_span_empty();
+      status = iree_status_from_loomc(
+          loomc_byte_sequence_clone(artifact->contents, allocator, &image));
+      if (iree_status_is_ok(status)) {
+        iree_hal_executable_load_params_t params;
+        iree_hal_executable_load_params_initialize(&params);
+        params.executable_data = iree_const_byte_span_from_loomc(image);
+        status = iree_hal_executable_load(iree_hal_queue_family(jit->dispatch),
+                                          jit->target, &params, &executable);
+      }
+      iree_allocator_free(jit->allocator, (void*)image.data);
+    }
+  }
+  loomc_result_release(result);
+  loomc_launch_config_function_t launch_function =
+      loomc_launch_config_function_invalid();
+  loomc_launch_config_t launch_config = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_status_from_loomc(loomc_launch_config_program_lookup_function(
+        launch, root, &launch_function));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_status_from_loomc(loomc_launch_config_program_invoke(
+        launch, launch_function, NULL, 0, &launch_config));
+  }
+  loomc_launch_config_program_release(launch);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_executable_lookup_function_by_name(executable, job->root,
+                                                         &native->functions[0]);
+  }
+  iree_hal_executable_function_info_t info = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_executable_function_info(executable, native->functions[0],
+                                               &info);
+  }
+  if (iree_status_is_ok(status) &&
+      (launch_config.workgroup_cluster_size.x != 1 ||
+       launch_config.workgroup_cluster_size.y != 1 ||
+       launch_config.workgroup_cluster_size.z != 1)) {
+    status =
+        iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                         "HAL direct stage cannot express clustered launch");
+  }
+  const uint64_t fixed_storage =
+      info.resource_usage.fixed_workgroup_local_memory_size;
+  if (iree_status_is_ok(status) && launch_config.workgroup_storage_bytes &&
+      (!iree_any_bit_set(
+           info.resource_usage.provided_flags,
+           IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_WORKGROUP_LOCAL_MEMORY) ||
+       launch_config.workgroup_storage_bytes < fixed_storage ||
+       launch_config.workgroup_storage_bytes - fixed_storage > UINT32_MAX)) {
+    status = iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "direct stage requires representable reflected local storage");
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_dispatch_config_t config = {
+        .workgroup_count = {launch_config.workgroup_count.x,
+                            launch_config.workgroup_count.y,
+                            launch_config.workgroup_count.z},
+        .dynamic_workgroup_local_memory =
+            launch_config.workgroup_storage_bytes > fixed_storage
+                ? (uint32_t)(launch_config.workgroup_storage_bytes -
+                             fixed_storage)
+                : 0,
+    };
+    // Static geometry is already part of the executable. An explicit override
+    // is a different HAL capability, needed only for dynamic workgroup size.
+    if (iree_any_bit_set(
+            info.flags,
+            IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC)) {
+      config.workgroup_size[0] = launch_config.workgroup_size.x;
+      config.workgroup_size[1] = launch_config.workgroup_size.y;
+      config.workgroup_size[2] = launch_config.workgroup_size.z;
+    }
+    status =
+        loom_serve_dispatch_create(executable, native->functions[0], config,
+                                   &native->dispatch, jit->allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    native->executable = executable;
+  } else {
+    iree_hal_executable_release(executable);
+  }
+  return status;
+}
+
+static iree_status_t jit_compile_dispatch(jit_job_t* job) {
+  loom_serve_jit_t* jit = job->jit;
+  const loomc_allocator_t allocator = loomc_allocator_from_iree(jit->allocator);
+  const loomc_string_view_t root = loomc_string_view_from_iree(job->root);
+  const loomc_target_specialization_t specialization = {
+      .function_symbol = root,
+      .target_profile = jit->kernel.profile,
+  };
+  const loomc_target_specialization_options_t targets = {
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      .specializations = &specialization,
+      .specialization_count = 1,
+  };
+  const loomc_link_options_t options = {
+      .next = &targets,
+      .link_index = jit->index,
+      .mode = LOOMC_LINK_MODE_LINK,
+      .root_symbols = &root,
+      .root_symbol_count = 1,
+      .config = *job->config,
+  };
+  loomc_module_t* module = NULL;
+  loomc_result_t* result = NULL;
+  const loomc_status_t operation = loomc_link_module(
+      jit->linker, jit->kernel.workspace, &options, &module, &result);
+  iree_status_t status =
+      loom_serve_compilation_result(operation, result, jit->report);
+  loomc_source_t* source = NULL;
+  const loomc_module_serialize_options_t serialize = {
+      .format = LOOMC_SOURCE_FORMAT_BYTECODE,
+  };
+  if (iree_status_is_ok(status)) {
+    status = iree_status_from_loomc(loomc_module_serialize_to_source(
+        module, &serialize, allocator, &source));
+  }
+  iree_string_builder_t key;
+  iree_string_builder_initialize(jit->allocator, &key);
+  if (iree_status_is_ok(status)) {
+    // Native-root keys have a distinct product domain from command requests.
+    const uintptr_t descriptor = 0;
+    const loomc_byte_span_t bytes = loomc_source_contents(source);
+    status = jit_key_append(&key, &descriptor, sizeof(descriptor));
+    if (iree_status_is_ok(status)) {
+      status = jit_key_append(&key, bytes.data, bytes.data_length);
+    }
+    if (iree_status_is_ok(status)) {
+      status = jit_key_append(&key, root.data, root.size);
+    }
+  }
+  jit_native_t* native = NULL;
+  bool created = false;
+  if (iree_status_is_ok(status)) {
+    status = jit_acquire_native(jit, &key, 1, &native, &created);
+  }
+  iree_string_builder_deinitialize(&key);
+  loomc_source_release(source);
+  if (iree_status_is_ok(status) && created) {
+    status = jit_load_dispatch(job, module, native);
+  } else if (iree_status_is_ok(status)) {
+    ++job->reused_count;
+  }
+  if (iree_status_is_ok(status)) {
+    job->dispatch = native->dispatch;
+  }
+  loomc_module_release(module);
+  return status;
+}
+
 static void jit_job_execute(loomc_task_t* base,
                             loomc_host_size_t worker_ordinal) {
   jit_job_t* job = (jit_job_t*)base;
   loom_serve_jit_t* jit = job->jit;
   loomc_host_size_t root_ordinal = 0;
   iree_status_t status = jit_lookup_root(jit, job->root, &root_ordinal);
+  if (job->direct_dispatch) {
+    job->status =
+        iree_status_is_ok(status) ? jit_compile_dispatch(job) : status;
+    return;
+  }
   if (iree_status_is_ok(status)) {
     const loomc_cmd_program_product_options_t options = {
         .link_index = jit->index,
@@ -858,10 +1081,11 @@ static const loomc_task_vtable_t jit_job_vtable = {
     .destroy = jit_job_destroy,
 };
 
-iree_status_t loom_serve_jit_compile_async(
-    loom_serve_jit_t* jit, iree_string_view_t root,
-    const loomc_config_options_t* config,
-    loom_serve_jit_completion_fn_t completion, void* user_data) {
+static iree_status_t jit_enqueue(loom_serve_jit_t* jit, iree_string_view_t root,
+                                 const loomc_config_options_t* config,
+                                 bool direct_dispatch,
+                                 loom_serve_jit_completion_fn_t completion,
+                                 void* user_data) {
   jit_job_t* job = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(jit->allocator, sizeof(*job), (void**)&job));
@@ -869,6 +1093,7 @@ iree_status_t loom_serve_jit_compile_async(
   iree_atomic_ref_count_init(&job->ref_count);
   job->jit = jit;
   job->root = root;
+  job->direct_dispatch = direct_dispatch;
   job->config = config;
   job->completion = completion;
   job->user_data = user_data;
@@ -882,6 +1107,20 @@ iree_status_t loom_serve_jit_compile_async(
     iree_allocator_free(jit->allocator, job);
   }
   return status;
+}
+
+iree_status_t loom_serve_jit_compile_async(
+    loom_serve_jit_t* jit, iree_string_view_t root,
+    const loomc_config_options_t* config,
+    loom_serve_jit_completion_fn_t completion, void* user_data) {
+  return jit_enqueue(jit, root, config, false, completion, user_data);
+}
+
+iree_status_t loom_serve_jit_compile_dispatch_async(
+    loom_serve_jit_t* jit, iree_string_view_t root,
+    const loomc_config_options_t* config,
+    loom_serve_jit_completion_fn_t completion, void* user_data) {
+  return jit_enqueue(jit, root, config, true, completion, user_data);
 }
 
 typedef struct jit_join_t {
@@ -939,7 +1178,12 @@ iree_status_t loom_serve_jit_compile(loom_serve_jit_t* jit,
 
 const loom_cmd_program_t* loom_serve_jit_stage_program(
     const loom_serve_jit_stage_t* stage) {
-  return &stage->program;
+  return stage->dispatch ? NULL : &stage->program;
+}
+
+loom_serve_dispatch_t* loom_serve_jit_stage_dispatch(
+    const loom_serve_jit_stage_t* stage) {
+  return stage->dispatch;
 }
 
 iree_status_t loom_serve_jit_stage_record(

@@ -175,6 +175,20 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    dispatch
+  HDRS
+    "dispatch.h"
+  SRCS
+    "dispatch.c"
+  DEPS
+    ::execution
+    iree::base
+    iree::hal
+  PUBLIC
+)
+
 if(IREE_HAL_DRIVER_TASK)
 loom_cc_test(
   NAME
@@ -303,6 +317,7 @@ loom_cc_library(
   SRCS
     "module.c"
   DEPS
+    ::dispatch
     ::execution
     iree::base
     iree::hal
@@ -377,6 +392,7 @@ loom_cc_library(
   DEPS
     ::command
     ::compilation
+    ::dispatch
     ::host
     ::target
     iree::base

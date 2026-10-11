@@ -42,6 +42,7 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/tokenizer.json"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/direct.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/policy.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/weights.loom"
   DEPS
@@ -91,6 +92,7 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/tokenizer.json"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/direct.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/policy.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/weights.loom"
   DEPS
@@ -141,6 +143,7 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/tokenizer.json"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/direct.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/policy.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/weights.loom"
   DEPS

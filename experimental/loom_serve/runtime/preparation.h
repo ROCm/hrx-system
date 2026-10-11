@@ -27,10 +27,18 @@ typedef struct loom_serve_preparation_parameter_t {
   iree_string_view_t policy;
 } loom_serve_preparation_parameter_t;
 
+// Compiler product selected by the model's cold source program.
+typedef enum loom_serve_preparation_stage_kind_e {
+  LOOM_SERVE_PREPARATION_STAGE_COMMAND = 0,
+  LOOM_SERVE_PREPARATION_STAGE_DISPATCH = 1,
+} loom_serve_preparation_stage_kind_t;
+
 // Immutable stage declaration produced by a model's cold source program.
 typedef struct loom_serve_preparation_stage_t {
-  // Exported command root in the model source catalog.
+  // Exported command or kernel root in the model source catalog.
   iree_string_view_t root;
+  // Product contract selected explicitly by stage or dispatch registration.
+  loom_serve_preparation_stage_kind_t kind;
   // Model-defined selection tag. The preparation service does not interpret it.
   int64_t tag;
   // Owned compiler bindings; compilation requires all configuration resolved.
@@ -47,6 +55,7 @@ typedef struct loom_serve_preparation_t loom_serve_preparation_t;
 // Invokes |entry| from |source_path| once with borrowed |arguments|. The source
 // imports runner-private "prepare" capabilities:
 //   stage(buffer root, i64 tag) -> i32 stage
+//   dispatch(buffer root, i64 tag) -> i32 stage
 //   config(i32 stage, buffer key, buffer value)
 //   config_i64(i32 stage, buffer key, i64 value)
 //   parameter(i32 stage, i32 binding, buffer directory, buffer path,
@@ -58,7 +67,9 @@ typedef struct loom_serve_preparation_t loom_serve_preparation_t;
 // Additional caller libraries are linked beside the prepare module. Results
 // are ordinary VM variants owned by the caller; the environment must outlive
 // any returned references. The source program is destroyed before return.
-// No JIT command compilation, device allocation or parameter IO occurs here.
+// dispatch declares a buffer-only kernel with a source-specialized launch
+// configuration. stage declares a command program with parameter reflection.
+// No device compilation, allocation or parameter IO occurs here.
 // On failure all partial declarations are released and *out_preparation is
 // NULL.
 // report receives copied compiler diagnostics independently of this outcome.

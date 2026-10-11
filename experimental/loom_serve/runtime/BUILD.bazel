@@ -160,6 +160,17 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "dispatch",
+    srcs = ["dispatch.c"],
+    hdrs = ["dispatch.h"],
+    deps = [
+        ":execution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
 loom_cc_test(
     name = "workspace_test",
     srcs = ["workspace_test.cc"],
@@ -274,6 +285,7 @@ loom_cc_library(
     srcs = ["module.c"],
     hdrs = ["module.h"],
     deps = [
+        ":dispatch",
         ":execution",
         "//loom/src/loom/target/arch/cmd:program",
         "//runtime/src/iree/base",
@@ -335,6 +347,7 @@ loom_cc_library(
     deps = [
         ":command",
         ":compilation",
+        ":dispatch",
         ":host",
         ":target",
         "//loom/binding/c:loomc",

@@ -335,10 +335,10 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
       clients[i] = Send(bodies[i]);
       connections[i] = Accept();
     }
-    EXPECT_TRUE(Step());  // CPU request preparation.
-    EXPECT_TRUE(Step());  // Source batch preparation.
-    EXPECT_TRUE(Step());  // Accepted device work and its actual readiness.
-    EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "running");
+    ASSERT_TRUE(Step());  // CPU request preparation.
+    ASSERT_TRUE(Step());  // Source batch preparation.
+    ASSERT_TRUE(Step());  // Accepted device work and its actual readiness.
+    ASSERT_STREQ(interface_.snapshot(interface_.self).phase, "running");
 
     if (!iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
       for (size_t i = 0; i < IREE_ARRAYSIZE(clients); ++i) {
@@ -513,6 +513,48 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
     weights.write(reinterpret_cast<const char*>(factor), sizeof(factor));
     weights.close();
     ASSERT_TRUE(weights.good());
+  }
+
+  // Replace the command package with a native kernel package while retaining
+  // the same source request packing, output encoding and device owner.
+  void UseDirectPackage() {
+    const std::string target =
+        iree::testing::MakeTempFilePath("direct_embedding");
+    ASSERT_TRUE(std::filesystem::create_directory(target));
+    for (const char* file : {"config.loom", "control.loom", "tokenizer.json"}) {
+      ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/" + file,
+                                             target + "/" + file));
+    }
+    ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/variants/direct.loom",
+                                           target + "/direct.loom"));
+    std::ifstream input(directory_ + "/prepare.loom");
+    ASSERT_TRUE(input.good());
+    std::string prepare((std::istreambuf_iterator<char>(input)), {});
+    const std::string root = "bytes(\"656d626564\")";
+    const auto root_position = prepare.find(root);
+    ASSERT_NE(root_position, std::string::npos);
+    prepare.replace(root_position, root.size(),
+                    "bytes(\"7265736964656e745f656d626564\")");
+    size_t position = 0;
+    while ((position = prepare.find("@stage(", position)) !=
+           std::string::npos) {
+      prepare.replace(position, 7, "@dispatch(");
+      position += 10;
+    }
+    std::ofstream bootstrap(target + "/prepare.loom");
+    bootstrap << prepare;
+    bootstrap.close();
+    ASSERT_TRUE(bootstrap.good());
+    std::ofstream manifest(target + "/sources.txt");
+    manifest << "config.loom\ndirect.loom\n";
+    manifest.close();
+    ASSERT_TRUE(manifest.good());
+    interface_.set_observer(interface_.self, {});
+    loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
+    IREE_ASSERT_OK(
+        loom_serve_finite_model_destroy(std::exchange(model_, nullptr)));
+    ASSERT_NO_FATAL_FAILURE(CreateModel(target));
+    ASSERT_NO_FATAL_FAILURE(CreateService(0));
   }
 
   // Host allocator used by all production owners.
@@ -896,6 +938,31 @@ TEST_P(SourceEmbeddingServiceTest,
 }
 
 TEST_P(SourceEmbeddingServiceTest, CancelledDeviceCohortSkipsEncoding) {
+  CheckAbandonedCohort(0);
+}
+
+TEST_P(SourceEmbeddingServiceTest, DirectDispatchReturnsCompactRaggedVectors) {
+  ASSERT_NO_FATAL_FAILURE(UseDirectPackage());
+  const int a = Send(R"({"model":"fixture","input":["a","bbb"]})");
+  Accept();
+  const int b = Send(R"({"model":"fixture","input":[[2,0]],"dimensions":2})");
+  Accept();
+  Drain();
+  const std::string first = Read(a);
+  EXPECT_EQ(first.find("HTTP/1.1 200"), 0u);
+  EXPECT_NE(first.find(R"("index":0,"embedding":[1,1,1,3])"),
+            std::string::npos);
+  EXPECT_NE(first.find(R"("index":1,"embedding":[6,3,2,3])"),
+            std::string::npos);
+  EXPECT_NE(Read(b).find(R"("embedding":[4,2])"), std::string::npos);
+  const int next = Send(R"({"model":"fixture","input":[1]})");
+  Accept();
+  Drain();
+  EXPECT_NE(Read(next).find(R"("embedding":[2,1,2,1])"), std::string::npos);
+}
+
+TEST_P(SourceEmbeddingServiceTest, DirectDispatchRetiresCancelledCohort) {
+  ASSERT_NO_FATAL_FAILURE(UseDirectPackage());
   CheckAbandonedCohort(0);
 }
 

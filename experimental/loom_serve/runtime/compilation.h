@@ -57,16 +57,16 @@ typedef struct loom_serve_compilation_report_t {
   loom_serve_compilation_diagnostic_t diagnostics[8];
   // Completed command compilation attempts, including failures.
   uint64_t commands;
-  // Native kernel tasks accepted by those command compilations, excluding
-  // reuse.
+  // Native compilations accepted directly or by command products, excluding
+  // exact-input reuse.
   uint64_t kernels;
   // Requests reusing an exact native input within the same JIT catalog.
   uint64_t reused_kernels;
-  // Successfully bound command executable entries.
+  // Successfully bound native entries across both stage kinds.
   uint64_t entries;
-  // Largest shared compiler worker pool used by a command attempt.
+  // Largest shared compiler worker pool used by a stage attempt.
   uint64_t workers;
-  // Sum of command-attempt wall durations, not CPU or device execution time.
+  // Sum of stage-attempt wall durations, not CPU or device execution time.
   uint64_t duration_ns;
 } loom_serve_compilation_report_t;
 

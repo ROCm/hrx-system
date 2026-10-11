@@ -38,6 +38,7 @@ filegroup(
         ] + filters,
         data = [
             "prepare.loom",
+            "variants/direct.loom",
             "variants/policy.loom",
             "variants/weights.loom",
             ":sources",

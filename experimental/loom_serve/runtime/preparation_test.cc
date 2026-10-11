@@ -45,7 +45,24 @@ TEST_F(PreparationTest, TextConfigurationCopiesValueSpelling) {
       iree_vm_variant_span_empty(), iree_vm_module_span_empty(), &compilation,
       &preparation, allocator));
   const auto* stage = loom_serve_preparation_stage(preparation, 0);
+  EXPECT_EQ(stage->kind, LOOM_SERVE_PREPARATION_STAGE_COMMAND);
   ASSERT_EQ(stage->config.binding_count, 1);
+  const auto& value = stage->config.bindings[0].value;
+  EXPECT_EQ(std::string(value.data, value.size), "true");
+}
+
+TEST_F(PreparationTest, DirectDeclarationRetainsProductAndSpecialization) {
+  IREE_ASSERT_OK(loom_serve_preparation_create(
+      environment, iree_make_cstring_view(FLAG_boundary_source),
+      IREE_SV("direct_config"), iree_vm_variant_span_empty(),
+      iree_vm_variant_span_empty(), iree_vm_module_span_empty(), &compilation,
+      &preparation, allocator));
+  ASSERT_EQ(loom_serve_preparation_stage_count(preparation), 1u);
+  const auto* stage = loom_serve_preparation_stage(preparation, 0);
+  EXPECT_EQ(stage->kind, LOOM_SERVE_PREPARATION_STAGE_DISPATCH);
+  EXPECT_EQ(stage->tag, 17);
+  EXPECT_EQ(std::string(stage->root.data, stage->root.size), "stage_root");
+  ASSERT_EQ(stage->config.binding_count, 1u);
   const auto& value = stage->config.bindings[0].value;
   EXPECT_EQ(std::string(value.data, value.size), "true");
 }
@@ -103,6 +120,7 @@ TEST_F(PreparationTest, InvalidDeclarationsReleasePartialOwnership) {
   };
   const Case cases[] = {{"missing_stage", IREE_STATUS_OUT_OF_RANGE},
                         {"duplicate_parameter", IREE_STATUS_ALREADY_EXISTS},
+                        {"direct_parameter", IREE_STATUS_INVALID_ARGUMENT},
                         {"no_stages", IREE_STATUS_INVALID_ARGUMENT}};
   for (const auto& test : cases) {
     SCOPED_TRACE(test.entry);
