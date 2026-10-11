@@ -128,6 +128,23 @@ loom_serve_memory_statistics_t loom_serve_residency_statistics(
 loom_serve_weight_activity_t loom_serve_residency_activity(
     const loom_serve_residency_t* residency);
 
+// Copied on the serialized owner. Active means activation was enqueued, not
+// that its device timeline has completed. Fixed backing has no virtual-pool
+// accounting; its zero memory fields do not describe actual physical usage.
+typedef struct loom_serve_residency_snapshot_t {
+  // Every parameter plan has enqueued activation on the model timeline.
+  bool active;
+  // Physical parameter backing can be reclaimed without destroying the model.
+  bool elastic;
+  // Parameter-only virtual accounting, available only with elastic backing.
+  loom_serve_memory_statistics_t memory;
+  // Cumulative activation and preparation work, independent of current backing.
+  loom_serve_weight_activity_t activity;
+} loom_serve_residency_snapshot_t;
+
+loom_serve_residency_snapshot_t loom_serve_residency_snapshot(
+    const loom_serve_residency_t* residency);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

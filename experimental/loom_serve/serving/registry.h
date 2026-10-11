@@ -9,6 +9,7 @@
 
 #include "experimental/loom_serve/http/service.h"
 #include "experimental/loom_serve/runtime/compilation.h"
+#include "experimental/loom_serve/runtime/residency.h"
 #include "experimental/loom_serve/serving/configuration.h"
 
 #ifdef __cplusplus
@@ -34,6 +35,14 @@ typedef struct loom_serve_registration_t {
   // Terminal success releases all model resources. Terminal failure retains
   // quiescent ownership for an explicit retry; no callback remains on failure.
   iree_status_t (*retire)(void* self, bool* out_complete);
+  // Optional copied parameter state, queried only after successful prepare and
+  // before retire. The adapter owns its actual parameter groups; neither the
+  // registry nor the HTTP client gains a borrowed model or pool handle.
+  loom_serve_residency_snapshot_t (*parameters)(void* self);
+  // Releases reloadable parameter storage after admitted service activity has
+  // retired. Preserves programs and mutable state. Paired with parameters and
+  // called only when its snapshot reports elastic backing. No execution wait.
+  iree_status_t (*deactivate)(void* self);
   // Frees the operation after successful retirement; no model resources remain.
   void (*destroy)(void* self);
 } loom_serve_registration_t;
@@ -87,6 +96,9 @@ typedef struct loom_serve_registered_model_t {
   loom_serve_removal_t removal;
   // Reversible admission gate, not a residency or cancellation flag.
   bool closed;
+  // Accepted parameter deactivation waiting for this service's admitted work.
+  // Independent of the initiating connection; terminal removal supersedes it.
+  bool deactivating;
   // Requests parked outside service admission on transport-owned storage.
   iree_host_size_t held_count;
   // Independent tokenizer processes still borrowing the model.
@@ -141,6 +153,15 @@ iree_status_t loom_serve_registry_register(
 // release-failure retry.
 iree_status_t loom_serve_registry_remove(loom_serve_registered_model_t* model,
                                          loom_serve_removal_t mode);
+
+// Requests parameter deactivation while preserving the prepared model and its
+// retained sessions/checkpoints. Requires closed admission and a healthy ready
+// elastic residency; an unprepared metadata-only registration is already cold.
+// Repeated requests are idempotent. Advance completes after admitted work,
+// without waiting for live device work or unrelated services. Physical unmap
+// and free remain native synchronous capacity transitions on that owner.
+iree_status_t loom_serve_registry_deactivate(
+    loom_serve_registered_model_t* model);
 
 // Returns STOPPING only for abort or after graceful admitted work has finished.
 // The router still owns held claims and external tokenizer lifetimes.

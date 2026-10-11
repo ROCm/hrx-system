@@ -105,6 +105,19 @@ static void finite_registration_destroy(void* self) {
   iree_allocator_free(registration->allocator, registration);
 }
 
+static loom_serve_residency_snapshot_t finite_registration_parameters(
+    void* self) {
+  finite_registration_t* registration = self;
+  return loom_serve_residency_snapshot(
+      loom_serve_finite_model_residency(registration->model));
+}
+
+static iree_status_t finite_registration_deactivate(void* self) {
+  finite_registration_t* registration = self;
+  return loom_serve_residency_deactivate(
+      loom_serve_finite_model_residency(registration->model));
+}
+
 static iree_status_t finite_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
     loom_serve_http_observer_t observer, loom_serve_telemetry_stream_t* stream,
@@ -126,11 +139,13 @@ static iree_status_t finite_registration_create(
       options->device, &model_options, observer.wake, observer.user_data,
       &registration->load, allocator);
   if (iree_status_is_ok(status)) {
-    *out_registration =
-        (loom_serve_registration_t){.self = registration,
-                                    .prepare = finite_registration_prepare,
-                                    .retire = finite_registration_retire,
-                                    .destroy = finite_registration_destroy};
+    *out_registration = (loom_serve_registration_t){
+        .self = registration,
+        .prepare = finite_registration_prepare,
+        .retire = finite_registration_retire,
+        .parameters = finite_registration_parameters,
+        .deactivate = finite_registration_deactivate,
+        .destroy = finite_registration_destroy};
   } else {
     iree_allocator_free(allocator, registration);
   }
@@ -228,6 +243,18 @@ static void image_registration_destroy(void* self) {
   iree_allocator_free(registration->allocator, registration);
 }
 
+static loom_serve_residency_snapshot_t image_registration_parameters(
+    void* self) {
+  image_registration_t* registration = self;
+  return loom_serve_residency_snapshot(
+      loom_serve_image_model_residency(registration->model));
+}
+
+static iree_status_t image_registration_deactivate(void* self) {
+  image_registration_t* registration = self;
+  return loom_serve_image_model_deactivate(registration->model);
+}
+
 static iree_status_t image_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
     loom_serve_http_observer_t observer, loom_serve_telemetry_stream_t* stream,
@@ -256,6 +283,8 @@ static iree_status_t image_registration_create(
         (loom_serve_registration_t){.self = registration,
                                     .prepare = image_registration_prepare,
                                     .retire = image_registration_retire,
+                                    .parameters = image_registration_parameters,
+                                    .deactivate = image_registration_deactivate,
                                     .destroy = image_registration_destroy};
   } else {
     iree_allocator_free(allocator, registration);
@@ -353,6 +382,18 @@ static void text_registration_destroy(void* self) {
   iree_allocator_free(registration->allocator, registration);
 }
 
+static loom_serve_residency_snapshot_t text_registration_parameters(
+    void* self) {
+  text_registration_t* registration = self;
+  return loom_serve_residency_snapshot(
+      loom_serve_text_model_residency(registration->model));
+}
+
+static iree_status_t text_registration_deactivate(void* self) {
+  text_registration_t* registration = self;
+  return loom_serve_text_model_deactivate(registration->model);
+}
+
 static iree_status_t text_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
     loom_serve_http_observer_t observer, loom_serve_telemetry_stream_t* stream,
@@ -394,6 +435,8 @@ static iree_status_t text_registration_create(
         (loom_serve_registration_t){.self = registration,
                                     .prepare = text_registration_prepare,
                                     .retire = text_registration_retire,
+                                    .parameters = text_registration_parameters,
+                                    .deactivate = text_registration_deactivate,
                                     .destroy = text_registration_destroy};
   } else {
     iree_allocator_free(allocator, registration);

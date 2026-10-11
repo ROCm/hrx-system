@@ -408,6 +408,26 @@ static loom_serve_http_service_snapshot_t router_snapshot(
                    .phase = loom_serve_registry_phase(model)};
 }
 
+static iree_status_t router_describe_parameters(
+    const loom_serve_registered_model_t* model, iree_string_builder_t* output) {
+  const loom_serve_residency_snapshot_t state =
+      model->registration.parameters(model->registration.self);
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      output,
+      ",\"parameters\":{\"active\":%s,\"backing\":\"%s\","
+      "\"deactivating\":%s,\"activations\":%" PRIu64
+      ",\"deactivations\":%" PRIu64,
+      state.active ? "true" : "false", state.elastic ? "elastic" : "fixed",
+      model->deactivating ? "true" : "false", state.activity.activations,
+      state.activity.deactivations));
+  if (state.elastic) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output, ",\"reserved_bytes\":%" PRIu64 ",\"committed_bytes\":%" PRIu64,
+        state.memory.reserved_bytes, state.memory.committed_bytes));
+  }
+  return iree_string_builder_append_cstring(output, "}");
+}
+
 static iree_status_t router_describe_service(
     const loom_serve_registered_model_t* admission, bool include_status,
     iree_string_builder_t* output) {
@@ -448,6 +468,10 @@ static iree_status_t router_describe_service(
     }
   }
   if (include_status) {
+    if (admission->phase == LOOM_SERVE_REGISTRATION_READY &&
+        admission->registration.parameters) {
+      IREE_RETURN_IF_ERROR(router_describe_parameters(admission, output));
+    }
     const loom_serve_http_service_snapshot_t state = router_snapshot(admission);
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(output, ",\"status\":{\"phase\":"));
@@ -813,7 +837,7 @@ static void router_held_collect(router_t* router, bool* out_progress) {
               state->removal ? "Gone" : "Service Unavailable",
               state->removal
                   ? IREE_SV("model is being unregistered")
-                  : IREE_SV("model preparation failed; inspect /v1/status"),
+                  : IREE_SV("model is unavailable; inspect /v1/status"),
               &router->output));
       router->stopping |= !iree_status_is_ok(router->status);
     } else if (!state->closed &&
@@ -979,6 +1003,8 @@ static iree_status_t router_accept(router_t* router,
       iree_string_view_equal(request->target, IREE_SV("/v1/models/undrain"));
   const bool unregister =
       iree_string_view_equal(request->target, IREE_SV("/v1/models/unregister"));
+  const bool deactivate =
+      iree_string_view_equal(request->target, IREE_SV("/v1/models/deactivate"));
   const bool post = iree_string_view_equal(request->method, IREE_SV("POST"));
   if ((!checkpoint && !post) ||
       (checkpoint && !post &&
@@ -1010,8 +1036,9 @@ static iree_status_t router_accept(router_t* router,
       }
     }
   } else {
-    iree_status_t status = router_model(request, drain || undrain || unregister,
-                                        unregister ? &removal : NULL, output);
+    iree_status_t status =
+        router_model(request, drain || undrain || unregister || deactivate,
+                     unregister ? &removal : NULL, output);
     if (!iree_status_is_ok(status)) {
       if (!iree_status_is_invalid_argument(status) &&
           !iree_status_is_out_of_range(status)) {
@@ -1037,7 +1064,19 @@ static iree_status_t router_accept(router_t* router,
         }
         return router_control(router, i, connection, 202);
       }
+      if (deactivate) {
+        iree_status_t status = loom_serve_registry_deactivate(state);
+        if (!iree_status_is_ok(status)) {
+          return router_management_error(router, connection, status);
+        }
+        return router_control(router, i, connection, 202);
+      }
       if (drain || undrain) {
+        if (undrain && state->deactivating) {
+          return router_reject(
+              router, connection, 409, "Conflict",
+              IREE_SV("parameter deactivation is still pending"), output);
+        }
         if (state->removal || (undrain && !iree_status_is_ok(state->status))) {
           return router_reject(
               router, connection, 409, "Conflict",
@@ -1054,7 +1093,7 @@ static iree_status_t router_accept(router_t* router,
       if (!iree_status_is_ok(state->status)) {
         return router_reject(
             router, connection, 503, "Service Unavailable",
-            IREE_SV("model preparation failed; inspect /v1/status"), output);
+            IREE_SV("model is unavailable; inspect /v1/status"), output);
       }
       if (state->closed || state->held_count ||
           state->phase != LOOM_SERVE_REGISTRATION_READY) {

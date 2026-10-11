@@ -252,6 +252,45 @@ It does not freeze background maintenance or make model storage safe to destroy;
 retirement must also join accepted CPU/device borrowers. Unregister is the
 separate irreversible operation; drain alone never deletes retained state.
 
+## Releasing idle parameters
+
+`POST /v1/models/deactivate` accepts exactly `{"model":"name"}` after
+admission is closed. Its 202 response accepts a registration-owned operation:
+already-admitted inference finishes, then reloadable parameter backing is
+released. Losing the control connection does not cancel the operation. Programs,
+tokenizers, session identities, KV/recurrent state and pinned checkpoints remain
+owned by the same model incarnation. This is not full model unloading.
+
+~~~sh
+curl http://127.0.0.1:8080/v1/models/drain \
+  -H 'Content-Type: application/json' -d '{"model":"scout"}'
+curl http://127.0.0.1:8080/v1/models/deactivate \
+  -H 'Content-Type: application/json' -d '{"model":"scout"}'
+curl http://127.0.0.1:8080/v1/status
+~~~
+
+The selected model's `loom.parameters.deactivating` becomes false when the
+operation finishes. On success, `active` is false and `committed_bytes` is zero;
+its parameter address reservation remains intact. Requests arriving behind the
+drain stay held. Once deactivation finishes, undrain opens admission and the next
+inference activates weights on its ordinary device timeline, without recompiling
+programs or re-registering the model. Undrain alone does not load weights.
+
+Deactivation requires elastic backing. Fixed-backed prepared models, open
+admission, preparing/failed/removing registrations, and borrowed services return
+409 without a partial operation. A drained metadata-only registration is already
+cold and succeeds without constructing a model. Repeating deactivation is
+idempotent; undrain during a pending deactivation returns 409. Unregister
+supersedes pending deactivation and follows its selected drain/abort policy.
+An actual parameter-release failure leaves admission closed with `loom.error`
+available for inspection; explicit unregister owns subsequent cleanup.
+
+This control waits for model work by advancing the shared task-driven service,
+not by blocking a task worker on device completion. Physical slab unmap/free
+calls are synchronous cold capacity transitions on the owner, so releasing a
+large model can still incur native allocation-management latency. The operation
+does not imply a zero-cost swap or release of retained session memory.
+
 ## Requests and retained state
 
 `POST /tokenize` and `POST /detokenize` use a deployment's already loaded input
@@ -403,7 +442,18 @@ Snapshots neither activate a model nor wait for CPU/device completion, and
 transport copies the response so a slow status peer retains no model buffers.
 Unmeasured device times and whole-device memory totals are not reported as zero.
 
-`GET /metrics` exposes those same ownership snapshots in
+Ready managed source models also expose a copied `loom.parameters` object.
+`active` means all weight-plan activations have been enqueued, not that their
+device work has completed. `backing` is `fixed` or `elastic`; `deactivating`
+reports an accepted explicit release waiting for admitted model work. Cumulative
+`activations` and `deactivations` count weight-plan transitions (a model can own
+several plans). Elastic backing additionally reports parameter-only
+`reserved_bytes` and `committed_bytes`. Fixed backing omits those accounting
+fields instead of presenting its allocated memory as zero. Neither these bytes
+nor these counters include the model's retained mutable state. Cache pressure
+can also release idle weights, so `active` is not an admission or pinning flag.
+
+`GET /metrics` exposes scheduler ownership gauges and request counters in
 [Prometheus text 0.0.4 format](https://prometheus.io/docs/instrumenting/exposition_formats/).
 It samples each deployment once per response, groups samples by metric family,
 and returns `Content-Type: text/plain; version=0.0.4; charset=utf-8`. For example:

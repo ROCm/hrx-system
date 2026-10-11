@@ -85,6 +85,15 @@ loom_serve_weight_activity_t loom_serve_residency_activity(
   return total;
 }
 
+loom_serve_residency_snapshot_t loom_serve_residency_snapshot(
+    const loom_serve_residency_t* residency) {
+  return (loom_serve_residency_snapshot_t){
+      .active = residency->active,
+      .elastic = residency->cache->pool != NULL,
+      .memory = loom_serve_residency_statistics(residency),
+      .activity = loom_serve_residency_activity(residency)};
+}
+
 static void residency_unlink(loom_serve_residency_t* residency) {
   loom_serve_residency_cache_t* cache = residency->cache;
   if (residency->previous) {

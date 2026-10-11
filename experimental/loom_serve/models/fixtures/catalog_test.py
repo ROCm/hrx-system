@@ -356,7 +356,6 @@ def running_server(server_command, directory, catalog, workers):
             f"--models={catalog.relative_to(directory)}",
             "--listen=127.0.0.1:0",
             f"--workers={workers}",
-            "--pool_backing=fixed",
             "--heartbeat_ms=0",
         ],
         log_path,
@@ -547,6 +546,172 @@ def run_round(client, iteration, observations):
     }
 
 
+def check_parameter_residency(client, backing, workers):
+    """Keep source programs and a pinned conversation across weight release."""
+    root = [{"role": "user", "content": "abxa"}]
+    seed = client.text("residency-root", root, 2)
+    pin = client.checkpoint("resident-prefix", "POST", "residency-root", status=201)
+    assert pin["position"] == 5, pin
+    history = root + [
+        {"role": "assistant", "content": seed["text"]},
+        {"role": "user", "content": "xx"},
+    ]
+    client.idle()
+
+    def snapshot(name="fixture-text"):
+        state = next(
+            item["loom"]
+            for item in client.request("/v1/status")["data"]
+            if item["id"] == name
+        )
+        assert "error" not in state, state
+        return state
+
+    before = snapshot()
+    assert before["parameters"]["active"], before
+    assert before["parameters"]["backing"] == backing, before
+    selector = {"model": "fixture-text"}
+    client.request("/v1/models/deactivate", selector, status=409)
+    client.request("/v1/models/drain", selector)
+    with ThreadPoolExecutor(max_workers=1) as clients:
+        continuation = clients.submit(
+            client.text, "residency-root", history, checkpoint="resident-prefix"
+        )
+        try:
+            wait_status(
+                urlsplit("http://" + client.address),
+                model="fixture-text",
+                held_requests=1,
+            )
+            client.request(
+                "/v1/models/deactivate",
+                selector,
+                status=202 if backing == "elastic" else 409,
+            )
+            while True:
+                cold = snapshot()
+                if not cold["parameters"]["deactivating"]:
+                    break
+            parameters = cold["parameters"]
+            assert cold["incarnation"] == before["incarnation"], cold
+            assert cold["compilation"] == before["compilation"], cold
+            assert cold["status"]["admission"] == "drained", cold
+            assert cold["status"]["held_requests"] == 1, cold
+            if backing == "elastic":
+                assert not parameters["active"], cold
+                assert parameters["committed_bytes"] == 0, cold
+                assert before["parameters"]["committed_bytes"] > 0, before
+                assert parameters["reserved_bytes"] > 0, cold
+                assert parameters["deactivations"] == (
+                    before["parameters"]["deactivations"] + 1
+                ), cold
+                # Repeating the operation cannot discard retained state or
+                # count another physical release of already-inactive weights.
+                client.request("/v1/models/deactivate", selector, status=202)
+                while snapshot()["parameters"]["deactivating"]:
+                    pass
+                assert snapshot()["parameters"] == parameters
+            else:
+                assert parameters == before["parameters"], cold
+                assert "committed_bytes" not in parameters, cold
+                assert "reserved_bytes" not in parameters, cold
+            peer = client.request(
+                "/v1/embeddings",
+                {"model": "vectors", "input": "ab", "dimensions": 2},
+            )
+            assert peer["data"][0]["embedding"] == [3, 2], peer
+            assert not continuation.done()
+        finally:
+            client.request("/v1/models/undrain", selector)
+        resumed = continuation.result()
+    assert resumed["usage"]["prompt_tokens_details"]["cached_tokens"] == 5, resumed
+    client.idle()
+    after = snapshot()
+    assert after["incarnation"] == before["incarnation"], after
+    assert after["compilation"] == before["compilation"], after
+    assert after["parameters"]["active"], after
+    assert after["parameters"]["activations"] == (
+        before["parameters"]["activations"] + (backing == "elastic")
+    ), after
+    if backing == "elastic":
+        assert (
+            after["parameters"]["committed_bytes"]
+            == (before["parameters"]["committed_bytes"])
+        ), after
+    assert client.request("/tokenize", {"model": "fixture-text", "content": "ab"}) == {
+        "tokens": [0, 1]
+    }
+    client.checkpoint("resident-prefix", "DELETE")
+    print(
+        json.dumps(
+            {
+                "event": "parameter_residency_resumed",
+                "workers": workers,
+                "backing": backing,
+                "before": before["parameters"],
+                "cold": cold["parameters"],
+                "after": after["parameters"],
+                "cached_tokens": resumed["usage"]["prompt_tokens_details"][
+                    "cached_tokens"
+                ],
+                "outputs_verified": True,
+                "incarnation_preserved": True,
+                "compilation_preserved": True,
+            }
+        ),
+        flush=True,
+    )
+    # Every native registration adapter owns this same boundary, including
+    # source programs without a parameter checkpoint. Exercise their operation
+    # and final HTTP result rather than inferring support from the text adapter.
+    for model, target, payload in (
+        ("vectors", "/v1/embeddings", {"input": "ab", "dimensions": 2}),
+        (
+            "pixels",
+            "/v1/images/generations",
+            {"prompt": "ab", "seed": 1, "response_format": "b64_json"},
+        ),
+        (
+            "judge",
+            "/v1/systemone",
+            {
+                "state": "a",
+                "questions": {
+                    "truth": {
+                        "type": "noul",
+                        "instructions": "???",
+                        "criteria": {"false": "", "true": "x"},
+                    }
+                },
+            },
+        ),
+    ):
+        selector = {"model": model}
+        identity = snapshot(model)["incarnation"]
+        client.request("/v1/models/drain", selector)
+        client.request(
+            "/v1/models/deactivate",
+            selector,
+            status=202 if backing == "elastic" else 409,
+        )
+        while True:
+            parameters = snapshot(model)["parameters"]
+            if not parameters["deactivating"]:
+                break
+        if backing == "elastic":
+            assert not parameters["active"], parameters
+            assert parameters["committed_bytes"] == 0, parameters
+        client.request("/v1/models/undrain", selector)
+        result = client.request(target, {**selector, **payload})
+        if model == "vectors":
+            assert result["data"][0]["embedding"] == [3, 2], result
+        elif model == "pixels":
+            check_png(result["data"][0]["b64_json"], "ab", 1)
+        else:
+            check_decision(result)
+        assert snapshot(model)["incarnation"] == identity
+
+
 def copy_package(source, directory, kind):
     """Relocate a fixture with numerical providers outside its model directory.
 
@@ -593,7 +758,6 @@ def check_startup_failures(server_command, directory, catalog):
                     f"--models={catalog_path.relative_to(directory)}",
                     "--listen=127.0.0.1:0",
                     "--workers=1",
-                    "--pool_backing=fixed",
                 ],
                 log_path,
                 cwd=directory,
@@ -665,7 +829,6 @@ def check_dynamic_observer(server_command, directory, catalog):
             *server_command,
             "--listen=127.0.0.1:0",
             "--workers=1",
-            "--pool_backing=fixed",
         ],
         log_path,
         cwd=directory,
@@ -734,7 +897,6 @@ def check_empty_server(server_command, directory):
                 *arguments,
                 "--listen=127.0.0.1:0",
                 "--workers=1",
-                "--pool_backing=fixed",
             ],
             log_path,
             cwd=directory,
@@ -880,7 +1042,6 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
         f"--workers={workers}",
         "--model_capacity=12",
         "--connections=320",
-        "--pool_backing=fixed",
         "--heartbeat_ms=0",
     ]
     if workers == 4:
@@ -914,6 +1075,12 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
             and item["loom"]["status"]["admission"] == "drained"
             for item in registered
         ), registered
+        # Metadata-only registrations are already cold; deactivation must not
+        # construct a model, prepare sources or change its registration identity.
+        client.request(
+            "/v1/models/deactivate", {"model": declarations[0]["name"]}, status=202
+        )
+        assert client.request("/v1/status")["data"] == registered
         registered_threads = thread_snapshot(process)
         assert (
             registered_threads["userspace"].keys()
@@ -1129,7 +1296,6 @@ def check_multiple_bindings(server_command, directory, catalog):
                 f"--listen=unix:{socket_path}",
                 "--workers=1",
                 "--connections=320",
-                "--pool_backing=fixed",
                 "--heartbeat_ms=0",
             ]
         )
@@ -1190,9 +1356,14 @@ def main():
     parser.add_argument("--server", type=Path, required=True)
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--device", default="amdgpu")
+    parser.add_argument("--pool_backing", choices=("fixed", "elastic"), default="fixed")
     parser.add_argument("--rounds", type=int, default=4, choices=range(1, 17))
     arguments = parser.parse_args()
-    server_command = [str(arguments.server.absolute()), f"--device={arguments.device}"]
+    server_command = [
+        str(arguments.server.absolute()),
+        f"--device={arguments.device}",
+        f"--pool_backing={arguments.pool_backing}",
+    ]
     with tempfile.TemporaryDirectory(prefix="loom catalog ") as temporary:
         directory = Path(temporary)
         check_empty_server(server_command, directory)
@@ -1261,6 +1432,7 @@ def main():
                             ),
                             flush=True,
                         )
+                check_parameter_residency(client, arguments.pool_backing, workers)
             print(
                 json.dumps(
                     {

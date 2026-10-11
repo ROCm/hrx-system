@@ -200,12 +200,39 @@ iree_status_t loom_serve_registry_remove(loom_serve_registered_model_t* model,
         "service lifetime belongs to its application, not this registry");
   }
   model->closed = true;
+  model->deactivating = false;
   if (mode > model->removal) {
     model->removal = mode;
   }
   if (model->phase == LOOM_SERVE_REGISTRATION_RELEASE_FAILED) {
     model->phase = LOOM_SERVE_REGISTRATION_RETIRING;
   }
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_registry_deactivate(
+    loom_serve_registered_model_t* model) {
+  if (!model->incarnation || !model->closed || model->removal ||
+      !iree_status_is_ok(model->status)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "deactivation requires a healthy, drained managed registration");
+  }
+  if (model->phase == LOOM_SERVE_REGISTRATION_DECLARED) {
+    return iree_ok_status();
+  }
+  if (model->phase != LOOM_SERVE_REGISTRATION_READY ||
+      !model->registration.parameters) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "registration has no prepared parameter residency");
+  }
+  const loom_serve_residency_snapshot_t state =
+      model->registration.parameters(model->registration.self);
+  if (!state.elastic) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "fixed parameter backing cannot deactivate");
+  }
+  model->deactivating = true;
   return iree_ok_status();
 }
 
@@ -291,6 +318,19 @@ bool loom_serve_registry_advance(loom_serve_registry_t* registry,
                                   (loom_serve_http_observer_t){0});
       registry_release_service(model);
       model->phase = LOOM_SERVE_REGISTRATION_RETIRING;
+      progress = true;
+    }
+  }
+  if (model->phase == LOOM_SERVE_REGISTRATION_READY && model->deactivating) {
+    const loom_serve_http_service_snapshot_t snapshot =
+        model->service.snapshot(model->service.self);
+    if (!snapshot.queued_requests && !snapshot.active_requests &&
+        !model->service.is_active(model->service.self)) {
+      model->status = model->registration.deactivate(model->registration.self);
+      model->deactivating = false;
+      if (!iree_status_is_ok(model->status)) {
+        registry_record_error(model, model->status);
+      }
       progress = true;
     }
   }

@@ -27,6 +27,7 @@ loom_cc_library(
             "--server=$(rootpath //experimental/loom_serve/serving:server)",
             "--catalog=$(rootpath :catalog.json)",
             "--device=" + device,
+            "--pool_backing=" + backing,
         ],
         data = [
             "catalog.json",
@@ -54,16 +55,25 @@ loom_cc_library(
             "//experimental/loom_serve/tools:observe_lib",
         ],
     )
-    for name, device, capability, requirement in [
+    for name, device, backing, capability, requirement in [
         (
             "catalog_test",
             "amdgpu",
+            "fixed",
+            "//loom/config/execute:amdgpu_hal",
+            "runtime.resource.amd_gpu",
+        ),
+        (
+            "catalog_elastic_test",
+            "amdgpu",
+            "elastic",
             "//loom/config/execute:amdgpu_hal",
             "runtime.resource.amd_gpu",
         ),
         (
             "catalog_vulkan_test",
             "vulkan",
+            "fixed",
             "//loom/config/execute:spirv_vulkan_hal",
             "vulkan.resource.device",
         ),

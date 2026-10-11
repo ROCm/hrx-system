@@ -28,6 +28,7 @@ loom_cc_library(
     iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::http::tokenization
     iree::experimental::loom_serve::runtime::compilation
+    iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::telemetry::stream
     iree::task
     iree::tokenizer
@@ -111,6 +112,7 @@ loom_cc_library(
     iree::base
     iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::runtime::compilation
+    iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::telemetry::record
     iree::experimental::loom_serve::telemetry::stream
   PUBLIC
@@ -137,6 +139,7 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule
     iree::experimental::loom_serve::text::service
