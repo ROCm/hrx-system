@@ -274,6 +274,35 @@ def latency_distribution(values):
     }
 
 
+def followup_cache_summary(results):
+    """Measures reuse only on subsequent turns, including partial prefix hits."""
+    followups = [turn for result in results for turn in result["turns"][1:]]
+    groups = {"hits": [], "misses": []}
+    for turn in followups:
+        cached = turn["usage"]["prompt_tokens_details"]["cached_tokens"]
+        groups["hits" if cached else "misses"].append(turn)
+    summary = {"requests": len(followups)}
+    for name, turns in groups.items():
+        cached = sum(
+            turn["usage"]["prompt_tokens_details"]["cached_tokens"] for turn in turns
+        )
+        summary[name] = {
+            "requests": len(turns),
+            "cached_prompt_tokens": cached,
+            "appended_prompt_tokens": sum(
+                turn["usage"]["prompt_tokens"] for turn in turns
+            )
+            - cached,
+            "request_latency_ms": latency_distribution(
+                turn["request_ms"] for turn in turns
+            ),
+            "first_text_latency_ms": latency_distribution(
+                turn["first_text_ms"] for turn in turns
+            ),
+        }
+    return summary
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8080")
@@ -357,6 +386,7 @@ def main(argv=None):
                 "aggregate_appended_prompt_tokens_per_second": inputs / seconds,
                 "output_tokens_including_eos": outputs,
                 "aggregate_output_tokens_per_second": outputs / seconds,
+                "followup_cache": followup_cache_summary(results),
                 "request_latency_ms": latency_distribution(
                     turn["request_ms"] for turn in turns
                 ),

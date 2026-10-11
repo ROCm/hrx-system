@@ -196,6 +196,16 @@ class BenchmarkServiceTest(unittest.TestCase):
             },
         )
 
+    def test_single_turn_sessions_have_no_followup_samples(self):
+        summary = benchmark_service.followup_cache_summary([{"turns": [{}]}])
+        self.assertEqual(summary["requests"], 0)
+        for group in ("hits", "misses"):
+            self.assertEqual(summary[group]["requests"], 0)
+            self.assertEqual(summary[group]["cached_prompt_tokens"], 0)
+            self.assertEqual(summary[group]["appended_prompt_tokens"], 0)
+            self.assertEqual(summary[group]["request_latency_ms"], {"samples": 0})
+            self.assertEqual(summary[group]["first_text_latency_ms"], {"samples": 0})
+
     def test_codeword_clients_extend_the_catalog_without_repeating_identity(self):
         for index, word in ((0, "MAPLE"), (7, "ONYX"), (8, "MAPLE-1"), (16, "MAPLE-2")):
             with self.subTest(index=index):
@@ -234,6 +244,16 @@ class BenchmarkServiceTest(unittest.TestCase):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 requests.append((self.headers["X-Loom-Session"], body))
+                index = int(self.headers["X-Loom-Session"].rsplit("-", 1)[1])
+                # Initial prefix sharing is not retained follow-up reuse. Half
+                # of the multi-turn clients lose their state between turns.
+                cached = (
+                    5
+                    if index == 0
+                    else 10
+                    if index % 2 == 0 and len(body["messages"]) > 2
+                    else 0
+                )
                 event = {
                     "model": body["model"],
                     "choices": [
@@ -242,9 +262,7 @@ class BenchmarkServiceTest(unittest.TestCase):
                     "usage": {
                         "prompt_tokens": 20,
                         "completion_tokens": 2,
-                        "prompt_tokens_details": {
-                            "cached_tokens": 10 if len(body["messages"]) > 2 else 0
-                        },
+                        "prompt_tokens_details": {"cached_tokens": cached},
                     },
                 }
                 payload = (
@@ -271,6 +289,11 @@ class BenchmarkServiceTest(unittest.TestCase):
                 workload["sessions"] = [
                     copy.deepcopy(workload["sessions"][0]) for _ in range(12)
                 ]
+                workload["sessions"][0]["turns"] = workload["sessions"][0]["turns"][:1]
+                for index in range(1, 12, 2):
+                    workload["sessions"][index]["turns"].append(
+                        {"content": "Now summarize your review.", "max_tokens": 32}
+                    )
                 path = Path(directory) / "workload.json"
                 path.write_text(json.dumps(workload))
                 benchmark_service.main(
@@ -278,6 +301,7 @@ class BenchmarkServiceTest(unittest.TestCase):
                         f"--url=http://127.0.0.1:{server.server_port}",
                         "--model=reviewer",
                         "--clients=12",
+                        "--retention=observe",
                         f"--workload={path}",
                     ]
                 )
@@ -286,17 +310,30 @@ class BenchmarkServiceTest(unittest.TestCase):
             server.shutdown()
             owner.join()
             server.server_close()
-        self.assertEqual(len(requests), 24)
+        self.assertEqual(len(requests), 29)
         self.assertEqual(len({session for session, _ in requests}), 12)
         self.assertTrue(all(body["model"] == "reviewer" for _, body in requests))
         summary = records[-1]
         self.assertEqual(summary["event"], "summary")
-        self.assertEqual(summary["requests"], 24)
-        self.assertEqual(summary["cached_prompt_tokens"], 120)
-        self.assertEqual(summary["appended_prompt_tokens"], 360)
-        self.assertEqual(summary["output_tokens_including_eos"], 48)
-        self.assertEqual(summary["request_latency_ms"]["samples"], 24)
-        self.assertEqual(summary["first_text_latency_ms"]["samples"], 24)
+        self.assertEqual(summary["requests"], 29)
+        self.assertEqual(summary["cached_prompt_tokens"], 55)
+        self.assertEqual(summary["appended_prompt_tokens"], 525)
+        self.assertEqual(summary["output_tokens_including_eos"], 58)
+        self.assertEqual(summary["request_latency_ms"]["samples"], 29)
+        self.assertEqual(summary["first_text_latency_ms"]["samples"], 29)
+        followups = summary["followup_cache"]
+        self.assertEqual(followups["requests"], 17)
+        for group, count, cached, appended in (
+            ("hits", 5, 50, 50),
+            ("misses", 12, 0, 240),
+        ):
+            self.assertEqual(followups[group]["requests"], count)
+            self.assertEqual(followups[group]["cached_prompt_tokens"], cached)
+            self.assertEqual(followups[group]["appended_prompt_tokens"], appended)
+            self.assertEqual(followups[group]["request_latency_ms"]["samples"], count)
+            self.assertEqual(
+                followups[group]["first_text_latency_ms"]["samples"], count
+            )
         for client in records[:-1]:
             for turn in client["turns"]:
                 self.assertEqual(len(turn["output_chunk_ms"]), 1)
