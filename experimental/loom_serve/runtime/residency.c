@@ -38,6 +38,8 @@ struct loom_serve_residency_t {
   iree_host_size_t pin_count;
   // Every checkpoint domain has enqueued readiness on the model timeline.
   bool active;
+  // Borrowed model idle-cache owner, independent of parameter pins.
+  loom_serve_residency_reclaimer_t reclaimer;
   // Independent of LRU membership and all already-accepted execution pins.
   struct {
     // Older interest, or NULL at the head/not queued.
@@ -54,6 +56,24 @@ struct loom_serve_residency_t {
 loom_serve_residency_cache_t* loom_serve_residency_cache(
     const loom_serve_residency_t* residency) {
   return residency->cache;
+}
+
+void loom_serve_residency_set_reclaimer(
+    loom_serve_residency_t* residency,
+    loom_serve_residency_reclaimer_t reclaimer) {
+  residency->reclaimer = reclaimer;
+}
+
+bool loom_serve_residency_cache_is_reclaiming(
+    const loom_serve_residency_cache_t* cache) {
+  for (const loom_serve_residency_t* entry = cache->oldest; entry;
+       entry = entry->next) {
+    if (entry->reclaimer.is_pending &&
+        entry->reclaimer.is_pending(entry->reclaimer.self)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 loom_serve_memory_statistics_t loom_serve_residency_statistics(
@@ -166,11 +186,23 @@ static iree_status_t residency_reclaim(void* user_data, uint64_t target_bytes) {
       remaining -= loom_serve_residency_statistics(entry).committed_bytes;
     }
   }
-  // Insufficient eligible backing cannot admit this request. Preserve useful
-  // idle weights instead of evicting them for a request that still cannot fit.
-  return remaining <= target_bytes
-             ? loom_serve_residency_cache_trim(cache, target_bytes)
-             : iree_ok_status();
+  if (remaining <= target_bytes) {
+    return loom_serve_residency_cache_trim(cache, target_bytes);
+  }
+  // Keep useful weights when their release alone cannot admit the request.
+  // Release at most one idle logical owner, then let its normal asynchronous
+  // maintenance retire before asking for more. A physical trim here could
+  // recurse into admission for compaction destinations.
+  if (!loom_serve_residency_cache_is_reclaiming(cache)) {
+    for (loom_serve_residency_t* entry = cache->oldest; entry;
+         entry = entry->next) {
+      if (entry->reclaimer.request &&
+          entry->reclaimer.request(entry->reclaimer.self)) {
+        break;
+      }
+    }
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_serve_residency_cache_create(
@@ -329,6 +361,9 @@ iree_status_t loom_serve_residency_try_admit(
     *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
   } else {
     residency_queue_admission(residency);
+    if (loom_serve_residency_cache_is_reclaiming(cache)) {
+      *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;
+    }
   }
   return iree_ok_status();
 }

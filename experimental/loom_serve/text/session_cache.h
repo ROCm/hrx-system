@@ -86,6 +86,18 @@ void loom_serve_text_session_cache_release(
     loom_serve_text_session_cache_entry_t* entry,
     loom_serve_text_telemetry_t* telemetry);
 
+// Releases the least-recent idle logical owner across resident rows and the
+// detached cache. Explicit checkpoint references survive. The caller excludes
+// CPU/device borrowers and supplies its prepared continuation's protected row
+// and endpoint, if any. True requires a subsequent model trim; logical release
+// alone does not make physical backing available. No device work is submitted.
+bool loom_serve_text_session_cache_evict(
+    loom_serve_text_session_cache_t* cache, iree_host_size_t row_count,
+    loom_serve_text_session_t* rows,
+    const loom_serve_text_session_t* protected_row,
+    const loom_serve_text_session_cache_entry_t* protected_entry,
+    loom_serve_text_telemetry_t* telemetry);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -1041,6 +1041,69 @@ TEST_P(WeightsTest, NewAdmissionsCoexistWithoutPhysicalPressure) {
   }
 }
 
+TEST_P(WeightsTest, IdleCacheMaintenanceDefersPressureWithoutReleasingBacking) {
+  if (!GetParam()) {
+    return;
+  }
+  IREE_ASSERT_OK(Compile(0, "domains"));
+  for (uint32_t i = 0; i < 2; ++i) {
+    const auto root = Root(0, i);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, path_.path()));
+  }
+  IREE_ASSERT_OK(Register(0, 0, 2));
+  IREE_ASSERT_OK(Register(1, 0, 0));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_create(pool_, kSlabBytes, 256,
+                                                  &state_statistics_, &state_));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, kSlabBytes));
+  struct CacheOwner {
+    // Logical ownership can be released once, independently of physical trim.
+    bool retained = true;
+    // Accepted maintenance keeps backing alive until its owner retires it.
+    bool pending = false;
+    // Counts requests, not repeated probes while retirement is pending.
+    uint32_t requests = 0;
+  } owner;
+  loom_serve_residency_set_reclaimer(
+      residencies_[1],
+      {&owner,
+       [](void* self) {
+         auto* owner = static_cast<CacheOwner*>(self);
+         if (!owner->retained) {
+           return false;
+         }
+         owner->retained = false;
+         owner->pending = true;
+         ++owner->requests;
+         return true;
+       },
+       [](void* self) { return static_cast<CacheOwner*>(self)->pending; }});
+  auto* cache = loom_serve_device_residency_cache(device_owner_);
+  loom_serve_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
+  EXPECT_TRUE(loom_serve_residency_cache_is_reclaiming(cache));
+  EXPECT_EQ(state_statistics_.committed_bytes, kSlabBytes);
+  EXPECT_EQ(loom_serve_residency_statistics(residencies_[0]).committed_bytes,
+            0u);
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
+  EXPECT_EQ(owner.requests, 1u);
+  // Cancelling admission does not pretend accepted maintenance has retired.
+  loom_serve_residency_cancel_admission(residencies_[0]);
+  EXPECT_TRUE(loom_serve_residency_cache_is_reclaiming(cache));
+  EXPECT_EQ(state_statistics_.committed_bytes, kSlabBytes);
+  loom_serve_virtual_buffer_begin_trim(state_);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(state_));
+  owner.pending = false;
+  EXPECT_FALSE(loom_serve_residency_cache_is_reclaiming(cache));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 90));
+  loom_serve_residency_release(residencies_[0]);
+  loom_serve_residency_set_reclaimer(residencies_[1], {});
+  EXPECT_EQ(owner.requests, 1u);
+}
+
 TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
   IREE_ASSERT_OK(Compile(0, "target"));
   const auto root = Root(0, 0);

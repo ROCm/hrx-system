@@ -18,6 +18,33 @@ loom_cc_library(
     deps = ["//runtime/src/iree/testing:gtest"],
 )
 
+py_test(
+    name = "pressure_test",
+    size = "medium",
+    srcs = ["pressure_test.py"],
+    args = [
+        "--server=$(rootpath //experimental/loom_serve/serving:server)",
+        "--source=$(rootpath //experimental/loom_serve/models/fixtures/text:prepare.loom)",
+    ],
+    data = [
+        "//experimental/loom_serve/models/fixtures/text:prepare.loom",
+        "//experimental/loom_serve/models/fixtures/text:sources",
+        "//experimental/loom_serve/serving:server",
+    ],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "resource_group:" + GPU_DEVICE_RESOURCE_GROUP,
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ["//experimental/loom_serve/testing:http"],
+)
+
 [
     py_test(
         name = name,

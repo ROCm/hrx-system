@@ -70,7 +70,9 @@ iree_status_t loom_serve_text_service_create(
 // Shared prefixes are counted once. Excess work waits in a bounded FIFO;
 // invalid requests reject before altering retained state and yield to ready
 // epochs before preparing another input. Idle cache yields to admission
-// pressure, but explicit pins remain protected until deletion.
+// pressure, including peer models sharing the physical pool, but explicit pins
+// remain protected until deletion. Peer reclamation releases logical ownership
+// only at an unborrowed boundary and schedules this model's asynchronous trim.
 // Evicted/cancelled rows and unused completion credit trigger physical trim
 // outside ordinary decoding. Compaction admits its temporary destination union
 // before moving. state_trim events report copy, release

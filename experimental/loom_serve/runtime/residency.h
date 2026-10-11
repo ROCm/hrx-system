@@ -13,10 +13,10 @@
 extern "C" {
 #endif
 
-// Single-host-owner parameter admission and LRU policy. Logical mutable state
-// remains owned by its model; this cache only releases reloadable parameters.
-// The common physical pool also invokes this policy during mutable-state
-// growth.
+// Single-host-owner parameter admission and LRU policy. Mutable state remains
+// model-owned; optional idle-cache owners can schedule reclamation when idle
+// parameters alone cannot meet pressure. The common physical pool invokes this
+// policy during both parameter activation and mutable-state growth.
 typedef struct loom_serve_residency_cache_t loom_serve_residency_cache_t;
 typedef struct loom_serve_residency_t loom_serve_residency_t;
 
@@ -59,6 +59,34 @@ void loom_serve_residency_destroy(loom_serve_residency_t* residency);
 loom_serve_residency_cache_t* loom_serve_residency_cache(
     const loom_serve_residency_t* residency);
 
+// Optional model-owned idle history, distinct from parameter pinning. Callbacks
+// run on the shared host owner inside a physical-capacity request. They never
+// allocate, submit device work, wait, or recurse into admission. The owner
+// excludes live CPU/device borrowers and protects explicit retained endpoints.
+typedef struct loom_serve_residency_reclaimer_t {
+  // Borrowed owner, alive until this registration removes the callbacks.
+  void* self;
+  // Releases one eligible logical owner and schedules its normal maintenance
+  // turn. True promises eventual progress through that owner's wake/retirement
+  // path; false means no eligible owner can currently be released.
+  bool (*request)(void* self);
+  // Whether requested or ordinary maintenance can still release backing.
+  // Completion/cancellation clears this through the same serialized owner.
+  bool (*is_pending)(void* self);
+} loom_serve_residency_reclaimer_t;
+
+// Installs/removes borrowed callbacks on the serialized owner. An empty value
+// removes them before service destruction; it never cancels accepted work.
+void loom_serve_residency_set_reclaimer(
+    loom_serve_residency_t* residency,
+    loom_serve_residency_reclaimer_t reclaimer);
+
+// Cold capacity-denial query. Pending cache retirement is actual scheduled
+// work, so callers defer rather than reject while it can release backing.
+// Queued inference alone is not pending reclamation.
+bool loom_serve_residency_cache_is_reclaiming(
+    const loom_serve_residency_cache_t* cache);
+
 // Pins the entire group before admission/loading. Already active groups need
 // no I/O. Enqueues loading before consumption on the model timeline, without
 // waiting on device or I/O completion. On success admitted=true owns one pin,
@@ -73,7 +101,8 @@ iree_status_t loom_serve_residency_try_acquire(
 typedef enum loom_serve_residency_admission_e {
   // Parameter backing cannot currently fit. No pin or partial load is owned.
   LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY = 0,
-  // An older pressure waiter has priority within this physical domain.
+  // An older waiter has priority or idle-cache maintenance is releasing
+  // backing.
   LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED,
   // One pin protects enqueued activation and subsequent consuming work.
   LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED,

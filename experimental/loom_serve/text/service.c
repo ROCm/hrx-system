@@ -812,6 +812,25 @@ static void text_reset_session(loom_serve_text_service_t* service,
   loom_serve_text_chat_completion_deinitialize(&session->completion);
 }
 
+static bool text_cache_reclaim_pending(void* self) {
+  const loom_serve_text_service_t* service = self;
+  return service->pool.trim.pending;
+}
+
+static bool text_cache_reclaim_request(void* self) {
+  loom_serve_text_service_t* service = self;
+  if (text_has_work(service) || service->control.connection ||
+      !loom_serve_text_session_cache_evict(
+          &service->cache, service->row_count, service->sessions,
+          service->pending.prepared.session, service->pending.prepared.cached,
+          &service->telemetry)) {
+    return false;
+  }
+  service->pool.trim.pending = true;
+  service->completion.observer.wake(service->completion.observer.user_data);
+  return true;
+}
+
 typedef enum text_admission_result_e {
   // Physical parameters or logical/physical state cannot currently fit.
   TEXT_ADMISSION_CAPACITY = 0,
@@ -874,29 +893,17 @@ static iree_status_t text_reclaim_idle(
     if (!iree_status_is_ok(status) || *out_result == TEXT_ADMISSION_READY) {
       break;
     }
-    loom_serve_text_session_t* oldest = NULL;
-    for (iree_host_size_t i = 0; i < service->row_count; ++i) {
-      loom_serve_text_session_t* session = &service->sessions[i];
-      if (session != selected && !session->request.connection &&
-          loom_serve_text_row_position(session->row) &&
-          (!oldest || session->lifetime.serial < oldest->lifetime.serial)) {
-        oldest = session;
-      }
-    }
-    loom_serve_text_session_cache_entry_t* cached =
-        loom_serve_text_session_cache_oldest(&service->cache,
-                                             service->pending.prepared.cached);
-    if (cached &&
-        (!oldest || cached->lifetime.serial < oldest->lifetime.serial)) {
-      loom_serve_text_session_cache_release(&service->cache, cached,
-                                            &service->telemetry);
-      service->pool.trim.pending = true;
-      continue;
-    }
-    if (!oldest) {
+    if (loom_serve_residency_cache_is_reclaiming(loom_serve_residency_cache(
+            loom_serve_text_model_residency(service->model)))) {
+      *out_result = TEXT_ADMISSION_QUEUED;
       break;
     }
-    text_reset_session(service, oldest);
+    if (!loom_serve_text_session_cache_evict(
+            &service->cache, service->row_count, service->sessions, selected,
+            service->pending.prepared.cached, &service->telemetry)) {
+      break;
+    }
+    service->pool.trim.pending = true;
   }
   return status;
 }
@@ -1631,6 +1638,9 @@ void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
   if (!service) {
     return;
   }
+  loom_serve_residency_set_reclaimer(
+      loom_serve_text_model_residency(service->model),
+      (loom_serve_residency_reclaimer_t){0});
   if (service->telemetry.failure_code) {
     terminal_code = service->telemetry.failure_code;
   }
@@ -1714,6 +1724,13 @@ static void text_set_observer(void* self, loom_serve_http_observer_t observer) {
   iree_slim_mutex_lock(&service->completion.mutex);
   service->completion.observer = observer;
   iree_slim_mutex_unlock(&service->completion.mutex);
+  loom_serve_residency_set_reclaimer(
+      loom_serve_text_model_residency(service->model),
+      observer.wake
+          ? (loom_serve_residency_reclaimer_t){service,
+                                               text_cache_reclaim_request,
+                                               text_cache_reclaim_pending}
+          : (loom_serve_residency_reclaimer_t){0});
   loom_serve_http_timer_set_observer(&service->heartbeat.timer, observer);
 }
 

@@ -108,3 +108,33 @@ void loom_serve_text_session_cache_release(
   loom_serve_text_checkpoint_entry_release(&entry->endpoint);
   --cache->count;
 }
+
+bool loom_serve_text_session_cache_evict(
+    loom_serve_text_session_cache_t* cache, iree_host_size_t row_count,
+    loom_serve_text_session_t* rows,
+    const loom_serve_text_session_t* protected_row,
+    const loom_serve_text_session_cache_entry_t* protected_entry,
+    loom_serve_text_telemetry_t* telemetry) {
+  loom_serve_text_session_t* oldest = NULL;
+  for (iree_host_size_t i = 0; i < row_count; ++i) {
+    loom_serve_text_session_t* row = &rows[i];
+    if (row != protected_row && !row->request.connection &&
+        loom_serve_text_row_position(row->row) &&
+        (!oldest || row->lifetime.serial < oldest->lifetime.serial)) {
+      oldest = row;
+    }
+  }
+  loom_serve_text_session_cache_entry_t* cached =
+      loom_serve_text_session_cache_oldest(cache, protected_entry);
+  if (cached &&
+      (!oldest || cached->lifetime.serial < oldest->lifetime.serial)) {
+    loom_serve_text_session_cache_release(cache, cached, telemetry);
+  } else if (oldest) {
+    loom_serve_text_telemetry_session_end(telemetry, &oldest->lifetime);
+    loom_serve_text_row_reset_retired(oldest->row);
+    loom_serve_text_chat_completion_deinitialize(&oldest->completion);
+  } else {
+    return false;
+  }
+  return true;
+}

@@ -129,6 +129,16 @@ cap than the generic runner; Qwen currently caps epochs at 512 tokens.
 `checkpoint_capacity` is opt-in retained endpoint capacity, not automatic
 prefix discovery. MTP and two-epoch continuation require source support.
 
+With elastic backing, physical pressure first reclaims sufficient idle model
+weights. If that cannot satisfy the request, idle text histories can also yield
+across models sharing the pool. Reclamation releases one eligible cache owner
+at a time and retires its normal asynchronous trim before retrying admission.
+Active requests, prepared continuations and explicit checkpoint references
+remain protected. An evicted `X-Loom-Session` can replay the full history on its
+next request; the name is a cache key, not durable storage. A budget occupied
+entirely by protected state still produces overload when no accepted work can
+release capacity. Pool pressure does not automatically offload histories.
+
 Each model also has `pending_requests` (default 32). For text/image it bounds
 the waiting queue; for embeddings/decisions it includes active requests.
 Increasing connection capacity alone does not increase model capacity.
