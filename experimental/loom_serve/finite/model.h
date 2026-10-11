@@ -174,12 +174,15 @@ iree_status_t loom_serve_finite_model_submit(
     loom_serve_execution_frontier_t* out_frontier);
 
 // Scheduler consumes successful ALL readiness, releasing the residency pin.
-// Borrowed result rows remain live until release_batch, which follows the CPU
-// encoder process release callback, not merely its completion callback.
+// Borrowed result rows remain live until release_batch. If a CPU encoder has
+// accepted those views, release_batch follows its process release callback, not
+// merely its completion callback. When no consumers remain, the owner may
+// release the batch immediately.
 void loom_serve_finite_model_complete(loom_serve_finite_model_t* model);
 
-// Trusted queries into the checked plan. Ordinals are supplied by the cohort
-// owner; row ordinals are local to each original HTTP request.
+// Trusted queries into the checked plan. Request ordinals name the original
+// prepared cohort, not a filtered set of surviving clients. Row ordinals are
+// local to each original HTTP request.
 uint64_t loom_serve_finite_model_input_tokens(
     const loom_serve_finite_model_t* model, iree_host_size_t request);
 iree_const_byte_span_t loom_serve_finite_model_row(

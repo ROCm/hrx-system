@@ -326,6 +326,64 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
     }
   }
 
+  void CheckAbandonedCohort(loom_serve_http_service_flags_t flags) {
+    const char* bodies[] = {R"({"model":"fixture","input":"a"})",
+                            R"({"model":"fixture","input":"bbb"})"};
+    int clients[IREE_ARRAYSIZE(bodies)] = {};
+    loom_serve_http_connection_t* connections[IREE_ARRAYSIZE(bodies)] = {};
+    for (size_t i = 0; i < IREE_ARRAYSIZE(bodies); ++i) {
+      clients[i] = Send(bodies[i]);
+      connections[i] = Accept();
+    }
+    EXPECT_TRUE(Step());  // CPU request preparation.
+    EXPECT_TRUE(Step());  // Source batch preparation.
+    EXPECT_TRUE(Step());  // Accepted device work and its actual readiness.
+    EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "running");
+
+    if (!iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+      for (size_t i = 0; i < IREE_ARRAYSIZE(clients); ++i) {
+        const linger reset = {1, 0};
+        ASSERT_EQ(setsockopt(clients[i], SOL_SOCKET, SO_LINGER, &reset,
+                             sizeof(reset)),
+                  0);
+        ASSERT_EQ(close(clients[i]), 0);
+        iree_notification_await(
+            loom_serve_http_server_notification(server_),
+            [](void* value) {
+              return loom_serve_http_connection_failed(
+                  static_cast<loom_serve_http_connection_t*>(value));
+            },
+            connections[i], iree_infinite_timeout());
+      }
+    }
+
+    // Successful completion still counts the whole device cohort. No response
+    // consumer survives, so no CPU encoder should acquire these result views.
+    EXPECT_TRUE(Step(flags));
+    EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "idle");
+    EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 0u);
+    EXPECT_FALSE(interface_.is_pending(interface_.self));
+    EXPECT_EQ(interface_.telemetry.counters->cancelled, 2u);
+    EXPECT_EQ(interface_.telemetry.counters->input_tokens, 4u);
+    EXPECT_EQ(interface_.telemetry.counters->batches, 1u);
+    Drain();
+    if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+      for (int client : clients) {
+        EXPECT_TRUE(Read(client).empty());
+      }
+      interface_.set_observer(interface_.self, {});
+      loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
+      ASSERT_NO_FATAL_FAILURE(CreateService(0));
+    }
+
+    const int next = Send(R"({"model":"fixture","input":[0]})");
+    Accept();
+    Drain();
+    EXPECT_NE(Read(next).find(R"("embedding":[1,1,1,1])"), std::string::npos);
+    EXPECT_EQ(interface_.telemetry.counters->completed, 1u);
+    EXPECT_EQ(interface_.telemetry.counters->failed, 0u);
+  }
+
   void StartRouter() {
     interface_.set_observer(interface_.self, {});
     router_ = std::thread([this] {
@@ -802,6 +860,10 @@ TEST_P(SourceEmbeddingServiceTest,
             static_cast<loom_serve_http_connection_t*>(value));
       },
       cancelled, iree_infinite_timeout());
+  EXPECT_TRUE(Step());  // Capture only live result views for CPU encoding.
+  EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "encoding");
+  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 2u);
+  EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
   Drain();
   const std::string result_a = Read(a);
   EXPECT_EQ(result_a.find("HTTP/1.1 200"), 0u);
@@ -831,6 +893,14 @@ TEST_P(SourceEmbeddingServiceTest,
   EXPECT_EQ(counters.failed, 0u);
   EXPECT_EQ(counters.input_tokens, 8u);
   EXPECT_EQ(counters.batches, 2u);
+}
+
+TEST_P(SourceEmbeddingServiceTest, CancelledDeviceCohortSkipsEncoding) {
+  CheckAbandonedCohort(0);
+}
+
+TEST_P(SourceEmbeddingServiceTest, StoppingDeviceCohortSkipsEncoding) {
+  CheckAbandonedCohort(LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
 }
 
 TEST_P(SourceEmbeddingServiceTest,

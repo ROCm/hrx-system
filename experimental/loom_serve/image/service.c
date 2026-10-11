@@ -523,7 +523,13 @@ static void image_collect(loom_serve_image_service_t* service, bool* progress) {
         (uint64_t)service->options.width * service->options.height;
     service->cpu.rgb = service->generator.complete(service->generator.self);
     image_event(service, &LOOM_SERVE_IMAGE_GENERATED, service->active);
-    image_schedule_cpu(service, IMAGE_PHASE_ENCODING);
+    if (service->connection) {
+      image_schedule_cpu(service, IMAGE_PHASE_ENCODING);
+    } else {
+      // Successful native retirement is mandatory even for an absent peer;
+      // response encoding is not. Finish resolves its cancellation outcome.
+      image_finish(service, LOOM_SERVE_TELEMETRY_COMPLETED);
+    }
   } else if (service->phase == IMAGE_PHASE_PREPARING) {
     loom_serve_image_record_prepared(service->telemetry.stream, service->active,
                                      &service->job.prepared);

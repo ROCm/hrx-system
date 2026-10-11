@@ -12,6 +12,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -225,6 +226,117 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     encoded.resize(length);
     iree_allocator_free(allocator_, png.data);
     return encoded;
+  }
+
+  void CheckAbandonedImage(loom_serve_http_service_flags_t flags) {
+    ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
+    const loom_serve_image_service_options_t options = {
+        .name = loom_serve_image_model_name(model_),
+        .width = kWidth,
+        .height = kHeight,
+        .pending_capacity = 8,
+        .heartbeat_interval = 0};
+    std::unique_ptr<loom_serve_image_service_t,
+                    decltype(&loom_serve_image_service_destroy)>
+        service(nullptr, loom_serve_image_service_destroy);
+    loom_serve_http_service_t interface = {};
+    auto* notification = loom_serve_http_server_notification(server_);
+    auto create_service = [&] {
+      loom_serve_image_service_t* value = nullptr;
+      IREE_ASSERT_OK(loom_serve_image_service_create(
+          host_, loom_serve_image_model_generator(model_), &options, nullptr,
+          &value, allocator_));
+      service.reset(value);
+      interface = loom_serve_image_service_interface(value);
+      interface.set_observer(interface.self,
+                             {[](void* self) {
+                                iree_notification_post(
+                                    static_cast<iree_notification_t*>(self),
+                                    IREE_ALL_WAITERS);
+                              },
+                              notification});
+    };
+    ASSERT_NO_FATAL_FAILURE(create_service());
+    auto accept = [&]() -> loom_serve_http_connection_t* {
+      for (;;) {
+        const auto ticket = iree_notification_prepare_wait(notification);
+        const loom_serve_http_request_t* request = nullptr;
+        auto* connection =
+            loom_serve_http_server_take_request(server_, &request);
+        if (connection) {
+          iree_notification_cancel_wait(notification);
+          IREE_EXPECT_OK(
+              interface.accept(interface.self, connection, request, 0));
+          return connection;
+        }
+        iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+    };
+    auto advance_until = [&](auto ready,
+                             loom_serve_http_service_flags_t flags = 0) {
+      while (!ready()) {
+        const auto ticket = iree_notification_prepare_wait(notification);
+        bool progress = false;
+        IREE_ASSERT_OK(interface.advance(interface.self, flags, &progress));
+        if (ready() || progress) {
+          iree_notification_cancel_wait(notification);
+        } else {
+          iree_notification_commit_wait(notification, ticket,
+                                        IREE_DURATION_ZERO,
+                                        IREE_TIME_INFINITE_FUTURE);
+        }
+      }
+    };
+
+    const int client = Send("POST", "/v1/images/generations",
+                            R"({"model":"fixture-image","prompt":"ab"})");
+    auto* connection = accept();
+    ASSERT_NO_FATAL_FAILURE(advance_until([&] {
+      return std::string(interface.snapshot(interface.self).phase) ==
+             "generating";
+    }));
+    if (!iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+      const linger reset = {1, 0};
+      ASSERT_EQ(
+          setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)), 0);
+      ASSERT_EQ(close(client), 0);
+      iree_notification_await(
+          notification,
+          [](void* self) {
+            return loom_serve_http_connection_failed(
+                static_cast<loom_serve_http_connection_t*>(self));
+          },
+          connection, iree_infinite_timeout());
+    }
+    // The native completion must release its pin and count completed device
+    // work, but no PNG/base64 borrower is needed for an absent consumer.
+    ASSERT_NO_FATAL_FAILURE(advance_until(
+        [&] { return interface.telemetry.counters->batches == 1; }, flags));
+    EXPECT_STREQ(interface.snapshot(interface.self).phase, "idle");
+    EXPECT_FALSE(interface.is_pending(interface.self));
+    EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
+    ASSERT_NO_FATAL_FAILURE(
+        advance_until([&] { return !interface.is_pending(interface.self); }));
+    if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+      EXPECT_TRUE(Read(client).empty());
+      interface.set_observer(interface.self, {});
+      service.reset();
+      ASSERT_NO_FATAL_FAILURE(create_service());
+    }
+
+    // Reuse the actual generator after retirement, including its prepared
+    // input and output storage, and compare the complete encoded response.
+    const int next =
+        Send("POST", "/v1/images/generations",
+             R"({"model":"fixture-image","prompt":"aba","seed":1})");
+    accept();
+    ASSERT_NO_FATAL_FAILURE(advance_until(
+        [&] { return interface.telemetry.counters->completed == 1; }));
+    EXPECT_NE(Read(next).find("\"b64_json\":\"" + EncodedPixels(3, 1) + "\""),
+              std::string::npos);
+    EXPECT_EQ(interface.telemetry.counters->failed, 0u);
+    interface.set_observer(interface.self, {});
   }
 
   // Allocator for model, transport and expected encoded output.
@@ -558,6 +670,14 @@ TEST_P(SourceImageServiceTest, FailedImageSourceLeavesPeerUsable) {
                 .find("HTTP/1.1 202"),
             0u);
   WaitModel("broken", {});
+}
+
+TEST_P(SourceImageServiceTest, CancelledDeviceImageSkipsEncoding) {
+  CheckAbandonedImage(0);
+}
+
+TEST_P(SourceImageServiceTest, StoppingDeviceImageSkipsEncoding) {
+  CheckAbandonedImage(LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, SourceImageServiceTest,

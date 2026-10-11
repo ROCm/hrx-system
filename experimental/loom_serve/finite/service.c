@@ -34,6 +34,8 @@ typedef struct finite_job_t {
   loom_serve_finite_prepared_t prepared;
   // Request-scoped parsing/source rejection, consumed after CPU release.
   iree_status_t status;
+  // Original device-cohort ordinal, preserved when cancelled peers are removed.
+  iree_host_size_t result_index;
   // Borrowed row views populated only during result encoding.
   iree_const_byte_span_t* rows;
   // Owned complete response, copied into transport before recycling the cohort.
@@ -327,14 +329,14 @@ static iree_status_t finite_cpu_run(iree_task_process_t* process,
       job->body = iree_string_view_empty();
     } else {
       for (iree_host_size_t row = 0; row < job->request->count; ++row) {
-        job->rows[row] = loom_serve_finite_model_row(service->model, i, row);
+        job->rows[row] =
+            loom_serve_finite_model_row(service->model, job->result_index, row);
       }
       status = finite_begin(&job->response, "200 OK");
       if (iree_status_is_ok(status)) {
-        status = service->protocol->response(
-            job->request, service->name, job->rows,
-            loom_serve_finite_model_input_tokens(service->model, i),
-            &job->response);
+        status =
+            service->protocol->response(job->request, service->name, job->rows,
+                                        job->input_tokens, &job->response);
       }
     }
   }
@@ -547,6 +549,34 @@ static void finite_cancel_peers(loom_serve_finite_service_t* service) {
   }
 }
 
+static void finite_complete_execution(loom_serve_finite_service_t* service) {
+  loom_serve_finite_model_complete(service->model);
+  finite_batch_event(service, &LOOM_SERVE_TELEMETRY_BATCH_END,
+                     ++service->telemetry.counters.batches);
+  iree_host_size_t retained = 0;
+  for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
+    finite_job_t* job = service->cohort[i];
+    job->input_tokens = loom_serve_finite_model_input_tokens(service->model, i);
+    service->telemetry.counters.input_tokens += job->input_tokens;
+    if (!job->connection) {
+      finite_job_destroy(service, job, iree_ok_status());
+      continue;
+    }
+    // The surviving encoding cohort can have holes in the original result
+    // plan. Preserve that ordinal without exposing mutable connection state
+    // to the CPU borrower or moving its per-row work onto the shared owner.
+    job->result_index = i;
+    service->cohort[retained++] = job;
+  }
+  service->cohort_count = retained;
+  if (retained) {
+    finite_schedule_cpu(service, FINITE_ENCODING);
+  } else {
+    loom_serve_finite_model_release_batch(service->model);
+    finite_finish(service, iree_ok_status());
+  }
+}
+
 static iree_status_t finite_collect(loom_serve_finite_service_t* service,
                                     bool* progress) {
   iree_slim_mutex_lock(&service->event.mutex);
@@ -577,16 +607,7 @@ static iree_status_t finite_collect(loom_serve_finite_service_t* service,
   } else if (service->phase == FINITE_BATCHING) {
     service->phase = FINITE_WAITING;
   } else if (service->phase == FINITE_RUNNING) {
-    loom_serve_finite_model_complete(service->model);
-    for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
-      finite_job_t* job = service->cohort[i];
-      job->input_tokens =
-          loom_serve_finite_model_input_tokens(service->model, i);
-      service->telemetry.counters.input_tokens += job->input_tokens;
-    }
-    finite_batch_event(service, &LOOM_SERVE_TELEMETRY_BATCH_END,
-                       ++service->telemetry.counters.batches);
-    finite_schedule_cpu(service, FINITE_ENCODING);
+    finite_complete_execution(service);
   } else {
     for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
       finite_job_t* job = service->cohort[i];
