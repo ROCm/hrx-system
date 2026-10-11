@@ -139,6 +139,7 @@ class ObserverTest(unittest.TestCase):
     def client(self):
         client = mock.Mock(spec=LogClient)
         client.address = urlsplit("http://127.0.0.1:8080")
+        client.unix_socket = None
         client.models.return_value = ["chat", "image"]
         client.forget.return_value = None
 
@@ -281,6 +282,30 @@ class ObserverTest(unittest.TestCase):
                 with self.assertRaises(FileExistsError):
                     observe.main()
             self.assertEqual(path.read_text(), "valuable evidence\n")
+
+    def test_unix_option_reaches_the_independent_reader(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "run.jsonl"
+            socket_path = str(Path(directory) / 'serve "local".sock')
+            with (
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "observe",
+                        "--url=http://localhost",
+                        f"--log={path}",
+                        f"--unix-socket={socket_path}",
+                        "--timeout=2.5",
+                    ],
+                ),
+                mock.patch.object(observe, "record_streams") as record,
+            ):
+                observe.main()
+            client = record.call_args.args[0]
+            self.assertEqual(client.unix_socket, socket_path)
+            self.assertEqual(client.timeout, 2.5)
+            self.assertEqual(client.address.geturl(), "http://localhost")
 
 
 if __name__ == "__main__":

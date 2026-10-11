@@ -8,8 +8,13 @@ import collections
 import contextlib
 import http.server
 import json
+import socket
+import socketserver
+import tempfile
 import threading
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from experimental.loom_serve.http.logs import LogClient, ModelNotFound
 
@@ -38,7 +43,7 @@ def batch(model, records, next_position, *, identity="100:1", oldest=0):
 
 
 @contextlib.contextmanager
-def endpoint(replies):
+def endpoint(replies, *, unix_socket=None):
     replies = collections.deque(replies)
     requests = []
 
@@ -56,14 +61,24 @@ def endpoint(replies):
         def log_message(self, *_):
             pass
 
-    with http.server.HTTPServer(("127.0.0.1", 0), Handler) as server:
+    server = (
+        socketserver.UnixStreamServer(unix_socket, Handler)
+        if unix_socket is not None
+        else http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    )
+    origin = (
+        "http://not-a-tcp-host.invalid:8099"
+        if unix_socket is not None
+        else f"http://127.0.0.1:{server.server_port}"
+    )
+    with server:
         thread = threading.Thread(
             target=server.serve_forever, kwargs={"poll_interval": 0.01}
         )
         thread.start()
         try:
             yield (
-                LogClient(f"http://127.0.0.1:{server.server_port}", timeout=None),
+                LogClient(origin, timeout=None, unix_socket=unix_socket),
                 requests,
             )
         finally:
@@ -72,6 +87,56 @@ def endpoint(replies):
 
 
 class LogsTest(unittest.TestCase):
+    @unittest.skipUnless(hasattr(socket, "AF_UNIX"), "requires Unix sockets")
+    def test_unix_path_is_literal_and_preserves_http_routing(self):
+        replies = [
+            (200, b'{"data":[{"id":"chat"}]}'),
+            (200, batch("chat", [{"event": "stream_begin", "sequence": 0}], 1)),
+            (200, batch("chat", [], 1)),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "serve local%25#.sock")
+            with endpoint(replies, unix_socket=path) as (client, requests):
+                self.assertEqual(client.models(), ["chat"])
+                client.poll("chat")
+                client.poll("chat")
+                self.assertEqual(client.cursors, {"chat": "100:1:1"})
+                self.assertEqual(
+                    [path for path, _ in requests], ["/v1/models", "/logz", "/logz"]
+                )
+                self.assertTrue(
+                    all(
+                        headers["Host"] == "not-a-tcp-host.invalid:8099"
+                        for _, headers in requests
+                    )
+                )
+                self.assertEqual(requests[-1][1]["X-Loom-Cursor"], "100:1:1")
+
+    @unittest.skipUnless(hasattr(socket, "AF_UNIX"), "requires Unix sockets")
+    def test_unix_connect_failure_closes_socket_and_preserves_cursor(self):
+        client = LogClient("http://localhost", timeout=2.5, unix_socket="missing.sock")
+        client.cursors["chat"] = "100:1:1"
+        with mock.patch.object(socket, "socket") as create_socket:
+            connection = create_socket.return_value
+            connection.connect.side_effect = FileNotFoundError("missing socket")
+            with self.assertRaisesRegex(FileNotFoundError, "missing socket"):
+                client.poll("chat")
+            create_socket.assert_called_once_with(socket.AF_UNIX, socket.SOCK_STREAM)
+            connection.settimeout.assert_called_once_with(2.5)
+            connection.connect.assert_called_once_with("missing.sock")
+            connection.close.assert_called_once_with()
+        self.assertEqual(client.cursors, {"chat": "100:1:1"})
+
+    def test_unix_selection_rejects_tls_and_nonfilesystem_paths(self):
+        for origin, path in (
+            ("https://localhost", "serve.sock"),
+            ("http://localhost", ""),
+            ("http://localhost", "\0abstract"),
+            ("http://localhost", 123),
+        ):
+            with self.subTest(origin=origin, path=path), self.assertRaises(ValueError):
+                LogClient(origin, unix_socket=path)
+
     def test_independent_cursors_gaps_and_fresh_counters(self):
         start = {"event": "stream_begin", "sequence": 0}
         gap = {"event": "gap", "from": 1, "to": 10}

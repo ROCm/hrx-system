@@ -39,6 +39,24 @@ def record(data, model="chat", identity="100:1", elapsed_ns=10_000_000_000):
 
 
 class DashboardTest(unittest.TestCase):
+    def test_unix_carrier_is_visible_and_terminal_safe(self):
+        sink = io.StringIO()
+        observe.EventLog(sink).emit(
+            "observer",
+            {
+                "event": "observation_begin",
+                "url": "http://localhost",
+                "unix_socket": "/tmp/serve\x1b[2J\nsocket",
+            },
+        )
+        view = dashboard.RunView()
+        view.apply(json.loads(sink.getvalue()))
+        heading = dashboard.render(view)[0]
+        self.assertIn("http://localhost via unix:", heading)
+        self.assertIn("/tmp/serve", heading)
+        self.assertNotIn("\x1b", heading)
+        self.assertNotIn("\n", heading)
+
     def records(self):
         stream = io.StringIO()
         log = observe.EventLog(stream)

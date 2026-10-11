@@ -351,10 +351,22 @@ use the same HTTP API:
 curl --unix-socket /path/to/loom-serve.sock http://localhost/v1/models
 ```
 
+The independent observer uses the same carrier override:
+
+```sh
+build_tools/bin/iree-bazel-run //experimental/loom_serve/tools:observe -- \
+  --url=http://localhost --unix-socket=/path/to/loom-serve.sock \
+  --log=/path/to/new-run.jsonl
+```
+
+The socket path is a literal local filesystem path, not URL-encoded. The HTTP
+origin supplies the Host header but is not resolved or contacted over TCP.
+Unix observation uses plain HTTP; an HTTPS origin with `--unix-socket` is an
+error. JSONL records and the dashboard identify both the origin and carrier.
+Observer timeouts apply to the socket as they do to TCP, not to model work.
+
 An occupied socket path is a startup error, not permission to delete another
 server's endpoint. Successfully owned paths are removed on listener teardown.
-The current Python observer accepts HTTP(S) origins; `curl --unix-socket` is
-the direct Unix-carrier client.
 
 These are trusted administration interfaces. Registration executes local Loom
 source and reads server-local assets. There is no built-in authentication,

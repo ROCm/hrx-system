@@ -205,8 +205,11 @@ def render(view, all_sensors=False, now_ns=None, width=None):
         else f"record age {lag / 1e9:.1f}s"
     )
     begin = latest.get("observation_begin", {})
+    endpoint = text(begin.get("url", "--"))
+    if begin.get("unix_socket") is not None:
+        endpoint += " via unix:" + text(begin["unix_socket"])
     lines = [
-        f"LOOM SERVE  |  {text(begin.get('url', '--'))}  |  +{elapsed_ns / 1e9:.1f}s  |  {state}",
+        f"LOOM SERVE  |  {endpoint}  |  +{elapsed_ns / 1e9:.1f}s  |  {state}",
         f"Observed streams {len(view.streams)}  record #{view.last['sequence']}  totals come from owner snapshots",
     ]
 

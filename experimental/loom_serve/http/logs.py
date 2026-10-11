@@ -15,6 +15,7 @@ stream incarnation is reported explicitly, never spliced into the old history.
 import dataclasses
 import http.client
 import json
+import socket
 from urllib.parse import urlsplit
 
 
@@ -35,7 +36,12 @@ class ModelNotFound(RuntimeError):
 
 
 class LogClient:
-    def __init__(self, url, timeout=10.0):
+    def __init__(self, url, timeout=10.0, *, unix_socket=None):
+        """Read HTTP logs, optionally through a raw filesystem socket path.
+
+        The origin still supplies the HTTP Host header. Unix connections use
+        plain HTTP and never resolve the origin's host or fall back to TCP.
+        """
         address = urlsplit(url)
         if (
             address.scheme not in ("http", "https")
@@ -47,7 +53,20 @@ class LogClient:
             or address.fragment
         ):
             raise ValueError("server URL must be an HTTP(S) origin")
+        if unix_socket is not None:
+            if address.scheme != "http":
+                raise ValueError("Unix socket observation requires a plain HTTP origin")
+            if (
+                not isinstance(unix_socket, str)
+                or not unix_socket
+                or "\0" in unix_socket
+            ):
+                raise ValueError("Unix socket path must be a nonempty filesystem path")
+            if not hasattr(socket, "AF_UNIX"):
+                raise ValueError("Unix sockets are unavailable on this platform")
         self.address = address
+        # Literal local filesystem path, or None for the origin's TCP endpoint.
+        self.unix_socket = unix_socket
         # Network observation deadline, not a deadline on submitted model work.
         self.timeout = timeout
         self.cursors = {}
@@ -62,6 +81,10 @@ class LogClient:
             self.address.hostname, self.address.port, timeout=self.timeout
         )
         try:
+            if self.unix_socket is not None:
+                connection.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                connection.sock.settimeout(self.timeout)
+                connection.sock.connect(self.unix_socket)
             connection.request("GET", path, headers=headers or {})
             response = connection.getresponse()
             # /logz currently renders at most 64 fixed-size records per poll.

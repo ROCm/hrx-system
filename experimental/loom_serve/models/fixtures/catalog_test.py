@@ -1094,6 +1094,7 @@ def check_dynamic_observer(server_command, directory, catalog):
         model for model in catalog["models"] if model["kind"] == "embedding"
     )
     log_path = directory / "dynamic-observer.log"
+    socket_path = directory / 'observer "local".sock'
     events, stopped = Events(), threading.Event()
 
     class Sink(io.StringIO):
@@ -1110,6 +1111,7 @@ def check_dynamic_observer(server_command, directory, catalog):
         [
             *server_command,
             "--listen=127.0.0.1:0",
+            f"--listen=unix:{socket_path}",
             "--workers=1",
         ],
         log_path,
@@ -1117,7 +1119,9 @@ def check_dynamic_observer(server_command, directory, catalog):
     ) as (_, address):
         assert address is not None, log_path.read_text()
         client = Client(address)
-        reader = LogClient("http://" + address, timeout=None)
+        reader = LogClient(
+            "http://observer.invalid", timeout=None, unix_socket=str(socket_path)
+        )
         sink = Sink()
 
         def observe():
@@ -1129,7 +1133,9 @@ def check_dynamic_observer(server_command, directory, catalog):
         with ThreadPoolExecutor(max_workers=1) as executor:
             observer = executor.submit(observe)
             try:
-                events.wait("observation_begin", models=[])
+                events.wait(
+                    "observation_begin", models=[], unix_socket=str(socket_path)
+                )
                 client.request("/v1/models/register", declaration, status=202)
                 first = events.wait("model_available", model="vectors")["identity"]
                 events.wait("model_cursor", model="vectors", identity=first)
@@ -1162,6 +1168,7 @@ def check_dynamic_observer(server_command, directory, catalog):
                 observer.result()
         assert set(reader.cursors) == {None, "vectors"}, reader.cursors
         events.wait("observation_end")
+    assert not socket_path.exists()
     print(json.dumps({"event": "dynamic_observer_followed_reincarnation"}), flush=True)
 
 

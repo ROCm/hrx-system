@@ -85,6 +85,7 @@ def record_streams(
         {
             "event": "observation_begin",
             "url": client.address.geturl(),
+            "unix_socket": client.unix_socket,
             "models": models,
             "follow_models": discover,
             "observer_host": platform.node(),
@@ -129,6 +130,10 @@ def record_streams(
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True, help="Server HTTP(S) origin.")
+    parser.add_argument(
+        "--unix-socket",
+        help="Connect to this local filesystem socket instead of the HTTP origin's host.",
+    )
     parser.add_argument("--log", required=True, help="New JSONL path, or - for stdout.")
     parser.add_argument("--interval", type=float, default=0.25)
     parser.add_argument(
@@ -156,7 +161,9 @@ def main():
         if arguments.local_pid <= 0 or sys.platform != "linux":
             parser.error("local-pid requires a positive Linux process ID")
     try:
-        client = LogClient(arguments.url, arguments.timeout)
+        client = LogClient(
+            arguments.url, arguments.timeout, unix_socket=arguments.unix_socket
+        )
     except ValueError as error:
         parser.error(str(error))
     stopped = threading.Event()
