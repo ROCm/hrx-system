@@ -1287,8 +1287,6 @@ int iree_test_loom_main(int argc, char** argv,
         !iree_string_view_is_empty(hal_context.driver_name)) {
       status = loom_run_hal_testbench_context_ensure_runtime(&hal_context);
       if (iree_status_is_ok(status)) {
-        execution_options.materializer.target_pool =
-            hal_context.runtime.staging_pool;
         execution_options.materializer.staging_pool =
             hal_context.runtime.staging_pool;
         execution_options.materializer.transfer_queue =
@@ -1317,10 +1315,10 @@ int iree_test_loom_main(int argc, char** argv,
                 &hal_scenario_profile);
       }
     }
-    if (iree_status_is_ok(status) && selected_scenario_count != 0 &&
-        execution_options.materializer.target_pool == NULL) {
+    if (iree_status_is_ok(status) && selected_scenario_count != 0) {
       // Scenario values are shared with host oracles. Each execution profile
-      // stages those values into its own device storage as needed.
+      // stages those values into its own device storage as needed. Device
+      // staging pools need not be host coherent; VM aliases require it.
       const iree_hal_pool_host_access_t host_access = {
           .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
           .modes =
