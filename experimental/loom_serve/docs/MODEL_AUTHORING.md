@@ -214,17 +214,21 @@ The source compilation sequence in [`jit.c`](../runtime/jit.c) is:
 2. Submit `loom_serve_jit_compile_async` with the root and configuration.
    Product construction calls `loomc_cmd_program_product_build` on a shared
    worker; its request sink takes ownership of reachable native requests.
-3. Submit each request through a `loomc_task_queue_t` on that shared pool.
-   Its binding/root ordinals and product requirements supply the native
-   specialization records. Each task deserializes, compiles, and emits from the
-   same private module, preserving prepared compiler facts. Compiler, pipeline,
-   profile and product are immutable and shared; mutable scratch is selected by
-   the task's mutually exclusive worker ordinal.
+3. Resolve each request's exact bytecode, ordered roots and effective native
+   specialization names against the catalog-local executable cache. Parent
+   requirement ordinals are bindings, not native input identity. The catalog's
+   compiler, profile, pipeline and loader are fixed. Each distinct miss submits
+   one task through the shared `loomc_task_sink_t`; equivalent requests reuse
+   its result. Each task deserializes, compiles and emits from one private
+   module, with scratch selected by its mutually exclusive worker ordinal.
 4. Each task loads its executable through the selected queue family and resolves
-   its disjoint requirement slots. The final native request's retirement binds
-   entries in command-local order and publishes the stage completion, including
-   cleanup after failure. No shared worker waits for the task queue or another
-   catalog. The workers and scratch survive for subsequent stages.
+   native roots into its own result slot. Once every task retires, the job binds
+   request roots to parent requirements, then entries in command-local order.
+   Stage completion transfers an independently owned executable reference for
+   each entry. Successful native results survive a failed parent; failed or
+   unsubmitted inputs are discarded and remain retryable. No shared worker waits
+   for another job. Workers, scratch and cached executables survive for
+   subsequent stages; stage completion may destroy the catalog itself.
 5. Allocate/load fixed parameter roots. `loom_serve_jit_stage_record` creates
    reusable commands retaining those buffers and executables.
 6. JIT the VM source, transfer its image to the trusted in-process VM loader,

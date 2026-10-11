@@ -255,17 +255,20 @@ server. The binary embeds the JIT; it never invokes `loom-link` or
 `loom-compile`, loads a prepared artifact directory, or falls back to stale code.
 
 `runtime/jit.c` indexes the catalog once and retains the immutable compiler, pipeline,
-and live HAL target profile across stage specializations. Its standard loomc
-task pool supplies up to eight physical-core workers, each with private reusable
-scratch. Stage calls are synchronous; their independent native requests compile
-and load concurrently, and the stage queue drains even after a task fails.
+and live HAL target profile across stage specializations. Compilation shares the
+server's loomc task pool, with private reusable scratch per worker. Dynamic
+registration submits stages asynchronously; independent native requests compile
+and load concurrently. All accepted tasks retire before stage completion, even
+after a task fails. Only outer CLI constructors join synchronously.
 `loomc_cmd_program_product_build` produces portable command bytes and
 independently owned kernel source requests. Their producer-supplied binding
 ordinals map emitted kernels to command entries; filenames and JSON do not
-participate. Each request is lowered in memory and emitted from the same module,
-preserving concrete target facts through native emission. Loaded executables and
-recorded commands have independent ownership. VM control is also compiled at
-startup and transferred directly into the VM's trusted in-process loading path.
+participate. Exact native source/root/specialization inputs reuse one loaded
+executable across stages in the same catalog. Distinct inputs are lowered in
+memory and emitted from the same module, preserving concrete target facts through
+native emission. Loaded executables and recorded commands have independent
+ownership. VM control is also compiled at startup and transferred directly into
+the VM's trusted in-process loading path.
 A compile error terminates preparation with its source diagnostics.
 
 The model's `config.loom` supplies fixed specialization defaults; its source
@@ -274,9 +277,9 @@ launch counts, buffer requirements, and entry mapping.
 All target stages must place the shared weights identically; model preparation
 checks this before allocating the one weight slab. MTP references existing
 target weight views and allocates only its additional parameter groups.
-Cold `compilation` records expose command attempts, native request and entry
-counts, pool worker count, and accumulated compilation/load duration. Source
-diagnostics are copied before compiler results retire, with severity counts and
+Cold `compilation` records expose command attempts, native task and reused-request
+counts, entry counts, pool worker count, and accumulated compilation/load duration.
+Source diagnostics are copied before compiler results retire, with severity counts and
 explicit retention limits. Only the outer construction caller renders JSONL;
 compiler workers never write to a sink. Warm execution reuses commands and
 storage without compiler tasks.

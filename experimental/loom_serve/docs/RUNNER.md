@@ -101,6 +101,10 @@ configuration interface; reusable device helpers still take explicit operands.
 The source JIT shares immutable compiler state and uses the host's loomc task
 sink for concurrent native requests. Each worker owns reusable scratch; stage
 completion retires that stage's work without draining peer compilations.
+Exact native input reuse spans command stages in the same catalog. Cached
+executables belong to its fixed compiler/target/loader domain; recorded commands
+retain independent references. Failed native inputs remain retryable, and warm
+execution performs no cache lookup.
 Dynamic registration uses `loom_serve_jit_compile_async`, keeping routing and
 already-ready models runnable during preparation. Synchronous CLI constructors
 join the same operation only on their outer application thread. Compiler jobs,

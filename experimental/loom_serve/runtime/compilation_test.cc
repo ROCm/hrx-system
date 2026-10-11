@@ -45,12 +45,14 @@ TEST(CompilationTest, OwnedDiagnosticAndWorkHaveExactJson) {
                        .message = "a\n\"b"}},
       .commands = 2,
       .kernels = 8,
+      .reused_kernels = 4,
       .entries = 16,
       .workers = 4,
       .duration_ns = 123};
   EXPECT_EQ(Format(report),
             "{\"event\":\"compilation\",\"commands\":2,\"kernels\":8,"
-            "\"entries\":16,\"workers\":4,\"duration_ns\":123,\"notes\":0,"
+            "\"reused_kernels\":4,\"entries\":16,\"workers\":4,"
+            "\"duration_ns\":123,\"notes\":0,"
             "\"warnings\":1,\"errors\":0,\"omitted_diagnostics\":0,"
             "\"diagnostics\":[{\"severity\":1,\"line\":9,\"column\":2,"
             "\"omitted_locations\":3,\"omitted_parameters\":1,"
@@ -69,6 +71,7 @@ TEST(CompilationTest, MergeRetainsBoundedEvidenceAndAllCounters) {
     source.diagnostics[0].line = i + 1;
     source.commands = 1;
     source.kernels = 2;
+    source.reused_kernels = 4;
     source.entries = 3;
     source.workers = 1 + i % 4;
     source.duration_ns = 100;
@@ -83,6 +86,7 @@ TEST(CompilationTest, MergeRetainsBoundedEvidenceAndAllCounters) {
   }
   EXPECT_EQ(report.commands, 12u);
   EXPECT_EQ(report.kernels, 24u);
+  EXPECT_EQ(report.reused_kernels, 48u);
   EXPECT_EQ(report.entries, 36u);
   EXPECT_EQ(report.workers, 4u);
   EXPECT_EQ(report.duration_ns, 1200u);

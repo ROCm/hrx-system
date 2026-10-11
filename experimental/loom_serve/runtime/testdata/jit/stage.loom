@@ -131,6 +131,14 @@ command.program.def public @advance() launch(%storage: buffer) {
   command.return
 }
 
+// A second command changes parent slots and repeats one cached native root.
+command.program.def public @selected_pair() launch(%storage: buffer) {
+  kernel.launch @increment_7(%storage) : (buffer)
+  kernel.launch @increment_2(%storage) : (buffer)
+  kernel.launch @increment_7(%storage) : (buffer)
+  command.return
+}
+
 kernel.def target(@wave32) @temporary_write() {
   %one = index.constant 1 : index
   kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index

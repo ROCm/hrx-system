@@ -364,18 +364,29 @@ TEST_P(JitTest, SourceDefaultsAndOverridesShareVmAndGpuState) {
 #endif
   // A failed native task must join its accepted siblings before compiler reuse.
   IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        Compile("3", 0, IREE_SV("invalid_native")));
+                        Compile("5", 0, IREE_SV("invalid_native")));
   ASSERT_EQ(commands_[0], nullptr);
+  EXPECT_EQ(compilation_.kernels, 9u);
+  EXPECT_EQ(compilation_.reused_kernels, 0u);
   EXPECT_GT(compilation_.severities[LOOMC_DIAGNOSTIC_SEVERITY_ERROR], 0u);
   ASSERT_GT(compilation_.diagnostic_count, 0u);
   EXPECT_GT(compilation_.diagnostics[0].message_length, 0u);
+  // Successful siblings survive a parent failure; the failed input is retried.
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Compile("5", 0, IREE_SV("invalid_native")));
+  EXPECT_EQ(compilation_.kernels, 10u);
+  EXPECT_EQ(compilation_.reused_kernels, 8u);
   IREE_ASSERT_OK(Compile(nullptr, 0));
+  EXPECT_EQ(compilation_.kernels, 10u);
+  EXPECT_EQ(compilation_.reused_kernels, 16u);
   IREE_ASSERT_OK(Compile("7", 1));
+  EXPECT_EQ(compilation_.kernels, 18u);
+  EXPECT_EQ(compilation_.reused_kernels, 16u);
   IREE_ASSERT_OK(PrepareVm());
   // Prepared commands must outlive all compiler/source storage.
   loom_serve_jit_destroy(jit_);
   jit_ = nullptr;
-  EXPECT_EQ(compilation_.commands, 3u);
+  EXPECT_EQ(compilation_.commands, 4u);
   EXPECT_EQ(compilation_.entries, 16u);
   EXPECT_EQ(compilation_.workers, GetParam());
   EXPECT_GT(compilation_.duration_ns, 0u);
@@ -458,6 +469,10 @@ TEST_P(JitTest, SourceFailureOutlivesUnconstructedCatalogAndVm) {
 }
 
 TEST_P(JitTest, CompletedCatalogsRetireWithoutClosingSharedCompilerQueue) {
+  // The first catalog is warm; the independent peer must compile its own copy.
+  IREE_ASSERT_OK(Compile(nullptr, 0));
+  iree_hal_command_buffer_release(commands_[0]);
+  commands_[0] = nullptr;
   loom_serve_compilation_report_t peer_report = {};
   loom_serve_jit_t* peer = nullptr;
   auto* host = loom_serve_device_host(device_owner_);
@@ -468,12 +483,13 @@ TEST_P(JitTest, CompletedCatalogsRetireWithoutClosingSharedCompilerQueue) {
       nullptr, 0, {}, LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED};
   Compilation jobs[2];
   jobs[0].jit = jit_;
+  jobs[0].root = IREE_SV("selected_pair");
   jobs[1].jit = peer;
+  jobs[1].root = IREE_SV("advance");
   // Both catalogs are now owned through their worker completion callbacks.
   jit_ = nullptr;
   for (auto& job : jobs) {
     job.retire_catalog = true;
-    job.root = IREE_SV("advance");
     job.config = &config;
     job.Start(loom_serve_host_executor(host));
   }
@@ -491,8 +507,12 @@ TEST_P(JitTest, CompletedCatalogsRetireWithoutClosingSharedCompilerQueue) {
     loom_serve_jit_stage_destroy(stage);
   }
   IREE_ASSERT_OK(status);
-  EXPECT_EQ(compilation_.entries, 8u);
+  EXPECT_EQ(compilation_.entries, 10u);
+  EXPECT_EQ(compilation_.kernels, 8u);
+  EXPECT_EQ(compilation_.reused_kernels, 2u);
   EXPECT_EQ(peer_report.entries, 8u);
+  EXPECT_EQ(peer_report.kernels, 8u);
+  EXPECT_EQ(peer_report.reused_kernels, 0u);
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       loom_serve_device_storage_pool(device_owner_),
       iree_hal_make_pool_reservation_request(sizeof(input_), 0),
@@ -515,7 +535,7 @@ TEST_P(JitTest, CompletedCatalogsRetireWithoutClosingSharedCompilerQueue) {
       loom_serve_execution_feedback(execution_, 1, &download, &completion));
   IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
   for (size_t i = 0; i < output_.size(); ++i) {
-    EXPECT_EQ(output_[i], 110 + 2 * i);
+    EXPECT_EQ(output_[i], 105 + i + (i == 7 ? 24 : (i == 2 ? 7 : 0)));
   }
 }
 

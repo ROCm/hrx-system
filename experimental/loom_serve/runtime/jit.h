@@ -21,6 +21,9 @@ extern "C" {
 // shared host compiler sink and catalog-local worker scratch. Compilation calls
 // on a catalog are serialized by the caller; native requests run concurrently.
 // Execution of already prepared commands does not access this object.
+// Native requests with identical source bytes, roots and specialization names
+// share loaded executables inside this catalog's fixed target/pipeline domain.
+// Prepared stages retain their executables independently of catalog lifetime.
 typedef struct loom_serve_jit_t loom_serve_jit_t;
 typedef struct loom_serve_jit_stage_t loom_serve_jit_stage_t;
 

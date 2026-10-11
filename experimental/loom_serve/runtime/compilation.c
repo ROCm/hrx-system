@@ -96,6 +96,7 @@ void loom_serve_compilation_merge(
   report->diagnostic_count += count;
   report->commands += source->commands;
   report->kernels += source->kernels;
+  report->reused_kernels += source->reused_kernels;
   report->entries += source->entries;
   report->workers = iree_max(report->workers, source->workers);
   report->duration_ns += source->duration_ns;
@@ -122,13 +123,14 @@ iree_status_t loom_serve_compilation_write(
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
       output,
       "{\"event\":\"compilation\",\"commands\":%" PRIu64 ",\"kernels\":%" PRIu64
-      ",\"entries\":%" PRIu64 ",\"workers\":%" PRIu64
-      ",\"duration_ns\":%" PRIu64 ",\"notes\":%" PRIu64 ",\"warnings\":%" PRIu64
-      ",\"errors\":%" PRIu64 ",\"omitted_diagnostics\":%" PRIu64
-      ",\"diagnostics\":[",
-      report->commands, report->kernels, report->entries, report->workers,
-      report->duration_ns, report->severities[0], report->severities[1],
-      report->severities[2], count - report->diagnostic_count));
+      ",\"reused_kernels\":%" PRIu64 ",\"entries\":%" PRIu64
+      ",\"workers\":%" PRIu64 ",\"duration_ns\":%" PRIu64 ",\"notes\":%" PRIu64
+      ",\"warnings\":%" PRIu64 ",\"errors\":%" PRIu64
+      ",\"omitted_diagnostics\":%" PRIu64 ",\"diagnostics\":[",
+      report->commands, report->kernels, report->reused_kernels,
+      report->entries, report->workers, report->duration_ns,
+      report->severities[0], report->severities[1], report->severities[2],
+      count - report->diagnostic_count));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < report->diagnostic_count && iree_status_is_ok(status); ++i) {
