@@ -1211,14 +1211,21 @@ loom_cc_test(
 
 loom_cc_library(
     name = "motion",
-    srcs = ["motion.c"],
-    hdrs = ["motion.h"],
+    srcs = [
+        "motion.c",
+        "motion_memory.c",
+    ],
+    hdrs = [
+        "motion.h",
+        "motion_memory.h",
+    ],
     deps = [
         ":availability",
         ":loop_domain",
         ":movement",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/util:adaptive_sort",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

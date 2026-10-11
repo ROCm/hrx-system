@@ -1,0 +1,132 @@
+// RUN: pass licm
+
+// A write in a sibling loop does not interfere. Both reads cross writes to
+// other slots, even though the function-wide write union covers both slots.
+func.def @sibling_writes(%storage: view<8xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %first = scf.for %i = [%begin to %end step %step](%carry = %initial : i32) -> (i32) {
+    %left = view.load %storage[0] : view<8xi32> -> i32
+    view.store %left, %storage[1] : i32, view<8xi32>
+    scf.yield %left : i32
+  }
+  %second = scf.for %i = [%begin to %end step %step](%carry = %first : i32) -> (i32) {
+    %right = view.load %storage[1] : view<8xi32> -> i32
+    view.store %right, %storage[0] : i32, view<8xi32>
+    scf.yield %right : i32
+  }
+  func.return %second : i32
+}
+
+// ----
+func.def @sibling_writes(%storage: view<8xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %left = view.load %storage[0] : view<8xi32> -> i32
+  %first = scf.for %i = [%begin to %end step %step](%carry = %initial : i32) -> (i32) {
+    view.store %left, %storage[1] : i32, view<8xi32>
+    scf.yield %left : i32
+  }
+  %right = view.load %storage[1] : view<8xi32> -> i32
+  %second = scf.for %i = [%begin to %end step %step](%carry = %first : i32) -> (i32) {
+    view.store %right, %storage[0] : i32, view<8xi32>
+    scf.yield %right : i32
+  }
+  func.return %second : i32
+}
+
+// ====
+
+// The same read moves across the inner loop and then stops at the outer
+// loop's write. The effect snapshot survives the first move; availability
+// and the destination loop's scope are evaluated again for the second.
+func.def @nested_write_scopes(%storage: view<8xi32>, %replacement: i32, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %outer_result = scf.for %outer = [%begin to %end step %step](%carry = %initial : i32) -> (i32) {
+    %inner_result = scf.for %inner = [%begin to %end step %step](%value = %carry : i32) -> (i32) {
+      %loaded = view.load %storage[1] : view<8xi32> -> i32
+      view.store %replacement, %storage[0] : i32, view<8xi32>
+      scf.yield %loaded : i32
+    }
+    view.store %inner_result, %storage[1] : i32, view<8xi32>
+    scf.yield %inner_result : i32
+  }
+  func.return %outer_result : i32
+}
+
+// ----
+func.def @nested_write_scopes(%storage: view<8xi32>, %replacement: i32, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %outer_result = scf.for %outer = [%begin to %end step %step](%carry = %initial : i32) -> (i32) {
+    %loaded = view.load %storage[1] : view<8xi32> -> i32
+    %inner_result = scf.for %inner = [%begin to %end step %step](%value = %carry : i32) -> (i32) {
+      view.store %replacement, %storage[0] : i32, view<8xi32>
+      scf.yield %loaded : i32
+    }
+    view.store %inner_result, %storage[1] : i32, view<8xi32>
+    scf.yield %inner_result : i32
+  }
+  func.return %outer_result : i32
+}
+
+// ====
+
+// The byte union retains holes between writes and covers overlapping writes.
+// Source order deliberately differs from byte order. The read in the hole
+// moves, while the read covered by the merged writes remains in the loop.
+func.def @write_union(%storage: view<16xi32>, %replacement: vector<4xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %result = scf.for %i = [%begin to %end step %step](%carry = %initial : i32) -> (i32) {
+    %gap = view.load %storage[6] : view<16xi32> -> i32
+    %covered = view.load %storage[4] : view<16xi32> -> i32
+    vector.store %replacement, %storage[8] : vector<4xi32>, view<16xi32>
+    vector.store %replacement, %storage[2] : vector<4xi32>, view<16xi32>
+    vector.store %replacement, %storage[0] : vector<4xi32>, view<16xi32>
+    %sum = test.addi %gap, %covered : i32
+    scf.yield %sum : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @write_union(%storage: view<16xi32>, %replacement: vector<4xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %gap = view.load %storage[6] : view<16xi32> -> i32
+  %result = scf.for %i = [%begin to %end step %step](%carry = %initial : i32) -> (i32) {
+    %covered = view.load %storage[4] : view<16xi32> -> i32
+    vector.store %replacement, %storage[8] : vector<4xi32>, view<16xi32>
+    vector.store %replacement, %storage[2] : vector<4xi32>, view<16xi32>
+    vector.store %replacement, %storage[0] : vector<4xi32>, view<16xi32>
+    %sum = test.addi %gap, %covered : i32
+    scf.yield %sum : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// An unbounded offset cannot exclude a write from the numeric union.
+func.def @unknown_write_offset(%storage: buffer, %offset: offset, %replacement: i32, %initial: i32) -> (i32) {
+  %base = index.constant 0 : offset
+  %read_view = buffer.view %storage[%base] : buffer -> view<8xi32>
+  %write_view = buffer.view %storage[%offset] : buffer -> view<8xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %result = scf.for %i = [%begin to %end step %step](%carry = %initial : i32) -> (i32) {
+    %loaded = view.load %read_view[0] : view<8xi32> -> i32
+    view.store %replacement, %write_view[0] : i32, view<8xi32>
+    scf.yield %loaded : i32
+  }
+  func.return %result : i32
+}

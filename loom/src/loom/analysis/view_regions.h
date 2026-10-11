@@ -229,6 +229,23 @@ bool loom_view_region_table_root_is_stable(
 bool loom_view_memory_spaces_are_disjoint(loom_value_fact_memory_space_t left,
                                           loom_value_fact_memory_space_t right);
 
+// Returns the comparable alias partition for a known root, or NONE when
+// disjointness requires individual proof. Distinct known roots in different
+// non-NONE partitions cannot alias. Same-root accesses still require byte
+// range proofs, even when their alias assumptions differ.
+static inline loom_value_fact_alias_scope_id_t
+loom_view_region_comparable_alias_scope(const loom_view_region_t* region) {
+  return region->root_value_id == LOOM_VALUE_ID_INVALID
+             ? LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE
+             : region->alias_scope_id;
+}
+
+// Proves disjointness using only retained allocation origins, memory spaces,
+// and comparable alias scopes. Same-root byte ranges require the interval
+// query below. This query neither allocates nor inspects source IR.
+bool loom_view_region_roots_are_disjoint(const loom_view_region_t* left,
+                                         const loom_view_region_t* right);
+
 // Attempts to prove that two view regions cannot overlap. Same-root regions
 // use symbolic byte intervals. Distinct roots are disjoint when their concrete
 // memory spaces cannot alias or both carry comparable and different alias

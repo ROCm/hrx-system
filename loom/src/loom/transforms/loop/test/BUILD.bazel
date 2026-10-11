@@ -16,6 +16,7 @@ loom_check_test_suite(
     name = "test",
     srcs = [
         "licm.loom-test",
+        "licm_memory.loom-test",
         "licm_periodic.loom-test",
         "licm_storage.loom-test",
         "loop_fusion.loom-test",

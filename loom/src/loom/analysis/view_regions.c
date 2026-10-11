@@ -1547,6 +1547,31 @@ bool loom_view_memory_spaces_are_disjoint(
          right == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE;
 }
 
+bool loom_view_region_roots_are_disjoint(
+    const loom_view_region_t* left_region,
+    const loom_view_region_t* right_region) {
+  if (loom_value_fact_reference_origins_are_disjoint(left_region->origin,
+                                                     right_region->origin)) {
+    return true;
+  }
+  if (left_region->root_value_id == LOOM_VALUE_ID_INVALID ||
+      right_region->root_value_id == LOOM_VALUE_ID_INVALID) {
+    return false;
+  }
+  if (left_region->root_value_id != right_region->root_value_id) {
+    const loom_value_fact_alias_scope_id_t left_alias =
+        loom_view_region_comparable_alias_scope(left_region);
+    const loom_value_fact_alias_scope_id_t right_alias =
+        loom_view_region_comparable_alias_scope(right_region);
+    return loom_view_memory_spaces_are_disjoint(left_region->memory_space,
+                                                right_region->memory_space) ||
+           (left_alias != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE &&
+            right_alias != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE &&
+            left_alias != right_alias);
+  }
+  return false;
+}
+
 iree_status_t loom_view_regions_prove_no_overlap(
     loom_view_region_table_t* table, const loom_view_region_t* left_region,
     const loom_view_region_t* right_region, bool* out_no_overlap) {
@@ -1554,23 +1579,11 @@ iree_status_t loom_view_regions_prove_no_overlap(
   if (!left_region || !right_region) {
     return iree_ok_status();
   }
-  if (loom_value_fact_reference_origins_are_disjoint(left_region->origin,
-                                                     right_region->origin)) {
-    *out_no_overlap = true;
-    return iree_ok_status();
-  }
-  if (left_region->root_value_id == LOOM_VALUE_ID_INVALID ||
-      right_region->root_value_id == LOOM_VALUE_ID_INVALID) {
-    return iree_ok_status();
-  }
-  if (left_region->root_value_id != right_region->root_value_id) {
-    if (loom_view_memory_spaces_are_disjoint(left_region->memory_space,
-                                             right_region->memory_space) ||
-        (left_region->alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE &&
-         right_region->alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE &&
-         left_region->alias_scope_id != right_region->alias_scope_id)) {
-      *out_no_overlap = true;
-    }
+  *out_no_overlap =
+      loom_view_region_roots_are_disjoint(left_region, right_region);
+  if (*out_no_overlap || left_region->root_value_id == LOOM_VALUE_ID_INVALID ||
+      right_region->root_value_id == LOOM_VALUE_ID_INVALID ||
+      left_region->root_value_id != right_region->root_value_id) {
     return iree_ok_status();
   }
 

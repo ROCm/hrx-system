@@ -57,6 +57,8 @@ typedef struct loom_motion_region_stack_t {
   iree_host_size_t capacity;
 } loom_motion_region_stack_t;
 
+typedef struct loom_motion_memory_t loom_motion_memory_t;
+
 typedef struct loom_motion_analysis_t {
   // Module containing the IR being queried.
   const loom_module_t* module;
@@ -72,8 +74,8 @@ typedef struct loom_motion_analysis_t {
   loom_movement_analysis_t movement;
   // True when movement owns initialized analysis storage.
   bool movement_initialized;
-  // True when the movement table has analyzed the local region tree.
-  bool movement_analyzed;
+  // Demand-built write and ordering snapshot, retained across legal hoists.
+  loom_motion_memory_t* memory;
   // Reusable stack for subtree region walks.
   loom_motion_region_stack_t region_stack;
 } loom_motion_analysis_t;
@@ -88,6 +90,11 @@ typedef struct loom_motion_read_barrier_table_t
 // tree. |fact_table| and |value_domain| may both be NULL for effect-free
 // relocation clients. Memory-aware loop placement requires both. The caller
 // owns all borrowed state and must keep it live for the analysis lifetime.
+// Memory queries retain write/ordering evidence. Moving ordinary reads and
+// effect-free subtrees preserves that evidence. Changing effects, operands,
+// their enclosing loop scopes, or region block topology requires a new
+// analysis instance. Availability is queried at each proposed insertion point
+// rather than cached across moves.
 iree_status_t loom_motion_analysis_initialize_region(
     const loom_module_t* module, const loom_region_t* region,
     loom_value_fact_table_t* fact_table,
@@ -121,7 +128,7 @@ typedef struct loom_motion_loop_hoist_result_t {
   loom_motion_loop_hoist_rejection_flags_t rejection_bits;
   // Movement classifier details when MOVEMENT_UNAVAILABLE is set.
   loom_movement_rejection_flags_t movement_rejection_bits;
-  // First operation proving the rejection, or NULL when no op applies.
+  // Operation proving the rejection, or NULL when no op applies.
   const loom_op_t* blocking_op;
 } loom_motion_loop_hoist_result_t;
 

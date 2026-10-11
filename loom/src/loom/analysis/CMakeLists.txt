@@ -1374,8 +1374,10 @@ loom_cc_library(
     motion
   HDRS
     "motion.h"
+    "motion_memory.h"
   SRCS
     "motion.c"
+    "motion_memory.c"
   DEPS
     ::availability
     ::loop_domain
@@ -1384,6 +1386,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::ir
     loom::ops::op_defs
+    loom::util::adaptive_sort
   PUBLIC
 )
 
