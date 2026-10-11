@@ -114,7 +114,8 @@ func.def @accept_oracle(%epoch: buffer, %inputs: buffer, %predictions: buffer, %
   %eos = view.load %control[515] : view<516xi32> -> i32
   %total = view.load %control[0] : view<516xi32> -> i32
   %span_word = view.load %control[1] : view<516xi32> -> i32
-  %span_count = index.cast %span_word : i32 to index
+  %span_value = index.cast %span_word : i32 to index
+  %span_count = index.assume %span_value [range(%span_value, 0, 16)] : index
   view.store %total, %accepted_header[0] : i32, view<3xi32>
   view.store %span_word, %accepted_header[1] : i32, view<3xi32>
   view.store %zero_word, %accepted_header[2] : i32, view<3xi32>
@@ -184,16 +185,17 @@ func.def @accept_oracle(%epoch: buffer, %inputs: buffer, %predictions: buffer, %
     }
     view.store %none, %accepted[%span, 4] : i32, view<64x5xi32>
     %next_replay = scf.if %speculative -> (index) {
+      %replay_slot = index.assume %replay_index [range(%replay_index, 0, 15)] : index
       %capture = index.mul %span, %four : index
       %capture_word = index.cast %capture : index to i32
       scf.for %field = [%zero to %four step %one] {
         %accepted_word = view.load %accepted[%span, %field] : view<64x5xi32> -> i32
         %is_begin = index.cmp eq, %field, %two : index
         %word = scf.select %is_begin, %capture_word, %accepted_word : i32
-        view.store %word, %replayed[%replay_index, %field] : i32, view<64x5xi32>
+        view.store %word, %replayed[%replay_slot, %field] : i32, view<64x5xi32>
       }
-      view.store %none, %replayed[%replay_index, 4] : i32, view<64x5xi32>
-      %next = index.add %replay_index, %one : index
+      view.store %none, %replayed[%replay_slot, 4] : i32, view<64x5xi32>
+      %next = index.add %replay_slot, %one : index
       scf.yield %next : index
     } else {
       scf.yield %replay_index : index

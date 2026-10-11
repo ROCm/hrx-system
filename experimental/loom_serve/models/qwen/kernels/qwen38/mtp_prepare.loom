@@ -44,13 +44,17 @@ kernel.def export("qwen38_mtp_shift_spans") @qwen38_mtp_shift_spans(%span_capaci
     %prior = buffer.view %carry[%carry_origin] : buffer -> view<5120xf32>
     %outputs = buffer.view %shifted[%byte_zero] : buffer -> view<512x5120xf32>
     scf.for %token = [%zero to %count step %one] {
-      %destination = index.add %begin, %token : index
+      // The validated packed partition fits the activation matrix, including
+      // each span's begin plus length; separate descriptor words carry it.
+      %destination_value = index.add %begin, %token : index
+      %destination = index.assume %destination_value [range(%destination_value, 0, 511)] : index
       %first = index.cmp eq, %token, %zero : index
       %hidden = scf.if %first -> (vector<4xf32>) {
         %value = vector.load %prior[%element] : view<5120xf32> -> vector<4xf32>
         scf.yield %value : vector<4xf32>
       } else {
-        %source = index.sub %destination, %one : index
+        %source_value = index.sub %destination, %one : index
+        %source = index.assume %source_value [range(%source_value, 0, 510)] : index
         %value = vector.load %inputs[%source, %element] : view<512x5120xf32> -> vector<4xf32>
         scf.yield %value : vector<4xf32>
       }
@@ -79,7 +83,9 @@ kernel.def export("qwen38_mtp_save_carry") @qwen38_mtp_save_carry(%span_capacity
     %count = index.cast %count_word : i32 to index
     %one = index.constant 1 : index
     %end = index.add %begin, %count : index
-    %last = index.sub %end, %one : index
+    // Every active packed span is nonempty and ends within 512 tokens.
+    %last_value = index.sub %end, %one : index
+    %last = index.assume %last_value [range(%last_value, 0, 511)] : index
     %tile = kernel.workgroup.id<x> : index
     %thread = kernel.workitem.id<x> : index
     %width = index.constant 256 : index

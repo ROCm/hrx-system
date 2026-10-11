@@ -48,6 +48,24 @@ loom_test(
 )
 
 loom_test(
+    name = "mtp_control_test",
+    srcs = [
+        "kernels/qwen38/mtp_accept.loom",
+        "kernels/qwen38/mtp_prepare.loom",
+        "kernels/qwen38/mtp_proposal.loom",
+        "kernels/qwen38/spans.loom",
+        "tests/mtp_accept.loom",
+        "tests/mtp_prepare.loom",
+        "tests/mtp_proposal.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "attention_state_test",
     srcs = [
         "kernels/qwen38/attention_common.loom",

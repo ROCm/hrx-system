@@ -113,3 +113,52 @@ check.case public @mtp_carry_spans {
   check.expect.equal actual(%actual22) expected(%expected22) : tensor<1x5120xf32>
   check.return
 }
+
+kernel.def @mtp_carry_full_metadata() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%epoch: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %epoch[%origin] : buffer -> view<387xi32>
+  %tokens = scalar.constant 512 : i32
+  %one = scalar.constant 1 : i32
+  %zero = scalar.constant 0 : i32
+  %row = scalar.constant 15 : i32
+  %absent = scalar.constant -1 : i32
+  view.store %tokens, %view[0] : i32, view<387xi32>
+  view.store %one, %view[1] : i32, view<387xi32>
+  view.store %zero, %view[2] : i32, view<387xi32>
+  view.store %tokens, %view[3] : i32, view<387xi32>
+  view.store %zero, %view[4] : i32, view<387xi32>
+  view.store %zero, %view[5] : i32, view<387xi32>
+  view.store %row, %view[6] : i32, view<387xi32>
+  view.store %absent, %view[7] : i32, view<387xi32>
+  kernel.return
+}
+
+// Full activation capacity reaches the final vector of token 511 and the last
+// resident carry row. Padded span workgroups remain inactive.
+check.case public @mtp_carry_full_span {
+  %spans = check.param.choice values([1, 16]) : index
+  %epoch = check.generate.fill value(-99) : tensor<387xi32>
+  %normalized = check.generate.iota offset(0.25) step(0.0000152587890625) : tensor<512x5120xf32>
+  %carry = check.generate.iota offset(-1.0) step(0.000030517578125) : tensor<16x5120xf32>
+  %initial_carry = check.generate.iota offset(-1.0) step(0.000030517578125) : tensor<16x5120xf32>
+  %shifted = check.generate.fill value(17.0) : tensor<512x5120xf32>
+  kernel.launch @mtp_carry_full_metadata(%epoch) : (tensor<387xi32>)
+  kernel.launch @qwen38_mtp_shift_spans[%spans](%epoch, %normalized, %carry, %shifted) : [index](tensor<387xi32>, tensor<512x5120xf32>, tensor<16x5120xf32>, tensor<512x5120xf32>)
+  kernel.launch @qwen38_mtp_save_carry[%spans](%epoch, %normalized, %carry) : [index](tensor<387xi32>, tensor<512x5120xf32>, tensor<16x5120xf32>)
+  %first = check.tensor.view %shifted offset(0) : tensor<512x5120xf32> -> tensor<1x5120xf32>
+  %prior = check.tensor.view %initial_carry offset(307200) : tensor<16x5120xf32> -> tensor<1x5120xf32>
+  check.expect.equal actual(%first) expected(%prior) : tensor<1x5120xf32>
+  %rest = check.tensor.view %shifted offset(20480) : tensor<512x5120xf32> -> tensor<511x5120xf32>
+  %inputs = check.tensor.view %normalized offset(0) : tensor<512x5120xf32> -> tensor<511x5120xf32>
+  check.expect.equal actual(%rest) expected(%inputs) : tensor<511x5120xf32>
+  %published = check.tensor.view %carry offset(307200) : tensor<16x5120xf32> -> tensor<1x5120xf32>
+  %last = check.tensor.view %normalized offset(10465280) : tensor<512x5120xf32> -> tensor<1x5120xf32>
+  check.expect.equal actual(%published) expected(%last) : tensor<1x5120xf32>
+  %unchanged = check.tensor.view %carry offset(0) : tensor<16x5120xf32> -> tensor<15x5120xf32>
+  %initial = check.tensor.view %initial_carry offset(0) : tensor<16x5120xf32> -> tensor<15x5120xf32>
+  check.expect.equal actual(%unchanged) expected(%initial) : tensor<15x5120xf32>
+  check.return
+}
