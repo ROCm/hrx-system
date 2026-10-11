@@ -871,8 +871,13 @@ static iree_status_t text_reclaim_idle(
         selected->row, mode, checkpoint ? checkpoint->state : NULL, reservation,
         &admission, &frontier);
     if (iree_status_is_ok(status) &&
-        admission == LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED) {
-      *out_result = TEXT_ADMISSION_QUEUED;
+        admission != LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
+      // Parameter admission owns shared pressure and idle-cache reclamation.
+      // Its denial is not a row-state shortage: local eviction cannot override
+      // a decision to wait for pinned parameters or another admission owner.
+      if (admission == LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED) {
+        *out_result = TEXT_ADMISSION_QUEUED;
+      }
       break;
     }
     if (iree_status_is_ok(status) &&

@@ -15,8 +15,9 @@ extern "C" {
 
 // Single-host-owner parameter admission and LRU policy. Mutable state remains
 // model-owned; optional idle-cache owners can schedule reclamation when idle
-// parameters alone cannot meet pressure. The common physical pool invokes this
-// policy during both parameter activation and mutable-state growth.
+// parameters alone cannot meet pressure and pinned parameters do not already
+// make the request impossible. The common physical pool invokes this policy
+// during both parameter activation and mutable-state growth.
 typedef struct loom_serve_residency_cache_t loom_serve_residency_cache_t;
 typedef struct loom_serve_residency_t loom_serve_residency_t;
 

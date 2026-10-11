@@ -187,14 +187,24 @@ static iree_status_t residency_reclaim(void* user_data, uint64_t target_bytes) {
   loom_serve_residency_cache_t* cache = user_data;
   uint64_t remaining =
       loom_serve_memory_pool_statistics(cache->pool).committed_bytes;
+  uint64_t pinned_bytes = 0;
   for (loom_serve_residency_t* entry = cache->oldest;
        entry && remaining > target_bytes; entry = entry->next) {
-    if (!entry->pin_count && !entry->pinned) {
-      remaining -= loom_serve_residency_statistics(entry).committed_bytes;
+    const uint64_t committed_bytes =
+        loom_serve_residency_statistics(entry).committed_bytes;
+    if (entry->pin_count || entry->pinned) {
+      pinned_bytes += committed_bytes;
+    } else {
+      remaining -= committed_bytes;
     }
   }
   if (remaining <= target_bytes) {
     return loom_serve_residency_cache_trim(cache, target_bytes);
+  }
+  // No idle history can make room while pinned parameters alone exceed the
+  // target. Preserve it until a pin retires and reclamation can help admission.
+  if (pinned_bytes > target_bytes) {
+    return iree_ok_status();
   }
   // Keep useful weights when their release alone cannot admit the request.
   // Release at most one idle logical owner, then let its normal asynchronous

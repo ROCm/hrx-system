@@ -1072,7 +1072,7 @@ TEST_P(WeightsTest, NewAdmissionsCoexistWithoutPhysicalPressure) {
   }
 }
 
-TEST_P(WeightsTest, IdleCacheMaintenanceDefersPressureWithoutReleasingBacking) {
+TEST_P(WeightsTest, PinnedWeightsDeferIdleCacheReclamationUntilItCanHelp) {
   if (!GetParam()) {
     return;
   }
@@ -1110,6 +1110,30 @@ TEST_P(WeightsTest, IdleCacheMaintenanceDefersPressureWithoutReleasingBacking) {
        [](void* self) { return static_cast<CacheOwner*>(self)->pending; }});
   auto* cache = loom_serve_device_residency_cache(device_owner_);
   loom_serve_residency_admission_t admission;
+  IREE_ASSERT_OK(Compile(1, "raw"));
+  const auto peer_root = Root(1, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &peer_root, path_.path()));
+  IREE_ASSERT_OK(Register(2, 2, 1));
+  IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[2]));
+  ASSERT_NO_FATAL_FAILURE(Run(1, 90));
+  // Even discarding every idle history cannot admit the two-slab group while
+  // this one-slab peer is pinned. Neither kind of pin permits useful eviction.
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_EQ(owner.requests, 0u);
+  EXPECT_TRUE(owner.retained);
+  EXPECT_FALSE(loom_serve_residency_cache_is_reclaiming(cache));
+  EXPECT_EQ(state_statistics_.committed_bytes, kSlabBytes);
+  loom_serve_residency_set_pinned(residencies_[2], true);
+  loom_serve_residency_release(residencies_[2]);
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_EQ(owner.requests, 0u);
+  EXPECT_TRUE(owner.retained);
+  EXPECT_FALSE(loom_serve_residency_cache_is_reclaiming(cache));
+  loom_serve_residency_set_pinned(residencies_[2], false);
+  // Once the peer's parameters become evictable, retiring the idle history is
+  // necessary and sufficient. The regular asynchronous reclaimer must run.
   IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
   EXPECT_TRUE(loom_serve_residency_cache_is_reclaiming(cache));
