@@ -4,14 +4,37 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+import sys
+import tempfile
 import threading
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
-from experimental.loom_serve.testing.http import Events, collect_events
+from experimental.loom_serve.testing.http import Events, collect_events, running_server
 
 
 class HttpTest(unittest.TestCase):
+    def test_child_failure_preserves_diagnostics_after_temporary_logs_are_removed(self):
+        command = [
+            sys.executable,
+            "-c",
+            "import sys; "
+            'print(\'{"event":"ready","address":"127.0.0.1:1"}\', '
+            "file=sys.stderr, flush=True); "
+            "print('native failure evidence', file=sys.stderr, flush=True); "
+            "sys.exit(7)",
+        ]
+        with self.assertRaises(RuntimeError) as failure:
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "server.log"
+                with running_server(command, path) as (process, address):
+                    self.assertEqual(address, "127.0.0.1:1")
+                    self.assertEqual(process.wait(), 7)
+        self.assertFalse(path.exists())
+        self.assertIn("server retirement failed: 7", str(failure.exception))
+        self.assertIn("native failure evidence", str(failure.exception))
+
     def test_names_are_scoped_and_native_session_ids_are_preserved(self):
         events = Events()
         for model, serial in (("scout", 7), ("researcher", 11)):

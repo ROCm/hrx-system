@@ -260,5 +260,6 @@ def running_server(command, log_path, on_event=None, *, cwd=None):
                     process.stderr.close()
                 if address is not None and returncode:
                     raise RuntimeError(
-                        f"server retirement failed: {returncode}; {log_path}"
+                        f"server retirement failed: {returncode}; {log_path}\n"
+                        f"{log_path.read_text()}"
                     )
