@@ -92,10 +92,9 @@ class StreamView:
                         delta * 1e9 / (when - self.counter_time_ns)
                     )
                 self.counters, self.counter_time_ns = counters, when
-        if event == "epoch":
+        if event == "epoch" and data["token_slots"] is not None:
             self.fill_history.append(
-                (data["prefill_tokens"] + data["decode_tokens"])
-                / data["token_capacity"]
+                (data["prefill_tokens"] + data["decode_tokens"]) / data["token_slots"]
             )
 
 
@@ -265,16 +264,24 @@ def render(view, all_sensors=False, now_ns=None, width=None):
         epoch = values.get("epoch")
         if epoch:
             useful = epoch["prefill_tokens"] + epoch["decode_tokens"]
-            lines.append(
-                f"Last epoch {epoch['epoch']}: {epoch['spans']} spans  "
-                f"{epoch['prefill_tokens']}P + {epoch['decode_tokens']}D / {epoch['token_capacity']} slots"
-                f"  {useful / epoch['token_capacity']:.0%}  {epoch['model_ns'] / 1e6:.1f}ms"
+            slots = epoch["token_slots"]
+            fill = (
+                f" / {slots} slots  {useful / slots:.0%}"
+                if slots is not None
+                else "  fill unavailable for isolated stages"
             )
             lines.append(
-                "Sampled committed fill |"
-                + history(stream.fill_history, 1)
-                + "| (not GPU utilization)"
+                f"Last cohort {epoch['epoch']}: {epoch['spans']} spans / {epoch['traversals']} traversals  "
+                f"{epoch['prefill_tokens']}P + {epoch['decode_tokens']}D"
+                + fill
+                + f"  {epoch['model_ns'] / 1e6:.1f}ms"
             )
+            if slots is not None:
+                lines.append(
+                    "Sampled committed fill |"
+                    + history(stream.fill_history, 1)
+                    + "| (not GPU utilization)"
+                )
         if stream.output_rates:
             lines.append(
                 "Output rate |"

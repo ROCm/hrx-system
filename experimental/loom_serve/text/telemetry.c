@@ -125,6 +125,14 @@ static iree_status_t text_epoch_format(
       value.schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED    ? "packed"
       : value.schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_MATCHED ? "matched"
                                                                 : "isolated";
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(output, ",\"token_slots\":"));
+  if (value.token_slots) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(output, "%" PRIu64,
+                                                           value.token_slots));
+  } else {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "null"));
+  }
   return iree_string_builder_append_format(
       output,
       ",\"epoch\":%" PRIu64
@@ -380,6 +388,7 @@ void loom_serve_text_telemetry_epoch(
       .spans = count,
       .shape = shape_index,
       .token_capacity = options->shapes[shape_index].token_capacity,
+      .token_slots = cohort->token_slots,
       .span_capacity = options->shapes[shape_index].span_capacity,
       .prefill_tokens = prefill_count,
       .decode_tokens = decode_count,

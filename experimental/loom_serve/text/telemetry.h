@@ -164,10 +164,13 @@ typedef struct loom_serve_text_epoch_record_t {
   uint64_t epoch;
   // Completed cohort span count.
   uint64_t spans;
-  // Selected bucket index.
+  // Selected first-epoch bucket index.
   uint64_t shape;
-  // Compiled token capacity of the bucket.
+  // Compiled token capacity of the first-epoch bucket, not the whole cohort.
   uint64_t token_capacity;
+  // Sum of issued packed bucket capacities across the cohort. Zero means
+  // unavailable for isolated/matched stages and is published as JSON null.
+  uint64_t token_slots;
   // Compiled independent span capacity.
   uint64_t span_capacity;
   // Prompt tokens consumed, excluding retained history.
@@ -188,10 +191,10 @@ typedef struct loom_serve_text_epoch_record_t {
   uint64_t verifications;
   // Draft inputs accepted by the target, excluding pending anchors.
   uint64_t accepted_draft_inputs;
-  // One loom_serve_text_schedule_mode_t.
-  uint64_t schedule_mode;
-  // One loom_serve_text_packing_mode_t.
-  uint64_t packing_mode;
+  // Packed execution or an isolated/matched control.
+  loom_serve_text_schedule_mode_t schedule_mode;
+  // Whether prompt inputs and verifiers may share a cohort.
+  loom_serve_text_packing_mode_t packing_mode;
 } loom_serve_text_epoch_record_t;
 
 typedef struct loom_serve_text_span_record_t {

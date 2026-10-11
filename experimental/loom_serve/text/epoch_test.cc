@@ -39,6 +39,7 @@ TEST(TextEpochTest, KnownInputsAndDecodePreserveRowIdentityAndPhase) {
   EXPECT_EQ(epoch.count, 3);
   EXPECT_EQ(epoch.input_count, 8);
   EXPECT_EQ(epoch.device_epochs, 1);
+  EXPECT_EQ(epoch.token_slots, 16);
   EXPECT_EQ(epoch.proposal_count, 0);
   EXPECT_EQ(continuation.continuation.span_count, 0);
   EXPECT_EQ(epoch.spans[0].row_index, 7);
@@ -84,6 +85,7 @@ TEST(TextEpochTest, ContinuationMixesPromptTailsAndBoundedVerifiers) {
   loom_serve_text_epoch_continuation_t next;
   loom_serve_text_epoch_prepare(&options, rows, 0, 4, scheduled, &epoch, &next);
   EXPECT_EQ(epoch.device_epochs, 2);
+  EXPECT_EQ(epoch.token_slots, 32);
   EXPECT_EQ(epoch.input_count, 8);
   EXPECT_EQ(epoch.proposal_count, 1);
   EXPECT_EQ(epoch.continued_prefill_count, 2);
@@ -132,9 +134,57 @@ TEST(TextEpochTest, NoContinuationReducesCreditToOneVerifier) {
   loom_serve_text_epoch_prepare(&options, rows, 0, 2, scheduled, &epoch,
                                 &continuation);
   EXPECT_EQ(epoch.device_epochs, 1);
+  EXPECT_EQ(epoch.token_slots, 16);
   EXPECT_EQ(epoch.output_limits[0], 4);
   EXPECT_EQ(epoch.output_limits[1], 0);
   EXPECT_EQ(continuation.continuation.span_count, 0);
+}
+
+TEST(TextEpochTest, ContinuationCapacityTracksItsIndependentlySelectedBucket) {
+  const loom_serve_packing_shape_t shapes[] = {{4, 1}, {16, 1}};
+  const loom_serve_text_epoch_options_t options = {
+      .context_capacity = 64,
+      .chunk_size = 16,
+      .continuation_epochs = 2,
+      .shapes = shapes,
+      .shape_count = IREE_ARRAYSIZE(shapes)};
+  const int32_t tokens[16] = {};
+  const loom_serve_text_epoch_row_t rows[] = {
+      {.input_tokens = tokens, .input_count = 16, .output_count = 9}};
+  for (iree_host_size_t first : {0u, 1u}) {
+    SCOPED_TRACE(first);
+    const loom_serve_packed_span_t scheduled[] = {
+        {0, shapes[first].token_capacity}};
+    loom_serve_text_epoch_t epoch;
+    loom_serve_text_epoch_continuation_t next;
+    loom_serve_text_epoch_prepare(&options, rows, first, 1, scheduled, &epoch,
+                                  &next);
+    EXPECT_EQ(epoch.device_epochs, 2);
+    EXPECT_EQ(next.continuation.shape_index, 1 - first);
+    EXPECT_EQ(epoch.token_slots, 20);
+  }
+}
+
+TEST(TextEpochTest, IsolatedStagesDoNotClaimPackedCapacity) {
+  const loom_serve_packing_shape_t shape = {16, 4};
+  for (auto mode :
+       {LOOM_SERVE_TEXT_SCHEDULE_ISOLATED, LOOM_SERVE_TEXT_SCHEDULE_MATCHED}) {
+    const loom_serve_text_epoch_options_t options = {.context_capacity = 64,
+                                                     .chunk_size = 8,
+                                                     .continuation_epochs = 1,
+                                                     .schedule_mode = mode,
+                                                     .shapes = &shape,
+                                                     .shape_count = 1};
+    const loom_serve_text_epoch_row_t rows[] = {
+        {.output_count = 9, .position = 3, .token = 21}};
+    const loom_serve_packed_span_t scheduled[] = {{0, 1}};
+    loom_serve_text_epoch_t epoch;
+    loom_serve_text_epoch_continuation_t next;
+    loom_serve_text_epoch_prepare(&options, rows, 0, 1, scheduled, &epoch,
+                                  &next);
+    EXPECT_EQ(epoch.device_epochs, 1);
+    EXPECT_EQ(epoch.token_slots, 0);
+  }
 }
 
 TEST(TextEpochTest, RowCapacityFamilyPreservesBorrowedInputsAndOutputCredit) {
@@ -188,6 +238,7 @@ TEST(TextEpochTest, RowCapacityFamilyPreservesBorrowedInputsAndOutputCredit) {
       }
       EXPECT_LE(continued_tokens, shape.token_capacity);
       EXPECT_EQ(epoch.device_epochs, next.continuation.span_count ? 2 : 1);
+      EXPECT_EQ(epoch.token_slots, shape.token_capacity * epoch.device_epochs);
     }
   }
 }

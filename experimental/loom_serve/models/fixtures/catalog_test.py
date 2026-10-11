@@ -489,6 +489,8 @@ def run_round(client, iteration, observations):
         assert spans and epochs
         assert all(span["request"] == completed["request"] for span in spans)
         assert {span["epoch"] for span in spans} == {epoch["epoch"] for epoch in epochs}
+        assert all(epoch["device_epochs"] == 1 for epoch in epochs)
+        assert all(epoch["token_slots"] == epoch["token_capacity"] for epoch in epochs)
     pin = client.checkpoint("base", "POST", "root", status=201)
     assert pin["position"] == 5, pin
     history = root + [{"role": "assistant", "content": seed["text"]}]

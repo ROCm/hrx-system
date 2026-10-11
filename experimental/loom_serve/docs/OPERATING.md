@@ -271,6 +271,16 @@ after a log gap, but an exact admission/latency reconstruction requires complete
 event coverage. The [comparison procedure](PERFORMANCE.md#a-controlled-comparison)
 keeps request work, cache replay and machine state visible together.
 
+An `epoch` record covers a completed host-visible cohort, including any
+device-fed continuation. `token_capacity` describes its first bucket;
+`token_slots` sums the capacities actually issued across the whole cohort.
+The dashboard divides consumed prompt/decode inputs by `token_slots` for its
+committed-fill sample. Rejected draft candidates occupy work slots without
+counting as committed inputs. Isolated/matched controls publish `token_slots`
+as null because their per-span stages do not share the packed bucket; the
+dashboard leaves their fill unavailable. Neither doubling the first bucket
+nor dividing all continuation work by that first capacity is correct.
+
 ### Current requests and retained sessions
 
 Current requests and retained text sessions are available without replaying log

@@ -105,6 +105,7 @@ class DashboardTest(unittest.TestCase):
                 "epoch": 50,
                 "spans": 8,
                 "token_capacity": 128,
+                "token_slots": 128,
                 "prefill_tokens": 120,
                 "decode_tokens": 8,
                 "selected_tokens_including_eos": 8,
@@ -172,6 +173,7 @@ class DashboardTest(unittest.TestCase):
         value = json.loads(self.records().splitlines()[5])
         value["data"].update(
             token_capacity=32,
+            token_slots=32,
             spans=2,
             prefill_tokens=16,
             decode_tokens=2,
@@ -183,6 +185,35 @@ class DashboardTest(unittest.TestCase):
         self.assertIn("Sampled committed fill", result)
         self.assertIn("16P + 2D / 32 slots", result)
         self.assertIn("Work counters unavailable", result)
+
+    def test_continuation_fill_uses_all_issued_bucket_capacities(self):
+        for slots, prefill, decode in ((1024, 1016, 0), (544, 510, 10)):
+            with self.subTest(slots=slots):
+                view = dashboard.RunView()
+                value = json.loads(self.records().splitlines()[5])
+                value["data"].update(
+                    token_capacity=512,
+                    token_slots=slots,
+                    prefill_tokens=prefill,
+                    decode_tokens=decode,
+                    traversals=2,
+                )
+                view.apply(value)
+                fill = (prefill + decode) / slots
+                self.assertEqual(view.streams[("model", "chat")].fill_history[0], fill)
+                result = "\n".join(dashboard.render(view))
+                self.assertIn(f"/ {slots} slots  {fill:.0%}", result)
+                self.assertIn("8 spans / 2 traversals", result)
+
+    def test_isolated_stages_have_no_inferred_fill_sample(self):
+        view = dashboard.RunView()
+        value = json.loads(self.records().splitlines()[5])
+        value["data"]["token_slots"] = None
+        view.apply(value)
+        self.assertFalse(view.streams[("model", "chat")].fill_history)
+        result = "\n".join(dashboard.render(view))
+        self.assertIn("120P + 8D  fill unavailable for isolated stages", result)
+        self.assertNotIn("Sampled committed fill", result)
 
     def test_corrupt_or_missing_record_fails_at_the_log_boundary(self):
         for payload in (b"not json\n", self.records().split(b"\n", 1)[1]):

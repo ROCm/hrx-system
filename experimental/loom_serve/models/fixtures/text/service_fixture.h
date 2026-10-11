@@ -290,6 +290,9 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
                     next, "X-Loom-Session: row" + std::to_string(i) + "\r\n"))),
                 Oracle::Complete(prompts[i] + first + "#bax", 4));
     }
+    const auto log =
+        Read(Send("", "X-Loom-Model: fixture-text\r\n", "/logz", "GET"));
+    EXPECT_NE(log.find(R"("token_slots":null)"), std::string::npos) << log;
   }
 
   void Observe(const loom_serve_http_service_t& interface) {

@@ -146,6 +146,14 @@ void loom_serve_text_epoch_prepare(
   epoch->input_count = input_count;
   epoch->proposal_count = proposal_count;
   epoch->device_epochs = continuation->continuation.span_count ? 2 : 1;
+  if (options->schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED) {
+    epoch->token_slots = options->shapes[shape_index].token_capacity;
+    if (continuation->continuation.span_count) {
+      epoch->token_slots +=
+          options->shapes[continuation->continuation.shape_index]
+              .token_capacity;
+    }
+  }
   epoch->continued_prefill_count = continued_prefill_count;
 }
 
