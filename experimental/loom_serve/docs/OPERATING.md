@@ -147,6 +147,15 @@ cap than the generic runner; Qwen currently caps epochs at 512 tokens.
 `checkpoint_capacity` is opt-in retained endpoint capacity, not automatic
 prefix discovery. MTP and two-epoch continuation require source support.
 
+`admission_overtakes` is independent of epoch packing. It defaults to `rows`:
+when the oldest text request cannot reserve its complete KV requirement, up to
+that many fitting requests can pass it. Zero selects strict FIFO. Arrivals,
+failed probes and cancelled tails do not replenish the budget; removing the
+oldest request does. The bound is on successful overtakes, not time: an active
+slow reader can retain its reservation. Changing this knob requires a new
+registration, as with the other deployment capacities. It does not change
+kernels, reserve less completion space, or reorder shared weight admission.
+
 With elastic backing, physical pressure first reclaims sufficient idle model
 weights. If that cannot satisfy the request, idle text histories can also yield
 across models sharing the pool. Reclamation releases one eligible cache owner
@@ -243,6 +252,27 @@ run separately from inference. Ctrl-C stops the selected client, not the server.
 The [observation contract](../serving/README.md#operational-discovery) describes
 counter scope, gaps, incarnation changes and unmeasured quantities.
 
+### Reading pressure without guessing at utilization
+
+| Question | Evidence |
+| --- | --- |
+| Is work waiting before model admission? | `/v1/status` separates router-held work from model queued/active requests and their oldest ages |
+| Is logical KV capacity occupied? | `text_memory.pool`: `resident_tokens + reserved_tokens` consumes `capacity_tokens`; per-session counts can include shared positions |
+| Is a slow client retaining execution capacity? | `text_activity.backpressured_rows` counts rows awaiting output credit, separately from prefill/decode rows |
+| Did backfill actually happen? | `admit.queue_rank > 0` records a successful bypass; `overtakes` and `overtake_budget` describe the current oldest request's budget |
+| Did retaining more agents preserve useful history? | Client `prompt_tokens_details.cached_tokens` and the benchmark's follow-up hit/miss groups separate reuse from full replay |
+| Did more packing complete more useful work? | Client cohort output rate and latency, together with `text_work` prefill/decode counts, traversals and MTP acceptance |
+
+These are distinct limits. A free execution row does not imply a fitting KV
+reservation; a free logical KV position does not imply physical backing fits
+the retained-memory budget. Server phase and packed slot occupancy are not GPU
+utilization or bandwidth measurements. Always-counted totals remain useful
+after a log gap, but an exact admission/latency reconstruction requires complete
+event coverage. The [comparison procedure](PERFORMANCE.md#a-controlled-comparison)
+keeps request work, cache replay and machine state visible together.
+
+### Current requests and retained sessions
+
 Current requests and retained text sessions are available without replaying log
 history:
 
@@ -273,6 +303,8 @@ Inspection never opens admission or loads a cold registration. An unprepared or
 retiring registration returns 409; an absent name returns 404. A service without
 the requested capability returns 501, including session inspection on stateless
 image/embedding/decision services. The same endpoints work on Unix listeners.
+
+### Admission and model lifetime
 
 Drain is reversible: accepted work finishes, new work waits within the holding
 budget, and control/observation routes remain available. It does not unload

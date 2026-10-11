@@ -119,14 +119,18 @@ in a native callback. A real model supplies its actual checkpoint file.
 `prepare.loom` declares model capacities, tokenizer and commands. `control.loom`
 owns request preparation, batch packing and result mapping. `sources.txt` lists
 the numerical providers and configuration. Compatible `.loom` edits take effect
-on the next server launch without relinking. Shapes, pooling, normalization,
-learned heads and device command selection remain source responsibilities;
+on the next registration without relinking or restarting the server. A prepared
+registration retains its compiled code until removal. Shapes, pooling,
+normalization, learned heads and device command selection remain source responsibilities;
 the native finite scheduler uses only declared cost and compatibility tags.
 
 An endpoint for embeddings or decisions does not imply that EmbeddingGemma2 or
 CLEF weights can already be loaded. Those ports still need their source package
-and real numerical evidence. XDNA execution additionally requires the matching
-compiler-target/HAL command path. This catalog proves the GPU serving boundary.
+and real numerical evidence. The separate
+[resident XDNA variant](embedding/README.md#verification) proves first and
+repeated HTTP output through direct `queue_dispatch`, with no command buffer.
+It requires an enabled XDNA compiler target/HAL and physical NPU, and has no
+learned weights. This catalog instead proves the GPU command-stage boundary.
 Audio, image-input conditioning and graph/workflow composition require their
 own concrete input/output ownership contracts rather than repurposed fields.
 
