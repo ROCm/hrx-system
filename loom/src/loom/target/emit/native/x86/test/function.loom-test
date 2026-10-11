@@ -130,6 +130,28 @@ stack: 8 bytes, alignment 8
 
 // ====
 
+// Synchronous call transport keeps a stored argument out of the allocatable
+// register set even when pure setup remains between its reload and the call.
+// RUN: emit x86-frame @stored_call strategy=pressure x86.gpr64=1
+x86.target<scalar> @target
+
+low.func.decl pure target<x86.scalar.core>(@target) @consume_stored(%value: reg<x86.gpr64>, %setup: reg<x86.gpr32>)
+
+low.func.def target<x86.scalar.core>(@target) @stored_call(%input: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %slot = storage {byte_alignment = 8, byte_length = 8} : low.storage<stack>
+  low.spill %input, %slot : reg<x86.gpr64>, low.storage<stack>
+  %loaded = low.reload %slot : low.storage<stack> -> reg<x86.gpr64>
+  %constant = mov.imm32 1
+  low.func.call pure @consume_stored(%loaded, %constant) : (reg<x86.gpr64>, reg<x86.gpr32>)
+  return %constant
+}
+
+// ----
+callee-preserved: none
+stack: 8 bytes, alignment 16
+
+// ====
+
 // Every SysV SIMD and mask register is volatile. The profile-wide ZMM range
 // aliases this live YMM value, while the K range includes the rotated K0 slot.
 // Both values therefore require retained stack storage across the call.

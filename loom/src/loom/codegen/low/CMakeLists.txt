@@ -343,6 +343,7 @@ loom_cc_library(
     ::storage_layout
     iree::base
     iree::base::internal::arena
+    loom::analysis::read_motion
     loom::ir
     loom::ops::low
     loom::target::registers

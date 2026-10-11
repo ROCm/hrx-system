@@ -202,27 +202,6 @@ bool loom_motion_op_can_speculate(const loom_module_t* module,
   return !loom_motion_op_has_retained_regions(op);
 }
 
-bool loom_motion_read_can_cross_op(const loom_module_t* module,
-                                   const loom_op_t* op) {
-  if (!module || !op) {
-    return false;
-  }
-  if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
-    return true;
-  }
-  if (op->region_count != 0) {
-    return false;
-  }
-  const loom_trait_flags_t traits = loom_op_effective_traits(module, op);
-  if (loom_traits_may_write(traits)) {
-    return false;
-  }
-  return !iree_any_bit_set(
-      traits, LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_HINT |
-                  LOOM_TRAIT_POISON_BOUNDARY | LOOM_TRAIT_CONVERGENT |
-                  LOOM_TRAIT_OBSERVABLE_EFFECT | LOOM_TRAIT_UNIQUE_IDENTITY);
-}
-
 //===----------------------------------------------------------------------===//
 // Read barrier intervals
 //===----------------------------------------------------------------------===//

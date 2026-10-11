@@ -6,7 +6,7 @@
 
 #include "loom/transforms/vector/sink_single_use_reads.h"
 
-#include "loom/analysis/motion.h"
+#include "loom/analysis/read_motion.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/rewriter.h"

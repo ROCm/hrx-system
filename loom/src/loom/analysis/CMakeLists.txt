@@ -1373,6 +1373,19 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    read_motion
+  HDRS
+    "read_motion.h"
+  SRCS
+    "read_motion.c"
+  DEPS
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     motion
   HDRS
     "motion.h"
@@ -1384,6 +1397,7 @@ loom_cc_library(
     ::availability
     ::loop_domain
     ::movement
+    ::read_motion
     iree::base
     iree::base::internal::arena
     loom::ir

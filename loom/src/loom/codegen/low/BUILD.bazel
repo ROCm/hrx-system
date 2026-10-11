@@ -350,6 +350,7 @@ loom_cc_library(
     deps = [
         ":function_model",
         ":storage_layout",
+        "//loom/src/loom/analysis:read_motion",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",

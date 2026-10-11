@@ -18,6 +18,28 @@ stored %loaded: stack+0
 
 // ====
 
+// Pure register setup may remain between a reload and its boundary consumer.
+// RUN: emit low-schedule-query @pure_interposition storage-transport=stack
+
+test.target<low_core> @target
+
+low.func.decl pure target<test.low.core>(@target) @consume_pair(%0: reg<test.i32>, %1: reg<test.i32>) -> (reg<test.i32>)
+
+low.func.def target<test.low.core>(@target) @pure_interposition(%input: reg<test.i32>) -> (reg<test.i32>) asm {
+  %slot = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  low.spill %input, %slot : reg<test.i32>, low.storage<stack>
+  %loaded = low.reload %slot : low.storage<stack> -> reg<test.i32>
+  %constant = test.const.i32 1
+  %result = low.func.call pure @consume_pair(%loaded, %constant) : (reg<test.i32>, reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+// ----
+stored %input: stack+0
+stored %loaded: stack+0
+
+// ====
+
 // RUN: emit low-schedule-query @pure_call_order storage-transport=stack kind=effect consumer=3,4
 
 test.target<low_core> @target

@@ -50,12 +50,13 @@ typedef struct loom_low_storage_transport_t {
 } loom_low_storage_transport_t;
 
 // Proves storage transfers at callable boundaries in one immutable function
-// snapshot. Reloads may join their sole boundary consumer through a contiguous
-// read group. A stored entry argument or call result has one store use in the
-// boundary's store prefix and an unescaped, single-writer root reservation.
-// All other instruction occurrences retain ordinary register materialization.
-// The returned plan borrows the model's IR and local value numbering and must
-// be rebuilt after any IR mutation. No plan arrays are allocated without folds.
+// snapshot. Reloads may join their sole boundary consumer across intervening
+// operations that preserve ordinary read ordering. A stored entry argument or
+// call result has one store use in the boundary's store prefix and an
+// unescaped, single-writer root reservation. All other instruction occurrences
+// retain ordinary register materialization. The returned plan borrows the
+// model's IR and local value numbering and must be rebuilt after any IR
+// mutation. No plan arrays are allocated without folds.
 iree_status_t loom_low_storage_transport_build(
     const struct loom_low_function_model_t* model,
     loom_low_storage_space_set_t synchronous_spaces,

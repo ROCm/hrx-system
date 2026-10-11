@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/analysis/read_motion.h"
 #include "loom/codegen/low/function_model.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
@@ -180,6 +181,8 @@ iree_status_t loom_low_storage_transport_build(
   for (uint16_t b = 0;
        b < model->context.body->block_count && iree_status_is_ok(status); ++b) {
     loom_block_t* block = model->context.body->blocks[b];
+    // First reload in the current read-barrier segment. Segments end at their
+    // first boundary, so the boundary scans below remain linear in block size.
     const loom_op_t* read_begin = NULL;
     const loom_op_t* store_boundary =
         block == entry ? model->context.function_op : NULL;
@@ -195,15 +198,22 @@ iree_status_t loom_low_storage_transport_build(
         }
         store_boundary = NULL;
       } else {
-        if (loom_low_func_call_isa(op) || loom_low_return_isa(op)) {
+        const bool is_boundary =
+            loom_low_func_call_isa(op) || loom_low_return_isa(op);
+        if (is_boundary) {
           for (const loom_op_t* read = read_begin;
                read && read != op && iree_status_is_ok(status);
                read = read->next_op) {
-            status =
-                loom_low_storage_transport_append(&builder, read, op, ordinal);
+            if (loom_low_reload_isa(read)) {
+              status = loom_low_storage_transport_append(&builder, read, op,
+                                                         ordinal);
+            }
           }
         }
-        read_begin = NULL;
+        if (is_boundary || (read_begin && !loom_motion_read_can_cross_op(
+                                              model->context.module, op))) {
+          read_begin = NULL;
+        }
         if (store_boundary && loom_low_spill_isa(op)) {
           const loom_value_t* value = loom_module_value(
               model->context.module, loom_low_spill_value(op));

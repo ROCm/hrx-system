@@ -117,7 +117,7 @@ loom_cc_library(
     "sink_single_use_reads.c"
   DEPS
     iree::base
-    loom::analysis::motion
+    loom::analysis::read_motion
     loom::ir
     loom::ops::op_defs
     loom::pass::types

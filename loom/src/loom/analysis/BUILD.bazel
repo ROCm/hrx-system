@@ -1212,6 +1212,16 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "read_motion",
+    srcs = ["read_motion.c"],
+    hdrs = ["read_motion.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+    ],
+)
+
+loom_cc_library(
     name = "motion",
     srcs = [
         "motion.c",
@@ -1225,6 +1235,7 @@ loom_cc_library(
         ":availability",
         ":loop_domain",
         ":movement",
+        ":read_motion",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/util:adaptive_sort",

@@ -36,6 +36,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/availability.h"
 #include "loom/analysis/movement.h"
+#include "loom/analysis/read_motion.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ops/op_defs.h"
@@ -188,13 +189,6 @@ bool loom_motion_op_can_speculate(const loom_module_t* module,
 // write, ordering, convergence, identity, or nondeterministic semantics.
 bool loom_motion_op_is_ordinary_load(const loom_module_t* module,
                                      const loom_op_t* op);
-
-// Returns true when sinking an ordinary load across |op| preserves source
-// ordering. This is a deliberately alias-independent predicate: any write,
-// fence, unknown effect, nested region, convergence, or retained semantic
-// boundary blocks motion.
-bool loom_motion_read_can_cross_op(const loom_module_t* module,
-                                   const loom_op_t* op);
 
 // Creates a lazy read-barrier table using |arena| storage. The first query in a
 // block captures source-order segments for every operation then live in that
