@@ -1,5 +1,5 @@
 config.decl @fixture.pixels : %value: index where [range(%value, 1, 4096)]
-amdgpu.target<gfx11-generic> @fixture_target {subgroup_size = 32}
+target.decl @fixture_target
 
 kernel.def target(@fixture_target) @colors() {
   %one = index.constant 1 : index

@@ -539,8 +539,13 @@ TEST_P(SourceEmbeddingServiceTest,
   EXPECT_NE(Read(Send(R"({"model":"fixture","input":"a"})"))
                 .find(R"("embedding":[1,1,1,1])"),
             std::string::npos);
-  EXPECT_NE(Read(held).find(R"("embedding":[2,2,2,2])"), std::string::npos);
-  EXPECT_NE(Read(tokenizer).find(R"({"tokens":[0,1]})"), std::string::npos);
+  const std::string embedding_response = Read(held);
+  const std::string tokenizer_response = Read(tokenizer);
+  ASSERT_NE(embedding_response.find(R"("embedding":[2,2,2,2])"),
+            std::string::npos)
+      << embedding_response << ModelStatus("weighted");
+  ASSERT_NE(tokenizer_response.find(R"({"tokens":[0,1]})"), std::string::npos)
+      << tokenizer_response;
   const auto ready = WaitModel("weighted", R"("registration":"ready")");
   EXPECT_NE(ready.find("\"workers\":" + std::to_string(GetParam())),
             std::string::npos);
@@ -586,6 +591,77 @@ TEST_P(SourceEmbeddingServiceTest,
                 .find("HTTP/1.1 202"),
             0u);
   WaitModel("weighted", {});
+}
+
+TEST_P(SourceEmbeddingServiceTest,
+       UnsupportedScratchAlignmentRetiresManagedRequests) {
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(loom_serve_device_storage_pool(device_),
+                                   &capabilities);
+  ASSERT_GT(capabilities.max_allocation_alignment, 0u);
+  ASSERT_LT(capabilities.max_allocation_alignment, uint64_t{1} << 62);
+  const uint64_t alignment = capabilities.max_allocation_alignment * 2;
+  const std::string package =
+      iree::testing::MakeTempFilePath("unsupported_alignment");
+  ASSERT_TRUE(std::filesystem::create_directory(package));
+  for (const char* file : {"config.loom", "control.loom", "embed.loom",
+                           "prepare.loom", "sources.txt", "tokenizer.json"}) {
+    ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/" + file,
+                                           package + "/" + file));
+  }
+  {
+    const std::string path = package + "/embed.loom";
+    std::ifstream input(path);
+    ASSERT_TRUE(input.good());
+    std::string source((std::istreambuf_iterator<char>(input)), {});
+    const std::string original = "buffer.alloca<global> align(16)";
+    const size_t position = source.find(original);
+    ASSERT_NE(position, std::string::npos);
+    source.replace(
+        position, original.size(),
+        "buffer.alloca<global> align(" + std::to_string(alignment) + ")");
+    input.close();
+    std::filesystem::permissions(path, std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
+    std::ofstream output(path, std::ios::trunc);
+    output << source;
+    ASSERT_TRUE(output.good());
+  }
+  StartManagedRouter();
+  EXPECT_EQ(Read(Send(Declaration("broken", package, "drained"),
+                      "/v1/models/register"))
+                .find("HTTP/1.1 202"),
+            0u);
+  EXPECT_EQ(Read(Send(Declaration("cold", directory_, "drained"),
+                      "/v1/models/register"))
+                .find("HTTP/1.1 202"),
+            0u);
+  const int cold = Send(R"({"model":"cold","input":"a"})");
+  WaitModel("cold", R"("held_requests":1)");
+  const int broken = Send(R"({"model":"broken","input":"a"})");
+  WaitModel("broken", R"("held_requests":1)");
+  EXPECT_EQ(Read(Send(R"({"model":"broken"})", "/v1/models/undrain"))
+                .find("HTTP/1.1 200"),
+            0u);
+
+  // The real reflected requirement is rejected, not weakened to fit this
+  // backend. Its terminal error drains even an unrelated held registration.
+  // Join the owner directly: polling HTTP after terminal shutdown would wait
+  // on a consumer that has already retired.
+  router_.join();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        std::exchange(status_, iree_ok_status()));
+  EXPECT_TRUE(Read(broken).empty());
+  EXPECT_TRUE(Read(cold).empty());
+  // Registry counters cover work admitted to a model. The cold request never
+  // left the router's holding set and is observed through its aborted claim.
+  EXPECT_EQ(retired_counters_.requests, 1u);
+  EXPECT_EQ(retired_counters_.failed, 1u);
+  EXPECT_EQ(retired_counters_.cancelled, 0u);
+  IREE_ASSERT_OK(loom_serve_device_trim(device_, 0));
+  const auto statistics = loom_serve_device_memory_statistics(device_);
+  EXPECT_EQ(statistics.workspace.reservation_count, 0u);
+  EXPECT_EQ(statistics.workspace.bytes_committed, 0u);
 }
 
 TEST_P(SourceEmbeddingServiceTest,
@@ -905,7 +981,7 @@ TEST_P(SourceEmbeddingServiceTest,
   const std::string package =
       iree::testing::MakeTempFilePath("drained_weighted_embedding");
   ASSERT_NO_FATAL_FAILURE(WriteWeightedPackage(package));
-  retained_ = model_;
+  retained_ = std::exchange(model_, nullptr);
   ASSERT_NO_FATAL_FAILURE(CreateModel(package));
   loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
   ASSERT_NO_FATAL_FAILURE(CreateService(0));

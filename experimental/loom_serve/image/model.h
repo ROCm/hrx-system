@@ -95,13 +95,15 @@ iree_status_t loom_serve_image_load_destroy(loom_serve_image_load_t* load);
 // The warm program imports input capabilities and runner.execute_N/feedback.
 // Each command has shared reflected fixed parameter domains and three dynamic
 // bindings: opaque request bytes, output F32 CHW RGB [-1,1], and workspace.
-// All retained stages have identical parameter placement. Input capacity comes
-// from source; workspace extent/alignment comes from compiler reflection and
-// its queue-ordered allocation is inserted by runner.execute_2. Private storage
-// belongs to the shared workspace pool, not this model's residency. This model
-// owns independent work and feedback timelines over the device queues.
-// The cold constructor drives the asynchronous load and joins on its outer
-// application caller, never a shared worker. Live registration uses
+// External input/output roots promise only byte alignment; stronger private
+// storage and parameter alignments come from their compiler-reflected
+// contracts. All retained stages have identical parameter placement. Input
+// capacity comes from source; workspace extent/alignment comes from compiler
+// reflection and its queue-ordered allocation is inserted by runner.execute_2.
+// Private storage belongs to the shared workspace pool, not this model's
+// residency. This model owns independent work and feedback timelines over the
+// device queues. The cold constructor drives the asynchronous load and joins on
+// its outer application caller, never a shared worker. Live registration uses
 // load_advance. Creation indexes parameters and records commands without
 // reading weight payloads. The device owner outlives the model and serializes
 // all model calls. Its physical pool backs parameter roots independently of

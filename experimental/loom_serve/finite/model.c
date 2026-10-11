@@ -568,10 +568,11 @@ static iree_status_t finite_model_link(
         model->weights.values, &stage->command));
   }
   // Register maximum cohort geometry without committing any backing. Roots
-  // and reflected private workspace borrow the shared pool only when submitted.
+  // are external byte packets with no stronger alignment promise. The control
+  // module registers the reflected private workspace requirements separately.
   IREE_RETURN_IF_ERROR(loom_serve_execution_reserve_workspace(
       model->execution, iree_max(model->input_capacity, model->output_capacity),
-      256));
+      1));
   return finite_create_control(model, module);
 }
 
@@ -1109,7 +1110,7 @@ iree_status_t loom_serve_finite_model_submit(
         i ? model->invocation.output_length : input.data_length;
     const iree_hal_pool_reservation_request_t request = {
         .allocation_size = length,
-        .min_alignment = 256,
+        .min_alignment = 1,
     };
     status =
         loom_serve_execution_alloca(execution, &request, &model->buffers[i]);

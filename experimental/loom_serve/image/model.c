@@ -543,7 +543,7 @@ static iree_status_t image_model_link(
         i == 0 ? model->input_capacity : model->output.data_length;
     status = iree_hal_pool_allocate_buffer(
         loom_serve_device_storage_pool(model->owner),
-        iree_hal_make_pool_reservation_request(length, 256),
+        iree_hal_make_pool_reservation_request(length, 1),
         iree_infinite_timeout(), &model->bindings[i].buffer);
     if (iree_status_is_ok(status)) {
       status = loom_serve_retirement_track(

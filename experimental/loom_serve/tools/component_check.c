@@ -258,7 +258,7 @@ static iree_status_t component_initialize(component_check_t* check,
             : program->requirements.transient.required_byte_length;
     const iree_device_size_t alignment =
         i < check->file_count
-            ? 256
+            ? 1
             : program->requirements.transient.minimum_alignment;
     status = iree_hal_pool_allocate_buffer(
         loom_serve_device_storage_pool(check->owner),

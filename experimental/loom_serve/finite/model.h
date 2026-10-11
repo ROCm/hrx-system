@@ -88,9 +88,10 @@ iree_status_t loom_serve_finite_load_destroy(loom_serve_finite_load_t* load);
 // State is immutable across requests. Positive units bound cohort work/storage;
 // equal tags permit batching. Ranges contain [offset, length] i64 pairs into
 // concatenated prepared bytes, in request order. Commands have two dynamic
-// roots (input/output) plus compiler-reflected private workspace. Every stage
-// shares exactly the same fixed parameter placement. Source run uses runner
-// execute_2/feedback; only compact final vectors cross to the host.
+// byte-aligned roots (input/output) plus compiler-reflected private workspace.
+// Source code has no stronger base-alignment promise for the external roots.
+// Every stage shares exactly the same fixed parameter placement. Source run
+// uses runner execute_2/feedback; only compact final vectors cross to the host.
 // The cold outer-application constructor drives the same asynchronous load and
 // joins it outside the shared worker pool. Creation indexes weights without
 // loading them. The shared device outlives this model. Failure releases partial

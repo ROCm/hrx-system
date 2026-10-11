@@ -473,8 +473,12 @@ concrete caller with a different ownership flow. The shared substrate is:
    keys across different domains never imply shared residency.
    Activation streams/prepares payloads before consumption. Deactivation at a
    retired cut releases physical backing without invalidating recorded roots.
-3. It allocates model input, output and persistent-state buffers. Reflected
-   transient requirements supply workspace size and alignment. It records the
+3. It allocates model input, output and persistent-state buffers. The finite
+   and image adapters supply external input/output byte packets without a
+   stronger base-alignment promise. Their allocation requests therefore use
+   byte alignment, rather than a device-specific convention. Parameter roots
+   and command-private transients retain their exact reflected alignment
+   requirements; an incompatible backing pool is an error. It records the
    stages with `loom_serve_jit_stage_record`; recorded commands retain their
    executables and fixed buffers after compiler storage is destroyed.
 4. For a finite transform contained in one source command, it can directly use

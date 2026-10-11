@@ -26,44 +26,63 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-loom_cc_test(
-    name = "service_test",
-    srcs = ["service_test.cc"],
-    args = ["--model_source=$(rootpath :prepare.loom)"],
-    data = [
-        "prepare.loom",
-        ":sources",
-    ],
-    resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = ["iree-run-requirement=runtime.resource.amd_gpu"],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/target/arch:vm",
-        "//loom/config/execute:amdgpu_hal",
-    ]) + select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
-    deps = [
-        "//experimental/loom_serve/http:listener",
-        "//experimental/loom_serve/http:server",
-        "//experimental/loom_serve/image:model",
-        "//experimental/loom_serve/image:output",
-        "//experimental/loom_serve/image:request",
-        "//experimental/loom_serve/image:service",
-        "//experimental/loom_serve/models/fixtures:stalled_stderr",
-        "//experimental/loom_serve/runtime:device",
-        "//experimental/loom_serve/runtime:execution",
-        "//experimental/loom_serve/runtime:host",
-        "//experimental/loom_serve/runtime:residency",
-        "//experimental/loom_serve/serving:model_registration",
-        "//experimental/loom_serve/serving:registry",
-        "//experimental/loom_serve/serving:router",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:base64",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-        "//runtime/src/iree/testing:temp_file",
-    ],
-)
+[
+    loom_cc_test(
+        name = name,
+        srcs = ["service_test.cc"],
+        args = [
+            "--model_source=$(rootpath :prepare.loom)",
+            "--test_device=" + device,
+        ],
+        data = [
+            "prepare.loom",
+            ":sources",
+        ],
+        resource_group = GPU_DEVICE_RESOURCE_GROUP,
+        tags = ["iree-run-requirement=" + requirement],
+        target_compatible_with = loom_config_compatible_with([
+            "//loom/config/target/arch:vm",
+            capability,
+        ]) + select({
+            "@platforms//os:linux": [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        }),
+        deps = [
+            "//experimental/loom_serve/http:listener",
+            "//experimental/loom_serve/http:server",
+            "//experimental/loom_serve/image:model",
+            "//experimental/loom_serve/image:output",
+            "//experimental/loom_serve/image:request",
+            "//experimental/loom_serve/image:service",
+            "//experimental/loom_serve/models/fixtures:stalled_stderr",
+            "//experimental/loom_serve/runtime:device",
+            "//experimental/loom_serve/runtime:execution",
+            "//experimental/loom_serve/runtime:host",
+            "//experimental/loom_serve/runtime:residency",
+            "//experimental/loom_serve/serving:model_registration",
+            "//experimental/loom_serve/serving:registry",
+            "//experimental/loom_serve/serving:router",
+            "//runtime/src/iree/async",
+            "//runtime/src/iree/base",
+            "//runtime/src/iree/base/internal:base64",
+            "//runtime/src/iree/base/tooling:flags",
+            "//runtime/src/iree/testing:gtest",
+            "//runtime/src/iree/testing:gtest_main",
+            "//runtime/src/iree/testing:temp_file",
+        ],
+    )
+    for name, device, capability, requirement in [
+        (
+            "service_test",
+            "amdgpu",
+            "//loom/config/execute:amdgpu_hal",
+            "runtime.resource.amd_gpu",
+        ),
+        (
+            "service_vulkan_test",
+            "vulkan",
+            "//loom/config/execute:spirv_vulkan_hal",
+            "vulkan.resource.device",
+        ),
+    ]
+]

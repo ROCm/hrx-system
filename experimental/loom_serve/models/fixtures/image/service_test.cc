@@ -30,6 +30,8 @@
 #include "iree/testing/temp_file.h"
 
 IREE_FLAG(string, model_source, "", "Deterministic image bootstrap source.");
+IREE_FLAG(string, test_device, "amdgpu",
+          "HAL device executing the source-defined image fixture.");
 
 namespace {
 
@@ -41,8 +43,8 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
 
   void SetUp() override {
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
-    const loom_serve_device_options_t device_options = {.uri =
-                                                            IREE_SV("amdgpu")};
+    const loom_serve_device_options_t device_options = {
+        .uri = iree_make_cstring_view(FLAG_test_device)};
     IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
                                                   &group_, allocator_));
     device_ = loom_serve_device_group_at(group_, 0);
@@ -455,10 +457,12 @@ TEST_P(SourceImageServiceTest, DynamicImageAdmissionRetirementAndReuse) {
                 .find("HTTP/1.1 200"),
             0u);
   const auto response = Read(held);
-  EXPECT_EQ(response.find("HTTP/1.1 200"), 0u);
+  const auto tokenizer_response = Read(tokens);
+  ASSERT_EQ(response.find("HTTP/1.1 200"), 0u) << response;
   EXPECT_NE(response.find("\"b64_json\":\"" + EncodedPixels(3, 1) + "\""),
             std::string::npos);
-  EXPECT_NE(Read(tokens).find(R"({"tokens":[0,1,0]})"), std::string::npos);
+  EXPECT_NE(tokenizer_response.find(R"({"tokens":[0,1,0]})"),
+            std::string::npos);
   const auto ready = ModelStatus("pixels");
   EXPECT_NE(ready.find(R"("registration":"ready")"), std::string::npos);
   EXPECT_NE(ready.find(R"("kernels":2)"), std::string::npos);
