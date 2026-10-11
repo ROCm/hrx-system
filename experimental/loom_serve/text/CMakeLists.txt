@@ -11,6 +11,29 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    admission
+  HDRS
+    "admission.h"
+  SRCS
+    "admission.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    admission_test
+  SRCS
+    "admission_test.cc"
+  DEPS
+    ::admission
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     chat
   HDRS
     "chat.h"
@@ -311,6 +334,7 @@ loom_cc_library(
   SRCS
     "service.c"
   DEPS
+    ::admission
     ::chat
     ::checkpoint_registry
     ::epoch

@@ -35,6 +35,9 @@ IREE_FLAG(int32_t, connections, 64,
           "Maximum simultaneous TCP connections, including queued requests.");
 IREE_FLAG(int32_t, pending_requests, 32,
           "Maximum claimed requests waiting for a model row or KV credit.");
+IREE_FLAG(int32_t, admission_overtakes, -1,
+          "Successful overtakes per blocked oldest request; -1 uses rows, "
+          "zero preserves FIFO.");
 IREE_FLAG(int32_t, request_body_bytes, 8 * 1024 * 1024,
           "Maximum HTTP request body bytes per connection.");
 IREE_FLAG(int32_t, chunk_size, 0,
@@ -56,7 +59,7 @@ int main(int argc, char** argv) {
       FLAG_rows > LOOM_SERVE_TEXT_ROW_CAPACITY || FLAG_chunk_size < 0 ||
       FLAG_max_tokens < 1 || FLAG_max_tokens > 16384 || FLAG_heartbeat_ms < 0 ||
       FLAG_connections < 1 || FLAG_pending_requests < 1 ||
-      FLAG_request_body_bytes < 1) {
+      FLAG_admission_overtakes < -1 || FLAG_request_body_bytes < 1) {
     fprintf(stderr,
             "Provide model paths, 1-16 rows, a valid port and positive token "
             "limits.\n");
@@ -95,6 +98,8 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   const iree_allocator_t allocator = iree_allocator_system();
+  const iree_host_size_t admission_overtakes =
+      FLAG_admission_overtakes < 0 ? FLAG_rows : FLAG_admission_overtakes;
   iree_status_t status = iree_async_signal_block_default();
   if (iree_status_is_ok(status)) {
     status = iree_async_signal_ignore_broken_pipe();
@@ -184,11 +189,12 @@ int main(int argc, char** argv) {
     if (iree_status_is_ok(status)) {
       fprintf(stderr,
               "{\"event\":\"ready\",\"address\":\"%.*s\",\"rows\":%d,\"chunk_"
-              "size\":%zu,\"scheduler\":\"%s\",\"shape_count\":%zu,"
+              "size\":%zu,\"admission_overtakes\":%zu,\"scheduler\":\"%s\","
+              "\"shape_count\":%zu,"
               "\"packing\":\"%s\",\"mtp_warm\":%s,\"mtp_depth\":%d,"
               "\"continuation_epochs\":%d}\n",
               (int)address.size, address.data, FLAG_rows, chunk_size,
-              FLAG_scheduler, epoch_count, FLAG_packing,
+              admission_overtakes, FLAG_scheduler, epoch_count, FLAG_packing,
               loom_serve_text_mtp_from_flags() ? "true" : "false",
               FLAG_mtp_depth, FLAG_continuation_epochs);
       const loom_serve_text_service_options_t service_options = {
@@ -197,6 +203,7 @@ int main(int argc, char** argv) {
           .chunk_size = chunk_size,
           .default_max_tokens = (iree_host_size_t)FLAG_max_tokens,
           .pending_capacity = (iree_host_size_t)FLAG_pending_requests,
+          .admission_overtakes = admission_overtakes,
           .heartbeat_interval = (iree_duration_t)FLAG_heartbeat_ms * 1000000,
           .schedule_mode = schedule_mode,
           .packing_mode = packing_mode,

@@ -27,6 +27,8 @@ typedef struct loom_serve_text_configuration_t {
   iree_string_view_t tokenizer;
   // Maximum simultaneous execution rows for this model.
   iree_host_size_t rows;
+  // Successful overtakes per blocked oldest text request; zero is FIFO.
+  iree_host_size_t admission_overtakes;
   // Logical context ceiling per row, not eagerly committed storage.
   iree_host_size_t context_capacity;
   // Shared token positions in this model's logical cache pool.

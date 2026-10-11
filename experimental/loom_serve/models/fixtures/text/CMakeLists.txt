@@ -34,8 +34,11 @@ loom_cc_test(
   NAME
     service_test
   SRCS
+    "admission_service_test.cc"
     "oracle.h"
     "owner_turn.h"
+    "service_fixture.cc"
+    "service_fixture.h"
     "service_test.cc"
     "stalled_client.h"
   DATA
@@ -66,6 +69,7 @@ loom_cc_test(
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule
     iree::experimental::loom_serve::text::service
+    iree::experimental::loom_serve::text::telemetry
     iree::net::carrier
     iree::net::carrier::loopback
     iree::task
@@ -87,8 +91,11 @@ loom_cc_test(
   NAME
     service_vulkan_test
   SRCS
+    "admission_service_test.cc"
     "oracle.h"
     "owner_turn.h"
+    "service_fixture.cc"
+    "service_fixture.h"
     "service_test.cc"
     "stalled_client.h"
   DATA
@@ -119,6 +126,7 @@ loom_cc_test(
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule
     iree::experimental::loom_serve::text::service
+    iree::experimental::loom_serve::text::telemetry
     iree::net::carrier
     iree::net::carrier::loopback
     iree::task
@@ -128,7 +136,7 @@ loom_cc_test(
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom}}"
     "--test_device=vulkan"
-    "--gtest_filter=Workers/SourceTextServiceTest.*"
+    "--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*"
   LABELS
     "iree-run-requirement=vulkan.resource.device"
   RESOURCE_GROUP
@@ -141,8 +149,11 @@ loom_cc_test(
   NAME
     service_cpu_test
   SRCS
+    "admission_service_test.cc"
     "oracle.h"
     "owner_turn.h"
+    "service_fixture.cc"
+    "service_fixture.h"
     "service_test.cc"
     "stalled_client.h"
   DATA
@@ -173,6 +184,7 @@ loom_cc_test(
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule
     iree::experimental::loom_serve::text::service
+    iree::experimental::loom_serve::text::telemetry
     iree::net::carrier
     iree::net::carrier::loopback
     iree::task
@@ -182,7 +194,7 @@ loom_cc_test(
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom}}"
     "--test_device=task"
-    "--gtest_filter=Workers/SourceTextServiceTest.*"
+    "--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*"
   LABELS
 
 )

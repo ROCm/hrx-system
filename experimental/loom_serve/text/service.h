@@ -27,6 +27,9 @@ typedef struct loom_serve_text_service_options_t {
   iree_host_size_t default_max_tokens;
   // Positive bound on claimed requests waiting without a model row.
   iree_host_size_t pending_capacity;
+  // Successful overtakes permitted per blocked oldest request. Zero is FIFO;
+  // deployment configuration defaults to one execution-row cohort.
+  iree_host_size_t admission_overtakes;
   // Detached idle endpoints retained beyond execution rows; zero disables.
   // The model reserves this many plus one exchange endpoint in addition to
   // explicit pin capacity. Automatic entries yield to admission pressure.
@@ -67,8 +70,12 @@ iree_status_t loom_serve_text_service_create(
 // Heartbeats observe a copied snapshot and continue during model waits.
 // Admission owns and physically backs the exact completion high-water, private
 // recurrent writer and partial-tail COW while pinning required parameters.
-// Shared prefixes are counted once. Excess work waits in a bounded FIFO;
-// invalid requests reject before altering retained state and yield to ready
+// Shared prefixes are counted once. Excess work waits in an arrival-ordered
+// bounded queue. admission_overtakes permits fitting tails to pass a blocked
+// oldest request; only successful admissions spend its budget. A new arrival
+// or cancelled tail never resets it. The bound is on overtakes, not wait time:
+// slow output consumers may retain active reservations indefinitely.
+// Invalid requests reject before altering retained state and yield to ready
 // epochs before preparing another input. Idle cache yields to admission
 // pressure, including peer models sharing the physical pool, but explicit pins
 // remain protected until deletion. Peer reclamation releases logical ownership
@@ -82,8 +89,11 @@ iree_status_t loom_serve_text_service_create(
 // an explicit pinned endpoint only after full canonical-history validation.
 // With session_cache_capacity, completed named histories detach only when their
 // row must be recycled. They resume automatically without a checkpoint header,
-// preserving session accounting. LRU eviction yields to the shared pool budget;
-// explicit pins and the prepared admission borrower remain protected.
+// preserving session accounting. LRU eviction yields to the shared pool budget.
+// Explicit pins and the current preparation/reservation borrower remain
+// protected. Parked inputs retain compact host tokens, not device pins. Idle
+// history eviction invalidates their suffix and requires fresh preparation;
+// unchanged capacity retries never tokenize again.
 // POST/DELETE /v1/checkpoints/NAME pin an idle completed X-Loom-Session or
 // release that pin. Deletion refuses while queued requests borrow the endpoint.
 // A detached session shares its immutable endpoint with a new explicit pin;

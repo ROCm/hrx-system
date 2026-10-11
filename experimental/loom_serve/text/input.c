@@ -8,6 +8,15 @@
 
 #include <string.h>
 
+static iree_vm_buffer_t* text_input_history(
+    const loom_serve_text_chat_t* chat, loom_serve_text_input_prefix_t prefix) {
+  return prefix.completion && iree_string_view_starts_with(
+                                  iree_string_builder_view(&chat->prompt),
+                                  prefix.completion->transcript)
+             ? prefix.completion->storage
+             : NULL;
+}
+
 void loom_serve_text_input_deinitialize(loom_serve_text_input_t* input,
                                         iree_allocator_t allocator) {
   iree_allocator_free(allocator, input->tokens);
@@ -15,20 +24,24 @@ void loom_serve_text_input_deinitialize(loom_serve_text_input_t* input,
   memset(input, 0, sizeof(*input));
 }
 
+bool loom_serve_text_input_is_current(const loom_serve_text_input_t* input,
+                                      const loom_serve_text_chat_t* chat,
+                                      loom_serve_text_input_prefix_t prefix) {
+  return input->tokens && input->history == text_input_history(chat, prefix);
+}
+
 iree_status_t loom_serve_text_input_prepare(
     const loom_serve_text_chat_t* chat, loom_serve_text_input_prefix_t prefix,
     bool require_prefix, iree_host_size_t context_capacity, int32_t* scratch,
     loom_serve_text_input_t* input, iree_allocator_t host_allocator) {
   const iree_string_view_t prompt = iree_string_builder_view(&chat->prompt);
-  const bool retained =
-      prefix.completion &&
-      iree_string_view_starts_with(prompt, prefix.completion->transcript);
+  iree_vm_buffer_t* history = text_input_history(chat, prefix);
+  const bool retained = history != NULL;
   if (require_prefix && !retained) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "request history does not extend the named checkpoint");
   }
-  iree_vm_buffer_t* history = retained ? prefix.completion->storage : NULL;
   if (input->tokens && input->history == history) {
     return iree_ok_status();
   }

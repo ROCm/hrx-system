@@ -44,6 +44,12 @@ typedef struct loom_serve_text_input_t {
 void loom_serve_text_input_deinitialize(loom_serve_text_input_t* input,
                                         iree_allocator_t allocator);
 
+// Tests whether preparation still names the available immutable frontier.
+// The chat and optional required-prefix check were validated by prepare.
+bool loom_serve_text_input_is_current(const loom_serve_text_input_t* input,
+                                      const loom_serve_text_chat_t* chat,
+                                      loom_serve_text_input_prefix_t prefix);
+
 // Prepares once per actual history identity. Capacity retries with the same
 // history reuse tokens; eviction prepares full replay instead of using stale
 // suffix tokens. Required prefixes reject mismatching canonical histories.

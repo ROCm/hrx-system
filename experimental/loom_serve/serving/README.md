@@ -72,6 +72,7 @@ Create a JSON or JSONC catalog, for example:
       "weights": "/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf",
       "tokenizer": "/path/to/tokenizer.json",
       "rows": 4,
+      "admission_overtakes": 4,
       "context_capacity": 8192,
       "pool_capacity": 32768,
       "prefill_capacity": 128,

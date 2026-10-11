@@ -13,6 +13,23 @@ package(
 )
 
 loom_cc_library(
+    name = "admission",
+    srcs = ["admission.c"],
+    hdrs = ["admission.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "admission_test",
+    srcs = ["admission_test.cc"],
+    deps = [
+        ":admission",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "chat",
     srcs = ["chat.c"],
     hdrs = ["chat.h"],
@@ -285,6 +302,7 @@ loom_cc_library(
         "//loom/config/target/arch:vm",
     ]),
     deps = [
+        ":admission",
         ":chat",
         ":checkpoint_registry",
         ":epoch",

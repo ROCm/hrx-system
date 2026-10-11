@@ -78,10 +78,12 @@ TEST(ConfigurationTest, IndependentModelsOwnDecodedStringsAndOptions) {
   EXPECT_EQ(a.kind, LOOM_SERVE_MODEL_KIND_TEXT);
   EXPECT_EQ(b.kind, LOOM_SERVE_MODEL_KIND_TEXT);
   EXPECT_EQ(a.text.rows, 4u);
+  EXPECT_EQ(a.text.admission_overtakes, 4u);
   EXPECT_EQ(a.text.context_capacity, 16384u);
   EXPECT_EQ(a.text.mtp_depth, 0u);
   EXPECT_EQ(a.text.session_cache_capacity, 0u);
   EXPECT_EQ(b.text.rows, 8u);
+  EXPECT_EQ(b.text.admission_overtakes, 8u);
   EXPECT_EQ(b.text.context_capacity, 262144u);
   EXPECT_EQ(b.text.pool_capacity, 4096u);
   EXPECT_EQ(b.text.checkpoint_capacity, 2u);
@@ -100,6 +102,28 @@ TEST(ConfigurationTest, EmptyCatalogHasNoModelStorage) {
   EXPECT_EQ(configuration.model_count, 0u);
   EXPECT_EQ(configuration.models, nullptr);
   loom_serve_configuration_deinitialize(&configuration);
+}
+
+TEST(ConfigurationTest, TextAdmissionBudgetIsIndependentOfRowCount) {
+  for (int budget : {0, 1, 16}) {
+    const auto json = Model("bounded", ",\"rows\":2,\"admission_overtakes\":" +
+                                           std::to_string(budget));
+    loom_serve_model_configuration_t model;
+    IREE_ASSERT_OK(loom_serve_model_configuration_initialize(
+        iree_make_cstring_view(json.c_str()), &model, iree_allocator_system()));
+    EXPECT_EQ(model.text.admission_overtakes, static_cast<size_t>(budget));
+    loom_serve_model_configuration_deinitialize(&model);
+  }
+  for (const char* value : {"-1", "1.5", "2147483648"}) {
+    const auto json =
+        Model("invalid", std::string(",\"admission_overtakes\":") + value);
+    loom_serve_model_configuration_t model;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          loom_serve_model_configuration_initialize(
+                              iree_make_cstring_view(json.c_str()), &model,
+                              iree_allocator_system()));
+    loom_serve_model_configuration_deinitialize(&model);
+  }
 }
 
 TEST(ConfigurationTest, AutomaticCacheAndExplicitPinsHaveIndependentQuotas) {

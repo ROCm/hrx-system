@@ -48,8 +48,11 @@ py_test(
     loom_cc_test(
         name = name,
         srcs = [
+            "admission_service_test.cc",
             "oracle.h",
             "owner_turn.h",
+            "service_fixture.cc",
+            "service_fixture.h",
             "service_test.cc",
             "stalled_client.h",
         ],
@@ -85,6 +88,7 @@ py_test(
             "//experimental/loom_serve/text:model",
             "//experimental/loom_serve/text:schedule",
             "//experimental/loom_serve/text:service",
+            "//experimental/loom_serve/text:telemetry",
             "//runtime/src/iree/async",
             "//runtime/src/iree/async:platform",
             "//runtime/src/iree/base",
@@ -113,7 +117,7 @@ py_test(
             ["//loom/config/execute:spirv_vulkan_hal"],
             GPU_DEVICE_RESOURCE_GROUP,
             ["iree-run-requirement=vulkan.resource.device"],
-            ["--gtest_filter=Workers/SourceTextServiceTest.*"],
+            ["--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*"],
         ),
         (
             "service_cpu_test",
@@ -124,7 +128,7 @@ py_test(
             ],
             None,
             [],
-            ["--gtest_filter=Workers/SourceTextServiceTest.*"],
+            ["--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*"],
         ),
     ]
 ]

@@ -62,11 +62,13 @@ static iree_status_t text_admission_format(
       ",\"retained_tokens\":%" PRIu64 ",\"appended_tokens\":%" PRIu64
       ",\"reservation_tokens\":%" PRIu64 ",\"restored_bytes\":%" PRIu64
       ",\"max_tokens\":%" PRIu64 ",\"prepare_ns\":%" PRIu64
-      ",\"queue_ns\":%" PRIu64 ",\"pool_reserved_tokens\":%" PRIu64
-      ",\"pool_resident_tokens\":%" PRIu64,
+      ",\"queue_rank\":%" PRIu64 ",\"overtakes\":%" PRIu64
+      ",\"overtake_budget\":%" PRIu64 ",\"queue_ns\":%" PRIu64
+      ",\"pool_reserved_tokens\":%" PRIu64 ",\"pool_resident_tokens\":%" PRIu64,
       value.session, value.row, value.retained_tokens, value.appended_tokens,
       value.reservation_tokens, value.restored_bytes, value.max_tokens,
-      value.prepare_ns, value.queue_ns, value.pool_reserved_tokens,
+      value.prepare_ns, value.queue_rank, value.overtakes,
+      value.overtake_budget, value.queue_ns, value.pool_reserved_tokens,
       value.pool_resident_tokens);
 }
 

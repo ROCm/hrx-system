@@ -368,8 +368,8 @@ is pending. Shutdown requests timer cancellation on the poll owner and joins
 both terminal completion and the cancellation receipt. Reporting creates no
 per-model thread and never counts as activity that can relieve memory pressure.
 
-Input preparation can overlap an already-submitted epoch: the FIFO head borrows
-one idle row's host input/history while device work owns other rows and its
+Input preparation can overlap an already-submitted epoch: the selected request
+borrows one idle row's host input/history while device work owns other rows and its
 transfer buffers. CPU release and device readiness have independent completion
 slots. The owner consumes CPU release before publishing device results or
 invoking the model again, preserving the single-VM-call contract regardless of
@@ -377,6 +377,31 @@ which operation finishes first. The prepared request acquires device capacity
 only at the normal retired epoch boundary. This does not force smaller cohorts
 or change the policy of collecting ready admissions before dispatch. Output
 translation still completes before the next epoch submission.
+
+### Admission under KV pressure
+
+Text deployments default `admission_overtakes` to `rows`: when the oldest
+request cannot reserve its full completion, smaller fitting requests can pass
+it up to that many times. Zero gives strict FIFO; another nonnegative value
+changes the budget independently of execution-row count. The single-model
+server exposes the same setting as `--admission_overtakes` (`-1` selects rows).
+New arrivals, failed probes and cancelled tails cannot replenish the oldest
+request's budget. Once spent, later requests wait until the oldest admits or
+leaves. This bounds overtakes, not elapsed waiting time: a slow output consumer
+can retain an active reservation indefinitely.
+
+Selection policy is separate from token preparation and native reservation.
+Only a selected attempt borrows an idle row/cache through CPU/native readiness.
+Parked requests own compact prepared token IDs, bounded by pending request and
+context limits, with no extra device pin or recurrent snapshot. Unchanged
+capacity retries reuse those IDs. If ordinary cache eviction removes a parked
+request's history, its suffix is replaced by full replay before reservation;
+an immutable host-history reference never authorizes use of missing device state.
+
+`admit` events report `queue_rank`, `overtakes`, and `overtake_budget` alongside
+queue time, exact completion reservation and actual cached/appended token counts.
+These expose the throughput/fairness tradeoff on the same workload without
+changing kernels, completion reservations or cache ownership.
 
 The native real-model witness is
 `models/qwen:epoch_check --checkpoints --checkpoint_capacity=1

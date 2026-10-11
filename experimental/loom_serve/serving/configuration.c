@@ -126,6 +126,9 @@ static iree_status_t configuration_text(const configuration_field_t* fields,
   IREE_RETURN_IF_ERROR(
       configuration_string(&fields[4], &text->tokenizer, allocator));
   IREE_RETURN_IF_ERROR(configuration_size(&fields[5], 1, 16, &text->rows));
+  text->admission_overtakes = text->rows;
+  IREE_RETURN_IF_ERROR(configuration_size(&fields[23], 0, INT32_MAX,
+                                          &text->admission_overtakes));
   IREE_RETURN_IF_ERROR(
       configuration_size(&fields[6], 1, 262144, &text->context_capacity));
   IREE_RETURN_IF_ERROR(
@@ -229,6 +232,8 @@ static iree_status_t configuration_model_parse(
                 (1u << LOOM_SERVE_MODEL_KIND_DECISION)},
       {"admission", IREE_JSON_VALUE_TYPE_STRING},
       {"session_cache_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
+      {"admission_overtakes", IREE_JSON_VALUE_TYPE_NUMBER,
        .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)}};
   configuration_fields_t context = {IREE_ARRAYSIZE(fields), fields};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
