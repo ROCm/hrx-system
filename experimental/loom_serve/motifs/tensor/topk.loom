@@ -1,0 +1,125 @@
+template.decl @selection.topk_tile_f32(%count: index, %output_row: index, %output_rows: index, %values: vector<16xf32>, %ids: vector<16xi32>, %output_values: buffer, %output_ids: buffer)
+template.decl @selection.topk_partial_f32(%rows: index, %columns: index, %count: index, %input: buffer, %output_values: buffer, %output_ids: buffer)
+template.decl @selection.topk_merge_f32(%rows: index, %partitions: index, %count: index, %input_values: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer)
+
+// Each of 256 threads retains sixteen candidates. Select up to sixteen
+// winners in descending value order, resolving ties by lowest ID. Invalid
+// candidates have value -inf and ID INT_MAX; valid values are finite and IDs
+// are unique non-negative I32 values. Only the winning lane discards its ID.
+template.def<@selection.topk_tile_f32> device @topk_tile_f32(%count: index, %output_row: index, %output_rows: index, %values: vector<16xf32>, %ids: vector<16xi32>, %output_values: buffer, %output_ids: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %negative = scalar.constant -inf : f32
+  %largest = scalar.constant 2147483647 : i32
+  %negative_vector = vector.constant -inf : vector<16xf32>
+  %largest_vector = vector.constant 2147483647 : vector<16xi32>
+  %thread = kernel.workitem.id<x> : index
+  %leader = index.cmp eq, %thread, %zero : index
+  %scores = buffer.view %output_values[%origin] : buffer -> view<[%output_rows]x[%count]xf32>
+  %tokens = buffer.view %output_ids[%origin] : buffer -> view<[%output_rows]x[%count]xi32>
+  %remaining = scf.for %rank = [%zero to %count step %one](%available = %values : vector<16xf32>) -> (vector<16xf32>) {
+    %local_max = vector.reduce<maxnumf> %available, %negative : vector<16xf32>, f32
+    %maximum = kernel.workgroup.reduce<maxnumf> %local_max : f32
+    %maximum_vector = vector.splat %maximum : vector<16xf32>
+    %matches = vector.cmpf oeq, %available, %maximum_vector : vector<16xf32> -> vector<16xi1>
+    %eligible = vector.select %matches, %ids, %largest_vector : vector<16xi32>
+    %local_id = vector.reduce<minsi> %eligible, %largest : vector<16xi32>, i32
+    %winning_id = kernel.workgroup.reduce<minsi> %local_id : i32
+    %has_winner = scalar.cmpf ogt, %maximum, %negative : f32
+    %winner = scf.select %has_winner, %winning_id, %largest : i32
+    scf.if %leader {
+      view.store %maximum, %scores[%output_row, %rank] : f32, view<[%output_rows]x[%count]xf32>
+      view.store %winner, %tokens[%output_row, %rank] : i32, view<[%output_rows]x[%count]xi32>
+      scf.yield
+    }
+    %winner_vector = vector.splat %winner : vector<16xi32>
+    %consumed = vector.cmpi eq, %ids, %winner_vector : vector<16xi32> -> vector<16xi1>
+    %next = vector.select %consumed, %negative_vector, %available : vector<16xf32>
+    scf.yield %next : vector<16xf32>
+  }
+  template.return
+}
+
+// Launch ceil(columns / 4096) by rows workgroups of 256 threads. Each group
+// reads its logit tile once and emits count winners. A short final tile emits
+// invalid sentinels after exhausting its valid candidates. Output buffers have
+// [rows, ceil(columns / 4096), count] elements and do not overlap input.
+template.def<@selection.topk_partial_f32> device @topk_partial_f32(%rows: index, %columns: index, %count: index, %input: buffer, %output_values: buffer, %output_ids: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %threads = index.constant 256 : index
+  %tile_width = index.constant 4096 : index
+  %padding = index.constant 4095 : index
+  %padded = index.add %columns, %padding : index
+  %partitions = index.div %padded, %tile_width : index
+  %row = kernel.workgroup.id<y> : index
+  %partition = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %begin = index.mul %partition, %tile_width : index
+  %first = index.add %begin, %thread : index
+  %x = buffer.view %input[%origin] : buffer -> view<[%rows]x[%columns]xf32>
+  %negative = scalar.constant -inf : f32
+  %largest = scalar.constant 2147483647 : i32
+  %negative_vector = vector.constant -inf : vector<16xf32>
+  %largest_vector = vector.constant 2147483647 : vector<16xi32>
+  %values, %ids = scf.for %slot = [%zero to %sixteen step %one](%scores = %negative_vector, %tokens = %largest_vector : vector<16xf32>, vector<16xi32>) -> (vector<16xf32>, vector<16xi32>) unroll {
+    %stride = index.mul %slot, %threads : index
+    %column = index.add %first, %stride : index
+    %live = index.cmp ult, %column, %columns : index
+    %value, %id = scf.if %live -> (f32, i32) {
+      %value = view.load %x[%row, %column] : view<[%rows]x[%columns]xf32> -> f32
+      %id = index.cast %column : index to i32
+      scf.yield %value, %id : f32, i32
+    } else {
+      scf.yield %negative, %largest : f32, i32
+    }
+    %next_scores = vector.insert %value into %scores[%slot] : f32, vector<16xf32>
+    %next_tokens = vector.insert %id into %tokens[%slot] : i32, vector<16xi32>
+    scf.yield %next_scores, %next_tokens : vector<16xf32>, vector<16xi32>
+  }
+  %row_begin = index.mul %row, %partitions : index
+  %output_row = index.add %row_begin, %partition : index
+  %output_rows = index.mul %rows, %partitions : index
+  template.apply<@selection.topk_tile_f32>(%count, %output_row, %output_rows, %values, %ids, %output_values, %output_ids) : (index, index, index, vector<16xf32>, vector<16xi32>, buffer, buffer)
+  template.return
+}
+
+// Launch one 256-thread workgroup per row. The input consists of disjoint
+// partial top-k lists whose total count is at most 4096. Merging their union is
+// sufficient for the global top-k; the full vocabulary is not reread.
+template.def<@selection.topk_merge_f32> device @topk_merge_f32(%rows: index, %partitions: index, %count: index, %input_values: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %threads = index.constant 256 : index
+  %columns = index.mul %partitions, %count : index
+  %row = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %x = buffer.view %input_values[%origin] : buffer -> view<[%rows]x[%columns]xf32>
+  %t = buffer.view %input_ids[%origin] : buffer -> view<[%rows]x[%columns]xi32>
+  %negative = scalar.constant -inf : f32
+  %largest = scalar.constant 2147483647 : i32
+  %negative_vector = vector.constant -inf : vector<16xf32>
+  %largest_vector = vector.constant 2147483647 : vector<16xi32>
+  %values, %ids = scf.for %slot = [%zero to %sixteen step %one](%scores = %negative_vector, %tokens = %largest_vector : vector<16xf32>, vector<16xi32>) -> (vector<16xf32>, vector<16xi32>) unroll {
+    %stride = index.mul %slot, %threads : index
+    %column = index.add %thread, %stride : index
+    %live = index.cmp ult, %column, %columns : index
+    %value, %id = scf.if %live -> (f32, i32) {
+      %value = view.load %x[%row, %column] : view<[%rows]x[%columns]xf32> -> f32
+      %id = view.load %t[%row, %column] : view<[%rows]x[%columns]xi32> -> i32
+      scf.yield %value, %id : f32, i32
+    } else {
+      scf.yield %negative, %largest : f32, i32
+    }
+    %next_scores = vector.insert %value into %scores[%slot] : f32, vector<16xf32>
+    %next_tokens = vector.insert %id into %tokens[%slot] : i32, vector<16xi32>
+    scf.yield %next_scores, %next_tokens : vector<16xf32>, vector<16xi32>
+  }
+  template.apply<@selection.topk_tile_f32>(%count, %row, %rows, %values, %ids, %output_values, %output_ids) : (index, index, index, vector<16xf32>, vector<16xi32>, buffer, buffer)
+  template.return
+}

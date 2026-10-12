@@ -1,0 +1,294 @@
+amdgpu.target<gfx11-generic> @wave32 {subgroup_size = 32}
+template.decl @selection.topk_partial_f32(%rows: index, %columns: index, %count: index, %input: buffer, %output_values: buffer, %output_ids: buffer)
+template.decl @selection.topk_merge_f32(%rows: index, %partitions: index, %count: index, %input_values: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer)
+
+// Serial order-statistic oracle. Each rank scans the unmodified input using
+// the preceding rank's strict (value descending, ID ascending) frontier.
+func.def @topk_reference(%rows: index, %columns: index, %count: index, %partitions: index, %tile_width0: index, %indexed: i1, %input: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %tile_width = index.assume %tile_width0 [ge(%tile_width0, 1)] : index
+  %x = buffer.view %input[%origin] : buffer -> view<[%rows]x[%columns]xf32>
+  %t = buffer.view %input_ids[%origin] : buffer -> view<[%rows]x[%columns]xi32>
+  %y = buffer.view %output_values[%origin] : buffer -> view<[%rows]x[%partitions]x[%count]xf32>
+  %ids = buffer.view %output_ids[%origin] : buffer -> view<[%rows]x[%partitions]x[%count]xi32>
+  %negative = scalar.constant -inf : f32
+  %positive = scalar.constant inf : f32
+  %largest = scalar.constant 2147483647 : i32
+  %none = scalar.constant -1 : i32
+  scf.for %row = [%zero to %rows step %one] {
+    scf.for %partition = [%zero to %partitions step %one] {
+      %begin = index.mul %partition, %tile_width : index
+      %limit = index.add %begin, %tile_width : index
+      %end = index.min %limit, %columns : index
+      %last_value, %last_id = scf.for %rank = [%zero to %count step %one](%previous = %positive, %previous_id = %none : f32, i32) -> (f32, i32) {
+        %value, %id = scf.for %column0 = [%begin to %end step %one](%best = %negative, %best_id = %largest : f32, i32) -> (f32, i32) {
+          %column = index.assume %column0 [ge(%column0, 0), lt(%column0, %columns)] : index
+          %candidate = view.load %x[%row, %column] : view<[%rows]x[%columns]xf32> -> f32
+          %candidate_id = scf.if %indexed -> (i32) {
+            %id = view.load %t[%row, %column] : view<[%rows]x[%columns]xi32> -> i32
+            scf.yield %id : i32
+          } else {
+            %id = index.cast %column : index to i32
+            scf.yield %id : i32
+          }
+          %lower = scalar.cmpf olt, %candidate, %previous : f32
+          %equal_previous = scalar.cmpf oeq, %candidate, %previous : f32
+          %later_id = scalar.cmpi sgt, %candidate_id, %previous_id : i32
+          %later_tie = scalar.andi %equal_previous, %later_id : i1
+          %after = scalar.ori %lower, %later_tie : i1
+          %valid = scalar.cmpi ne, %candidate_id, %largest : i32
+          %eligible = scalar.andi %after, %valid : i1
+          %greater = scalar.cmpf ogt, %candidate, %best : f32
+          %equal_best = scalar.cmpf oeq, %candidate, %best : f32
+          %earlier_id = scalar.cmpi slt, %candidate_id, %best_id : i32
+          %earlier_tie = scalar.andi %equal_best, %earlier_id : i1
+          %better = scalar.ori %greater, %earlier_tie : i1
+          %take = scalar.andi %eligible, %better : i1
+          %next = scf.select %take, %candidate, %best : f32
+          %next_id = scf.select %take, %candidate_id, %best_id : i32
+          scf.yield %next, %next_id : f32, i32
+        }
+        view.store %value, %y[%row, %partition, %rank] : f32, view<[%rows]x[%partitions]x[%count]xf32>
+        view.store %id, %ids[%row, %partition, %rank] : i32, view<[%rows]x[%partitions]x[%count]xi32>
+        scf.yield %value, %id : f32, i32
+      }
+    }
+  }
+  func.return
+}
+
+kernel.def target(@wave32) @vocabulary() {
+  %x = index.constant 61 : index
+  %y = index.constant 1 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%x, %y, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer) {
+  %rows = index.constant 1 : index
+  %columns = index.constant 248320 : index
+  %partitions = index.constant 61 : index
+  %count = index.constant 16 : index
+  template.apply<@selection.topk_partial_f32>(%rows, %columns, %count, %input, %output_values, %output_ids) : (index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @vocabulary_reference(%input: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer) {
+  %rows = index.constant 1 : index
+  %columns = index.constant 248320 : index
+  %count = index.constant 16 : index
+  %partitions = index.constant 61 : index
+  %tile_width = index.constant 4096 : index
+  %indexed = scalar.constant false : i1
+  func.call @topk_reference(%rows, %columns, %count, %partitions, %tile_width, %indexed, %input, %input_ids, %output_values, %output_ids) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer) -> ()
+  func.return
+}
+
+check.scenario public @vocabulary_case {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2.0 to 2.0) : tensor<1x248320xf32>
+    %ids = check.generate.iota offset(248319) step(-1) period(248320) : tensor<1x248320xi32>
+    %values = check.generate.fill value(-99.0) : tensor<1x61x16xf32>
+    %output_ids = check.generate.fill value(-99) : tensor<1x61x16xi32>
+    check.compare<@vocabulary, @vocabulary_reference>(%input, %ids, %values, %output_ids) : (tensor<1x248320xf32>, tensor<1x248320xi32>, tensor<1x61x16xf32>, tensor<1x61x16xi32>) -> () {
+      check.expect.bitwise actual(%values) expected(%values) : tensor<1x61x16xf32>
+      check.expect.bitwise actual(%output_ids) expected(%output_ids) : tensor<1x61x16xi32>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@wave32) @short_tail() {
+  %x = index.constant 3 : index
+  %y = index.constant 2 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%x, %y, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer) {
+  %rows = index.constant 2 : index
+  %columns = index.constant 8201 : index
+  %partitions = index.constant 3 : index
+  %count = index.constant 16 : index
+  template.apply<@selection.topk_partial_f32>(%rows, %columns, %count, %input, %output_values, %output_ids) : (index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @short_tail_reference(%input: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer) {
+  %rows = index.constant 2 : index
+  %columns = index.constant 8201 : index
+  %count = index.constant 16 : index
+  %partitions = index.constant 3 : index
+  %tile_width = index.constant 4096 : index
+  %indexed = scalar.constant false : i1
+  func.call @topk_reference(%rows, %columns, %count, %partitions, %tile_width, %indexed, %input, %input_ids, %output_values, %output_ids) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer) -> ()
+  func.return
+}
+
+check.scenario public @short_tail_case {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.iota offset(0.0) step(1.0) period(17) : tensor<2x8201xf32>
+    %ids = check.generate.iota offset(8200) step(-1) period(8201) : tensor<2x8201xi32>
+    %values = check.generate.fill value(-99.0) : tensor<2x3x16xf32>
+    %output_ids = check.generate.fill value(-99) : tensor<2x3x16xi32>
+    check.compare<@short_tail, @short_tail_reference>(%input, %ids, %values, %output_ids) : (tensor<2x8201xf32>, tensor<2x8201xi32>, tensor<2x3x16xf32>, tensor<2x3x16xi32>) -> () {
+      check.expect.bitwise actual(%values) expected(%values) : tensor<2x3x16xf32>
+      check.expect.bitwise actual(%output_ids) expected(%output_ids) : tensor<2x3x16xi32>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@wave32) @ties() {
+  %x = index.constant 1 : index
+  %y = index.constant 2 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%x, %y, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer) {
+  %rows = index.constant 2 : index
+  %columns = index.constant 256 : index
+  %partitions = index.constant 1 : index
+  %count = index.constant 1 : index
+  template.apply<@selection.topk_partial_f32>(%rows, %columns, %count, %input, %output_values, %output_ids) : (index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @ties_reference(%input: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer) {
+  %rows = index.constant 2 : index
+  %columns = index.constant 256 : index
+  %count = index.constant 1 : index
+  %partitions = index.constant 1 : index
+  %tile_width = index.constant 4096 : index
+  %indexed = scalar.constant false : i1
+  func.call @topk_reference(%rows, %columns, %count, %partitions, %tile_width, %indexed, %input, %input_ids, %output_values, %output_ids) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer) -> ()
+  func.return
+}
+
+check.scenario public @ties_case {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.iota offset(0.0) step(1.0) period(17) : tensor<2x256xf32>
+    %ids = check.generate.iota offset(255) step(-1) period(256) : tensor<2x256xi32>
+    %values = check.generate.fill value(-99.0) : tensor<2x1x1xf32>
+    %output_ids = check.generate.fill value(-99) : tensor<2x1x1xi32>
+    check.compare<@ties, @ties_reference>(%input, %ids, %values, %output_ids) : (tensor<2x256xf32>, tensor<2x256xi32>, tensor<2x1x1xf32>, tensor<2x1x1xi32>) -> () {
+      check.expect.bitwise actual(%values) expected(%values) : tensor<2x1x1xf32>
+      check.expect.bitwise actual(%output_ids) expected(%output_ids) : tensor<2x1x1xi32>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@wave32) @merge() {
+  %x = index.constant 3 : index
+  %y = index.constant 1 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%x, %y, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer) {
+  %rows = index.constant 3 : index
+  %columns = index.constant 976 : index
+  %partitions = index.constant 61 : index
+  %count = index.constant 16 : index
+  template.apply<@selection.topk_merge_f32>(%rows, %partitions, %count, %input, %input_ids, %output_values, %output_ids) : (index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @merge_reference(%input: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer) {
+  %rows = index.constant 3 : index
+  %columns = index.constant 976 : index
+  %count = index.constant 16 : index
+  %partitions = index.constant 1 : index
+  %tile_width = index.constant 976 : index
+  %indexed = scalar.constant true : i1
+  func.call @topk_reference(%rows, %columns, %count, %partitions, %tile_width, %indexed, %input, %input_ids, %output_values, %output_ids) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer) -> ()
+  func.return
+}
+
+check.scenario public @merge_case {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2.0 to 2.0) : tensor<3x976xf32>
+    %ids = check.generate.iota offset(975) step(-1) period(976) : tensor<3x976xi32>
+    %values = check.generate.fill value(-99.0) : tensor<3x1x16xf32>
+    %output_ids = check.generate.fill value(-99) : tensor<3x1x16xi32>
+    check.compare<@merge, @merge_reference>(%input, %ids, %values, %output_ids) : (tensor<3x976xf32>, tensor<3x976xi32>, tensor<3x1x16xf32>, tensor<3x1x16xi32>) -> () {
+      check.expect.bitwise actual(%values) expected(%values) : tensor<3x1x16xf32>
+      check.expect.bitwise actual(%output_ids) expected(%output_ids) : tensor<3x1x16xi32>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@wave32) @merge_ties() {
+  %x = index.constant 2 : index
+  %y = index.constant 1 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%x, %y, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer) {
+  %rows = index.constant 2 : index
+  %columns = index.constant 24 : index
+  %partitions = index.constant 8 : index
+  %count = index.constant 3 : index
+  template.apply<@selection.topk_merge_f32>(%rows, %partitions, %count, %input, %input_ids, %output_values, %output_ids) : (index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @merge_ties_reference(%input: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer) {
+  %rows = index.constant 2 : index
+  %columns = index.constant 24 : index
+  %count = index.constant 3 : index
+  %partitions = index.constant 1 : index
+  %tile_width = index.constant 24 : index
+  %indexed = scalar.constant true : i1
+  func.call @topk_reference(%rows, %columns, %count, %partitions, %tile_width, %indexed, %input, %input_ids, %output_values, %output_ids) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer) -> ()
+  func.return
+}
+
+check.scenario public @merge_ties_case {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.iota offset(0.0) step(1.0) period(17) : tensor<2x24xf32>
+    %ids = check.generate.iota offset(23) step(-1) period(24) : tensor<2x24xi32>
+    %values = check.generate.fill value(-99.0) : tensor<2x1x3xf32>
+    %output_ids = check.generate.fill value(-99) : tensor<2x1x3xi32>
+    check.compare<@merge_ties, @merge_ties_reference>(%input, %ids, %values, %output_ids) : (tensor<2x24xf32>, tensor<2x24xi32>, tensor<2x1x3xf32>, tensor<2x1x3xi32>) -> () {
+      check.expect.bitwise actual(%values) expected(%values) : tensor<2x1x3xf32>
+      check.expect.bitwise actual(%output_ids) expected(%output_ids) : tensor<2x1x3xi32>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@wave32) @merge_vocabulary() {
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input_values: buffer, %input_ids: buffer, %output_values: buffer, %output_ids: buffer) {
+  %rows = index.constant 1 : index
+  %partitions = index.constant 61 : index
+  %count = index.constant 16 : index
+  template.apply<@selection.topk_merge_f32>(%rows, %partitions, %count, %input_values, %input_ids, %output_values, %output_ids) : (index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+// Equal winners in sixty separate vocabulary tiles must merge by token ID.
+// This exercises the actual two-dispatch path, including the short last tile.
+check.case public @vocabulary_merge_case {
+  %input = check.generate.iota offset(0.0) step(1.0) period(4096) : tensor<1x248320xf32>
+  %partial_values = check.generate.fill value(-99.0) : tensor<1x61x16xf32>
+  %partial_ids = check.generate.fill value(-99) : tensor<1x61x16xi32>
+  %values = check.generate.fill value(-99.0) : tensor<1x16xf32>
+  %ids = check.generate.fill value(-99) : tensor<1x16xi32>
+  %expected_values = check.generate.fill value(4095.0) : tensor<1x16xf32>
+  %expected_ids = check.generate.iota offset(4095) step(4096) : tensor<1x16xi32>
+  kernel.launch @vocabulary(%input, %input, %partial_values, %partial_ids) : (tensor<1x248320xf32>, tensor<1x248320xf32>, tensor<1x61x16xf32>, tensor<1x61x16xi32>)
+  kernel.launch @merge_vocabulary(%partial_values, %partial_ids, %values, %ids) : (tensor<1x61x16xf32>, tensor<1x61x16xi32>, tensor<1x16xf32>, tensor<1x16xi32>)
+  check.expect.bitwise actual(%values) expected(%expected_values) : tensor<1x16xf32>
+  check.expect.bitwise actual(%ids) expected(%expected_ids) : tensor<1x16xi32>
+  check.return
+}

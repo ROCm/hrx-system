@@ -40,6 +40,19 @@ loom_test(
 )
 
 loom_test(
+    name = "topk_test",
+    srcs = [
+        "tests/topk.loom",
+        "topk.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "quantization_test",
     srcs = [
         "quantization.loom",
