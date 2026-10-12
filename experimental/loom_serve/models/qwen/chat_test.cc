@@ -13,6 +13,7 @@
 
 #include "experimental/loom_serve/runtime/input.h"
 #include "experimental/loom_serve/runtime/json.h"
+#include "experimental/loom_serve/text/input.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -274,6 +275,65 @@ TEST_F(QwenChatTest, MultipleGeneratedCallsHaveDistinctIdsAndCanonicalOrder) {
   EXPECT_NE(View(calls_).find("call_7_1"), std::string::npos);
   EXPECT_NE(View(checkpoint_).find("</tool_call>\n<tool_call>"),
             std::string::npos);
+}
+
+TEST_F(QwenChatTest, NestedToolJsonSpacingDoesNotInvalidateRetainedHistory) {
+  const std::string tools =
+      R"(,"tools":[{"type":"function","function":{"name":"edit","parameters":{"type":"object","properties":{"edits":{"type":"array"}},"required":["edits"]}}}])";
+  IREE_ASSERT_OK(Initialize(
+      Request(R"([{"role":"user","content":"Repair the function."}])", tools)));
+  const std::string generated =
+      "<tool_call><function=edit><parameter=edits>\n"
+      "[{\"oldText\": \" x \", \"newText\": \" y \"}]\n"
+      "</parameter></function></tool_call>";
+  IREE_ASSERT_OK(Complete(generated));
+  // The fixture's ASCII tokenizer has one ID per byte. Its consumed frontier
+  // still describes the original spaced output, not the compact history key.
+  const loom_serve_text_input_prefix_t prefix = {
+      &checkpoint_, View(chat_.prompt).size() + generated.size() - 1,
+      generated.back(), LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN};
+  EXPECT_NE(View(checkpoint_).find(R"([{"oldText":" x ","newText":" y "}])"),
+            std::string::npos);
+  for (const std::string replacement : {" y ", "different"}) {
+    SCOPED_TRACE(replacement);
+    // Pi parses the function arguments and serializes them without JSON
+    // spacing. String content remains semantically significant.
+    const std::string followup = Request(
+        R"([{"role":"user","content":"Repair the function."},{"role":"assistant","content":null,"tool_calls":[{"id":"call_7_0","type":"function","function":{"name":"edit","arguments":"{\"edits\":[{\"oldText\":\" x \",\"newText\":\")" +
+            replacement +
+            R"(\"}]}"}}]},{"role":"tool","tool_call_id":"call_7_0","content":"done"}])",
+        tools);
+    loom_serve_text_chat_t next;
+    IREE_ASSERT_OK(loom_serve_text_chat_initialize(
+        &policy_, policy_.name,
+        iree_make_string_view(followup.data(), followup.size()), 128,
+        iree_allocator_system(), &next));
+    EXPECT_EQ(
+        iree_string_view_starts_with(iree_string_builder_view(&next.prompt),
+                                     checkpoint_.transcript),
+        replacement == " y ");
+    int32_t scratch[4096];
+    loom_serve_text_input_t input = {};
+    IREE_ASSERT_OK(loom_serve_text_input_prepare(
+        &next, prefix, false, IREE_ARRAYSIZE(scratch), scratch, &input,
+        iree_allocator_system()));
+    if (replacement == " y ") {
+      EXPECT_EQ(input.history, checkpoint_.storage);
+      EXPECT_EQ(input.retained_count, prefix.position);
+      ASSERT_GT(input.count, 0u);
+      EXPECT_EQ(input.tokens[0], prefix.token);
+      EXPECT_LT(input.count, View(next.prompt).size());
+    } else {
+      EXPECT_EQ(input.history, nullptr);
+      EXPECT_EQ(input.retained_count, 0u);
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                            loom_serve_text_input_prepare(
+                                &next, prefix, true, IREE_ARRAYSIZE(scratch),
+                                scratch, &input, iree_allocator_system()));
+    }
+    loom_serve_text_input_deinitialize(&input, iree_allocator_system());
+    loom_serve_text_chat_deinitialize(&next);
+  }
 }
 
 TEST_F(QwenChatTest, HistoryFormatsEveryArgumentTypeInSource) {

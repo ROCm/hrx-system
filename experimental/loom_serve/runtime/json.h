@@ -16,6 +16,12 @@ extern "C" {
 
 // Creates synchronous JSON utilities for source-owned request policy.
 //
+// json.compact(buffer) -> buffer validates one complete UTF-8 JSON/JSONC value
+// and returns owned bytes without insignificant whitespace, comments or the
+// leading BOM. String contents and escape spelling, number spelling, member
+// order, duplicate keys and trailing commas are preserved. This is lexical
+// compaction, not semantic canonicalization or conversion from JSONC to JSON.
+//
 // json.members(buffer) -> (buffer, i32 type, i64 count) validates one complete
 // UTF-8 object or array using IREE's JSON/JSONC parser. The owned result
 // contains count records of five little-endian i64 fields: key offset/length,

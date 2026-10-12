@@ -329,6 +329,7 @@ loom_cc_test(
         "//experimental/loom_serve/runtime:json",
         "//experimental/loom_serve/runtime:program",
         "//experimental/loom_serve/text:chat",
+        "//experimental/loom_serve/text:input",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/testing:gtest",

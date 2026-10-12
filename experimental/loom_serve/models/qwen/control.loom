@@ -262,6 +262,7 @@ func.def public @publish_epoch(%plan: buffer, %count: i32, %verified: i32, %cont
   func.return
 }
 
+func.decl import("json") @compact(%text: buffer) -> (buffer)
 func.decl import("json") @members(%text: buffer) -> (buffer, i32, i64)
 func.decl import("json") @unescape(%source: buffer, %offset: i64, %length: i64, %target: buffer, %target_offset: i64) -> (i64)
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
@@ -417,7 +418,10 @@ func.def @tool_append(%output: buffer, %position: offset, %text: buffer) -> (off
 
 // Both client history and generated calls use this canonical spelling. JSON
 // syntax and unescaping are utilities; model framing and tag policy live here.
-func.def public @render_tool(%name: buffer, %arguments: buffer, %ordinal: i64) -> (buffer, i64) {
+func.def public @render_tool(%name: buffer, %raw_arguments: buffer, %ordinal: i64) -> (buffer, i64) {
+  // Clients may reserialize decoded arguments. Insignificant nested spacing
+  // must not change the history key; original generated IDs stay in the row.
+  %arguments = func.call @compact(%raw_arguments) : (buffer) -> (buffer)
   %zero64 = scalar.constant 0 : i64
   %name_bytes = buffer.length %name
   %name_length = index.cast %name_bytes : offset to i64

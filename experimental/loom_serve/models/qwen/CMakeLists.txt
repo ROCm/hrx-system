@@ -725,6 +725,7 @@ loom_cc_test(
     iree::experimental::loom_serve::runtime::json
     iree::experimental::loom_serve::runtime::program
     iree::experimental::loom_serve::text::chat
+    iree::experimental::loom_serve::text::input
     iree::testing::gtest
     iree::testing::gtest_main
     iree::tokenizer

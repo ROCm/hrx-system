@@ -609,6 +609,15 @@ explicitly by the Qwen program, not the default interpretation of text.
 The independent [plain-text/JSON policy](../models/qwen/testdata/portable_chat.loom)
 is tested through the same native caller without linking that codec.
 
+Qwen uses the generic [`json.compact`](../runtime/json.h) capability before
+rendering tool arguments. Clients commonly parse and reserialize generated
+arguments; insignificant spacing inside nested objects or arrays then changes
+without changing the tool call. Compaction makes those histories share the
+same checkpoint key while preserving string contents, number and escape
+spelling, and member order. The key validates continuation of the original
+generated tokens, not equality with a fresh tokenization. Native positions and
+the exact selected-but-unconsumed token remain separately owned by the session.
+
 Input format is rendered=0 or single-user=1; boundary is fresh=0, open=1 or
 terminal=2. Open/terminal refers to the separately retained pending token.
 The input capability returns a bounded token prefix; complete encoding needs

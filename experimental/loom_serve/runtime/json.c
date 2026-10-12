@@ -22,6 +22,90 @@ typedef struct json_module_t {
   iree_vm_ref_types_t types;
 } json_module_t;
 
+// Copies an already validated value without insignificant bytes. Validation
+// establishes closing quotes/comments and escaped-byte bounds. The output is
+// at most input.size bytes and preserves every significant byte verbatim.
+static iree_host_size_t json_compact_copy(iree_string_view_t input,
+                                          char* output) {
+  iree_host_size_t written = 0;
+  for (iree_host_size_t i = 0; i < input.size;) {
+    const char c = input.data[i++];
+    if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+      continue;
+    }
+    if (c == '/') {
+      if (input.data[i++] == '/') {
+        while (i < input.size && input.data[i] != '\n') {
+          ++i;
+        }
+      } else {
+        while (input.data[i] != '*' || input.data[i + 1] != '/') {
+          ++i;
+        }
+        i += 2;
+      }
+      continue;
+    }
+    output[written++] = c;
+    if (c == '"') {
+      while (input.data[i] != '"') {
+        const char byte = input.data[i++];
+        output[written++] = byte;
+        if (byte == '\\') {
+          output[written++] = input.data[i++];
+        }
+      }
+      output[written++] = input.data[i++];
+    }
+  }
+  return written;
+}
+
+static iree_status_t json_compact(json_module_t* module,
+                                  const iree_vm_call_packet_t* call,
+                                  iree_vm_buffer_t* input) {
+  iree_const_byte_span_t bytes = iree_const_byte_span_empty();
+  IREE_RETURN_IF_ERROR(
+      iree_vm_buffer_map_read(input, 0, iree_vm_buffer_length(input), &bytes));
+  iree_string_view_t cursor =
+      iree_make_string_view((const char*)bytes.data, bytes.data_length);
+  if (!iree_unicode_utf8_validate(cursor)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "JSON input must be UTF-8");
+  }
+  IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(&cursor));
+  iree_string_view_t document = cursor;
+  iree_string_view_t value;
+  IREE_RETURN_IF_ERROR(iree_json_consume_value(&cursor, &value));
+  document.size -= cursor.size;
+  IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(&cursor));
+  if (cursor.size) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "trailing JSON input");
+  }
+  iree_string_builder_t compact;
+  iree_string_builder_initialize(module->allocator, &compact);
+  char* data = NULL;
+  iree_host_size_t capacity = 0;
+  iree_status_t status = iree_string_builder_reserve_for_append(
+      &compact, document.size, &data, &capacity);
+  iree_vm_buffer_t* output = NULL;
+  if (iree_status_is_ok(status)) {
+    const iree_host_size_t length = json_compact_copy(document, data);
+    status = iree_vm_buffer_clone(IREE_VM_BUFFER_ACCESS_FLAG_READ,
+                                  iree_make_const_byte_span(data, length), 1,
+                                  module->allocator, &output);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_vm_ref_t result =
+        iree_vm_buffer_ref_from_ptr_move(&module->types, &output);
+    iree_vm_call_ref_result_store_move(call, 0, &result);
+  }
+  iree_vm_buffer_release(output);
+  iree_string_builder_deinitialize(&compact);
+  return status;
+}
+
 typedef struct json_members_t {
   // Complete input used as the origin for all recorded offsets.
   iree_string_view_t input;
@@ -160,14 +244,27 @@ static iree_status_t json_module_start(
                             "JSON input must not be null");
   }
   iree_vm_buffer_t* input = (iree_vm_buffer_t*)input_ref.object;
-  IREE_RETURN_IF_ERROR(params->function_ordinal == 0
-                           ? json_read_members(module, call, input)
-                           : json_unescape(call, input));
+  switch (params->function_ordinal) {
+    case 0: {
+      IREE_RETURN_IF_ERROR(json_compact(module, call, input));
+      break;
+    }
+    case 1: {
+      IREE_RETURN_IF_ERROR(json_read_members(module, call, input));
+      break;
+    }
+    case 2: {
+      IREE_RETURN_IF_ERROR(json_unescape(call, input));
+      break;
+    }
+    default:
+      IREE_CHECK_UNREACHABLE("invalid JSON function ordinal");
+  }
   *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
   return iree_ok_status();
 }
 
-static const iree_vm_module_signature_type_t json_members_arguments[] = {
+static const iree_vm_module_signature_type_t json_buffer_type[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}};
 static const iree_vm_module_signature_type_t json_members_results[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
@@ -182,18 +279,23 @@ static const iree_vm_module_signature_type_t json_unescape_arguments[] = {
 static const iree_vm_module_signature_type_t json_unescape_results[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0}};
 static const iree_vm_module_callable_type_declaration_t json_callables[] = {
-    {.signature = {.arguments = {json_members_arguments, 1, 0, 1, 0},
+    {.signature = {.arguments = {json_buffer_type, 1, 0, 1, 0},
+                   .results = {json_buffer_type, 1, 0, 1, 0}}},
+    {.signature = {.arguments = {json_buffer_type, 1, 0, 1, 0},
                    .results = {json_members_results, 3, 2, 1, 0}}},
     {.signature = {.arguments = {json_unescape_arguments, 5, 3, 2, 0},
                    .results = {json_unescape_results, 1, 1, 0, 0}}},
 };
 static const iree_vm_module_export_declaration_t json_exports[] = {
-    {.export_name = IREE_SVL("members"),
+    {.export_name = IREE_SVL("compact"),
      .callable_type_ordinal = 0,
      .function_ordinal = 0},
-    {.export_name = IREE_SVL("unescape"),
+    {.export_name = IREE_SVL("members"),
      .callable_type_ordinal = 1,
      .function_ordinal = 1},
+    {.export_name = IREE_SVL("unescape"),
+     .callable_type_ordinal = 2,
+     .function_ordinal = 2},
 };
 
 static void json_module_destroy(iree_vm_module_t* base) {
@@ -251,10 +353,10 @@ iree_status_t loom_serve_json_module_create(iree_vm_environment_t* environment,
       .name = IREE_SVL("json"),
       .flags = IREE_VM_MODULE_FLAG_LINKABLE,
       .ref_types = {&module->types.buffer, 1},
-      .counts = {.function_count = 2,
-                 .callable_type_count = 2,
-                 .export_count = 2,
-                 .callable_fields = {.value_count = 6, .ref_count = 4}},
+      .counts = {.function_count = 3,
+                 .callable_type_count = 3,
+                 .export_count = 3,
+                 .callable_fields = {.value_count = 6, .ref_count = 6}},
   };
   iree_status_t status = iree_vm_module_initialize(
       &json_module_vtable, &module->descriptor, &module->base);

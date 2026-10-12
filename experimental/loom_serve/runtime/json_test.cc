@@ -69,6 +69,23 @@ class JsonTest : public ::testing::Test {
     arguments_[0] = Text(document);
     return Invoke(IREE_SV("members"), 1, 3);
   }
+  iree_status_t Compact(std::string_view document) {
+    ResetCall();
+    arguments_[0] = Text(document);
+    return Invoke(IREE_SV("compact"), 1, 1);
+  }
+  std::string CompactResult() {
+    // Results own their backing after the call's input is released.
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments_));
+    iree_vm_buffer_t* buffer = nullptr;
+    IREE_CHECK_OK(iree_vm_buffer_ptr_from_variant_borrowed(&types_, results_[0],
+                                                           &buffer));
+    iree_const_byte_span_t bytes = {};
+    IREE_CHECK_OK(iree_vm_buffer_map_read(
+        buffer, 0, iree_vm_buffer_length(buffer), &bytes));
+    return std::string(reinterpret_cast<const char*>(bytes.data),
+                       bytes.data_length);
+  }
   iree_const_byte_span_t Records(int32_t expected_type,
                                  int64_t expected_count) {
     int32_t type = 0;
@@ -123,6 +140,55 @@ class JsonTest : public ::testing::Test {
   // Owned results, empty on failed invocation.
   iree_vm_variant_t results_[3] = {};
 };
+
+TEST_F(JsonTest, CompactPreservesSignificantBytesAcrossAllValueTypes) {
+  const std::pair<std::string_view, std::string_view> cases[] = {
+      {" \t\n\r { } ", "{}"},
+      {" [ ] ", "[]"},
+      {" true ", "true"},
+      {" false ", "false"},
+      {" null ", "null"},
+      {" -0.01250E+003 ", "-0.01250E+003"},
+      {" 9007199254740993 ", "9007199254740993"},
+      {R"( " a \" \\ \/ \b\f\n\r\t λ\u03bb\uD83D\uDE80 " )",
+       R"(" a \" \\ \/ \b\f\n\r\t λ\u03bb\uD83D\uDE80 ")"},
+      {R"( { "b" : [1, {"a": true}, null], "a" : false, "b": 2 } )",
+       R"({"b":[1,{"a":true},null],"a":false,"b":2})"},
+      {R"( [ "/* string */ // not a comment", "", { "\u0061": "a" } ] )",
+       R"(["/* string */ // not a comment","",{"\u0061":"a"}])"},
+      {"\xEF\xBB\xBF /* first */ [ // line\n 1 /* middle */,\r\n"
+       " {\"text\" /* key */ : \"hello world\",},] // end",
+       R"([1,{"text":"hello world",},])"},
+  };
+  for (const auto& [input, expected] : cases) {
+    SCOPED_TRACE(input);
+    IREE_ASSERT_OK(Compact(input));
+    const auto compact = CompactResult();
+    EXPECT_EQ(compact, expected);
+    IREE_ASSERT_OK(Compact(compact));
+    EXPECT_EQ(CompactResult(), expected);
+  }
+}
+
+TEST_F(JsonTest, CompactRejectsMalformedDocumentsWithoutPoisoningInvocation) {
+  for (const char* document :
+       {"", " ", "/* comment */", "{", "[", "{\"x\":}", "[true]x", "true false",
+        "00", "1e", "1 /* unterminated", "[1 2]", "\"unterminated", R"("\q")",
+        R"("\uXYZW")", "\"x\ny\"", "{\"x\":\"\xff\"}"}) {
+    SCOPED_TRACE(document);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Compact(document));
+    IREE_ASSERT_OK(Compact(" {\"ok\": true} "));
+    EXPECT_EQ(CompactResult(), R"({"ok":true})");
+  }
+  const std::string nested = std::string(129, '[') + std::string(129, ']');
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Compact(nested));
+  ResetCall();
+  arguments_[0] = iree_vm_buffer_variant_from_ptr_borrowed(&types_, nullptr);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Invoke(IREE_SV("compact"), 1, 1));
+  IREE_ASSERT_OK(Compact("null"));
+  EXPECT_EQ(CompactResult(), "null");
+}
 
 TEST_F(JsonTest, MembersPreserveTypesOffsetsAndOrder) {
   const std::string document =
