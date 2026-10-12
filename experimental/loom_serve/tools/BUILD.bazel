@@ -88,13 +88,40 @@ py_test(
 py_library(
     name = "simulate_packing_lib",
     srcs = ["simulate_packing.py"],
-    deps = [":agent_trace_lib"],
+    deps = [
+        ":agent_trace_lib",
+        ":packing_policy",
+    ],
 )
 
 py_binary(
     name = "simulate_packing",
     srcs = ["simulate_packing.py"],
-    deps = [":agent_trace_lib"],
+    deps = [
+        ":agent_trace_lib",
+        ":packing_policy",
+    ],
+)
+
+py_library(
+    name = "packing_policy",
+    srcs = ["packing_policy.py"],
+)
+
+loom_cc_binary(
+    name = "packing_reference",
+    testonly = True,
+    srcs = ["packing_reference.cc"],
+    deps = ["//experimental/loom_serve/scheduling:packing"],
+)
+
+py_test(
+    name = "packing_policy_test",
+    size = "small",
+    srcs = ["packing_policy_test.py"],
+    args = ["$(rootpath :packing_reference)"],
+    data = [":packing_reference"],
+    deps = [":packing_policy"],
 )
 
 py_test(

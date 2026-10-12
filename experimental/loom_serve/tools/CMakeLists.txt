@@ -9,6 +9,16 @@
 
 iree_add_all_subdirs()
 
+loom_cc_binary(
+  NAME
+    packing_reference
+  SRCS
+    "packing_reference.cc"
+  DEPS
+    iree::experimental::loom_serve::scheduling::packing
+  TESTONLY
+)
+
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_binary(
   NAME

@@ -18,8 +18,9 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from experimental.loom_serve.tools.agent_trace import Request, compose_trace, load_trace
+from experimental.loom_serve.tools.packing_policy import pack_shapes
 
-POLICIES = ("single-pass", "fair-fill")
+POLICIES = ("minimum-first", "single-pass", "fair-fill")
 ADMISSION_ORDERS = ("round-robin", "longest", "shortest")
 COHORT_POLICIES = ("fill", "cost")
 
@@ -315,6 +316,78 @@ def admit(ready, count, order, urgent_by_us, max_hold_us):
     return sorted(ready, key=priority)[:count]
 
 
+def plan_rotating_epoch(
+    rows,
+    *,
+    row_count,
+    cursor,
+    span_capacity,
+    costs,
+    capacities,
+    depths,
+    acceptance,
+    capture_bytes,
+    cohort_policy,
+):
+    """Applies the native packer to fixed session rows, including idle holes.
+
+    Shape selection in fill mode is production-equivalent for the given
+    readiness. Draft-depth selection and cost mode remain replay hypotheses.
+    """
+    indexed = {row.session: row for row in rows}
+    candidates = []
+    has_decode = any(not row.prefill_remaining for row in rows)
+    shapes = tuple((capacity, span_capacity) for capacity in capacities)
+    catalogs = (shapes,) if cohort_policy == "fill" else tuple((s,) for s in shapes)
+    for depth in depths if has_decode else (0,):
+        ready = [(0, 0)] * row_count
+        for row in rows:
+            ready[row.session] = (
+                (row.prefill_remaining, 1)
+                if row.prefill_remaining
+                else (decode_width(row, depth),) * 2
+            )
+        for catalog in catalogs:
+            packed = pack_shapes(ready, catalog, capacities[-1], cursor)
+            if not packed.spans:
+                continue
+            admitted = [indexed[index] for index, _ in packed.spans]
+            grants = tuple(count for _, count in packed.spans)
+            capture = costs.transition_bytes_per_token * sum(
+                count
+                for row, count in zip(admitted, grants)
+                if not row.prefill_remaining and count > 1
+            )
+            if capture > capture_bytes:
+                continue
+            progress = [
+                count if row.prefill_remaining else expected_progress(count, acceptance)
+                for row, count in zip(admitted, grants)
+            ]
+            capacity = catalog[packed.shape][0]
+            duration = math.ceil(
+                sum(
+                    epoch_cost(
+                        costs, admitted, grants, capacity, progress, bool(depths[-1])
+                    ).values()
+                )
+            )
+            plan = EpochPlan(grants, capacity, depth, capture, sum(progress), duration)
+            score = (
+                (depth, sum(grants), len(grants), -capacity)
+                if cohort_policy == "fill"
+                else (
+                    plan.expected_inputs / plan.expected_us,
+                    -plan.expected_us,
+                    -depth,
+                    -capacity,
+                )
+            )
+            candidates.append((score, admitted, plan, packed.cursor))
+    _, admitted, plan, next_cursor = max(candidates, key=lambda candidate: candidate[0])
+    return admitted, plan, next_cursor
+
+
 def simulate(
     trace,
     *,
@@ -333,9 +406,10 @@ def simulate(
 ):
     """Replays trusted counts with resident state and explicit stage cost hypotheses.
 
-    Every client has at most one active request. Admission settings are shared
-    by both allocators. Arrivals during an epoch wait for its completion; a
-    finished response releases its successor only after the recorded client gap.
+    Every client has at most one active request. Minimum-first uses fixed session
+    rows and the native rotating cursor; historical policies admit from a ready
+    deque. Arrivals during an epoch wait for its completion; a finished response
+    releases its successor only after the recorded client gap.
     Capacities and depths are sorted unique tuples; depth zero is always available.
     The CLI validates cost, capacity and probability inputs. The hold is a
     ready-to-dispatch target, not a guarantee: overloaded queues and
@@ -356,6 +430,7 @@ def simulate(
     max_hold_overrun_us = 0
     busy_us = 0
     peak_capture_bytes = 0
+    cursor = 0
 
     def release_arrivals(time_us):
         while arrivals and arrivals[0][0] <= time_us:
@@ -395,13 +470,27 @@ def simulate(
         release_arrivals(now_us)
         collection_start_us = now_us
         while True:
-            admitted = admit(
-                ready,
-                min(len(ready), span_capacity, budget),
-                admission,
-                now_us + max(costs.target_us.values()),
-                max_hold_us,
-            )
+            if policy == "minimum-first":
+                admitted, plan, next_cursor = plan_rotating_epoch(
+                    ready,
+                    row_count=len(trace.sessions),
+                    cursor=cursor,
+                    span_capacity=span_capacity,
+                    costs=costs,
+                    capacities=capacities,
+                    depths=depths,
+                    acceptance=acceptance,
+                    capture_bytes=capture_bytes,
+                    cohort_policy=cohort_policy,
+                )
+            else:
+                admitted = admit(
+                    ready,
+                    min(len(ready), span_capacity, budget),
+                    admission,
+                    now_us + max(costs.target_us.values()),
+                    max_hold_us,
+                )
             admitted_tokens = sum(
                 row.prefill_remaining or decode_width(row, depths[-1])
                 for row in admitted
@@ -417,16 +506,19 @@ def simulate(
             # of its demand. Without new work, the collection timer still fires.
             now_us = min(hold_until_us, arrivals[0][0]) if arrivals else hold_until_us
             release_arrivals(now_us)
-        plan = plan_epoch(
-            admitted,
-            costs=costs,
-            capacities=capacities,
-            depths=depths,
-            acceptance=acceptance,
-            capture_bytes=capture_bytes,
-            policy=policy,
-            cohort_policy=cohort_policy,
-        )
+        if policy == "minimum-first":
+            cursor = next_cursor
+        else:
+            plan = plan_epoch(
+                admitted,
+                costs=costs,
+                capacities=capacities,
+                depths=depths,
+                acceptance=acceptance,
+                capture_bytes=capture_bytes,
+                policy=policy,
+                cohort_policy=cohort_policy,
+            )
         ready_tokens = sum(
             row.prefill_remaining or decode_width(row, plan.depth) for row in ready
         )
@@ -661,7 +753,7 @@ def main():
     parser.add_argument(
         "--seed", type=int, default=0, help="counter-keyed hypothetical acceptance seed"
     )
-    parser.add_argument("--policy", choices=(*POLICIES, "both"), default="both")
+    parser.add_argument("--policy", choices=(*POLICIES, "all"), default="minimum-first")
     parser.add_argument(
         "--output", type=Path, help="new summary file; defaults to stdout"
     )
@@ -679,6 +771,8 @@ def main():
             raise ValueError("span-capacity and epoch-us must be positive")
         if args.max_hold_us < 0:
             raise ValueError("max-hold-us must be nonnegative")
+        if args.policy in ("minimum-first", "all") and args.admission != "round-robin":
+            raise ValueError("minimum-first uses native rotating row admission")
         depths = tuple(int(value) for value in args.depths.split(","))
         if not depths or depths[0] != 0 or tuple(sorted(set(depths))) != depths:
             raise ValueError("depths must be ascending, unique, and start with 0")
@@ -714,7 +808,7 @@ def main():
         if args.composition:
             with args.composition.open() as stream:
                 trace, composition = compose_trace(trace, json.load(stream))
-        policies = POLICIES if args.policy == "both" else (args.policy,)
+        policies = POLICIES if args.policy == "all" else (args.policy,)
         configuration = {
             "format": "loom-packing-replay-v2",
             "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest(),
@@ -744,6 +838,8 @@ def main():
                 "Conditional acceptance is a seeded hypothesis, not observed MTP quality; planning cannot see its samples or future EOS.",
                 "MTP catch-up is charged on every committed input when any nonzero depth is configured, even in depth-zero epochs.",
                 "Shape/depth selection is local to the admitted cohort, not a global scheduling optimum.",
+                "Minimum-first matches the native packer for a supplied readiness table; each recorded session keeps a fixed row, including across idle gaps.",
+                "Minimum-first does not model the server's request-to-row assignment or KV admission; historical policies instead rotate a ready deque.",
                 "Hold targets may be exceeded by queueing/nonpreemptible work.",
                 "All recorded request input is ready at arrival; no incremental tokenizer publication timings.",
             ],

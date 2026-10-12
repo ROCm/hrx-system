@@ -884,24 +884,35 @@ duration in this experiment; shape occupancy is not hardware utilization.
 `--costs` instead supplies explicit shape/stage hypotheses or calibrations;
 measured shape/context costs require separate controlled device evidence.
 
-Both policies use the same admission rule, bounded by token and span capacity.
-Each admitted decode reserves one input token; prefill divides the remaining
-budget. `single-pass` uses the count arithmetic in `qwen_workload_plan`;
-`fair-fill` redistributes short-span leftovers. Both choose the smallest listed
-shape fitting their actual plan. Final prefill selects the first prediction,
-so a request with N recorded outputs requires N-1 subsequent causal decodes.
-The defaults use round-robin admission, immediate dispatch and no speculative
-lookahead. Nonzero `--depths` require explicit stage costs, transition-payload
-capacity and hypothetical conditional acceptance probabilities. Those inputs
-model speculation; they do not establish actual model acceptance or speed.
+The default `minimum-first` policy mirrors the native serving packer. A rotating
+cursor admits indivisible minima first, then fills remaining token slots from
+longer spans in that order. Every cached shape is considered independently:
+more occupied tokens wins, then more rows advanced, then smaller token/span
+capacity. A differential test checks these plans and cursor movements against
+the actual C implementation. Each recorded client keeps a fixed row, including
+across idle gaps; actual request-to-row assignment and KV admission are not
+modeled by this replay.
+
+`--policy=all` also runs two historical comparison policies. `single-pass`
+uses the count arithmetic in `qwen_workload_plan`; `fair-fill` redistributes
+short-span leftovers. These admit from a ready deque before allocating tokens
+and shrink to the smallest shape fitting the result. Their admission order and
+completion frontiers can differ from the native policy, not just their grants.
+Final prefill selects the first prediction, so a request with N recorded
+outputs requires N-1 subsequent causal decodes. Defaults dispatch immediately
+without speculative lookahead. Nonzero `--depths` require explicit stage costs,
+transition-payload capacity and hypothetical conditional acceptance
+probabilities. Draft-depth selection is an experiment, not a reproduction of
+the server's MTP policy or evidence of actual acceptance or speed.
 
 `--max-hold-us` experiments with bounded collection: dispatch once the maximum
 token budget or span slots are full, or the oldest ready row reaches its hold
-target. `--admission=longest` and `--admission=shortest` rank ready spans by
-length, with oldest-first priority for rows due before another epoch can
-complete. Prefill spans remain splittable, so size ranking matters primarily
-when more rows are ready than fit in the span table. These are experimental
-policies, not a claim that either ordering wins.
+target. For the two historical policies, `--admission=longest` and
+`--admission=shortest` rank ready spans by length, with oldest-first priority
+for rows due before another epoch can complete. Minimum-first always uses its
+native rotating row selection. Prefill spans remain splittable, so size ranking
+matters primarily when more rows are ready than fit in the span table. These
+are experimental policies, not a claim that either ordering wins.
 
 The hold is a ready-to-dispatch target, not a hard real-time guarantee. A request
 arriving during a nonpreemptible epoch can already be late when the scheduler
@@ -918,7 +929,7 @@ unpacked; `span_gap_tokens` is work excluded by span admission;
 `causal_gap_tokens` is space with no ready input to fill it. These differ from
 `shape_padding_tokens`, which counts only empty slots in the emitted shape.
 The summary includes shape occupancy, epoch counts, per-request completion,
-and longest runnable-to-service wait. Both policies complete identical recorded
+and longest runnable-to-service wait. All policies complete identical recorded
 token counts, but their evolving ready frontiers can differ.
 
 All request input is assumed ready at arrival; pi histories do not record
@@ -933,5 +944,6 @@ not silently duplicate sessions or call synthetic replicas real agents.
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/tools:agent_trace_test \
+  //experimental/loom_serve/tools:packing_policy_test \
   //experimental/loom_serve/tools:simulate_packing_test
 ```

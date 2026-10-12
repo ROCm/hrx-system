@@ -4,8 +4,13 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+import io
 import itertools
+import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from experimental.loom_serve.tools.agent_trace import (
     COMPOSITION_FORMAT,
@@ -23,7 +28,9 @@ from experimental.loom_serve.tools.simulate_packing import (
     allocate,
     epoch_cost,
     expected_progress,
+    main,
     plan_epoch,
+    plan_rotating_epoch,
     read_costs,
     simulate,
 )
@@ -49,6 +56,41 @@ class PackingTest(unittest.TestCase):
     def test_short_tail_redistribution(self):
         self.assertEqual(allocate([0, 0, 1000, 2], 128, "single-pass"), [1, 1, 63, 2])
         self.assertEqual(allocate([0, 0, 1000, 2], 128, "fair-fill"), [1, 1, 124, 2])
+
+    def test_native_expansion_changes_prompt_completion_not_total_work(self):
+        workload = trace([request(130, 3)], [request(2, 3)])
+        native, native_epochs = self.replay(workload, policy="minimum-first")
+        fair, fair_epochs = self.replay(workload)
+        self.assertEqual(
+            [span["input_tokens"] for span in native_epochs[0]["spans"]], [127, 1]
+        )
+        self.assertEqual(
+            [span["input_tokens"] for span in fair_epochs[0]["spans"]], [126, 2]
+        )
+        self.assertEqual(native_epochs[0]["selected_outputs"], 0)
+        self.assertEqual(fair_epochs[0]["selected_outputs"], 1)
+        self.assertEqual(native_epochs[1]["capacity"], 4)
+        for key in ("prefill_tokens", "decode_tokens", "selected_outputs"):
+            self.assertEqual(native[key], fair[key])
+
+    def test_native_cursor_crosses_idle_rows_and_followup_gaps(self):
+        workload = Trace(
+            "loom",
+            "qwen3.8-27b",
+            0,
+            (
+                Session("0" * 64, 0, (request(1, 2), request(1, 1, delay=17))),
+                Session("1" * 64, 5, (request(1, 2),)),
+                Session("2" * 64, 0, (request(1, 2),)),
+            ),
+        )
+        result, epochs = self.replay(workload, policy="minimum-first", span_capacity=1)
+        self.assertEqual(
+            [[span["session"] for span in epoch["spans"]] for epoch in epochs],
+            [[0], [1], [2], [0], [1], [2], [0]],
+        )
+        self.assertEqual(result["requests"][1]["arrival_us"], 57)
+        self.assertEqual(result["selected_outputs"], 7)
 
     def test_single_pass_selects_smallest_shape_without_changing_grants(self):
         rows = [
@@ -297,11 +339,12 @@ class SpeculativePackingTest(unittest.TestCase):
         capture_bytes=1024,
         cohort_policy="fill",
         costs=None,
+        policy="fair-fill",
     ):
         epochs = []
         result = simulate(
             workload,
-            policy="fair-fill",
+            policy=policy,
             capacities=(4, 8, 32),
             span_capacity=8,
             costs=costs or self.costs(),
@@ -312,6 +355,65 @@ class SpeculativePackingTest(unittest.TestCase):
             emit_epoch=epochs.append,
         )
         return result, epochs
+
+    def test_native_speculation_conserves_mixed_closed_loop_work(self):
+        workload = trace(
+            [request(53, 13), request(5, 3, delay=11, retained=65)],
+            [request(2, 8)],
+            [request(91, 6)],
+        )
+        for acceptance in ((0, 0, 0), (1, 1, 1), (0.7, 0.5, 0.2)):
+            result, epochs = self.replay(
+                workload, policy="minimum-first", acceptance=acceptance
+            )
+            self.assertEqual(result["prefill_tokens"], 151)
+            self.assertEqual(result["decode_tokens"], 26)
+            self.assertEqual(result["selected_outputs"], 30)
+            self.assertEqual(len(result["requests"]), 4)
+            first, second = result["requests"][:2]
+            self.assertEqual(second["arrival_us"], first["completion_us"] + 11)
+            self.assertTrue(all(epoch["capture_bytes"] <= 1024 for epoch in epochs))
+            for epoch in epochs:
+                self.assertEqual(
+                    epoch["target_input_tokens"]
+                    + epoch["packing_gap_tokens"]
+                    + epoch["span_gap_tokens"]
+                    + epoch["causal_gap_tokens"],
+                    32,
+                )
+
+    def test_native_small_shapes_select_complete_verifiers(self):
+        rows = [
+            ActiveRequest(index, 0, request(1, 8), 0, 0, 0, 0, 8, 10)
+            for index in range(3)
+        ]
+        admitted, plan, cursor = plan_rotating_epoch(
+            rows,
+            row_count=5,
+            cursor=1,
+            span_capacity=3,
+            costs=EpochCosts("narrow shapes", {2: 10, 4: 10}),
+            capacities=(2, 4),
+            depths=(0, 3),
+            acceptance=(1, 1, 1),
+            capture_bytes=0,
+            cohort_policy="fill",
+        )
+        self.assertEqual([row.session for row in admitted], [1])
+        self.assertEqual((plan.capacity, plan.grants, cursor), (4, (4,), 2))
+
+    def test_native_capture_pressure_and_cost_mode(self):
+        workload = trace([request(1, 7)])
+        result, _ = self.replay(workload, policy="minimum-first", capture_bytes=7)
+        self.assertEqual(result["depth_epochs"], {0: 7})
+        self.assertEqual(result["peak_capture_bytes"], 0)
+        costly, _ = self.replay(
+            workload,
+            policy="minimum-first",
+            cohort_policy="cost",
+            costs=self.costs(draft_round_us=100),
+        )
+        self.assertEqual(costly["depth_epochs"], {0: 7})
 
     def test_all_acceptance_prefixes_and_terminal_cuts_preserve_work(self):
         # Zero through three matching drafts, including EOS/budget cuts inside
@@ -512,6 +614,54 @@ class SpeculativePackingTest(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 read_costs({**base, **change}, (4,))
+
+
+class CommandLineTest(unittest.TestCase):
+    def test_default_and_all_policies_preserve_work_and_identify_assumptions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "trace.json"
+            path.write_text(json.dumps(trace([request(3, 2)]).to_dict()))
+            for extra, policies in (
+                ([], ["minimum-first"]),
+                (["--policy=all"], ["minimum-first", "single-pass", "fair-fill"]),
+            ):
+                output = io.StringIO()
+                with (
+                    mock.patch(
+                        "sys.argv",
+                        ["simulate_packing", str(path), "--epoch-us=10", *extra],
+                    ),
+                    mock.patch("sys.stdout", output),
+                ):
+                    main()
+                result = json.loads(output.getvalue())
+                self.assertEqual([row["policy"] for row in result["results"]], policies)
+                self.assertTrue(
+                    any("fixed row" in item for item in result["assumptions"])
+                )
+                for row in result["results"]:
+                    self.assertEqual(row["selected_outputs"], 2)
+                    self.assertEqual(row["useful_input_tokens"], 4)
+
+    def test_native_policy_rejects_a_different_admission_rule(self):
+        for policy in ("minimum-first", "all"):
+            with (
+                mock.patch(
+                    "sys.argv",
+                    [
+                        "simulate_packing",
+                        "unused.json",
+                        "--epoch-us=10",
+                        "--admission=longest",
+                        f"--policy={policy}",
+                    ],
+                ),
+                mock.patch("sys.stderr", new_callable=io.StringIO) as error,
+            ):
+                with self.assertRaises(SystemExit) as exit:
+                    main()
+                self.assertEqual(exit.exception.code, 1)
+                self.assertIn("native rotating row admission", error.getvalue())
 
 
 if __name__ == "__main__":
