@@ -6,6 +6,7 @@
 
 #include "loom/target/reporting/report.h"
 
+#include <limits.h>
 #include <string.h>
 
 #include "loom/target/reporting/config_bindings.h"
@@ -1170,47 +1171,108 @@ loom_target_compile_report_source_low_selection_summary_from_row(
   return summary;
 }
 
-static bool loom_target_compile_report_source_low_selection_summaries_match(
+static int loom_target_compile_report_source_low_selection_summaries_compare(
     const loom_target_compile_report_source_low_selection_summary_t* lhs,
     const loom_target_compile_report_source_low_selection_summary_t* rhs) {
-  return iree_string_view_equal(lhs->function_name, rhs->function_name) &&
-         iree_string_view_equal(lhs->source_op_name, rhs->source_op_name) &&
-         lhs->source_op_kind == rhs->source_op_kind &&
-         lhs->selection_kind == rhs->selection_kind &&
-         iree_string_view_equal(lhs->plan_key, rhs->plan_key) &&
-         iree_string_view_equal(lhs->descriptor_key, rhs->descriptor_key) &&
-         iree_string_view_equal(lhs->descriptor_semantic_tag,
-                                rhs->descriptor_semantic_tag);
+  if (lhs->source_op_kind != rhs->source_op_kind) {
+    return lhs->source_op_kind < rhs->source_op_kind ? -1 : 1;
+  }
+  if (lhs->selection_kind != rhs->selection_kind) {
+    return lhs->selection_kind < rhs->selection_kind ? -1 : 1;
+  }
+  int order = iree_string_view_compare(lhs->function_name, rhs->function_name);
+  if (order == 0) {
+    order = iree_string_view_compare(lhs->source_op_name, rhs->source_op_name);
+  }
+  if (order == 0) {
+    order = iree_string_view_compare(lhs->plan_key, rhs->plan_key);
+  }
+  if (order == 0) {
+    order = iree_string_view_compare(lhs->descriptor_key, rhs->descriptor_key);
+  }
+  if (order == 0) {
+    order = iree_string_view_compare(lhs->descriptor_semantic_tag,
+                                     rhs->descriptor_semantic_tag);
+  }
+  return order;
+}
+
+static uint8_t loom_target_compile_report_selection_height(
+    const loom_target_compile_report_source_low_selection_summary_t* row) {
+  return row ? row->index.height : 0;
+}
+
+static void loom_target_compile_report_selection_update_height(
+    loom_target_compile_report_source_low_selection_summary_t* row) {
+  row->index.height =
+      1 +
+      iree_max(
+          loom_target_compile_report_selection_height(row->index.children[0]),
+          loom_target_compile_report_selection_height(row->index.children[1]));
+}
+
+// Promotes the selected child while keeping row storage and output order fixed.
+static loom_target_compile_report_source_low_selection_summary_t*
+loom_target_compile_report_selection_rotate(
+    loom_target_compile_report_source_low_selection_summary_t* row,
+    uint32_t direction) {
+  loom_target_compile_report_source_low_selection_summary_t* pivot =
+      row->index.children[direction];
+  row->index.children[direction] = pivot->index.children[1 - direction];
+  pivot->index.children[1 - direction] = row;
+  loom_target_compile_report_selection_update_height(row);
+  loom_target_compile_report_selection_update_height(pivot);
+  return pivot;
 }
 
 static loom_target_compile_report_source_low_selection_summary_t*
-loom_target_compile_report_find_source_low_selection_summary(
-    loom_target_compile_report_t* report,
-    const loom_target_compile_report_source_low_selection_summary_t* row) {
-  for (loom_target_compile_report_vec_t* vec =
-           report->source_low_selection_summaries.head;
-       vec != NULL; vec = vec->next) {
-    loom_target_compile_report_source_low_selection_summary_t* summaries =
-        (loom_target_compile_report_source_low_selection_summary_t*)
-            loom_target_compile_report_vec_rows(vec);
-    for (iree_host_size_t i = 0; i < vec->count; ++i) {
-      loom_target_compile_report_source_low_selection_summary_t* summary =
-          &summaries[i];
-      if (loom_target_compile_report_source_low_selection_summaries_match(
-              summary, row)) {
-        return summary;
-      }
+loom_target_compile_report_selection_balance(
+    loom_target_compile_report_source_low_selection_summary_t* row) {
+  loom_target_compile_report_selection_update_height(row);
+  const int balance =
+      (int)loom_target_compile_report_selection_height(row->index.children[0]) -
+      (int)loom_target_compile_report_selection_height(row->index.children[1]);
+  if (balance < -1 || balance > 1) {
+    const uint32_t direction = balance < 0;
+    loom_target_compile_report_source_low_selection_summary_t* child =
+        row->index.children[direction];
+    if (loom_target_compile_report_selection_height(
+            child->index.children[direction]) <
+        loom_target_compile_report_selection_height(
+            child->index.children[1 - direction])) {
+      row->index.children[direction] =
+          loom_target_compile_report_selection_rotate(child, 1 - direction);
     }
+    row = loom_target_compile_report_selection_rotate(row, direction);
   }
-  return NULL;
+  return row;
 }
 
 static iree_status_t
 loom_target_compile_report_record_source_low_selection_summary_row(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_source_low_selection_summary_t* row) {
-  loom_target_compile_report_source_low_selection_summary_t* summary =
-      loom_target_compile_report_find_source_low_selection_summary(report, row);
+  if (iree_allocator_is_null(report->allocator)) {
+    return iree_ok_status();
+  }
+  // An AVL tree has height below twice log2(node_count + 1). Addressable row
+  // storage bounds node_count, so this path covers every representable report.
+  loom_target_compile_report_source_low_selection_summary_t**
+      path[2 * sizeof(iree_host_size_t) * CHAR_BIT];
+  iree_host_size_t depth = 0;
+  loom_target_compile_report_source_low_selection_summary_t** link =
+      &report->source_low_selection_root;
+  while (*link != NULL) {
+    const int order =
+        loom_target_compile_report_source_low_selection_summaries_compare(
+            row, *link);
+    if (order == 0) {
+      break;
+    }
+    path[depth++] = link;
+    link = &(*link)->index.children[order > 0];
+  }
+  loom_target_compile_report_source_low_selection_summary_t* summary = *link;
   if (summary != NULL) {
     summary->selected_op_count += row->selected_op_count;
     summary->emitted_low_op_count += row->emitted_low_op_count;
@@ -1223,9 +1285,29 @@ loom_target_compile_report_record_source_low_selection_summary_row(
     summary->dynamic_emitted_low_op_count += row->dynamic_emitted_low_op_count;
     return iree_ok_status();
   }
-  return loom_target_compile_report_row_list_append(
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_row_list_append(
       &report->source_low_selection_summaries, sizeof(*row), report->allocator,
-      row);
+      row));
+  loom_target_compile_report_vec_t* tail =
+      report->source_low_selection_summaries.tail;
+  summary = (loom_target_compile_report_source_low_selection_summary_t*)
+                loom_target_compile_report_vec_rows(tail) +
+            (tail->count - 1);
+  // Merged source rows may already be indexed by another report.
+  summary->index.children[0] = NULL;
+  summary->index.children[1] = NULL;
+  summary->index.height = 1;
+  *link = summary;
+  while (depth != 0) {
+    --depth;
+    link = path[depth];
+    const uint8_t old_height = (*link)->index.height;
+    *link = loom_target_compile_report_selection_balance(*link);
+    if ((*link)->index.height == old_height) {
+      break;
+    }
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_target_compile_report_record_entry_report(

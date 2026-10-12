@@ -222,9 +222,11 @@ loom_cc_test(
         "format_planning_test.cc",
         "format_test.cc",
         "memory_summary_test.cc",
+        "selection_summary_test.cc",
     ],
     deps = [
         ":format",
+        ":report",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:math_policy",
         "//runtime/src/iree/base/internal:arena",

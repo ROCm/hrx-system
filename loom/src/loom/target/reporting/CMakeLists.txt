@@ -227,8 +227,10 @@ loom_cc_test(
     "format_planning_test.cc"
     "format_test.cc"
     "memory_summary_test.cc"
+    "selection_summary_test.cc"
   DEPS
     ::format
+    ::report
     iree::base::internal::arena
     iree::base::internal::json
     iree::testing::gtest

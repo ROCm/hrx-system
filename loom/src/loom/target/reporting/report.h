@@ -1312,6 +1312,15 @@ typedef struct loom_target_compile_report_source_low_selection_summary_t {
   uint64_t dynamic_selected_op_count;
   // Exact dynamic low operations emitted across exact rows.
   uint64_t dynamic_emitted_low_op_count;
+  // Capture-owned AVL links into this report's stable summary row blocks.
+  // These do not contribute to the grouping key or formatted evidence.
+  struct {
+    // Smaller and larger semantic keys, respectively, or NULL.
+    struct loom_target_compile_report_source_low_selection_summary_t*
+        children[2];
+    // Subtree height including this row, or zero before insertion.
+    uint8_t height;
+  } index;
 } loom_target_compile_report_source_low_selection_summary_t;
 
 // Source memory packet execution count evidence is not statically known.
@@ -2118,6 +2127,9 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t loop_pipeline_stage_rows;
   // Owned source-to-low selection summaries.
   loom_target_compile_report_row_list_t source_low_selection_summaries;
+  // Borrowed root of the selection index in |source_low_selection_summaries|.
+  loom_target_compile_report_source_low_selection_summary_t*
+      source_low_selection_root;
   // Owned emitted source-memory packet rows.
   loom_target_compile_report_row_list_t source_low_memory_rows;
   // Owned source-memory summaries grouped by named source memory root.
