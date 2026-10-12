@@ -27,7 +27,7 @@ func.def inline @qwen38_output_projection_q6k_rows(%rows: index, %input: buffer,
   %partials = scf.for %iteration = [%zero to %five step %one](%accumulators = %zeroes : vector<32xf32>) -> (vector<32xf32>) {
     %block_base = index.mul %iteration, %four : index
     %block = index.add %block_base, %block_in_iteration : index
-    %next = scf.for %row = [%zero to %rows step %one](%bank = %accumulators : vector<32xf32>) -> (vector<32xf32>) unroll {
+    %next = scf.for %row = [%zero to %rows step %one](%bank = %accumulators : vector<32xf32>) -> (vector<32xf32>) unroll schedule(recurrence) {
       %input_origin = index.scale %row, %input_stride : index, offset -> offset
       %low = func.call @ggml_q6k_q8_1_x4_block_lane(%weight_noalias, %weight_origin, %input_noalias, %input_origin, %block, %virtual0) : (buffer, offset, buffer, offset, index, index) -> (f32)
       %high = func.call @ggml_q6k_q8_1_x4_block_lane(%weight_noalias, %weight_origin, %input_noalias, %input_origin, %block, %virtual1) : (buffer, offset, buffer, offset, index, index) -> (f32)
