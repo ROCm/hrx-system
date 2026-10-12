@@ -1,0 +1,222 @@
+// Private accesses indexed by a countdown derived from an ascending counter
+// decompose into a static byte offset plus a dynamic term with a negative
+// stride. The complete offset stays in [0, 112], but the dynamic term alone
+// reaches -112. Scratch addresses are unsigned, so the static part must move
+// into the address register instead of the instruction offset. This holds
+// whether the term is uniform or varies per lane.
+
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @private_uniform_descending_offset() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca<private> align(8) %bytes : buffer
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf64>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf64>
+  %seed = vector.load %input_view[%lane] : view<64xf64> -> vector<1xf64>
+  %seed_scalar = vector.extract %seed[0] : vector<1xf64> -> f64
+  %scratch_whole = buffer.view %scratch[%buffer_base] : buffer -> view<16xf64>
+  %fill_lo = index.constant 0 : index
+  %fill_hi = index.constant 16 : index
+  %fill_step = index.constant 1 : index
+  scf.for %i = [%fill_lo to %fill_hi step %fill_step] {
+    view.store %seed_scalar, %scratch_whole[%i] : f64, view<16xf64>
+    scf.yield
+  }
+  %shift = scalar.constant 3 : i64
+  %base = index.cast %buffer_base : offset to i64
+  %one = scalar.constant 1 : i64
+  %count = scalar.constant 15 : i64
+  %last = scalar.constant 14 : i64
+  %first = scalar.constant 0 : i64
+  %initial = scalar.constant 0.0 : f64
+  %kb_final, %sum = scf.while(%kb = %first : i64, %acc = %initial : f64) -> (i64, f64) {
+    %more = scalar.cmpi ult, %kb, %count : i64
+    scf.condition %more, %kb, %acc : i1, i64, f64
+  } do(%kb_body: i64, %acc_body: f64) {
+    %k = scalar.subi %last, %kb_body : i64
+    %scaled = scalar.shli %k, %shift : i64
+    %byte = scalar.addi %base, %scaled : i64
+    %byte_ranged = scalar.assume %byte [range(%byte, 0, 9223372036854775807)] : i64
+    %byte_offset = index.cast %byte_ranged : i64 to offset
+    %slot = buffer.view %scratch[%byte_offset] : buffer -> view<1xf64>
+    %value = view.load %slot[0] : view<1xf64> -> f64
+    %next_acc = scalar.addf %acc_body, %value : f64
+    %next_kb = scalar.addi %kb_body, %one : i64
+    scf.yield %next_kb, %next_acc : i64, f64
+  }
+  view.store %sum, %output_view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @private_uniform_descending_offset() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %55 = storage {byte_alignment = 8, byte_length = 128} : low.storage<private>
+  %57 = v_lshlrev_b32_src0_inline %lane, 3
+  %seed_scalar = global_load_dwordx2_saddr %57, %input_view
+  %fill_lo = s_mov_b32 0
+  %fill_hi = s_mov_b32 16
+  %fill_step = s_mov_b32 1
+  low.br ^_bb1(%fill_lo: reg<amdgpu.sgpr>)
+^_bb1(%i: reg<amdgpu.sgpr>):
+  %62 = s_cmp_lt_i32 %i, %fill_hi
+  low.cond_br %62, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %63 = v_mov_b32_copy %i
+  %64 = v_lshlrev_b32_src0_inline %63, 3
+  scratch_store_b64_vaddr %64, %seed_scalar
+  %65 = s_add_u32 %i, %fill_step
+  low.br ^_bb1(%65: reg<amdgpu.sgpr>)
+^_bb3:
+  %72 = s_mov_b32 15
+  %81 = v_mov_b32 0
+  %initial = concat(%81, %81) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^_bb4(%fill_lo: reg<amdgpu.sgpr>, %fill_lo: reg<amdgpu.sgpr>, %initial: reg<amdgpu.vgpr x2>)
+^_bb4(%135: reg<amdgpu.sgpr>, %136: reg<amdgpu.sgpr>, %acc: reg<amdgpu.vgpr x2>):
+  %85 = v_mov_b32_copy %135
+  %87 = v_mov_b32_copy %136
+  %90 = v_mov_b32_copy %72
+  %92 = v_mov_b32_copy %fill_lo
+  %98 = v_cmp_lt_u32 %87, %92
+  %99 = v_cmp_lt_u32 %85, %90
+  %100 = v_cmp_eq_i32 %87, %92
+  %101 = s_and_b64 %100, %99
+  %more = s_or_b64 %98, %101
+  %103 = s_mov_b64_exec_read
+  %104, %105 = s_and_b64_scc %more, %103
+  low.cond_br %105, ^_bb5, ^_bb6 : reg<amdgpu.scc>
+^_bb5:
+  %120 = v_mov_b32 4294967288
+  %121 = v_mul_lo_u32 %85, %120
+  %122 = v_add_u32_lit %121, 112
+  %value = scratch_load_b64_vaddr %122
+  %next_acc = v_add_f64 %acc, %value
+  %129, %130 = s_add_co_u32 %135, %fill_step
+  %131, %132 = s_addc_u32 %136, %fill_lo, %130
+  low.br ^_bb4(%129: reg<amdgpu.sgpr>, %131: reg<amdgpu.sgpr>, %next_acc: reg<amdgpu.vgpr x2>)
+^_bb6:
+  global_store_dwordx2_saddr %57, %acc, %output_view
+  return
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @private_lane_descending_offset() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca<private> align(8) %bytes : buffer
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf64>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf64>
+  %seed = vector.load %input_view[%lane] : view<64xf64> -> vector<1xf64>
+  %seed_scalar = vector.extract %seed[0] : vector<1xf64> -> f64
+  %scratch_whole = buffer.view %scratch[%buffer_base] : buffer -> view<16xf64>
+  %fill_lo = index.constant 0 : index
+  %fill_hi = index.constant 16 : index
+  %fill_step = index.constant 1 : index
+  scf.for %i = [%fill_lo to %fill_hi step %fill_step] {
+    view.store %seed_scalar, %scratch_whole[%i] : f64, view<16xf64>
+    scf.yield
+  }
+  %shift = scalar.constant 3 : i64
+  %base = index.cast %buffer_base : offset to i64
+  %one = scalar.constant 1 : i64
+  %lane_i64 = index.cast %lane : index to i64
+  %mask = scalar.constant 15 : i64
+  %count = scalar.andi %lane_i64, %mask : i64
+  %last = scalar.constant 14 : i64
+  %first = scalar.constant 0 : i64
+  %initial = scalar.constant 0.0 : f64
+  %kb_final, %sum = scf.while(%kb = %first : i64, %acc = %initial : f64) -> (i64, f64) {
+    %more = scalar.cmpi ult, %kb, %count : i64
+    scf.condition %more, %kb, %acc : i1, i64, f64
+  } do(%kb_body: i64, %acc_body: f64) {
+    %k = scalar.subi %last, %kb_body : i64
+    %scaled = scalar.shli %k, %shift : i64
+    %byte = scalar.addi %base, %scaled : i64
+    %byte_ranged = scalar.assume %byte [range(%byte, 0, 9223372036854775807)] : i64
+    %byte_offset = index.cast %byte_ranged : i64 to offset
+    %slot = buffer.view %scratch[%byte_offset] : buffer -> view<1xf64>
+    %value = view.load %slot[0] : view<1xf64> -> f64
+    %next_acc = scalar.addf %acc_body, %value : f64
+    %next_kb = scalar.addi %kb_body, %one : i64
+    scf.yield %next_kb, %next_acc : i64, f64
+  }
+  view.store %sum, %output_view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @private_lane_descending_offset() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %59 = storage {byte_alignment = 8, byte_length = 128} : low.storage<private>
+  %61 = v_lshlrev_b32_src0_inline %lane, 3
+  %seed_scalar = global_load_dwordx2_saddr %61, %input_view
+  %fill_lo = s_mov_b32 0
+  %fill_hi = s_mov_b32 16
+  %fill_step = s_mov_b32 1
+  low.br ^_bb1(%fill_lo: reg<amdgpu.sgpr>)
+^_bb1(%i: reg<amdgpu.sgpr>):
+  %66 = s_cmp_lt_i32 %i, %fill_hi
+  low.cond_br %66, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %67 = v_mov_b32_copy %i
+  %68 = v_lshlrev_b32_src0_inline %67, 3
+  scratch_store_b64_vaddr %68, %seed_scalar
+  %69 = s_add_u32 %i, %fill_step
+  low.br ^_bb1(%69: reg<amdgpu.sgpr>)
+^_bb3:
+  %76 = v_mov_b32 0
+  %78 = s_mov_b32 15
+  %82 = v_mov_b32_copy %78
+  %84 = v_mov_b32_copy %fill_lo
+  %88 = v_and_b32 %lane, %82
+  %91 = v_and_b32 %76, %84
+  %initial = concat(%76, %76) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %116 = s_mov_b64_exec_read
+  low.br ^_bb4(%84: reg<amdgpu.vgpr>, %84: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr x2>)
+^_bb4(%157: reg<amdgpu.vgpr>, %158: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr x2>):
+  %111 = v_cmp_lt_u32 %158, %91
+  %112 = v_cmp_lt_u32 %157, %88
+  %113 = v_cmp_eq_i32 %158, %91
+  %114 = s_and_b64 %113, %112
+  %more = s_or_b64 %111, %114
+  %117, %118 = s_and_saveexec_b64 %more
+  low.cond_br %118, ^_bb5, ^_bb6 : reg<amdgpu.scc>
+^_bb5:
+  %137 = v_mov_b32 4294967288
+  %138 = v_mul_lo_u32 %157, %137
+  %139 = v_add_u32_lit %138, 112
+  %value = scratch_load_b64_vaddr %139
+  %next_acc = v_add_f64 %acc, %value
+  %143 = v_mov_b32_copy %fill_step
+  %145 = v_mov_b32_copy %fill_lo
+  %151, %152 = v_add_co_u32 %157, %143
+  %153, %154 = v_addc_co_u32 %158, %145, %152
+  low.br ^_bb4(%151: reg<amdgpu.vgpr>, %153: reg<amdgpu.vgpr>, %next_acc: reg<amdgpu.vgpr x2>)
+^_bb6:
+  s_mov_b64_exec %116
+  %156 = v_lshlrev_b32_src0_inline %lane, 3
+  global_store_dwordx2_saddr %156, %acc, %output_view
+  return
+}

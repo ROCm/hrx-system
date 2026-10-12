@@ -1524,6 +1524,16 @@ bool loom_amdgpu_memory_access_select_flat_offset(
   return true;
 }
 
+// Returns true when the scratch address register value, every dynamic term
+// plus |static_byte_offset|, is proven to be a non-negative 32-bit offset.
+static bool loom_amdgpu_memory_scratch_address_fits_u32(
+    const loom_amdgpu_memory_access_t* access, int64_t static_byte_offset) {
+  return loom_amdgpu_memory_vaddr_offset_fits_u32(access,
+                                                  static_byte_offset) &&
+         loom_amdgpu_source_memory_offset_fits_u32(&access->source,
+                                                   static_byte_offset);
+}
+
 static bool loom_amdgpu_memory_access_split_scratch_vaddr_static_offset(
     loom_amdgpu_memory_access_t* access,
     const loom_amdgpu_descriptor_offset_immediate_info_t* offset_info,
@@ -1550,8 +1560,21 @@ static bool loom_amdgpu_memory_access_split_scratch_vaddr_static_offset(
     access->immediate_offset = 0;
     access->vaddr_static_byte_offset = (uint64_t)static_byte_offset;
   }
+  // Every dynamic term lands in the unsigned scratch address register,
+  // including uniform terms selected for scalar materialization, so the
+  // complete non-immediate address must be a non-negative 32-bit offset. A
+  // descending dynamic term can reach below zero while the complete offset,
+  // including the static part, stays in range; fold the static part into the
+  // address register then.
+  if (access->immediate_offset != 0 && static_byte_offset >= 0 &&
+      !loom_amdgpu_memory_scratch_address_fits_u32(access,
+                                                   /*static_byte_offset=*/0) &&
+      loom_amdgpu_memory_scratch_address_fits_u32(access, static_byte_offset)) {
+    access->immediate_offset = 0;
+    access->vaddr_static_byte_offset = (uint64_t)static_byte_offset;
+  }
   if (access->vaddr_static_byte_offset > INT64_MAX ||
-      !loom_amdgpu_memory_vaddr_offset_fits_u32(
+      !loom_amdgpu_memory_scratch_address_fits_u32(
           access, (int64_t)access->vaddr_static_byte_offset)) {
     diagnostic->rejection_bits |=
         LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_DYNAMIC_OFFSET_RANGE;
