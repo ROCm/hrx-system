@@ -11,7 +11,7 @@
 
 #include "binding/hip/api.h"
 #include "binding/hip/error_state.h"
-#include "binding/hip/spirv_linker_compiler.h"
+#include "binding/hip/linker_compiler.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/call_once.h"
@@ -20,7 +20,9 @@
 typedef struct iree_hip_link_input_t {
   // Next input in insertion order.
   struct iree_hip_link_input_t* next;
-  // Owned SPIR-V input bytes.
+  // Format selected by the caller's HIP linker input type.
+  iree_hip_linker_input_format_t format;
+  // Owned compiler input bytes.
   uint8_t* data;
   // Number of bytes in |data|.
   size_t data_size;
@@ -193,13 +195,30 @@ static hipError_t iree_hip_link_copy_options(unsigned int count,
   return hipSuccess;
 }
 
-static hipError_t iree_hip_link_append_input(hipLinkState_t state,
-                                             const void* data, size_t size,
-                                             const char* name) {
+static hipError_t iree_hip_link_input_format(
+    hipJitInputType type, iree_hip_linker_input_format_t* out_format) {
+  switch (type) {
+    case hipJitInputLLVMBitcode:
+      *out_format = IREE_HIP_LINKER_INPUT_FORMAT_LLVM_BITCODE;
+      return hipSuccess;
+    case hipJitInputSpirv:
+      *out_format = IREE_HIP_LINKER_INPUT_FORMAT_SPIRV;
+      return hipSuccess;
+    default:
+      return hipErrorInvalidValue;
+  }
+}
+
+static hipError_t iree_hip_link_append_input(
+    hipLinkState_t state, iree_hip_linker_input_format_t format,
+    const void* data, size_t size, const char* name) {
+  if (state->input_head && state->input_head->format != format) {
+    return hipErrorInvalidValue;
+  }
   if (state->input_count == IREE_HOST_SIZE_MAX) {
     return hipErrorOutOfMemory;
   }
-  static const char kDefaultName[] = "LinkerProgram.spv";
+  static const char kDefaultName[] = "LinkerProgram";
   if (!name) {
     name = kDefaultName;
   }
@@ -230,6 +249,7 @@ static hipError_t iree_hip_link_append_input(hipLinkState_t state,
     return hipErrorOutOfMemory;
   }
   memcpy(input->data, data, size);
+  input->format = format;
   input->data_size = size;
   memcpy(input->name, name, name_size);
 
@@ -305,11 +325,12 @@ HIPAPI hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type,
   if (!data || size == 0) {
     HIP_RETURN_ERROR(hipErrorInvalidImage);
   }
-  if (type != hipJitInputSpirv) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  iree_hip_linker_input_format_t format;
+  hipError_t result = iree_hip_link_input_format(type, &format);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
   }
-  hipError_t result =
-      iree_hip_link_validate_options(numOptions, options, optionValues);
+  result = iree_hip_link_validate_options(numOptions, options, optionValues);
   if (result != hipSuccess) {
     HIP_RETURN_ERROR(result);
   }
@@ -323,7 +344,7 @@ HIPAPI hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type,
     HIP_RETURN_ERROR(result);
   }
   iree_slim_mutex_lock(&retained_state->mutex);
-  result = iree_hip_link_append_input(retained_state, data, size, name);
+  result = iree_hip_link_append_input(retained_state, format, data, size, name);
   iree_slim_mutex_unlock(&retained_state->mutex);
   iree_hip_link_state_release(retained_state);
   HIP_RETURN_ERROR(result);
@@ -336,11 +357,15 @@ HIPAPI hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type,
   if (!state) {
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
-  if (type != hipJitInputSpirv || !path) {
+  if (!path) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  hipError_t result =
-      iree_hip_link_validate_options(numOptions, options, optionValues);
+  iree_hip_linker_input_format_t format;
+  hipError_t result = iree_hip_link_input_format(type, &format);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
+  result = iree_hip_link_validate_options(numOptions, options, optionValues);
   if (result != hipSuccess) {
     HIP_RETURN_ERROR(result);
   }
@@ -374,8 +399,8 @@ HIPAPI hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type,
         result = hipErrorInvalidImage;
       } else {
         iree_slim_mutex_lock(&retained_state->mutex);
-        result =
-            iree_hip_link_append_input(retained_state, data, data_size, path);
+        result = iree_hip_link_append_input(retained_state, format, data,
+                                            data_size, path);
         iree_slim_mutex_unlock(&retained_state->mutex);
       }
     }
@@ -422,7 +447,7 @@ HIPAPI hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut,
   }
 
   iree_slim_mutex_lock(&retained_state->mutex);
-  iree_hip_spirv_linker_input_t* inputs = NULL;
+  iree_hip_linker_input_t* inputs = NULL;
   iree_status_t status = retained_state->input_count == 0
                              ? iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                                 "link state has no inputs")
@@ -441,12 +466,13 @@ HIPAPI hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut,
     iree_host_size_t i = 0;
     for (iree_hip_link_input_t* input = retained_state->input_head; input;
          input = input->next) {
+      inputs[i].format = input->format;
       inputs[i].data = iree_make_const_byte_span(input->data, input->data_size);
       inputs[i].name = input->name;
       ++i;
     }
     iree_byte_span_t executable = iree_byte_span_empty();
-    status = iree_hip_spirv_linker_compile(
+    status = iree_hip_linker_compile(
         iree_make_cstring_view(target_isa), retained_state->input_count, inputs,
         retained_state->option_count,
         (const char* const*)retained_state->options, iree_allocator_system(),

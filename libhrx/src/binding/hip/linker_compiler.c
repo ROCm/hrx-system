@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "binding/hip/spirv_linker_compiler.h"
+#include "binding/hip/linker_compiler.h"
 
 #include <stdbool.h>
 #include <string.h>
@@ -31,9 +31,15 @@ enum {
 };
 
 enum {
+  IREE_HIP_COMGR_ACTION_LINK_BC_TO_BC = 0x3,
+  IREE_HIP_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE = 0x4,
   IREE_HIP_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE = 0x7,
   IREE_HIP_COMGR_ACTION_UNBUNDLE = 0xF,
   IREE_HIP_COMGR_ACTION_COMPILE_SPIRV_TO_RELOCATABLE = 0x10,
+};
+
+enum {
+  IREE_HIP_COMGR_LANGUAGE_HIP = 0x3,
 };
 
 typedef struct iree_hip_comgr_data_t {
@@ -97,6 +103,9 @@ typedef struct iree_hip_comgr_library_t {
   // Sets the target ISA for a compiler action.
   iree_hip_comgr_status_t (*action_info_set_isa_name)(
       iree_hip_comgr_action_info_t action_info, const char* isa_name);
+  // Selects the source-language convention for a compiler action.
+  iree_hip_comgr_status_t (*action_info_set_language)(
+      iree_hip_comgr_action_info_t action_info, int32_t language);
   // Sets command-line options for a compiler action.
   iree_hip_comgr_status_t (*action_info_set_option_list)(
       iree_hip_comgr_action_info_t action_info, const char* options[],
@@ -149,8 +158,9 @@ static iree_status_t iree_hip_comgr_load(iree_allocator_t host_allocator,
       IREE_DYNAMIC_LIBRARY_FLAG_NODELETE, host_allocator, &out_comgr->library);
   if (iree_status_is_not_found(status)) {
     iree_status_ignore(status);
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "AMD COMGR is required to link SPIR-V HIP modules");
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "AMD COMGR is required to compile HIP linker inputs");
   }
 
 #define IREE_HIP_COMGR_LOOKUP(member, symbol)                                \
@@ -173,6 +183,8 @@ static iree_status_t iree_hip_comgr_load(iree_allocator_t host_allocator,
   IREE_HIP_COMGR_LOOKUP(destroy_action_info, "amd_comgr_destroy_action_info");
   IREE_HIP_COMGR_LOOKUP(action_info_set_isa_name,
                         "amd_comgr_action_info_set_isa_name");
+  IREE_HIP_COMGR_LOOKUP(action_info_set_language,
+                        "amd_comgr_action_info_set_language");
   IREE_HIP_COMGR_LOOKUP(action_info_set_option_list,
                         "amd_comgr_action_info_set_option_list");
   IREE_HIP_COMGR_LOOKUP(action_info_set_bundle_entry_ids,
@@ -301,7 +313,7 @@ static bool iree_hip_spirv_input_is_bundled(iree_const_byte_span_t input) {
 static iree_status_t iree_hip_comgr_add_spirv_input(
     const iree_hip_comgr_library_t* comgr, const char* target_isa,
     iree_host_size_t option_count, const char* const* options,
-    const iree_hip_spirv_linker_input_t* input,
+    const iree_hip_linker_input_t* input,
     iree_hip_comgr_data_set_t compile_inputs, iree_allocator_t host_allocator) {
   if (!iree_hip_spirv_input_is_bundled(input->data)) {
     return iree_hip_comgr_add_data(comgr, compile_inputs,
@@ -375,16 +387,18 @@ static iree_status_t iree_hip_comgr_add_spirv_input(
   return status;
 }
 
-iree_status_t iree_hip_spirv_linker_compile(
-    iree_string_view_t target_isa, iree_host_size_t input_count,
-    const iree_hip_spirv_linker_input_t* inputs, iree_host_size_t option_count,
-    const char* const* options, iree_allocator_t host_allocator,
-    iree_byte_span_t* out_executable) {
+iree_status_t iree_hip_linker_compile(iree_string_view_t target_isa,
+                                      iree_host_size_t input_count,
+                                      const iree_hip_linker_input_t* inputs,
+                                      iree_host_size_t option_count,
+                                      const char* const* options,
+                                      iree_allocator_t host_allocator,
+                                      iree_byte_span_t* out_executable) {
   IREE_ASSERT_ARGUMENT(out_executable);
   *out_executable = iree_byte_span_empty();
   if (input_count == 0 || !inputs) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "at least one SPIR-V input is required");
+                            "at least one compiler input is required");
   }
 
   char target_isa_buffer[128];
@@ -399,19 +413,52 @@ iree_status_t iree_hip_spirv_linker_compile(
   iree_hip_comgr_library_t comgr;
   IREE_RETURN_IF_ERROR(iree_hip_comgr_load(host_allocator, &comgr));
   iree_hip_comgr_data_set_t compile_inputs = {0};
+  iree_hip_comgr_data_set_t linked_bitcode = {0};
   iree_hip_comgr_data_set_t relocatables = {0};
   iree_hip_comgr_data_set_t executable_outputs = {0};
   iree_hip_comgr_action_info_t compile_action = {0};
+  iree_hip_comgr_action_info_t bitcode_link_action = {0};
   iree_hip_comgr_action_info_t link_action = {0};
+  const bool is_spirv = inputs[0].format == IREE_HIP_LINKER_INPUT_FORMAT_SPIRV;
 
   iree_status_t status = iree_hip_comgr_status_to_iree(
       &comgr, comgr.create_data_set(&compile_inputs),
       "amd_comgr_create_data_set");
   for (iree_host_size_t i = 0; i < input_count && iree_status_is_ok(status);
        ++i) {
-    status = iree_hip_comgr_add_spirv_input(&comgr, target_isa_buffer,
-                                            option_count, options, &inputs[i],
-                                            compile_inputs, host_allocator);
+    if (is_spirv) {
+      status = iree_hip_comgr_add_spirv_input(&comgr, target_isa_buffer,
+                                              option_count, options, &inputs[i],
+                                              compile_inputs, host_allocator);
+    } else {
+      status = iree_hip_comgr_add_data(&comgr, compile_inputs,
+                                       IREE_HIP_COMGR_DATA_KIND_BC,
+                                       inputs[i].data, inputs[i].name);
+    }
+  }
+  if (iree_status_is_ok(status) && !is_spirv) {
+    status = iree_hip_comgr_status_to_iree(
+        &comgr, comgr.create_data_set(&linked_bitcode),
+        "amd_comgr_create_data_set");
+  }
+  if (iree_status_is_ok(status) && !is_spirv) {
+    status = iree_hip_comgr_create_action(
+        &comgr, target_isa_buffer, option_count, options,
+        /*link_device_libraries=*/false, &bitcode_link_action);
+  }
+  if (iree_status_is_ok(status) && !is_spirv) {
+    status = iree_hip_comgr_status_to_iree(
+        &comgr,
+        comgr.action_info_set_language(bitcode_link_action,
+                                       IREE_HIP_COMGR_LANGUAGE_HIP),
+        "amd_comgr_action_info_set_language");
+  }
+  if (iree_status_is_ok(status) && !is_spirv) {
+    status = iree_hip_comgr_status_to_iree(
+        &comgr,
+        comgr.do_action(IREE_HIP_COMGR_ACTION_LINK_BC_TO_BC,
+                        bitcode_link_action, compile_inputs, linked_bitcode),
+        "AMD_COMGR_ACTION_LINK_BC_TO_BC");
   }
   if (iree_status_is_ok(status)) {
     status = iree_hip_comgr_status_to_iree(&comgr,
@@ -421,14 +468,18 @@ iree_status_t iree_hip_spirv_linker_compile(
   if (iree_status_is_ok(status)) {
     status = iree_hip_comgr_create_action(
         &comgr, target_isa_buffer, option_count, options,
-        /*link_device_libraries=*/true, &compile_action);
+        /*link_device_libraries=*/is_spirv, &compile_action);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hip_comgr_status_to_iree(
         &comgr,
-        comgr.do_action(IREE_HIP_COMGR_ACTION_COMPILE_SPIRV_TO_RELOCATABLE,
-                        compile_action, compile_inputs, relocatables),
-        "AMD_COMGR_ACTION_COMPILE_SPIRV_TO_RELOCATABLE");
+        comgr.do_action(
+            is_spirv ? IREE_HIP_COMGR_ACTION_COMPILE_SPIRV_TO_RELOCATABLE
+                     : IREE_HIP_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE,
+            compile_action, is_spirv ? compile_inputs : linked_bitcode,
+            relocatables),
+        is_spirv ? "AMD_COMGR_ACTION_COMPILE_SPIRV_TO_RELOCATABLE"
+                 : "AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE");
   }
   if (iree_status_is_ok(status)) {
     status = iree_hip_comgr_status_to_iree(
@@ -459,11 +510,17 @@ iree_status_t iree_hip_spirv_linker_compile(
   if (compile_action.handle) {
     comgr.destroy_action_info(compile_action);
   }
+  if (bitcode_link_action.handle) {
+    comgr.destroy_action_info(bitcode_link_action);
+  }
   if (executable_outputs.handle) {
     comgr.destroy_data_set(executable_outputs);
   }
   if (relocatables.handle) {
     comgr.destroy_data_set(relocatables);
+  }
+  if (linked_bitcode.handle) {
+    comgr.destroy_data_set(linked_bitcode);
   }
   if (compile_inputs.handle) {
     comgr.destroy_data_set(compile_inputs);

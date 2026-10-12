@@ -342,11 +342,11 @@ iree_cc_library(
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
-    spirv_linker_compiler
+    linker_compiler
   HDRS
-    "spirv_linker_compiler.h"
+    "linker_compiler.h"
   SRCS
-    "spirv_linker_compiler.c"
+    "linker_compiler.c"
   DEPS
     iree::base
     iree::base::internal::dynamic_library
@@ -459,8 +459,8 @@ iree_cc_library(
     ::function_handle
     ::handle_registry
     ::launch_params
+    ::linker_compiler
     ::peer
-    ::spirv_linker_compiler
     ::staged_copy
     ::status_conversion
     ::stream
@@ -519,8 +519,8 @@ iree_cc_library(
     ::function_handle
     ::handle_registry
     ::launch_params
+    ::linker_compiler
     ::peer
-    ::spirv_linker_compiler
     ::staged_copy
     ::status_conversion
     ::stream

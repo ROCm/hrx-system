@@ -267,9 +267,9 @@ hrx_cc_library(
 )
 
 hrx_cc_library(
-    name = "spirv_linker_compiler",
-    srcs = ["spirv_linker_compiler.c"],
-    hdrs = ["spirv_linker_compiler.h"],
+    name = "linker_compiler",
+    srcs = ["linker_compiler.c"],
+    hdrs = ["linker_compiler.h"],
     includes = ["../.."],
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
@@ -369,8 +369,8 @@ hrx_cc_shared_library(
         ":function_handle",
         ":handle_registry",
         ":launch_params",
+        ":linker_compiler",
         ":peer",
-        ":spirv_linker_compiler",
         ":staged_copy",
         ":status_conversion",
         ":stream",
@@ -431,8 +431,8 @@ hrx_cc_shared_library(
         ":function_handle",
         ":handle_registry",
         ":launch_params",
+        ":linker_compiler",
         ":peer",
-        ":spirv_linker_compiler",
         ":staged_copy",
         ":status_conversion",
         ":stream",

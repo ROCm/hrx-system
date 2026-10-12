@@ -164,13 +164,6 @@ using HipLinkAddDataFn = hipError_t (*)(hipLinkState_t state,
                                         unsigned int option_count,
                                         hipJitOption* options,
                                         void** option_values);
-using HipLinkAddFileFn = hipError_t (*)(hipLinkState_t state,
-                                        hipJitInputType type, const char* path,
-                                        unsigned int option_count,
-                                        hipJitOption* options,
-                                        void** option_values);
-using HipLinkCompleteFn = hipError_t (*)(hipLinkState_t state, void** binary,
-                                         size_t* size);
 using HipLinkDestroyFn = hipError_t (*)(hipLinkState_t state);
 
 using HipGetSymbolAddressFn = hipError_t (*)(void** pointer,
@@ -298,8 +291,6 @@ struct HipApi {
                         "hipKernelGetAttribute");
     HRX_RESOLVE_HIP_API(link_create, HipLinkCreateFn, "hipLinkCreate");
     HRX_RESOLVE_HIP_API(link_add_data, HipLinkAddDataFn, "hipLinkAddData");
-    HRX_RESOLVE_HIP_API(link_add_file, HipLinkAddFileFn, "hipLinkAddFile");
-    HRX_RESOLVE_HIP_API(link_complete, HipLinkCompleteFn, "hipLinkComplete");
     HRX_RESOLVE_HIP_API(link_destroy, HipLinkDestroyFn, "hipLinkDestroy");
     HRX_RESOLVE_HIP_API(get_symbol_address, HipGetSymbolAddressFn,
                         "hipGetSymbolAddress");
@@ -341,12 +332,11 @@ struct HipApi {
            library_enumerate_kernels && library_get_global &&
            kernel_get_function && kernel_get_library && kernel_get_name &&
            kernel_get_param_info && kernel_get_attribute && link_create &&
-           link_add_data && link_add_file && link_complete && link_destroy &&
-           get_symbol_address && get_symbol_size && memcpy_to_symbol &&
-           memcpy_to_symbol_async && memcpy_from_symbol &&
-           memcpy_from_symbol_async && get_func_by_symbol &&
-           register_fat_binary && unregister_fat_binary && register_function &&
-           register_managed_variable;
+           link_add_data && link_destroy && get_symbol_address &&
+           get_symbol_size && memcpy_to_symbol && memcpy_to_symbol_async &&
+           memcpy_from_symbol && memcpy_from_symbol_async &&
+           get_func_by_symbol && register_fat_binary && unregister_fat_binary &&
+           register_function && register_managed_variable;
   }
 
   HipInitFn init = nullptr;
@@ -400,8 +390,6 @@ struct HipApi {
   HipKernelGetAttributeFn kernel_get_attribute = nullptr;
   HipLinkCreateFn link_create = nullptr;
   HipLinkAddDataFn link_add_data = nullptr;
-  HipLinkAddFileFn link_add_file = nullptr;
-  HipLinkCompleteFn link_complete = nullptr;
   HipLinkDestroyFn link_destroy = nullptr;
   HipGetSymbolAddressFn get_symbol_address = nullptr;
   HipGetSymbolSizeFn get_symbol_size = nullptr;
@@ -1237,90 +1225,38 @@ TEST_F(HipModuleLibraryExecutionTest,
   }
 }
 
-TEST_F(HipModuleLibraryExecutionTest,
-       LinkerOwnsDataAndFileInputsThroughExecutableLaunch) {
-  static constexpr uint32_t kNoopSpirv[] = {
-      0x07230203u, 0x00010000u, 0x00000000u, 0x00000005u, 0x00000000u,
-      0x00020011u, 0x00000004u, 0x00020011u, 0x00000006u, 0x0003000eu,
-      0x00000002u, 0x00000002u, 0x0007000fu, 0x00000006u, 0x00000003u,
-      0x5f787268u, 0x6b6e696cu, 0x6e5f6465u, 0x00706f6fu, 0x00060010u,
-      0x00000003u, 0x00000011u, 0x00000001u, 0x00000001u, 0x00000001u,
-      0x00020013u, 0x00000001u, 0x00030021u, 0x00000002u, 0x00000001u,
-      0x00050036u, 0x00000001u, 0x00000003u, 0x00000000u, 0x00000002u,
-      0x000200f8u, 0x00000004u, 0x000100fdu, 0x00010038u,
-  };
-
-  hipLinkState_t state = nullptr;
-  ASSERT_EQ(hipSuccess,
-            api_.link_create(/*option_count=*/0, /*options=*/nullptr,
-                             /*option_values=*/nullptr, &state));
-  EXPECT_EQ(hipErrorInvalidImage,
-            api_.link_add_data(state, hipJitInputSpirv, /*data=*/nullptr,
-                               /*size=*/0, /*name=*/nullptr,
-                               /*option_count=*/0, /*options=*/nullptr,
-                               /*option_values=*/nullptr));
-  EXPECT_EQ(hipErrorInvalidImage, api_.get_last_error());
-  std::vector<uint32_t> transient_spirv(std::begin(kNoopSpirv),
-                                        std::end(kNoopSpirv));
-  ASSERT_EQ(hipSuccess,
-            api_.link_add_data(state, hipJitInputSpirv, transient_spirv.data(),
-                               transient_spirv.size() * sizeof(uint32_t),
-                               "linked_noop.spv",
-                               /*option_count=*/0, /*options=*/nullptr,
-                               /*option_values=*/nullptr));
-  std::fill(transient_spirv.begin(), transient_spirv.end(), UINT32_MAX);
-  std::vector<uint32_t>().swap(transient_spirv);
-
-  void* linked_binary = nullptr;
-  size_t linked_binary_size = 0;
-  const hipError_t link_result =
-      api_.link_complete(state, &linked_binary, &linked_binary_size);
-  if (link_result == hipErrorNotSupported) {
-    ASSERT_EQ(hipSuccess, api_.link_destroy(state));
-    GTEST_SKIP() << "HIP linker compiler support is unavailable";
+TEST_F(HipModuleLibraryExecutionTest, LinkerValidatesInputFormats) {
+  // Admission checks do not invoke the compiler or depend on input contents.
+  char input[] = "compiler input";
+  for (hipJitInputType format : {hipJitInputLLVMBitcode, hipJitInputSpirv}) {
+    SCOPED_TRACE(static_cast<int>(format));
+    hipLinkState_t state = nullptr;
+    ASSERT_EQ(hipSuccess, api_.link_create(0, nullptr, nullptr, &state));
+    ASSERT_EQ(hipSuccess,
+              api_.link_add_data(state, format, input, sizeof(input),
+                                 /*name=*/nullptr, 0, nullptr, nullptr));
+    for (hipJitInputType unsupported :
+         {hipJitInputCubin, hipJitInputPtx, hipJitInputFatBinary,
+          hipJitInputObject, hipJitInputLibrary, hipJitInputNvvm,
+          hipJitInputLLVMBundledBitcode,
+          hipJitInputLLVMArchivesOfBundledBitcode,
+          static_cast<hipJitInputType>(-1)}) {
+      ExpectPublishedError(
+          api_, "unsupported linker input type", hipErrorInvalidValue, [&] {
+            return api_.link_add_data(state, unsupported, input, sizeof(input),
+                                      "input", 0, nullptr, nullptr);
+          });
+    }
+    const hipJitInputType other_format = format == hipJitInputLLVMBitcode
+                                             ? hipJitInputSpirv
+                                             : hipJitInputLLVMBitcode;
+    ExpectPublishedError(
+        api_, "mixed LLVM and SPIR-V linker inputs", hipErrorInvalidValue, [&] {
+          return api_.link_add_data(state, other_format, input, sizeof(input),
+                                    "input", 0, nullptr, nullptr);
+        });
+    EXPECT_EQ(hipSuccess, api_.link_destroy(state));
   }
-  ASSERT_EQ(hipSuccess, link_result);
-  ASSERT_NE(nullptr, linked_binary);
-  ASSERT_GT(linked_binary_size, 0u);
-  hipModule_t module = nullptr;
-  ASSERT_EQ(hipSuccess,
-            api_.module_load_data_ex(&module, linked_binary,
-                                     /*option_count=*/0, /*options=*/nullptr,
-                                     /*option_values=*/nullptr));
-  hipFunction_t function = nullptr;
-  ASSERT_EQ(hipSuccess,
-            api_.module_get_function(&function, module, "hrx_linked_noop"));
-  ASSERT_EQ(hipSuccess, api_.module_launch_kernel(
-                            function, 1, 1, 1, 1, 1, 1, 0, /*stream=*/nullptr,
-                            /*arguments=*/nullptr, /*extra=*/nullptr));
-  EXPECT_EQ(hipSuccess, api_.device_synchronize());
-  EXPECT_EQ(hipSuccess, api_.module_unload(module));
-  EXPECT_EQ(hipSuccess, api_.link_destroy(state));
-
-  iree::testing::TempFilePath spirv_path("hip_linker_input", ".spv");
-  {
-    std::ofstream output(spirv_path.path(), std::ios::binary);
-    ASSERT_TRUE(output.good());
-    output.write(reinterpret_cast<const char*>(kNoopSpirv), sizeof(kNoopSpirv));
-    ASSERT_TRUE(output.good());
-  }
-  state = nullptr;
-  ASSERT_EQ(hipSuccess,
-            api_.link_create(/*option_count=*/0, /*options=*/nullptr,
-                             /*option_values=*/nullptr, &state));
-  ASSERT_EQ(hipSuccess,
-            api_.link_add_file(state, hipJitInputSpirv,
-                               spirv_path.path().c_str(), /*option_count=*/0,
-                               /*options=*/nullptr,
-                               /*option_values=*/nullptr));
-  ASSERT_TRUE(spirv_path.Remove());
-  linked_binary = nullptr;
-  linked_binary_size = 0;
-  ASSERT_EQ(hipSuccess,
-            api_.link_complete(state, &linked_binary, &linked_binary_size));
-  ASSERT_NE(nullptr, linked_binary);
-  EXPECT_GT(linked_binary_size, 0u);
-  EXPECT_EQ(hipSuccess, api_.link_destroy(state));
 }
 
 }  // namespace
