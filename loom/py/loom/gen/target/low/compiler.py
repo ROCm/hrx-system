@@ -1547,8 +1547,11 @@ def compile_descriptor_set(
     storage_leases: list[StorageLease] = []
     storage_lease_labels: list[tuple[str, int]] = []
     issue_uses: list[IssueUse] = []
+    issue_use_group_starts: dict[tuple[IssueUse, ...], int] = {}
     hazards: list[Hazard] = []
+    hazard_group_starts: dict[tuple[Hazard, ...], int] = {}
     pressure_deltas: list[PressureDelta] = []
+    pressure_delta_group_starts: dict[tuple[PressureDelta, ...], int] = {}
     feature_mask_words: list[int] = []
     encoding_field_values: list[EncodingFieldValue] = []
     operand_forms: list[CompiledOperandForm] = []
@@ -1677,12 +1680,21 @@ def compile_descriptor_set(
         )
 
     for schedule_class in schedule_classes:
-        issue_use_start = len(issue_uses)
-        issue_uses.extend(schedule_class.issue_uses)
-        hazard_start = len(hazards)
-        hazards.extend(schedule_class.hazards)
-        pressure_delta_start = len(pressure_deltas)
-        pressure_deltas.extend(schedule_class.pressure_deltas)
+        issue_use_start, _ = append_interned_sequence(
+            schedule_class.issue_uses,
+            issue_uses,
+            issue_use_group_starts,
+        )
+        hazard_start, _ = append_interned_sequence(
+            schedule_class.hazards,
+            hazards,
+            hazard_group_starts,
+        )
+        pressure_delta_start, _ = append_interned_sequence(
+            schedule_class.pressure_deltas,
+            pressure_deltas,
+            pressure_delta_group_starts,
+        )
         schedule_rows.append(
             {
                 "issue_use_start": issue_use_start,
@@ -1866,6 +1878,9 @@ def compile_descriptor_set(
         ("feature mask word", feature_mask_words),
         ("encoding field value", encoding_field_values),
         ("operand form", operand_forms),
+        ("issue use", issue_uses),
+        ("hazard", hazards),
+        ("pressure delta", pressure_deltas),
     )
     for table_name, rows in compact_start_tables:
         validation.validate_u16_table_count(len(rows), f"descriptor set '{spec.key}' {table_name}")

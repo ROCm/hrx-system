@@ -23,6 +23,8 @@ from loom.target.low_descriptors import (
     EncodingFieldValue,
     EnumDomain,
     EnumValue,
+    Hazard,
+    HazardKind,
     ImmediateFlag,
     ImmediateKind,
     InstructionClass,
@@ -37,6 +39,7 @@ from loom.target.low_descriptors import (
     OperandFormMatch,
     OperandFormMatchKind,
     PhysicalRegisterView,
+    PressureDelta,
     RegClassAlt,
     RegClassAltFlag,
     Resource,
@@ -285,6 +288,73 @@ def test_resource_calendar_retains_common_issue_demand(second_uses, expected_uni
     assert ScheduleClassFlag.DISJOINT_ISSUE_USES not in classes["test.first"].flags
     expected_flags = (ScheduleClassFlag.DISJOINT_ISSUE_USES,) if second_uses else ()
     assert classes["test.second"].flags == expected_flags
+
+
+@pytest.mark.parametrize(
+    ("field", "span", "rows"),
+    [
+        ("issue_uses", "issue_use", (IssueUse("test.issue", cycles=1, units=1), IssueUse("test.issue", cycles=2, units=1, stage=1))),
+        ("hazards", "hazard", (Hazard(HazardKind.MIN_DISTANCE, counter_id=1, distance=2), Hazard(HazardKind.MIN_DISTANCE, target_id=1, distance=3))),
+        ("pressure_deltas", "pressure_delta", (PressureDelta("test.i32", 1), PressureDelta("test.i64", -1))),
+    ],
+)
+@pytest.mark.parametrize("change", ["prefix", "order", "repetition", "payload"])
+def test_schedule_spans_share_exact_sequences(field, span, rows, change) -> None:
+    if change == "prefix":
+        changed_rows = rows[:1]
+    elif change == "order":
+        changed_rows = tuple(reversed(rows))
+    elif change == "repetition":
+        changed_rows = (*rows, rows[0])
+    else:
+        payload = {"issue_uses": "cycles", "hazards": "distance", "pressure_deltas": "delta"}[field]
+        changed_rows = (replace(rows[0], **{payload: 5}), rows[1])
+    schedule = ScheduleClass("test.first", latency_kind=LatencyKind.EXACT, model_quality=ModelQuality.EXACT, **{field: rows})
+    schedules = (
+        schedule,
+        replace(schedule, name="test.copy", latency_cycles=7),
+        replace(schedule, name="test.changed", **{field: changed_rows}),
+        replace(schedule, name="test.empty", **{field: ()}),
+    )
+    compiled = compiler.compile_descriptor_set(
+        replace(
+            TEST_LOW_CORE_DESCRIPTOR_SET,
+            resources=(Resource("test.issue", capacity_per_cycle=4, kind=ResourceKind.PIPELINE),),
+            schedule_classes=schedules,
+            descriptors=(replace(TEST_LOW_ADD_I32_DESCRIPTOR, schedule_class=schedule.name, instruction_classes=(InstructionClass.SCALAR_ALU,)),),
+        ),
+        required_schedule_class_names=tuple(schedule.name for schedule in schedules),
+    )
+    assert getattr(compiled, field) == [*rows, *changed_rows]
+    assert [row[f"{span}_start"] for row in compiled.schedule_rows] == [0, 0, len(rows), 0]
+    assert [row[f"{span}_count"] for row in compiled.schedule_rows] == [len(rows), len(rows), len(changed_rows), 0]
+    assert [schedule.latency_cycles for schedule in compiled.schedule_classes] == [0, 7, 0, 0]
+
+
+@pytest.mark.parametrize(
+    ("field", "description", "row"),
+    [
+        ("issue_uses", "issue use", IssueUse("test.issue", cycles=1, units=1, kind=IssueUseKind.RESERVED)),
+        ("hazards", "hazard", Hazard(HazardKind.MIN_DISTANCE, counter_id=1, distance=2)),
+        ("pressure_deltas", "pressure delta", PressureDelta("test.i32", 1)),
+    ],
+)
+@pytest.mark.parametrize("count", [65535, 65536])
+def test_schedule_spans_validate_compact_storage_after_sharing(field, description, row, count) -> None:
+    schedule = ScheduleClass("test.first", latency_kind=LatencyKind.EXACT, model_quality=ModelQuality.EXACT, **{field: (row,) * count})
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        resources=(Resource("test.issue", capacity_per_cycle=4, kind=ResourceKind.PIPELINE),),
+        schedule_classes=(schedule, replace(schedule, name="test.copy")),
+        descriptors=(replace(TEST_LOW_ADD_I32_DESCRIPTOR, schedule_class=schedule.name, instruction_classes=(InstructionClass.SCALAR_ALU,)),),
+    )
+    if count == 65536:
+        with pytest.raises(ValueError, match=f"{description} count does not fit a u16-indexed table"):
+            compiler.compile_descriptor_set(descriptor_set, required_schedule_class_names=("test.copy",))
+    else:
+        compiled = compiler.compile_descriptor_set(descriptor_set, required_schedule_class_names=("test.copy",))
+        assert len(getattr(compiled, field)) == count
+        assert compiled.schedule_rows[0] == compiled.schedule_rows[1]
 
 
 @pytest.mark.parametrize("second_resource", ["test.issue", "test.alias", "test.other"])

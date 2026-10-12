@@ -15,10 +15,11 @@ import pytest
 from loom.gen.target.low import compiler, views
 from loom.gen.target.low.low_descriptors import (
     DescriptorAllowlist,
+    compile_descriptor_set_family,
     generate_descriptor_set,
     generate_descriptor_set_family,
 )
-from loom.target.low_descriptors import DescriptorSet
+from loom.target.low_descriptors import DescriptorSet, Hazard, HazardKind, PressureDelta
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -90,6 +91,25 @@ def test_equal_view_register_tables_share_storage() -> None:
     assert "kTestLowCoreRegClasses[]" not in source
     assert ".name_string_ref = LOOM_STRING_REF_NONE," in source
     assert source.count(".operands = kTestLowCoreOperands,") == 2
+
+
+def test_view_only_schedule_reuses_storage_spans_without_merging_identity() -> None:
+    descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+    schedule = next(schedule for schedule in TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes if schedule.name == descriptor.schedule_class)
+    schedule = replace(schedule, hazards=(Hazard(HazardKind.MIN_DISTANCE, target_id=1, distance=2),), pressure_deltas=(PressureDelta("test.i32", 1),))
+    view_schedule = replace(schedule, name="test.view.alu", latency_cycles=7)
+    storage = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,), schedule_classes=(schedule, view_schedule))
+    view_spec = replace(_view_spec(), descriptors=(replace(descriptor, schedule_class=view_schedule.name),), schedule_classes=(view_schedule,))
+
+    compiled, (view,) = compile_descriptor_set_family(storage, (view_spec,))
+
+    assert compiled.schedule_class_ids == {schedule.name: 0, view_schedule.name: 1}
+    assert compiled.schedule_rows[0] == compiled.schedule_rows[1]
+    assert compiled.issue_uses == list(schedule.issue_uses)
+    assert compiled.hazards == list(schedule.hazards)
+    assert compiled.pressure_deltas == list(schedule.pressure_deltas)
+    assert compiled.schedule_classes[1].latency_cycles == 7
+    assert view.descriptors[0].schedule_class == view_schedule.name
 
 
 @pytest.mark.parametrize(
