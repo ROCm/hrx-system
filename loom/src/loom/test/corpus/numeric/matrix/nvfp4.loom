@@ -37,8 +37,8 @@ template.def<@numeric.nvfp4.matrix_tile> device @nvfp4_matrix_tile_portable(%lhs
 
 kernel.def @nvfp4_matrix() {
   %unit = index.constant 1 : index
-  %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+  %subgroup_size = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%subgroup_size, %unit, %unit) : index
 } launch(%lhs_payload_buffer: buffer, %lhs_scale_buffer: buffer, %rhs_payload_buffer: buffer, %rhs_scale_buffer: buffer, %init_buffer: buffer, %output_buffer: buffer) {
   %base = index.constant 0 : offset
   %output_byte_offset = index.constant 16 : offset
