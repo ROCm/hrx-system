@@ -858,19 +858,36 @@ iree_status_t loom_serve_text_state_row_submit_pin(
   loom_serve_text_state_checkpoint_t* checkpoint =
       &state->checkpoints.values[index];
   checkpoint->position = row->position;
-  checkpoint->recurrent_slot = row->recurrent.slot;
-  checkpoint->block_count = row->block_count;
+  checkpoint->recurrent_slot = row->recurrent.anchor != UINT32_MAX
+                                   ? row->recurrent.anchor
+                                   : row->recurrent.slot;
+  checkpoint->block_count =
+      (uint32_t)((row->position + state->storage.block_size - 1) /
+                 state->storage.block_size);
   const iree_host_size_t row_index = (iree_host_size_t)(row - state->rows);
   memcpy(checkpoint->blocks,
          state->cache.maps + row_index * state->storage.blocks_per_row,
-         row->block_count * sizeof(*checkpoint->blocks));
+         checkpoint->block_count * sizeof(*checkpoint->blocks));
   loom_serve_block_pool_retain(&state->cache.pool, checkpoint->block_count,
                                checkpoint->blocks);
   loom_serve_block_pool_retain(&state->recurrent.pool, 1,
                                &checkpoint->recurrent_slot);
-  iree_status_t status =
-      text_copy_carry(state, row_index, state->row_count + index);
-  if (iree_status_is_ok(status)) {
+  // Sharing a reserved writer cannot defer COW admission to the next epoch.
+  // The normal reservation planner preserves its unused private pages and
+  // either backs the complete continuation or leaves the original row intact.
+  bool reserved = true;
+  iree_status_t status = iree_ok_status();
+  if (row->reserved_extent) {
+    status = loom_serve_text_state_row_submit_reserve(
+        row, LOOM_SERVE_TEXT_RESERVE_CONTINUE, NULL, row->reserved_extent,
+        &reserved);
+  }
+  if (iree_status_is_ok(status) && !reserved) {
+    loom_serve_text_state_checkpoint_release(checkpoint);
+  } else if (iree_status_is_ok(status)) {
+    status = text_copy_carry(state, row_index, state->row_count + index);
+  }
+  if (iree_status_is_ok(status) && reserved) {
     *out_checkpoint = checkpoint;
   }
   return status;
@@ -1171,7 +1188,7 @@ static iree_status_t text_fork_cache_block(loom_serve_text_state_t* state,
 // Admission may reuse the selected row's private IDs, but only borrows them
 // until the physical union fits. Its existing references preserve denial.
 typedef struct text_replacement_t {
-  // Selected row whose private ownership can fund a replacement, or NULL.
+  // Selected row whose private ownership can fund a replacement.
   loom_serve_text_state_row_t* row;
   // Next selected map entry to consider exactly once.
   uint32_t cursor;
@@ -1181,16 +1198,14 @@ typedef struct text_replacement_t {
 
 static uint32_t text_reserve_block(loom_serve_text_state_t* state,
                                    text_replacement_t* replacement) {
-  if (replacement->row) {
-    const loom_serve_text_state_row_t* row = replacement->row;
-    const uint32_t* blocks =
-        state->cache.maps + (row - state->rows) * state->storage.blocks_per_row;
-    while (replacement->cursor < row->block_count) {
-      const uint32_t block = blocks[replacement->cursor++];
-      if (!loom_serve_block_pool_is_shared(&state->cache.pool, block)) {
-        loom_serve_block_pool_retain(&state->cache.pool, 1, &block);
-        return block;
-      }
+  const loom_serve_text_state_row_t* row = replacement->row;
+  const uint32_t* blocks =
+      state->cache.maps + (row - state->rows) * state->storage.blocks_per_row;
+  while (replacement->cursor < row->block_count) {
+    const uint32_t block = blocks[replacement->cursor++];
+    if (!loom_serve_block_pool_is_shared(&state->cache.pool, block)) {
+      loom_serve_block_pool_retain(&state->cache.pool, 1, &block);
+      return block;
     }
   }
   uint32_t block = 0;
@@ -1200,7 +1215,7 @@ static uint32_t text_reserve_block(loom_serve_text_state_t* state,
 
 static uint32_t text_reserve_recurrent(loom_serve_text_state_t* state,
                                        text_replacement_t* replacement) {
-  if (replacement->row && !replacement->recurrent_used) {
+  if (!replacement->recurrent_used) {
     replacement->recurrent_used = true;
     const uint32_t slot = replacement->row->recurrent.slot;
     if (slot != UINT32_MAX &&
@@ -1225,7 +1240,9 @@ static void text_release_reverse(loom_serve_block_pool_t* pool, uint32_t count,
 
 iree_status_t loom_serve_text_state_row_submit_reserve(
     loom_serve_text_state_row_t* row, loom_serve_text_reserve_mode_t mode,
-    loom_serve_text_state_checkpoint_t* checkpoint, iree_host_size_t extent) {
+    loom_serve_text_state_checkpoint_t* checkpoint, iree_host_size_t extent,
+    bool* out_reserved) {
+  *out_reserved = false;
   loom_serve_text_state_t* state = row->owner;
   const iree_host_size_t index = (iree_host_size_t)(row - state->rows);
   const iree_host_size_t position = checkpoint ? checkpoint->position
@@ -1244,29 +1261,32 @@ iree_status_t loom_serve_text_state_row_submit_reserve(
              : 0;
   const bool fork_tail = prefix && position % state->storage.block_size &&
                          (checkpoint || text_row_has_shared_tail(row));
-  const uint32_t source_slot = checkpoint ? checkpoint->recurrent_slot
-                               : position ? row->recurrent.slot
-                                          : UINT32_MAX;
+  const uint32_t source_slot = checkpoint  ? checkpoint->recurrent_slot
+                               : !position ? UINT32_MAX
+                               : row->recurrent.anchor != UINT32_MAX
+                                   ? row->recurrent.anchor
+                                   : row->recurrent.slot;
   const bool fork_recurrent =
       position && (checkpoint || loom_serve_block_pool_is_shared(
                                      &state->recurrent.pool, source_slot));
+  // The consumed prefix remains live, but an active reservation's unused
+  // private pages can fund its replacement without a second full reservation.
   text_replacement_t replacement = {
-      .row = mode == LOOM_SERVE_TEXT_RESERVE_CONTINUE ? NULL : row};
+      .row = row,
+      .cursor = mode == LOOM_SERVE_TEXT_RESERVE_CONTINUE ? prefix : 0};
   uint32_t reusable = 0;
   const uint32_t* old_blocks =
       state->cache.maps
           ? state->cache.maps + index * state->storage.blocks_per_row
           : NULL;
-  if (replacement.row) {
-    for (uint32_t i = 0; i < row->block_count; ++i) {
-      reusable +=
-          !loom_serve_block_pool_is_shared(&state->cache.pool, old_blocks[i]);
-    }
+  for (uint32_t i = replacement.cursor; i < row->block_count; ++i) {
+    reusable +=
+        !loom_serve_block_pool_is_shared(&state->cache.pool, old_blocks[i]);
   }
   const uint32_t needed = count - prefix + fork_tail + (cold ? prefix : 0);
   const uint32_t recurrent_needed = cold + (!position || fork_recurrent);
   const uint32_t recurrent_reusable =
-      replacement.row && row->recurrent.slot != UINT32_MAX &&
+      row->recurrent.slot != UINT32_MAX &&
       !loom_serve_block_pool_is_shared(&state->recurrent.pool,
                                        row->recurrent.slot);
   if (needed > state->cache.pool.available + reusable ||
@@ -1452,6 +1472,7 @@ iree_status_t loom_serve_text_state_row_submit_reserve(
   iree_allocator_free(state->allocator, restore_ranges);
   iree_allocator_free(state->allocator, ranges);
   iree_allocator_free(state->allocator, blocks);
+  *out_reserved = installed;
   return status;
 }
 

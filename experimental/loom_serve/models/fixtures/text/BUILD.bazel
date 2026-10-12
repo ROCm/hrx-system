@@ -49,6 +49,7 @@ py_test(
         name = name,
         srcs = [
             "admission_service_test.cc",
+            "checkpoint_test.cc",
             "oracle.h",
             "owner_turn.h",
             "service_fixture.cc",

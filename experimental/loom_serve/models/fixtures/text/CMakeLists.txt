@@ -35,6 +35,7 @@ loom_cc_test(
     service_test
   SRCS
     "admission_service_test.cc"
+    "checkpoint_test.cc"
     "oracle.h"
     "owner_turn.h"
     "service_fixture.cc"
@@ -92,6 +93,7 @@ loom_cc_test(
     service_vulkan_test
   SRCS
     "admission_service_test.cc"
+    "checkpoint_test.cc"
     "oracle.h"
     "owner_turn.h"
     "service_fixture.cc"
@@ -150,6 +152,7 @@ loom_cc_test(
     service_cpu_test
   SRCS
     "admission_service_test.cc"
+    "checkpoint_test.cc"
     "oracle.h"
     "owner_turn.h"
     "service_fixture.cc"

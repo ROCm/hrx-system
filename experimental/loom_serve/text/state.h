@@ -228,8 +228,10 @@ iree_status_t loom_serve_text_state_row_suspend(
 iree_status_t loom_serve_text_state_row_try_resume(
     loom_serve_text_state_row_t* row, bool* out_resumed);
 // Retains the retired row's exact endpoint and queues its optional carry copy.
-// The owner excludes mutation through successful execution readiness. Failure
-// retains acquired IDs for state teardown; capacity denial returns NULL.
+// An active reservation admits its private continuation before sharing state;
+// unused completion pages remain private to the row. The owner excludes
+// mutation through successful execution readiness. Failure retains acquired IDs
+// for state teardown; capacity denial returns NULL without changing the row.
 iree_status_t loom_serve_text_state_row_submit_pin(
     loom_serve_text_state_row_t* row,
     loom_serve_text_state_checkpoint_t** out_checkpoint);
@@ -240,9 +242,13 @@ iree_status_t loom_serve_text_state_row_try_restore(
 // Extent and starting frontier have passed model validation. Denial changes no
 // selected row or checkpoint contents/ownership. Success installs ownership
 // before submitting transfers; all maps and backing survive until completion.
+// CONTINUE may replace an active reservation while retaining its exact
+// frontier. out_reserved distinguishes admission from an unchanged earlier
+// reservation.
 iree_status_t loom_serve_text_state_row_submit_reserve(
     loom_serve_text_state_row_t* row, loom_serve_text_reserve_mode_t mode,
-    loom_serve_text_state_checkpoint_t* checkpoint, iree_host_size_t extent);
+    loom_serve_text_state_checkpoint_t* checkpoint, iree_host_size_t extent,
+    bool* out_reserved);
 // After successful readiness, releases the copied tail source. The recurrent
 // reader survives until the first epoch or cancellation. False denotes state
 // capacity denial, not a transfer failure.

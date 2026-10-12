@@ -465,10 +465,13 @@ void loom_serve_text_row_reset_retired(loom_serve_text_row_t* row);
 // Synchronous outer-thread join followed by reset_retired.
 iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row);
 
-// Retains the exact consumed endpoint without copying recurrent state or KV.
+// Retains the exact consumed endpoint by sharing recurrent state and KV.
 // The pending prediction, if any, remains unconsumed. Requires a nonempty
-// idle resident row at a successfully completed model boundary. Capacity
-// refusal succeeds with a null output, empty frontier and no mutation.
+// resident row at a successfully completed model boundary. An active request
+// keeps its completion reservation: the pin admits a private recurrent writer
+// and partial-tail COW before sharing consumed state. Unused reserved pages are
+// not retained by the endpoint. Capacity refusal succeeds with a null output,
+// empty frontier and no mutation, including the active reservation.
 // Optional source-sized draft carry is copied on the existing queue timeline.
 // A returned handle is pending: the owner excludes model mutation and waits
 // asynchronously for successful ALL readiness before publishing, querying,

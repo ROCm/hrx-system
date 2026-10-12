@@ -484,6 +484,98 @@ static iree_status_t Compare(const char* label, ModelWork& epoch) {
   return iree_ok_status();
 }
 
+static iree_status_t CheckActivePrefix(loom_serve_text_model_t* model,
+                                       size_t count, const int32_t* tokens) {
+  if (!loom_serve_text_model_checkpoint_capacity(model)) {
+    return iree_ok_status();
+  }
+  const size_t prefix = count / 2;
+  auto* source = loom_serve_text_model_row(model, kRows[0]);
+  auto* branch = loom_serve_text_model_row(model, 4);
+  ModelWork reserve;
+  reserve.model = model;
+  reserve.operation = ModelWork::Operation::kReserve;
+  reserve.reservation.row = source;
+  reserve.reservation.extent = count + 32;
+  IREE_RETURN_IF_ERROR(reserve.Run());
+  if (!reserve.reservation.admitted) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "active prefix witness cannot reserve its source");
+  }
+  // Both reference rows start from full replay; only the candidate source is
+  // checkpointed mid-prefill. The second epoch row is independent ballast.
+  ModelWork prefill;
+  prefill.model = model;
+  prefill.spans = {{{kRows[0], prefix, tokens, 0}, {4, 1, tokens, 0}}};
+  IREE_RETURN_IF_ERROR(SelectShape(model, prefill.spans, &prefill.shape));
+  IREE_RETURN_IF_ERROR(prefill.Run());
+  ModelWork pin;
+  pin.model = model;
+  pin.operation = ModelWork::Operation::kPin;
+  pin.checkpoint.row = source;
+  IREE_RETURN_IF_ERROR(pin.Run());
+  if (!pin.checkpoint.value) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "active prefix witness cannot retain its endpoint");
+  }
+  ModelWork fork;
+  fork.model = model;
+  fork.operation = ModelWork::Operation::kReserve;
+  fork.reservation.row = branch;
+  fork.reservation.mode = LOOM_SERVE_TEXT_RESERVE_CHECKPOINT;
+  fork.reservation.checkpoint = pin.checkpoint.value;
+  fork.reservation.extent = count + 32;
+  IREE_RETURN_IF_ERROR(fork.Run());
+  if (!fork.reservation.admitted) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "active prefix witness cannot reserve its branch");
+  }
+  loom_serve_text_checkpoint_release(pin.checkpoint.value);
+  ModelWork remainder;
+  remainder.model = model;
+  remainder.spans = {
+      {{kRows[0], count - prefix, tokens + prefix,
+        LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+       {4, count - prefix, tokens + prefix, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT}}};
+  IREE_RETURN_IF_ERROR(SelectShape(model, remainder.spans, &remainder.shape));
+  IREE_RETURN_IF_ERROR(remainder.Run());
+  for (size_t i = 0; i < kSpanCount; ++i) {
+    auto* reference = loom_serve_text_model_row(model, kReferenceRows[i]);
+    IREE_RETURN_IF_ERROR(loom_serve_text_row_prefill(reference, count, tokens));
+    if (remainder.results[i].output_count != 1 ||
+        remainder.results[i].tokens[0] !=
+            loom_serve_text_row_token(reference)) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "active prefix changed prompt completion");
+    }
+  }
+  const bool mtp = loom_serve_text_mtp_from_flags();
+  uint32_t limits[kSpanCount] = {4, 4};
+  std::array<int32_t, kSpanCount> anchors = {};
+  ModelWork continuation;
+  continuation.model = model;
+  continuation.limits = mtp ? limits : nullptr;
+  for (size_t i = 0; i < kSpanCount; ++i) {
+    const size_t index = remainder.spans[i].row_index;
+    anchors[i] =
+        loom_serve_text_row_token(loom_serve_text_model_row(model, index));
+    continuation.spans[i] = {
+        index, mtp ? 4u : 1u, &anchors[i],
+        LOOM_SERVE_TEXT_SPAN_FLAG_SELECT |
+            (mtp ? LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE : 0u)};
+  }
+  IREE_RETURN_IF_ERROR(Compare("active-prefix-continuation", continuation));
+  for (size_t index :
+       {kRows[0], size_t{4}, kReferenceRows[0], kReferenceRows[1]}) {
+    ModelWork reset;
+    reset.model = model;
+    reset.operation = ModelWork::Operation::kReset;
+    reset.reset_row = loom_serve_text_model_row(model, index);
+    IREE_RETURN_IF_ERROR(reset.Run());
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t Run(loom_serve_text_model_t* model,
                          iree_allocator_t allocator,
                          iree_status_code_t* out_terminal_code) {
@@ -585,6 +677,7 @@ static iree_status_t Run(loom_serve_text_model_t* model,
           loom_serve_text_model_pool_usage(model).capacity ? "true" : "false",
           loom_serve_text_mtp_from_flags() ? "true" : "false");
   fflush(stdout);
+  IREE_RETURN_IF_ERROR(CheckActivePrefix(model, counts[0], inputs[0].data()));
   // Low physical IDs belong to independent ballast rows. Releasing them after
   // the target/reference work guarantees a fragmented live pool for trim.
   const Spans ballast = {{{7, counts[0], inputs[0].data(), 0},

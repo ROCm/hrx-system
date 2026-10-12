@@ -1118,11 +1118,9 @@ iree_status_t loom_serve_text_row_submit_pin(
     loom_serve_execution_frontier_t* out_frontier) {
   *out_checkpoint = NULL;
   *out_frontier = (loom_serve_execution_frontier_t){0};
-  if (!row->state->position || row->state->snapshot ||
-      row->state->reserved_extent) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "checkpoint requires an idle nonempty resident row");
+  if (!row->state->position || row->state->snapshot) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "checkpoint requires a nonempty resident row");
   }
   loom_serve_text_state_checkpoint_t* state = NULL;
   IREE_RETURN_IF_ERROR(
@@ -1221,9 +1219,11 @@ iree_status_t loom_serve_text_row_submit_reserve(
   }
   // Even state-capacity denial retains the activation pin until completion.
   // Cancellation likewise leaves this operation intact until it retires.
+  bool reserved = false;
   IREE_RETURN_IF_ERROR(loom_serve_text_state_row_submit_reserve(
-      row->state, mode, checkpoint ? checkpoint->state : NULL, extent));
-  if (row->state->reserved_extent) {
+      row->state, mode, checkpoint ? checkpoint->state : NULL, extent,
+      &reserved));
+  if (reserved) {
     if (mode == LOOM_SERVE_TEXT_RESERVE_FRESH) {
       row->has_prediction = false;
       memset(&row->transfer, 0, sizeof(row->transfer));
