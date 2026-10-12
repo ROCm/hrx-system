@@ -52,8 +52,11 @@ struct iree_net_tcp_listener_t {
   // Proactor dispatching accept and stopped callbacks. Retained.
   iree_async_proactor_t* proactor;
 
-  // Bound socket retained through listener teardown.
+  // Bound socket retained until all native accept ownership has retired.
   iree_async_socket_t* listen_socket;
+
+  // Immutable contact retained for diagnostics after the socket closes.
+  iree_async_address_t bound_address;
 
   // Serializes stop requests with accept completion.
   iree_slim_mutex_t mutex;
@@ -215,13 +218,19 @@ static iree_status_t iree_net_tcp_receive_pool_create(
 static void iree_net_tcp_listener_finish_stop(
     iree_net_tcp_listener_t* listener) {
   iree_net_listener_stopped_callback_t callback = {0};
+  iree_async_socket_t* listen_socket = NULL;
   iree_slim_mutex_lock(&listener->mutex);
   if (listener->state == IREE_NET_TCP_LISTENER_STATE_STOPPING &&
       !listener->flags) {
     listener->state = IREE_NET_TCP_LISTENER_STATE_STOPPED;
     callback = listener->stopped_callback;
+    listen_socket = listener->listen_socket;
+    listener->listen_socket = NULL;
   }
   iree_slim_mutex_unlock(&listener->mutex);
+  // A stopped listener cannot service the kernel backlog. Close its native
+  // endpoint before publishing retirement so later peers fail to connect.
+  iree_async_socket_release(listen_socket);
   if (callback.fn) {
     callback.fn(callback.user_data);
   }
@@ -439,11 +448,8 @@ static iree_status_t iree_net_tcp_listener_query_bound_address(
                             "bound address storage is required");
   }
 
-  iree_async_address_t address;
-  IREE_RETURN_IF_ERROR(
-      iree_async_socket_query_local_address(listener->listen_socket, &address));
-  return iree_async_address_format(&address, buffer_capacity, buffer,
-                                   out_address);
+  return iree_async_address_format(&listener->bound_address, buffer_capacity,
+                                   buffer, out_address);
 }
 
 static const iree_net_listener_vtable_t iree_net_tcp_listener_vtable = {
@@ -705,6 +711,9 @@ static iree_status_t iree_net_tcp_factory_create_listener(
     status = iree_async_socket_listen(listen_socket,
                                       factory->options.listen_backlog);
   }
+  if (iree_status_is_ok(status)) {
+    status = iree_async_socket_query_local_address(listen_socket, &address);
+  }
 
   iree_net_tcp_listener_t* listener = NULL;
   if (iree_status_is_ok(status)) {
@@ -719,6 +728,7 @@ static iree_status_t iree_net_tcp_factory_create_listener(
     listener->proactor = proactor;
     iree_async_proactor_retain(proactor);
     listener->listen_socket = listen_socket;
+    listener->bound_address = address;
     listen_socket = NULL;
     iree_slim_mutex_initialize(&listener->mutex);
     listener->state = IREE_NET_TCP_LISTENER_STATE_LISTENING;

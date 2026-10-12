@@ -68,6 +68,11 @@ iree_net_tcp_factory_options_default(void) {
 // generic receive pool arguments passed to connect and create_listener are not
 // used by this transport.
 //
+// Stopping a listener closes its native listening socket before delivering the
+// stopped callback. Its bound address remains queryable until the listener is
+// freed. Connections already published by the listener retain their independent
+// lifetimes.
+//
 // Capabilities: RELIABLE | ORDERED.
 IREE_API_EXPORT iree_status_t
 iree_net_tcp_factory_create(const iree_net_tcp_factory_options_t* options,

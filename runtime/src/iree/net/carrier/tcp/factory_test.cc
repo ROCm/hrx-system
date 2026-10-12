@@ -464,6 +464,37 @@ TEST_P(TcpFactoryTest, ReportsEphemeralBoundAddress) {
   EXPECT_TRUE(iree_string_view_is_empty(tiny_address));
 }
 
+TEST_P(TcpFactoryTest, StoppedListenerRejectsConnectionsBeforeFree) {
+  AcceptState accept_state;
+  const std::string address = CreateListener(&accept_state);
+  StopState stop_state;
+  IREE_ASSERT_OK(iree_net_listener_stop(listener_, stop_state.callback()));
+  PollUntil([&] { return stop_state.completed; });
+
+  // A retained listener is still useful for contact diagnostics, but its
+  // native endpoint must no longer admit peers into an unserviced backlog.
+  std::array<char, IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH> storage = {};
+  iree_string_view_t stopped_address;
+  IREE_ASSERT_OK(iree_net_listener_query_bound_address(
+      listener_, storage.size(), storage.data(), &stopped_address));
+  EXPECT_EQ(std::string(stopped_address.data, stopped_address.size), address);
+
+  ConnectState connect_state;
+  IREE_ASSERT_OK(iree_net_transport_factory_connect(
+      factory_, iree_make_string_view(address.data(), address.size()),
+      proactor_, /*receive_pool=*/nullptr, connect_state.callback(),
+      &connect_state.operation));
+  PollUntil([&] { return connect_state.callback_count == 1; });
+  EXPECT_EQ(accept_state.callback_count, 0);
+  EXPECT_NE(connect_state.status_codes[0], IREE_STATUS_OK);
+  EXPECT_EQ(connect_state.connections[0], nullptr);
+  for (auto* connection : connect_state.connections) {
+    connections_.push_back(connection);
+  }
+  iree_net_listener_free(listener_);
+  listener_ = nullptr;
+}
+
 TEST_P(TcpFactoryTest, StopFromFirstAcceptOwnsUnpublishedSockets) {
   StopState stop_state;
   AcceptState accept_state;
