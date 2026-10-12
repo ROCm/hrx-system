@@ -20,6 +20,7 @@ filegroup(
     srcs = [
         "sources.txt",
         "//experimental/loom_serve/motifs/ggml:sources",
+        "//experimental/loom_serve/motifs/tensor:sources",
     ] + glob([
         "*.loom",
         "kernels/qwen38/*.loom",

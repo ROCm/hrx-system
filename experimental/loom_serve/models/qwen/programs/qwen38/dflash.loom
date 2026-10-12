@@ -1,0 +1,185 @@
+// DFlash2 block transforms. Committed context and transient proposal K/V have
+// separate ownership: running a block never publishes its keys into the pool.
+config.decl @runner.qwen38.span_capacity : %value: index where [range(%value, 1, 64)]
+config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
+config.decl @qwen38.attention.pool_capacity : %value: index where [range(%value, 0, 4194304)]
+
+kernel.decl @qwen38_linear_q4k_f16_wmma_x64(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q4k_f16_wmma_x128(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q6k_f16_wmma_x64(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_x128(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_rmsnorm_f32_prefill(%tokens: index) launch(%capacity: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_swiglu_f32_prefill(%tokens: index) launch(%capacity: index, %gate: buffer, %up: buffer, %output: buffer)
+kernel.decl @qwen38_dflash_convolve_prepare(%blocks: index) launch(%blocks: index, %input: buffer, %dynamic: buffer, %base: buffer, %output: buffer)
+kernel.decl @qwen38_dflash_convolve_finish(%blocks: index) launch(%blocks: index, %input: buffer, %dynamic: buffer, %base: buffer, %output: buffer)
+kernel.decl @qwen38_dflash_query_prepare(%tokens: index, %spans: index) launch(%capacity: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_dflash_block_prepare(%tokens: index, %spans: index) launch(%capacity: index, %epoch: buffer, %key: buffer, %value: buffer, %weight: buffer, %cache: buffer)
+kernel.decl @qwen38_dflash_context_prepare(%tokens: index, %spans: index) launch(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %key: buffer, %value: buffer, %weight: buffer, %cache: buffer)
+kernel.decl @qwen38_dflash_attention(%tokens: index, %spans: index) launch(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %block_cache: buffer, %context: buffer, %output: buffer)
+
+command.program.def @qwen38_dflash_layer(%tokens: index, %spans: index, %layer: index, %layer_origin: offset) launch(%parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %residual: buffer) where [range(%tokens, 1, 512), range(%spans, 1, 64), range(%layer, 0, 4)] {
+  %sixty_five = index.constant 65 : index
+  %narrow = index.cmp ult, %tokens, %sixty_five : index
+  %hidden = index.constant 5120 : index
+  %queries = index.constant 4096 : index
+  %keys = index.constant 1024 : index
+  %coefficients = index.constant 1280 : index
+  %intermediate = index.constant 17408 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %is_two = index.cmp eq, %layer, %two : index
+  %is_four = index.cmp eq, %layer, %four : index
+  %q6 = scalar.ori %is_two, %is_four : i1
+  %q4_value_bytes = index.constant 2949120 : index
+  %q6_value_bytes = index.constant 4300800 : index
+  %value_bytes = scf.select %q6, %q6_value_bytes, %q4_value_bytes : index
+  %q4_down_bytes = index.constant 50135040 : index
+  %q6_down_bytes = index.constant 73113600 : index
+  %down_bytes = scf.select %q6, %q6_down_bytes, %q4_down_bytes : index
+  %attention_norm = command.parameter %parameters, "blk.{}.attn_norm.weight"[%layer] : view<5120xf32>
+  %attention_conv = command.parameter %parameters, "blk.{}.attn_conv_proj.weight"[%layer] : view<3686400xi8>
+  %attention_base = command.parameter %parameters, "blk.{}.attn_conv_base"[%layer] : view<20480xf32>
+  %query_weight = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<11796480xi8>
+  %key_weight = command.parameter %parameters, "blk.{}.attn_k.weight"[%layer] : view<2949120xi8>
+  %value_weight = command.parameter %parameters, "blk.{}.attn_v.weight"[%layer] : view<[%value_bytes]xi8>
+  %query_norm = command.parameter %parameters, "blk.{}.attn_q_norm.weight"[%layer] : view<128xf32>
+  %key_norm = command.parameter %parameters, "blk.{}.attn_k_norm.weight"[%layer] : view<128xf32>
+  %attention_output = command.parameter %parameters, "blk.{}.attn_output.weight"[%layer] : view<11796480xi8>
+  %ffn_norm = command.parameter %parameters, "blk.{}.ffn_norm.weight"[%layer] : view<5120xf32>
+  %ffn_conv = command.parameter %parameters, "blk.{}.ffn_conv_proj.weight"[%layer] : view<3686400xi8>
+  %ffn_base = command.parameter %parameters, "blk.{}.ffn_conv_base"[%layer] : view<20480xf32>
+  %gate_weight = command.parameter %parameters, "blk.{}.ffn_gate.weight"[%layer] : view<50135040xi8>
+  %up_weight = command.parameter %parameters, "blk.{}.ffn_up.weight"[%layer] : view<50135040xi8>
+  %down_weight = command.parameter %parameters, "blk.{}.ffn_down.weight"[%layer] : view<[%down_bytes]xi8>
+  %epsilon = scalar.constant 0.000001 : f32
+  %hidden_row_bytes = index.constant 20480 : offset
+  %hidden_bytes = index.scale %tokens, %hidden_row_bytes : index, offset -> offset
+  %query_row_bytes = index.constant 16384 : offset
+  %query_bytes = index.scale %tokens, %query_row_bytes : index, offset -> offset
+  %key_row_bytes = index.constant 4096 : offset
+  %key_bytes = index.scale %tokens, %key_row_bytes : index, offset -> offset
+  %dynamic_row_bytes = index.constant 5120 : offset
+  %dynamic_bytes = index.scale %tokens, %dynamic_row_bytes : index, offset -> offset
+  %ffn_row_bytes = index.constant 69632 : offset
+  %ffn_bytes = index.scale %tokens, %ffn_row_bytes : index, offset -> offset
+  %block_row_bytes = index.constant 4096 : offset
+  %block_bytes = index.scale %tokens, %block_row_bytes : index, offset -> offset
+  %normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %dynamic = buffer.alloca<global> align(256) %dynamic_bytes : buffer
+  %convolved = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %query = buffer.alloca<global> align(256) %query_bytes : buffer
+  %rotated_query = buffer.alloca<global> align(256) %query_bytes : buffer
+  %key = buffer.alloca<global> align(256) %key_bytes : buffer
+  %value = buffer.alloca<global> align(256) %key_bytes : buffer
+  %block_cache = buffer.alloca<global> align(256) %block_bytes : buffer
+  %attended = buffer.alloca<global> align(256) %query_bytes : buffer
+  %projected = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %gate = buffer.alloca<global> align(256) %ffn_bytes : buffer
+  %up = buffer.alloca<global> align(256) %ffn_bytes : buffer
+  %activated = buffer.alloca<global> align(256) %ffn_bytes : buffer
+
+  kernel.launch @qwen38_rmsnorm_f32_prefill[%tokens](%tokens, %epsilon, %residual, %attention_norm, %normalized) : [index](index, f32, buffer, view<5120xf32>, buffer)
+  scf.if %narrow {
+    kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%tokens, %hidden, %coefficients](%epoch, %hidden, %coefficients, %normalized, %attention_conv, %dynamic) : [index, index, index](buffer, index, index, buffer, view<3686400xi8>, buffer)
+  } else {
+    kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%tokens, %hidden, %coefficients](%epoch, %hidden, %coefficients, %normalized, %attention_conv, %dynamic) : [index, index, index](buffer, index, index, buffer, view<3686400xi8>, buffer)
+  }
+  kernel.launch @qwen38_dflash_convolve_prepare[%spans](%spans, %normalized, %dynamic, %attention_base, %convolved) : [index](index, buffer, buffer, view<20480xf32>, buffer)
+  command.concurrent {
+    scf.if %narrow {
+      kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%tokens, %hidden, %queries](%epoch, %hidden, %queries, %convolved, %query_weight, %query) : [index, index, index](buffer, index, index, buffer, view<11796480xi8>, buffer)
+    } else {
+      kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%tokens, %hidden, %queries](%epoch, %hidden, %queries, %convolved, %query_weight, %query) : [index, index, index](buffer, index, index, buffer, view<11796480xi8>, buffer)
+    }
+    scf.if %narrow {
+      kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %convolved, %key_weight, %key) : [index, index, index](buffer, index, index, buffer, view<2949120xi8>, buffer)
+    } else {
+      kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %convolved, %key_weight, %key) : [index, index, index](buffer, index, index, buffer, view<2949120xi8>, buffer)
+    }
+    scf.if %q6 {
+      scf.if %narrow {
+        kernel.launch @qwen38_linear_q6k_f16_wmma_x64[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %convolved, %value_weight, %value) : [index, index, index](buffer, index, index, buffer, view<[%value_bytes]xi8>, buffer)
+      } else {
+        kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_x128[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %convolved, %value_weight, %value) : [index, index, index](buffer, index, index, buffer, view<[%value_bytes]xi8>, buffer)
+      }
+    } else {
+      scf.if %narrow {
+        kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %convolved, %value_weight, %value) : [index, index, index](buffer, index, index, buffer, view<[%value_bytes]xi8>, buffer)
+      } else {
+        kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %convolved, %value_weight, %value) : [index, index, index](buffer, index, index, buffer, view<[%value_bytes]xi8>, buffer)
+      }
+    }
+  }
+  command.concurrent {
+    kernel.launch @qwen38_dflash_query_prepare[%tokens, %spans](%tokens, %epoch, %query, %query_norm, %rotated_query) : [index, index](index, buffer, buffer, view<128xf32>, buffer)
+    kernel.launch @qwen38_dflash_block_prepare[%tokens, %spans](%tokens, %epoch, %key, %value, %key_norm, %block_cache) : [index, index](index, buffer, buffer, buffer, view<128xf32>, buffer)
+  }
+  kernel.launch @qwen38_dflash_attention[%tokens, %spans](%tokens, %epoch, %rows, %layer_origin, %rotated_query, %block_cache, %context, %attended) : [index, index](index, buffer, buffer, offset, buffer, buffer, buffer, buffer)
+  scf.if %narrow {
+    kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%tokens, %queries, %hidden](%epoch, %queries, %hidden, %attended, %attention_output, %projected) : [index, index, index](buffer, index, index, buffer, view<11796480xi8>, buffer)
+  } else {
+    kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%tokens, %queries, %hidden](%epoch, %queries, %hidden, %attended, %attention_output, %projected) : [index, index, index](buffer, index, index, buffer, view<11796480xi8>, buffer)
+  }
+  kernel.launch @qwen38_dflash_convolve_finish[%spans](%spans, %projected, %dynamic, %attention_base, %residual) : [index](index, buffer, buffer, view<20480xf32>, buffer)
+
+  kernel.launch @qwen38_rmsnorm_f32_prefill[%tokens](%tokens, %epsilon, %residual, %ffn_norm, %normalized) : [index](index, f32, buffer, view<5120xf32>, buffer)
+  scf.if %narrow {
+    kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%tokens, %hidden, %coefficients](%epoch, %hidden, %coefficients, %normalized, %ffn_conv, %dynamic) : [index, index, index](buffer, index, index, buffer, view<3686400xi8>, buffer)
+  } else {
+    kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%tokens, %hidden, %coefficients](%epoch, %hidden, %coefficients, %normalized, %ffn_conv, %dynamic) : [index, index, index](buffer, index, index, buffer, view<3686400xi8>, buffer)
+  }
+  kernel.launch @qwen38_dflash_convolve_prepare[%spans](%spans, %normalized, %dynamic, %ffn_base, %convolved) : [index](index, buffer, buffer, view<20480xf32>, buffer)
+  command.concurrent {
+    scf.if %narrow {
+      kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%tokens, %hidden, %intermediate](%epoch, %hidden, %intermediate, %convolved, %gate_weight, %gate) : [index, index, index](buffer, index, index, buffer, view<50135040xi8>, buffer)
+    } else {
+      kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%tokens, %hidden, %intermediate](%epoch, %hidden, %intermediate, %convolved, %gate_weight, %gate) : [index, index, index](buffer, index, index, buffer, view<50135040xi8>, buffer)
+    }
+    scf.if %narrow {
+      kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%tokens, %hidden, %intermediate](%epoch, %hidden, %intermediate, %convolved, %up_weight, %up) : [index, index, index](buffer, index, index, buffer, view<50135040xi8>, buffer)
+    } else {
+      kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%tokens, %hidden, %intermediate](%epoch, %hidden, %intermediate, %convolved, %up_weight, %up) : [index, index, index](buffer, index, index, buffer, view<50135040xi8>, buffer)
+    }
+  }
+  kernel.launch @qwen38_swiglu_f32_prefill[%tokens](%tokens, %gate, %up, %activated) : [index](index, buffer, buffer, buffer)
+  scf.if %q6 {
+    scf.if %narrow {
+      kernel.launch @qwen38_linear_q6k_f16_wmma_x64[%tokens, %intermediate, %hidden](%epoch, %intermediate, %hidden, %activated, %down_weight, %projected) : [index, index, index](buffer, index, index, buffer, view<[%down_bytes]xi8>, buffer)
+    } else {
+      kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_x128[%tokens, %intermediate, %hidden](%epoch, %intermediate, %hidden, %activated, %down_weight, %projected) : [index, index, index](buffer, index, index, buffer, view<[%down_bytes]xi8>, buffer)
+    }
+  } else {
+    scf.if %narrow {
+      kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%tokens, %intermediate, %hidden](%epoch, %intermediate, %hidden, %activated, %down_weight, %projected) : [index, index, index](buffer, index, index, buffer, view<[%down_bytes]xi8>, buffer)
+    } else {
+      kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%tokens, %intermediate, %hidden](%epoch, %intermediate, %hidden, %activated, %down_weight, %projected) : [index, index, index](buffer, index, index, buffer, view<[%down_bytes]xi8>, buffer)
+    }
+  }
+  kernel.launch @qwen38_dflash_convolve_finish[%spans](%spans, %projected, %dynamic, %ffn_base, %residual) : [index](index, buffer, buffer, view<20480xf32>, buffer)
+  command.return
+}
+
+// The embedding is private proposal storage, updated in place across layers.
+// Output normalization remains separate from that residual stream.
+command.program.def public @qwen38_dflash_transform() launch(%parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %embedding: buffer, %normalized: buffer) {
+  %spans = config.get @runner.qwen38.span_capacity : index
+  %eight = index.constant 8 : index
+  %tokens = index.mul %spans, %eight : index
+  %logical = config.get @qwen38.attention.cache_capacity : index
+  %pool = config.get @qwen38.attention.pool_capacity : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %five = index.constant 5 : index
+  %paged = index.cmp ne, %pool, %zero : index
+  %storage = scf.select %paged, %pool, %logical : index
+  %token_bytes = index.constant 4096 : offset
+  %layer_bytes = index.scale %storage, %token_bytes : index, offset -> offset
+  scf.for %layer = [%zero to %five step %one] unroll {
+    %layer_origin = index.scale %layer, %layer_bytes : index, offset -> offset
+    command.program.launch @qwen38_dflash_layer[%tokens, %spans, %layer, %layer_origin](%parameters, %epoch, %rows, %context, %embedding) : [index, index, index, offset](buffer, buffer, buffer, buffer, buffer)
+  }
+  %epsilon = scalar.constant 0.000001 : f32
+  %weight = command.parameter %parameters, "output_norm.weight" : view<5120xf32>
+  kernel.launch @qwen38_rmsnorm_f32_prefill[%tokens](%tokens, %epsilon, %embedding, %weight, %normalized) : [index](index, f32, buffer, view<5120xf32>, buffer)
+  command.return
+}

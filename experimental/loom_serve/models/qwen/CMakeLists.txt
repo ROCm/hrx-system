@@ -17,6 +17,7 @@ add_custom_command(OUTPUT sources.stamp
     COMMAND ${CMAKE_COMMAND} -E touch sources.stamp
   DEPENDS
     "${IREE_BINARY_DIR}/experimental/loom_serve/motifs/ggml/sources.stamp"
+    "${IREE_BINARY_DIR}/experimental/loom_serve/motifs/tensor/sources.stamp"
     "${_GLOB_KERNELS_QWEN38_X_LOOM}"
     "${_GLOB_PROGRAMS_QWEN38_X_LOOM}"
     "${_GLOB_X_LOOM}"

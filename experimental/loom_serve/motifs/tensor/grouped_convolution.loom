@@ -45,8 +45,10 @@ template.def<@convolution.grouped_causal_f32> device @grouped_causal_f32(%blocks
   %tile_width = index.constant 512 : index
   %vector_width = index.constant 4 : index
   %tile = kernel.workgroup.id<x> : index
-  %position = kernel.workgroup.id<y> : index
-  %block = kernel.workgroup.id<z> : index
+  %position0 = kernel.workgroup.id<y> : index
+  %position = index.assume %position0 [ge(%position0, 0), lt(%position0, %length)] : index
+  %block0 = kernel.workgroup.id<z> : index
+  %block = index.assume %block0 [ge(%block0, 0), lt(%block0, %blocks)] : index
   %thread = kernel.workitem.id<x> : index
   %tile_origin = index.mul %tile, %tile_width : index
   %within = index.mul %thread, %vector_width : index
@@ -69,8 +71,10 @@ template.def<@convolution.grouped_causal_add_f32> device @grouped_causal_add_f32
   %tile_width = index.constant 512 : index
   %vector_width = index.constant 4 : index
   %tile = kernel.workgroup.id<x> : index
-  %position = kernel.workgroup.id<y> : index
-  %block = kernel.workgroup.id<z> : index
+  %position0 = kernel.workgroup.id<y> : index
+  %position = index.assume %position0 [ge(%position0, 0), lt(%position0, %length)] : index
+  %block0 = kernel.workgroup.id<z> : index
+  %block = index.assume %block0 [ge(%block0, 0), lt(%block0, %blocks)] : index
   %thread = kernel.workitem.id<x> : index
   %tile_origin = index.mul %tile, %tile_width : index
   %within = index.mul %thread, %vector_width : index
