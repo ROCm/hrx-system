@@ -62,6 +62,13 @@ static void serving_shutdown_requested(void* user_data,
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
+  if (argc > 1) {
+    fprintf(stderr,
+            "Unexpected positional argument '%s'; use --models=path or "
+            "--flagfile=path.\n",
+            argv[1]);
+    return EXIT_FAILURE;
+  }
   if (FLAG_model_capacity < 1 || FLAG_connections < 1 ||
       FLAG_held_requests < -1 || FLAG_held_requests >= FLAG_connections ||
       FLAG_request_body_bytes < 1 || FLAG_heartbeat_ms < 0) {

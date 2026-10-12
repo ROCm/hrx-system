@@ -102,8 +102,9 @@ model graph, weight policy and modality contract.
 Process flags configure resources that outlive models. `--models=path.json`
 optionally supplies initial registrations as `{"models":[...]}`. Each entry
 uses exactly the same schema as `POST /v1/models/register`; an empty array or
-omitted catalog starts empty. Unknown, duplicate, wrongly typed and
-wrong-modality fields are rejected.
+omitted catalog starts empty. Catalog and flag-file paths use `--models=path`
+and `--flagfile=path`; positional arguments are rejected before startup.
+Unknown, duplicate, wrongly typed and wrong-modality fields are rejected.
 
 | Process option | Default and scope |
 | --- | --- |

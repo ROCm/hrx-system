@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@rules_python//python:defs.bzl", "py_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 
 package(
@@ -155,6 +156,30 @@ loom_cc_library(
         "//experimental/loom_serve/telemetry:stream",
         "//runtime/src/iree/base",
     ],
+)
+
+py_test(
+    name = "server_test",
+    size = "small",
+    srcs = ["server_test.py"],
+    args = [
+        "$(rootpath :server)",
+        "$(rootpath //experimental/loom_serve/models/fixtures/embedding:prepare.loom)",
+    ],
+    data = [
+        ":server",
+        "//experimental/loom_serve/models/fixtures/embedding:prepare.loom",
+        "//experimental/loom_serve/models/fixtures/embedding:sources",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ["//experimental/loom_serve/testing:http"],
 )
 
 loom_cc_library(
