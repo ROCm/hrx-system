@@ -1,74 +1,6 @@
-amdgpu.target<gfx11-generic> @nvfp4_wave32_target
-
-amdgpu.target<gfx9-4-generic> @nvfp4_wave64_target
-
-template.decl @numeric.nvfp4.workgroup_size() -> (index)
-
-template.def<@numeric.nvfp4.workgroup_size> target(@nvfp4_wave32_target) priority(20) @nvfp4_wave32_workgroup_size() -> (index) {
-  %size = index.constant 32 : index
-  template.return %size : index
-}
-
-template.def<@numeric.nvfp4.workgroup_size> target(@nvfp4_wave64_target) priority(20) @nvfp4_wave64_workgroup_size() -> (index) {
-  %size = index.constant 64 : index
-  template.return %size : index
-}
-
-template.def<@numeric.nvfp4.workgroup_size> priority(1) @nvfp4_portable_workgroup_size() -> (index) {
-  %size = index.constant 32 : index
-  template.return %size : index
-}
-
 template.decl device @numeric.nvfp4.matrix_tile(%lhs_payload: vector<2xi32>, %lhs_scale: vector<1xi32>, %rhs_payload: vector<2xi32>, %rhs_scale: vector<1xi32>, %init: buffer, %init_byte_offset: offset, %output: buffer, %output_byte_offset: offset)
 
-template.def<@numeric.nvfp4.matrix_tile> device target(@nvfp4_wave32_target) requires [#target.subgroup.size<32>] priority(20) @nvfp4_matrix_tile_wave32(%lhs_payload: vector<2xi32>, %lhs_scale: vector<1xi32>, %rhs_payload: vector<2xi32>, %rhs_scale: vector<1xi32>, %init_buffer: buffer, %init_byte_offset: offset, %output_buffer: buffer, %output_byte_offset: offset) {
-  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
-  %lhs_data = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
-  %rhs_data = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
-  %extent = index.constant 16 : index
-  %origin = index.constant 0 : index
-  %lhs = vector.fragment<lhs> %lhs_data shape [%extent, %extent] : vector<16xf16>
-  %rhs = vector.fragment<rhs> %rhs_data shape [%extent, %extent] : vector<16xf16>
-  %init_view = buffer.view %init_buffer[%init_byte_offset] : buffer -> view<16x16xf32>
-  %init = vector.fragment.load<init> %init_view[%origin, %origin] shape [%extent, %extent] : view<16x16xf32> -> vector<8xf32>
-  %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
-  %output_view = buffer.view %output_buffer[%output_byte_offset] : buffer -> view<16x16xf32>
-  vector.fragment.store<result> %result, %output_view[%origin, %origin] shape [%extent, %extent] : vector<8xf32>, view<16x16xf32>
-  template.return
-}
-
-template.def<@numeric.nvfp4.matrix_tile> device target(@nvfp4_wave64_target) requires [#target.subgroup.size<64>] priority(20) @nvfp4_matrix_tile_wave64(%lhs_payload: vector<2xi32>, %lhs_scale: vector<1xi32>, %rhs_payload: vector<2xi32>, %rhs_scale: vector<1xi32>, %init_buffer: buffer, %init_byte_offset: offset, %output_buffer: buffer, %output_byte_offset: offset) {
-  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=8, payload_packing=little_endian_nibbles, payload_registers=1, scale_format=f8e4m3fn, scale_group_elements=8, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
-  %extent = index.constant 16 : index
-  %origin = index.constant 0 : index
-  %lane_index = kernel.subgroup.lane.id : index
-  %lane = index.cast %lane_index : index to i32
-  %word_shift = scalar.constant 5 : i32
-  %quarter_shift_mask = scalar.constant 16 : i32
-  %payload_word_i32 = scalar.shrui %lane, %word_shift : i32
-  %payload_word = index.cast %payload_word_i32 : i32 to index
-  %payload_shift = scalar.andi %lane, %quarter_shift_mask : i32
-  %lhs_word = vector.extract %lhs_payload[%payload_word] : vector<2xi32> -> i32
-  %lhs_shifted = scalar.shrui %lhs_word, %payload_shift : i32
-  %lhs_selected = vector.splat %lhs_shifted : vector<1xi32>
-  %rhs_word = vector.extract %rhs_payload[%payload_word] : vector<2xi32> -> i32
-  %rhs_shifted = scalar.shrui %rhs_word, %payload_shift : i32
-  %rhs_selected = vector.splat %rhs_shifted : vector<1xi32>
-  %lhs_decoded = vector.decode %lhs_selected using %schema {scale = %lhs_scale : vector<1xi32>} : vector<1xi32>, encoding<schema> -> vector<8xf16>
-  %rhs_decoded = vector.decode %rhs_selected using %schema {scale = %rhs_scale : vector<1xi32>} : vector<1xi32>, encoding<schema> -> vector<8xf16>
-  %lhs_data = vector.slice %lhs_decoded[%origin] : vector<8xf16> -> vector<4xf16>
-  %rhs_data = vector.slice %rhs_decoded[%origin] : vector<8xf16> -> vector<4xf16>
-  %lhs = vector.fragment<lhs> %lhs_data shape [%extent, %extent] : vector<4xf16>
-  %rhs = vector.fragment<rhs> %rhs_data shape [%extent, %extent] : vector<4xf16>
-  %init_view = buffer.view %init_buffer[%init_byte_offset] : buffer -> view<16x16xf32>
-  %init = vector.fragment.load<init> %init_view[%origin, %origin] shape [%extent, %extent] : view<16x16xf32> -> vector<4xf32>
-  %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
-  %output_view = buffer.view %output_buffer[%output_byte_offset] : buffer -> view<16x16xf32>
-  vector.fragment.store<result> %result, %output_view[%origin, %origin] shape [%extent, %extent] : vector<4xf32>, view<16x16xf32>
-  template.return
-}
-
-template.def<@numeric.nvfp4.matrix_tile> device priority(1) @nvfp4_matrix_tile_portable(%lhs_payload: vector<2xi32>, %lhs_scale: vector<1xi32>, %rhs_payload: vector<2xi32>, %rhs_scale: vector<1xi32>, %init_buffer: buffer, %init_byte_offset: offset, %output_buffer: buffer, %output_byte_offset: offset) {
+template.def<@numeric.nvfp4.matrix_tile> device @nvfp4_matrix_tile_portable(%lhs_payload: vector<2xi32>, %lhs_scale: vector<1xi32>, %rhs_payload: vector<2xi32>, %rhs_scale: vector<1xi32>, %init_buffer: buffer, %init_byte_offset: offset, %output_buffer: buffer, %output_byte_offset: offset) {
   %workitem = kernel.workitem.id<x> : index
   %origin = index.constant 0 : index
   %is_leader = index.cmp eq, %workitem, %origin : index
@@ -105,7 +37,7 @@ template.def<@numeric.nvfp4.matrix_tile> device priority(1) @nvfp4_matrix_tile_p
 
 kernel.def @nvfp4_matrix() {
   %unit = index.constant 1 : index
-  %workgroup_size = template.apply<@numeric.nvfp4.workgroup_size>() pure : () -> (index)
+  %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_payload_buffer: buffer, %lhs_scale_buffer: buffer, %rhs_payload_buffer: buffer, %rhs_scale_buffer: buffer, %init_buffer: buffer, %output_buffer: buffer) {
   %base = index.constant 0 : offset
