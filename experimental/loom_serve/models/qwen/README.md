@@ -169,6 +169,28 @@ python -B -m experimental.loom_serve.models.qwen.check_tools \
   --tokenizer=/path/to/tokenizer.json --output=/path/to/new-results --clients=3
 ```
 
+## DFlash2 drafting
+
+`--draft_depth=7` selects the eight-input DFlash2 block (one anchor and seven
+proposals). Its checkpoint is source policy, passed as
+`--model_options='{"draft_weights":"/path/to/Qwen3.8-27B-DFlash2-Q4_K_M.gguf"}'`
+or as catalog `options` with the same object. Depth three selects MTP and depth
+zero disables drafting; both require empty bootstrap options.
+
+The draft borrows the target embedding and vocabulary head, with independently
+prepared draft matrices in the same model residency. Target layers 5, 19, 33,
+47 and 61 publish feature taps into 50 MiB of shared scratch. Accepted spans
+warm five draft K/V plane pairs in the same logical block pool; rejected tokens
+never advance their cache frontier. DFlash has no recurrent draft carry to
+copy for checkpoints. Proposals, verification, accepted-state replay and
+catch-up remain device work scheduled by `control.loom`.
+
+The model-neutral `//experimental/loom_serve/text:epoch_check` accepts this
+configuration and compares retained continuations against ordinary target
+steps. It covers mixed known/speculative spans, two device-fed epochs and
+subsequent continuation. The older model-specific checker uses MTP's four-input
+fixtures and is selected with depth three.
+
 ## Bounded device-fed continuation
 
 `--draft_depth=3 --continuation_epochs=2` lets the source VM enqueue two

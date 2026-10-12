@@ -252,6 +252,7 @@ loom_cc_test(
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:host",
         "//experimental/loom_serve/runtime:input",
+        "//experimental/loom_serve/runtime:json",
         "//experimental/loom_serve/runtime:preparation",
         "//experimental/loom_serve/scheduling:packing",
         "//experimental/loom_serve/text:model",

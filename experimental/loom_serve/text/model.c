@@ -23,6 +23,7 @@
 #include "experimental/loom_serve/runtime/program.h"
 #include "experimental/loom_serve/runtime/weights.h"
 #include "experimental/loom_serve/text/source.h"
+#include "experimental/loom_serve/text/stages.h"
 #include "experimental/loom_serve/text/state.h"
 #include "experimental/loom_serve/text/storage.h"
 #include "iree/async/operations/semaphore.h"
@@ -58,19 +59,6 @@ typedef enum text_step_kind_e {
   TEXT_STEP_DECODE,
 } text_step_kind_t;
 
-typedef struct text_stage_t {
-  // Owned JIT command image and loaded executable entries.
-  loom_serve_jit_stage_t* compiled;
-  // Parsed view borrowing compiled.
-  loom_cmd_program_t program;
-  // Reusable command retaining its executable and fixed weight resources.
-  iree_hal_command_buffer_t* command;
-  // Number of owned fixed-root slots, including partial initialization.
-  uint32_t fixed_buffer_count;
-  // Owned views of immutable parameter groups, in reflected fixed-root order.
-  iree_hal_buffer_t** fixed_buffers;
-} text_stage_t;
-
 struct loom_serve_text_model_t {
   // Host allocation policy used for all owned resources.
   iree_allocator_t allocator;
@@ -92,12 +80,13 @@ struct loom_serve_text_model_t {
   iree_hal_command_buffer_mode_t command_mode;
   // Shared source index and compiler for this model residency.
   loom_serve_jit_t* jit;
-  // Retained checkpoint/preparation plan owning stable parameter reservations.
-  loom_serve_weights_t* weights;
-  // Shared-device admission registration borrowing weights until teardown.
+  // Checkpoint domains owning stable parameter reservations across all stages.
+  loom_serve_text_parameters_t parameters;
+  // Shared-device admission registration borrowing parameter plans until
+  // teardown.
   loom_serve_residency_t* residency;
   // Source-declared command programs, owned in declaration order.
-  text_stage_t* stages;
+  loom_serve_text_stage_t* stages;
   // Number of allocated stages, including partially initialized cold entries.
   iree_host_size_t stage_count;
   // Number of target packed shapes, independent of auxiliary draft stages.
@@ -195,109 +184,6 @@ struct loom_serve_text_checkpoint_t {
   // Pending token; meaningful only when has_prediction is set.
   int32_t token;
 };
-
-static iree_status_t text_check_layouts(loom_serve_text_model_t* runner) {
-  const loom_cmd_program_t* prefill = &runner->stages[0].program;
-  const loom_serve_preparation_stage_t* first =
-      loom_serve_preparation_stage(runner->source.preparation, 0);
-  if (!first->parameter_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "source must declare a checkpoint domain");
-  }
-  const loom_serve_preparation_parameter_t* checkpoint = &first->parameters[0];
-  for (iree_host_size_t i = 0; i < runner->stage_count; ++i) {
-    const loom_cmd_program_t* program = &runner->stages[i].program;
-    const loom_serve_preparation_stage_t* declaration =
-        loom_serve_preparation_stage(runner->source.preparation, i);
-    const uint32_t binding_count =
-        program->requirements.rebindable_binding_count;
-    const uint32_t roots = program->requirements.fixed_buffer_count;
-    if (program->parameter_roots.count != roots ||
-        declaration->parameter_count != roots || binding_count < 1 ||
-        binding_count > 8 ||
-        (program->requirements.transient.binding_index != UINT32_MAX &&
-         program->requirements.transient.binding_index != binding_count - 1) ||
-        program->requirements.launch_counts.required_byte_length != 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "stage does not match the token runner bindings");
-    }
-    for (uint32_t root = 0; root < roots; ++root) {
-      const loom_serve_preparation_parameter_t* parameter =
-          &declaration->parameters[root];
-      if (parameter->binding != root ||
-          loom_cmd_program_parameter_root_at(program, root)
-                  .fixed_buffer_index != root ||
-          !iree_string_view_equal(parameter->path, checkpoint->path) ||
-          !iree_string_view_equal(parameter->policy, checkpoint->policy)) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "stages must declare the same checkpoint domain");
-      }
-    }
-    if (i >= runner->source.shared_stage_count) {
-      continue;
-    }
-    const bool has_workspace =
-        program->requirements.transient.required_byte_length != 0;
-    if (roots != 1 || binding_count - has_workspace != TEXT_BINDING_COUNT) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "shared stages must implement the target bindings");
-    }
-    if (prefill->parameters.count != program->parameters.count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "stage parameter counts differ");
-    }
-    for (uint32_t i = 0; i < prefill->parameters.count; ++i) {
-      const loom_cmd_program_parameter_t lhs =
-          loom_cmd_program_parameter_at(prefill, i);
-      const loom_cmd_program_parameter_t rhs =
-          loom_cmd_program_parameter_at(program, i);
-      if (!iree_string_view_equal(lhs.key, rhs.key) ||
-          lhs.fixed_buffer_index != rhs.fixed_buffer_index ||
-          lhs.byte_offset != rhs.byte_offset ||
-          lhs.byte_length != rhs.byte_length ||
-          lhs.minimum_alignment != rhs.minimum_alignment) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "stage parameter placement %u differs", i);
-      }
-    }
-  }
-  return iree_ok_status();
-}
-
-// Weight placement and preparation are cold model-wide work. Session rows
-// never own weights and every compiled shape retains views of this residency.
-static iree_status_t text_bind_weights(loom_serve_text_model_t* model) {
-  iree_host_size_t root_count = 0;
-  for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
-    root_count += model->stages[i].program.parameter_roots.count;
-  }
-  loom_serve_weight_root_t* roots = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      model->allocator, root_count, sizeof(*roots), (void**)&roots));
-  iree_host_size_t root_index = 0;
-  for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
-    const loom_cmd_program_t* program = &model->stages[i].program;
-    for (uint32_t r = 0; r < program->parameter_roots.count; ++r) {
-      const loom_cmd_program_parameter_root_t root =
-          loom_cmd_program_parameter_root_at(program, r);
-      roots[root_index++] = (loom_serve_weight_root_t){
-          .program = program,
-          .root = root,
-          .buffer = &model->stages[i].fixed_buffers[root.fixed_buffer_index],
-      };
-    }
-  }
-  iree_status_t status = loom_serve_weights_create(
-      model->device, model->transfer, model->dispatch,
-      loom_serve_device_storage_pool(model->device_owner),
-      loom_serve_device_memory_pool(model->device_owner),
-      model->source.shared_stage_count, root_count, roots, &model->weights,
-      model->allocator);
-  iree_allocator_free(model->allocator, roots);
-  return status;
-}
 
 static iree_status_t text_create_program(loom_serve_text_model_t* runner) {
   // Both dense padding and semantic packed inputs belong to the single model
@@ -459,7 +345,7 @@ struct loom_serve_text_load_t {
   loom_serve_text_options_t options;
   // Serialized owner-only phase; callbacks publish results, never transition.
   text_load_phase_t phase;
-  // Next native stage; the previous slot receives the compilation result.
+  // Next stage or parameter domain within the current load phase.
   iree_host_size_t index;
   // Owned parameter policy path retained through asynchronous preparation.
   char* policy_path;
@@ -560,26 +446,12 @@ static void text_load_ready(void* user_data, iree_async_operation_t* operation,
 }
 
 static iree_status_t text_load_bind(loom_serve_text_model_t* model) {
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       i < model->stage_count && iree_status_is_ok(status); ++i) {
-    text_stage_t* stage = &model->stages[i];
-    stage->program = *loom_serve_jit_stage_program(stage->compiled);
-    const uint32_t count = stage->program.requirements.fixed_buffer_count;
-    if (count) {
-      status = iree_allocator_malloc_array(model->allocator, count,
-                                           sizeof(*stage->fixed_buffers),
-                                           (void**)&stage->fixed_buffers);
-      if (iree_status_is_ok(status)) {
-        stage->fixed_buffer_count = count;
-      }
-    }
-  }
-  IREE_RETURN_IF_ERROR(status);
-  IREE_RETURN_IF_ERROR(text_check_layouts(model));
   IREE_RETURN_IF_ERROR(loom_serve_device_create_execution(model->device_owner,
                                                           &model->execution));
-  return text_bind_weights(model);
+  return loom_serve_text_stages_bind(
+      model->device_owner, model->source.preparation,
+      model->source.shared_stage_count, model->stage_count, model->stages,
+      &model->parameters, model->allocator);
 }
 
 static iree_status_t text_load_link(loom_serve_text_load_t* load) {
@@ -587,10 +459,11 @@ static iree_status_t text_load_link(loom_serve_text_load_t* load) {
   iree_status_t status = iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_serve_residency_create(
       loom_serve_device_residency_cache(model->device_owner), model->execution,
-      1, &model->weights, &model->residency, model->allocator));
+      model->parameters.count, model->parameters.plans, &model->residency,
+      model->allocator));
   for (iree_host_size_t i = 0;
        i < model->stage_count && iree_status_is_ok(status); ++i) {
-    text_stage_t* stage = &model->stages[i];
+    loom_serve_text_stage_t* stage = &model->stages[i];
     status = loom_serve_jit_stage_record(
         stage->compiled, iree_hal_queue_family(model->dispatch),
         model->command_mode, NULL, stage->fixed_buffers, &stage->command);
@@ -716,6 +589,8 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
   iree_status_t status = load->event.status;
   load->event.status = iree_ok_status();
   iree_slim_mutex_unlock(&load->event.mutex);
+  iree_allocator_free(load->allocator, load->policy_path);
+  load->policy_path = NULL;
   if (iree_status_is_ok(status) && load->cancelled) {
     status = iree_make_status(IREE_STATUS_CANCELLED, "model load cancelled");
   }
@@ -752,26 +627,30 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
           submitted = iree_status_is_ok(status);
         } else {
           status = text_load_bind(model);
+          load->index = 0;
           load->phase = TEXT_LOAD_WEIGHTS;
         }
         break;
-      case TEXT_LOAD_WEIGHTS: {
-        const loom_serve_preparation_parameter_t* checkpoint =
-            &loom_serve_preparation_stage(model->source.preparation, 0)
-                 ->parameters[0];
-        status = iree_file_path_join(load->options.source_directory,
-                                     checkpoint->policy, load->allocator,
-                                     &load->policy_path);
-        if (iree_status_is_ok(status)) {
-          status = loom_serve_weights_prepare_async(
-              model->weights, host, model->jit, model->command_mode,
-              checkpoint->path, iree_make_cstring_view(load->policy_path),
-              text_load_complete, load);
-          submitted = iree_status_is_ok(status);
+      case TEXT_LOAD_WEIGHTS:
+        if (load->index < model->parameters.count) {
+          const iree_host_size_t index = load->index++;
+          const loom_serve_preparation_parameter_t* checkpoint =
+              model->parameters.sources[index];
+          status = iree_file_path_join(load->options.source_directory,
+                                       checkpoint->policy, load->allocator,
+                                       &load->policy_path);
+          if (iree_status_is_ok(status)) {
+            status = loom_serve_weights_prepare_async(
+                model->parameters.plans[index], host, model->jit,
+                model->command_mode, checkpoint->path,
+                iree_make_cstring_view(load->policy_path), text_load_complete,
+                load);
+            submitted = iree_status_is_ok(status);
+          }
+        } else {
+          load->phase = TEXT_LOAD_LINK;
         }
-        load->phase = TEXT_LOAD_LINK;
         break;
-      }
       case TEXT_LOAD_LINK:
         status = text_load_link(load);
         submitted = iree_status_is_ok(status);
@@ -867,7 +746,10 @@ void loom_serve_text_model_retire(loom_serve_text_model_t* model,
     loom_serve_execution_set_retirement_observer(model->execution, wake,
                                                  user_data);
   }
-  loom_serve_weights_set_retirement_observer(model->weights, wake, user_data);
+  for (iree_host_size_t i = 0; i < model->parameters.count; ++i) {
+    loom_serve_weights_set_retirement_observer(model->parameters.plans[i], wake,
+                                               user_data);
+  }
   loom_serve_text_chat_policy_deinitialize(&model->chat_policy);
   loom_serve_program_destroy(model->program);
   model->program = NULL;
@@ -885,10 +767,15 @@ void loom_serve_text_model_retire(loom_serve_text_model_t* model,
 }
 
 bool loom_serve_text_model_is_retired(loom_serve_text_model_t* model) {
-  return !model || ((!model->execution ||
-                     loom_serve_execution_is_retired(model->execution)) &&
-                    loom_serve_weights_is_retired(model->weights) &&
-                    loom_serve_retirement_is_idle(&model->state.retirement));
+  if (!model) {
+    return true;
+  }
+  bool retired =
+      !model->execution || loom_serve_execution_is_retired(model->execution);
+  for (iree_host_size_t i = 0; i < model->parameters.count; ++i) {
+    retired &= loom_serve_weights_is_retired(model->parameters.plans[i]);
+  }
+  return retired && loom_serve_retirement_is_idle(&model->state.retirement);
 }
 
 iree_status_t loom_serve_text_model_destroy_retired(
@@ -899,8 +786,15 @@ iree_status_t loom_serve_text_model_destroy_retired(
   IREE_ASSERT(loom_serve_text_model_is_retired(model));
   loom_serve_residency_destroy(model->residency);
   model->residency = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_weights_destroy(model->weights));
-  model->weights = NULL;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < model->parameters.count && iree_status_is_ok(status); ++i) {
+    status = loom_serve_weights_destroy(model->parameters.plans[i]);
+    if (iree_status_is_ok(status)) {
+      model->parameters.plans[i] = NULL;
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(loom_serve_text_state_deinitialize(&model->state));
   for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
     loom_serve_jit_stage_destroy(model->stages[i].compiled);
@@ -908,6 +802,8 @@ iree_status_t loom_serve_text_model_destroy_retired(
   }
   iree_allocator_free(model->allocator, model->shapes);
   iree_allocator_free(model->allocator, model->stages);
+  iree_allocator_free(model->allocator, model->parameters.plans);
+  iree_allocator_free(model->allocator, model->parameters.sources);
   loom_serve_jit_destroy(model->jit);
   for (iree_host_size_t i = 0; i < TEXT_HOST_BUFFER_COUNT; ++i) {
     iree_vm_buffer_release(model->host.buffers[i]);
@@ -928,7 +824,9 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   iree_status_t status = model->execution
                              ? loom_serve_execution_drain(model->execution)
                              : iree_ok_status();
-  loom_serve_weights_await_retirement(model->weights);
+  for (iree_host_size_t i = 0; i < model->parameters.count; ++i) {
+    loom_serve_weights_await_retirement(model->parameters.plans[i]);
+  }
   loom_serve_retirement_await(&model->state.retirement);
   return iree_status_join(status, loom_serve_text_model_destroy_retired(model));
 }
@@ -950,12 +848,12 @@ loom_serve_memory_statistics_t loom_serve_text_model_memory_statistics(
 
 loom_serve_memory_statistics_t loom_serve_text_model_weight_statistics(
     const loom_serve_text_model_t* model) {
-  return loom_serve_weights_statistics(model->weights);
+  return loom_serve_residency_statistics(model->residency);
 }
 
 loom_serve_weight_activity_t loom_serve_text_model_weight_activity(
     const loom_serve_text_model_t* model) {
-  return loom_serve_weights_activity(model->weights);
+  return loom_serve_residency_activity(model->residency);
 }
 
 loom_serve_residency_t* loom_serve_text_model_residency(

@@ -73,6 +73,9 @@ typedef struct loom_serve_text_options_t {
   // Requires pooled execution. Source reserves reader/writer slot headroom;
   // elastic backing commits only used ranges, fixed backing reserves it all.
   iree_host_size_t checkpoint_capacity;
+  // Opaque bootstrap JSON object interpreted by source; empty means {}.
+  // Borrowed through load completion, independently of per-request options.
+  iree_string_view_t options;
 } loom_serve_text_options_t;
 
 enum loom_serve_text_span_flag_bits_e {

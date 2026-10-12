@@ -91,7 +91,8 @@ iree_status_t loom_serve_text_state_allocate(
         i < 2 || (i < 6 ? iree_any_bit_set(state->flags,
                                            LOOM_SERVE_TEXT_STATE_FLAG_PACKED)
                         : iree_any_bit_set(state->flags,
-                                           LOOM_SERVE_TEXT_STATE_FLAG_DRAFT));
+                                           LOOM_SERVE_TEXT_STATE_FLAG_DRAFT) &&
+                              (i != 6 || state->storage.carry_stride));
     if ((length != 0) != required || clear_length > length ||
         length > INT64_MAX || !alignment ||
         !iree_is_power_of_two_uint64(alignment)) {
@@ -653,8 +654,7 @@ static iree_status_t text_row_initialize(loom_serve_text_state_row_t* row) {
   uint64_t completion = 0;
   iree_status_t status = loom_serve_execution_transfer(
       state->execution, IREE_ARRAYSIZE(fills), fills, &completion);
-  if (iree_status_is_ok(status) &&
-      iree_any_bit_set(row->owner->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)) {
+  if (iree_status_is_ok(status) && row->owner->storage.carry_stride) {
     const iree_hal_transfer_operation_t clear_carry = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
         .fill = {.target_buffer = row->owner->draft.carry,
@@ -833,7 +833,7 @@ iree_status_t loom_serve_text_state_row_try_resume(
 static iree_status_t text_copy_carry(loom_serve_text_state_t* state,
                                      iree_host_size_t source,
                                      iree_host_size_t target) {
-  if (!iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)) {
+  if (!state->storage.carry_stride) {
     return iree_ok_status();
   }
   const iree_hal_transfer_operation_t copy = {

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "experimental/loom_serve/runtime/input.h"
+#include "experimental/loom_serve/runtime/json.h"
 #include "experimental/loom_serve/runtime/program.h"
 #include "iree/base/internal/path.h"
 #include "iree/io/file_contents.h"
@@ -79,6 +80,16 @@ static iree_status_t text_prepare(loom_serve_text_source_t* source,
                                   options->weights_path.size),
         1, allocator, &weights);
   }
+  iree_vm_buffer_t* source_options = NULL;
+  if (iree_status_is_ok(status)) {
+    const iree_string_view_t json = iree_string_view_is_empty(options->options)
+                                        ? IREE_SV("{}")
+                                        : options->options;
+    status =
+        iree_vm_buffer_clone(IREE_VM_BUFFER_ACCESS_FLAG_READ,
+                             iree_make_const_byte_span(json.data, json.size), 1,
+                             allocator, &source_options);
+  }
   iree_vm_variant_t arguments[] = {
       iree_vm_variant_from_i64((int64_t)options->prefill_capacity),
       iree_vm_variant_from_i64((int64_t)options->context_capacity),
@@ -89,19 +100,24 @@ static iree_status_t text_prepare(loom_serve_text_source_t* source,
       iree_vm_buffer_variant_from_ptr_move(&source->vm_types, &shapes),
       iree_vm_variant_from_i64((int64_t)options->epoch_count),
       iree_vm_buffer_variant_from_ptr_move(&source->vm_types, &weights),
+      iree_vm_buffer_variant_from_ptr_move(&source->vm_types, &source_options),
   };
   iree_vm_variant_t results[4 + LOOM_SERVE_TEXT_STORAGE_RESULT_COUNT] = {0};
-  iree_vm_module_t* input = NULL;
+  iree_vm_module_t* modules[2] = {0};
   if (iree_status_is_ok(status)) {
-    status = loom_serve_input_module_create(source->environment, NULL, &input,
-                                            allocator);
+    status = loom_serve_input_module_create(source->environment, NULL,
+                                            &modules[0], allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_json_module_create(source->environment, &modules[1],
+                                           allocator);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_preparation_create(
         source->environment, iree_make_cstring_view(path), IREE_SV("prepare"),
         iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
-        (iree_vm_module_span_t){&input, 1}, &source->compilation,
+        iree_vm_module_span_from_array(modules), &source->compilation,
         &source->preparation, allocator);
   }
   int64_t prefill_capacity = 0;
@@ -160,7 +176,7 @@ static iree_status_t text_prepare(loom_serve_text_source_t* source,
     const uint64_t carry_bytes = iree_unaligned_load_le_u64(
         storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + 6 * 24);
     if (storage->recurrent.capacity < slots ||
-        (options->draft_depth &&
+        (storage->carry_stride &&
          options->row_count + options->checkpoint_capacity >
              carry_bytes / storage->carry_stride)) {
       status = iree_make_status(
@@ -176,7 +192,8 @@ static iree_status_t text_prepare(loom_serve_text_source_t* source,
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
-  iree_vm_module_release(input);
+  iree_vm_module_release(modules[1]);
+  iree_vm_module_release(modules[0]);
   iree_allocator_free(allocator, path);
   return status;
 }

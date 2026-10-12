@@ -73,11 +73,13 @@ loom_cc_library(
     srcs = [
         "model.c",
         "source.c",
+        "stages.c",
         "state.c",
     ],
     hdrs = [
         "model.h",
         "source.h",
+        "stages.h",
         "state.h",
     ],
     target_compatible_with = loom_config_compatible_with([

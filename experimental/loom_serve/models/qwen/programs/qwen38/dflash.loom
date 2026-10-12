@@ -17,7 +17,7 @@ kernel.decl @qwen38_dflash_block_prepare(%tokens: index, %spans: index) launch(%
 kernel.decl @qwen38_dflash_context_prepare(%tokens: index, %spans: index) launch(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %key: buffer, %value: buffer, %weight: buffer, %cache: buffer)
 kernel.decl @qwen38_dflash_attention(%tokens: index, %spans: index) launch(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %block_cache: buffer, %context: buffer, %output: buffer)
 
-command.program.def @qwen38_dflash_layer(%tokens: index, %spans: index, %layer: index, %layer_origin: offset) launch(%parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %residual: buffer) where [range(%tokens, 1, 512), range(%spans, 1, 64), range(%layer, 0, 4)] {
+command.program.def @qwen38_dflash_layer(%tokens: index, %spans: index, %layer: index, %layer_origin: offset) launch(%parameters: buffer, %context_parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %residual: buffer) where [range(%tokens, 1, 512), range(%spans, 1, 64), range(%layer, 0, 4)] {
   %sixty_five = index.constant 65 : index
   %narrow = index.cmp ult, %tokens, %sixty_five : index
   %hidden = index.constant 5120 : index
@@ -40,10 +40,10 @@ command.program.def @qwen38_dflash_layer(%tokens: index, %spans: index, %layer: 
   %attention_conv = command.parameter %parameters, "blk.{}.attn_conv_proj.weight"[%layer] : view<3686400xi8>
   %attention_base = command.parameter %parameters, "blk.{}.attn_conv_base"[%layer] : view<20480xf32>
   %query_weight = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<11796480xi8>
-  %key_weight = command.parameter %parameters, "blk.{}.attn_k.weight"[%layer] : view<2949120xi8>
-  %value_weight = command.parameter %parameters, "blk.{}.attn_v.weight"[%layer] : view<[%value_bytes]xi8>
+  %key_weight = command.parameter %context_parameters, "blk.{}.attn_k.weight"[%layer] : view<2949120xi8>
+  %value_weight = command.parameter %context_parameters, "blk.{}.attn_v.weight"[%layer] : view<[%value_bytes]xi8>
   %query_norm = command.parameter %parameters, "blk.{}.attn_q_norm.weight"[%layer] : view<128xf32>
-  %key_norm = command.parameter %parameters, "blk.{}.attn_k_norm.weight"[%layer] : view<128xf32>
+  %key_norm = command.parameter %context_parameters, "blk.{}.attn_k_norm.weight"[%layer] : view<128xf32>
   %attention_output = command.parameter %parameters, "blk.{}.attn_output.weight"[%layer] : view<11796480xi8>
   %ffn_norm = command.parameter %parameters, "blk.{}.ffn_norm.weight"[%layer] : view<5120xf32>
   %ffn_conv = command.parameter %parameters, "blk.{}.ffn_conv_proj.weight"[%layer] : view<3686400xi8>
@@ -161,7 +161,7 @@ command.program.def @qwen38_dflash_layer(%tokens: index, %spans: index, %layer: 
 
 // The embedding is private proposal storage, updated in place across layers.
 // Output normalization remains separate from that residual stream.
-command.program.def public @qwen38_dflash_transform() launch(%parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %embedding: buffer, %normalized: buffer) {
+command.program.def public @qwen38_dflash_transform() launch(%parameters: buffer, %context_parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %embedding: buffer, %normalized: buffer) {
   %spans = config.get @runner.qwen38.span_capacity : index
   %eight = index.constant 8 : index
   %tokens = index.mul %spans, %eight : index
@@ -176,7 +176,7 @@ command.program.def public @qwen38_dflash_transform() launch(%parameters: buffer
   %layer_bytes = index.scale %storage, %token_bytes : index, offset -> offset
   scf.for %layer = [%zero to %five step %one] unroll {
     %layer_origin = index.scale %layer, %layer_bytes : index, offset -> offset
-    command.program.launch @qwen38_dflash_layer[%tokens, %spans, %layer, %layer_origin](%parameters, %epoch, %rows, %context, %embedding) : [index, index, index, offset](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @qwen38_dflash_layer[%tokens, %spans, %layer, %layer_origin](%parameters, %context_parameters, %epoch, %rows, %context, %embedding) : [index, index, index, offset](buffer, buffer, buffer, buffer, buffer, buffer)
   }
   %epsilon = scalar.constant 0.000001 : f32
   %weight = command.parameter %parameters, "output_norm.weight" : view<5120xf32>

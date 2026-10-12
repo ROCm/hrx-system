@@ -1,4 +1,5 @@
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
@@ -25,7 +26,7 @@ func.def @allocation(%records: buffer, %slot: index, %bytes: i64, %clear: i64) {
 
 // One shared command handles every host token/span bucket. The cold program
 // owns storage geometry; the host owns physical page IDs and recurrent slots.
-func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft_depth: i32, %shapes: buffer, %shape_count: i64, %weights: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
+func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft_depth: i32, %shapes: buffer, %shape_count: i64, %weights: buffer, %options: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -38,7 +39,13 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %packed = scalar.cmpi ne, %shape_count, %zero64 : i64
   %no_draft = scalar.cmpi eq, %draft_depth, %zero32 : i32
   %has_epochs = scalar.andi %pooled, %packed : i1
-  %supported = scalar.andi %has_epochs, %no_draft : i1
+  %supported_mode = scalar.andi %has_epochs, %no_draft : i1
+  %fields, %type, %field_count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
+  %object_type = scalar.constant 2 : i32
+  %object = scalar.cmpi eq, %type, %object_type : i32
+  %empty_options = scalar.cmpi eq, %field_count, %zero64 : i64
+  %valid_options = scalar.andi %object, %empty_options : i1
+  %supported = scalar.andi %supported_mode, %valid_options : i1
   %supported32 = scalar.extui %supported : i1 to i32
   %error = global.load @unsupported : buffer
   func.call @require(%supported32, %error) : (i32, buffer) -> ()
@@ -146,7 +153,7 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %geometry_view = buffer.view %geometry[%origin] : buffer -> view<13xi64>
   view.store %four64, %geometry_view[0] : i64, view<13xi64>
   view.store %map_origin, %geometry_view[1] : i64, view<13xi64>
-  view.store %four64, %geometry_view[2] : i64, view<13xi64>
+  view.store %zero64, %geometry_view[2] : i64, view<13xi64>
   view.store %four64, %geometry_view[3] : i64, view<13xi64>
   view.store %private_rows, %geometry_view[4] : i64, view<13xi64>
   view.store %slot_stride, %geometry_view[5] : i64, view<13xi64>

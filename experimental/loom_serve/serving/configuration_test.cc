@@ -120,6 +120,18 @@ TEST(ConfigurationTest, DraftDepthIsModelPolicyWithinNativePacketCapacity) {
   }
 }
 
+TEST(ConfigurationTest, TextBootstrapOptionsRemainOpaqueSourcePolicy) {
+  const std::string json =
+      Model("draft", R"(,"options":{"draft_weights":"/models/draft.gguf"})");
+  loom_serve_model_configuration_t model;
+  IREE_ASSERT_OK(loom_serve_model_configuration_initialize(
+      iree_make_string_view(json.data(), json.size()), &model,
+      iree_allocator_system()));
+  EXPECT_EQ(std::string(model.options.data, model.options.size),
+            R"({"draft_weights":"/models/draft.gguf"})");
+  loom_serve_model_configuration_deinitialize(&model);
+}
+
 TEST(ConfigurationTest, TextAdmissionBudgetIsIndependentOfRowCount) {
   for (int budget : {0, 1, 16}) {
     const auto json = Model("bounded", ",\"rows\":2,\"admission_overtakes\":" +
@@ -292,7 +304,7 @@ TEST(ConfigurationTest,
        "{\"models\":[" + Model("x", R"(,"typo":true)") + "]}",
        "{\"models\":[" + Model("x", R"(,"width":384)") + "]}",
        "{\"models\":[" + Model("x", R"(,"command_quantum":1)") + "]}",
-       "{\"models\":[" + Model("x", R"(,"options":{})") + "]}",
+       "{\"models\":[" + Model("x", R"(,"options":[])") + "]}",
        "{\"models\":[" + Image("x", R"(,"options":[])") + "]}",
        "{\"models\":[" + Image("x", R"(,"weights":"file.gguf")") + "]}",
        "{\"models\":[" + Image("x", R"(,"rows":1)") + "]}",

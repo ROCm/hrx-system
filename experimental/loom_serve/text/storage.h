@@ -48,7 +48,7 @@ typedef struct loom_serve_text_storage_t {
   iree_device_size_t map_origin;
   // Maximum logical blocks per row, independent of physical capacity.
   iree_host_size_t blocks_per_row;
-  // Byte extent of one row's retained draft hidden state.
+  // Byte extent of one row's retained draft hidden state; zero omits carry.
   iree_device_size_t carry_stride;
   // Split between first and second draft feedback banks, in bytes.
   iree_device_size_t feedback_split;

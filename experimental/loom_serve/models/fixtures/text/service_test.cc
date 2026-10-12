@@ -1202,6 +1202,12 @@ TEST_P(SourceTextServiceTest,
                                                      &unsupported, allocator_));
   EXPECT_EQ(unsupported, nullptr);
   options.draft_depth = 0;
+  options.options = IREE_SV("{\"unknown\":true}");
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_model_create(device_, &options,
+                                                     &unsupported, allocator_));
+  EXPECT_EQ(unsupported, nullptr);
+  options.options = IREE_SV("{}");
   options.pool_capacity = 0;
   options.checkpoint_capacity = 0;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

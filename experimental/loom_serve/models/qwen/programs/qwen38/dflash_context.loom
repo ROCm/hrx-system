@@ -12,7 +12,9 @@ kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_x128(%tokens: index, %inputs: i
 kernel.decl @qwen38_rmsnorm_f32_prefill(%tokens: index) launch(%capacity: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_dflash_context_prepare(%tokens: index, %spans: index) launch(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %key: buffer, %value: buffer, %weight: buffer, %cache: buffer)
 
-command.program.def public @qwen38_dflash_warm() launch(%parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %cache: buffer) {
+// Context projections have the same parameter root in warm and proposal
+// programs. The feature encoder is separate because only warming uses it.
+command.program.def public @qwen38_dflash_warm() launch(%parameters: buffer, %context_parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %cache: buffer) {
   %tokens = config.get @runner.qwen38.prefill_token_count : index
   %spans = config.get @runner.qwen38.span_capacity : index
   %logical = config.get @qwen38.attention.cache_capacity : index
@@ -57,9 +59,9 @@ command.program.def public @qwen38_dflash_warm() launch(%parameters: buffer, %re
     %q4_bytes = index.constant 2949120 : index
     %q6_bytes = index.constant 4300800 : index
     %value_bytes = scf.select %q6, %q6_bytes, %q4_bytes : index
-    %key_weight = command.parameter %parameters, "blk.{}.attn_k.weight"[%layer] : view<2949120xi8>
-    %value_weight = command.parameter %parameters, "blk.{}.attn_v.weight"[%layer] : view<[%value_bytes]xi8>
-    %key_norm = command.parameter %parameters, "blk.{}.attn_k_norm.weight"[%layer] : view<128xf32>
+    %key_weight = command.parameter %context_parameters, "blk.{}.attn_k.weight"[%layer] : view<2949120xi8>
+    %value_weight = command.parameter %context_parameters, "blk.{}.attn_v.weight"[%layer] : view<[%value_bytes]xi8>
+    %key_norm = command.parameter %context_parameters, "blk.{}.attn_k_norm.weight"[%layer] : view<128xf32>
     command.concurrent {
       scf.if %narrow {
         kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %normalized, %key_weight, %key) : [index, index, index](buffer, index, index, buffer, view<2949120xi8>, buffer)

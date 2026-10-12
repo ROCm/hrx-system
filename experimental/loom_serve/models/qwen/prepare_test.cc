@@ -11,6 +11,7 @@
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/host.h"
 #include "experimental/loom_serve/runtime/input.h"
+#include "experimental/loom_serve/runtime/json.h"
 #include "experimental/loom_serve/runtime/preparation.h"
 #include "experimental/loom_serve/text/model.h"
 #include "experimental/loom_serve/text/schedule.h"
@@ -39,20 +40,24 @@ class PrepareTest : public ::testing::Test {
         &types));
     IREE_ASSERT_OK(loom_serve_input_module_create(environment, nullptr, &input,
                                                   allocator));
+    IREE_ASSERT_OK(
+        loom_serve_json_module_create(environment, &json, allocator));
   }
 
   void TearDown() override {
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
     loom_serve_preparation_destroy(preparation);
     iree_vm_module_release(input);
+    iree_vm_module_release(json);
     iree_vm_environment_free(environment);
   }
 
-  void Prepare(iree_host_size_t rows, iree_host_size_t pool, bool mtp,
+  void Prepare(iree_host_size_t rows, iree_host_size_t pool, uint32_t depth,
                const std::vector<loom_serve_packing_shape_t>& shapes,
                iree_host_size_t context = 16384, iree_host_size_t prefill = 512,
                iree_host_size_t pins = 0,
-               iree_status_code_t expected = IREE_STATUS_OK) {
+               iree_status_code_t expected = IREE_STATUS_OK,
+               const std::string& options = "{}") {
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
     loom_serve_preparation_destroy(preparation);
     preparation = nullptr;
@@ -74,28 +79,36 @@ class PrepareTest : public ::testing::Test {
         IREE_VM_BUFFER_ACCESS_FLAG_READ,
         iree_make_const_byte_span(weight_path.data, weight_path.size), 1,
         allocator, &weights));
+    iree_vm_buffer_t* source_options = nullptr;
+    IREE_ASSERT_OK(iree_vm_buffer_clone(
+        IREE_VM_BUFFER_ACCESS_FLAG_READ,
+        iree_make_const_byte_span(options.data(), options.size()), 1, allocator,
+        &source_options));
     iree_vm_variant_t arguments[] = {
         iree_vm_variant_from_i64(prefill),
         iree_vm_variant_from_i64(context),
         iree_vm_variant_from_i64(pool),
         iree_vm_variant_from_i64(rows),
         iree_vm_variant_from_i64(pins),
-        iree_vm_variant_from_i32(mtp ? 3 : 0),
+        iree_vm_variant_from_i32(depth),
         iree_vm_buffer_variant_from_ptr_move(&types, &shape_buffer),
         iree_vm_variant_from_i64(shapes.size()),
         iree_vm_buffer_variant_from_ptr_move(&types, &weights),
+        iree_vm_buffer_variant_from_ptr_move(&types, &source_options),
     };
+    iree_vm_module_t* libraries[] = {input, json};
     iree_status_t status = loom_serve_preparation_create(
         environment, iree_make_cstring_view(FLAG_prepare_source),
         IREE_SV("prepare"), iree_vm_variant_span_from_array(arguments),
-        iree_vm_variant_span_from_array(results), {&input, 1}, &compilation,
-        &preparation, allocator);
+        iree_vm_variant_span_from_array(results),
+        iree_vm_module_span_from_array(libraries), &compilation, &preparation,
+        allocator);
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
     IREE_ASSERT_STATUS_IS(expected, status);
   }
 
   void CheckStorage(uint64_t rows, uint64_t context, uint64_t pool, bool packed,
-                    bool mtp, uint64_t pins = 0) {
+                    bool mtp, uint64_t pins = 0, bool dflash = false) {
     // These address equations are the preceding production layout. Source
     // descriptors must preserve both dense and pooled kernel bindings.
     const uint64_t attention = pool ? 0 : context * 65536;
@@ -103,22 +116,33 @@ class PrepareTest : public ::testing::Test {
     const uint64_t slots = pins ? 2 * rows + pins : rows;
     const uint64_t row_bytes = slots * stride;
     const uint64_t table = pool ? 2048 + rows * ((context + 63) / 64) * 4 : 512;
+    const bool drafting = mtp || dflash;
+    const uint64_t residual_bytes = dflash ? 62914560 : 10485760;
+    const uint64_t draft_bytes = dflash ? 20480 : 4096;
     const uint64_t lengths[] = {
-        10485760,
+        residual_bytes,
         row_bytes + pool * 65536,
         packed ? 4704u : 0,
         packed ? table : 0,
         packed ? 4096u : 0,
         packed ? 64u : 0,
         mtp ? (rows + pins) * 20480 : 0,
-        mtp ? 1548u : 0,
-        mtp ? 1344u : 0,
-        mtp ? (pool ? pool : rows * context) * 4096 : 0,
-        mtp ? table : 0,
+        drafting ? 1548u : 0,
+        drafting ? 1344u : 0,
+        drafting ? (pool ? pool : rows * context) * draft_bytes : 0,
+        drafting ? table : 0,
     };
-    const uint64_t clear[] = {
-        10485760, row_bytes, 0, 0, 0, 0, mtp ? (rows + pins) * 20480 : 0,
-        0,        0,         0, 0};
+    const uint64_t clear[] = {residual_bytes,
+                              row_bytes,
+                              0,
+                              0,
+                              0,
+                              0,
+                              mtp ? (rows + pins) * 20480 : 0,
+                              0,
+                              0,
+                              0,
+                              0};
     std::vector<std::vector<uint64_t>> expected(5);
     for (size_t i = 0; i < IREE_ARRAYSIZE(lengths); ++i) {
       expected[0].insert(expected[0].end(), {lengths[i], 256, clear[i]});
@@ -134,14 +158,16 @@ class PrepareTest : public ::testing::Test {
       expected[2][row * 4] = base + 256;
       expected[2][row * 4 + 1] = base + 256;
       expected[2][row * 4 + 2] = pool ? row_bytes : base + 156893440;
-      expected[3][row * 4 + 2] = pool ? 0 : row * context * 4096;
+      expected[3][row * 4 + 2] = pool ? 0 : row * context * draft_bytes;
     }
-    expected[4] = {64, 2048, 20480, 640, 256, stride, 156893184, slots};
+    expected[4] = {64,  2048,   mtp ? 20480u : 0u, 640,
+                   256, stride, 156893184,         slots};
     if (pool) {
       expected[4].insert(expected[4].end(),
                          {1, row_bytes, 32, pool * 2048, 131072});
-      if (mtp) {
-        expected[4].insert(expected[4].end(), {9, 0, 2, pool * 2048, 131072});
+      if (drafting) {
+        expected[4].insert(expected[4].end(),
+                           {9, 0, dflash ? 10u : 2u, pool * 2048, 131072});
       }
     }
     for (size_t i = 0; i < expected.size(); ++i) {
@@ -170,6 +196,8 @@ class PrepareTest : public ::testing::Test {
   iree_vm_ref_types_t types = {};
   // Actual source input-validation capability; no tokenizer is needed.
   iree_vm_module_t* input = nullptr;
+  // Actual opaque bootstrap JSON parser.
+  iree_vm_module_t* json = nullptr;
   // Independently owned declarations after bootstrap teardown.
   loom_serve_preparation_t* preparation = nullptr;
   // Returned capacities, control state, terminal marker and storage records.
@@ -206,7 +234,7 @@ TEST_F(PrepareTest, DeclaresCompleteProductionCatalogAndOpaqueState) {
         shapes.resize(LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY);
         shapes.resize(loom_serve_text_default_shapes(rows, 512, shapes.data()));
       }
-      ASSERT_NO_FATAL_FAILURE(Prepare(rows, pool, mtp, shapes));
+      ASSERT_NO_FATAL_FAILURE(Prepare(rows, pool, mtp ? 3 : 0, shapes));
       ASSERT_NE(preparation, nullptr);
       CheckStorage(rows, 16384, pool, mode != 0, mtp);
       std::vector<Stage> expected = {
@@ -285,12 +313,13 @@ TEST_F(PrepareTest, DeclaresCompleteProductionCatalogAndOpaqueState) {
         IREE_ASSERT_OK(iree_vm_buffer_map_read(
             buffer, 0, iree_vm_buffer_length(buffer), &bytes));
         if (i == 2) {
-          ASSERT_EQ(bytes.data_length, 16);
+          ASSERT_EQ(bytes.data_length, 20);
           EXPECT_EQ(iree_unaligned_load_le_u32(bytes.data), 0);
           EXPECT_EQ(iree_unaligned_load_le_u32(bytes.data + 4), 1);
           EXPECT_EQ(iree_unaligned_load_le_u32(bytes.data + 8), shapes.size());
           EXPECT_EQ(iree_unaligned_load_le_u32(bytes.data + 12),
                     mtp ? shared : 0);
+          EXPECT_EQ(iree_unaligned_load_le_u32(bytes.data + 16), 0);
         } else {
           EXPECT_EQ(std::string((const char*)bytes.data, bytes.data_length),
                     "<|im_end|>");
@@ -307,9 +336,71 @@ TEST_F(PrepareTest, StoragePreservesPageBoundariesAndWideByteOrigins) {
       SCOPED_TRACE(pool);
       // The maximum logical/dense case has byte origins beyond 32 bits; the
       // tiny shared pool also proves that logical map stride is independent.
-      ASSERT_NO_FATAL_FAILURE(Prepare(16, pool, true, {{32, 16}}, context, 32));
+      ASSERT_NO_FATAL_FAILURE(Prepare(16, pool, 3, {{32, 16}}, context, 32));
       CheckStorage(16, context, pool, true, true);
     }
+  }
+}
+
+TEST_F(PrepareTest, DFlashSharesTargetRootsAndSeparatesItsCheckpoint) {
+  for (const uint64_t rows : {1u, 16u}) {
+    for (const uint64_t context : {65u, 262144u}) {
+      for (const uint64_t pool : {0u, 64u}) {
+        ASSERT_NO_FATAL_FAILURE(Prepare(
+            rows, pool, 7, {{32, rows}, {128, rows}}, context, 32, 1,
+            IREE_STATUS_OK, R"({"draft_weights":"/models/draft\u002egguf"})"));
+        CheckStorage(rows, context, pool, true, false, 1, true);
+        ASSERT_EQ(loom_serve_preparation_stage_count(preparation), 10);
+        for (size_t i = 0; i < 10; ++i) {
+          const auto* stage = loom_serve_preparation_stage(preparation, i);
+          for (size_t root = 0; root < stage->parameter_count; ++root) {
+            const bool draft = i == 5 || i == 6 || (i == 4 && root >= 2);
+            EXPECT_EQ(String(stage->parameters[root].path),
+                      draft ? "/models/draft.gguf" : "/models/target.gguf");
+            EXPECT_EQ(String(stage->parameters[root].policy),
+                      draft ? "dflash_weights.loom" : "weights.loom");
+          }
+          std::map<std::string, std::string> config;
+          for (size_t j = 0; j < stage->config.binding_count; ++j) {
+            const auto& binding = stage->config.bindings[j];
+            config.emplace(std::string(binding.key.data, binding.key.size),
+                           std::string(binding.value.data, binding.value.size));
+          }
+          if (i == 2 || i == 3 || i == 7 || i == 8) {
+            EXPECT_EQ(config["runner.qwen38.capture_features"], "1");
+          }
+          if (i == 7 || i == 8) {
+            EXPECT_EQ(config["runner.qwen38.verification_width"], "8");
+          }
+        }
+        const auto* proposal = loom_serve_preparation_stage(preparation, 4);
+        EXPECT_EQ(String(proposal->root), "qwen38_dflash_propose");
+        EXPECT_EQ(proposal->parameter_count, 4);
+        EXPECT_EQ(String(loom_serve_preparation_stage(preparation, 5)->root),
+                  "qwen38_dflash_warm");
+        EXPECT_EQ(loom_serve_preparation_stage(preparation, 5)->parameter_count,
+                  2);
+      }
+    }
+  }
+}
+
+TEST_F(PrepareTest, RejectsUnsupportedDraftOptionsBeforeLoadingWeights) {
+  for (uint32_t depth : {1u, 2u, 4u, 5u, 6u, 8u}) {
+    ASSERT_NO_FATAL_FAILURE(Prepare(1, 64, depth, {{32, 1}}, 128, 32, 0,
+                                    IREE_STATUS_INVALID_ARGUMENT));
+  }
+  for (const std::string options :
+       {"{}", "[]", R"({"draft_weights":""})", R"({"draft_weights":123})",
+        R"({"unknown":"draft.gguf"})",
+        R"({"draft_weights":"a","draft_weights":"b"})"}) {
+    ASSERT_NO_FATAL_FAILURE(Prepare(1, 64, 7, {{32, 1}}, 128, 32, 0,
+                                    IREE_STATUS_INVALID_ARGUMENT, options));
+  }
+  for (uint32_t depth : {0u, 3u}) {
+    ASSERT_NO_FATAL_FAILURE(Prepare(1, 64, depth, {{32, 1}}, 128, 32, 0,
+                                    IREE_STATUS_INVALID_ARGUMENT,
+                                    R"({"draft_weights":"draft.gguf"})"));
   }
 }
 
@@ -318,7 +409,7 @@ TEST_F(PrepareTest, CheckpointCapacityReservesIndependentSlotsAndCarry) {
     for (uint64_t pins : {1u, 3u}) {
       for (bool mtp : {false, true}) {
         ASSERT_NO_FATAL_FAILURE(
-            Prepare(rows, 65536, mtp, {{32, rows}}, 262144, 32, pins));
+            Prepare(rows, 65536, mtp ? 3 : 0, {{32, rows}}, 262144, 32, pins));
         CheckStorage(rows, 262144, 65536, true, mtp, pins);
       }
     }
@@ -329,11 +420,12 @@ TEST_F(PrepareTest, SourceRejectsTokenShapesBeyondItsPacketCapacity) {
   for (bool mtp : {false, true}) {
     for (size_t capacity : {513u, 1024u, 262144u}) {
       SCOPED_TRACE(capacity);
-      ASSERT_NO_FATAL_FAILURE(Prepare(1, 64, mtp, {{32, 1}}, 262144, capacity,
-                                      0, IREE_STATUS_INVALID_ARGUMENT));
+      ASSERT_NO_FATAL_FAILURE(Prepare(1, 64, mtp ? 3 : 0, {{32, 1}}, 262144,
+                                      capacity, 0,
+                                      IREE_STATUS_INVALID_ARGUMENT));
       EXPECT_EQ(preparation, nullptr);
-      ASSERT_NO_FATAL_FAILURE(Prepare(1, 64, mtp, {{32, 1}, {capacity, 1}},
-                                      262144, 32, 0,
+      ASSERT_NO_FATAL_FAILURE(Prepare(1, 64, mtp ? 3 : 0,
+                                      {{32, 1}, {capacity, 1}}, 262144, 32, 0,
                                       IREE_STATUS_INVALID_ARGUMENT));
       EXPECT_EQ(preparation, nullptr);
     }

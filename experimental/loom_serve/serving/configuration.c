@@ -235,10 +235,7 @@ static iree_status_t configuration_model_parse(
       {"assets", IREE_JSON_VALUE_TYPE_STRING,
        .kinds = (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
                 (1u << LOOM_SERVE_MODEL_KIND_DECISION)},
-      {"options", IREE_JSON_VALUE_TYPE_OBJECT,
-       .kinds = (1u << LOOM_SERVE_MODEL_KIND_IMAGE) |
-                (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
-                (1u << LOOM_SERVE_MODEL_KIND_DECISION)},
+      {"options", IREE_JSON_VALUE_TYPE_OBJECT},
       {"admission", IREE_JSON_VALUE_TYPE_STRING},
       {"session_cache_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
        .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
@@ -295,9 +292,6 @@ static iree_status_t configuration_model_parse(
                               "admission must be open or drained");
     }
   }
-  if (model->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
-    return configuration_text(fields, &model->text, allocator);
-  }
   const iree_string_view_t options =
       fields[20].value.data ? fields[20].value : IREE_SV("{}");
   char* data = NULL;
@@ -305,6 +299,9 @@ static iree_status_t configuration_model_parse(
       allocator, iree_make_const_byte_span(options.data, options.size),
       (void**)&data));
   model->options = iree_make_string_view(data, options.size);
+  if (model->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
+    return configuration_text(fields, &model->text, allocator);
+  }
   if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
     return configuration_image(fields, &model->image, allocator);
   }

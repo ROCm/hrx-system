@@ -1,6 +1,6 @@
 config.decl @runner.qwen38.span_capacity : %value: index where [range(%value, 1, 64)]
 command.program.decl @qwen38_output_projection_logits(%tokens: index, %origin: offset) launch(%parameters: buffer, %normalized: buffer, %logits: buffer)
-command.program.decl @qwen38_dflash_transform() launch(%parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %embedding: buffer, %normalized: buffer)
+command.program.decl @qwen38_dflash_transform() launch(%parameters: buffer, %context_parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %embedding: buffer, %normalized: buffer)
 kernel.decl @qwen38_dflash_proposal_prepare() launch(%epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %anchors: buffer, %draft_tokens: buffer, %selection: buffer)
 kernel.decl @qwen38_dflash_selection_rows(%blocks: index) launch(%blocks: index, %draft: buffer, %normalized: buffer, %output: buffer)
 kernel.decl @qwen38_dflash_proposal_publish() launch(%draft: buffer, %origins: buffer, %proposals: buffer, %target_tokens: buffer)
@@ -55,7 +55,7 @@ command.program.def public @qwen38_dflash_candidates(%spans: index) launch(%targ
 
 // The only persistent mutation is the reserved target input suffix. Every
 // draft activation, private block K/V, and selector intermediate is transient.
-command.program.def public @qwen38_dflash_propose() launch(%target_parameters: buffer, %draft_parameters: buffer, %epoch: buffer, %target_tokens: buffer, %rows: buffer, %cache: buffer) {
+command.program.def public @qwen38_dflash_propose() launch(%embedding_parameters: buffer, %head_parameters: buffer, %draft_parameters: buffer, %context_parameters: buffer, %epoch: buffer, %target_tokens: buffer, %rows: buffer, %cache: buffer) {
   %spans = config.get @runner.qwen38.span_capacity : index
   %eight = index.constant 8 : index
   %seven = index.constant 7 : index
@@ -79,12 +79,12 @@ command.program.def public @qwen38_dflash_propose() launch(%target_parameters: b
   %normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %compact = buffer.alloca<global> align(256) %selected_bytes : buffer
   %proposals = buffer.alloca<global> align(256) %proposal_bytes : buffer
-  %embedding_weight = command.parameter %target_parameters, "token_embd.weight" : view<874086400xi8>
+  %embedding_weight = command.parameter %embedding_parameters, "token_embd.weight" : view<874086400xi8>
   kernel.launch @qwen38_dflash_proposal_prepare(%epoch, %target_tokens, %draft, %mapping, %anchors, %inputs, %selection) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @qwen38_token_embedding_q5k_f32_prefill[%tokens](%inputs, %embedding_weight, %embedding) : [index](buffer, view<874086400xi8>, buffer)
-  command.program.launch @qwen38_dflash_transform(%draft_parameters, %draft, %rows, %cache, %embedding, %normalized) : (buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_dflash_transform(%draft_parameters, %context_parameters, %draft, %rows, %cache, %embedding, %normalized) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @qwen38_dflash_selection_rows[%spans](%spans, %draft, %normalized, %compact) : [index](index, buffer, buffer, buffer)
-  command.program.launch @qwen38_dflash_candidates[%spans](%target_parameters, %draft_parameters, %selection, %anchors, %compact, %proposals) : [index](buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_dflash_candidates[%spans](%head_parameters, %draft_parameters, %selection, %anchors, %compact, %proposals) : [index](buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @qwen38_dflash_proposal_publish(%draft, %mapping, %proposals, %target_tokens) : (buffer, buffer, buffer, buffer)
   command.return
 }

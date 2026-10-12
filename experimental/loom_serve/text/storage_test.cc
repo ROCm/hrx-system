@@ -124,6 +124,27 @@ TEST_F(TextStorageTest, RejectsUnrepresentablePoolGeometry) {
                             &types, results, 3, 17, 32, &storage, allocator));
 }
 
+TEST_F(TextStorageTest, DraftCacheWithoutCarryHasNoSnapshotCarryRange) {
+  iree_unaligned_store_le_u64(bytes[4].data + 16, 0);
+  IREE_ASSERT_OK(loom_serve_text_storage_initialize(&types, results, 3, 17, 32,
+                                                    &storage, allocator));
+  loom_serve_text_storage_release_payloads(&storage);
+  iree_hal_buffer_t* views[5] = {};
+  const uint32_t blocks[] = {7, 2, 5};
+  iree_host_size_t count = 0;
+  loom_serve_snapshot_range_t* ranges = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_storage_plan_snapshot(
+      &storage, 2, views, true, 3, blocks, &count, &ranges, allocator));
+  ASSERT_EQ(count, 9u);
+  for (size_t i = 0; i < count; ++i) {
+    EXPECT_EQ(ranges[i].buffer_index, i < 6 ? 1u : 9u);
+    EXPECT_EQ(ranges[i].offset, i < 6
+                                    ? 256 + (i / 3) * 4096 + blocks[i % 3] * 128
+                                    : 512 + blocks[i % 3] * 64);
+  }
+  iree_allocator_free(allocator, ranges);
+}
+
 TEST_F(TextStorageTest, IndependentEndpointOmitsRowPrivateExecutionState) {
   // Carry has its own endpoint bank beyond the three active row entries.
   iree_unaligned_store_le_u64(bytes[0].data + 6 * 24, 5 * 128);

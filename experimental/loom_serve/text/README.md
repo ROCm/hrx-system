@@ -115,7 +115,7 @@ The cold entry in `prepare.loom` is:
 
 ```text
 prepare(prefill:i64, context:i64, pool:i64, rows:i64, pins:i64, draft_depth:i32,
-        shapes:buffer, shape_count:i64, weights:buffer)
+        shapes:buffer, shape_count:i64, weights:buffer, options:buffer)
   -> (prefill_capacity:i64, shared_stage_count:i32, state:buffer,
       terminal_spelling:buffer, allocations:buffer, row_views:buffer,
       target_origins:buffer, draft_origins:buffer, geometry:buffer)
@@ -127,12 +127,19 @@ checkpoint bindings through the [preparation capability](../runtime/preparation.
 The existing `input.require` capability accepts source-specific configuration
 checks during bootstrap; tokenization is available only in the warm program.
 The first `shared_stage_count` stages have identical target parameter
-placement and six persistent bindings. All stages use one checkpoint domain,
-with at most seven explicit dynamic bindings plus private workspace when present.
+placement in one checkpoint domain and six persistent bindings. Stages have
+at most seven explicit dynamic bindings plus private workspace when present.
 The runner inserts the reflected transient binding; the model VM never receives
 it. Allocation, command execution and deallocation have explicit queue edges,
 so draft/verify/catch-up stages can reuse the same backing without host waits.
-Auxiliary roots may share existing tensors or add draft tensors.
+Auxiliary roots may share existing tensors or add draft tensors. Roots are
+grouped by the source-declared checkpoint path and preparation policy; tensor
+keys only share storage within that domain. All domains participate in one
+model residency, including admission, activation, deactivation and retirement.
+`options` is a JSON object passed through from catalog `options` or CLI
+`--model_options`; empty native options become `{}`. The source validates its
+keys and resolves any additional checkpoints using the existing `prepare`
+capabilities. These cold options are independent of request `model_options`.
 
 `state` is opaque to C and survives cold-VM teardown. The terminal spelling
 is looked up in the supplied tokenizer. The current token protocol has one
@@ -152,9 +159,11 @@ are opaque; the model source owns their record format:
 The eleven allocation slots are residual, state arena, packed metadata,
 target origins/page map, packed input IDs, ordinary selected IDs, draft carry,
 committed metadata, verification feedback, draft cache, and draft origins/page
-map. The first two are present; packed slots 2–5 exist with epoch shapes;
-draft slots 6–10 exist with drafting. Workspace size and alignment come from command
-reflection, independently of this list.
+map. The first two are present; packed slots 2–5 exist with epoch shapes.
+Draft slots 7–10 exist with drafting. Slot 6 is optional: zero carry stride
+omits retained hidden-state carry, including row initialization and snapshot
+copies. Workspace size and alignment come from command reflection,
+independently of this list.
 
 Each enabled origin payload must fit its table allocation. In pooled mode,
 the payload precedes `page_map_byte_origin`; the following row-major U32 map

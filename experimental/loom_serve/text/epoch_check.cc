@@ -56,7 +56,7 @@ struct ModelWork {
   size_t shape = 0;
   // Borrowed caller plan copied into submission-local storage before use.
   Spans spans = {};
-  // Optional caller-owned MTP limits copied before submission.
+  // Optional caller-owned verification limits copied before submission.
   const uint32_t* limits = nullptr;
   // Optional caller-owned second plan copied before submission.
   const loom_serve_text_continuation_t* continuation = nullptr;
@@ -577,15 +577,63 @@ static iree_status_t CheckActivePrefix(loom_serve_text_model_t* model,
   return iree_ok_status();
 }
 
+// These independent rows advance only through ordinary one-token target work.
+// Comparing beyond the speculative boundary also exercises committed state,
+// rather than only comparing the two invocation paths of the same verifier.
+static iree_status_t CompareGreedy(
+    ModelWork& speculative,
+    const std::array<size_t, kSpanCount>& reference_indices) {
+  for (size_t i = 0; i < kSpanCount; ++i) {
+    auto* reference =
+        loom_serve_text_model_row(speculative.model, reference_indices[i]);
+    const auto& result = speculative.results[i];
+    if (result.consumed_count != result.output_count) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "decode verifier consumed a different extent");
+    }
+    for (size_t j = 0; j < result.output_count; ++j) {
+      if (loom_serve_text_row_is_eos(reference)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "verification continued beyond target EOS");
+      }
+      IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(reference));
+      if (result.tokens[j] != loom_serve_text_row_token(reference)) {
+        return iree_make_status(
+            IREE_STATUS_DATA_LOSS,
+            "row %zu output %zu is %d; ordinary target selected %d", i, j,
+            result.tokens[j], loom_serve_text_row_token(reference));
+      }
+    }
+    const auto* actual = loom_serve_text_model_row(
+        speculative.model, speculative.spans[i].row_index);
+    if (loom_serve_text_row_position(actual) !=
+            loom_serve_text_row_position(reference) ||
+        loom_serve_text_row_token(actual) !=
+            loom_serve_text_row_token(reference) ||
+        loom_serve_text_row_is_eos(actual) !=
+            loom_serve_text_row_is_eos(reference)) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "ordinary target retained frontier differs");
+    }
+  }
+  fprintf(stdout,
+          "{\"event\":\"greedy_check\",\"spans\":%zu,\"output_tokens\":%zu}\n",
+          kSpanCount,
+          speculative.results[0].output_count +
+              speculative.results[1].output_count);
+  fflush(stdout);
+  return iree_ok_status();
+}
+
 static iree_status_t Run(loom_serve_text_model_t* model,
                          iree_allocator_t allocator,
                          iree_status_code_t* out_terminal_code) {
   *out_terminal_code = IREE_STATUS_OK;
   const iree_string_view_t prompts[] = {
-      IREE_SV(
-          "Repeat these words: amber cedar maple violet birch willow falcon."),
-      IREE_SV(
-          "Repeat these words: silver pine oak robin copper hazel sparrow."),
+      IREE_SV("List the integers from 1 to 50 in order, separated by commas, "
+              "with no other text."),
+      IREE_SV("List the integers from 51 to 100 in order, separated by commas, "
+              "with no other text."),
   };
   std::array<std::array<int32_t, kTokenCapacity>, kSpanCount> inputs = {};
   std::array<size_t, kSpanCount> counts = {};
@@ -730,6 +778,15 @@ static iree_status_t Run(loom_serve_text_model_t* model,
   }
   if (loom_serve_text_model_draft_depth(model)) {
     const uint32_t width = loom_serve_text_model_draft_depth(model) + 1;
+    const std::array<size_t, kSpanCount> greedy_indices = {3, 4};
+    for (size_t i = 0; i < kSpanCount; ++i) {
+      auto* reference = loom_serve_text_model_row(model, greedy_indices[i]);
+      IREE_RETURN_IF_ERROR(
+          loom_serve_text_row_prefill(reference, counts[i], inputs[i].data()));
+      if (i == 1) {
+        IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(reference));
+      }
+    }
     for (size_t pass = 0; pass < 2; ++pass) {
       std::array<int32_t, kSpanCount> anchors = {};
       uint32_t limits[kSpanCount] = {width, width};
@@ -769,6 +826,22 @@ static iree_status_t Run(loom_serve_text_model_t* model,
       }
       IREE_RETURN_IF_ERROR(
           Compare(pass ? "draft-continuation" : "draft", speculative));
+      IREE_RETURN_IF_ERROR(CompareGreedy(speculative, greedy_indices));
+    }
+    std::array<int32_t, kSpanCount> anchors = {};
+    ModelWork ordinary;
+    ordinary.model = model;
+    for (size_t i = 0; i < kSpanCount; ++i) {
+      anchors[i] =
+          loom_serve_text_row_token(loom_serve_text_model_row(model, kRows[i]));
+      ordinary.spans[i] = {kRows[i], 1, &anchors[i],
+                           LOOM_SERVE_TEXT_SPAN_FLAG_SELECT};
+    }
+    IREE_RETURN_IF_ERROR(Compare("post-draft-target", ordinary));
+    IREE_RETURN_IF_ERROR(CompareGreedy(ordinary, greedy_indices));
+    for (const size_t index : greedy_indices) {
+      IREE_RETURN_IF_ERROR(
+          loom_serve_text_row_reset(loom_serve_text_model_row(model, index)));
     }
   }
   for (size_t index : kRows) {

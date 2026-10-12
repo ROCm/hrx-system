@@ -157,6 +157,11 @@ def main():
     parser.add_argument("--tokenizer", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--clients", type=int, default=3)
+    parser.add_argument("--draft-depth", type=int, choices=(0, 3, 7), default=3)
+    parser.add_argument("--model-options", default="{}")
+    parser.add_argument(
+        "--pool-backing", choices=("elastic", "fixed"), default="elastic"
+    )
     arguments = parser.parse_args()
     if not 1 <= arguments.clients <= 16:
         parser.error("clients must be in [1, 16]")
@@ -170,8 +175,10 @@ def main():
         "--context_capacity=2048",
         f"--rows={arguments.clients}",
         f"--pool_capacity={arguments.clients * 2048}",
-        "--draft_depth=3",
-        "--continuation_epochs=2",
+        f"--draft_depth={arguments.draft_depth}",
+        f"--model_options={arguments.model_options}",
+        f"--pool_backing={arguments.pool_backing}",
+        f"--continuation_epochs={2 if arguments.draft_depth else 1}",
         "--port=0",
         "--heartbeat_ms=1000",
     ]

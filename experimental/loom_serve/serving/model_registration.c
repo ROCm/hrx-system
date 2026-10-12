@@ -515,8 +515,8 @@ static iree_status_t text_registration_create(
       .row_count = text->rows,
       .checkpoint_capacity =
           text->checkpoint_capacity + text->prefix_cache_capacity +
-          (text->session_cache_capacity ? text->session_cache_capacity + 1
-                                        : 0)};
+          (text->session_cache_capacity ? text->session_cache_capacity + 1 : 0),
+      .options = configuration->options};
   iree_status_t status = loom_serve_text_load_create(
       options->device, &model_options, observer.wake, observer.user_data,
       &registration->load, allocator);

@@ -87,10 +87,12 @@ loom_cc_library(
   HDRS
     "model.h"
     "source.h"
+    "stages.h"
     "state.h"
   SRCS
     "model.c"
     "source.c"
+    "stages.c"
     "state.c"
   DEPS
     ::chat

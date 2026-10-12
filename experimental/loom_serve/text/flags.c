@@ -32,6 +32,8 @@ IREE_FLAG(int32_t, checkpoint_capacity, 0,
           "Requires pooled KV and reserves source-defined recurrent headroom.");
 IREE_FLAG(string, weights, "", "Parameter file selected by the model source.");
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json path.");
+IREE_FLAG(string, model_options, "{}",
+          "Model bootstrap JSON object interpreted by prepare.loom.");
 IREE_FLAG(string, kernel_sanitizer, "none",
           "Device checks: none or access|value|operation|race.");
 IREE_FLAG(string, kernel_sanitizer_reporting, "default",
@@ -152,6 +154,7 @@ iree_status_t loom_serve_text_model_create_from_flags(
       .kernel_sanitizer = sanitizer,
       .weights_path = iree_make_cstring_view(FLAG_weights),
       .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),
+      .options = iree_make_cstring_view(FLAG_model_options),
       .row_count = defaults->row_count,
       .checkpoint_capacity = (iree_host_size_t)FLAG_checkpoint_capacity,
   };
