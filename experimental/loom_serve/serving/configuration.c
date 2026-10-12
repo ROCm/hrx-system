@@ -154,15 +154,16 @@ static iree_status_t configuration_text(const configuration_field_t* fields,
   }
   IREE_RETURN_IF_ERROR(
       configuration_size(&fields[11], 1, 16384, &text->max_tokens));
-  IREE_RETURN_IF_ERROR(configuration_size(&fields[12], 0, 3, &text->mtp_depth));
+  IREE_RETURN_IF_ERROR(
+      configuration_size(&fields[12], 0, 7, &text->draft_depth));
   IREE_RETURN_IF_ERROR(
       configuration_size(&fields[13], 1, 2, &text->continuation_epochs));
-  if ((text->mtp_depth != 0 && text->mtp_depth != 3) ||
-      (text->mtp_depth && text->prefill_capacity < 4) ||
-      (text->continuation_epochs == 2 && text->mtp_depth != 3)) {
+  if (text->prefill_capacity < text->draft_depth + 1 ||
+      (text->continuation_epochs == 2 && !text->draft_depth)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "MTP requires depth 3 and at least four tokens; "
-                            "two-epoch continuation requires MTP");
+                            "drafting requires capacity for an anchor and "
+                            "every proposal; two-epoch continuation requires "
+                            "nonzero draft depth");
   }
   return iree_ok_status();
 }
@@ -217,7 +218,7 @@ static iree_status_t configuration_model_parse(
       {"pending_requests", IREE_JSON_VALUE_TYPE_NUMBER},
       {"max_tokens", IREE_JSON_VALUE_TYPE_NUMBER,
        .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
-      {"mtp_depth", IREE_JSON_VALUE_TYPE_NUMBER,
+      {"draft_depth", IREE_JSON_VALUE_TYPE_NUMBER,
        .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       {"continuation_epochs", IREE_JSON_VALUE_TYPE_NUMBER,
        .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},

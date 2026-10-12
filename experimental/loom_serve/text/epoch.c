@@ -20,6 +20,7 @@ static void epoch_prepare_continuation(
   if (options->continuation_epochs != 2) {
     return;
   }
+  const iree_host_size_t width = options->draft_depth + 1;
   loom_serve_ready_span_t ready[LOOM_SERVE_TEXT_ROW_CAPACITY] = {0};
   for (iree_host_size_t i = 0; i < count; ++i) {
     const loom_serve_text_span_t* span = &spans[i];
@@ -32,9 +33,10 @@ static void epoch_prepare_continuation(
     } else {
       const iree_host_size_t minimum_consumed =
           output_limits[i] ? 1 : span->token_count;
-      if (remaining_output > 1 &&
-          options->context_capacity - row->position >= minimum_consumed + 4) {
-        ready[i] = (loom_serve_ready_span_t){4, 4};
+      if (options->draft_depth && remaining_output > 1 &&
+          options->context_capacity - row->position >=
+              minimum_consumed + width) {
+        ready[i] = (loom_serve_ready_span_t){width, width};
       }
     }
   }
@@ -65,7 +67,7 @@ static void epoch_prepare_continuation(
   for (iree_host_size_t i = 0; i < next_count; ++i) {
     const iree_host_size_t first = scheduled[i].row_index;
     const iree_host_size_t row = spans[first].row_index;
-    const bool speculative = ready[first].minimum_count == 4;
+    const bool speculative = ready[first].minimum_count > 1;
     const bool select =
         speculative || scheduled[i].token_count == ready[first].token_count;
     next_spans[i] = (loom_serve_text_span_t){
@@ -77,10 +79,11 @@ static void epoch_prepare_continuation(
         .flags = (select ? LOOM_SERVE_TEXT_SPAN_FLAG_SELECT : 0) |
                  (speculative ? LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE : 0),
     };
-    next_limits[i] = speculative
-                         ? (uint32_t)iree_min(output_limits[first] ? 8 : 5,
-                                              rows[row].output_count)
-                         : 0;
+    next_limits[i] =
+        speculative
+            ? (uint32_t)iree_min(output_limits[first] ? 2 * width : width + 1,
+                                 rows[row].output_count)
+            : 0;
   }
   *out_continuation = (loom_serve_text_continuation_t){
       .shape_index = shape,
@@ -105,6 +108,7 @@ void loom_serve_text_epoch_prepare(
   uint32_t* output_limits = epoch->output_limits;
   iree_host_size_t proposal_count = 0;
   iree_host_size_t input_count = 0;
+  const iree_host_size_t width = options->draft_depth + 1;
   for (iree_host_size_t i = 0; i < count; ++i) {
     const iree_host_size_t row = scheduled[i].row_index;
     const loom_serve_text_epoch_row_t* input = &rows[row];
@@ -115,10 +119,10 @@ void loom_serve_text_epoch_prepare(
     positions[i] = input->position;
     if (!prefill) {
       decode_tokens[i] = input->token;
-      if (scheduled[i].token_count == 4) {
+      if (options->draft_depth && scheduled[i].token_count == width) {
         ++proposal_count;
-        output_limits[i] = (uint32_t)iree_min(4 * options->continuation_epochs,
-                                              input->output_count);
+        output_limits[i] = (uint32_t)iree_min(
+            width * options->continuation_epochs, input->output_count);
       }
     }
     spans[i] = (loom_serve_text_span_t){
@@ -135,7 +139,7 @@ void loom_serve_text_epoch_prepare(
                              &continuation->continuation);
   if (!continuation->continuation.span_count) {
     for (iree_host_size_t i = 0; i < count; ++i) {
-      output_limits[i] = iree_min(output_limits[i], 4u);
+      output_limits[i] = (uint32_t)iree_min(output_limits[i], width);
     }
   }
   iree_host_size_t continued_prefill_count = 0;

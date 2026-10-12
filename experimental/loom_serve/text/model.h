@@ -57,9 +57,9 @@ typedef struct loom_serve_text_options_t {
   iree_host_size_t epoch_count;
   // Borrowed scheduling shapes supplied to the source bootstrap.
   const loom_serve_packing_shape_t* epoch_shapes;
-  // Prepare MTP proposal, catch-up, and verification using shared target
-  // weights.
-  bool enable_mtp;
+  // Proposed tokens after each known anchor (0-7). Zero disables drafting;
+  // the source bootstrap validates its supported nonzero depths.
+  iree_host_size_t draft_depth;
   // Device assertion classes/reporting applied to every JIT kernel pipeline.
   // Initialize structure type and size even when no checks are enabled.
   loomc_sanitizer_options_t kernel_sanitizer;
@@ -79,9 +79,9 @@ enum loom_serve_text_span_flag_bits_e {
   // Select the next token after consuming this span. An intermediate input
   // chunk can omit this flag; its previous prediction then becomes invalid.
   LOOM_SERVE_TEXT_SPAN_FLAG_SELECT = 1u << 0,
-  // Generate three candidates on device before verification. The span reserves
-  // four inputs but token_ids supplies only the pending anchor. Requires SELECT
-  // and a nonzero output limit in the epoch plan.
+  // Generate candidates on device before verification. The span reserves
+  // draft_depth + 1 inputs but token_ids supplies only the pending anchor.
+  // Requires SELECT and a nonzero output limit in the epoch plan.
   LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE = 1u << 1,
 };
 typedef uint32_t loom_serve_text_span_flags_t;
@@ -94,7 +94,7 @@ typedef struct loom_serve_text_span_t {
   // Nonempty prefix appended at the row's current consumed position.
   iree_host_size_t token_count;
   // Borrowed known IDs, copied before submission. PROPOSE supplies one anchor;
-  // the other three reserved inputs are generated and consumed on device.
+  // the remaining reserved inputs are generated and consumed on device.
   const int32_t* token_ids;
   // Output selection and optional device proposal generation for this span.
   loom_serve_text_span_flags_t flags;
@@ -121,7 +121,7 @@ typedef struct loom_serve_text_continuation_t {
 // consumes its pending anchor plus matched drafts; its final output stays
 // pending. Consumed and output counts therefore agree for speculative spans.
 typedef struct loom_serve_text_result_t {
-  // Inputs consumed into retained target and MTP state.
+  // Inputs consumed into retained target and draft state.
   iree_host_size_t consumed_count;
   // Consumed caller-supplied inputs, excluding speculative anchor/draft work.
   // This separates prompt progress when a cohort also starts generation.
@@ -358,6 +358,10 @@ const loom_serve_text_chat_policy_t* loom_serve_text_model_chat_policy(
     const loom_serve_text_model_t* model);
 iree_host_size_t loom_serve_text_model_context_capacity(
     const loom_serve_text_model_t* model);
+
+// Prepared proposal count after each anchor; zero disables drafting.
+iree_host_size_t loom_serve_text_model_draft_depth(
+    const loom_serve_text_model_t* model);
 // Number of distinct native endpoints reserved at model creation. Several
 // logical owners may retain one endpoint without consuming additional slots.
 iree_host_size_t loom_serve_text_model_checkpoint_capacity(
@@ -384,7 +388,7 @@ iree_host_size_t loom_serve_text_row_pool_growth(
 // row's logical map; it belongs outside ordinary epoch scheduling.
 iree_host_size_t loom_serve_text_row_pool_reclaimable(
     const loom_serve_text_row_t* row);
-// Maximum chunk accepted by row_prefill. Pooled/MTP execution is also bounded
+// Maximum chunk accepted by row_prefill. Pooled/draft execution is also bounded
 // by the largest packed shape, which owns mapped target/draft state updates.
 iree_host_size_t loom_serve_text_model_prefill_capacity(
     const loom_serve_text_model_t* model);
@@ -399,21 +403,21 @@ const loom_serve_packing_shape_t* loom_serve_text_model_shapes(
 // The nonempty span list and total token count must fit the prepared shape,
 // and each span must fit its row's remaining context. Validation rejects the
 // whole plan before submission. NULL output_limits selects ordinary known
-// input and requires NULL continuation. Non-NULL output_limits requires MTP
-// and mixes known input with four-input speculative spans. An optional
-// continuation enqueues a second mixed plan without an intermediate host wait.
-// A zero output limit denotes known input.
-// Limits 1 through 4 (8 with continuation) denote speculative input, require
-// SELECT and a pending non-EOS prediction, and cap the number of new selected
-// outputs. PROPOSE spans supply only the pending token: three draft rounds
-// publish directly into the verifier input buffer. Other speculative spans
-// supply {pending token, three proposals} themselves. Greedy acceptance stops
-// at the first mismatch, EOS, or limit. Only accepted state is published;
-// catch-up pairs accepted inputs with target hidden state. Proposal,
-// verification, commit and catch-up have no intermediate host wait or readback.
-// Each known input chunk executes once. Continuation advances known chunks or
-// promotes a selected first result to speculation, stopping speculative work
-// at EOS, output credit or context bound.
+// input and requires NULL continuation. Non-NULL output_limits requires
+// drafting and mixes known input with spans of draft_depth + 1 speculative
+// inputs. An optional continuation enqueues a second mixed plan without an
+// intermediate host wait. A zero output limit denotes known input. Limits 1
+// through draft_depth + 1 (twice that with continuation) denote speculative
+// input, require SELECT and a pending non-EOS prediction, and cap the number of
+// new selected outputs. PROPOSE spans supply only the pending token: source
+// draft commands publish directly into the verifier input buffer. Other
+// speculative spans supply the pending token followed by proposals themselves.
+// Greedy acceptance stops at the first mismatch, EOS, or limit. Only accepted
+// state is published; catch-up pairs accepted inputs with target hidden state.
+// Proposal, verification, commit and catch-up have no intermediate host wait or
+// readback. Each known input chunk executes once. Continuation advances known
+// chunks or promotes a selected first result to speculation, stopping
+// speculative work at EOS, output credit or context bound.
 //
 // Accepted inputs and publication metadata are copied before return. Caller
 // storage may be reused immediately, even on submission failure. Success
@@ -442,8 +446,9 @@ iree_status_t loom_serve_text_model_complete_epoch(
     loom_serve_text_model_t* model, loom_serve_text_result_t* out_results);
 
 // Synchronous outer-thread joins over submit_epoch and complete_epoch. Epoch
-// selects ordinary input; verify requires MTP and returns semantic progress.
-// These entry points are for CLI consumers, not task-worker execution.
+// selects ordinary input; verify requires drafting and returns semantic
+// progress. These entry points are for CLI consumers, not task-worker
+// execution.
 iree_status_t loom_serve_text_model_epoch(loom_serve_text_model_t* model,
                                           iree_host_size_t shape_index,
                                           iree_host_size_t span_count,
@@ -568,7 +573,7 @@ iree_host_size_t loom_serve_text_row_suspended_bytes(
 // Submits one active chunk at the retained absolute position and selects the
 // next token. Input count is in [1, prefill_capacity] and fits the context.
 // Input is copied into model-owned storage and not borrowed after return, even
-// on failure. Pooled/MTP storage uses one packed span; dense storage uses the
+// on failure. Pooled/draft storage uses one packed span; dense storage uses the
 // source's isolated prefill command. The model owns one outstanding invocation
 // and its parameter pin through successful ALL readiness and complete_step.
 // The owner excludes model mutation and prediction queries until completion.

@@ -192,9 +192,11 @@ typedef struct loom_serve_text_epoch_record_t {
   // Draft inputs accepted by the target, excluding pending anchors.
   uint64_t accepted_draft_inputs;
   // Packed execution or an isolated/matched control.
-  loom_serve_text_schedule_mode_t schedule_mode;
+  uint8_t schedule_mode;
   // Whether prompt inputs and verifiers may share a cohort.
-  loom_serve_text_packing_mode_t packing_mode;
+  uint8_t packing_mode;
+  // Candidates after each anchor; multiplied by verifications for totals.
+  uint8_t draft_depth;
 } loom_serve_text_epoch_record_t;
 
 typedef struct loom_serve_text_span_record_t {

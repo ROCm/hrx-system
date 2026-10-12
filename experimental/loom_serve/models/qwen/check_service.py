@@ -41,34 +41,33 @@ def main():
         "--rows=4",
         "--port=0",
         "--heartbeat_ms=1000",
-        "--mtp",
     ]
     for capacity in (1, 2, 3):
         log_path = arguments.output / f"rejected-{capacity}.log"
         with running_server(
-            command + [f"--epoch={capacity}:8", "--mtp_depth=3"], log_path
+            command + [f"--epoch={capacity}:8", "--draft_depth=3"], log_path
         ) as (process, address):
             if address is not None or process.wait() == 0:
                 raise RuntimeError(f"infeasible shape reached readiness: {log_path}")
         expected = (
-            "mtp_depth=3 requires an epoch shape with at least 4 tokens; "
+            "draft_depth=3 requires an epoch shape with at least 4 tokens; "
             f"largest capacity is {capacity}"
         )
         if expected not in log_path.read_text():
             raise RuntimeError(f"startup failed for the wrong reason: {log_path}")
         print(json.dumps({"event": "rejected", "token_capacity": capacity}), flush=True)
 
-    log_path = arguments.output / "warm-narrow.log"
-    with running_server(command + ["--epoch=1:8", "--mtp_depth=0"], log_path) as (
+    log_path = arguments.output / "target-only-narrow.log"
+    with running_server(command + ["--epoch=1:8", "--draft_depth=0"], log_path) as (
         _,
         address,
     ):
         if address is None:
-            raise RuntimeError(f"warm target-only shape failed startup: {log_path}")
-    print(json.dumps({"event": "warm_narrow_ready"}), flush=True)
+            raise RuntimeError(f"target-only shape failed startup: {log_path}")
+    print(json.dumps({"event": "target_only_narrow_ready"}), flush=True)
 
     log_path = arguments.output / "minimum-verifier.log"
-    with running_server(command + ["--epoch=4:8", "--mtp_depth=3"], log_path) as (
+    with running_server(command + ["--epoch=4:8", "--draft_depth=3"], log_path) as (
         _,
         address,
     ):
@@ -78,7 +77,7 @@ def main():
 
     log_path = arguments.output / "retained.log"
     with running_server(
-        command + ["--epoch=1:8", "--epoch=32:8", "--mtp_depth=3"], log_path
+        command + ["--epoch=1:8", "--epoch=32:8", "--draft_depth=3"], log_path
     ) as (_, address):
         if address is None:
             raise RuntimeError(f"feasible shape table failed startup: {log_path}")

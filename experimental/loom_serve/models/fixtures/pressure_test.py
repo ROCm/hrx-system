@@ -116,7 +116,7 @@ def check(server, source, directory, workers, memory_bytes, retention):
                         "checkpoint_capacity": 2,
                         "session_cache_capacity": 2,
                         "max_tokens": 2,
-                        "mtp_depth": 0,
+                        "draft_depth": 0,
                     }
                     for name in ("alpha", "beta")
                 ]

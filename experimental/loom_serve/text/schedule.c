@@ -34,7 +34,7 @@ iree_host_size_t loom_serve_text_request_reservation(
   iree_host_size_t extent = input_count + output_count - 1;
   if (proposal_depth && output_count >= 3 &&
       context_capacity - input_count >= proposal_depth + 1) {
-    // The last two-output verifier writes one anchor and three drafts, while
+    // The last two-output verifier writes one anchor and a full draft, while
     // only two inputs can commit. Near the context limit only legal launches
     // contribute; an ordinary single-output tail requires no extra credit.
     extent = iree_min(context_capacity, extent + proposal_depth - 1);

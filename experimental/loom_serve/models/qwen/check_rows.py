@@ -62,8 +62,7 @@ def main():
         f"--rows={arguments.rows}",
         "--context_capacity=2048",
         "--prefill_capacity=512",
-        "--mtp",
-        "--mtp_depth=3",
+        "--draft_depth=3",
         "--port=0",
         "--heartbeat_ms=1000",
     ]

@@ -25,7 +25,7 @@ the selected token extent. Wider classes retain their token-reuse schedules.
 All classes share prepared weights, resident storage and the catalog's
 native-kernel cache.
 
-`--mtp` prepares block-64 proposal, cache catch-up, and target verification.
+`--draft_depth=3` prepares block-64 proposal, cache catch-up, and target verification.
 The proposal uses a 32-token projection tile and the configured resident-row
 count (1–16); each target epoch gets matching catch-up and verifier variants.
 Shared embedding, target normalization, and full-vocabulary output roots reference the existing weight slab. Extra block-64
@@ -171,7 +171,7 @@ python -B -m experimental.loom_serve.models.qwen.check_tools \
 
 ## Bounded device-fed continuation
 
-`--mtp --mtp_depth=3 --continuation_epochs=2` lets the source VM enqueue two
+`--draft_depth=3 --continuation_epochs=2` lets the source VM enqueue two
 target/MTP epochs before returning to admission and transport. The default is
 one. The first epoch accepts mixed prompt/known and speculative spans normally.
 The host pre-issues a second mixed plan from those same admitted rows: remaining
@@ -395,8 +395,8 @@ retained state; capture and replay scratch both scale with the span shape.
 Attention tails beyond the accepted position stay unreachable. MTP catch-up then consumes
 accepted inputs paired with committed target hidden. All buffers and commands
 are prepared once. The HTTP scheduler selects this optional path with
-`--mtp --mtp_depth=3`; depth zero keeps MTP warm without
-proposing. Whole verifier spans share a target epoch with known prompt input.
+`--draft_depth=3`; depth zero selects target-only residency.
+Whole verifier spans share a target epoch with known prompt input.
 
 Both MTP input projections consume the normalized embedding/hidden matrix
 directly with the token-reusing Q8_0/F16 WMMA contraction and F32 accumulation.
@@ -419,7 +419,7 @@ distinct activation rows. Their numerical tolerance accounts for F16 operand
 rounding. Target verification, not draft arithmetic agreement, determines
 committed outputs; full-model qualification also observes draft acceptance.
 
-The real-weight `qwen_epoch_check --mtp` compares distinct
+The real-weight `qwen_epoch_check --draft_depth=3` compares distinct
 resident histories against ordinary target continuations: compact-row
 permutation, zero/partial/full draft
 acceptance, output-credit truncation, mixed known/speculative epochs, and
@@ -826,7 +826,7 @@ build_tools/bin/iree-bazel-run --config=asan \
   --case=@attention_independent_specializations
 ```
 
-The retained `qwen_epoch_check --mtp` witness places unequal prefixes directly
+The retained `qwen_epoch_check --draft_depth=3` witness places unequal prefixes directly
 before page boundaries, derives accepted candidates from target execution,
 injects mismatches, resets/reuses rows, and continues untouched histories.
 Run the identical catalog with `--pool_capacity=0` and a nonzero capacity and

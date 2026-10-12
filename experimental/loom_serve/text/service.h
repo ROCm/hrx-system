@@ -43,12 +43,8 @@ typedef struct loom_serve_text_service_options_t {
   loom_serve_text_schedule_mode_t schedule_mode;
   // Whether prompt and decode inputs may share an epoch, independent of math.
   loom_serve_text_packing_mode_t packing_mode;
-  // Proposal depth: zero or three. Three requires packed scheduling and an MTP
-  // bundle on the borrowed model, with at least one epoch shape admitting four
-  // tokens. Zero with a bundle measures warm target-only.
-  iree_host_size_t mtp_depth;
   // One or two device-fed epochs between transport/admission observations.
-  // Two requires MTP; output credit and speculative residency cover both.
+  // Two requires drafting; output credit and speculative residency cover both.
   iree_host_size_t continuation_epochs;
 } loom_serve_text_service_options_t;
 

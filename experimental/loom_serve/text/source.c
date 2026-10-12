@@ -85,7 +85,7 @@ static iree_status_t text_prepare(loom_serve_text_source_t* source,
       iree_vm_variant_from_i64((int64_t)options->pool_capacity),
       iree_vm_variant_from_i64((int64_t)options->row_count),
       iree_vm_variant_from_i64((int64_t)options->checkpoint_capacity),
-      iree_vm_variant_from_i32(options->enable_mtp),
+      iree_vm_variant_from_i32((int32_t)options->draft_depth),
       iree_vm_buffer_variant_from_ptr_move(&source->vm_types, &shapes),
       iree_vm_variant_from_i64((int64_t)options->epoch_count),
       iree_vm_buffer_variant_from_ptr_move(&source->vm_types, &weights),
@@ -160,7 +160,7 @@ static iree_status_t text_prepare(loom_serve_text_source_t* source,
     const uint64_t carry_bytes = iree_unaligned_load_le_u64(
         storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + 6 * 24);
     if (storage->recurrent.capacity < slots ||
-        (options->enable_mtp &&
+        (options->draft_depth &&
          options->row_count + options->checkpoint_capacity >
              carry_bytes / storage->carry_stride)) {
       status = iree_make_status(

@@ -143,7 +143,7 @@ static iree_status_t text_epoch_format(
       ",\"selected_tokens_including_eos\":%" PRIu64 ",\"traversals\":%" PRIu64
       ",\"model_ns\":%" PRIu64 ",\"device_epochs\":%" PRIu64
       ",\"continued_prefill_tokens\":%" PRIu64
-      ",\"mtp\":{\"verifications\":%" PRIu64 ",\"proposed_tokens\":%" PRIu64
+      ",\"draft\":{\"verifications\":%" PRIu64 ",\"proposed_tokens\":%" PRIu64
       ",\"accepted_draft_inputs\":%" PRIu64 "}",
       value.epoch, schedule,
       value.packing_mode == LOOM_SERVE_TEXT_PACKING_SEPARATE ? "separate"
@@ -152,7 +152,7 @@ static iree_status_t text_epoch_format(
       value.prefill_tokens, value.decode_tokens, value.output_tokens,
       value.traversals, value.duration_ns, value.device_epochs,
       value.continued_prefill_tokens, value.verifications,
-      value.verifications * 3, value.accepted_draft_inputs);
+      value.verifications * value.draft_depth, value.accepted_draft_inputs);
 }
 
 static iree_status_t text_span_format(
@@ -392,8 +392,8 @@ void loom_serve_text_telemetry_epoch(
   state->prefill_tokens += prefill_count;
   state->decode_tokens += decode_count;
   state->model_duration += completed - start;
-  state->mtp.proposed_tokens += verification_count * 3;
-  state->mtp.accepted_inputs += accepted_drafts;
+  state->draft.proposed_tokens += verification_count * options->draft_depth;
+  state->draft.accepted_inputs += accepted_drafts;
   state->last_completion = completed;
   iree_slim_mutex_unlock(&heartbeat->mutex);
   telemetry->counters.input_tokens += prefill_count + decode_count;
@@ -416,7 +416,8 @@ void loom_serve_text_telemetry_epoch(
       .verifications = verification_count,
       .accepted_draft_inputs = accepted_drafts,
       .schedule_mode = options->schedule_mode,
-      .packing_mode = options->packing_mode};
+      .packing_mode = options->packing_mode,
+      .draft_depth = (uint8_t)options->draft_depth};
   loom_serve_text_record(telemetry->stream, &LOOM_SERVE_TEXT_EPOCH, 0, &value,
                          sizeof(value));
 }

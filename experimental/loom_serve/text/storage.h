@@ -48,9 +48,9 @@ typedef struct loom_serve_text_storage_t {
   iree_device_size_t map_origin;
   // Maximum logical blocks per row, independent of physical capacity.
   iree_host_size_t blocks_per_row;
-  // Byte extent of one row's retained MTP hidden state.
+  // Byte extent of one row's retained draft hidden state.
   iree_device_size_t carry_stride;
-  // Split between first and second MTP feedback banks, in bytes.
+  // Split between first and second draft feedback banks, in bytes.
   iree_device_size_t feedback_split;
   // Recurrent state slots in the state arena, independent of row identity.
   struct {
@@ -93,7 +93,7 @@ void loom_serve_text_storage_deinitialize(loom_serve_text_storage_t* storage);
 // returned array. Capture and restore supply their respective physical IDs.
 iree_status_t loom_serve_text_storage_plan_snapshot(
     const loom_serve_text_storage_t* storage, iree_host_size_t carry_index,
-    iree_hal_buffer_t* const* private_views, bool enable_mtp,
+    iree_hal_buffer_t* const* private_views, bool include_carry,
     uint32_t block_count, const uint32_t* blocks, iree_host_size_t* out_count,
     loom_serve_snapshot_range_t** out_ranges, iree_allocator_t allocator);
 

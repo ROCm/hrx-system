@@ -216,7 +216,7 @@ def main():
                 "pool_capacity": 4096,
                 "prefill_capacity": prefill,
                 "checkpoint_capacity": 1,
-                "mtp_depth": depth,
+                "draft_depth": depth,
                 "continuation_epochs": 2 if depth else 1,
             }
         )

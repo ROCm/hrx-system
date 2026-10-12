@@ -418,7 +418,6 @@ static iree_status_t text_registration_prepare(
         .heartbeat_interval = registration->options->heartbeat_interval,
         .schedule_mode = LOOM_SERVE_TEXT_SCHEDULE_PACKED,
         .packing_mode = LOOM_SERVE_TEXT_PACKING_MIXED,
-        .mtp_depth = text->mtp_depth,
         .continuation_epochs = text->continuation_epochs};
     status = loom_serve_text_service_create(
         registration->model, &options, registration->stream,
@@ -508,7 +507,7 @@ static iree_status_t text_registration_create(
       .pool_capacity = text->pool_capacity,
       .epoch_count = shape_count,
       .epoch_shapes = registration->shapes,
-      .enable_mtp = text->mtp_depth != 0,
+      .draft_depth = text->draft_depth,
       .kernel_sanitizer = {.type = LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
                            .structure_size = sizeof(loomc_sanitizer_options_t)},
       .weights_path = text->weights,

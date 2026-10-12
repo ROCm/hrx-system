@@ -274,14 +274,14 @@ not need `loom-compile`, Python model frameworks, or generated kernel files.
 ```sh
 bazel-bin/experimental/loom_serve/models/qwen/epoch_check \
   --model=experimental/loom_serve/models/qwen \
-  --prefill_capacity=128 --context_capacity=2048 --epoch=32:8 --mtp \
+  --prefill_capacity=128 --context_capacity=2048 --epoch=32:8 --draft_depth=3 \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
   --tokenizer="$model_dir/tokenizer.json"
 ```
 
 This check allocates eight retained rows. It must exit zero with
 `PASS: packed outputs, omitted outputs, row continuation and schedule transitions.`
-With `--mtp` it also exercises speculative verification. That differential
+With `--draft_depth=3` it also exercises speculative verification. That differential
 compares implementations in this runner; it does not replace the independent
 numerical oracle required for a new model port.
 
@@ -295,7 +295,7 @@ token capacities:
 check_shapes() {
   bazel-bin/experimental/loom_serve/models/qwen/epoch_check \
     --model=experimental/loom_serve/models/qwen \
-    --prefill_capacity=512 --context_capacity=2048 --mtp \
+    --prefill_capacity=512 --context_capacity=2048 --draft_depth=3 \
     --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
     --tokenizer="$model_dir/tokenizer.json" "$@"
 }
@@ -314,7 +314,7 @@ After the check exits and releases the residency, start one server:
 ```sh
 bazel-bin/experimental/loom_serve/text/server \
   --model=experimental/loom_serve/models/qwen \
-  --context_capacity=2048 --pool_capacity=8192 --mtp --mtp_depth=3 \
+  --context_capacity=2048 --pool_capacity=8192 --draft_depth=3 \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
   --tokenizer="$model_dir/tokenizer.json" \
   --rows=4 --port=8080 --heartbeat_ms=1000

@@ -45,8 +45,8 @@ typedef struct loom_serve_text_configuration_t {
   iree_host_size_t prefix_cache_capacity;
   // Default output limit when a request omits max_tokens.
   iree_host_size_t max_tokens;
-  // Speculative proposal depth, zero or three.
-  iree_host_size_t mtp_depth;
+  // Proposed tokens after each anchor (0-7), validated by the model source.
+  iree_host_size_t draft_depth;
   // Device-fed epochs per scheduling turn, one or two.
   iree_host_size_t continuation_epochs;
 } loom_serve_text_configuration_t;

@@ -157,8 +157,7 @@ The service already exposes useful ablations:
 | `--packing=separate` versus `mixed`, both packed | Sharing traversal capacity across prompt/decode cohorts |
 | `--scheduler=matched` versus `packed` | Independent versus shared traversals using prefill math for decode controls |
 | One `--epoch` versus several cached shapes | Occupancy-based shape selection at fixed model/state semantics |
-| No `--mtp` versus `--mtp --mtp_depth=0` | Draft-state residency and maintenance without speculation |
-| MTP depth zero versus three | Proposal, verification, acceptance, and extra committed output |
+| `--draft_depth=0` versus a source-supported nonzero depth | Draft residency, proposal, verification, acceptance, and extra committed output |
 
 MTP requires packed scheduling. A comparison against another runtime records
 its corresponding settings rather than describing different speculative modes
@@ -225,7 +224,7 @@ bazel-bin/experimental/loom_serve/text/server \
   --tokenizer="$model_dir/tokenizer.json" \
   --prefill_capacity=512 --context_capacity=16384 --rows=8 \
   --epoch=32:8 --epoch=128:8 --epoch=256:8 --epoch=512:8 \
-  --mtp --mtp_depth=3 --scheduler=packed --packing=mixed \
+  --draft_depth=3 --scheduler=packed --packing=mixed \
   --port=8080 --heartbeat_ms=1000
 ```
 

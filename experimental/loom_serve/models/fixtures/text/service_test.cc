@@ -1195,13 +1195,13 @@ TEST_P(SourceTextServiceTest, WideSourceEpochsRetainExactHttpHistory) {
 TEST_P(SourceTextServiceTest,
        SourceRejectsUnsupportedConfigurationAndUsesWeights) {
   auto options = ModelOptions();
-  options.enable_mtp = true;
+  options.draft_depth = 3;
   loom_serve_text_model_t* unsupported = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_serve_text_model_create(device_, &options,
                                                      &unsupported, allocator_));
   EXPECT_EQ(unsupported, nullptr);
-  options.enable_mtp = false;
+  options.draft_depth = 0;
   options.pool_capacity = 0;
   options.checkpoint_capacity = 0;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

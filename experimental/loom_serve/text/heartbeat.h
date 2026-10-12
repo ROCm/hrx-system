@@ -88,11 +88,11 @@ typedef struct loom_serve_text_heartbeat_snapshot_t {
   iree_duration_t model_duration;
   // Completed speculative work, separate from committed output progress.
   struct {
-    // Candidate tokens produced across the three proposal rounds.
+    // Candidate tokens produced across completed verifications.
     uint64_t proposed_tokens;
     // Draft inputs consumed by the target, excluding each pending anchor.
     uint64_t accepted_inputs;
-  } mtp;
+  } draft;
   // Span count of the most recently issued epoch.
   iree_host_size_t epoch_spans;
   // Input count of the most recently issued epoch, including proposed inputs.

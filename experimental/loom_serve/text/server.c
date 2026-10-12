@@ -18,14 +18,11 @@
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 
-IREE_FLAG(
-    int32_t, mtp_depth, 0,
-    "Proposal depth: 0 or 3. Depth 0 with --mtp measures warm target-only.");
 IREE_FLAG(string, scheduler, "packed",
           "packed, isolated, or matched (isolated with prefill decode math).");
-IREE_FLAG(
-    int32_t, continuation_epochs, 1,
-    "One or two device-fed epochs per cohort; two requires --mtp_depth=3.");
+IREE_FLAG(int32_t, continuation_epochs, 1,
+          "One or two device-fed epochs per cohort; two requires nonzero draft "
+          "depth.");
 IREE_FLAG(string, packing, "mixed",
           "mixed or separate prompt/decode cohorts, with the same kernels.");
 IREE_FLAG(int32_t, port, 8080,
@@ -76,16 +73,14 @@ int main(int argc, char** argv) {
     fprintf(stderr, "scheduler must be packed, isolated, or matched.\n");
     return EXIT_FAILURE;
   }
+  const iree_host_size_t draft_depth = loom_serve_text_draft_depth_from_flags();
   if (FLAG_continuation_epochs < 1 || FLAG_continuation_epochs > 2 ||
-      (FLAG_continuation_epochs == 2 && FLAG_mtp_depth != 3) ||
-      (FLAG_mtp_depth != 0 && FLAG_mtp_depth != 3) ||
-      (FLAG_mtp_depth && !loom_serve_text_mtp_from_flags()) ||
-      (loom_serve_text_mtp_from_flags() &&
-       schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED)) {
+      (FLAG_continuation_epochs == 2 && !draft_depth) || draft_depth > 7 ||
+      (draft_depth && schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED)) {
     fprintf(stderr,
-            "mtp_depth must be 0 or 3; MTP requires --mtp and packed "
+            "draft_depth must be in [0, 7]; drafting requires packed "
             "scheduling; continuation_epochs must be 1 or 2, and 2 requires "
-            "mtp_depth=3.\n");
+            "nonzero draft depth.\n");
     return EXIT_FAILURE;
   }
   loom_serve_text_packing_mode_t packing_mode;
@@ -142,14 +137,13 @@ int main(int argc, char** argv) {
       }
     }
     chunk_size = FLAG_chunk_size ? (iree_host_size_t)FLAG_chunk_size : capacity;
-    const iree_host_size_t minimum_capacity =
-        (iree_host_size_t)FLAG_mtp_depth + 1;
+    const iree_host_size_t minimum_capacity = draft_depth + 1;
     if (capacity < minimum_capacity) {
       status = iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "mtp_depth=%d requires an epoch shape with at least %zu tokens; "
+          "draft_depth=%zu requires an epoch shape with at least %zu tokens; "
           "largest capacity is %zu",
-          FLAG_mtp_depth, minimum_capacity, capacity);
+          draft_depth, minimum_capacity, capacity);
     } else if (chunk_size > capacity) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "chunk_size exceeds compiled stage capacity");
@@ -191,12 +185,11 @@ int main(int argc, char** argv) {
               "{\"event\":\"ready\",\"address\":\"%.*s\",\"rows\":%d,\"chunk_"
               "size\":%zu,\"admission_overtakes\":%zu,\"scheduler\":\"%s\","
               "\"shape_count\":%zu,"
-              "\"packing\":\"%s\",\"mtp_warm\":%s,\"mtp_depth\":%d,"
+              "\"packing\":\"%s\",\"draft_depth\":%zu,"
               "\"continuation_epochs\":%d}\n",
               (int)address.size, address.data, FLAG_rows, chunk_size,
               admission_overtakes, FLAG_scheduler, epoch_count, FLAG_packing,
-              loom_serve_text_mtp_from_flags() ? "true" : "false",
-              FLAG_mtp_depth, FLAG_continuation_epochs);
+              draft_depth, FLAG_continuation_epochs);
       const loom_serve_text_service_options_t service_options = {
           .name = loom_serve_text_model_chat_policy(model)->name,
           .row_count = (iree_host_size_t)FLAG_rows,
@@ -207,7 +200,6 @@ int main(int argc, char** argv) {
           .heartbeat_interval = (iree_duration_t)FLAG_heartbeat_ms * 1000000,
           .schedule_mode = schedule_mode,
           .packing_mode = packing_mode,
-          .mtp_depth = (iree_host_size_t)FLAG_mtp_depth,
           .continuation_epochs = (iree_host_size_t)FLAG_continuation_epochs,
       };
       loom_serve_text_service_t* service = NULL;

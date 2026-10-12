@@ -238,7 +238,7 @@ def main():
         pool_capacity=4096,
         prefill_capacity=128,
         checkpoint_capacity=1,
-        mtp_depth=3,
+        draft_depth=3,
         continuation_epochs=2,
     )
     image = dict(

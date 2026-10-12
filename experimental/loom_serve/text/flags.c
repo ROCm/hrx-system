@@ -24,7 +24,9 @@ IREE_FLAG_LIST(
     string, epoch,
     "Packed JIT shape as tokens:spans; repeated flags replace the automatic "
     "catalog bounded by prefill_capacity and resident rows.");
-IREE_FLAG(bool, mtp, false, "JIT MTP proposal, catch-up, and verifier stages.");
+IREE_FLAG(int32_t, draft_depth, 0,
+          "Proposed tokens after each anchor (0-7); supported depths are "
+          "defined by the model source. Zero disables drafting.");
 IREE_FLAG(int32_t, checkpoint_capacity, 0,
           "Explicitly pinned endpoint capacity; zero disables checkpoints. "
           "Requires pooled KV and reserves source-defined recurrent headroom.");
@@ -84,7 +86,9 @@ iree_host_size_t loom_serve_text_explicit_shape_count_from_flags(void) {
   return FLAG_epoch_list().count;
 }
 
-bool loom_serve_text_mtp_from_flags(void) { return FLAG_mtp; }
+iree_host_size_t loom_serve_text_draft_depth_from_flags(void) {
+  return (iree_host_size_t)FLAG_draft_depth;
+}
 
 iree_status_t loom_serve_text_model_create_from_flags(
     loom_serve_device_t* device,
@@ -95,6 +99,7 @@ iree_status_t loom_serve_text_model_create_from_flags(
       FLAG_prefill_capacity < 1 ||
       FLAG_prefill_capacity > FLAG_context_capacity ||
       FLAG_context_capacity > 262144 || FLAG_pool_capacity < -1 ||
+      FLAG_draft_depth < 0 || FLAG_draft_depth > 7 ||
       FLAG_checkpoint_capacity < 0 || defaults->row_count < 1 ||
       defaults->row_count > LOOM_SERVE_TEXT_ROW_CAPACITY) {
     return iree_make_status(
@@ -111,7 +116,7 @@ iree_status_t loom_serve_text_model_create_from_flags(
   loom_serve_packing_shape_t automatic[LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY];
   iree_host_size_t automatic_count = 0;
   if (!epochs.count &&
-      (defaults->automatic_shapes || pool_capacity || FLAG_mtp)) {
+      (defaults->automatic_shapes || pool_capacity || FLAG_draft_depth)) {
     automatic_count = loom_serve_text_default_shapes(
         defaults->row_count, (iree_host_size_t)FLAG_prefill_capacity,
         automatic);
@@ -143,7 +148,7 @@ iree_status_t loom_serve_text_model_create_from_flags(
       .pool_capacity = pool_capacity,
       .epoch_count = epochs.count ? epochs.count : automatic_count,
       .epoch_shapes = epochs.count ? shapes : automatic,
-      .enable_mtp = FLAG_mtp,
+      .draft_depth = (iree_host_size_t)FLAG_draft_depth,
       .kernel_sanitizer = sanitizer,
       .weights_path = iree_make_cstring_view(FLAG_weights),
       .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),

@@ -63,6 +63,7 @@ TEST(TextEpochTest, ContinuationMixesPromptTailsAndBoundedVerifiers) {
   loom_serve_text_epoch_options_t options = {.context_capacity = 64,
                                              .chunk_size = 8,
                                              .continuation_epochs = 2,
+                                             .draft_depth = 3,
                                              .shapes = &shape,
                                              .shape_count = 1};
   const int32_t tokens[] = {10, 11, 12, 13};
@@ -123,6 +124,7 @@ TEST(TextEpochTest, NoContinuationReducesCreditToOneVerifier) {
   const loom_serve_text_epoch_options_t options = {.context_capacity = 64,
                                                    .chunk_size = 8,
                                                    .continuation_epochs = 2,
+                                                   .draft_depth = 3,
                                                    .shapes = &shape,
                                                    .shape_count = 1};
   loom_serve_text_epoch_row_t rows[16] = {};
@@ -146,6 +148,7 @@ TEST(TextEpochTest, ContinuationCapacityTracksItsIndependentlySelectedBucket) {
       .context_capacity = 64,
       .chunk_size = 16,
       .continuation_epochs = 2,
+      .draft_depth = 3,
       .shapes = shapes,
       .shape_count = IREE_ARRAYSIZE(shapes)};
   const int32_t tokens[16] = {};
@@ -188,58 +191,92 @@ TEST(TextEpochTest, IsolatedStagesDoNotClaimPackedCapacity) {
 }
 
 TEST(TextEpochTest, RowCapacityFamilyPreservesBorrowedInputsAndOutputCredit) {
-  const loom_serve_packing_shape_t shape = {64, 16};
+  const loom_serve_packing_shape_t shape = {128, 16};
   const int32_t tokens[10] = {};
-  for (iree_host_size_t count = 1; count <= 16; ++count) {
-    for (iree_host_size_t epochs : {1u, 2u}) {
-      SCOPED_TRACE(count);
-      SCOPED_TRACE(epochs);
-      const loom_serve_text_epoch_options_t options = {
-          .context_capacity = 64,
-          .chunk_size = 8,
-          .continuation_epochs = epochs,
-          .shapes = &shape,
-          .shape_count = 1};
-      loom_serve_text_epoch_row_t rows[16] = {};
-      loom_serve_packed_span_t scheduled[16];
-      for (iree_host_size_t i = 0; i < count; ++i) {
-        const iree_host_size_t row = 15 - i;
-        rows[row] = {.input_tokens = i % 2 ? nullptr : tokens,
-                     .input_count = i % 2 ? 0u : 10u,
-                     .output_count = 3 + i,
-                     .position = i,
-                     .token = static_cast<int32_t>(i)};
-        scheduled[i] = {row, i % 2 ? 4u : 2u};
-      }
-      loom_serve_text_epoch_t epoch;
-      loom_serve_text_epoch_continuation_t next;
-      loom_serve_text_epoch_prepare(&options, rows, 0, count, scheduled, &epoch,
-                                    &next);
-      EXPECT_EQ(epoch.count, count);
-      for (iree_host_size_t i = 0; i < count; ++i) {
-        EXPECT_EQ(epoch.spans[i].row_index, scheduled[i].row_index);
-        EXPECT_EQ(epoch.positions[i], i);
-        EXPECT_EQ(epoch.prefill[i], i % 2 == 0);
-        EXPECT_LE(epoch.output_limits[i], rows[15 - i].output_count);
-        EXPECT_EQ(epoch.results[i].output_count, 0);
-        if (i % 2) {
-          EXPECT_EQ(epoch.spans[i].token_ids, &epoch.decode_tokens[i]);
-          EXPECT_EQ(*epoch.spans[i].token_ids, i);
-        } else {
-          EXPECT_EQ(epoch.spans[i].token_ids, tokens);
+  for (iree_host_size_t depth = 1; depth <= 7; ++depth) {
+    for (iree_host_size_t count = 1; count <= 16; ++count) {
+      for (iree_host_size_t epochs : {1u, 2u}) {
+        SCOPED_TRACE(count);
+        SCOPED_TRACE(epochs);
+        const loom_serve_text_epoch_options_t options = {
+            .context_capacity = 64,
+            .chunk_size = 8,
+            .continuation_epochs = epochs,
+            .draft_depth = depth,
+            .shapes = &shape,
+            .shape_count = 1};
+        loom_serve_text_epoch_row_t rows[16] = {};
+        loom_serve_packed_span_t scheduled[16];
+        for (iree_host_size_t i = 0; i < count; ++i) {
+          const iree_host_size_t row = 15 - i;
+          rows[row] = {.input_tokens = i % 2 ? nullptr : tokens,
+                       .input_count = i % 2 ? 0u : 10u,
+                       .output_count = 3 + i,
+                       .position = i,
+                       .token = static_cast<int32_t>(i)};
+          scheduled[i] = {row, i % 2 ? depth + 1 : 2u};
         }
+        loom_serve_text_epoch_t epoch;
+        loom_serve_text_epoch_continuation_t next;
+        loom_serve_text_epoch_prepare(&options, rows, 0, count, scheduled,
+                                      &epoch, &next);
+        EXPECT_EQ(epoch.count, count);
+        for (iree_host_size_t i = 0; i < count; ++i) {
+          EXPECT_EQ(epoch.spans[i].row_index, scheduled[i].row_index);
+          EXPECT_EQ(epoch.positions[i], i);
+          EXPECT_EQ(epoch.prefill[i], i % 2 == 0);
+          EXPECT_LE(epoch.output_limits[i], rows[15 - i].output_count);
+          EXPECT_EQ(epoch.results[i].output_count, 0);
+          if (i % 2) {
+            EXPECT_EQ(epoch.spans[i].token_ids, &epoch.decode_tokens[i]);
+            EXPECT_EQ(*epoch.spans[i].token_ids, i);
+          } else {
+            EXPECT_EQ(epoch.spans[i].token_ids, tokens);
+          }
+        }
+        iree_host_size_t continued_tokens = 0;
+        for (iree_host_size_t i = 0; i < next.continuation.span_count; ++i) {
+          const auto& span = next.spans[i];
+          EXPECT_GE(span.row_index, 16 - count);
+          EXPECT_LE(next.output_limits[i], rows[span.row_index].output_count);
+          continued_tokens += span.token_count;
+        }
+        EXPECT_LE(continued_tokens, shape.token_capacity);
+        EXPECT_EQ(epoch.device_epochs, next.continuation.span_count ? 2 : 1);
+        EXPECT_EQ(epoch.token_slots,
+                  shape.token_capacity * epoch.device_epochs);
       }
-      iree_host_size_t continued_tokens = 0;
-      for (iree_host_size_t i = 0; i < next.continuation.span_count; ++i) {
-        const auto& span = next.spans[i];
-        EXPECT_GE(span.row_index, 16 - count);
-        EXPECT_LE(next.output_limits[i], rows[span.row_index].output_count);
-        continued_tokens += span.token_count;
-      }
-      EXPECT_LE(continued_tokens, shape.token_capacity);
-      EXPECT_EQ(epoch.device_epochs, next.continuation.span_count ? 2 : 1);
-      EXPECT_EQ(epoch.token_slots, shape.token_capacity * epoch.device_epochs);
     }
+  }
+}
+
+TEST(TextEpochTest, DraftWidthControlsContinuationCreditAndContextFrontier) {
+  const loom_serve_packing_shape_t shape = {128, 16};
+  for (iree_host_size_t depth = 1; depth <= 7; ++depth) {
+    const iree_host_size_t width = depth + 1;
+    const loom_serve_text_epoch_options_t options = {.context_capacity = 64,
+                                                     .chunk_size = 8,
+                                                     .continuation_epochs = 2,
+                                                     .draft_depth = depth,
+                                                     .shapes = &shape,
+                                                     .shape_count = 1};
+    loom_serve_text_epoch_row_t rows[] = {
+        {.output_count = 16, .position = 64 - width - 1, .token = 21}};
+    const loom_serve_packed_span_t scheduled[] = {{0, width}};
+    loom_serve_text_epoch_t epoch;
+    loom_serve_text_epoch_continuation_t next;
+    loom_serve_text_epoch_prepare(&options, rows, 0, 1, scheduled, &epoch,
+                                  &next);
+    EXPECT_EQ(epoch.spans[0].flags, kSelect | kPropose);
+    EXPECT_EQ(epoch.output_limits[0], 2 * width);
+    ASSERT_EQ(next.continuation.span_count, 1);
+    EXPECT_EQ(next.spans[0].token_count, width);
+    EXPECT_EQ(next.output_limits[0], 2 * width);
+    ++rows[0].position;
+    loom_serve_text_epoch_prepare(&options, rows, 0, 1, scheduled, &epoch,
+                                  &next);
+    EXPECT_EQ(epoch.output_limits[0], width);
+    EXPECT_EQ(next.continuation.span_count, 0);
   }
 }
 

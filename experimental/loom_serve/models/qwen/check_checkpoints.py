@@ -437,8 +437,7 @@ def main():
         "--pool_backing=elastic",
         "--memory_bytes=23622320128",
         "--checkpoint_capacity=1",
-        "--mtp",
-        "--mtp_depth=3",
+        "--draft_depth=3",
         "--continuation_epochs=2",
     ]
     log = arguments.output / "server.log"

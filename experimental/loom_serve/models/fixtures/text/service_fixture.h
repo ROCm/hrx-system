@@ -178,7 +178,7 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
            tokenizer_ +
            "\",\"rows\":4,\"context_capacity\":96,"
            "\"pool_capacity\":256,\"prefill_capacity\":32,"
-           "\"checkpoint_capacity\":2,\"mtp_depth\":0,\"admission\":\"" +
+           "\"checkpoint_capacity\":2,\"draft_depth\":0,\"admission\":\"" +
            admission + "\"}";
   }
 

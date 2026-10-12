@@ -73,7 +73,7 @@ TEST(TextScheduleTest, DefaultCatalogShrinksBothAxesWithLiveReadiness) {
   ASSERT_EQ(shape_count, 37);
   loom_serve_packed_span_t spans[16], scratch[16];
   for (iree_host_size_t active = 1; active <= 16; ++active) {
-    for (iree_host_size_t minimum : {1u, 4u}) {
+    for (iree_host_size_t minimum = 1; minimum <= 8; ++minimum) {
       loom_serve_ready_span_t ready[16] = {};
       for (iree_host_size_t row = 16 - active; row < 16; ++row) {
         ready[row] = {minimum, minimum};
@@ -116,16 +116,17 @@ TEST(TextScheduleTest, CompletionReservationCoversLegalWriteHighWater) {
     for (iree_host_size_t input = 1; input <= context; ++input) {
       for (iree_host_size_t outputs = 1;
            outputs <= iree_min(17, context - input + 1); ++outputs) {
-        for (iree_host_size_t depth : {0u, 3u}) {
+        for (iree_host_size_t depth = 0; depth <= 7; ++depth) {
           // Every selected count is reachable by accepting only the anchor.
           // Enumerate the service's actual launch rule instead of reproducing
           // the closed-form reservation calculation.
           iree_host_size_t high_water = input;
           for (iree_host_size_t selected = 1; selected < outputs; ++selected) {
             const iree_host_size_t position = input + selected - 1;
-            const bool verify =
-                depth && outputs - selected > 1 && context - position >= 4;
-            high_water = iree_max(high_water, position + (verify ? 4 : 1));
+            const bool verify = depth && outputs - selected > 1 &&
+                                context - position >= depth + 1;
+            high_water =
+                iree_max(high_water, position + (verify ? depth + 1 : 1));
           }
           const iree_host_size_t expected = ((high_water + 63) / 64) * 64;
           ASSERT_EQ(loom_serve_text_request_reservation(context, input, outputs,

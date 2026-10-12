@@ -63,7 +63,7 @@ TEST(ConfigurationTest, IndependentModelsOwnDecodedStringsAndOptions) {
       "{\"models\":[" + Model("scout") + "," +
       Model(
           R"(research\u0065r)",
-          R"(,"rows":8,"context_capacity":262144,"pool_capacity":4096,"checkpoint_capacity":2,"prefill_capacity":128,"mtp_depth":3,"continuation_epochs":2,"pending_requests":17,"max_tokens":128)") +
+          R"(,"rows":8,"context_capacity":262144,"pool_capacity":4096,"checkpoint_capacity":2,"prefill_capacity":128,"draft_depth":3,"continuation_epochs":2,"pending_requests":17,"max_tokens":128)") +
       "]}";
   loom_serve_configuration_t configuration;
   IREE_ASSERT_OK(loom_serve_configuration_initialize(
@@ -80,7 +80,7 @@ TEST(ConfigurationTest, IndependentModelsOwnDecodedStringsAndOptions) {
   EXPECT_EQ(a.text.rows, 4u);
   EXPECT_EQ(a.text.admission_overtakes, 4u);
   EXPECT_EQ(a.text.context_capacity, 16384u);
-  EXPECT_EQ(a.text.mtp_depth, 0u);
+  EXPECT_EQ(a.text.draft_depth, 0u);
   EXPECT_EQ(a.text.session_cache_capacity, 0u);
   EXPECT_EQ(a.text.prefix_cache_capacity, 0u);
   EXPECT_EQ(b.text.rows, 8u);
@@ -89,7 +89,7 @@ TEST(ConfigurationTest, IndependentModelsOwnDecodedStringsAndOptions) {
   EXPECT_EQ(b.text.pool_capacity, 4096u);
   EXPECT_EQ(b.text.checkpoint_capacity, 2u);
   EXPECT_EQ(b.text.prefill_capacity, 128u);
-  EXPECT_EQ(b.text.mtp_depth, 3u);
+  EXPECT_EQ(b.text.draft_depth, 3u);
   EXPECT_EQ(b.text.continuation_epochs, 2u);
   EXPECT_EQ(b.pending_requests, 17u);
   EXPECT_EQ(b.text.max_tokens, 128u);
@@ -103,6 +103,21 @@ TEST(ConfigurationTest, EmptyCatalogHasNoModelStorage) {
   EXPECT_EQ(configuration.model_count, 0u);
   EXPECT_EQ(configuration.models, nullptr);
   loom_serve_configuration_deinitialize(&configuration);
+}
+
+TEST(ConfigurationTest, DraftDepthIsModelPolicyWithinNativePacketCapacity) {
+  for (unsigned depth = 0; depth <= 7; ++depth) {
+    const std::string json = Model(
+        "draft", ",\"draft_depth\":" + std::to_string(depth) +
+                     ",\"prefill_capacity\":" + std::to_string(depth + 1) +
+                     ",\"continuation_epochs\":" + (depth ? "2" : "1"));
+    loom_serve_model_configuration_t model;
+    IREE_ASSERT_OK(loom_serve_model_configuration_initialize(
+        iree_make_string_view(json.data(), json.size()), &model,
+        iree_allocator_system()));
+    EXPECT_EQ(model.text.draft_depth, depth);
+    loom_serve_model_configuration_deinitialize(&model);
+  }
 }
 
 TEST(ConfigurationTest, TextAdmissionBudgetIsIndependentOfRowCount) {
@@ -263,10 +278,10 @@ TEST(ConfigurationTest,
        "{\"models\":[" + Model("x", R"(,"rows":0)") + "]}",
        "{\"models\":[" + Model("x", R"(,"rows":17)") + "]}",
        "{\"models\":[" + Model("x", R"(,"rows":2,"rows":4)") + "]}",
-       "{\"models\":[" + Model("x", R"(,"mtp_depth":2)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"draft_depth":8)") + "]}",
        "{\"models\":[" + Model("x", R"(,"continuation_epochs":2)") + "]}",
-       "{\"models\":[" + Model("x", R"(,"prefill_capacity":2,"mtp_depth":3)") +
-           "]}",
+       "{\"models\":[" +
+           Model("x", R"(,"prefill_capacity":2,"draft_depth":3)") + "]}",
        "{\"models\":[" + Model("x", R"(,"prefill_capacity":262145)") + "]}",
        "{\"models\":[" +
            Model("x", R"(,"prefill_capacity":1024,"context_capacity":513)") +

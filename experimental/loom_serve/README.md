@@ -465,7 +465,7 @@ build_tools/bin/iree-bazel-run --config=asan \
   --model=experimental/loom_serve/models/qwen \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
-  --mtp --mtp_depth=3 --port=8080 --max_tokens=384
+  --draft_depth=3 --port=8080 --max_tokens=384
 ```
 
 The packed server defaults to sixteen resident slots and a shared pool of
@@ -500,7 +500,7 @@ events record it. Comparing separate against mixed with `--scheduler=packed`
 isolates cohort mixing, while packed against isolated measures shared versus
 per-row traversals. Neither option alone enables speculative decoding.
 
-`--mtp --mtp_depth=3` enables three-token MTP proposals under
+`--draft_depth=3` enables three-token MTP proposals under
 packed scheduling. At least one configured epoch must admit the anchor plus
 three proposals; an infeasible shape table is rejected before listening. Narrow
 shapes can coexist with that wider shape. Only admitted verifier rows are

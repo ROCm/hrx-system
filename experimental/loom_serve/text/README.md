@@ -24,7 +24,7 @@ build_tools/bin/iree-bazel-run //experimental/loom_serve/text:server -- \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
   --rows=4 --context_capacity=32768 --pool_capacity=65536 \
-  --prefill_capacity=512 --mtp --mtp_depth=3
+  --prefill_capacity=512 --draft_depth=3
 ```
 
 The real Qwen sources have been exercised on gfx1100 and gfx1151. Repository
@@ -65,10 +65,10 @@ speculation. It is not an arbitrary model-graph interpreter.
   shapes in its bootstrap. This is not a generic serving limit.
   Physical pool capacity is independent, up to 4194304 positions, divisible
   by the source-declared page size.
-* MTP is optional. Depth three consumes one anchor and three proposals;
-  the source must implement proposal, target verification, accepted-state
-  publication and draft catch-up. A model without this path runs without
-  `--mtp`; merely declaring MTP does not implement it.
+* Drafting is optional. `--draft_depth` specifies up to seven proposals after
+  each known anchor; zero disables drafting. The source validates its supported
+  depths and implements proposal, target verification, accepted-state publication
+  and draft catch-up. Qwen's MTP path uses depth three.
 * `--continuation_epochs=2` pre-issues a second device-fed cohort. The host
   still joins each cohort; this is not an autonomous persistent device loop.
 * Pooled execution reserves stable device addresses at startup. HTTP admission
@@ -114,7 +114,7 @@ fixtures verify real HTTP output, retained history, cancellation and removal.
 The cold entry in `prepare.loom` is:
 
 ```text
-prepare(prefill:i64, context:i64, pool:i64, rows:i64, pins:i64, mtp:i32,
+prepare(prefill:i64, context:i64, pool:i64, rows:i64, pins:i64, draft_depth:i32,
         shapes:buffer, shape_count:i64, weights:buffer)
   -> (prefill_capacity:i64, shared_stage_count:i32, state:buffer,
       terminal_spelling:buffer, allocations:buffer, row_views:buffer,
@@ -153,7 +153,7 @@ The eleven allocation slots are residual, state arena, packed metadata,
 target origins/page map, packed input IDs, ordinary selected IDs, draft carry,
 committed metadata, verification feedback, draft cache, and draft origins/page
 map. The first two are present; packed slots 2–5 exist with epoch shapes;
-draft slots 6–10 exist with MTP. Workspace size and alignment come from command
+draft slots 6–10 exist with drafting. Workspace size and alignment come from command
 reflection, independently of this list.
 
 Each enabled origin payload must fit its table allocation. In pooled mode,
@@ -256,7 +256,7 @@ private state. `loom_serve_text_row_suspended_bytes` reports host payload bytes
 separately from physical device commitment; UMA copies do not create extra
 machine RAM. Transfers use bounded descriptor batches and the HAL's staging
 pool, whose host allocation is separate from the device pool budget. The
-`models/qwen:epoch_check --suspend_rows --pool_capacity=2048 --mtp` witness
+`models/qwen:epoch_check --suspend_rows --pool_capacity=2048 --draft_depth=3` witness
 overwrites the old blocks, denies resume under logical capacity pressure, then
 compares resumed target/MTP output with uninterrupted execution. It also covers
 unselected prefill state and resetting a suspended row. File-backed images and
@@ -439,7 +439,7 @@ changing kernels, completion reservations or cache ownership.
 The native real-model witness is
 `models/qwen:epoch_check --checkpoints --checkpoint_capacity=1
 --pool_capacity=65536 --context_capacity=1024 --prefill_capacity=128
---epoch=64:4 --epoch=128:8 --mtp`, with normal model/weights/tokenizer flags.
+--epoch=64:4 --epoch=128:8 --draft_depth=3`, with normal model/weights/tokenizer flags.
 
 ### Idle sessions beyond execution capacity
 

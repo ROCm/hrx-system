@@ -100,12 +100,14 @@ struct loom_serve_text_model_t {
   text_stage_t* stages;
   // Number of allocated stages, including partially initialized cold entries.
   iree_host_size_t stage_count;
-  // Number of target packed shapes, independent of auxiliary MTP stages.
+  // Number of target packed shapes, independent of auxiliary draft stages.
   iree_host_size_t shape_count;
   // Immutable prepared shape capacities, owned in epoch option order.
   loom_serve_packing_shape_t* shapes;
   // Context specialization shared by every compiled stage.
   iree_host_size_t context_capacity;
+  // Proposed tokens after each known anchor; zero disables drafting.
+  iree_host_size_t draft_depth;
   // Number of preallocated rows.
   iree_host_size_t row_count;
   // Fixed row records, owned by this model.
@@ -120,7 +122,7 @@ struct loom_serve_text_model_t {
   loom_serve_program_t* program;
   // Cold-resolved model step function.
   iree_vm_function_t step;
-  // Source-owned packed target, feedback and MTP submission sequence.
+  // Source-owned packed target, feedback and draft submission sequence.
   iree_vm_function_t epoch_step;
   // Source-owned conversion of semantic spans to opaque device uploads.
   iree_vm_function_t encode_epoch;
@@ -307,7 +309,7 @@ static iree_status_t text_create_program(loom_serve_text_model_t* runner) {
   }
   const bool packed =
       runner->state.cache.capacity ||
-      iree_any_bit_set(runner->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP);
+      iree_any_bit_set(runner->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT);
   if (packed &&
       runner->source.prefill_capacity > input_length / (2 * sizeof(int32_t))) {
     return iree_make_status(
@@ -339,11 +341,11 @@ static iree_status_t text_create_program(loom_serve_text_model_t* runner) {
       runner->shape_count
           ? iree_hal_buffer_byte_length(runner->state.epoch.buffers[5])
           : 0,
-      iree_any_bit_set(runner->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)
+      iree_any_bit_set(runner->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)
           ? runner->state.storage.feedback_split
           : 0,
-      iree_any_bit_set(runner->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)
-          ? iree_hal_buffer_byte_length(runner->state.mtp.next_results)
+      iree_any_bit_set(runner->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)
+          ? iree_hal_buffer_byte_length(runner->state.draft.next_results)
           : 0,
       TEXT_ROW_CAPACITY * 20 * sizeof(int32_t),
       TEXT_ROW_CAPACITY * 4 * sizeof(int64_t),
@@ -643,14 +645,16 @@ iree_status_t loom_serve_text_load_create(
       options->context_capacity < options->prefill_capacity ||
       options->context_capacity > 262144 || options->epoch_count > INT32_MAX ||
       options->epoch_count > SIZE_MAX / (2 * sizeof(int64_t)) ||
-      (options->enable_mtp && !options->epoch_count) ||
+      options->draft_depth > 7 ||
+      (options->draft_depth && !options->epoch_count) ||
       options->pool_capacity > 4194304 ||
       options->checkpoint_capacity > INT32_MAX ||
       (options->checkpoint_capacity && !options->pool_capacity) ||
       (options->pool_capacity && !options->epoch_count)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "invalid model capacities; pooled KV and MTP require epoch shapes");
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid model capacities; pooled KV and drafting "
+                            "require epoch shapes, "
+                            "and draft depth must be in [0, 7]");
   }
   for (iree_host_size_t i = 0; i < options->epoch_count; ++i) {
     const loom_serve_packing_shape_t shape = options->epoch_shapes[i];
@@ -685,6 +689,7 @@ iree_status_t loom_serve_text_load_create(
     model->dispatch = loom_serve_device_dispatch_queue(device);
     model->transfer = loom_serve_device_transfer_queue(device);
     model->row_count = options->row_count;
+    model->draft_depth = options->draft_depth;
     model->command_mode =
         retain_profile_metadata
             ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA
@@ -979,6 +984,11 @@ const loom_serve_text_chat_policy_t* loom_serve_text_model_chat_policy(
 iree_host_size_t loom_serve_text_model_context_capacity(
     const loom_serve_text_model_t* model) {
   return model->context_capacity;
+}
+
+iree_host_size_t loom_serve_text_model_draft_depth(
+    const loom_serve_text_model_t* model) {
+  return model->draft_depth;
 }
 
 iree_host_size_t loom_serve_text_model_checkpoint_capacity(
@@ -1498,12 +1508,12 @@ iree_status_t loom_serve_text_model_submit_epoch(
   *out_frontier = (loom_serve_execution_frontier_t){0};
   if (continuation && !output_limits) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "continuation requires MTP output limits");
+                            "continuation requires speculative output limits");
   }
   if (output_limits &&
-      !iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)) {
+      !iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "MTP artifacts were not loaded");
+                            "draft artifacts were not loaded");
   }
   if (shape_index >= model->shape_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -1523,6 +1533,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
   uint32_t next_indices[TEXT_ROW_CAPACITY];
   uint32_t continued_speculative_mask = 0;
   const iree_host_size_t epoch_count = continuation ? 2 : 1;
+  const iree_host_size_t width = model->draft_depth + 1;
   bool proposes = false;
   for (iree_host_size_t i = 0; i < span_count; ++i) {
     const loom_serve_text_span_t* span = &spans[i];
@@ -1557,7 +1568,8 @@ iree_status_t loom_serve_text_model_submit_epoch(
     }
     if (output_limits && output_limits[i]) {
       const loom_serve_text_row_t* row = &model->rows[span->row_index];
-      if (output_limits[i] > 4 * epoch_count || span->token_count != 4 ||
+      if (output_limits[i] > width * epoch_count ||
+          span->token_count != width ||
           !iree_any_bit_set(span->flags, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT) ||
           !row->has_prediction || row->transfer.progress[7] ||
           span->token_ids[0] != row->transfer.token) {
@@ -1608,7 +1620,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
           model->context_capacity -
           model->rows[span->row_index].state->position;
       if (limit) {
-        if (limit > 8 || span->token_count != 4 ||
+        if (limit > 2 * width || span->token_count != width ||
             span->flags != (LOOM_SERVE_TEXT_SPAN_FLAG_SELECT |
                             LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE) ||
             !iree_any_bit_set(prior->flags, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT) ||
@@ -1617,9 +1629,9 @@ iree_status_t loom_serve_text_model_submit_epoch(
                                   "invalid speculative continuation span %zu",
                                   i);
         }
-        const iree_host_size_t extent = output_limits[first]
-                                            ? iree_min(8u, limit + 3)
-                                            : prior->token_count + 4;
+        const iree_host_size_t extent =
+            output_limits[first] ? iree_min(2 * width, limit + width - 1)
+                                 : prior->token_count + width;
         extents[first] = (uint32_t)iree_min(remaining, extent);
         continued_speculative_mask |= 1u << first;
       } else {
@@ -1726,9 +1738,9 @@ iree_status_t loom_serve_text_model_submit_epoch(
       model->state.residual,         model->state.epoch.buffers[1],
       model->state.epoch.buffers[2], model->state.row_arena,
       model->state.epoch.buffers[4], model->state.epoch.buffers[5],
-      model->state.mtp.carry,        model->state.mtp.committed,
-      model->state.mtp.results,      model->state.mtp.cache,
-      model->state.mtp.row_table,    model->state.mtp.next_results,
+      model->state.draft.carry,      model->state.draft.committed,
+      model->state.draft.results,    model->state.draft.cache,
+      model->state.draft.row_table,  model->state.draft.next_results,
   };
   iree_vm_variant_t arguments[9 + IREE_ARRAYSIZE(buffers)] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&model->source.vm_types,
@@ -1844,9 +1856,9 @@ iree_status_t loom_serve_text_model_verify(
     const uint32_t* output_limits,
     const loom_serve_text_continuation_t* continuation,
     loom_serve_text_result_t* out_results) {
-  if (!iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)) {
+  if (!iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "MTP artifacts were not loaded");
+                            "draft artifacts were not loaded");
   }
   return text_epoch(model, shape_index, span_count, spans, output_limits,
                     continuation, out_results);
@@ -1867,7 +1879,7 @@ iree_status_t loom_serve_text_row_submit_prefill(
   row->step.kind = TEXT_STEP_PREFILL;
   row->step.token_count = count;
   row->step.start_time = iree_time_now();
-  if (iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP) ||
+  if (iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT) ||
       model->state.cache.capacity) {
     iree_host_size_t shape_index = 0;
     // The public prefill capacity is bounded by the largest prepared shape.
@@ -1931,7 +1943,7 @@ iree_status_t loom_serve_text_row_submit_decode(
   row->step.token_count = 1;
   row->step.start_time = iree_time_now();
   if (iree_any_bit_set(row->model->state.flags,
-                       LOOM_SERVE_TEXT_STATE_FLAG_MTP) ||
+                       LOOM_SERVE_TEXT_STATE_FLAG_DRAFT) ||
       row->model->state.cache.capacity) {
     const int32_t token = row->transfer.token;
     const loom_serve_text_span_t span = {
@@ -1969,7 +1981,7 @@ iree_status_t loom_serve_text_row_submit_decode(
 
 iree_status_t loom_serve_text_row_complete_step(loom_serve_text_row_t* row) {
   loom_serve_text_model_t* model = row->model;
-  if (iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP) ||
+  if (iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT) ||
       model->state.cache.capacity) {
     IREE_RETURN_IF_ERROR(loom_serve_text_model_complete_epoch(model, NULL));
   } else {

@@ -19,8 +19,8 @@ typedef struct loom_serve_text_flag_defaults_t {
   iree_host_size_t row_count;
   // Shared KV positions when --pool_capacity is omitted; zero keeps dense KV.
   iree_host_size_t pool_capacity;
-  // Generate packed shapes when --epoch is omitted. Explicit pooling or MTP
-  // also generates shapes because both use the packed addressing path.
+  // Generate packed shapes when --epoch is omitted. Explicit pooling or
+  // drafting also generates shapes because both use the packed addressing path.
   bool automatic_shapes;
 } loom_serve_text_flag_defaults_t;
 
@@ -29,7 +29,7 @@ typedef struct loom_serve_text_flag_defaults_t {
 // Explicit count excludes the generated catalog; experiment tools use it to
 // require operator-selected shapes rather than changing their control arm.
 iree_host_size_t loom_serve_text_explicit_shape_count_from_flags(void);
-bool loom_serve_text_mtp_from_flags(void);
+iree_host_size_t loom_serve_text_draft_depth_from_flags(void);
 iree_status_t loom_serve_text_model_create_from_flags(
     loom_serve_device_t* device,
     const loom_serve_text_flag_defaults_t* defaults,

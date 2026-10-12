@@ -197,12 +197,12 @@ iree_status_t loom_serve_text_storage_initialize(
 
 iree_status_t loom_serve_text_storage_plan_snapshot(
     const loom_serve_text_storage_t* storage, iree_host_size_t carry_index,
-    iree_hal_buffer_t* const* private_views, bool enable_mtp,
+    iree_hal_buffer_t* const* private_views, bool include_carry,
     uint32_t block_count, const uint32_t* blocks, iree_host_size_t* out_count,
     loom_serve_snapshot_range_t** out_ranges, iree_allocator_t allocator) {
   *out_count = 0;
   *out_ranges = NULL;
-  iree_host_size_t capacity = 5 + (enable_mtp ? 1 : 0);
+  iree_host_size_t capacity = 5 + (include_carry ? 1 : 0);
   for (iree_host_size_t r = 0; r < storage->region_count; ++r) {
     if (block_count && storage->regions[r].blocks.count >
                            (IREE_HOST_SIZE_MAX - capacity) / block_count) {
@@ -222,7 +222,7 @@ iree_status_t loom_serve_text_storage_plan_snapshot(
           iree_hal_buffer_byte_length(private_views[i])};
     }
   }
-  if (enable_mtp) {
+  if (include_carry) {
     ranges[count++] = (loom_serve_snapshot_range_t){
         6, carry_index * storage->carry_stride, storage->carry_stride};
   }

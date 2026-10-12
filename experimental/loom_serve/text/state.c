@@ -18,7 +18,7 @@ void loom_serve_text_state_initialize(const loom_serve_text_options_t* options,
   *out_state = (loom_serve_text_state_t){
       .allocator = allocator,
       .flags = (options->epoch_count ? LOOM_SERVE_TEXT_STATE_FLAG_PACKED : 0) |
-               (options->enable_mtp ? LOOM_SERVE_TEXT_STATE_FLAG_MTP : 0),
+               (options->draft_depth ? LOOM_SERVE_TEXT_STATE_FLAG_DRAFT : 0),
       .row_count = options->row_count,
       .cache.capacity = options->pool_capacity,
       .checkpoints.capacity = (uint32_t)options->checkpoint_capacity,
@@ -46,9 +46,9 @@ static iree_hal_buffer_t** text_allocation(loom_serve_text_state_t* state,
       &state->residual,         &state->row_arena,
       &state->epoch.buffers[1], &state->epoch.buffers[2],
       &state->epoch.buffers[4], &state->epoch.buffers[5],
-      &state->mtp.carry,        &state->mtp.committed,
-      &state->mtp.results,      &state->mtp.cache,
-      &state->mtp.row_table,
+      &state->draft.carry,      &state->draft.committed,
+      &state->draft.results,    &state->draft.cache,
+      &state->draft.row_table,
   };
   return allocations[index];
 }
@@ -88,10 +88,10 @@ iree_status_t loom_serve_text_state_allocate(
     const uint64_t alignment = iree_unaligned_load_le_u64(record + 8);
     const uint64_t clear_length = iree_unaligned_load_le_u64(record + 16);
     const bool required =
-        i < 2 ||
-        (i < 6
-             ? iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_PACKED)
-             : iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP));
+        i < 2 || (i < 6 ? iree_any_bit_set(state->flags,
+                                           LOOM_SERVE_TEXT_STATE_FLAG_PACKED)
+                        : iree_any_bit_set(state->flags,
+                                           LOOM_SERVE_TEXT_STATE_FLAG_DRAFT));
     if ((length != 0) != required || clear_length > length ||
         length > INT64_MAX || !alignment ||
         !iree_is_power_of_two_uint64(alignment)) {
@@ -222,20 +222,20 @@ iree_status_t loom_serve_text_state_allocate(
     }
   }
   if (iree_status_is_ok(status) &&
-      iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)) {
+      iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)) {
     status = iree_hal_buffer_subspan(
-        state->mtp.results, state->storage.feedback_split,
-        IREE_HAL_WHOLE_BUFFER, state->allocator, &state->mtp.next_results);
+        state->draft.results, state->storage.feedback_split,
+        IREE_HAL_WHOLE_BUFFER, state->allocator, &state->draft.next_results);
   }
   if (iree_status_is_ok(status) &&
-      iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)) {
+      iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)) {
     const iree_const_byte_span_t origins =
         state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_DRAFT_ORIGINS];
     if (origins.data_length) {
       transfers[transfer_count++] = (iree_hal_transfer_operation_t){
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
           .upload = {.source = origins.data,
-                     .target_buffer = state->mtp.row_table,
+                     .target_buffer = state->draft.row_table,
                      .length = origins.data_length},
       };
     }
@@ -277,8 +277,8 @@ void loom_serve_text_state_retire(loom_serve_text_state_t* state,
       state->checkpoints.values[i].snapshot = NULL;
     }
   }
-  iree_hal_buffer_release(state->mtp.next_results);
-  state->mtp.next_results = NULL;
+  iree_hal_buffer_release(state->draft.next_results);
+  state->draft.next_results = NULL;
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
     iree_hal_buffer_release(*text_allocation(state, i));
@@ -523,14 +523,15 @@ iree_status_t loom_serve_text_state_submit_trim(
                     .length = length}},
         {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
          .upload = {.source = state->cache.maps,
-                    .target_buffer = state->mtp.row_table,
+                    .target_buffer = state->draft.row_table,
                     .target_offset = state->storage.map_origin,
                     .length = length}},
     };
     uint64_t completion = 0;
     status = loom_serve_execution_transfer(
         state->execution,
-        iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP) ? 2 : 1,
+        iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT) ? 2
+                                                                         : 1,
         uploads, &completion);
   }
   out_result->released_bytes =
@@ -653,10 +654,10 @@ static iree_status_t text_row_initialize(loom_serve_text_state_row_t* row) {
   iree_status_t status = loom_serve_execution_transfer(
       state->execution, IREE_ARRAYSIZE(fills), fills, &completion);
   if (iree_status_is_ok(status) &&
-      iree_any_bit_set(row->owner->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)) {
+      iree_any_bit_set(row->owner->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)) {
     const iree_hal_transfer_operation_t clear_carry = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-        .fill = {.target_buffer = row->owner->mtp.carry,
+        .fill = {.target_buffer = row->owner->draft.carry,
                  .target_offset = (uint64_t)(row - row->owner->rows) *
                                   row->owner->storage.carry_stride,
                  .length = row->owner->storage.carry_stride,
@@ -716,7 +717,7 @@ iree_status_t loom_serve_text_state_row_suspend(
   loom_serve_snapshot_range_t* ranges = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_text_storage_plan_snapshot(
       &state->storage, index, &row->buffers[TEXT_CONTROL],
-      iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP),
+      iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT),
       row->block_count, blocks, &range_count, &ranges, state->allocator));
   iree_hal_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
@@ -761,7 +762,7 @@ iree_status_t loom_serve_text_state_row_try_resume(
   loom_serve_snapshot_range_t* ranges = NULL;
   iree_status_t status = loom_serve_text_storage_plan_snapshot(
       &state->storage, index, &row->buffers[TEXT_CONTROL],
-      iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP), needed,
+      iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT), needed,
       blocks, &range_count, &ranges, state->allocator);
   loom_serve_memory_range_t* commitments = NULL;
   if (iree_status_is_ok(status)) {
@@ -802,14 +803,15 @@ iree_status_t loom_serve_text_state_row_try_resume(
                     .length = needed * sizeof(*blocks)}},
         {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
          .upload = {.source = blocks,
-                    .target_buffer = state->mtp.row_table,
+                    .target_buffer = state->draft.row_table,
                     .target_offset = state->storage.map_origin + map_index * 4,
                     .length = needed * sizeof(*blocks)}},
     };
     uint64_t completion = 0;
     status = loom_serve_execution_transfer(
         state->execution,
-        iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP) ? 2 : 1,
+        iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT) ? 2
+                                                                         : 1,
         uploads, &completion);
     status =
         iree_status_join(status, loom_serve_execution_drain(state->execution));
@@ -831,14 +833,14 @@ iree_status_t loom_serve_text_state_row_try_resume(
 static iree_status_t text_copy_carry(loom_serve_text_state_t* state,
                                      iree_host_size_t source,
                                      iree_host_size_t target) {
-  if (!iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)) {
+  if (!iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)) {
     return iree_ok_status();
   }
   const iree_hal_transfer_operation_t copy = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
-      .copy = {.source_buffer = state->mtp.carry,
+      .copy = {.source_buffer = state->draft.carry,
                .source_offset = source * state->storage.carry_stride,
-               .target_buffer = state->mtp.carry,
+               .target_buffer = state->draft.carry,
                .target_offset = target * state->storage.carry_stride,
                .length = state->storage.carry_stride}};
   uint64_t completion = 0;
@@ -920,7 +922,7 @@ static iree_status_t text_checkpoint_plan_snapshot(
       state->row_count + (checkpoint - state->checkpoints.values);
   return loom_serve_text_storage_plan_snapshot(
       &state->storage, carry_index, views,
-      iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP),
+      iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT),
       checkpoint->block_count, checkpoint->blocks, out_count, out_ranges,
       state->allocator);
 }
@@ -1097,7 +1099,7 @@ iree_status_t loom_serve_text_state_row_try_restore(
                   .length = row->block_count * sizeof(*blocks)}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = blocks,
-                  .target_buffer = state->mtp.row_table,
+                  .target_buffer = state->draft.row_table,
                   .target_offset = state->storage.map_origin + map_index * 4,
                   .length = row->block_count * sizeof(*blocks)}},
   };
@@ -1105,7 +1107,8 @@ iree_status_t loom_serve_text_state_row_try_restore(
   if (iree_status_is_ok(status)) {
     status = loom_serve_execution_transfer(
         state->execution,
-        iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP) ? 2 : 1,
+        iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT) ? 2
+                                                                         : 1,
         uploads, &completion);
   }
   status =
@@ -1341,7 +1344,7 @@ iree_status_t loom_serve_text_state_row_submit_reserve(
   loom_serve_snapshot_range_t* restore_ranges = NULL;
   iree_status_t status = loom_serve_text_storage_plan_snapshot(
       &state->storage, index, views,
-      iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP), count,
+      iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT), count,
       blocks, &range_count, &ranges, state->allocator);
   if (iree_status_is_ok(status) && cold) {
     // The carry index belongs to the real endpoint record, not the temporary
@@ -1353,8 +1356,9 @@ iree_status_t loom_serve_text_state_row_submit_reserve(
         &state->storage,
         state->row_count + (checkpoint - state->checkpoints.values),
         checkpoint_views,
-        iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP), prefix,
-        restored.blocks, &restore_count, &restore_ranges, state->allocator);
+        iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT),
+        prefix, restored.blocks, &restore_count, &restore_ranges,
+        state->allocator);
   }
   loom_serve_memory_range_t* commitments = NULL;
   if (iree_status_is_ok(status) && state->memory.pool) {
@@ -1437,7 +1441,7 @@ iree_status_t loom_serve_text_state_row_submit_reserve(
           {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
            .upload = {.source = state->cache.maps +
                                 index * state->storage.blocks_per_row,
-                      .target_buffer = state->mtp.row_table,
+                      .target_buffer = state->draft.row_table,
                       .target_offset =
                           state->storage.map_origin +
                           index * state->storage.blocks_per_row * 4,
@@ -1446,8 +1450,8 @@ iree_status_t loom_serve_text_state_row_submit_reserve(
       uint64_t completion = 0;
       status = loom_serve_execution_transfer(
           state->execution,
-          iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP) ? 2
-                                                                         : 1,
+          iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT) ? 2
+                                                                           : 1,
           uploads, &completion);
     }
   }
@@ -1562,9 +1566,9 @@ iree_status_t loom_serve_text_state_grow(loom_serve_text_state_t* state,
                        state->storage.map_origin + map_index * sizeof(*blocks),
                    .length = count * sizeof(*blocks)},
     };
-    if (iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)) {
+    if (iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)) {
       uploads[upload_count] = uploads[upload_count - 1];
-      uploads[upload_count++].upload.target_buffer = state->mtp.row_table;
+      uploads[upload_count++].upload.target_buffer = state->draft.row_table;
     }
   }
   if (!upload_count) {

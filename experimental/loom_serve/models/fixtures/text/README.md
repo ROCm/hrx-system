@@ -132,7 +132,7 @@ The shared server accepts the same package alongside [catalog.json](../catalog.j
   "prefill_capacity": 32,
   "checkpoint_capacity": 2,
   "max_tokens": 16,
-  "mtp_depth": 0
+  "draft_depth": 0
 }
 ```
 

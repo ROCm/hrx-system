@@ -25,7 +25,7 @@ func.def @allocation(%records: buffer, %slot: index, %bytes: i64, %clear: i64) {
 
 // One shared command handles every host token/span bucket. The cold program
 // owns storage geometry; the host owns physical page IDs and recurrent slots.
-func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %mtp: i32, %shapes: buffer, %shape_count: i64, %weights: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
+func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft_depth: i32, %shapes: buffer, %shape_count: i64, %weights: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -36,9 +36,9 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %four64 = scalar.constant 4 : i64
   %pooled = scalar.cmpi ne, %pool, %zero64 : i64
   %packed = scalar.cmpi ne, %shape_count, %zero64 : i64
-  %no_mtp = scalar.cmpi eq, %mtp, %zero32 : i32
+  %no_draft = scalar.cmpi eq, %draft_depth, %zero32 : i32
   %has_epochs = scalar.andi %pooled, %packed : i1
-  %supported = scalar.andi %has_epochs, %no_mtp : i1
+  %supported = scalar.andi %has_epochs, %no_draft : i1
   %supported32 = scalar.extui %supported : i1 to i32
   %error = global.load @unsupported : buffer
   func.call @require(%supported32, %error) : (i32, buffer) -> ()

@@ -76,7 +76,7 @@ Create a JSON or JSONC catalog, for example:
       "context_capacity": 8192,
       "pool_capacity": 32768,
       "prefill_capacity": 128,
-      "mtp_depth": 3,
+      "draft_depth": 3,
       "continuation_epochs": 2,
       "checkpoint_capacity": 2,
       "session_cache_capacity": 8
@@ -91,7 +91,7 @@ Create a JSON or JSONC catalog, for example:
       "context_capacity": 131072,
       "pool_capacity": 65536,
       "prefill_capacity": 512,
-      "mtp_depth": 0
+      "draft_depth": 0
     },
     {
       "kind": "image",

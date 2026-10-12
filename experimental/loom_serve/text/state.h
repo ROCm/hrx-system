@@ -30,7 +30,7 @@ enum {
 
 enum loom_serve_text_state_flag_bits_e {
   LOOM_SERVE_TEXT_STATE_FLAG_PACKED = 1u << 0,
-  LOOM_SERVE_TEXT_STATE_FLAG_MTP = 1u << 1,
+  LOOM_SERVE_TEXT_STATE_FLAG_DRAFT = 1u << 1,
 };
 typedef uint32_t loom_serve_text_state_flags_t;
 
@@ -64,8 +64,8 @@ typedef struct loom_serve_text_state_row_t {
   loom_serve_snapshot_t* snapshot;
 } loom_serve_text_state_row_t;
 
-// Explicit endpoint holding immutable KV and recurrence by reference. MTP carry
-// lives in the source-declared carry slab after the ordinary row entries.
+// Explicit endpoint holding immutable KV and recurrence by reference. Draft
+// carry lives in the source-declared carry slab after the ordinary row entries.
 typedef struct loom_serve_text_state_checkpoint_t {
   // Borrowed storage owner, outliving this endpoint.
   loom_serve_text_state_t* owner;
@@ -171,7 +171,7 @@ struct loom_serve_text_state_t {
     iree_hal_buffer_t* cache;
     // Draft row origins and logical-to-physical block maps.
     iree_hal_buffer_t* row_table;
-  } mtp;
+  } draft;
 };
 
 // Initializes ownership before bootstrap can fail. Options have passed the

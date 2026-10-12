@@ -549,20 +549,21 @@ static iree_status_t CheckActivePrefix(loom_serve_text_model_t* model,
                               "active prefix changed prompt completion");
     }
   }
-  const bool mtp = loom_serve_text_mtp_from_flags();
-  uint32_t limits[kSpanCount] = {4, 4};
+  const bool drafts = loom_serve_text_model_draft_depth(model) != 0;
+  const uint32_t width = loom_serve_text_model_draft_depth(model) + 1;
+  uint32_t limits[kSpanCount] = {width, width};
   std::array<int32_t, kSpanCount> anchors = {};
   ModelWork continuation;
   continuation.model = model;
-  continuation.limits = mtp ? limits : nullptr;
+  continuation.limits = drafts ? limits : nullptr;
   for (size_t i = 0; i < kSpanCount; ++i) {
     const size_t index = remainder.spans[i].row_index;
     anchors[i] =
         loom_serve_text_row_token(loom_serve_text_model_row(model, index));
     continuation.spans[i] = {
-        index, mtp ? 4u : 1u, &anchors[i],
+        index, drafts ? width : 1u, &anchors[i],
         LOOM_SERVE_TEXT_SPAN_FLAG_SELECT |
-            (mtp ? LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE : 0u)};
+            (drafts ? LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE : 0u)};
   }
   IREE_RETURN_IF_ERROR(Compare("active-prefix-continuation", continuation));
   for (size_t index :
@@ -673,9 +674,9 @@ static iree_status_t Run(loom_serve_text_model_t* model,
   }
   fprintf(stdout,
           "{\"event\":\"step_check\",\"case\":\"prefill-decode-matched\","
-          "\"steps\":10,\"pooled\":%s,\"mtp\":%s}\n",
+          "\"steps\":10,\"pooled\":%s,\"draft_depth\":%zu}\n",
           loom_serve_text_model_pool_usage(model).capacity ? "true" : "false",
-          loom_serve_text_mtp_from_flags() ? "true" : "false");
+          loom_serve_text_model_draft_depth(model));
   fflush(stdout);
   IREE_RETURN_IF_ERROR(CheckActivePrefix(model, counts[0], inputs[0].data()));
   // Low physical IDs belong to independent ballast rows. Releasing them after
@@ -727,10 +728,11 @@ static iree_status_t Run(loom_serve_text_model_t* model,
                               "fixture cannot admit continuing reservation");
     }
   }
-  if (loom_serve_text_mtp_from_flags()) {
+  if (loom_serve_text_model_draft_depth(model)) {
+    const uint32_t width = loom_serve_text_model_draft_depth(model) + 1;
     for (size_t pass = 0; pass < 2; ++pass) {
       std::array<int32_t, kSpanCount> anchors = {};
-      uint32_t limits[kSpanCount] = {4, 4};
+      uint32_t limits[kSpanCount] = {width, width};
       ModelWork speculative;
       speculative.model = model;
       speculative.limits = limits;
@@ -741,20 +743,20 @@ static iree_status_t Run(loom_serve_text_model_t* model,
                                   "fixture ended before speculative work");
         }
         anchors[i] = loom_serve_text_row_token(row);
-        speculative.spans[i] = {kRows[i], 4, &anchors[i],
+        speculative.spans[i] = {kRows[i], width, &anchors[i],
                                 LOOM_SERVE_TEXT_SPAN_FLAG_SELECT |
                                     LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE};
       }
       Spans next = {};
-      uint32_t next_limits[kSpanCount] = {8, 4};
+      uint32_t next_limits[kSpanCount] = {2 * width, width};
       loom_serve_text_continuation_t continuation = {};
       if (pass) {
         limits[0] = 0;
-        limits[1] = 8;
+        limits[1] = 2 * width;
         speculative.spans[0].token_count = 1;
         speculative.spans[0].flags = LOOM_SERVE_TEXT_SPAN_FLAG_SELECT;
         for (size_t i = 0; i < kSpanCount; ++i) {
-          next[i] = {kRows[kSpanCount - 1 - i], 4, nullptr,
+          next[i] = {kRows[kSpanCount - 1 - i], width, nullptr,
                      LOOM_SERVE_TEXT_SPAN_FLAG_SELECT |
                          LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE};
         }
@@ -766,7 +768,7 @@ static iree_status_t Run(loom_serve_text_model_t* model,
         speculative.continuation = &continuation;
       }
       IREE_RETURN_IF_ERROR(
-          Compare(pass ? "mtp-continuation" : "mtp", speculative));
+          Compare(pass ? "draft-continuation" : "draft", speculative));
     }
   }
   for (size_t index : kRows) {

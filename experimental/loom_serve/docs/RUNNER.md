@@ -358,7 +358,7 @@ steps repeat under one model owner; another session has no VM instantiation.
 
 ## MTP and bounded device-fed cohorts
 
-With `--mtp --mtp_depth=3`, admitted speculative rows reserve the anchor plus
+With `--draft_depth=3`, admitted speculative rows reserve the anchor plus
 three proposals. The proposal command compacts those rows and executes three
 draft rounds, routing samples directly into the next round and verifier input.
 The target verifies them together with ordinary known spans. Greedy acceptance
@@ -370,8 +370,9 @@ Catch-up advances private MTP KV/carry using accepted target information.
 Proposal, target verification, commit, and catch-up share the work timeline
 without an intermediate host readback. By default the host receives the
 completed epoch's output/progress records and then chooses the next epoch.
-Depth zero with `--mtp` measures a warm draft state without proposal; omitting
-`--mtp` measures target-only residency.
+`--draft_depth=0` selects target-only residency. The configured proposal width
+belongs to the model; scheduling, reservation, continuation and telemetry use
+that same width. The model source validates which nonzero depths it supports.
 
 `--continuation_epochs=2` grants two device-fed epochs per scheduling turn.
 The host pre-issues a second mixed plan from the admitted row cohort, including

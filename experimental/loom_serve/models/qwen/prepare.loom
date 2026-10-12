@@ -25,6 +25,8 @@ global.rodata.def @terminal = bytes("3c7c696d5f656e647c3e")
 global.rodata.def @empty = bytes("")
 // Qwen token packets support at most 512 tokens per epoch.
 global.rodata.def @token_capacity_error = bytes("5177656e20746f6b656e207061636b65747320737570706f7274206174206d6f73742035313220746f6b656e73207065722065706f6368")
+// Qwen MTP requires draft depth zero or three.
+global.rodata.def @draft_depth_error = bytes("5177656e204d5450207265717569726573206472616674206465707468207a65726f206f72207468726565")
 // runner.qwen38.prefill_token_count
 global.rodata.def @prefill_key = bytes("72756e6e65722e7177656e33382e70726566696c6c5f746f6b656e5f636f756e74")
 // runner.qwen38.span_capacity
@@ -289,12 +291,19 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %pins: i64, %packed: i1
 // little-endian i64 {tokens, spans}; no C struct layout crosses this boundary.
 // Commands, specialization and their shared checkpoint identity are source
 // policy. Returned state is interpreted only by control.loom.
-func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %mtp: i32, %shapes: buffer, %shape_count: i64, %weights: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
+func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft_depth: i32, %shapes: buffer, %shape_count: i64, %weights: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %zero32 = scalar.constant 0 : i32
   %one32 = scalar.constant 1 : i32
+  %three32 = scalar.constant 3 : i32
+  %disabled = scalar.cmpi eq, %draft_depth, %zero32 : i32
+  %mtp = scalar.cmpi eq, %draft_depth, %three32 : i32
+  %valid_depth = scalar.ori %disabled, %mtp : i1
+  %valid_depth32 = scalar.extui %valid_depth : i1 to i32
+  %depth_error = global.load @draft_depth_error : buffer
+  func.call @require(%valid_depth32, %depth_error) : (i32, buffer) -> ()
   %zero64 = scalar.constant 0 : i64
   %one64 = scalar.constant 1 : i64
   %capacity = scalar.constant 512 : i64
@@ -326,7 +335,7 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
     %next = scf.select %larger, %tokens, %previous : i64
     scf.yield %next : i64
   }
-  %enabled = scalar.cmpi ne, %mtp, %zero32 : i32
+  %enabled = scalar.cmpi ne, %draft_depth, %zero32 : i32
   %proposal_stage = scf.if %enabled -> (i32) {
     %proposal_root = global.load @proposal_root : buffer
     %warm_root = global.load @warm_root : buffer

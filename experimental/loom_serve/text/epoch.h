@@ -23,6 +23,8 @@ typedef struct loom_serve_text_epoch_options_t {
   iree_host_size_t chunk_size;
   // One or two pre-issued device epochs per host publication boundary.
   iree_host_size_t continuation_epochs;
+  // Proposed tokens after the known anchor; zero disables drafting.
+  iree_host_size_t draft_depth;
   // Packed, isolated or matched execution of the selected partition.
   loom_serve_text_schedule_mode_t schedule_mode;
   // Whether known inputs and verifiers may share a cohort.

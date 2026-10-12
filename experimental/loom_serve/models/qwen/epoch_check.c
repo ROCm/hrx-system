@@ -479,7 +479,7 @@ static iree_status_t qwen_check_verified_epoch(
 
 static iree_status_t qwen_check_mtp_verification(loom_serve_text_model_t* model,
                                                  iree_allocator_t allocator) {
-  if (!loom_serve_text_mtp_from_flags()) {
+  if (!loom_serve_text_draft_depth_from_flags()) {
     return iree_ok_status();
   }
   qwen_check_row_t rows[4] = {
@@ -965,7 +965,7 @@ static iree_status_t qwen_check_trim(loom_serve_text_model_t* model,
   const int32_t expected_pending = loom_serve_text_row_token(reference);
   loom_serve_text_result_t expected_verification = {0};
   const uint32_t limit = 4;
-  if (loom_serve_text_mtp_from_flags()) {
+  if (loom_serve_text_draft_depth_from_flags()) {
     const loom_serve_text_span_t span = {
         6, 4, &expected_pending,
         LOOM_SERVE_TEXT_SPAN_FLAG_SELECT | LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE};
@@ -1033,7 +1033,7 @@ static iree_status_t qwen_check_trim(loom_serve_text_model_t* model,
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "compaction changed pending token");
   }
-  if (loom_serve_text_mtp_from_flags()) {
+  if (loom_serve_text_draft_depth_from_flags()) {
     const loom_serve_text_span_t span = {
         7, 4, &expected_pending,
         LOOM_SERVE_TEXT_SPAN_FLAG_SELECT | LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE};
@@ -1304,7 +1304,7 @@ static iree_status_t qwen_check_checkpoint_suspension(
   }
   IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 6, 127, input));
   IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 3, 6));
-  if (loom_serve_text_mtp_from_flags()) {
+  if (loom_serve_text_draft_depth_from_flags()) {
     const int32_t anchor = loom_serve_text_row_token(restored);
     const loom_serve_text_span_t span = {
         3, 4, &anchor,
@@ -1438,7 +1438,7 @@ static iree_status_t qwen_check_reserved_relocation(
   IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(survivor));
   IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(reference));
   IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 1, 7));
-  if (loom_serve_text_mtp_from_flags()) {
+  if (loom_serve_text_draft_depth_from_flags()) {
     const int32_t token = loom_serve_text_row_token(survivor);
     const loom_serve_text_span_t spans[] = {
         {1, 4, &token,
@@ -1701,7 +1701,7 @@ static iree_status_t qwen_check_checkpoints(loom_serve_text_model_t* model,
   const loom_serve_text_continuation_t known = {0, 2, second, known_limits};
   const iree_host_size_t before_append =
       loom_serve_text_model_pool_usage(model).available;
-  if (loom_serve_text_mtp_from_flags()) {
+  if (loom_serve_text_draft_depth_from_flags()) {
     loom_serve_text_result_t results[2];
     IREE_RETURN_IF_ERROR(loom_serve_text_model_verify(
         model, 0, 2, first, known_limits, &known, results));
@@ -1755,7 +1755,7 @@ static iree_status_t qwen_check_checkpoints(loom_serve_text_model_t* model,
     IREE_RETURN_IF_ERROR(
         qwen_check_endpoint(model, first[i].row_index, i ? 5 : 6));
   }
-  if (loom_serve_text_mtp_from_flags()) {
+  if (loom_serve_text_draft_depth_from_flags()) {
     int32_t anchors[2];
     loom_serve_text_span_t spans[2];
     loom_serve_text_span_t next[2];

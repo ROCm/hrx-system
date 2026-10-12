@@ -89,8 +89,6 @@ struct loom_serve_text_service_t {
   iree_host_size_t row_count;
   // Output bound when the client omits one.
   iree_host_size_t default_max_tokens;
-  // Fixed proposal depth: zero for target-only, three for whole verifiers.
-  iree_host_size_t mtp_depth;
   // Immutable model epoch geometry and execution choices.
   loom_serve_text_epoch_options_t scheduling;
   // Rotating admission priority, independent of row or request identity.
@@ -951,7 +949,7 @@ static iree_status_t text_prepare_admission(
   const iree_host_size_t retained_count = pending->input.retained_count;
   const iree_host_size_t reservation = loom_serve_text_request_reservation(
       service->scheduling.context_capacity, retained_count + input_count,
-      pending->chat.max_tokens, service->mtp_depth,
+      pending->chat.max_tokens, service->scheduling.draft_depth,
       service->pool.geometry.block_size);
   if (service->pool.geometry.capacity &&
       reservation > service->pool.geometry.capacity) {
@@ -1477,13 +1475,14 @@ static iree_status_t text_prepare_ready(loom_serve_text_service_t* service,
   } else {
     // A final single output cannot amortize drafting. Near the context limit,
     // ordinary decode avoids writing speculative KV beyond allocated capacity.
+    const iree_host_size_t width = service->scheduling.draft_depth + 1;
     const bool verify =
-        service->mtp_depth &&
+        service->scheduling.draft_depth &&
         session->request.chat.max_tokens - session->request.output_count > 1 &&
         service->scheduling.context_capacity -
                 loom_serve_text_row_position(session->row) >=
-            4;
-    *out_ready = verify ? (loom_serve_ready_span_t){4, 4}
+            width;
+    *out_ready = verify ? (loom_serve_ready_span_t){width, width}
                         : (loom_serve_ready_span_t){1, 1};
   }
   return iree_ok_status();
@@ -1801,6 +1800,15 @@ iree_status_t loom_serve_text_service_create(
     loom_serve_telemetry_stream_t* stream,
     loom_serve_text_service_t** out_service, iree_allocator_t host_allocator) {
   *out_service = NULL;
+  const iree_host_size_t draft_depth = loom_serve_text_model_draft_depth(model);
+  if ((draft_depth &&
+       options->schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED) ||
+      options->continuation_epochs < 1 || options->continuation_epochs > 2 ||
+      (options->continuation_epochs == 2 && !draft_depth)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "drafting requires packed scheduling; two device "
+                            "epochs require a nonzero draft depth");
+  }
   if (options->session_cache_capacity &&
       options->session_cache_capacity >=
           loom_serve_text_model_checkpoint_capacity(model)) {
@@ -1831,13 +1839,13 @@ iree_status_t loom_serve_text_service_create(
       .cache = {.capacity = options->session_cache_capacity},
       .prefixes = {.capacity = options->prefix_cache_capacity},
       .pool = {.geometry = loom_serve_text_model_pool_usage(model)},
-      .mtp_depth = options->mtp_depth,
       .scheduling = {
           .chunk_size = options->chunk_size,
           .context_capacity = loom_serve_text_model_context_capacity(model),
           .schedule_mode = options->schedule_mode,
           .packing_mode = options->packing_mode,
           .continuation_epochs = options->continuation_epochs,
+          .draft_depth = draft_depth,
           .shapes = loom_serve_text_model_shapes(model),
           .shape_count = loom_serve_text_model_shape_count(model)}};
   if (!service->scheduling.shape_count) {

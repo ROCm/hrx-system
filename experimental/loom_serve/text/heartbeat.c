@@ -144,7 +144,7 @@ static iree_status_t text_work_format(
       ",\"issued_epochs\":%" PRIu64 ",\"completed_epochs\":%" PRIu64
       ",\"traversals\":%" PRIu64 ",\"prefill_tokens\":%" PRIu64
       ",\"decode_tokens\":%" PRIu64 ",\"model_ns\":%" PRIu64
-      ",\"mtp\":{\"proposed_tokens\":%" PRIu64
+      ",\"draft\":{\"proposed_tokens\":%" PRIu64
       ",\"accepted_draft_inputs\":%" PRIu64 "}",
       value.issued_epochs, value.completed_epochs, value.traversals,
       value.prefill_tokens, value.decode_tokens, value.model_ns,
@@ -232,8 +232,8 @@ static void text_heartbeat_report(loom_serve_text_heartbeat_t* heartbeat) {
       .prefill_tokens = state.prefill_tokens,
       .decode_tokens = state.decode_tokens,
       .model_ns = state.model_duration,
-      .proposed_tokens = state.mtp.proposed_tokens,
-      .accepted_inputs = state.mtp.accepted_inputs};
+      .proposed_tokens = state.draft.proposed_tokens,
+      .accepted_inputs = state.draft.accepted_inputs};
   memset(&record.data, 0, sizeof(record.data));
   record.event = &text_work_event;
   memcpy(record.data.words, &work, sizeof(work));

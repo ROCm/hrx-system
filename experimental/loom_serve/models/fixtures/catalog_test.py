@@ -1936,7 +1936,7 @@ def main():
                 "prefill_capacity": 32,
                 "checkpoint_capacity": 2,
                 "max_tokens": 16,
-                "mtp_depth": 0,
+                "draft_depth": 0,
                 "pending_requests": 32,
             }
         )
