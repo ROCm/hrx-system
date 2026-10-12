@@ -9,20 +9,30 @@ template.decl @projection.linear_tiled_i8(%rows: index, %inputs: index, %outputs
 // the dot product to I32 and supplies a positive traversal group size.
 // All input, scale and output buffers are non-overlapping.
 //
-// Eight waves share padded 64x80 byte panels through LDS. Publication and
-// retirement barriers permit pipelined acquisition without reusing a live
-// panel. Partial row tiles zero-fill acquisition and suppress whole unused
-// result waves; every thread still participates in both barriers.
+// Eight waves share padded panels through LDS. A 128-input panel amortizes
+// publication and retirement across eight MMA steps; widths not divisible by
+// 128 use 64-input panels. These shape facts specialize during compilation.
+// Partial row tiles zero-fill acquisition and suppress whole unused result
+// waves; every thread still participates in both barriers.
 template.def<@projection.linear_tiled_i8> device @projection.linear_tiled_i8_impl(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %layout: encoding<layout>, %input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %two = index.constant 2 : index
-  %four = index.constant 4 : index
+  %depth = index.constant 3 : index
   %tile = index.constant 16 : index
   %wave_outputs = index.constant 32 : index
   %block = index.constant 64 : index
-  %stage_bytes = index.constant 5120 : offset
+  %wide_panel = index.constant 128 : index
+  %remainder = index.rem %inputs, %wide_panel : index
+  %wide = index.cmp eq, %remainder, %zero : index
+  %panel = scf.select %wide, %wide_panel, %block : index
+  %pieces = index.div %panel, %tile : index
+  %stripes = index.div %panel, %block : index
+  %threads = index.constant 256 : index
+  %stage_width = index.add %panel, %tile : index
+  %stage_stride = index.cast %stage_width : index to offset
+  %stage_bytes = index.scale %block, %stage_stride : index, offset -> offset
   %row_group, %output_group = template.apply<@projection.linear_tiled_coordinates>(%rows, %outputs, %row_tile_group_size) : (index, index, index) -> (index, index)
   %workitem = kernel.workitem.id<x> : index
   %subgroup = kernel.subgroup.id : index
@@ -48,35 +58,39 @@ template.def<@projection.linear_tiled_i8> device @projection.linear_tiled_i8_imp
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%outputs]xbf16, %layout>
   %input_stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
   %weight_stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
-  %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<64x80xi8>
-  %weight_stage_view = buffer.view %weight_stage[%origin] : buffer -> view<64x80xi8>
+  %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<64x[%stage_width]xi8>
+  %weight_stage_view = buffer.view %weight_stage[%origin] : buffer -> view<64x[%stage_width]xi8>
   %schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
   %zeros = vector.constant 0 : vector<8xi32>
   %initial = vector.fragment<init> %zeros shape [%tile, %tile] : vector<8xi32>
-  %result0, %result1 = scf.for %column = [%zero to %inputs step %block](%acc0 = %initial : vector<8xi32>, %acc1 = %initial : vector<8xi32>) -> (vector<8xi32>, vector<8xi32>) pipeline(%two) {
-    %stage_row = index.div %workitem, %four : index
-    %stage_packet = index.rem %workitem, %four : index
-    %stage_column = index.mul %stage_packet, %tile : index
-    %input_row = index.add %row_origin, %stage_row : index
-    %output_row = index.add %output_origin, %stage_row : index
-    %input_column = index.add %column, %stage_column : index
-    %valid = index.cmp ult, %input_row, %rows : index
-    %a = scf.if %valid -> (vector<16xi8>) {
-      %values = vector.load %input_view[%input_row, %input_column] : view<[%rows]x[%inputs]xi8> -> vector<16xi8>
-      scf.yield %values : vector<16xi8>
-    } else {
-      %padding = vector.constant 0 : vector<16xi8>
-      scf.yield %padding : vector<16xi8>
+  %result0, %result1 = scf.for %column = [%zero to %inputs step %panel](%acc0 = %initial : vector<8xi32>, %acc1 = %initial : vector<8xi32>) -> (vector<8xi32>, vector<8xi32>) pipeline(%depth) unroll(%two) schedule(recurrence) {
+    scf.for %stripe = [%zero to %stripes step %one] unroll schedule(linear) {
+      %copy_thread = index.madd %stripe, %threads, %workitem : index
+      %stage_row = index.div %copy_thread, %pieces : index
+      %stage_packet = index.rem %copy_thread, %pieces : index
+      %stage_column = index.mul %stage_packet, %tile : index
+      %input_row = index.add %row_origin, %stage_row : index
+      %output_row = index.add %output_origin, %stage_row : index
+      %input_column = index.add %column, %stage_column : index
+      %valid = index.cmp ult, %input_row, %rows : index
+      %a = scf.if %valid -> (vector<16xi8>) {
+        %values = vector.load %input_view[%input_row, %input_column] : view<[%rows]x[%inputs]xi8> -> vector<16xi8>
+        scf.yield %values : vector<16xi8>
+      } else {
+        %padding = vector.constant 0 : vector<16xi8>
+        scf.yield %padding : vector<16xi8>
+      }
+      %b = vector.load %weight_view[%output_row, %input_column] : view<[%outputs]x[%inputs]xi8> -> vector<16xi8>
+      vector.store %a, %input_stage_view[%stage_row, %stage_column] : vector<16xi8>, view<64x[%stage_width]xi8>
+      vector.store %b, %weight_stage_view[%stage_row, %stage_column] : vector<16xi8>, view<64x[%stage_width]xi8>
+      scf.yield
     }
-    %b = vector.load %weight_view[%output_row, %input_column] : view<[%outputs]x[%inputs]xi8> -> vector<16xi8>
-    vector.store %a, %input_stage_view[%stage_row, %stage_column] : vector<16xi8>, view<64x80xi8>
-    vector.store %b, %weight_stage_view[%stage_row, %stage_column] : vector<16xi8>, view<64x80xi8>
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-    %next0, %next1 = scf.for %piece = [%zero to %four step %one](%partial0 = %acc0 : vector<8xi32>, %partial1 = %acc1 : vector<8xi32>) -> (vector<8xi32>, vector<8xi32>) unroll schedule(linear) {
+    %next0, %next1 = scf.for %piece = [%zero to %pieces step %one](%partial0 = %acc0 : vector<8xi32>, %partial1 = %acc1 : vector<8xi32>) -> (vector<8xi32>, vector<8xi32>) unroll schedule(linear) {
       %fragment_column = index.mul %piece, %tile : index
-      %a_bytes = vector.load %input_stage_view[%operand_row, %fragment_column] : view<64x80xi8> -> vector<16xi8>
-      %b_bytes0 = vector.load %weight_stage_view[%weight_row0, %fragment_column] : view<64x80xi8> -> vector<16xi8>
-      %b_bytes1 = vector.load %weight_stage_view[%weight_row1, %fragment_column] : view<64x80xi8> -> vector<16xi8>
+      %a_bytes = vector.load %input_stage_view[%operand_row, %fragment_column] : view<64x[%stage_width]xi8> -> vector<16xi8>
+      %b_bytes0 = vector.load %weight_stage_view[%weight_row0, %fragment_column] : view<64x[%stage_width]xi8> -> vector<16xi8>
+      %b_bytes1 = vector.load %weight_stage_view[%weight_row1, %fragment_column] : view<64x[%stage_width]xi8> -> vector<16xi8>
       %a_packed = vector.bitcast %a_bytes : vector<16xi8> to vector<4xi32>
       %b_packed0 = vector.bitcast %b_bytes0 : vector<16xi8> to vector<4xi32>
       %b_packed1 = vector.bitcast %b_bytes1 : vector<16xi8> to vector<4xi32>

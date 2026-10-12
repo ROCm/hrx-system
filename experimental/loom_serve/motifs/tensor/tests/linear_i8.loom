@@ -89,7 +89,7 @@ kernel.def target(@wave32) @tail_column() {
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
   %rows = index.constant 144 : index
-  %inputs = index.constant 256 : index
+  %inputs = index.constant 192 : index
   %outputs = index.constant 128 : index
   %group = index.constant 2 : index
   %layout = encoding.layout.strided [1, %rows] : encoding<layout>
@@ -99,7 +99,7 @@ kernel.def target(@wave32) @tail_column() {
 
 func.def @tail_column_reference(%input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
   %rows = index.constant 144 : index
-  %inputs = index.constant 256 : index
+  %inputs = index.constant 192 : index
   %outputs = index.constant 128 : index
   %column_major = scalar.constant true : i1
   func.call @contraction_reference(%rows, %inputs, %outputs, %column_major, %input, %input_scales, %weight, %weight_scales, %output) : (index, index, index, i1, buffer, buffer, buffer, buffer, buffer) -> ()
@@ -108,12 +108,12 @@ func.def @tail_column_reference(%input: buffer, %input_scales: buffer, %weight: 
 
 check.scenario public @tail_column_contraction {
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %x = check.generate.iota offset(-128) step(1) period(251) : tensor<144x256xi8>
-    %w = check.generate.iota offset(-128) step(1) period(239) : tensor<128x256xi8>
+    %x = check.generate.iota offset(-128) step(1) period(251) : tensor<144x192xi8>
+    %w = check.generate.iota offset(-128) step(1) period(239) : tensor<128x192xi8>
     %xs = check.generate.iota offset(0.00390625) step(0.000030517578125) : tensor<144xf32>
     %ws = check.generate.iota offset(0.0078125) step(0.000244140625) : tensor<128xf32>
     %y = check.generate.fill value(-1.0) : tensor<18432xbf16>
-    check.compare<@tail_column, @tail_column_reference>(%x, %xs, %w, %ws, %y) : (tensor<144x256xi8>, tensor<144xf32>, tensor<128x256xi8>, tensor<128xf32>, tensor<18432xbf16>) -> () {
+    check.compare<@tail_column, @tail_column_reference>(%x, %xs, %w, %ws, %y) : (tensor<144x192xi8>, tensor<144xf32>, tensor<128x192xi8>, tensor<128xf32>, tensor<18432xbf16>) -> () {
       check.expect.bitwise actual(%y) expected(%y) : tensor<18432xbf16>
     }
   }
