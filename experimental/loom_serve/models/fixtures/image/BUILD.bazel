@@ -38,12 +38,11 @@ filegroup(
             "prepare.loom",
             ":sources",
         ],
-        resource_group = GPU_DEVICE_RESOURCE_GROUP,
-        tags = ["iree-run-requirement=" + requirement],
+        resource_group = resource_group,
+        tags = tags,
         target_compatible_with = loom_config_compatible_with([
             "//loom/config/target/arch:vm",
-            capability,
-        ]) + select({
+        ] + capabilities) + select({
             "@platforms//os:linux": [],
             "//conditions:default": ["@platforms//:incompatible"],
         }),
@@ -66,23 +65,36 @@ filegroup(
             "//runtime/src/iree/base",
             "//runtime/src/iree/base/internal:base64",
             "//runtime/src/iree/base/tooling:flags",
+            "//runtime/src/iree/hal",
             "//runtime/src/iree/testing:gtest",
             "//runtime/src/iree/testing:gtest_main",
             "//runtime/src/iree/testing:temp_file",
         ],
     )
-    for name, device, capability, requirement in [
+    for name, device, capabilities, resource_group, tags in [
         (
             "service_test",
             "amdgpu",
-            "//loom/config/execute:amdgpu_hal",
-            "runtime.resource.amd_gpu",
+            ["//loom/config/execute:amdgpu_hal"],
+            GPU_DEVICE_RESOURCE_GROUP,
+            ["iree-run-requirement=runtime.resource.amd_gpu"],
         ),
         (
             "service_vulkan_test",
             "vulkan",
-            "//loom/config/execute:spirv_vulkan_hal",
-            "vulkan.resource.device",
+            ["//loom/config/execute:spirv_vulkan_hal"],
+            GPU_DEVICE_RESOURCE_GROUP,
+            ["iree-run-requirement=vulkan.resource.device"],
+        ),
+        (
+            "service_cpu_test",
+            "task",
+            [
+                "//loom/config/target/arch:x86",
+                "//loom/config/execute:task_hal",
+            ],
+            None,
+            [],
         ),
     ]
 ]

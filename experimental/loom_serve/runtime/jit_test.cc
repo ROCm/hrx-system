@@ -254,9 +254,10 @@ class JitTest : public ::testing::TestWithParam<int> {
     if (iree_status_is_ok(status)) {
       transients_[index] =
           loom_serve_jit_stage_program(stage)->requirements.transient;
-      status = loom_serve_jit_stage_record(
-          stage, iree_hal_queue_family(dispatch_),
-          IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, &commands_[index]);
+      status =
+          loom_serve_jit_stage_record(stage, iree_hal_queue_family(dispatch_),
+                                      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                      nullptr, nullptr, &commands_[index]);
     }
     loom_serve_jit_stage_destroy(stage);
     return status;
@@ -510,9 +511,10 @@ TEST_P(JitTest, CompletedCatalogsRetireWithoutClosingSharedCompilerQueue) {
     auto outcome = jobs[i].Await(&stage);
     EXPECT_EQ(jobs[i].jit, nullptr);
     if (iree_status_is_ok(outcome)) {
-      outcome = loom_serve_jit_stage_record(
-          stage, iree_hal_queue_family(dispatch_),
-          IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, &commands_[i]);
+      outcome =
+          loom_serve_jit_stage_record(stage, iree_hal_queue_family(dispatch_),
+                                      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                      nullptr, nullptr, &commands_[i]);
     }
     status = iree_status_join(status, outcome);
     loom_serve_jit_stage_destroy(stage);
@@ -926,7 +928,7 @@ TEST_P(JitTest, RetiredModelDoesNotJoinRawQueueAllocationCaptures) {
   IREE_ASSERT_OK(compilation.Await(&stage));
   auto status = loom_serve_jit_stage_record(
       stage, iree_hal_queue_family(dispatch_),
-      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, &commands_[1]);
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, nullptr, &commands_[1]);
   transients_[1] = loom_serve_jit_stage_program(stage)->requirements.transient;
   loom_serve_jit_stage_destroy(stage);
   IREE_ASSERT_OK(status);

@@ -182,7 +182,7 @@ class ControlTest
                                          &config, &stage);
     if (iree_status_is_ok(status)) {
       status = loom_serve_jit_stage_record(stage, family, GetParam(), nullptr,
-                                           out_command);
+                                           nullptr, out_command);
     }
     loom_serve_jit_stage_destroy(stage);
     return status;

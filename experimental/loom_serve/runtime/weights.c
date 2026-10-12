@@ -416,7 +416,7 @@ static void weight_preparation_compiled(void* user_data, iree_status_t status,
     } else {
       status = loom_serve_jit_stage_record(
           compiled, iree_hal_queue_family(job->weights->dispatch),
-          job->command_mode, NULL, &preparer->command);
+          job->command_mode, NULL, NULL, &preparer->command);
     }
   }
   loom_serve_jit_stage_destroy(compiled);

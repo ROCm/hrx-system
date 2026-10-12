@@ -97,10 +97,12 @@ struct ImageGate {
     ++gate->discarded;
     gate->Publish(kDiscarded);
   }
-  static iree_status_t Submit(void* self,
-                              loom_serve_execution_frontier_t* out_frontier) {
+  static iree_status_t Submit(void* self, loom_serve_image_submit_flags_t flags,
+                              loom_serve_execution_frontier_t* out_frontier,
+                              bool* out_complete) {
     auto* gate = static_cast<ImageGate*>(self);
     *out_frontier = loom_serve_execution_frontier(gate->execution);
+    *out_complete = true;
     gate->Publish(kSubmitted);
     return iree_ok_status();
   }

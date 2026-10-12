@@ -27,6 +27,13 @@ typedef struct loom_serve_image_prepared_t {
   uint64_t input_bytes;
 } loom_serve_image_prepared_t;
 
+enum loom_serve_image_submit_flag_bits_e {
+  // At a retired part boundary, release invocation resources without issuing
+  // more model work. The returned terminal frontier still requires retirement.
+  LOOM_SERVE_IMAGE_SUBMIT_FLAG_CANCEL = 1u << 0,
+};
+typedef uint32_t loom_serve_image_submit_flags_t;
+
 // Finite-image invocation with explicit CPU and device phases. The scheduler
 // owns admission, submission and successful completion; prepare runs as a CPU
 // task with exclusive model access. None of these functions waits for device
@@ -50,9 +57,13 @@ typedef struct loom_serve_image_generator_t {
   // physical denial. ACQUIRED pins and enqueues parameter activation.
   iree_status_t (*try_admit)(void* self,
                              loom_serve_residency_admission_t* out_admission);
-  // Enqueues consumption and feedback, returning borrowed completion handles.
-  iree_status_t (*submit)(void* self,
-                          loom_serve_execution_frontier_t* out_frontier);
+  // Enqueues one source-controlled part, returning borrowed completion handles.
+  // The first call follows admission; each subsequent call follows successful
+  // retirement of both previous frontiers. A terminal part authorizes complete
+  // only after its frontiers retire. CANCEL is valid between submitted parts.
+  iree_status_t (*submit)(void* self, loom_serve_image_submit_flags_t flags,
+                          loom_serve_execution_frontier_t* out_frontier,
+                          bool* out_complete);
   // Consumes successful completion and releases model pins. Borrowed F32 CHW
   // RGB in [-1,1] remains live until the next invocation or model destruction.
   iree_const_byte_span_t (*complete)(void* self);

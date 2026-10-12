@@ -340,7 +340,8 @@ static iree_status_t image_registration_create(
       .adapter_path = configuration->image.adapter,
       .height = configuration->image.height,
       .width = configuration->image.width,
-      .text_tokens = configuration->image.text_tokens};
+      .text_tokens = configuration->image.text_tokens,
+      .command_quantum = configuration->image.command_quantum};
   iree_status_t status = loom_serve_image_load_create(
       options->device, &model_options, observer.wake, observer.user_data,
       &registration->load, allocator);

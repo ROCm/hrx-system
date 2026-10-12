@@ -107,10 +107,13 @@ loom_serve_dispatch_t* loom_serve_jit_stage_dispatch(
 
 // Records the compiled stage after the model has allocated its fixed parameter
 // roots. The command retains executables and buffers, independently of stage.
+// NULL range records the whole program; otherwise it selects complete barrier
+// waves with unchanged bindings and workspace, as in command_create.
 iree_status_t loom_serve_jit_stage_record(
     const loom_serve_jit_stage_t* stage,
     const iree_hal_queue_family_t* queue_family,
     iree_hal_command_buffer_mode_t mode,
+    const loom_cmd_program_command_range_t* range,
     iree_hal_buffer_t* const* fixed_buffers,
     iree_hal_command_buffer_t** out_command);
 

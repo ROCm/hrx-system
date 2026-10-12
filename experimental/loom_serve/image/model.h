@@ -32,6 +32,9 @@ typedef struct loom_serve_image_model_options_t {
   uint32_t width;
   // Text capacity requested from the source; its meaning is model-defined.
   uint32_t text_tokens;
+  // Soft command-count target per submission; zero records the whole program.
+  // Cuts occur only at full barriers, never within an indivisible wave.
+  uint32_t command_quantum;
 } loom_serve_image_model_options_t;
 
 // Owner-driven preparation. Private CPU/JIT work runs on the shared host;
@@ -91,7 +94,11 @@ iree_status_t loom_serve_image_load_destroy(loom_serve_image_load_t* load);
 //   prepare_request(buffer state, buffer i64_stage_tags, i32 stage_count,
 //                   buffer prompt, i64 seed, f32 strength) -> (i32 stage,
 //                                                             buffer payload)
-//   generate(i32 stage, i64 output_bytes, hal.buffer payload, hal.buffer rgb)
+//   generate(i32 first_part, i32 part_count, i32 cursor, i64 output_bytes,
+//            hal.buffer payload, hal.buffer rgb, hal.buffer workspace) -> i32
+// The cursor starts at zero. Each invocation submits its next part and returns
+// a cursor for continuation, or a negative value after final feedback. The
+// owner invokes it again only after both accepted frontiers retire.
 // The warm program imports input capabilities and runner.execute_N/feedback.
 // Each command has shared reflected fixed parameter domains and three dynamic
 // bindings: opaque request bytes, output F32 CHW RGB [-1,1], and workspace.
@@ -99,11 +106,13 @@ iree_status_t loom_serve_image_load_destroy(loom_serve_image_load_t* load);
 // storage and parameter alignments come from their compiler-reflected
 // contracts. All retained stages have identical parameter placement. Input
 // capacity comes from source; workspace extent/alignment comes from compiler
-// reflection and its queue-ordered allocation is inserted by runner.execute_2.
-// Private storage belongs to the shared workspace pool, not this model's
-// residency. This model owns independent work and feedback timelines over the
-// device queues. The cold constructor drives the asynchronous load and joins on
-// its outer application caller, never a shared worker. Live registration uses
+// reflection. One queue allocation preserves all compiler live values across
+// the barrier-aligned parts; execute_3 receives it explicitly. Final output or
+// cancellation queues its release. Private storage belongs to the shared
+// workspace pool, not this model's residency. This model owns independent work
+// and feedback timelines over the device queues. The cold constructor drives
+// the asynchronous load and joins on its outer application caller, never a
+// shared worker. Live registration uses
 // load_advance. Creation indexes parameters and records commands without
 // reading weight payloads. The device owner outlives the model and serializes
 // all model calls. Its physical pool backs parameter roots independently of
@@ -181,18 +190,21 @@ iree_status_t loom_serve_image_model_prepare_request(
 void loom_serve_image_model_discard_prepared_request(
     loom_serve_image_model_t* model);
 
-// Queues a prepared request and returns its work/feedback frontiers. The caller
-// first acquires the model residency on the shared scheduler owner. Only one
-// request may be outstanding. Failure is terminal and preserves payload and
-// residency protection for outer-thread destruction; no host wait occurs.
+// Queues one part and returns its work/feedback frontiers and terminal state.
+// The first call follows residency acquisition; continuation or cancellation
+// follows successful retirement of both previous frontiers. Only one request
+// may be outstanding. Failure preserves payload and residency protection for
+// outer-owner destruction; no host wait occurs.
 iree_status_t loom_serve_image_model_submit(
-    loom_serve_image_model_t* model,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_serve_image_model_t* model, loom_serve_image_submit_flags_t flags,
+    loom_serve_execution_frontier_t* out_frontier, bool* out_complete);
 
-// Consumes successful completion of both submitted frontiers on the scheduler
+// Consumes successful completion of both terminal frontiers on the scheduler
 // owner. Releases the request payload and residency pin. Returned F32 CHW RGB
 // remains borrowed until another submission or model destruction. Failed
 // readiness never calls this function: teardown joins actual queue ownership.
+// Cancelled invocations return storage without valid output; callers discard
+// it.
 iree_const_byte_span_t loom_serve_image_model_complete(
     loom_serve_image_model_t* model);
 

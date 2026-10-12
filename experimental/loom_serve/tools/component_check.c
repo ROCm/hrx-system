@@ -238,9 +238,10 @@ static iree_status_t component_initialize(component_check_t* check,
     }
     IREE_RETURN_IF_ERROR(status);
   }
-  IREE_RETURN_IF_ERROR(loom_serve_jit_stage_record(
-      check->stage, iree_hal_queue_family(dispatch),
-      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, check->weights, &check->command));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_jit_stage_record(check->stage, iree_hal_queue_family(dispatch),
+                                  IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, NULL,
+                                  check->weights, &check->command));
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       allocator, program->requirements.rebindable_binding_count,
       sizeof(*check->bindings), (void**)&check->bindings));

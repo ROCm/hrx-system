@@ -579,7 +579,7 @@ static iree_status_t finite_model_link(
     finite_model_stage_t* stage = &model->stages.values[i];
     if (loom_serve_jit_stage_program(stage->compiled)) {
       IREE_RETURN_IF_ERROR(loom_serve_jit_stage_record(
-          stage->compiled, iree_hal_queue_family(dispatch), command_mode,
+          stage->compiled, iree_hal_queue_family(dispatch), command_mode, NULL,
           model->weights.values, &stage->command));
     }
   }

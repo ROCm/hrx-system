@@ -29,6 +29,8 @@ typedef struct image_job_t {
   loom_serve_image_work_t work;
   // Copied source selection, observed only after CPU preparation releases it.
   loom_serve_image_prepared_t prepared;
+  // Successfully completed model command parts, excluding cancellation cleanup.
+  uint64_t completed_parts;
 } image_job_t;
 
 typedef struct image_pending_t {
@@ -42,12 +44,13 @@ typedef enum image_phase_e {
   IMAGE_PHASE_IDLE = 0,
   IMAGE_PHASE_PREPARING,
   IMAGE_PHASE_WAITING,
+  IMAGE_PHASE_READY,
   IMAGE_PHASE_GENERATING,
   IMAGE_PHASE_ENCODING,
 } image_phase_t;
 
-static const char* const image_phases[] = {"idle", "preparing", "waiting",
-                                           "generating", "encoding"};
+static const char* const image_phases[] = {"idle",  "preparing",  "waiting",
+                                           "ready", "generating", "encoding"};
 
 enum { IMAGE_EVENT_CPU = 1u << 0, IMAGE_EVENT_DEVICE = 1u << 1 };
 
@@ -103,6 +106,10 @@ struct loom_serve_image_service_t {
     loom_serve_execution_frontier_t frontier;
     // Toll-free async semaphore handles used by the public proactor API.
     iree_async_semaphore_t* semaphores[2];
+    // The accepted part releases invocation resources at its final frontier.
+    bool complete;
+    // The accepted part performs cancellation cleanup instead of model work.
+    bool cancelled;
   } device;
   // Periodic readiness and owned cancellation, independent of device waits.
   loom_serve_http_timer_t timer;
@@ -369,13 +376,21 @@ static void image_device_completed(void* user_data,
 
 static iree_status_t image_submit(loom_serve_image_service_t* service) {
   const iree_time_t begin = iree_time_now();
-  service->job.work.admission_ns = begin - service->phase_start;
-  service->telemetry.totals.work.admission_ns += service->job.work.admission_ns;
-  IREE_RETURN_IF_ERROR(service->generator.submit(service->generator.self,
-                                                 &service->device.frontier));
+  if (service->phase == IMAGE_PHASE_WAITING) {
+    service->job.work.admission_ns = begin - service->phase_start;
+    service->telemetry.totals.work.admission_ns +=
+        service->job.work.admission_ns;
+  }
+  service->device.cancelled = service->stopping || !service->connection;
+  const loom_serve_image_submit_flags_t flags =
+      service->device.cancelled ? LOOM_SERVE_IMAGE_SUBMIT_FLAG_CANCEL : 0;
+  IREE_RETURN_IF_ERROR(service->generator.submit(service->generator.self, flags,
+                                                 &service->device.frontier,
+                                                 &service->device.complete));
   service->phase_start = iree_time_now();
-  service->job.work.submit_ns = service->phase_start - begin;
-  service->telemetry.totals.work.submit_ns += service->job.work.submit_ns;
+  const iree_duration_t submit_ns = service->phase_start - begin;
+  service->job.work.submit_ns += submit_ns;
+  service->telemetry.totals.work.submit_ns += submit_ns;
   image_event(service, &LOOM_SERVE_IMAGE_SUBMITTED, service->active);
   iree_async_semaphore_wait_operation_t* wait = &service->device.operation;
   memset(wait, 0, sizeof(*wait));
@@ -514,14 +529,25 @@ static void image_collect(loom_serve_image_service_t* service, bool* progress) {
     return;
   }
   if (iree_any_bit_set(ready, IMAGE_EVENT_DEVICE)) {
-    service->job.work.execution_ns = iree_time_now() - service->phase_start;
-    service->telemetry.totals.work.execution_ns +=
-        service->job.work.execution_ns;
-    ++service->telemetry.counters.batches;
+    const iree_duration_t execution_ns = iree_time_now() - service->phase_start;
+    service->job.work.execution_ns += execution_ns;
+    service->telemetry.totals.work.execution_ns += execution_ns;
+    if (!service->device.cancelled) {
+      ++service->telemetry.counters.batches;
+      ++service->job.completed_parts;
+    }
+    if (!service->device.complete) {
+      service->phase = IMAGE_PHASE_READY;
+      return;
+    }
+    service->cpu.rgb = service->generator.complete(service->generator.self);
+    if (service->device.cancelled) {
+      image_finish(service, LOOM_SERVE_TELEMETRY_CANCELLED);
+      return;
+    }
     ++service->telemetry.totals.generated_images;
     service->telemetry.totals.generated_pixels +=
         (uint64_t)service->options.width * service->options.height;
-    service->cpu.rgb = service->generator.complete(service->generator.self);
     image_event(service, &LOOM_SERVE_IMAGE_GENERATED, service->active);
     if (service->connection) {
       image_schedule_cpu(service, IMAGE_PHASE_ENCODING);
@@ -661,9 +687,7 @@ static bool image_request_at(void* self, iree_host_size_t index,
       .id = job->id,
       .phase = phase,
       .arrival_time = job->arrival_time,
-      .counters = {.requests = 1,
-                   .batches = index == service->pending_count &&
-                              service->phase == IMAGE_PHASE_ENCODING}};
+      .counters = {.requests = 1, .batches = job->completed_parts}};
   return true;
 }
 
@@ -718,6 +742,7 @@ static void image_set_observer(void* self,
 static bool image_is_active(void* self) {
   const loom_serve_image_service_t* service = self;
   return service->phase == IMAGE_PHASE_PREPARING ||
+         service->phase == IMAGE_PHASE_READY ||
          service->phase == IMAGE_PHASE_GENERATING ||
          service->phase == IMAGE_PHASE_ENCODING;
 }
@@ -747,6 +772,12 @@ static iree_status_t image_advance(void* self,
   }
   if (service->phase == IMAGE_PHASE_WAITING) {
     image_prepared(service, flags, out_progress);
+  } else if (service->phase == IMAGE_PHASE_READY) {
+    service->status = image_submit(service);
+    *out_progress = true;
+    if (!iree_status_is_ok(service->status)) {
+      image_finish(service, LOOM_SERVE_TELEMETRY_FAILED);
+    }
   }
   if (!service->stopping && iree_status_is_ok(service->status) &&
       !service->active && service->pending_count) {

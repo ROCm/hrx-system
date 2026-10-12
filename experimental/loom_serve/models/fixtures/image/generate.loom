@@ -27,18 +27,11 @@ kernel.def target(@fixture_target) @colors() {
 
 kernel.def target(@fixture_target) @pixels() {
   %count = config.get @fixture.pixels : index
-  %threads = index.constant 32 : index
-  %padding = index.constant 31 : index
-  %padded = index.add %count, %padding : index
-  %groups = index.div %padded, %threads : index
   %one = index.constant 1 : index
-  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%count, %one, %one) workgroup_size(%one, %one, %one) : index
 } launch(%colors: buffer, %rgb: buffer) {
   %count = config.get @fixture.pixels : index
-  %threads = index.constant 32 : index
-  %group = kernel.workgroup.id<x> : index
-  %lane = kernel.workitem.id<x> : index
-  %pixel = index.madd %group, %threads, %lane : index
+  %pixel = kernel.workgroup.id<x> : index
   %valid = index.cmp ult, %pixel, %count : index
   scf.if %valid {
     %origin = index.constant 0 : offset

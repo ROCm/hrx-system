@@ -23,9 +23,9 @@ typedef struct loom_serve_image_work_t {
   uint64_t prepare_ns;
   // Time awaiting parameter admission after CPU preparation.
   uint64_t admission_ns;
-  // Host device-submission time.
+  // Host device-submission time, summed across command parts.
   uint64_t submit_ns;
-  // Submission return through successful device readiness collection.
+  // Submission return through readiness collection, summed across parts.
   uint64_t execution_ns;
   // CPU PNG encoding time.
   uint64_t png_ns;

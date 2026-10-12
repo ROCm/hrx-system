@@ -2,7 +2,7 @@
 
 This small package implements the same source ABI as learned image models.
 It needs no downloaded weights. `prepare.loom` declares one command stage;
-`control.loom` tokenizes the prompt and constructs a request payload. Two GPU
+`control.loom` tokenizes the prompt and constructs a request payload. Two device
 kernels exchange a palette through compiler-reflected private workspace and
 write F32 CHW pixels. The ordinary image service encodes those pixels as PNG.
 
@@ -14,11 +14,16 @@ The source rejects prompts beyond the configured token limit, exercising
 request validation in the VM rather than in the HTTP parser.
 
 The integration test runs real source JIT, VM control, command submission and
-HTTP responses with one and four shared CPU workers:
+HTTP responses with one and four shared CPU workers, both whole-command and
+one-command-per-part execution. The latter preserves the palette across queue
+submissions and exercises cancellation before the pixel consumer. CPU task,
+AMDGPU and Vulkan use the same source and output oracle:
 
 ```sh
 iree-bazel-test --config=asan \
-  //experimental/loom_serve/models/fixtures/image:service_test
+  //experimental/loom_serve/models/fixtures/image:service_cpu_test \
+  //experimental/loom_serve/models/fixtures/image:service_test \
+  //experimental/loom_serve/models/fixtures/image:service_vulkan_test
 ```
 
 On an admitted AMDGPU runner, the standalone image server can load this package

@@ -231,19 +231,24 @@ static iree_status_t loom_serve_command_record_wave(
 }
 
 static iree_status_t loom_serve_command_record(
-    const loom_cmd_program_t* program, iree_hal_buffer_t* const* fixed_buffers,
+    const loom_cmd_program_t* program, loom_cmd_program_command_range_t range,
+    iree_hal_buffer_t* const* fixed_buffers,
     const loom_serve_command_entry_t* entries,
     loom_serve_command_layout_t* layouts,
     iree_hal_command_buffer_t* command_buffer) {
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
   loom_cmd_program_barrier_wave_iterator_t iterator;
   loom_cmd_program_barrier_wave_iterator_initialize(program, &iterator);
+  iterator.next_command = range.first_command;
+  const uint32_t end = range.first_command + range.command_count;
+  IREE_ASSERT_LE(end, program->commands.count);
   loom_cmd_program_barrier_wave_t wave;
   iree_hal_execution_stage_t source_stages =
       IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER;
   iree_status_t status = iree_ok_status();
-  while (iree_status_is_ok(status) &&
+  while (iree_status_is_ok(status) && iterator.next_command < end &&
          loom_cmd_program_barrier_wave_iterator_next(&iterator, &wave)) {
+    IREE_ASSERT_LE(iterator.next_command, end);
     const iree_hal_execution_stage_t target_stages =
         loom_serve_command_wave_stages(program, wave.commands);
     if (wave.ordinal != 0) {
@@ -285,6 +290,7 @@ static iree_status_t loom_serve_command_record(
 iree_status_t loom_serve_command_create(
     const iree_hal_queue_family_t* queue_family,
     iree_hal_command_buffer_mode_t mode, const loom_cmd_program_t* program,
+    const loom_cmd_program_command_range_t* range,
     iree_host_size_t fixed_buffer_count,
     iree_hal_buffer_t* const* fixed_buffers, iree_host_size_t entry_count,
     const loom_serve_command_entry_t* entries, iree_allocator_t host_allocator,
@@ -337,8 +343,9 @@ iree_status_t loom_serve_command_create(
         program->requirements.rebindable_binding_count, &command_buffer);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_command_record(program, fixed_buffers, entries, layouts,
-                                       command_buffer);
+    status = loom_serve_command_record(
+        program, range ? *range : loom_cmd_program_command_range_all(program),
+        fixed_buffers, entries, layouts, command_buffer);
   }
   for (iree_host_size_t i = 0; i < entry_count; ++i) {
     iree_allocator_free(host_allocator, layouts[i].constants);

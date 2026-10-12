@@ -388,16 +388,31 @@ The image binary's external contract is documented in
 | --- | --- |
 | `sources.txt` | Relative catalog paths for model command programs, kernels and shared motifs. |
 | `prepare.loom` | Cold VM entry declaring commands, specialization and checkpoint domains; returns request capacity, tokenizer asset, public name and opaque state. |
-| `control.loom` | Warm VM entries preparing one request payload and submitting the selected command plus final feedback. |
+| `control.loom` | Warm VM entries preparing one request payload and advancing command parts through final feedback. |
 | Weight policy source | Cold preparation policy named by each checkpoint-domain declaration. |
 
 The caller passes dimensions, text capacity and asset paths into the cold
 entry. Source validates its architecture's geometry before declaring stages.
 Each retained command has the same reflected fixed parameter placement and
 three dynamic bindings: opaque request, F32 CHW RGB in [-1,1], and workspace.
-The native owner prepares one shared parameter bank. The warm VM passes only
-request and output buffers; the runner inserts the reflected private workspace
-using queue allocation, execution and deallocation on explicit timeline edges.
+The native owner prepares one shared parameter bank and allocates the reflected
+workspace once per image. The warm VM receives request, output and workspace
+buffers and submits them through `runner.execute_3`. The optional registration
+field `command_quantum` groups complete compiler barrier waves into bounded
+command parts. Zero retains one complete submission. It is a soft command-count
+target, not a time limit: an indivisible wave can exceed the target. Every part
+retains the same parameter placement and workspace offsets; there is no weight
+copy, re-JIT or intermediate tensor readback.
+
+The source `generate` entry receives the first part, part count and its previous
+cursor (initially zero). It returns the next cursor, or a negative value after
+submitting final feedback. The scheduler asynchronously retires both frontiers
+before invoking the next part, letting other modalities make progress between
+parts. The original command's workspace stays live for the entire image. Final
+submission or cancellation between parts queues its release before the owner
+releases request payload and model pins. Failed readiness preserves accepted
+ownership for outer retirement instead of reusing the storage.
+
 Its HAL pool is shared across models in the device's execution domain, with
 slab geometry rounded to a TLSF size class covering the largest registered
 command and no backing committed until execution. Idle backing can be trimmed

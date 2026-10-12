@@ -162,7 +162,7 @@ TEST(ConfigurationTest, MixedModalitiesKeepDisjointOptionsAndOwnedStrings) {
       "{\"models\":[" + Image("default-image") + "," + Model("text") + "," +
       Image(
           "styled",
-          R"(,"adapter":"style\u002esafetensors","width":768,"height":512,"text_tokens":1024,"pending_requests":3)") +
+          R"(,"adapter":"style\u002esafetensors","width":768,"height":512,"text_tokens":1024,"command_quantum":64,"pending_requests":3)") +
       "]}";
   loom_serve_configuration_t configuration;
   IREE_ASSERT_OK(loom_serve_configuration_initialize(
@@ -183,12 +183,14 @@ TEST(ConfigurationTest, MixedModalitiesKeepDisjointOptionsAndOwnedStrings) {
   EXPECT_EQ(a.image.width, 384u);
   EXPECT_EQ(a.image.height, 384u);
   EXPECT_EQ(a.image.text_tokens, 512u);
+  EXPECT_EQ(a.image.command_quantum, 0u);
   EXPECT_EQ(a.pending_requests, 32u);
   EXPECT_EQ(std::string(b.image.adapter.data, b.image.adapter.size),
             "style.safetensors");
   EXPECT_EQ(b.image.width, 768u);
   EXPECT_EQ(b.image.height, 512u);
   EXPECT_EQ(b.image.text_tokens, 1024u);
+  EXPECT_EQ(b.image.command_quantum, 64u);
   EXPECT_EQ(b.pending_requests, 3u);
   loom_serve_configuration_deinitialize(&configuration);
 }
@@ -271,6 +273,7 @@ TEST(ConfigurationTest,
        "{\"models\":[" + Model("x", R"(,"max_tokens":1.5)") + "]}",
        "{\"models\":[" + Model("x", R"(,"typo":true)") + "]}",
        "{\"models\":[" + Model("x", R"(,"width":384)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"command_quantum":1)") + "]}",
        "{\"models\":[" + Image("x", R"(,"weights":"file.gguf")") + "]}",
        "{\"models\":[" + Image("x", R"(,"rows":1)") + "]}",
        "{\"models\":[" + Image("x", R"(,"width":0)") + "]}",
@@ -279,6 +282,9 @@ TEST(ConfigurationTest,
        "{\"models\":[" + Image("x", R"(,"height":4294967296)") + "]}",
        "{\"models\":[" + Image("x", R"(,"text_tokens":0)") + "]}",
        "{\"models\":[" + Image("x", R"(,"text_tokens":1.5)") + "]}",
+       "{\"models\":[" + Image("x", R"(,"command_quantum":-1)") + "]}",
+       "{\"models\":[" + Image("x", R"(,"command_quantum":1.5)") + "]}",
+       "{\"models\":[" + Image("x", R"(,"command_quantum":4294967296)") + "]}",
        "{\"models\":[" + Image("x", R"(,"adapter":"")") + "]}",
        "{\"models\":[" + Image("x", R"(,"adapter":"style\u0000file")") + "]}",
        "{\"models\":[" + Image("same") + "," + Model("same") + "]}",

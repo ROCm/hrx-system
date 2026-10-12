@@ -433,7 +433,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     if (!commands_[index]) {
       IREE_ASSERT_OK(loom_serve_jit_stage_record(
           compiled_[index], iree_hal_queue_family(dispatch_),
-          IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, buffers_[index].data(),
+          IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, buffers_[index].data(),
           &commands_[index]));
     }
     const iree_hal_buffer_binding_t binding = {output_buffer_, 0,
@@ -526,7 +526,8 @@ TEST_P(WeightsTest, OneWorkerActivatesAndConsumesThroughAsyncTimelineWait) {
   IREE_ASSERT_OK(Register(0, 0, 1));
   IREE_ASSERT_OK(loom_serve_jit_stage_record(
       compiled_[0], iree_hal_queue_family(dispatch_),
-      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, buffers_[0].data(), &commands_[0]));
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, buffers_[0].data(),
+      &commands_[0]));
   auto* host = loom_serve_device_host(device_owner_);
   Activation activation;
   activation.executor = loom_serve_host_executor(host);

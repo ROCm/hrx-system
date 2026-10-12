@@ -1190,10 +1190,11 @@ iree_status_t loom_serve_jit_stage_record(
     const loom_serve_jit_stage_t* stage,
     const iree_hal_queue_family_t* queue_family,
     iree_hal_command_buffer_mode_t mode,
+    const loom_cmd_program_command_range_t* range,
     iree_hal_buffer_t* const* fixed_buffers,
     iree_hal_command_buffer_t** out_command) {
   return loom_serve_command_create(
-      queue_family, mode, &stage->program,
+      queue_family, mode, &stage->program, range,
       stage->program.requirements.fixed_buffer_count, fixed_buffers,
       stage->entry_count, stage->entries, stage->allocator, out_command);
 }

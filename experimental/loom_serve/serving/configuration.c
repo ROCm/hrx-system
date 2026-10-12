@@ -177,13 +177,17 @@ static iree_status_t configuration_image(
         configuration_string(&fields[15], &image->adapter, allocator));
   }
   iree_host_size_t width = 384, height = 384, text_tokens = 512;
+  iree_host_size_t command_quantum = 0;
   IREE_RETURN_IF_ERROR(configuration_size(&fields[16], 1, UINT32_MAX, &width));
   IREE_RETURN_IF_ERROR(configuration_size(&fields[17], 1, UINT32_MAX, &height));
   IREE_RETURN_IF_ERROR(
       configuration_size(&fields[18], 1, UINT32_MAX, &text_tokens));
+  IREE_RETURN_IF_ERROR(
+      configuration_size(&fields[25], 0, UINT32_MAX, &command_quantum));
   image->width = (uint32_t)width;
   image->height = (uint32_t)height;
   image->text_tokens = (uint32_t)text_tokens;
+  image->command_quantum = (uint32_t)command_quantum;
   return iree_ok_status();
 }
 
@@ -239,7 +243,9 @@ static iree_status_t configuration_model_parse(
       {"admission_overtakes", IREE_JSON_VALUE_TYPE_NUMBER,
        .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       {"prefix_cache_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
-       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)}};
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
+      {"command_quantum", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_IMAGE)}};
   configuration_fields_t context = {IREE_ARRAYSIZE(fields), fields};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
       value, configuration_field_visit, &context));

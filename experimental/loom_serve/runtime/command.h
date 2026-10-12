@@ -34,9 +34,13 @@ typedef struct loom_serve_command_entry_t {
 // allocates none of their backing storage. |out_command_buffer| is untouched on
 // failure. |mode| selects HAL recording policy, including retained profiling
 // metadata when a caller intends to profile these reusable commands.
+// A non-NULL range selects complete contiguous barrier waves. NULL selects the
+// complete program. Ranges retain the original binding/parameter layout; the
+// caller preserves live workspace and orders successive ranges with semaphores.
 iree_status_t loom_serve_command_create(
     const iree_hal_queue_family_t* queue_family,
     iree_hal_command_buffer_mode_t mode, const loom_cmd_program_t* program,
+    const loom_cmd_program_command_range_t* range,
     iree_host_size_t fixed_buffer_count,
     iree_hal_buffer_t* const* fixed_buffers, iree_host_size_t entry_count,
     const loom_serve_command_entry_t* entries, iree_allocator_t host_allocator,

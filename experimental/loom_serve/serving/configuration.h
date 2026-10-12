@@ -62,6 +62,9 @@ typedef struct loom_serve_image_configuration_t {
   uint32_t height;
   // Text capacity requested from the source; its meaning is model-defined.
   uint32_t text_tokens;
+  // Soft command-count target for barrier-aligned image submissions; zero is
+  // one whole-program submission. This is not a wall-clock latency bound.
+  uint32_t command_quantum;
 } loom_serve_image_configuration_t;
 
 typedef struct loom_serve_finite_configuration_t {

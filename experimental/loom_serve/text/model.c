@@ -591,7 +591,7 @@ static iree_status_t text_load_link(loom_serve_text_load_t* load) {
     text_stage_t* stage = &model->stages[i];
     status = loom_serve_jit_stage_record(
         stage->compiled, iree_hal_queue_family(model->dispatch),
-        model->command_mode, stage->fixed_buffers, &stage->command);
+        model->command_mode, NULL, stage->fixed_buffers, &stage->command);
   }
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(loom_serve_text_state_allocate(

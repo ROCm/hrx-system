@@ -122,6 +122,13 @@ Unknown, duplicate and wrong-modality fields reject instead of silently changing
 configuration. Image `checkpoint` is an asset directory, whereas text `weights`
 is a checkpoint file; an image's optional `adapter` is interpreted by its source.
 A model source can impose additional shape/storage constraints.
+Image `command_quantum` optionally cuts the compiled command into contiguous
+full-barrier waves for cooperative mixed-modality scheduling. Zero (the default)
+submits the whole command; positive values are soft command-count targets, not
+latency promises. Parts share one weight bank and the original invocation's
+workspace; only final output is downloaded. See the
+[source image contract](../docs/MODEL_AUTHORING.md#source-defined-diffusion-package)
+for continuation and cancellation ownership.
 Embedding/decision `assets` names the package's asset directory; `options` is passed
 unchanged as JSON to its cold source program. There are no native model-specific
 embedding configuration fields. The example uses a deterministic ABI fixture,

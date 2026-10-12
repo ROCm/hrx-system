@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include "experimental/loom_serve/http/listener.h"
@@ -36,14 +37,16 @@ IREE_FLAG(string, test_device, "amdgpu",
 
 namespace {
 
-class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
+class SourceImageServiceTest
+    : public ::testing::TestWithParam<std::tuple<uint32_t, uint32_t>> {
  protected:
   static constexpr uint32_t kWidth = 7;
   static constexpr uint32_t kHeight = 5;
   static constexpr size_t kPixels = kWidth * kHeight;
 
   void SetUp() override {
-    IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
+    IREE_ASSERT_OK(
+        loom_serve_host_create(std::get<0>(GetParam()), &host_, allocator_));
     const loom_serve_device_options_t device_options = {
         .uri = iree_make_cstring_view(FLAG_test_device)};
     IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
@@ -112,7 +115,8 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
         .checkpoint_directory = iree_make_cstring_view(directory_.c_str()),
         .height = kHeight,
         .width = kWidth,
-        .text_tokens = 32};
+        .text_tokens = 32,
+        .command_quantum = std::get<1>(GetParam())};
     IREE_ASSERT_OK(
         loom_serve_image_model_create(device_, &options, &model_, allocator_));
   }
@@ -138,7 +142,9 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     return "{\"kind\":\"image\",\"name\":\"" + name + "\",\"source\":\"" +
            source + "\",\"checkpoint\":\"" + directory_ +
            "\",\"width\":7,\"height\":5,\"text_tokens\":32,\"admission\":\"" +
-           admission + "\"}";
+           admission +
+           "\",\"command_quantum\":" + std::to_string(std::get<1>(GetParam())) +
+           "}";
   }
 
   std::string ModelStatus(const std::string& name) {
@@ -309,10 +315,12 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
           },
           connection, iree_infinite_timeout());
     }
-    // The native completion must release its pin and count completed device
-    // work, but no PNG/base64 borrower is needed for an absent consumer.
+    // Retire the accepted first part and its workspace before releasing the
+    // pin. Split execution must skip the second kernel and output feedback;
+    // neither path needs a PNG/base64 borrower for an absent consumer.
     ASSERT_NO_FATAL_FAILURE(advance_until(
-        [&] { return interface.telemetry.counters->batches == 1; }, flags));
+        [&] { return interface.telemetry.counters->cancelled == 1; }, flags));
+    EXPECT_EQ(interface.telemetry.counters->batches, 1u);
     EXPECT_STREQ(interface.snapshot(interface.self).phase, "idle");
     EXPECT_FALSE(interface.is_pending(interface.self));
     EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
@@ -509,7 +517,9 @@ TEST_P(SourceImageServiceTest, IndependentLogReadersCannotBlockColdImageWork) {
             0u);
   drain();
   const std::string totals =
-      R"("requests":42,"completed":40,"rejected":2,"cancelled":0,"failed":0,"input_tokens":0,"output_tokens":0,"batches":40)";
+      std::string(
+          R"("requests":42,"completed":40,"rejected":2,"cancelled":0,"failed":0,"input_tokens":0,"output_tokens":0,"batches":)") +
+      (std::get<1>(GetParam()) ? "80" : "40");
   EXPECT_NE(latest.find(totals), std::string::npos);
   EXPECT_NE(events.find(R"("generated_images":40,"generated_pixels":1400)"),
             std::string::npos);
@@ -680,7 +690,31 @@ TEST_P(SourceImageServiceTest, StoppingDeviceImageSkipsEncoding) {
   CheckAbandonedImage(LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
 }
 
-INSTANTIATE_TEST_SUITE_P(Workers, SourceImageServiceTest,
-                         ::testing::Values(1u, 4u));
+TEST_P(SourceImageServiceTest, FailedPartReadinessPreservesActualRetirement) {
+  ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
+  loom_serve_image_prepared_t prepared;
+  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(model_, IREE_SV("aba"),
+                                                        1, 1.0f, &prepared));
+  const auto generator = loom_serve_image_model_generator(model_);
+  loom_serve_residency_admission_t admission;
+  IREE_ASSERT_OK(generator.try_admit(generator.self, &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_serve_execution_frontier_t frontier;
+  bool complete = false;
+  IREE_ASSERT_OK(generator.submit(generator.self, 0, &frontier, &complete));
+  EXPECT_EQ(complete, std::get<1>(GetParam()) == 0);
+  // Failure readiness does not authorize releasing the workspace or upload
+  // payload while the native queue still owns its accepted first part.
+  iree_hal_semaphore_fail(
+      frontier.semaphores[0],
+      iree_make_status(IREE_STATUS_ABORTED, "failed image part"));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                        loom_serve_image_model_destroy(model_));
+  model_ = nullptr;
+}
+
+INSTANTIATE_TEST_SUITE_P(WorkersAndQuanta, SourceImageServiceTest,
+                         ::testing::Combine(::testing::Values(1u, 4u),
+                                            ::testing::Values(0u, 1u)));
 
 }  // namespace

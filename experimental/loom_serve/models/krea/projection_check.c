@@ -167,7 +167,7 @@ static iree_status_t projection_initialize(projection_check_t* check,
     if (iree_status_is_ok(status)) {
       status = loom_serve_jit_stage_record(
           check->stages[i], iree_hal_queue_family(dispatch),
-          IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, &check->weights[i],
+          IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, NULL, &check->weights[i],
           &check->commands[i]);
     }
   }
