@@ -325,10 +325,11 @@ against that completed accounting. Cancellation resets an already-retired row
 without another device wait. Native allocation and mapping calls remain cold
 platform operations, outside the steady-state epoch path.
 
-The admission FIFO prepares its head once and retains the encoded input in an
-idle slot's existing host array while capacity is unavailable. This acquires no
-device reservation. Cancellation or rejection relinquishes that host choice;
-admission consumes the same token counts and completion extent. The `prepared`
+The bounded admission selector retains compact encoded input independently of
+execution rows while capacity is unavailable. Only its current attempt borrows
+an idle row or endpoint; parked inputs own no device reservation. Cancellation
+or rejection relinquishes that choice; admission consumes the same completion
+extent. The `prepared`
 JSONL event reports source/tokenizer duration separately from admission queue
 time, along with retained, appended and reserved token counts. Only invalid
 request arguments or context overflow become client errors; allocation and
@@ -342,8 +343,8 @@ denial consumes the already-completed semaphore/value pair immediately; it
 does not register a self-waking retry. Remaining pressure waits for transport
 or model progress, with prepared input retained unchanged.
 
-These handles are serialized model API objects. The HTTP service owns them
-through explicitly named endpoints; automatic prefix discovery is not enabled.
+These handles are serialized model API objects. The HTTP service uses them for
+explicit pins, idle completed histories and optional consumed-token prefixes.
 
 `session.h` owns reusable host token/decoder storage, canonical continuation
 text and bounded output packets. It performs source-directed token decoding and
@@ -351,6 +352,38 @@ SSE formatting without sending transport data or releasing native reservations.
 The service owns those claim/admission policies and serializes session CPU work
 against the model's shared VM invocation. Scratch builders are shared by the
 exclusive model owner, not multiplied per retained session.
+
+### Automatic token-prefix reuse
+
+The shared server's `prefix_cache_capacity` reserves an independent number of
+evictable endpoints; zero disables capture. An endpoint contains immutable KV
+pages, a recurrent reader and exact consumed token IDs, not rendered transcript
+bytes. Compatible fresh named or anonymous requests can reuse it while its
+originating request is still generating. A continuing row reserves its private
+writer and partial tail before capture becomes visible, preserving the request's
+already-promised completion capacity.
+
+The initial policy captures natural intermediate prefill frontiers of at least
+one KV page. An existing ancestor suppresses redundant descendant captures.
+Admission selects the longest retained strict prefix; at least one known input
+remains for ordinary token selection. A prompt equal to an endpoint therefore
+replays unless another shorter endpoint matches. Completed same-session history
+and explicit checkpoint requests retain their exact pending-token semantics.
+No epoch splitting, batch hold or change to device-fed continuation is imposed.
+
+`prefix_cache.c` owns a bounded exact-token table with admission-recency LRU.
+The service lends an entry only through reservation readiness, then the new row
+owns its independent references. Automatic entries yield before idle completed
+histories under pressure. If the selected prefix itself prevents admission,
+the preserved full input replays after releasing that optional endpoint. Explicit
+pins never silently degrade. Physical trim still follows the existing model
+timeline; failed device readiness leaves accepted handles to model retirement.
+
+Client `prompt_tokens_details.cached_tokens` and `admit.retained_tokens` report
+actual reuse. `text_memory.prefix_cache` reports capacity and retained endpoints;
+`prefix_capture.readiness_ns` measures the host readiness handoff separately from
+epoch time. Capture consumes a recurrent snapshot per distinct endpoint, so its
+capacity is a memory/workload choice, not a free additional session count.
 
 Source request rendering/tokenization and completed-token response formatting
 run as finite jobs on the shared host task executor. The HTTP claim, input

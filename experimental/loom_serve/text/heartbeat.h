@@ -50,6 +50,13 @@ typedef struct loom_serve_text_heartbeat_snapshot_t {
     // Retained endpoints, including at most one temporary admission exchange.
     iree_host_size_t endpoints;
   } session_cache;
+  // Intermediate consumed-token prefixes, separate from completed histories.
+  struct {
+    // Configured evictable frontier bound.
+    iree_host_size_t capacity;
+    // Retained frontiers, including a capture awaiting readiness.
+    iree_host_size_t endpoints;
+  } prefix_cache;
   // Host payload owned by explicitly suspended endpoints, not device backing.
   iree_host_size_t checkpoint_host_bytes;
   // Elastic mutable-state backing; weights and transient workspace are

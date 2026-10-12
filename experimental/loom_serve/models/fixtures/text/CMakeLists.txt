@@ -38,6 +38,7 @@ loom_cc_test(
     "checkpoint_test.cc"
     "oracle.h"
     "owner_turn.h"
+    "prefix_service_test.cc"
     "service_fixture.cc"
     "service_fixture.h"
     "service_test.cc"
@@ -96,6 +97,7 @@ loom_cc_test(
     "checkpoint_test.cc"
     "oracle.h"
     "owner_turn.h"
+    "prefix_service_test.cc"
     "service_fixture.cc"
     "service_fixture.h"
     "service_test.cc"
@@ -138,7 +140,7 @@ loom_cc_test(
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom}}"
     "--test_device=vulkan"
-    "--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*"
+    "--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*:SharedWorkers/PrefixServiceTest.*"
   LABELS
     "iree-run-requirement=vulkan.resource.device"
   RESOURCE_GROUP
@@ -155,6 +157,7 @@ loom_cc_test(
     "checkpoint_test.cc"
     "oracle.h"
     "owner_turn.h"
+    "prefix_service_test.cc"
     "service_fixture.cc"
     "service_fixture.h"
     "service_test.cc"
@@ -197,7 +200,7 @@ loom_cc_test(
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom}}"
     "--test_device=task"
-    "--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*"
+    "--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*:SharedWorkers/PrefixServiceTest.*"
   LABELS
 
 )

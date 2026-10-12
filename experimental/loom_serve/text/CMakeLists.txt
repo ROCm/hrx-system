@@ -325,6 +325,20 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    prefix_cache
+  HDRS
+    "prefix_cache.h"
+  SRCS
+    "prefix_cache.c"
+  DEPS
+    ::model
+    iree::base
+    iree::experimental::loom_serve::runtime::execution
+  PUBLIC
+)
+
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
@@ -341,6 +355,7 @@ loom_cc_library(
     ::heartbeat
     ::input
     ::model
+    ::prefix_cache
     ::schedule
     ::session
     ::session_cache

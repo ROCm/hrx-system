@@ -52,6 +52,7 @@ py_test(
             "checkpoint_test.cc",
             "oracle.h",
             "owner_turn.h",
+            "prefix_service_test.cc",
             "service_fixture.cc",
             "service_fixture.h",
             "service_test.cc",
@@ -118,7 +119,7 @@ py_test(
             ["//loom/config/execute:spirv_vulkan_hal"],
             GPU_DEVICE_RESOURCE_GROUP,
             ["iree-run-requirement=vulkan.resource.device"],
-            ["--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*"],
+            ["--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*:SharedWorkers/PrefixServiceTest.*"],
         ),
         (
             "service_cpu_test",
@@ -129,7 +130,7 @@ py_test(
             ],
             None,
             [],
-            ["--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*"],
+            ["--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*:SharedWorkers/PrefixServiceTest.*"],
         ),
     ]
 ]

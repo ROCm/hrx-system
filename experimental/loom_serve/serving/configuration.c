@@ -143,9 +143,12 @@ static iree_status_t configuration_text(const configuration_field_t* fields,
       configuration_size(&fields[9], 0, INT32_MAX, &text->checkpoint_capacity));
   IREE_RETURN_IF_ERROR(configuration_size(&fields[22], 0, INT32_MAX - 1,
                                           &text->session_cache_capacity));
-  if (text->session_cache_capacity &&
-      text->checkpoint_capacity >
-          INT32_MAX - text->session_cache_capacity - 1) {
+  IREE_RETURN_IF_ERROR(configuration_size(&fields[24], 0, INT32_MAX,
+                                          &text->prefix_cache_capacity));
+  const uint64_t endpoint_capacity =
+      (uint64_t)text->checkpoint_capacity + text->prefix_cache_capacity +
+      (text->session_cache_capacity ? text->session_cache_capacity + 1 : 0);
+  if (endpoint_capacity > INT32_MAX) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "combined endpoint capacity exceeds INT32_MAX");
   }
@@ -234,6 +237,8 @@ static iree_status_t configuration_model_parse(
       {"session_cache_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
        .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       {"admission_overtakes", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
+      {"prefix_cache_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
        .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)}};
   configuration_fields_t context = {IREE_ARRAYSIZE(fields), fields};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(

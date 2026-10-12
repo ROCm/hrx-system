@@ -295,6 +295,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "prefix_cache",
+    srcs = ["prefix_cache.c"],
+    hdrs = ["prefix_cache.h"],
+    visibility = [":__pkg__"],
+    deps = [
+        ":model",
+        "//experimental/loom_serve/runtime:execution",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "service",
     srcs = ["service.c"],
     hdrs = ["service.h"],
@@ -309,6 +321,7 @@ loom_cc_library(
         ":heartbeat",
         ":input",
         ":model",
+        ":prefix_cache",
         ":schedule",
         ":session",
         ":session_cache",

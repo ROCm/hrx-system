@@ -150,8 +150,12 @@ high-water; excess work queues within bounded capacity or returns overload.
 `prefill_capacity` bounds the source-JIT shape catalog, not prompt length.
 The source may impose a tighter cap than the generic runner; Qwen currently
 caps epochs at 512 tokens.
-`checkpoint_capacity` is opt-in retained endpoint capacity, not automatic
-prefix discovery. MTP and two-epoch continuation require source support.
+`checkpoint_capacity` reserves explicit pinned endpoints. Independent
+`prefix_cache_capacity` enables bounded automatic sharing of exact intermediate
+token prefixes, including reuse while the source request remains active. It
+defaults to zero; [prefix-cache policy](../text/README.md#automatic-token-prefix-reuse)
+explains capture boundaries, recurrent-state cost and eviction. MTP and
+two-epoch continuation require source support.
 
 `admission_overtakes` is independent of epoch packing. It defaults to `rows`:
 when the oldest text request cannot reserve its complete KV requirement, up to

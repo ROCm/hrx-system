@@ -411,6 +411,7 @@ static iree_status_t text_registration_prepare(
         .default_max_tokens = text->max_tokens,
         .pending_capacity = configuration->pending_requests,
         .session_cache_capacity = text->session_cache_capacity,
+        .prefix_cache_capacity = text->prefix_cache_capacity,
         .admission_overtakes = text->admission_overtakes,
         .heartbeat_interval = registration->options->heartbeat_interval,
         .schedule_mode = LOOM_SERVE_TEXT_SCHEDULE_PACKED,
@@ -512,9 +513,9 @@ static iree_status_t text_registration_create(
       .tokenizer_path = text->tokenizer,
       .row_count = text->rows,
       .checkpoint_capacity =
-          text->checkpoint_capacity + (text->session_cache_capacity
-                                           ? text->session_cache_capacity + 1
-                                           : 0)};
+          text->checkpoint_capacity + text->prefix_cache_capacity +
+          (text->session_cache_capacity ? text->session_cache_capacity + 1
+                                        : 0)};
   iree_status_t status = loom_serve_text_load_create(
       options->device, &model_options, observer.wake, observer.user_data,
       &registration->load, allocator);

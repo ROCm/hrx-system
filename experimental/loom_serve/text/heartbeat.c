@@ -69,6 +69,13 @@ typedef struct text_memory_record_t {
     // Owned endpoints, including one possible pending admission exchange.
     uint64_t endpoints;
   } session_cache;
+  // Exact token-prefix frontiers, independent of completed session histories.
+  struct {
+    // Configured frontier bound.
+    uint64_t capacity;
+    // Owned frontiers, including a pending capture.
+    uint64_t endpoints;
+  } prefix_cache;
   // Model mutable-state backing excluding weights/workspace.
   loom_serve_memory_statistics_t state;
   // Independently reclaimable model parameter backing.
@@ -156,6 +163,8 @@ static iree_status_t text_memory_format(
       ",\"resident_tokens\":%" PRIu64 "},\"checkpoint_host_bytes\":%" PRIu64
       ",\"session_cache\":{\"capacity\":%" PRIu64 ",\"endpoints\":%" PRIu64
       "}"
+      ",\"prefix_cache\":{\"capacity\":%" PRIu64 ",\"endpoints\":%" PRIu64
+      "}"
       ",\"elastic_state\":{\"reserved_bytes\":%" PRIu64
       ",\"committed_bytes\":%" PRIu64 ",\"peak_bytes\":%" PRIu64
       ",\"released_bytes\":%" PRIu64
@@ -165,7 +174,8 @@ static iree_status_t text_memory_format(
       ",\"released_bytes\":%" PRIu64 "}",
       value.capacity, value.reserved, value.resident,
       value.checkpoint_host_bytes, value.session_cache.capacity,
-      value.session_cache.endpoints, value.state.reserved_bytes,
+      value.session_cache.endpoints, value.prefix_cache.capacity,
+      value.prefix_cache.endpoints, value.state.reserved_bytes,
       value.state.committed_bytes, value.state.peak_bytes,
       value.state.released_bytes, value.weights.reserved_bytes,
       value.weights.committed_bytes, value.weights.peak_bytes,
@@ -235,6 +245,8 @@ static void text_heartbeat_report(loom_serve_text_heartbeat_t* heartbeat) {
       .checkpoint_host_bytes = state.checkpoint_host_bytes,
       .session_cache = {state.session_cache.capacity,
                         state.session_cache.endpoints},
+      .prefix_cache = {state.prefix_cache.capacity,
+                       state.prefix_cache.endpoints},
       .state = state.state_memory,
       .weights = state.weight_memory};
   memset(&record.data, 0, sizeof(record.data));

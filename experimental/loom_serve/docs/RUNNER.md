@@ -546,7 +546,7 @@ transport choices under those same obligations, not alternative serving ABIs.
 | More rows or wider epochs | Host fixed arrays, descriptor capacities, authored views, scratch sizing, shape selection, and full-sized correctness/performance qualification |
 | Online shape insertion | Stage publication and immutable command-table lifetime; cached code and in-flight bindings must remain valid |
 | Overcommitted pooled sessions | Replace full-completion admission guarantees with explicit held/offloaded residency and a policy for restoring older sessions; kernels still consume only resident pages |
-| Automatic shared prefix cache | Discover compatible endpoints and select bounded retention policy over named/native checkpoints; intermediate message markers need source-rendered token boundaries |
+| Finer automatic prefix retention | The bounded exact-token cache captures natural prefill frontiers; finer or message-directed boundaries require source/tokenizer markers and a measured capture-versus-replay policy |
 | Continuous device-owned continuation | Extend the bounded two-epoch handoff to admission/completion rings with credit, cancellation and independently retired output slots |
 | Additional prepared weight formats | Model-specific in-place ownership or bounded scratch, all consuming kernel variants, shared target/auxiliary placement, and startup/inference qualification |
 | NPU/GPU or collective execution | Target packages, actual queue/device domains, scoped memory pools, and the [cross-domain ownership boundary](#single-node-scope-and-remote-execution) |

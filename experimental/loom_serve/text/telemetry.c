@@ -190,6 +190,22 @@ static iree_status_t text_checkpoint_format(
       value.name, value.position, value.host_bytes);
 }
 
+static iree_status_t text_prefix_format(
+    const loom_serve_telemetry_record_t* record,
+    iree_string_builder_t* output) {
+  loom_serve_text_prefix_record_t value;
+  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
+  memcpy(&value, record->data.words, sizeof(value));
+  return iree_string_builder_append_format(
+      output,
+      ",\"readiness_ns\":%" PRIu64 ",\"capacity\":%" PRIu64
+      ",\"endpoints\":%" PRIu64,
+      value.readiness_ns, value.capacity, value.endpoints);
+}
+
+const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_PREFIX_CAPTURE = {
+    "prefix_capture", text_prefix_format};
+
 static iree_status_t text_trim_format(
     const loom_serve_telemetry_record_t* record,
     iree_string_builder_t* output) {

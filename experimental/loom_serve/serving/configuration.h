@@ -40,6 +40,9 @@ typedef struct loom_serve_text_configuration_t {
   // Evictable idle endpoints retained beyond execution rows; zero disables.
   // Native storage includes one additional endpoint for an admission exchange.
   iree_host_size_t session_cache_capacity;
+  // Exact intermediate token-prefix endpoints shared across requests. Zero
+  // disables capture; these evictable slots are independent of other caches.
+  iree_host_size_t prefix_cache_capacity;
   // Default output limit when a request omits max_tokens.
   iree_host_size_t max_tokens;
   // Speculative proposal depth, zero or three.

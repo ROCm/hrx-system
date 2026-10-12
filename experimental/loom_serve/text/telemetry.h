@@ -246,6 +246,15 @@ typedef struct loom_serve_text_trim_record_t {
   uint64_t committed_bytes;
 } loom_serve_text_trim_record_t;
 
+typedef struct loom_serve_text_prefix_record_t {
+  // Host readiness-registration to owner-observation nanoseconds, not GPU time.
+  uint64_t readiness_ns;
+  // Configured automatic frontier bound.
+  uint64_t capacity;
+  // Retained automatic frontiers after completed capture.
+  uint64_t endpoints;
+} loom_serve_text_prefix_record_t;
+
 extern const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_PREPARED;
 extern const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_ADMIT;
 extern const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_REQUEST_STATS;
@@ -257,6 +266,7 @@ extern const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_CHECKPOINT_PIN;
 extern const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_CHECKPOINT_SUSPEND;
 extern const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_CHECKPOINT_RELEASE;
 extern const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_TRIM;
+extern const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_PREFIX_CAPTURE;
 
 // Copies a statically sized payload into the fixed record. Each schema's size
 // is checked where it is defined, not revalidated on the publication hot path.

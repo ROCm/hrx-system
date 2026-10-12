@@ -34,6 +34,9 @@ typedef struct loom_serve_text_service_options_t {
   // The model reserves this many plus one exchange endpoint in addition to
   // explicit pin capacity. Automatic entries yield to admission pressure.
   iree_host_size_t session_cache_capacity;
+  // Exact intermediate token prefixes shared across sessions; zero disables.
+  // Native endpoints are reserved separately from idle histories/explicit pins.
+  iree_host_size_t prefix_cache_capacity;
   // Reporting interval in nanoseconds; zero disables periodic heartbeats.
   iree_duration_t heartbeat_interval;
   // Execution choice; the planner and HTTP lifecycle are shared by all modes.
@@ -102,9 +105,15 @@ iree_status_t loom_serve_text_service_create(
 // backing without changing live branches or queued identity. Wake admission
 // includes missing prefix pages and preserves the selected row until its
 // replacement fits. Host image bytes are reported separately from device pages.
-// Untagged requests without an explicit pin always replay. Peer cancellation
-// discards its live row, not independently pinned endpoints, at a completed
-// stage boundary. Capacities match the created model.
+// prefix_cache_capacity enables exact consumed-token reuse across fresh named
+// and untagged requests. Natural intermediate prefill frontiers are retained
+// once per distinct prefix; an existing ancestor suppresses descendant copies.
+// Lookup leaves at least one known input to establish selection normally.
+// Automatic prefixes yield before idle histories under admission pressure,
+// including replaying a selected prefix if keeping it prevents admission.
+// This policy does not alter epoch shapes or wait for matching requests.
+// Peer cancellation discards its live row, not independently pinned endpoints,
+// at a completed stage boundary. Capacities match the created model.
 loom_serve_http_service_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service);
 

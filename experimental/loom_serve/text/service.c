@@ -17,6 +17,7 @@
 #include "experimental/loom_serve/text/epoch.h"
 #include "experimental/loom_serve/text/heartbeat.h"
 #include "experimental/loom_serve/text/input.h"
+#include "experimental/loom_serve/text/prefix_cache.h"
 #include "experimental/loom_serve/text/schedule.h"
 #include "experimental/loom_serve/text/session.h"
 #include "experimental/loom_serve/text/session_cache.h"
@@ -35,6 +36,7 @@ typedef enum text_work_e {
   TEXT_WORK_TRIM,
   TEXT_WORK_RESERVE,
   TEXT_WORK_RETAIN,
+  TEXT_WORK_PREFIX,
 } text_work_t;
 
 // Exclusive host/VM borrow; input preparation may overlap an accepted epoch.
@@ -109,6 +111,8 @@ struct loom_serve_text_service_t {
     iree_async_semaphore_wait_operation_t operation;
     // Exact work and feedback values captured by submission.
     loom_serve_execution_frontier_t frontier;
+    // Host observation before registering this operation's readiness wait.
+    iree_time_t start_time;
     // Toll-free handles for asynchronous readiness registration.
     iree_async_semaphore_t* semaphores[2];
     // Callback-published result, consumed together with ready under mutex.
@@ -165,6 +169,8 @@ struct loom_serve_text_service_t {
       loom_serve_text_session_t* session;
       // Idle logical history protected through CPU preparation/admission.
       loom_serve_text_session_cache_entry_t* cached;
+      // Exact token prefix borrowed through this reservation attempt.
+      loom_serve_text_prefix_entry_t* prefix;
       // Outgoing row pin awaiting readiness before logical ownership moves.
       loom_serve_text_session_cache_entry_t* detaching;
       // Cold image payload before the current reservation attempt.
@@ -189,6 +195,8 @@ struct loom_serve_text_service_t {
   loom_serve_text_checkpoint_registry_t checkpoints;
   // Evictable idle histories, independent of execution rows and explicit pins.
   loom_serve_text_session_cache_t cache;
+  // Shared consumed-token frontiers, independent of completed chat histories.
+  loom_serve_text_prefix_cache_t prefixes;
   // Shared JSON/SSE serialization scratch, copied into a row packet or carrier.
   iree_string_builder_t scratch;
   // Shared typed tool-call serialization scratch used at generation end.
@@ -230,6 +238,7 @@ static iree_status_t text_await_work(loom_serve_text_service_t* service,
   wait->values = service->completion.frontier.values;
   wait->count = 2;
   wait->mode = IREE_ASYNC_WAIT_MODE_ALL;
+  service->completion.start_time = iree_time_now();
   IREE_RETURN_IF_ERROR(iree_async_proactor_submit_one(
       service->completion.proactor, &wait->base));
   service->completion.work = work;
@@ -297,6 +306,8 @@ static void text_observe(loom_serve_text_service_t* service,
   state->pool.resident = pool.capacity - pool.available - pool.pending;
   state->session_cache.capacity = service->cache.capacity;
   state->session_cache.endpoints = service->cache.count;
+  state->prefix_cache.capacity = service->prefixes.capacity;
+  state->prefix_cache.endpoints = service->prefixes.count;
   state->checkpoint_host_bytes =
       loom_serve_text_model_checkpoint_suspended_bytes(service->model);
   state->state_memory = loom_serve_text_model_memory_statistics(service->model);
@@ -809,7 +820,11 @@ static bool text_cache_reclaim_pending(void* self) {
 
 static bool text_cache_reclaim_request(void* self) {
   loom_serve_text_service_t* service = self;
-  if (text_has_work(service) || service->control.connection ||
+  if (text_has_work(service) || service->control.connection) {
+    return false;
+  }
+  if (!loom_serve_text_prefix_cache_evict(&service->prefixes,
+                                          service->pending.prepared.prefix) &&
       !loom_serve_text_session_cache_evict(
           &service->cache, service->row_count, service->sessions,
           service->pending.prepared.session, service->pending.prepared.cached,
@@ -837,9 +852,8 @@ typedef enum text_admission_result_e {
 // named endpoints and active reservations remain protected on every denial.
 static iree_status_t text_reclaim_idle(
     loom_serve_text_service_t* service, loom_serve_text_session_t* selected,
-    const loom_serve_text_checkpoint_entry_t* checkpoint,
-    iree_host_size_t retained, iree_host_size_t reservation,
-    text_admission_result_t* out_result) {
+    const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t retained,
+    iree_host_size_t reservation, text_admission_result_t* out_result) {
   *out_result = TEXT_ADMISSION_CAPACITY;
   const loom_serve_text_reserve_mode_t mode =
       checkpoint ? LOOM_SERVE_TEXT_RESERVE_CHECKPOINT
@@ -855,8 +869,7 @@ static iree_status_t text_reclaim_idle(
     loom_serve_residency_admission_t admission;
     loom_serve_execution_frontier_t frontier;
     status = loom_serve_text_row_submit_reserve(
-        selected->row, mode, checkpoint ? checkpoint->state : NULL, reservation,
-        &admission, &frontier);
+        selected->row, mode, checkpoint, reservation, &admission, &frontier);
     if (iree_status_is_ok(status) &&
         admission != LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
       // Parameter admission owns shared pressure and idle-cache reclamation.
@@ -897,7 +910,9 @@ static iree_status_t text_reclaim_idle(
       *out_result = TEXT_ADMISSION_QUEUED;
       break;
     }
-    if (!loom_serve_text_session_cache_evict(
+    if (!loom_serve_text_prefix_cache_evict(&service->prefixes,
+                                            service->pending.prepared.prefix) &&
+        !loom_serve_text_session_cache_evict(
             &service->cache, service->row_count, service->sessions, selected,
             service->pending.prepared.cached, &service->telemetry)) {
       break;
@@ -1031,8 +1046,11 @@ static iree_status_t text_admit_request(loom_serve_text_service_t* service,
   text_pending_request_t* pending =
       &service->pending.values[service->pending.admission.cursor];
   loom_serve_text_session_t* session = service->pending.prepared.session;
-  const iree_host_size_t input_count = pending->input.count;
-  const iree_host_size_t retained_count = pending->input.retained_count;
+  loom_serve_text_prefix_entry_t* prefix = service->pending.prepared.prefix;
+  const iree_host_size_t input_origin = prefix ? prefix->count : 0;
+  const iree_host_size_t input_count = pending->input.count - input_origin;
+  const iree_host_size_t retained_count =
+      pending->input.retained_count + input_origin;
   const iree_host_size_t reservation = pending->reservation;
   const iree_host_size_t restored_bytes =
       service->pending.prepared.restored_bytes;
@@ -1047,7 +1065,10 @@ static iree_status_t text_admit_request(loom_serve_text_service_t* service,
   loom_serve_text_admission_acquired(&service->pending.admission);
   const iree_host_size_t overtakes = service->pending.admission.overtakes;
   memcpy(session->tokens, pending->input.tokens,
-         input_count * sizeof(*session->tokens));
+         pending->input.count * sizeof(*session->tokens));
+  if (prefix) {
+    loom_serve_text_prefix_cache_touch(&service->prefixes, prefix);
+  }
   const iree_duration_t prepare_duration = pending->prepare_duration;
   loom_serve_text_session_cache_entry_t* cached =
       service->pending.prepared.cached;
@@ -1086,6 +1107,7 @@ static iree_status_t text_admit_request(loom_serve_text_service_t* service,
   session->request.chat = request.chat;
   session->request.phase = LOOM_SERVE_TEXT_REQUEST_PREFILL;
   session->request.input_count = input_count;
+  session->request.input_origin = input_origin;
   session->request.retained_count = retained_count;
   session->request.start_time = iree_time_now();
   session->request.queue_duration =
@@ -1199,14 +1221,20 @@ static iree_status_t text_admit_pending(loom_serve_text_service_t* service,
         service->completion.work != TEXT_WORK_NONE) {
       break;
     }
-    const loom_serve_text_checkpoint_entry_t* checkpoint = pending->checkpoint;
+    const loom_serve_text_checkpoint_t* checkpoint =
+        pending->checkpoint ? pending->checkpoint->state : NULL;
     if (!checkpoint && retained_count && service->pending.prepared.cached) {
-      checkpoint = &service->pending.prepared.cached->endpoint;
+      checkpoint = service->pending.prepared.cached->endpoint.state;
+    }
+    if (!checkpoint && !retained_count) {
+      service->pending.prepared.prefix = loom_serve_text_prefix_cache_find(
+          &service->prefixes, pending->input.count, pending->input.tokens);
+      if (service->pending.prepared.prefix) {
+        checkpoint = service->pending.prepared.prefix->state;
+      }
     }
     service->pending.prepared.restored_bytes =
-        checkpoint
-            ? loom_serve_text_checkpoint_suspended_bytes(checkpoint->state)
-            : 0;
+        checkpoint ? loom_serve_text_checkpoint_suspended_bytes(checkpoint) : 0;
     text_admission_result_t admission;
     status = text_reclaim_idle(service, session, checkpoint, retained_count,
                                reservation, &admission);
@@ -1219,6 +1247,15 @@ static iree_status_t text_admit_pending(loom_serve_text_service_t* service,
     }
     if (admission == TEXT_ADMISSION_CAPACITY ||
         admission == TEXT_ADMISSION_STATE_CAPACITY) {
+      if (service->pending.prepared.prefix) {
+        // Opportunistic sharing must not make an otherwise fitting request
+        // impossible. The original full replay tokens remain unchanged.
+        loom_serve_text_prefix_cache_release(&service->prefixes,
+                                             service->pending.prepared.prefix);
+        service->pending.prepared.prefix = NULL;
+        service->pool.trim.pending = true;
+        continue;
+      }
       bool active =
           iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY);
       for (iree_host_size_t i = 0; i < service->row_count; ++i) {
@@ -1484,8 +1521,10 @@ static iree_status_t text_submit_epoch(
     const bool prefill =
         session->request.phase == LOOM_SERVE_TEXT_REQUEST_PREFILL;
     rows[row] = (loom_serve_text_epoch_row_t){
-        .input_tokens =
-            prefill ? session->tokens + session->request.input_offset : NULL,
+        .input_tokens = prefill
+                            ? session->tokens + session->request.input_origin +
+                                  session->request.input_offset
+                            : NULL,
         .input_count = prefill ? session->request.input_count -
                                      session->request.input_offset
                                : 0,
@@ -1515,14 +1554,12 @@ static iree_status_t text_submit_epoch(
   return text_await_work(service, TEXT_WORK_EPOCH);
 }
 
-static bool text_publish_epoch(loom_serve_text_service_t* service) {
+static void text_publish_epoch(loom_serve_text_service_t* service) {
   loom_serve_text_telemetry_epoch(&service->telemetry, &service->heartbeat,
                                   &service->scheduling, &service->epoch,
                                   service->sessions);
   text_observe(service, "output");
-  bool has_output = false;
   for (iree_host_size_t i = 0; i < service->epoch.count; ++i) {
-    has_output |= service->epoch.results[i].output_count != 0;
     loom_serve_text_session_t* session =
         &service->sessions[service->epoch.spans[i].row_index];
     const bool prefill = service->epoch.prefill[i];
@@ -1533,7 +1570,6 @@ static bool text_publish_epoch(loom_serve_text_service_t* service) {
       }
     }
   }
-  return has_output;
 }
 
 static iree_status_t text_process_output(
@@ -1577,6 +1613,55 @@ static void text_complete_output(loom_serve_text_service_t* service) {
   service->epoch.count = 0;
 }
 
+// Output processing borrows the VM only after any captured prefix has retired.
+static void text_begin_output(loom_serve_text_service_t* service) {
+  bool has_output = false;
+  for (iree_host_size_t i = 0; i < service->epoch.count; ++i) {
+    has_output |= service->epoch.results[i].output_count != 0;
+  }
+  if (has_output) {
+    text_schedule_cpu(service, TEXT_CPU_WORK_OUTPUT, text_process_output);
+  } else {
+    service->epoch.count = 0;
+  }
+}
+
+// Capture at most one new frontier per retired epoch. Decode rows perform no
+// token lookup; capture adds no model traversal, prefill split or cohort hold.
+static iree_status_t text_capture_prefix(loom_serve_text_service_t* service) {
+  if (!service->prefixes.capacity) {
+    return iree_ok_status();
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < service->epoch.count && iree_status_is_ok(status); ++i) {
+    loom_serve_text_session_t* session =
+        &service->sessions[service->epoch.spans[i].row_index];
+    const iree_host_size_t count =
+        session->request.input_origin + session->request.input_offset;
+    if (!service->epoch.prefill[i] ||
+        session->request.phase != LOOM_SERVE_TEXT_REQUEST_PREFILL ||
+        session->request.retained_count != session->request.input_origin ||
+        count < service->pool.geometry.block_size ||
+        loom_serve_http_connection_failed(session->request.connection)) {
+      continue;
+    }
+    bool evicted = false;
+    loom_serve_execution_frontier_t frontier;
+    status = loom_serve_text_prefix_cache_submit(
+        &service->prefixes, session->row, count, session->tokens,
+        service->pending.prepared.prefix, &evicted, &frontier);
+    service->pool.trim.pending |= evicted;
+    if (iree_status_is_ok(status) && frontier.semaphores[0]) {
+      service->completion.frontier = frontier;
+      text_observe(service, "prefix_capture");
+      status = text_await_work(service, TEXT_WORK_PREFIX);
+      break;
+    }
+  }
+  return status;
+}
+
 static iree_status_t text_complete_epoch(
     loom_serve_text_service_t* service, loom_serve_http_service_flags_t flags) {
   IREE_RETURN_IF_ERROR(loom_serve_text_epoch_complete(
@@ -1597,11 +1682,10 @@ static iree_status_t text_complete_epoch(
         NULL, &service->completion.frontier));
     return text_await_work(service, TEXT_WORK_EPOCH);
   }
-  const bool has_output = text_publish_epoch(service);
-  if (has_output) {
-    text_schedule_cpu(service, TEXT_CPU_WORK_OUTPUT, text_process_output);
-  } else {
-    service->epoch.count = 0;
+  text_publish_epoch(service);
+  IREE_RETURN_IF_ERROR(text_capture_prefix(service));
+  if (service->completion.work == TEXT_WORK_NONE) {
+    text_begin_output(service);
   }
   return iree_ok_status();
 }
@@ -1617,10 +1701,13 @@ static iree_status_t text_service_initialize(
       loom_serve_host_proactor_pool(host), 0, &service->completion.proactor));
   IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_registry_initialize(
       loom_serve_text_model_checkpoint_capacity(service->model) -
-          (service->cache.capacity ? service->cache.capacity + 1 : 0),
+          (service->cache.capacity ? service->cache.capacity + 1 : 0) -
+          service->prefixes.capacity,
       &service->checkpoints, service->allocator));
   IREE_RETURN_IF_ERROR(loom_serve_text_session_cache_initialize(
       service->cache.capacity, &service->cache, service->allocator));
+  IREE_RETURN_IF_ERROR(loom_serve_text_prefix_cache_initialize(
+      service->prefixes.capacity, &service->prefixes, service->allocator));
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       service->allocator, service->pending.capacity,
       sizeof(*service->pending.values), (void**)&service->pending.values));
@@ -1673,6 +1760,7 @@ static void text_stop(loom_serve_text_service_t* service,
                                             terminal_code);
   loom_serve_text_session_cache_reset(&service->cache, &service->telemetry,
                                       terminal_code);
+  loom_serve_text_prefix_cache_reset(&service->prefixes, terminal_code);
   service->pool.trim.pending = false;
   text_observe(service, terminal_code == IREE_STATUS_OK ? "stopped" : "failed");
 }
@@ -1699,6 +1787,7 @@ void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
   iree_allocator_free(host_allocator, service->pending.values);
   loom_serve_text_checkpoint_registry_deinitialize(&service->checkpoints);
   loom_serve_text_session_cache_deinitialize(&service->cache);
+  loom_serve_text_prefix_cache_deinitialize(&service->prefixes);
   loom_serve_text_heartbeat_deinitialize(&service->heartbeat);
   if (service->telemetry.owns_stream) {
     loom_serve_telemetry_stream_destroy(service->telemetry.stream);
@@ -1719,6 +1808,13 @@ iree_status_t loom_serve_text_service_create(
         IREE_STATUS_INVALID_ARGUMENT,
         "session cache requires capacity plus one native exchange endpoint");
   }
+  const iree_host_size_t session_endpoints =
+      options->session_cache_capacity ? options->session_cache_capacity + 1 : 0;
+  if (options->prefix_cache_capacity >
+      loom_serve_text_model_checkpoint_capacity(model) - session_endpoints) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prefix cache exceeds remaining native endpoints");
+  }
   loom_serve_text_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*service),
                                              (void**)&service));
@@ -1733,6 +1829,7 @@ iree_status_t loom_serve_text_service_create(
       .pending = {.capacity = options->pending_capacity,
                   .admission = {.budget = options->admission_overtakes}},
       .cache = {.capacity = options->session_cache_capacity},
+      .prefixes = {.capacity = options->prefix_cache_capacity},
       .pool = {.geometry = loom_serve_text_model_pool_usage(model)},
       .mtp_depth = options->mtp_depth,
       .scheduling = {
@@ -1864,6 +1961,21 @@ static iree_status_t text_advance_work(void* self,
       case TEXT_WORK_RETAIN:
         text_complete_retention(service);
         break;
+      case TEXT_WORK_PREFIX: {
+        const loom_serve_text_prefix_record_t record = {
+            .readiness_ns = iree_time_now() - service->completion.start_time,
+            .capacity = service->prefixes.capacity,
+            .endpoints = service->prefixes.count};
+        loom_serve_text_record(service->telemetry.stream,
+                               &LOOM_SERVE_TEXT_PREFIX_CAPTURE, 0, &record,
+                               sizeof(record));
+        if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+          service->epoch.count = 0;
+        } else {
+          text_begin_output(service);
+        }
+        break;
+      }
       case TEXT_WORK_NONE:
         break;
     }

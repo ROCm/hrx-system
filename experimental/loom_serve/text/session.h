@@ -75,6 +75,9 @@ typedef struct loom_serve_text_session_t {
     loom_serve_text_request_phase_t phase;
     // Host input tokens prepared for this turn.
     iree_host_size_t input_count;
+    // Token-array origin after exact-prefix reuse. Full replay IDs preceding
+    // this offset remain available for later consumed-frontier identity.
+    iree_host_size_t input_origin;
     // Input tokens already consumed by prefill.
     iree_host_size_t input_offset;
     // Retained device tokens preceding this request's appended input.
