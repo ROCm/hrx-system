@@ -22,7 +22,7 @@ const tasks = JSON.parse(readFileSync(join(root, "tasks.json"), "utf8")).slice(0
 if (!Number.isInteger(count) || count < 1 || count > 8 || tasks.length !== count) {
   throw new Error("Expected: run.mjs PI_PACKAGE OUTPUT_DIR BASE_URL MODEL TASK_COUNT ENGINE (one to eight tasks)");
 }
-if (!["loom", "llama", "vllm"].includes(engine)) throw new Error("Need an explicit serving engine");
+if (!["loom", "llama", "vllm", "gufo"].includes(engine)) throw new Error("Need an explicit serving engine");
 const output = resolve(outputArgument);
 mkdirSync(output);
 const pi = await import(pathToFileURL(join(resolve(packagePath), "dist/index.js")));
