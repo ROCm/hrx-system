@@ -136,6 +136,7 @@ iree_py_test(
     name = "target_info_isa_oracle_test",
     srcs = ["amdgpu_target_info_isa_oracle_test.py"],
     data = [
+        "@amdgpu_isa_xml//:amdgpu_isa_cdna2.xml",
         "@amdgpu_isa_xml//:amdgpu_isa_cdna3.xml",
         "@amdgpu_isa_xml//:amdgpu_isa_cdna4.xml",
         "@amdgpu_isa_xml//:amdgpu_isa_rdna3.xml",

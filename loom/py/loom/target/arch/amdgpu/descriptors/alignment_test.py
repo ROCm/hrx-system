@@ -81,7 +81,7 @@ def test_alignment_belongs_to_selected_register_alternative() -> None:
     ) == (4, 1)
 
 
-@pytest.mark.parametrize("target", ["cdna3", "cdna4", "gfx9_4_generic"])
+@pytest.mark.parametrize("target", ["cdna2", "cdna3", "cdna4", "gfx9_4_generic"])
 @pytest.mark.parametrize(
     ("operation", "names"),
     [("add", ("lhs", "rhs")), ("mul", ("lhs", "rhs")), ("fma", ("a", "b", "c"))],

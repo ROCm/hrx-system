@@ -209,3 +209,63 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @cdna_fragment_accumulato
 
 // ----
 {"format":"loom.amdgpu.occupancy.v0","function":"cdna_fragment_accumulator_pressure","target":"gfx942_target","descriptor_set":"amdgpu.cdna3.core","processor":"gfx942","wave_size":64,"max_waves_per_simd":8,"flat_workgroup_size":0,"waves_per_workgroup":0,"resident_waves_per_simd":8,"occupancy_percent":100,"limiting_resource":"max_waves","spill_count":0,"scratch_spill_bytes":0,"spill_store_count":0,"spill_reload_count":0,"register_classes":[{"register_class":"amdgpu.sgpr","allocated_units":0,"rounded_units":0,"pool_units":800,"allocation_granularity":16,"limits_occupancy":true,"wave_limit":8,"next_cliff_units":97,"units_until_next_cliff":97,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.vgpr","allocated_units":32,"rounded_units":32,"pool_units":512,"allocation_granularity":8,"limits_occupancy":true,"wave_limit":8,"next_cliff_units":65,"units_until_next_cliff":33,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.agpr","allocated_units":32,"rounded_units":32,"pool_units":256,"allocation_granularity":4,"limits_occupancy":false,"wave_limit":8,"next_cliff_units":null,"units_until_next_cliff":null,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0}],"pressure_resources":[{"resource":"amdgpu.vgpr_agpr","allocated_units":64,"rounded_units":64,"pool_units":512,"allocation_granularity":8,"wave_limit":8,"next_cliff_units":65,"units_until_next_cliff":1}]}
+
+// ====
+
+// CDNA2 shares the 512-entry unified VGPR file and eight-register granule, so
+// 64 VGPRs match LLVM's gfx90a occupancy at this boundary.
+// RUN: emit amdgpu-occupancy-json @cdna2_vgpr_boundary_64 fixed=%value:physical_register:63:1
+
+amdgpu.target<gfx90a> @gfx90a_target
+
+low.func.def target<amdgpu.cdna2.core>(@gfx90a_target) @cdna2_vgpr_boundary_64(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+// ----
+{"format":"loom.amdgpu.occupancy.v0","function":"cdna2_vgpr_boundary_64","target":"gfx90a_target","descriptor_set":"amdgpu.cdna2.core","processor":"gfx90a","wave_size":64,"max_waves_per_simd":8,"flat_workgroup_size":0,"waves_per_workgroup":0,"resident_waves_per_simd":8,"occupancy_percent":100,"limiting_resource":"max_waves","spill_count":0,"scratch_spill_bytes":0,"spill_store_count":0,"spill_reload_count":0,"register_classes":[{"register_class":"amdgpu.sgpr","allocated_units":0,"rounded_units":0,"pool_units":800,"allocation_granularity":16,"limits_occupancy":true,"wave_limit":8,"next_cliff_units":97,"units_until_next_cliff":97,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.vgpr","allocated_units":64,"rounded_units":64,"pool_units":512,"allocation_granularity":8,"limits_occupancy":true,"wave_limit":8,"next_cliff_units":65,"units_until_next_cliff":1,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.agpr","allocated_units":0,"rounded_units":0,"pool_units":256,"allocation_granularity":4,"limits_occupancy":false,"wave_limit":8,"next_cliff_units":null,"units_until_next_cliff":null,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0}],"pressure_resources":[{"resource":"amdgpu.vgpr_agpr","allocated_units":64,"rounded_units":64,"pool_units":512,"allocation_granularity":8,"wave_limit":8,"next_cliff_units":65,"units_until_next_cliff":1}]}
+
+// ====
+
+// CDNA2 shares the 512-entry unified VGPR file and eight-register granule, so
+// 65 VGPRs match LLVM's gfx90a occupancy at this boundary.
+// RUN: emit amdgpu-occupancy-json @cdna2_vgpr_boundary_65 fixed=%value:physical_register:64:1
+
+amdgpu.target<gfx90a> @gfx90a_target
+
+low.func.def target<amdgpu.cdna2.core>(@gfx90a_target) @cdna2_vgpr_boundary_65(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+// ----
+{"format":"loom.amdgpu.occupancy.v0","function":"cdna2_vgpr_boundary_65","target":"gfx90a_target","descriptor_set":"amdgpu.cdna2.core","processor":"gfx90a","wave_size":64,"max_waves_per_simd":8,"flat_workgroup_size":0,"waves_per_workgroup":0,"resident_waves_per_simd":7,"occupancy_percent":87,"limiting_resource":"amdgpu.vgpr","spill_count":0,"scratch_spill_bytes":0,"spill_store_count":0,"spill_reload_count":0,"register_classes":[{"register_class":"amdgpu.sgpr","allocated_units":0,"rounded_units":0,"pool_units":800,"allocation_granularity":16,"limits_occupancy":true,"wave_limit":8,"next_cliff_units":97,"units_until_next_cliff":97,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.vgpr","allocated_units":65,"rounded_units":72,"pool_units":512,"allocation_granularity":8,"limits_occupancy":true,"wave_limit":7,"next_cliff_units":73,"units_until_next_cliff":8,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.agpr","allocated_units":0,"rounded_units":0,"pool_units":256,"allocation_granularity":4,"limits_occupancy":false,"wave_limit":8,"next_cliff_units":null,"units_until_next_cliff":null,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0}],"pressure_resources":[{"resource":"amdgpu.vgpr_agpr","allocated_units":68,"rounded_units":72,"pool_units":512,"allocation_granularity":8,"wave_limit":7,"next_cliff_units":73,"units_until_next_cliff":5}]}
+
+// ====
+
+// CDNA2 shares the 512-entry unified VGPR file and eight-register granule, so
+// 129 VGPRs match LLVM's gfx90a occupancy at this boundary.
+// RUN: emit amdgpu-occupancy-json @cdna2_vgpr_boundary_129 fixed=%value:physical_register:128:1
+
+amdgpu.target<gfx90a> @gfx90a_target
+
+low.func.def target<amdgpu.cdna2.core>(@gfx90a_target) @cdna2_vgpr_boundary_129(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+// ----
+{"format":"loom.amdgpu.occupancy.v0","function":"cdna2_vgpr_boundary_129","target":"gfx90a_target","descriptor_set":"amdgpu.cdna2.core","processor":"gfx90a","wave_size":64,"max_waves_per_simd":8,"flat_workgroup_size":0,"waves_per_workgroup":0,"resident_waves_per_simd":3,"occupancy_percent":37,"limiting_resource":"amdgpu.vgpr","spill_count":0,"scratch_spill_bytes":0,"spill_store_count":0,"spill_reload_count":0,"register_classes":[{"register_class":"amdgpu.sgpr","allocated_units":0,"rounded_units":0,"pool_units":800,"allocation_granularity":16,"limits_occupancy":true,"wave_limit":8,"next_cliff_units":97,"units_until_next_cliff":97,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.vgpr","allocated_units":129,"rounded_units":136,"pool_units":512,"allocation_granularity":8,"limits_occupancy":true,"wave_limit":3,"next_cliff_units":169,"units_until_next_cliff":40,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.agpr","allocated_units":0,"rounded_units":0,"pool_units":256,"allocation_granularity":4,"limits_occupancy":false,"wave_limit":8,"next_cliff_units":null,"units_until_next_cliff":null,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0}],"pressure_resources":[{"resource":"amdgpu.vgpr_agpr","allocated_units":132,"rounded_units":136,"pool_units":512,"allocation_granularity":8,"wave_limit":3,"next_cliff_units":169,"units_until_next_cliff":37}]}
+
+// ====
+
+// CDNA2 shares the 512-entry unified VGPR file and eight-register granule, so
+// 256 VGPRs match LLVM's gfx90a occupancy at this boundary.
+// RUN: emit amdgpu-occupancy-json @cdna2_vgpr_boundary_256 fixed=%value:physical_register:255:1
+
+amdgpu.target<gfx90a> @gfx90a_target
+
+low.func.def target<amdgpu.cdna2.core>(@gfx90a_target) @cdna2_vgpr_boundary_256(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+// ----
+{"format":"loom.amdgpu.occupancy.v0","function":"cdna2_vgpr_boundary_256","target":"gfx90a_target","descriptor_set":"amdgpu.cdna2.core","processor":"gfx90a","wave_size":64,"max_waves_per_simd":8,"flat_workgroup_size":0,"waves_per_workgroup":0,"resident_waves_per_simd":2,"occupancy_percent":25,"limiting_resource":"amdgpu.vgpr","spill_count":0,"scratch_spill_bytes":0,"spill_store_count":0,"spill_reload_count":0,"register_classes":[{"register_class":"amdgpu.sgpr","allocated_units":0,"rounded_units":0,"pool_units":800,"allocation_granularity":16,"limits_occupancy":true,"wave_limit":8,"next_cliff_units":97,"units_until_next_cliff":97,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.vgpr","allocated_units":256,"rounded_units":256,"pool_units":512,"allocation_granularity":8,"limits_occupancy":true,"wave_limit":2,"next_cliff_units":257,"units_until_next_cliff":1,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0},{"register_class":"amdgpu.agpr","allocated_units":0,"rounded_units":0,"pool_units":256,"allocation_granularity":4,"limits_occupancy":false,"wave_limit":8,"next_cliff_units":null,"units_until_next_cliff":null,"spill_count":0,"spill_bytes":0,"spill_store_count":0,"spill_reload_count":0}],"pressure_resources":[{"resource":"amdgpu.vgpr_agpr","allocated_units":256,"rounded_units":256,"pool_units":512,"allocation_granularity":8,"wave_limit":2,"next_cliff_units":257,"units_until_next_cliff":1}]}

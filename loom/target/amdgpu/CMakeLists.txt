@@ -273,6 +273,17 @@ loom_target_profile(
     LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE
 )
 
+loom_target_profile(
+  NAME
+    "gfx90a"
+  FAMILY
+    "amdgpu"
+  SELECTOR
+    "gfx90a"
+  REQUIRES
+    LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE
+)
+
 set(_all_platform_targets "")
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE)
   list(APPEND _all_platform_targets loom::target::amdgpu::gfx940)
@@ -308,6 +319,9 @@ if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE)
 endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE)
   list(APPEND _all_platform_targets loom::target::amdgpu::gfx1251)
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE)
+  list(APPEND _all_platform_targets loom::target::amdgpu::gfx90a)
 endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE)
   list(APPEND _all_platform_targets loom::target::amdgpu::gfx9-4-generic)
@@ -365,6 +379,9 @@ if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE)
   list(APPEND _without_bf16_fma_platform_targets loom::target::amdgpu::gfx1172)
 endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE)
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE)
+  list(APPEND _without_bf16_fma_platform_targets loom::target::amdgpu::gfx90a)
 endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE)
   list(APPEND _without_bf16_fma_platform_targets loom::target::amdgpu::gfx9-4-generic)

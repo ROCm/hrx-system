@@ -2127,7 +2127,12 @@ def _divf_arcp_rule(
     )
 
 
-def _divf_exact_rule(source_op: Op, type_pattern: TypePattern) -> DescriptorRule:
+def _divf_exact_rule(
+    source_op: Op,
+    type_pattern: TypePattern,
+    *,
+    materialized_one: bool = False,
+) -> DescriptorRule:
     scale = _descriptor("amdgpu.v_div_scale_f32")
     reciprocal = _descriptor("amdgpu.v_rcp_f32")
     negate = _descriptor("amdgpu.v_xor_b32.lit")
@@ -2136,6 +2141,8 @@ def _divf_exact_rule(source_op: Op, type_pattern: TypePattern) -> DescriptorRule
     # DIV_SCALE keeps this product near one. It cannot enter the subnormal
     # range where the literal FMAAK form has weaker behavior on CDNA.
     fmaak = _descriptor("amdgpu.v_fmaak_f32")
+    # Targets without FMAAK (CDNA2) materialize 1.0 for the VOP3 FMA instead.
+    move = _descriptor("amdgpu.v_mov_b32")
     fmas = _descriptor("amdgpu.v_div_fmas_f32")
     fixup = _descriptor("amdgpu.v_div_fixup_f32")
     result_type = _F32
@@ -2144,7 +2151,10 @@ def _divf_exact_rule(source_op: Op, type_pattern: TypePattern) -> DescriptorRule
     return DescriptorRule(
         source_op=source_op,
         descriptor=scale,
-        report_key=_report_key(source_op, "exact_fixup"),
+        report_key=_report_key(
+            source_op,
+            "exact_fixup_materialized_one" if materialized_one else "exact_fixup",
+        ),
         guards=(
             *_typed_guards(("lhs", "rhs", "result"), type_pattern),
             Guard.value_materializable(
@@ -2162,7 +2172,7 @@ def _divf_exact_rule(source_op: Op, type_pattern: TypePattern) -> DescriptorRule
             Guard.descriptor_available(negate),
             Guard.descriptor_available(multiply),
             Guard.descriptor_available(fma),
-            Guard.descriptor_available(fmaak),
+            Guard.descriptor_available(move if materialized_one else fmaak),
             Guard.descriptor_available(fmas),
             Guard.descriptor_available(fixup),
         ),
@@ -2199,16 +2209,40 @@ def _divf_exact_rule(source_op: Op, type_pattern: TypePattern) -> DescriptorRule
                 immediates={"imm32": _F32_SIGN_MASK},
                 form=_emit_form(type_pattern),
             ),
-            EmitDescriptorOp(
-                descriptor=fmaak,
-                operands={
-                    "a": ValueRef.temporary("neg_scaled_denominator"),
-                    "b": ValueRef.temporary("reciprocal"),
-                },
-                results={"dst": ValueRef.temporary("reciprocal_error")},
-                result_types={"dst": result_type},
-                immediates={"imm32": _F32_ONE_BITS},
-                form=_emit_form(type_pattern),
+            *(
+                (
+                    EmitDescriptorOp(
+                        descriptor=move,
+                        results={"dst": ValueRef.temporary("one")},
+                        result_types={"dst": DescriptorResultType()},
+                        immediates={"imm32": _F32_ONE_BITS},
+                    ),
+                    EmitDescriptorOp(
+                        descriptor=fma,
+                        operands={
+                            "a": ValueRef.temporary("neg_scaled_denominator"),
+                            "b": ValueRef.temporary("reciprocal"),
+                            "c": ValueRef.temporary("one"),
+                        },
+                        results={"dst": ValueRef.temporary("reciprocal_error")},
+                        result_types={"dst": result_type},
+                        form=_emit_form(type_pattern),
+                    ),
+                )
+                if materialized_one
+                else (
+                    EmitDescriptorOp(
+                        descriptor=fmaak,
+                        operands={
+                            "a": ValueRef.temporary("neg_scaled_denominator"),
+                            "b": ValueRef.temporary("reciprocal"),
+                        },
+                        results={"dst": ValueRef.temporary("reciprocal_error")},
+                        result_types={"dst": result_type},
+                        immediates={"imm32": _F32_ONE_BITS},
+                        form=_emit_form(type_pattern),
+                    ),
+                )
             ),
             EmitDescriptorOp(
                 descriptor=fma,
@@ -4671,6 +4705,9 @@ def _rules() -> tuple[ContractCase, ...]:
             _divf_arcp_literal_lhs_rule(vector.vector_divf, _VEC_F32_STATIC),
             _divf_arcp_rule(vector.vector_divf, _VEC_F32_STATIC),
             _divf_exact_rule(vector.vector_divf, _VEC_F32_STATIC),
+            _divf_exact_rule(
+                vector.vector_divf, _VEC_F32_STATIC, materialized_one=True
+            ),
             _packed_f32_vector_fma_rule(),
             *_packed_f16_vector_fma_rules(),
             _packed_bf16_vector_fma_rule(),
@@ -4952,6 +4989,9 @@ def _rules() -> tuple[ContractCase, ...]:
             _divf_arcp_literal_lhs_rule(scalar_arithmetic.scalar_divf, _F32),
             _divf_arcp_rule(scalar_arithmetic.scalar_divf, _F32),
             _divf_exact_rule(scalar_arithmetic.scalar_divf, _F32),
+            _divf_exact_rule(
+                scalar_arithmetic.scalar_divf, _F32, materialized_one=True
+            ),
             _divf_exact_f64_rule(),
             *_f32_fma_rules(scalar_math.scalar_fmaf, _F32),
             _fma_rule(scalar_math.scalar_fmaf, _F64, "amdgpu.v_fma_f64"),

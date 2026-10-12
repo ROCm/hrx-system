@@ -34,6 +34,7 @@ set(_LOOM_AMDGPU_SUPPORTED_EXACT_PROCESSORS
   "gfx1171"
   "gfx1172"
   "gfx1251"
+  "gfx90a"
 )
 
 set(_LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS
@@ -63,6 +64,7 @@ set(_LOOM_AMDGPU_SUPPORTED_DESCRIPTOR_BACKED_PROCESSORS
   "gfx1171"
   "gfx1172"
   "gfx1251"
+  "gfx90a"
   "gfx9-4-generic"
   "gfx11-generic"
   "gfx12-generic"
@@ -94,6 +96,7 @@ set(_LOOM_AMDGPU_SUPPORTED_TARGETS
   "gfx1251"
   "gfx9-4-generic"
   "gfx1250-a0"
+  "gfx90a"
 )
 
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
@@ -105,6 +108,7 @@ set(_LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
   "descriptor_set_rdna3_5_core"
   "descriptor_set_rdna4m_core"
   "descriptor_set_rdna4_gfx1251_core"
+  "descriptor_set_cdna2_core"
   "descriptor_set_gfx9_4_generic_core"
   "descriptor_set_gfx11_generic_core"
   "descriptor_set_gfx12_generic_core"
@@ -210,6 +214,17 @@ set(_LOOM_AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGET_descriptor_set_rdna4_gfx1251_co
 set(_LOOM_AMDGPU_LOW_DESCRIPTOR_HEADER_descriptor_set_rdna4_gfx1251_core "loom/target/arch/amdgpu/descriptors/rdna4_gfx1251_descriptors.h")
 set(_LOOM_AMDGPU_LOW_DESCRIPTOR_PROVIDER_SYMBOL_descriptor_set_rdna4_gfx1251_core "loom_amdgpu_rdna4_gfx1251_core_descriptor_set")
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_DEFINE_descriptor_set_rdna4_gfx1251_core "LOOM_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE")
+
+set(_LOOM_AMDGPU_DESCRIPTOR_SET_KEY_descriptor_set_cdna2_core "amdgpu.cdna2.core")
+set(_LOOM_AMDGPU_DESCRIPTOR_SET_EXACT_PROCESSORS_descriptor_set_cdna2_core
+  "gfx90a"
+)
+set(_LOOM_AMDGPU_DESCRIPTOR_SET_GENERIC_PROCESSORS_descriptor_set_cdna2_core
+)
+set(_LOOM_AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGET_descriptor_set_cdna2_core "cdna2")
+set(_LOOM_AMDGPU_LOW_DESCRIPTOR_HEADER_descriptor_set_cdna2_core "loom/target/arch/amdgpu/descriptors/cdna2_descriptors.h")
+set(_LOOM_AMDGPU_LOW_DESCRIPTOR_PROVIDER_SYMBOL_descriptor_set_cdna2_core "loom_amdgpu_cdna2_core_descriptor_set")
+set(_LOOM_AMDGPU_DESCRIPTOR_SET_DEFINE_descriptor_set_cdna2_core "LOOM_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE")
 
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_KEY_descriptor_set_gfx9_4_generic_core "amdgpu.gfx9_4.generic.core")
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_EXACT_PROCESSORS_descriptor_set_gfx9_4_generic_core

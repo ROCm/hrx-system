@@ -1,0 +1,31 @@
+// RUN: emit source-low target=amdgpu:gfx90a output=low
+
+// The gfx90a compiler contract exposes no matrix packets, so every fragment
+// operation is rejected with a structured diagnostic before native emission.
+kernel.def @f16_mma_rejected() {
+  %unit = index.constant 1 : index
+  %subgroup = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%subgroup, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf16>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xf16, %rhs_layout>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.target_layout"}
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16> -> vector<4xf16>
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.target_layout"}
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, %rhs_layout> -> vector<4xf16>
+  %zero = vector.constant 0.0 : vector<4xf32>
+  %init = vector.fragment<init> %zero shape [%m, %n] : vector<4xf32>
+  // ERROR@+1: AMDGPU/021 {matrix_constraint="processor_features"}
+  %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.target_layout"}
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ----

@@ -604,6 +604,8 @@ class PacketPlanFixture {
     loom_amdgpu_hal_kernel_abi_verify_result_t abi_verify_result = {};
     AbortOnError(loom_amdgpu_hal_kernel_abi_verify_low(
         module_, low_function, resolved_target.descriptor_set,
+        loom_amdgpu_hal_kernel_abi_launch_inputs_for_target_facts(
+            resolved_target.target_facts),
         /*max_errors=*/20, /*emitter=*/{}, &abi_verify_result, &frame_arena_));
     if (abi_verify_result.error_count != 0) {
       std::abort();

@@ -50,7 +50,8 @@ typedef enum loom_amdgpu_target_kind_e {
   LOOM_AMDGPU_TARGET_KIND_GFX1251 = 22,
   LOOM_AMDGPU_TARGET_KIND_GFX9_4_GENERIC = 23,
   LOOM_AMDGPU_TARGET_KIND_GFX1250_A0 = 24,
-  LOOM_AMDGPU_TARGET_KIND_COUNT_ = 25,
+  LOOM_AMDGPU_TARGET_KIND_GFX90A = 25,
+  LOOM_AMDGPU_TARGET_KIND_COUNT_ = 26,
 } loom_amdgpu_target_kind_t;
 
 // Configurable AMDHSA target-ID feature.

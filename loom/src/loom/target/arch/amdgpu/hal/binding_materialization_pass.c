@@ -88,8 +88,11 @@ iree_status_t loom_amdgpu_materialize_hal_kernel_abi_run(
 
   loom_amdgpu_hal_kernel_abi_verify_result_t verify_result = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
-      module, function.op, target.descriptor_set, /*max_errors=*/20,
-      pass->diagnostic_emitter, &verify_result, pass->arena));
+      module, function.op, target.descriptor_set,
+      loom_amdgpu_hal_kernel_abi_launch_inputs_for_target_facts(
+          target.target_facts),
+      /*max_errors=*/20, pass->diagnostic_emitter, &verify_result,
+      pass->arena));
   loom_amdgpu_hal_kernel_abi_statistics_t* statistics =
       loom_amdgpu_hal_kernel_abi_statistics(pass);
   statistics->errors += verify_result.error_count;

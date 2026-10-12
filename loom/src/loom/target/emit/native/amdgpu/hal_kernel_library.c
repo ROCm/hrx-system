@@ -127,6 +127,43 @@ loom_amdgpu_hal_kernel_library_emit_target_identity_mismatch(
                               &emission);
 }
 
+// Rejects target-ID feature states whose correctness requirements the
+// processor's compiler contract does not implement.
+static iree_status_t loom_amdgpu_hal_kernel_library_check_feature_states(
+    const loom_target_entry_t* entry,
+    const loom_amdgpu_target_identity_t* identity,
+    loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
+    iree_arena_allocator_t* arena, bool* out_failed) {
+  *out_failed = false;
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(identity->target);
+  IREE_ASSERT(processor != NULL);
+  if (!loom_amdgpu_processor_properties_have_flags(
+          &processor->properties,
+          LOOM_AMDGPU_PROCESSOR_INFO_FLAG_REJECT_XNACK_ON) ||
+      identity->amdhsa_features.xnack != LOOM_AMDGPU_TARGET_FEATURE_ON) {
+    return iree_ok_status();
+  }
+  *out_failed = true;
+  iree_string_view_t target_key = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_artifact_key_format_arena(identity, arena, &target_key));
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(entry->func_name),
+      loom_param_string(target_key),
+      loom_param_string(processor->name),
+      loom_param_string(IREE_SV("xnack+")),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = entry->func.op,
+      .error = LOOM_ERR_AMDGPU_052,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(loom_target_entry_emitter(diagnostic_emitter),
+                              &emission);
+}
+
 typedef struct loom_amdgpu_hal_kernel_library_kernel_plan_t {
   // Selected prepared low.kernel.def op for frame.
   loom_op_t* low_function_op;
@@ -610,9 +647,11 @@ static iree_status_t loom_amdgpu_hal_kernel_library_verify_kernel_abi(
     iree_arena_allocator_t* table_arena) {
   *out_failed = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
-      module, plan->low_function_op, plan->target.descriptor_set, max_errors,
-      loom_target_entry_emitter(diagnostic_emitter), &plan->abi_verify,
-      table_arena));
+      module, plan->low_function_op, plan->target.descriptor_set,
+      loom_amdgpu_hal_kernel_abi_launch_inputs_for_target_facts(
+          plan->target.target_facts),
+      max_errors, loom_target_entry_emitter(diagnostic_emitter),
+      &plan->abi_verify, table_arena));
   *out_failed = plan->abi_verify.error_count != 0;
   return iree_ok_status();
 }
@@ -709,7 +748,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel(
   loom_amdgpu_hal_kernel_library_spill_lowering_context_t
       spill_lowering_context = {
           .descriptor_set = plan->target.descriptor_set,
-      };
+  };
   const loom_low_emission_frame_spill_free_options_t spill_free_options = {
       .materialization_options =
           {
@@ -925,6 +964,9 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
       if (code_object_identity == NULL) {
         code_object_entry = &entries.values[i];
         code_object_identity = &target_facts->identity;
+        status = loom_amdgpu_hal_kernel_library_check_feature_states(
+            code_object_entry, code_object_identity, diagnostic_emitter,
+            table_arena, &diagnostics_failed);
       } else if (!loom_amdgpu_target_identity_equal(code_object_identity,
                                                     &target_facts->identity)) {
         diagnostics_failed = true;
@@ -1081,7 +1123,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
                       LOOM_TARGET_EMIT_SIDECAR_ARTIFACT_KIND_ARTIFACT_MANIFEST,
                   .identifier = options->artifact_manifest_identifier,
                   .contents = manifest_sequence,
-              };
+          };
         }
         loom_target_artifact_manifest_json_release(&artifact_manifest_json,
                                                    allocator);

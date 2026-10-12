@@ -1142,6 +1142,7 @@ def test_valu_schedule_class_separates_result_latency_from_issue_rate(
     descriptor_set: DescriptorSet,
 ) -> None:
     cdna_contracts = {
+        "amdgpu.cdna2.core",
         "amdgpu.cdna3.core",
         "amdgpu.cdna4.core",
         "amdgpu.gfx9_4.generic.core",
@@ -6767,3 +6768,23 @@ def test_gfx940_scratch_memory_forms_cover_spill_packets() -> None:
         "sc0",
         "sc1",
     )
+
+
+def test_cdna2_coverage_rows_explain_every_cdna3_omission() -> None:
+    from loom.target.arch.amdgpu.descriptors.sets import (
+        _cdna2_cdna3_coverage_rows,
+        _gfx90a_core_overlays,
+    )
+
+    rows = _cdna2_cdna3_coverage_rows()
+    coverage_by_key = {overlay.descriptor_key: row[1] for overlay, row in rows}
+    assert all(
+        coverage == "out_of_scope"
+        for key, coverage in coverage_by_key.items()
+        if "mfma" in key
+    )
+    assert coverage_by_key["amdgpu.scratch_load_b32_offset_only"] == "withheld"
+    assert coverage_by_key["amdgpu.v_fmaak_f32"] == "absent_from_isa"
+    cdna2_keys = {overlay.descriptor_key for overlay in _gfx90a_core_overlays()}
+    assert not cdna2_keys & set(coverage_by_key)
+    assert not any(key.startswith("amdgpu.v_mfma_") for key in cdna2_keys)

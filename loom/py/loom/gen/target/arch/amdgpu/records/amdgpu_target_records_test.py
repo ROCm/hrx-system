@@ -147,6 +147,7 @@ def test_target_record_enum_values_are_stable_and_explicit() -> None:
         "gfx1251": 22,
         "gfx9-4-generic": 23,
         "gfx1250-a0": 24,
+        "gfx90a": 25,
     }
 
 

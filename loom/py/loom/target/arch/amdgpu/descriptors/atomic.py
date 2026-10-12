@@ -813,6 +813,21 @@ _FLAT_ATOMIC_GFX950_ROWS = (
 )
 
 
+# CDNA2 exposes only integer global/flat atomics. Its floating-point atomic
+# packets have memory-domain restrictions that are not yet qualified.
+_GLOBAL_ATOMIC_CDNA2_ROWS = tuple(
+    row
+    for row in _GLOBAL_ATOMIC_GFX940_ROWS
+    if not row.data_format_name.startswith("FMT_NUM_F")
+)
+
+_FLAT_ATOMIC_CDNA2_ROWS = tuple(
+    row
+    for row in _FLAT_ATOMIC_GFX950_ROWS
+    if not row.data_format_name.startswith(("FMT_NUM_F", "FMT_NUM_PK2_"))
+)
+
+
 def _flat_atomic_overlay(
     *,
     descriptor_key: str,
@@ -1492,9 +1507,11 @@ __all__ = (
     "_BUFFER_ATOMIC_GFX12_ROWS",
     "_FLAT_ATOMIC_GFX11_ROWS",
     "_FLAT_ATOMIC_GFX12_ROWS",
+    "_FLAT_ATOMIC_CDNA2_ROWS",
     "_FLAT_ATOMIC_GFX950_ROWS",
     "_GLOBAL_ATOMIC_GFX11_ROWS",
     "_GLOBAL_ATOMIC_GFX12_ROWS",
+    "_GLOBAL_ATOMIC_CDNA2_ROWS",
     "_GLOBAL_ATOMIC_GFX940_ROWS",
     "_buffer_atomic_cmpswap_overlay",
     "_buffer_atomic_overlay",

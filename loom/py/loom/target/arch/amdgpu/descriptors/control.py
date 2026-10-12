@@ -652,6 +652,43 @@ def _gfx950_cache_control_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
+def _cdna2_cache_control_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    # CDNA2 has no scoped BUFFER_INV. Agent acquisition invalidates volatile L1
+    # lines; system acquisition additionally invalidates L2 (MI200 ISA 10.8,
+    # LLVM GFX90A memory-model table).
+    return (
+        _cache_control_overlay(
+            descriptor_key="amdgpu.buffer_wbinvl1_vol",
+            instruction_name="BUFFER_WBINVL1_VOL",
+            completion_counter=_COUNTER_VMEM_LOAD,
+            mnemonic="buffer_wbinvl1_vol",
+            encoding_name="ENC_MUBUF",
+            semantic_tag="memory.cache.invalidate.buffer.l1.volatile",
+        ),
+        _cache_control_overlay(
+            descriptor_key="amdgpu.buffer_invl2",
+            instruction_name="BUFFER_INVL2",
+            completion_counter=_COUNTER_VMEM_LOAD,
+            mnemonic="buffer_invl2",
+            encoding_name="ENC_MUBUF",
+            semantic_tag="memory.cache.invalidate.buffer.l2",
+        ),
+        _cache_control_overlay(
+            descriptor_key="amdgpu.buffer_wbl2",
+            instruction_name="BUFFER_WBL2",
+            completion_counter=_COUNTER_VMEM_STORE,
+            mnemonic="buffer_wbl2",
+            encoding_name="ENC_MUBUF",
+            semantic_tag="memory.cache.writeback.buffer.l2",
+        ),
+        *(
+            overlay
+            for overlay in _gfx950_cache_control_overlays()
+            if overlay.encoding_name != "ENC_MUBUF"
+        ),
+    )
+
+
 def _gfx11_cache_control_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         _cache_control_overlay(
@@ -747,6 +784,7 @@ def _gfx12_cache_control_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
 
 __all__ = (
     "_cache_control_overlay",
+    "_cdna2_cache_control_overlays",
     "_gfx11_cache_control_overlays",
     "_gfx12_cache_control_overlays",
     "_gfx12_prefetch_overlays",

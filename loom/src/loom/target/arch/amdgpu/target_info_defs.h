@@ -120,7 +120,7 @@ typedef enum loom_amdgpu_target_id_feature_support_bit_e {
   LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK = 1u << 1,
   // AMDHSA target-ID feature bits known by the AMDGPU target package.
   LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_KNOWN_FLAGS =
-      LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC |
+          LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC |
       LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
 } loom_amdgpu_target_id_feature_support_bit_t;
 
@@ -260,11 +260,15 @@ typedef enum loom_amdgpu_processor_info_flag_bits_e {
   LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1u << 1,
   // Workgroup coordinates arrive in architected TTMP launch state.
   LOOM_AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS = 1u << 2,
+  // XNACK-on code objects are rejected until replay-sensitive allocation and
+  // scheduling are qualified for the processor.
+  LOOM_AMDGPU_PROCESSOR_INFO_FLAG_REJECT_XNACK_ON = 1u << 3,
   // Processor info flags known by the AMDGPU target package.
   LOOM_AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS =
-      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION |
+          LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION |
       LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE |
-      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS,
+      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS |
+      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_REJECT_XNACK_ON,
 } loom_amdgpu_processor_info_flag_bits_t;
 
 // Bitset of loom_amdgpu_processor_info_flag_bits_t values.
@@ -294,7 +298,7 @@ typedef enum loom_amdgpu_processor_scheduling_bit_e {
   LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_MASK_WRITE_DEPCTR = 1u << 9,
   // Processor scheduling bits known by the AMDGPU target package.
   LOOM_AMDGPU_PROCESSOR_SCHEDULING_KNOWN_BITS =
-      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES |
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES |
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_DESTINATION_SELECTION_WAIT_STATES |
@@ -316,13 +320,13 @@ typedef enum loom_amdgpu_instruction_constraint_bit_e {
   LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT = 1u << 0,
   // DS ADDTID packets require an explicitly materialized address.
   LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION = 1u
-                                                                         << 1,
+      << 1,
   // Cluster multicast operations require mask preservation around the packet.
   LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_CLUSTER_MULTICAST_MASK_PRESERVATION = 1u
-                                                                           << 2,
+      << 2,
   // Tensor multicast operations require mask preservation around the packet.
   LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_TENSOR_MULTICAST_MASK_PRESERVATION = 1u
-                                                                          << 3,
+      << 3,
   // K64 FP8/BF8 WMMA requires a neutral regular-scale prefix.
   LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K64_SCALE_PREFIX = 1u << 4,
   // K128 FP8/BF8 WMMA must be split into regular-scale K64 packets.
@@ -335,10 +339,10 @@ typedef enum loom_amdgpu_instruction_constraint_bit_e {
   LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING = 1u << 8,
   // Integer matrix packets require coexecution spacing.
   LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING = 1u
-                                                                          << 9,
+      << 9,
   // Instruction constraints known by the AMDGPU target package.
   LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS =
-      LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT |
+          LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT |
       LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION |
       LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_CLUSTER_MULTICAST_MASK_PRESERVATION |
       LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_TENSOR_MULTICAST_MASK_PRESERVATION |
@@ -367,8 +371,8 @@ typedef enum loom_amdgpu_wavefront_size_flag_bits_e {
   // Processor supports wavefront-size-64 kernels.
   LOOM_AMDGPU_WAVEFRONT_SIZE_FLAG_64 = 1u << 1,
   // Wavefront-size flags known by the AMDGPU target package.
-  LOOM_AMDGPU_WAVEFRONT_SIZE_KNOWN_FLAGS =
-      LOOM_AMDGPU_WAVEFRONT_SIZE_FLAG_32 | LOOM_AMDGPU_WAVEFRONT_SIZE_FLAG_64,
+  LOOM_AMDGPU_WAVEFRONT_SIZE_KNOWN_FLAGS = LOOM_AMDGPU_WAVEFRONT_SIZE_FLAG_32 |
+      LOOM_AMDGPU_WAVEFRONT_SIZE_FLAG_64,
 } loom_amdgpu_wavefront_size_flag_bits_t;
 
 // Bitset of loom_amdgpu_wavefront_size_flag_bits_t values.
@@ -377,59 +381,65 @@ typedef uint32_t loom_amdgpu_wavefront_size_flags_t;
 typedef enum loom_amdgpu_descriptor_set_info_flag_bits_e {
   // Descriptor packets have implemented native binary encoding.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING = UINT64_C(1)
-                                                                    << 0,
+      << 0,
   // Descriptor set supports native VOPD packetization for wave32 kernels.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION = UINT64_C(1) << 1,
   // VOPD floating-point min/max use the numeric-minimum/maximum mnemonics.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS =
-      UINT64_C(1) << 2,
+          UINT64_C(1)
+      << 2,
   // Descriptor set supports native packed BF16 add, multiply, and FMA.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC =
-      UINT64_C(1) << 3,
+          UINT64_C(1)
+      << 3,
   // VOP3 packets may read two distinct scalar-source registers.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOP3_TWO_SCALAR_SOURCES = UINT64_C(1)
-                                                                 << 4,
+      << 4,
   // Native OCP FP8 encodes require exact NaN canonicalization after conversion.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_OCP_FP8_NONCANONICAL_NAN =
-      UINT64_C(1) << 5,
+          UINT64_C(1)
+      << 5,
   // Descriptor set supports native F16/F32 scalar floating-point arithmetic.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC =
-      UINT64_C(1) << 6,
+          UINT64_C(1)
+      << 6,
   // Descriptor set supports native F16/F32 scalar conversion instructions.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_CONVERSION =
-      UINT64_C(1) << 7,
+          UINT64_C(1)
+      << 7,
   // Descriptor set supports native F16/F32 scalar comparison instructions.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_COMPARE = UINT64_C(1)
-                                                                     << 8,
+      << 8,
   // A dual v_mov_b32 pair routes the Y source through the SRC2 cache.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_DUAL_MOV_SRC2_CACHE = UINT64_C(1)
-                                                                  << 9,
+      << 9,
   // F32/F64 memory min/max prefer a number over either quiet or signaling NaNs.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_ATOMIC_NUMBER_EXTREMA = UINT64_C(1)
-                                                               << 10,
+      << 10,
   // Floating atomics work on fine-grained host and peer memory at device scope.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_ATOMIC_FLOAT_AGENT_MEMORY = UINT64_C(1)
-                                                                   << 11,
+      << 11,
   // Floating system atomics use hardware CAS when the fabric lacks the opcode.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_ATOMIC_FLOAT_SYSTEM_MEMORY = UINT64_C(1)
-                                                                    << 12,
+      << 12,
   // Global/flat/buffer F32 atomic add preserves input and output subnormals.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_ATOMIC_F32_ADD_DENORMALS = UINT64_C(1)
-                                                                  << 13,
+      << 13,
   // Wide VMEM payloads remain readable during a short issue-slot window.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_STORE_DATA_WAIT_STATES = UINT64_C(1)
-                                                                << 14,
+      << 14,
   // Ordinary system-scope stores must first drain prior asynchronous memory
   // work.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_WAITS_BEFORE_SYSTEM_SCOPE_STORES =
-      UINT64_C(1) << 15,
+          UINT64_C(1)
+      << 15,
   // Memory packets retain source operands in independently drained XCNT
   // translation groups.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_XCNT_SOURCE_RETENTION = UINT64_C(1)
-                                                               << 16,
+      << 16,
   // Descriptor-set info flags known by the AMDGPU target package.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_KNOWN_FLAGS =
-      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING |
+          LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING |
       LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION |
       LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS |
       LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC |
@@ -454,19 +464,19 @@ typedef uint64_t loom_amdgpu_descriptor_set_info_flags_t;
 typedef enum loom_amdgpu_kernel_descriptor_abi_flag_bits_e {
   // Flat scratch is architected and legacy user SGPRs are invalid.
   LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH = UINT64_C(1)
-                                                                    << 0,
+      << 0,
   // SGPR resource counts use the GFX10+ encoding rule.
   LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_GFX10_SGPR_ENCODING = UINT64_C(1) << 1,
   // COMPUTE_PGM_RSRC3.ACCUM_OFFSET must be encoded.
   LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ACCUM_OFFSET = UINT64_C(1) << 2,
   // COMPUTE_PGM_RSRC1 DX10 clamp and IEEE mode bits are supported.
   LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_DX10_CLAMP_AND_IEEE_MODE = UINT64_C(1)
-                                                                    << 3,
+      << 3,
   // Workitem IDs are packed into v0 instead of separate VGPRs.
   LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID = UINT64_C(1) << 4,
   // Kernel descriptor ABI flags known by the AMDGPU target package.
   LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_KNOWN_FLAGS =
-      LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH |
+          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH |
       LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_GFX10_SGPR_ENCODING |
       LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ACCUM_OFFSET |
       LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_DX10_CLAMP_AND_IEEE_MODE |
@@ -507,6 +517,8 @@ typedef enum loom_amdgpu_vector_memory_cache_policy_encoding_e {
   LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH = 2,
   // Vector memory descriptors expose NT/SC0/SC1 cache controls.
   LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1 = 3,
+  // Vector memory descriptors expose GFX9 GLC/SLC/SCC cache controls.
+  LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX90A_GLC_SLC_SCC = 4,
 } loom_amdgpu_vector_memory_cache_policy_encoding_t;
 
 // Memory ordering is independent of the packet's cache-field encoding. In
@@ -523,6 +535,8 @@ typedef enum loom_amdgpu_memory_ordering_model_e {
   LOOM_AMDGPU_MEMORY_ORDERING_MODEL_GFX125 = 3,
   // CDNA3/4 scoped cache controls with unified vector completion.
   LOOM_AMDGPU_MEMORY_ORDERING_MODEL_CDNA = 4,
+  // CDNA2 GLC observations with L1 and system-scope L2 cache maintenance.
+  LOOM_AMDGPU_MEMORY_ORDERING_MODEL_GFX90A = 5,
 } loom_amdgpu_memory_ordering_model_t;
 
 typedef struct loom_amdgpu_descriptor_set_sopp_opcodes_t {
@@ -776,6 +790,19 @@ static inline bool loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
     loom_amdgpu_kernel_descriptor_abi_flags_t flags) {
   return properties != NULL &&
          iree_all_bits_set(properties->kernel_descriptor.flags, flags);
+}
+
+// Returns true when kernels for |properties| must compose an absolute flat
+// scratch base from the flat-scratch-init and wave-offset launch SGPRs instead
+// of using hardware-architected scratch.
+static inline bool loom_amdgpu_processor_properties_use_absolute_flat_scratch(
+    const loom_amdgpu_processor_properties_t* properties) {
+  return properties != NULL &&
+         properties->kernel_descriptor.profile !=
+             LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_NONE &&
+         !iree_any_bit_set(
+             properties->kernel_descriptor.flags,
+             LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH);
 }
 
 // Returns true when |properties| advertises every requested processor-info

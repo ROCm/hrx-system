@@ -1105,6 +1105,29 @@ ERR_AMDGPU_051 = ErrorDef(
     ),
 )
 
+# ERR_AMDGPU_052: AMDGPU target feature state is not qualified.
+ERR_AMDGPU_052 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=52,
+    severity=Severity.ERROR,
+    summary="AMDGPU target feature state is not qualified.",
+    message=(
+        "AMDGPU HAL kernel '@{function_name}' targets '{target_key}', but "
+        "processor '{processor}' does not support code objects with "
+        "'{feature}'"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("target_key", ParamKind.STRING),
+        ErrorParam("processor", ParamKind.STRING),
+        ErrorParam("feature", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Select the opposite feature state or omit the feature to accept any "
+        "state; XNACK replay is not yet qualified for this processor"
+    ),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_006,
@@ -1152,4 +1175,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_049,
     ERR_AMDGPU_050,
     ERR_AMDGPU_051,
+    ERR_AMDGPU_052,
 )

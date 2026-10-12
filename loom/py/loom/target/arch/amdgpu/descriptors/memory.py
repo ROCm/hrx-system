@@ -3514,6 +3514,7 @@ def _scratch_load_overlay(
     implicit_flat_scratch: bool,
     xml_has_m0: bool,
     cache_fields: tuple[tuple[str, int], ...] = (),
+    vaddr_enable_field_name: str | None = "SVE",
 ) -> AmdgpuDescriptorOverlay:
     operands: tuple[AmdgpuOperandOverlay, ...] = (
         AmdgpuOperandOverlay(data_field_name, _vgpr_result(units=units)),
@@ -3525,8 +3526,11 @@ def _scratch_load_overlay(
         implicit_operands = (*implicit_operands, _IGNORE_FLAT_SCRATCH_INPUT)
     if xml_has_m0:
         implicit_operands = (*implicit_operands, _IGNORE_REGISTER_MEMORY_M0)
+    # GFX9-era scratch packets select VADDR through SADDR=off instead of SVE.
     fixed_encoding_fields: tuple[tuple[str, AmdgpuFixedEncodingValue], ...] = (
-        ("SVE", 1 if fixed_vaddr is None else 0),
+        ((vaddr_enable_field_name, 1 if fixed_vaddr is None else 0),)
+        if vaddr_enable_field_name is not None
+        else ()
     )
     if fixed_vaddr is None:
         operands += (AmdgpuOperandOverlay(address_field_name, _vgpr_operand("addr")),)
@@ -3600,6 +3604,7 @@ def _scratch_store_overlay(
     implicit_flat_scratch: bool,
     xml_has_m0: bool,
     cache_fields: tuple[tuple[str, int], ...] = (),
+    vaddr_enable_field_name: str | None = "SVE",
 ) -> AmdgpuDescriptorOverlay:
     operands: tuple[AmdgpuOperandOverlay, ...] = ()
     implicit_operands: tuple[AmdgpuImplicitOperandOverlay, ...] = (
@@ -3609,8 +3614,11 @@ def _scratch_store_overlay(
         implicit_operands = (*implicit_operands, _IGNORE_FLAT_SCRATCH_INPUT)
     if xml_has_m0:
         implicit_operands = (*implicit_operands, _IGNORE_REGISTER_MEMORY_M0)
+    # GFX9-era scratch packets select VADDR through SADDR=off instead of SVE.
     fixed_encoding_fields: tuple[tuple[str, AmdgpuFixedEncodingValue], ...] = (
-        ("SVE", 1 if fixed_vaddr is None else 0),
+        ((vaddr_enable_field_name, 1 if fixed_vaddr is None else 0),)
+        if vaddr_enable_field_name is not None
+        else ()
     )
     if fixed_vaddr is None:
         operands += (AmdgpuOperandOverlay(address_field_name, _vgpr_operand("addr")),)
@@ -3686,6 +3694,7 @@ def _scratch_load_narrow_overlays(
     xml_has_m0: bool,
     descriptor_key_suffix: str = "",
     cache_fields: tuple[tuple[str, int], ...] = (),
+    vaddr_enable_field_name: str | None = "SVE",
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
     return tuple(
         _scratch_load_overlay(
@@ -3713,6 +3722,7 @@ def _scratch_load_narrow_overlays(
             implicit_flat_scratch=implicit_flat_scratch,
             xml_has_m0=xml_has_m0,
             cache_fields=cache_fields,
+            vaddr_enable_field_name=vaddr_enable_field_name,
         )
         for (
             descriptor_suffix,
@@ -3740,6 +3750,7 @@ def _scratch_store_narrow_overlays(
     xml_has_m0: bool,
     descriptor_key_suffix: str = "",
     cache_fields: tuple[tuple[str, int], ...] = (),
+    vaddr_enable_field_name: str | None = "SVE",
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
     return tuple(
         _scratch_store_overlay(
@@ -3767,6 +3778,7 @@ def _scratch_store_narrow_overlays(
             implicit_flat_scratch=implicit_flat_scratch,
             xml_has_m0=xml_has_m0,
             cache_fields=cache_fields,
+            vaddr_enable_field_name=vaddr_enable_field_name,
         )
         for (
             descriptor_suffix,
@@ -3796,6 +3808,7 @@ def _scratch_memory_overlays(
     narrow_b16_load_mnemonic_suffixes: tuple[str, str] = ("u16", "i16"),
     narrow_store_mnemonic_suffixes: tuple[str, str] = ("b8", "b16"),
     cache_fields: tuple[tuple[str, int], ...] = (),
+    vaddr_enable_field_name: str | None = "SVE",
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *_scratch_load_narrow_overlays(
@@ -3813,6 +3826,7 @@ def _scratch_memory_overlays(
             xml_has_m0=xml_has_m0,
             descriptor_key_suffix=descriptor_key_suffix,
             cache_fields=cache_fields,
+            vaddr_enable_field_name=vaddr_enable_field_name,
         ),
         *_scratch_load_narrow_overlays(
             rows=_SCRATCH_NARROW_B16_LOAD_ROWS,
@@ -3829,6 +3843,7 @@ def _scratch_memory_overlays(
             xml_has_m0=xml_has_m0,
             descriptor_key_suffix=descriptor_key_suffix,
             cache_fields=cache_fields,
+            vaddr_enable_field_name=vaddr_enable_field_name,
         ),
         *_scratch_store_narrow_overlays(
             rows=_SCRATCH_NARROW_STORE_ROWS,
@@ -3845,6 +3860,7 @@ def _scratch_memory_overlays(
             xml_has_m0=xml_has_m0,
             descriptor_key_suffix=descriptor_key_suffix,
             cache_fields=cache_fields,
+            vaddr_enable_field_name=vaddr_enable_field_name,
         ),
         *(
             _scratch_load_overlay(
@@ -3866,6 +3882,7 @@ def _scratch_memory_overlays(
                 implicit_flat_scratch=implicit_flat_scratch,
                 xml_has_m0=xml_has_m0,
                 cache_fields=cache_fields,
+                vaddr_enable_field_name=vaddr_enable_field_name,
             )
             for (width_bits, units), instruction_suffix, mnemonic_suffix in zip(
                 _MEMORY_DWORD_VECTOR_WIDTHS,
@@ -3894,6 +3911,7 @@ def _scratch_memory_overlays(
                 implicit_flat_scratch=implicit_flat_scratch,
                 xml_has_m0=xml_has_m0,
                 cache_fields=cache_fields,
+                vaddr_enable_field_name=vaddr_enable_field_name,
             )
             for (width_bits, units), instruction_suffix, mnemonic_suffix in zip(
                 _MEMORY_DWORD_VECTOR_WIDTHS,

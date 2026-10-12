@@ -23,6 +23,19 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE)
+loom_cc_library(
+  NAME
+    cdna2_encoding_tables
+  SRCS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/cdna2_encoding_tables.c"
+  DEPS
+    ::encoding_defs
+    iree::base
+  PUBLIC
+)
+endif()
+
 if(LOOM_TARGET_ARCH_AMDGPU AND (LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE))
 loom_cc_library(
   NAME
@@ -212,6 +225,9 @@ endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE)
   list(APPEND _encoding_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE")
 endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE)
+  list(APPEND _encoding_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE")
+endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE)
   list(APPEND _encoding_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE")
 endif()
@@ -251,6 +267,9 @@ if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE)
 endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE)
   list(APPEND _encoding_platform_deps ::rdna4_gfx1251_encoding_tables)
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA2_CORE)
+  list(APPEND _encoding_platform_deps ::cdna2_encoding_tables)
 endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE)
   list(APPEND _encoding_platform_deps ::gfx9_4_generic_encoding_tables)

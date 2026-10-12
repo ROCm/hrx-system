@@ -155,6 +155,10 @@ def test_narrow_stores_read_only_the_low_register_part(target: str) -> None:
             else f"amdgpu.buffer_store_b{width}",
         )
         for key in keys:
+            # CDNA2 has no ST-mode scratch; every scratch slot uses VADDR.
+            if key.endswith("_offset_only") and key not in descriptors:
+                assert target == "cdna2", key
+                continue
             descriptor = descriptors[key]
             variants = [descriptor]
             if key.startswith("amdgpu.buffer_store"):

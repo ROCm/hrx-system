@@ -63,6 +63,7 @@ loom_low_descriptor_data_archive(
 )
 
 _AMDGPU_ISA_XML_ARGS = [
+    "--isa-xml=cdna2:$(location @amdgpu_isa_xml//:amdgpu_isa_cdna2.xml)",
     "--isa-xml=cdna3:$(location @amdgpu_isa_xml//:amdgpu_isa_cdna3.xml)",
     "--isa-xml=cdna4:$(location @amdgpu_isa_xml//:amdgpu_isa_cdna4.xml)",
     "--isa-xml=rdna3:$(location @amdgpu_isa_xml//:amdgpu_isa_rdna3.xml)",
@@ -71,6 +72,7 @@ _AMDGPU_ISA_XML_ARGS = [
 ]
 
 _AMDGPU_ISA_XML_INPUTS = [
+    "@amdgpu_isa_xml//:amdgpu_isa_cdna2.xml",
     "@amdgpu_isa_xml//:amdgpu_isa_cdna3.xml",
     "@amdgpu_isa_xml//:amdgpu_isa_cdna4.xml",
     "@amdgpu_isa_xml//:amdgpu_isa_rdna3.xml",
@@ -120,14 +122,17 @@ loom_generated_file_family(
 loom_generated_file_family(
     name = "cdna_gen",
     args = [
+        "--target=cdna2",
         "--target=cdna3",
         "--target=cdna4",
+        "--isa-xml=cdna2:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna2.xml)",
         "--isa-xml=cdna3:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna3.xml)",
         "--isa-xml=cdna4:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_cdna4.xml)",
     ],
     comment = "Generating CDNA runtime target table family",
     generator = _AMDGPU_TARGET_TABLE_GENERATOR,
     inputs = [
+        "@amdgpu_isa_xml//:amdgpu_isa_cdna2.xml",
         "@amdgpu_isa_xml//:amdgpu_isa_cdna3.xml",
         "@amdgpu_isa_xml//:amdgpu_isa_cdna4.xml",
     ],
@@ -136,8 +141,12 @@ loom_generated_file_family(
         "--encoding-source",
         "--descriptor-source",
         "--encoding-source",
+        "--descriptor-source",
+        "--encoding-source",
     ],
     outputs = [
+        "cdna2_descriptors.c",
+        "cdna2_encoding_tables.c",
         "cdna3_descriptors.c",
         "cdna3_encoding_tables.c",
         "cdna4_descriptors.c",
@@ -203,6 +212,13 @@ loom_generated_file_family(
         "rdna4_gfx125x_encoding_tables.c",
     ],
     visibility = _AMDGPU_TARGET_TABLE_VISIBILITY,
+)
+
+loom_cc_library(
+    name = "cdna2",
+    srcs = [":cdna2_descriptors.c"],
+    target_compatible_with = loom_amdgpu_descriptor_table_compatible_with("cdna2"),
+    deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
 loom_cc_library(

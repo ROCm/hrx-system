@@ -42,6 +42,7 @@ from loom.target.low_descriptors import (
 )
 
 _NATIVE_TARGETS = (
+    "cdna2",
     "cdna3",
     "cdna4",
     "gfx9_4_generic",
@@ -105,7 +106,7 @@ def test_asynchronous_continuations_have_one_preserved_vgpr_part(target: str) ->
                 "amdgpu.global_load_b16_d16_hi_saddr",
             }
         )
-    if target in ("cdna3", "cdna4", "gfx9_4_generic"):
+    if target in ("cdna2", "cdna3", "cdna4", "gfx9_4_generic"):
         expected = set()
     assert continuations == expected, (target, continuations, expected)
 

@@ -446,8 +446,7 @@ iree_status_t loom_amdgpu_kernel_emission_build(
           table_arena));
 
   const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
-      loom_amdgpu_kernel_entry_envelope_for_properties(
-          &record.processor->properties);
+      &record.entry_envelope;
   iree_const_byte_span_t kernel_text = iree_const_byte_span_empty();
   const loom_amdgpu_hsaco_text_fixup_t* kernel_text_fixups = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_entry_prepend_text(

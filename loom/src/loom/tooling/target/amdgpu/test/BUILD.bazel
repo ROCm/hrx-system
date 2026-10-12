@@ -194,6 +194,18 @@ loom_test(
 )
 
 loom_test(
+    name = "device_publication_test",
+    srcs = ["device_publication.loom"],
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+)
+
+loom_test(
+    name = "forced_spills_test",
+    srcs = ["forced_spills.loom"],
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+)
+
+loom_test(
     name = "callable_values_test",
     srcs = ["callable_values.loom"],
     execution_profiles = [

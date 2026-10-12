@@ -581,3 +581,157 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cyclic_flat_gfx942(%address: re
   v_add_u32 v1, v4, v5
   v_add_u32 v0, v0, v1
   s_endpgm
+
+// ====
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// RUN: emit amdgpu-assembly @flat_loads_gfx90a strategy=source
+
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @flat_loads_gfx90a(%address: reg<amdgpu.vgpr x2>, %addend: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %older = flat_load_dword %address : reg<amdgpu.vgpr>
+  %younger = flat_load_dword %address {offset = 4} : reg<amdgpu.vgpr>
+  %used = v_add_u32 %older, %addend
+  %result = v_add_u32 %used, %younger
+  return %result
+}
+
+// ----
+  flat_load_dword v3, v[0:1], off offset:0
+  flat_load_dword v0, v[0:1], off offset:4
+  s_waitcnt vmcnt(0) lgkmcnt(0)
+  v_add_u32 v1, v3, v2
+  v_add_u32 v0, v1, v0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @flat_store_then_local_load_gfx90a strategy=source
+
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @flat_store_then_local_load_gfx90a(%address: reg<amdgpu.vgpr x2>, %local: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  flat_store_dword %address, %value
+  %loaded = ds_read_b32 %local
+  return %loaded
+}
+
+// ----
+  flat_store_dword v[0:1], v2, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(0)
+  ds_read_b32 v0, v3 offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @incoming_flat_gfx90a strategy=source
+
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @incoming_flat_gfx90a(%address: reg<amdgpu.vgpr x2>, %addend: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %loaded = flat_load_dword %address : reg<amdgpu.vgpr>
+  low.br ^consume
+^consume:
+  %result = v_add_u32 %loaded, %addend
+  return %result
+}
+
+// ----
+  flat_load_dword v0, v[0:1], off offset:0
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(0)
+  v_add_u32 v0, v0, v2
+  s_endpgm
+
+// ====
+
+// The atomic write must complete in both domains before a local read aliases it.
+// RUN: emit amdgpu-assembly @flat_atomic_no_return_gfx90a strategy=source
+
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @flat_atomic_no_return_gfx90a(%address: reg<amdgpu.vgpr x2>, %local: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  flat_atomic_add %address, %value
+  %loaded = ds_read_b32 %local
+  return %loaded
+}
+
+// ----
+  flat_atomic_add v[0:1], v2 offset:0 scc:0
+  s_waitcnt vmcnt(0) lgkmcnt(0)
+  ds_read_b32 v0, v3 offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_endpgm
+
+// ====
+
+// The atomic write must complete in both domains before a local read aliases it.
+// RUN: emit amdgpu-assembly @flat_atomic_return_gfx90a strategy=source
+
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @flat_atomic_return_gfx90a(%address: reg<amdgpu.vgpr x2>, %local: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %old = flat_atomic_add_rtn %address, %value : reg<amdgpu.vgpr>
+  %loaded = ds_read_b32 %local
+  return %loaded
+}
+
+// ----
+  flat_atomic_add v0, v[0:1], v2 offset:0 scc:0
+  s_waitcnt vmcnt(0) lgkmcnt(0)
+  ds_read_b32 v0, v3 offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_endpgm
+
+// ====
+
+// Early completion must not create a false partial bound for a seeded loop epoch.
+// RUN: emit amdgpu-assembly @cyclic_flat_gfx90a strategy=source fixed=%seed0:physical_register:4:1 fixed=%seed1:physical_register:5:1 fixed=%carried0:physical_register:4:1 fixed=%carried1:physical_register:5:1 fixed=%third:physical_register:4:1 fixed=%fourth:physical_register:5:1 fixed=%first:physical_register:6:1 fixed=%second:physical_register:7:1
+
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @cyclic_flat_gfx90a(%address: reg<amdgpu.vgpr x2>, %seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  low.br ^loop(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>)
+^loop(%carried0: reg<amdgpu.vgpr>, %carried1: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>):
+  %first = flat_load_dword %address : reg<amdgpu.vgpr>
+  %second = flat_load_dword %address {offset = 4} : reg<amdgpu.vgpr>
+  %used0 = v_add_u32 %acc, %carried0
+  %third = flat_load_dword %address {offset = 8} : reg<amdgpu.vgpr>
+  %used1 = v_add_u32 %used0, %carried1
+  %fourth = flat_load_dword %address {offset = 12} : reg<amdgpu.vgpr>
+  %used2 = v_add_u32 %used1, %first
+  %used3 = v_add_u32 %used2, %second
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%third: reg<amdgpu.vgpr>, %fourth: reg<amdgpu.vgpr>, %used3: reg<amdgpu.vgpr>)
+^exit:
+  %remaining = v_add_u32 %third, %fourth
+  %result = v_add_u32 %used3, %remaining
+  return %result
+}
+
+// ----
+.Lbb1:
+  flat_load_dword v6, v[2:3], off offset:0
+  flat_load_dword v7, v[2:3], off offset:4
+  s_waitcnt vmcnt(0) lgkmcnt(0)
+  v_add_u32 v0, v0, v4
+  flat_load_dword v4, v[2:3], off offset:8
+  v_add_u32 v0, v0, v5
+  flat_load_dword v5, v[2:3], off offset:12
+  v_add_u32 v0, v0, v6
+  v_add_u32 v0, v0, v7
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
+.Lbb3:
+  s_waitcnt vmcnt(0) lgkmcnt(0)
+  v_add_u32 v1, v4, v5
+  v_add_u32 v0, v0, v1
+  s_endpgm

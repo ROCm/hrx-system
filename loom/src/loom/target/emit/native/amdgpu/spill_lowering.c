@@ -17,6 +17,7 @@
 #include "loom/ops/type_registry.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
 #include "loom/target/registers.h"
@@ -709,15 +710,23 @@ static iree_status_t loom_amdgpu_spill_lowering_store_chunk(
     loom_rewriter_t* rewriter, loom_value_id_t storage, loom_value_id_t value,
     uint32_t chunk_units, const loom_amdgpu_spill_access_t* access,
     loom_type_t value_type, loom_location_id_t location) {
+  const loom_amdgpu_descriptor_ref_t offset_only_ref =
+      loom_amdgpu_spill_lowering_store_descriptor_ref(chunk_units);
+  const bool has_offset_only = loom_amdgpu_descriptor_set_has_ref(
+      context->descriptor_set, offset_only_ref);
   loom_amdgpu_spill_descriptor_t spill_descriptor =
       loom_amdgpu_spill_lowering_scratch_descriptor_ref(
           context->descriptor_set,
-          loom_amdgpu_spill_lowering_store_descriptor_ref(chunk_units));
+          has_offset_only
+              ? offset_only_ref
+              : loom_amdgpu_spill_lowering_store_vaddr_descriptor_ref(
+                    chunk_units));
   loom_value_id_t operands[2] = {value, LOOM_VALUE_ID_INVALID};
   iree_host_size_t operand_count = 1;
   int64_t offset = access->segment_offset;
-  if (!loom_amdgpu_spill_lowering_offset_fits_immediate(
-          spill_descriptor.offset_immediate, offset)) {
+  // Targets without offset-only scratch packets address every slot by VADDR.
+  if (!has_offset_only || !loom_amdgpu_spill_lowering_offset_fits_immediate(
+                              spill_descriptor.offset_immediate, offset)) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_build_storage_address(
         context, rewriter, storage, access, value_type, location,
         &operands[0]));
@@ -751,15 +760,22 @@ static iree_status_t loom_amdgpu_spill_lowering_load_chunk(
     loom_type_t result_type, const loom_amdgpu_spill_access_t* access,
     loom_location_id_t location, loom_value_id_t* out_value) {
   *out_value = LOOM_VALUE_ID_INVALID;
+  const loom_amdgpu_descriptor_ref_t offset_only_ref =
+      loom_amdgpu_spill_lowering_load_descriptor_ref(chunk_units);
+  const bool has_offset_only = loom_amdgpu_descriptor_set_has_ref(
+      context->descriptor_set, offset_only_ref);
   loom_amdgpu_spill_descriptor_t spill_descriptor =
       loom_amdgpu_spill_lowering_scratch_descriptor_ref(
           context->descriptor_set,
-          loom_amdgpu_spill_lowering_load_descriptor_ref(chunk_units));
+          has_offset_only
+              ? offset_only_ref
+              : loom_amdgpu_spill_lowering_load_vaddr_descriptor_ref(
+                    chunk_units));
   loom_value_id_t operands[1] = {LOOM_VALUE_ID_INVALID};
   iree_host_size_t operand_count = 0;
   int64_t offset = access->segment_offset;
-  if (!loom_amdgpu_spill_lowering_offset_fits_immediate(
-          spill_descriptor.offset_immediate, offset)) {
+  if (!has_offset_only || !loom_amdgpu_spill_lowering_offset_fits_immediate(
+                              spill_descriptor.offset_immediate, offset)) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_build_storage_address(
         context, rewriter, storage, access, result_type, location,
         &operands[0]));

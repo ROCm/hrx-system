@@ -229,6 +229,20 @@ _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE = _with_matrix_timings(
     _AMDGPU_GFX942_MATRIX_TIMINGS,
 )
 
+# CDNA2 shares the CDNA3 register files and scalar/vector/memory pipeline
+# classes. Matrix packets are not yet exposed, so no MFMA timings are imported
+# from newer processors.
+_AMDGPU_CDNA2_CORE_DESCRIPTOR_SET_BASE = _with_matrix_timings(
+    _amdgpu_core_descriptor_set(
+        key="amdgpu.cdna2.core",
+        reg_classes=_AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE.reg_classes,
+        register_parts=_AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE.register_parts,
+        resources=_AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE.resources,
+        schedule_classes=_AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
+    ),
+    {},
+)
+
 _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE = (
     _amdgpu_core_descriptor_set_intersection(
         key="amdgpu.gfx9_4.generic.core",
@@ -245,6 +259,7 @@ _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE = _with_matrix_timings(
 
 
 __all__ = (
+    "_AMDGPU_CDNA2_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE",

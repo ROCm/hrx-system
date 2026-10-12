@@ -584,6 +584,12 @@ loom_check_test_suite(
             "//loom/target/amdgpu:" + target
             for target in LOOM_AMDGPU_SUPPORTED_TARGETS
         ],
+        "test/source_low/source_low_matrix_unsupported_gfx90a.loom-test": [
+            "//loom/target/amdgpu:gfx90a",
+        ],
+        "test/source_low/source_low_memory_atomic_integer_gfx90a.loom-test": [
+            "//loom/target/amdgpu:gfx90a",
+        ],
         "test/source_low/source_low_system_scope_store_wait.loom-test": [
             "//loom/target/amdgpu:gfx1200",
             "//loom/target/amdgpu:gfx1201",

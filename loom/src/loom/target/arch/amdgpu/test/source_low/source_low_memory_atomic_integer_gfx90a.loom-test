@@ -1,0 +1,121 @@
+// RUN: emit source-low target=amdgpu:gfx90a output=low
+
+// Device-scope integer updates use GLC only to request the old value. Relaxed
+// updates need no cache maintenance because CDNA2 atomics bypass the L1.
+kernel.def @integer_updates() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%counters: buffer, %output: buffer, %increment: i32, %wide_increment: i64) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %counters : buffer
+  %words = buffer.view %global[%base] : buffer -> view<4xi32>
+  %wide_offset = index.constant 16 : offset
+  %wides = buffer.view %global[%wide_offset] : buffer -> view<2xi64>
+  %results = buffer.view %output[%base] : buffer -> view<2xi32>
+  view.atomic.reduce<addi> %increment, %words[0] {ordering = relaxed, scope = device} : i32, view<4xi32>
+  %old = view.atomic.rmw<addi> %increment, %words[1] {ordering = relaxed, scope = device} : i32, view<4xi32> -> i32
+  view.store %old, %results[0] : i32, view<2xi32>
+  view.atomic.reduce<addi> %wide_increment, %wides[0] {ordering = relaxed, scope = device} : i64, view<2xi64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "increment", arg1 = "wide_increment"}, direct_arg_offsets = [16, 20], direct_arg_parameter_indices = [2, 3], direct_arg_sizes = [4, 8], parameter_count = 4, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @integer_updates(%increment: reg<amdgpu.sgpr>, %wide_increment: reg<amdgpu.sgpr x2>) asm {
+  %wides = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %results = resource<hal_binding> {extent = 8, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = v_mov_b32 0
+  %17 = v_mov_b32_copy %increment
+  global_atomic_add_saddr %16, %17, %wides
+  %old = global_atomic_add_rtn_saddr %16, %17, %wides {offset = 4}
+  global_store_dword_saddr %16, %old, %results
+  %23 = slice %wide_increment[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %24 = v_mov_b32_copy %23
+  %25 = slice %wide_increment[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = v_mov_b32_copy %25
+  %27 = concat(%24, %26) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_atomic_add_x2_saddr %16, %27, %wides {offset = 16}
+  return
+}
+
+// ====
+
+// Compare-exchange returns the observed word through the GLC return form.
+kernel.def @integer_compare_exchange() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%cells: buffer, %output: buffer, %expected: i32, %replacement: i32, %wide_expected: i64, %wide_replacement: i64) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %cells : buffer
+  %words = buffer.view %global[%base] : buffer -> view<2xi32>
+  %wide_offset = index.constant 8 : offset
+  %wides = buffer.view %global[%wide_offset] : buffer -> view<1xi64>
+  %results = buffer.view %output[%base] : buffer -> view<4xi32>
+  %old = view.atomic.cmpxchg %expected, %replacement, %words[0] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<2xi32> -> i32
+  view.store %old, %results[0] : i32, view<4xi32>
+  %wide_old = view.atomic.cmpxchg %wide_expected, %wide_replacement, %wides[0] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i64, view<1xi64> -> i64
+  %wide_results = buffer.view %output[%wide_offset] : buffer -> view<1xi64>
+  view.store %wide_old, %wide_results[0] : i64, view<1xi64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 6, direct_arg_count = 4, direct_arg_names = {arg0 = "expected", arg1 = "replacement", arg2 = "wide_expected", arg3 = "wide_replacement"}, direct_arg_offsets = [16, 20, 24, 32], direct_arg_parameter_indices = [2, 3, 4, 5], direct_arg_sizes = [4, 4, 8, 8], parameter_count = 6, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @integer_compare_exchange(%expected: reg<amdgpu.sgpr>, %replacement: reg<amdgpu.sgpr>, %wide_expected: reg<amdgpu.sgpr x2>, %wide_replacement: reg<amdgpu.sgpr x2>) asm {
+  %wides = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %wide_results = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %22 = v_mov_b32 0
+  %23 = v_mov_b32_copy %expected
+  %24 = v_mov_b32_copy %replacement
+  %25 = concat(%24, %23) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %old = global_atomic_cmpswap_b32_rtn_saddr %22, %25, %wides
+  global_store_dword_saddr %22, %old, %wide_results
+  %29 = slice %wide_expected[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = v_mov_b32_copy %29
+  %31 = slice %wide_expected[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = v_mov_b32_copy %31
+  %33 = concat(%30, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %34 = slice %wide_replacement[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = v_mov_b32_copy %34
+  %36 = slice %wide_replacement[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %37 = v_mov_b32_copy %36
+  %38 = concat(%35, %37) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %39 = concat(%38, %33) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %wide_old = global_atomic_cmpswap_x2_rtn_saddr %22, %39, %wides {offset = 8}
+  global_store_dwordx2_saddr %22, %wide_old, %wide_results {offset = 8}
+  return
+}
+
+// ====
+
+// Floating-point global atomic packets are withheld on CDNA2 until their memory
+// domains are qualified, so the update retries an integer compare-exchange.
+kernel.def @float_update_compare_exchange_loop() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%accumulators: buffer, %value: f32) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %accumulators : buffer
+  %cells = buffer.view %global[%base] : buffer -> view<1xf32>
+  view.atomic.reduce<addf> %value, %cells[0] {ordering = relaxed, scope = device} : f32, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @float_update_compare_exchange_loop(%value: reg<amdgpu.sgpr>) asm {
+  %cells = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %21 = v_mov_b32 0
+  %28 = s_mov_b64_exec_read
+  low.br ^_bb1(%21: reg<amdgpu.vgpr>)
+^_bb1(%18: reg<amdgpu.vgpr>):
+  %22 = v_mov_b32_copy %value
+  %23 = v_add_f32 %18, %22
+  %25 = concat(%23, %18) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %26 = global_atomic_cmpswap_b32_rtn_saddr %21, %25, %cells
+  %27 = v_cmp_ne_i32 %26, %18
+  %29, %30 = s_and_saveexec_b64 %27
+  low.cond_br %30, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  low.br ^_bb1(%26: reg<amdgpu.vgpr>)
+^_bb3:
+  s_mov_b64_exec %28
+  return
+}

@@ -261,11 +261,16 @@ TEST(AmdgpuDescriptorTest, EncodesComputePgmFieldsForEveryDescriptorProfile) {
               expected_vgpr_blocks)
         << processor->name.data;
 
+    // Legacy encodings add VCC, XNACK_MASK, and FLAT_SCRATCH when scratch is
+    // architected; this kernel has no private segment to initialize.
     const uint32_t expected_sgpr_blocks =
         loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
             &processor->properties,
             LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_GFX10_SGPR_ENCODING)
             ? 0u
+        : loom_amdgpu_processor_properties_use_absolute_flat_scratch(
+              &processor->properties)
+            ? 2u
             : 3u;
     EXPECT_EQ(Field(compute_pgm_rsrc1, kComputePgmRsrc1SgprCountShift,
                     kComputePgmRsrc1SgprCountWidth),
@@ -690,6 +695,37 @@ TEST(AmdgpuDescriptorTest, SupportsEnabledProcessorVariants) {
         EncodeDescriptor(c.processor, metadata, -64,
                          iree_make_byte_span(bytes.data(), bytes.size())));
   }
+}
+
+// An absolute flat-scratch kernel that initializes FLAT_SCRATCH for a private
+// segment reserves VCC, XNACK_MASK, and FLAT_SCRATCH above its SGPRs, and
+// enables the flat-scratch-init pair and the private-segment wave offset.
+TEST(AmdgpuDescriptorTest, EncodesAbsoluteFlatScratchInitialization) {
+  loom_amdgpu_metadata_kernel_t metadata = MinimalMetadataKernel();
+  metadata.wavefront_size = 64;
+  metadata.private_segment_fixed_size = 16;
+  metadata.sgpr_count = 20;
+  metadata.vgpr_count = 9;
+  const loom_amdgpu_kernel_descriptor_options_t options = {
+      /*.flags=*/LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_FLAT_SCRATCH_INIT,
+      /*.minimum_user_sgpr_count=*/2,
+  };
+  std::array<uint8_t, 65> bytes;
+  bytes.fill(0);
+  IREE_ASSERT_OK(EncodeDescriptor(
+      IREE_SV("gfx90a"), metadata, 0,
+      iree_make_byte_span(bytes.data(), bytes.size()), options));
+  EXPECT_EQ(LoadLeU32(bytes, 4), 16u);
+  const uint32_t compute_pgm_rsrc1 = LoadLeU32(bytes, 48);
+  EXPECT_EQ(Field(compute_pgm_rsrc1, kComputePgmRsrc1SgprCountShift,
+                  kComputePgmRsrc1SgprCountWidth),
+            3u);
+  const uint32_t compute_pgm_rsrc2 = LoadLeU32(bytes, 52);
+  EXPECT_EQ(compute_pgm_rsrc2 & 1u, 1u);
+  EXPECT_EQ((compute_pgm_rsrc2 >> 1) & 0x1fu, 2u);
+  const uint16_t kernel_code_properties =
+      (uint16_t)(bytes[56] | ((uint16_t)bytes[57] << 8));
+  EXPECT_EQ((kernel_code_properties >> 5) & 1u, 1u);
 }
 
 TEST(AmdgpuDescriptorTest, RejectsTooFewUserSgprs) {

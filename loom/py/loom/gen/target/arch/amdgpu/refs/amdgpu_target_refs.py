@@ -105,6 +105,8 @@ _SPILL_LOWERING_SCRATCH_DESCRIPTOR_KEYS = (
     "amdgpu.scratch_store_b128_vaddr",
 )
 
+_SPILL_LOWERING_OPTIONAL_SCRATCH_DESCRIPTOR_KEYS = frozenset(key for key in _SPILL_LOWERING_SCRATCH_DESCRIPTOR_KEYS if key.endswith("_offset_only"))
+
 _SPILL_LOWERING_HELPER_DESCRIPTOR_KEYS = (
     "amdgpu.v_mov_b32_copy",
     "amdgpu.v_readfirstlane_b32",
@@ -405,7 +407,11 @@ def _validate_spill_lowering_descriptor_contracts(
     descriptor_set: DescriptorSet,
 ) -> None:
     requires_m0_materialization = False
+    descriptor_keys = frozenset(descriptor.key for descriptor in descriptor_set.descriptors)
     for descriptor_key in _SPILL_LOWERING_SCRATCH_DESCRIPTOR_KEYS:
+        # Targets without ST-mode scratch spill every slot through VADDR.
+        if descriptor_key in _SPILL_LOWERING_OPTIONAL_SCRATCH_DESCRIPTOR_KEYS and descriptor_key not in descriptor_keys:
+            continue
         descriptor = _descriptor_by_key(descriptor_set, descriptor_key)
         _validate_spill_lowering_descriptor_shape(descriptor_set, descriptor)
         offset_slot = _descriptor_address_offset_immediate_slot(descriptor_set, descriptor)

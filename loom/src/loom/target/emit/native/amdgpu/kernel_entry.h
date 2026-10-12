@@ -36,11 +36,39 @@ typedef struct loom_amdgpu_kernel_entry_envelope_t {
   uint32_t minimum_vgpr_count;
 } loom_amdgpu_kernel_entry_envelope_t;
 
-// Returns the immutable hardware-entry envelope selected by |properties|.
-// Targets without an entry profile return an empty record.
-const loom_amdgpu_kernel_entry_envelope_t*
-loom_amdgpu_kernel_entry_envelope_for_properties(
+// Sentinel for an entry plan without an SGPR input.
+#define LOOM_AMDGPU_KERNEL_ENTRY_NO_SGPR UINT32_MAX
+
+// Finalized entry requirements of one kernel, retained by its kernel record
+// and consumed identically by assembly and binary emission.
+//
+// The absolute flat-scratch sequence reads the flat-scratch-init pair and the
+// private-segment wave offset, writes FLAT_SCRATCH, and clobbers SCC. None of
+// these are live into the scheduled body, so the body allocation may reuse the
+// consumed input SGPRs after the entry sequence.
+typedef struct loom_amdgpu_kernel_entry_plan_t {
+  // Hardware-entry profile selected by the processor.
+  loom_amdgpu_kernel_entry_profile_t profile;
+  // First SGPR of the flat-scratch-init launch pair, or
+  // LOOM_AMDGPU_KERNEL_ENTRY_NO_SGPR when the entry composes no absolute
+  // flat-scratch base.
+  uint32_t flat_scratch_init_sgpr;
+  // System SGPR holding the private-segment wave byte offset. Valid only with
+  // |flat_scratch_init_sgpr|.
+  uint32_t private_segment_wave_offset_sgpr;
+} loom_amdgpu_kernel_entry_plan_t;
+
+// Returns a plan with only |properties|' static entry profile.
+loom_amdgpu_kernel_entry_plan_t loom_amdgpu_kernel_entry_plan_for_properties(
     const loom_amdgpu_processor_properties_t* properties);
+
+// Materializes the hardware-entry instructions required by |plan|. Profile
+// packets precede the flat-scratch sequence, which precedes every body or
+// spill access to private memory. Plan-dependent storage is allocated from
+// |arena|; static-only plans borrow immutable storage.
+iree_status_t loom_amdgpu_kernel_entry_envelope_build(
+    const loom_amdgpu_kernel_entry_plan_t* plan, iree_arena_allocator_t* arena,
+    loom_amdgpu_kernel_entry_envelope_t* out_envelope);
 
 // Prepends |envelope| to |body_text| and displaces all body-relative fixups.
 // Empty envelopes return the original body storage and fixup array directly.

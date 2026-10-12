@@ -158,10 +158,14 @@ AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS = {
 AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1 << 0
 AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1 << 1
 AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS = 1 << 2
+# XNACK-on code objects are rejected until replay-sensitive allocation and
+# scheduling are qualified for the processor.
+AMDGPU_PROCESSOR_INFO_FLAG_REJECT_XNACK_ON = 1 << 3
 AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS = (
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
     | AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE
     | AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS
+    | AMDGPU_PROCESSOR_INFO_FLAG_REJECT_XNACK_ON
 )
 
 AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT = 1 << 0
@@ -224,11 +228,13 @@ AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE = "none"
 AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX11_GLC_SLC_DLC = "gfx11_glc_slc_dlc"
 AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH = "gfx12_nv_scope_th"
 AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1 = "gfx950_nt_sc0_sc1"
+AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX90A_GLC_SLC_SCC = "gfx90a_glc_slc_scc"
 AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODINGS = (
     AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE,
     AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX11_GLC_SLC_DLC,
     AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
     AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1,
+    AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX90A_GLC_SLC_SCC,
 )
 
 AMDGPU_MEMORY_ORDERING_MODEL_NONE = "none"
@@ -236,12 +242,14 @@ AMDGPU_MEMORY_ORDERING_MODEL_GFX11 = "gfx11"
 AMDGPU_MEMORY_ORDERING_MODEL_GFX12 = "gfx12"
 AMDGPU_MEMORY_ORDERING_MODEL_GFX125 = "gfx125"
 AMDGPU_MEMORY_ORDERING_MODEL_CDNA = "cdna"
+AMDGPU_MEMORY_ORDERING_MODEL_GFX90A = "gfx90a"
 AMDGPU_MEMORY_ORDERING_MODELS = (
     AMDGPU_MEMORY_ORDERING_MODEL_NONE,
     AMDGPU_MEMORY_ORDERING_MODEL_GFX11,
     AMDGPU_MEMORY_ORDERING_MODEL_GFX12,
     AMDGPU_MEMORY_ORDERING_MODEL_GFX125,
     AMDGPU_MEMORY_ORDERING_MODEL_CDNA,
+    AMDGPU_MEMORY_ORDERING_MODEL_GFX90A,
 )
 
 AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ATTR_SCOPE = "scope"
@@ -373,6 +381,12 @@ AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAGS_CDNA_GFX9 = (
     | AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_DX10_CLAMP_AND_IEEE_MODE
     | AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID
 )
+# CDNA2 composes an absolute flat-scratch base in the kernel prologue.
+AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAGS_CDNA2_GFX9 = (
+    AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ACCUM_OFFSET
+    | AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_DX10_CLAMP_AND_IEEE_MODE
+    | AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID
+)
 AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAGS_RDNA3 = (
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH
     | AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_GFX10_SGPR_ENCODING
@@ -498,6 +512,13 @@ class AmdgpuDescriptorSetInfo:
         AmdgpuDescriptorSetVectorMemoryInfo()
     )
 
+
+AMDGPU_DESCRIPTOR_SET_ISA_CDNA2 = AmdgpuDescriptorSetIsaInfo(
+    isa_xml_key="cdna2",
+    isa_architecture_name="AMD CDNA 2",
+    isa_architecture_id=1,
+    sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_CDNA,
+)
 
 AMDGPU_DESCRIPTOR_SET_ISA_CDNA3 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="cdna3",
@@ -798,6 +819,11 @@ AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA_GFX9 = AmdgpuProcessorKernelDescriptorInfo(
     flags=AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAGS_CDNA_GFX9,
     vgpr_granules=AmdgpuKernelDescriptorVgprGranules(wave32=8, wave64=8),
 )
+AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA2_GFX9 = AmdgpuProcessorKernelDescriptorInfo(
+    profile=AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX9,
+    flags=AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAGS_CDNA2_GFX9,
+    vgpr_granules=AmdgpuKernelDescriptorVgprGranules(wave32=8, wave64=8),
+)
 AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA3_GFX11 = AmdgpuProcessorKernelDescriptorInfo(
     profile=AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
     flags=AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAGS_RDNA3,
@@ -903,6 +929,10 @@ AMDGPU_OCCUPANCY_CDNA4 = AmdgpuProcessorOccupancyInfo(
     ),
 )
 AMDGPU_OCCUPANCY_GFX9_4_GENERIC = AMDGPU_OCCUPANCY_CDNA3
+# gfx90a uses the same unified 512-entry VGPR/AGPR file, eight-granule VGPR
+# allocation, eight waves per SIMD, and 64 KiB LDS as gfx942 (LLVM
+# AMDGPU::IsaInfo, FeatureGFX90AInsts).
+AMDGPU_OCCUPANCY_CDNA2 = AMDGPU_OCCUPANCY_CDNA3
 AMDGPU_OCCUPANCY_RDNA_1024 = AmdgpuProcessorOccupancyInfo(
     wave32=AmdgpuOccupancyModelInfo(
         max_waves_per_simd=16,
@@ -1000,6 +1030,14 @@ AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_INFOS: tuple[
         cache_scopes=("device",),
         cache_temporals=("regular", "non_temporal"),
         attrs=(AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ATTR_NT,),
+    ),
+    # GLC selects coherence and SLC streaming; only the regular device policy
+    # is exposed until SLC/SCC behavior is qualified on CDNA2 hardware.
+    AmdgpuVectorMemoryCachePolicyEncodingInfo(
+        encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX90A_GLC_SLC_SCC,
+        selected_key="memory_cache_policy.gfx90a_glc_slc_scc",
+        cache_scopes=("device",),
+        cache_temporals=("regular",),
     ),
 )
 
@@ -1305,6 +1343,20 @@ def gfx125x_processor_info(
 # for signaling NaNs, so that guarantee is absent.
 AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
     AmdgpuDescriptorSetInfo(
+        generator_target="cdna2",
+        key="amdgpu.cdna2.core",
+        isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_CDNA2,),
+        flags=(
+            AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING
+            | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_STORE_DATA_WAIT_STATES
+        ),
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE48_LEGACY,
+        vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
+            cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX90A_GLC_SLC_SCC,
+            ordering_model=AMDGPU_MEMORY_ORDERING_MODEL_GFX90A,
+        ),
+    ),
+    AmdgpuDescriptorSetInfo(
         generator_target="cdna3",
         key="amdgpu.cdna3.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_CDNA3,),
@@ -1544,12 +1596,21 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     gfx9_10_processor_info(
         "gfx909", 0x031, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
     ),
-    gfx9_10_processor_info(
+    processor_info(
         "gfx90a",
         0x03F,
+        flags=(
+            AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
+            | AMDGPU_PROCESSOR_INFO_FLAG_REJECT_XNACK_ON
+        ),
+        descriptor_set_key="amdgpu.cdna2.core",
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
-        matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A,
-        kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_PACKED_WORKITEM_ID,
+        kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA2_GFX9,
+        # The MFMA_GFX90A inventory is withheld until amdgpu.cdna2.core
+        # carries qualified matrix descriptors; matrix ops are rejected.
+        scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
+        max_workgroup_storage_bytes=AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES,
+        occupancy=AMDGPU_OCCUPANCY_CDNA2,
     ),
     gfx9_10_processor_info(
         "gfx90c", 0x032, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
@@ -1874,6 +1935,13 @@ AMDGPU_TARGET_INFOS: tuple[AmdgpuTargetInfo, ...] = (
         processor="gfx9-4-generic",
         enum_value=23,
         doc="GFX9.4 generic code-object target row.",
+        default_for_descriptor_set=True,
+    ),
+    AmdgpuTargetInfo(
+        target="gfx90a",
+        processor="gfx90a",
+        enum_value=25,
+        doc="CDNA 2 gfx90a target row.",
         default_for_descriptor_set=True,
     ),
     AmdgpuTargetInfo(

@@ -157,6 +157,7 @@ loom_check_test_suite(
     "test/atomic_float64.loom-test"
     "test/atomic_i64.loom-test"
     "test/cache_completion.loom-test"
+    "test/cdna2.loom-test"
     "test/compile_time_insertions.loom-test"
     "test/delay_alu.loom-test"
     "test/delay_layout.loom-test"

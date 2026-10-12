@@ -50,6 +50,9 @@ typedef struct loom_amdgpu_memory_coherence_rule_t {
   uint32_t writeback_wait_mask;
   // Cache invalidation packets, in issue order.
   loom_amdgpu_descriptor_ref_t invalidates[2];
+  // Narrowest cache scope requiring each invalidation packet. Zero
+  // (workgroup) applies the packet at every acquiring scope.
+  uint8_t invalidate_scopes[2];
   // Number of populated cache invalidation packets.
   uint8_t invalidate_count;
   // Completion required after invalidation, or zero for ordered invalidates.
@@ -71,6 +74,13 @@ typedef struct loom_amdgpu_memory_coherence_rule_t {
 // Returns the target's coherence recipe, or NULL for an unsupported model.
 const loom_amdgpu_memory_coherence_rule_t* loom_amdgpu_memory_coherence_rule(
     const loom_low_descriptor_set_t* descriptor_set);
+
+// Returns whether |rule| issues invalidation |index| when acquiring at |scope|.
+static inline bool loom_amdgpu_memory_coherence_invalidates_at(
+    const loom_amdgpu_memory_coherence_rule_t* rule, uint8_t index,
+    loom_cache_scope_t scope) {
+  return scope >= rule->invalidate_scopes[index];
+}
 
 // Maps the supported source atomic scopes to cache packet scopes.
 loom_cache_scope_t loom_amdgpu_memory_coherence_scope(

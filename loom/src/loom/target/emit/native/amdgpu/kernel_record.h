@@ -20,6 +20,7 @@
 #include "loom/target/arch/amdgpu/target_identity.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/descriptor.h"
+#include "loom/target/emit/native/amdgpu/kernel_entry.h"
 #include "loom/target/emit/native/amdgpu/metadata.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
 
@@ -50,6 +51,11 @@ typedef struct loom_amdgpu_kernel_record_t {
   uint32_t system_vgpr_workitem_id;
   // User SGPR count required by ABI live-ins.
   uint32_t user_sgpr_count;
+  // Finalized hardware-entry requirements, including any flat-scratch setup
+  // selected after allocation fixed the private segment size.
+  loom_amdgpu_kernel_entry_plan_t entry_plan;
+  // Entry instructions materialized from |entry_plan|.
+  loom_amdgpu_kernel_entry_envelope_t entry_envelope;
 } loom_amdgpu_kernel_record_t;
 
 typedef struct loom_amdgpu_kernel_record_options_t {

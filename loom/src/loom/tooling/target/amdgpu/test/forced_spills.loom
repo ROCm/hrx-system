@@ -1,0 +1,40 @@
+// Every work-item keeps 288 loaded values live across a 288-wide sum, which
+// exceeds the vector register file and forces automatic scratch spills. Each
+// work-item owns a distinct slice, so a scratch slot shared between lanes or
+// waves would corrupt a neighbor's values.
+kernel.def @forced_spill_sum() {
+  %workgroups = index.constant 4 : index
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %sums: buffer, %copies: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %width = index.constant 64 : index
+  %group_base = index.mul %workgroup, %width : index
+  %item = index.add %group_base, %lane : index
+  %base = index.constant 0 : offset
+  %second = index.constant 294912 : offset
+  %first_half = buffer.view %input[%base] : buffer -> view<256x288xf32>
+  %second_half = buffer.view %input[%second] : buffer -> view<256x288xf32>
+  %sum_view = buffer.view %sums[%base] : buffer -> view<256x288xf32>
+  %copy_view = buffer.view %copies[%base] : buffer -> view<256x288xf32>
+  %a = vector.load %first_half[%item, 0] : view<256x288xf32> -> vector<288xf32>
+  %b = vector.load %second_half[%item, 0] : view<256x288xf32> -> vector<288xf32>
+  %sum = vector.addf %a, %b : vector<288xf32>
+  vector.store %sum, %sum_view[%item, 0] : vector<288xf32>, view<256x288xf32>
+  vector.store %a, %copy_view[%item, 0] : vector<288xf32>, view<256x288xf32>
+  kernel.return
+}
+
+check.case public @forced_spill_sum_values {
+  %input = check.generate.iota offset(0.0) step(1.0) : tensor<147456xf32>
+  %sums = check.generate.fill value(-1.0) : tensor<73728xf32>
+  %copies = check.generate.fill value(-1.0) : tensor<73728xf32>
+  %expected_sums = check.generate.iota offset(73728.0) step(2.0) : tensor<73728xf32>
+  %expected_copies = check.generate.iota offset(0.0) step(1.0) : tensor<73728xf32>
+  kernel.launch @forced_spill_sum(%input, %sums, %copies) : (tensor<147456xf32>, tensor<73728xf32>, tensor<73728xf32>)
+  check.expect.bitwise actual(%sums) expected(%expected_sums) : tensor<73728xf32>
+  check.expect.bitwise actual(%copies) expected(%expected_copies) : tensor<73728xf32>
+  check.return
+}

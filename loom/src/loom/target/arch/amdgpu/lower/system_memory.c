@@ -488,6 +488,9 @@ iree_status_t loom_amdgpu_system_memory_build_acquire_ordering_scoped(
   IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_load_wait(
       builder, descriptor_set, location));
   for (uint8_t i = 0; i < rule->invalidate_count; ++i) {
+    if (!loom_amdgpu_memory_coherence_invalidates_at(rule, i, scope)) {
+      continue;
+    }
     IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_cache_packet(
         builder, descriptor_set, rule, rule->invalidates[i], scope, location));
   }

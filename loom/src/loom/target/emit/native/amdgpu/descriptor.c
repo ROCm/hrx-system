@@ -240,10 +240,19 @@ static uint32_t loom_amdgpu_kernel_descriptor_user_sgpr_count_width(
   return LOOM_AMDGPU_COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_WIDTH;
 }
 
+// Mirrors LLVM's VCC/FLAT_SCRATCH/XNACK_MASK reservation above the addressable
+// SGPRs. An absolute flat-scratch base occupies FLAT_SCRATCH only when the
+// entry initializes it for a private segment.
 static uint32_t loom_amdgpu_kernel_descriptor_legacy_extra_sgpr_count(
-    const loom_amdgpu_processor_info_t* processor) {
+    const loom_amdgpu_kernel_descriptor_fields_t* descriptor) {
+  const loom_amdgpu_processor_info_t* processor = descriptor->processor;
+  const bool initializes_flat_scratch = iree_all_bits_set(
+      descriptor->flags,
+      LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_FLAT_SCRATCH_INIT |
+          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_PRIVATE_SEGMENT);
   uint32_t count = 2u;
-  if (loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
+  if (initializes_flat_scratch ||
+      loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
           &processor->properties,
           LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH)) {
     count = 6u;
@@ -467,7 +476,7 @@ iree_status_t loom_amdgpu_kernel_descriptor_encode(
           &processor->properties,
           LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_GFX10_SGPR_ENCODING)) {
     const uint32_t extra_sgpr_count =
-        loom_amdgpu_kernel_descriptor_legacy_extra_sgpr_count(processor);
+        loom_amdgpu_kernel_descriptor_legacy_extra_sgpr_count(&descriptor);
     if (descriptor.next_free_sgpr > UINT32_MAX - extra_sgpr_count) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,

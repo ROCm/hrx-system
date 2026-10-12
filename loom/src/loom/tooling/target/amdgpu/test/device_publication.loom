@@ -1,0 +1,78 @@
+// Each work-item writes four plain payload words and publishes them with a
+// device-scope release store. The matching work-item of the next workgroup
+// acquires that flag and copies the payload, so a missing release writeback
+// or acquire invalidation leaves a stale zero in the output. The eight small
+// workgroups are co-resident, so the spin cannot wait on an unscheduled
+// producer.
+kernel.def @device_publication() {
+  %workgroups = index.constant 8 : index
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%payload: buffer, %flags: buffer, %output: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c64 = index.constant 64 : index
+  %base = index.constant 0 : offset
+  %global_payload = buffer.assume.memory_space<global> %payload : buffer
+  %global_flags = buffer.assume.memory_space<global> %flags : buffer
+  %payload_view = buffer.view %global_payload[%base] : buffer -> view<2048xi32>
+  %flag_view = buffer.view %global_flags[%base] : buffer -> view<512xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<2048xi32>
+  %group_base = index.mul %workgroup, %c64 : index
+  %item = index.add %group_base, %lane : index
+  %word0 = index.mul %item, %c4 : index
+  %word1 = index.add %word0, %c1 : index
+  %word2 = index.add %word0, %c2 : index
+  %word3 = index.add %word0, %c3 : index
+  %value0 = index.cast %word1 : index to i32
+  %value1 = index.cast %word2 : index to i32
+  %value2 = index.cast %word3 : index to i32
+  %word4 = index.add %word0, %c4 : index
+  %value3 = index.cast %word4 : index to i32
+  view.store %value0, %payload_view[%word0] : i32, view<2048xi32>
+  view.store %value1, %payload_view[%word1] : i32, view<2048xi32>
+  view.store %value2, %payload_view[%word2] : i32, view<2048xi32>
+  view.store %value3, %payload_view[%word3] : i32, view<2048xi32>
+  %ready = scalar.constant 1 : i32
+  view.atomic.store %ready, %flag_view[%item] {ordering = release, scope = device} : i32, view<512xi32>
+  %next_group = index.add %workgroup, %c1 : index
+  %neighbor_group = index.rem %next_group, %c8 : index
+  %neighbor_base = index.mul %neighbor_group, %c64 : index
+  %neighbor = index.add %neighbor_base, %lane : index
+  scf.while {
+    %flag = view.atomic.load %flag_view[%neighbor] {ordering = acquire, scope = device} : view<512xi32> -> i32
+    %pending = scalar.cmpi ne, %flag, %ready : i32
+    scf.condition %pending : i1
+  } do {
+    scf.yield
+  }
+  %source0 = index.mul %neighbor, %c4 : index
+  %source1 = index.add %source0, %c1 : index
+  %source2 = index.add %source0, %c2 : index
+  %source3 = index.add %source0, %c3 : index
+  %observed0 = view.load %payload_view[%source0] : view<2048xi32> -> i32
+  %observed1 = view.load %payload_view[%source1] : view<2048xi32> -> i32
+  %observed2 = view.load %payload_view[%source2] : view<2048xi32> -> i32
+  %observed3 = view.load %payload_view[%source3] : view<2048xi32> -> i32
+  view.store %observed0, %output_view[%source0] : i32, view<2048xi32>
+  view.store %observed1, %output_view[%source1] : i32, view<2048xi32>
+  view.store %observed2, %output_view[%source2] : i32, view<2048xi32>
+  view.store %observed3, %output_view[%source3] : i32, view<2048xi32>
+  kernel.return
+}
+
+check.case public @device_publication_values {
+  %payload = check.generate.fill value(0) : tensor<2048xi32>
+  %flags = check.generate.fill value(0) : tensor<512xi32>
+  %output = check.generate.fill value(0) : tensor<2048xi32>
+  %expected = check.generate.iota offset(1) step(1) : tensor<2048xi32>
+  kernel.launch @device_publication(%payload, %flags, %output) : (tensor<2048xi32>, tensor<512xi32>, tensor<2048xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<2048xi32>
+  check.return
+}

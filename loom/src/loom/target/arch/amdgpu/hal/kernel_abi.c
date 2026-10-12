@@ -14,6 +14,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/registers.h"
@@ -397,23 +398,41 @@ static void loom_amdgpu_hal_kernel_abi_build_fixed_values(
           LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_DISPATCH_PTR,
           LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_KERNARG_SEGMENT_PTR,
           LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_DISPATCH_ID,
-      };
+  };
   uint32_t user_sgpr_base = 0;
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kUserSgprSourceKinds); ++i) {
     const loom_amdgpu_hal_kernel_abi_source_kind_t source_kind =
         kUserSgprSourceKinds[i];
     const loom_value_id_t value_id = live_in_values[source_kind];
-    if (value_id == LOOM_VALUE_ID_INVALID) {
-      continue;
-    }
     const loom_amdgpu_hal_kernel_abi_source_info_t* source_info =
         loom_amdgpu_hal_kernel_abi_source_info_from_kind(source_kind);
     IREE_ASSERT(source_info != NULL,
                 "verified AMDGPU HAL ABI user SGPR source info");
+    if (value_id == LOOM_VALUE_ID_INVALID) {
+      // The descriptor enables the kernarg pointer for any non-empty kernarg
+      // segment, even after DCE removes every use. Reserving it whenever the
+      // flat-scratch-init pair follows keeps that pair's position independent
+      // of whether a kernarg use survived.
+      if (source_kind ==
+              LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_KERNARG_SEGMENT_PTR &&
+          iree_any_bit_set(
+              result->launch_input_flags,
+              LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_INPUT_FLAT_SCRATCH_INIT)) {
+        user_sgpr_base += source_info->unit_count;
+      }
+      continue;
+    }
     loom_amdgpu_hal_kernel_abi_append_fixed_value(
         result->fixed_values, &result->fixed_value_count, value_id,
         user_sgpr_base, source_info->unit_count);
     user_sgpr_base += source_info->unit_count;
+  }
+  // Flat-scratch init follows the other enabled user SGPRs in AMDHSA order.
+  if (iree_any_bit_set(
+          result->launch_input_flags,
+          LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_INPUT_FLAT_SCRATCH_INIT)) {
+    result->flat_scratch_init_sgpr = user_sgpr_base;
+    user_sgpr_base += 2;
   }
   result->user_sgpr_count = user_sgpr_base;
 
@@ -1386,7 +1405,7 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_verify_live_ins(
           NULL,
           NULL,
           NULL,
-      };
+  };
   const loom_op_t* packed_workitem_op = NULL;
   iree_string_view_t packed_workitem_source_name = iree_string_view_empty();
   loom_value_id_t
@@ -1501,14 +1520,39 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_verify_live_ins(
   return iree_ok_status();
 }
 
+loom_amdgpu_hal_kernel_abi_launch_input_flags_t
+loom_amdgpu_hal_kernel_abi_launch_inputs_for_processor(
+    const loom_amdgpu_processor_properties_t* properties) {
+  return loom_amdgpu_processor_properties_use_absolute_flat_scratch(properties)
+             ? LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_INPUT_FLAT_SCRATCH_INIT
+             : LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_INPUT_NONE;
+}
+
+loom_amdgpu_hal_kernel_abi_launch_input_flags_t
+loom_amdgpu_hal_kernel_abi_launch_inputs_for_target_facts(
+    const loom_target_facts_t* target_facts) {
+  const loom_amdgpu_target_facts_t* amdgpu_facts =
+      loom_amdgpu_target_facts_cast(target_facts);
+  if (amdgpu_facts == NULL) {
+    return LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_INPUT_NONE;
+  }
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(amdgpu_facts->identity.target);
+  return loom_amdgpu_hal_kernel_abi_launch_inputs_for_processor(
+      processor != NULL ? &processor->properties : NULL);
+}
+
 iree_status_t loom_amdgpu_hal_kernel_abi_verify_low(
     const loom_module_t* module, const loom_op_t* function_op,
-    const loom_low_descriptor_set_t* descriptor_set, uint32_t max_errors,
-    iree_diagnostic_emitter_t emitter,
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_hal_kernel_abi_launch_input_flags_t launch_input_flags,
+    uint32_t max_errors, iree_diagnostic_emitter_t emitter,
     loom_amdgpu_hal_kernel_abi_verify_result_t* out_result,
     iree_arena_allocator_t* arena) {
   *out_result = (loom_amdgpu_hal_kernel_abi_verify_result_t){
       .kernarg_segment_ptr = LOOM_VALUE_ID_INVALID,
+      .launch_input_flags = launch_input_flags,
+      .flat_scratch_init_sgpr = LOOM_AMDGPU_HAL_KERNEL_ABI_NO_SGPR,
   };
   if (module == NULL || function_op == NULL || descriptor_set == NULL ||
       arena == NULL) {

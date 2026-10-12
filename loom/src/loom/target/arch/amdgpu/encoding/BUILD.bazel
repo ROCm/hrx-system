@@ -60,6 +60,16 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "cdna2_encoding_tables",
+    srcs = ["//loom/src/loom/target/arch/amdgpu/descriptors:cdna2_encoding_tables.c"],
+    target_compatible_with = loom_amdgpu_descriptor_table_compatible_with("cdna2"),
+    deps = [
+        ":encoding_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "cdna3_encoding_tables",
     srcs = ["//loom/src/loom/target/arch/amdgpu/descriptors:cdna3_encoding_tables.c"],
     target_compatible_with = loom_amdgpu_descriptor_table_compatible_with("cdna3"),

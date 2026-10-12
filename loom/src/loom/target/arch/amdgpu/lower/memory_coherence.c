@@ -238,6 +238,45 @@ static const loom_amdgpu_memory_coherence_rule_t kMemoryCoherenceRules[] = {
                     .release_wait_count = 1,
                 },
         },
+    [LOOM_AMDGPU_MEMORY_ORDERING_MODEL_GFX90A] =
+        {
+            // GLC misses the per-CU L1 for device and system observations.
+            // Stores are write-through and update atomics bypass L1, using
+            // GLC only as return control (LLVM GFX90A memory-model table).
+            .load_attrs =
+                {
+                    [LOOM_CACHE_SCOPE_DEVICE] =
+                        LOOM_AMDGPU_MEMORY_COHERENCE_ATTR_GLC,
+                    [LOOM_CACHE_SCOPE_SYSTEM] =
+                        LOOM_AMDGPU_MEMORY_COHERENCE_ATTR_GLC,
+                },
+            .release_wait_masks = {LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS |
+                                   LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM},
+            .release_wait_count = 1,
+            .local_wait_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS |
+                               LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM,
+            // The device L2 is coherent; only system publication writes it
+            // back to memory.
+            .writeback = LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_WBL2,
+            .writeback_scope = LOOM_CACHE_SCOPE_SYSTEM,
+            .writeback_wait_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE,
+            // System acquisition drops stale non-coherent L2 lines before
+            // the L1 invalidation shared with device acquisition. Both are
+            // ordered with later accesses of the same wave.
+            .invalidates = {LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_INVL2,
+                            LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_WBINVL1_VOL},
+            .invalidate_scopes = {LOOM_CACHE_SCOPE_SYSTEM,
+                                  LOOM_CACHE_SCOPE_DEVICE},
+            .invalidate_count = 2,
+            // With TgSplit disabled the workgroup shares an ordered L1.
+            .workgroup =
+                {
+                    .cache_scope = LOOM_CACHE_SCOPE_WORKGROUP,
+                    .release_wait_masks = {LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS |
+                                           LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM},
+                    .release_wait_count = 1,
+                },
+        },
 };
 
 const loom_amdgpu_memory_coherence_rule_t* loom_amdgpu_memory_coherence_rule(

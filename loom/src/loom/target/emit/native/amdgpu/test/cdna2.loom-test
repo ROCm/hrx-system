@@ -1,0 +1,229 @@
+// RUN: emit amdgpu-kernel-assembly
+
+// Scratch first introduced by private storage composes an absolute flat-scratch
+// base from the flat-scratch-init pair and the wave offset before any access.
+// CDNA2 has no offset-only scratch form, so every slot is addressed by VADDR.
+amdgpu.target<gfx90a> @target
+
+low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @private_round_trip() asm {
+  %storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %value = v_mov_b32 7
+  low.spill %value, %storage : reg<amdgpu.vgpr>, low.storage<private>
+  %reloaded = low.reload %storage : low.storage<private> -> reg<amdgpu.vgpr>
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx90a"
+.amdhsa_code_object_version 6
+
+.protected private_round_trip
+.globl private_round_trip
+.p2align 8
+.type private_round_trip,@function
+private_round_trip:
+  s_add_u32 flat_scratch_lo, s2, s4
+  s_addc_u32 flat_scratch_hi, s3, 0
+  v_mov_b32 v0, 7
+  v_mov_b32 v1, 0
+  scratch_store_b32 v1, v0, off offset:0 glc:0 slc:0 scc:0
+  v_mov_b32 v0, 0
+  scratch_load_b32 v0, v0, off offset:0 glc:0 slc:0 scc:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+.Lfunc_end0:
+.size private_round_trip, .Lfunc_end0-private_round_trip
+
+.rodata
+.p2align 6
+.amdhsa_kernel private_round_trip
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 4
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 4
+  .amdhsa_user_sgpr_private_segment_buffer 0
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_flat_scratch_init 1
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_system_sgpr_private_segment_wavefront_offset 1
+  .amdhsa_system_sgpr_workgroup_id_x 0
+  .amdhsa_system_sgpr_workgroup_id_y 0
+  .amdhsa_system_sgpr_workgroup_id_z 0
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 2
+  .amdhsa_next_free_sgpr 5
+  .amdhsa_accum_offset 4
+  .amdhsa_reserve_vcc 0
+  .amdhsa_reserve_flat_scratch 1
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_dx10_clamp 1
+  .amdhsa_ieee_mode 1
+  .amdhsa_fp16_overflow 0
+  .amdhsa_tg_split 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx90a'
+  amdhsa.kernels:
+    - .name: 'private_round_trip'
+      .symbol: 'private_round_trip.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 0
+      .private_segment_fixed_size: 4
+      .kernarg_segment_align: 8
+      .wavefront_size: 64
+      .sgpr_count: 5
+      .vgpr_count: 2
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .args: []
+.end_amdgpu_metadata
+
+// ====
+
+// A kernel without private storage keeps the flat-scratch-init pair reserved
+// but neither enables the wave offset nor initializes FLAT_SCRATCH.
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx90a> @target
+
+low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @scratch_free() asm {
+  %value = v_mov_b32 7
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx90a"
+.amdhsa_code_object_version 6
+
+.protected scratch_free
+.globl scratch_free
+.p2align 8
+.type scratch_free,@function
+scratch_free:
+  v_mov_b32 v0, 7
+  s_endpgm
+.Lfunc_end0:
+.size scratch_free, .Lfunc_end0-scratch_free
+
+.rodata
+.p2align 6
+.amdhsa_kernel scratch_free
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 4
+  .amdhsa_user_sgpr_private_segment_buffer 0
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_flat_scratch_init 1
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_system_sgpr_private_segment_wavefront_offset 0
+  .amdhsa_system_sgpr_workgroup_id_x 0
+  .amdhsa_system_sgpr_workgroup_id_y 0
+  .amdhsa_system_sgpr_workgroup_id_z 0
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 4
+  .amdhsa_accum_offset 4
+  .amdhsa_reserve_vcc 0
+  .amdhsa_reserve_flat_scratch 0
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_dx10_clamp 1
+  .amdhsa_ieee_mode 1
+  .amdhsa_fp16_overflow 0
+  .amdhsa_tg_split 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx90a'
+  amdhsa.kernels:
+    - .name: 'scratch_free'
+      .symbol: 'scratch_free.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 0
+      .private_segment_fixed_size: 0
+      .kernarg_segment_align: 8
+      .wavefront_size: 64
+      .sgpr_count: 4
+      .vgpr_count: 1
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .args: []
+.end_amdgpu_metadata
+
+// ====
+
+// A 64-bit VALU shift must not read its VGPR amount from the last register of
+// an eight-VGPR allocation block (MI200 erratum), so the amount is even-aligned.
+// RUN: emit amdgpu-assembly @divergent_shift64 strategy=source
+
+amdgpu.target<gfx90a> @target
+
+low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @divergent_shift64(%value: reg<amdgpu.vgpr x2>, %bias: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>) asm {
+  %amount = v_add_u32 %bias, %bias
+  %shifted = v_lshlrev_b64 %amount, %value
+  return %shifted, %bias
+}
+
+// ----
+  v_add_u32 v4, v2, v2
+  v_lshlrev_b64 v[0:1], v4, v[0:1]
+  s_endpgm
+
+// ====
+
+// XNACK replay is not yet qualified for CDNA2 allocation and scheduling, so an
+// XNACK-on code object is rejected before native emission.
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx90a> @target {features = [xnack]}
+
+// ERROR@+1: AMDGPU/052 {function_name="xnack_on", target_key="gfx90a:xnack+", processor="gfx90a", feature="xnack+"}
+low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @xnack_on() asm {
+  %value = v_mov_b32 7
+  return
+}

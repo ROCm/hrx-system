@@ -787,7 +787,10 @@ class LowKernelEmitter {
     }
     loom_amdgpu_hal_kernel_abi_verify_result_t source_abi = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
-        module_, low_function, descriptor_set, /*max_errors=*/20,
+        module_, low_function, descriptor_set,
+        loom_amdgpu_hal_kernel_abi_launch_inputs_for_target_facts(
+            target.target_facts),
+        /*max_errors=*/20,
         iree_diagnostic_emitter_t{
             .fn = PrintCompilerDiagnostic,
             .user_data = nullptr,
@@ -804,7 +807,10 @@ class LowKernelEmitter {
 
     loom_amdgpu_hal_kernel_abi_verify_result_t abi_verify_result = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
-        module_, low_function, descriptor_set, /*max_errors=*/20,
+        module_, low_function, descriptor_set,
+        loom_amdgpu_hal_kernel_abi_launch_inputs_for_target_facts(
+            target.target_facts),
+        /*max_errors=*/20,
         iree_diagnostic_emitter_t{
             .fn = PrintCompilerDiagnostic,
             .user_data = nullptr,

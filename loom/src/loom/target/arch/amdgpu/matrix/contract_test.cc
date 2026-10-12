@@ -622,9 +622,11 @@ TEST(MatrixContractTest, ProcessorFeatureBitsGateAvailability) {
   loom_amdgpu_matrix_feature_bits_t gfx942_features = 0;
   IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
       IREE_SV("gfx942"), &gfx942_features));
+  // The gfx90a compiler target exposes no matrix contracts.
   loom_amdgpu_matrix_feature_bits_t gfx90a_features = 0;
-  IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
-      IREE_SV("gfx90a"), &gfx90a_features));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_amdgpu_matrix_feature_bits_from_processor(
+                            IREE_SV("gfx90a"), &gfx90a_features));
   loom_amdgpu_matrix_feature_bits_t gfx950_features = 0;
   IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
       IREE_SV("gfx950"), &gfx950_features));
@@ -671,7 +673,7 @@ TEST(MatrixContractTest, ProcessorFeatureBitsGateAvailability) {
   EXPECT_FALSE(loom_amdgpu_matrix_contract_is_available(double_mfma,
                                                         gfx908_features, 64));
   EXPECT_TRUE(loom_amdgpu_matrix_contract_is_available(double_mfma,
-                                                       gfx90a_features, 64));
+                                                       gfx942_features, 64));
 
   const loom_amdgpu_matrix_contract_descriptor_t* scaled_mfma =
       FindDescriptor("mfma.scale.f32.16x16x128.f8f6f4.f4.f4");

@@ -184,6 +184,23 @@ static iree_status_t loom_amdgpu_kernel_record_build_storage_layout(
   return iree_ok_status();
 }
 
+// Counts the system SGPRs that AMDHSA initializes before the private-segment
+// wave offset.
+static uint32_t loom_amdgpu_kernel_record_system_sgpr_count_before_wave_offset(
+    loom_amdgpu_kernel_descriptor_flags_t flags) {
+  static const loom_amdgpu_kernel_descriptor_flags_t kSystemSgprFlags[] = {
+      LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_X,
+      LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_Y,
+      LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_ID_Z,
+      LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_WORKGROUP_INFO,
+  };
+  uint32_t count = 0;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kSystemSgprFlags); ++i) {
+    count += iree_any_bit_set(flags, kSystemSgprFlags[i]) ? 1u : 0u;
+  }
+  return count;
+}
+
 static iree_status_t loom_amdgpu_kernel_record_collect_descriptor_flags(
     const loom_low_schedule_table_t* schedule,
     const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify,
@@ -443,17 +460,42 @@ iree_status_t loom_amdgpu_kernel_record_build(
       loom_amdgpu_kernel_descriptor_workitem_id_mode_from_flags(
           descriptor_flags, &system_vgpr_workitem_id));
 
-  const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
-      loom_amdgpu_kernel_entry_envelope_for_properties(&processor->properties);
+  const uint64_t private_segment_fixed_size =
+      storage_layout.segment_sizes.private_segment_fixed_size;
+  if (private_segment_fixed_size != 0) {
+    descriptor_flags |= LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_PRIVATE_SEGMENT;
+  }
+  loom_amdgpu_kernel_entry_plan_t entry_plan =
+      loom_amdgpu_kernel_entry_plan_for_properties(&processor->properties);
+  if (abi_verify->flat_scratch_init_sgpr !=
+      LOOM_AMDGPU_HAL_KERNEL_ABI_NO_SGPR) {
+    // The pair, and the kernarg pointer before it, are requested for every
+    // kernel so that allocation-introduced scratch never moves launch inputs.
+    // The wave offset is the last system SGPR, so enabling it only for a
+    // private segment moves nothing either.
+    descriptor_flags |=
+        LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
+        LOOM_AMDGPU_KERNEL_DESCRIPTOR_ENABLE_SGPR_FLAT_SCRATCH_INIT;
+    if (private_segment_fixed_size != 0) {
+      entry_plan.flat_scratch_init_sgpr = abi_verify->flat_scratch_init_sgpr;
+      entry_plan.private_segment_wave_offset_sgpr =
+          user_sgpr_count +
+          loom_amdgpu_kernel_record_system_sgpr_count_before_wave_offset(
+              descriptor_flags);
+    }
+  }
+  loom_amdgpu_kernel_entry_envelope_t entry_envelope = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_entry_envelope_build(
+      &entry_plan, scratch_arena, &entry_envelope));
   uint32_t next_free_sgpr = preflight->next_free_sgpr > user_sgpr_count
                                 ? preflight->next_free_sgpr
                                 : user_sgpr_count;
-  if (entry_envelope->minimum_sgpr_count > next_free_sgpr) {
-    next_free_sgpr = entry_envelope->minimum_sgpr_count;
+  if (entry_envelope.minimum_sgpr_count > next_free_sgpr) {
+    next_free_sgpr = entry_envelope.minimum_sgpr_count;
   }
   uint32_t next_free_vgpr = preflight->next_free_vgpr;
-  if (entry_envelope->minimum_vgpr_count > next_free_vgpr) {
-    next_free_vgpr = entry_envelope->minimum_vgpr_count;
+  if (entry_envelope.minimum_vgpr_count > next_free_vgpr) {
+    next_free_vgpr = entry_envelope.minimum_vgpr_count;
   }
 
   iree_string_view_t descriptor_symbol = iree_string_view_empty();
@@ -510,6 +552,8 @@ iree_status_t loom_amdgpu_kernel_record_build(
       .descriptor_flags = descriptor_flags,
       .system_vgpr_workitem_id = system_vgpr_workitem_id,
       .user_sgpr_count = user_sgpr_count,
+      .entry_plan = entry_plan,
+      .entry_envelope = entry_envelope,
   };
   return iree_ok_status();
 }

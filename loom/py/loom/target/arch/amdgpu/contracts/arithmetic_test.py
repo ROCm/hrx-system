@@ -626,9 +626,13 @@ def test_exact_f32_division_uses_scaled_fmaak_product() -> None:
             for rule in _rules_for_source_op(compiled, source_op)
             if "amdgpu.v_div_fixup_f32" in _rule_descriptor_keys(compiled, rule)
         )
-        assert len(exact_rules) == 1
-        descriptor_keys = _rule_descriptor_keys(compiled, exact_rules[0])
-        assert "amdgpu.v_fmaak_f32" in descriptor_keys
+        # FMAAK is preferred; targets without it (CDNA2) materialize 1.0.
+        assert len(exact_rules) == 2
+        fmaak_keys = _rule_descriptor_keys(compiled, exact_rules[0])
+        assert "amdgpu.v_fmaak_f32" in fmaak_keys
+        fallback_keys = _rule_descriptor_keys(compiled, exact_rules[1])
+        assert "amdgpu.v_fmaak_f32" not in fallback_keys
+        assert {"amdgpu.v_mov_b32", "amdgpu.v_fma_f32"} <= set(fallback_keys)
 
 
 def test_packed_f16_arithmetic_rules_publish_native_pk_ops() -> None:

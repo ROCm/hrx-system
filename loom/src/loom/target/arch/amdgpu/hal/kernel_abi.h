@@ -20,6 +20,7 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/target/arch/amdgpu/target_info_defs.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -163,13 +164,28 @@ typedef enum loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flag_bits_e {
   LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Z = 1u << 2,
   // Workgroup-coordinate launch-state flags known by the AMDGPU HAL ABI.
   LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_KNOWN_FLAGS =
-      LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_X |
+          LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_X |
       LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Y |
       LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Z,
 } loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flag_bits_t;
 
 // Bitset of loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flag_bits_t values.
 typedef uint32_t loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t;
+
+// Launch inputs requested by the processor ABI independently of live-ins.
+typedef enum loom_amdgpu_hal_kernel_abi_launch_input_flag_bits_e {
+  LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_INPUT_NONE = 0u,
+  // Request the flat-scratch-init user SGPR pair for an absolute scratch base.
+  // The pair is reserved for every kernel so that scratch first introduced by
+  // register allocation never moves the launch inputs that follow it.
+  LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_INPUT_FLAT_SCRATCH_INIT = 1u << 0,
+} loom_amdgpu_hal_kernel_abi_launch_input_flag_bits_t;
+
+// Bitset of loom_amdgpu_hal_kernel_abi_launch_input_flag_bits_t values.
+typedef uint32_t loom_amdgpu_hal_kernel_abi_launch_input_flags_t;
+
+// Sentinel for an absent ABI SGPR location.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_NO_SGPR UINT32_MAX
 
 // Stable low.live_in source spelling for workitem_id.x in v0.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_X_SOURCE "amdgpu.workitem_id.x"
@@ -329,8 +345,14 @@ typedef struct loom_amdgpu_hal_kernel_abi_verify_result_t {
   // Launch workgroup-coordinate state required by the verified low function.
   loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t
       launch_workgroup_id_flags;
-  // Number of hidden user SGPRs consumed by verified ABI live-ins.
+  // Launch inputs requested by the processor ABI.
+  loom_amdgpu_hal_kernel_abi_launch_input_flags_t launch_input_flags;
+  // Number of hidden user SGPRs consumed by verified ABI live-ins and
+  // processor-requested launch inputs.
   uint32_t user_sgpr_count;
+  // First SGPR of the flat-scratch-init pair, or
+  // LOOM_AMDGPU_HAL_KERNEL_ABI_NO_SGPR when it is not requested.
+  uint32_t flat_scratch_init_sgpr;
   // Fixed physical values retained from verified ABI live-ins.
   loom_low_allocation_fixed_value_t
       fixed_values[LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_FIXED_VALUE_COUNT];
@@ -345,10 +367,22 @@ typedef struct loom_amdgpu_hal_kernel_abi_verify_result_t {
 // |out_result|.
 iree_status_t loom_amdgpu_hal_kernel_abi_verify_low(
     const loom_module_t* module, const loom_op_t* function_op,
-    const loom_low_descriptor_set_t* descriptor_set, uint32_t max_errors,
-    iree_diagnostic_emitter_t emitter,
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_hal_kernel_abi_launch_input_flags_t launch_input_flags,
+    uint32_t max_errors, iree_diagnostic_emitter_t emitter,
     loom_amdgpu_hal_kernel_abi_verify_result_t* out_result,
     iree_arena_allocator_t* arena);
+
+// Returns the launch inputs the processor ABI requests for every HAL kernel.
+loom_amdgpu_hal_kernel_abi_launch_input_flags_t
+loom_amdgpu_hal_kernel_abi_launch_inputs_for_processor(
+    const loom_amdgpu_processor_properties_t* properties);
+
+// Returns the launch inputs requested by the processor selected by
+// |target_facts|, or none for non-AMDGPU or portable targets.
+loom_amdgpu_hal_kernel_abi_launch_input_flags_t
+loom_amdgpu_hal_kernel_abi_launch_inputs_for_target_facts(
+    const loom_target_facts_t* target_facts);
 
 // Derives the AMDGPU HAL-kernel ABI layout for |function_op|.
 //
