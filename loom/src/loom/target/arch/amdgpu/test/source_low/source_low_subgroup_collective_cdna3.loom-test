@@ -79,6 +79,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0
   s_mov_b64_exec %56
   %62 = v_mov_b32 0
   %sum0 = ds_bpermute_b32 %62, %61
+  s_barrier
   %64 = v_and_b32_src0_inline %tid, 63
   %65 = storage {byte_alignment = 4, byte_length = 8} : low.storage<workgroup>
   %66 = storage_address %65 : low.storage<workgroup> -> reg<amdgpu.vgpr>
@@ -113,6 +114,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0
   s_mov_b64_exec %88
   %94 = v_mov_b32 0
   %sum1 = ds_bpermute_b32 %94, %93
+  s_barrier
   %96 = v_mov_b32 0
   %bias_bf16 = global_load_d16_b16_saddr %96, %bias_view
   %bias_f32 = v_lshlrev_b32_src0_16_low16 %bias_bf16

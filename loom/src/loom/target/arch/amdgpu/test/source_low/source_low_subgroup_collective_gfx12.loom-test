@@ -55,6 +55,8 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) abi_layout({constant_c
   s_mov_b64_exec %37
   %43 = v_mov_b32 0
   %result = ds_bpermute_b32 %43, %42
+  s_barrier_signal_all
+  s_barrier_wait_all
   %45 = v_lshlrev_b32_src0_inline %tid, 2
   global_store_b32_saddr %45, %result, %output_view
   return

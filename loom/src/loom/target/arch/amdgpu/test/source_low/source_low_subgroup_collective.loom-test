@@ -633,6 +633,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   s_mov_b64_exec %37
   %43 = v_mov_b32 0
   %result = ds_bpermute_b32 %43, %42
+  s_barrier
   %45 = v_lshlrev_b32_src0_inline %tid, 2
   global_store_b32_saddr %45, %result, %output_view
   return
@@ -738,6 +739,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   s_mov_b64_exec %45
   s_barrier
   %result = ds_read_b32 %21
+  s_barrier
   %48 = v_lshlrev_b32_src0_inline %tid, 2
   global_store_b32_saddr %48, %result, %output_view
   return
@@ -846,6 +848,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   s_mov_b64_exec %87
   s_barrier
   %sum0 = ds_read_b32 %63
+  s_barrier
   %90 = v_and_b32_src0_inline %tid, 31
   %91 = storage {byte_alignment = 4, byte_length = 8} : low.storage<workgroup>
   %92 = storage_address %91 : low.storage<workgroup> -> reg<amdgpu.vgpr>
@@ -879,6 +882,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   s_mov_b64_exec %116
   s_barrier
   %sum1 = ds_read_b32 %92
+  s_barrier
   %no_fusion = s_mov_b32 0
   %has_bias_bits = s_and_b32_rhs_inline %fusion_flags, 1
   %121 = s_cmp_lg_i32 %has_bias_bits, %no_fusion
@@ -996,6 +1000,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   s_mov_b64_exec %51
   s_barrier
   %result = ds_read_b32 %21
+  s_barrier
   %54 = v_lshlrev_b32_src0_inline %tid, 2
   global_store_b32_saddr %54, %result, %output_view
   return
@@ -1065,6 +1070,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   s_mov_b64_exec %48
   s_barrier
   %result = ds_read_b32 %21
+  s_barrier
   %51 = v_lshlrev_b32_src0_inline %tid, 2
   global_store_b32_saddr %51, %result, %output_view
   return
@@ -1128,6 +1134,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %43 = ds_read_b32 %42
   %result = v_add_f32 %41, %43
   s_mov_b64_exec %39
+  s_barrier
   %is_leader = v_cmp_eq_i32_src1_inline %tid {rhs = 0}
   %46, %47 = s_and_saveexec_b64 %is_leader
   low.cond_br %47, ^_bb1, ^_bb2 : reg<amdgpu.scc>
@@ -1204,6 +1211,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %49 = ds_read_b32 %48
   %result = v_add_f32 %47, %49
   s_mov_b64_exec %39
+  s_barrier
   %is_leader = v_cmp_eq_i32_src1_inline %tid {rhs = 0}
   %52, %53 = s_and_saveexec_b64 %is_leader
   low.cond_br %53, ^_bb1, ^_bb2 : reg<amdgpu.scc>
@@ -1277,6 +1285,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %43 = ds_read_b32 %42
   %result = v_add_f32_dpp16 %43, %43 {dpp_ctrl = 177}
   s_mov_b64_exec %39
+  s_barrier
   %is_leader = v_cmp_eq_i32_src1_inline %tid {rhs = 0}
   %46, %47 = s_and_saveexec_b64 %is_leader
   low.cond_br %47, ^_bb1, ^_bb2 : reg<amdgpu.scc>
@@ -1351,6 +1360,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %45 = ds_read_b32 %44
   %result = v_add_f32_dpp16 %45, %45 {dpp_ctrl = 177}
   s_mov_b64_exec %41
+  s_barrier
   %is_wave_leader = v_cmp_eq_i32_src1_inline %lane {rhs = 0}
   %48, %49 = s_and_saveexec_b64 %is_wave_leader
   low.cond_br %49, ^_bb1, ^_bb2 : reg<amdgpu.scc>
@@ -1445,6 +1455,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   s_mov_b64_exec %37
   %70 = v_mov_b32 0
   %result = ds_bpermute_b32 %70, %69
+  s_barrier
   %72 = v_lshlrev_b32_src0_inline %tid, 2
   global_store_b32_saddr %72, %result, %output_view
   return
@@ -1536,6 +1547,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   s_mov_b64_exec %69
   %75 = v_mov_b32 0
   %result = ds_bpermute_b32 %75, %74
+  s_barrier
   %77 = v_lshlrev_b32_src0_inline %tid, 2
   global_store_b32_saddr %77, %result, %output_view
   return
@@ -1659,6 +1671,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %113 = ds_read_b32 %28
   %114 = v_add_u32_src0_inline %28, 8
   %115 = ds_read_b32 %114
+  s_barrier
   %min = concat(%113, %115) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %117 = v_lshlrev_b32_src0_inline %tid, 3
   global_store_b64_saddr %117, %min, %output_view
@@ -1772,6 +1785,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %103 = ds_read_b32 %102
   %104 = v_add_u32_src0_inline %28, 24
   %105 = ds_read_b32 %104
+  s_barrier
   %sum = concat(%99, %101, %103, %105) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   %107 = v_lshlrev_b32_src0_inline %tid, 4
   global_store_b128_saddr %107, %sum, %output_view

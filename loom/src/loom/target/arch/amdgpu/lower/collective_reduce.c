@@ -1065,6 +1065,18 @@ static iree_status_t loom_amdgpu_emit_workgroup_reduce_barrier(
                                                         &plan->cross_wave);
 }
 
+static iree_status_t loom_amdgpu_complete_workgroup_reduce(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_workgroup_reduce_plan_t* plan,
+    const loom_value_id_t* result_registers) {
+  // Every workitem must finish reading shared partials before another dynamic
+  // execution can reuse the reduction's workgroup storage.
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_emit_workgroup_reduce_barrier(context, source_op, plan));
+  return loom_amdgpu_collective_bind_payload_result(
+      context, source_op, plan->result, plan->register_count, result_registers);
+}
+
 static iree_status_t loom_amdgpu_emit_workgroup_reduce_saveexec(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_workgroup_reduce_plan_t* plan, loom_value_id_t guard,
@@ -1369,15 +1381,15 @@ iree_status_t loom_amdgpu_lower_kernel_workgroup_reduce(
               lane_type, mask_type, result_registers));
       if (plan->publication_kind ==
           LOOM_AMDGPU_WORKGROUP_REDUCE_PUBLICATION_LEADER_WORKITEM) {
-        return loom_amdgpu_collective_bind_payload_result(
-            context, source_op, plan->result, register_count, result_registers);
+        return loom_amdgpu_complete_workgroup_reduce(context, source_op, plan,
+                                                     result_registers);
       }
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_emit_workgroup_reduce_serial_scratch_publication(
               context, source_op, plan, scratch_base, linear_id, wave_count,
               lane_type, mask_type, result_registers));
-      return loom_amdgpu_collective_bind_payload_result(
-          context, source_op, plan->result, register_count, result_registers);
+      return loom_amdgpu_complete_workgroup_reduce(context, source_op, plan,
+                                                   result_registers);
     }
 
     if (plan->publication_kind ==
@@ -1436,8 +1448,8 @@ iree_status_t loom_amdgpu_lower_kernel_workgroup_reduce(
 
       if (plan->publication_kind ==
           LOOM_AMDGPU_WORKGROUP_REDUCE_PUBLICATION_REDUNDANT_SUBGROUP_LEADER_LANE) {
-        return loom_amdgpu_collective_bind_payload_result(
-            context, source_op, plan->result, register_count, result_registers);
+        return loom_amdgpu_complete_workgroup_reduce(context, source_op, plan,
+                                                     result_registers);
       }
 
       loom_value_id_t first_lane_offset = LOOM_VALUE_ID_INVALID;
@@ -1451,8 +1463,8 @@ iree_status_t loom_amdgpu_lower_kernel_workgroup_reduce(
             &result_registers[i]));
       }
 
-      return loom_amdgpu_collective_bind_payload_result(
-          context, source_op, plan->result, register_count, result_registers);
+      return loom_amdgpu_complete_workgroup_reduce(context, source_op, plan,
+                                                   result_registers);
     }
 
     loom_value_id_t wave_count_value = LOOM_VALUE_ID_INVALID;
@@ -1504,8 +1516,8 @@ iree_status_t loom_amdgpu_lower_kernel_workgroup_reduce(
         LOOM_AMDGPU_WORKGROUP_REDUCE_PUBLICATION_LEADER_WORKITEM) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_workgroup_reduce_restore_exec(
           context, source_op, plan, saved_exec));
-      return loom_amdgpu_collective_bind_payload_result(
-          context, source_op, plan->result, register_count, result_registers);
+      return loom_amdgpu_complete_workgroup_reduce(context, source_op, plan,
+                                                   result_registers);
     }
 
     loom_value_id_t publish_saved_exec = LOOM_VALUE_ID_INVALID;
@@ -1539,8 +1551,8 @@ iree_status_t loom_amdgpu_lower_kernel_workgroup_reduce(
           context, source_op, plan, address, lane_type, &result_registers[i]));
     }
 
-    return loom_amdgpu_collective_bind_payload_result(
-        context, source_op, plan->result, register_count, result_registers);
+    return loom_amdgpu_complete_workgroup_reduce(context, source_op, plan,
+                                                 result_registers);
   }
 }
 iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_reduce(
