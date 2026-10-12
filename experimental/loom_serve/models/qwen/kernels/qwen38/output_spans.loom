@@ -7,13 +7,13 @@ amdgpu.target<gfx11-generic> @qwen38_output_spans_gfx11_wave32 {subgroup_size = 
 // row is zeroed here, so the fixed four-row projection groups never read stale
 // activations when output cardinality changes or a chunk requests no output.
 kernel.def target(@qwen38_output_spans_gfx11_wave32) export("qwen38_output_normalize_spans") @qwen38_output_normalize_spans(%output_capacity: index) {
-  %outputs = index.assume %output_capacity [range(%output_capacity, 1, 64)] : index
+  %outputs = index.assume %output_capacity [range(%output_capacity, 1, 128)] : index
   %one = index.constant 1 : index
   %threads = index.constant 256 : index
   kernel.launch.config workgroups(%outputs, %one, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%epoch: buffer, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
   %ordinal_value = kernel.workgroup.id<x> : index
-  %ordinal = index.assume %ordinal_value [range(%ordinal_value, 0, 63)] : index
+  %ordinal = index.assume %ordinal_value [range(%ordinal_value, 0, 127)] : index
   %zero_origin = index.constant 0 : offset
   %selection_origin = index.constant 1292 : offset
   %row_bytes = index.constant 20480 : offset
@@ -24,8 +24,8 @@ kernel.def target(@qwen38_output_spans_gfx11_wave32) export("qwen38_output_norma
   %count = index.cast %count_word : i32 to index
   %active = index.cmp ult, %ordinal, %count : index
   scf.if %active {
-    %selection = buffer.view %metadata[%selection_origin] : buffer -> view<64xi32>
-    %row_word = view.load %selection[%ordinal] : view<64xi32> -> i32
+    %selection = buffer.view %metadata[%selection_origin] : buffer -> view<128xi32>
+    %row_word = view.load %selection[%ordinal] : view<128xi32> -> i32
     %row_value = index.cast %row_word : i32 to index
     %row = index.assume %row_value [range(%row_value, 0, 511)] : index
     %capacity = index.constant 512 : index

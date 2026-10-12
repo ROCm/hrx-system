@@ -11,7 +11,7 @@ kernel.def @proposal_fixture() {
   %span_count = index.assume %span_count_value [range(%span_count_value, 1, 16)] : index
   %origin = index.constant 0 : offset
   %descriptor_origin = index.constant 12 : offset
-  %options_origin = index.constant 1548 : offset
+  %options_origin = index.constant 1804 : offset
   %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
   %spans = buffer.view %epoch[%descriptor_origin] : buffer -> view<64x5xi32>
   %options = buffer.view %epoch[%options_origin] : buffer -> view<64x2xi32>
@@ -103,7 +103,7 @@ kernel.def @proposal_fixture() {
 check.case public @proposal_compaction {
   %span_count = check.param.range linear bounds(1 to 16) step(1) : index
   %mask = check.param.choice values([1, 32769, 21845, 43691, 65535]) : i32
-  %epoch = check.generate.fill value(-99) : tensor<516xi32>
+  %epoch = check.generate.fill value(-99) : tensor<580xi32>
   %draft = check.generate.fill value(-99) : tensor<387xi32>
   %origins = check.generate.fill value(-99) : tensor<16xi32>
   %inputs = check.generate.fill value(-99) : tensor<512xi32>
@@ -113,8 +113,8 @@ check.case public @proposal_compaction {
   %expected_anchors = check.generate.fill value(0) : tensor<512xi32>
   %expected_inputs = check.generate.fill value(0) : tensor<512xi32>
   %expected_target = check.generate.iota offset(1000) step(1) : tensor<512xi32>
-  kernel.launch @proposal_fixture(%span_count, %mask, %epoch, %expected_draft, %expected_origins, %expected_anchors, %expected_inputs, %expected_target) : (index, i32, tensor<516xi32>, tensor<387xi32>, tensor<16xi32>, tensor<512xi32>, tensor<512xi32>, tensor<512xi32>)
-  kernel.launch @qwen38_mtp_proposal_prepare(%epoch, %target, %draft, %origins, %inputs) : (tensor<516xi32>, tensor<512xi32>, tensor<387xi32>, tensor<16xi32>, tensor<512xi32>)
+  kernel.launch @proposal_fixture(%span_count, %mask, %epoch, %expected_draft, %expected_origins, %expected_anchors, %expected_inputs, %expected_target) : (index, i32, tensor<580xi32>, tensor<387xi32>, tensor<16xi32>, tensor<512xi32>, tensor<512xi32>, tensor<512xi32>)
+  kernel.launch @qwen38_mtp_proposal_prepare(%epoch, %target, %draft, %origins, %inputs) : (tensor<580xi32>, tensor<512xi32>, tensor<387xi32>, tensor<16xi32>, tensor<512xi32>)
   check.expect.bitwise actual(%inputs) expected(%expected_anchors) : tensor<512xi32>
   check.expect.bitwise actual(%origins) expected(%expected_origins) : tensor<16xi32>
   check.return
@@ -123,7 +123,7 @@ check.case public @proposal_compaction {
 check.case public @proposal_publication {
   %span_count = check.param.range linear bounds(1 to 16) step(1) : index
   %mask = check.param.choice values([1, 32769, 21845, 43691, 65535]) : i32
-  %epoch = check.generate.fill value(-99) : tensor<516xi32>
+  %epoch = check.generate.fill value(-99) : tensor<580xi32>
   %draft = check.generate.fill value(-99) : tensor<387xi32>
   %origins = check.generate.fill value(-99) : tensor<16xi32>
   %inputs = check.generate.fill value(-99) : tensor<512xi32>
@@ -134,8 +134,8 @@ check.case public @proposal_publication {
   %expected_anchors = check.generate.fill value(0) : tensor<512xi32>
   %expected_inputs = check.generate.fill value(0) : tensor<512xi32>
   %expected_target = check.generate.iota offset(1000) step(1) : tensor<512xi32>
-  kernel.launch @proposal_fixture(%span_count, %mask, %epoch, %expected_draft, %expected_origins, %expected_anchors, %expected_inputs, %expected_target) : (index, i32, tensor<516xi32>, tensor<387xi32>, tensor<16xi32>, tensor<512xi32>, tensor<512xi32>, tensor<512xi32>)
-  kernel.launch @qwen38_mtp_proposal_prepare(%epoch, %target, %draft, %origins, %inputs) : (tensor<516xi32>, tensor<512xi32>, tensor<387xi32>, tensor<16xi32>, tensor<512xi32>)
+  kernel.launch @proposal_fixture(%span_count, %mask, %epoch, %expected_draft, %expected_origins, %expected_anchors, %expected_inputs, %expected_target) : (index, i32, tensor<580xi32>, tensor<387xi32>, tensor<16xi32>, tensor<512xi32>, tensor<512xi32>, tensor<512xi32>)
+  kernel.launch @qwen38_mtp_proposal_prepare(%epoch, %target, %draft, %origins, %inputs) : (tensor<580xi32>, tensor<512xi32>, tensor<387xi32>, tensor<16xi32>, tensor<512xi32>)
   %zero = check.literal value(0) : index
   %one = check.literal value(1) : index
   %two = check.literal value(2) : index

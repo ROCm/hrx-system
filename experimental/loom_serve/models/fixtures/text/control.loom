@@ -279,19 +279,19 @@ func.def public @publish_epoch(%plan: buffer, %count: i32, %verified: i32, %cont
   %length = index.cast %bounded_count : i32 to index
   %requests = buffer.view %plan[%origin] : buffer -> view<32x8xi32>
   %outputs = buffer.view %ordinary[%origin] : buffer -> view<16xi32>
-  %published = buffer.view %progress[%origin] : buffer -> view<16x12xi32>
+  %published = buffer.view %progress[%origin] : buffer -> view<16x20xi32>
   scf.for %i = [%zero to %length step %one] {
     %consumed = view.load %requests[%i, 0] : view<32x8xi32> -> i32
     %flags = view.load %requests[%i, 5] : view<32x8xi32> -> i32
     %bits = scalar.andi %flags, %one32 : i32
     %selected = scalar.cmpi ne, %bits, %zero32 : i32
     %selected_count = scalar.extui %selected : i1 to i32
-    view.store %consumed, %published[%i, 0] : i32, view<16x12xi32>
-    view.store %consumed, %published[%i, 1] : i32, view<16x12xi32>
-    view.store %selected_count, %published[%i, 2] : i32, view<16x12xi32>
+    view.store %consumed, %published[%i, 0] : i32, view<16x20xi32>
+    view.store %consumed, %published[%i, 1] : i32, view<16x20xi32>
+    view.store %selected_count, %published[%i, 2] : i32, view<16x20xi32>
     scf.if %selected {
       %token = view.load %outputs[%i] : view<16xi32> -> i32
-      view.store %token, %published[%i, 4] : i32, view<16x12xi32>
+      view.store %token, %published[%i, 4] : i32, view<16x20xi32>
       scf.yield
     }
     scf.yield

@@ -4,12 +4,12 @@ func.decl @qwen38_row_gdn_binding(%epoch: buffer, %control_origin: offset, %rows
 template.decl @qwen38.gdn_conv_prepare_prefill.body(%publish: i1, %head: index, %thread: index, %epoch: buffer, %epsilon: f32, %qkv: buffer, %weight: buffer, %state: buffer, %output: buffer, %inverse_norm: buffer, %control_origin: offset, %token_begin: index, %history_origin: offset, %next_history_origin: offset)
 template.decl @qwen38.gdn_recurrent_prefill_x4.body(%publish: i1, %head: index, %column: index, %lane: index, %epoch: buffer, %qkv: buffer, %inverse_norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %state_origin: offset, %next_state_origin: offset)
 
-// Verification extends the immutable epoch after its 64 selected-row slots:
+// Verification extends the immutable epoch after its 128 selected-row slots:
 // 64 pairs of {speculative, output_limit}, followed by the EOS token. Known
-// spans publish in the traversal; four-input speculative spans publish only
+// spans publish in the traversal; speculative spans publish only
 // after acceptance. The ordinary five-word span and cold row layouts match.
 func.def public inline @qwen38_span_speculative(%epoch: buffer, %span: index) -> (i1) {
-  %origin = index.constant 1548 : offset
+  %origin = index.constant 1804 : offset
   %zero = scalar.constant 0 : i32
   %metadata = buffer.assume.memory_space<constant> %epoch : buffer
   %options = buffer.view %metadata[%origin] : buffer -> view<64x2xi32>
@@ -77,16 +77,21 @@ kernel.def export("qwen38_gdn_recurrent_verify_spans") @qwen38_gdn_recurrent_ver
   kernel.return
 }
 
-// Each layer retains four transitions per compiled span, independently of its
-// padded token capacity. Slot 4*span names that span's four input transitions.
+// Each layer retains verification_width transitions per compiled span,
+// independently of its padded token capacity. Capture slots keep original span
+// placement even when acceptance compacts the replay descriptors.
 // Known prompt/decode spans leave their slots untouched and are never replayed.
-kernel.def export("qwen38_gdn_capture_spans") @qwen38_gdn_capture_spans(%span_capacity: index) {
+kernel.def export("qwen38_gdn_capture_spans") @qwen38_gdn_capture_spans(%span_capacity: index, %verification_width: index) {
   %spans = index.assume %span_capacity [range(%span_capacity, 1, 16)] : index
-  %tiles = index.constant 41 : index
+  %width = index.assume %verification_width [range(%verification_width, 1, 8)] : index
+  %tiles_per_row = index.constant 10 : index
+  %qkv_tiles = index.mul %width, %tiles_per_row : index
   %threads = index.constant 256 : index
   %one = index.constant 1 : index
+  %tiles = index.add %qkv_tiles, %one : index
   kernel.launch.config workgroups(%tiles, %spans, %one) workgroup_size(%threads, %one, %one) : index
-} launch(%epoch: buffer, %qkv: buffer, %alpha: buffer, %beta: buffer, %capture: buffer, %layer_origin: offset) {
+} launch(%verification_width: index, %epoch: buffer, %qkv: buffer, %alpha: buffer, %beta: buffer, %capture: buffer, %layer_origin: offset) {
+  %width = index.assume %verification_width [range(%verification_width, 1, 8)] : index
   %span = kernel.workgroup.id<y> : index
   %active = func.call @qwen38_span_active(%epoch, %span) : (buffer, index) -> (i1)
   scf.if %active {
@@ -96,26 +101,31 @@ kernel.def export("qwen38_gdn_capture_spans") @qwen38_gdn_capture_spans(%span_ca
       %tile = kernel.workgroup.id<x> : index
       %thread = kernel.workitem.id<x> : index
       %four = index.constant 4 : index
-      %forty = index.constant 40 : index
+      %tiles_per_row = index.constant 10 : index
+      %qkv_tiles = index.mul %width, %tiles_per_row : index
       %threads = index.constant 256 : index
       %qkv_row_bytes = index.constant 40960 : offset
-      %qkv_span_bytes = index.constant 163840 : offset
+      %qkv_span_bytes = index.scale %width, %qkv_row_bytes : index, offset -> offset
       %gate_row_bytes = index.constant 192 : offset
-      %gate_span_bytes = index.constant 768 : offset
-      %is_qkv = index.cmp ult, %tile, %forty : index
+      %gate_span_bytes = index.scale %width, %gate_row_bytes : index, offset -> offset
+      %qkv_channels = index.constant 10240 : index
+      %gate_channels = index.constant 48 : index
+      %qkv_elements = index.mul %width, %qkv_channels : index
+      %gate_elements = index.mul %width, %gate_channels : index
+      %is_qkv = index.cmp ult, %tile, %qkv_tiles : index
       scf.if %is_qkv {
         %source_origin = index.scale %begin, %qkv_row_bytes : index, offset -> offset
         %span_origin = index.scale %span, %qkv_span_bytes : index, offset -> offset
         %target_origin = index.add %layer_origin, %span_origin : offset
-        %input = buffer.view %qkv[%source_origin] : buffer -> view<40960xf32>
-        %output = buffer.view %capture[%target_origin] : buffer -> view<40960xf32>
+        %input = buffer.view %qkv[%source_origin] : buffer -> view<[%qkv_elements]xf32>
+        %output = buffer.view %capture[%target_origin] : buffer -> view<[%qkv_elements]xf32>
         %tile_begin = index.mul %tile, %threads : index
         %packet = index.add %tile_begin, %thread : index
         %element = index.mul %packet, %four : index
-        %value = vector.load %input[%element] : view<40960xf32> -> vector<4xf32>
-        vector.store %value, %output[%element] : vector<4xf32>, view<40960xf32>
+        %value = vector.load %input[%element] : view<[%qkv_elements]xf32> -> vector<4xf32>
+        vector.store %value, %output[%element] : vector<4xf32>, view<[%qkv_elements]xf32>
       } else {
-        %packets = index.constant 48 : index
+        %packets = index.div %gate_elements, %four : index
         %active_packet = index.cmp ult, %thread, %packets : index
         scf.if %active_packet {
           %source_origin = index.scale %begin, %gate_row_bytes : index, offset -> offset
@@ -127,15 +137,15 @@ kernel.def export("qwen38_gdn_capture_spans") @qwen38_gdn_capture_spans(%span_ca
           %beta_offset = index.add %alpha_offset, %gate_bytes : offset
           %alpha_origin = index.add %target_origin, %alpha_offset : offset
           %beta_origin = index.add %target_origin, %beta_offset : offset
-          %input_a = buffer.view %alpha[%source_origin] : buffer -> view<192xf32>
-          %input_b = buffer.view %beta[%source_origin] : buffer -> view<192xf32>
-          %output_a = buffer.view %capture[%alpha_origin] : buffer -> view<192xf32>
-          %output_b = buffer.view %capture[%beta_origin] : buffer -> view<192xf32>
+          %input_a = buffer.view %alpha[%source_origin] : buffer -> view<[%gate_elements]xf32>
+          %input_b = buffer.view %beta[%source_origin] : buffer -> view<[%gate_elements]xf32>
+          %output_a = buffer.view %capture[%alpha_origin] : buffer -> view<[%gate_elements]xf32>
+          %output_b = buffer.view %capture[%beta_origin] : buffer -> view<[%gate_elements]xf32>
           %element = index.mul %thread, %four : index
-          %a = vector.load %input_a[%element] : view<192xf32> -> vector<4xf32>
-          %b = vector.load %input_b[%element] : view<192xf32> -> vector<4xf32>
-          vector.store %a, %output_a[%element] : vector<4xf32>, view<192xf32>
-          vector.store %b, %output_b[%element] : vector<4xf32>, view<192xf32>
+          %a = vector.load %input_a[%element] : view<[%gate_elements]xf32> -> vector<4xf32>
+          %b = vector.load %input_b[%element] : view<[%gate_elements]xf32> -> vector<4xf32>
+          vector.store %a, %output_a[%element] : vector<4xf32>, view<[%gate_elements]xf32>
+          vector.store %b, %output_b[%element] : vector<4xf32>, view<[%gate_elements]xf32>
         }
       }
     }

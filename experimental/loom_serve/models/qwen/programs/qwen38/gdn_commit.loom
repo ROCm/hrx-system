@@ -5,11 +5,18 @@ kernel.decl @qwen38_gdn_recurrent_spans(%span_capacity: index) launch(%epoch: bu
 // state. The capture holds the dense projections; this never repeats the model
 // traversal or copies the full recurrent state. Known spans are absent from
 // replay, having published in the target traversal. Scratch and captured rows
-// retain original_span*4 placement even when acceptance compacts descriptors.
-command.program.def public @qwen38_gdn_commit_layer(%span_capacity: index, %layer: index, %ordinal: index) launch(%parameters: buffer, %capture: buffer, %replay: buffer, %rows: buffer, %state: buffer) where [range(%span_capacity, 1, 16), range(%layer, 0, 63), range(%ordinal, 0, 47)] {
-  %span_bytes = index.constant 165376 : offset
-  %qkv_span_bytes = index.constant 163840 : offset
-  %gate_span_bytes = index.constant 768 : offset
+// retain original_span*verification_width placement after descriptor compaction.
+command.program.def public @qwen38_gdn_commit_layer(%span_capacity: index, %width: index, %layer: index, %ordinal: index) launch(%parameters: buffer, %capture: buffer, %replay: buffer, %rows: buffer, %state: buffer) where [range(%span_capacity, 1, 16), range(%width, 1, 8), range(%layer, 0, 63), range(%ordinal, 0, 47)] {
+  %transition_bytes = index.constant 41344 : offset
+  %qkv_row_bytes = index.constant 40960 : offset
+  %gate_row_bytes = index.constant 192 : offset
+  %span_bytes = index.scale %width, %transition_bytes : index, offset -> offset
+  %qkv_span_bytes = index.scale %width, %qkv_row_bytes : index, offset -> offset
+  %gate_span_bytes = index.scale %width, %gate_row_bytes : index, offset -> offset
+  %qkv_channels = index.constant 10240 : index
+  %gate_channels = index.constant 48 : index
+  %qkv_extent = index.mul %width, %qkv_channels : index
+  %gate_extent = index.mul %width, %gate_channels : index
   %layer_bytes = index.scale %span_capacity, %span_bytes : index, offset -> offset
   %alpha_offset = index.scale %span_capacity, %qkv_span_bytes : index, offset -> offset
   %gate_bytes = index.scale %span_capacity, %gate_span_bytes : index, offset -> offset
@@ -17,9 +24,9 @@ command.program.def public @qwen38_gdn_commit_layer(%span_capacity: index, %laye
   %origin = index.scale %ordinal, %layer_bytes : index, offset -> offset
   %alpha_origin = index.add %origin, %alpha_offset : offset
   %beta_origin = index.add %origin, %beta_offset : offset
-  %qkv = buffer.view %capture[%origin] : buffer -> view<[%span_capacity]x40960xf32>
-  %alpha = buffer.view %capture[%alpha_origin] : buffer -> view<[%span_capacity]x192xf32>
-  %beta = buffer.view %capture[%beta_origin] : buffer -> view<[%span_capacity]x192xf32>
+  %qkv = buffer.view %capture[%origin] : buffer -> view<[%span_capacity]x[%qkv_extent]xf32>
+  %alpha = buffer.view %capture[%alpha_origin] : buffer -> view<[%span_capacity]x[%gate_extent]xf32>
+  %beta = buffer.view %capture[%beta_origin] : buffer -> view<[%span_capacity]x[%gate_extent]xf32>
   %state_layer_bytes = index.constant 3268608 : offset
   %history_offset = index.constant 3145728 : offset
   %state_origin = index.scale %ordinal, %state_layer_bytes : index, offset -> offset
@@ -28,20 +35,22 @@ command.program.def public @qwen38_gdn_commit_layer(%span_capacity: index, %laye
   %a = command.parameter %parameters, "blk.{}.ssm_a"[%layer] : view<48xf32>
   %bias = command.parameter %parameters, "blk.{}.ssm_dt.bias"[%layer] : view<48xf32>
   %qkv_bytes = index.scale %span_capacity, %qkv_span_bytes : index, offset -> offset
-  %norm_span_bytes = index.constant 512 : offset
-  %output_span_bytes = index.constant 98304 : offset
+  %norm_row_bytes = index.constant 128 : offset
+  %output_row_bytes = index.constant 24576 : offset
+  %norm_span_bytes = index.scale %width, %norm_row_bytes : index, offset -> offset
+  %output_span_bytes = index.scale %width, %output_row_bytes : index, offset -> offset
   %norm_bytes = index.scale %span_capacity, %norm_span_bytes : index, offset -> offset
   %output_bytes = index.scale %span_capacity, %output_span_bytes : index, offset -> offset
   %qkv_silu = buffer.alloca<global> align(256) %qkv_bytes : buffer
   %inverse_norm = buffer.alloca<global> align(256) %norm_bytes : buffer
   %output = buffer.alloca<global> align(256) %output_bytes : buffer
   %epsilon = scalar.constant 0.000001 : f32
-  kernel.launch @qwen38_gdn_conv_spans[%span_capacity](%replay, %rows, %history_origin, %epsilon, %qkv, %conv_weight, %state, %qkv_silu, %inverse_norm) : [index](buffer, buffer, offset, f32, view<[%span_capacity]x40960xf32>, view<40960xf32>, buffer, buffer, buffer)
-  kernel.launch @qwen38_gdn_recurrent_spans[%span_capacity](%replay, %rows, %state_origin, %qkv_silu, %inverse_norm, %alpha, %beta, %a, %bias, %state, %output) : [index](buffer, buffer, offset, buffer, buffer, view<[%span_capacity]x192xf32>, view<[%span_capacity]x192xf32>, view<48xf32>, view<48xf32>, buffer, buffer)
+  kernel.launch @qwen38_gdn_conv_spans[%span_capacity](%replay, %rows, %history_origin, %epsilon, %qkv, %conv_weight, %state, %qkv_silu, %inverse_norm) : [index](buffer, buffer, offset, f32, view<[%span_capacity]x[%qkv_extent]xf32>, view<40960xf32>, buffer, buffer, buffer)
+  kernel.launch @qwen38_gdn_recurrent_spans[%span_capacity](%replay, %rows, %state_origin, %qkv_silu, %inverse_norm, %alpha, %beta, %a, %bias, %state, %output) : [index](buffer, buffer, offset, buffer, buffer, view<[%span_capacity]x[%gate_extent]xf32>, view<[%span_capacity]x[%gate_extent]xf32>, view<48xf32>, view<48xf32>, buffer, buffer)
   command.return
 }
 
-command.program.def public @qwen38_gdn_commit(%span_capacity: index) launch(%parameters: buffer, %capture: buffer, %replay: buffer, %rows: buffer, %state: buffer) where [range(%span_capacity, 1, 16)] {
+command.program.def public @qwen38_gdn_commit(%span_capacity: index, %width: index) launch(%parameters: buffer, %capture: buffer, %replay: buffer, %rows: buffer, %state: buffer) where [range(%span_capacity, 1, 16), range(%width, 1, 8)] {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %two = index.constant 2 : index
@@ -55,9 +64,9 @@ command.program.def public @qwen38_gdn_commit(%span_capacity: index) launch(%par
     %ordinal0 = index.mul %group, %three : index
     %ordinal1 = index.add %ordinal0, %one : index
     %ordinal2 = index.add %ordinal0, %two : index
-    command.program.launch @qwen38_gdn_commit_layer[%span_capacity, %layer0, %ordinal0](%parameters, %capture, %replay, %rows, %state) : [index, index, index](buffer, buffer, buffer, buffer, buffer)
-    command.program.launch @qwen38_gdn_commit_layer[%span_capacity, %layer1, %ordinal1](%parameters, %capture, %replay, %rows, %state) : [index, index, index](buffer, buffer, buffer, buffer, buffer)
-    command.program.launch @qwen38_gdn_commit_layer[%span_capacity, %layer2, %ordinal2](%parameters, %capture, %replay, %rows, %state) : [index, index, index](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @qwen38_gdn_commit_layer[%span_capacity, %width, %layer0, %ordinal0](%parameters, %capture, %replay, %rows, %state) : [index, index, index, index](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @qwen38_gdn_commit_layer[%span_capacity, %width, %layer1, %ordinal1](%parameters, %capture, %replay, %rows, %state) : [index, index, index, index](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @qwen38_gdn_commit_layer[%span_capacity, %width, %layer2, %ordinal2](%parameters, %capture, %replay, %rows, %state) : [index, index, index, index](buffer, buffer, buffer, buffer, buffer)
   }
   command.return
 }

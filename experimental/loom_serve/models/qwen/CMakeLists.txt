@@ -558,11 +558,11 @@ loom_test_module(
   NAME
     mtp_control_test_module
   SRCS
-    "kernels/qwen38/mtp_accept.loom"
+    "kernels/qwen38/accept.loom"
     "kernels/qwen38/mtp_prepare.loom"
     "kernels/qwen38/mtp_proposal.loom"
     "kernels/qwen38/spans.loom"
-    "tests/mtp_accept.loom"
+    "tests/accept.loom"
     "tests/mtp_prepare.loom"
     "tests/mtp_proposal.loom"
 )

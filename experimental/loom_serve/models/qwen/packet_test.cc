@@ -65,26 +65,28 @@ class PacketTest : public ::testing::Test {
     return iree_vm_buffer_variant_from_ptr_borrowed(&types, buffers[index]);
   }
 
-  void Run(int count, int trial) {
+  void Run(int count, int trial, int width) {
     ReleaseBuffers();
     const bool verifies = trial >= 12 || trial % 3 != 0;
     const int next_count =
         verifies && trial >= 3 ? (trial % 2 ? count : (count + 1) / 2) : 0;
     storage = {std::vector<int32_t>(256, -1),
                std::vector<int32_t>(1024, -2),
-               std::vector<int32_t>(1048, -3),
+               std::vector<int32_t>(1176, -3),
                std::vector<int32_t>(1024, -4),
                std::vector<int32_t>(16, -5),
-               std::vector<int32_t>(verifies ? 96 : 0, -6),
-               std::vector<int32_t>(next_count ? 112 : 0, -7),
-               std::vector<int32_t>(192, -8)};
+               std::vector<int32_t>(verifies ? 160 : 0, -6),
+               std::vector<int32_t>(next_count ? 176 : 0, -7),
+               std::vector<int32_t>(320, -8)};
     auto& plans = storage[0];
     int input_count = 0;
     for (int i = 0; i < count; ++i) {
       const int kind =
           trial >= 12 ? trial - 12 : (i + trial) % (verifies ? 4 : 2);
       const bool speculative = kind >= 2;
-      const int length = speculative ? 4 : count == 1 ? 512 : 1 + i * 7 % 24;
+      const int length = speculative  ? width
+                         : count == 1 ? 512
+                                      : 1 + i * 7 % 24;
       const int known = kind == 3 ? 1 : length;
       const int flags = kind == 0 ? 0 : kind == 3 ? 3 : 1;
       const int values[] = {length,
@@ -93,7 +95,7 @@ class PacketTest : public ::testing::Test {
                             input_count,
                             known,
                             flags,
-                            speculative ? (next_count ? 8 : 4) : 0,
+                            speculative ? (next_count ? 2 * width : width) : 0,
                             i};
       std::copy_n(values, 8, plans.data() + i * 8);
       for (int j = 0; j < known; ++j) {
@@ -105,15 +107,18 @@ class PacketTest : public ::testing::Test {
       const int first = trial % 2 ? next_count - 1 - i : (i + trial) % count;
       const int* prior = plans.data() + first * 8;
       const bool speculative = (prior[5] & 1) != 0;
-      const int length = speculative ? 4 : count == 1 ? 512 : 1 + i * 11 % 24;
-      const int values[] = {length,
-                            prior[1],
-                            prior[2],
-                            input_count,
-                            speculative ? 0 : length,
-                            speculative ? 3 : i % 2,
-                            speculative ? (prior[6] ? 8 : 5) : 0,
-                            first};
+      const int length = speculative  ? width
+                         : count == 1 ? 512
+                                      : 1 + i * 11 % 24;
+      const int values[] = {
+          length,
+          prior[1],
+          prior[2],
+          input_count,
+          speculative ? 0 : length,
+          speculative ? 3 : i % 2,
+          speculative ? (prior[6] ? 2 * width : width + 1) : 0,
+          first};
       std::copy_n(values, 8, plans.data() + (16 + i) * 8);
       if (speculative) {
         next_speculative_mask |= 1u << first;
@@ -131,10 +136,10 @@ class PacketTest : public ::testing::Test {
       int tokens = 0;
       int outputs = 0;
       const int bank_count = bank ? next_count : count;
-      int32_t* metadata = expected[2].data() + bank * 516;
+      int32_t* metadata = expected[2].data() + bank * 580;
       for (int i = 0; i < bank_count; ++i) {
         const int* request = plans.data() + (bank * 16 + i) * 8;
-        const int selected = request[5] & 1 ? (request[6] ? 4 : 1) : 0;
+        const int selected = request[5] & 1 ? (request[6] ? width : 1) : 0;
         const int values[] = {request[0], request[1], tokens, request[2],
                               selected ? outputs : -1};
         std::copy_n(values, 5, metadata + 3 + i * 5);
@@ -144,16 +149,16 @@ class PacketTest : public ::testing::Test {
         for (int j = 0; j < selected; ++j) {
           metadata[323 + outputs++] = tokens - selected + j;
         }
-        metadata[387 + i * 2] = request[5] & 2 ? 2 : request[6] != 0;
-        metadata[388 + i * 2] = request[6];
+        metadata[451 + i * 2] = request[5] & 2 ? 2 : request[6] != 0;
+        metadata[452 + i * 2] = request[6];
         if (bank) {
-          expected[2][1032 + i] = request[7];
+          expected[2][1160 + i] = request[7];
         }
       }
       metadata[0] = tokens;
       metadata[1] = bank_count;
       metadata[2] = outputs;
-      metadata[515] = 42;
+      metadata[579] = 42;
       if (!bank) {
         first_outputs = outputs;
       }
@@ -164,18 +169,18 @@ class PacketTest : public ::testing::Test {
     for (int i = 0; i < count; ++i) {
       const int* request = plans.data() + i * 8;
       const bool speculative = request[6] != 0;
-      const int consumed = speculative ? 1 + (i + trial) % 4 : request[0];
+      const int consumed = speculative ? 1 + (i + trial) % width : request[0];
       const int outputs = speculative ? consumed : request[5] & 1;
-      int32_t* progress = expected[7].data() + i * 12;
+      int32_t* progress = expected[7].data() + i * 20;
       progress[0] = consumed;
       progress[1] = speculative ? 0 : consumed;
       progress[2] = outputs;
       progress[3] = speculative;
       if (verifies) {
-        storage[5][i * 6] = consumed;
-        storage[5][i * 6 + 1] = outputs;
+        storage[5][i * 10] = consumed;
+        storage[5][i * 10 + 1] = outputs;
         for (int j = 0; j < outputs; ++j) {
-          progress[4 + j] = storage[5][i * 6 + 2 + j] = 3000 + i * 10 + j;
+          progress[4 + j] = storage[5][i * 10 + 2 + j] = 3000 + i * 10 + j;
         }
       } else if (outputs) {
         progress[4] = storage[4][ordinary_index++] = 4000 + i;
@@ -183,7 +188,7 @@ class PacketTest : public ::testing::Test {
     }
     int live = 0;
     if (next_count) {
-      std::fill(storage[6].begin() + 96, storage[6].end(), -1);
+      std::fill(storage[6].begin() + 160, storage[6].end(), -1);
     }
     for (int i = 0; i < next_count; ++i) {
       if ((i + trial) % 4 == 0) {
@@ -191,14 +196,14 @@ class PacketTest : public ::testing::Test {
       }
       const int* request = plans.data() + (16 + i) * 8;
       const bool speculative = request[6] != 0;
-      const int consumed = speculative ? 1 + (i + trial) % 4 : request[0];
+      const int consumed = speculative ? 1 + (i + trial) % width : request[0];
       const int outputs = speculative ? consumed : request[5] & 1;
-      int32_t* progress = expected[7].data() + request[7] * 12;
-      storage[6][live * 6] = consumed;
-      storage[6][live * 6 + 1] = outputs;
-      storage[6][96 + live] = request[7];
+      int32_t* progress = expected[7].data() + request[7] * 20;
+      storage[6][live * 10] = consumed;
+      storage[6][live * 10 + 1] = outputs;
+      storage[6][160 + live] = request[7];
       for (int j = 0; j < outputs; ++j) {
-        progress[4 + progress[2] + j] = storage[6][live * 6 + 2 + j] =
+        progress[4 + progress[2] + j] = storage[6][live * 10 + 2 + j] =
             5000 + i * 10 + j;
       }
       progress[0] += consumed;
@@ -289,7 +294,10 @@ TEST_F(PacketTest, PreservesPacketLayoutAndPublishesSemanticProgress) {
     for (int trial = 0; trial < 16; ++trial) {
       SCOPED_TRACE(count);
       SCOPED_TRACE(trial);
-      ASSERT_NO_FATAL_FAILURE(Run(count, trial));
+      for (int width : {4, 8}) {
+        SCOPED_TRACE(width);
+        ASSERT_NO_FATAL_FAILURE(Run(count, trial, width));
+      }
     }
   }
 }

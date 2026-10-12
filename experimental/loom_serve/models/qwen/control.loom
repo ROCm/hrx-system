@@ -40,13 +40,13 @@ func.def @encode_plan(%plan: buffer, %inputs: buffer, %count: index, %first: ind
   %four = index.constant 4 : offset
   %descriptor_base = index.constant 12 : offset
   %selection_base = index.constant 1292 : offset
-  %options_base = index.constant 1548 : offset
+  %options_base = index.constant 1804 : offset
   %descriptor_origin = index.add %metadata_origin, %descriptor_base : offset
   %selection_origin = index.add %metadata_origin, %selection_base : offset
   %options_origin = index.add %metadata_origin, %options_base : offset
   %requests = buffer.view %plan[%origin] : buffer -> view<32x8xi32>
   %descriptors = buffer.view %metadata[%descriptor_origin] : buffer -> view<64x5xi32>
-  %selections = buffer.view %metadata[%selection_origin] : buffer -> view<64xi32>
+  %selections = buffer.view %metadata[%selection_origin] : buffer -> view<128xi32>
   %options = buffer.view %metadata[%options_origin] : buffer -> view<64x2xi32>
   %span_count = index.assume %count [range(%count, 1, 16)] : index
   %zero32 = scalar.constant 0 : i32
@@ -89,16 +89,16 @@ func.def @encode_plan(%plan: buffer, %inputs: buffer, %count: index, %first: ind
     %end = scalar.addi %cursor, %length : i32
     %selected_count = scf.select %speculative, %length, %one32 : i32
     %active_selections = scf.select %selected, %selected_count, %zero32 : i32
-    %bounded_selections = scalar.assume %active_selections [range(%active_selections, 0, 4)] : i32
+    %bounded_selections = scalar.assume %active_selections [range(%active_selections, 0, 8)] : i32
     %selection_count = index.cast %bounded_selections : i32 to index
     %selection_first = scalar.subi %end, %active_selections : i32
     scf.for %j = [%zero to %selection_count step %one] {
       %j32 = index.cast %j : index to i32
       %slot32 = scalar.addi %outputs, %j32 : i32
       %slot_value = index.cast %slot32 : i32 to index
-      %slot = index.assume %slot_value [range(%slot_value, 0, 63)] : index
+      %slot = index.assume %slot_value [range(%slot_value, 0, 127)] : index
       %token = scalar.addi %selection_first, %j32 : i32
-      view.store %token, %selections[%slot] : i32, view<64xi32>
+      view.store %token, %selections[%slot] : i32, view<128xi32>
       scf.yield
     }
     %next_outputs = scalar.addi %outputs, %active_selections : i32
@@ -125,21 +125,21 @@ func.def public @encode_epoch(%plan: buffer, %inputs: buffer, %first_count: i32,
   %first_bounded = scalar.assume %first_count [range(%first_count, 1, 16)] : i32
   %first = index.cast %first_bounded : i32 to index
   %outputs = func.call @encode_plan(%plan, %inputs, %first, %zero, %metadata, %origin, %tokens, %origin) : (buffer, buffer, index, index, buffer, offset, buffer, offset) -> (i32)
-  %eos_offset = index.constant 2060 : offset
+  %eos_offset = index.constant 2316 : offset
   %terminal = buffer.view %metadata[%eos_offset] : buffer -> view<1xi32>
   view.store %eos, %terminal[0] : i32, view<1xi32>
   %continues = scalar.cmpi ne, %next_count, %zero32 : i32
   scf.if %continues {
     %next_bounded = scalar.assume %next_count [range(%next_count, 1, 16)] : i32
     %next = index.cast %next_bounded : i32 to index
-    %metadata_base = index.constant 2064 : offset
+    %metadata_base = index.constant 2320 : offset
     %token_base = index.constant 2048 : offset
     %next_outputs = func.call @encode_plan(%plan, %inputs, %next, %sixteen, %metadata, %metadata_base, %tokens, %token_base) : (buffer, buffer, index, index, buffer, offset, buffer, offset) -> (i32)
-    %next_eos_offset = index.constant 4124 : offset
+    %next_eos_offset = index.constant 4636 : offset
     %next_terminal = buffer.view %metadata[%next_eos_offset] : buffer -> view<1xi32>
     view.store %eos, %next_terminal[0] : i32, view<1xi32>
     %requests = buffer.view %plan[%origin] : buffer -> view<32x8xi32>
-    %indices_origin = index.constant 4128 : offset
+    %indices_origin = index.constant 4640 : offset
     %indices = buffer.view %metadata[%indices_origin] : buffer -> view<16xi32>
     scf.for %i = [%zero to %next step %one] {
       %record = index.add %sixteen, %i : index
@@ -152,7 +152,7 @@ func.def public @encode_epoch(%plan: buffer, %inputs: buffer, %first_count: i32,
   func.return %outputs : i32
 }
 
-// Semantic progress is {consumed, known, outputs, verifications, tokens[8]}.
+// Semantic progress is {consumed, known, outputs, verifications, tokens[16]}.
 // Only completed feedback enters this transform; bank contents are immutable.
 func.def public @publish_epoch(%plan: buffer, %count: i32, %verified: i32, %continues: i32, %next_speculative_mask: i32, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer) {
   %origin = index.constant 0 : offset
@@ -167,24 +167,24 @@ func.def public @publish_epoch(%plan: buffer, %count: i32, %verified: i32, %cont
   %progress_bytes = buffer.length %progress
   buffer.fill %zero32, %progress[%origin], %progress_bytes : i32
   %requests = buffer.view %plan[%origin] : buffer -> view<32x8xi32>
-  %published = buffer.view %progress[%origin] : buffer -> view<16x12xi32>
+  %published = buffer.view %progress[%origin] : buffer -> view<16x20xi32>
   %verifies = scalar.cmpi ne, %verified, %zero32 : i32
   %outputs = scf.for %i = [%zero to %extent step %one](%ordinary_index = %zero : index) -> (index) {
     %consumed, %known, %output_count, %verifications = scf.if %verifies -> (i32, i32, i32, i32) {
-      %records = buffer.view %first_results[%origin] : buffer -> view<16x6xi32>
-      %consumed = view.load %records[%i, 0] : view<16x6xi32> -> i32
-      %output_count = view.load %records[%i, 1] : view<16x6xi32> -> i32
+      %records = buffer.view %first_results[%origin] : buffer -> view<16x10xi32>
+      %consumed = view.load %records[%i, 0] : view<16x10xi32> -> i32
+      %output_count = view.load %records[%i, 1] : view<16x10xi32> -> i32
       %credit = view.load %requests[%i, 6] : view<32x8xi32> -> i32
       %speculative = scalar.cmpi ne, %credit, %zero32 : i32
       %verifications = scalar.extui %speculative : i1 to i32
       %known = scf.select %speculative, %zero32, %consumed : i32
-      %bounded_outputs = scalar.assume %output_count [range(%output_count, 0, 4)] : i32
+      %bounded_outputs = scalar.assume %output_count [range(%output_count, 0, 8)] : i32
       %output_extent = index.cast %bounded_outputs : i32 to index
       scf.for %j = [%zero to %output_extent step %one] {
         %source = index.add %j, %two : index
         %target = index.add %j, %four : index
-        %token = view.load %records[%i, %source] : view<16x6xi32> -> i32
-        view.store %token, %published[%i, %target] : i32, view<16x12xi32>
+        %token = view.load %records[%i, %source] : view<16x10xi32> -> i32
+        view.store %token, %published[%i, %target] : i32, view<16x20xi32>
         scf.yield
       }
       scf.yield %consumed, %known, %output_count, %verifications : i32, i32, i32, i32
@@ -198,23 +198,23 @@ func.def public @publish_epoch(%plan: buffer, %count: i32, %verified: i32, %cont
         %tokens = buffer.view %ordinary[%origin] : buffer -> view<16xi32>
         %slot = index.assume %ordinary_index [range(%ordinary_index, 0, 15)] : index
         %token = view.load %tokens[%slot] : view<16xi32> -> i32
-        view.store %token, %published[%i, 4] : i32, view<16x12xi32>
+        view.store %token, %published[%i, 4] : i32, view<16x20xi32>
         scf.yield
       }
       scf.yield %length, %length, %selected_count, %zero32 : i32, i32, i32, i32
     }
-    view.store %consumed, %published[%i, 0] : i32, view<16x12xi32>
-    view.store %known, %published[%i, 1] : i32, view<16x12xi32>
-    view.store %output_count, %published[%i, 2] : i32, view<16x12xi32>
-    view.store %verifications, %published[%i, 3] : i32, view<16x12xi32>
+    view.store %consumed, %published[%i, 0] : i32, view<16x20xi32>
+    view.store %known, %published[%i, 1] : i32, view<16x20xi32>
+    view.store %output_count, %published[%i, 2] : i32, view<16x20xi32>
+    view.store %verifications, %published[%i, 3] : i32, view<16x20xi32>
     %advance = index.cast %output_count : i32 to index
     %next_index = index.add %ordinary_index, %advance : index
     scf.yield %next_index : index
   }
   %has_next = scalar.cmpi ne, %continues, %zero32 : i32
   scf.if %has_next {
-    %records = buffer.view %next_results[%origin] : buffer -> view<16x6xi32>
-    %tags_origin = index.constant 384 : offset
+    %records = buffer.view %next_results[%origin] : buffer -> view<16x10xi32>
+    %tags_origin = index.constant 640 : offset
     %tags = buffer.view %next_results[%tags_origin] : buffer -> view<16xi32>
     scf.for %i = [%zero to %extent step %one] {
       %tag = view.load %tags[%i] : view<16xi32> -> i32
@@ -222,12 +222,12 @@ func.def public @publish_epoch(%plan: buffer, %count: i32, %verified: i32, %cont
       scf.if %live {
         %tag_value = index.cast %tag : i32 to index
         %first = index.assume %tag_value [range(%tag_value, 0, 15)] : index
-        %consumed = view.load %records[%i, 0] : view<16x6xi32> -> i32
-        %output_count = view.load %records[%i, 1] : view<16x6xi32> -> i32
-        %prior_consumed = view.load %published[%first, 0] : view<16x12xi32> -> i32
-        %prior_known = view.load %published[%first, 1] : view<16x12xi32> -> i32
-        %prior_outputs = view.load %published[%first, 2] : view<16x12xi32> -> i32
-        %prior_verifications = view.load %published[%first, 3] : view<16x12xi32> -> i32
+        %consumed = view.load %records[%i, 0] : view<16x10xi32> -> i32
+        %output_count = view.load %records[%i, 1] : view<16x10xi32> -> i32
+        %prior_consumed = view.load %published[%first, 0] : view<16x20xi32> -> i32
+        %prior_known = view.load %published[%first, 1] : view<16x20xi32> -> i32
+        %prior_outputs = view.load %published[%first, 2] : view<16x20xi32> -> i32
+        %prior_verifications = view.load %published[%first, 3] : view<16x20xi32> -> i32
         %bit = scalar.shli %one32, %tag : i32
         %bits = scalar.andi %next_speculative_mask, %bit : i32
         %speculative = scalar.cmpi ne, %bits, %zero32 : i32
@@ -237,20 +237,20 @@ func.def public @publish_epoch(%plan: buffer, %count: i32, %verified: i32, %cont
         %total_known = scalar.addi %prior_known, %known : i32
         %total_outputs = scalar.addi %prior_outputs, %output_count : i32
         %total_verifications = scalar.addi %prior_verifications, %verification : i32
-        view.store %total_consumed, %published[%first, 0] : i32, view<16x12xi32>
-        view.store %total_known, %published[%first, 1] : i32, view<16x12xi32>
-        view.store %total_outputs, %published[%first, 2] : i32, view<16x12xi32>
-        view.store %total_verifications, %published[%first, 3] : i32, view<16x12xi32>
-        %bounded_outputs = scalar.assume %output_count [range(%output_count, 0, 4)] : i32
+        view.store %total_consumed, %published[%first, 0] : i32, view<16x20xi32>
+        view.store %total_known, %published[%first, 1] : i32, view<16x20xi32>
+        view.store %total_outputs, %published[%first, 2] : i32, view<16x20xi32>
+        view.store %total_verifications, %published[%first, 3] : i32, view<16x20xi32>
+        %bounded_outputs = scalar.assume %output_count [range(%output_count, 0, 8)] : i32
         %output_extent = index.cast %bounded_outputs : i32 to index
         %prior_extent = index.cast %prior_outputs : i32 to index
         scf.for %j = [%zero to %output_extent step %one] {
           %source = index.add %j, %two : index
           %token_index = index.add %prior_extent, %j : index
           %target_value = index.add %token_index, %four : index
-          %target = index.assume %target_value [range(%target_value, 4, 11)] : index
-          %token = view.load %records[%i, %source] : view<16x6xi32> -> i32
-          view.store %token, %published[%first, %target] : i32, view<16x12xi32>
+          %target = index.assume %target_value [range(%target_value, 4, 19)] : index
+          %token = view.load %records[%i, %source] : view<16x10xi32> -> i32
+          view.store %token, %published[%first, %target] : i32, view<16x20xi32>
           scf.yield
         }
         scf.yield
@@ -1003,10 +1003,10 @@ func.def @epoch_once(%control_state: buffer, %shape: i32, %proposes: i32, %verif
     %verify_stage = scalar.addi %warm_stage, %shape_count : i32
     %completion = func.call @execute_7(%verify_stage, %residual, %metadata, %origins, %state, %tokens, %committed, %results) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     %count = scalar.extui %span_count : i32 to i64
-    %record_bytes = scalar.constant 24 : i64
+    %record_bytes = scalar.constant 40 : i64
     %record_length = scalar.muli %count, %record_bytes : i64
     %tagged = scalar.cmpi eq, %feedback_slot, %two : i32
-    %tagged_length = scalar.constant 448 : i64
+    %tagged_length = scalar.constant 704 : i64
     %length = scf.select %tagged, %tagged_length, %record_length : i64
     %feedback = func.call @feedback(%feedback_slot, %results, %zero_offset, %length) : (i32, hal.buffer, i64, i64) -> (i64)
     scf.yield %completion : i64

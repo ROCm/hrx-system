@@ -45,19 +45,19 @@ class ContinuationTest : public ::testing::Test {
     iree_vm_environment_free(environment);
   }
 
-  void Run(int count, int trial) {
+  void Run(int count, int trial, int width) {
     constexpr int kContext = 1024;
     constexpr int kEos = 42;
     std::array<std::vector<int32_t>, 3> actual = {
-        std::vector<int32_t>(1048, -99), std::vector<int32_t>(1024, -77),
-        std::vector<int32_t>(208, -55)};
+        std::vector<int32_t>(1176, -99), std::vector<int32_t>(1024, -77),
+        std::vector<int32_t>(336, -55)};
     auto& metadata = actual[0];
     auto& results = actual[2];
-    metadata[0] = count * 4;
+    metadata[0] = count * width;
     metadata[1] = count;
-    metadata[2] = count * 4;
-    metadata[515] = kEos;
-    metadata[517] = count;
+    metadata[2] = count * width;
+    metadata[579] = kEos;
+    metadata[581] = count;
     int queued_count = 0;
     for (int slot = 0; slot < count; ++slot) {
       // Rotation and reversal ensure source records cannot be recovered from
@@ -67,28 +67,28 @@ class ContinuationTest : public ::testing::Test {
       const bool known = kind == 1 || kind == 6;
       const bool promoted = kind == 5;
       const int length =
-          known ? (count == 1 ? 512 : 1 + (slot * 11 + trial) % 24) : 4;
+          known ? (count == 1 ? 512 : 1 + (slot * 11 + trial) % 24) : width;
       const int consumed =
-          known || promoted ? 13 + first : 1 + (first + trial) % 4;
+          known || promoted ? 13 + first : 1 + (first + trial) % width;
       const int emitted = known ? 0 : promoted ? 1 : consumed;
-      const int position = kind == 4   ? kContext - consumed - 3
+      const int position = kind == 4   ? kContext - consumed - (width - 1)
                            : trial % 2 ? kContext - consumed - length
                                        : 100 + first;
       const int credit = known       ? 0
                          : kind == 3 ? emitted
                          : trial % 2 ? emitted + 1
-                                     : 8;
+                                     : 2 * width;
       const int fields[] = {length, position, queued_count, 15 - first,
                             kind == 1 ? -1 : 0};
-      std::memcpy(metadata.data() + 519 + slot * 5, fields, sizeof(fields));
-      metadata[903 + slot * 2] = known ? 0 : 2;
-      metadata[904 + slot * 2] = credit;
-      metadata[1032 + slot] = first;
-      results[first * 6] = consumed;
-      results[first * 6 + 1] = emitted;
-      for (int token = 0; token < 4; ++token) {
-        results[first * 6 + 2 + token] =
-            kind == 2 && token == emitted - 1 ? kEos : 1000 + first * 4 + token;
+      std::memcpy(metadata.data() + 583 + slot * 5, fields, sizeof(fields));
+      metadata[1031 + slot * 2] = known ? 0 : 2;
+      metadata[1032 + slot * 2] = credit;
+      metadata[1160 + slot] = first;
+      results[first * 10] = consumed;
+      results[first * 10 + 1] = emitted;
+      for (int token = 0; token < 8; ++token) {
+        results[first * 10 + 2 + token] =
+            kind == 2 && token == emitted - 1 ? kEos : 1000 + first * 8 + token;
       }
       for (int token = 0; token < length; ++token) {
         actual[1][512 + queued_count + token] = 10000 + queued_count + token;
@@ -97,31 +97,32 @@ class ContinuationTest : public ::testing::Test {
     }
     auto expected = actual;
     std::fill(expected[1].begin(), expected[1].begin() + 512, 0);
-    std::fill(expected[2].begin() + 96, expected[2].begin() + 192, 0);
-    std::fill(expected[2].begin() + 192, expected[2].end(), -1);
+    std::fill(expected[2].begin() + 160, expected[2].begin() + 320, 0);
+    std::fill(expected[2].begin() + 320, expected[2].end(), -1);
     int live_count = 0;
     int input_count = 0;
     int output_count = 0;
     for (int plan = 0; plan < count; ++plan) {
-      const int first = metadata[1032 + plan];
-      const int* descriptor = metadata.data() + 519 + plan * 5;
-      const int consumed = results[first * 6];
-      const int emitted = results[first * 6 + 1];
-      const bool speculative = metadata[903 + plan * 2] != 0;
-      const int prediction = speculative ? results[first * 6 + emitted + 1] : 0;
-      const int credit = metadata[904 + plan * 2] - emitted;
+      const int first = metadata[1160 + plan];
+      const int* descriptor = metadata.data() + 583 + plan * 5;
+      const int consumed = results[first * 10];
+      const int emitted = results[first * 10 + 1];
+      const bool speculative = metadata[1031 + plan * 2] != 0;
+      const int prediction =
+          speculative ? results[first * 10 + emitted + 1] : 0;
+      const int credit = metadata[1032 + plan * 2] - emitted;
       const int position = descriptor[1] + consumed;
       if (speculative &&
-          (prediction == kEos || credit <= 0 || position + 4 > kContext)) {
+          (prediction == kEos || credit <= 0 || position + width > kContext)) {
         continue;
       }
-      const int selected = descriptor[4] >= 0 ? (speculative ? 4 : 1) : 0;
+      const int selected = descriptor[4] >= 0 ? (speculative ? width : 1) : 0;
       const int fields[] = {descriptor[0], position, input_count, descriptor[3],
                             selected ? output_count : -1};
       std::memcpy(expected[0].data() + 3 + live_count * 5, fields,
                   sizeof(fields));
-      expected[0][387 + live_count * 2] = speculative ? 2 : 0;
-      expected[0][388 + live_count * 2] = credit;
+      expected[0][451 + live_count * 2] = speculative ? 2 : 0;
+      expected[0][452 + live_count * 2] = credit;
       if (speculative) {
         expected[1][input_count] = prediction;
       } else {
@@ -132,7 +133,7 @@ class ContinuationTest : public ::testing::Test {
         expected[0][323 + output_count + token] =
             input_count + descriptor[0] - selected + token;
       }
-      expected[2][192 + live_count] = first;
+      expected[2][320 + live_count] = first;
       ++live_count;
       input_count += descriptor[0];
       output_count += selected;
@@ -178,7 +179,10 @@ TEST_F(ContinuationTest, CompactsLiveSpansAndPreservesFeedback) {
     for (int trial = 0; trial < 28; ++trial) {
       SCOPED_TRACE(count);
       SCOPED_TRACE(trial);
-      ASSERT_NO_FATAL_FAILURE(Run(count, trial));
+      for (int width : {4, 8}) {
+        SCOPED_TRACE(width);
+        ASSERT_NO_FATAL_FAILURE(Run(count, trial, width));
+      }
     }
   }
 }

@@ -591,7 +591,7 @@ is independent of the model's device packet format:
   `runner.feedback` without waiting. Private workspace is allocated by the
   execution domain around each command; escaping state has separate bindings.
 * After retirement, `publish_epoch` translates opaque feedback into
-  `{consumed, known, outputs, verifications, tokens[8]}` i32 records in
+  `{consumed, known, outputs, verifications, tokens[16]}` i32 records in
   original span order. Only accepted state contributes to consumed progress.
 * The isolated `step` receives state, a prefill/decode selector and six
   buffers: residual, control, recurrent, attention, IDs and progress.

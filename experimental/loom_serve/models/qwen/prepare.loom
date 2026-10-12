@@ -13,8 +13,8 @@ global.rodata.def @epoch_root = bytes("7177656e33385f65706f6368")
 global.rodata.def @proposal_root = bytes("7177656e33385f6d74705f70726f706f7365")
 // qwen38_mtp_warm
 global.rodata.def @warm_root = bytes("7177656e33385f6d74705f7761726d")
-// qwen38_mtp_verify
-global.rodata.def @verify_root = bytes("7177656e33385f6d74705f766572696679")
+// qwen38_verify
+global.rodata.def @verify_root = bytes("7177656e33385f766572696679")
 // qwen38_continue
 global.rodata.def @continue_root = bytes("7177656e33385f636f6e74696e7565")
 // weights.loom
@@ -146,10 +146,10 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %pins: i64, %packed: i1
   %cohort_token_bytes = scalar.constant 4096 : i64
   %progress_bytes = scalar.constant 32 : i64
   %progress_extent = scalar.constant 256 : i64
-  %metadata_bytes = scalar.constant 4192 : i64
+  %metadata_bytes = scalar.constant 4704 : i64
   %committed_bytes = scalar.constant 1548 : i64
   %output_bytes = scalar.constant 64 : i64
-  %result_bytes = scalar.constant 832 : i64
+  %result_bytes = scalar.constant 1344 : i64
   %pooled = scalar.cmpi ne, %pool, %zero64 : i64
   %dense_attention_bytes = scalar.muli %context, %target_token_bytes : i64
   %attention_bytes = scf.select %pooled, %zero64, %dense_attention_bytes : i64
@@ -251,7 +251,7 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %pins: i64, %packed: i1
   view.store %block_tokens, %geometry_view[0] : i64, view<8xi64>
   view.store %map_origin, %geometry_view[1] : i64, view<8xi64>
   view.store %carry_stride, %geometry_view[2] : i64, view<8xi64>
-  %feedback_split = scalar.constant 384 : i64
+  %feedback_split = scalar.constant 640 : i64
   view.store %feedback_split, %geometry_view[3] : i64, view<8xi64>
   view.store %gdn_offset, %geometry_view[4] : i64, view<8xi64>
   view.store %row_stride, %geometry_view[5] : i64, view<8xi64>

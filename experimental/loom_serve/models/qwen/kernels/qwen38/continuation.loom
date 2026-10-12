@@ -6,18 +6,18 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
   %origin = index.constant 0 : offset
   %descriptor_origin = index.constant 12 : offset
   %selection_origin = index.constant 1292 : offset
-  %options_origin = index.constant 1548 : offset
-  %eos_origin = index.constant 2060 : offset
-  %plan_origin = index.constant 2064 : offset
-  %plan_descriptors = index.constant 2076 : offset
-  %plan_options = index.constant 3612 : offset
-  %indices_origin = index.constant 4128 : offset
+  %options_origin = index.constant 1804 : offset
+  %eos_origin = index.constant 2316 : offset
+  %plan_origin = index.constant 2320 : offset
+  %plan_descriptors = index.constant 2332 : offset
+  %plan_options = index.constant 4124 : offset
+  %indices_origin = index.constant 4640 : offset
   %queued_origin = index.constant 2048 : offset
-  %next_origin = index.constant 384 : offset
-  %tags_origin = index.constant 768 : offset
+  %next_origin = index.constant 640 : offset
+  %tags_origin = index.constant 1280 : offset
   %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
   %spans = buffer.view %epoch[%descriptor_origin] : buffer -> view<64x5xi32>
-  %selections = buffer.view %epoch[%selection_origin] : buffer -> view<64xi32>
+  %selections = buffer.view %epoch[%selection_origin] : buffer -> view<128xi32>
   %options = buffer.view %epoch[%options_origin] : buffer -> view<64x2xi32>
   %terminal = buffer.view %epoch[%eos_origin] : buffer -> view<1xi32>
   %plan = buffer.view %epoch[%plan_origin] : buffer -> view<3xi32>
@@ -26,14 +26,14 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
   %indices = buffer.view %epoch[%indices_origin] : buffer -> view<16xi32>
   %inputs = buffer.view %tokens[%origin] : buffer -> view<512xi32>
   %queued = buffer.view %tokens[%queued_origin] : buffer -> view<512xi32>
-  %prior = buffer.view %results[%origin] : buffer -> view<16x6xi32>
-  %next = buffer.view %results[%next_origin] : buffer -> view<96xi32>
+  %prior = buffer.view %results[%origin] : buffer -> view<16x10xi32>
+  %next = buffer.view %results[%next_origin] : buffer -> view<160xi32>
   %tags = buffer.view %results[%tags_origin] : buffer -> view<16xi32>
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %four = index.constant 4 : index
   %sixteen = index.constant 16 : index
-  %ninety_six = index.constant 96 : index
+  %result_words = index.constant 160 : index
   %capacity = index.constant 512 : index
   %zero_word = scalar.constant 0 : i32
   %one_word = scalar.constant 1 : i32
@@ -43,8 +43,8 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
   scf.for %i = [%zero to %capacity step %four] {
     vector.store %zeros, %inputs[%i] : vector<4xi32>, view<512xi32>
   }
-  scf.for %i = [%zero to %ninety_six step %four] {
-    vector.store %zeros, %next[%i] : vector<4xi32>, view<96xi32>
+  scf.for %i = [%zero to %result_words step %four] {
+    vector.store %zeros, %next[%i] : vector<4xi32>, view<160xi32>
   }
   scf.for %i = [%zero to %sixteen step %one] {
     view.store %none, %tags[%i] : i32, view<16xi32>
@@ -58,8 +58,8 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
     %tag = view.load %indices[%span] : view<16xi32> -> i32
     %tag_value = index.cast %tag : i32 to index
     %first = index.assume %tag_value [range(%tag_value, 0, 15)] : index
-    %consumed = view.load %prior[%first, 0] : view<16x6xi32> -> i32
-    %emitted = view.load %prior[%first, 1] : view<16x6xi32> -> i32
+    %consumed = view.load %prior[%first, 0] : view<16x10xi32> -> i32
+    %emitted = view.load %prior[%first, 1] : view<16x10xi32> -> i32
     %length_word = view.load %planned[%span, 0] : view<64x5xi32> -> i32
     %position = view.load %planned[%span, 1] : view<64x5xi32> -> i32
     %source_word = view.load %planned[%span, 2] : view<64x5xi32> -> i32
@@ -73,8 +73,8 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
     %continues, %prediction = scf.if %speculative -> (i1, i32) {
       %last_word = scalar.addi %emitted, %one_word : i32
       %last_value = index.cast %last_word : i32 to index
-      %last = index.assume %last_value [range(%last_value, 2, 5)] : index
-      %prediction = view.load %prior[%first, %last] : view<16x6xi32> -> i32
+      %last = index.assume %last_value [range(%last_value, 2, 9)] : index
+      %prediction = view.load %prior[%first, %last] : view<16x10xi32> -> i32
       %extent = scalar.addi %advanced, %length_word : i32
       %fits = scalar.cmpi ule, %extent, %context_word : i32
       %credited = scalar.cmpi sgt, %remaining, %zero_word : i32
@@ -102,7 +102,7 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
       view.store %remaining, %options[%slot, 1] : i32, view<64x2xi32>
       view.store %tag, %tags[%slot] : i32, view<16xi32>
       scf.if %speculative {
-        %anchor = index.assume %begin [range(%begin, 0, 508)] : index
+        %anchor = index.assume %begin [range(%begin, 0, 511)] : index
         view.store %prediction, %inputs[%anchor] : i32, view<512xi32>
         scf.yield
       } else {
@@ -118,15 +118,15 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
         scf.yield
       }
       %selection_count = scf.if %has_output -> (index) {
-        %selection_count = scf.select %speculative, %four, %one : index
+        %selection_count = scf.select %speculative, %length, %one : index
         %end = index.add %begin, %length : index
         %selection_begin = index.sub %end, %selection_count : index
         scf.for %token = [%zero to %selection_count step %one] {
           %selection_value = index.add %selected, %token : index
-          %selection_index = index.assume %selection_value [range(%selection_value, 0, 63)] : index
+          %selection_index = index.assume %selection_value [range(%selection_value, 0, 127)] : index
           %selected_token = index.add %selection_begin, %token : index
           %word = index.cast %selected_token : index to i32
-          view.store %word, %selections[%selection_index] : i32, view<64xi32>
+          view.store %word, %selections[%selection_index] : i32, view<128xi32>
         }
         scf.yield %selection_count : index
       } else {

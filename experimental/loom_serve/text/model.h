@@ -37,7 +37,6 @@ typedef struct loom_serve_text_model_t loom_serve_text_model_t;
 typedef struct loom_serve_text_row_t loom_serve_text_row_t;
 typedef struct loom_serve_text_checkpoint_t loom_serve_text_checkpoint_t;
 
-// Four-input verification uses at most 64 selected-token entries per epoch.
 // Retained arenas are sized to row_count, not this control-payload bound.
 enum { LOOM_SERVE_TEXT_ROW_CAPACITY = 16 };
 
@@ -132,7 +131,7 @@ typedef struct loom_serve_text_result_t {
   // Number of speculative verifications that advanced this span.
   iree_host_size_t verification_count;
   // Valid prefix of output_count IDs across at most two device-fed epochs.
-  int32_t tokens[8];
+  int32_t tokens[16];
 } loom_serve_text_result_t;
 
 typedef struct loom_serve_text_metrics_t {

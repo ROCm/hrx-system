@@ -106,13 +106,13 @@ class PrepareTest : public ::testing::Test {
     const uint64_t lengths[] = {
         10485760,
         row_bytes + pool * 65536,
-        packed ? 4192u : 0,
+        packed ? 4704u : 0,
         packed ? table : 0,
         packed ? 4096u : 0,
         packed ? 64u : 0,
         mtp ? (rows + pins) * 20480 : 0,
         mtp ? 1548u : 0,
-        mtp ? 832u : 0,
+        mtp ? 1344u : 0,
         mtp ? (pool ? pool : rows * context) * 4096 : 0,
         mtp ? table : 0,
     };
@@ -136,7 +136,7 @@ class PrepareTest : public ::testing::Test {
       expected[2][row * 4 + 2] = pool ? row_bytes : base + 156893440;
       expected[3][row * 4 + 2] = pool ? 0 : row * context * 4096;
     }
-    expected[4] = {64, 2048, 20480, 384, 256, stride, 156893184, slots};
+    expected[4] = {64, 2048, 20480, 640, 256, stride, 156893184, slots};
     if (pool) {
       expected[4].insert(expected[4].end(),
                          {1, row_bytes, 32, pool * 2048, 131072});
@@ -225,7 +225,7 @@ TEST_F(PrepareTest, DeclaresCompleteProductionCatalogAndOpaqueState) {
                               shape.span_capacity, 512, 512, 7});
         }
         for (const auto& shape : shapes) {
-          expected.push_back({"qwen38_mtp_verify", shape.token_capacity,
+          expected.push_back({"qwen38_verify", shape.token_capacity,
                               shape.span_capacity, 512, 512, 1});
         }
         expected.push_back({"qwen38_continue", 1, rows, 512, 1, 0});

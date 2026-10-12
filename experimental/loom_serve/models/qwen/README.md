@@ -441,9 +441,10 @@ build_tools/bin/iree-bazel-run --config=asan \
   --device=amdgpu --target=amdgpu:gfx1151 --case=@mtp_carry_spans
 ```
 
-`tests/mtp_accept.loom` compares acceptance records and both derived descriptor
+`tests/accept.loom` compares acceptance records and both derived descriptor
 tables against an independent minimum-frontier oracle across all counts from
-one through sixteen and four mismatch/EOS/credit patterns, including untouched
+one through sixteen and every mismatch/EOS/credit position in four- and
+eight-token verification blocks, including untouched
 inactive storage. `tests/gdn_speculation.loom` compares the entire sixteen-row recurrent/history slab bitwise before and after accepted
 publication: known work commits once, speculative work remains unpublished
 until replay, and rejected transitions never publish. Both support device access

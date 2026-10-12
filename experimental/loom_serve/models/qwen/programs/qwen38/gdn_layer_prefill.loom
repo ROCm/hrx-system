@@ -91,13 +91,13 @@ kernel.decl @qwen38_gdn_conv_spans(%span_capacity: index) launch(%epoch: buffer,
 kernel.decl @qwen38_gdn_recurrent_spans(%span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %qkv: buffer, %inverse_norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer)
 kernel.decl @qwen38_gdn_conv_verify_spans(%span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %epsilon: f32, %qkv: buffer, %weight: buffer, %state: buffer, %output: buffer, %inverse_norm: buffer)
 kernel.decl @qwen38_gdn_recurrent_verify_spans(%span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %qkv: buffer, %inverse_norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer)
-kernel.decl @qwen38_gdn_capture_spans(%span_capacity: index) launch(%epoch: buffer, %qkv: buffer, %alpha: buffer, %beta: buffer, %capture: buffer, %layer_origin: offset)
+kernel.decl @qwen38_gdn_capture_spans(%span_capacity: index, %width: index) launch(%width: index, %epoch: buffer, %qkv: buffer, %alpha: buffer, %beta: buffer, %capture: buffer, %layer_origin: offset)
 
-// Verification depth is zero for ordinary prefill and four for the MTP target
-// verifier. Dense projection selection is independent of state publication:
+// Verification width is zero for ordinary prefill. Dense projection selection
+// is independent of state publication:
 // four-token packed epochs and isolated verification share the four-row
 // projection family; wider packed epochs retain their WMMA schedule.
-command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %schedule_token_count: index, %layer: index, %gdn_ordinal: index, %verification_depth: index, %span_capacity: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer, %token_count_data: buffer, %transition_capture: buffer, %rows: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%layer, 0, 63), range(%gdn_ordinal, 0, 47), range(%verification_depth, 0, 4), range(%span_capacity, 0, 64)] {
+command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %schedule_token_count: index, %layer: index, %gdn_ordinal: index, %verification_depth: index, %span_capacity: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer, %token_count_data: buffer, %transition_capture: buffer, %rows: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%layer, 0, 63), range(%gdn_ordinal, 0, 47), range(%verification_depth, 0, 8), range(%span_capacity, 0, 64)] {
   %token_capacity = index.constant 512 : index
   %hidden_size = index.constant 5120 : index
   %qkv_size = index.constant 10240 : index
@@ -112,7 +112,7 @@ command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %sched
   %c256 = index.constant 256 : index
   %c512 = index.constant 512 : index
   %epsilon = scalar.constant 9.9999999999999995e-07 : f32
-  %verifying = index.cmp eq, %verification_depth, %c4 : index
+  %verifying = index.cmp ne, %verification_depth, %c0 : index
   %isolated = index.cmp eq, %span_capacity, %c0 : index
   %isolated_verification = scalar.andi %verifying, %isolated : i1
   %uses_spans = index.cmp ne, %span_capacity, %c0 : index
@@ -264,10 +264,11 @@ command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %sched
   }
   %verifying_spans = scalar.andi %verifying, %uses_spans : i1
   scf.if %verifying_spans {
-    %span_bytes = index.constant 165376 : offset
+    %transition_bytes = index.constant 41344 : offset
+    %span_bytes = index.scale %verification_depth, %transition_bytes : index, offset -> offset
     %layer_bytes = index.scale %span_capacity, %span_bytes : index, offset -> offset
     %layer_origin = index.scale %gdn_ordinal, %layer_bytes : index, offset -> offset
-    kernel.launch @qwen38_gdn_capture_spans[%span_capacity](%token_count_data, %qkv, %alpha, %beta, %transition_capture, %layer_origin) : [index](buffer, buffer, buffer, buffer, buffer, offset)
+    kernel.launch @qwen38_gdn_capture_spans[%span_capacity, %verification_depth](%verification_depth, %token_count_data, %qkv, %alpha, %beta, %transition_capture, %layer_origin) : [index, index](index, buffer, buffer, buffer, buffer, buffer, offset)
   }
 
   %qkv_silu = buffer.alloca<global> align(256) %qkv_bytes : buffer

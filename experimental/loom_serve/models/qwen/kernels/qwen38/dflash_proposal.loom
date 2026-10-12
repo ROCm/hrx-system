@@ -6,7 +6,7 @@ kernel.def @qwen38_dflash_proposal_prepare() {
 } launch(%epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %anchors: buffer, %draft_tokens: buffer, %selection: buffer) {
   %origin = index.constant 0 : offset
   %descriptor_origin = index.constant 12 : offset
-  %options_origin = index.constant 1548 : offset
+  %options_origin = index.constant 1804 : offset
   %input = buffer.assume.memory_space<constant> %epoch : buffer
   %header = buffer.view %input[%origin] : buffer -> view<3xi32>
   %spans = buffer.view %input[%descriptor_origin] : buffer -> view<64x5xi32>

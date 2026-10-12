@@ -345,7 +345,7 @@ static iree_status_t text_create_program(loom_serve_text_model_t* runner) {
       iree_any_bit_set(runner->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)
           ? iree_hal_buffer_byte_length(runner->state.mtp.next_results)
           : 0,
-      TEXT_ROW_CAPACITY * 12 * sizeof(int32_t),
+      TEXT_ROW_CAPACITY * 20 * sizeof(int32_t),
       TEXT_ROW_CAPACITY * 4 * sizeof(int64_t),
       runner->shape_count
           ? runner->state.storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS]
@@ -1787,7 +1787,7 @@ iree_status_t loom_serve_text_model_complete_epoch(
                   iree_vm_variant_span_empty()));
   for (iree_host_size_t i = 0; i < model->invocation.span_count; ++i) {
     const uint8_t* record =
-        model->host.bytes[TEXT_HOST_PROGRESS].data + i * 12 * sizeof(int32_t);
+        model->host.bytes[TEXT_HOST_PROGRESS].data + i * 20 * sizeof(int32_t);
     loom_serve_text_result_t result = {
         .consumed_count = iree_unaligned_load_le_u32(record),
         .known_count = iree_unaligned_load_le_u32(record + 4),
