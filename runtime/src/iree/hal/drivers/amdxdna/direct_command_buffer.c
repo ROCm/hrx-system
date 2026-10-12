@@ -1870,7 +1870,9 @@ static iree_status_t iree_hal_amdxdna_find_prepared_single_command(
   if (cmd->src_executable_identity != 0) {
     return iree_hal_amdxdna_find_single_command_cache_executable_entry(
         cache, queue, cmd->src_cu_idx.index, cmd->src_executable_identity,
-        cmd->src_entry_point, cmd->src_run_ordinal, out_entry);
+        cmd->src_entry_point, cmd->src_run_ordinal,
+        cmd->src_asm_inst ? cmd->src_asm_inst->count : 0, cmd->binding_count,
+        out_entry);
   }
   return iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
       cache, queue, cmd->src_cu_idx.index, cmd->src_asm_inst, cmd->src_patches,
