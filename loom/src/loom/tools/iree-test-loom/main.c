@@ -903,7 +903,7 @@ int iree_test_loom_main(int argc, char** argv,
   loom_run_hal_testbench_scenario_profile_t hal_scenario_profile = {0};
   iree_test_loom_xfail_list_t xfails = {0};
   iree_test_loom_diagnostic_capture_t diagnostic_capture = {0};
-  iree_hal_pool_t* host_pool = NULL;
+  iree_hal_pool_t* scenario_host_pool = NULL;
   loom_testbench_device_event_capture_t device_event_capture = {0};
   bool device_event_capture_initialized = false;
   iree_arena_allocator_t plan_arena;
@@ -1131,6 +1131,9 @@ int iree_test_loom_main(int argc, char** argv,
     }
     loom_testbench_case_execution_options_t execution_options = {0};
     loom_testbench_case_execution_options_initialize(&execution_options);
+    loom_testbench_value_materializer_options_t scenario_materializer_options;
+    loom_testbench_value_materializer_options_initialize(
+        &scenario_materializer_options);
     loom_testbench_scenario_execution_options_t scenario_execution_options = {
         0};
     loom_testbench_scenario_execution_options_initialize(
@@ -1262,6 +1265,9 @@ int iree_test_loom_main(int argc, char** argv,
     execution_options.materializer.open_read_file.fn =
         iree_test_loom_open_file_for_read;
     execution_options.materializer.open_read_file.user_data = &file_provider;
+    scenario_materializer_options.host_allocator = allocator;
+    scenario_materializer_options.open_read_file =
+        execution_options.materializer.open_read_file;
     if (iree_status_is_ok(status)) {
       status = loom_testbench_device_event_capture_initialize(
           LOOM_TESTBENCH_DEVICE_EVENT_DEFAULT_CAPACITY, allocator,
@@ -1287,12 +1293,6 @@ int iree_test_loom_main(int argc, char** argv,
         !iree_string_view_is_empty(hal_context.driver_name)) {
       status = loom_run_hal_testbench_context_ensure_runtime(&hal_context);
       if (iree_status_is_ok(status)) {
-        execution_options.materializer.target_pool =
-            hal_context.runtime.staging_pool;
-        execution_options.materializer.staging_pool =
-            hal_context.runtime.staging_pool;
-        execution_options.materializer.transfer_queue =
-            hal_context.runtime.transfer_queue;
         const iree_string_view_t target = iree_make_cstring_view(FLAG_target);
         const loom_run_hal_testbench_actual_provider_options_t
             provider_options = {
@@ -1317,8 +1317,7 @@ int iree_test_loom_main(int argc, char** argv,
                 &hal_scenario_profile);
       }
     }
-    if (iree_status_is_ok(status) && selected_scenario_count != 0 &&
-        execution_options.materializer.target_pool == NULL) {
+    if (iree_status_is_ok(status) && selected_scenario_count != 0) {
       // Scenario values are shared with host oracles. Each execution profile
       // stages those values into its own device storage as needed.
       const iree_hal_pool_host_access_t host_access = {
@@ -1327,9 +1326,9 @@ int iree_test_loom_main(int argc, char** argv,
               IREE_HAL_MAPPING_MODE_SCOPED | IREE_HAL_MAPPING_MODE_PERSISTENT,
       };
       status = iree_hal_heap_pool_create(host_access, allocator, allocator,
-                                         &host_pool);
+                                         &scenario_host_pool);
       if (iree_status_is_ok(status)) {
-        execution_options.materializer.target_pool = host_pool;
+        scenario_materializer_options.target_pool = scenario_host_pool;
       }
     }
     iree_host_size_t sample_count = 0;
@@ -1422,7 +1421,7 @@ int iree_test_loom_main(int argc, char** argv,
       } else {
         status = iree_test_loom_run_scenario(
             &module_plan, scenario_index, &scenario_execution_options,
-            &execution_options.materializer, entropy_root, &diagnostic_capture,
+            &scenario_materializer_options, entropy_root, &diagnostic_capture,
             &trials, &trial_count, &failed_trial_count);
       }
       if (!iree_test_loom_xfail_try_accept_compile_failure(
@@ -1525,7 +1524,7 @@ int iree_test_loom_main(int argc, char** argv,
   iree_string_builder_deinitialize(&sample_output);
   iree_arena_deinitialize(&execution_arena);
   iree_arena_deinitialize(&plan_arena);
-  iree_hal_pool_release(host_pool);
+  iree_hal_pool_release(scenario_host_pool);
   loom_run_hal_testbench_context_deinitialize(&hal_context);
   loom_config_text_binding_set_deinitialize(&config_set);
   if (device_event_capture_initialized) {
