@@ -15,25 +15,17 @@ kernel.decl @qwen38_rmsnorm_f32_prefill_last() launch(%control: buffer, %epsilon
 kernel.decl @qwen38_greedy_argmax_partial_rows_f32(%token_count: index, %output_size: index) launch(%token_count: index, %output_size: index, %logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer)
 kernel.decl @qwen38_greedy_argmax_reduce_rows_f32(%token_count: index, %output_size: index) launch(%token_count: index, %output_size: index, %partial_logits: buffer, %partial_token_ids: buffer, %token_ids: buffer)
 
-// Projects normalized hidden rows and publishes their deterministic greedy
-// tokens. Complete cohorts share packing and argmax, while each contraction
-// retains vocabulary weights across a measured group of activation rows.
-command.program.def public @qwen38_output_projection_greedy(%token_count: index, %normalized_origin: offset, %output_origin: offset) launch(%parameters: buffer, %normalized: buffer, %token_id: buffer) where [range(%token_count, 1, 64)] {
+// Projects normalized hidden rows into caller-owned device-local logits.
+// Greedy and chained selection share packing and vocabulary contractions.
+command.program.def public @qwen38_output_projection_logits(%token_count: index, %normalized_origin: offset) launch(%parameters: buffer, %normalized: buffer, %logits: buffer) where [range(%token_count, 1, 512)] {
   %hidden_size = index.constant 5120 : index
   %vocabulary_size = index.constant 248320 : index
   %output_weight = command.parameter %parameters, "output.weight" : view<1042944000xi8>
   %hidden_q8_row_bytes = index.constant 5760 : offset
   %logits_row_bytes = index.constant 993280 : offset
-  %partial_row_bytes = index.constant 244 : offset
   %hidden_q8_bytes = index.scale %token_count, %hidden_q8_row_bytes : index, offset -> offset
-  %logits_bytes = index.scale %token_count, %logits_row_bytes : index, offset -> offset
-  %partial_bytes = index.scale %token_count, %partial_row_bytes : index, offset -> offset
   %normalized_q8 = buffer.alloca<global> align(256) %hidden_q8_bytes : buffer
-  %logits = buffer.alloca<global> align(256) %logits_bytes : buffer
-  %partial_logits = buffer.alloca<global> align(256) %partial_bytes : buffer
-  %partial_token_ids = buffer.alloca<global> align(256) %partial_bytes : buffer
   %normalized_rows = buffer.view %normalized[%normalized_origin] : buffer -> view<[%token_count]x5120xf32>
-  %output_rows = buffer.view %token_id[%output_origin] : buffer -> view<[%token_count]xi32>
 
   kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %normalized_rows, %normalized_q8) : [index, index](index, index, view<[%token_count]x5120xf32>, buffer)
   %zero = index.constant 0 : index
@@ -78,6 +70,22 @@ command.program.def public @qwen38_output_projection_greedy(%token_count: index,
       kernel.launch @ggml_linear_q6k_q8_1_x4[%count, %hidden_size, %vocabulary_size](%count, %hidden_size, %vocabulary_size, %input_group, %output_weight, %logits_group) : [index, index, index](index, index, index, view<[%count]x5760xi8>, view<1042944000xi8>, view<[%count]x248320xf32>)
     }
   }
+  command.return
+}
+
+// Only selected token IDs escape greedy projection; its logits and partial
+// winners remain transient and can be reclaimed after the final reduction.
+command.program.def public @qwen38_output_projection_greedy(%token_count: index, %normalized_origin: offset, %output_origin: offset) launch(%parameters: buffer, %normalized: buffer, %token_id: buffer) where [range(%token_count, 1, 512)] {
+  %vocabulary_size = index.constant 248320 : index
+  %logits_row_bytes = index.constant 993280 : offset
+  %partial_row_bytes = index.constant 244 : offset
+  %logits_bytes = index.scale %token_count, %logits_row_bytes : index, offset -> offset
+  %partial_bytes = index.scale %token_count, %partial_row_bytes : index, offset -> offset
+  %logits = buffer.alloca<global> align(256) %logits_bytes : buffer
+  %partial_logits = buffer.alloca<global> align(256) %partial_bytes : buffer
+  %partial_token_ids = buffer.alloca<global> align(256) %partial_bytes : buffer
+  %output_rows = buffer.view %token_id[%output_origin] : buffer -> view<[%token_count]xi32>
+  command.program.launch @qwen38_output_projection_logits[%token_count, %normalized_origin](%parameters, %normalized, %logits) : [index, offset](buffer, buffer, buffer)
   kernel.launch @qwen38_greedy_argmax_partial_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %logits, %partial_logits, %partial_token_ids) : [index, index](index, index, buffer, buffer, buffer)
   kernel.launch @qwen38_greedy_argmax_reduce_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %partial_logits, %partial_token_ids, %output_rows) : [index, index](index, index, buffer, buffer, view<[%token_count]xi32>)
   command.return

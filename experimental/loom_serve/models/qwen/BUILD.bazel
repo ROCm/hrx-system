@@ -125,6 +125,19 @@ loom_test(
 )
 
 loom_test(
+    name = "dflash_proposal_test",
+    srcs = [
+        "kernels/qwen38/dflash_proposal.loom",
+        "tests/dflash_proposal.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "gdn_state_test",
     srcs = [
         "kernels/qwen38/gdn_common.loom",

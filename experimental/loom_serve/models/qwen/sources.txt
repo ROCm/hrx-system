@@ -13,7 +13,9 @@ continue.loom
 ../../motifs/ggml/linear_qk_common.loom
 ../../motifs/ggml/q4k.loom
 ../../motifs/ggml/quantize_q8_1_x4.loom
+../../motifs/ggml/selection.loom
 ../../motifs/tensor/grouped_convolution.loom
+../../motifs/tensor/topk.loom
 kernels/qwen38/attention_common.loom
 kernels/qwen38/continuation.loom
 kernels/qwen38/attention_decode.loom
@@ -24,6 +26,8 @@ kernels/qwen38/attention_spans.loom
 kernels/qwen38/decode_control.loom
 kernels/qwen38/dflash_attention.loom
 kernels/qwen38/dflash_convolution.loom
+kernels/qwen38/dflash_proposal.loom
+kernels/qwen38/dflash_selection.loom
 kernels/qwen38/ffn_gate_up_q5k_f16_wmma_wave32.loom
 kernels/qwen38/ffn_gate_up_prefetch.loom
 kernels/qwen38/gdn_common.loom
@@ -52,6 +56,7 @@ programs/qwen38/attention_layer_decode.loom
 programs/qwen38/attention_layer_prefill.loom
 programs/qwen38/dflash.loom
 programs/qwen38/dflash_context.loom
+programs/qwen38/dflash_proposal.loom
 programs/qwen38/gdn_commit.loom
 programs/qwen38/gdn_layer_decode.loom
 programs/qwen38/gdn_layer_prefill.loom

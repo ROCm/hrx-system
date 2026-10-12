@@ -18,7 +18,8 @@ template.def<@selection.chain_q4k_256> device @chain_q4k_256(%blocks: index, %le
   %one = index.constant 1 : index
   %two = index.constant 2 : index
   %sixteen = index.constant 16 : index
-  %block = kernel.workgroup.id<x> : index
+  %block0 = kernel.workgroup.id<x> : index
+  %block = index.assume %block0 [ge(%block0, 0), lt(%block0, %blocks)] : index
   %thread = kernel.workitem.id<x> : index
   %candidate = index.div %thread, %sixteen : index
   %lane = index.rem %thread, %sixteen : index

@@ -55,7 +55,8 @@ template.def<@selection.topk_partial_f32> device @topk_partial_f32(%rows: index,
   %padding = index.constant 4095 : index
   %padded = index.add %columns, %padding : index
   %partitions = index.div %padded, %tile_width : index
-  %row = kernel.workgroup.id<y> : index
+  %row0 = kernel.workgroup.id<y> : index
+  %row = index.assume %row0 [ge(%row0, 0), lt(%row0, %rows)] : index
   %partition = kernel.workgroup.id<x> : index
   %thread = kernel.workitem.id<x> : index
   %begin = index.mul %partition, %tile_width : index
@@ -97,7 +98,8 @@ template.def<@selection.topk_merge_f32> device @topk_merge_f32(%rows: index, %pa
   %sixteen = index.constant 16 : index
   %threads = index.constant 256 : index
   %columns = index.mul %partitions, %count : index
-  %row = kernel.workgroup.id<x> : index
+  %row0 = kernel.workgroup.id<x> : index
+  %row = index.assume %row0 [ge(%row0, 0), lt(%row0, %rows)] : index
   %thread = kernel.workitem.id<x> : index
   %x = buffer.view %input_values[%origin] : buffer -> view<[%rows]x[%columns]xf32>
   %t = buffer.view %input_ids[%origin] : buffer -> view<[%rows]x[%columns]xi32>

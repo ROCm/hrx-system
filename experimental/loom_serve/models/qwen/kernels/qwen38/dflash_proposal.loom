@@ -1,0 +1,157 @@
+// Only generated spans enter the draft batch. Anchor tokens and target packed
+// offsets stay distinct from compact draft offsets and resident cache rows.
+kernel.def @qwen38_dflash_proposal_prepare() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %anchors: buffer, %draft_tokens: buffer, %selection: buffer) {
+  %origin = index.constant 0 : offset
+  %descriptor_origin = index.constant 12 : offset
+  %options_origin = index.constant 1548 : offset
+  %input = buffer.assume.memory_space<constant> %epoch : buffer
+  %header = buffer.view %input[%origin] : buffer -> view<3xi32>
+  %spans = buffer.view %input[%descriptor_origin] : buffer -> view<64x5xi32>
+  %options = buffer.view %input[%options_origin] : buffer -> view<64x2xi32>
+  %tokens = buffer.view %target_tokens[%origin] : buffer -> view<512xi32>
+  %draft_header = buffer.view %draft[%origin] : buffer -> view<3xi32>
+  %draft_spans = buffer.view %draft[%descriptor_origin] : buffer -> view<64x5xi32>
+  %mapping = buffer.view %origins[%origin] : buffer -> view<64xi32>
+  %anchor_view = buffer.view %anchors[%origin] : buffer -> view<64xi32>
+  %inputs = buffer.view %draft_tokens[%origin] : buffer -> view<512xi32>
+  %selection_header = buffer.view %selection[%origin] : buffer -> view<3xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
+  %capacity = index.constant 512 : index
+  %slots = index.constant 64 : index
+  %zero_word = scalar.constant 0 : i32
+  %eight_word = scalar.constant 8 : i32
+  %generated_word = scalar.constant 2 : i32
+  %masks = vector.constant 248070 : vector<4xi32>
+  scf.for %token = [%zero to %capacity step %four] {
+    vector.store %masks, %inputs[%token] : vector<4xi32>, view<512xi32>
+  }
+  scf.for %slot = [%zero to %slots step %one] {
+    view.store %zero_word, %anchor_view[%slot] : i32, view<64xi32>
+  }
+  %span_word = view.load %header[1] : view<3xi32> -> i32
+  %span_value = index.cast %span_word : i32 to index
+  %span_count = index.assume %span_value [range(%span_value, 0, 64)] : index
+  %count = scf.for %span = [%zero to %span_count step %one](%count = %zero : index) -> (index) {
+    %flag = view.load %options[%span, 0] : view<64x2xi32> -> i32
+    %generated = scalar.cmpi eq, %flag, %generated_word : i32
+    %next = scf.if %generated -> (index) {
+      %slot = index.assume %count [range(%count, 0, 63)] : index
+      %position = view.load %spans[%span, 1] : view<64x5xi32> -> i32
+      %begin_word = view.load %spans[%span, 2] : view<64x5xi32> -> i32
+      %row = view.load %spans[%span, 3] : view<64x5xi32> -> i32
+      %begin_value = index.cast %begin_word : i32 to index
+      %begin = index.assume %begin_value [range(%begin_value, 0, 504)] : index
+      %anchor = view.load %tokens[%begin] : view<512xi32> -> i32
+      %draft_begin = index.mul %slot, %eight : index
+      %draft_begin_word = index.cast %draft_begin : index to i32
+      %selection_begin = index.mul %slot, %seven : index
+      %selection_word = index.cast %selection_begin : index to i32
+      view.store %eight_word, %draft_spans[%slot, 0] : i32, view<64x5xi32>
+      view.store %position, %draft_spans[%slot, 1] : i32, view<64x5xi32>
+      view.store %draft_begin_word, %draft_spans[%slot, 2] : i32, view<64x5xi32>
+      view.store %row, %draft_spans[%slot, 3] : i32, view<64x5xi32>
+      view.store %selection_word, %draft_spans[%slot, 4] : i32, view<64x5xi32>
+      view.store %begin_word, %mapping[%slot] : i32, view<64xi32>
+      view.store %anchor, %anchor_view[%slot] : i32, view<64xi32>
+      view.store %anchor, %inputs[%draft_begin] : i32, view<512xi32>
+      %incremented = index.add %count, %one : index
+      scf.yield %incremented : index
+    } else {
+      scf.yield %count : index
+    }
+    scf.yield %next : index
+  }
+  %token_count = index.mul %count, %eight : index
+  %selection_count = index.mul %count, %seven : index
+  %count_word = index.cast %count : index to i32
+  %token_word = index.cast %token_count : index to i32
+  %selection_word = index.cast %selection_count : index to i32
+  view.store %token_word, %draft_header[0] : i32, view<3xi32>
+  view.store %count_word, %draft_header[1] : i32, view<3xi32>
+  view.store %selection_word, %draft_header[2] : i32, view<3xi32>
+  view.store %selection_word, %selection_header[0] : i32, view<3xi32>
+  view.store %count_word, %selection_header[1] : i32, view<3xi32>
+  view.store %selection_word, %selection_header[2] : i32, view<3xi32>
+  kernel.return
+}
+
+// Remove the anchor activation from each independent block before the output
+// head. Padded rows are explicitly zero, never stale proposal storage.
+kernel.def @qwen38_dflash_selection_rows(%blocks: index) {
+  %seven = index.constant 7 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%seven, %blocks, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%blocks: index, %draft: buffer, %normalized: buffer, %output: buffer) {
+  %block0 = kernel.workgroup.id<y> : index
+  %block = index.assume %block0 [ge(%block0, 0), lt(%block0, %blocks)] : index
+  %position = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %width = index.constant 5120 : index
+  %stride = index.constant 1024 : index
+  %first = index.mul %thread, %four : index
+  %metadata = buffer.assume.memory_space<constant> %draft : buffer
+  %header = buffer.view %metadata[%origin] : buffer -> view<3xi32>
+  %count_word = view.load %header[1] : view<3xi32> -> i32
+  %count = index.cast %count_word : i32 to index
+  %active = index.cmp ult, %block, %count : index
+  %input = buffer.view %normalized[%origin] : buffer -> view<[%blocks]x8x5120xf32>
+  %result = buffer.view %output[%origin] : buffer -> view<[%blocks]x7x5120xf32>
+  %source_position = index.add %position, %one : index
+  %zeros = vector.constant 0.0 : vector<4xf32>
+  scf.for %channel = [%first to %width step %stride] {
+    %value = scf.if %active -> (vector<4xf32>) {
+      %value = vector.load %input[%block, %source_position, %channel] : view<[%blocks]x8x5120xf32> -> vector<4xf32>
+      scf.yield %value : vector<4xf32>
+    } else {
+      scf.yield %zeros : vector<4xf32>
+    }
+    vector.store %value, %result[%block, %position, %channel] : vector<4xf32>, view<[%blocks]x7x5120xf32>
+  }
+  kernel.return
+}
+
+// These writes only populate reserved verifier inputs. Neither the target
+// frontier nor any client-visible output changes before target acceptance.
+kernel.def @qwen38_dflash_proposal_publish() {
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%draft: buffer, %origins: buffer, %proposals: buffer, %target_tokens: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %draft[%origin] : buffer -> view<3xi32>
+  %count_word = view.load %header[1] : view<3xi32> -> i32
+  %count0 = index.cast %count_word : i32 to index
+  %count = index.assume %count0 [range(%count0, 0, 64)] : index
+  %slot = kernel.workitem.id<x> : index
+  %active = index.cmp ult, %slot, %count : index
+  scf.if %active {
+    %mapping = buffer.view %origins[%origin] : buffer -> view<64xi32>
+    %predictions = buffer.view %proposals[%origin] : buffer -> view<[%count]x7xi32>
+    %tokens = buffer.view %target_tokens[%origin] : buffer -> view<512xi32>
+    %begin_word = view.load %mapping[%slot] : view<64xi32> -> i32
+    %begin_value = index.cast %begin_word : i32 to index
+    %begin = index.assume %begin_value [range(%begin_value, 0, 504)] : index
+    %zero = index.constant 0 : index
+    %one = index.constant 1 : index
+    %seven = index.constant 7 : index
+    %first = index.add %begin, %one : index
+    scf.for %position = [%zero to %seven step %one] {
+      %token = view.load %predictions[%slot, %position] : view<[%count]x7xi32> -> i32
+      %destination = index.add %first, %position : index
+      view.store %token, %tokens[%destination] : i32, view<512xi32>
+    }
+  }
+  kernel.return
+}
