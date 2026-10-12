@@ -33,6 +33,7 @@ loom_library(
     srcs = [
         "kernels/qwen38/ffn_gate_up_q5k_f16_wmma_wave32.loom",
         "kernels/qwen38/layer_prefill.loom",
+        "kernels/qwen38/linear_q4k_f16_wmma.loom",
         "kernels/qwen38/linear_q5k_f16_wmma.loom",
         "kernels/qwen38/linear_q5k_f16_wmma_wave32.loom",
         "kernels/qwen38/linear_q6k_f16_wmma.loom",
@@ -44,6 +45,17 @@ loom_library(
 loom_test(
     name = "ffn_gate_up_test",
     srcs = ["tests/ffn_gate_up.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":projection_kernels"],
+)
+
+loom_test(
+    name = "q4_matrix_test",
+    srcs = ["tests/linear_q4k_f16_wmma.loom"],
     benchmark_smoke = False,
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,

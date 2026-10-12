@@ -1,0 +1,91 @@
+amdgpu.target<gfx11-generic> @qwen38_q4k_matrix_wave64 {subgroup_size = 64}
+template.decl @qwen38.dense_qk_f16_wmma.metadata.body(%weight_format: index, %weight_macro_block_byte_count: index, %input_is_f16: i1, %adds_residual: i1, %token_count: index, %input_size: index, %output_size: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %input: buffer, %weight: buffer, %output: buffer)
+
+// Canonical Q4_K weights share decoded metadata and matrix operands across
+// the token tile. Runtime token counts mask the final tile without changing
+// its matrix schedule or reading inactive activation rows.
+kernel.def target(@qwen38_q4k_matrix_wave64) @qwen38_linear_q4k_f16_wmma_x64(%tokens0: index, %inputs0: index, %outputs0: index) {
+  %tokens = index.assume %tokens0 [range(%tokens0, 0, 512)] : index
+  %outputs = index.assume %outputs0 [range(%outputs0, 1, 32768)] : index
+  %one = index.constant 1 : index
+  %channels = index.constant 64 : index
+  %tile = index.constant 64 : index
+  %threads = index.constant 256 : index
+  %channel_padding = index.constant 63 : index
+  %token_padding = index.constant 63 : index
+  %padded_channels = index.add %outputs, %channel_padding : index
+  %channel_tiles = index.div %padded_channels, %channels : index
+  %padded_tokens = index.add %tokens, %token_padding : index
+  %token_tiles = index.div %padded_tokens, %tile : index
+  kernel.launch.config workgroups(%channel_tiles, %token_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%control: buffer, %inputs0: index, %outputs0: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %format = index.constant 4 : index
+  %macro_bytes = index.constant 144 : index
+  %channels = index.constant 64 : index
+  %tile = index.constant 64 : index
+  %channel_groups = index.constant 4 : index
+  %threads = index.constant 256 : index
+  %subgroups = index.constant 4 : index
+  %input_f16 = scalar.constant false : i1
+  %residual = scalar.constant false : i1
+  %header = buffer.view %control[%origin] : buffer -> view<1xi32>
+  %count_word = view.load %header[%zero] : view<1xi32> -> i32
+  %count0 = index.cast %count_word : i32 to index
+  %count = index.assume %count0 [range(%count0, 1, 512)] : index
+  %inputs = index.assume %inputs0 [range(%inputs0, 256, 32768), multiple_of(%inputs0, 256)] : index
+  %outputs = index.assume %outputs0 [range(%outputs0, 1, 32768)] : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token_tile = kernel.workgroup.id<y> : index
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 255)] : index
+  %subgroup0 = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 3)] : index
+  %lane = kernel.subgroup.lane.id : index
+  template.apply<@qwen38.dense_qk_f16_wmma.metadata.body>(%format, %macro_bytes, %input_f16, %residual, %count, %inputs, %outputs, %channel_tile, %token_tile, %channels, %tile, %channel_groups, %threads, %subgroups, %workitem, %subgroup, %lane, %input, %weight, %output) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@qwen38_q4k_matrix_wave64) @qwen38_linear_q4k_f16_wmma_x128(%tokens0: index, %inputs0: index, %outputs0: index) {
+  %tokens = index.assume %tokens0 [range(%tokens0, 0, 512)] : index
+  %outputs = index.assume %outputs0 [range(%outputs0, 1, 32768)] : index
+  %one = index.constant 1 : index
+  %channels = index.constant 64 : index
+  %tile = index.constant 128 : index
+  %threads = index.constant 512 : index
+  %channel_padding = index.constant 63 : index
+  %token_padding = index.constant 127 : index
+  %padded_channels = index.add %outputs, %channel_padding : index
+  %channel_tiles = index.div %padded_channels, %channels : index
+  %padded_tokens = index.add %tokens, %token_padding : index
+  %token_tiles = index.div %padded_tokens, %tile : index
+  kernel.launch.config workgroups(%channel_tiles, %token_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%control: buffer, %inputs0: index, %outputs0: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %format = index.constant 4 : index
+  %macro_bytes = index.constant 144 : index
+  %channels = index.constant 64 : index
+  %tile = index.constant 128 : index
+  %channel_groups = index.constant 4 : index
+  %threads = index.constant 512 : index
+  %subgroups = index.constant 8 : index
+  %input_f16 = scalar.constant false : i1
+  %residual = scalar.constant false : i1
+  %header = buffer.view %control[%origin] : buffer -> view<1xi32>
+  %count_word = view.load %header[%zero] : view<1xi32> -> i32
+  %count0 = index.cast %count_word : i32 to index
+  %count = index.assume %count0 [range(%count0, 1, 512)] : index
+  %inputs = index.assume %inputs0 [range(%inputs0, 256, 32768), multiple_of(%inputs0, 256)] : index
+  %outputs = index.assume %outputs0 [range(%outputs0, 1, 32768)] : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token_tile = kernel.workgroup.id<y> : index
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 511)] : index
+  %subgroup0 = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
+  %lane = kernel.subgroup.lane.id : index
+  template.apply<@qwen38.dense_qk_f16_wmma.metadata.body>(%format, %macro_bytes, %input_f16, %residual, %count, %inputs, %outputs, %channel_tile, %token_tile, %channels, %tile, %channel_groups, %threads, %subgroups, %workitem, %subgroup, %lane, %input, %weight, %output) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}

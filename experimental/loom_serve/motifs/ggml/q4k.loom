@@ -1,5 +1,34 @@
 template.decl @ggml.qk.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
 
+// Four adjacent unsigned codes from one 32-value scale group. Scale/minimum
+// metadata is independent of the packet and can be shared by a matrix tile.
+func.def public inline @ggml_q4k_codes_f32_vector4(%weight: buffer, %row_origin: offset, %block: index, %group0: index, %packet0: index) -> (vector<4xf32>) {
+  %group = index.assume %group0 [range(%group0, 0, 7)] : index
+  %packet = index.assume %packet0 [range(%packet0, 0, 7)] : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %block_bytes = index.constant 144 : offset
+  %payload_add = index.constant 16 : offset
+  %block_add = index.scale %block, %block_bytes : index, offset -> offset
+  %block_origin = index.add %row_origin, %block_add : offset
+  %payload_origin = index.add %block_origin, %payload_add : offset
+  %page = index.div %group, %two : index
+  %word = index.madd %page, %eight, %packet : index
+  %half = index.rem %group, %two : index
+  %shift_index = index.mul %half, %four : index
+  %shift_word = index.cast %shift_index : index to i32
+  %shift = vector.splat %shift_word : vector<1xi32>
+  %mask = vector.constant 252645135 : vector<1xi32>
+  %view = buffer.view %weight[%payload_origin] : buffer -> view<32xi32>
+  %packed = vector.load %view[%word] : view<32xi32> -> vector<1xi32>
+  %shifted = vector.shrui %packed, %shift : vector<1xi32>
+  %codes = vector.andi %shifted, %mask : vector<1xi32>
+  %bytes = vector.bitcast %codes : vector<1xi32> to vector<4xi8>
+  %values = vector.uitofp %bytes : vector<4xi8> to vector<4xf32>
+  func.return %values : vector<4xf32>
+}
+
 // Decodes one 16-value half of a Q4_K scale group.
 func.def public inline @ggml_q4k_chunk(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group: index, %q4_half: index) -> (vector<16xi8>, f32, f32) {
   %c4 = index.constant 4 : index

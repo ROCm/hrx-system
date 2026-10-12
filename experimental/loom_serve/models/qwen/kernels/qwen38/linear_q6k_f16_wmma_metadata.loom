@@ -1,9 +1,11 @@
-template.decl @qwen38.dense_q6k_f16_wmma.metadata.body(%weight_format: index, %weight_macro_block_byte_count: index, %input_is_f16: i1, %adds_residual: i1, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @qwen38.dense_qk_f16_wmma.metadata.body(%weight_format: index, %weight_macro_block_byte_count: index, %input_is_f16: i1, %adds_residual: i1, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @ggml.qk.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
+func.decl @ggml_q4k_codes_f32_vector4(%weight: buffer, %row_origin: offset, %block: index, %group: index, %packet: index) -> (vector<4xf32>)
 
-// Q6_K contractions with shared metadata and register read-ahead.
+// Q4_K and Q6_K contractions with shared metadata and register read-ahead.
 //
-// Canonical Q6_K bytes are unchanged. The workgroup decodes each row/group
-// scale pair once, stages it in LDS, and reuses it for all eight Q6 payload
+// Canonical weight bytes are unchanged. The workgroup decodes each row/group
+// scale pair once, stages it in LDS, and reuses it for all eight payload
 // packets. F32 and producer-rounded F16 activation storage specialize into the
 // same F16 WMMA operand stream. Global codes and activations are acquired one
 // K32 group ahead of LDS publication and matrix consumption; metadata scaling
@@ -91,7 +93,7 @@ func.def inline @qwen38_q6k_f16_vector4_prescaled(%weight: buffer, %row_byte_bas
   func.return %values : vector<4xf16>
 }
 
-template.def<@qwen38.dense_q6k_f16_wmma.metadata.body> device @qwen38_dense_q6k_f16_wmma_metadata_body(%weight_format: index, %weight_macro_block_byte_count: index, %input_is_f16: i1, %adds_residual: i1, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %input: buffer, %weight: buffer, %output: buffer) {
+template.def<@qwen38.dense_qk_f16_wmma.metadata.body> device @qwen38_dense_qk_f16_wmma_metadata_body(%weight_format: index, %weight_macro_block_byte_count: index, %input_is_f16: i1, %adds_residual: i1, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %input: buffer, %weight: buffer, %output: buffer) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
   %bounded_input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), multiple_of(%input_size0, 256)] : index
   %bounded_output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
@@ -184,7 +186,7 @@ template.def<@qwen38.dense_q6k_f16_wmma.metadata.body> device @qwen38_dense_q6k_
   %weight_load_count = index.mul %channel_tile_width, %c8 : index
   %activation_load_count = index.mul %token_tile_width, %c8 : index
   %metadata_load_count = index.mul %channel_tile_width, %c8 : index
-  %uses_x64 = index.cmp eq, %token_tile_width, %c64 : index
+  %uses_q4 = index.cmp eq, %weight_format, %c4 : index
   %init00 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<4xf32>
   %init01 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<4xf32>
   %init10 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<4xf32>
@@ -204,7 +206,17 @@ template.def<@qwen38.dense_q6k_f16_wmma.metadata.body> device @qwen38_dense_q6k_
       %metadata_pair = scf.if %valid_metadata_channel -> (vector<2xf32>) {
         %metadata_channel_byte_index = index.mul %metadata_channel, %weight_row_bytes : index
         %metadata_row_byte_base = index.cast %metadata_channel_byte_index : index to offset
-        %decoded_pair = func.call @qwen38_q6k_scale_pair(%weight_noalias, %metadata_row_byte_base, %quant_block, %metadata_group) : (buffer, offset, index, index) -> (vector<2xf32>)
+        %decoded_pair = scf.if %uses_q4 -> (vector<2xf32>) {
+          %block_bytes = index.constant 144 : offset
+          %block_add = index.scale %quant_block, %block_bytes : index, offset -> offset
+          %block_origin = index.add %metadata_row_byte_base, %block_add : offset
+          %scale, %minimum = template.apply<@ggml.qk.scale_min>(%weight_noalias, %block_origin, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+          %pair = vector.from_elements %scale, %minimum : vector<2xf32>
+          scf.yield %pair : vector<2xf32>
+        } else {
+          %pair = func.call @qwen38_q6k_scale_pair(%weight_noalias, %metadata_row_byte_base, %quant_block, %metadata_group) : (buffer, offset, index, index) -> (vector<2xf32>)
+          scf.yield %pair : vector<2xf32>
+        }
         scf.yield %decoded_pair : vector<2xf32>
       } else {
         %zero_pair = vector.constant 0.0 : vector<2xf32>
@@ -217,107 +229,77 @@ template.def<@qwen38.dense_q6k_f16_wmma.metadata.body> device @qwen38_dense_q6k_
       %block_k_base = index.mul %quant_block, %c256 : index
       %group_k_add = index.mul %quant_group, %c32 : index
       %k_origin = index.add %block_k_base, %group_k_add : index
-      scf.if %uses_x64 {
-        %load_packet0 = index.rem %workitem, %c8 : index
+      scf.for %weight_task = [%workitem to %weight_load_count step %workgroup_size] unroll {
+        %load_packet0 = index.rem %weight_task, %c8 : index
         %load_packet = index.assume %load_packet0 [range(%load_packet0, 0, 7)] : index
         %load_k = index.mul %load_packet, %c4 : index
-        %load_row0 = index.div %workitem, %c8 : index
-        %load_row = index.assume %load_row0 [range(%load_row0, 0, 31)] : index
-        scf.for %row_offset = [%c0 to %c64 step %c32] unroll {
-          %local_row0 = index.add %load_row, %row_offset : index
-          %local_row = index.assume %local_row0 [range(%local_row0, 0, 63)] : index
-          %channel = index.add %channel_tile_base, %local_row : index
-          %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
-          %weight_values = scf.if %valid_channel -> (vector<4xf16>) {
-            %channel_byte_index = index.mul %channel, %weight_row_bytes : index
-            %row_byte_base = index.cast %channel_byte_index : index to offset
-            %packet_half = index.div %load_packet, %c4 : index
-            %combined_scale = view.load %metadata_stage_view[%local_row, %quant_group, %packet_half] : view<[%channel_tile_width]x8x2xf32> -> f32
-            %decoded = func.call @qwen38_q6k_f16_vector4_prescaled(%weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet, %combined_scale) : (buffer, offset, index, index, index, f32) -> (vector<4xf16>)
-            scf.yield %decoded : vector<4xf16>
-          } else {
-            scf.yield %c0_f16x4 : vector<4xf16>
-          }
-          vector.store %weight_values, %weight_stage_view[%local_row, %load_k] : vector<4xf16>, view<[%channel_tile_width]x40xf16>
-          %token = index.add %token_tile_base, %local_row : index
-          %valid_token = index.cmp ult, %token, %bounded_token_count : index
-          %activation_values = scf.if %valid_token -> (vector<4xf16>) {
-            %bounded_token, %input_token_count = index.assume %token, %bounded_token_count [lt(%token, %bounded_token_count)] : index, index
-            %input_k = index.add %k_origin, %load_k : index
-            %loaded = scf.if %input_is_f16 -> (vector<4xf16>) {
-              %input_word0 = index.div %input_k, %c2 : index
-              %input_word = index.assume %input_word0 [ge(%input_word0, 0), lt(%input_word0, %last_input_f16_packet_start)] : index
-              %packed = vector.load %input_f16_packed_view[%bounded_token, %input_word] : view<[%bounded_token_count]x[%input_f16_word_count]xi32> -> vector<2xi32>
-              %value = vector.bitcast %packed : vector<2xi32> to vector<4xf16>
-              scf.yield %value : vector<4xf16>
-            } else {
-              %input_mask = vector.mask.range [%input_k to %bounded_input_size step %c1] : index -> vector<4xi1>
-              %value_f32 = vector.load.mask %input_f32_view[%bounded_token, %input_k], %input_mask, %c0_f32x4 : view<[%bounded_token_count]x[%bounded_input_size]xf32>, vector<4xi1>, vector<4xf32>
-              %value = vector.fptrunc %value_f32 : vector<4xf32> to vector<4xf16>
-              scf.yield %value : vector<4xf16>
-            }
-            scf.yield %loaded : vector<4xf16>
-          } else {
-            scf.yield %c0_f16x4 : vector<4xf16>
-          }
-          vector.store %activation_values, %activation_stage_physical_view[%local_row, %load_k] : vector<4xf16>, view<[%token_tile_width]x40xf16>
+        %load_row0 = index.div %weight_task, %c8 : index
+        %load_row = index.assume %load_row0 [lt(%load_row0, %channel_tile_width)] : index
+        %channel = index.add %channel_tile_base, %load_row : index
+        %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
+        // Keep acquisition outside guarded reconvergence. Padded channels
+        // read a valid row, then publish positive zero in the consumer.
+        %safe_channel = scf.select %valid_channel, %channel, %c0 : index
+        %channel_byte_index = index.mul %safe_channel, %weight_row_bytes : index
+        %row_byte_base = index.cast %channel_byte_index : index to offset
+        %codes = scf.if %uses_q4 -> (vector<4xf32>) {
+          %value = func.call @ggml_q4k_codes_f32_vector4(%weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet) : (buffer, offset, index, index, index) -> (vector<4xf32>)
+          scf.yield %value : vector<4xf32>
+        } else {
+          %value = func.call @qwen38_q6k_codes_f32_vector4(%weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet) : (buffer, offset, index, index, index) -> (vector<4xf32>)
+          scf.yield %value : vector<4xf32>
         }
-      } else {
-        scf.for %weight_task = [%workitem to %weight_load_count step %workgroup_size] unroll {
-          %load_packet0 = index.rem %weight_task, %c8 : index
-          %load_packet = index.assume %load_packet0 [range(%load_packet0, 0, 7)] : index
-          %load_k = index.mul %load_packet, %c4 : index
-          %load_row0 = index.div %weight_task, %c8 : index
-          %load_row = index.assume %load_row0 [lt(%load_row0, %channel_tile_width)] : index
-          %channel = index.add %channel_tile_base, %load_row : index
-          %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
-          // Keep acquisition outside guarded reconvergence. Padded channels
-          // read a valid row, then publish positive zero in the consumer.
-          %safe_channel = scf.select %valid_channel, %channel, %c0 : index
-          %channel_byte_index = index.mul %safe_channel, %weight_row_bytes : index
-          %row_byte_base = index.cast %channel_byte_index : index to offset
-          %codes = func.call @qwen38_q6k_codes_f32_vector4(%weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet) : (buffer, offset, index, index, index) -> (vector<4xf32>)
-          %packet_half = index.div %load_packet, %c4 : index
-          %metadata_pair_index = index.madd %load_row, %c8, %quant_group : index
-          %metadata_index0 = index.madd %metadata_pair_index, %c2, %packet_half : index
-          %metadata_index = index.assume %metadata_index0 [ge(%metadata_index0, 0), lt(%metadata_index0, %metadata_stage_elements)] : index
-          %combined_scale = view.load %metadata_linear_view[%metadata_index] : view<[%metadata_stage_elements]xf32> -> f32
-          %scale_vector = vector.splat %combined_scale : vector<4xf32>
-          %decoded_f32 = vector.mulf %codes, %scale_vector : vector<4xf32>
-          %decoded = vector.fptrunc %decoded_f32 : vector<4xf32> to vector<4xf16>
-          %valid_weight = vector.splat %valid_channel : vector<4xi1>
-          %weight_values = vector.select %valid_weight, %decoded, %c0_f16x4 : vector<4xf16>
-          vector.store %weight_values, %weight_stage_view[%load_row, %load_k] : vector<4xf16>, view<[%channel_tile_width]x40xf16>
+        %packet_half = index.div %load_packet, %c4 : index
+        %metadata_pair_index = index.madd %load_row, %c8, %quant_group : index
+        %scale_slot = scf.select %uses_q4, %c0, %packet_half : index
+        %metadata_index0 = index.madd %metadata_pair_index, %c2, %scale_slot : index
+        %metadata_index = index.assume %metadata_index0 [ge(%metadata_index0, 0), lt(%metadata_index0, %metadata_stage_elements)] : index
+        %combined_scale = view.load %metadata_linear_view[%metadata_index] : view<[%metadata_stage_elements]xf32> -> f32
+        %scale_vector = vector.splat %combined_scale : vector<4xf32>
+        %scaled_f32 = vector.mulf %codes, %scale_vector : vector<4xf32>
+        %decoded_f32 = scf.if %uses_q4 -> (vector<4xf32>) {
+          %minimum_index0 = index.add %metadata_index, %c1 : index
+          %minimum_index = index.assume %minimum_index0 [ge(%minimum_index0, 0), lt(%minimum_index0, %metadata_stage_elements)] : index
+          %minimum = view.load %metadata_linear_view[%minimum_index] : view<[%metadata_stage_elements]xf32> -> f32
+          %minimum_v = vector.splat %minimum : vector<4xf32>
+          %decoded = vector.subf %scaled_f32, %minimum_v : vector<4xf32>
+          scf.yield %decoded : vector<4xf32>
+        } else {
+          scf.yield %scaled_f32 : vector<4xf32>
         }
-        scf.for %activation_task = [%workitem to %activation_load_count step %workgroup_size] unroll {
-          %load_packet0 = index.rem %activation_task, %c8 : index
-          %load_packet = index.assume %load_packet0 [range(%load_packet0, 0, 7)] : index
-          %load_k = index.mul %load_packet, %c4 : index
-          %activation_row0 = index.div %activation_task, %c8 : index
-          %activation_row = index.assume %activation_row0 [ge(%activation_row0, 0), lt(%activation_row0, %token_tile_width)] : index
-          %token = index.add %token_tile_base, %activation_row : index
-          %valid_token = index.cmp ult, %token, %bounded_token_count : index
-          // Mask after acquisition so next-group loads can overlap current
-          // matrix work without draining at a divergent merge.
-          %safe_token = scf.select %valid_token, %token, %c0 : index
-          %bounded_token, %input_token_count = index.assume %safe_token, %bounded_token_count [ge(%safe_token, 0), lt(%safe_token, %bounded_token_count)] : index, index
-          %input_k = index.add %k_origin, %load_k : index
-          %loaded = scf.if %input_is_f16 -> (vector<4xf16>) {
-            %input_word0 = index.div %input_k, %c2 : index
-            %input_word = index.assume %input_word0 [ge(%input_word0, 0), lt(%input_word0, %last_input_f16_packet_start)] : index
-            %packed = vector.load %input_f16_packed_view[%bounded_token, %input_word] : view<[%bounded_token_count]x[%input_f16_word_count]xi32> -> vector<2xi32>
-            %value = vector.bitcast %packed : vector<2xi32> to vector<4xf16>
-            scf.yield %value : vector<4xf16>
-          } else {
-            %input_mask = vector.mask.range [%input_k to %bounded_input_size step %c1] : index -> vector<4xi1>
-            %value_f32 = vector.load.mask %input_f32_view[%bounded_token, %input_k], %input_mask, %c0_f32x4 : view<[%bounded_token_count]x[%bounded_input_size]xf32>, vector<4xi1>, vector<4xf32>
-            %value = vector.fptrunc %value_f32 : vector<4xf32> to vector<4xf16>
-            scf.yield %value : vector<4xf16>
-          }
-          %valid_activation = vector.splat %valid_token : vector<4xi1>
-          %activation_values = vector.select %valid_activation, %loaded, %c0_f16x4 : vector<4xf16>
-          vector.store %activation_values, %activation_stage_physical_view[%activation_row, %load_k] : vector<4xf16>, view<[%token_tile_width]x40xf16>
+        %decoded = vector.fptrunc %decoded_f32 : vector<4xf32> to vector<4xf16>
+        %valid_weight = vector.splat %valid_channel : vector<4xi1>
+        %weight_values = vector.select %valid_weight, %decoded, %c0_f16x4 : vector<4xf16>
+        vector.store %weight_values, %weight_stage_view[%load_row, %load_k] : vector<4xf16>, view<[%channel_tile_width]x40xf16>
+      }
+      scf.for %activation_task = [%workitem to %activation_load_count step %workgroup_size] unroll {
+        %load_packet0 = index.rem %activation_task, %c8 : index
+        %load_packet = index.assume %load_packet0 [range(%load_packet0, 0, 7)] : index
+        %load_k = index.mul %load_packet, %c4 : index
+        %activation_row0 = index.div %activation_task, %c8 : index
+        %activation_row = index.assume %activation_row0 [ge(%activation_row0, 0), lt(%activation_row0, %token_tile_width)] : index
+        %token = index.add %token_tile_base, %activation_row : index
+        %valid_token = index.cmp ult, %token, %bounded_token_count : index
+        // Mask after acquisition so next-group loads can overlap current
+        // matrix work without draining at a divergent merge.
+        %safe_token = scf.select %valid_token, %token, %c0 : index
+        %bounded_token, %input_token_count = index.assume %safe_token, %bounded_token_count [ge(%safe_token, 0), lt(%safe_token, %bounded_token_count)] : index, index
+        %input_k = index.add %k_origin, %load_k : index
+        %loaded = scf.if %input_is_f16 -> (vector<4xf16>) {
+          %input_word0 = index.div %input_k, %c2 : index
+          %input_word = index.assume %input_word0 [ge(%input_word0, 0), lt(%input_word0, %last_input_f16_packet_start)] : index
+          %packed = vector.load %input_f16_packed_view[%bounded_token, %input_word] : view<[%bounded_token_count]x[%input_f16_word_count]xi32> -> vector<2xi32>
+          %value = vector.bitcast %packed : vector<2xi32> to vector<4xf16>
+          scf.yield %value : vector<4xf16>
+        } else {
+          %input_mask = vector.mask.range [%input_k to %bounded_input_size step %c1] : index -> vector<4xi1>
+          %value_f32 = vector.load.mask %input_f32_view[%bounded_token, %input_k], %input_mask, %c0_f32x4 : view<[%bounded_token_count]x[%bounded_input_size]xf32>, vector<4xi1>, vector<4xf32>
+          %value = vector.fptrunc %value_f32 : vector<4xf32> to vector<4xf16>
+          scf.yield %value : vector<4xf16>
         }
+        %valid_activation = vector.splat %valid_token : vector<4xi1>
+        %activation_values = vector.select %valid_activation, %loaded, %c0_f16x4 : vector<4xf16>
+        vector.store %activation_values, %activation_stage_physical_view[%activation_row, %load_k] : vector<4xf16>, view<[%token_tile_width]x40xf16>
       }
       kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
       %next00, %next01, %next10, %next11, %next20, %next21, %next30, %next31 = scf.for %k_half = [%c0 to %c32 step %c16](%half_acc00 = %acc00 : vector<4xf32>, %half_acc01 = %acc01 : vector<4xf32>, %half_acc10 = %acc10 : vector<4xf32>, %half_acc11 = %acc11 : vector<4xf32>, %half_acc20 = %acc20 : vector<4xf32>, %half_acc21 = %acc21 : vector<4xf32>, %half_acc30 = %acc30 : vector<4xf32>, %half_acc31 = %acc31 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) unroll {
@@ -602,7 +584,7 @@ kernel.def target(@qwen38_q6k_metadata_gfx11_wave64) export("qwen38_linear_q6k_f
   %subgroup0 = kernel.subgroup.id : index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
   %lane = kernel.subgroup.lane.id : index
-  template.apply<@qwen38.dense_q6k_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c64, %c128, %c4, %c512, %c8, %workitem, %subgroup, %lane, %input, %weight, %output) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
+  template.apply<@qwen38.dense_qk_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c64, %c128, %c4, %c512, %c8, %workitem, %subgroup, %lane, %input, %weight, %output) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -643,7 +625,7 @@ kernel.def target(@qwen38_q6k_metadata_gfx11_wave64) export("qwen38_linear_q6k_f
   %subgroup0 = kernel.subgroup.id : index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 15)] : index
   %lane = kernel.subgroup.lane.id : index
-  template.apply<@qwen38.dense_q6k_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c128, %c128, %c8, %c1024, %c16, %workitem, %subgroup, %lane, %input, %weight, %output) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
+  template.apply<@qwen38.dense_qk_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c128, %c128, %c8, %c1024, %c16, %workitem, %subgroup, %lane, %input, %weight, %output) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -690,7 +672,7 @@ kernel.def target(@qwen38_q6k_metadata_gfx11_wave64) export("qwen38_linear_q6k_f
   %subgroup0 = kernel.subgroup.id : index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
   %lane = kernel.subgroup.lane.id : index
-  template.apply<@qwen38.dense_q6k_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c64, %c128, %c4, %c512, %c8, %workitem, %subgroup, %lane, %input, %weight, %residual) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
+  template.apply<@qwen38.dense_qk_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c64, %c128, %c4, %c512, %c8, %workitem, %subgroup, %lane, %input, %weight, %residual) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -732,7 +714,7 @@ kernel.def target(@qwen38_q6k_metadata_gfx11_wave64) export("qwen38_linear_q6k_f
   %subgroup0 = kernel.subgroup.id : index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 15)] : index
   %lane = kernel.subgroup.lane.id : index
-  template.apply<@qwen38.dense_q6k_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c128, %c128, %c8, %c1024, %c16, %workitem, %subgroup, %lane, %input, %weight, %residual) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
+  template.apply<@qwen38.dense_qk_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c128, %c128, %c8, %c1024, %c16, %workitem, %subgroup, %lane, %input, %weight, %residual) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -779,7 +761,7 @@ kernel.def target(@qwen38_q6k_metadata_gfx11_wave64) export("qwen38_linear_q6k_f
   %subgroup0 = kernel.subgroup.id : index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
   %lane = kernel.subgroup.lane.id : index
-  template.apply<@qwen38.dense_q6k_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c64, %c128, %c4, %c512, %c8, %workitem, %subgroup, %lane, %input, %weight, %residual) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
+  template.apply<@qwen38.dense_qk_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c64, %c128, %c4, %c512, %c8, %workitem, %subgroup, %lane, %input, %weight, %residual) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -820,7 +802,7 @@ kernel.def target(@qwen38_q6k_metadata_gfx11_wave64) export("qwen38_linear_q6k_f
   %subgroup0 = kernel.subgroup.id : index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 15)] : index
   %lane = kernel.subgroup.lane.id : index
-  template.apply<@qwen38.dense_q6k_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c128, %c128, %c8, %c1024, %c16, %workitem, %subgroup, %lane, %input, %weight, %residual) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
+  template.apply<@qwen38.dense_qk_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c128, %c128, %c8, %c1024, %c16, %workitem, %subgroup, %lane, %input, %weight, %residual) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -865,7 +847,7 @@ kernel.def target(@qwen38_q6k_metadata_gfx11_wave64) export("qwen38_linear_q6k_f
   %subgroup0 = kernel.subgroup.id : index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 15)] : index
   %lane = kernel.subgroup.lane.id : index
-  template.apply<@qwen38.dense_q6k_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c128, %c256, %c8, %c1024, %c16, %workitem, %subgroup, %lane, %input, %weight, %residual) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
+  template.apply<@qwen38.dense_qk_f16_wmma.metadata.body>(%c6, %c210, %input_is_f16, %adds_residual, %token_count, %input_size, %output_size, %channel_tile, %token_tile, %c128, %c256, %c8, %c1024, %c16, %workitem, %subgroup, %lane, %input, %weight, %residual) : (index, index, i1, i1, index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
