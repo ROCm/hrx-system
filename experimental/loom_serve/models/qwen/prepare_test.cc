@@ -108,15 +108,17 @@ class PrepareTest : public ::testing::Test {
   }
 
   void CheckStorage(uint64_t rows, uint64_t context, uint64_t pool, bool packed,
-                    bool mtp, uint64_t pins = 0, bool dflash = false) {
-    // These address equations are the preceding production layout. Source
-    // descriptors must preserve both dense and pooled kernel bindings.
+                    uint32_t draft_depth, uint64_t pins = 0) {
+    // These address equations independently describe the production layout.
+    // Source descriptors must preserve both dense and pooled kernel bindings.
     const uint64_t attention = pool ? 0 : context * 65536;
     const uint64_t stride = 156895744 + attention;
     const uint64_t slots = pins ? 2 * rows + pins : rows;
     const uint64_t row_bytes = slots * stride;
     const uint64_t table = pool ? 2048 + rows * ((context + 63) / 64) * 4 : 512;
-    const bool drafting = mtp || dflash;
+    const bool drafting = draft_depth != 0;
+    const bool mtp = draft_depth == 3;
+    const bool dflash = draft_depth == 7;
     const uint64_t residual_bytes = dflash ? 62914560 : 10485760;
     const uint64_t draft_bytes = dflash ? 20480 : 4096;
     const uint64_t lengths[] = {
@@ -236,7 +238,7 @@ TEST_F(PrepareTest, DeclaresCompleteProductionCatalogAndOpaqueState) {
       }
       ASSERT_NO_FATAL_FAILURE(Prepare(rows, pool, mtp ? 3 : 0, shapes));
       ASSERT_NE(preparation, nullptr);
-      CheckStorage(rows, 16384, pool, mode != 0, mtp);
+      CheckStorage(rows, 16384, pool, mode != 0, mtp ? 3 : 0);
       std::vector<Stage> expected = {
           {"qwen38_prefill", 512, rows, 512, 1, 1},
           {"qwen38_text_decode_greedy", 512, rows, 1, 1, 1},
@@ -337,7 +339,7 @@ TEST_F(PrepareTest, StoragePreservesPageBoundariesAndWideByteOrigins) {
       // The maximum logical/dense case has byte origins beyond 32 bits; the
       // tiny shared pool also proves that logical map stride is independent.
       ASSERT_NO_FATAL_FAILURE(Prepare(16, pool, 3, {{32, 16}}, context, 32));
-      CheckStorage(16, context, pool, true, true);
+      CheckStorage(16, context, pool, true, 3);
     }
   }
 }
@@ -349,7 +351,7 @@ TEST_F(PrepareTest, DFlashSharesTargetRootsAndSeparatesItsCheckpoint) {
         ASSERT_NO_FATAL_FAILURE(Prepare(
             rows, pool, 7, {{32, rows}, {128, rows}}, context, 32, 1,
             IREE_STATUS_OK, R"({"draft_weights":"/models/draft\u002egguf"})"));
-        CheckStorage(rows, context, pool, true, false, 1, true);
+        CheckStorage(rows, context, pool, true, 7, 1);
         ASSERT_EQ(loom_serve_preparation_stage_count(preparation), 10);
         for (size_t i = 0; i < 10; ++i) {
           const auto* stage = loom_serve_preparation_stage(preparation, i);
@@ -410,7 +412,7 @@ TEST_F(PrepareTest, CheckpointCapacityReservesIndependentSlotsAndCarry) {
       for (bool mtp : {false, true}) {
         ASSERT_NO_FATAL_FAILURE(
             Prepare(rows, 65536, mtp ? 3 : 0, {{32, rows}}, 262144, 32, pins));
-        CheckStorage(rows, 262144, 65536, true, mtp, pins);
+        CheckStorage(rows, 262144, 65536, true, mtp ? 3 : 0, pins);
       }
     }
   }
