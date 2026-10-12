@@ -9,6 +9,7 @@ kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %o
 kernel.decl @ggml_linear_q6k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_output_projection_q6k_m8() launch(%input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_output_projection_q6k_m8_prefix() launch(%row_begin: index, %control: buffer, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_output_projection_q6k_m32() launch(%input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_rmsnorm_f32_decode() launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_rmsnorm_f32_prefill(%token_count: index) launch(%token_count: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_rmsnorm_f32_prefill_last() launch(%control: buffer, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
@@ -32,8 +33,21 @@ command.program.def public @qwen38_output_projection_logits(%token_count: index,
   %one = index.constant 1 : index
   %four = index.constant 4 : index
   %eight = index.constant 8 : index
+  %thirty_two = index.constant 32 : index
+  %wide_groups = index.div %token_count, %thirty_two : index
+  scf.for %group = [%zero to %wide_groups step %one] unroll {
+    %row = index.mul %group, %thirty_two : index
+    %input_origin = index.scale %row, %hidden_q8_row_bytes : index, offset -> offset
+    %logits_offset = index.scale %row, %logits_row_bytes : index, offset -> offset
+    %logits_origin = index.add %output_origin, %logits_offset : offset
+    %input_group = buffer.view %normalized_q8[%input_origin] : buffer -> view<32x5760xi8>
+    %logits_group = buffer.view %logits[%logits_origin] : buffer -> view<32x248320xf32>
+    kernel.launch @qwen38_output_projection_q6k_m32(%input_group, %output_weight, %logits_group) : (view<32x5760xi8>, view<1042944000xi8>, view<32x248320xf32>)
+  }
+  %wide_rows = index.mul %wide_groups, %thirty_two : index
+  %first_group = index.div %wide_rows, %eight : index
   %groups = index.div %token_count, %eight : index
-  scf.for %group = [%zero to %groups step %one] unroll {
+  scf.for %group = [%first_group to %groups step %one] unroll {
     %row = index.mul %group, %eight : index
     %input_origin = index.scale %row, %hidden_q8_row_bytes : index, offset -> offset
     %logits_offset = index.scale %row, %logits_row_bytes : index, offset -> offset
