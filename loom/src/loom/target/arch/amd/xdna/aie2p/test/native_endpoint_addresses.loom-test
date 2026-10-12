@@ -1,0 +1,76 @@
+// RUN: emit aie2p-xdna input=source-low
+
+// Each phase fully initializes, publishes, reborrows, updates, and releases
+// its own record before the next phase begins. Eight endpoint identities fill
+// the physical address-register file but are never simultaneously borrowed.
+// The two pools keep every semaphore pair within the sixteen-lock limit.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
+
+func.def inline @advance_record_phase(%records: channel<tile<1xi32>>, %seed: i32) -> (i32) {
+  %write, %destination = channel.reserve %records : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  view.store %seed, %destination[0] : i32, view<1xi32>
+  channel.publish %write : write<tile<1xi32>>
+  %read, %initial_payload = channel.acquire<mutable> %records : channel<tile<1xi32>> -> (read<tile<1xi32>, mutable>, view<1xi32>)
+  %payload = channel.wait %read : read<tile<1xi32>, mutable> -> view<1xi32>
+  %value = view.load %payload[0] : view<1xi32> -> i32
+  %increment = scalar.constant 1 : i32
+  %result = scalar.addi %value, %increment : i32
+  view.store %result, %payload[0] : i32, view<1xi32>
+  channel.release %read : read<tile<1xi32>, mutable>
+  func.return %result : i32
+}
+
+pipeline.def<kernel> public retain target(@device) @sequential_endpoint_phases() run() {
+  %local_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %north_memory = pipeline.memory<workgroup>[0, 4] : pool
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 4 : offset
+  %capacity = index.constant 1 : index
+  %first_storage = buffer.alloca<workgroup> pool(%local_memory) align(4) %record_bytes : buffer
+  %second_storage = buffer.alloca<workgroup> pool(%local_memory) align(4) %record_bytes : buffer
+  %third_storage = buffer.alloca<workgroup> pool(%local_memory) align(4) %record_bytes : buffer
+  %fourth_storage = buffer.alloca<workgroup> pool(%local_memory) align(4) %record_bytes : buffer
+  %fifth_storage = buffer.alloca<workgroup> pool(%local_memory) align(4) %record_bytes : buffer
+  %sixth_storage = buffer.alloca<workgroup> pool(%north_memory) align(4) %record_bytes : buffer
+  %seventh_storage = buffer.alloca<workgroup> pool(%north_memory) align(4) %record_bytes : buffer
+  %eighth_storage = buffer.alloca<workgroup> pool(%north_memory) align(4) %record_bytes : buffer
+  %first_slots = buffer.view %first_storage[%origin] : buffer -> view<1x1xi32>
+  %second_slots = buffer.view %second_storage[%origin] : buffer -> view<1x1xi32>
+  %third_slots = buffer.view %third_storage[%origin] : buffer -> view<1x1xi32>
+  %fourth_slots = buffer.view %fourth_storage[%origin] : buffer -> view<1x1xi32>
+  %fifth_slots = buffer.view %fifth_storage[%origin] : buffer -> view<1x1xi32>
+  %sixth_slots = buffer.view %sixth_storage[%origin] : buffer -> view<1x1xi32>
+  %seventh_slots = buffer.view %seventh_storage[%origin] : buffer -> view<1x1xi32>
+  %eighth_slots = buffer.view %eighth_storage[%origin] : buffer -> view<1x1xi32>
+  %first_records = channel.bind<fifo> %first_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %second_records = channel.bind<fifo> %second_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %third_records = channel.bind<fifo> %third_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %fourth_records = channel.bind<fifo> %fourth_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %fifth_records = channel.bind<fifo> %fifth_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %sixth_records = channel.bind<fifo> %sixth_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %seventh_records = channel.bind<fifo> %seventh_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %eighth_records = channel.bind<fifo> %eighth_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %begin = index.constant 0 : index
+    %record_count = index.constant 3 : index
+    %step = index.constant 1 : index
+    scf.for %record = [%begin to %record_count step %step] {
+      %seed = index.cast %record : index to i32
+      %first = func.call @advance_record_phase(%first_records, %seed) : (channel<tile<1xi32>>, i32) -> (i32)
+      %second = func.call @advance_record_phase(%second_records, %first) : (channel<tile<1xi32>>, i32) -> (i32)
+      %third = func.call @advance_record_phase(%third_records, %second) : (channel<tile<1xi32>>, i32) -> (i32)
+      %fourth = func.call @advance_record_phase(%fourth_records, %third) : (channel<tile<1xi32>>, i32) -> (i32)
+      %fifth = func.call @advance_record_phase(%fifth_records, %fourth) : (channel<tile<1xi32>>, i32) -> (i32)
+      %sixth = func.call @advance_record_phase(%sixth_records, %fifth) : (channel<tile<1xi32>>, i32) -> (i32)
+      %seventh = func.call @advance_record_phase(%seventh_records, %sixth) : (channel<tile<1xi32>>, i32) -> (i32)
+      %eighth = func.call @advance_record_phase(%eighth_records, %seventh) : (channel<tile<1xi32>>, i32) -> (i32)
+    }
+  }
+}
+
+// ----
+partition: 1 columns, 6 rows
+entries: 1
+entry 0: 0 bindings, 0 dynamic relocations
+  invocation 0: bytes=1360 next=1
+  invocation 1: bytes=540 next=1

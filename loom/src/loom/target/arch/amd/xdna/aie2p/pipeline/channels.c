@@ -17,7 +17,9 @@ typedef struct loom_aie2p_native_endpoint_t {
   const loom_aie2p_native_channel_access_t* access;
   // Initial physical slot address helper.
   loom_symbol_ref_t base;
-  // Backing buffer address, defined in the worker entry block.
+  // Backing buffer address retained across borrows, or invalid when the
+  // worker's endpoint set fills or exceeds the physical address-register
+  // capacity.
   loom_value_id_t buffer;
   // Mutable state indices for directions owned by this worker. Fixed-slot
   // endpoints use zero displacement and require no threaded state.
@@ -102,6 +104,7 @@ static iree_status_t loom_aie2p_native_endpoint(
     const loom_aie2p_native_channel_access_t* access,
     loom_aie2p_native_endpoint_t* endpoint) {
   *endpoint = (loom_aie2p_native_endpoint_t){.access = access,
+                                             .buffer = LOOM_VALUE_ID_INVALID,
                                              .acquire = loom_symbol_ref_null(),
                                              .reserve = loom_symbol_ref_null(),
                                              .publish = loom_symbol_ref_null(),
@@ -209,9 +212,14 @@ static iree_status_t loom_aie2p_native_channel_action(
       view_result = 1;
     }
     const loom_type_t buffer_type = loom_type_buffer();
+    loom_value_id_t buffer = endpoint->buffer;
+    if (buffer == LOOM_VALUE_ID_INVALID) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_invoke(
+          builder, endpoint->base, NULL, 0, &buffer_type, &buffer));
+    }
     loom_op_t* aligned;
     IREE_RETURN_IF_ERROR(loom_buffer_assume_alignment_build(
-        builder, &endpoint->buffer, 1, endpoint->alignment, &buffer_type, 1,
+        builder, &buffer, 1, endpoint->alignment, &buffer_type, 1,
         action->op->location, &aligned));
     loom_op_t* view;
     IREE_RETURN_IF_ERROR(loom_buffer_view_build(
@@ -322,11 +330,23 @@ iree_status_t loom_aie2p_native_emit_worker(
       arena, endpoint_count * 2, sizeof(*state), (void**)&state));
   iree_host_size_t state_count = 0;
   const loom_type_t buffer_type = loom_type_buffer();
+  const uint16_t address_register_capacity =
+      code->descriptors->reg_classes[AIE2P_CORE_REG_CLASS_ID_AIE2P_EP]
+          .allocatable_count;
+  // Retain every address when the physical file can hold the complete set and
+  // still leave a register for payload addressing, so repeated borrows pay no
+  // setup. Sets filling the file materialize at each borrow; ordinary CSE
+  // shares adjacent phases without making disjoint endpoints simultaneously
+  // live.
+  const bool retain_endpoint_addresses =
+      endpoint_count < address_register_capacity;
   for (iree_host_size_t i = 0; i < endpoint_count; ++i) {
     loom_aie2p_native_endpoint_t* endpoint = &emitter.endpoints[i];
-    IREE_RETURN_IF_ERROR(
-        loom_aie2p_native_invoke(&rewriter->builder, endpoint->base, NULL, 0,
-                                 &buffer_type, &endpoint->buffer));
+    if (retain_endpoint_addresses) {
+      IREE_RETURN_IF_ERROR(
+          loom_aie2p_native_invoke(&rewriter->builder, endpoint->base, NULL, 0,
+                                   &buffer_type, &endpoint->buffer));
+    }
     const loom_aie2p_native_channel_t* channel = endpoint->access->channel;
     if (channel->cursor.reader.worker == worker_index &&
         channel->cursor.reader.advances) {
