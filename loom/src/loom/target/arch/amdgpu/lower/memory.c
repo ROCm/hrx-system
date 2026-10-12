@@ -1538,24 +1538,23 @@ static bool loom_amdgpu_memory_access_split_scratch_vaddr_static_offset(
   const int64_t signed_max = offset_info->unsigned_max > INT64_MAX
                                  ? INT64_MAX
                                  : (int64_t)offset_info->unsigned_max;
-  if (static_byte_offset < offset_info->signed_min) {
+  // The instruction adds its signed immediate to an unsigned u32 VADDR. Keep
+  // the static term in the immediate only when the remaining VADDR is valid;
+  // otherwise materialize the complete proven address through VADDR.
+  if (!loom_amdgpu_memory_vaddr_offset_fits_u32(access, static_byte_offset)) {
     diagnostic->rejection_bits |=
-        LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_DESCRIPTOR_OFFSET_RANGE;
+        LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_DYNAMIC_OFFSET_RANGE;
     return false;
   }
-  if (static_byte_offset <= signed_max) {
+  if (static_byte_offset >= offset_info->signed_min &&
+      static_byte_offset <= signed_max &&
+      loom_amdgpu_memory_vaddr_offset_fits_u32(access,
+                                               /*static_byte_offset=*/0)) {
     access->immediate_offset = static_byte_offset;
     access->vaddr_static_byte_offset = 0;
   } else {
     access->immediate_offset = 0;
     access->vaddr_static_byte_offset = (uint64_t)static_byte_offset;
-  }
-  if (access->vaddr_static_byte_offset > INT64_MAX ||
-      !loom_amdgpu_memory_vaddr_offset_fits_u32(
-          access, (int64_t)access->vaddr_static_byte_offset)) {
-    diagnostic->rejection_bits |=
-        LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_DYNAMIC_OFFSET_RANGE;
-    return false;
   }
   access->scalar_byte_offset = 0;
   return true;
@@ -2201,7 +2200,6 @@ static bool loom_amdgpu_memory_access_try_select_scratch_vaddr(
           access, &offset_info, diagnostic)) {
     return false;
   }
-  loom_amdgpu_memory_access_route_dynamic_terms_through_vaddr(access);
   access->address_form = LOOM_AMDGPU_MEMORY_ADDRESS_FORM_SCRATCH_VADDR;
   access->descriptor = descriptor;
   return true;
@@ -2531,9 +2529,7 @@ static bool loom_amdgpu_memory_access_select_packet(
 
   if (descriptor_domain == LOOM_AMDGPU_MEMORY_DESCRIPTOR_DOMAIN_LDS ||
       descriptor_domain == LOOM_AMDGPU_MEMORY_DESCRIPTOR_DOMAIN_SCRATCH) {
-    if (descriptor_domain == LOOM_AMDGPU_MEMORY_DESCRIPTOR_DOMAIN_LDS) {
-      loom_amdgpu_memory_access_route_dynamic_terms_through_vaddr(access);
-    }
+    loom_amdgpu_memory_access_route_dynamic_terms_through_vaddr(access);
   }
   if (!loom_amdgpu_memory_access_signed_i16_repair_is_available(
           selection_context->descriptor_set, access)) {

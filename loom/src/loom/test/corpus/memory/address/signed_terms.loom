@@ -156,3 +156,76 @@ check.scenario @workgroup_signed_coordinate_values {
   }
   check.return
 }
+
+// Uniform and varying countdowns address the same private array from opposite
+// ends while keeping every complete byte address in bounds.
+kernel.def @private_descending_coordinates() {
+  %unit = index.constant 1 : index
+  %width = index.constant 15 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%position: i64, %input: buffer, %output: buffer) where [range(%position, 0, 14)] {
+  %lane = kernel.workitem.id<x> : index
+  %lane_i64 = index.cast %lane : index to i64
+  %base = index.constant 0 : offset
+  %bytes = index.constant 60 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 15 : index
+  %step = index.constant 1 : index
+  %last = scalar.constant 14 : i64
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %scratch = buffer.alloca<private> align(4) %bytes : buffer
+  %source = buffer.view %input[%base] : buffer -> view<15xi32>
+  %private = buffer.view %scratch[%base] : buffer -> view<15xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<15x2xi32>
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %source[%i] : view<15xi32> -> i32
+    view.store %value, %private[%i] : i32, view<15xi32>
+  }
+  %uniform_i64 = scalar.subi %last, %position : i64
+  %uniform = index.cast %uniform_i64 : i64 to index
+  %varying_i64 = scalar.subi %last, %lane_i64 : i64
+  %varying = index.cast %varying_i64 : i64 to index
+  %uniform_value = view.load %private[%uniform] : view<15xi32> -> i32
+  %varying_value = view.load %private[%varying] : view<15xi32> -> i32
+  view.store %uniform_value, %destination[%lane, %c0] : i32, view<15x2xi32>
+  view.store %varying_value, %destination[%lane, %c1] : i32, view<15x2xi32>
+  kernel.return
+}
+
+func.def @private_descending_coordinates_oracle(%position: i64, %input: buffer, %output: buffer) where [range(%position, 0, 14)] {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 15 : index
+  %step = index.constant 1 : index
+  %last = scalar.constant 14 : i64
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %source = buffer.view %input[%base] : buffer -> view<15xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<15x2xi32>
+  %uniform_i64 = scalar.subi %last, %position : i64
+  %uniform = index.cast %uniform_i64 : i64 to index
+  %uniform_value = view.load %source[%uniform] : view<15xi32> -> i32
+  scf.for %lane = [%begin to %end step %step] {
+    %lane_i64 = index.cast %lane : index to i64
+    %varying_i64 = scalar.subi %last, %lane_i64 : i64
+    %varying = index.cast %varying_i64 : i64 to index
+    %varying_value = view.load %source[%varying] : view<15xi32> -> i32
+    view.store %uniform_value, %destination[%lane, %c0] : i32, view<15x2xi32>
+    view.store %varying_value, %destination[%lane, %c1] : i32, view<15x2xi32>
+  }
+  func.return
+}
+
+check.scenario @private_descending_coordinate_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %position = check.literal value(7) : i64
+    %input = check.generate.iota offset(17) step(13) : tensor<15xi32>
+    %output = check.generate.fill value(-1) : tensor<15x2xi32>
+    check.compare<@private_descending_coordinates, @private_descending_coordinates_oracle>(%position, %input, %output) : (i64, tensor<15xi32>, tensor<15x2xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<15xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<15x2xi32>
+    }
+  }
+  check.return
+}

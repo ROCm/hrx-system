@@ -1,0 +1,70 @@
+// RUN: emit source-low @descending_scratch_addresses target=amdgpu:gfx942 output=low
+
+// Keep the positive bias in unsigned VADDR when the dynamic term descends.
+kernel.def @descending_scratch_addresses() {
+  %unit = index.constant 1 : index
+  %lanes = index.constant 15 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
+} launch(%position: i64, %fill: i32, %output: buffer) where [range(%position, 0, 14)] {
+  %lane = kernel.workitem.id<x> : index
+  %lane_i64 = index.cast %lane : index to i64
+  %base = index.constant 0 : offset
+  %bytes = index.constant 60 : offset
+  %last = scalar.constant 14 : i64
+  %shift = scalar.constant 2 : i64
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %scratch = buffer.alloca<private> align(4) %bytes : buffer
+  buffer.fill %fill, %scratch[%base], %bytes : i32
+  %output_view = buffer.view %output[%base] : buffer -> view<15x2xi32>
+  %uniform_slot = scalar.subi %last, %position : i64
+  %uniform_byte_i64 = scalar.shli %uniform_slot, %shift : i64
+  %uniform_byte = index.cast %uniform_byte_i64 : i64 to offset
+  %uniform_view = buffer.view %scratch[%uniform_byte] : buffer -> view<1xi32>
+  %varying_slot = scalar.subi %last, %lane_i64 : i64
+  %varying_byte_i64 = scalar.shli %varying_slot, %shift : i64
+  %varying_byte = index.cast %varying_byte_i64 : i64 to offset
+  %varying_view = buffer.view %scratch[%varying_byte] : buffer -> view<1xi32>
+  %uniform_value = view.load %uniform_view[%c0] : view<1xi32> -> i32
+  %varying_value = view.load %varying_view[%c0] : view<1xi32> -> i32
+  view.store %uniform_value, %output_view[%lane, %c0] : i32, view<15x2xi32>
+  view.store %varying_value, %output_view[%lane, %c1] : i32, view<15x2xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "position", arg1 = "fill"}, direct_arg_offsets = [0, 8], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [8, 4], parameter_count = 3, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(15, 1, 1) workgroup_count(1, 1, 1) @descending_scratch_addresses(%position: reg<amdgpu.sgpr x2>, %fill: reg<amdgpu.sgpr>) where [range(%position, 0, 14)] asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {extent = 120, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %58 = storage {byte_alignment = 4, byte_length = 60} : low.storage<private>
+  %base = s_mov_b32 0
+  %bytes = s_mov_b32 60
+  %70 = s_mov_b32 1
+  %71 = v_mov_b32_copy %fill
+  low.br ^_bb1(%base: reg<amdgpu.sgpr>, %71: reg<amdgpu.vgpr>)
+^_bb1(%54: reg<amdgpu.sgpr>, %55: reg<amdgpu.vgpr>):
+  %72 = s_cmp_lt_u32 %54, %bytes
+  low.cond_br %72, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %73 = v_mov_b32_copy %54
+  scratch_store_byte_vaddr %73, %55
+  %74 = v_lshrrev_b32_src0_inline %55, 8
+  %75 = v_lshlrev_b32_src0_inline %55, 24
+  %76 = v_or_b32 %74, %75
+  %77 = s_add_u32 %54, %70
+  low.br ^_bb1(%77: reg<amdgpu.sgpr>, %76: reg<amdgpu.vgpr>)
+^_bb3:
+  %107 = slice %position[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %108 = v_mov_b32_copy %107
+  %109 = v_mov_b32 4294967292
+  %110 = v_mul_lo_u32 %108, %109
+  %111 = v_add_u32_src0_inline %110, 56
+  %uniform_value = scratch_load_b32_vaddr %111
+  %114 = v_mul_lo_u32 %lane, %109
+  %115 = v_add_u32_src0_inline %114, 56
+  %varying_value = scratch_load_b32_vaddr %115
+  %117 = v_lshlrev_b32_src0_inline %lane, 3
+  global_store_dword_saddr %117, %uniform_value, %output_view
+  global_store_dword_saddr %117, %varying_value, %output_view {offset = 4}
+  return
+}
