@@ -106,6 +106,7 @@ _KERNEL_SOURCES = [
     "numeric/integer/wide/shifts.loom",
     "numeric/integer/wide/subtract.loom",
     "numeric/integer/wide/uniform_immediate.loom",
+    "numeric/matrix/nvfp4.loom",
     "numeric/predicate/extract.loom",
     "numeric/vector/broadcast_arithmetic.loom",
     "numeric/vector/conversion.loom",
