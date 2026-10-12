@@ -101,7 +101,7 @@ anchors come from device results. Native code owns the semantic table and ID
 stream but contains no device descriptor, selection or verification-bank layout.
 
 After both execution frontiers retire, `publish_epoch` folds ordinary or verified
-feedback into `{consumed, known, outputs, verifications, tokens[8]}` records.
+feedback into `{consumed, known, outputs, verifications, tokens[16]}` records.
 This preserves caller order across compacted continuation rows and distinguishes
 prompt progress from speculation. All host buffers and VM wrappers are allocated
 once; opaque upload/readback sizes come from source-declared device storage.
@@ -193,8 +193,8 @@ fixtures and is selected with depth three.
 
 ## Bounded device-fed continuation
 
-`--draft_depth=3 --continuation_epochs=2` lets the source VM enqueue two
-target/MTP epochs before returning to admission and transport. The default is
+`--continuation_epochs=2` with MTP or DFlash lets the source VM enqueue two
+target/draft epochs before returning to admission and transport. The default is
 one. The first epoch accepts mixed prompt/known and speculative spans normally.
 The host pre-issues a second mixed plan from those same admitted rows: remaining
 prompt chunks, continuing verifiers, and completed prompt tails ready to begin
@@ -208,13 +208,14 @@ token re-upload between those epochs.
 
 EOS, exhausted output credit and insufficient context remove a span before
 the second epoch can mutate its state. Two result banks and original-span tags
-keep feedback immutable while later work proceeds. The result payload grows
-by 448 bytes. A second fixed input/plan bank adds 4176 bytes, shared by all rows.
+keep feedback immutable while later work proceeds. Device input, plan and
+feedback banks are shared by all rows; their extents come from source preparation.
 The host provisions the speculative high-water mark against
 reserved capacity before submission and releases rejected pages
-only after both work and feedback retire. At most eight outputs per original
-span return in generation order. Cancellation and new arrivals are observed
-at the next cohort boundary, not delayed behind an unbounded queue.
+only after both work and feedback retire. At most eight MTP outputs or sixteen
+DFlash outputs per original span return in generation order. Cancellation and
+new arrivals are observed at the next cohort boundary, not delayed behind an
+unbounded queue.
 
 An empty second cohort still runs padded stateless math in the current fixed
 commands; it mutates no retained state. This explicit experiment is not a
