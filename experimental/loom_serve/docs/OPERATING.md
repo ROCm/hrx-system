@@ -33,10 +33,12 @@ build_tools/bin/iree-bazel-run --config=opt \
 ```
 
 For a download-free x86 CPU first output, use the same command with
-`--device=task --pool_backing=fixed`. The embedding registration below executes
-the package's native JIT kernels on the shared task workers. It needs no GPU or
-checkpoint. The image fixture's workitem lowering is not yet supported on CPU;
-the [fixture guide](../models/fixtures/README.md) distinguishes its GPU path.
+`--device=task --pool_backing=fixed`; the
+[CPU-only build recipe](README.md#cpu-first-output-without-a-model-download)
+supplies the matching compiler/driver settings. The embedding registration below
+executes the package's native JIT kernels on the shared task workers. It needs
+no GPU or checkpoint. The image fixture's workitem lowering is not yet supported
+on CPU; the [fixture guide](../models/fixtures/README.md) distinguishes its GPU path.
 
 Managed build and hardware-runner policies apply. A separate execution host
 needs the built executable, its runtime libraries and the source/asset closure;
@@ -81,8 +83,10 @@ curl --fail --silent --show-error http://127.0.0.1:8080/v1/embeddings \
 
 The model progresses through `preparing` to `ready`. Inference arriving during
 preparation waits within the holding budget, so a client need not guess a JIT
-delay. Result indices 0 and 1 contain `[1,1]` and `[6,3]`, with four input tokens.
-This is deterministic arithmetic through the normal VM/device/HTTP path, not a
+delay. Undrain returns HTTP 200 with the changed admission state, not a promise
+that JIT has completed. Result indices 0 and 1 contain `[1,1]` and `[6,3]`, with
+four input tokens. This is deterministic arithmetic through the normal
+VM/device/HTTP path, not a
 language embedding. The [fixture catalog](../models/fixtures/README.md) adds
 image and decision results; the [tiny text package](../models/fixtures/text/README.md)
 adds pooled sessions and checkpoints without a model download.
