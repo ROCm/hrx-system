@@ -7,10 +7,19 @@ kernel.def @qwen38_dflash_topk_partial(%rows: index) {
   %one = index.constant 1 : index
   %threads = index.constant 256 : index
   kernel.launch.config workgroups(%partitions, %rows, %one) workgroup_size(%threads, %one, %one) : index
-} launch(%rows: index, %logits: buffer, %scores: buffer, %ids: buffer) {
+} launch(%rows: index, %control: buffer, %logits: buffer, %scores: buffer, %ids: buffer) {
+  %origin = index.constant 0 : offset
+  %metadata = buffer.assume.memory_space<constant> %control : buffer
+  %header = buffer.view %metadata[%origin] : buffer -> view<1xi32>
+  %live_word = view.load %header[0] : view<1xi32> -> i32
+  %live = index.cast %live_word : i32 to index
+  %row = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %row, %live : index
   %vocabulary = index.constant 248320 : index
   %count = index.constant 16 : index
-  template.apply<@selection.topk_partial_f32>(%rows, %vocabulary, %count, %logits, %scores, %ids) : (index, index, index, buffer, buffer, buffer)
+  scf.if %active {
+    template.apply<@selection.topk_partial_f32>(%rows, %vocabulary, %count, %logits, %scores, %ids) : (index, index, index, buffer, buffer, buffer)
+  }
   kernel.return
 }
 
@@ -18,10 +27,19 @@ kernel.def @qwen38_dflash_topk_merge(%rows: index) {
   %one = index.constant 1 : index
   %threads = index.constant 256 : index
   kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
-} launch(%rows: index, %partial_scores: buffer, %partial_ids: buffer, %scores: buffer, %ids: buffer) {
+} launch(%rows: index, %control: buffer, %partial_scores: buffer, %partial_ids: buffer, %scores: buffer, %ids: buffer) {
+  %origin = index.constant 0 : offset
+  %metadata = buffer.assume.memory_space<constant> %control : buffer
+  %header = buffer.view %metadata[%origin] : buffer -> view<1xi32>
+  %live_word = view.load %header[0] : view<1xi32> -> i32
+  %live = index.cast %live_word : i32 to index
+  %row = kernel.workgroup.id<x> : index
+  %active = index.cmp ult, %row, %live : index
   %partitions = index.constant 61 : index
   %count = index.constant 16 : index
-  template.apply<@selection.topk_merge_f32>(%rows, %partitions, %count, %partial_scores, %partial_ids, %scores, %ids) : (index, index, index, buffer, buffer, buffer, buffer)
+  scf.if %active {
+    template.apply<@selection.topk_merge_f32>(%rows, %partitions, %count, %partial_scores, %partial_ids, %scores, %ids) : (index, index, index, buffer, buffer, buffer, buffer)
+  }
   kernel.return
 }
 

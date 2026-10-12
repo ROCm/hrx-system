@@ -1,0 +1,95 @@
+kernel.decl @qwen38_dflash_topk_partial(%rows: index) launch(%rows: index, %control: buffer, %logits: buffer, %scores: buffer, %ids: buffer)
+kernel.decl @qwen38_dflash_topk_merge(%rows: index) launch(%rows: index, %control: buffer, %partial_scores: buffer, %partial_ids: buffer, %scores: buffer, %ids: buffer)
+
+// Constant logits have an analytic ordering: each tile emits its first
+// sixteen IDs and the global merge emits IDs zero through fifteen. Only the
+// live seven-row proposal blocks replace the caller's sentinel outputs.
+func.def @dflash_topk_fixture(%blocks: index, %control: buffer) {
+  %origin = index.constant 0 : offset
+  %seven = index.constant 7 : index
+  %rows = index.mul %blocks, %seven : index
+  %rows_word = index.cast %rows : index to i32
+  %blocks_word = index.cast %blocks : index to i32
+  %header = buffer.view %control[%origin] : buffer -> view<3xi32>
+  view.store %rows_word, %header[0] : i32, view<3xi32>
+  view.store %blocks_word, %header[1] : i32, view<3xi32>
+  view.store %rows_word, %header[2] : i32, view<3xi32>
+  func.return
+}
+
+func.def @dflash_topk_expected(%rows: index, %control: buffer, %partitions: index, %tile_width: index, %scores: buffer, %ids: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %header = buffer.view %control[%origin] : buffer -> view<3xi32>
+  %live_word = view.load %header[0] : view<3xi32> -> i32
+  %live = index.cast %live_word : i32 to index
+  %values = buffer.view %scores[%origin] : buffer -> view<[%rows]x[%partitions]x16xf32>
+  %tokens = buffer.view %ids[%origin] : buffer -> view<[%rows]x[%partitions]x16xi32>
+  %value = scalar.constant 1.0 : f32
+  scf.for %row = [%zero to %rows step %one] {
+    %active = index.cmp ult, %row, %live : index
+    scf.if %active {
+      scf.for %partition = [%zero to %partitions step %one] {
+        %begin = index.mul %partition, %tile_width : index
+        scf.for %rank = [%zero to %sixteen step %one] {
+          %column = index.add %begin, %rank : index
+          %id = index.cast %column : index to i32
+          view.store %value, %values[%row, %partition, %rank] : f32, view<[%rows]x[%partitions]x16xf32>
+          view.store %id, %tokens[%row, %partition, %rank] : i32, view<[%rows]x[%partitions]x16xi32>
+        }
+      }
+    }
+  }
+  func.return
+}
+
+func.def @dflash_topk_partial_reference(%rows: index, %control: buffer, %logits: buffer, %scores: buffer, %ids: buffer) {
+  %partitions = index.constant 61 : index
+  %tile_width = index.constant 4096 : index
+  func.call @dflash_topk_expected(%rows, %control, %partitions, %tile_width, %scores, %ids) : (index, buffer, index, index, buffer, buffer) -> ()
+  func.return
+}
+
+func.def @dflash_topk_merge_reference(%rows: index, %control: buffer, %partial_scores: buffer, %partial_ids: buffer, %scores: buffer, %ids: buffer) {
+  %partitions = index.constant 1 : index
+  %tile_width = index.constant 4096 : index
+  func.call @dflash_topk_expected(%rows, %control, %partitions, %tile_width, %scores, %ids) : (index, buffer, index, index, buffer, buffer) -> ()
+  func.return
+}
+
+check.scenario public @dflash_topk_partial_live_prefix {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %rows = check.literal value(21) : index
+    %control = check.generate.fill value(0) : tensor<3xi32>
+    check.generate<@dflash_topk_fixture>(%trial, %control) : (index, tensor<3xi32>) -> ()
+    %logits = check.generate.fill value(1.0) : tensor<21x248320xf32>
+    %partial_scores = check.generate.fill value(-99.0) : tensor<21x61x16xf32>
+    %partial_ids = check.generate.fill value(-99) : tensor<21x61x16xi32>
+    check.compare<@qwen38_dflash_topk_partial, @dflash_topk_partial_reference>[%rows](%rows, %control, %logits, %partial_scores, %partial_ids) : [index](index, tensor<3xi32>, tensor<21x248320xf32>, tensor<21x61x16xf32>, tensor<21x61x16xi32>) -> () {
+      check.expect.bitwise actual(%partial_scores) expected(%partial_scores) : tensor<21x61x16xf32>
+      check.expect.bitwise actual(%partial_ids) expected(%partial_ids) : tensor<21x61x16xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @dflash_topk_merge_live_prefix {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %rows = check.literal value(21) : index
+    %control = check.generate.fill value(0) : tensor<3xi32>
+    check.generate<@dflash_topk_fixture>(%trial, %control) : (index, tensor<3xi32>) -> ()
+    %logits = check.generate.fill value(1.0) : tensor<21x248320xf32>
+    %partial_scores = check.generate.fill value(-99.0) : tensor<21x61x16xf32>
+    %partial_ids = check.generate.fill value(-99) : tensor<21x61x16xi32>
+    %scores = check.generate.fill value(-99.0) : tensor<21x16xf32>
+    %ids = check.generate.fill value(-99) : tensor<21x16xi32>
+    check.generate<@dflash_topk_partial_reference>(%rows, %control, %logits, %partial_scores, %partial_ids) : (index, tensor<3xi32>, tensor<21x248320xf32>, tensor<21x61x16xf32>, tensor<21x61x16xi32>) -> ()
+    check.compare<@qwen38_dflash_topk_merge, @dflash_topk_merge_reference>[%rows](%rows, %control, %partial_scores, %partial_ids, %scores, %ids) : [index](index, tensor<3xi32>, tensor<21x61x16xf32>, tensor<21x61x16xi32>, tensor<21x16xf32>, tensor<21x16xi32>) -> () {
+      check.expect.bitwise actual(%scores) expected(%scores) : tensor<21x16xf32>
+      check.expect.bitwise actual(%ids) expected(%ids) : tensor<21x16xi32>
+    }
+  }
+  check.return
+}

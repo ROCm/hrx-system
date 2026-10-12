@@ -63,6 +63,28 @@ kernel.def target(@qwen38_output_projection_wave64) @qwen38_output_projection_q6
   kernel.return
 }
 
+// The device control prefix contains the live row count. A wholly inactive
+// group leaves its output untouched; consumers must use the same live prefix.
+// A partially live group keeps the full eight-row contraction and its packing.
+kernel.def target(@qwen38_output_projection_wave64) @qwen38_output_projection_q6k_m8_prefix() {
+  %groups = index.constant 248320 : index
+  %threads = index.constant 64 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%row_begin: index, %control: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %metadata = buffer.assume.memory_space<constant> %control : buffer
+  %header = buffer.view %metadata[%origin] : buffer -> view<1xi32>
+  %count_word = view.load %header[0] : view<1xi32> -> i32
+  %count = index.cast %count_word : i32 to index
+  %active = index.cmp ult, %row_begin, %count : index
+  scf.if %active {
+    %rows = index.constant 8 : index
+    func.call @qwen38_output_projection_q6k_rows(%rows, %input, %weight, %output) : (index, buffer, buffer, buffer)
+  }
+  kernel.return
+}
+
 kernel.def target(@qwen38_output_projection_wave64) @qwen38_output_projection_q6k_m32() {
   %groups = index.constant 248320 : index
   %threads = index.constant 64 : index

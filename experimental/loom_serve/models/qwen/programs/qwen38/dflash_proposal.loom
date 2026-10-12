@@ -1,11 +1,11 @@
 config.decl @runner.qwen38.span_capacity : %value: index where [range(%value, 1, 64)]
-command.program.decl @qwen38_output_projection_logits(%tokens: index, %origin: offset) launch(%parameters: buffer, %normalized: buffer, %logits: buffer)
+command.program.decl @qwen38_output_projection_logits_prefix(%tokens: index) launch(%parameters: buffer, %control: buffer, %normalized: buffer, %logits: buffer)
 command.program.decl @qwen38_dflash_transform() launch(%parameters: buffer, %context_parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %embedding: buffer, %normalized: buffer)
 kernel.decl @qwen38_dflash_proposal_prepare() launch(%epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %anchors: buffer, %draft_tokens: buffer, %selection: buffer)
 kernel.decl @qwen38_dflash_selection_rows(%blocks: index) launch(%blocks: index, %draft: buffer, %normalized: buffer, %output: buffer)
 kernel.decl @qwen38_dflash_proposal_publish() launch(%draft: buffer, %origins: buffer, %proposals: buffer, %target_tokens: buffer)
-kernel.decl @qwen38_dflash_topk_partial(%rows: index) launch(%rows: index, %logits: buffer, %scores: buffer, %ids: buffer)
-kernel.decl @qwen38_dflash_topk_merge(%rows: index) launch(%rows: index, %partial_scores: buffer, %partial_ids: buffer, %scores: buffer, %ids: buffer)
+kernel.decl @qwen38_dflash_topk_partial(%rows: index) launch(%rows: index, %control: buffer, %logits: buffer, %scores: buffer, %ids: buffer)
+kernel.decl @qwen38_dflash_topk_merge(%rows: index) launch(%rows: index, %control: buffer, %partial_scores: buffer, %partial_ids: buffer, %scores: buffer, %ids: buffer)
 kernel.decl @qwen38_dflash_select(%blocks: index) launch(%blocks: index, %control: buffer, %anchors: buffer, %candidates: buffer, %unary: buffer, %hidden: buffer, %predecessors: buffer, %successors: buffer, %output: buffer)
 kernel.decl @qwen38_token_embedding_q5k_f32_prefill(%tokens: index) launch(%token_ids: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_linear_q4k_f16_wmma_x64(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
@@ -15,7 +15,6 @@ kernel.decl @qwen38_linear_q4k_f16_wmma_x128(%tokens: index, %inputs: index, %ou
 // projection and codebooks supply transition scores. Both parameter roots are
 // borrowed, so embeddings and vocabulary weights remain shared with the target.
 command.program.def public @qwen38_dflash_candidates(%spans: index) launch(%target_parameters: buffer, %draft_parameters: buffer, %control: buffer, %anchors: buffer, %normalized: buffer, %proposals: buffer) where [range(%spans, 1, 64)] {
-  %zero = index.constant 0 : offset
   %seven = index.constant 7 : index
   %rows = index.mul %spans, %seven : index
   %hidden_size = index.constant 5120 : index
@@ -40,15 +39,15 @@ command.program.def public @qwen38_dflash_candidates(%spans: index) launch(%targ
   %sixty_five = index.constant 65 : index
   %narrow = index.cmp ult, %rows, %sixty_five : index
   command.concurrent {
-    command.program.launch @qwen38_output_projection_logits[%rows, %zero](%target_parameters, %normalized, %logits) : [index, offset](buffer, buffer, buffer)
+    command.program.launch @qwen38_output_projection_logits_prefix[%rows](%target_parameters, %control, %normalized, %logits) : [index](buffer, buffer, buffer, buffer)
     scf.if %narrow {
       kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%rows, %hidden_size, %rank](%control, %hidden_size, %rank, %normalized, %projection, %hidden) : [index, index, index](buffer, index, index, buffer, view<737280xi8>, buffer)
     } else {
       kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%rows, %hidden_size, %rank](%control, %hidden_size, %rank, %normalized, %projection, %hidden) : [index, index, index](buffer, index, index, buffer, view<737280xi8>, buffer)
     }
   }
-  kernel.launch @qwen38_dflash_topk_partial[%rows](%rows, %logits, %partial_scores, %partial_ids) : [index](index, buffer, buffer, buffer)
-  kernel.launch @qwen38_dflash_topk_merge[%rows](%rows, %partial_scores, %partial_ids, %scores, %candidates) : [index](index, buffer, buffer, buffer, buffer)
+  kernel.launch @qwen38_dflash_topk_partial[%rows](%rows, %control, %logits, %partial_scores, %partial_ids) : [index](index, buffer, buffer, buffer, buffer)
+  kernel.launch @qwen38_dflash_topk_merge[%rows](%rows, %control, %partial_scores, %partial_ids, %scores, %candidates) : [index](index, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @qwen38_dflash_select[%spans](%spans, %control, %anchors, %candidates, %scores, %hidden, %predecessors, %successors, %proposals) : [index](index, buffer, buffer, buffer, buffer, buffer, view<35758080xi8>, view<35758080xi8>, buffer)
   command.return
 }

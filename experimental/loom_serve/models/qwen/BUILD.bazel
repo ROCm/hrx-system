@@ -101,6 +101,7 @@ loom_test(
         ),
     ],
     variants = {
+        "live_prefix": {"case": "@output_projection_live_prefix_case"},
         "m32": {"case": "@output_projection_m32_case"},
         "m8": {"case": "@output_projection_m8_case"},
     },
@@ -129,6 +130,20 @@ loom_test(
     srcs = [
         "kernels/qwen38/dflash_proposal.loom",
         "tests/dflash_proposal.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "dflash_selection_test",
+    srcs = [
+        "kernels/qwen38/dflash_selection.loom",
+        "tests/dflash_selection.loom",
+        "//experimental/loom_serve/motifs/tensor:sources",
     ],
     benchmark_smoke = False,
     execution_profiles = [
