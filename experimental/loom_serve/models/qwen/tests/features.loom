@@ -1,0 +1,50 @@
+kernel.decl @qwen38_capture_feature(%capacity: index) launch(%feature: index, %control: buffer, %residual: buffer, %features: buffer)
+
+func.def @feature_fixture(%trial: index, %control: buffer) -> (index) {
+  %five = index.constant 5 : index
+  %two = index.constant 2 : index
+  %feature = index.rem %trial, %five : index
+  %phase = index.div %trial, %five : index
+  %count = index.mul %phase, %two : index
+  %word = index.cast %count : index to i32
+  %origin = index.constant 0 : offset
+  %header = buffer.view %control[%origin] : buffer -> view<1xi32>
+  view.store %word, %header[0] : i32, view<1xi32>
+  func.return %feature : index
+}
+
+func.def @feature_oracle(%feature_value: index, %control: buffer, %residual: buffer, %features: buffer) {
+  %feature = index.assume %feature_value [range(%feature_value, 0, 4)] : index
+  %origin = index.constant 0 : offset
+  %header = buffer.view %control[%origin] : buffer -> view<1xi32>
+  %count_word = view.load %header[0] : view<1xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %count = index.assume %count_value [range(%count_value, 0, 8)] : index
+  %input = buffer.view %residual[%origin] : buffer -> view<8x5120xf32>
+  %output = buffer.view %features[%origin] : buffer -> view<8x5x5120xf32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %channels = index.constant 5120 : index
+  scf.for %token = [%zero to %count step %one] {
+    scf.for %channel = [%zero to %channels step %one] {
+      %value = view.load %input[%token, %channel] : view<8x5120xf32> -> f32
+      view.store %value, %output[%token, %feature, %channel] : f32, view<8x5x5120xf32>
+    }
+  }
+  func.return
+}
+
+check.scenario public @feature_capture {
+  check.trial[25](%trial: index, %entropy: check.entropy) {
+    %capacity = check.literal value(8) : index
+    %control = check.generate.fill value(0) : tensor<1xi32>
+    %feature = check.generate<@feature_fixture>(%trial, %control) : (index, tensor<1xi32>) -> (index)
+    %residual = check.generate.iota offset(-1.0) step(0.0000152587890625) : tensor<8x5120xf32>
+    %features = check.generate.fill value(-99.0) : tensor<8x5x5120xf32>
+    check.compare<@qwen38_capture_feature, @feature_oracle>[%capacity](%feature, %control, %residual, %features) : [index](index, tensor<1xi32>, tensor<8x5120xf32>, tensor<8x5x5120xf32>) -> () {
+      check.expect.bitwise actual(%features) expected(%features) : tensor<8x5x5120xf32>
+      check.expect.bitwise actual(%residual) expected(%residual) : tensor<8x5120xf32>
+    }
+  }
+  check.return
+}

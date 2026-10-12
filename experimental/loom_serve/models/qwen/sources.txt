@@ -28,6 +28,7 @@ kernels/qwen38/dflash_attention.loom
 kernels/qwen38/dflash_convolution.loom
 kernels/qwen38/dflash_proposal.loom
 kernels/qwen38/dflash_selection.loom
+kernels/qwen38/features.loom
 kernels/qwen38/ffn_gate_up_q5k_f16_wmma_wave32.loom
 kernels/qwen38/ffn_gate_up_prefetch.loom
 kernels/qwen38/gdn_common.loom

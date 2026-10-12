@@ -138,6 +138,19 @@ loom_test(
 )
 
 loom_test(
+    name = "feature_capture_test",
+    srcs = [
+        "kernels/qwen38/features.loom",
+        "tests/features.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "gdn_state_test",
     srcs = [
         "kernels/qwen38/gdn_common.loom",
