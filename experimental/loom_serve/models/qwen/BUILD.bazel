@@ -344,6 +344,7 @@ py_binary(
     testonly = True,
     srcs = ["benchmark_service.py"],
     data = ["testdata/source_review.json"],
+    deps = ["//experimental/loom_serve/http:chat_client"],
 )
 
 py_test(
@@ -376,7 +377,7 @@ py_binary(
     testonly = True,
     srcs = ["check_capacity.py"],
     deps = [
-        ":benchmark_service_lib",
+        "//experimental/loom_serve/http:chat_client",
         "//experimental/loom_serve/testing:http",
     ],
 )
@@ -386,7 +387,7 @@ py_binary(
     testonly = True,
     srcs = ["check_router.py"],
     deps = [
-        ":benchmark_service_lib",
+        "//experimental/loom_serve/http:chat_client",
         "//experimental/loom_serve/testing:http",
     ],
 )
@@ -396,7 +397,7 @@ py_binary(
     testonly = True,
     srcs = ["check_checkpoints.py"],
     deps = [
-        ":benchmark_service_lib",
+        "//experimental/loom_serve/http:chat_client",
         "//experimental/loom_serve/testing:http",
     ],
 )
@@ -405,6 +406,7 @@ py_library(
     name = "benchmark_service_lib",
     testonly = True,
     srcs = ["benchmark_service.py"],
+    deps = ["//experimental/loom_serve/http:chat_client"],
 )
 
 py_binary(
@@ -412,7 +414,7 @@ py_binary(
     testonly = True,
     srcs = ["check_rows.py"],
     deps = [
-        ":benchmark_service_lib",
+        "//experimental/loom_serve/http:chat_client",
         "//experimental/loom_serve/testing:http",
     ],
 )
@@ -422,7 +424,7 @@ py_binary(
     testonly = True,
     srcs = ["check_tools.py"],
     deps = [
-        ":benchmark_service_lib",
+        "//experimental/loom_serve/http:chat_client",
         "//experimental/loom_serve/testing:http",
     ],
 )

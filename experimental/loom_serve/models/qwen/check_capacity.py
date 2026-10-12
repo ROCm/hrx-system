@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.models.qwen import benchmark_service
+from experimental.loom_serve.http import chat
 from experimental.loom_serve.testing.http import (
     Events,
     running_server,
@@ -78,7 +78,7 @@ def retained(address, pooled):
         {"role": "system", "content": "Follow instructions exactly. Do not use tools."},
         {"role": "user", "content": "Remember my codeword MAPLE. Reply with only OK."},
     ]
-    first = benchmark_service.request(address, "retained", history, 16)
+    first = chat.request(address, "retained", history, 16, model="qwen3.8-27b")
     history.extend(
         [
             {"role": "assistant", "content": first["text"]},
@@ -91,7 +91,7 @@ def retained(address, pooled):
     if pooled:
         # An impossible request must leave the existing checkpoint intact.
         reject(address, "retained", history, 512, 400, "shared pool holds")
-    second = benchmark_service.request(address, "retained", history, 16)
+    second = chat.request(address, "retained", history, 16, model="qwen3.8-27b")
     if second["text"].strip() != "MAPLE":
         raise RuntimeError(f"retained content mismatch: {second['text']!r}")
     if not second["usage"]["prompt_tokens_details"]["cached_tokens"]:
@@ -105,12 +105,12 @@ def cohort(address, events, pooled):
     ]
     if not pooled:
         return [
-            benchmark_service.request(address, f"row-{index}", prompt, maximum)
+            chat.request(address, f"row-{index}", prompt, maximum, model="qwen3.8-27b")
             for index, (prompt, maximum) in enumerate(requests)
         ]
     with ThreadPoolExecutor(max_workers=len(requests)) as clients:
         anchor = clients.submit(
-            benchmark_service.request, address, "row-0", *requests[0]
+            chat.request, address, "row-0", *requests[0], model="qwen3.8-27b"
         )
         wait_status(address, active_requests=1, queued_requests=0)
         # This identical request cannot fit beside the anchor. Its confirmed
@@ -138,7 +138,12 @@ def cohort(address, events, pooled):
             )
         futures = [anchor] + [
             clients.submit(
-                benchmark_service.request, address, f"row-{index}", prompt, maximum
+                chat.request,
+                address,
+                f"row-{index}",
+                prompt,
+                maximum,
+                model="qwen3.8-27b",
             )
             for index, (prompt, maximum) in enumerate(requests[1:], 1)
         ]
@@ -178,11 +183,12 @@ def cancel_active(address):
         peer.close()
     wait_counters(address, lambda counts: counts["cancelled"] == cancelled_before + 1)
     wait_status(address, active_requests=0, queued_requests=0)
-    result = benchmark_service.request(
+    result = chat.request(
         address,
         name,
         [{"role": "user", "content": "What is 2+2? Reply with only one number."}],
         8,
+        model="qwen3.8-27b",
     )
     if result["text"].strip() != "4":
         raise RuntimeError("cancelled row reuse changed output")

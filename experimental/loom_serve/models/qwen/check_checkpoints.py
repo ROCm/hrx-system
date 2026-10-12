@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.models.qwen.benchmark_service import request
+from experimental.loom_serve.http.chat import request
 from experimental.loom_serve.testing.http import (
     Events,
     control,
@@ -57,7 +57,9 @@ def tool_rewind(address):
         },
         {"role": "user", "content": "Call lookup with topic kernels."},
     ]
-    first = request(address, "tool-root", messages, 128, tools=tools)
+    first = request(
+        address, "tool-root", messages, 128, tools=tools, model="qwen3.8-27b"
+    )
     calls = first["tool_calls"]
     if (
         len(calls) != 1
@@ -77,21 +79,33 @@ def tool_rewind(address):
         },
         {"role": "user", "content": "Summarize this evidence in one short sentence."},
     ]
-    summary = request(address, "tool-root", temporary, 48, tools=tools)
+    summary = request(
+        address, "tool-root", temporary, 48, tools=tools, model="qwen3.8-27b"
+    )
     if not summary["text"].strip() or summary["tool_calls"]:
         raise RuntimeError(f"tool evidence did not produce a plain summary: {summary}")
     revised = base + [
         {"role": "tool", "tool_call_id": calls[0]["id"], "content": summary["text"]},
         {"role": "user", "content": "Reply with only the project codeword."},
     ]
-    rewound = request(address, "tool-root", revised, 16, tools=tools, checkpoint="tool")
+    rewound = request(
+        address,
+        "tool-root",
+        revised,
+        16,
+        tools=tools,
+        checkpoint="tool",
+        model="qwen3.8-27b",
+    )
     if (
         rewound["usage"]["prompt_tokens_details"]["cached_tokens"]
         != receipt["position"]
     ):
         raise RuntimeError("tool rewind did not restore the pre-result endpoint")
     control(address, "DELETE", "/v1/checkpoints/tool", 200)
-    same_output(rewound, request(address, "", revised, 16, tools=tools))
+    same_output(
+        rewound, request(address, "", revised, 16, tools=tools, model="qwen3.8-27b")
+    )
     print(
         json.dumps(
             {
@@ -115,7 +129,13 @@ def queued_pin(address, base):
     ]
     with ThreadPoolExecutor(max_workers=1) as clients:
         active = clients.submit(
-            request, address, "pin-anchor", history, 256, checkpoint="base"
+            request,
+            address,
+            "pin-anchor",
+            history,
+            256,
+            checkpoint="base",
+            model="qwen3.8-27b",
         )
         wait_status(address, active_requests=1, queued_requests=0)
         cancelled_before = wait_counters(address, lambda _: True)["cancelled"]
@@ -188,7 +208,7 @@ def cold_endpoint(address, events, messages, base, receipt):
     # even recycling this selected row cannot fund that completion guarantee.
     competing = [dict(message) for message in messages]
     competing[0]["content"] = competing[0]["content"].replace("MAPLE", "CEDAR")
-    selected = request(address, "cold-selected", competing, 12)
+    selected = request(address, "cold-selected", competing, 12, model="qwen3.8-27b")
     frontier = events.wait("request_stats", "cold-selected")["position"]
     history = base + [
         {"role": "user", "content": "Reply with only the project codeword."}
@@ -216,12 +236,14 @@ def cold_endpoint(address, events, messages, base, receipt):
         {"role": "assistant", "content": selected["text"]},
         {"role": "user", "content": "Reply with only the project codeword."},
     ]
-    kept = request(address, "cold-selected", selected_history, 16)
+    kept = request(address, "cold-selected", selected_history, 16, model="qwen3.8-27b")
     if kept["usage"]["prompt_tokens_details"]["cached_tokens"] != frontier:
         raise RuntimeError("refused cold wake replaced the selected continuation")
 
     # With a fresh destination, the competing idle row can yield its pages.
-    restored = request(address, "cold-restored", history, 16, checkpoint="base")
+    restored = request(
+        address, "cold-restored", history, 16, checkpoint="base", model="qwen3.8-27b"
+    )
     admitted = events.wait("admit", "cold-restored")
     if (
         restored["usage"]["prompt_tokens_details"]["cached_tokens"]
@@ -249,7 +271,7 @@ def fixed_suspension(command, log):
             raise RuntimeError(f"fixed server did not become ready: {log}")
         address = urlsplit(f"http://{endpoint}")
         history = [{"role": "user", "content": "Reply with only READY."}]
-        first = request(address, "fixed", history, 8)
+        first = request(address, "fixed", history, 8, model="qwen3.8-27b")
         receipt = control(
             address, "POST", "/v1/checkpoints/fixed", 201, session="fixed"
         )
@@ -260,14 +282,16 @@ def fixed_suspension(command, log):
             {"role": "assistant", "content": first["text"]},
             {"role": "user", "content": "Reply with only OK."},
         ]
-        restored = request(address, "fixed-fork", history, 8, checkpoint="fixed")
+        restored = request(
+            address, "fixed-fork", history, 8, checkpoint="fixed", model="qwen3.8-27b"
+        )
         if (
             restored["usage"]["prompt_tokens_details"]["cached_tokens"]
             != receipt["position"]
         ):
             raise RuntimeError("fixed rejection changed the endpoint")
         control(address, "DELETE", "/v1/checkpoints/fixed", 200)
-        same_output(restored, request(address, "", history, 8))
+        same_output(restored, request(address, "", history, 8, model="qwen3.8-27b"))
     print(json.dumps({"event": "fixed_suspend_rejected"}), flush=True)
 
 
@@ -288,7 +312,7 @@ def physical_completion(command, messages, output, parameter_bytes):
             if endpoint is None:
                 raise RuntimeError(f"physical-budget server failed startup: {log}")
             address = urlsplit(f"http://{endpoint}")
-            first = request(address, "root", messages, 12)
+            first = request(address, "root", messages, 12, model="qwen3.8-27b")
             history = messages + [
                 {"role": "assistant", "content": first["text"]},
                 {"role": "user", "content": "Reply with only the project codeword."},
@@ -329,8 +353,16 @@ def physical_completion(command, messages, output, parameter_bytes):
                         name,
                         [{"role": "user", "content": f"Reply with only {token}."}],
                         8,
+                        model="qwen3.8-27b",
                     )
-                result = request(address, "restored", history, 16, checkpoint="base")
+                result = request(
+                    address,
+                    "restored",
+                    history,
+                    16,
+                    checkpoint="base",
+                    model="qwen3.8-27b",
+                )
                 admitted = events.wait("admit", "restored")
                 if admitted["restored_bytes"] != parked["host_snapshot_bytes"]:
                     raise RuntimeError(f"physical wake replayed: {admitted}")
@@ -355,13 +387,13 @@ def physical_completion(command, messages, output, parameter_bytes):
             control(address, "DELETE", "/v1/checkpoints/base", 200)
             if headroom_mib == 256:
                 # Last shared reader is gone; in-place continuation now fits.
-                result = request(address, "root", history, 16)
+                result = request(address, "root", history, 16, model="qwen3.8-27b")
             if (
                 result["usage"]["prompt_tokens_details"]["cached_tokens"]
                 != receipt["position"]
             ):
                 raise RuntimeError("physical pressure discarded the selected frontier")
-            same_output(result, request(address, "", history, 16))
+            same_output(result, request(address, "", history, 16, model="qwen3.8-27b"))
         heartbeats = [e for e in events.values if e["event"] == "text_memory"]
         if not heartbeats or any(
             e["elastic_parameters"]["released_bytes"] for e in heartbeats
@@ -427,7 +459,7 @@ def main():
                 + "Reply with only READY.",
             },
         ]
-        first = request(address, "root", messages, 12)
+        first = request(address, "root", messages, 12, model="qwen3.8-27b")
         base = messages + [{"role": "assistant", "content": first["text"]}]
         receipt = control(address, "POST", "/v1/checkpoints/base", 201, session="root")
         print(json.dumps({"event": "pinned", **receipt}), flush=True)
@@ -485,7 +517,7 @@ def main():
                 + "Summarize this evidence in one short sentence.",
             }
         ]
-        summary = request(address, "root", temporary, 32)
+        summary = request(address, "root", temporary, 32, model="qwen3.8-27b")
         if (
             summary["usage"]["prompt_tokens_details"]["cached_tokens"]
             != receipt["position"]
@@ -508,7 +540,9 @@ def main():
                 "content": f"Retained summary: {summary['text']}\nReply with only the project codeword.",
             }
         ]
-        rewound = request(address, "root", revised, 16, checkpoint="base")
+        rewound = request(
+            address, "root", revised, 16, checkpoint="base", model="qwen3.8-27b"
+        )
         if (
             rewound["usage"]["prompt_tokens_details"]["cached_tokens"]
             != receipt["position"]
@@ -528,7 +562,14 @@ def main():
         def branch(index):
             history = base + [{"role": "user", "content": suffixes[index]}]
             barrier.wait()
-            return request(address, f"fork-{index}", history, 32, checkpoint="base")
+            return request(
+                address,
+                f"fork-{index}",
+                history,
+                32,
+                checkpoint="base",
+                model="qwen3.8-27b",
+            )
 
         with ThreadPoolExecutor(max_workers=2) as clients:
             futures = [clients.submit(branch, index) for index in range(2)]
@@ -547,12 +588,12 @@ def main():
             raise RuntimeError("cold release retained its image")
         # The tight pool cannot hold the pin plus an independent full prefix.
         # Drop the explicit pin before running fresh replays of every output.
-        same_output(rewound, request(address, "", revised, 16))
+        same_output(rewound, request(address, "", revised, 16, model="qwen3.8-27b"))
         for index, result in enumerate(branches):
             history = base + [{"role": "user", "content": suffixes[index]}]
-            same_output(result, request(address, "", history, 32))
+            same_output(result, request(address, "", history, 32, model="qwen3.8-27b"))
         for result, history in cold_results:
-            same_output(result, request(address, "", history, 16))
+            same_output(result, request(address, "", history, 16, model="qwen3.8-27b"))
         control(address, "DELETE", "/v1/checkpoints/base", 404)
         control(
             address,

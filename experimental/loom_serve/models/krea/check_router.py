@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 
 from PIL import Image
 
-from experimental.loom_serve.models.qwen.benchmark_service import request
+from experimental.loom_serve.http.chat import request
 from experimental.loom_serve.models.qwen.check_router import continuation, history
 from experimental.loom_serve.testing.http import (
     Events,

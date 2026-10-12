@@ -73,6 +73,19 @@ loom_cc_library(
 )
 
 py_library(
+    name = "chat_client",
+    srcs = ["chat.py"],
+)
+
+py_test(
+    name = "chat_client_test",
+    size = "small",
+    srcs = ["chat_test.py"],
+    main = "chat_test.py",
+    deps = [":chat_client"],
+)
+
+py_library(
     name = "logs_client",
     srcs = ["logs.py"],
 )

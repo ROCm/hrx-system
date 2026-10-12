@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.models.qwen import benchmark_service
+from experimental.loom_serve.http import chat
 from experimental.loom_serve.testing.http import Events, running_server
 
 
@@ -38,8 +38,8 @@ def request(address, index, barrier=None, *, long_prompt=False):
     ]
     if barrier:
         barrier.wait()
-    return benchmark_service.request(
-        address, f"row-{index}", messages, 48 + 8 * (index % 4)
+    return chat.request(
+        address, f"row-{index}", messages, 48 + 8 * (index % 4), model="qwen3.8-27b"
     )
 
 

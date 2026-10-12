@@ -83,7 +83,11 @@ def main():
         if address is None:
             raise RuntimeError(f"feasible shape table failed startup: {log_path}")
         client_arguments = argparse.Namespace(
-            long_lines=8, max_tokens=32, session_prefix="service-check"
+            long_lines=8,
+            max_tokens=32,
+            session_prefix="service-check",
+            model="qwen3.8-27b",
+            retention="required",
         )
         barrier = threading.Barrier(5)
         with ThreadPoolExecutor(max_workers=4) as clients:

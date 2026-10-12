@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.models.qwen.benchmark_service import request
+from experimental.loom_serve.http.chat import request
 from experimental.loom_serve.testing.http import (
     Events,
     control,

@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.models.qwen import benchmark_service
+from experimental.loom_serve.http import chat
 from experimental.loom_serve.testing.http import running_server
 
 TOOLS = [
@@ -101,7 +101,9 @@ def client(address, index, output):
             log.flush()
 
         record({"event": "request", "messages": messages, "tools": TOOLS})
-        first = benchmark_service.request(address, session, messages, 192, tools=TOOLS)
+        first = chat.request(
+            address, session, messages, 192, model="qwen3.8-27b", tools=TOOLS
+        )
         record({"event": "response", **first})
         calls = first["tool_calls"]
         if first["finish_reason"] != "tool_calls" or len(calls) != 1:
@@ -127,7 +129,9 @@ def client(address, index, output):
         rejected = rejected_history(address, session, messages)
         record({"event": "rejected_history", **rejected})
         record({"event": "request", "messages": messages, "tools": TOOLS})
-        second = benchmark_service.request(address, session, messages, 32, tools=TOOLS)
+        second = chat.request(
+            address, session, messages, 32, model="qwen3.8-27b", tools=TOOLS
+        )
         record({"event": "response", **second})
         if second["finish_reason"] != "stop" or second["text"].strip() != codeword:
             raise RuntimeError(f"{session}: incorrect tool-result answer: {second}")
