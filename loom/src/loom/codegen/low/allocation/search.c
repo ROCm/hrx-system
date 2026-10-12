@@ -254,10 +254,28 @@ bool loom_low_allocation_search_assignment_conflicts(
           ignored_value_ids, ignored_value_count)) {
     return true;
   }
-  if (loom_low_allocation_target_constraints_reserved_range_conflicts(
-          context->target_constraints, candidate->descriptor_reg_class_id,
-          candidate->location_kind, candidate->location_base,
-          candidate->location_count)) {
+  // An explicit fixed value at its requested location may occupy reserved
+  // windows that admit fixed values; every other candidate avoids them.
+  const loom_low_allocation_resolved_fixed_value_t* fixed_value =
+      context->target_constraints->reserved_range_count != 0
+          ? loom_low_allocation_target_constraints_preassigned_fixed_value_for_value(
+                context->target_constraints, candidate->value_id)
+          : NULL;
+  const bool candidate_is_fixed_value =
+      fixed_value != NULL &&
+      fixed_value->assignment.value_id == candidate->value_id &&
+      fixed_value->assignment.descriptor_reg_class_id ==
+          candidate->descriptor_reg_class_id &&
+      fixed_value->assignment.location_kind == candidate->location_kind &&
+      fixed_value->assignment.location_base == candidate->location_base &&
+      fixed_value->assignment.location_count == candidate->location_count;
+  if (candidate_is_fixed_value
+          ? loom_low_allocation_target_constraints_fixed_value_reserved_range_conflicts(
+                context->target_constraints, candidate)
+          : loom_low_allocation_target_constraints_reserved_range_conflicts(
+                context->target_constraints,
+                candidate->descriptor_reg_class_id, candidate->location_kind,
+                candidate->location_base, candidate->location_count)) {
     return true;
   }
   if (loom_low_allocation_storage_lease_state_conflicts(

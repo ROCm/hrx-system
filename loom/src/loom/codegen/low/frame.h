@@ -153,6 +153,25 @@ typedef struct loom_low_emission_frame_t {
   loom_low_allocation_materialized_spill_list_t materialized_spills;
 } loom_low_emission_frame_t;
 
+// Register value created by target spill lowering that executes with lanes
+// enabled beyond the current program point's active mask.
+//
+// Ordinary allocation reuses a register once its value is dead in the active
+// lanes, while inactive lanes may still hold another value there, such as the
+// final state of lanes that retired from a divergent loop. Writes under a
+// widened execution mask would clobber those lanes. The frame pins each
+// whole-wave value inside a whole-function register window that ordinary
+// values never occupy.
+typedef struct loom_low_emission_frame_whole_wave_value_t {
+  // Register value written under a widened execution mask.
+  loom_value_id_t value_id;
+  // First unit of the value relative to the whole-wave window base. Values
+  // that may be live together must use disjoint unit ranges.
+  uint32_t window_offset;
+  // Number of allocation units occupied by the value.
+  uint32_t unit_count;
+} loom_low_emission_frame_whole_wave_value_t;
+
 // Summary from target structural spill-traffic lowering.
 typedef struct loom_low_emission_frame_lower_spill_traffic_result_t {
   // Number of user-facing diagnostics emitted while lowering spill traffic.
@@ -164,6 +183,15 @@ typedef struct loom_low_emission_frame_lower_spill_traffic_result_t {
   const loom_value_id_t* required_register_value_ids;
   // Number of entries in |required_register_value_ids|.
   iree_host_size_t required_register_value_count;
+  // Scratch-arena-owned whole-wave values created by this lowering round. The
+  // frame retains them across rounds and pins them inside one reserved window
+  // of |whole_wave_register_class|.
+  const loom_low_emission_frame_whole_wave_value_t* whole_wave_values;
+  // Number of entries in |whole_wave_values|.
+  iree_host_size_t whole_wave_value_count;
+  // Register class containing every whole-wave value. Required when
+  // |whole_wave_value_count| is nonzero.
+  iree_string_view_t whole_wave_register_class;
 } loom_low_emission_frame_lower_spill_traffic_result_t;
 
 // Target callback that rewrites structural low.spill/low.reload traffic into

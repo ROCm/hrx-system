@@ -742,6 +742,7 @@ loom_low_allocation_target_constraints_resolve_reserved_ranges(
             .location_kind = reserved_range->location_kind,
             .location_base = reserved_range->location_base,
             .location_count = reserved_range->location_count,
+            .admits_fixed_values = reserved_range->admits_fixed_values,
         };
     constraints->reserved_range_index[resolved_range_index] =
         (loom_low_allocation_reserved_range_index_entry_t){
@@ -1251,10 +1252,12 @@ iree_status_t loom_low_allocation_target_constraints_resolve_fixed_locations(
       }
       continue;
     }
-    constraints->fixed_values[constraints->fixed_value_count++] =
-        loom_low_allocation_target_constraints_make_resolved_fixed_value(
-            interval, value_ordinal, reg_class_id, fixed_value->location_kind,
-            fixed_value->location_base, fixed_value->location_count);
+    loom_low_allocation_resolved_fixed_value_t* resolved =
+        &constraints->fixed_values[constraints->fixed_value_count++];
+    *resolved = loom_low_allocation_target_constraints_make_resolved_fixed_value(
+        interval, value_ordinal, reg_class_id, fixed_value->location_kind,
+        fixed_value->location_base, fixed_value->location_count);
+    resolved->unsplittable = fixed_value->unsplittable;
   }
 
   constraints->preassigned_fixed_value_count = constraints->fixed_value_count;
@@ -1570,6 +1573,40 @@ bool loom_low_allocation_target_constraints_reserved_range_conflicts(
     };
     if (loom_low_allocation_storage_assignment_ranges_overlap(
             descriptor_set, &reserved_assignment, &candidate_assignment)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool loom_low_allocation_target_constraints_fixed_value_reserved_range_conflicts(
+    const loom_low_allocation_target_constraints_t* constraints,
+    const loom_low_allocation_assignment_t* candidate) {
+  IREE_ASSERT_ARGUMENT(constraints);
+  IREE_ASSERT_ARGUMENT(candidate);
+  if (candidate->location_count == 0) {
+    return false;
+  }
+  const loom_low_descriptor_set_t* descriptor_set =
+      constraints->target->descriptor_set;
+  for (iree_host_size_t i = 0; i < constraints->reserved_range_count; ++i) {
+    const loom_low_allocation_resolved_reserved_range_t* reserved_range =
+        &constraints->reserved_ranges[i];
+    if (reserved_range->admits_fixed_values ||
+        reserved_range->location_kind != candidate->location_kind ||
+        !loom_low_allocation_storage_reg_classes_share(
+            descriptor_set, reserved_range->descriptor_reg_class_id,
+            candidate->descriptor_reg_class_id)) {
+      continue;
+    }
+    const loom_low_allocation_assignment_t reserved_assignment = {
+        .descriptor_reg_class_id = reserved_range->descriptor_reg_class_id,
+        .location_kind = reserved_range->location_kind,
+        .location_base = reserved_range->location_base,
+        .location_count = reserved_range->location_count,
+    };
+    if (loom_low_allocation_storage_assignment_ranges_overlap(
+            descriptor_set, &reserved_assignment, candidate)) {
       return true;
     }
   }

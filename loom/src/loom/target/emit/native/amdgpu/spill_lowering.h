@@ -17,6 +17,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/frame.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 
@@ -32,6 +33,14 @@ typedef struct loom_amdgpu_spill_lowering_result_t {
   const loom_value_id_t* required_register_value_ids;
   // Number of entries in |required_register_value_ids|.
   iree_host_size_t required_register_value_count;
+  // Scratch-arena-owned VGPR temporaries written under full EXEC by SGPR spill
+  // and reload sequences. Each must occupy the frame's whole-wave window so it
+  // cannot overwrite inactive lanes of an ordinary VGPR value.
+  const loom_low_emission_frame_whole_wave_value_t* whole_wave_values;
+  // Number of entries in |whole_wave_values|.
+  iree_host_size_t whole_wave_value_count;
+  // Register class name of every entry in |whole_wave_values|.
+  iree_string_view_t whole_wave_register_class;
 } loom_amdgpu_spill_lowering_result_t;
 
 // Rewrites low.spill/low.reload in |function_op| into descriptor-backed AMDGPU

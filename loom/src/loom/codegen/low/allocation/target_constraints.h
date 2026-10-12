@@ -54,6 +54,10 @@ typedef struct loom_low_allocation_fixed_value_t {
   // registers use their declared view's units; linear locations use consecutive
   // IDs.
   uint32_t location_count;
+  // True when allocation repair must never detach the value from its fixed
+  // location by splitting its live range. A replica would be an ordinary value
+  // outside the location's constraints.
+  bool unsplittable;
 } loom_low_allocation_fixed_value_t;
 
 // Whole-function location range owned by target machinery.
@@ -72,6 +76,10 @@ typedef struct loom_low_allocation_reserved_range_t {
   uint32_t location_base;
   // Number of contiguous units reserved at |location_base|.
   uint32_t location_count;
+  // True when explicit fixed values may occupy the range. Ordinary values still
+  // never allocate inside it. Targets use this for register windows owned by
+  // target machinery that pins its own short-lived values there.
+  bool admits_fixed_values;
 } loom_low_allocation_reserved_range_t;
 
 typedef struct loom_low_allocation_resolved_budget_t {
@@ -90,6 +98,8 @@ typedef struct loom_low_allocation_resolved_reserved_range_t {
   uint32_t location_base;
   // Number of contiguous units reserved at |location_base|.
   uint32_t location_count;
+  // True when explicit fixed values may occupy the range.
+  bool admits_fixed_values;
 } loom_low_allocation_resolved_reserved_range_t;
 
 typedef struct loom_low_allocation_reserved_range_index_entry_t
@@ -112,6 +122,8 @@ typedef struct loom_low_allocation_resolved_fixed_value_t {
   loom_value_ordinal_t tied_root_ordinal;
   // Exclusive semantic live-range end before storage lifetime refinement.
   uint32_t semantic_end_point;
+  // True when allocation repair must not split the value's live range.
+  bool unsplittable;
 } loom_low_allocation_resolved_fixed_value_t;
 
 typedef struct loom_low_allocation_class_capacity_t {
@@ -380,6 +392,12 @@ bool loom_low_allocation_target_constraints_reserved_range_conflicts(
     const loom_low_allocation_target_constraints_t* constraints,
     uint16_t reg_class_id, loom_low_allocation_location_kind_t location_kind,
     uint32_t location_base, uint32_t location_count);
+
+// Returns true when the location range of the explicit fixed value
+// |candidate| conflicts with a reserved range that does not admit fixed values.
+bool loom_low_allocation_target_constraints_fixed_value_reserved_range_conflicts(
+    const loom_low_allocation_target_constraints_t* constraints,
+    const loom_low_allocation_assignment_t* candidate);
 
 // Returns true when static reservations can provide ordered availability for
 // |candidate|. Eligible candidates use one continuous unit in a linear

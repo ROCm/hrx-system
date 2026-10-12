@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/addressability.h"
+#include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/allocation_live_range_splitting.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function.h"
@@ -931,6 +932,215 @@ static iree_status_t loom_low_emission_frame_apply_materialization_summary(
   return iree_ok_status();
 }
 
+// Whole-wave values retained across repair rounds and the reserved register
+// window holding them. The window stays unplaced until a frame supplies the
+// descriptor set and current register extent.
+typedef struct loom_low_emission_frame_whole_wave_state_t {
+  // Retained whole-wave values from every target lowering round.
+  loom_low_emission_frame_whole_wave_value_t* values;
+  // Number of entries in |values|.
+  iree_host_size_t value_count;
+  // Capacity of |values|.
+  iree_host_size_t value_capacity;
+  // Register class containing every whole-wave value.
+  iree_string_view_t register_class;
+  // Units required by the retained window offsets.
+  uint32_t required_unit_count;
+  // Strongest power-of-two alignment required by a retained value.
+  uint32_t required_alignment;
+  // Placed window, valid when |placed_unit_count| is nonzero.
+  loom_low_allocation_reserved_range_t window;
+  // Units covered by |window|; zero before placement.
+  uint32_t placed_unit_count;
+  // Options with the caller constraints plus the whole-wave window and pins.
+  loom_low_emission_frame_options_t effective_options;
+} loom_low_emission_frame_whole_wave_state_t;
+
+static iree_status_t loom_low_emission_frame_whole_wave_record(
+    const loom_low_emission_frame_lower_spill_traffic_result_t* result,
+    iree_arena_allocator_t* arena,
+    loom_low_emission_frame_whole_wave_state_t* state) {
+  if (result->whole_wave_value_count == 0) {
+    return iree_ok_status();
+  }
+  if (iree_string_view_is_empty(result->whole_wave_register_class)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "whole-wave spill values require a register class");
+  }
+  if (iree_string_view_is_empty(state->register_class)) {
+    char* name = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(
+        arena, result->whole_wave_register_class.size, (void**)&name));
+    memcpy(name, result->whole_wave_register_class.data,
+           result->whole_wave_register_class.size);
+    state->register_class =
+        iree_make_string_view(name, result->whole_wave_register_class.size);
+  } else if (!iree_string_view_equal(state->register_class,
+                                     result->whole_wave_register_class)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "whole-wave spill values must share one register class");
+  }
+  const iree_host_size_t minimum_capacity =
+      state->value_count + result->whole_wave_value_count;
+  if (minimum_capacity > state->value_capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        arena, state->value_count, iree_max(minimum_capacity, 16u),
+        sizeof(*state->values), &state->value_capacity,
+        (void**)&state->values));
+  }
+  for (iree_host_size_t i = 0; i < result->whole_wave_value_count; ++i) {
+    const loom_low_emission_frame_whole_wave_value_t* value =
+        &result->whole_wave_values[i];
+    if (value->unit_count == 0 ||
+        value->window_offset > UINT32_MAX - value->unit_count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "whole-wave spill value has an invalid window "
+                              "range");
+    }
+    state->values[state->value_count++] = *value;
+    state->required_unit_count = iree_max(
+        state->required_unit_count, value->window_offset + value->unit_count);
+    uint32_t alignment = 1;
+    while (alignment < value->unit_count) {
+      alignment <<= 1;
+    }
+    state->required_alignment = iree_max(state->required_alignment, alignment);
+  }
+  return iree_ok_status();
+}
+
+static bool loom_low_emission_frame_whole_wave_needs_placement(
+    const loom_low_emission_frame_whole_wave_state_t* state) {
+  return state->value_count != 0 &&
+         state->placed_unit_count < state->required_unit_count;
+}
+
+// Places the whole-wave window just past the register extent of |frame|, or as
+// high as the class capacity permits. Correctness does not depend on the
+// placement because ordinary values never occupy the window; the extent only
+// keeps the window from displacing already-allocated values.
+static iree_status_t loom_low_emission_frame_whole_wave_place(
+    const loom_low_emission_frame_options_t* options,
+    const loom_low_emission_frame_t* frame,
+    loom_low_emission_frame_whole_wave_state_t* state) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      frame->schedule.target.descriptor_set;
+  if (descriptor_set == NULL) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "whole-wave window placement requires a resolved "
+                            "descriptor set");
+  }
+  uint16_t reg_class_id = LOOM_LOW_REG_CLASS_NONE;
+  const loom_low_reg_class_t* reg_class = NULL;
+  if (!loom_low_descriptor_set_lookup_register_class(
+          descriptor_set, state->register_class, &reg_class_id, &reg_class)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unknown whole-wave register class '%.*s'",
+                            (int)state->register_class.size,
+                            state->register_class.data);
+  }
+  uint32_t capacity = reg_class->allocatable_count;
+  for (iree_host_size_t i = 0; i < options->allocation_budget_count; ++i) {
+    if (iree_string_view_equal(options->allocation_budgets[i].register_class,
+                               state->register_class)) {
+      capacity = options->allocation_budgets[i].max_units;
+    }
+  }
+  const uint32_t unit_count = state->required_unit_count;
+  const uint32_t alignment = state->required_alignment;
+  uint32_t extent_end = capacity;
+  if (frame->allocation.physical_extents.ends_by_reg_class != NULL &&
+      reg_class_id < frame->allocation.physical_extents.count) {
+    extent_end =
+        frame->allocation.physical_extents.ends_by_reg_class[reg_class_id];
+  }
+  uint64_t base = ((uint64_t)extent_end + alignment - 1) / alignment * alignment;
+  if (capacity != 0) {
+    if (unit_count > capacity) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "whole-wave window of %u units exceeds register "
+                              "class capacity %u",
+                              unit_count, capacity);
+    }
+    if (base + unit_count > capacity) {
+      base = (capacity - unit_count) / alignment * alignment;
+    }
+  }
+  state->window = (loom_low_allocation_reserved_range_t){
+      .register_class = state->register_class,
+      .location_kind =
+          loom_low_allocation_storage_reg_class_location_kind(reg_class),
+      .location_base = (uint32_t)base,
+      .location_count = unit_count,
+      .admits_fixed_values = true,
+  };
+  state->placed_unit_count = unit_count;
+  return iree_ok_status();
+}
+
+// Rebuilds |state->effective_options| with the placed window and one fixed
+// value per surviving whole-wave value. Values erased by later rewrites are
+// skipped.
+static iree_status_t loom_low_emission_frame_whole_wave_apply(
+    const loom_module_t* module,
+    const loom_low_emission_frame_options_t* options,
+    iree_arena_allocator_t* arena,
+    loom_low_emission_frame_whole_wave_state_t* state) {
+  state->effective_options = *options;
+  if (state->placed_unit_count == 0) {
+    return iree_ok_status();
+  }
+  loom_low_allocation_reserved_range_t* reserved_ranges = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, options->allocation_reserved_range_count + 1,
+      sizeof(*reserved_ranges), (void**)&reserved_ranges));
+  if (options->allocation_reserved_range_count != 0) {
+    memcpy(reserved_ranges, options->allocation_reserved_ranges,
+           options->allocation_reserved_range_count * sizeof(*reserved_ranges));
+  }
+  reserved_ranges[options->allocation_reserved_range_count] = state->window;
+  state->effective_options.allocation_reserved_ranges = reserved_ranges;
+  state->effective_options.allocation_reserved_range_count =
+      options->allocation_reserved_range_count + 1;
+
+  loom_low_allocation_fixed_value_t* fixed_values = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, options->allocation_fixed_value_count + state->value_count,
+      sizeof(*fixed_values), (void**)&fixed_values));
+  if (options->allocation_fixed_value_count != 0) {
+    memcpy(fixed_values, options->allocation_fixed_values,
+           options->allocation_fixed_value_count * sizeof(*fixed_values));
+  }
+  iree_host_size_t fixed_value_count = options->allocation_fixed_value_count;
+  for (iree_host_size_t i = 0; i < state->value_count; ++i) {
+    const loom_low_emission_frame_whole_wave_value_t* value =
+        &state->values[i];
+    if (value->value_id >= module->values.count) {
+      continue;
+    }
+    const loom_value_t* module_value =
+        loom_module_value(module, value->value_id);
+    const loom_op_t* definition = loom_value_is_block_arg(module_value)
+                                      ? NULL
+                                      : loom_value_def_op(module_value);
+    if (definition == NULL || definition->parent_block == NULL ||
+        loom_value_has_no_uses(module_value)) {
+      continue;
+    }
+    fixed_values[fixed_value_count++] = (loom_low_allocation_fixed_value_t){
+        .value_id = value->value_id,
+        .location_kind = state->window.location_kind,
+        .location_base = state->window.location_base + value->window_offset,
+        .location_count = value->unit_count,
+        .unsplittable = true,
+    };
+  }
+  state->effective_options.allocation_fixed_values = fixed_values;
+  state->effective_options.allocation_fixed_value_count = fixed_value_count;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_emission_frame_build_spill_free_impl(
     loom_module_t* module, loom_op_t* low_func_op,
     const loom_low_emission_frame_options_t* frame_options,
@@ -967,6 +1177,9 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
       spill_lowering_result.required_register_value_ids,
       spill_lowering_result.required_register_value_count, repair_arena,
       &required_register_values));
+  loom_low_emission_frame_whole_wave_state_t whole_wave = {0};
+  IREE_RETURN_IF_ERROR(loom_low_emission_frame_whole_wave_record(
+      &spill_lowering_result, repair_arena, &whole_wave));
   iree_host_size_t value_repair_iteration_count = 0;
   iree_host_size_t value_repair_iteration_limit = 0;
   iree_host_size_t last_rematerialized_spill_plan_count = IREE_HOST_SIZE_MAX;
@@ -981,11 +1194,24 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
       restore_frame_before_build = false;
     }
     iree_arena_reset(scratch_arena);
+    IREE_RETURN_IF_ERROR(loom_low_emission_frame_whole_wave_apply(
+        module, frame_options, repair_arena, &whole_wave));
+    const loom_low_emission_frame_options_t* effective_options =
+        &whole_wave.effective_options;
     loom_low_emission_frame_t frame = {0};
     IREE_RETURN_IF_ERROR(loom_low_emission_frame_build_impl(
-        module, low_func_op, frame_options, NULL,
+        module, low_func_op, effective_options, NULL,
         loom_low_placement_pair_use_list_empty(), required_register_values,
         rematerialization.per_user_values, arena, statistics, &frame));
+    if (loom_low_emission_frame_whole_wave_needs_placement(&whole_wave)) {
+      // Whole-wave values first need a window. This frame only measures the
+      // register extent that the window should avoid displacing.
+      IREE_RETURN_IF_ERROR(loom_low_emission_frame_whole_wave_place(
+          frame_options, &frame, &whole_wave));
+      loom_low_emission_frame_advance_repair_iteration(statistics);
+      restore_frame_before_build = true;
+      continue;
+    }
     if (value_repair_iteration_limit == 0) {
       // Use the initial function-local value population as the convergence
       // budget. Allocation repair can retire a complete batch in one pass;
@@ -1045,11 +1271,11 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
     if (frame.allocation.spill_plan_count == 0) {
       IREE_ASSERT_EQ(frame.allocation.spill_count, 0u);
       IREE_RETURN_IF_ERROR(loom_low_emission_frame_try_guarded_motion(
-          module, low_func_op, frame_options, required_register_values,
+          module, low_func_op, effective_options, required_register_values,
           rematerialization.per_user_values, frame_checkpoint, repair_arena,
           scratch_arena, statistics, &frame));
       IREE_RETURN_IF_ERROR(loom_low_emission_frame_try_pair_replication(
-          module, low_func_op, frame_options, required_register_values,
+          module, low_func_op, effective_options, required_register_values,
           rematerialization.per_user_values, frame_checkpoint, repair_arena,
           scratch_arena, statistics, &frame));
       bool accepted = false;
@@ -1148,6 +1374,8 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
         spill_lowering_result.required_register_value_ids,
         spill_lowering_result.required_register_value_count, repair_arena,
         &required_register_values));
+    IREE_RETURN_IF_ERROR(loom_low_emission_frame_whole_wave_record(
+        &spill_lowering_result, repair_arena, &whole_wave));
     loom_low_emission_frame_advance_repair_iteration(statistics);
     restore_frame_before_build = true;
   }

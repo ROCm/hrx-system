@@ -364,6 +364,9 @@ static iree_status_t loom_amdgpu_loom_check_lower_spill_traffic(
   out_result->required_register_value_ids = result.required_register_value_ids;
   out_result->required_register_value_count =
       result.required_register_value_count;
+  out_result->whole_wave_values = result.whole_wave_values;
+  out_result->whole_wave_value_count = result.whole_wave_value_count;
+  out_result->whole_wave_register_class = result.whole_wave_register_class;
   return iree_ok_status();
 }
 

@@ -568,6 +568,9 @@ static iree_status_t loom_low_allocation_try_split_fixed_value(
     const loom_low_allocation_resolved_fixed_value_t* fixed_value,
     iree_diagnostic_emitter_t emitter,
     loom_low_allocation_live_range_split_result_t* result) {
+  if (fixed_value->unsplittable) {
+    return iree_ok_status();
+  }
   loom_module_t* module = rewriter->module;
   const loom_value_id_t value_id = fixed_value->assignment.value_id;
   const loom_value_t* value = loom_module_value(module, value_id);

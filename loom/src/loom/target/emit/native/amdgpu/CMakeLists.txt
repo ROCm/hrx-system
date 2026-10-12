@@ -271,6 +271,7 @@ loom_cc_library(
     loom::codegen::low::builder
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
+    loom::codegen::low::frame
     loom::codegen::low::function
     loom::error::emitter
     loom::ir

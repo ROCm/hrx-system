@@ -83,6 +83,12 @@ typedef struct loom_amdgpu_spill_lowering_context_t {
   iree_host_size_t required_register_value_count;
   // Capacity of |required_register_value_ids|.
   iree_host_size_t required_register_value_capacity;
+  // VGPR temporaries written under full EXEC.
+  loom_low_emission_frame_whole_wave_value_t* whole_wave_values;
+  // Number of entries in |whole_wave_values|.
+  iree_host_size_t whole_wave_value_count;
+  // Capacity of |whole_wave_values|.
+  iree_host_size_t whole_wave_value_capacity;
 } loom_amdgpu_spill_lowering_context_t;
 
 static iree_status_t loom_amdgpu_spill_lowering_record_required_register_value(
@@ -376,6 +382,45 @@ static iree_status_t loom_amdgpu_spill_lowering_make_chunk_type(
   loom_type_t chunk_type =
       loom_low_register_carrier_type_with_unit_count(base_type, chunk_units);
   return loom_module_intern_type(module, chunk_type, out_type);
+}
+
+// Records the VGPR values created since |first_value_id| for one full-EXEC
+// chunk bracket. Exec writes order the brackets, so every bracket shares one
+// data unit and one address unit in the whole-wave window.
+static iree_status_t loom_amdgpu_spill_lowering_record_whole_wave_chunk(
+    loom_amdgpu_spill_lowering_context_t* context,
+    loom_value_id_t first_value_id) {
+  for (loom_value_id_t value_id = first_value_id;
+       value_id < context->module->values.count; ++value_id) {
+    const loom_type_t type = loom_module_value_type(context->module, value_id);
+    if (!loom_low_type_is_register(type) ||
+        loom_low_register_type_class_id(type) != context->vgpr_class_id) {
+      continue;
+    }
+    const loom_value_t* value = loom_module_value(context->module, value_id);
+    const loom_op_t* definition =
+        loom_value_is_block_arg(value) ? NULL : loom_value_def_op(value);
+    const bool is_address =
+        definition != NULL && loom_low_storage_address_isa(definition);
+    const uint32_t unit_count = loom_low_register_type_unit_count(type);
+    IREE_ASSERT_EQ(unit_count, 1u);
+    const iree_host_size_t minimum_capacity =
+        context->whole_wave_value_count + 1;
+    if (minimum_capacity > context->whole_wave_value_capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          context->scratch_arena, context->whole_wave_value_count,
+          iree_max(minimum_capacity, 8u), sizeof(*context->whole_wave_values),
+          &context->whole_wave_value_capacity,
+          (void**)&context->whole_wave_values));
+    }
+    context->whole_wave_values[context->whole_wave_value_count++] =
+        (loom_low_emission_frame_whole_wave_value_t){
+            .value_id = value_id,
+            .window_offset = is_address ? 1u : 0u,
+            .unit_count = unit_count,
+        };
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_spill_lowering_make_register_type(
@@ -754,7 +799,7 @@ static iree_status_t loom_amdgpu_spill_lowering_load_chunk(
 }
 
 static iree_status_t loom_amdgpu_spill_lowering_rewrite_spill(
-    const loom_amdgpu_spill_lowering_context_t* context,
+    loom_amdgpu_spill_lowering_context_t* context,
     loom_rewriter_t* rewriter, loom_op_t* op) {
   const loom_value_id_t value = loom_low_spill_value(op);
   const loom_type_t value_type = loom_module_value_type(context->module, value);
@@ -797,13 +842,18 @@ static iree_status_t loom_amdgpu_spill_lowering_rewrite_spill(
   // Preserve the other lanes already accumulated in their lane-private spill
   // slots by leaving EXEC unchanged. SGPR values describe one wave-wide value
   // and still require every lane's scratch slot to receive the same snapshot.
+  // Their VGPR temporaries are written in every lane, including lanes that
+  // may still hold live values, so they occupy the frame's whole-wave window.
   const bool requires_full_exec =
       spill_register.kind == LOOM_AMDGPU_SPILL_REGISTER_KIND_SGPR;
-  if (requires_full_exec) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_enter_full_exec(
-        context, rewriter, op->location, &saved_exec));
-  }
+  // Each chunk runs in its own full-EXEC bracket so all chunks reuse one
+  // data/address slot pair in the whole-wave window.
   for (uint32_t chunk_start = 0; chunk_start < unit_count;) {
+    const loom_value_id_t chunk_first_value_id = context->module->values.count;
+    if (requires_full_exec) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_enter_full_exec(
+          context, rewriter, op->location, &saved_exec));
+    }
     uint32_t chunk_units = loom_amdgpu_spill_lowering_register_chunk_units(
         &spill_register, unit_count - chunk_start);
     const uint64_t chunk_byte_offset =
@@ -827,17 +877,19 @@ static iree_status_t loom_amdgpu_spill_lowering_rewrite_spill(
     IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_store_chunk(
         context, rewriter, storage, chunk_value, chunk_units, &access,
         scratch_value_type, op->location));
+    if (requires_full_exec) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_build_exec_write(
+          context, rewriter, saved_exec, op->location));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_record_whole_wave_chunk(
+          context, chunk_first_value_id));
+    }
     chunk_start += chunk_units;
-  }
-  if (requires_full_exec) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_build_exec_write(
-        context, rewriter, saved_exec, op->location));
   }
   return loom_rewriter_erase(rewriter, op);
 }
 
 static iree_status_t loom_amdgpu_spill_lowering_rewrite_reload(
-    const loom_amdgpu_spill_lowering_context_t* context,
+    loom_amdgpu_spill_lowering_context_t* context,
     loom_rewriter_t* rewriter, loom_op_t* op) {
   const loom_value_id_t result = loom_low_reload_result(op);
   const loom_type_t result_type =
@@ -881,13 +933,10 @@ static iree_status_t loom_amdgpu_spill_lowering_rewrite_reload(
   // every other VGPR-producing instruction. This also lets a backedge reload
   // share its destination with the prior loop state without clobbering retired
   // lanes. SGPR reloads still gather a wave-wide scalar snapshot through a
-  // temporary VGPR and therefore require full EXEC.
+  // temporary VGPR and therefore require full EXEC; that temporary occupies the
+  // frame's whole-wave window so inactive lanes keep their values.
   const bool requires_full_exec =
       spill_register.kind == LOOM_AMDGPU_SPILL_REGISTER_KIND_SGPR;
-  if (requires_full_exec) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_enter_full_exec(
-        context, rewriter, op->location, &saved_exec));
-  }
   const loom_value_id_t value_checkpoint =
       loom_rewriter_value_checkpoint(rewriter);
   loom_value_id_t* loaded_chunks = NULL;
@@ -895,7 +944,14 @@ static iree_status_t loom_amdgpu_spill_lowering_rewrite_reload(
                                                  sizeof(*loaded_chunks),
                                                  (void**)&loaded_chunks));
   iree_host_size_t loaded_chunk_count = 0;
+  // Each chunk runs in its own full-EXEC bracket so all chunks reuse one
+  // data/address slot pair in the whole-wave window.
   for (uint32_t chunk_start = 0; chunk_start < unit_count;) {
+    const loom_value_id_t chunk_first_value_id = context->module->values.count;
+    if (requires_full_exec) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_enter_full_exec(
+          context, rewriter, op->location, &saved_exec));
+    }
     uint32_t chunk_units = loom_amdgpu_spill_lowering_register_chunk_units(
         &spill_register, unit_count - chunk_start);
     const uint64_t chunk_byte_offset =
@@ -918,11 +974,13 @@ static iree_status_t loom_amdgpu_spill_lowering_rewrite_reload(
     IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_materialize_loaded_value(
         context, rewriter, &spill_register, loaded_chunk, chunk_units,
         op->location, &loaded_chunks[loaded_chunk_count++]));
+    if (requires_full_exec) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_build_exec_write(
+          context, rewriter, saved_exec, op->location));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_record_whole_wave_chunk(
+          context, chunk_first_value_id));
+    }
     chunk_start += chunk_units;
-  }
-  if (requires_full_exec) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_build_exec_write(
-        context, rewriter, saved_exec, op->location));
   }
 
   loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
@@ -1087,6 +1145,12 @@ iree_status_t loom_amdgpu_lower_spill_traffic(
         context.required_register_value_ids;
     out_result->required_register_value_count =
         context.required_register_value_count;
+    out_result->whole_wave_values = context.whole_wave_values;
+    out_result->whole_wave_value_count = context.whole_wave_value_count;
+    const loom_low_reg_class_t* vgpr_class =
+        &descriptor_set->reg_classes[context.vgpr_class_id];
+    out_result->whole_wave_register_class = loom_low_descriptor_set_string(
+        descriptor_set, vgpr_class->name_string_ref);
   }
   return status;
 }
