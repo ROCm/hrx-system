@@ -137,13 +137,15 @@ protected. HTTP 200 reports the requested target and the actual device resource
 record, even when protected memory prevents reaching that target. Fixed weights
 are not reclaimable. Subsequent requests reload evicted weights without re-JIT.
 
-Text `rows` limits simultaneously resident sessions (1–16), `context_capacity`
-limits each logical context, and `pool_capacity` limits shared physical token
-slots. Short sessions grow by pages instead of reserving their entire logical
-context. Admission reserves the requested completion high-water; excess work
-queues within bounded capacity or returns overload. `prefill_capacity` bounds
-the source-JIT shape catalog, not prompt length. The source may impose a tighter
-cap than the generic runner; Qwen currently caps epochs at 512 tokens.
+Text `rows` limits simultaneous execution slots (1–16); configured idle-history
+and checkpoint capacity can retain additional sessions without execution slots.
+`context_capacity` limits each logical context, and `pool_capacity` limits
+shared physical token slots. Short sessions grow by pages instead of reserving
+their entire logical context. Admission reserves the requested completion
+high-water; excess work queues within bounded capacity or returns overload.
+`prefill_capacity` bounds the source-JIT shape catalog, not prompt length.
+The source may impose a tighter cap than the generic runner; Qwen currently
+caps epochs at 512 tokens.
 `checkpoint_capacity` is opt-in retained endpoint capacity, not automatic
 prefix discovery. MTP and two-epoch continuation require source support.
 
