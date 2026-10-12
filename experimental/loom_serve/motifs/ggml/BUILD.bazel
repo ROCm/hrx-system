@@ -16,6 +16,21 @@ filegroup(
 )
 
 loom_test(
+    name = "selection_test",
+    srcs = [
+        "linear_qk_common.loom",
+        "q4k.loom",
+        "selection.loom",
+        "tests/selection.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "narrow_projection_test",
     srcs = [":sources"],
     benchmark_smoke = False,

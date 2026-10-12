@@ -1,0 +1,213 @@
+amdgpu.target<gfx11-generic> @wave32 {subgroup_size = 32}
+amdgpu.target<gfx11-generic> @wave64 {subgroup_size = 64}
+template.decl @selection.chain_q4k_256(%blocks: index, %length: index, %vocabulary: index, %anchors: buffer, %candidates: buffer, %unary: buffer, %hidden: buffer, %predecessors: buffer, %successors: buffer, %output: buffer)
+
+// Independent scalar interpretation of a canonical Q4_K row. Byte/nibble
+// indexing does not reuse the production chunk decoder or its lane mapping.
+func.def @q4_reference(%table: buffer, %row0: i32, %channel0: index) -> (f64) {
+  %row = scalar.assume %row0 [range(%row0, 0, 511)] : i32
+  %channel = index.assume %channel0 [range(%channel0, 0, 255)] : index
+  %row_index = index.cast %row : i32 to index
+  %row_bytes = index.constant 144 : offset
+  %header_bytes = index.constant 4 : offset
+  %payload_bytes = index.constant 16 : offset
+  %base = index.scale %row_index, %row_bytes : index, offset -> offset
+  %scales_base = index.add %base, %header_bytes : offset
+  %codes_base = index.add %base, %payload_bytes : offset
+  %header = buffer.view %table[%base] : buffer -> view<2xf16>
+  %scales = buffer.view %table[%scales_base] : buffer -> view<12xi8>
+  %codes = buffer.view %table[%codes_base] : buffer -> view<128xi8>
+  %four = index.constant 4 : index
+  %thirty_two = index.constant 32 : index
+  %sixty_four = index.constant 64 : index
+  %group = index.div %channel, %thirty_two : index
+  %group_plus4 = index.add %group, %four : index
+  %shift4 = scalar.constant 4 : i32
+  %shift6 = scalar.constant 6 : i32
+  %mask4 = scalar.constant 15 : i32
+  %mask6 = scalar.constant 63 : i32
+  %low = index.cmp ult, %group, %four : index
+  %scale, %minimum = scf.if %low -> (i32, i32) {
+    %a = view.load %scales[%group] : view<12xi8> -> i8
+    %b = view.load %scales[%group_plus4] : view<12xi8> -> i8
+    %ua = scalar.extui %a : i8 to i32
+    %ub = scalar.extui %b : i8 to i32
+    %s = scalar.andi %ua, %mask6 : i32
+    %m = scalar.andi %ub, %mask6 : i32
+    scf.yield %s, %m : i32, i32
+  } else {
+    %group_minus4 = index.sub %group, %four : index
+    %a = view.load %scales[%group_minus4] : view<12xi8> -> i8
+    %b = view.load %scales[%group] : view<12xi8> -> i8
+    %c = view.load %scales[%group_plus4] : view<12xi8> -> i8
+    %ua = scalar.extui %a : i8 to i32
+    %ub = scalar.extui %b : i8 to i32
+    %uc = scalar.extui %c : i8 to i32
+    %s_low = scalar.andi %uc, %mask4 : i32
+    %m_low = scalar.shrui %uc, %shift4 : i32
+    %s_high0 = scalar.shrui %ua, %shift6 : i32
+    %m_high0 = scalar.shrui %ub, %shift6 : i32
+    %s_high = scalar.shli %s_high0, %shift4 : i32
+    %m_high = scalar.shli %m_high0, %shift4 : i32
+    %s = scalar.ori %s_low, %s_high : i32
+    %m = scalar.ori %m_low, %m_high : i32
+    scf.yield %s, %m : i32, i32
+  }
+  %page = index.div %channel, %sixty_four : index
+  %within = index.rem %channel, %thirty_two : index
+  %page_base = index.mul %page, %thirty_two : index
+  %code_index = index.add %page_base, %within : index
+  %packed = view.load %codes[%code_index] : view<128xi8> -> i8
+  %word = scalar.extui %packed : i8 to i32
+  %half = index.rem %channel, %sixty_four : index
+  %upper = index.cmp uge, %half, %thirty_two : index
+  %high = scalar.shrui %word, %shift4 : i32
+  %chosen = scf.select %upper, %high, %word : i32
+  %code = scalar.andi %chosen, %mask4 : i32
+  %d16 = view.load %header[0] : view<2xf16> -> f16
+  %m16 = view.load %header[1] : view<2xf16> -> f16
+  %d = scalar.extf %d16 : f16 to f64
+  %m = scalar.extf %m16 : f16 to f64
+  %s = scalar.uitofp %scale : i32 to f64
+  %minimum_f = scalar.uitofp %minimum : i32 to f64
+  %q = scalar.uitofp %code : i32 to f64
+  %scaled = scalar.mulf %d, %s : f64
+  %positive = scalar.mulf %scaled, %q : f64
+  %negative = scalar.mulf %m, %minimum_f : f64
+  %value = scalar.subf %positive, %negative : f64
+  func.return %value : f64
+}
+
+func.def @chain_reference(%anchors: buffer, %candidates: buffer, %unary: buffer, %hidden: buffer, %predecessors: buffer, %successors: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %blocks = index.constant 3 : index
+  %length = index.constant 7 : index
+  %count = index.constant 16 : index
+  %rank = index.constant 256 : index
+  %a = buffer.view %anchors[%origin] : buffer -> view<3xi32>
+  %c = buffer.view %candidates[%origin] : buffer -> view<3x7x16xi32>
+  %u = buffer.view %unary[%origin] : buffer -> view<3x7x16xf32>
+  %h = buffer.view %hidden[%origin] : buffer -> view<3x7x256xf32>
+  %y = buffer.view %output[%origin] : buffer -> view<3x7xi32>
+  %zero_f = scalar.constant 0.0 : f64
+  %negative = scalar.constant -inf : f64
+  %largest = scalar.constant 2147483647 : i32
+  scf.for %block = [%zero to %blocks step %one] {
+    %anchor = view.load %a[%block] : view<3xi32> -> i32
+    %last = scf.for %position = [%zero to %length step %one](%previous = %anchor : i32) -> (i32) {
+      %score, %winner = scf.for %candidate = [%zero to %count step %one](%best = %negative, %best_id = %largest : f64, i32) -> (f64, i32) {
+        %id = view.load %c[%block, %position, %candidate] : view<3x7x16xi32> -> i32
+        %dot = scf.for %channel = [%zero to %rank step %one](%sum = %zero_f : f64) -> (f64) {
+          %p = func.call @q4_reference(%predecessors, %previous, %channel) : (buffer, i32, index) -> (f64)
+          %s = func.call @q4_reference(%successors, %id, %channel) : (buffer, i32, index) -> (f64)
+          %feature = view.load %h[%block, %position, %channel] : view<3x7x256xf32> -> f32
+          %wide = scalar.extf %feature : f32 to f64
+          %conditioned = scalar.mulf %p, %wide : f64
+          %product = scalar.mulf %conditioned, %s : f64
+          %next = scalar.addf %sum, %product : f64
+          scf.yield %next : f64
+        }
+        %logit = view.load %u[%block, %position, %candidate] : view<3x7x16xf32> -> f32
+        %wide_logit = scalar.extf %logit : f32 to f64
+        %corrected = scalar.addf %wide_logit, %dot : f64
+        %greater = scalar.cmpf ogt, %corrected, %best : f64
+        %equal = scalar.cmpf oeq, %corrected, %best : f64
+        %lower_id = scalar.cmpi slt, %id, %best_id : i32
+        %tie = scalar.andi %equal, %lower_id : i1
+        %take = scalar.ori %greater, %tie : i1
+        %next_score = scf.select %take, %corrected, %best : f64
+        %next_id = scf.select %take, %id, %best_id : i32
+        scf.yield %next_score, %next_id : f64, i32
+      }
+      view.store %winner, %y[%block, %position] : i32, view<3x7xi32>
+      scf.yield %winner : i32
+    }
+  }
+  func.return
+}
+
+kernel.def target(@wave32) @chain_wave32() {
+  %blocks = index.constant 3 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%blocks, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%anchors: buffer, %candidates: buffer, %unary: buffer, %hidden: buffer, %predecessors: buffer, %successors: buffer, %output: buffer) {
+  %blocks = index.constant 3 : index
+  %length = index.constant 7 : index
+  %vocabulary = index.constant 512 : index
+  template.apply<@selection.chain_q4k_256>(%blocks, %length, %vocabulary, %anchors, %candidates, %unary, %hidden, %predecessors, %successors, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@wave64) @chain_wave64() {
+  %blocks = index.constant 3 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%blocks, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%anchors: buffer, %candidates: buffer, %unary: buffer, %hidden: buffer, %predecessors: buffer, %successors: buffer, %output: buffer) {
+  %blocks = index.constant 3 : index
+  %length = index.constant 7 : index
+  %vocabulary = index.constant 512 : index
+  template.apply<@selection.chain_q4k_256>(%blocks, %length, %vocabulary, %anchors, %candidates, %unary, %hidden, %predecessors, %successors, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+// High-bit packed scales/codes and negative finite half headers exercise the
+// physical decoder independently of the rank contraction and greedy chain.
+check.scenario public @chain_case {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %seed2 = check.entropy.read %entropy[2] : check.entropy -> i64
+    %seed3 = check.entropy.read %entropy[3] : check.entropy -> i64
+    %anchors = check.generate.iota offset(256) step(17) : tensor<3xi32>
+    %candidates = check.generate.iota offset(335) step(-1) : tensor<3x7x16xi32>
+    %unary = check.generate.random.uniform seed(%seed0) range(-0.25 to 0.25) : tensor<3x7x16xf32>
+    %hidden = check.generate.random.uniform seed(%seed1) range(-0.25 to 0.25) : tensor<3x7x256xf32>
+    %predecessors = check.generate.random.uniform seed(%seed2) range(-128 to -65) : tensor<512x144xi8>
+    %successors = check.generate.random.uniform seed(%seed3) range(0 to 63) : tensor<512x144xi8>
+    %output = check.generate.fill value(-99) : tensor<3x7xi32>
+    check.compare<@chain_wave32, @chain_reference>(%anchors, %candidates, %unary, %hidden, %predecessors, %successors, %output) : (tensor<3xi32>, tensor<3x7x16xi32>, tensor<3x7x16xf32>, tensor<3x7x256xf32>, tensor<512x144xi8>, tensor<512x144xi8>, tensor<3x7xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<3x7xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @chain_wave64_case {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %seed2 = check.entropy.read %entropy[2] : check.entropy -> i64
+    %seed3 = check.entropy.read %entropy[3] : check.entropy -> i64
+    %anchors = check.generate.iota offset(256) step(17) : tensor<3xi32>
+    %candidates = check.generate.iota offset(335) step(-1) : tensor<3x7x16xi32>
+    %unary = check.generate.random.uniform seed(%seed0) range(-0.25 to 0.25) : tensor<3x7x16xf32>
+    %hidden = check.generate.random.uniform seed(%seed1) range(-0.25 to 0.25) : tensor<3x7x256xf32>
+    %predecessors = check.generate.random.uniform seed(%seed2) range(-128 to -65) : tensor<512x144xi8>
+    %successors = check.generate.random.uniform seed(%seed3) range(0 to 63) : tensor<512x144xi8>
+    %output = check.generate.fill value(-99) : tensor<3x7xi32>
+    check.compare<@chain_wave64, @chain_reference>(%anchors, %candidates, %unary, %hidden, %predecessors, %successors, %output) : (tensor<3xi32>, tensor<3x7x16xi32>, tensor<3x7x16xf32>, tensor<3x7x256xf32>, tensor<512x144xi8>, tensor<512x144xi8>, tensor<3x7xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<3x7xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @chain_ties {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %anchors = check.generate.iota offset(256) step(17) : tensor<3xi32>
+    %candidates = check.generate.iota offset(335) step(-1) : tensor<3x7x16xi32>
+    %unary = check.generate.fill value(0.0) : tensor<3x7x16xf32>
+    %hidden = check.generate.fill value(0.0) : tensor<3x7x256xf32>
+    %predecessors = check.generate.fill value(17) : tensor<512x144xi8>
+    %successors = check.generate.fill value(31) : tensor<512x144xi8>
+    %output = check.generate.fill value(-99) : tensor<3x7xi32>
+    check.compare<@chain_wave32, @chain_reference>(%anchors, %candidates, %unary, %hidden, %predecessors, %successors, %output) : (tensor<3xi32>, tensor<3x7x16xi32>, tensor<3x7x16xf32>, tensor<3x7x256xf32>, tensor<512x144xi8>, tensor<512x144xi8>, tensor<3x7xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<3x7xi32>
+    }
+  }
+  check.return
+}

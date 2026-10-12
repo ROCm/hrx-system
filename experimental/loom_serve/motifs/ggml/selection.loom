@@ -1,0 +1,75 @@
+func.decl @ggml_q4k_chunk(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group: index, %q4_half: index) -> (vector<16xi8>, f32, f32)
+template.decl @selection.chain_q4k_256(%blocks: index, %length: index, %vocabulary: index, %anchors: buffer, %candidates: buffer, %unary: buffer, %hidden: buffer, %predecessors: buffer, %successors: buffer, %output: buffer)
+
+// Greedy low-rank transition correction over sixteen candidates per position.
+// Each 256-thread workgroup owns one independent block; sixteen-lane clusters
+// contract the 256-channel predecessor, hidden, and successor product for one
+// candidate. The selected token is the next position's predecessor. Both
+// codebooks use one canonical 144-byte Q4_K block per vocabulary row.
+//
+// Launch blocks workgroups of 256 threads on a wave32 or wave64 target. Anchors
+// and candidates are valid vocabulary IDs; candidates within a position are
+// unique. Scores and decoded operands are finite. The buffers do not overlap.
+// Equal corrected scores select the lowest candidate ID.
+template.def<@selection.chain_q4k_256> device @chain_q4k_256(%blocks: index, %length: index, %vocabulary: index, %anchors: buffer, %candidates: buffer, %unary: buffer, %hidden: buffer, %predecessors: buffer, %successors: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %row_bytes = index.constant 144 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %sixteen = index.constant 16 : index
+  %block = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %candidate = index.div %thread, %sixteen : index
+  %lane = index.rem %thread, %sixteen : index
+  %group = index.div %lane, %two : index
+  %half = index.rem %lane, %two : index
+  %channel = index.mul %lane, %sixteen : index
+  %leader = index.cmp eq, %thread, %zero : index
+  %anchor_view = buffer.view %anchors[%origin] : buffer -> view<[%blocks]xi32>
+  %candidate_view = buffer.view %candidates[%origin] : buffer -> view<[%blocks]x[%length]x16xi32>
+  %unary_view = buffer.view %unary[%origin] : buffer -> view<[%blocks]x[%length]x16xf32>
+  %hidden_view = buffer.view %hidden[%origin] : buffer -> view<[%blocks]x[%length]x256xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%blocks]x[%length]xi32>
+  %anchor = view.load %anchor_view[%block] : view<[%blocks]xi32> -> i32
+  %zero_f = scalar.constant 0.0 : f32
+  %largest = scalar.constant 2147483647 : i32
+  %last = scf.for %position = [%zero to %length step %one](%previous = %anchor : i32) -> (i32) {
+    %id = view.load %candidate_view[%block, %position, %candidate] : view<[%blocks]x[%length]x16xi32> -> i32
+    %previous_index0 = index.cast %previous : i32 to index
+    %previous_index = index.assume %previous_index0 [ge(%previous_index0, 0), lt(%previous_index0, %vocabulary)] : index
+    %next_index0 = index.cast %id : i32 to index
+    %next_index = index.assume %next_index0 [ge(%next_index0, 0), lt(%next_index0, %vocabulary)] : index
+    %previous_origin = index.scale %previous_index, %row_bytes : index, offset -> offset
+    %next_origin = index.scale %next_index, %row_bytes : index, offset -> offset
+    %previous_codes, %previous_scale, %previous_minimum = func.call @ggml_q4k_chunk(%predecessors, %previous_origin, %zero, %group, %half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
+    %next_codes, %next_scale, %next_minimum = func.call @ggml_q4k_chunk(%successors, %next_origin, %zero, %group, %half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
+    %previous_values = vector.uitofp %previous_codes : vector<16xi8> to vector<16xf32>
+    %next_values = vector.uitofp %next_codes : vector<16xi8> to vector<16xf32>
+    %previous_scale_vector = vector.splat %previous_scale : vector<16xf32>
+    %previous_minimum_vector = vector.splat %previous_minimum : vector<16xf32>
+    %next_scale_vector = vector.splat %next_scale : vector<16xf32>
+    %next_minimum_vector = vector.splat %next_minimum : vector<16xf32>
+    %previous_scaled = vector.mulf %previous_values, %previous_scale_vector : vector<16xf32>
+    %previous_decoded = vector.subf %previous_scaled, %previous_minimum_vector : vector<16xf32>
+    %next_scaled = vector.mulf %next_values, %next_scale_vector : vector<16xf32>
+    %next_decoded = vector.subf %next_scaled, %next_minimum_vector : vector<16xf32>
+    %features = vector.load %hidden_view[%block, %position, %channel] : view<[%blocks]x[%length]x256xf32> -> vector<16xf32>
+    %conditioned = vector.mulf %previous_decoded, %features : vector<16xf32>
+    %products = vector.mulf %conditioned, %next_decoded : vector<16xf32>
+    %partial = vector.reduce<addf> %products, %zero_f : vector<16xf32>, f32
+    %transition = kernel.subgroup.reduce<addf> %partial {cluster_size = 16} : f32
+    %logit = view.load %unary_view[%block, %position, %candidate] : view<[%blocks]x[%length]x16xf32> -> f32
+    %score = scalar.addf %logit, %transition : f32
+    %maximum = kernel.workgroup.reduce<maxnumf> %score : f32
+    %wins = scalar.cmpf oeq, %score, %maximum : f32
+    %eligible = scf.select %wins, %id, %largest : i32
+    %selected = kernel.workgroup.reduce<minsi> %eligible : i32
+    scf.if %leader {
+      view.store %selected, %output_view[%block, %position] : i32, view<[%blocks]x[%length]xi32>
+      scf.yield
+    }
+    scf.yield %selected : i32
+  }
+  template.return
+}

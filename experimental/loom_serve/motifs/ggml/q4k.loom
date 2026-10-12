@@ -1,0 +1,37 @@
+template.decl @ggml.qk.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
+
+// Decodes one 16-value half of a Q4_K scale group.
+func.def public inline @ggml_q4k_chunk(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group: index, %q4_half: index) -> (vector<16xi8>, f32, f32) {
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %block_bytes = index.constant 144 : offset
+  %code_byte_add = index.constant 16 : offset
+  %nibble_mask = vector.constant 252645135 : vector<4xi32>
+  %c4_i32v = vector.constant 4 : vector<4xi32>
+  %bounded_group = index.assume %q4_group [range(%q4_group, 0, 7)] : index
+  %bounded_half = index.assume %q4_half [range(%q4_half, 0, 1)] : index
+  %block_byte_add = index.scale %q4_block, %block_bytes : index, offset -> offset
+  %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
+  %code_byte_base = index.add %block_byte_base, %code_byte_add : offset
+  %code_view = buffer.view %weight[%code_byte_base] : buffer -> view<32xi32>
+  %iqs_group = index.mul %bounded_group, %c8 : index
+  %iqs_half = index.mul %bounded_half, %c4 : index
+  %iqs = index.add %iqs_group, %iqs_half : index
+  %code_page0 = index.div %iqs, %c16 : index
+  %code_page = index.mul %code_page0, %c8 : index
+  %code_lane = index.rem %iqs, %c8 : index
+  %code_index0 = index.add %code_page, %code_lane : index
+  %code_index = index.assume %code_index0 [range(%code_index0, 0, 28)] : index
+  %iqs_mod16 = index.rem %iqs, %c16 : index
+  %nibble_page = index.div %iqs_mod16, %c8 : index
+  %nibble_shift_index = index.mul %nibble_page, %c4 : index
+  %nibble_shift_i32 = index.cast %nibble_shift_index : index to i32
+  %nibble_shift = vector.splat %nibble_shift_i32 : vector<4xi32>
+  %packed_codes = vector.load %code_view[%code_index] : view<32xi32> -> vector<4xi32>
+  %shifted_codes = vector.shrui %packed_codes, %nibble_shift : vector<4xi32>
+  %q4_words = vector.andi %shifted_codes, %nibble_mask : vector<4xi32>
+  %q4_values = vector.bitcast %q4_words : vector<4xi32> to vector<16xi8>
+  %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%weight, %block_byte_base, %bounded_group) : (buffer, offset, index) -> (f32, f32)
+  func.return %q4_values, %d_scale, %dmin_scale : vector<16xi8>, f32, f32
+}
