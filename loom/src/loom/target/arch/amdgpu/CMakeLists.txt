@@ -662,7 +662,7 @@ loom_check_compile_tests(
   SRC
     "test/source_low/immutable_storage.loom-test"
   REGISTERED_SRCS
-    "${_GLOB_TEST_SOURCE_LOW_X_LOOM_TEST_49E0437B}"
+    "${_GLOB_TEST_SOURCE_LOW_X_LOOM_TEST_BE73FC6D}"
   TARGETS
     loom::target::amdgpu::gfx11-generic
     loom::target::amdgpu::gfx1100
