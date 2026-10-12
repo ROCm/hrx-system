@@ -61,6 +61,7 @@ loom_corpus_sources(
     "integer/wide/subtract.loom"
     "integer/wide/uniform_immediate.loom"
     "integer/widening.loom"
+    "matrix/nvfp4.loom"
     "predicate/extension.loom"
     "predicate/extract.loom"
     "predicate/lanes.loom"

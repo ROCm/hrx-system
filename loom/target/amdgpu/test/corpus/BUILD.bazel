@@ -85,6 +85,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "numeric/integer/scalar_observations.loom",
     "numeric/integer/wide/observations.loom",
     "numeric/integer/widening.loom",
+    "numeric/matrix/nvfp4.loom",
     "numeric/predicate/extension.loom",
     "numeric/predicate/lanes.loom",
     "numeric/predicate/scalar_logic.loom",

@@ -1,0 +1,187 @@
+// A complete logical 16x16x16 matrix multiply with one NVFP4 scale group per
+// lhs row and rhs column. Row-major lhs groups and column-major rhs groups keep
+// each dot product contiguous without imposing a target fragment layout.
+func.def @nvfp4_matrix(%lhs_payload_buffer: buffer, %lhs_scale_buffer: buffer, %rhs_payload_buffer: buffer, %rhs_scale_buffer: buffer, %init_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %output_byte_offset = index.constant 16 : offset
+  %origin = index.constant 0 : index
+  %extent = index.constant 16 : index
+  %words_per_group = index.constant 2 : index
+  %step = index.constant 1 : index
+  %lhs_payload_view = buffer.view %lhs_payload_buffer[%base] : buffer -> view<32xi32>
+  %lhs_scale_view = buffer.view %lhs_scale_buffer[%base] : buffer -> view<16xi8>
+  %rhs_payload_view = buffer.view %rhs_payload_buffer[%base] : buffer -> view<32xi32>
+  %rhs_scale_view = buffer.view %rhs_scale_buffer[%base] : buffer -> view<16xi8>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<256xf32>
+  %output_view = buffer.view %output_buffer[%output_byte_offset] : buffer -> view<256xf32>
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2, scale_format=f8e4m3fn, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  scf.for %row = [%origin to %extent step %step] {
+    %lhs_payload_position = index.mul %row, %words_per_group : index
+    %lhs_payload = vector.load %lhs_payload_view[%lhs_payload_position] : view<32xi32> -> vector<2xi32>
+    %lhs_scale_byte = view.load %lhs_scale_view[%row] : view<16xi8> -> i8
+    %lhs_scale_word = scalar.extui %lhs_scale_byte : i8 to i32
+    %lhs_scale = vector.splat %lhs_scale_word : vector<1xi32>
+    %lhs_f16 = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
+    %lhs = vector.extf %lhs_f16 : vector<16xf16> to vector<16xf32>
+    %row_base = index.mul %row, %extent : index
+    scf.for %column = [%origin to %extent step %step] {
+      %rhs_payload_position = index.mul %column, %words_per_group : index
+      %rhs_payload = vector.load %rhs_payload_view[%rhs_payload_position] : view<32xi32> -> vector<2xi32>
+      %rhs_scale_byte = view.load %rhs_scale_view[%column] : view<16xi8> -> i8
+      %rhs_scale_word = scalar.extui %rhs_scale_byte : i8 to i32
+      %rhs_scale = vector.splat %rhs_scale_word : vector<1xi32>
+      %rhs_f16 = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xi32>} : vector<2xi32>, encoding<schema> -> vector<16xf16>
+      %rhs = vector.extf %rhs_f16 : vector<16xf16> to vector<16xf32>
+      %cell = index.add %row_base, %column : index
+      %initial = view.load %init_view[%cell] : view<256xf32> -> f32
+      %result = vector.dotf %lhs, %rhs, %initial : vector<16xf32>, vector<16xf32>, f32
+      view.store %result, %output_view[%cell] : f32, view<256xf32>
+    }
+  }
+  func.return
+}
+
+// Decodes one positive, normal E4M3FN scale byte. The scenario constrains
+// scale generation to 0x28 through 0x3f so this path is exact and branchless.
+func.def inline @decode_positive_e4m3fn_scale(%scale_word: i32) -> (f32) {
+  %mantissa_mask = scalar.constant 7 : i32
+  %exponent_shift = scalar.constant 3 : i32
+  %exponent_mask = scalar.constant 15 : i32
+  %f32_exponent_bias = scalar.constant 120 : i32
+  %f32_exponent_shift = scalar.constant 23 : i32
+  %f32_mantissa_shift = scalar.constant 20 : i32
+  %mantissa = scalar.andi %scale_word, %mantissa_mask : i32
+  %shifted_exponent = scalar.shrui %scale_word, %exponent_shift : i32
+  %exponent = scalar.andi %shifted_exponent, %exponent_mask : i32
+  %f32_exponent = scalar.addi %exponent, %f32_exponent_bias : i32
+  %exponent_bits = scalar.shli %f32_exponent, %f32_exponent_shift : i32
+  %mantissa_bits = scalar.shli %mantissa, %f32_mantissa_shift : i32
+  %bits = scalar.ori %exponent_bits, %mantissa_bits : i32
+  %scale = scalar.bitcast %bits : i32 to f32
+  func.return %scale : f32
+}
+
+// Decodes one signed E2M1 nibble, applies the block scale, and rounds through
+// f16 exactly where vector.decode produces the matrix instruction operand.
+func.def inline @decode_scaled_e2m1(%nibble: i32, %scale: f32) -> (f32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c3 = scalar.constant 3 : i32
+  %c7 = scalar.constant 7 : i32
+  %c8 = scalar.constant 8 : i32
+  %c22 = scalar.constant 22 : i32
+  %c23 = scalar.constant 23 : i32
+  %c28 = scalar.constant 28 : i32
+  %f32_exponent_bias = scalar.constant 126 : i32
+  %half_bits = scalar.constant 1056964608 : i32
+  %magnitude = scalar.andi %nibble, %c7 : i32
+  %sign = scalar.andi %nibble, %c8 : i32
+  %is_zero = scalar.cmpi eq, %magnitude, %c0 : i32
+  %is_half = scalar.cmpi eq, %magnitude, %c1 : i32
+  %magnitude_bits = scf.if %is_zero -> (i32) {
+    scf.yield %c0 : i32
+  } else {
+    %nonzero_bits = scf.if %is_half -> (i32) {
+      scf.yield %half_bits : i32
+    } else {
+      %exponent = scalar.shrui %magnitude, %c1 : i32
+      %f32_exponent = scalar.addi %exponent, %f32_exponent_bias : i32
+      %exponent_bits = scalar.shli %f32_exponent, %c23 : i32
+      %mantissa = scalar.andi %magnitude, %c1 : i32
+      %mantissa_bits = scalar.shli %mantissa, %c22 : i32
+      %normal_bits = scalar.ori %exponent_bits, %mantissa_bits : i32
+      scf.yield %normal_bits : i32
+    }
+    scf.yield %nonzero_bits : i32
+  }
+  %sign_bits = scalar.shli %sign, %c28 : i32
+  %signed_bits = scalar.ori %magnitude_bits, %sign_bits : i32
+  %unscaled = scalar.bitcast %signed_bits : i32 to f32
+  %scaled = scalar.mulf %unscaled, %scale : f32
+  %rounded = scalar.fptrunc %scaled : f32 to f16
+  %result = scalar.extf %rounded : f16 to f32
+  func.return %result : f32
+}
+
+func.def inline @decode_nvfp4_payload_element(%payload: view<32xi32>, %position: index, %scale: f32) -> (f32) {
+  %elements_per_word = index.constant 8 : index
+  %nibble_bit_count = index.constant 4 : index
+  %nibble_mask = scalar.constant 15 : i32
+  %word_position = index.div %position, %elements_per_word : index
+  %nibble_position = index.rem %position, %elements_per_word : index
+  %bit_position_index = index.mul %nibble_position, %nibble_bit_count : index
+  %bit_position = index.cast %bit_position_index : index to i32
+  %word = view.load %payload[%word_position] : view<32xi32> -> i32
+  %shifted = scalar.shrui %word, %bit_position : i32
+  %nibble = scalar.andi %shifted, %nibble_mask : i32
+  %value = func.call @decode_scaled_e2m1(%nibble, %scale) : (i32, f32) -> (f32)
+  func.return %value : f32
+}
+
+func.def @nvfp4_matrix_oracle(%lhs_payload_buffer: buffer, %lhs_scale_buffer: buffer, %rhs_payload_buffer: buffer, %rhs_scale_buffer: buffer, %init_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %output_byte_offset = index.constant 16 : offset
+  %origin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %extent = index.constant 16 : index
+  %lhs_payload = buffer.view %lhs_payload_buffer[%base] : buffer -> view<32xi32>
+  %lhs_scale_view = buffer.view %lhs_scale_buffer[%base] : buffer -> view<16xi8>
+  %rhs_payload = buffer.view %rhs_payload_buffer[%base] : buffer -> view<32xi32>
+  %rhs_scale_view = buffer.view %rhs_scale_buffer[%base] : buffer -> view<16xi8>
+  %init = buffer.view %init_buffer[%base] : buffer -> view<256xf32>
+  %output = buffer.view %output_buffer[%output_byte_offset] : buffer -> view<256xf32>
+  scf.for %row = [%origin to %extent step %step] {
+    %lhs_scale_byte = view.load %lhs_scale_view[%row] : view<16xi8> -> i8
+    %lhs_scale_word = scalar.extui %lhs_scale_byte : i8 to i32
+    %lhs_scale = func.call @decode_positive_e4m3fn_scale(%lhs_scale_word) : (i32) -> (f32)
+    %row_base = index.mul %row, %extent : index
+    scf.for %column = [%origin to %extent step %step] {
+      %cell = index.add %row_base, %column : index
+      %initial = view.load %init[%cell] : view<256xf32> -> f32
+      %rhs_scale_byte = view.load %rhs_scale_view[%column] : view<16xi8> -> i8
+      %rhs_scale_word = scalar.extui %rhs_scale_byte : i8 to i32
+      %rhs_scale = func.call @decode_positive_e4m3fn_scale(%rhs_scale_word) : (i32) -> (f32)
+      %rhs_column_base = index.mul %column, %extent : index
+      %result = scf.for %k = [%origin to %extent step %step](%accumulator = %initial : f32) -> (f32) {
+        %lhs_position = index.add %row_base, %k : index
+        %rhs_position = index.add %rhs_column_base, %k : index
+        %lhs_value = func.call @decode_nvfp4_payload_element(%lhs_payload, %lhs_position, %lhs_scale) : (view<32xi32>, index, f32) -> (f32)
+        %rhs_value = func.call @decode_nvfp4_payload_element(%rhs_payload, %rhs_position, %rhs_scale) : (view<32xi32>, index, f32) -> (f32)
+        %next = scalar.fmaf %lhs_value, %rhs_value, %accumulator : f32
+        scf.yield %next : f32
+      }
+      view.store %result, %output[%cell] : f32, view<256xf32>
+    }
+  }
+  func.return
+}
+
+check.scenario @nvfp4_matrix_values {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %lhs_payload_entropy = check.entropy.fork %entropy name("lhs_payload") : check.entropy
+    %lhs_scale_entropy = check.entropy.fork %entropy name("lhs_scale") : check.entropy
+    %rhs_payload_entropy = check.entropy.fork %entropy name("rhs_payload") : check.entropy
+    %rhs_scale_entropy = check.entropy.fork %entropy name("rhs_scale") : check.entropy
+    %init_entropy = check.entropy.fork %entropy name("init") : check.entropy
+    %lhs_payload_seed = check.entropy.read %lhs_payload_entropy[%trial] : check.entropy -> i64
+    %lhs_scale_seed = check.entropy.read %lhs_scale_entropy[%trial] : check.entropy -> i64
+    %rhs_payload_seed = check.entropy.read %rhs_payload_entropy[%trial] : check.entropy -> i64
+    %rhs_scale_seed = check.entropy.read %rhs_scale_entropy[%trial] : check.entropy -> i64
+    %init_seed = check.entropy.read %init_entropy[%trial] : check.entropy -> i64
+    %lhs_payload = check.generate.random.uniform seed(%lhs_payload_seed) range(-2147483648 to 2147483647) : tensor<32xi32>
+    %lhs_scale = check.generate.random.uniform seed(%lhs_scale_seed) range(40 to 63) : tensor<16xi8>
+    %rhs_payload = check.generate.random.uniform seed(%rhs_payload_seed) range(-2147483648 to 2147483647) : tensor<32xi32>
+    %rhs_scale = check.generate.random.uniform seed(%rhs_scale_seed) range(40 to 63) : tensor<16xi8>
+    %init = check.generate.random.uniform seed(%init_seed) range(-2.0 to 2.0) : tensor<256xf32>
+    %output = check.generate.fill value(-8192.0) : tensor<264xf32>
+    check.compare<@nvfp4_matrix, @nvfp4_matrix_oracle>(%lhs_payload, %lhs_scale, %rhs_payload, %rhs_scale, %init, %output) : (tensor<32xi32>, tensor<16xi8>, tensor<32xi32>, tensor<16xi8>, tensor<256xf32>, tensor<264xf32>) -> () {
+      check.expect.bitwise actual(%lhs_payload) expected(%lhs_payload) : tensor<32xi32>
+      check.expect.bitwise actual(%lhs_scale) expected(%lhs_scale) : tensor<16xi8>
+      check.expect.bitwise actual(%rhs_payload) expected(%rhs_payload) : tensor<32xi32>
+      check.expect.bitwise actual(%rhs_scale) expected(%rhs_scale) : tensor<16xi8>
+      check.expect.bitwise actual(%init) expected(%init) : tensor<256xf32>
+      check.expect.close actual(%output) expected(%output) atol(1.9999999999999999e-06) rtol(2.0000000000000002e-05) nan(same) : tensor<264xf32>
+    }
+  }
+  check.return
+}

@@ -88,6 +88,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "numeric/integer/scalar_observations.loom",
     "numeric/integer/wide/observations.loom",
     "numeric/integer/widening.loom",
+    "numeric/matrix/nvfp4.loom",
     "numeric/predicate/extension.loom",
     "numeric/predicate/lanes.loom",
     "numeric/predicate/scalar_logic.loom",
@@ -494,6 +495,7 @@ _SPIRV_EXECUTION_XFAILS = {
     "numeric/integer/division.loom:@integer_division_values": "TARGET/093",
     "numeric/integer/wide/address_comparison.loom:@mixed_width_index_comparison_values": "SPIRV/026",
     "numeric/integer/wide/observations.loom:@wide_dynamic_lane_values": "TARGET/004",
+    "numeric/matrix/nvfp4.loom:@nvfp4_matrix_values": "TARGET/002",
     "numeric/predicate/extract.loom:@predicate_extract_values": "TARGET/032",
     # BF16-capable profiles reach the missing FMA contract; other devices reject
     # the narrow carrier before arithmetic selection.
