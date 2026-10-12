@@ -39,7 +39,71 @@ global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
 // (empty path)
 global.rodata.def @empty = bytes("")
 
-func.def @declare_stage(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer, %adapted: i1) {
+func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
+func.decl import("json") @unescape(%source: buffer, %offset: i64, %length: i64, %target: buffer, %target_offset: i64) -> (i64)
+
+// int8_convrot_checkpoint
+global.rodata.def @int8_option = bytes("696e74385f636f6e76726f745f636865636b706f696e74")
+// krea2.dit_int8
+global.rodata.def @int8_config = bytes("6b726561322e6469745f696e7438")
+// expected {} or {"int8_convrot_checkpoint":"checkpoint path"}
+global.rodata.def @options_error = bytes("6578706563746564207b7d206f72207b22696e74385f636f6e76726f745f636865636b706f696e74223a22636865636b706f696e742070617468227d")
+
+func.def @check_options(%valid: i1) {
+  %condition = scalar.extui %valid : i1 to i32
+  %error = global.load @options_error : buffer
+  func.call @require(%condition, %error) : (i32, buffer) -> ()
+  func.return
+}
+
+func.def @int8_checkpoint(%options: buffer) -> (buffer) {
+  %zero = scalar.constant 0 : i64
+  %one = scalar.constant 1 : i64
+  %object_type = scalar.constant 2 : i32
+  %fields, %type, %count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
+  %object = scalar.cmpi eq, %type, %object_type : i32
+  %bounded = scalar.cmpi ule, %count, %one : i64
+  %valid = scalar.andi %object, %bounded : i1
+  func.call @check_options(%valid) : (i1) -> ()
+  %present = scalar.cmpi eq, %count, %one : i64
+  %checkpoint = scf.if %present -> (buffer) {
+    %origin = index.constant 0 : offset
+    %record = buffer.view %fields[%origin] : buffer -> view<1x5xi64>
+    %key_begin = view.load %record[0, 0] : view<1x5xi64> -> i64
+    %key_length = view.load %record[0, 1] : view<1x5xi64> -> i64
+    %value_begin = view.load %record[0, 2] : view<1x5xi64> -> i64
+    %value_length = view.load %record[0, 3] : view<1x5xi64> -> i64
+    %value_type = view.load %record[0, 4] : view<1x5xi64> -> i64
+    %string = scalar.cmpi eq, %value_type, %zero : i64
+    %nonempty = scalar.cmpi ugt, %value_length, %zero : i64
+    %typed = scalar.andi %string, %nonempty : i1
+    func.call @check_options(%typed) : (i1) -> ()
+    %source_length = buffer.length %options
+    %decoded = buffer.alloca<private> align(1) %source_length : buffer
+    %decoded_key_length = func.call @unescape(%options, %key_begin, %key_length, %decoded, %zero) : (buffer, i64, i64, buffer, i64) -> (i64)
+    %expected_length = scalar.constant 23 : i64
+    %right_length = scalar.cmpi eq, %decoded_key_length, %expected_length : i64
+    func.call @check_options(%right_length) : (i1) -> ()
+    %key = global.load @int8_option : buffer
+    %key_bytes = index.constant 23 : offset
+    %order = buffer.compare %decoded[%origin], %key[%origin], %key_bytes
+    %zero32 = scalar.constant 0 : i32
+    %equal = scalar.cmpi eq, %order, %zero32 : i32
+    func.call @check_options(%equal) : (i1) -> ()
+    %decoded_length = func.call @unescape(%options, %value_begin, %value_length, %decoded, %zero) : (buffer, i64, i64, buffer, i64) -> (i64)
+    %positive_length = scalar.assume %decoded_length [range(%decoded_length, 1, 9223372036854775807)] : i64
+    %bytes = index.cast %positive_length : i64 to offset
+    %path = buffer.alloca<private> align(1) %bytes : buffer
+    buffer.copy %decoded[%origin], %path[%origin], %bytes
+    scf.yield %path : buffer
+  } else {
+    %empty = global.load @empty : buffer
+    scf.yield %empty : buffer
+  }
+  func.return %checkpoint : buffer
+}
+
+func.def @declare_stage(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer, %adapted: i1, %int8_checkpoint: buffer) {
   %root = scf.if %adapted -> (buffer) {
     %value = global.load @root_adapted : buffer
     scf.yield %value : buffer
@@ -48,6 +112,12 @@ func.def @declare_stage(%height: i64, %width: i64, %text: i64, %directory: buffe
     scf.yield %value : buffer
   }
   %stage = func.call @stage(%root, %text) : (buffer, i64) -> (i32)
+  %int8_length = buffer.length %int8_checkpoint
+  %empty_length = index.constant 0 : offset
+  %is_int8 = index.cmp ne, %int8_length, %empty_length : offset
+  %int8_flag = scalar.extui %is_int8 : i1 to i64
+  %int8_key = global.load @int8_config : buffer
+  func.call @config_i64(%stage, %int8_key, %int8_flag) : (i32, buffer, i64) -> ()
   %eight = scalar.constant 8 : i64
   %sixteen = scalar.constant 16 : i64
   %rows = scalar.divui %height, %sixteen : i64
@@ -75,7 +145,14 @@ func.def @declare_stage(%height: i64, %width: i64, %text: i64, %directory: buffe
   %transformer = global.load @transformer : buffer
   %policy = global.load @policy : buffer
   func.call @parameter(%stage, %zero, %directory, %encoder, %policy) : (i32, i32, buffer, buffer, buffer) -> ()
-  func.call @parameter(%stage, %one, %directory, %transformer, %policy) : (i32, i32, buffer, buffer, buffer) -> ()
+  scf.if %is_int8 {
+    %empty = global.load @empty : buffer
+    func.call @parameter(%stage, %one, %int8_checkpoint, %empty, %policy) : (i32, i32, buffer, buffer, buffer) -> ()
+    scf.yield
+  } else {
+    func.call @parameter(%stage, %one, %directory, %transformer, %policy) : (i32, i32, buffer, buffer, buffer) -> ()
+    scf.yield
+  }
   %vae_binding = scf.if %adapted -> (i32) {
     %empty = global.load @empty : buffer
     func.call @parameter(%stage, %two, %adapter, %empty, %policy) : (i32, i32, buffer, buffer, buffer) -> ()
@@ -92,7 +169,7 @@ func.def @declare_stage(%height: i64, %width: i64, %text: i64, %directory: buffe
 // Stage zero is the maximum prompt extent. The smaller command preserves the
 // live-key partitions used by the attention kernels when the maximum is a
 // multiple of 64; other valid extents retain only their full-size command.
-func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer) -> (i64, buffer, buffer, buffer) {
+func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer, %options: buffer) -> (i64, buffer, buffer, buffer) {
   %zero_geometry = scalar.constant 0 : i64
   %sixteen_geometry = scalar.constant 16 : i64
   %pixel_limit = scalar.constant 8192 : i64
@@ -132,10 +209,11 @@ func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buff
   %valid_tokens = scalar.andi %patch_valid, %combined_bounded : i1
   %valid_tokens32 = scalar.extui %valid_tokens : i1 to i32
   func.call @require(%valid_tokens32, %diagnostic) : (i32, buffer) -> ()
+  %int8_checkpoint = func.call @int8_checkpoint(%options) : (buffer) -> (buffer)
   %length = buffer.length %adapter
   %zero_offset = index.constant 0 : offset
   %adapted = index.cmp ne, %length, %zero_offset : offset
-  func.call @declare_stage(%height, %width, %text, %directory, %adapter, %adapted) : (i64, i64, i64, buffer, buffer, i1) -> ()
+  func.call @declare_stage(%height, %width, %text, %directory, %adapter, %adapted, %int8_checkpoint) : (i64, i64, i64, buffer, buffer, i1, buffer) -> ()
   %zero = scalar.constant 0 : i64
   %alignment = scalar.constant 64 : i64
   %small = scalar.constant 128 : i64
@@ -144,7 +222,7 @@ func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buff
   %aligned = scalar.cmpi eq, %remainder, %zero : i64
   %retain_small = scalar.andi %larger, %aligned : i1
   scf.if %retain_small {
-    func.call @declare_stage(%height, %width, %small, %directory, %adapter, %adapted) : (i64, i64, i64, buffer, buffer, i1) -> ()
+    func.call @declare_stage(%height, %width, %small, %directory, %adapter, %adapted, %int8_checkpoint) : (i64, i64, i64, buffer, buffer, i1, buffer) -> ()
     scf.yield
   }
   %framing = scalar.constant 34 : i64

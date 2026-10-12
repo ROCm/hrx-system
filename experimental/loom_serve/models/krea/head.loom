@@ -1,10 +1,12 @@
+config.decl @krea2.dit_int8 : %value: index where [range(%value, 0, 1)]
+
 config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 amdgpu.target<gfx11-generic> @head_wave32 {subgroup_size = 32}
 template.decl @normalization.row_inverse(%rows: index, %width: index, %threads: index, %row: index, %input: buffer, %epsilon: f32) -> (f32)
 template.decl @normalization.zero_centered_bf16(%value: bf16, %weight: f32, %inverse: f32) -> (bf16)
 template.decl @modulation.affine_bf16(%value: bf16, %scale: bf16, %scale_table: f32, %shift: bf16, %shift_table: f32) -> (bf16)
-template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %row_origin: index, %output_origin: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
-template.decl @projection.bias_f32_as_bf16(%outputs: index, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
+template.decl @projection.linear_storage_bf16(%rows: index, %inputs: index, %outputs: index, %weight_is_bf16: i1, %row_origin: index, %output_origin: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+template.decl @projection.bias_storage_bf16(%outputs: index, %weight_is_bf16: i1, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
 template.decl @projection.store_bf16(%rows: index, %outputs: index, %row_origin: index, %output_origin: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
 template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %row_origin: index, %output_origin: index, %base_layout: encoding<layout>, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
 template.decl @krea2.velocity_head(%rows: index, %first_row: index, %embedding_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %embedding: buffer, %strength: buffer, %output: buffer)
@@ -17,6 +19,9 @@ kernel.def target(@head_wave32) @krea_head_input() {
   %threads = index.constant 256 : index
   kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %embedding: buffer, %table: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %zero_storage = index.constant 0 : index
+  %table_is_bf16 = index.cmp ne, %storage, %zero_storage : index
   %rows = config.get @krea2.image_tokens : index
   %width = index.constant 6144 : index
   %threads = index.constant 256 : index
@@ -37,8 +42,24 @@ kernel.def target(@head_wave32) @krea_head_input() {
     %weight_value = view.load %weight_view[%column] : view<6144xf32> -> f32
     %normalized = template.apply<@normalization.zero_centered_bf16>(%value, %weight_value, %inverse) : (bf16, f32, f32) -> (bf16)
     %time_value = view.load %embedding_view[%column] : view<6144xbf16> -> bf16
-    %scale_table = view.load %table_view[%scale_row, %column] : view<2x6144xf32> -> f32
-    %shift_table = view.load %table_view[%shift_row, %column] : view<2x6144xf32> -> f32
+    %scale_table = scf.if %table_is_bf16 -> (f32) {
+      %table_bf16 = buffer.view %table[%origin] : buffer -> view<2x6144xbf16>
+      %stored = view.load %table_bf16[%scale_row, %column] : view<2x6144xbf16> -> bf16
+      %value = scalar.extf %stored : bf16 to f32
+      scf.yield %value : f32
+    } else {
+      %value = view.load %table_view[%scale_row, %column] : view<2x6144xf32> -> f32
+      scf.yield %value : f32
+    }
+    %shift_table = scf.if %table_is_bf16 -> (f32) {
+      %table_bf16 = buffer.view %table[%origin] : buffer -> view<2x6144xbf16>
+      %stored = view.load %table_bf16[%shift_row, %column] : view<2x6144xbf16> -> bf16
+      %value = scalar.extf %stored : bf16 to f32
+      scf.yield %value : f32
+    } else {
+      %value = view.load %table_view[%shift_row, %column] : view<2x6144xf32> -> f32
+      scf.yield %value : f32
+    }
     %result = template.apply<@modulation.affine_bf16>(%normalized, %time_value, %scale_table, %time_value, %shift_table) : (bf16, bf16, f32, bf16, f32) -> (bf16)
     view.store %result, %output_view[%row, %column] : bf16, view<[%rows]x6144xbf16>
   }
@@ -54,6 +75,9 @@ kernel.def target(@head_wave32) @krea_head_projection() {
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %zero_storage = index.constant 0 : index
+  %weight_is_bf16 = index.cmp ne, %storage, %zero_storage : index
   %rows = config.get @krea2.image_tokens : index
   %inputs = index.constant 6144 : index
   %outputs = index.constant 64 : index
@@ -62,8 +86,8 @@ kernel.def target(@head_wave32) @krea_head_projection() {
   %output_tile = kernel.workgroup.id<y> : index
   %row_origin = index.mul %row_tile, %projection_tile : index
   %output_origin = index.mul %output_tile, %projection_tile : index
-  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %row_origin, %output_origin, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<8xf32>)
-  %biased = template.apply<@projection.bias_f32_as_bf16>(%outputs, %result, %bias) : (index, vector<8xf32>, buffer) -> (vector<8xf32>)
+  %result = template.apply<@projection.linear_storage_bf16>(%rows, %inputs, %outputs, %weight_is_bf16, %row_origin, %output_origin, %input, %weight) : (index, index, index, i1, index, index, buffer, buffer) -> (vector<8xf32>)
+  %biased = template.apply<@projection.bias_storage_bf16>(%outputs, %weight_is_bf16, %result, %bias) : (index, i1, vector<8xf32>, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
   template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %biased, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
@@ -78,6 +102,7 @@ kernel.def target(@head_wave32) @krea_head_adapter_down() {
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %weight_is_bf16 = scalar.constant false : i1
   %rows = config.get @krea2.image_tokens : index
   %inputs = index.constant 6144 : index
   %outputs = index.constant 32 : index
@@ -86,7 +111,7 @@ kernel.def target(@head_wave32) @krea_head_adapter_down() {
   %output_tile = kernel.workgroup.id<y> : index
   %row_origin = index.mul %row_tile, %projection_tile : index
   %output_origin = index.mul %output_tile, %projection_tile : index
-  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %row_origin, %output_origin, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<8xf32>)
+  %result = template.apply<@projection.linear_storage_bf16>(%rows, %inputs, %outputs, %weight_is_bf16, %row_origin, %output_origin, %input, %weight) : (index, index, index, i1, index, index, buffer, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
   template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %result, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
@@ -101,6 +126,7 @@ kernel.def target(@head_wave32) @krea_head_adapter_add() {
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %weight_is_bf16 = scalar.constant false : i1
   %rows = config.get @krea2.image_tokens : index
   %inputs = index.constant 32 : index
   %outputs = index.constant 64 : index
@@ -109,7 +135,7 @@ kernel.def target(@head_wave32) @krea_head_adapter_add() {
   %output_tile = kernel.workgroup.id<y> : index
   %row_origin = index.mul %row_tile, %projection_tile : index
   %output_origin = index.mul %output_tile, %projection_tile : index
-  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %row_origin, %output_origin, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<8xf32>)
+  %result = template.apply<@projection.linear_storage_bf16>(%rows, %inputs, %outputs, %weight_is_bf16, %row_origin, %output_origin, %input, %weight) : (index, index, index, i1, index, index, buffer, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
   %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %result, %strength, %base) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
   template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %combined, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
@@ -117,21 +143,33 @@ kernel.def target(@head_wave32) @krea_head_adapter_add() {
 }
 
 command.program.def public @krea2.head_input(%first_row: index, %embedding_offset: offset) launch(%parameters: buffer, %input: buffer, %embedding: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %storage_bf16 = index.cmp ne, %storage, %storage_zero : index
+  %bf16_bytes = index.constant 2 : index
+  %f32_bytes = index.constant 4 : index
+  %storage_bytes = scf.select %storage_bf16, %bf16_bytes, %f32_bytes : index
   %rows = config.get @krea2.image_tokens : index
   %row_bytes = index.constant 12288 : offset
   %byte_offset = index.scale %first_row, %row_bytes : index, offset -> offset
   %input_view = buffer.view %input[%byte_offset] : buffer -> view<[%rows]x6144xbf16>
   %weight = command.parameter %parameters, "last.norm.scale" : view<6144xf32>
-  %table = command.parameter %parameters, "last.modulation.lin" : view<2x6144xf32>
+  %table = command.parameter %parameters, "last.modulation.lin" : view<2x6144x[%storage_bytes]xi8>
   %embedding_view = buffer.view %embedding[%embedding_offset] : buffer -> view<6144xbf16>
-  kernel.launch @krea_head_input(%input_view, %weight, %embedding_view, %table, %output) : (view<[%rows]x6144xbf16>, view<6144xf32>, view<6144xbf16>, view<2x6144xf32>, buffer)
+  kernel.launch @krea_head_input(%input_view, %weight, %embedding_view, %table, %output) : (view<[%rows]x6144xbf16>, view<6144xf32>, view<6144xbf16>, view<2x6144x[%storage_bytes]xi8>, buffer)
   command.return
 }
 
 command.program.def public @krea2.head_projection() launch(%parameters: buffer, %input: buffer, %output: buffer) {
-  %weight = command.parameter %parameters, "last.linear.weight" : view<64x6144xf32>
-  %bias = command.parameter %parameters, "last.linear.bias" : view<64xf32>
-  kernel.launch @krea_head_projection(%input, %weight, %bias, %output) : (buffer, view<64x6144xf32>, view<64xf32>, buffer)
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %storage_bf16 = index.cmp ne, %storage, %storage_zero : index
+  %bf16_bytes = index.constant 2 : index
+  %f32_bytes = index.constant 4 : index
+  %storage_bytes = scf.select %storage_bf16, %bf16_bytes, %f32_bytes : index
+  %weight = command.parameter %parameters, "last.linear.weight" : view<64x6144x[%storage_bytes]xi8>
+  %bias = command.parameter %parameters, "last.linear.bias" : view<64x[%storage_bytes]xi8>
+  kernel.launch @krea_head_projection(%input, %weight, %bias, %output) : (buffer, view<64x6144x[%storage_bytes]xi8>, view<64x[%storage_bytes]xi8>, buffer)
   command.return
 }
 

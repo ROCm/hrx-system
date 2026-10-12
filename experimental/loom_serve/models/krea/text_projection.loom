@@ -1,9 +1,11 @@
+config.decl @krea2.dit_int8 : %value: index where [range(%value, 0, 1)]
+
 config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 amdgpu.target<gfx11-generic> @text_projection_wave32 {subgroup_size = 32}
 template.decl @normalization.zero_centered_rows_bf16(%rows: index, %width: index, %threads: index, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @activation.gelu_bf16(%value: bf16) -> (bf16)
-template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %row_origin: index, %output_origin: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
-template.decl @projection.bias_f32_as_bf16(%outputs: index, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
+template.decl @projection.linear_storage_bf16(%rows: index, %inputs: index, %outputs: index, %weight_is_bf16: i1, %row_origin: index, %output_origin: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+template.decl @projection.bias_storage_bf16(%outputs: index, %weight_is_bf16: i1, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
 template.decl @projection.store_bf16(%rows: index, %outputs: index, %row_origin: index, %output_origin: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
 template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %row_origin: index, %output_origin: index, %base_layout: encoding<layout>, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
 template.decl @krea2.text_projection(%rows: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
@@ -56,6 +58,9 @@ kernel.def target(@text_projection_wave32) @krea_text_linear_first() {
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %zero_storage = index.constant 0 : index
+  %weight_is_bf16 = index.cmp ne, %storage, %zero_storage : index
   %rows = config.get @krea2.text_tokens : index
   %inputs = index.constant 2560 : index
   %outputs = index.constant 6144 : index
@@ -64,8 +69,8 @@ kernel.def target(@text_projection_wave32) @krea_text_linear_first() {
   %output_tile = kernel.workgroup.id<y> : index
   %row_origin = index.mul %row_tile, %projection_tile : index
   %output_origin = index.mul %output_tile, %projection_tile : index
-  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %row_origin, %output_origin, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<8xf32>)
-  %final = template.apply<@projection.bias_f32_as_bf16>(%outputs, %result, %bias) : (index, vector<8xf32>, buffer) -> (vector<8xf32>)
+  %result = template.apply<@projection.linear_storage_bf16>(%rows, %inputs, %outputs, %weight_is_bf16, %row_origin, %output_origin, %input, %weight) : (index, index, index, i1, index, index, buffer, buffer) -> (vector<8xf32>)
+  %final = template.apply<@projection.bias_storage_bf16>(%outputs, %weight_is_bf16, %result, %bias) : (index, i1, vector<8xf32>, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
   template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %final, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
@@ -80,6 +85,9 @@ kernel.def target(@text_projection_wave32) @krea_text_linear_second() {
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %zero_storage = index.constant 0 : index
+  %weight_is_bf16 = index.cmp ne, %storage, %zero_storage : index
   %rows = config.get @krea2.text_tokens : index
   %inputs = index.constant 6144 : index
   %outputs = index.constant 6144 : index
@@ -88,8 +96,8 @@ kernel.def target(@text_projection_wave32) @krea_text_linear_second() {
   %output_tile = kernel.workgroup.id<y> : index
   %row_origin = index.mul %row_tile, %projection_tile : index
   %output_origin = index.mul %output_tile, %projection_tile : index
-  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %row_origin, %output_origin, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<8xf32>)
-  %final = template.apply<@projection.bias_f32_as_bf16>(%outputs, %result, %bias) : (index, vector<8xf32>, buffer) -> (vector<8xf32>)
+  %result = template.apply<@projection.linear_storage_bf16>(%rows, %inputs, %outputs, %weight_is_bf16, %row_origin, %output_origin, %input, %weight) : (index, index, index, i1, index, index, buffer, buffer) -> (vector<8xf32>)
+  %final = template.apply<@projection.bias_storage_bf16>(%outputs, %weight_is_bf16, %result, %bias) : (index, i1, vector<8xf32>, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
   template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %final, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
@@ -104,6 +112,7 @@ kernel.def target(@text_projection_wave32) @krea_text_adapter_down_features() {
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %weight_is_bf16 = scalar.constant false : i1
   %rows = config.get @krea2.text_tokens : index
   %inputs = index.constant 2560 : index
   %outputs = index.constant 32 : index
@@ -112,7 +121,7 @@ kernel.def target(@text_projection_wave32) @krea_text_adapter_down_features() {
   %output_tile = kernel.workgroup.id<y> : index
   %row_origin = index.mul %row_tile, %projection_tile : index
   %output_origin = index.mul %output_tile, %projection_tile : index
-  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %row_origin, %output_origin, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<8xf32>)
+  %result = template.apply<@projection.linear_storage_bf16>(%rows, %inputs, %outputs, %weight_is_bf16, %row_origin, %output_origin, %input, %weight) : (index, index, index, i1, index, index, buffer, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
   template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %result, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
@@ -127,6 +136,7 @@ kernel.def target(@text_projection_wave32) @krea_text_adapter_down_hidden() {
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %weight_is_bf16 = scalar.constant false : i1
   %rows = config.get @krea2.text_tokens : index
   %inputs = index.constant 6144 : index
   %outputs = index.constant 32 : index
@@ -135,7 +145,7 @@ kernel.def target(@text_projection_wave32) @krea_text_adapter_down_hidden() {
   %output_tile = kernel.workgroup.id<y> : index
   %row_origin = index.mul %row_tile, %projection_tile : index
   %output_origin = index.mul %output_tile, %projection_tile : index
-  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %row_origin, %output_origin, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<8xf32>)
+  %result = template.apply<@projection.linear_storage_bf16>(%rows, %inputs, %outputs, %weight_is_bf16, %row_origin, %output_origin, %input, %weight) : (index, index, index, i1, index, index, buffer, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
   template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %result, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
@@ -150,6 +160,7 @@ kernel.def target(@text_projection_wave32) @krea_text_adapter_add() {
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %weight_is_bf16 = scalar.constant false : i1
   %rows = config.get @krea2.text_tokens : index
   %inputs = index.constant 32 : index
   %outputs = index.constant 6144 : index
@@ -158,7 +169,7 @@ kernel.def target(@text_projection_wave32) @krea_text_adapter_add() {
   %output_tile = kernel.workgroup.id<y> : index
   %row_origin = index.mul %row_tile, %projection_tile : index
   %output_origin = index.mul %output_tile, %projection_tile : index
-  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %row_origin, %output_origin, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<8xf32>)
+  %result = template.apply<@projection.linear_storage_bf16>(%rows, %inputs, %outputs, %weight_is_bf16, %row_origin, %output_origin, %input, %weight) : (index, index, index, i1, index, index, buffer, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
   %final = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %result, %strength, %base) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
   template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %final, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
@@ -177,8 +188,14 @@ command.program.def public @krea2.text_gelu() launch(%input: buffer, %output: bu
 }
 
 command.program.def public @krea2.text_first(%adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
-  %weight = command.parameter %parameters, "txtmlp.1.weight" : view<6144x2560xf32>
-  %bias = command.parameter %parameters, "txtmlp.1.bias" : view<6144xf32>
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %storage_bf16 = index.cmp ne, %storage, %storage_zero : index
+  %bf16_bytes = index.constant 2 : index
+  %f32_bytes = index.constant 4 : index
+  %storage_bytes = scf.select %storage_bf16, %bf16_bytes, %f32_bytes : index
+  %weight = command.parameter %parameters, "txtmlp.1.weight" : view<6144x2560x[%storage_bytes]xi8>
+  %bias = command.parameter %parameters, "txtmlp.1.bias" : view<6144x[%storage_bytes]xi8>
   scf.if %adapted {
     %rows = config.get @krea2.text_tokens : index
     %rank_bytes = index.constant 64 : offset
@@ -187,21 +204,27 @@ command.program.def public @krea2.text_first(%adapted: i1) launch(%parameters: b
     %down = command.parameter %adapter, "transformer.txt_in.linear_1.lora_A.weight" : view<32x2560xf32>
     %up = command.parameter %adapter, "transformer.txt_in.linear_1.lora_B.weight" : view<6144x32xf32>
     command.concurrent {
-      kernel.launch @krea_text_linear_first(%input, %weight, %bias, %output) : (buffer, view<6144x2560xf32>, view<6144xf32>, buffer)
+      kernel.launch @krea_text_linear_first(%input, %weight, %bias, %output) : (buffer, view<6144x2560x[%storage_bytes]xi8>, view<6144x[%storage_bytes]xi8>, buffer)
       kernel.launch @krea_text_adapter_down_features(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
     }
     kernel.launch @krea_text_adapter_add(%low, %up, %strength, %output, %output) : (buffer, view<6144x32xf32>, buffer, buffer, buffer)
     scf.yield
   } else {
-    kernel.launch @krea_text_linear_first(%input, %weight, %bias, %output) : (buffer, view<6144x2560xf32>, view<6144xf32>, buffer)
+    kernel.launch @krea_text_linear_first(%input, %weight, %bias, %output) : (buffer, view<6144x2560x[%storage_bytes]xi8>, view<6144x[%storage_bytes]xi8>, buffer)
     scf.yield
   }
   command.return
 }
 
 command.program.def public @krea2.text_second(%adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
-  %weight = command.parameter %parameters, "txtmlp.3.weight" : view<6144x6144xf32>
-  %bias = command.parameter %parameters, "txtmlp.3.bias" : view<6144xf32>
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %storage_bf16 = index.cmp ne, %storage, %storage_zero : index
+  %bf16_bytes = index.constant 2 : index
+  %f32_bytes = index.constant 4 : index
+  %storage_bytes = scf.select %storage_bf16, %bf16_bytes, %f32_bytes : index
+  %weight = command.parameter %parameters, "txtmlp.3.weight" : view<6144x6144x[%storage_bytes]xi8>
+  %bias = command.parameter %parameters, "txtmlp.3.bias" : view<6144x[%storage_bytes]xi8>
   scf.if %adapted {
     %rows = config.get @krea2.text_tokens : index
     %rank_bytes = index.constant 64 : offset
@@ -210,13 +233,13 @@ command.program.def public @krea2.text_second(%adapted: i1) launch(%parameters: 
     %down = command.parameter %adapter, "transformer.txt_in.linear_2.lora_A.weight" : view<32x6144xf32>
     %up = command.parameter %adapter, "transformer.txt_in.linear_2.lora_B.weight" : view<6144x32xf32>
     command.concurrent {
-      kernel.launch @krea_text_linear_second(%input, %weight, %bias, %output) : (buffer, view<6144x6144xf32>, view<6144xf32>, buffer)
+      kernel.launch @krea_text_linear_second(%input, %weight, %bias, %output) : (buffer, view<6144x6144x[%storage_bytes]xi8>, view<6144x[%storage_bytes]xi8>, buffer)
       kernel.launch @krea_text_adapter_down_hidden(%input, %down, %low) : (buffer, view<32x6144xf32>, buffer)
     }
     kernel.launch @krea_text_adapter_add(%low, %up, %strength, %output, %output) : (buffer, view<6144x32xf32>, buffer, buffer, buffer)
     scf.yield
   } else {
-    kernel.launch @krea_text_linear_second(%input, %weight, %bias, %output) : (buffer, view<6144x6144xf32>, view<6144xf32>, buffer)
+    kernel.launch @krea_text_linear_second(%input, %weight, %bias, %output) : (buffer, view<6144x6144x[%storage_bytes]xi8>, view<6144x[%storage_bytes]xi8>, buffer)
     scf.yield
   }
   command.return

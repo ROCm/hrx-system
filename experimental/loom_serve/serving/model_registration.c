@@ -179,7 +179,7 @@ static iree_status_t finite_registration_create(
   const loom_serve_finite_model_options_t model_options = {
       .source_directory = configuration->source,
       .asset_directory = configuration->finite.assets,
-      .options = configuration->finite.options};
+      .options = configuration->options};
   iree_status_t status = loom_serve_finite_load_create(
       options->device, &model_options, observer.wake, observer.user_data,
       &registration->load, allocator);
@@ -338,6 +338,7 @@ static iree_status_t image_registration_create(
       .source_directory = configuration->source,
       .checkpoint_directory = configuration->image.checkpoint,
       .adapter_path = configuration->image.adapter,
+      .options = configuration->options,
       .height = configuration->image.height,
       .width = configuration->image.width,
       .text_tokens = configuration->image.text_tokens,

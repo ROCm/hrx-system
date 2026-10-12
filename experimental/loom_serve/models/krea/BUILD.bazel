@@ -32,6 +32,7 @@ loom_cc_test(
     ]),
     deps = [
         "//experimental/loom_serve/runtime:input",
+        "//experimental/loom_serve/runtime:json",
         "//experimental/loom_serve/runtime:preparation",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/base",

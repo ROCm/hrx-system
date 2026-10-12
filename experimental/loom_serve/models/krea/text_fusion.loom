@@ -1,6 +1,8 @@
+config.decl @krea2.dit_int8 : %value: index where [range(%value, 0, 1)]
+
 config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 amdgpu.target<gfx11-generic> @fusion_projector_wave32 {subgroup_size = 32}
-template.decl @projection.layer_mix_12_bf16(%rows: index, %width: index, %rank: index, %row: index, %channel: index, %adapted: i1, %input: buffer, %weight: buffer, %down: buffer, %up: buffer, %strength: buffer) -> (bf16)
+template.decl @projection.layer_mix_12_bf16(%rows: index, %width: index, %rank: index, %row: index, %channel: index, %adapted: i1, %weight_is_bf16: i1, %input: buffer, %weight: buffer, %down: buffer, %up: buffer, %strength: buffer) -> (bf16)
 template.decl @krea2.text_fusion(%rows: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %mask: buffer, %strength: buffer, %output: buffer)
 command.program.decl @krea2.fusion_layerwise_block(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
 command.program.decl @krea2.fusion_refiner_block(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %mask: buffer, %strength: buffer, %output: buffer)
@@ -12,6 +14,9 @@ kernel.def target(@fusion_projector_wave32) @fusion_projector() {
   %one = index.constant 1 : index
   kernel.launch.config workgroups(%rows, %columns, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %zero_storage = index.constant 0 : index
+  %weight_is_bf16 = index.cmp ne, %storage, %zero_storage : index
   %rows = config.get @krea2.text_tokens : index
   %width = index.constant 2560 : index
   %rank = index.constant 32 : index
@@ -21,7 +26,7 @@ kernel.def target(@fusion_projector_wave32) @fusion_projector() {
   %lane = kernel.workitem.id<x> : index
   %channel = index.madd %group, %threads, %lane : index
   %adapted = scalar.constant false : i1
-  %result = template.apply<@projection.layer_mix_12_bf16>(%rows, %width, %rank, %row, %channel, %adapted, %input, %weight, %weight, %weight, %weight) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer) -> (bf16)
+  %result = template.apply<@projection.layer_mix_12_bf16>(%rows, %width, %rank, %row, %channel, %adapted, %weight_is_bf16, %input, %weight, %weight, %weight, %weight) : (index, index, index, index, index, i1, i1, buffer, buffer, buffer, buffer, buffer) -> (bf16)
   %origin = index.constant 0 : offset
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]xbf16>
   view.store %result, %output_view[%row, %channel] : bf16, view<[%rows]x[%width]xbf16>
@@ -35,6 +40,9 @@ kernel.def target(@fusion_projector_wave32) @fusion_projector_adapted() {
   %one = index.constant 1 : index
   kernel.launch.config workgroups(%rows, %columns, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %down: buffer, %up: buffer, %strength: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %zero_storage = index.constant 0 : index
+  %weight_is_bf16 = index.cmp ne, %storage, %zero_storage : index
   %rows = config.get @krea2.text_tokens : index
   %width = index.constant 2560 : index
   %rank = index.constant 32 : index
@@ -44,7 +52,7 @@ kernel.def target(@fusion_projector_wave32) @fusion_projector_adapted() {
   %lane = kernel.workitem.id<x> : index
   %channel = index.madd %group, %threads, %lane : index
   %adapted = scalar.constant true : i1
-  %result = template.apply<@projection.layer_mix_12_bf16>(%rows, %width, %rank, %row, %channel, %adapted, %input, %weight, %down, %up, %strength) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer) -> (bf16)
+  %result = template.apply<@projection.layer_mix_12_bf16>(%rows, %width, %rank, %row, %channel, %adapted, %weight_is_bf16, %input, %weight, %down, %up, %strength) : (index, index, index, index, index, i1, i1, buffer, buffer, buffer, buffer, buffer) -> (bf16)
   %origin = index.constant 0 : offset
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]xbf16>
   view.store %result, %output_view[%row, %channel] : bf16, view<[%rows]x[%width]xbf16>
@@ -52,14 +60,20 @@ kernel.def target(@fusion_projector_wave32) @fusion_projector_adapted() {
 }
 
 command.program.def public @krea2.fusion_projector(%adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
-  %weight = command.parameter %parameters, "txtfusion.projector.weight" : view<1x12xf32>
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %storage_bf16 = index.cmp ne, %storage, %storage_zero : index
+  %bf16_bytes = index.constant 2 : index
+  %f32_bytes = index.constant 4 : index
+  %storage_bytes = scf.select %storage_bf16, %bf16_bytes, %f32_bytes : index
+  %weight = command.parameter %parameters, "txtfusion.projector.weight" : view<1x12x[%storage_bytes]xi8>
   scf.if %adapted {
     %down = command.parameter %adapter, "transformer.text_fusion.projector.lora_A.weight" : view<32x12xf32>
     %up = command.parameter %adapter, "transformer.text_fusion.projector.lora_B.weight" : view<1x32xf32>
-    kernel.launch @fusion_projector_adapted(%input, %weight, %down, %up, %strength, %output) : (buffer, view<1x12xf32>, view<32x12xf32>, view<1x32xf32>, buffer, buffer)
+    kernel.launch @fusion_projector_adapted(%input, %weight, %down, %up, %strength, %output) : (buffer, view<1x12x[%storage_bytes]xi8>, view<32x12xf32>, view<1x32xf32>, buffer, buffer)
     scf.yield
   } else {
-    kernel.launch @fusion_projector(%input, %weight, %output) : (buffer, view<1x12xf32>, buffer)
+    kernel.launch @fusion_projector(%input, %weight, %output) : (buffer, view<1x12x[%storage_bytes]xi8>, buffer)
     scf.yield
   }
   command.return

@@ -26,6 +26,8 @@ typedef struct loom_serve_image_model_options_t {
   iree_string_view_t checkpoint_directory;
   // Optional adapter asset, interpreted by the source bootstrap.
   iree_string_view_t adapter_path;
+  // Source-owned JSON options, borrowed through load completion; empty is {}.
+  iree_string_view_t options;
   // Fixed output height in pixels.
   uint32_t height;
   // Fixed output width in pixels.
@@ -84,7 +86,7 @@ iree_status_t loom_serve_image_load_destroy(loom_serve_image_load_t* load);
 
 // Source ABI:
 // prepare.loom: prepare(i64 height, i64 width, i64 text_capacity,
-//                      buffer checkpoint, buffer adapter)
+//                      buffer checkpoint, buffer adapter, buffer options)
 //   -> (i64 request_capacity, buffer tokenizer_asset, buffer name, buffer
 //   state)
 // The source declares commands/configuration/parameter domains through prepare

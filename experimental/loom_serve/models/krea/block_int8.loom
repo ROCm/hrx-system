@@ -1,0 +1,226 @@
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+
+amdgpu.target<gfx11-generic> @block_i8_wave32 {subgroup_size = 32}
+template.decl @quantization.convrot256_i8(%rows: index, %columns: index, %input: buffer, %output: buffer, %scales: buffer)
+template.decl @projection.linear_tiled_i8(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %layout: encoding<layout>, %input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer)
+
+// The input rotation is shared by every projection consuming the same rows.
+// Source scheduling retains the unrotated BF16 input independently for LoRA.
+
+kernel.def target(@block_i8_wave32) @block_quantize_6144() {
+  %rows = config.get @krea2.block_tokens : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %output: buffer, %scales: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %columns = index.constant 6144 : index
+  template.apply<@quantization.convrot256_i8>(%rows, %columns, %input, %output, %scales) : (index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @krea2.block_quantize_6144() launch(%input: buffer, %output: buffer, %scales: buffer) {
+  kernel.launch @block_quantize_6144(%input, %output, %scales) : (buffer, buffer, buffer)
+  command.return
+}
+
+kernel.def target(@block_i8_wave32) @block_quantize_16384() {
+  %rows = config.get @krea2.block_tokens : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %output: buffer, %scales: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %columns = index.constant 16384 : index
+  template.apply<@quantization.convrot256_i8>(%rows, %columns, %input, %output, %scales) : (index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @krea2.block_quantize_16384() launch(%input: buffer, %output: buffer, %scales: buffer) {
+  kernel.launch @block_quantize_16384(%input, %output, %scales) : (buffer, buffer, buffer)
+  command.return
+}
+
+kernel.def target(@block_i8_wave32) @block_linear_i8_6144_6144() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %padded = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded, %tile : index
+  %output_tiles = index.constant 96 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 6144 : index
+  %outputs = index.constant 6144 : index
+  %group_size = index.constant 8 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_i8>(%rows, %inputs, %outputs, %group_size, %layout, %input, %input_scales, %weight, %weight_scales, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_i8_wave32) @block_linear_i8_6144_1536() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %padded = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded, %tile : index
+  %output_tiles = index.constant 24 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 6144 : index
+  %outputs = index.constant 1536 : index
+  %group_size = index.constant 8 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_i8>(%rows, %inputs, %outputs, %group_size, %layout, %input, %input_scales, %weight, %weight_scales, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_i8_wave32) @block_linear_i8_6144_1536_column_major() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %padded = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded, %tile : index
+  %output_tiles = index.constant 24 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 6144 : index
+  %outputs = index.constant 1536 : index
+  %group_size = index.constant 8 : index
+  %layout = encoding.layout.strided [1, %rows] : encoding<layout>
+  template.apply<@projection.linear_tiled_i8>(%rows, %inputs, %outputs, %group_size, %layout, %input, %input_scales, %weight, %weight_scales, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_i8_wave32) @block_linear_i8_6144_16384() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %padded = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded, %tile : index
+  %output_tiles = index.constant 256 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 6144 : index
+  %outputs = index.constant 16384 : index
+  %group_size = index.constant 8 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_i8>(%rows, %inputs, %outputs, %group_size, %layout, %input, %input_scales, %weight, %weight_scales, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_i8_wave32) @block_linear_i8_16384_6144() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %padded = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded, %tile : index
+  %output_tiles = index.constant 96 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 16384 : index
+  %outputs = index.constant 6144 : index
+  %group_size = index.constant 8 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_i8>(%rows, %inputs, %outputs, %group_size, %layout, %input, %input_scales, %weight, %weight_scales, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @krea2.block_query_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "blocks.{}.attn.wq.weight"[%layer] : view<6144x6144xi8>
+  %weight_scales = command.parameter %parameters, "blocks.{}.attn.wq.weight_scale"[%layer] : view<6144x1xf32>
+  kernel.launch @block_linear_i8_6144_6144(%input, %scales, %weight, %weight_scales, %output) : (buffer, buffer, view<6144x6144xi8>, view<6144x1xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.block_key_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "blocks.{}.attn.wk.weight"[%layer] : view<1536x6144xi8>
+  %weight_scales = command.parameter %parameters, "blocks.{}.attn.wk.weight_scale"[%layer] : view<1536x1xf32>
+  kernel.launch @block_linear_i8_6144_1536(%input, %scales, %weight, %weight_scales, %output) : (buffer, buffer, view<1536x6144xi8>, view<1536x1xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.block_value_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "blocks.{}.attn.wv.weight"[%layer] : view<1536x6144xi8>
+  %weight_scales = command.parameter %parameters, "blocks.{}.attn.wv.weight_scale"[%layer] : view<1536x1xf32>
+  kernel.launch @block_linear_i8_6144_1536_column_major(%input, %scales, %weight, %weight_scales, %output) : (buffer, buffer, view<1536x6144xi8>, view<1536x1xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.block_gate_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "blocks.{}.attn.gate.weight"[%layer] : view<6144x6144xi8>
+  %weight_scales = command.parameter %parameters, "blocks.{}.attn.gate.weight_scale"[%layer] : view<6144x1xf32>
+  kernel.launch @block_linear_i8_6144_6144(%input, %scales, %weight, %weight_scales, %output) : (buffer, buffer, view<6144x6144xi8>, view<6144x1xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.block_attention_output_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "blocks.{}.attn.wo.weight"[%layer] : view<6144x6144xi8>
+  %weight_scales = command.parameter %parameters, "blocks.{}.attn.wo.weight_scale"[%layer] : view<6144x1xf32>
+  kernel.launch @block_linear_i8_6144_6144(%input, %scales, %weight, %weight_scales, %output) : (buffer, buffer, view<6144x6144xi8>, view<6144x1xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.block_feed_forward_gate_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "blocks.{}.mlp.gate.weight"[%layer] : view<16384x6144xi8>
+  %weight_scales = command.parameter %parameters, "blocks.{}.mlp.gate.weight_scale"[%layer] : view<16384x1xf32>
+  kernel.launch @block_linear_i8_6144_16384(%input, %scales, %weight, %weight_scales, %output) : (buffer, buffer, view<16384x6144xi8>, view<16384x1xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.block_feed_forward_up_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "blocks.{}.mlp.up.weight"[%layer] : view<16384x6144xi8>
+  %weight_scales = command.parameter %parameters, "blocks.{}.mlp.up.weight_scale"[%layer] : view<16384x1xf32>
+  kernel.launch @block_linear_i8_6144_16384(%input, %scales, %weight, %weight_scales, %output) : (buffer, buffer, view<16384x6144xi8>, view<16384x1xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.block_feed_forward_down_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "blocks.{}.mlp.down.weight"[%layer] : view<6144x16384xi8>
+  %weight_scales = command.parameter %parameters, "blocks.{}.mlp.down.weight_scale"[%layer] : view<6144x1xf32>
+  kernel.launch @block_linear_i8_16384_6144(%input, %scales, %weight, %weight_scales, %output) : (buffer, buffer, view<6144x16384xi8>, view<6144x1xf32>, buffer)
+  command.return
+}
+
+template.decl @krea2.block_quantized_input(%tokens: index, %columns: index, %use_int8: i1, %input: buffer) -> (buffer, buffer)
+
+// A projection cohort owns one rotated input and one scale per token.
+// The BF16 specialization returns unused aliases and allocates no extra storage.
+template.def<@krea2.block_quantized_input> @krea2_block_quantized_input(%tokens: index, %columns: index, %use_int8: i1, %input: buffer) -> (buffer, buffer) {
+  %quantized, %scales = scf.if %use_int8 -> (buffer, buffer) {
+    %column_bytes = index.cast %columns : index to offset
+    %bytes = index.scale %tokens, %column_bytes : index, offset -> offset
+    %scale_stride = index.constant 4 : offset
+    %scale_bytes = index.scale %tokens, %scale_stride : index, offset -> offset
+    %quantized = buffer.alloca<global> align(256) %bytes : buffer
+    %scales = buffer.alloca<global> align(256) %scale_bytes : buffer
+    %hidden_width = index.constant 6144 : index
+    %hidden = index.cmp eq, %columns, %hidden_width : index
+    scf.if %hidden {
+      command.program.launch @krea2.block_quantize_6144(%input, %quantized, %scales) : (buffer, buffer, buffer)
+      scf.yield
+    } else {
+      command.program.launch @krea2.block_quantize_16384(%input, %quantized, %scales) : (buffer, buffer, buffer)
+      scf.yield
+    }
+    scf.yield %quantized, %scales : buffer, buffer
+  } else {
+    scf.yield %input, %input : buffer, buffer
+  }
+  template.return %quantized, %scales : buffer, buffer
+}

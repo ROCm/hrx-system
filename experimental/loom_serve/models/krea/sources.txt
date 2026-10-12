@@ -9,6 +9,9 @@ projection.loom
 ../../motifs/tensor/linear_temporal.loom
 block.loom
 block_projections.loom
+block_int8.loom
+../../motifs/tensor/quantization.loom
+../../motifs/tensor/linear_i8.loom
 ../../motifs/tensor/normalization.loom
 block_rotary.loom
 ../../motifs/tensor/rotary.loom

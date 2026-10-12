@@ -210,6 +210,7 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::runtime::input
     iree::experimental::loom_serve::runtime::jit
+    iree::experimental::loom_serve::runtime::json
     iree::experimental::loom_serve::runtime::module
     iree::experimental::loom_serve::runtime::preparation
     iree::experimental::loom_serve::runtime::program

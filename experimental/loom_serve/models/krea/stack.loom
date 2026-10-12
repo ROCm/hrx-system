@@ -1,35 +1,43 @@
+config.decl @krea2.dit_int8 : %value: index where [range(%value, 0, 1)]
+
 config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
-template.decl @krea2.block_forward(%tokens: index, %layer: index, %modulation_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
-template.decl @krea2.transformer_stack(%tokens: index, %layers: index, %modulation_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+template.decl @krea2.block_forward(%tokens: index, %layer: index, %modulation_offset: offset, %adapted: i1, %use_int8: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+template.decl @krea2.transformer_stack(%tokens: index, %layers: index, %modulation_offset: offset, %adapted: i1, %use_int8: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
 
 // A block writes its final output only after all original-input consumers.
 // Later layers can therefore advance caller storage in place. Internal
 // intermediates remain separate, with lifetimes packed across layer boundaries.
-template.def<@krea2.transformer_stack> @krea2_transformer_stack(%tokens: index, %layers: index, %modulation_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
+template.def<@krea2.transformer_stack> @krea2_transformer_stack(%tokens: index, %layers: index, %modulation_offset: offset, %adapted: i1, %use_int8: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  template.apply<@krea2.block_forward>(%tokens, %zero, %modulation_offset, %adapted, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %strength, %output) : (index, index, offset, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@krea2.block_forward>(%tokens, %zero, %modulation_offset, %adapted, %use_int8, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %strength, %output) : (index, index, offset, i1, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   scf.for %layer = [%one to %layers step %one] unroll {
-    template.apply<@krea2.block_forward>(%tokens, %layer, %modulation_offset, %adapted, %parameters, %adapter, %output, %modulation, %cosine, %sine, %mask, %strength, %output) : (index, index, offset, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    template.apply<@krea2.block_forward>(%tokens, %layer, %modulation_offset, %adapted, %use_int8, %parameters, %adapter, %output, %modulation, %cosine, %sine, %mask, %strength, %output) : (index, index, offset, i1, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   }
   template.return
 }
 
 command.program.def public @transformer_stack() launch(%parameters: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %use_int8 = index.cmp ne, %storage, %storage_zero : index
   %tokens = config.get @krea2.block_tokens : index
   %layers = index.constant 28 : index
   %adapted = scalar.constant false : i1
   // Adapter and strength operands have no uses in the base specialization.
   %modulation_offset = index.constant 0 : offset
-  template.apply<@krea2.transformer_stack>(%tokens, %layers, %modulation_offset, %adapted, %parameters, %parameters, %input, %modulation, %cosine, %sine, %mask, %input, %output) : (index, index, offset, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@krea2.transformer_stack>(%tokens, %layers, %modulation_offset, %adapted, %use_int8, %parameters, %parameters, %input, %modulation, %cosine, %sine, %mask, %input, %output) : (index, index, offset, i1, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
 command.program.def public @transformer_stack_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %use_int8 = index.cmp ne, %storage, %storage_zero : index
   %tokens = config.get @krea2.block_tokens : index
   %layers = index.constant 28 : index
   %adapted = scalar.constant true : i1
   %modulation_offset = index.constant 0 : offset
-  template.apply<@krea2.transformer_stack>(%tokens, %layers, %modulation_offset, %adapted, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %strength, %output) : (index, index, offset, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@krea2.transformer_stack>(%tokens, %layers, %modulation_offset, %adapted, %use_int8, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %strength, %output) : (index, index, offset, i1, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }

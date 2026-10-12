@@ -1,7 +1,7 @@
 config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 amdgpu.target<gfx11-generic> @fusion_projector_qualification_wave32 {subgroup_size = 32}
 template.decl @projection.gather_12_bf16(%rows: index, %width: index, %row: index, %channel: index, %input: buffer) -> (vector<12xf32>)
-template.decl @projection.dot_12_f32_as_bf16(%outputs: index, %row: index, %values: vector<12xf32>, %weight: buffer) -> (bf16)
+template.decl @projection.dot_12_storage_bf16(%outputs: index, %row: index, %weight_is_bf16: i1, %values: vector<12xf32>, %weight: buffer) -> (bf16)
 command.program.decl @krea2.fusion_projector(%adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
 
 // Only qualification materializes the [token,channel,rank] tensor so A and B
@@ -24,7 +24,8 @@ kernel.def target(@fusion_projector_qualification_wave32) @fusion_projector_down
   %lane = kernel.workitem.id<x> : index
   %channel = index.madd %group, %threads, %lane : index
   %values = template.apply<@projection.gather_12_bf16>(%rows, %width, %row, %channel, %input) : (index, index, index, index, buffer) -> (vector<12xf32>)
-  %result = template.apply<@projection.dot_12_f32_as_bf16>(%rank, %element, %values, %weight) : (index, index, vector<12xf32>, buffer) -> (bf16)
+  %weight_is_bf16 = scalar.constant false : i1
+  %result = template.apply<@projection.dot_12_storage_bf16>(%rank, %element, %weight_is_bf16, %values, %weight) : (index, index, i1, vector<12xf32>, buffer) -> (bf16)
   %origin = index.constant 0 : offset
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]x32xbf16>
   view.store %result, %output_view[%row, %channel, %element] : bf16, view<[%rows]x[%width]x32xbf16>

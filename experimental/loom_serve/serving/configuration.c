@@ -235,7 +235,8 @@ static iree_status_t configuration_model_parse(
        .kinds = (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
                 (1u << LOOM_SERVE_MODEL_KIND_DECISION)},
       {"options", IREE_JSON_VALUE_TYPE_OBJECT,
-       .kinds = (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_IMAGE) |
+                (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
                 (1u << LOOM_SERVE_MODEL_KIND_DECISION)},
       {"admission", IREE_JSON_VALUE_TYPE_STRING},
       {"session_cache_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
@@ -295,19 +296,18 @@ static iree_status_t configuration_model_parse(
   }
   if (model->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
     return configuration_text(fields, &model->text, allocator);
-  } else if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
-    return configuration_image(fields, &model->image, allocator);
   }
-  IREE_RETURN_IF_ERROR(
-      configuration_string(&fields[19], &model->finite.assets, allocator));
   const iree_string_view_t options =
       fields[20].value.data ? fields[20].value : IREE_SV("{}");
   char* data = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_clone(
       allocator, iree_make_const_byte_span(options.data, options.size),
       (void**)&data));
-  model->finite.options = iree_make_string_view(data, options.size);
-  return iree_ok_status();
+  model->options = iree_make_string_view(data, options.size);
+  if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
+    return configuration_image(fields, &model->image, allocator);
+  }
+  return configuration_string(&fields[19], &model->finite.assets, allocator);
 }
 
 void loom_serve_model_configuration_deinitialize(
@@ -315,6 +315,7 @@ void loom_serve_model_configuration_deinitialize(
   const iree_allocator_t allocator = model->allocator;
   iree_allocator_free(allocator, (void*)model->name.data);
   iree_allocator_free(allocator, (void*)model->source.data);
+  iree_allocator_free(allocator, (void*)model->options.data);
   if (model->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
     iree_allocator_free(allocator, (void*)model->text.weights.data);
     iree_allocator_free(allocator, (void*)model->text.tokenizer.data);
@@ -324,7 +325,6 @@ void loom_serve_model_configuration_deinitialize(
   } else if (model->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING ||
              model->kind == LOOM_SERVE_MODEL_KIND_DECISION) {
     iree_allocator_free(allocator, (void*)model->finite.assets.data);
-    iree_allocator_free(allocator, (void*)model->finite.options.data);
   }
   memset(model, 0, sizeof(*model));
 }

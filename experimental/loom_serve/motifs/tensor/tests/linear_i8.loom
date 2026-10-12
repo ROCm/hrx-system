@@ -1,0 +1,160 @@
+amdgpu.target<gfx11-generic> @wave32 {subgroup_size = 32}
+template.decl @projection.linear_tiled_i8(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %layout: encoding<layout>, %input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer)
+
+func.def @contraction_reference(%rows: index, %inputs: index, %outputs: index, %column_major: i1, %input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %x = buffer.view %input[%origin] : buffer -> view<[%rows]x[%inputs]xi8>
+  %w = buffer.view %weight[%origin] : buffer -> view<[%outputs]x[%inputs]xi8>
+  %xs = buffer.view %input_scales[%origin] : buffer -> view<[%rows]xf32>
+  %ws = buffer.view %weight_scales[%origin] : buffer -> view<[%outputs]xf32>
+  %y = buffer.view %output[%origin] : buffer -> view<[%rows]x[%outputs]xbf16>
+  %yt = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%rows]xbf16>
+  scf.for %row = [%zero to %rows step %one] {
+    scf.for %column = [%zero to %outputs step %one] {
+      %sum = scf.for %k = [%zero to %inputs step %one](%acc = %initial : i32) -> (i32) {
+        %a = view.load %x[%row, %k] : view<[%rows]x[%inputs]xi8> -> i8
+        %b = view.load %w[%column, %k] : view<[%outputs]x[%inputs]xi8> -> i8
+        %aw = scalar.extsi %a : i8 to i32
+        %bw = scalar.extsi %b : i8 to i32
+        %product = scalar.muli %aw, %bw : i32
+        %next = scalar.addi %acc, %product : i32
+        scf.yield %next : i32
+      }
+      %a_scale = view.load %xs[%row] : view<[%rows]xf32> -> f32
+      %w_scale = view.load %ws[%column] : view<[%outputs]xf32> -> f32
+      %scale = scalar.mulf %a_scale, %w_scale : f32
+      %wide = scalar.sitofp %sum : i32 to f32
+      %scaled = scalar.mulf %wide, %scale : f32
+      %rounded = scalar.fptrunc %scaled : f32 to bf16
+      scf.if %column_major {
+        view.store %rounded, %yt[%column, %row] : bf16, view<[%outputs]x[%rows]xbf16>
+        scf.yield
+      } else {
+        view.store %rounded, %y[%row, %column] : bf16, view<[%rows]x[%outputs]xbf16>
+        scf.yield
+      }
+    }
+  }
+  func.return
+}
+
+
+kernel.def target(@wave32) @tail_dense() {
+  %row_tiles = index.constant 2 : index
+  %output_tiles = index.constant 2 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
+  %rows = index.constant 80 : index
+  %inputs = index.constant 256 : index
+  %outputs = index.constant 128 : index
+  %group = index.constant 8 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_i8>(%rows, %inputs, %outputs, %group, %layout, %input, %input_scales, %weight, %weight_scales, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @tail_dense_reference(%input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
+  %rows = index.constant 80 : index
+  %inputs = index.constant 256 : index
+  %outputs = index.constant 128 : index
+  %column_major = scalar.constant false : i1
+  func.call @contraction_reference(%rows, %inputs, %outputs, %column_major, %input, %input_scales, %weight, %weight_scales, %output) : (index, index, index, i1, buffer, buffer, buffer, buffer, buffer) -> ()
+  func.return
+}
+
+check.scenario public @tail_dense_contraction {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %x = check.generate.iota offset(-128) step(1) period(251) : tensor<80x256xi8>
+    %w = check.generate.iota offset(-128) step(1) period(239) : tensor<128x256xi8>
+    %xs = check.generate.iota offset(0.00390625) step(0.000030517578125) : tensor<80xf32>
+    %ws = check.generate.iota offset(0.0078125) step(0.000244140625) : tensor<128xf32>
+    %y = check.generate.fill value(-1.0) : tensor<10240xbf16>
+    check.compare<@tail_dense, @tail_dense_reference>(%x, %xs, %w, %ws, %y) : (tensor<80x256xi8>, tensor<80xf32>, tensor<128x256xi8>, tensor<128xf32>, tensor<10240xbf16>) -> () {
+      check.expect.bitwise actual(%y) expected(%y) : tensor<10240xbf16>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@wave32) @tail_column() {
+  %row_tiles = index.constant 3 : index
+  %output_tiles = index.constant 2 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
+  %rows = index.constant 144 : index
+  %inputs = index.constant 256 : index
+  %outputs = index.constant 128 : index
+  %group = index.constant 2 : index
+  %layout = encoding.layout.strided [1, %rows] : encoding<layout>
+  template.apply<@projection.linear_tiled_i8>(%rows, %inputs, %outputs, %group, %layout, %input, %input_scales, %weight, %weight_scales, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @tail_column_reference(%input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
+  %rows = index.constant 144 : index
+  %inputs = index.constant 256 : index
+  %outputs = index.constant 128 : index
+  %column_major = scalar.constant true : i1
+  func.call @contraction_reference(%rows, %inputs, %outputs, %column_major, %input, %input_scales, %weight, %weight_scales, %output) : (index, index, index, i1, buffer, buffer, buffer, buffer, buffer) -> ()
+  func.return
+}
+
+check.scenario public @tail_column_contraction {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %x = check.generate.iota offset(-128) step(1) period(251) : tensor<144x256xi8>
+    %w = check.generate.iota offset(-128) step(1) period(239) : tensor<128x256xi8>
+    %xs = check.generate.iota offset(0.00390625) step(0.000030517578125) : tensor<144xf32>
+    %ws = check.generate.iota offset(0.0078125) step(0.000244140625) : tensor<128xf32>
+    %y = check.generate.fill value(-1.0) : tensor<18432xbf16>
+    check.compare<@tail_column, @tail_column_reference>(%x, %xs, %w, %ws, %y) : (tensor<144x256xi8>, tensor<144xf32>, tensor<128x256xi8>, tensor<128xf32>, tensor<18432xbf16>) -> () {
+      check.expect.bitwise actual(%y) expected(%y) : tensor<18432xbf16>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@wave32) @long_k() {
+  %row_tiles = index.constant 1 : index
+  %output_tiles = index.constant 1 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
+  %rows = index.constant 16 : index
+  %inputs = index.constant 16384 : index
+  %outputs = index.constant 64 : index
+  %group = index.constant 1 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_i8>(%rows, %inputs, %outputs, %group, %layout, %input, %input_scales, %weight, %weight_scales, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @long_k_reference(%input: buffer, %input_scales: buffer, %weight: buffer, %weight_scales: buffer, %output: buffer) {
+  %rows = index.constant 16 : index
+  %inputs = index.constant 16384 : index
+  %outputs = index.constant 64 : index
+  %column_major = scalar.constant false : i1
+  func.call @contraction_reference(%rows, %inputs, %outputs, %column_major, %input, %input_scales, %weight, %weight_scales, %output) : (index, index, index, i1, buffer, buffer, buffer, buffer, buffer) -> ()
+  func.return
+}
+
+check.scenario public @long_k_contraction {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %x = check.generate.fill value(-128) : tensor<16x16384xi8>
+    %w = check.generate.fill value(-128) : tensor<64x16384xi8>
+    %xs = check.generate.iota offset(0.00390625) step(0.000030517578125) : tensor<16xf32>
+    %ws = check.generate.iota offset(0.0078125) step(0.000244140625) : tensor<64xf32>
+    %y = check.generate.fill value(-1.0) : tensor<1024xbf16>
+    check.compare<@long_k, @long_k_reference>(%x, %xs, %w, %ws, %y) : (tensor<16x16384xi8>, tensor<16xf32>, tensor<64x16384xi8>, tensor<64xf32>, tensor<1024xbf16>) -> () {
+      check.expect.bitwise actual(%y) expected(%y) : tensor<1024xbf16>
+    }
+  }
+  check.return
+}

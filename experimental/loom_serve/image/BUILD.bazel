@@ -191,6 +191,7 @@ loom_cc_library(
         "//experimental/loom_serve/runtime:host",
         "//experimental/loom_serve/runtime:input",
         "//experimental/loom_serve/runtime:jit",
+        "//experimental/loom_serve/runtime:json",
         "//experimental/loom_serve/runtime:module",
         "//experimental/loom_serve/runtime:preparation",
         "//experimental/loom_serve/runtime:program",

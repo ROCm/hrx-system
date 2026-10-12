@@ -1,7 +1,7 @@
 config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 amdgpu.target<gfx11-generic> @head_qualification_wave32 {subgroup_size = 32}
 template.decl @normalization.zero_centered_rows_bf16(%rows: index, %width: index, %threads: index, %input: buffer, %weight: buffer, %output: buffer)
-template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %row_origin: index, %output_origin: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+template.decl @projection.linear_storage_bf16(%rows: index, %inputs: index, %outputs: index, %weight_is_bf16: i1, %row_origin: index, %output_origin: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
 template.decl @projection.store_bf16(%rows: index, %outputs: index, %row_origin: index, %output_origin: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
 command.program.decl @krea2.head_input(%first_row: index, %embedding_offset: offset) launch(%parameters: buffer, %input: buffer, %embedding: buffer, %output: buffer)
 
@@ -29,6 +29,7 @@ kernel.def target(@head_qualification_wave32) @qualify_head_adapter_up() {
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %weight_is_bf16 = scalar.constant false : i1
   %rows = config.get @krea2.image_tokens : index
   %inputs = index.constant 32 : index
   %outputs = index.constant 64 : index
@@ -37,7 +38,7 @@ kernel.def target(@head_qualification_wave32) @qualify_head_adapter_up() {
   %output_tile = kernel.workgroup.id<y> : index
   %row_origin = index.mul %row_tile, %projection_tile : index
   %output_origin = index.mul %output_tile, %projection_tile : index
-  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %row_origin, %output_origin, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<8xf32>)
+  %result = template.apply<@projection.linear_storage_bf16>(%rows, %inputs, %outputs, %weight_is_bf16, %row_origin, %output_origin, %input, %weight) : (index, index, index, i1, index, index, buffer, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
   template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %result, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return

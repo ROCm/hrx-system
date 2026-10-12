@@ -8,6 +8,7 @@
 #include <string>
 
 #include "experimental/loom_serve/runtime/input.h"
+#include "experimental/loom_serve/runtime/json.h"
 #include "experimental/loom_serve/runtime/preparation.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -34,25 +35,29 @@ class PreparationTest : public ::testing::Test {
         &types));
     IREE_ASSERT_OK(loom_serve_input_module_create(environment, nullptr, &input,
                                                   allocator));
+    IREE_ASSERT_OK(
+        loom_serve_json_module_create(environment, &json, allocator));
   }
 
   void TearDown() override {
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
     iree_vm_module_release(input);
+    iree_vm_module_release(json);
     iree_vm_environment_free(environment);
     loom_serve_preparation_destroy(preparation);
   }
 
   iree_status_t Prepare(uint32_t height, uint32_t width, uint32_t text_tokens,
-                        iree_string_view_t adapter) {
+                        iree_string_view_t adapter,
+                        iree_string_view_t options = IREE_SV("{}")) {
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
     arguments[0] = iree_vm_variant_from_i64(height);
     arguments[1] = iree_vm_variant_from_i64(width);
     arguments[2] = iree_vm_variant_from_i64(text_tokens);
-    const iree_string_view_t paths[] = {IREE_SVL("/checkpoints/model"),
-                                        adapter};
+    const iree_string_view_t paths[] = {IREE_SVL("/checkpoints/model"), adapter,
+                                        options};
     for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(paths); ++i) {
       iree_vm_buffer_t* buffer = nullptr;
       IREE_RETURN_IF_ERROR(iree_vm_buffer_wrap(
@@ -61,12 +66,13 @@ class PreparationTest : public ::testing::Test {
           iree_vm_buffer_release_callback_null(), allocator, &buffer));
       arguments[3 + i] = iree_vm_buffer_variant_from_ptr_move(&types, &buffer);
     }
+    iree_vm_module_t* modules[] = {input, json};
     return loom_serve_preparation_create(
         environment, iree_make_cstring_view(FLAG_model_source),
         IREE_SV("prepare"), iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
-        (iree_vm_module_span_t){&input, 1}, &compilation, &preparation,
-        allocator);
+        (iree_vm_module_span_t){modules, IREE_ARRAYSIZE(modules)}, &compilation,
+        &preparation, allocator);
   }
 
   // Host declarations outlive all temporary VM reference and argument storage.
@@ -76,11 +82,13 @@ class PreparationTest : public ::testing::Test {
   // Resolved VM buffer type, borrowed from the environment.
   iree_vm_ref_types_t types = {};
   // Arguments own the borrowed-content VM buffer wrappers.
-  iree_vm_variant_t arguments[5] = {};
+  iree_vm_variant_t arguments[6] = {};
   // Ordinary returned references outlive the temporary cold source program.
   iree_vm_variant_t results[4] = {};
   // Synchronous input validation capability, borrowed by cold invocations.
   iree_vm_module_t* input = nullptr;
+  // Synchronous JSON parsing capability, with no model-specific policy.
+  iree_vm_module_t* json = nullptr;
   // Independently owned result of the source bootstrap.
   loom_serve_preparation_t* preparation = nullptr;
 };
@@ -125,7 +133,8 @@ TEST_F(PreparationTest, KreaDeclaresShapesAndSharedDomains) {
           config.emplace(std::string(item.key.data, item.key.size),
                          std::string(item.value.data, item.value.size));
         }
-        EXPECT_EQ(config.size(), 6);
+        EXPECT_EQ(config.size(), 7);
+        EXPECT_EQ(config["krea2.dit_int8"], "0");
         EXPECT_EQ(config["krea2.image_tokens"], "3072");
         EXPECT_EQ(config["krea2.block_tokens"], std::to_string(3072 + text));
         EXPECT_EQ(config["krea2.text_tokens"], std::to_string(text));
@@ -165,6 +174,8 @@ TEST_F(PreparationTest, DeclarationsOutliveArgumentsAndEnvironment) {
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   iree_vm_module_release(input);
   input = nullptr;
+  iree_vm_module_release(json);
+  json = nullptr;
   iree_vm_environment_free(environment);
   environment = nullptr;
   path.assign(path.size(), 'x');
@@ -186,6 +197,40 @@ TEST_F(PreparationTest, SourceRejectsUnsupportedGeometryBeforeDeclarations) {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                           Prepare(dimensions[0], dimensions[1], dimensions[2],
                                   iree_string_view_empty()));
+    EXPECT_EQ(preparation, nullptr);
+  }
+}
+
+TEST_F(PreparationTest, ConvRotOptionsSelectSharedCompactCheckpoint) {
+  IREE_ASSERT_OK(Prepare(
+      1024, 1024, 512, iree_string_view_empty(),
+      IREE_SV(
+          R"({"int8_\u0063onvrot_checkpoint":"/weights/compact\u002esafetensors"})")));
+  ASSERT_EQ(loom_serve_preparation_stage_count(preparation), 2u);
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    const auto* stage = loom_serve_preparation_stage(preparation, i);
+    EXPECT_EQ(String(stage->parameters[1].path),
+              "/weights/compact.safetensors");
+    std::map<std::string, std::string> config;
+    for (iree_host_size_t j = 0; j < stage->config.binding_count; ++j) {
+      const auto& item = stage->config.bindings[j];
+      config.emplace(std::string(item.key.data, item.key.size),
+                     std::string(item.value.data, item.value.size));
+    }
+    EXPECT_EQ(config["krea2.dit_int8"], "1");
+  }
+}
+
+TEST_F(PreparationTest, SourceRejectsMalformedPrecisionOptions) {
+  for (const char* value :
+       {"[]", R"({"unknown":"x"})", R"({"int8_convrot_checkpoint":0})",
+        R"({"int8_convrot_checkpoint":""})",
+        R"({"int8_convrot_checkpoint":"a","int8_convrot_checkpoint":"b"})",
+        R"({"int8_convrot_checkpoint":"a\u0000b"})"}) {
+    SCOPED_TRACE(value);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          Prepare(1024, 1024, 512, iree_string_view_empty(),
+                                  iree_make_cstring_view(value)));
     EXPECT_EQ(preparation, nullptr);
   }
 }

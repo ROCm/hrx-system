@@ -391,8 +391,12 @@ The image binary's external contract is documented in
 | `control.loom` | Warm VM entries preparing one request payload and advancing command parts through final feedback. |
 | Weight policy source | Cold preparation policy named by each checkpoint-domain declaration. |
 
-The caller passes dimensions, text capacity and asset paths into the cold
-entry. Source validates its architecture's geometry before declaring stages.
+The caller passes dimensions, text capacity, asset paths and an owned JSON
+options buffer into the cold entry. Registration's optional `options` object
+defaults to `{}`; its keys and values are interpreted by the source, not the
+native scheduler. The cold VM has the shared `json` parsing capability beside
+`input` and `prepare`. Source validates its options and architecture's geometry
+before declaring stages. Returned source state may retain the argument buffers.
 Each retained command has the same reflected fixed parameter placement and
 three dynamic bindings: opaque request, F32 CHW RGB in [-1,1], and workspace.
 The native owner prepares one shared parameter bank and allocates the reflected

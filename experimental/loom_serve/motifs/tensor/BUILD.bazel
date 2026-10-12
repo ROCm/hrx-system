@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_HARDWARE_PROFILE")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
 package(default_visibility = ["//visibility:private"])
@@ -23,4 +24,25 @@ loom_test(
     ],
     benchmark_smoke = False,
     execution_profiles = [VM_REFERENCE_PROFILE],
+)
+
+loom_test(
+    name = "quantization_test",
+    srcs = [
+        "quantization.loom",
+        "tests/quantization.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+)
+
+loom_test(
+    name = "linear_i8_test",
+    srcs = [
+        "linear_i8.loom",
+        "linear_tiled.loom",
+        "tests/linear_i8.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
 )

@@ -1,0 +1,119 @@
+template.decl @quantization.convrot256_i8(%rows: index, %columns: index, %input: buffer, %output: buffer, %scales: buffer)
+
+template.decl @quantization.convrot_digit(%value: vector<8xf32>, %distance: i32) -> (vector<8xf32>)
+template.def<@quantization.convrot_digit> device @quantization.convrot_digit_impl(%value: vector<8xf32>, %distance: i32) -> (vector<8xf32>) {
+  %width = scalar.constant 32 : i32
+  %two = scalar.constant 2 : i32
+  %three = scalar.constant 3 : i32
+  %second = scalar.muli %distance, %two : i32
+  %third = scalar.muli %distance, %three : i32
+  %peer1, %valid1 = kernel.subgroup.shuffle<xor> %value, %distance, %width : vector<8xf32>, i32, i32
+  %peer2, %valid2 = kernel.subgroup.shuffle<xor> %value, %second, %width : vector<8xf32>, i32, i32
+  %peer3, %valid3 = kernel.subgroup.shuffle<xor> %value, %third, %width : vector<8xf32>, i32, i32
+  %a = vector.addf %value, %peer1 : vector<8xf32>
+  %b = vector.subf %peer2, %peer3 : vector<8xf32>
+  %result = vector.addf %a, %b : vector<8xf32>
+  template.return %result : vector<8xf32>
+}
+
+// Regular H4 Kronecker power four, normalized by 1/16, followed by
+// per-row symmetric INT8 quantization. Input is BF16; rotation output, the
+// divisor scale and quotient each round to BF16 before nearest-even I8.
+// Output scales retain F32 precision for the subsequent integer contraction.
+//
+// Launch one 128-thread wave32 workgroup per row. Columns are a positive
+// multiple of 256, at most 16384. One BF16 row stays in LDS across the amax
+// reduction; no rotated tensor is written to global memory. Buffers do not
+// overlap. Finite input and finite BF16 rotation/quotient are caller facts.
+template.def<@quantization.convrot256_i8> device @convrot256_i8(%rows: index, %columns: index, %input: buffer, %output: buffer, %scales: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %stride = index.constant 32 : index
+  %four = index.constant 4 : index
+  %group_width = index.constant 256 : index
+  %group_count = index.div %columns, %group_width : index
+  %element_bytes = index.constant 2 : offset
+  %scratch_bytes = index.scale %columns, %element_bytes : index, offset -> offset
+  %max_bytes = index.constant 16 : offset
+  %row = kernel.workgroup.id<x> : index
+  %subgroup = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %width = scalar.constant 32 : i32
+  %distance1 = scalar.constant 1 : i32
+  %distance4 = scalar.constant 4 : i32
+  %distance16 = scalar.constant 16 : i32
+  %normalization = vector.constant 0.0625 : vector<8xf32>
+  %zero_f = scalar.constant 0.0 : f32
+  %offsets = vector.iota %zero step %stride : vector<8xindex>
+  %x = buffer.view %input[%origin] : buffer -> view<[%rows]x[%group_count]x256xbf16>
+  %y = buffer.view %output[%origin] : buffer -> view<[%rows]x[%group_count]x256xi8>
+  %s = buffer.view %scales[%origin] : buffer -> view<[%rows]xf32>
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %staged = buffer.view %scratch[%origin] : buffer -> view<[%group_count]x256xbf16>
+  %maxima = buffer.alloca<workgroup> align(16) %max_bytes : buffer
+  %maxima_view = buffer.view %maxima[%origin] : buffer -> view<4xf32>
+  %local_max = scf.for %group = [%subgroup to %group_count step %four](%maximum = %zero_f : f32) -> (f32) {
+    %stored = vector.gather %x[%row, %group, %lane][%offsets] : view<[%rows]x[%group_count]x256xbf16>, vector<8xindex> -> vector<8xbf16>
+    %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+    %digit0 = template.apply<@quantization.convrot_digit>(%values, %distance1) : (vector<8xf32>, i32) -> (vector<8xf32>)
+    %digit1 = template.apply<@quantization.convrot_digit>(%digit0, %distance4) : (vector<8xf32>, i32) -> (vector<8xf32>)
+    %peer16, %valid16 = kernel.subgroup.shuffle<xor> %digit1, %distance16, %width : vector<8xf32>, i32, i32
+    %peer32 = vector.shuffle<[1, 0, 3, 2, 5, 4, 7, 6]> %digit1 : vector<8xf32>
+    %peer48 = vector.shuffle<[1, 0, 3, 2, 5, 4, 7, 6]> %peer16 : vector<8xf32>
+    %a2 = vector.addf %digit1, %peer16 : vector<8xf32>
+    %b2 = vector.subf %peer32, %peer48 : vector<8xf32>
+    %digit2 = vector.addf %a2, %b2 : vector<8xf32>
+    %peer64 = vector.shuffle<[2, 3, 0, 1, 6, 7, 4, 5]> %digit2 : vector<8xf32>
+    %peer128 = vector.shuffle<[4, 5, 6, 7, 0, 1, 2, 3]> %digit2 : vector<8xf32>
+    %peer192 = vector.shuffle<[6, 7, 4, 5, 2, 3, 0, 1]> %digit2 : vector<8xf32>
+    %a3 = vector.addf %digit2, %peer64 : vector<8xf32>
+    %b3 = vector.subf %peer128, %peer192 : vector<8xf32>
+    %digit3 = vector.addf %a3, %b3 : vector<8xf32>
+    %normalized = vector.mulf %digit3, %normalization : vector<8xf32>
+    %rotated = vector.fptrunc %normalized : vector<8xf32> to vector<8xbf16>
+    vector.scatter %rotated, %staged[%group, %lane][%offsets] : vector<8xbf16>, view<[%group_count]x256xbf16>, vector<8xindex>
+    %rounded = vector.extf %rotated : vector<8xbf16> to vector<8xf32>
+    %absolute = vector.absf %rounded : vector<8xf32>
+    %next_max = vector.reduce<maxnumf> %absolute, %maximum : vector<8xf32>, f32
+    scf.yield %next_max : f32
+  }
+  %wave_max = kernel.subgroup.reduce<maxnumf> %local_max : f32
+  %first = index.cmp eq, %lane, %zero : index
+  scf.if %first {
+    view.store %wave_max, %maxima_view[%subgroup] : f32, view<4xf32>
+    scf.yield
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %wave_maxima = vector.load %maxima_view[0] : view<4xf32> -> vector<4xf32>
+  %maximum = vector.reduce<maxnumf> %wave_maxima, %zero_f : vector<4xf32>, f32
+  %limit = scalar.constant 127.0 : f32
+  %floor = scalar.constant 1.0e-30 : f32
+  %divided = scalar.divf %maximum, %limit : f32
+  %scale = scalar.maxnumf %divided, %floor : f32
+  %scale_bf16 = scalar.fptrunc %scale : f32 to bf16
+  %scale_f32 = scalar.extf %scale_bf16 : bf16 to f32
+  %scale_vector = vector.splat %scale_f32 : vector<8xf32>
+  %lower = vector.constant -128.0 : vector<8xf32>
+  %upper = vector.constant 127.0 : vector<8xf32>
+  %workitem = kernel.workitem.id<x> : index
+  %leader = index.cmp eq, %workitem, %zero : index
+  scf.if %leader {
+    view.store %scale, %s[%row] : f32, view<[%rows]xf32>
+    scf.yield
+  }
+  scf.for %group = [%subgroup to %group_count step %four] {
+    %stored = vector.gather %staged[%group, %lane][%offsets] : view<[%group_count]x256xbf16>, vector<8xindex> -> vector<8xbf16>
+    %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+    %divided = vector.divf %values, %scale_vector : vector<8xf32>
+    %rounded_bf16 = vector.fptrunc %divided : vector<8xf32> to vector<8xbf16>
+    %rounded = vector.extf %rounded_bf16 : vector<8xbf16> to vector<8xf32>
+    %nearest = vector.roundevenf %rounded : vector<8xf32>
+    %bounded_low = vector.maxnumf %nearest, %lower : vector<8xf32>
+    %bounded = vector.minnumf %bounded_low, %upper : vector<8xf32>
+    %integer = vector.fptosi %bounded : vector<8xf32> to vector<8xi32>
+    %bytes = vector.trunci %integer : vector<8xi32> to vector<8xi8>
+    vector.scatter %bytes, %y[%row, %group, %lane][%offsets] : vector<8xi8>, view<[%rows]x[%group_count]x256xi8>, vector<8xindex>
+    scf.yield
+  }
+  template.return
+}

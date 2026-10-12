@@ -1,4 +1,5 @@
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
@@ -6,11 +7,11 @@ global.rodata.def @root = bytes("67656e65726174655f696d616765")
 global.rodata.def @pixels = bytes("666978747572652e706978656c73")
 global.rodata.def @tokenizer = bytes("746f6b656e697a65722e6a736f6e")
 global.rodata.def @name = bytes("666978747572652d696d616765")
-global.rodata.def @invalid = bytes("6669787475726520726571756972657320312d363420706978656c20657874656e74732c20312d34303936207465787420746f6b656e7320616e64206e6f2061646170746572")
+global.rodata.def @invalid = bytes("6669787475726520726571756972657320312d363420706978656c20657874656e74732c20312d34303936207465787420746f6b656e732c206e6f206164617074657220616e6420656d707479206f7074696f6e73")
 
 // A real source bootstrap with no immutable parameter roots. The two kernels
 // communicate through compiler-reflected private command workspace.
-func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer) -> (i64, buffer, buffer, buffer) {
+func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer, %options: buffer) -> (i64, buffer, buffer, buffer) {
   %zero = scalar.constant 0 : i64
   %maximum = scalar.constant 64 : i64
   %text_maximum = scalar.constant 4096 : i64
@@ -32,6 +33,13 @@ func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buff
   %valid32 = scalar.extui %valid : i1 to i32
   %error = global.load @invalid : buffer
   func.call @require(%valid32, %error) : (i32, buffer) -> ()
+  %fields, %type, %count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
+  %object_type = scalar.constant 2 : i32
+  %object = scalar.cmpi eq, %type, %object_type : i32
+  %empty = scalar.cmpi eq, %count, %zero : i64
+  %valid_options = scalar.andi %object, %empty : i1
+  %valid_options32 = scalar.extui %valid_options : i1 to i32
+  func.call @require(%valid_options32, %error) : (i32, buffer) -> ()
   %root = global.load @root : buffer
   %stage = func.call @stage(%root, %text) : (buffer, i64) -> (i32)
   %key = global.load @pixels : buffer

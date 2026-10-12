@@ -39,6 +39,7 @@ loom_cc_test(
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::input
+    iree::experimental::loom_serve::runtime::json
     iree::experimental::loom_serve::runtime::preparation
     iree::testing::gtest
     iree::testing::gtest_main

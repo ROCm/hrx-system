@@ -11,6 +11,7 @@
 
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/input.h"
+#include "experimental/loom_serve/runtime/json.h"
 #include "experimental/loom_serve/runtime/module.h"
 #include "experimental/loom_serve/runtime/preparation.h"
 #include "experimental/loom_serve/runtime/program.h"
@@ -265,25 +266,34 @@ static iree_status_t image_prepare(
   char* path = NULL;
   IREE_RETURN_IF_ERROR(iree_file_path_join(
       options->source_directory, IREE_SV("prepare.loom"), allocator, &path));
-  iree_vm_module_t* input = NULL;
+  iree_vm_module_t* modules[2] = {0};
   iree_status_t status = loom_serve_input_module_create(
-      model->control.environment, NULL, &input, allocator);
+      model->control.environment, NULL, &modules[0], allocator);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_json_module_create(model->control.environment,
+                                           &modules[1], allocator);
+  }
   iree_vm_variant_t arguments[] = {
       iree_vm_variant_from_i64(options->height),
       iree_vm_variant_from_i64(options->width),
       iree_vm_variant_from_i64(options->text_tokens),
       {0},
+      {0},
       {0}};
-  const iree_string_view_t paths[] = {options->checkpoint_directory,
-                                      options->adapter_path};
+  const iree_string_view_t inputs[] = {
+      options->checkpoint_directory, options->adapter_path,
+      iree_string_view_is_empty(options->options) ? IREE_SV("{}")
+                                                  : options->options};
   for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(paths) && iree_status_is_ok(status); ++i) {
+       i < IREE_ARRAYSIZE(inputs) && iree_status_is_ok(status); ++i) {
     iree_vm_buffer_t* buffer = NULL;
-    status = iree_vm_buffer_wrap(
-        IREE_VM_BUFFER_ACCESS_FLAG_READ,
-        iree_make_byte_span((void*)paths[i].data, paths[i].size),
-        iree_vm_buffer_release_callback_null(), allocator, &buffer);
+    status = iree_vm_buffer_create(inputs[i].size, 8, allocator, &buffer);
     if (iree_status_is_ok(status)) {
+      iree_byte_span_t bytes;
+      status = iree_vm_buffer_map_write(buffer, 0, inputs[i].size, &bytes);
+      if (iree_status_is_ok(status) && inputs[i].size) {
+        memcpy(bytes.data, inputs[i].data, inputs[i].size);
+      }
       arguments[3 + i] = iree_vm_buffer_variant_from_ptr_move(
           &model->control.vm_types, &buffer);
     }
@@ -294,8 +304,8 @@ static iree_status_t image_prepare(
         model->control.environment, iree_make_cstring_view(path),
         IREE_SV("prepare"), iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
-        (iree_vm_module_span_t){&input, 1}, &model->compilation,
-        &model->preparation, allocator);
+        (iree_vm_module_span_t){modules, IREE_ARRAYSIZE(modules)},
+        &model->compilation, &model->preparation, allocator);
   }
   int64_t capacity = 0;
   iree_vm_buffer_t* metadata[2] = {0};
@@ -347,7 +357,9 @@ static iree_status_t image_prepare(
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
-  iree_vm_module_release(input);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(modules); ++i) {
+    iree_vm_module_release(modules[i]);
+  }
   iree_allocator_free(allocator, path);
   if (iree_status_is_ok(status)) {
     const iree_host_size_t count =

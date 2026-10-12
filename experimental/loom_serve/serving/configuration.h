@@ -70,8 +70,6 @@ typedef struct loom_serve_image_configuration_t {
 typedef struct loom_serve_finite_configuration_t {
   // Owned asset directory passed to source prepare.
   iree_string_view_t assets;
-  // Owned JSON object interpreted by source prepare, not the native scheduler.
-  iree_string_view_t options;
 } loom_serve_finite_configuration_t;
 
 // One source-defined deployment. Entries have independent logical state and
@@ -86,6 +84,9 @@ typedef struct loom_serve_model_configuration_t {
   iree_string_view_t name;
   // Owned source package directory path.
   iree_string_view_t source;
+  // Owned JSON object interpreted by finite/image source prepare. Text has no
+  // source options channel and keeps this empty.
+  iree_string_view_t options;
   // Bounded host request credit. Text/image exclude the active invocation;
   // finite vector services include all requests in the active cohort.
   iree_host_size_t pending_requests;

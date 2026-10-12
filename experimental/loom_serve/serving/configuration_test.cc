@@ -162,7 +162,7 @@ TEST(ConfigurationTest, MixedModalitiesKeepDisjointOptionsAndOwnedStrings) {
       "{\"models\":[" + Image("default-image") + "," + Model("text") + "," +
       Image(
           "styled",
-          R"(,"adapter":"style\u002esafetensors","width":768,"height":512,"text_tokens":1024,"command_quantum":64,"pending_requests":3)") +
+          R"(,"adapter":"style\u002esafetensors","width":768,"height":512,"text_tokens":1024,"command_quantum":64,"pending_requests":3,"options":{"checkpoint":"compact.safetensors"})") +
       "]}";
   loom_serve_configuration_t configuration;
   IREE_ASSERT_OK(loom_serve_configuration_initialize(
@@ -185,6 +185,7 @@ TEST(ConfigurationTest, MixedModalitiesKeepDisjointOptionsAndOwnedStrings) {
   EXPECT_EQ(a.image.text_tokens, 512u);
   EXPECT_EQ(a.image.command_quantum, 0u);
   EXPECT_EQ(a.pending_requests, 32u);
+  EXPECT_EQ(std::string(a.options.data, a.options.size), "{}");
   EXPECT_EQ(std::string(b.image.adapter.data, b.image.adapter.size),
             "style.safetensors");
   EXPECT_EQ(b.image.width, 768u);
@@ -192,6 +193,8 @@ TEST(ConfigurationTest, MixedModalitiesKeepDisjointOptionsAndOwnedStrings) {
   EXPECT_EQ(b.image.text_tokens, 1024u);
   EXPECT_EQ(b.image.command_quantum, 64u);
   EXPECT_EQ(b.pending_requests, 3u);
+  EXPECT_EQ(std::string(b.options.data, b.options.size),
+            R"({"checkpoint":"compact.safetensors"})");
   loom_serve_configuration_deinitialize(&configuration);
 }
 
@@ -228,9 +231,9 @@ TEST(ConfigurationTest, EmbeddingPolicyStaysSourceOwned) {
   EXPECT_EQ(model.kind, LOOM_SERVE_MODEL_KIND_EMBEDDING);
   EXPECT_EQ(std::string(model.finite.assets.data, model.finite.assets.size),
             "weights");
-  EXPECT_EQ(std::string(model.finite.options.data, model.finite.options.size),
+  EXPECT_EQ(std::string(model.options.data, model.options.size),
             R"({"task":"query","batch_units":128})");
-  const auto& defaults = configuration.models[1].finite.options;
+  const auto& defaults = configuration.models[1].options;
   EXPECT_EQ(std::string(defaults.data, defaults.size), "{}");
   loom_serve_configuration_deinitialize(&configuration);
   for (const char* extra : {R"(,"width":32)", R"(,"rows":8)",
@@ -274,6 +277,8 @@ TEST(ConfigurationTest,
        "{\"models\":[" + Model("x", R"(,"typo":true)") + "]}",
        "{\"models\":[" + Model("x", R"(,"width":384)") + "]}",
        "{\"models\":[" + Model("x", R"(,"command_quantum":1)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"options":{})") + "]}",
+       "{\"models\":[" + Image("x", R"(,"options":[])") + "]}",
        "{\"models\":[" + Image("x", R"(,"weights":"file.gguf")") + "]}",
        "{\"models\":[" + Image("x", R"(,"rows":1)") + "]}",
        "{\"models\":[" + Image("x", R"(,"width":0)") + "]}",
@@ -318,7 +323,7 @@ TEST(ConfigurationTest, DecisionAndEmbeddingShareOnlyFiniteConfiguration) {
   ASSERT_EQ(configuration.model_count, 2u);
   EXPECT_EQ(configuration.models[0].kind, LOOM_SERVE_MODEL_KIND_DECISION);
   EXPECT_EQ(configuration.models[1].kind, LOOM_SERVE_MODEL_KIND_EMBEDDING);
-  const auto policy = configuration.models[0].finite.options;
+  const auto policy = configuration.models[0].options;
   EXPECT_EQ(std::string(policy.data, policy.size), R"({"batch_units":64})");
   loom_serve_configuration_deinitialize(&configuration);
   for (const char* field : {R"("rows":8)", R"("width":32)", R"("weights":"x")",
