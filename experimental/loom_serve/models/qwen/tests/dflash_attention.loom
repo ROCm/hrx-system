@@ -1,0 +1,390 @@
+kernel.decl @qwen38_dflash_query_prepare(%tokens: index, %spans: index) launch(%capacity: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_dflash_block_prepare(%tokens: index, %spans: index) launch(%capacity: index, %epoch: buffer, %key: buffer, %value: buffer, %weight: buffer, %cache: buffer)
+kernel.decl @qwen38_dflash_context_prepare(%tokens: index, %spans: index) launch(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %key: buffer, %value: buffer, %weight: buffer, %cache: buffer)
+kernel.decl @qwen38_dflash_attention(%tokens: index, %spans: index) launch(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %block_cache: buffer, %context: buffer, %output: buffer)
+
+// One live descriptor uses the second half of the packed activation storage
+// and resident row one. The second dispatch span has poisoned metadata. Page
+// zero and page 65 are guards; the other pages follow a fixed permutation.
+func.def @dflash_fixture(%position: index, %count: index, %epoch: buffer, %rows: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<13xi32>
+  %sixteen = scalar.constant 16 : i32
+  %one_word = scalar.constant 1 : i32
+  %eight_word = scalar.constant 8 : i32
+  %count_word = index.cast %count : index to i32
+  %position_word = index.cast %position : index to i32
+  view.store %sixteen, %header[0] : i32, view<13xi32>
+  view.store %one_word, %header[1] : i32, view<13xi32>
+  view.store %count_word, %header[3] : i32, view<13xi32>
+  view.store %position_word, %header[4] : i32, view<13xi32>
+  view.store %eight_word, %header[5] : i32, view<13xi32>
+  view.store %one_word, %header[6] : i32, view<13xi32>
+  %origins = buffer.view %rows[%origin] : buffer -> view<2x4xi64>
+  %guard = scalar.constant 256 : i64
+  view.store %guard, %origins[1, 2] : i64, view<2x4xi64>
+  %map_origin = index.constant 2304 : offset
+  %map = buffer.view %rows[%map_origin] : buffer -> view<64xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %five = index.constant 5 : index
+  %sixty_four = index.constant 64 : index
+  scf.for %page = [%zero to %sixty_four step %one] {
+    %mixed = index.madd %page, %three, %five : index
+    %permuted = index.rem %mixed, %sixty_four : index
+    %physical = index.add %permuted, %one : index
+    %word = index.cast %physical : index to i32
+    view.store %word, %map[%page] : i32, view<64xi32>
+  }
+  func.return
+}
+
+// Independent scalar RMS and rotary oracle. Reduction uses F64; the rotary
+// angle deliberately retains the production F32 transcendental contract.
+func.def @dflash_rotary_reference(%tokens: index, %heads: index, %token0: index, %head0: index, %position: index, %channel0: index, %input: buffer, %weight: buffer) -> (f32) {
+  %token = index.assume %token0 [ge(%token0, 0), lt(%token0, %tokens)] : index
+  %head = index.assume %head0 [ge(%head0, 0), lt(%head0, %heads)] : index
+  %channel = index.assume %channel0 [range(%channel0, 0, 127)] : index
+  %origin = index.constant 0 : offset
+  %x = buffer.view %input[%origin] : buffer -> view<[%tokens]x[%heads]x128xf32>
+  %w = buffer.view %weight[%origin] : buffer -> view<128xf32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %width = index.constant 128 : index
+  %half = index.constant 64 : index
+  %zero_f = scalar.constant 0.0 : f64
+  %sum = scf.for %i = [%zero to %width step %one](%acc = %zero_f : f64) -> (f64) {
+    %value = view.load %x[%token, %head, %i] : view<[%tokens]x[%heads]x128xf32> -> f32
+    %wide = scalar.extf %value : f32 to f64
+    %square = scalar.mulf %wide, %wide : f64
+    %next = scalar.addf %acc, %square : f64
+    scf.yield %next : f64
+  }
+  %scale = scalar.constant 0.0078125 : f64
+  %epsilon = scalar.constant 0.000001 : f64
+  %mean = scalar.mulf %sum, %scale : f64
+  %variance = scalar.addf %mean, %epsilon : f64
+  %variance_f32 = scalar.fptrunc %variance : f64 to f32
+  %inverse = scalar.rsqrtf<afn> %variance_f32 : f32
+  %pair = index.rem %channel, %half : index
+  %right = index.add %pair, %half : index
+  %a = view.load %x[%token, %head, %pair] : view<[%tokens]x[%heads]x128xf32> -> f32
+  %b = view.load %x[%token, %head, %right] : view<[%tokens]x[%heads]x128xf32> -> f32
+  %wa = view.load %w[%pair] : view<128xf32> -> f32
+  %wb = view.load %w[%right] : view<128xf32> -> f32
+  %na = scalar.mulf %a, %inverse : f32
+  %nb = scalar.mulf %b, %inverse : f32
+  %sa = scalar.mulf %na, %wa : f32
+  %sb = scalar.mulf %nb, %wb : f32
+  %pair_word = index.cast %pair : index to i32
+  %position_word = index.cast %position : index to i32
+  %pair_f = scalar.uitofp %pair_word : i32 to f32
+  %position_f = scalar.uitofp %position_word : i32 to f32
+  %log_step = scalar.constant -0.25184524454622375 : f32
+  %log_frequency = scalar.mulf %pair_f, %log_step : f32
+  %frequency = scalar.expf<afn> %log_frequency : f32
+  %angle = scalar.mulf %position_f, %frequency : f32
+  %sine = scalar.sinf<afn> %angle : f32
+  %cosine = scalar.cosf<afn> %angle : f32
+  %ac = scalar.mulf %sa, %cosine : f32
+  %bs = scalar.mulf %sb, %sine : f32
+  %bc = scalar.mulf %sb, %cosine : f32
+  %as = scalar.mulf %sa, %sine : f32
+  %left_result = scalar.subf %ac, %bs : f32
+  %right_result = scalar.addf %bc, %as : f32
+  %low = index.cmp ult, %channel, %half : index
+  %result = scf.select %low, %left_result, %right_result : f32
+  func.return %result : f32
+}
+
+func.def @query_reference(%capacity: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<13xi32>
+  %word = view.load %header[4] : view<13xi32> -> i32
+  %position = index.cast %word : i32 to index
+  %y = buffer.view %output[%origin] : buffer -> view<16x32x128xf32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %eight = index.constant 8 : index
+  %heads = index.constant 32 : index
+  %width = index.constant 128 : index
+  scf.for %relative = [%zero to %eight step %one] {
+    %token = index.add %relative, %eight : index
+    %absolute = index.add %position, %relative : index
+    scf.for %head = [%zero to %heads step %one] {
+      scf.for %channel = [%zero to %width step %one] {
+        %value = func.call @dflash_rotary_reference(%capacity, %heads, %token, %head, %absolute, %channel, %input, %weight) : (index, index, index, index, index, index, buffer, buffer) -> (f32)
+        view.store %value, %y[%token, %head, %channel] : f32, view<16x32x128xf32>
+      }
+    }
+  }
+  func.return
+}
+
+// The fixture's page permutation is evaluated directly instead of calling the
+// production map helper. All bytes outside the accepted three-token range keep
+// their sentinels, including the five rejected tokens in the packed block.
+func.def @context_reference(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %key: buffer, %value: buffer, %weight: buffer, %cache: buffer) {
+  %origin = index.constant 0 : offset
+  %key_origin = index.constant 4352 : offset
+  %value_origin = index.constant 8655104 : offset
+  %k = buffer.view %cache[%key_origin] : buffer -> view<4224x8x128xf16>
+  %v = buffer.view %cache[%value_origin] : buffer -> view<4224x8x128xf16>
+  %input_v = buffer.view %value[%origin] : buffer -> view<16x8x128xf32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %five = index.constant 5 : index
+  %eight = index.constant 8 : index
+  %position = index.constant 67 : index
+  %page_width = index.constant 64 : index
+  %width = index.constant 128 : index
+  scf.for %relative = [%zero to %three step %one] {
+    %token = index.add %relative, %eight : index
+    %absolute = index.add %position, %relative : index
+    %page = index.div %absolute, %page_width : index
+    %within = index.rem %absolute, %page_width : index
+    %mixed = index.madd %page, %three, %five : index
+    %permuted = index.rem %mixed, %page_width : index
+    %physical_page = index.add %permuted, %one : index
+    %physical = index.madd %physical_page, %page_width, %within : index
+    scf.for %head = [%zero to %eight step %one] {
+      scf.for %channel = [%zero to %width step %one] {
+        %key_value = func.call @dflash_rotary_reference(%capacity, %eight, %token, %head, %absolute, %channel, %key, %weight) : (index, index, index, index, index, index, buffer, buffer) -> (f32)
+        %value_value = view.load %input_v[%token, %head, %channel] : view<16x8x128xf32> -> f32
+        %k16 = scalar.fptrunc %key_value : f32 to f16
+        %v16 = scalar.fptrunc %value_value : f32 to f16
+        view.store %k16, %k[%physical, %head, %channel] : f16, view<4224x8x128xf16>
+        view.store %v16, %v[%physical, %head, %channel] : f16, view<4224x8x128xf16>
+      }
+    }
+  }
+  func.return
+}
+
+// Uniform logits reduce to a visible-window mean. Distinct committed and block
+// values detect accidentally causal block attention and an off-by-one window.
+func.def @window_reference(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %block_cache: buffer, %context: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<13xi32>
+  %position_word = view.load %header[4] : view<13xi32> -> i32
+  %position = index.cast %position_word : i32 to index
+  %y = buffer.view %output[%origin] : buffer -> view<16x32x128xf32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %eight = index.constant 8 : index
+  %heads = index.constant 32 : index
+  %width = index.constant 128 : index
+  %tail = index.constant 2047 : index
+  %context_value = scalar.constant 0.25 : f64
+  %block_sum = scalar.constant 6.0 : f64
+  scf.for %relative = [%zero to %eight step %one] {
+    %allowed = index.sub %tail, %relative : index
+    %history = index.min %allowed, %position : index
+    %total = index.add %history, %eight : index
+    %history_word = index.cast %history : index to i32
+    %total_word = index.cast %total : index to i32
+    %history_f = scalar.uitofp %history_word : i32 to f64
+    %total_f = scalar.uitofp %total_word : i32 to f64
+    %old_sum = scalar.mulf %history_f, %context_value : f64
+    %sum = scalar.addf %old_sum, %block_sum : f64
+    %mean = scalar.divf %sum, %total_f : f64
+    %result = scalar.fptrunc %mean : f64 to f32
+    %token = index.add %relative, %eight : index
+    scf.for %head = [%zero to %heads step %one] {
+      scf.for %channel = [%zero to %width step %one] {
+        view.store %result, %y[%token, %head, %channel] : f32, view<16x32x128xf32>
+      }
+    }
+  }
+  func.return
+}
+
+check.scenario public @query_rotary {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %capacity = check.literal value(16) : index
+    %spans = check.literal value(2) : index
+    %position = check.literal value(67) : index
+    %count = check.literal value(8) : index
+    %epoch = check.generate.fill value(-99) : tensor<13xi32>
+    %rows = check.generate.fill value(-1) : tensor<640xi32>
+    check.generate<@dflash_fixture>(%position, %count, %epoch, %rows) : (index, index, tensor<13xi32>, tensor<640xi32>) -> ()
+    %input = check.generate.iota offset(-0.5) step(0.001) period(997) : tensor<16x32x128xf32>
+    %weight = check.generate.iota offset(0.75) step(0.001) : tensor<128xf32>
+    %output = check.generate.fill value(-9.0) : tensor<16x32x128xf32>
+    check.compare<@qwen38_dflash_query_prepare, @query_reference>[%capacity, %spans](%capacity, %epoch, %input, %weight, %output) : [index, index](index, tensor<13xi32>, tensor<16x32x128xf32>, tensor<128xf32>, tensor<16x32x128xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(4.0e-6) rtol(3.0e-6) nan(different) : tensor<16x32x128xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @accepted_context {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %capacity = check.literal value(16) : index
+    %spans = check.literal value(2) : index
+    %position = check.literal value(67) : index
+    %count = check.literal value(3) : index
+    %layer_origin = check.literal value(4096) : offset
+    %epoch = check.generate.fill value(-99) : tensor<13xi32>
+    %rows = check.generate.fill value(-1) : tensor<640xi32>
+    check.generate<@dflash_fixture>(%position, %count, %epoch, %rows) : (index, index, tensor<13xi32>, tensor<640xi32>) -> ()
+    %key = check.generate.iota offset(-0.5) step(0.001) period(997) : tensor<16x8x128xf32>
+    %value = check.generate.iota offset(-0.25) step(0.001) period(499) : tensor<16x8x128xf32>
+    %weight = check.generate.iota offset(0.75) step(0.001) : tensor<128xf32>
+    %cache = check.generate.fill value(-9.0) : tensor<8652928xf16>
+    check.compare<@qwen38_dflash_context_prepare, @context_reference>[%capacity, %spans](%capacity, %epoch, %rows, %layer_origin, %key, %value, %weight, %cache) : [index, index](index, tensor<13xi32>, tensor<640xi32>, offset, tensor<16x8x128xf32>, tensor<16x8x128xf32>, tensor<128xf32>, tensor<8652928xf16>) -> () {
+      check.expect.close actual(%cache) expected(%cache) atol(0.001) rtol(0.001) nan(different) : tensor<8652928xf16>
+    }
+  }
+  check.return
+}
+
+func.def @attention_operand(%key0: index, %head0: index, %channel0: index, %plane: index, %block_cache: buffer, %context: buffer) -> (f64) {
+  %key = index.assume %key0 [range(%key0, 0, 74)] : index
+  %head = index.assume %head0 [range(%head0, 0, 7)] : index
+  %channel = index.assume %channel0 [range(%channel0, 0, 127)] : index
+  %history = index.constant 67 : index
+  %old = index.cmp ult, %key, %history : index
+  %stored = scf.if %old -> (f16) {
+    %one = index.constant 1 : index
+    %three = index.constant 3 : index
+    %five = index.constant 5 : index
+    %sixty_four = index.constant 64 : index
+    %page = index.div %key, %sixty_four : index
+    %within = index.rem %key, %sixty_four : index
+    %mixed = index.madd %page, %three, %five : index
+    %permuted = index.rem %mixed, %sixty_four : index
+    %physical_page = index.add %permuted, %one : index
+    %physical = index.madd %physical_page, %sixty_four, %within : index
+    %guard = index.constant 4352 : offset
+    %plane_bytes = index.constant 8650752 : offset
+    %relative = index.scale %plane, %plane_bytes : index, offset -> offset
+    %origin = index.add %relative, %guard : offset
+    %view = buffer.view %context[%origin] : buffer -> view<4224x8x128xf16>
+    %value = view.load %view[%physical, %head, %channel] : view<4224x8x128xf16> -> f16
+    scf.yield %value : f16
+  } else {
+    %eight = index.constant 8 : index
+    %relative = index.sub %key, %history : index
+    %token = index.add %relative, %eight : index
+    %plane_bytes = index.constant 32768 : offset
+    %origin = index.scale %plane, %plane_bytes : index, offset -> offset
+    %view = buffer.view %block_cache[%origin] : buffer -> view<16x8x128xf16>
+    %value = view.load %view[%token, %head, %channel] : view<16x8x128xf16> -> f16
+    scf.yield %value : f16
+  }
+  %wide = scalar.extf %stored : f16 to f64
+  func.return %wide : f64
+}
+
+func.def @attention_reference(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %block_cache: buffer, %context: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %score_bytes = index.constant 600 : offset
+  %score_storage = buffer.alloca<private> align(8) %score_bytes : buffer
+  %scores = buffer.view %score_storage[%origin] : buffer -> view<75xf64>
+  %q = buffer.view %query[%origin] : buffer -> view<16x32x128xf32>
+  %y = buffer.view %output[%origin] : buffer -> view<16x32x128xf32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %heads = index.constant 32 : index
+  %width = index.constant 128 : index
+  %visible = index.constant 75 : index
+  %zero_f = scalar.constant 0.0 : f64
+  %negative = scalar.constant -inf : f64
+  %scale = scalar.constant 0.08838834764831845 : f64
+  scf.for %relative = [%zero to %eight step %one] {
+    %token = index.add %relative, %eight : index
+    scf.for %head = [%zero to %heads step %one] {
+      %kv_head = index.div %head, %four : index
+      %maximum = scf.for %key = [%zero to %visible step %one](%maximum = %negative : f64) -> (f64) {
+        %dot = scf.for %channel = [%zero to %width step %one](%acc = %zero_f : f64) -> (f64) {
+          %q32 = view.load %q[%token, %head, %channel] : view<16x32x128xf32> -> f32
+          %q64 = scalar.extf %q32 : f32 to f64
+          %k64 = func.call @attention_operand(%key, %kv_head, %channel, %zero, %block_cache, %context) : (index, index, index, index, buffer, buffer) -> (f64)
+          %product = scalar.mulf %q64, %k64 : f64
+          %next = scalar.addf %acc, %product : f64
+          scf.yield %next : f64
+        }
+        %score = scalar.mulf %dot, %scale : f64
+        view.store %score, %scores[%key] : f64, view<75xf64>
+        %next = scalar.maxnumf %maximum, %score : f64
+        scf.yield %next : f64
+      }
+      %denominator = scf.for %key = [%zero to %visible step %one](%sum = %zero_f : f64) -> (f64) {
+        %score = view.load %scores[%key] : view<75xf64> -> f64
+        %centered = scalar.subf %score, %maximum : f64
+        %centered32 = scalar.fptrunc %centered : f64 to f32
+        %weight32 = scalar.expf<afn> %centered32 : f32
+        %weight = scalar.extf %weight32 : f32 to f64
+        view.store %weight, %scores[%key] : f64, view<75xf64>
+        %next = scalar.addf %sum, %weight : f64
+        scf.yield %next : f64
+      }
+      scf.for %channel = [%zero to %width step %one] {
+        %numerator = scf.for %key = [%zero to %visible step %one](%sum = %zero_f : f64) -> (f64) {
+          %weight = view.load %scores[%key] : view<75xf64> -> f64
+          %value = func.call @attention_operand(%key, %kv_head, %channel, %one, %block_cache, %context) : (index, index, index, index, buffer, buffer) -> (f64)
+          %product = scalar.mulf %weight, %value : f64
+          %next = scalar.addf %sum, %product : f64
+          scf.yield %next : f64
+        }
+        %result = scalar.divf %numerator, %denominator : f64
+        %rounded = scalar.fptrunc %result : f64 to f32
+        view.store %rounded, %y[%token, %head, %channel] : f32, view<16x32x128xf32>
+      }
+    }
+  }
+  func.return
+}
+
+check.scenario public @scattered_attention {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %capacity = check.literal value(16) : index
+    %spans = check.literal value(2) : index
+    %position = check.literal value(67) : index
+    %count = check.literal value(8) : index
+    %layer_origin = check.literal value(4096) : offset
+    %epoch = check.generate.fill value(-99) : tensor<13xi32>
+    %rows = check.generate.fill value(-1) : tensor<640xi32>
+    check.generate<@dflash_fixture>(%position, %count, %epoch, %rows) : (index, index, tensor<13xi32>, tensor<640xi32>) -> ()
+    %query = check.generate.iota offset(-0.5) step(0.001) period(997) : tensor<16x32x128xf32>
+    %block_cache = check.generate.iota offset(-0.25) step(0.001) period(499) : tensor<2x16x8x128xf16>
+    %context = check.generate.iota offset(-0.75) step(0.002) period(751) : tensor<8652928xf16>
+    %output = check.generate.fill value(-9.0) : tensor<16x32x128xf32>
+    check.compare<@qwen38_dflash_attention, @attention_reference>[%capacity, %spans](%capacity, %epoch, %rows, %layer_origin, %query, %block_cache, %context, %output) : [index, index](index, tensor<13xi32>, tensor<640xi32>, offset, tensor<16x32x128xf32>, tensor<2x16x8x128xf16>, tensor<8652928xf16>, tensor<16x32x128xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(2.0e-6) rtol(5.0e-6) nan(different) : tensor<16x32x128xf32>
+    }
+  }
+  check.return
+}
+
+func.def @window_position(%trial: index) -> (index) {
+  %stride = index.constant 1100 : index
+  %position = index.mul %trial, %stride : index
+  func.return %position : index
+}
+
+check.scenario public @window_attention {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %capacity = check.literal value(16) : index
+    %spans = check.literal value(2) : index
+    %position = check.generate<@window_position>(%trial) : (index) -> (index)
+    %count = check.literal value(8) : index
+    %layer_origin = check.literal value(4096) : offset
+    %epoch = check.generate.fill value(-99) : tensor<13xi32>
+    %rows = check.generate.fill value(-1) : tensor<640xi32>
+    check.generate<@dflash_fixture>(%position, %count, %epoch, %rows) : (index, index, tensor<13xi32>, tensor<640xi32>) -> ()
+    %query = check.generate.fill value(0.0) : tensor<16x32x128xf32>
+    %block_cache = check.generate.fill value(0.75) : tensor<2x16x8x128xf16>
+    %context = check.generate.fill value(0.25) : tensor<8652928xf16>
+    %output = check.generate.fill value(-9.0) : tensor<16x32x128xf32>
+    check.compare<@qwen38_dflash_attention, @window_reference>[%capacity, %spans](%capacity, %epoch, %rows, %layer_origin, %query, %block_cache, %context, %output) : [index, index](index, tensor<13xi32>, tensor<640xi32>, offset, tensor<16x32x128xf32>, tensor<2x16x8x128xf16>, tensor<8652928xf16>, tensor<16x32x128xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(1.0e-6) rtol(1.0e-6) nan(different) : tensor<16x32x128xf32>
+    }
+  }
+  check.return
+}
