@@ -347,6 +347,31 @@ py_binary(
     deps = ["//experimental/loom_serve/http:chat_client"],
 )
 
+py_library(
+    name = "benchmark_cohort_lib",
+    testonly = True,
+    srcs = ["benchmark_cohort.py"],
+    deps = [
+        ":benchmark_service_lib",
+        "//experimental/loom_serve/http:chat_client",
+        "//experimental/loom_serve/testing:http",
+    ],
+)
+
+py_binary(
+    name = "benchmark_cohort",
+    testonly = True,
+    srcs = ["benchmark_cohort.py"],
+    deps = [":benchmark_cohort_lib"],
+)
+
+py_test(
+    name = "benchmark_cohort_test",
+    size = "small",
+    srcs = ["benchmark_cohort_test.py"],
+    deps = [":benchmark_cohort_lib"],
+)
+
 py_test(
     name = "request_check_test",
     size = "small",
