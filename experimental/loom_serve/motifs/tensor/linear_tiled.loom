@@ -1,19 +1,15 @@
-template.decl @projection.linear_tiled_coordinates(%rows: index, %outputs: index, %group_size: index) -> (index, index)
+template.decl @projection.linear_tiled_coordinates(%row_tiles: index, %output_tiles: index, %group_size: index) -> (index, index)
 
-// Biject the ceil(rows/64) x (outputs/64) grid onto groups of row
+// Biject a positive row_tiles x output_tiles grid onto groups of row
 // tiles. Nearby workgroups traverse output columns within a bounded input
 // panel, allowing cache reuse without changing operand layout or ownership.
 // The positive group size is a specialization fact. The final group contains
-// exactly ceil(rows/64) mod group_size row tiles when nonzero.
-template.def<@projection.linear_tiled_coordinates> device @linear_tiled_coordinates(%rows: index, %outputs: index, %group_size: index) -> (index, index) {
+// exactly row_tiles mod group_size row tiles when nonzero. Callers own the
+// tile dimensions; this traversal only consumes their launch grid counts.
+template.def<@projection.linear_tiled_coordinates> device @linear_tiled_coordinates(%row_tiles: index, %output_tiles: index, %group_size: index) -> (index, index) {
   %zero = index.constant 0 : index
-  %tile = index.constant 64 : index
-  %rounding = index.constant 63 : index
   %physical_row = kernel.workgroup.id<x> : index
   %physical_output = kernel.workgroup.id<y> : index
-  %padded_rows = index.add %rows, %rounding : index
-  %row_tiles = index.div %padded_rows, %tile : index
-  %output_tiles = index.div %outputs, %tile : index
   %flat = index.madd %physical_output, %row_tiles, %physical_row : index
   %group_width = index.mul %group_size, %output_tiles : index
   %group = index.div %flat, %group_width : index
@@ -84,13 +80,14 @@ template.def<@projection.linear_tiled_bf16> device @linear_tiled_bf16(%rows: ind
   %rounding = index.constant 63 : index
   %padded_rows = index.add %rows, %rounding : index
   %row_tiles = index.div %padded_rows, %workgroup_tile : index
+  %output_tiles = index.div %outputs, %workgroup_tile : index
   %whole_rows = index.cmp uge, %row_tile_group_size, %row_tiles : index
   %row_group, %output_group = scf.if %whole_rows -> (index, index) {
     %row = kernel.workgroup.id<x> : index
     %output = kernel.workgroup.id<y> : index
     scf.yield %row, %output : index, index
   } else {
-    %row, %output = template.apply<@projection.linear_tiled_coordinates>(%rows, %outputs, %row_tile_group_size) : (index, index, index) -> (index, index)
+    %row, %output = template.apply<@projection.linear_tiled_coordinates>(%row_tiles, %output_tiles, %row_tile_group_size) : (index, index, index) -> (index, index)
     scf.yield %row, %output : index, index
   }
   %workitem = kernel.workitem.id<x> : index
@@ -236,13 +233,14 @@ template.def<@projection.linear_tiled_full_k_bf16> device @linear_tiled_full_k_b
   %rounding = index.constant 63 : index
   %padded_rows = index.add %rows, %rounding : index
   %row_tiles = index.div %padded_rows, %workgroup_tile : index
+  %output_tiles = index.div %outputs, %workgroup_tile : index
   %whole_rows = index.cmp uge, %row_tile_group_size, %row_tiles : index
   %row_group, %output_group = scf.if %whole_rows -> (index, index) {
     %row = kernel.workgroup.id<x> : index
     %output = kernel.workgroup.id<y> : index
     scf.yield %row, %output : index, index
   } else {
-    %row, %output = template.apply<@projection.linear_tiled_coordinates>(%rows, %outputs, %row_tile_group_size) : (index, index, index) -> (index, index)
+    %row, %output = template.apply<@projection.linear_tiled_coordinates>(%row_tiles, %output_tiles, %row_tile_group_size) : (index, index, index) -> (index, index)
     scf.yield %row, %output : index, index
   }
   %workitem = kernel.workitem.id<x> : index

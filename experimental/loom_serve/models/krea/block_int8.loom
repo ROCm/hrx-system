@@ -43,11 +43,11 @@ command.program.def public @krea2.block_quantize_16384() launch(%input: buffer, 
 
 kernel.def target(@block_i8_wave32) @block_linear_i8_6144_6144() {
   %rows = config.get @krea2.block_tokens : index
-  %tile = index.constant 64 : index
-  %rounding = index.constant 63 : index
+  %tile = index.constant 128 : index
+  %rounding = index.constant 127 : index
   %padded = index.add %rows, %rounding : index
   %row_tiles = index.div %padded, %tile : index
-  %output_tiles = index.constant 96 : index
+  %output_tiles = index.constant 48 : index
   %one = index.constant 1 : index
   %threads = index.constant 256 : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
@@ -63,11 +63,11 @@ kernel.def target(@block_i8_wave32) @block_linear_i8_6144_6144() {
 
 kernel.def target(@block_i8_wave32) @block_linear_i8_6144_1536() {
   %rows = config.get @krea2.block_tokens : index
-  %tile = index.constant 64 : index
-  %rounding = index.constant 63 : index
+  %tile = index.constant 128 : index
+  %rounding = index.constant 127 : index
   %padded = index.add %rows, %rounding : index
   %row_tiles = index.div %padded, %tile : index
-  %output_tiles = index.constant 24 : index
+  %output_tiles = index.constant 12 : index
   %one = index.constant 1 : index
   %threads = index.constant 256 : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
@@ -83,11 +83,11 @@ kernel.def target(@block_i8_wave32) @block_linear_i8_6144_1536() {
 
 kernel.def target(@block_i8_wave32) @block_linear_i8_6144_1536_column_major() {
   %rows = config.get @krea2.block_tokens : index
-  %tile = index.constant 64 : index
-  %rounding = index.constant 63 : index
+  %tile = index.constant 128 : index
+  %rounding = index.constant 127 : index
   %padded = index.add %rows, %rounding : index
   %row_tiles = index.div %padded, %tile : index
-  %output_tiles = index.constant 24 : index
+  %output_tiles = index.constant 12 : index
   %one = index.constant 1 : index
   %threads = index.constant 256 : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
@@ -103,11 +103,11 @@ kernel.def target(@block_i8_wave32) @block_linear_i8_6144_1536_column_major() {
 
 kernel.def target(@block_i8_wave32) @block_linear_i8_6144_16384() {
   %rows = config.get @krea2.block_tokens : index
-  %tile = index.constant 64 : index
-  %rounding = index.constant 63 : index
+  %tile = index.constant 128 : index
+  %rounding = index.constant 127 : index
   %padded = index.add %rows, %rounding : index
   %row_tiles = index.div %padded, %tile : index
-  %output_tiles = index.constant 256 : index
+  %output_tiles = index.constant 128 : index
   %one = index.constant 1 : index
   %threads = index.constant 256 : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
@@ -123,11 +123,11 @@ kernel.def target(@block_i8_wave32) @block_linear_i8_6144_16384() {
 
 kernel.def target(@block_i8_wave32) @block_linear_i8_16384_6144() {
   %rows = config.get @krea2.block_tokens : index
-  %tile = index.constant 64 : index
-  %rounding = index.constant 63 : index
+  %tile = index.constant 128 : index
+  %rounding = index.constant 127 : index
   %padded = index.add %rows, %rounding : index
   %row_tiles = index.div %padded, %tile : index
-  %output_tiles = index.constant 96 : index
+  %output_tiles = index.constant 48 : index
   %one = index.constant 1 : index
   %threads = index.constant 256 : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
