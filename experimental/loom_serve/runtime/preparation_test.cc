@@ -135,4 +135,19 @@ TEST_F(PreparationTest, InvalidDeclarationsReleasePartialOwnership) {
   }
 }
 
+TEST_F(PreparationTest, EmbeddedNulCannotTruncateDeclarationStrings) {
+  for (int32_t field = 0; field < 6; ++field) {
+    SCOPED_TRACE(field);
+    iree_vm_variant_t arguments[] = {iree_vm_variant_from_i32(field)};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_serve_preparation_create(
+            environment, iree_make_cstring_view(FLAG_boundary_source),
+            IREE_SV("nul_string"), iree_vm_variant_span_from_array(arguments),
+            iree_vm_variant_span_empty(), iree_vm_module_span_empty(),
+            &compilation, &preparation, allocator));
+    EXPECT_EQ(preparation, nullptr);
+  }
+}
+
 }  // namespace

@@ -60,8 +60,9 @@ typedef struct loom_serve_preparation_t loom_serve_preparation_t;
 //   config_i64(i32 stage, buffer key, i64 value)
 //   parameter(i32 stage, i32 binding, buffer directory, buffer path,
 //             buffer policy)
-// Config values use the public loomc textual value syntax; config_i64 formats
-// signed decimal values. Parameter paths join directory and path. Policy paths
+// All string buffers exclude NUL bytes. Config values use the public loomc
+// textual value syntax; config_i64 formats signed decimal values. Parameter
+// paths join directory and path. Policy paths
 // are relative to the source directory. Declarations copy their strings and
 // retain no references to arguments, source mappings or the VM environment.
 // Additional caller libraries are linked beside the prepare module. Results

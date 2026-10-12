@@ -8,6 +8,7 @@
 
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "experimental/loom_serve/runtime/program.h"
 #include "iree/base/internal/path.h"
@@ -98,6 +99,10 @@ static iree_status_t preparation_string_argument(
   iree_const_byte_span_t bytes = iree_const_byte_span_empty();
   IREE_RETURN_IF_ERROR(iree_vm_buffer_map_read(
       buffer, 0, iree_vm_buffer_length(buffer), &bytes));
+  if (bytes.data_length && memchr(bytes.data, 0, bytes.data_length)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "preparation strings must not contain NUL bytes");
+  }
   *out_value =
       iree_make_string_view((const char*)bytes.data, bytes.data_length);
   return iree_ok_status();

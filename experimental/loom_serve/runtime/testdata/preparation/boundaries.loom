@@ -114,3 +114,40 @@ func.def public @large_catalog() {
   }
   func.return
 }
+
+// Each string position crosses the same native declaration boundary.
+global.rodata.def @nul = bytes("610062")
+
+func.def public @nul_string(%field: i32) {
+  %nul = global.load @nul : buffer
+  %root = global.load @root : buffer
+  %key = global.load @key : buffer
+  %value = global.load @value : buffer
+  %directory = global.load @directory : buffer
+  %path = global.load @path : buffer
+  %policy = global.load @policy : buffer
+  %tag = scalar.constant 0 : i64
+  %zero = scalar.constant 0 : i32
+  %field_root = scalar.constant 0 : i32
+  %is_root = scalar.cmpi eq, %field, %field_root : i32
+  %selected_root = scf.select %is_root, %nul, %root : buffer
+  %field_key = scalar.constant 1 : i32
+  %is_key = scalar.cmpi eq, %field, %field_key : i32
+  %selected_key = scf.select %is_key, %nul, %key : buffer
+  %field_value = scalar.constant 2 : i32
+  %is_value = scalar.cmpi eq, %field, %field_value : i32
+  %selected_value = scf.select %is_value, %nul, %value : buffer
+  %field_directory = scalar.constant 3 : i32
+  %is_directory = scalar.cmpi eq, %field, %field_directory : i32
+  %selected_directory = scf.select %is_directory, %nul, %directory : buffer
+  %field_path = scalar.constant 4 : i32
+  %is_path = scalar.cmpi eq, %field, %field_path : i32
+  %selected_path = scf.select %is_path, %nul, %path : buffer
+  %field_policy = scalar.constant 5 : i32
+  %is_policy = scalar.cmpi eq, %field, %field_policy : i32
+  %selected_policy = scf.select %is_policy, %nul, %policy : buffer
+  %stage = func.call @stage(%selected_root, %tag) : (buffer, i64) -> (i32)
+  func.call @config(%stage, %selected_key, %selected_value) : (i32, buffer, buffer) -> ()
+  func.call @parameter(%stage, %zero, %selected_directory, %selected_path, %selected_policy) : (i32, i32, buffer, buffer, buffer) -> ()
+  func.return
+}
