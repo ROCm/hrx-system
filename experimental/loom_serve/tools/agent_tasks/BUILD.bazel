@@ -1,0 +1,31 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],
+)
+
+py_library(
+    name = "checker",
+    srcs = ["check.py"],
+    data = ["tasks.json"],
+)
+
+py_binary(
+    name = "check",
+    srcs = ["check.py"],
+    data = ["tasks.json"],
+)
+
+py_test(
+    name = "check_test",
+    size = "small",
+    srcs = ["check_test.py"],
+    deps = [":checker"],
+)
