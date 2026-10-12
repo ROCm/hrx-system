@@ -545,34 +545,100 @@ TEST(SingleCommandCacheTest, ExecutableIdentityHitDoesNotRequireTemplateScan) {
   iree_hal_amdxdna_single_command_cache_entry_t* found = nullptr;
   IREE_CHECK_OK(iree_hal_amdxdna_find_single_command_cache_executable_entry(
       &cache, FakeQueue(0x290), /*cu_index=*/1, /*executable_identity=*/7,
-      /*entry_point=*/2, /*run_ordinal=*/3, &found));
+      /*entry_point=*/2, /*run_ordinal=*/3,
+      /*ctrl_word_count=*/IREE_ARRAYSIZE(ctrl_words),
+      /*binding_count=*/IREE_ARRAYSIZE(binding_buffers), &found));
   EXPECT_EQ(found, stored);
 
   found = stored;
   IREE_CHECK_OK(iree_hal_amdxdna_find_single_command_cache_executable_entry(
       &cache, FakeQueue(0x290), /*cu_index=*/1, /*executable_identity=*/8,
-      /*entry_point=*/2, /*run_ordinal=*/3, &found));
+      /*entry_point=*/2, /*run_ordinal=*/3,
+      /*ctrl_word_count=*/IREE_ARRAYSIZE(ctrl_words),
+      /*binding_count=*/IREE_ARRAYSIZE(binding_buffers), &found));
   EXPECT_EQ(found, nullptr);
 
   found = stored;
   IREE_CHECK_OK(iree_hal_amdxdna_find_single_command_cache_executable_entry(
       &cache, FakeQueue(0x290), /*cu_index=*/2, /*executable_identity=*/7,
-      /*entry_point=*/2, /*run_ordinal=*/3, &found));
+      /*entry_point=*/2, /*run_ordinal=*/3,
+      /*ctrl_word_count=*/IREE_ARRAYSIZE(ctrl_words),
+      /*binding_count=*/IREE_ARRAYSIZE(binding_buffers), &found));
   EXPECT_EQ(found, nullptr);
 
   found = stored;
   IREE_CHECK_OK(iree_hal_amdxdna_find_single_command_cache_executable_entry(
       &cache, FakeQueue(0x290), /*cu_index=*/1, /*executable_identity=*/0,
-      /*entry_point=*/2, /*run_ordinal=*/3, &found));
+      /*entry_point=*/2, /*run_ordinal=*/3,
+      /*ctrl_word_count=*/IREE_ARRAYSIZE(ctrl_words),
+      /*binding_count=*/IREE_ARRAYSIZE(binding_buffers), &found));
   EXPECT_EQ(found, nullptr);
 
   iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(stored);
   found = stored;
   IREE_CHECK_OK(iree_hal_amdxdna_find_single_command_cache_executable_entry(
       &cache, FakeQueue(0x290), /*cu_index=*/1, /*executable_identity=*/7,
-      /*entry_point=*/2, /*run_ordinal=*/3, &found));
+      /*entry_point=*/2, /*run_ordinal=*/3,
+      /*ctrl_word_count=*/IREE_ARRAYSIZE(ctrl_words),
+      /*binding_count=*/IREE_ARRAYSIZE(binding_buffers), &found));
   EXPECT_EQ(found, nullptr);
   iree_hal_amdxdna_single_command_cache_entry_release_in_flight(&cache, stored);
+
+  FreeSignature(&cache, stored);
+  ReleaseCacheStorage(&cache);
+  iree_slim_mutex_deinitialize(&cache.mutex);
+}
+
+TEST(SingleCommandCacheTest, ExecutableIdentityMissesOnShapeChange) {
+  // An executable identity hit must still match the command shape: some engines
+  // (e.g. Qwen2.5) re-emit a variable-length control program for the same
+  // identity. A lookup for a different control-word or binding count must miss
+  // so the caller builds a fresh, size-compatible command instead of rewriting
+  // a mismatched cache entry in place.
+  iree_hal_amdxdna_device_single_command_cache_t cache = {};
+  cache.host_allocator = TestAllocator();
+  iree_slim_mutex_initialize(&cache.mutex);
+  const uint32_t ctrl_words[] = {1, 2, 3};
+  iree_hal_amdxdna_native_buffer_t* binding_buffers[] = {FakeBuffer(0x192)};
+  const uint64_t binding_device_addrs[] = {0x89200000};
+  const iree_device_size_t binding_offsets[] = {0};
+  const iree_device_size_t binding_lengths[] = {64};
+
+  auto* stored = iree_hal_amdxdna_store_single_command_cache_entry(
+      &cache, FakeQueue(0x292), /*cu_index=*/1, ctrl_words,
+      IREE_ARRAYSIZE(ctrl_words), binding_buffers, binding_device_addrs,
+      binding_offsets, binding_lengths, IREE_ARRAYSIZE(binding_buffers),
+      FakeBuffer(0x392), FakeCommand(0x492));
+  ASSERT_NE(stored, nullptr);
+  iree_hal_amdxdna_single_command_cache_entry_set_executable_key(stored, 7, 2,
+                                                                 3);
+
+  // Same identity/queue/CU, same shape -> hit.
+  iree_hal_amdxdna_single_command_cache_entry_t* found = nullptr;
+  IREE_CHECK_OK(iree_hal_amdxdna_find_single_command_cache_executable_entry(
+      &cache, FakeQueue(0x292), /*cu_index=*/1, /*executable_identity=*/7,
+      /*entry_point=*/2, /*run_ordinal=*/3,
+      /*ctrl_word_count=*/IREE_ARRAYSIZE(ctrl_words),
+      /*binding_count=*/IREE_ARRAYSIZE(binding_buffers), &found));
+  EXPECT_EQ(found, stored);
+
+  // Same identity, different control-word count -> miss.
+  found = stored;
+  IREE_CHECK_OK(iree_hal_amdxdna_find_single_command_cache_executable_entry(
+      &cache, FakeQueue(0x292), /*cu_index=*/1, /*executable_identity=*/7,
+      /*entry_point=*/2, /*run_ordinal=*/3,
+      /*ctrl_word_count=*/IREE_ARRAYSIZE(ctrl_words) + 1,
+      /*binding_count=*/IREE_ARRAYSIZE(binding_buffers), &found));
+  EXPECT_EQ(found, nullptr);
+
+  // Same identity, different binding count -> miss.
+  found = stored;
+  IREE_CHECK_OK(iree_hal_amdxdna_find_single_command_cache_executable_entry(
+      &cache, FakeQueue(0x292), /*cu_index=*/1, /*executable_identity=*/7,
+      /*entry_point=*/2, /*run_ordinal=*/3,
+      /*ctrl_word_count=*/IREE_ARRAYSIZE(ctrl_words),
+      /*binding_count=*/IREE_ARRAYSIZE(binding_buffers) + 1, &found));
+  EXPECT_EQ(found, nullptr);
 
   FreeSignature(&cache, stored);
   ReleaseCacheStorage(&cache);

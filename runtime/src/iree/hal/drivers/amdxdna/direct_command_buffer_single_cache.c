@@ -403,16 +403,24 @@ iree_status_t iree_hal_amdxdna_find_single_command_cache_executable_entry(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_native_queue_t* queue, uint32_t cu_index,
     uint64_t executable_identity, uint32_t entry_point, uint32_t run_ordinal,
+    iree_host_size_t ctrl_word_count, iree_host_size_t binding_count,
     iree_hal_amdxdna_single_command_cache_entry_t** out_entry) {
   *out_entry = NULL;
   if (executable_identity == 0) return iree_ok_status();
   for (iree_host_size_t i = 0; i < cache->entry_count; ++i) {
     iree_hal_amdxdna_single_command_cache_entry_t* entry = &cache->entries[i];
+    // The executable identity lets us skip the expensive control-word memcmp,
+    // but the command shape (control-word and binding counts) is still part of
+    // the key: some engines (e.g. Qwen2.5) re-emit a variable-length control
+    // program for the same executable identity, and each distinct shape is a
+    // separate entry so the in-place rewrite is always size-compatible.
     if (!entry->command || entry->queue != queue ||
         entry->in_flight_count != 0 || entry->cu_index != cu_index ||
         entry->src_executable_identity != executable_identity ||
         entry->src_entry_point != entry_point ||
-        entry->src_run_ordinal != run_ordinal) {
+        entry->src_run_ordinal != run_ordinal ||
+        entry->ctrl_word_count != ctrl_word_count ||
+        entry->binding_count != binding_count) {
       continue;
     }
     entry->last_use = ++cache->use_clock;

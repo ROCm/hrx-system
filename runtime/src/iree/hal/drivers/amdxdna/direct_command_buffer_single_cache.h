@@ -139,13 +139,17 @@ iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
     iree_hal_amdxdna_single_command_cache_entry_t** out_entry);
 
 // Finds a retained command recorded from the same executable export on the
-// same queue and CU. Identity 0 never matches: callers without a
-// cache_identity fall back to template content. The matched command is still
-// rewritten from the fresh dispatch.
+// same queue and CU with a matching command shape (control-word and binding
+// counts). Identity 0 never matches: callers without a cache_identity fall
+// back to template content. Including the shape in the key keeps distinct
+// control-program lengths for the same executable identity as separate entries,
+// so the matched command is always size-compatible with the in-place rewrite
+// from the fresh dispatch.
 iree_status_t iree_hal_amdxdna_find_single_command_cache_executable_entry(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_native_queue_t* queue, uint32_t cu_index,
     uint64_t executable_identity, uint32_t entry_point, uint32_t run_ordinal,
+    iree_host_size_t ctrl_word_count, iree_host_size_t binding_count,
     iree_hal_amdxdna_single_command_cache_entry_t** out_entry);
 
 iree_status_t iree_hal_amdxdna_update_single_command_cache_entry(
