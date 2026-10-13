@@ -10,13 +10,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
 #include "experimental/loom_serve/serving/configuration.h"
 #include "iree/base/internal/path.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
+#include "loom/serve/service/image/model.h"
 
 IREE_FLAG(string, model, "", "Model JSON document.");
 IREE_FLAG(string, checkpoint, "",

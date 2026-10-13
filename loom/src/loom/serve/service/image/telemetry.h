@@ -4,10 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_IMAGE_TELEMETRY_H_
-#define EXPERIMENTAL_LOOM_SERVE_IMAGE_TELEMETRY_H_
+#ifndef LOOM_SERVE_SERVICE_IMAGE_TELEMETRY_H_
+#define LOOM_SERVE_SERVICE_IMAGE_TELEMETRY_H_
 
-#include "experimental/loom_serve/image/generator.h"
+#include "loom/serve/service/image/generator.h"
 #include "loom/serve/telemetry/stream.h"
 
 #ifdef __cplusplus
@@ -63,4 +63,4 @@ void loom_serve_image_record_totals(loom_serve_telemetry_stream_t* stream,
 #ifdef __cplusplus
 }  // extern "C"
 #endif
-#endif  // EXPERIMENTAL_LOOM_SERVE_IMAGE_TELEMETRY_H_
+#endif  // LOOM_SERVE_SERVICE_IMAGE_TELEMETRY_H_

@@ -11,7 +11,7 @@ The [Qwen package](../models/qwen/README.md) is the real-weight implementation
 of this contract. Its numerical kernels, stage composition, storage geometry,
 checkpoint policy, tokenizer framing and chat policy live in Loom source.
 Its remaining C programs are test-only numerical/replay observers.
-The [image runner](../image/model.h) provides a separate source-defined
+The [image runner](../../../loom/src/loom/serve/service/image/model.h) provides a separate source-defined
 diffusion contract over the same JIT, weight and execution infrastructure.
 
 ## First output and first port

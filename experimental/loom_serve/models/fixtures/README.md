@@ -108,7 +108,7 @@ admission and drains accepted work before model and device destruction.
 
 | Model behavior | Source starting point | Native contract |
 | --- | --- | --- |
-| Text-conditioned finite image | [Image package](image/README.md), then [Krea](../krea/README.md) | [Image model](../../image/model.h) |
+| Text-conditioned finite image | [Image package](image/README.md), then [Krea](../krea/README.md) | [Image model](../../../../loom/src/loom/serve/service/image/model.h) |
 | Ragged inputs to final embedding vectors | [Embedding package](embedding/README.md) | [Finite model](../../../../loom/src/loom/serve/service/finite/README.md), [embedding records](../../../../loom/src/loom/serve/service/finite/embedding/protocol.h) |
 | Structured questions to choice/score/noul probabilities | [Decision package](decision/README.md) | [Finite model](../../../../loom/src/loom/serve/service/finite/README.md), [SystemOne records](../../../../loom/src/loom/serve/service/finite/decision/protocol.h) |
 | Retained autoregressive sessions | [Tiny text package](text/README.md), then [Qwen](../qwen/README.md) | [Text model and source entries](../../text/README.md) |
@@ -163,7 +163,7 @@ build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/models/fixtures/decision:service_test
 ```
 
-The [held-device service check](../../image/service_test.cc) separately verifies
+The [held-device service check](../../../../loom/src/loom/serve/service/image/service_test.cc) separately verifies
 that readiness/status and heartbeat progress while a real HAL predecessor is
 held, then releases it and checks final output. It is not a timeout-based speed
 assertion. Real model quality and controlled performance runs follow the

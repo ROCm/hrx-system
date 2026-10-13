@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_IMAGE_OUTPUT_H_
-#define EXPERIMENTAL_LOOM_SERVE_IMAGE_OUTPUT_H_
+#ifndef LOOM_SERVE_SERVICE_IMAGE_OUTPUT_H_
+#define LOOM_SERVE_SERVICE_IMAGE_OUTPUT_H_
 
 #include "iree/base/api.h"
 
@@ -30,4 +30,4 @@ iree_status_t loom_serve_image_encode_rgb_f32_png(
 }  // extern "C"
 #endif
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_IMAGE_OUTPUT_H_
+#endif  // LOOM_SERVE_SERVICE_IMAGE_OUTPUT_H_

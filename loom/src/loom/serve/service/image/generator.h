@@ -4,13 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_IMAGE_GENERATOR_H_
-#define EXPERIMENTAL_LOOM_SERVE_IMAGE_GENERATOR_H_
+#ifndef LOOM_SERVE_SERVICE_IMAGE_GENERATOR_H_
+#define LOOM_SERVE_SERVICE_IMAGE_GENERATOR_H_
 
-#include "experimental/loom_serve/image/request.h"
 #include "iree/tokenizer/tokenizer.h"
 #include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/runtime/parameter/residency.h"
+#include "loom/serve/service/image/request.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -84,4 +84,4 @@ typedef struct loom_serve_image_generator_t {
 }  // extern "C"
 #endif
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_IMAGE_GENERATOR_H_
+#endif  // LOOM_SERVE_SERVICE_IMAGE_GENERATOR_H_

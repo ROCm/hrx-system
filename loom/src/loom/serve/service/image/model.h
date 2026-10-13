@@ -4,13 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_IMAGE_MODEL_H_
-#define EXPERIMENTAL_LOOM_SERVE_IMAGE_MODEL_H_
+#ifndef LOOM_SERVE_SERVICE_IMAGE_MODEL_H_
+#define LOOM_SERVE_SERVICE_IMAGE_MODEL_H_
 
-#include "experimental/loom_serve/image/generator.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/program/compilation.h"
 #include "loom/serve/runtime/program/sources.h"
+#include "loom/serve/service/image/generator.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -227,4 +227,4 @@ iree_status_t loom_serve_image_model_generate(
 #ifdef __cplusplus
 }  // extern "C"
 #endif
-#endif  // EXPERIMENTAL_LOOM_SERVE_IMAGE_MODEL_H_
+#endif  // LOOM_SERVE_SERVICE_IMAGE_MODEL_H_

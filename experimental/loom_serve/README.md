@@ -178,7 +178,7 @@ IREE tokenization, source-JIT text encoding, conditioning, eight denoising steps
 and the complete VAE to a PPM image, with optional softwatercolor LoRA.
 The generic [`generate.c`](image/generate.c) uses the same device, source
 compiler, weight loader and execution timelines as Qwen. The
-[diffusion-image ABI](image/model.h) lets source bootstrap declare command
+[diffusion-image ABI](../../loom/src/loom/serve/service/image/model.h) lets source bootstrap declare command
 stages, checkpoint domains, tokenizer asset and opaque request state. Source VM
 control frames prompts, selects a stage and returns one opaque upload payload;
 the native input module supplies bounded tokenization and vocabulary lookup.

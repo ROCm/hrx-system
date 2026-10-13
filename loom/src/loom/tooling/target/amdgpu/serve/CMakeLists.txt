@@ -72,6 +72,38 @@ loom_cc_test(
 )
 endif()
 
+if(IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+loom_cc_test(
+  NAME
+    image_service_test
+  SRCS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/image/service_test.cc"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::experimental::loom_serve::serving::registry
+    iree::experimental::loom_serve::serving::router
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::host
+    loom::serve::service::image::service
+    loom::serve::telemetry::record
+    loom::serve::telemetry::stream
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME

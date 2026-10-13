@@ -10,7 +10,7 @@ directly in the command workspace. The command computes its own Qwen3-VL taps
 and derives the combined text/image key mask on-device. The generic
 [`image generator`](../../image/generate.c) and
 [`image server`](../../image/server.c) load this external source package through
-the [diffusion-image ABI](../../image/model.h). Source owns model policy;
+the [diffusion-image ABI](../../../../loom/src/loom/serve/service/image/model.h). Source owns model policy;
 native capabilities provide IREE tokenization, IO and device ownership.
 The server shares one residency across requests.
 No captured tensors, Python inference library or compiled model artifact is
@@ -213,7 +213,7 @@ does not batch images or use the Qwen token scheduler.
 
 ### Retained model ownership
 
-[`image/model.h`](../../image/model.h)/[`image/model.c`](../../image/model.c)
+[`image/model.h`](../../../../loom/src/loom/serve/service/image/model.h)/[`image/model.c`](../../../../loom/src/loom/serve/service/image/model.c)
 is the reusable native residency
 behind the CLI. Creation loads the tokenizer and specializes the bounded
 retained command set declared by the bootstrap. All checkpoint declarations,
@@ -272,7 +272,7 @@ three-domain base residency separately.
 ### Serve images over HTTP
 
 The server reuses the model leaf above and the runner's model-independent
-[`image_service`](../../image/service.h). It exposes one configured pixel shape,
+[`image_service`](../../../../loom/src/loom/serve/service/image/service.h). It exposes one configured pixel shape,
 maximum text capacity and one optional adapter. The common HTTP router handles
 bounded admission, health, completed responses and peer cancellation on the
 shared task executor. Preparation and PNG encoding are finite CPU tasks; GPU
@@ -388,8 +388,8 @@ maximum workspace backing, and exactly one load per parameter domain.
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve/image:request_test \
-  //experimental/loom_serve/image:output_test \
+  //loom/src/loom/serve/service/image:request_test \
+  //loom/src/loom/serve/service/image:output_test \
   //loom/src/loom/serve/transport/http:request_test \
   //loom/src/loom/serve/transport/http:server_test
 build_tools/bin/iree-bazel-build --config=asan \

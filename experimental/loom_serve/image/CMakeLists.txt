@@ -9,148 +9,6 @@
 
 iree_add_all_subdirs()
 
-loom_cc_library(
-  NAME
-    request
-  HDRS
-    "request.h"
-  SRCS
-    "request.c"
-  DEPS
-    iree::base
-    iree::base::internal::json
-    iree::base::internal::unicode
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    request_test
-  SRCS
-    "request_test.cc"
-  DEPS
-    ::request
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-loom_cc_library(
-  NAME
-    output
-  HDRS
-    "output.h"
-  SRCS
-    "output.c"
-  DEPS
-    iree::base
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    output_test
-  SRCS
-    "output_test.cc"
-  DEPS
-    ::output
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-loom_cc_library(
-  NAME
-    generator
-  HDRS
-    "generator.h"
-  DEPS
-    ::request
-    iree::base
-    iree::tokenizer
-    loom::serve::runtime::execution
-    loom::serve::runtime::parameter::residency
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    telemetry
-  HDRS
-    "telemetry.h"
-  SRCS
-    "telemetry.c"
-  DEPS
-    ::generator
-    iree::base
-    loom::serve::telemetry::record
-    loom::serve::telemetry::stream
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    service
-  HDRS
-    "service.h"
-  SRCS
-    "service.c"
-  DEPS
-    ::generator
-    ::output
-    ::request
-    ::telemetry
-    iree::async
-    iree::async::util::proactor_pool
-    iree::base
-    iree::base::internal::base64
-    iree::base::threading
-    iree::task
-    loom::serve::runtime::execution
-    loom::serve::runtime::host
-    loom::serve::runtime::host::timer
-    loom::serve::runtime::host::wake
-    loom::serve::runtime::parameter::telemetry
-    loom::serve::service
-    loom::serve::telemetry::record
-    loom::serve::telemetry::stream
-    loom::serve::transport::http::request
-    loom::serve::transport::http::server
-    loom::util::json
-    loom::util::stream
-  PUBLIC
-)
-
-if(IREE_HAL_DRIVER_AMDGPU)
-loom_cc_test(
-  NAME
-    service_test
-  SRCS
-    "service_test.cc"
-  DEPS
-    ::service
-    iree::async
-    iree::base
-    iree::base::threading
-    iree::experimental::loom_serve::serving::registry
-    iree::experimental::loom_serve::serving::router
-    iree::hal
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::serve::runtime::device
-    loom::serve::runtime::execution
-    loom::serve::runtime::host
-    loom::serve::telemetry::record
-    loom::serve::telemetry::stream
-    loom::serve::transport::http::listener
-    loom::serve::transport::http::server
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-  RESOURCE_GROUP
-    gpu-device
-)
-endif()
-
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_binary(
   NAME
@@ -182,7 +40,6 @@ loom_cc_binary(
   SRCS
     "model_check.c"
   DEPS
-    ::model
     iree::base
     iree::base::internal::path
     iree::base::tooling::flags
@@ -190,45 +47,8 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::serving::configuration
     iree::io::file_handle
+    loom::serve::service::image::model
   TESTONLY
-)
-endif()
-
-if(LOOM_TARGET_ARCH_VM)
-loom_cc_library(
-  NAME
-    model
-  HDRS
-    "model.h"
-  SRCS
-    "model.c"
-  DEPS
-    ::generator
-    iree::base
-    iree::hal
-    iree::io::file_handle
-    iree::module::hal::types
-    iree::tokenizer
-    iree::tokenizer::format::huggingface::tokenizer_json
-    iree::tooling::device_util
-    iree::vm
-    loom::binding::c::loomc
-    loom::serve::runtime::device
-    loom::serve::runtime::execution
-    loom::serve::runtime::execution::retirement
-    loom::serve::runtime::host
-    loom::serve::runtime::parameter::residency
-    loom::serve::runtime::parameter::weights
-    loom::serve::runtime::program
-    loom::serve::runtime::program::compilation
-    loom::serve::runtime::program::input
-    loom::serve::runtime::program::jit
-    loom::serve::runtime::program::json
-    loom::serve::runtime::program::module
-    loom::serve::runtime::program::preparation
-    loom::serve::runtime::program::sources
-    loom::util::stream
-  PUBLIC
 )
 endif()
 
@@ -239,7 +59,6 @@ loom_cc_binary(
   SRCS
     "generate.c"
   DEPS
-    ::model
     iree::base
     iree::base::internal
     iree::base::internal::json
@@ -248,6 +67,7 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::serving::configuration
     iree::io::file_handle
+    loom::serve::service::image::model
 )
 endif()
 
@@ -258,9 +78,6 @@ loom_cc_binary(
   SRCS
     "server.c"
   DEPS
-    ::model
-    ::request
-    ::service
     iree::async
     iree::base
     iree::base::tooling::flags
@@ -270,6 +87,9 @@ loom_cc_binary(
     iree::experimental::loom_serve::serving::configuration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    loom::serve::service::image::model
+    loom::serve::service::image::request
+    loom::serve::service::image::service
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
 )

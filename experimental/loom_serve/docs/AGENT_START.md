@@ -57,7 +57,7 @@ transport, shared workers, device timelines, memory ownership and observation.
 | Model behavior | Source contract and first-output witness | Scheduling/storage boundary |
 | --- | --- | --- |
 | Autoregressive text | [Text entries](../text/README.md), [tiny retained model](../models/fixtures/text/README.md) | Ready prompt/decode/verification spans share epochs; pages and recurrent state survive requests |
-| Text to finite image | [Image entries](../image/model.h), [image fixture](../models/fixtures/image/README.md), then Krea | One prepared invocation per image residency; request storage retires after output |
+| Text to finite image | [Image entries](../../../loom/src/loom/serve/service/image/model.h), [image fixture](../models/fixtures/image/README.md), then Krea | One prepared invocation per image residency; request storage retires after output |
 | Embedding or structured decision | [Finite entries](../../../loom/src/loom/serve/service/finite/README.md), [embedding](../models/fixtures/embedding/README.md) or [decision](../models/fixtures/decision/README.md) fixture | Source declares additive batch cost, compatibility and original result indices; compatible requests share a cohort |
 | Resident native computation | [Finite direct-stage contract](../../../loom/src/loom/serve/service/finite/README.md#compact-results-and-physical-storage), [resident variants](../models/fixtures/embedding/README.md#verification) | `prepare.dispatch` supplies a native entry submitted through `queue_dispatch`, with the same timeline/feedback retirement as command stages |
 

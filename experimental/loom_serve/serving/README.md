@@ -41,7 +41,7 @@ ownership sequence as the shared server.
 Each model document selects source providers and deployment options. Model math,
 checkpoint interpretation, storage geometry and chat policy remain in the
 Loom sources described by the [text model contract](../text/README.md),
-[image model contract](../image/model.h), and
+[image model contract](../../../loom/src/loom/serve/service/image/model.h), and
 [finite-vector contract](../../../loom/src/loom/serve/service/finite/README.md). None of these modalities requires
 model-specific C in the executable.
 

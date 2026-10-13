@@ -4,19 +4,19 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/image/service.h"
+#include "loom/serve/service/image/service.h"
 
 #include <inttypes.h>
 #include <string.h>
 
-#include "experimental/loom_serve/image/output.h"
-#include "experimental/loom_serve/image/telemetry.h"
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/internal/base64.h"
 #include "iree/base/threading/mutex.h"
 #include "loom/serve/runtime/host/timer.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/runtime/parameter/telemetry.h"
+#include "loom/serve/service/image/output.h"
+#include "loom/serve/service/image/telemetry.h"
 #include "loom/util/json.h"
 
 typedef struct image_job_t {

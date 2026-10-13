@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_IMAGE_REQUEST_H_
-#define EXPERIMENTAL_LOOM_SERVE_IMAGE_REQUEST_H_
+#ifndef LOOM_SERVE_SERVICE_IMAGE_REQUEST_H_
+#define LOOM_SERVE_SERVICE_IMAGE_REQUEST_H_
 
 #include "iree/base/api.h"
 #include "iree/base/string_builder.h"
@@ -42,4 +42,4 @@ void loom_serve_image_request_deinitialize(loom_serve_image_request_t* request);
 }  // extern "C"
 #endif
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_IMAGE_REQUEST_H_
+#endif  // LOOM_SERVE_SERVICE_IMAGE_REQUEST_H_

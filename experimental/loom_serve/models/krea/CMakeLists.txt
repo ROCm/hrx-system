@@ -82,11 +82,11 @@ loom_cc_test(
   DEPS
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::image::model
     iree::testing::gtest
     iree::testing::gtest_main
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::service::image::model
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/krea/prepare.loom}}"
   LABELS

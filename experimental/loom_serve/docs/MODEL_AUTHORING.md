@@ -358,7 +358,7 @@ weights. It derives the downstream key mask from encoder visibility, so the
 caller cannot accidentally give two stages different text masks.
 
 The generic [image CLI](../image/generate.c) uses a
-[source-defined diffusion residency](../image/model.h): source VM bootstrap and
+[source-defined diffusion residency](../../../loom/src/loom/serve/service/image/model.h): source VM bootstrap and
 request preparation, source JIT, immutable weight loading, queued request upload,
 source command execution and final RGB download. The CLI encodes that output as PPM.
 The model can serve successive serialized calls without warm JIT, weight loads
@@ -374,7 +374,7 @@ checks use independently justified BF16/F32 envelopes rather than host libm bits
 Cold source declarations and returned metadata define parameter domains, request
 capacity, tokenizer asset, public name and opaque state. The same executable
 accepts another compatible source package through `--model`, without relinking.
-The [finite-image service](../image/service.h) is a second concrete serving
+The [finite-image service](../../../loom/src/loom/serve/service/image/service.h) is a second concrete serving
 pipeline. Its serialized generator returns borrowed completed RGB; one worker
 encodes it before another model call, while the application owner admits bounded
 requests and serves health checks over the shared TCP transport. Transport-owned
@@ -389,7 +389,7 @@ remains a separate consumer, and no audio model is claimed by this packet.
 ### Source-defined diffusion package
 
 The image binary's external contract is documented in
-[`image/model.h`](../image/model.h). A compatible package supplies these files:
+[`image/model.h`](../../../loom/src/loom/serve/service/image/model.h). A compatible package supplies these files:
 
 | Source | Role |
 | --- | --- |

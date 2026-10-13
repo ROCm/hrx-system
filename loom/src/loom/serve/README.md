@@ -42,6 +42,10 @@ The shared foundation consists of:
   returning compact vectors. Embedding and decision protocols share this
   preparation, batching, residency and retirement machinery; their separate
   packages own wire input and output, not learned math.
+- [`service/image`](service/image/model.h): staged image invocations with
+  source-owned preparation and submission control. The service owns bounded
+  admission, asynchronous completion and output encoding; slow clients retain
+  copied responses independently of model buffers and parameter pins.
 - [`server/http`](server/http/logs.h): endpoint projections for telemetry and
   raw tokenization. Log readers keep independent cursors; tokenizer requests
   use independent CPU states without advancing a model's execution timeline.

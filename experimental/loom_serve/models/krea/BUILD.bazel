@@ -74,9 +74,9 @@ loom_cc_test(
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
-        "//experimental/loom_serve/image:model",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/service/image:model",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/testing:gtest",

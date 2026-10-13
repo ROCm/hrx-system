@@ -196,8 +196,6 @@ loom_cc_library(
     deps = [
         ":configuration",
         ":registry",
-        "//experimental/loom_serve/image:model",
-        "//experimental/loom_serve/image:service",
         "//experimental/loom_serve/text:model",
         "//experimental/loom_serve/text:schedule",
         "//experimental/loom_serve/text:service",
@@ -213,6 +211,8 @@ loom_cc_library(
         "//loom/src/loom/serve/service/finite:service",
         "//loom/src/loom/serve/service/finite/decision:protocol",
         "//loom/src/loom/serve/service/finite/embedding:protocol",
+        "//loom/src/loom/serve/service/image:model",
+        "//loom/src/loom/serve/service/image:service",
         "//runtime/src/iree/base",
     ],
 )

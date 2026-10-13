@@ -179,8 +179,6 @@ loom_cc_library(
     ::configuration
     ::registry
     iree::base
-    iree::experimental::loom_serve::image::model
-    iree::experimental::loom_serve::image::service
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule
     iree::experimental::loom_serve::text::service
@@ -196,6 +194,8 @@ loom_cc_library(
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model
     loom::serve::service::finite::service
+    loom::serve::service::image::model
+    loom::serve::service::image::service
   PUBLIC
 )
 
