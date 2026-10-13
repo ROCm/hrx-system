@@ -52,9 +52,9 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %re
   func.return %result, %next : buffer, i64
 }
 
-func.def public @chat_end(%state: i64) -> (buffer) {
+func.def public @chat_end(%state: i64) -> (buffer, i64) {
   %prefix = global.load @assistant : buffer
-  func.return %prefix : buffer
+  func.return %prefix, %state : buffer, i64
 }
 
 func.def public @render_tool(%name: buffer, %arguments: buffer, %ordinal: i64) -> (buffer, i64) {
@@ -76,7 +76,7 @@ func.def public @prepare_input(%text: buffer, %format: i32, %boundary: i32, %cap
 }
 
 // This deliberately conservative streaming policy publishes at completion.
-func.def public @text_end(%response: buffer, %previous: i64, %phase: i32) -> (i64) {
+func.def public @output_next(%response: buffer, %previous: i64, %state: i64, %phase: i32) -> (i64, i64, i64, i64) {
   %c0 = index.constant 0 : offset
   %zero64 = scalar.constant 0 : i64
   %zero32 = scalar.constant 0 : i32
@@ -95,7 +95,8 @@ func.def public @text_end(%response: buffer, %previous: i64, %phase: i32) -> (i6
   %withhold = scalar.ori %streaming, %json : i1
   %count = index.cast %length : offset to i64
   %end = scf.select %withhold, %zero64, %count : i64
-  func.return %end : i64
+  %content = scalar.constant 1 : i64
+  func.return %content, %previous, %end, %state : i64, i64, i64, i64
 }
 
 func.def public @parse_tools(%schemas: buffer, %response: buffer) -> (buffer) {
@@ -107,10 +108,11 @@ func.def public @parse_tools(%schemas: buffer, %response: buffer) -> (buffer) {
   func.return %result : buffer
 }
 
-func.def public @complete_text(%prompt: buffer, %content: buffer, %tools: buffer) -> (buffer) {
+func.def public @complete_text(%prompt: buffer, %content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
   %newline = global.load @newline : buffer
   %text = func.call @join(%prompt, %content) : (buffer, buffer) -> (buffer)
   %calls = func.call @join(%text, %tools) : (buffer, buffer) -> (buffer)
   %result = func.call @join(%calls, %newline) : (buffer, buffer) -> (buffer)
-  func.return %result : buffer
+  %reusable = scalar.constant 1 : i32
+  func.return %result, %reusable : buffer, i32
 }
