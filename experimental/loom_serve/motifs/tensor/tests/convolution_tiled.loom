@@ -1,5 +1,5 @@
 // Link the actual scalar and cooperative convolution helpers with --library.
-// check_convolution_tiled.py binds the tensor sample and kernel specialization.
+// Bind convolution_test dimensions with --config and select the matching sample.
 // Full 96/192/384-channel reductions use original OI(T)HW weights with three
 // distinct temporal planes. One-pixel, one-row and odd shapes exercise borders,
 // inactive lanes and tiles that cross row boundaries. Separate initial output
