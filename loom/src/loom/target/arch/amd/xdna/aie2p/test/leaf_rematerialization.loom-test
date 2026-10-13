@@ -722,3 +722,175 @@ issue cycles: 165
 code bytes: 752
 coissued bundles: 39
 coissued components: 78
+
+// ====
+
+// Nine endpoint bases exceed the eight EP registers across the block boundary.
+// Recreate each constant address near its store without retaining all bases.
+// RUN: emit aie2p-leaf @literal_address_pressure report=code uses=payload
+
+low.func.def target<amd.xdna.aie2p.core> @literal_address_pressure(%payload: reg<aie2p.er>) asm {
+  %endpoint0 = mov.local-address 458752
+  %endpoint1 = mov.local-address 458816
+  %endpoint2 = mov.local-address 458880
+  %endpoint3 = mov.local-address 458944
+  %endpoint4 = mov.local-address 459008
+  %endpoint5 = mov.local-address 459072
+  %endpoint6 = mov.local-address 459136
+  %endpoint7 = mov.local-address 459200
+  %endpoint8 = mov.local-address 459264
+  low.br ^publish
+^publish:
+  st %payload, %endpoint0, 0
+  st %payload, %endpoint1, 0
+  st %payload, %endpoint2, 0
+  st %payload, %endpoint3, 0
+  st %payload, %endpoint4, 0
+  st %payload, %endpoint5, 0
+  st %payload, %endpoint6, 0
+  st %payload, %endpoint7, 0
+  st %payload, %endpoint8, 0
+  return
+}
+
+// ----
+code: 44 00 c0 00 07 00 3a 11 20 30 c0 01 00 30 82 00 3a 11 40 30 c0 01 00 30 82 00 3a 11 60 30 c0 01 00 30 82 00 3a 11 80 30 c0 01 00 30 82 00 3a 11 a0 30 c0 01 00 30 82 00 3a 11 c0 30 c0 01 00 30 82 00 3a 11 e0 30 c0 01 00 30 82 00 3a 11 00 31 c0 01 00 30 82 00 5c 00 50 30 82 00 00 00 00 00 00 00 00 00 00 00
+%payload -> st operand=0 (%payload, %endpoint0_remat)
+%payload -> st operand=0 (%payload, %endpoint1_remat)
+%payload -> st operand=0 (%payload, %endpoint2_remat)
+%payload -> st operand=0 (%payload, %endpoint3_remat)
+%payload -> st operand=0 (%payload, %endpoint4_remat)
+%payload -> st operand=0 (%payload, %endpoint5_remat)
+%payload -> st operand=0 (%payload, %endpoint6_remat)
+%payload -> st operand=0 (%payload, %endpoint7_remat)
+%payload -> st operand=0 (%payload, %endpoint8_remat)
+
+// ====
+
+// Symbolic bases have the same EP pressure. Every rematerialized address keeps
+// its data identity, and its absolute relocation follows each worker placement.
+// RUN: emit aie2p-xdna output=sections
+
+global.rodata.def @coefficient0 = align(4) bytes("01000000")
+
+global.rodata.def @coefficient1 = align(4) bytes("02000000")
+
+global.rodata.def @coefficient2 = align(4) bytes("03000000")
+
+global.rodata.def @coefficient3 = align(4) bytes("04000000")
+
+global.rodata.def @coefficient4 = align(4) bytes("05000000")
+
+global.rodata.def @coefficient5 = align(4) bytes("06000000")
+
+global.rodata.def @coefficient6 = align(4) bytes("07000000")
+
+global.rodata.def @coefficient7 = align(4) bytes("08000000")
+
+global.rodata.def @coefficient8 = align(4) bytes("09000000")
+
+aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix.17f0_10"}
+
+aie2p.target<core> @core
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) @symbolic_address_pressure() asm {
+  %columns = constant 2 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @initialize() asm {
+  %first_column = constant 0 : reg<aie2p.config.scalar : i64>
+  %second_column = constant 1 : reg<aie2p.config.scalar : i64>
+  %row = constant 3 : reg<aie2p.config.scalar : i64>
+  %origin = constant 0 : reg<aie2p.config.scalar : i64>
+  %bank_bytes = constant 16384 : reg<aie2p.config.scalar : i64>
+  data.reserve %first_column, %row, %origin, %bank_bytes
+  program.load %first_column, %row, @read_coefficients
+  program.load %second_column, %row, @read_coefficients
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @invoke() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @read_coefficients() asm {
+  %scratch = storage {byte_alignment = 64, byte_length = 64} : low.storage<private>
+  %output = storage_address %scratch : low.storage<private> -> reg<aie2p.ep>
+  %table0 = mov.local-address @coefficient0
+  %table1 = mov.local-address @coefficient1
+  %table2 = mov.local-address @coefficient2
+  %table3 = mov.local-address @coefficient3
+  %table4 = mov.local-address @coefficient4
+  %table5 = mov.local-address @coefficient5
+  %table6 = mov.local-address @coefficient6
+  %table7 = mov.local-address @coefficient7
+  %table8 = mov.local-address @coefficient8
+  low.br ^read
+^read:
+  %value0 = lda %table0, 0
+  st %value0, %output, 0
+  %value1 = lda %table1, 0
+  st %value1, %output, 4
+  %value2 = lda %table2, 0
+  st %value2, %output, 8
+  %value3 = lda %table3, 0
+  st %value3, %output, 12
+  %value4 = lda %table4, 0
+  st %value4, %output, 16
+  %value5 = lda %table5, 0
+  st %value5, %output, 20
+  %value6 = lda %table6, 0
+  st %value6, %output, 24
+  %value7 = lda %table7, 0
+  st %value7, %output, 28
+  %value8 = lda %table8, 0
+  %output_end = padda %output, 64
+  st %value8, %output_end, -32
+  return
+}
+
+// ----
+.text.read_coefficients: address=0x00000000 bytes=250 initialized
+  4400c04007004480c0420700ba1022b0d00100d0822000000000000000000000000098110408ba1024b0d00100d0822000000000000000000000000098111408ba1026b0d00100d0822000000000000000000000000098112408ba1028b0d00100d0822000000000000000000000000098113408ba102ab0d00100d0822000000000000000000000000098114408ba102cb0d00100d0822000000000000000000000000098115408ba102eb0d00100d0822000000000000000000000000098116408ba1030b0d00100d082200000000000000000000000000c23e8f08c0398160401000000000000000018002810000098118408000000000000
+.text.read_coefficients: address=0x00000000 bytes=250 initialized
+  4400c00007004480c0020700ba1022b0c00100d0822000000000000000000000000098110408ba1024b0c00100d0822000000000000000000000000098111408ba1026b0c00100d0822000000000000000000000000098112408ba1028b0c00100d0822000000000000000000000000098113408ba102ab0c00100d0822000000000000000000000000098114408ba102cb0c00100d0822000000000000000000000000098115408ba102eb0c00100d0822000000000000000000000000098116408ba1030b0c00100d082200000000000000000000000000c23e8f08c0398160401000000000000000018002810000098118408000000000000
+.rodata.coefficient0: address=0x00074040 bytes=4 initialized
+  01000000
+.rodata.coefficient1: address=0x00074044 bytes=4 initialized
+  02000000
+.rodata.coefficient2: address=0x00074048 bytes=4 initialized
+  03000000
+.rodata.coefficient3: address=0x0007404c bytes=4 initialized
+  04000000
+.rodata.coefficient4: address=0x00074050 bytes=4 initialized
+  05000000
+.rodata.coefficient5: address=0x00074054 bytes=4 initialized
+  06000000
+.rodata.coefficient6: address=0x00074058 bytes=4 initialized
+  07000000
+.rodata.coefficient7: address=0x0007405c bytes=4 initialized
+  08000000
+.rodata.coefficient8: address=0x00074060 bytes=4 initialized
+  09000000
+.storage.read_coefficients.private: address=0x00074000 bytes=64 reserved
+.rodata.coefficient0: address=0x00070040 bytes=4 initialized
+  01000000
+.rodata.coefficient1: address=0x00070044 bytes=4 initialized
+  02000000
+.rodata.coefficient2: address=0x00070048 bytes=4 initialized
+  03000000
+.rodata.coefficient3: address=0x0007004c bytes=4 initialized
+  04000000
+.rodata.coefficient4: address=0x00070050 bytes=4 initialized
+  05000000
+.rodata.coefficient5: address=0x00070054 bytes=4 initialized
+  06000000
+.rodata.coefficient6: address=0x00070058 bytes=4 initialized
+  07000000
+.rodata.coefficient7: address=0x0007005c bytes=4 initialized
+  08000000
+.rodata.coefficient8: address=0x00070060 bytes=4 initialized
+  09000000
+.storage.read_coefficients.private: address=0x00070000 bytes=64 reserved

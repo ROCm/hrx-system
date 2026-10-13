@@ -1678,6 +1678,7 @@ _BASE_DESCRIPTOR_SPECS = (
         (("dst", "eP"),),
         asm_mnemonic="mov.local-address",
         symbolic_immediates=("i",),
+        rematerializable=True,
         flags=(DescriptorFlag.SAFE_TO_SPECULATE,),
     ),
     _DescriptorSpec(

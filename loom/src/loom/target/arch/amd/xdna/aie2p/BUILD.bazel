@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:python.bzl", "iree_py_test")
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//libamdf/requirements:defs.bzl", "LIBAMDF")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
@@ -661,6 +662,18 @@ iree_py_test(
     main = "test/transpose_family_test.py",
     tags = ["manual"],
     target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,
+)
+
+iree_execution_test_suite(
+    name = "native_allocation_report_test",
+    size = "small",
+    data = ["test/native_allocation_report.loom"],
+    manifests = ["test/native_allocation_report.test.json"],
+    tags = ["hostonly"],
+    target_compatible_with = _XDNA_IMAGE_COMPATIBLE_WITH,
+    tools = {
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+    },
 )
 
 loom_check_test_suite(

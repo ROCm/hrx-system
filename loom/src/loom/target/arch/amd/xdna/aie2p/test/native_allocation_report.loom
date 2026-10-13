@@ -1,0 +1,111 @@
+// Native reports outlive each worker's scheduling and allocation scratch.
+// The rejected entry compiles one worker before exhausting another worker's
+// address-index bank. The accepted entry isolates the same successful worker
+// for a report-enabled versus report-disabled artifact comparison.
+aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) @accepted() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize_accepted, @invoke
+  return
+}
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) @rejected() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize_rejected, @invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @initialize_accepted() asm {
+  %column = constant 0 : reg<aie2p.config.scalar : i64>
+  %row = constant 2 : reg<aie2p.config.scalar : i64>
+  program.load %column, %row, @accepted_worker
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @initialize_rejected() asm {
+  %column = constant 0 : reg<aie2p.config.scalar : i64>
+  %accepted_row = constant 2 : reg<aie2p.config.scalar : i64>
+  %rejected_row = constant 3 : reg<aie2p.config.scalar : i64>
+  program.load %column, %accepted_row, @accepted_worker
+  program.load %column, %rejected_row, @simultaneous_indices
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @invoke() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @accepted_worker() asm {
+  %scratch = storage {byte_alignment = 64, byte_length = 64} : low.storage<private>
+  %address = storage_address %scratch : low.storage<private> -> reg<aie2p.ep>
+  %identity = mov.short 0
+  st %identity, %address, 0
+  return
+}
+
+// Nine loop-carried indices coexist on the backedge. Their indexed loads keep
+// every block argument live, so rematerialization cannot fit the loop into
+// eight address-index registers. The worker has no arguments or results.
+low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @simultaneous_indices() asm {
+  %storage = storage {byte_alignment = 64, byte_length = 640} : low.storage<private>
+  %address = storage_address %storage : low.storage<private> -> reg<aie2p.ep>
+  %iterations = mov.short 2
+  %step = mov.short 1
+  %initial_value = mov.short 0
+  %offset0 = mov.static-byte-offset 64
+  %index0 = mov.address-index %offset0
+  st.i32.index %initial_value, %address, %index0
+  %offset1 = mov.static-byte-offset 128
+  %index1 = mov.address-index %offset1
+  st.i32.index %initial_value, %address, %index1
+  %offset2 = mov.static-byte-offset 192
+  %index2 = mov.address-index %offset2
+  st.i32.index %initial_value, %address, %index2
+  %offset3 = mov.static-byte-offset 256
+  %index3 = mov.address-index %offset3
+  st.i32.index %initial_value, %address, %index3
+  %offset4 = mov.static-byte-offset 320
+  %index4 = mov.address-index %offset4
+  st.i32.index %initial_value, %address, %index4
+  %offset5 = mov.static-byte-offset 384
+  %index5 = mov.address-index %offset5
+  st.i32.index %initial_value, %address, %index5
+  %offset6 = mov.static-byte-offset 448
+  %index6 = mov.address-index %offset6
+  st.i32.index %initial_value, %address, %index6
+  %offset7 = mov.static-byte-offset 512
+  %index7 = mov.address-index %offset7
+  st.i32.index %initial_value, %address, %index7
+  %offset8 = mov.static-byte-offset 576
+  %index8 = mov.address-index %offset8
+  st.i32.index %initial_value, %address, %index8
+  low.br ^loop(%iterations: reg<aie2p.er>, %index0: reg<aie2p.edj>, %index1: reg<aie2p.edj>, %index2: reg<aie2p.edj>, %index3: reg<aie2p.edj>, %index4: reg<aie2p.edj>, %index5: reg<aie2p.edj>, %index6: reg<aie2p.edj>, %index7: reg<aie2p.edj>, %index8: reg<aie2p.edj>)
+^loop(%remaining: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>):
+  %value0 = lda.i32.index %address, %carried0
+  %value1 = lda.i32.index %address, %carried1
+  %sum1 = add.rr %value0, %value1
+  %value2 = lda.i32.index %address, %carried2
+  %sum2 = add.rr %sum1, %value2
+  %value3 = lda.i32.index %address, %carried3
+  %sum3 = add.rr %sum2, %value3
+  %value4 = lda.i32.index %address, %carried4
+  %sum4 = add.rr %sum3, %value4
+  %value5 = lda.i32.index %address, %carried5
+  %sum5 = add.rr %sum4, %value5
+  %value6 = lda.i32.index %address, %carried6
+  %sum6 = add.rr %sum5, %value6
+  %value7 = lda.i32.index %address, %carried7
+  %sum7 = add.rr %sum6, %value7
+  %value8 = lda.i32.index %address, %carried8
+  %sum8 = add.rr %sum7, %value8
+  st %sum8, %address, 0
+  %next = sub %remaining, %step
+  low.cond_br %next, ^repeat, ^done : reg<aie2p.er>
+^repeat:
+  low.br ^loop(%next: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>)
+^done:
+  return
+}

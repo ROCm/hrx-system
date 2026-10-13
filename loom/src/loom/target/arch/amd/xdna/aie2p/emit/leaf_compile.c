@@ -94,16 +94,20 @@ static iree_status_t loom_aie2p_leaf_build_frame(
     loom_target_compile_report_record_low_planning(options->compile_report,
                                                    &planning_statistics);
   }
-  if (iree_status_is_ok(status) && *out_accepted &&
-      options->compile_report != NULL) {
-    const loom_target_bundle_t* bundle =
-        loom_low_resolved_target_bundle(&out_frame->target);
-    if (bundle != NULL) {
-      loom_target_compile_report_record_target_bundle(options->compile_report,
-                                                      bundle);
+  if (iree_status_is_ok(status) && options->compile_report != NULL) {
+    if (*out_accepted) {
+      const loom_target_bundle_t* bundle =
+          loom_low_resolved_target_bundle(&out_frame->target);
+      if (bundle != NULL) {
+        loom_target_compile_report_record_target_bundle(options->compile_report,
+                                                        bundle);
+      }
+      status = loom_target_compile_report_record_low_emission_frame(
+          options->compile_report, out_frame);
+    } else if (out_frame->allocation.function_op != NULL) {
+      status = loom_target_compile_report_record_low_allocation(
+          options->compile_report, &out_frame->allocation);
     }
-    status = loom_target_compile_report_record_low_emission_frame(
-        options->compile_report, out_frame);
   }
   return status;
 }
@@ -115,7 +119,7 @@ iree_status_t loom_aie2p_leaf_compile(
     loom_aie2p_leaf_contribution_t* out_contribution) {
   *out_compiled = false;
   *out_contribution = (loom_aie2p_leaf_contribution_t){0};
-  // Only the detached contribution outlives this compilation. Schedule,
+  // The contribution and optional report retain no frame scratch. Schedule,
   // allocation, and packet-planning storage is reusable by the next worker.
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(arena->block_pool, &scratch_arena);

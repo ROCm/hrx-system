@@ -799,6 +799,23 @@ iree_py_test(
 )
 endif()
 
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND AMDF_BUILD)
+iree_execution_test_suite(
+  NAME
+    native_allocation_report_test
+  MANIFESTS
+    "test/native_allocation_report.test.json"
+  TOOLS
+    "loom-compile=loom::tools::loom-compile"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/native_allocation_report.loom"
+  LABELS
+    "hostonly"
+  TIMEOUT
+    60
+)
+endif()
+
 if(LOOM_TARGET_ARCH_XDNA)
 loom_check_test_suite(
   NAME
