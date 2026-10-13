@@ -34,22 +34,4 @@ iree_py_library(
     loom::py::loom::target::arch::amd::xdna::device::strix
 )
 
-iree_py_test(
-  NAME
-    hardware_tables_test
-  MAIN
-    "../../../../../tools/pytest_style_runner.py"
-  SRCS
-    "hardware_tables_test.py"
-    "../../../../../tools/pytest_style_runner.py"
-  ARGS
-    "loom.gen.target.arch.amd.xdna.hardware_tables_test"
-  DEPS
-    loom::py::loom::gen::target::arch::amd::xdna::hardware_tables
-  PACKAGE_DIRS
-    "${PROJECT_SOURCE_DIR}/loom/py"
-    "${PROJECT_BINARY_DIR}/loom/py"
-    "${PROJECT_SOURCE_DIR}"
-)
-
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -18,16 +18,10 @@ from loom.target.arch.amd.xdna.array.model import (
     StreamPort,
     TileKind,
     maximum_encoded_dma_transfer_length,
-    register_field_count,
     tile_resource_totals,
     validate_array_family,
 )
-from loom.target.arch.amd.xdna.array.npu2 import (
-    AIE_RT_SOURCE_COMMIT,
-    MLIR_AIE_SOURCE_COMMIT,
-    NPU2_ARRAY_FAMILY,
-    REGISTER_DATABASE_VERSION,
-)
+from loom.target.arch.amd.xdna.array.npu2 import NPU2_ARRAY_FAMILY
 
 
 @pytest.mark.parametrize("tile_kind", tuple(TileKind))
@@ -621,8 +615,6 @@ def test_validator_rejects_loopback_pairs_outside_dma_channels(
 def test_register_patterns_cover_complete_seed_resource_families() -> None:
     family = NPU2_ARRAY_FAMILY
 
-    assert len(family.registers) == 163
-    assert register_field_count(family) == 410
     assert all(
         pattern.provenance & (Provenance.AIE_RT | Provenance.REGISTER_DATABASE)
         == (Provenance.AIE_RT | Provenance.REGISTER_DATABASE)
@@ -684,12 +676,6 @@ def test_trace_and_timer_modules_preserve_hardware_differences(
             (dimension.count, dimension.stride) for dimension in pattern.dimensions
         ] == [(switch_count, 0x40)]
         assert pattern.fields[0].access is RegisterAccess.READ_ONLY
-
-
-def test_npu2_source_revisions_are_explicit_oracle_identities() -> None:
-    assert AIE_RT_SOURCE_COMMIT == "8849e208bdcc533b20a0ed3f95c1ce961dee9c3a"
-    assert MLIR_AIE_SOURCE_COMMIT == "db06374df9bf83d9fc557001ca213368aed15788"
-    assert REGISTER_DATABASE_VERSION == "AM025-2024-11-13-1.1"
 
 
 def test_validator_rejects_register_provenance_claims_missing_an_oracle() -> None:

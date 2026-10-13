@@ -157,6 +157,69 @@ pipeline.def<kernel> public retain target(@array_target) @double_i32() run(%inpu
   }
 }
 
+func.def inline @add_routed_packet(%input: buffer, %output: buffer, %inputs: channel<tile<16xi32>>, %outputs: channel<tile<16xi32>>, %bias: i32) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<16xi32>
+  %input_write, %input_destination = channel.reserve %inputs : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  %input_copy = kernel.async.copy %source to %input_destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %input_group = kernel.async.group %input_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %input_group {newer_groups = 0} : kernel.async.group
+  channel.publish %input_write : write<tile<16xi32>>
+
+  %input_read, %input_values = channel.acquire %inputs : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  %output_write, %output_values = channel.reserve %outputs : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  %values = vector.load %input_values[0] : view<16xi32> -> vector<16xi32>
+  %bias_values = vector.splat %bias : vector<16xi32>
+  %results = vector.addi %values, %bias_values : vector<16xi32>
+  vector.store %results, %output_values[0] : vector<16xi32>, view<16xi32>
+  channel.release %input_read : read<tile<16xi32>>
+  channel.publish %output_write : write<tile<16xi32>>
+
+  %output_read, %output_source = channel.acquire %outputs : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  %destination = buffer.view %output[%origin] : buffer -> view<16xi32>
+  %output_copy = kernel.async.copy %output_source to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %output_group = kernel.async.group %output_copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %output_group {newer_groups = 0} : kernel.async.group
+  channel.release %output_read : read<tile<16xi32>>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @add_on_self_routed_tile() run(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %origin = index.constant 0 : offset
+  %packet_bytes = index.constant 64 : offset
+  %capacity = index.constant 1 : index
+  %input_storage = buffer.alloca<workgroup> pool(%memory) align(64) %packet_bytes : buffer
+  %output_storage = buffer.alloca<workgroup> pool(%memory) align(64) %packet_bytes : buffer
+  %input_slots = buffer.view %input_storage[%origin] : buffer -> view<1x16xi32>
+  %output_slots = buffer.view %output_storage[%origin] : buffer -> view<1x16xi32>
+  %inputs = channel.bind<fifo> %input_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %outputs = channel.bind<fifo> %output_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %bias = scalar.constant 3 : i32
+    func.call @add_routed_packet(%input_aligned, %output_aligned, %inputs, %outputs, %bias) : (buffer, buffer, channel<tile<16xi32>>, channel<tile<16xi32>>, i32)
+  }
+}
+
+pipeline.def<kernel> public retain target(@array_target) @add_on_neighbor_routed_tile() run(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %origin = index.constant 0 : offset
+  %packet_bytes = index.constant 64 : offset
+  %capacity = index.constant 1 : index
+  %input_storage = buffer.alloca<workgroup> pool(%memory) align(64) %packet_bytes : buffer
+  %output_storage = buffer.alloca<workgroup> pool(%memory) align(64) %packet_bytes : buffer
+  %input_slots = buffer.view %input_storage[%origin] : buffer -> view<1x16xi32>
+  %output_slots = buffer.view %output_storage[%origin] : buffer -> view<1x16xi32>
+  %inputs = channel.bind<fifo> %input_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %outputs = channel.bind<fifo> %output_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %bias = scalar.constant 7 : i32
+    func.call @add_routed_packet(%input_aligned, %output_aligned, %inputs, %outputs, %bias) : (buffer, buffer, channel<tile<16xi32>>, channel<tile<16xi32>>, i32)
+  }
+}
+
 check.case public @serial_array_programs {
   %input = check.generate.fill value(7) : tensor<16xi32>
   %intermediate = check.generate.fill value(-4) : tensor<16xi32>
@@ -185,6 +248,27 @@ check.case public @concurrent_array_programs {
   %expected_b = check.generate.fill value(18) : tensor<16xi32>
   check.expect.equal actual(%output_a) expected(%expected_a) : tensor<16xi32>
   check.expect.equal actual(%output_b) expected(%expected_b) : tensor<16xi32>
+  check.return
+}
+
+// Independent entries that change the DMA owner must establish all switch
+// state they use. The final A entry restores the self route after B used the
+// north-neighbor route; checking every live buffer also catches stray writes.
+check.case public @serial_route_reestablishment {
+  %first = check.generate.fill value(7) : tensor<16xi32>
+  %second = check.generate.fill value(-4) : tensor<16xi32>
+  %third = check.generate.fill value(-19) : tensor<16xi32>
+  kernel.launch.serial {
+    kernel.launch @add_on_self_routed_tile(%first, %second) : (tensor<16xi32>, tensor<16xi32>)
+    kernel.launch @add_on_neighbor_routed_tile(%second, %third) : (tensor<16xi32>, tensor<16xi32>)
+    kernel.launch @add_on_self_routed_tile(%third, %first) : (tensor<16xi32>, tensor<16xi32>)
+  }
+  %expected_first = check.generate.fill value(20) : tensor<16xi32>
+  %expected_second = check.generate.fill value(10) : tensor<16xi32>
+  %expected_third = check.generate.fill value(17) : tensor<16xi32>
+  check.expect.equal actual(%first) expected(%expected_first) : tensor<16xi32>
+  check.expect.equal actual(%second) expected(%expected_second) : tensor<16xi32>
+  check.expect.equal actual(%third) expected(%expected_third) : tensor<16xi32>
   check.return
 }
 
