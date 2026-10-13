@@ -31,47 +31,54 @@ func.def @tiled_channel_load_f32(%input: buffer, %row: index, %lane: index) -> (
   func.return %result : f32
 }
 
-func.def @tiled_channel_observations(%ordinal: index, %integer_input: buffer, %float_input: buffer, %integer_output: buffer, %float_output: buffer) {
+func.def @tiled_channel_observations(%integer_input: buffer, %float_input: buffer, %output: buffer) {
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
   %c16 = index.constant 16 : index
-  %bounded_ordinal = index.assume %ordinal [range(%ordinal, 0, 255)] : index
-  %row = index.rem %bounded_ordinal, %c16 : index
-  %integer_result = func.call @tiled_channel_load(%integer_input, %row, %bounded_ordinal) : (buffer, index, index) -> (i32)
-  %float_result = func.call @tiled_channel_load_f32(%float_input, %row, %bounded_ordinal) : (buffer, index, index) -> (f32)
   %origin = index.constant 0 : offset
-  %integer_result_view = buffer.view %integer_output[%origin] : buffer -> view<1xi32>
-  %float_result_view = buffer.view %float_output[%origin] : buffer -> view<1xf32>
-  view.store %integer_result, %integer_result_view[0] : i32, view<1xi32>
-  view.store %float_result, %float_result_view[0] : f32, view<1xf32>
+  %float_origin = index.constant 1024 : offset
+  %integer_result_view = buffer.view %output[%origin] : buffer -> view<256xi32>
+  %float_result_view = buffer.view %output[%float_origin] : buffer -> view<256xf32>
+  scf.for %ordinal = [%begin to %end step %step] {
+    %bounded_ordinal = index.assume %ordinal [range(%ordinal, 0, 255)] : index
+    %row = index.rem %bounded_ordinal, %c16 : index
+    %integer_result = func.call @tiled_channel_load(%integer_input, %row, %bounded_ordinal) : (buffer, index, index) -> (i32)
+    %float_result = func.call @tiled_channel_load_f32(%float_input, %row, %bounded_ordinal) : (buffer, index, index) -> (f32)
+    view.store %integer_result, %integer_result_view[%ordinal] : i32, view<256xi32>
+    view.store %float_result, %float_result_view[%ordinal] : f32, view<256xf32>
+  }
   func.return
 }
 
 // Every lane and row participates. Finite, ordinary F32 values keep this a
 // target-neutral address/arithmetic contract; representation edges stay Low.
 check.scenario @tiled_channel_values {
-  check.trial[256](%trial: index, %entropy: check.entropy) {
-    %integer_storage = check.generate.iota offset(-2048) step(3) : tensor<4104xi32>
-    %integer_input = check.tensor.view %integer_storage offset(16) : tensor<4104xi32> -> tensor<4096xi32>
-    %integer_prefix = check.tensor.view %integer_storage offset(0) : tensor<4104xi32> -> tensor<4xi32>
-    %integer_suffix = check.tensor.view %integer_storage offset(16400) : tensor<4104xi32> -> tensor<4xi32>
-    %expected_integer_prefix = check.generate.iota offset(-2048) step(3) : tensor<4xi32>
-    %expected_integer_suffix = check.generate.iota offset(10252) step(3) : tensor<4xi32>
-    %float_storage = check.generate.iota offset(-8.0) step(0.00390625) : tensor<4104xf32>
-    %float_input = check.tensor.view %float_storage offset(16) : tensor<4104xf32> -> tensor<4096xf32>
-    %float_prefix = check.tensor.view %float_storage offset(0) : tensor<4104xf32> -> tensor<4xf32>
-    %float_suffix = check.tensor.view %float_storage offset(16400) : tensor<4104xf32> -> tensor<4xf32>
-    %expected_float_prefix = check.generate.iota offset(-8.0) step(0.00390625) : tensor<4xf32>
-    %expected_float_suffix = check.generate.iota offset(8.015625) step(0.00390625) : tensor<4xf32>
-    %integer_output = check.generate.fill value(-123) : tensor<1xi32>
-    %float_output = check.generate.fill value(-123.5) : tensor<1xf32>
-    check.compare<@tiled_channel_observations>(%trial, %integer_input, %float_input, %integer_output, %float_output) : (index, tensor<4096xi32>, tensor<4096xf32>, tensor<1xi32>, tensor<1xf32>) -> () {
-      check.expect.bitwise actual(%integer_storage) expected(%integer_storage) : tensor<4104xi32>
-      check.expect.bitwise actual(%float_storage) expected(%float_storage) : tensor<4104xf32>
-      check.expect.bitwise actual(%integer_output) expected(%integer_output) : tensor<1xi32>
-      check.expect.close actual(%float_output) expected(%float_output) atol(0.0) rtol(9.9999999999999995e-07) nan(same) : tensor<1xf32>
-      check.expect.bitwise actual(%integer_prefix) expected(%expected_integer_prefix) : tensor<4xi32>
-      check.expect.bitwise actual(%integer_suffix) expected(%expected_integer_suffix) : tensor<4xi32>
-      check.expect.bitwise actual(%float_prefix) expected(%expected_float_prefix) : tensor<4xf32>
-      check.expect.bitwise actual(%float_suffix) expected(%expected_float_suffix) : tensor<4xf32>
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %integer_storage = check.generate.iota offset(-2048) step(3) : tensor<4112xi32>
+    %integer_input = check.tensor.view %integer_storage offset(32) : tensor<4112xi32> -> tensor<4096xi32>
+    %integer_prefix = check.tensor.view %integer_storage offset(0) : tensor<4112xi32> -> tensor<8xi32>
+    %integer_suffix = check.tensor.view %integer_storage offset(16416) : tensor<4112xi32> -> tensor<8xi32>
+    %expected_integer_prefix = check.generate.iota offset(-2048) step(3) : tensor<8xi32>
+    %expected_integer_suffix = check.generate.iota offset(10264) step(3) : tensor<8xi32>
+    %float_storage = check.generate.iota offset(-8.0) step(0.00390625) : tensor<4112xf32>
+    %float_input = check.tensor.view %float_storage offset(32) : tensor<4112xf32> -> tensor<4096xf32>
+    %float_prefix = check.tensor.view %float_storage offset(0) : tensor<4112xf32> -> tensor<8xf32>
+    %float_suffix = check.tensor.view %float_storage offset(16416) : tensor<4112xf32> -> tensor<8xf32>
+    %expected_float_prefix = check.generate.iota offset(-8.0) step(0.00390625) : tensor<8xf32>
+    %expected_float_suffix = check.generate.iota offset(8.03125) step(0.00390625) : tensor<8xf32>
+    %output = check.generate.fill value(-123) : tensor<512xi32>
+    %integer_output = check.tensor.view %output offset(0) : tensor<512xi32> -> tensor<256xi32>
+    %float_output = check.tensor.view %output offset(1024) : tensor<512xi32> -> tensor<256xf32>
+    check.compare<@tiled_channel_observations>(%integer_input, %float_input, %output) : (tensor<4096xi32>, tensor<4096xf32>, tensor<512xi32>) -> () {
+      check.expect.bitwise actual(%integer_storage) expected(%integer_storage) : tensor<4112xi32>
+      check.expect.bitwise actual(%float_storage) expected(%float_storage) : tensor<4112xf32>
+      check.expect.bitwise actual(%integer_output) expected(%integer_output) : tensor<256xi32>
+      check.expect.close actual(%float_output) expected(%float_output) atol(0.0) rtol(9.9999999999999995e-07) nan(same) : tensor<256xf32>
+      check.expect.bitwise actual(%integer_prefix) expected(%expected_integer_prefix) : tensor<8xi32>
+      check.expect.bitwise actual(%integer_suffix) expected(%expected_integer_suffix) : tensor<8xi32>
+      check.expect.bitwise actual(%float_prefix) expected(%expected_float_prefix) : tensor<8xf32>
+      check.expect.bitwise actual(%float_suffix) expected(%expected_float_suffix) : tensor<8xf32>
     }
   }
   check.return

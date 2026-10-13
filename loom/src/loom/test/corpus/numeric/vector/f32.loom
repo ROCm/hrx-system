@@ -1,22 +1,38 @@
-func.def @vector_f32_unary(%input_buffer: buffer, %output_buffer: buffer) {
+func.def @vector_f32_sign(%input_buffer: buffer, %output_buffer: buffer) {
   %base = index.constant 0 : offset
   %input_view = buffer.view %input_buffer[%base] : buffer -> view<4xf32>
-  %output_view = buffer.view %output_buffer[%base] : buffer -> view<28xf32>
+  %output_view = buffer.view %output_buffer[%base] : buffer -> view<8xf32>
   %input = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
   %absolute = vector.absf %input : vector<4xf32>
-  vector.store %absolute, %output_view[0] : vector<4xf32>, view<28xf32>
+  vector.store %absolute, %output_view[0] : vector<4xf32>, view<8xf32>
   %negated = vector.negf %input : vector<4xf32>
-  vector.store %negated, %output_view[4] : vector<4xf32>, view<28xf32>
+  vector.store %negated, %output_view[4] : vector<4xf32>, view<8xf32>
+  func.return
+}
+
+func.def @vector_f32_rounding(%input_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_buffer[%base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output_buffer[%base] : buffer -> view<16xf32>
+  %input = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
   %ceil = vector.ceilf %input : vector<4xf32>
-  vector.store %ceil, %output_view[8] : vector<4xf32>, view<28xf32>
+  vector.store %ceil, %output_view[0] : vector<4xf32>, view<16xf32>
   %floor = vector.floorf %input : vector<4xf32>
-  vector.store %floor, %output_view[12] : vector<4xf32>, view<28xf32>
+  vector.store %floor, %output_view[4] : vector<4xf32>, view<16xf32>
   %roundeven = vector.roundevenf %input : vector<4xf32>
-  vector.store %roundeven, %output_view[16] : vector<4xf32>, view<28xf32>
+  vector.store %roundeven, %output_view[8] : vector<4xf32>, view<16xf32>
   %trunc = vector.truncf %input : vector<4xf32>
-  vector.store %trunc, %output_view[20] : vector<4xf32>, view<28xf32>
+  vector.store %trunc, %output_view[12] : vector<4xf32>, view<16xf32>
+  func.return
+}
+
+func.def @vector_f32_square_root(%input_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_buffer[%base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output_buffer[%base] : buffer -> view<4xf32>
+  %input = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
   %square_root = vector.sqrtf %input : vector<4xf32>
-  vector.store %square_root, %output_view[24] : vector<4xf32>, view<28xf32>
+  vector.store %square_root, %output_view[0] : vector<4xf32>, view<4xf32>
   func.return
 }
 
@@ -24,17 +40,27 @@ func.def @vector_f32_arithmetic(%lhs_buffer: buffer, %rhs_buffer: buffer, %outpu
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xf32>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4xf32>
-  %output_view = buffer.view %output_buffer[%base] : buffer -> view<16xf32>
+  %output_view = buffer.view %output_buffer[%base] : buffer -> view<12xf32>
   %lhs = vector.load %lhs_view[0] : view<4xf32> -> vector<4xf32>
   %rhs = vector.load %rhs_view[0] : view<4xf32> -> vector<4xf32>
   %sum = vector.addf %lhs, %rhs : vector<4xf32>
-  vector.store %sum, %output_view[0] : vector<4xf32>, view<16xf32>
+  vector.store %sum, %output_view[0] : vector<4xf32>, view<12xf32>
   %difference = vector.subf %lhs, %rhs : vector<4xf32>
-  vector.store %difference, %output_view[4] : vector<4xf32>, view<16xf32>
+  vector.store %difference, %output_view[4] : vector<4xf32>, view<12xf32>
   %product = vector.mulf %lhs, %rhs : vector<4xf32>
-  vector.store %product, %output_view[8] : vector<4xf32>, view<16xf32>
+  vector.store %product, %output_view[8] : vector<4xf32>, view<12xf32>
+  func.return
+}
+
+func.def @vector_f32_division(%lhs_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xf32>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output_buffer[%base] : buffer -> view<4xf32>
+  %lhs = vector.load %lhs_view[0] : view<4xf32> -> vector<4xf32>
+  %rhs = vector.load %rhs_view[0] : view<4xf32> -> vector<4xf32>
   %quotient = vector.divf %lhs, %rhs : vector<4xf32>
-  vector.store %quotient, %output_view[12] : vector<4xf32>, view<16xf32>
+  vector.store %quotient, %output_view[0] : vector<4xf32>, view<4xf32>
   func.return
 }
 
@@ -87,24 +113,70 @@ func.def @vector_bf16_origin_scale(%input_buffer: buffer, %output_buffer: buffer
 // Each trial covers four independent lanes. The random finite domain exercises
 // ordinary ML values; target-specific suites own representation details such
 // as NaN payloads, subnormals, and signed zeros.
-check.scenario @numeric_vector_f32_values {
+check.scenario @vector_f32_sign_values {
   check.trial[64](%trial: index, %entropy: check.entropy) {
-    %input_entropy = check.entropy.fork %entropy name("unary_input") : check.entropy
+    %input_entropy = check.entropy.fork %entropy name("sign_input") : check.entropy
     %input_seed = check.entropy.read %input_entropy[%trial] : check.entropy -> i64
     %input = check.generate.random.uniform seed(%input_seed) range(-1024.0 to 1024.0) : tensor<4xf32>
     %expected_input = check.generate.random.uniform seed(%input_seed) range(-1024.0 to 1024.0) : tensor<4xf32>
-    %storage = check.generate.fill value(-123.5) : tensor<36xf32>
-    %output = check.tensor.view %storage offset(16) : tensor<36xf32> -> tensor<28xf32>
-    %prefix = check.tensor.view %storage offset(0) : tensor<36xf32> -> tensor<4xf32>
-    %suffix = check.tensor.view %storage offset(128) : tensor<36xf32> -> tensor<4xf32>
+    %storage = check.generate.fill value(-123.5) : tensor<16xf32>
+    %output = check.tensor.view %storage offset(16) : tensor<16xf32> -> tensor<8xf32>
+    %prefix = check.tensor.view %storage offset(0) : tensor<16xf32> -> tensor<4xf32>
+    %suffix = check.tensor.view %storage offset(48) : tensor<16xf32> -> tensor<4xf32>
     %guard = check.generate.fill value(-123.5) : tensor<4xf32>
-    check.compare<@vector_f32_unary>(%input, %output) : (tensor<4xf32>, tensor<28xf32>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(9.9999999999999995e-07) nan(same) : tensor<28xf32>
+    check.compare<@vector_f32_sign>(%input, %output) : (tensor<4xf32>, tensor<8xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(9.9999999999999995e-07) nan(same) : tensor<8xf32>
       check.expect.bitwise actual(%input) expected(%expected_input) : tensor<4xf32>
       check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xf32>
       check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xf32>
     }
   }
+  check.return
+}
+
+check.scenario @vector_f32_rounding_values {
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %input_entropy = check.entropy.fork %entropy name("rounding_input") : check.entropy
+    %input_seed = check.entropy.read %input_entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-1024.0 to 1024.0) : tensor<4xf32>
+    %expected_input = check.generate.random.uniform seed(%input_seed) range(-1024.0 to 1024.0) : tensor<4xf32>
+    %storage = check.generate.fill value(-123.5) : tensor<24xf32>
+    %output = check.tensor.view %storage offset(16) : tensor<24xf32> -> tensor<16xf32>
+    %prefix = check.tensor.view %storage offset(0) : tensor<24xf32> -> tensor<4xf32>
+    %suffix = check.tensor.view %storage offset(80) : tensor<24xf32> -> tensor<4xf32>
+    %guard = check.generate.fill value(-123.5) : tensor<4xf32>
+    check.compare<@vector_f32_rounding>(%input, %output) : (tensor<4xf32>, tensor<16xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(9.9999999999999995e-07) nan(same) : tensor<16xf32>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<4xf32>
+      check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xf32>
+      check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario @vector_f32_square_root_values {
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %input_entropy = check.entropy.fork %entropy name("square_root_input") : check.entropy
+    %input_seed = check.entropy.read %input_entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-1024.0 to 1024.0) : tensor<4xf32>
+    %expected_input = check.generate.random.uniform seed(%input_seed) range(-1024.0 to 1024.0) : tensor<4xf32>
+    %storage = check.generate.fill value(-123.5) : tensor<12xf32>
+    %output = check.tensor.view %storage offset(16) : tensor<12xf32> -> tensor<4xf32>
+    %prefix = check.tensor.view %storage offset(0) : tensor<12xf32> -> tensor<4xf32>
+    %suffix = check.tensor.view %storage offset(32) : tensor<12xf32> -> tensor<4xf32>
+    %guard = check.generate.fill value(-123.5) : tensor<4xf32>
+    check.compare<@vector_f32_square_root>(%input, %output) : (tensor<4xf32>, tensor<4xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<4xf32>
+      check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xf32>
+      check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario @vector_f32_arithmetic_values {
   check.trial[64](%trial: index, %entropy: check.entropy) {
     %lhs_entropy = check.entropy.fork %entropy name("arithmetic_lhs") : check.entropy
     %rhs_entropy = check.entropy.fork %entropy name("arithmetic_rhs") : check.entropy
@@ -114,19 +186,49 @@ check.scenario @numeric_vector_f32_values {
     %rhs = check.generate.random.uniform seed(%rhs_seed) range(-1024.0 to 1024.0) : tensor<4xf32>
     %expected_lhs = check.generate.random.uniform seed(%lhs_seed) range(-1024.0 to 1024.0) : tensor<4xf32>
     %expected_rhs = check.generate.random.uniform seed(%rhs_seed) range(-1024.0 to 1024.0) : tensor<4xf32>
-    %storage = check.generate.fill value(-123.5) : tensor<24xf32>
-    %output = check.tensor.view %storage offset(16) : tensor<24xf32> -> tensor<16xf32>
-    %prefix = check.tensor.view %storage offset(0) : tensor<24xf32> -> tensor<4xf32>
-    %suffix = check.tensor.view %storage offset(80) : tensor<24xf32> -> tensor<4xf32>
+    %storage = check.generate.fill value(-123.5) : tensor<20xf32>
+    %output = check.tensor.view %storage offset(16) : tensor<20xf32> -> tensor<12xf32>
+    %prefix = check.tensor.view %storage offset(0) : tensor<20xf32> -> tensor<4xf32>
+    %suffix = check.tensor.view %storage offset(64) : tensor<20xf32> -> tensor<4xf32>
     %guard = check.generate.fill value(-123.5) : tensor<4xf32>
-    check.compare<@vector_f32_arithmetic>(%lhs, %rhs, %output) : (tensor<4xf32>, tensor<4xf32>, tensor<16xf32>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(9.9999999999999995e-07) nan(same) : tensor<16xf32>
+    check.compare<@vector_f32_arithmetic>(%lhs, %rhs, %output) : (tensor<4xf32>, tensor<4xf32>, tensor<12xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(9.9999999999999995e-07) nan(same) : tensor<12xf32>
       check.expect.bitwise actual(%lhs) expected(%expected_lhs) : tensor<4xf32>
       check.expect.bitwise actual(%rhs) expected(%expected_rhs) : tensor<4xf32>
       check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xf32>
       check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xf32>
     }
   }
+  check.return
+}
+
+check.scenario @vector_f32_division_values {
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %lhs_entropy = check.entropy.fork %entropy name("division_lhs") : check.entropy
+    %rhs_entropy = check.entropy.fork %entropy name("division_rhs") : check.entropy
+    %lhs_seed = check.entropy.read %lhs_entropy[%trial] : check.entropy -> i64
+    %rhs_seed = check.entropy.read %rhs_entropy[%trial] : check.entropy -> i64
+    %lhs = check.generate.random.uniform seed(%lhs_seed) range(-1024.0 to 1024.0) : tensor<4xf32>
+    %rhs = check.generate.random.uniform seed(%rhs_seed) range(-1024.0 to 1024.0) : tensor<4xf32>
+    %expected_lhs = check.generate.random.uniform seed(%lhs_seed) range(-1024.0 to 1024.0) : tensor<4xf32>
+    %expected_rhs = check.generate.random.uniform seed(%rhs_seed) range(-1024.0 to 1024.0) : tensor<4xf32>
+    %storage = check.generate.fill value(-123.5) : tensor<12xf32>
+    %output = check.tensor.view %storage offset(16) : tensor<12xf32> -> tensor<4xf32>
+    %prefix = check.tensor.view %storage offset(0) : tensor<12xf32> -> tensor<4xf32>
+    %suffix = check.tensor.view %storage offset(32) : tensor<12xf32> -> tensor<4xf32>
+    %guard = check.generate.fill value(-123.5) : tensor<4xf32>
+    check.compare<@vector_f32_division>(%lhs, %rhs, %output) : (tensor<4xf32>, tensor<4xf32>, tensor<4xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.0) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
+      check.expect.bitwise actual(%lhs) expected(%expected_lhs) : tensor<4xf32>
+      check.expect.bitwise actual(%rhs) expected(%expected_rhs) : tensor<4xf32>
+      check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xf32>
+      check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario @vector_f32_comparisons_no_nan_values {
   check.trial[64](%trial: index, %entropy: check.entropy) {
     %lhs_entropy = check.entropy.fork %entropy name("no_nan_lhs") : check.entropy
     %rhs_entropy = check.entropy.fork %entropy name("no_nan_rhs") : check.entropy

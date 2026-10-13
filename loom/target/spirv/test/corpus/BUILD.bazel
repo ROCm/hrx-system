@@ -518,7 +518,10 @@ _SPIRV_EXECUTION_XFAILS = {
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16_values": "TARGET/001,TARGET/003",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_f16_values": "TARGET/001",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_fma_values": "TARGET/001",
-    "numeric/vector/f32.loom:@numeric_vector_f32_values": "LOWERING/036",
+    "numeric/vector/f32.loom:@vector_f32_rounding_values": "LOWERING/036",
+    "numeric/vector/f32.loom:@vector_f32_square_root_values": "TARGET/001",
+    # BF16-capable devices reach the missing extrema contract; other devices
+    # reject the narrow carrier before extrema selection.
     "numeric/vector/float_extrema.loom:@vector_float_extrema_bf16_values": "TARGET/001,TARGET/003",
     "numeric/vector/float_extrema.loom:@vector_float_extrema_f16_values": "TARGET/001",
     "numeric/vector/float_extrema.loom:@vector_float_extrema_f64_values": "TARGET/002",
