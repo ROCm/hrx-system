@@ -18,7 +18,7 @@ from types import ModuleType
 from loom.gen import bootstrap as _bootstrap
 from loom.gen.cxx import intrinsics as cxx_intrinsics
 from loom.gen.editor import textmate
-from loom.gen.ops import c_tables
+from loom.gen.ops import c_tables, hal_schema
 from loom.gen.python import builders_pyi, package_inits
 from loom.gen.support.generated_file import (
     GeneratedFileFamily,
@@ -88,6 +88,12 @@ def checked_in_artifact_families(*, repository_root: Path | None = None) -> tupl
             regenerate_command=c_tables.REGENERATE_COMMAND,
             file_set=c_tables.checked_in_file_set(),
             input_roots=(_PYTHON_MODEL_ROOT,),
+        ),
+        GeneratedFileFamily(
+            description=hal_schema.DESCRIPTION,
+            regenerate_command=hal_schema.REGENERATE_COMMAND,
+            file_set=hal_schema.checked_in_file_set(),
+            input_roots=("loom/py/loom/dialect/hal", "loom/py/loom/gen/ops/hal_schema.py"),
         ),
         GeneratedFileFamily(
             description=amdgpu_target_config.DESCRIPTION,

@@ -1,0 +1,71 @@
+// RUN: emit vm-dis
+
+vm.target<core> @vm
+
+// Cardinalities and optional presence belong to the callsite, not the export.
+func.def public target(@vm) @copy(%queue: hal.queue, %semaphore: hal.semaphore, %source: hal.buffer, %target: hal.buffer, %offset: i64, %length: i64, %value: i64, %scope: i32, %stage: i32, %flags: i64, %effects: i32) {
+  hal.queue.copy (%queue, [(%semaphore, %value)], [], (%source, %offset), (%target, %offset), %length, (none, []), %flags)
+  hal.queue.copy (%queue, [], [(%semaphore, %value)], (%source, %offset), (%target, %offset), %length, ([(%stage, %stage, %flags, %effects, [(%scope, %scope)], []), (%stage, %stage, %flags, %effects, [], [(%scope, %scope, (%source, %offset, %length), none), (%scope, %scope, (%target, %offset, %length), (%effects, []))])], none), %flags)
+  func.return
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "copy"
+    string @string1 = "hal"
+    string @string2 = "buffer"
+    string @string3 = "queue"
+    string @string4 = "semaphore"
+    string @string5 = "hal"
+    string @string6 = "queue.copy"
+    string @string7 = "hal"
+    string @string8 = "queue.copy"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+      ref_type @ref_type1 name(@string3)
+      ref_type @ref_type2 name(@string4)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (ref(@ref_type1), ref(@ref_type2), ref(@ref_type0), ref(@ref_type0), i64, i64, i64, i32, i32, i64, i32) -> ()
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([has_native_call]) frame(local_bytes = 0, value_registers = 7, ref_registers = 4, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call.native @native_callsite0
+      control.call.native @native_callsite1
+      control.return
+    }
+  }
+
+  section native_calls alignment(8) {
+    native_layout @native_layout0 (ref(@ref_type2), i64)
+    native_layout @native_layout1 (i32, i32)
+    native_layout @native_layout2 (i32, i32, i32, i64, i32, i32, i32)
+    native_layout @native_layout3 (i32, [@native_layout2])
+    native_layout @native_layout4 (i32, i32, ref(@ref_type0), i64, i64, [@native_layout3])
+    native_layout @native_layout5 (i32, i32, i64, i32, [@native_layout1], [@native_layout4])
+    native_layout @native_layout6 ([@native_layout5])
+    native_layout @native_layout7 (ref(@ref_type1), [@native_layout0], [@native_layout0], ref(@ref_type0), i64, ref(@ref_type0), i64, i64, [@native_layout6], [@native_layout6], i64)
+    native_import @native_import0 module(@string5) export(@string6) version(1) : @native_layout7
+    native_import @native_import1 module(@string7) export(@string8) version(1) : @native_layout7
+    native_callsite @native_callsite0 function(@function0) callee(@native_import0) (%r0, [(%r1, %v2)], [], %r2, %v0, %r3, %v0, %v1, [], [([])], %v5)
+    native_callsite @native_callsite1 function(@function0) callee(@native_import1) (%r0, [], [(%r1, %v2)], %r2, %v0, %r3, %v0, %v1, [([(%v4, %v4, %v5, %v6, [(%v3, %v3)], []), (%v4, %v4, %v5, %v6, [], [(%v3, %v3, %r2, %v0, %v1, []), (%v3, %v3, %r3, %v0, %v1, [(%v6, [])])])])], [], %v5)
+  }
+
+}

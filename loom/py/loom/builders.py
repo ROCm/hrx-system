@@ -833,6 +833,7 @@ def default_ops() -> tuple[Op, ...]:
     from loom.dialect.func import ALL_FUNC_OPS
     from loom.dialect.globals import ALL_GLOBAL_OPS
     from loom.dialect.group import ALL_GROUP_OPS
+    from loom.dialect.hal import ALL_HAL_OPS
     from loom.dialect.index import ALL_INDEX_OPS
     from loom.dialect.kernel import ALL_KERNEL_OPS
     from loom.dialect.low import ALL_LOW_OPS
@@ -857,6 +858,7 @@ def default_ops() -> tuple[Op, ...]:
         *ALL_FUNC_OPS,
         *ALL_GLOBAL_OPS,
         *ALL_GROUP_OPS,
+        *ALL_HAL_OPS,
         *ALL_INDEX_OPS,
         *ALL_KERNEL_OPS,
         *ALL_LOW_OPS,

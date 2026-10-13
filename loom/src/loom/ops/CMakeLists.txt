@@ -298,6 +298,7 @@ loom_cc_library(
     loom::ops::func
     loom::ops::global
     loom::ops::group
+    loom::ops::hal
     loom::ops::index
     loom::ops::kernel
     loom::ops::low

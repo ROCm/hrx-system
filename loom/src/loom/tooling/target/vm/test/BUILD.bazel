@@ -15,6 +15,7 @@ package(
 )
 
 exports_files([
+    "hal_copy.loom",
     "imports.loom",
     "native_calls.loom",
     "native_references.loom",

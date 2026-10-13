@@ -99,6 +99,40 @@ iree_py_library(
 
 C_TABLES_BASE_DEPS = [":c_tables"]
 
+iree_py_library(
+    name = "hal_schema",
+    srcs = ["hal_schema.py"],
+    deps = [
+        "//loom/py/loom/dialect/hal",
+        "//loom/py/loom/gen/support",
+    ],
+)
+
+iree_py_binary(
+    name = "hal_schema_generator",
+    main_module = "loom.gen.ops.hal_schema",
+    visibility = GENERATOR_VISIBILITY + ["//loom/src/loom/target/arch/vm:__pkg__"],
+    deps = [":hal_schema"],
+)
+
+iree_py_test(
+    name = "hal_schema_test",
+    srcs = [
+        "hal_schema_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.ops.hal_schema_test"],
+    main = "pytest_style_runner.py",
+    deps = [":hal_schema"],
+)
+
+iree_py_binary(
+    name = "c_tables_hal_generator",
+    main_module = "loom.gen.ops.c_tables",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/hal"],
+)
+
 iree_py_binary(
     name = "c_tables_generator",
     main_module = "loom.gen.ops.c_tables",

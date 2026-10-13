@@ -218,12 +218,15 @@ loom_cc_library(
   NAME
     provider
   HDRS
+    "hal_lower.h"
     "lower.h"
     "math_policy.h"
     "provider.h"
   TEXTUAL_HDRS
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/vm/contracts/tables.inl"
+    "hal_tables.inl"
   SRCS
+    "hal_lower.c"
     "lower.c"
     "math_policy.c"
     "provider.c"
@@ -231,10 +234,13 @@ loom_cc_library(
     ::records
     ::types
     iree::base
+    iree::module::hal::native_schema
+    iree::vm
     loom::codegen::low::lower
     loom::error::error_defs
     loom::ir
     loom::ops::global
+    loom::ops::hal
     loom::ops::low
     loom::target::arch::vm::contracts::core
     loom::target::arch::vm::contracts::core_lower_rules
@@ -243,6 +249,19 @@ loom_cc_library(
     loom::target::math_policy
     loom::target::provider
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_generated_file(
+  NAME
+    hal_tables
+  GENERATOR
+    loom::py::loom::gen::ops::hal_schema_generator
+  OUTPUT
+    "hal_tables.inl"
+  OUTPUT_FLAG
+    "--vm-projection"
 )
 endif()
 
@@ -258,6 +277,7 @@ loom_check_test_suite(
     "test/calls.loom-test"
     "test/effects.loom-test"
     "test/emission.loom-test"
+    "test/hal_copy.loom-test"
     "test/hal_handles.loom-test"
     "test/imports.loom-test"
     "test/math_contraction.loom-test"
@@ -268,6 +288,7 @@ loom_check_test_suite(
     "test/source_low/callable_policy.loom-test"
     "test/source_low/callable_values.loom-test"
     "test/source_low/carried_counter_store.loom-test"
+    "test/source_low/hal_copy.loom-test"
     "test/source_low/loop_counter_offset.loom-test"
     "test/source_low/memory_access_flags.loom-test"
     "test/source_low/memory_generic_atomic.loom-test"
@@ -313,6 +334,7 @@ loom_check_compile_tests(
     "test/calls.loom-test"
     "test/effects.loom-test"
     "test/emission.loom-test"
+    "test/hal_copy.loom-test"
     "test/hal_handles.loom-test"
     "test/imports.loom-test"
     "test/math_contraction.loom-test"
@@ -323,6 +345,7 @@ loom_check_compile_tests(
     "test/source_low/callable_policy.loom-test"
     "test/source_low/callable_values.loom-test"
     "test/source_low/carried_counter_store.loom-test"
+    "test/source_low/hal_copy.loom-test"
     "test/source_low/loop_counter_offset.loom-test"
     "test/source_low/memory_access_flags.loom-test"
     "test/source_low/memory_generic_atomic.loom-test"

@@ -72,6 +72,53 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    hal_schema
+  SRCS
+    "hal_schema.py"
+  DEPS
+    loom::py::loom::dialect::hal::hal
+    loom::py::loom::gen::support::support
+)
+
+iree_py_library(
+  NAME
+    hal_schema_generator
+  MAIN_MODULE
+    "loom.gen.ops.hal_schema"
+  DEPS
+    loom::py::loom::gen::ops::hal_schema
+)
+
+iree_py_test(
+  NAME
+    hal_schema_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
+  SRCS
+    "hal_schema_test.py"
+    "../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.gen.ops.hal_schema_test"
+  DEPS
+    loom::py::loom::gen::ops::hal_schema
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_library(
+  NAME
+    c_tables_hal_generator
+  MAIN_MODULE
+    "loom.gen.ops.c_tables"
+  DEPS
+    loom::py::loom::gen::ops::c_tables
+    loom::py::loom::dialect::hal::hal
+)
+
+iree_py_library(
+  NAME
     c_tables_generator
   MAIN_MODULE
     "loom.gen.ops.c_tables"

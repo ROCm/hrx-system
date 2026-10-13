@@ -4,15 +4,38 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:python.bzl", "iree_py_library")
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
 
 package(
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],  # Apache 2.0
 )
 
+iree_py_test(
+    name = "hal_ops_test",
+    srcs = [
+        "hal_ops_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.dialect.hal.hal_ops_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":hal",
+        "//loom/py/loom/dialect/func",
+        "//loom/py/loom/format/bytecode",
+        "//loom/py/loom/format/text",
+    ],
+)
+
 iree_py_library(
     name = "hal",
-    srcs = ["__init__.py"],
-    deps = ["//loom/py/loom:core"],
+    srcs = [
+        "__init__.py",
+        "defs.py",
+        "methods.py",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/error",
+    ],
 )

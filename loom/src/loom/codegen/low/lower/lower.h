@@ -1069,6 +1069,10 @@ typedef struct loom_low_lower_options_t {
   // Optional module-scope target state shared by all function lowerings in one
   // source-to-low module pass.
   loom_low_lower_module_state_t* module_state;
+  // Observes newly emitted helper declarations/definitions at publication.
+  // The owning module pass attaches their inherited compiler function version.
+  // Standalone lowering leaves this empty and uses authored target identity.
+  loom_builder_callback_t on_function_created;
   // Optional allocator enabling production source-low report rows.
   iree_allocator_t report_allocator;
 } loom_low_lower_options_t;
@@ -1351,6 +1355,11 @@ iree_arena_allocator_t* loom_low_lower_context_emission_arena(
 // NULL when the caller is lowering a standalone function.
 loom_low_lower_module_state_t* loom_low_lower_context_module_state(
     loom_low_lower_context_t* context);
+
+// Publishes one newly emitted callable to the compilation's version owner.
+// Targets call this once after constructing each helper declaration/definition.
+iree_status_t loom_low_lower_publish_function(loom_low_lower_context_t* context,
+                                              loom_op_t* function);
 
 // Allocates state retained for the complete function lowering call.
 iree_status_t loom_low_lower_allocate_function_array(

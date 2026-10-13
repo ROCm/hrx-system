@@ -88,6 +88,7 @@ DIALECT_REFERENCE_SPECS = (
     DialectReferenceSpec("scf", "program"),
     DialectReferenceSpec("cfg", "program"),
     DialectReferenceSpec("command", "program"),
+    DialectReferenceSpec("hal", "program"),
     DialectReferenceSpec("buffer", "program"),
     DialectReferenceSpec("view", "program"),
     DialectReferenceSpec("vector", "program"),

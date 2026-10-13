@@ -17,6 +17,7 @@ from loom.dialect.encoding.builders import EncodingBuilder
 from loom.dialect.func.builders import FuncBuilder
 from loom.dialect.globals.builders import GlobalBuilder
 from loom.dialect.group.builders import GroupBuilder
+from loom.dialect.hal.builders import HalBuilder
 from loom.dialect.index.builders import IndexBuilder
 from loom.dialect.kernel.builders import KernelBuilder
 from loom.dialect.low.builders import LowBuilder
@@ -70,6 +71,8 @@ class LoomBuilder:
     def global_(self) -> GlobalBuilder: ...
     @property
     def group(self) -> GroupBuilder: ...
+    @property
+    def hal(self) -> HalBuilder: ...
     @property
     def index(self) -> IndexBuilder: ...
     @property

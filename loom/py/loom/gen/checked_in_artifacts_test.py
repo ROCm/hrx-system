@@ -52,6 +52,11 @@ def test_checked_in_artifact_families_register_expected_families() -> None:
             return_value=empty_file_set,
         ),
         mock.patch.object(
+            checked_in_artifacts.hal_schema,
+            "checked_in_file_set",
+            return_value=empty_file_set,
+        ),
+        mock.patch.object(
             checked_in_artifacts.textmate,
             "checked_in_file_set",
             return_value=empty_file_set,
@@ -69,6 +74,7 @@ def test_checked_in_artifact_families_register_expected_families() -> None:
         "Python package initializers",
         "Python builder stubs",
         "C op table artifacts",
+        "HAL native declarations",
         "AMDGPU target configuration",
         "TextMate grammars",
         "x86 packed-dot contract header",

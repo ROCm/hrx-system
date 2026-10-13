@@ -19,6 +19,7 @@
 #include "loom/pass/registry.h"
 #include "loom/pass/value_facts.h"
 #include "loom/sanitizer/options.h"
+#include "loom/target/function_contract.h"
 #include "loom/target/low_legality.h"
 #include "loom/target/pass_environment.h"
 #include "loom/target/reporting/low.h"
@@ -61,7 +62,57 @@ typedef struct loom_low_source_function_plan_t {
   loom_low_lower_function_plan_t* function;
   // Planning diagnostics/report rows, followed by actual execution output.
   loom_low_lower_result_t result;
+  // Owning pass used to publish generated callable versions during emission.
+  loom_pass_t* pass;
+  // Module owning the emitted helper declarations and their symbol identities.
+  loom_module_t* module;
 } loom_low_source_function_plan_t;
+
+static iree_status_t loom_low_source_to_low_publish_function(
+    void* user_data, loom_op_t* function) {
+  const loom_low_source_function_plan_t* plan = user_data;
+  const loom_target_function_version_t* caller =
+      loom_target_function_version_const_cast(plan->selection->version_handle);
+  if (caller == NULL) {
+    return iree_ok_status();
+  }
+  loom_function_version_owner_t* owner =
+      loom_target_pass_capability_function_version_owner(
+          loom_target_pass_capability_from_pass(plan->pass));
+  const loom_func_like_t helper = loom_func_like_cast(plan->module, function);
+  const loom_symbol_ref_t symbol = loom_func_like_callee(helper);
+  const loom_target_abi_kind_t abi =
+      (loom_target_abi_kind_t)loom_func_like_abi(helper);
+  const loom_func_symbol_facts_t function_facts = {
+      .func_op = function,
+      .name = loom_string_table_get(
+          &plan->module->strings,
+          plan->module->symbols.entries[symbol.symbol_id].name_id),
+      .has_abi = abi != LOOM_TARGET_ABI_UNKNOWN,
+      .abi_kind = abi,
+      .abi_attrs = loom_func_like_abi_attrs(helper),
+  };
+  bool valid = false;
+  const loom_target_facts_t* facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_function_contract_refine_internal_facts(
+      plan->module, &function_facts,
+      loom_target_facts_identity_name(caller->resolved_target.facts),
+      caller->resolved_target.facts, plan->pass->diagnostic_emitter,
+      owner->arena, &valid, &facts));
+  // Helpers carry compiler-created ABI contracts in the admitted caller
+  // context; an incompatible helper contract is a lowering producer bug.
+  IREE_ASSERT(valid);
+  loom_target_function_version_t* version = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(owner->arena, sizeof(*version), (void**)&version));
+  *version = (loom_target_function_version_t){
+      .base = {.type = &loom_target_function_version_type, .function = helper},
+      .resolved_target = caller->resolved_target,
+      .target_context_ordinal = caller->target_context_ordinal,
+      .function_target_facts = facts,
+  };
+  return loom_function_version_owner_append(owner, &version->base);
+}
 
 static iree_status_t loom_low_source_to_low_record_target_specialization(
     loom_target_compile_report_t* compile_report,
@@ -490,6 +541,10 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     if (!iree_status_is_ok(status)) {
       break;
     }
+    loom_low_source_function_plan_t* plan =
+        &function_plans[planned_function_count++];
+    *plan = (loom_low_source_function_plan_t){
+        .selection = selection, .pass = pass, .module = module};
     const loom_low_lower_options_t lower_options = {
         .target_ref = selection->target_ref,
         .target_facts = selection->target_facts,
@@ -513,10 +568,9 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
                                         : LOOM_SANITIZER_REPORTING_MODE_DEFAULT,
         .module_state = module_state,
         .report_allocator = source_low_report_allocator,
+        .on_function_created = {.fn = loom_low_source_to_low_publish_function,
+                                .user_data = plan},
     };
-    loom_low_source_function_plan_t* plan =
-        &function_plans[planned_function_count++];
-    *plan = (loom_low_source_function_plan_t){.selection = selection};
     if (launch_config_program != NULL) {
       status = loom_kernel_launch_config_program_capture(
           launch_config_program, module, selection->func,

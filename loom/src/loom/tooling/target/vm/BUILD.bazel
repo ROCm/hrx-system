@@ -15,6 +15,51 @@ package(
 
 _VM_CHECK_VISIBILITY = ["//loom/src/loom/tools/loom-check:__pkg__"]
 
+loom_generated_file(
+    name = "hal_copy_binary",
+    testonly = True,
+    args = [
+        "$(location //loom/src/loom/tooling/target/vm/test:hal_copy.loom)",
+        "--target=vm:core",
+    ],
+    generator = "//loom/src/loom/tools/loom-compile",
+    inputs = ["//loom/src/loom/tooling/target/vm/test:hal_copy.loom"],
+    output = "hal_copy.vm",
+    output_flag = "--output=",
+    target_compatible_with = loom_config_compatible_with(["//loom/config/target/arch:vm"]),
+)
+
+iree_c_embed_data(
+    name = "hal_copy_bytecode",
+    testonly = True,
+    srcs = [":hal_copy_binary"],
+    c_file_output = "hal_copy_bytecode.c",
+    h_file_output = "hal_copy_bytecode.h",
+    identifier = "loom_vm_hal_copy_bytecode",
+    target_compatible_with = loom_config_compatible_with(["//loom/config/target/arch:vm"]),
+)
+
+loom_cc_test(
+    name = "hal_copy_test",
+    srcs = ["hal_copy_test.cc"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/target/arch:vm"]),
+    deps = [
+        ":hal_copy_bytecode",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/task:device",
+        "//runtime/src/iree/module/hal",
+        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode:module",
+    ],
+)
+
 loom_cc_library(
     name = "loom_check",
     srcs = ["check/loom_check.c"],

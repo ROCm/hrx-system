@@ -14,12 +14,64 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "hal",
+    srcs = [
+        "module.c",
+        "queue.c",
+    ],
+    hdrs = [
+        "module.h",
+        "queue.h",
+    ],
+    deps = [
+        ":native_abi",
+        ":native_schema",
+        ":types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "native_schema",
+    hdrs = [
+        "native_abi.h",
+        "native_schema.h",
+    ],
+    deps = ["//runtime/src/iree/vm"],
+)
+
+iree_runtime_cc_library(
+    name = "native_abi",
+    srcs = ["native_abi.c"],
+    deps = [
+        ":native_schema",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "types",
     srcs = ["types.c"],
     hdrs = ["types.h"],
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "module_test",
+    srcs = ["module_test.cc"],
+    deps = [
+        ":hal",
+        ":native_schema",
+        ":types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
     ],
 )

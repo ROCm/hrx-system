@@ -1,0 +1,27 @@
+// Real queue submissions authored without Low declarations or a sidecar library.
+// The caller keeps the pool alive until the returned timeline is complete.
+func.def public @defaults(%queue: hal.queue, %wait0: hal.semaphore, %wait1: hal.semaphore, %done0: hal.semaphore, %done1: hal.semaphore, %source: hal.buffer, %target: hal.buffer, %source_offset: i64, %target_offset: i64, %length: i64) -> (hal.semaphore) {
+  %timeline_value = scalar.constant 1 : i64
+  %flags = scalar.constant 0 : i64
+  hal.queue.copy (%queue, [(%wait0, %timeline_value), (%wait1, %timeline_value)], [(%done0, %timeline_value)], (%source, %source_offset), (%target, %target_offset), %length, (none, none), %flags)
+  func.return %done0 : hal.semaphore
+}
+
+// Independent lists and ragged nested barriers, including an explicit empty
+// after boundary and an explicit ranged host flush through the HAL mapping API.
+func.def public @explicit(%queue: hal.queue, %wait0: hal.semaphore, %wait1: hal.semaphore, %done0: hal.semaphore, %done1: hal.semaphore, %source: hal.buffer, %target: hal.buffer, %source_offset: i64, %target_offset: i64, %length: i64) -> (hal.semaphore) {
+  %timeline_value = scalar.constant 1 : i64
+  %byte_granularity = scalar.constant 1 : i64
+  %flags = scalar.constant 0 : i64
+  %none = scalar.constant 0 : i32
+  %range = scalar.constant 2 : i32
+  %host_api = scalar.constant 4 : i32
+  %flush = scalar.constant 3 : i32
+  %flush_effect = scalar.constant 16 : i32
+  %host = scalar.constant 32 : i32
+  %transfer = scalar.constant 8 : i32
+  %host_write = scalar.constant 128 : i32
+  %transfer_read = scalar.constant 16 : i32
+  hal.queue.copy (%queue, [(%wait0, %timeline_value), (%wait1, %timeline_value)], [(%done0, %timeline_value), (%done1, %timeline_value)], (%source, %source_offset), (%target, %target_offset), %length, ([(%host, %transfer, %flags, %none, [(%host_write, %transfer_read)], []), (%host, %transfer, %flags, %flush_effect, [], [(%host_write, %transfer_read, (%source, %source_offset, %length), (%flush_effect, [(%range, %host_api, %flush, %byte_granularity, %none, %none, %none)]))])], []), %flags)
+  func.return %done0 : hal.semaphore
+}

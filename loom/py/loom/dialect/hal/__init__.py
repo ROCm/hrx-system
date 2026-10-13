@@ -4,10 +4,10 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""HAL dialect: hardware abstraction layer types.
+"""HAL dialect: target-independent hardware orchestration and resource types.
 
 Provides opaque type declarations for HAL resource handles that
-appear in loom IR. These are dialect-specific types (DialectType
+appear in Loom IR. These are dialect-specific types (DialectType
 in ir.py), not built-in types — they are registered by code that
 needs them (pool ops, host-side scheduling, etc.).
 
@@ -17,6 +17,7 @@ consumed by HAL queue operations (copies, fills, etc.).
 hal.buffer_view — a managed buffer range with shape, element type and encoding.
 """
 
+from loom.dialect.hal.defs import ALL_HAL_OPS, hal_ops
 from loom.dsl import ReferenceTypeKey, TypeDef
 
 # ============================================================================
@@ -80,6 +81,8 @@ ALL_HAL_TYPES: tuple[TypeDef, ...] = (
 )
 
 __all__ = [
+    "ALL_HAL_OPS",
+    "hal_ops",
     "hal_buffer_type",
     "hal_buffer_view_type",
     "hal_device_group_type",

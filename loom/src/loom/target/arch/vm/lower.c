@@ -13,6 +13,7 @@
 #include "loom/target/arch/vm/contracts/core.h"
 #include "loom/target/arch/vm/contracts/core_lower_rules.h"
 #include "loom/target/arch/vm/descriptors/descriptors.h"
+#include "loom/target/arch/vm/hal_lower.h"
 #include "loom/target/arch/vm/types.h"
 
 static bool loom_vm_source_type_supported(void* user_data,
@@ -59,6 +60,9 @@ static iree_status_t loom_vm_select_op(void* user_data,
                                        const loom_op_t* source_op,
                                        loom_low_lower_plan_t* out_plan) {
   *out_plan = loom_low_lower_plan_empty();
+  if (loom_op_dialect_id(source_op->kind) == LOOM_DIALECT_HAL) {
+    return loom_vm_hal_select(context, source_op, out_plan);
+  }
   if (!loom_global_load_isa(source_op)) {
     return iree_ok_status();
   }
@@ -83,6 +87,9 @@ static iree_status_t loom_vm_emit_op(void* user_data,
                                      loom_low_lower_context_t* context,
                                      const loom_op_t* source_op,
                                      loom_low_lower_plan_t plan) {
+  if (loom_op_dialect_id(source_op->kind) == LOOM_DIALECT_HAL) {
+    return loom_vm_hal_emit(context, source_op, plan);
+  }
   loom_builder_t* builder = loom_low_lower_context_builder(context);
   loom_string_id_t name = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(

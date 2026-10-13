@@ -1198,6 +1198,8 @@ struct loom_low_lower_function_plan_t {
     const loom_low_lower_policy_t* policy;
     // Shared module state receiving published target resources.
     loom_low_lower_module_state_t* module_state;
+    // Publication observer for helpers created during target emission.
+    loom_builder_callback_t on_function_created;
     // Diagnostic sink for target emission remarks.
     iree_diagnostic_emitter_t emitter;
     // Enabled target diagnostic remark categories.
@@ -1393,6 +1395,7 @@ iree_status_t loom_low_lower_plan_function(
               .target_facts = options->target_facts,
               .policy = options->policy,
               .module_state = options->module_state,
+              .on_function_created = options->on_function_created,
               .emitter = options->emitter,
               .diagnostic_flags = options->legality_diagnostic_flags,
               .control_flow_lowering = options->control_flow_lowering,
@@ -1496,6 +1499,7 @@ iree_status_t loom_low_lower_emit_function(loom_low_lower_function_plan_t* plan,
       .target_facts = plan->emission.target_facts,
       .policy = plan->emission.policy,
       .module_state = plan->emission.module_state,
+      .on_function_created = plan->emission.on_function_created,
       .emitter = plan->emission.emitter,
       .legality_diagnostic_flags = plan->emission.diagnostic_flags,
       .control_flow_lowering = plan->emission.control_flow_lowering,

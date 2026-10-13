@@ -10,6 +10,67 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_VM)
+loom_generated_file(
+  NAME
+    hal_copy_binary
+  GENERATOR
+    loom::tools::loom-compile
+  OUTPUT
+    "hal_copy.vm"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/vm/test/hal_copy.loom"
+    "--target=vm:core"
+  INPUTS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/vm/test/hal_copy.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+iree_c_embed_data(
+  NAME
+    hal_copy_bytecode
+  SRCS
+    "${CMAKE_CURRENT_BINARY_DIR}/hal_copy.vm"
+  C_FILE_OUTPUT
+    "hal_copy_bytecode.c"
+  H_FILE_OUTPUT
+    "hal_copy_bytecode.h"
+  IDENTIFIER
+    "loom_vm_hal_copy_bytecode"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    hal_copy_test
+  SRCS
+    "hal_copy_test.cc"
+  DEPS
+    ::hal_copy_bytecode
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::hal::drivers::task::device
+    iree::module::hal
+    iree::module::hal::types
+    iree::task
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::bytecode::module
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     loom_check

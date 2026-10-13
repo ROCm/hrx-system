@@ -35,6 +35,7 @@ loom_cc_library(
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/sanitizer:options",
+        "//loom/src/loom/target:function_contract",
         "//loom/src/loom/target:low_legality",
         "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/target/reporting:low",

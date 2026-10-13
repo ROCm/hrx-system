@@ -11,6 +11,47 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    hal
+  HDRS
+    "module.h"
+    "queue.h"
+  SRCS
+    "module.c"
+    "queue.c"
+  DEPS
+    ::native_abi
+    ::native_schema
+    ::types
+    iree::base
+    iree::hal
+    iree::vm
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    native_schema
+  HDRS
+    "native_abi.h"
+    "native_schema.h"
+  DEPS
+    iree::vm
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    native_abi
+  SRCS
+    "native_abi.c"
+  DEPS
+    ::native_schema
+    iree::base
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     types
   HDRS
     "types.h"
@@ -21,6 +62,21 @@ iree_cc_library(
     iree::hal
     iree::vm
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    module_test
+  SRCS
+    "module_test.cc"
+  DEPS
+    ::hal
+    ::native_schema
+    ::types
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
 )
 
 iree_cc_test(

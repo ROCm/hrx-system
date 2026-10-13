@@ -271,6 +271,7 @@ loom_cc_library(
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/group",
+        "//loom/src/loom/ops/hal",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/low",

@@ -1,0 +1,61 @@
+// RUN: verify
+
+func.def @copy(%queue: hal.queue, %semaphore: hal.semaphore, %source: hal.buffer, %target: hal.buffer, %offset: i64, %length: i64, %value: i64, %scope: i32, %stage: i32, %flags: i64, %effects: i32) {
+  hal.queue.copy (%queue, [(%semaphore, %value)], [], (%source, %offset), (%target, %offset), %length, (none, []), %flags)
+  hal.queue.copy (%queue, [], [(%semaphore, %value)], (%source, %offset), (%target, %offset), %length, ([(%stage, %stage, %flags, %effects, [(%scope, %scope)], []), (%stage, %stage, %flags, %effects, [], [(%scope, %scope, (%source, %offset, %length), none), (%scope, %scope, (%target, %offset, %length), (%effects, []))])], none), %flags)
+  func.return
+}
+
+// ====
+// RUN: verify
+
+func.def @wrong_queue(%queue: hal.buffer, %buffer: hal.buffer, %offset: i64, %length: i64, %flags: i64) {
+  // ERROR@+1: TYPE/003 "arguments" "hal.buffer" "hal.queue"
+  hal.queue.copy (%queue, [], [], (%buffer, %offset), (%buffer, %offset), %length, (none, none), %flags)
+  func.return
+}
+
+// ====
+// RUN: verify
+
+func.def @wrong_record(%queue: hal.queue) {
+  // ERROR@+1: STRUCTURE/014 "shape" "6" "a record with the declared field count"
+  hal.queue.copy (%queue)
+  func.return
+}
+
+// ====
+// RUN: verify
+
+func.def @wrong_wait(%queue: hal.queue, %buffer: hal.buffer, %offset: i64, %length: i64, %flags: i64) {
+  // ERROR@+1: STRUCTURE/014 "shape" "2" "a range of the declared element type"
+  hal.queue.copy (%queue, (), [], (%buffer, %offset), (%buffer, %offset), %length, (none, none), %flags)
+  func.return
+}
+
+// ====
+// RUN: verify
+
+func.def @wrong_timepoint(%queue: hal.queue, %semaphore: hal.semaphore, %value: i32, %buffer: hal.buffer, %offset: i64, %length: i64, %flags: i64) {
+  // ERROR@+1: TYPE/003 "arguments" "i32" "i64"
+  hal.queue.copy (%queue, [(%semaphore, %value)], [], (%buffer, %offset), (%buffer, %offset), %length, (none, none), %flags)
+  func.return
+}
+
+// ====
+// RUN: verify
+
+func.def @wrong_optional(%queue: hal.queue, %buffer: hal.buffer, %offset: i64, %length: i64, %flags: i64) {
+  // ERROR@+1: STRUCTURE/014 "shape" "2" "a range of the declared element type"
+  hal.queue.copy (%queue, [], [], (%buffer, %offset), (%buffer, %offset), %length, ((), none), %flags)
+  func.return
+}
+
+// ====
+// RUN: verify
+
+func.def @wrong_recipe(%queue: hal.queue, %buffer: hal.buffer, %offset: i64, %length: i64, %flags: i64, %scope: i32, %stage: i32, %effects: i32) {
+  // ERROR@+1: STRUCTURE/014 "shape" "2" "a record with the declared field count"
+  hal.queue.copy (%queue, [], [], (%buffer, %offset), (%buffer, %offset), %length, ([(%stage, %stage, %flags, %effects, [], [(%scope, %scope, (%buffer, %offset, %length), ())])], none), %flags)
+  func.return
+}

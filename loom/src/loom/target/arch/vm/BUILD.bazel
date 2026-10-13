@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with", "loom_generated_file")
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
 
 package(
@@ -203,16 +203,21 @@ loom_cc_test(
 loom_cc_library(
     name = "provider",
     srcs = [
+        "hal_lower.c",
         "lower.c",
         "math_policy.c",
         "provider.c",
     ],
     hdrs = [
+        "hal_lower.h",
         "lower.h",
         "math_policy.h",
         "provider.h",
     ],
-    textual_hdrs = ["//loom/src/loom/target/arch/vm/contracts:tables.inl"],
+    textual_hdrs = [
+        "hal_tables.inl",
+        "//loom/src/loom/target/arch/vm/contracts:tables.inl",
+    ],
     visibility = [
         "//loom/src/loom/target/all:__pkg__",
         "//loom/src/loom/target/arch/vm/check:__pkg__",
@@ -228,6 +233,7 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/hal",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:math_policy",
         "//loom/src/loom/target:provider",
@@ -236,7 +242,16 @@ loom_cc_library(
         "//loom/src/loom/target/arch/vm/descriptors",
         "//loom/src/loom/target/arch/vm/ops",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/module/hal:native_schema",
+        "//runtime/src/iree/vm",
     ],
+)
+
+loom_generated_file(
+    name = "hal_tables",
+    generator = "//loom/py/loom/gen/ops:hal_schema_generator",
+    output = "hal_tables.inl",
+    output_flag = "--vm-projection",
 )
 
 loom_check_test_suite(
@@ -249,6 +264,7 @@ loom_check_test_suite(
         "test/calls.loom-test",
         "test/effects.loom-test",
         "test/emission.loom-test",
+        "test/hal_copy.loom-test",
         "test/hal_handles.loom-test",
         "test/imports.loom-test",
         "test/math_contraction.loom-test",
@@ -259,6 +275,7 @@ loom_check_test_suite(
         "test/source_low/callable_policy.loom-test",
         "test/source_low/callable_values.loom-test",
         "test/source_low/carried_counter_store.loom-test",
+        "test/source_low/hal_copy.loom-test",
         "test/source_low/loop_counter_offset.loom-test",
         "test/source_low/memory_access_flags.loom-test",
         "test/source_low/memory_generic_atomic.loom-test",

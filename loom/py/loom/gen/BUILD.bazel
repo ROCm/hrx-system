@@ -35,6 +35,7 @@ iree_py_library(
         "//loom/py/loom/gen/cxx:intrinsics",
         "//loom/py/loom/gen/editor:textmate",
         "//loom/py/loom/gen/ops:c_tables",
+        "//loom/py/loom/gen/ops:hal_schema",
         "//loom/py/loom/gen/python",
         "//loom/py/loom/gen/support",
         "//loom/py/loom/gen/target/arch/x86:packed_dot_contract",

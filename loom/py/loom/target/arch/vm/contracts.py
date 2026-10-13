@@ -59,6 +59,7 @@ from loom.dialect import buffer, view
 from loom.dialect.atomic import AtomicKind, AtomicOrdering, AtomicScope
 from loom.dialect.globals import ALL_GLOBAL_OPS
 from loom.dialect.globals.defs import global_load
+from loom.dialect.hal import ALL_HAL_OPS
 from loom.dialect.index import ALL_INDEX_OPS, IndexPredicate
 from loom.dialect.index import defs as index
 from loom.dialect.scalar import (
@@ -303,6 +304,7 @@ assert _CMPXCHG_ATTR_NAMES[
 VM_CORE_CONTRACT_DIALECT_OPS = {
     "buffer": buffer.ALL_BUFFER_OPS,
     "global": ALL_GLOBAL_OPS,
+    "hal": ALL_HAL_OPS,
     "scalar": ALL_SCALAR_OPS,
     "index": ALL_INDEX_OPS,
     "scf": ALL_SCF_OPS,
@@ -1212,6 +1214,7 @@ VM_CORE_CONTRACT_FRAGMENT = ContractFragment(
     + tuple(_address_cases())
     + tuple(_buffer_cases())
     + (RecipeRule(source_op=global_load),)
+    + tuple(RecipeRule(source_op=op) for op in ALL_HAL_OPS)
     + tuple(_view_cases())
     + (
         DescriptorRule(

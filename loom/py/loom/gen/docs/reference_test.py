@@ -107,6 +107,10 @@ def test_reference_renders_semantics_and_canonical_examples() -> None:
     template_def = files["dialects/template/ops/def.md"]
     assert "requires [#target.subgroup.size<32>]" in template_def
 
+    hal_copy = files["dialects/hal/ops/queue-copy.md"]
+    assert "Absent before/after barriers preserve conservative defaults" in hal_copy
+    assert "hal.queue.copy (%queue, [(%ready, %value)], [(%done, %value)]" in hal_copy
+
     subgroup_size = files["attributes/families/target-subgroup-size.md"]
     assert "static target-applicability requirement" in subgroup_size
     assert "`size` is the compact positional parameter" in subgroup_size

@@ -473,6 +473,14 @@ loom_low_lower_module_state_t* loom_low_lower_context_module_state(
   return context->module_state;
 }
 
+iree_status_t loom_low_lower_publish_function(loom_low_lower_context_t* context,
+                                              loom_op_t* function) {
+  const loom_builder_callback_t callback =
+      context->options->on_function_created;
+  return callback.fn ? callback.fn(callback.user_data, function)
+                     : iree_ok_status();
+}
+
 iree_status_t loom_low_lower_allocate_function_array(
     loom_low_lower_context_t* context, iree_host_size_t count,
     iree_host_size_t element_size, void** out_ptr) {

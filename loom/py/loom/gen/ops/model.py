@@ -192,6 +192,12 @@ def _load_low_generation() -> DialectGeneration:
     return DialectGeneration(low_ops, list(ALL_LOW_OPS), None)
 
 
+def _load_hal_generation() -> DialectGeneration:
+    from loom.dialect.hal import ALL_HAL_OPS, hal_ops
+
+    return DialectGeneration(hal_ops, list(ALL_HAL_OPS), None)
+
+
 def _load_template_generation() -> DialectGeneration:
     from loom.dialect.template import ALL_TEMPLATE_OPS, template_ops
 
@@ -258,6 +264,7 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("func", _load_func_generation),
     ("encoding", _load_encoding_generation),
     ("pool", _load_pool_generation),
+    ("hal", _load_hal_generation),
     ("global", _load_global_generation),
     ("scf", _load_scf_generation),
     ("cfg", _load_cfg_generation),

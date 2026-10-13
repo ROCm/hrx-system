@@ -31,6 +31,7 @@ loom_cc_library(
     loom::pass::types
     loom::pass::value_facts
     loom::sanitizer::options
+    loom::target::function_contract
     loom::target::low_legality
     loom::target::pass_environment
     loom::target::reporting::low

@@ -9,13 +9,37 @@
 
 iree_add_all_subdirs()
 
+iree_py_test(
+  NAME
+    hal_ops_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
+  SRCS
+    "hal_ops_test.py"
+    "../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.dialect.hal.hal_ops_test"
+  DEPS
+    loom::py::loom::dialect::hal::hal
+    loom::py::loom::dialect::func::func
+    loom::py::loom::format::bytecode::bytecode
+    loom::py::loom::format::text::text
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
 iree_py_library(
   NAME
     hal
   SRCS
     "__init__.py"
+    "defs.py"
+    "methods.py"
   DEPS
     loom::py::loom::core
+    loom::py::loom::error::error
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
