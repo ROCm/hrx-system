@@ -13,7 +13,6 @@
 #include <string>
 #include <thread>
 
-#include "experimental/loom_serve/testing/model.h"
 #include "iree/async/proactor.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/tooling/flags.h"
@@ -22,6 +21,7 @@
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/finite/decision/protocol.h"
 #include "loom/serve/service/finite/embedding/protocol.h"
+#include "loom/serve/testing/model.h"
 #include "loom/serve/transport/http/listener.h"
 
 IREE_FLAG(string, model_source, "", "Deterministic decision bootstrap source.");
@@ -42,7 +42,8 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
     const loom_serve_finite_model_options_t options = {
         .sources = document.value().sources,
         .asset_directory = IREE_SV("."),
-        .options = IREE_SV("{\"batch_units\":64}")};
+        .options = IREE_SV("{\"batch_units\":64}"),
+    };
     IREE_ASSERT_OK(
         loom_serve_finite_model_create(device_, &options, output, allocator_));
   }
@@ -50,7 +51,8 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
     iree_notification_initialize(&notification_);
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
     const loom_serve_device_options_t options = {
-        .uri = iree_make_cstring_view(FLAG_test_device)};
+        .uri = iree_make_cstring_view(FLAG_test_device),
+    };
     IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &options, &group_,
                                                   allocator_));
     device_ = loom_serve_device_group_at(group_, 0);

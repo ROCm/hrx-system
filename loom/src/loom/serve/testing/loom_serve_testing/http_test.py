@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from experimental.loom_serve.testing.http import Events, collect_events, running_server
+from loom_serve_testing.http import Events, collect_events, running_server
 
 
 class HttpTest(unittest.TestCase):

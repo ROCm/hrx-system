@@ -18,8 +18,6 @@
 #include <tuple>
 #include <vector>
 
-#include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
-#include "experimental/loom_serve/testing/model.h"
 #include "iree/async/proactor.h"
 #include "iree/base/internal/base64.h"
 #include "iree/base/tooling/flags.h"
@@ -30,6 +28,8 @@
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/image/model.h"
 #include "loom/serve/service/image/output.h"
+#include "loom/serve/testing/model.h"
+#include "loom/serve/testing/stalled_stderr.h"
 #include "loom/serve/transport/http/listener.h"
 
 IREE_FLAG(string, model_source, "", "Deterministic image bootstrap source.");
@@ -49,7 +49,8 @@ class SourceImageServiceTest
     IREE_ASSERT_OK(
         loom_serve_host_create(std::get<0>(GetParam()), &host_, allocator_));
     const loom_serve_device_options_t device_options = {
-        .uri = iree_make_cstring_view(FLAG_test_device)};
+        .uri = iree_make_cstring_view(FLAG_test_device),
+    };
     IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
                                                   &group_, allocator_));
     device_ = loom_serve_device_group_at(group_, 0);
@@ -100,9 +101,11 @@ class SourceImageServiceTest
                                                   &registry, allocator_));
         status_ = loom_serve_router_run(
             loom_serve_host_executor(host_), server_, registry,
-            {.request_quota = options.pending_capacity,
-             .holding_capacity =
-                 loom_serve_http_server_connection_capacity(server_) / 2},
+            {
+                .request_quota = options.pending_capacity,
+                .holding_capacity =
+                    loom_serve_http_server_connection_capacity(server_) / 2,
+            },
             allocator_);
         IREE_ASSERT_OK(loom_serve_registry_destroy(registry));
       }
@@ -119,7 +122,8 @@ class SourceImageServiceTest
         .height = kHeight,
         .width = kWidth,
         .text_tokens = 32,
-        .command_quantum = std::get<1>(GetParam())};
+        .command_quantum = std::get<1>(GetParam()),
+    };
     IREE_ASSERT_OK(
         loom_serve_image_model_create(device_, &options, &model_, allocator_));
   }
@@ -127,7 +131,9 @@ class SourceImageServiceTest
   void StartManaged() {
     service_ = std::thread([this] {
       const loom_serve_model_registration_options_t options = {
-          .device_group = group_, .heartbeat_interval = 0};
+          .device_group = group_,
+          .heartbeat_interval = 0,
+      };
       loom_serve_registry_t* registry = nullptr;
       IREE_ASSERT_OK(loom_serve_registry_create(
           0, nullptr, 2, loom_serve_model_registration_factory(&options),
@@ -249,7 +255,8 @@ class SourceImageServiceTest
         .width = kWidth,
         .height = kHeight,
         .pending_capacity = 8,
-        .heartbeat_interval = 0};
+        .heartbeat_interval = 0,
+    };
     std::unique_ptr<loom_serve_image_service_t,
                     decltype(&loom_serve_image_service_destroy)>
         service(nullptr, loom_serve_image_service_destroy);

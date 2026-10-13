@@ -23,7 +23,8 @@ import threading
 import time
 from pathlib import Path
 
-from experimental.loom_serve.http.logs import LogClient, ModelNotFound
+from loom_serve_testing.logs import LogClient, ModelNotFound
+
 from experimental.loom_serve.tools.system_stats import SystemStats
 
 

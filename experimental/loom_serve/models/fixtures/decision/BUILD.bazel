@@ -51,7 +51,6 @@ filegroup(
             "//conditions:default": ["@platforms//:incompatible"],
         }),
         deps = [
-            "//experimental/loom_serve/testing:model",
             "//loom/src/loom/serve/runtime/device",
             "//loom/src/loom/serve/runtime/host",
             "//loom/src/loom/serve/server:registry",
@@ -60,6 +59,7 @@ filegroup(
             "//loom/src/loom/serve/service/finite:service",
             "//loom/src/loom/serve/service/finite/decision:protocol",
             "//loom/src/loom/serve/service/finite/embedding:protocol",
+            "//loom/src/loom/serve/testing:model",
             "//loom/src/loom/serve/transport/http:listener",
             "//loom/src/loom/serve/transport/http:server",
             "//runtime/src/iree/async",

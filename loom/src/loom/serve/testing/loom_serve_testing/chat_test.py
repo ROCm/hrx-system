@@ -11,7 +11,7 @@ import threading
 import unittest
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.http.chat import request
+from loom_serve_testing.chat import request
 
 
 @contextlib.contextmanager

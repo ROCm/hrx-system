@@ -8,7 +8,8 @@
 
 Requires an exact built shared server, Qwen and Krea source/assets, Pillow,
 and check_model.py's independent isolated-0.ppm reference. Run from the repo
-root with python -m on a qualified exclusive GPU runner. One worker must serve
+root with python -m and PYTHONPATH=loom/src/loom/serve/testing on a qualified
+exclusive GPU runner. One worker must serve
 health and cancellation while device work is outstanding. Text-only execution
 provides the exact continuation oracle. This checks ownership, not performance.
 Artifacts are catalogs, JSONL and one PNG, under 16 MiB; weights are not copied.
@@ -25,17 +26,17 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from PIL import Image
-
-from experimental.loom_serve.http.chat import request
-from experimental.loom_serve.models.qwen.check_router import continuation, history
-from experimental.loom_serve.testing.http import (
+from loom_serve_testing.chat import request
+from loom_serve_testing.http import (
     Events,
     control,
     running_server,
     wait_counters,
     wait_status,
 )
+from PIL import Image
+
+from experimental.loom_serve.models.qwen.check_router import continuation, history
 
 
 def send_image(address):

@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from experimental.loom_serve.http.logs import LogClient, ModelNotFound
+from loom_serve_testing.logs import LogClient, ModelNotFound
 
 
 def batch(model, records, next_position, *, identity="100:1", oldest=0):

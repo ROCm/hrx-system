@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_TESTING_MODEL_H_
-#define EXPERIMENTAL_LOOM_SERVE_TESTING_MODEL_H_
+#ifndef LOOM_SERVE_TESTING_MODEL_H_
+#define LOOM_SERVE_TESTING_MODEL_H_
 
 #include <string>
 
@@ -58,4 +58,4 @@ class ModelDocument {
 
 }  // namespace loom_serve::testing
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_TESTING_MODEL_H_
+#endif  // LOOM_SERVE_TESTING_MODEL_H_

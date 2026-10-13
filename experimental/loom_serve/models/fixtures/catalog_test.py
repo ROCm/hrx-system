@@ -27,9 +27,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.http.logs import LogClient
-from experimental.loom_serve.testing.http import Events, wait_counters, wait_status
-from experimental.loom_serve.testing.http import running_server as child_server
+from loom_serve_testing.http import Events, wait_counters, wait_status
+from loom_serve_testing.http import running_server as child_server
+from loom_serve_testing.logs import LogClient
+
 from experimental.loom_serve.tools.observe import EventLog, record_streams
 
 

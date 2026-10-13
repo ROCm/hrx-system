@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_TEXT_SERVICE_FIXTURE_H_
-#define EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_TEXT_SERVICE_FIXTURE_H_
+#ifndef EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_TEXT_SERVICE_TEST_FIXTURE_H_
+#define EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_TEXT_SERVICE_TEST_FIXTURE_H_
 
 #include <sys/socket.h>
 #include <unistd.h>
@@ -20,11 +20,9 @@
 #include <utility>
 #include <vector>
 
-#include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
 #include "experimental/loom_serve/models/fixtures/text/oracle.h"
 #include "experimental/loom_serve/models/fixtures/text/owner_turn.h"
-#include "experimental/loom_serve/models/fixtures/text/stalled_client.h"
-#include "experimental/loom_serve/testing/model.h"
+#include "experimental/loom_serve/models/fixtures/text/stalled_client_test_util.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -35,6 +33,8 @@
 #include "loom/serve/service/text/input.h"
 #include "loom/serve/service/text/service.h"
 #include "loom/serve/telemetry/stream.h"
+#include "loom/serve/testing/model.h"
+#include "loom/serve/testing/stalled_stderr.h"
 #include "loom/serve/transport/http/listener.h"
 
 namespace loom_serve::testing::text {
@@ -674,4 +674,4 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
 
 }  // namespace loom_serve::testing::text
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_TEXT_SERVICE_FIXTURE_H_
+#endif  // EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_TEXT_SERVICE_TEST_FIXTURE_H_

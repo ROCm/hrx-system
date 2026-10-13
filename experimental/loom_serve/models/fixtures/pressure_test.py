@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.testing.http import control, running_server, wait_status
+from loom_serve_testing.http import control, running_server, wait_status
 
 
 def completion(address, model, messages, session=None, *, checkpoint=None):

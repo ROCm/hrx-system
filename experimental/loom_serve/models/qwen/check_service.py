@@ -18,8 +18,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from loom_serve_testing.http import running_server
+
 from experimental.loom_serve.models.qwen import benchmark_service
-from experimental.loom_serve.testing.http import running_server
 
 
 def main():

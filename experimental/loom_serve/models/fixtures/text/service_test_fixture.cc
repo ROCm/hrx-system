@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/models/fixtures/text/service_fixture.h"
+#include "experimental/loom_serve/models/fixtures/text/service_test_fixture.h"
 
 IREE_FLAG(string, model_source, "", "Deterministic text bootstrap source.");
 IREE_FLAG(string, test_device, "amdgpu",

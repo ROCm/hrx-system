@@ -1,0 +1,85 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "model",
+    testonly = True,
+    hdrs = ["model.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/serve/server:configuration",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+loom_cc_library(
+    name = "stalled_stderr",
+    testonly = True,
+    hdrs = ["stalled_stderr.h"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//loom/src/loom/serve:implementation"],
+    deps = ["//runtime/src/iree/testing:gtest"],
+)
+
+py_library(
+    name = "chat",
+    testonly = True,
+    srcs = ["loom_serve_testing/chat.py"],
+    imports = ["."],
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "chat_test",
+    size = "small",
+    srcs = ["loom_serve_testing/chat_test.py"],
+    deps = [":chat"],
+)
+
+py_library(
+    name = "logs",
+    testonly = True,
+    srcs = ["loom_serve_testing/logs.py"],
+    imports = ["."],
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "logs_test",
+    size = "small",
+    srcs = ["loom_serve_testing/logs_test.py"],
+    deps = [":logs"],
+)
+
+py_library(
+    name = "http",
+    testonly = True,
+    srcs = ["loom_serve_testing/http.py"],
+    imports = ["."],
+    visibility = ["//visibility:public"],
+    deps = [":logs"],
+)
+
+py_test(
+    name = "http_test",
+    size = "small",
+    srcs = ["loom_serve_testing/http_test.py"],
+    deps = [":http"],
+)

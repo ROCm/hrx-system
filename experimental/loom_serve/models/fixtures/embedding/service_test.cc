@@ -21,8 +21,6 @@
 #include <utility>
 #include <vector>
 
-#include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
-#include "experimental/loom_serve/testing/model.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -31,6 +29,8 @@
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/finite/embedding/protocol.h"
+#include "loom/serve/testing/model.h"
+#include "loom/serve/testing/stalled_stderr.h"
 #include "loom/serve/transport/http/listener.h"
 
 IREE_FLAG(string, model_source, "",
@@ -204,7 +204,8 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
     const loom_serve_finite_model_options_t model_options = {
         .sources = document.value().sources,
         .asset_directory = IREE_SV("."),
-        .options = IREE_SV("{\"batch_units\":64}")};
+        .options = IREE_SV("{\"batch_units\":64}"),
+    };
     ModelLifecycle load;
     IREE_ASSERT_OK(load.Run(device_, model_options));
     model_ = load.model;
@@ -412,7 +413,9 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
     }
     router_ = std::thread([this, capacity] {
       const loom_serve_model_registration_options_t options = {
-          .device_group = group_, .heartbeat_interval = 1000000};
+          .device_group = group_,
+          .heartbeat_interval = 1000000,
+      };
       loom_serve_registry_t* registry = nullptr;
       IREE_ASSERT_OK(loom_serve_registry_create(
           service_ ? 1 : 0, &interface_, capacity,
@@ -835,7 +838,8 @@ TEST_P(ElasticEmbeddingServiceTest,
       .uri = IREE_SV("amdgpu"),
       .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
       .slab_size = 2 * 1024 * 1024,
-      .memory_limit = 2 * 1024 * 1024};
+      .memory_limit = 2 * 1024 * 1024,
+  };
   IREE_ASSERT_OK(
       loom_serve_device_group_create(host_, 1, &options, &group_, allocator_));
   device_ = loom_serve_device_group_at(group_, 0);
@@ -1301,7 +1305,8 @@ TEST_P(SourceEmbeddingServiceTest,
   const loom_serve_finite_model_options_t options = {
       .sources = document.value().sources,
       .asset_directory = IREE_SV("."),
-      .options = IREE_SV("{}")};
+      .options = IREE_SV("{}"),
+  };
   const int resident = Send(R"({"model":"fixture","input":"a"})");
   Accept();
   ModelLifecycle load;
@@ -1355,7 +1360,8 @@ TEST_P(SourceEmbeddingServiceTest,
     const loom_serve_finite_model_options_t options = {
         .sources = document.value().sources,
         .asset_directory = IREE_SV("."),
-        .options = IREE_SV("{}")};
+        .options = IREE_SV("{}"),
+    };
     const int resident = Send(R"({"model":"fixture","input":"a"})");
     Accept();
     ModelLifecycle load;
@@ -1397,7 +1403,8 @@ TEST_P(ElasticEmbeddingServiceTest,
       .uri = IREE_SV("amdgpu"),
       .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
       .slab_size = kSlabBytes,
-      .memory_limit = kSlabBytes};
+      .memory_limit = kSlabBytes,
+  };
   IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
                                                 &group_, allocator_));
   device_ = loom_serve_device_group_at(group_, 0);
@@ -1573,8 +1580,10 @@ TEST_P(GroupEmbeddingServiceTest, EmbeddingsCompleteBeforeOtherDeviceRetires) {
             loom_serve_device_residency_cache(device_));
   IREE_ASSERT_OK(loom_serve_device_create_execution(first, &execution_));
   IREE_ASSERT_OK(loom_serve_execution_reserve_workspace(execution_, 64, 16));
-  const iree_hal_pool_reservation_request_t request = {.allocation_size = 64,
-                                                       .min_alignment = 16};
+  const iree_hal_pool_reservation_request_t request = {
+      .allocation_size = 64,
+      .min_alignment = 16,
+  };
   IREE_ASSERT_OK(
       loom_serve_execution_alloca(execution_, &request, &workspace_));
   IREE_ASSERT_OK(iree_hal_semaphore_create(
@@ -1585,16 +1594,24 @@ TEST_P(GroupEmbeddingServiceTest, EmbeddingsCompleteBeforeOtherDeviceRetires) {
   const uint32_t pattern = 0x13579BDF;
   const iree_hal_transfer_operation_t fill = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-      .fill = {.target_buffer = workspace_,
-               .length = sizeof(output_),
-               .pattern = &pattern,
-               .pattern_length = sizeof(pattern)}};
+      .fill =
+          {
+              .target_buffer = workspace_,
+              .length = sizeof(output_),
+              .pattern = &pattern,
+              .pattern_length = sizeof(pattern),
+          },
+  };
   IREE_ASSERT_OK(loom_serve_execution_transfer(execution_, 1, &fill, &value));
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-      .download = {.source_buffer = workspace_,
-                   .target = output_.data(),
-                   .length = sizeof(output_)}};
+      .download =
+          {
+              .source_buffer = workspace_,
+              .target = output_.data(),
+              .length = sizeof(output_),
+          },
+  };
   IREE_ASSERT_OK(
       loom_serve_execution_feedback(execution_, 1, &download, &value));
   auto frontier = loom_serve_execution_frontier(execution_);

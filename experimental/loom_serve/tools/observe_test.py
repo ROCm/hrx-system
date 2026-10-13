@@ -15,7 +15,8 @@ from pathlib import Path
 from unittest import mock
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.http.logs import LogBatch, LogClient, ModelNotFound
+from loom_serve_testing.logs import LogBatch, LogClient, ModelNotFound
+
 from experimental.loom_serve.tools import observe, system_stats
 
 

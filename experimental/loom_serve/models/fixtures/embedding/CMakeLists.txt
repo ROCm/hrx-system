@@ -51,8 +51,6 @@ loom_cc_test(
     iree::base
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::task
     iree::testing::gtest
@@ -69,6 +67,8 @@ loom_cc_test(
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model
     loom::serve::service::finite::service
+    loom::serve::testing::model
+    loom::serve::testing::stalled_stderr
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
@@ -103,8 +103,6 @@ loom_cc_test(
     iree::base
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::task
     iree::testing::gtest
@@ -121,6 +119,8 @@ loom_cc_test(
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model
     loom::serve::service::finite::service
+    loom::serve::testing::model
+    loom::serve::testing::stalled_stderr
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
@@ -156,8 +156,6 @@ loom_cc_test(
     iree::base
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::task
     iree::testing::gtest
@@ -174,6 +172,8 @@ loom_cc_test(
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model
     loom::serve::service::finite::service
+    loom::serve::testing::model
+    loom::serve::testing::stalled_stderr
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
@@ -211,8 +211,6 @@ loom_cc_test(
     iree::base
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::task
     iree::testing::gtest
@@ -229,6 +227,8 @@ loom_cc_test(
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model
     loom::serve::service::finite::service
+    loom::serve::testing::model
+    loom::serve::testing::stalled_stderr
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS

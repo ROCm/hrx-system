@@ -394,7 +394,8 @@ build_tools/bin/iree-bazel-test --config=asan \
   //loom/src/loom/serve/transport/http:server_test
 build_tools/bin/iree-bazel-build --config=asan \
   //experimental/loom_serve/image:server
-python -B experimental/loom_serve/models/krea/check_service.py \
+PYTHONPATH=loom/src/loom/serve/testing \
+python -B -m experimental.loom_serve.models.krea.check_service \
   --server bazel-bin/experimental/loom_serve/image/server \
   --model experimental/loom_serve/models/krea \
   --checkpoint "$krea_weights" \

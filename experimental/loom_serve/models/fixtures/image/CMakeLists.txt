@@ -47,8 +47,6 @@ loom_cc_test(
     iree::base
     iree::base::internal::base64
     iree::base::tooling::flags
-    iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
@@ -64,6 +62,8 @@ loom_cc_test(
     loom::serve::service::image::output
     loom::serve::service::image::request
     loom::serve::service::image::service
+    loom::serve::testing::model
+    loom::serve::testing::stalled_stderr
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
@@ -94,8 +94,6 @@ loom_cc_test(
     iree::base
     iree::base::internal::base64
     iree::base::tooling::flags
-    iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
@@ -111,6 +109,8 @@ loom_cc_test(
     loom::serve::service::image::output
     loom::serve::service::image::request
     loom::serve::service::image::service
+    loom::serve::testing::model
+    loom::serve::testing::stalled_stderr
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
@@ -141,8 +141,6 @@ loom_cc_test(
     iree::base
     iree::base::internal::base64
     iree::base::tooling::flags
-    iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
@@ -158,6 +156,8 @@ loom_cc_test(
     loom::serve::service::image::output
     loom::serve::service::image::request
     loom::serve::service::image::service
+    loom::serve::testing::model
+    loom::serve::testing::stalled_stderr
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS

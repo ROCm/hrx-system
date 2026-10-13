@@ -21,7 +21,7 @@ import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from experimental.loom_serve.http.logs import LogClient
+from loom_serve_testing.logs import LogClient
 
 
 def control(address, method, path, expected, *, session=None, body=None, headers=None):

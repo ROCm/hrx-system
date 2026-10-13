@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_STALLED_STDERR_H_
-#define EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_STALLED_STDERR_H_
+#ifndef LOOM_SERVE_TESTING_STALLED_STDERR_H_
+#define LOOM_SERVE_TESTING_STALLED_STDERR_H_
 
 #include <errno.h>
 #include <fcntl.h>
@@ -67,4 +67,4 @@ class StalledStderr {
 
 }  // namespace loom_serve::testing
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_STALLED_STDERR_H_
+#endif  // LOOM_SERVE_TESTING_STALLED_STDERR_H_

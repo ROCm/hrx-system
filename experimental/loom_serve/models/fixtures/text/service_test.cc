@@ -6,7 +6,7 @@
 
 #include <cerrno>
 
-#include "experimental/loom_serve/models/fixtures/text/service_fixture.h"
+#include "experimental/loom_serve/models/fixtures/text/service_test_fixture.h"
 
 namespace {
 
@@ -194,7 +194,8 @@ TEST_P(SourceTextServiceTest,
       .completion = &completion,
       .position = 1,
       .token = Oracle::Id('b'),
-      .boundary = LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN};
+      .boundary = LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN,
+  };
   loom_serve_text_input_t input = {};
   int32_t scratch[96];
   IREE_ASSERT_OK(loom_serve_text_input_prepare(&next, prefix, true,
@@ -1085,7 +1086,8 @@ TEST_P(ElasticTextServiceTest, RetirementOwnsAcceptedCheckpointCapture) {
   group_ = nullptr;
   const loom_serve_device_options_t device_options = {
       .uri = iree_make_cstring_view(ServiceTestDevice()),
-      .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC};
+      .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
+  };
   IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
                                                 &group_, allocator_));
   device_ = loom_serve_device_group_at(group_, 0);
@@ -1219,7 +1221,8 @@ TEST_P(ElasticTextServiceTest,
   group_ = nullptr;
   const loom_serve_device_options_t device_options = {
       .uri = iree_make_cstring_view(ServiceTestDevice()),
-      .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC};
+      .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
+  };
   IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
                                                 &group_, allocator_));
   device_ = loom_serve_device_group_at(group_, 0);
@@ -1391,7 +1394,8 @@ TEST_P(ElasticTextServiceTest, EndpointAliasesShareOneSuspendedPayload) {
   group_ = nullptr;
   const loom_serve_device_options_t device_options = {
       .uri = iree_make_cstring_view(ServiceTestDevice()),
-      .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC};
+      .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
+  };
   IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
                                                 &group_, allocator_));
   device_ = loom_serve_device_group_at(group_, 0);

@@ -39,10 +39,10 @@ loom_cc_test(
     "oracle.h"
     "owner_turn.h"
     "prefix_service_test.cc"
-    "service_fixture.cc"
-    "service_fixture.h"
     "service_test.cc"
-    "stalled_client.h"
+    "service_test_fixture.cc"
+    "service_test_fixture.h"
+    "stalled_client_test_util.h"
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/control.loom"
@@ -56,8 +56,6 @@ loom_cc_test(
     iree::base
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::testing::model
     iree::net::carrier
     iree::net::carrier::loopback
     iree::task
@@ -77,6 +75,8 @@ loom_cc_test(
     loom::serve::service::text::service
     loom::serve::service::text::telemetry
     loom::serve::telemetry::stream
+    loom::serve::testing::model
+    loom::serve::testing::stalled_stderr
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
@@ -99,10 +99,10 @@ loom_cc_test(
     "oracle.h"
     "owner_turn.h"
     "prefix_service_test.cc"
-    "service_fixture.cc"
-    "service_fixture.h"
     "service_test.cc"
-    "stalled_client.h"
+    "service_test_fixture.cc"
+    "service_test_fixture.h"
+    "stalled_client_test_util.h"
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/control.loom"
@@ -116,8 +116,6 @@ loom_cc_test(
     iree::base
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::testing::model
     iree::net::carrier
     iree::net::carrier::loopback
     iree::task
@@ -137,6 +135,8 @@ loom_cc_test(
     loom::serve::service::text::service
     loom::serve::service::text::telemetry
     loom::serve::telemetry::stream
+    loom::serve::testing::model
+    loom::serve::testing::stalled_stderr
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
@@ -160,10 +160,10 @@ loom_cc_test(
     "oracle.h"
     "owner_turn.h"
     "prefix_service_test.cc"
-    "service_fixture.cc"
-    "service_fixture.h"
     "service_test.cc"
-    "stalled_client.h"
+    "service_test_fixture.cc"
+    "service_test_fixture.h"
+    "stalled_client_test_util.h"
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/control.loom"
@@ -177,8 +177,6 @@ loom_cc_test(
     iree::base
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::testing::model
     iree::net::carrier
     iree::net::carrier::loopback
     iree::task
@@ -198,6 +196,8 @@ loom_cc_test(
     loom::serve::service::text::service
     loom::serve::service::text::telemetry
     loom::serve::telemetry::stream
+    loom::serve::testing::model
+    loom::serve::testing::stalled_stderr
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS

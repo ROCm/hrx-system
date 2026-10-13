@@ -27,14 +27,13 @@ from contextlib import ExitStack
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from PIL import Image
-
-from experimental.loom_serve.testing.http import (
+from loom_serve_testing.http import (
     Events,
     running_server,
     wait_counters,
     wait_status,
 )
+from PIL import Image
 
 
 def main():

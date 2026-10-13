@@ -21,8 +21,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from experimental.loom_serve.http import chat
-from experimental.loom_serve.testing.http import running_server
+from loom_serve_testing import chat
+from loom_serve_testing.http import running_server
 
 TOOLS = [
     {

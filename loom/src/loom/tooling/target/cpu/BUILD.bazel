@@ -74,7 +74,7 @@ py_test(
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    deps = ["//experimental/loom_serve/testing:http"],
+    deps = ["//loom/src/loom/serve/testing:http"],
 )
 
 # Addressable C++ locals preserve independent storage across native calls.
