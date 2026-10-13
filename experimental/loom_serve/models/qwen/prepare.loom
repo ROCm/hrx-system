@@ -64,8 +64,8 @@ global.rodata.def @width_key = bytes("72756e6e65722e7177656e33382e76657269666963
 // draft_weights
 global.rodata.def @draft_option = bytes("64726166745f77656967687473")
 
-// expected {} without DFlash or {"draft_weights":"checkpoint path"} at draft depth seven
-global.rodata.def @options_error = bytes("6578706563746564207b7d20776974686f75742044466c617368206f72207b2264726166745f77656967687473223a22636865636b706f696e742070617468227d20617420647261667420646570746820736576656e")
+// draft_weights must name a checkpoint only at draft depth seven.
+global.rodata.def @options_error = bytes("64726166745f77656967687473206d757374206e616d65206120636865636b706f696e74206f6e6c7920617420647261667420646570746820736576656e")
 
 func.def @check_options(%valid: i1) {
   %condition = scalar.extui %valid : i1 to i32
@@ -75,48 +75,58 @@ func.def @check_options(%valid: i1) {
 }
 
 func.def @draft_checkpoint(%options: buffer) -> (buffer) {
-  %c0 = scalar.constant 0 : i64
-  %c1 = scalar.constant 1 : i64
+  %zero64 = scalar.constant 0 : i64
+  %zero32 = scalar.constant 0 : i32
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
   %object_type = scalar.constant 2 : i32
   %fields, %type, %count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
   %object = scalar.cmpi eq, %type, %object_type : i32
-  %bounded = scalar.cmpi ule, %count, %c1 : i64
-  %valid = scalar.andi %object, %bounded : i1
-  func.call @check_options(%valid) : (i1)
-  %present = scalar.cmpi eq, %count, %c1 : i64
-  %checkpoint = scf.if %present -> (buffer) {
-    %origin = index.constant 0 : offset
-    %record = buffer.view %fields[%origin] : buffer -> view<1x5xi64>
-    %key_begin = view.load %record[0, 0] : view<1x5xi64> -> i64
-    %key_length = view.load %record[0, 1] : view<1x5xi64> -> i64
-    %value_begin = view.load %record[0, 2] : view<1x5xi64> -> i64
-    %value_length = view.load %record[0, 3] : view<1x5xi64> -> i64
-    %value_type = view.load %record[0, 4] : view<1x5xi64> -> i64
-    %string = scalar.cmpi eq, %value_type, %c0 : i64
-    %nonempty = scalar.cmpi ugt, %value_length, %c0 : i64
-    %typed = scalar.andi %string, %nonempty : i1
-    func.call @check_options(%typed) : (i1)
-    %source_length = buffer.length %options
-    %decoded = buffer.alloca<private> align(1) %source_length : buffer
-    %decoded_key_length = func.call @unescape(%options, %key_begin, %key_length, %decoded, %c0) : (buffer, i64, i64, buffer, i64) -> (i64)
-    %expected_length = scalar.constant 13 : i64
+  func.call @check_options(%object) : (i1)
+  %bounded = scalar.assume %count [range(%count, 0, 2147483647)] : i64
+  %extent = index.cast %bounded : i64 to index
+  %records = buffer.view %fields[%origin] : buffer -> view<[%extent]x5xi64>
+  %source_length = buffer.length %options
+  %decoded = buffer.alloca<private> align(1) %source_length : buffer
+  %key = global.load @draft_option : buffer
+  %expected_length = scalar.constant 13 : i64
+  %key_bytes = index.constant 13 : offset
+  %empty = global.load @empty : buffer
+  %checkpoint = scf.for %i = [%c0 to %extent step %c1](%path = %empty : buffer) -> (buffer) {
+    %key_begin = view.load %records[%i, 0] : view<[%extent]x5xi64> -> i64
+    %key_length = view.load %records[%i, 1] : view<[%extent]x5xi64> -> i64
+    %decoded_key_length = func.call @unescape(%options, %key_begin, %key_length, %decoded, %zero64) : (buffer, i64, i64, buffer, i64) -> (i64)
     %right_length = scalar.cmpi eq, %decoded_key_length, %expected_length : i64
-    func.call @check_options(%right_length) : (i1)
-    %key = global.load @draft_option : buffer
-    %key_bytes = index.constant 13 : offset
-    %order = buffer.compare %decoded[%origin], %key[%origin], %key_bytes
-    %zero32 = scalar.constant 0 : i32
-    %equal = scalar.cmpi eq, %order, %zero32 : i32
-    func.call @check_options(%equal) : (i1)
-    %decoded_length = func.call @unescape(%options, %value_begin, %value_length, %decoded, %c0) : (buffer, i64, i64, buffer, i64) -> (i64)
-    %positive_length = scalar.assume %decoded_length [range(%decoded_length, 1, 9223372036854775807)] : i64
-    %bytes = index.cast %positive_length : i64 to offset
-    %path = buffer.alloca<private> align(1) %bytes : buffer
-    buffer.copy %decoded[%origin], %path[%origin], %bytes
-    scf.yield %path : buffer
-  } else {
-    %empty = global.load @empty : buffer
-    scf.yield %empty : buffer
+    %matches = scf.if %right_length -> (i1) {
+      %order = buffer.compare %decoded[%origin], %key[%origin], %key_bytes
+      %equal = scalar.cmpi eq, %order, %zero32 : i32
+      scf.yield %equal : i1
+    } else {
+      %false = scalar.constant false : i1
+      scf.yield %false : i1
+    }
+    %next = scf.if %matches -> (buffer) {
+      %prior_length = buffer.length %path
+      %unique = index.cmp eq, %prior_length, %origin : offset
+      func.call @check_options(%unique) : (i1)
+      %value_begin = view.load %records[%i, 2] : view<[%extent]x5xi64> -> i64
+      %value_length = view.load %records[%i, 3] : view<[%extent]x5xi64> -> i64
+      %value_type = view.load %records[%i, 4] : view<[%extent]x5xi64> -> i64
+      %string = scalar.cmpi eq, %value_type, %zero64 : i64
+      func.call @check_options(%string) : (i1)
+      %decoded_length = func.call @unescape(%options, %value_begin, %value_length, %decoded, %zero64) : (buffer, i64, i64, buffer, i64) -> (i64)
+      %nonempty = scalar.cmpi ugt, %decoded_length, %zero64 : i64
+      func.call @check_options(%nonempty) : (i1)
+      %positive_length = scalar.assume %decoded_length [range(%decoded_length, 1, 9223372036854775807)] : i64
+      %bytes = index.cast %positive_length : i64 to offset
+      %result = buffer.alloca<private> align(1) %bytes : buffer
+      buffer.copy %decoded[%origin], %result[%origin], %bytes
+      scf.yield %result : buffer
+    } else {
+      scf.yield %path : buffer
+    }
+    scf.yield %next : buffer
   }
   func.return %checkpoint : buffer
 }
@@ -258,7 +268,7 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %pins: i64, %packed: i1
   %cohort_token_bytes = scalar.constant 4096 : i64
   %progress_bytes = scalar.constant 32 : i64
   %progress_extent = scalar.constant 256 : i64
-  %metadata_bytes = scalar.constant 4704 : i64
+  %metadata_bytes = scalar.constant 6112 : i64
   %committed_bytes = scalar.constant 1548 : i64
   %output_bytes = scalar.constant 64 : i64
   %result_bytes = scalar.constant 1344 : i64
@@ -511,8 +521,9 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %two64 = scalar.constant 2 : i64
   %shared64 = scalar.addi %shape_count, %two64 : i64
   %shared = scalar.trunci %shared64 : i64 to i32
-  %state_bytes = index.constant 20 : offset
-  %state = buffer.alloca<private> align(4) %state_bytes : buffer
+  %state_bytes = index.constant 416 : offset
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
+  buffer.fill %zero32, %state[%origin], %state_bytes : i32
   %state_view = buffer.view %state[%origin] : buffer -> view<5xi32>
   %count32 = scalar.trunci %shape_count : i64 to i32
   view.store %prefill_stage, %state_view[0] : i32, view<5xi32>
