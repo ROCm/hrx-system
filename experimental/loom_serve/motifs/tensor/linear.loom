@@ -1,0 +1,176 @@
+template.decl @projection.linear_storage_bf16(%rows: index, %inputs: index, %outputs: index, %weight_is_bf16: i1, %row_origin: index, %output_origin: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+
+template.decl @projection.linear_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %row_origin: index, %output_origin: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
+
+template.decl @projection.bias_storage_bf16(%outputs: index, %weight_is_bf16: i1, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
+
+template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %row_origin: index, %output_origin: index, %base_layout: encoding<layout>, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
+
+// Complete 16x16 tiles, row-major activations and [output,input] checkpoint
+// weights. Storage is selected by an SSA specialization fact. F32 values round
+// to BF16 before contraction, matching a BF16 model load; native BF16 storage
+// is read directly. Accumulation is
+// F32 in 256-input partials; the caller selects an epilogue before rounding
+// the result to BF16.
+// Dimensions and 16-aligned tile origins are explicit operands; the caller
+// owns traversal independently of the contraction and epilogue.
+template.def<@projection.linear_storage_bf16> device @linear_storage_bf16(%rows: index, %inputs: index, %outputs: index, %weight_is_bf16: i1, %row_origin: index, %output_origin: index, %input: buffer, %weight: buffer) -> (vector<8xf32>) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %tile = index.constant 16 : index
+  %block_size = index.constant 256 : index
+  %lane = kernel.workitem.id<x> : index
+  %lane_row = index.rem %lane, %tile : index
+  %weight_row = index.add %output_origin, %lane_row : index
+  %input_noalias, %weight_noalias = buffer.assume.noalias %input, %weight : buffer, buffer
+  %input_view = buffer.view %input_noalias[%origin] : buffer -> view<[%rows]x[%inputs]xbf16>
+  %weight_view = buffer.view %weight_noalias[%origin] : buffer -> view<[%outputs]x[%inputs]xf32>
+  %weight_bf16_view = buffer.view %weight_noalias[%origin] : buffer -> view<[%outputs]x[%inputs]xbf16>
+  %c0_0 = vector.constant 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %c0_0 shape [%tile, %tile] : vector<8xf32>
+  %result = scf.for %block = [%c0 to %inputs step %block_size](%total = %initial : vector<8xf32>) -> (vector<8xf32>) {
+    %block_limit = index.add %block, %block_size : index
+    %block_end = index.min %block_limit, %inputs : index
+    %partial = scf.for %column = [%block to %block_end step %tile](%acc = %initial : vector<8xf32>) -> (vector<8xf32>) {
+      %lhs = vector.fragment.load<lhs> %input_view[%row_origin, %column] shape [%tile, %tile] : view<[%rows]x[%inputs]xbf16> -> vector<16xbf16>
+      %rounded = scf.if %weight_is_bf16 -> (vector<16xbf16>) {
+        %weights = vector.load %weight_bf16_view[%weight_row, %column] : view<[%outputs]x[%inputs]xbf16> -> vector<16xbf16>
+        scf.yield %weights : vector<16xbf16>
+      } else {
+        %weights = vector.load %weight_view[%weight_row, %column] : view<[%outputs]x[%inputs]xf32> -> vector<16xf32>
+        %values = vector.fptrunc %weights : vector<16xf32> to vector<16xbf16>
+        scf.yield %values : vector<16xbf16>
+      }
+      %rhs = vector.fragment<rhs> %rounded shape [%tile, %tile] : vector<16xbf16>
+      %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      scf.yield %next : vector<8xf32>
+    }
+    %next = vector.addf %total, %partial : vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  template.return %result : vector<8xf32>
+}
+
+// Native BF16 checkpoint storage uses the same activation and accumulator
+// layout as the F32-storage path without a conversion or expanded weight copy.
+// Four independent chains are combined every 256 inputs, then accumulated
+// across blocks. This bounds cancellation-sensitive F32 recurrence lengths
+// without global partial sums or extra dispatches.
+// Input width is a multiple of 64; rows and output width are multiples of 16.
+template.def<@projection.linear_bf16> device @linear_bf16_weights(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %tile = index.constant 16 : index
+  %tile2 = index.constant 32 : index
+  %tile3 = index.constant 48 : index
+  %stride = index.constant 64 : index
+  %block_size = index.constant 256 : index
+  %row_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %lane_row = index.rem %lane, %tile : index
+  %row_origin = index.mul %row_tile, %tile : index
+  %output_origin = index.mul %output_tile, %tile : index
+  %weight_row = index.add %output_origin, %lane_row : index
+  %input_noalias, %weight_noalias = buffer.assume.noalias %input, %weight : buffer, buffer
+  %input_view = buffer.view %input_noalias[%origin] : buffer -> view<[%rows]x[%inputs]xbf16>
+  %weight_view = buffer.view %weight_noalias[%origin] : buffer -> view<[%outputs]x[%inputs]xbf16>
+  %c0_0 = vector.constant 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %c0_0 shape [%tile, %tile] : vector<8xf32>
+  %result = scf.for %block = [%c0 to %inputs step %block_size](%total = %initial : vector<8xf32>) -> (vector<8xf32>) {
+    %block_limit = index.add %block, %block_size : index
+    %block_end = index.min %block_limit, %inputs : index
+    %result0, %result1, %result2, %result3 = scf.for %column = [%block to %block_end step %stride](%acc0 = %initial : vector<8xf32>, %acc1 = %initial : vector<8xf32>, %acc2 = %initial : vector<8xf32>, %acc3 = %initial : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+      %column1 = index.add %column, %tile : index
+      %column2 = index.add %column, %tile2 : index
+      %column3 = index.add %column, %tile3 : index
+      %lhs0 = vector.fragment.load<lhs> %input_view[%row_origin, %column] shape [%tile, %tile] : view<[%rows]x[%inputs]xbf16> -> vector<16xbf16>
+      %lhs1 = vector.fragment.load<lhs> %input_view[%row_origin, %column1] shape [%tile, %tile] : view<[%rows]x[%inputs]xbf16> -> vector<16xbf16>
+      %lhs2 = vector.fragment.load<lhs> %input_view[%row_origin, %column2] shape [%tile, %tile] : view<[%rows]x[%inputs]xbf16> -> vector<16xbf16>
+      %lhs3 = vector.fragment.load<lhs> %input_view[%row_origin, %column3] shape [%tile, %tile] : view<[%rows]x[%inputs]xbf16> -> vector<16xbf16>
+      %weights0 = vector.load %weight_view[%weight_row, %column] : view<[%outputs]x[%inputs]xbf16> -> vector<16xbf16>
+      %weights1 = vector.load %weight_view[%weight_row, %column1] : view<[%outputs]x[%inputs]xbf16> -> vector<16xbf16>
+      %weights2 = vector.load %weight_view[%weight_row, %column2] : view<[%outputs]x[%inputs]xbf16> -> vector<16xbf16>
+      %weights3 = vector.load %weight_view[%weight_row, %column3] : view<[%outputs]x[%inputs]xbf16> -> vector<16xbf16>
+      %rhs0 = vector.fragment<rhs> %weights0 shape [%tile, %tile] : vector<16xbf16>
+      %rhs1 = vector.fragment<rhs> %weights1 shape [%tile, %tile] : vector<16xbf16>
+      %rhs2 = vector.fragment<rhs> %weights2 shape [%tile, %tile] : vector<16xbf16>
+      %rhs3 = vector.fragment<rhs> %weights3 shape [%tile, %tile] : vector<16xbf16>
+      %next0 = vector.mma %lhs0, %rhs0, %acc0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next1 = vector.mma %lhs1, %rhs1, %acc1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next2 = vector.mma %lhs2, %rhs2, %acc2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next3 = vector.mma %lhs3, %rhs3, %acc3 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    }
+    %sum01 = vector.addf %result0, %result1 : vector<8xf32>
+    %sum23 = vector.addf %result2, %result3 : vector<8xf32>
+    %partial = vector.addf %sum01, %sum23 : vector<8xf32>
+    %next = vector.addf %total, %partial : vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  template.return %result : vector<8xf32>
+}
+
+template.def<@projection.store_bf16> device @store_projection_bf16(%rows: index, %outputs: index, %row_origin: index, %output_origin: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%outputs]xbf16, %output_layout>
+  vector.fragment.store<result> %result, %output_view[%row_origin, %output_origin] shape [%tile, %tile] : vector<8xf32>, view<[%rows]x[%outputs]xbf16, %output_layout>
+  template.return
+}
+
+template.def<@projection.bias_storage_bf16> device @bias_projection_storage_bf16(%outputs: index, %weight_is_bf16: i1, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %output_origin = index.mul %output_tile, %tile : index
+  // GFX11 wave32 WMMA assigns each lane eight rows of one output column.
+  %lane = kernel.workitem.id<x> : index
+  %column = index.rem %lane, %tile : index
+  %output_column = index.add %output_origin, %column : index
+  %bias_view = buffer.view %bias[%origin] : buffer -> view<[%outputs]xf32>
+  %rounded = scf.if %weight_is_bf16 -> (bf16) {
+    %view = buffer.view %bias[%origin] : buffer -> view<[%outputs]xbf16>
+    %value = view.load %view[%output_column] : view<[%outputs]xbf16> -> bf16
+    scf.yield %value : bf16
+  } else {
+    %stored = view.load %bias_view[%output_column] : view<[%outputs]xf32> -> f32
+    %value = scalar.fptrunc %stored : f32 to bf16
+    scf.yield %value : bf16
+  }
+  %value = scalar.extf %rounded : bf16 to f32
+  %values = vector.splat %value : vector<8xf32>
+  %biased = vector.addf %result, %values : vector<8xf32>
+  template.return %biased : vector<8xf32>
+}
+
+// Fusion preserves the BF16 B-projection and scaling boundaries. Reading
+// and writing the same base tile is safe when both use the same injective
+// layout: no other logical tile consumes its values.
+template.def<@projection.adapter_epilogue_bf16> device @adapter_epilogue_bf16(%rows: index, %outputs: index, %row_origin: index, %output_origin: index, %base_layout: encoding<layout>, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %tile = index.constant 16 : index
+  %base_view = buffer.view %base[%origin] : buffer -> view<[%rows]x[%outputs]xbf16, %base_layout>
+  %strength_view = buffer.view %strength[%origin] : buffer -> view<1xf32>
+  %base_bf16 = vector.fragment.load<result> %base_view[%row_origin, %output_origin] shape [%tile, %tile] : view<[%rows]x[%outputs]xbf16, %base_layout> -> vector<8xbf16>
+  %base_f32 = vector.extf %base_bf16 : vector<8xbf16> to vector<8xf32>
+  %scale = view.load %strength_view[%c0] : view<1xf32> -> f32
+  %c0_0_2 = scalar.constant 0.0 : f32
+  %disabled = scalar.cmpf oeq, %scale, %c0_0_2 : f32
+  %combined = scf.if %disabled -> (vector<8xf32>) {
+    scf.yield %base_f32 : vector<8xf32>
+  } else {
+    %delta_bf16 = vector.fptrunc %result : vector<8xf32> to vector<8xbf16>
+    %delta_f32 = vector.extf %delta_bf16 : vector<8xbf16> to vector<8xf32>
+    %scales = vector.splat %scale : vector<8xf32>
+    %scaled_f32 = vector.mulf %delta_f32, %scales : vector<8xf32>
+    %scaled_bf16 = vector.fptrunc %scaled_f32 : vector<8xf32> to vector<8xbf16>
+    %scaled = vector.extf %scaled_bf16 : vector<8xbf16> to vector<8xf32>
+    %sum = vector.addf %base_f32, %scaled : vector<8xf32>
+    scf.yield %sum : vector<8xf32>
+  }
+  template.return %combined : vector<8xf32>
+}
