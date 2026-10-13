@@ -503,6 +503,7 @@ TEST_F(SlabCacheTest, ChildReturnPreservesUntouchedAlignmentTailHistory) {
       child, 1, &reservation,
       iree_async_fixed_frontier_as_const_frontier(&later));
   iree_hal_pool_trim(child, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
+  Drain();
   IREE_ASSERT_OK(Acquire(cache_, 4097, nullptr,
                          IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER |
                              IREE_HAL_POOL_RESERVE_FLAG_DISALLOW_GROWTH,
