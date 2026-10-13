@@ -442,9 +442,23 @@ static bool loom_low_allocation_search_has_ordered_availability(
              release_policy);
 }
 
+static bool loom_low_allocation_search_active_location_conflicts(
+    loom_low_allocation_search_context_t* context,
+    const loom_low_allocation_assignment_t* candidate_template, uint32_t base) {
+  loom_low_allocation_assignment_t candidate = *candidate_template;
+  candidate.location_base = base;
+  return loom_low_allocation_active_set_conflicts(
+      context->active_set, context->descriptor_set, context->unit_liveness,
+      context->assignment_map->assignments,
+      context->assignment_map->assignment_count, &candidate,
+      /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0);
+}
+
 // Finds the next location not rejected by retained ordered conflict sources.
 // Repeating monotone gap queries preserves the authored candidate order while
-// jumping whole active, future-fixed, and permanently reserved runs.
+// jumping whole active, future-fixed, and permanently reserved runs. When
+// active liveness cannot be indexed as definite continuous occupancy, reject
+// its conflicts before consulting the remaining availability indexes.
 static bool loom_low_allocation_search_find_ordered_unoccupied_location(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* candidate, uint32_t minimum_base,
@@ -475,6 +489,15 @@ static bool loom_low_allocation_search_find_ordered_unoccupied_location(
     uint32_t cursor = minimum_base;
     while (cursor <= maximum_base) {
       const uint32_t initial_cursor = cursor;
+      if (!can_skip_active &&
+          loom_low_allocation_search_active_location_conflicts(
+              context, candidate, cursor)) {
+        if (cursor == maximum_base) {
+          return false;
+        }
+        ++cursor;
+        continue;
+      }
       if (can_skip_active &&
           !loom_low_allocation_active_unit_index_find_unoccupied_location(
               &context->active_set->units, candidate, cursor, maximum_base,
@@ -510,6 +533,15 @@ static bool loom_low_allocation_search_find_ordered_unoccupied_location(
   uint32_t cursor = maximum_base;
   while (true) {
     const uint32_t initial_cursor = cursor;
+    if (!can_skip_active &&
+        loom_low_allocation_search_active_location_conflicts(context, candidate,
+                                                             cursor)) {
+      if (cursor == minimum_base) {
+        return false;
+      }
+      --cursor;
+      continue;
+    }
     if (can_skip_active &&
         !loom_low_allocation_active_unit_index_find_unoccupied_location(
             &context->active_set->units, candidate, minimum_base, cursor,

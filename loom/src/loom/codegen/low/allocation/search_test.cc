@@ -669,9 +669,9 @@ TEST_F(LowAllocationSearchTest,
   const loom_liveness_value_class_t value_class =
       RegisterValueClass(descriptor_set_id);
   const loom_liveness_interval_t intervals[] = {
-      Interval(scalar_value, /*start=*/0, /*end=*/8, value_class,
+      Interval(scalar_value, /*start=*/1, /*end=*/8, value_class,
                /*unit_count=*/1),
-      Interval(wide_value, /*start=*/1, /*end=*/7, value_class,
+      Interval(wide_value, /*start=*/0, /*end=*/7, value_class,
                /*unit_count=*/4),
       Interval(unrelated_scalar_value, /*start=*/8, /*end=*/10, value_class,
                /*unit_count=*/1),
@@ -696,7 +696,7 @@ TEST_F(LowAllocationSearchTest,
   };
 
   loom_low_allocation_unit_liveness_value_t unit_values[] = {
-      {0, 0}, {1, 1}, {5, 8}};
+      {0, 1}, {1, 0}, {5, 8}};
   uint32_t unit_end_points[] = {8, 7, 7, 7, 7, 10};
   uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {
@@ -809,6 +809,36 @@ TEST_F(LowAllocationSearchTest,
   reserved_range.location_count = 8;
   EXPECT_FALSE(loom_low_allocation_search_find_free_location(
       &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
+
+  // The preferred descending range intersects an active tuple. Keep the
+  // first-fit packing order when active conflicts and reserved gaps alternate.
+  assignments[0] = Assignment(wide_value, /*start=*/0, /*end=*/7, value_class,
+                              /*location_base=*/1, /*location_count=*/4,
+                              /*unit_point_start=*/1);
+  assignment_map.assignment_count = 1;
+  loom_low_allocation_active_set_insert(&active_set, &descriptor_set,
+                                        assignments, /*assignment_count=*/1,
+                                        /*assignment_index=*/0);
+  reserved_range.location_base = 6;
+  reserved_range.location_count = 2;
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
+  EXPECT_EQ(location_base, 0u);
+
+  reserved_range.location_base = 0;
+  reserved_range.location_count = 1;
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
+  EXPECT_EQ(location_base, 5u);
+  EXPECT_FALSE(loom_low_allocation_search_find_free_location(
+      &context, &intervals[0], Capacity(/*max_units=*/5), &location_base));
+
+  // A tuple's individual units can retire before the whole assignment. The
+  // early rejection must honor unit liveness, not its enclosing active extent.
+  unit_end_points[3] = 1;
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &context, &intervals[0], Capacity(/*max_units=*/5), &location_base));
+  EXPECT_EQ(location_base, 3u);
 
   loom_module_value_ordinal_scratch_clear(module, scalar_value);
   loom_module_value_ordinal_scratch_clear(module, wide_value);
