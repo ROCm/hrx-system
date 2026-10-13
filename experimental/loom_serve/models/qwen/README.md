@@ -44,8 +44,7 @@ curl --fail --silent --show-error http://127.0.0.1:8080/v1/chat/completions \
 
 The registration name is the HTTP routing alias. Reusing `X-Loom-Session` with
 the complete matching conversation allows the server to reuse retained state.
-Current token selection is greedy (`temperature: 0`); nonzero temperature is
-rejected. Thinking is enabled by default, using the checkpoint's xhigh reasoning
+Thinking is enabled by default, using the checkpoint's xhigh reasoning
 instruction. `enable_thinking: false` selects the closed, empty reasoning prefix
 used in the short example above. Streamed deltas and complete messages carry
 reasoning in `reasoning_content`, independently of answer `content` and tool calls.
@@ -54,6 +53,30 @@ conversation. A generation truncated inside its reasoning block remains valid
 output but requires replay instead of reusing a falsely closed device prefix.
 Tool definitions and tool-result turns use the chat endpoint;
 the source policy formats and parses the model's XML tool-call protocol.
+
+## Device sampling
+
+Requests support `temperature`, `top_p`, `top_k` and a signed 64-bit `seed`.
+Omitted values come from `definition.options.sampling`, for example:
+
+```json
+{"sampling": {"temperature": 0.7, "top_p": 0.95, "top_k": 20}}
+```
+
+Without deployment overrides the defaults are greedy temperature zero,
+`top_p: 1` and `top_k: 0` (unbounded vocabulary). Positive temperature applies
+temperature scaling, then top-k, then nucleus selection. Top-p is in `(0,1]`;
+top-k is a nonnegative signed 32-bit integer. Positive temperature and top-p
+must be representable as normal F32 values. Temperature zero always retains
+the greedy lowest-ID tie rule. Unsupported fields and duplicate defaults reject.
+
+A seed fixes the random stream by absolute target-token position and token ID,
+independently of packed row placement or speculative depth. An omitted seed
+uses a distinct request nonce; this is not a cryptographic random source.
+Floating-point differences between device kernels can still change a draw near
+a probability boundary. Selection stays on device, including target sampling
+inside MTP/DFlash verification. Draft proposals do not consume target randomness;
+acceptance commits only the prefix matching sampled target tokens.
 
 ## Scheduling and state
 

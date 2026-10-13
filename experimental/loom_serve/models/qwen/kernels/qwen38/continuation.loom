@@ -12,6 +12,7 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
   %plan_descriptors = index.constant 2332 : offset
   %plan_options = index.constant 4124 : offset
   %indices_origin = index.constant 4640 : offset
+  %identity_origin = index.constant 5088 : offset
   %queued_origin = index.constant 2048 : offset
   %next_origin = index.constant 640 : offset
   %tags_origin = index.constant 1280 : offset
@@ -24,6 +25,7 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
   %planned = buffer.view %epoch[%plan_descriptors] : buffer -> view<64x5xi32>
   %credits = buffer.view %epoch[%plan_options] : buffer -> view<64x2xi32>
   %indices = buffer.view %epoch[%indices_origin] : buffer -> view<16xi32>
+  %identities = buffer.view %epoch[%identity_origin] : buffer -> view<128x2xi32>
   %inputs = buffer.view %tokens[%origin] : buffer -> view<512xi32>
   %queued = buffer.view %tokens[%queued_origin] : buffer -> view<512xi32>
   %prior = buffer.view %results[%origin] : buffer -> view<16x10xi32>
@@ -125,6 +127,12 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
           %selected_token = index.add %selection_begin, %token : index
           %word = index.cast %selected_token : index to i32
           view.store %word, %selections[%selection_index] : i32, view<128xi32>
+          %relative = index.sub %selected_token, %begin : index
+          %relative_word = index.cast %relative : index to i32
+          %input_position = scalar.addi %advanced, %relative_word : i32
+          %target_position = scalar.addi %input_position, %c1_2 : i32
+          view.store %row, %identities[%selection_index, 0] : i32, view<128x2xi32>
+          view.store %target_position, %identities[%selection_index, 1] : i32, view<128x2xi32>
         }
         scf.yield %selection_count : index
       } else {
