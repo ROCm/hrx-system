@@ -810,6 +810,7 @@ loom_check_test_suite(
         "test/source_low/numeric_index_conversion.loom-test",
         "test/source_low/numeric_index_operands.loom-test",
         "test/source_low/numeric_integer_extrema.loom-test",
+        "test/source_low/numeric_integer_extrema_reductions.loom-test",
         "test/source_low/numeric_integer_shift_i64.loom-test",
         "test/source_low/numeric_integer_shift_report.loom-test",
         "test/source_low/numeric_integer_widening.loom-test",

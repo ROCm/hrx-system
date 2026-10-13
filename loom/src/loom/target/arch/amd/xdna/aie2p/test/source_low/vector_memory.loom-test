@@ -679,28 +679,39 @@ func.def target(@target) @reduce_positive_i32x7(%input: buffer) -> (i32) {
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @reduce_positive_i32x7() -> (reg<aie2p.er>) asm {
   %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %20 = lda %input_view, 16
+  %21 = lda %input_view, 20
+  %22 = lda %input_view, 24
+  %23 = vbcst.32 %20
+  %24 = mov.short 1
+  %25 = copy %24 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %26 = vinsert.32.reg %23, %25, %21
+  %27 = mov.short 2
+  %28 = copy %27 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %29 = vinsert.32.reg %26, %28, %22
+  %30 = mov.short 0
+  %31 = vbcst.32 %30
+  %32 = slice %31[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %33 = vlda.128.i32x4 %input_view, 0
+  %34 = concat(%33, %32) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %35 = mova.i32 16
+  %36 = vshift %34, %34, %35
+  %37 = mova.i32 48
+  %value = vshift %36, %29, %37
   %initial = mov.short 1000
-  %60 = lda %input_view, 0
-  %61 = ltu.select %initial, %60
-  %62 = sel.nez %initial, %60, %61
-  %63 = lda %input_view, 4
-  %64 = ltu.select %62, %63
-  %65 = sel.nez %62, %63, %64
-  %66 = lda %input_view, 8
-  %67 = ltu.select %65, %66
-  %68 = sel.nez %65, %66, %67
-  %69 = lda %input_view, 12
-  %70 = ltu.select %68, %69
-  %71 = sel.nez %68, %69, %70
-  %72 = lda %input_view, 16
-  %73 = ltu.select %71, %72
-  %74 = sel.nez %71, %72, %73
-  %75 = lda %input_view, 20
-  %76 = ltu.select %74, %75
-  %77 = sel.nez %74, %75, %76
-  %78 = lda %input_view, 24
-  %79 = ltu.select %77, %78
-  %minimum = sel.nez %77, %78, %79
+  %40 = vbcst.32 %initial
+  %41 = predicate.constant.low32 127
+  %42 = predicate.complete.zero.high32 %41, 0
+  %43 = vsel.32.mask64 %40, %value, %42
+  %45 = vshift %43, %43, %35
+  %46 = min.u32x16 %43, %45
+  %47 = mova.i32 8
+  %48 = vshift %46, %46, %47
+  %49 = min.u32x16 %46, %48
+  %50 = mova.i32 4
+  %51 = vshift %49, %49, %50
+  %52 = min.u32x16 %49, %51
+  %minimum = vextract.32.imm %52, 0
   return %minimum
 }
 

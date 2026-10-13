@@ -1,0 +1,141 @@
+// The boundary widths exercise the two-word i8 active-lane predicate, a
+// partial i32 tree, and multi-carrier i16 and i64 reductions. The i64 path
+// additionally exercises packed lexicographic word pairs. Every input contains
+// -1 and 0 while the authored initial value is 1, making signed maximum and
+// unsigned ordering independently observable.
+
+func.def @integer_extrema_reductions_i8x33(%storage_buffer: buffer) {
+  %output_origin = index.constant 0 : offset
+  %output_view = buffer.view %storage_buffer[%output_origin] : buffer -> view<4xi8>
+  %negative = scalar.constant -1 : i8
+  %c0 = scalar.constant 0 : i8
+  %negative_values = vector.splat %negative : vector<33xi8>
+  %input = vector.insert %c0 into %negative_values[0] : i8, vector<33xi8>
+  %initial = scalar.constant 1 : i8
+  %signed_minimum = vector.reduce<minsi> %input, %initial : vector<33xi8>, i8
+  view.store %signed_minimum, %output_view[0] : i8, view<4xi8>
+  %signed_maximum = vector.reduce<maxsi> %input, %initial : vector<33xi8>, i8
+  view.store %signed_maximum, %output_view[1] : i8, view<4xi8>
+  %unsigned_maximum = vector.reduce<maxui> %input, %initial : vector<33xi8>, i8
+  view.store %unsigned_maximum, %output_view[2] : i8, view<4xi8>
+  %unsigned_minimum = vector.reduce<minui> %input, %initial : vector<33xi8>, i8
+  view.store %unsigned_minimum, %output_view[3] : i8, view<4xi8>
+  func.return
+}
+
+func.def @integer_extrema_reductions_i16x33(%storage_buffer: buffer) {
+  %output_origin = index.constant 0 : offset
+  %output_view = buffer.view %storage_buffer[%output_origin] : buffer -> view<4xi16>
+  %negative = scalar.constant -1 : i16
+  %c0 = scalar.constant 0 : i16
+  %negative_values = vector.splat %negative : vector<33xi16>
+  %input = vector.insert %c0 into %negative_values[0] : i16, vector<33xi16>
+  %initial = scalar.constant 1 : i16
+  %signed_minimum = vector.reduce<minsi> %input, %initial : vector<33xi16>, i16
+  view.store %signed_minimum, %output_view[0] : i16, view<4xi16>
+  %signed_maximum = vector.reduce<maxsi> %input, %initial : vector<33xi16>, i16
+  view.store %signed_maximum, %output_view[1] : i16, view<4xi16>
+  %unsigned_maximum = vector.reduce<maxui> %input, %initial : vector<33xi16>, i16
+  view.store %unsigned_maximum, %output_view[2] : i16, view<4xi16>
+  %unsigned_minimum = vector.reduce<minui> %input, %initial : vector<33xi16>, i16
+  view.store %unsigned_minimum, %output_view[3] : i16, view<4xi16>
+  func.return
+}
+
+func.def @integer_extrema_reductions_i32x3(%storage_buffer: buffer) {
+  %output_origin = index.constant 0 : offset
+  %output_view = buffer.view %storage_buffer[%output_origin] : buffer -> view<4xi32>
+  %negative = scalar.constant -1 : i32
+  %c0 = scalar.constant 0 : i32
+  %negative_values = vector.splat %negative : vector<3xi32>
+  %input = vector.insert %c0 into %negative_values[0] : i32, vector<3xi32>
+  %initial = scalar.constant 1 : i32
+  %signed_minimum = vector.reduce<minsi> %input, %initial : vector<3xi32>, i32
+  view.store %signed_minimum, %output_view[0] : i32, view<4xi32>
+  %signed_maximum = vector.reduce<maxsi> %input, %initial : vector<3xi32>, i32
+  view.store %signed_maximum, %output_view[1] : i32, view<4xi32>
+  %unsigned_maximum = vector.reduce<maxui> %input, %initial : vector<3xi32>, i32
+  view.store %unsigned_maximum, %output_view[2] : i32, view<4xi32>
+  %unsigned_minimum = vector.reduce<minui> %input, %initial : vector<3xi32>, i32
+  view.store %unsigned_minimum, %output_view[3] : i32, view<4xi32>
+  func.return
+}
+
+func.def @integer_extrema_reductions_i64x9(%storage_buffer: buffer) {
+  %output_origin = index.constant 0 : offset
+  %output_view = buffer.view %storage_buffer[%output_origin] : buffer -> view<4xi64>
+  %negative = scalar.constant -1 : i64
+  %c0 = scalar.constant 0 : i64
+  %negative_values = vector.splat %negative : vector<9xi64>
+  %input = vector.insert %c0 into %negative_values[0] : i64, vector<9xi64>
+  %initial = scalar.constant 1 : i64
+  %signed_minimum = vector.reduce<minsi> %input, %initial : vector<9xi64>, i64
+  view.store %signed_minimum, %output_view[0] : i64, view<4xi64>
+  %signed_maximum = vector.reduce<maxsi> %input, %initial : vector<9xi64>, i64
+  view.store %signed_maximum, %output_view[1] : i64, view<4xi64>
+  %unsigned_maximum = vector.reduce<maxui> %input, %initial : vector<9xi64>, i64
+  view.store %unsigned_maximum, %output_view[2] : i64, view<4xi64>
+  %unsigned_minimum = vector.reduce<minui> %input, %initial : vector<9xi64>, i64
+  view.store %unsigned_minimum, %output_view[3] : i64, view<4xi64>
+  func.return
+}
+
+check.scenario @integer_extrema_reduction_boundaries {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(42) : tensor<64xi8>
+    %signed = check.tensor.view %storage offset(0) : tensor<64xi8> -> tensor<2xi8>
+    %unsigned_maximum = check.tensor.view %storage offset(2) : tensor<64xi8> -> tensor<1xi8>
+    %unsigned_minimum = check.tensor.view %storage offset(3) : tensor<64xi8> -> tensor<1xi8>
+    %expected_signed = check.generate.iota offset(-1) step(2) : tensor<2xi8>
+    %expected_unsigned_maximum = check.generate.fill value(-1) : tensor<1xi8>
+    %expected_unsigned_minimum = check.generate.fill value(0) : tensor<1xi8>
+    check.compare<@integer_extrema_reductions_i8x33>(%storage) : (tensor<64xi8>) -> () {
+      check.expect.bitwise actual(%signed) expected(%expected_signed) : tensor<2xi8>
+      check.expect.bitwise actual(%unsigned_maximum) expected(%expected_unsigned_maximum) : tensor<1xi8>
+      check.expect.bitwise actual(%unsigned_minimum) expected(%expected_unsigned_minimum) : tensor<1xi8>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(42) : tensor<32xi16>
+    %signed = check.tensor.view %storage offset(0) : tensor<32xi16> -> tensor<2xi16>
+    %unsigned_maximum = check.tensor.view %storage offset(4) : tensor<32xi16> -> tensor<1xi16>
+    %unsigned_minimum = check.tensor.view %storage offset(6) : tensor<32xi16> -> tensor<1xi16>
+    %expected_signed = check.generate.iota offset(-1) step(2) : tensor<2xi16>
+    %expected_unsigned_maximum = check.generate.fill value(-1) : tensor<1xi16>
+    %expected_unsigned_minimum = check.generate.fill value(0) : tensor<1xi16>
+    check.compare<@integer_extrema_reductions_i16x33>(%storage) : (tensor<32xi16>) -> () {
+      check.expect.bitwise actual(%signed) expected(%expected_signed) : tensor<2xi16>
+      check.expect.bitwise actual(%unsigned_maximum) expected(%expected_unsigned_maximum) : tensor<1xi16>
+      check.expect.bitwise actual(%unsigned_minimum) expected(%expected_unsigned_minimum) : tensor<1xi16>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(42) : tensor<16xi32>
+    %signed = check.tensor.view %storage offset(0) : tensor<16xi32> -> tensor<2xi32>
+    %unsigned_maximum = check.tensor.view %storage offset(8) : tensor<16xi32> -> tensor<1xi32>
+    %unsigned_minimum = check.tensor.view %storage offset(12) : tensor<16xi32> -> tensor<1xi32>
+    %expected_signed = check.generate.iota offset(-1) step(2) : tensor<2xi32>
+    %expected_unsigned_maximum = check.generate.fill value(-1) : tensor<1xi32>
+    %expected_unsigned_minimum = check.generate.fill value(0) : tensor<1xi32>
+    check.compare<@integer_extrema_reductions_i32x3>(%storage) : (tensor<16xi32>) -> () {
+      check.expect.bitwise actual(%signed) expected(%expected_signed) : tensor<2xi32>
+      check.expect.bitwise actual(%unsigned_maximum) expected(%expected_unsigned_maximum) : tensor<1xi32>
+      check.expect.bitwise actual(%unsigned_minimum) expected(%expected_unsigned_minimum) : tensor<1xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(42) : tensor<8xi64>
+    %signed = check.tensor.view %storage offset(0) : tensor<8xi64> -> tensor<2xi64>
+    %unsigned_maximum = check.tensor.view %storage offset(16) : tensor<8xi64> -> tensor<1xi64>
+    %unsigned_minimum = check.tensor.view %storage offset(24) : tensor<8xi64> -> tensor<1xi64>
+    %expected_signed = check.generate.iota offset(-1) step(2) : tensor<2xi64>
+    %expected_unsigned_maximum = check.generate.fill value(-1) : tensor<1xi64>
+    %expected_unsigned_minimum = check.generate.fill value(0) : tensor<1xi64>
+    check.compare<@integer_extrema_reductions_i64x9>(%storage) : (tensor<8xi64>) -> () {
+      check.expect.bitwise actual(%signed) expected(%expected_signed) : tensor<2xi64>
+      check.expect.bitwise actual(%unsigned_maximum) expected(%expected_unsigned_maximum) : tensor<1xi64>
+      check.expect.bitwise actual(%unsigned_minimum) expected(%expected_unsigned_minimum) : tensor<1xi64>
+    }
+  }
+  check.return
+}

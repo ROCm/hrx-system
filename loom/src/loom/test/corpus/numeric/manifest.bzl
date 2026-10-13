@@ -80,6 +80,7 @@ NUMERIC_CORPUS = loom_corpus_manifest(
         "vector/integer_arithmetic.loom",
         "vector/integer_bitwise.loom",
         "vector/integer_comparison.loom",
+        "vector/integer_extrema_reductions.loom",
         "vector/integer_shifts.loom",
         "vector/integer_widening.loom",
         "vector/interleave.loom",

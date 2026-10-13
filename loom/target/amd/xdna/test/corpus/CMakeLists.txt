@@ -23,6 +23,7 @@ loom_corpus_test(
   SOURCES
     "numeric/vector/bfloat_extrema_reductions.loom"
     "numeric/vector/constants.loom"
+    "numeric/vector/integer_extrema_reductions.loom"
     "numeric/vector/integer_widening.loom"
   XFAILS
     "numeric/vector/constants.loom"

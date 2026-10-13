@@ -1,0 +1,230 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @maximum_unsigned_i16x16(%values: vector<16xi16>, %initial: i16) -> (i16) {
+  %result = vector.reduce<maxui> %values, %initial : vector<16xi16>, i16
+  func.return %result : i16
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @maximum_unsigned_i16x16(%values: reg<aie2p.vec256 x2>, %initial: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %7 = vbcst.16 %initial
+  %8 = max.u16x32 %values, %7
+  %9 = mova.i32 16
+  %10 = vshift %8, %8, %9
+  %11 = max.u16x32 %8, %10
+  %12 = mova.i32 8
+  %13 = vshift %11, %11, %12
+  %14 = max.u16x32 %11, %13
+  %15 = mova.i32 4
+  %16 = vshift %14, %14, %15
+  %17 = max.u16x32 %14, %16
+  %18 = mova.i32 2
+  %19 = vshift %17, %17, %18
+  %20 = max.u16x32 %17, %19
+  %result = vextract.16.imm %20, 0
+  return %result
+}
+
+// ====
+
+func.def @minimum_signed_i8x33(%values: vector<33xi8>, %initial: i8) -> (i8) {
+  %result = vector.reduce<minsi> %values, %initial : vector<33xi8>, i8
+  func.return %result : i8
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @minimum_signed_i8x33(%values: reg<aie2p.vec256 x2>, %initial: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %7 = vbcst.8 %initial
+  %8 = predicate.constant.low32 -1
+  %9 = predicate.complete.constant.high32 %8, 1
+  %10 = vsel.8 %7, %values, %9
+  %11 = mova.i32 32
+  %12 = vshift %10, %10, %11
+  %13 = min.s8x64 %10, %12
+  %14 = mova.i32 16
+  %15 = vshift %13, %13, %14
+  %16 = min.s8x64 %13, %15
+  %17 = mova.i32 8
+  %18 = vshift %16, %16, %17
+  %19 = min.s8x64 %16, %18
+  %20 = mova.i32 4
+  %21 = vshift %19, %19, %20
+  %22 = min.s8x64 %19, %21
+  %23 = mova.i32 2
+  %24 = vshift %22, %22, %23
+  %25 = min.s8x64 %22, %24
+  %26 = mova.i32 1
+  %27 = vshift %25, %25, %26
+  %28 = min.s8x64 %25, %27
+  %result = vextract.8.imm %28, 0
+  return %result
+}
+
+// ====
+
+func.def @minimum_unsigned_i16x33(%values: vector<33xi16>, %initial: i16) -> (i16) {
+  %result = vector.reduce<minui> %values, %initial : vector<33xi16>, i16
+  func.return %result : i16
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @minimum_unsigned_i16x33(%values: reg<aie2p.vec256 x4>, %initial: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %11 = slice %values[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %12 = slice %values[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %13 = vbcst.16 %initial
+  %14 = min.u16x32 %11, %13
+  %15 = mova.i32 32
+  %16 = vshift %14, %14, %15
+  %17 = min.u16x32 %14, %16
+  %18 = mova.i32 16
+  %19 = vshift %17, %17, %18
+  %20 = min.u16x32 %17, %19
+  %21 = mova.i32 8
+  %22 = vshift %20, %20, %21
+  %23 = min.u16x32 %20, %22
+  %24 = mova.i32 4
+  %25 = vshift %23, %23, %24
+  %26 = min.u16x32 %23, %25
+  %27 = mova.i32 2
+  %28 = vshift %26, %26, %27
+  %29 = min.u16x32 %26, %28
+  %30 = vextract.16.imm %29, 0
+  %31 = vbcst.16 %30
+  %32 = min.u16x32 %12, %31
+  %result = vextract.16.imm %32, 0
+  return %result
+}
+
+// ====
+
+func.def @maximum_signed_i64x2(%values: vector<2xi64>, %initial: i64) -> (i64) {
+  %result = vector.reduce<maxsi> %values, %initial : vector<2xi64>, i64
+  func.return %result : i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @maximum_signed_i64x2(%values: reg<aie2p.vec256 x2>, %initial: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+  %7 = mova.i32 4
+  %8 = mova.i32 5
+  %9 = vshuffle %values, %values, %7
+  %10 = vshuffle %values, %values, %8
+  %11 = slice %initial[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %12 = vbcst.32 %11
+  %13 = slice %initial[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %14 = vbcst.32 %13
+  %15 = max.s32x16 %10, %14
+  %16 = max.u32x16 %9, %12
+  %17 = vlt.s32x16.el.low32 %14, %10
+  %18 = vlt.s32x16.el.low32 %10, %14
+  %19 = vsel.32.mask64 %16, %9, %17
+  %20 = vsel.32.mask64 %19, %12, %18
+  %22 = vshift %20, %20, %7
+  %23 = vshift %15, %15, %7
+  %24 = max.s32x16 %15, %23
+  %25 = max.u32x16 %20, %22
+  %26 = vlt.s32x16.el.low32 %23, %15
+  %27 = vlt.s32x16.el.low32 %15, %23
+  %28 = vsel.32.mask64 %25, %20, %26
+  %29 = vsel.32.mask64 %28, %22, %27
+  %30 = vextract.32.imm %29, 0
+  %31 = vextract.32.imm %24, 0
+  %result = concat(%30, %31) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %result
+}
+
+// ====
+
+func.def @minimum_unsigned_i64x5(%values: vector<5xi64>, %initial: i64) -> (i64) {
+  %result = vector.reduce<minui> %values, %initial : vector<5xi64>, i64
+  func.return %result : i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @minimum_unsigned_i64x5(%values: reg<aie2p.vec256 x2>, %initial: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+  %7 = mova.i32 4
+  %8 = mova.i32 5
+  %9 = vshuffle %values, %values, %7
+  %10 = vshuffle %values, %values, %8
+  %11 = slice %initial[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %12 = vbcst.32 %11
+  %13 = slice %initial[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %14 = vbcst.32 %13
+  %15 = predicate.constant.low32 31
+  %16 = vsel.32.mask64 %12, %9, %15
+  %17 = vsel.32.mask64 %14, %10, %15
+  %18 = mova.i32 16
+  %19 = vshift %16, %16, %18
+  %20 = vshift %17, %17, %18
+  %21 = min.u32x16 %17, %20
+  %22 = min.u32x16 %16, %19
+  %23 = vlt.u32x16.el.low32 %17, %20
+  %24 = vlt.u32x16.el.low32 %20, %17
+  %25 = vsel.32.mask64 %22, %16, %23
+  %26 = vsel.32.mask64 %25, %19, %24
+  %27 = mova.i32 8
+  %28 = vshift %26, %26, %27
+  %29 = vshift %21, %21, %27
+  %30 = min.u32x16 %21, %29
+  %31 = min.u32x16 %26, %28
+  %32 = vlt.u32x16.el.low32 %21, %29
+  %33 = vlt.u32x16.el.low32 %29, %21
+  %34 = vsel.32.mask64 %31, %26, %32
+  %35 = vsel.32.mask64 %34, %28, %33
+  %37 = vshift %35, %35, %7
+  %38 = vshift %30, %30, %7
+  %39 = min.u32x16 %30, %38
+  %40 = min.u32x16 %35, %37
+  %41 = vlt.u32x16.el.low32 %30, %38
+  %42 = vlt.u32x16.el.low32 %38, %30
+  %43 = vsel.32.mask64 %40, %35, %41
+  %44 = vsel.32.mask64 %43, %37, %42
+  %45 = vextract.32.imm %44, 0
+  %46 = vextract.32.imm %39, 0
+  %result = concat(%45, %46) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %result
+}
+
+// ====
+
+// RUN: compile-report target=amd.xdna.aie2p:core source-to-low,low-dce
+
+func.def @maximum_unsigned_i16x16(%values: vector<16xi16>, %initial: i16) -> (i16) {
+  %result = vector.reduce<maxui> %values, %initial : vector<16xi16>, i16
+  func.return %result : i16
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=15 rows=1 unkeyed_maximum_emitted_ops=0
+COMPILE-REPORT: source_low_target[0] function=maximum_unsigned_i16x16 source=specialization target=- bundle=aie2p-core config=amd.xdna.aie2p.core
+COMPILE-REPORT: source_low[0] function=maximum_unsigned_i16x16 source_op=vector.reduce selection=rule plan_key=i16_packed_maxui_tree descriptor_key=amd.xdna.aie2p.extract.i16.immediate descriptor_semantic_tag=integer.extract.i16 emitted_ops=15
+
+// ====
+
+// RUN: compile-report target=amd.xdna.aie2p:core source-to-low,low-dce
+
+func.def @minimum_signed_i8x33(%values: vector<33xi8>, %initial: i8) -> (i8) {
+  %result = vector.reduce<minsi> %values, %initial : vector<33xi8>, i8
+  func.return %result : i8
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=23 rows=1 unkeyed_maximum_emitted_ops=0
+COMPILE-REPORT: source_low_target[0] function=minimum_signed_i8x33 source=specialization target=- bundle=aie2p-core config=amd.xdna.aie2p.core
+COMPILE-REPORT: source_low[0] function=minimum_signed_i8x33 source_op=vector.reduce selection=rule plan_key=i8_padded_minsi_tree descriptor_key=amd.xdna.aie2p.extract.i8.immediate descriptor_semantic_tag=integer.extract.i8 emitted_ops=23
+
+// ====
+
+// RUN: compile-report target=amd.xdna.aie2p:core source-to-low,low-dce
+
+func.def @minimum_unsigned_i64x5(%values: vector<5xi64>, %initial: i64) -> (i64) {
+  %result = vector.reduce<minui> %values, %initial : vector<5xi64>, i64
+  func.return %result : i64
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=41 rows=1 unkeyed_maximum_emitted_ops=0
+COMPILE-REPORT: source_low_target[0] function=minimum_unsigned_i64x5 source=specialization target=- bundle=aie2p-core config=amd.xdna.aie2p.core
+COMPILE-REPORT: source_low[0] function=minimum_unsigned_i64x5 source_op=vector.reduce selection=rule plan_key=i64_padded_minui_tree descriptor_key=amd.xdna.aie2p.extract.i32.immediate descriptor_semantic_tag=integer.extract.i32 emitted_ops=41
