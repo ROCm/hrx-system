@@ -20,6 +20,7 @@ amdf_cc_library(
     hdrs = ["device_sdma_fixture.h"],
     deps = [
         "//libamdf/cts/gpu/aql:dispatch_fixture",
+        "//libamdf/cts/gpu/pm4:dispatch_fixture",
         "//third_party:google_test",
     ],
 )
@@ -42,6 +43,7 @@ amdf_cts_test_suite(
     srcs = [
         "copy_dispatch_test.cc",
         "device_sdma_lookahead_test.cc",
+        "device_sdma_serial_test.cc",
         "device_sdma_test.cc",
         "memory_pair_test.cc",
         "pm4_reader_reuse_test.cc",

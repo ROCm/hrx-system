@@ -6,7 +6,8 @@
 
 #include "libamdf/cts/gpu/recipes/device_sdma_fixture.h"
 
-amdf_status_t DeviceGeneratedSdmaTest::MatchGpuEndpoint(
+template <typename DispatchTest>
+amdf_status_t DeviceSdmaTest<DispatchTest>::MatchGpuEndpoint(
     amdf_endpoint_t* endpoint, bool* out_matches) {
   const GpuQueueRequirements requirements = {
       .command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA,
@@ -24,7 +25,7 @@ amdf_status_t DeviceGeneratedSdmaTest::MatchGpuEndpoint(
     *out_matches = false;
     return AMDF_STATUS_OK;
   }
-  status = AqlDispatchTest::MatchGpuEndpoint(endpoint, &matches);
+  status = DispatchTest::MatchGpuEndpoint(endpoint, &matches);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -35,9 +36,10 @@ amdf_status_t DeviceGeneratedSdmaTest::MatchGpuEndpoint(
   return AMDF_STATUS_OK;
 }
 
-void DeviceGeneratedSdmaTest::QueryPair(const amdf_memory_site_t& producer,
-                                        const amdf_memory_site_t& consumer,
-                                        amdf_memory_pair_info_t* out_pair) {
+template <typename DispatchTest>
+void DeviceSdmaTest<DispatchTest>::QueryPair(
+    const amdf_memory_site_t& producer, const amdf_memory_site_t& consumer,
+    amdf_memory_pair_info_t* out_pair) {
   out_pair->type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
   out_pair->structure_size = sizeof(*out_pair);
   ASSERT_EQ(api_->memory_query_pair_info(&producer, &consumer, out_pair),
@@ -46,7 +48,8 @@ void DeviceGeneratedSdmaTest::QueryPair(const amdf_memory_site_t& producer,
             0u);
 }
 
-void DeviceGeneratedSdmaTest::CheckTransition(
+template <typename DispatchTest>
+void DeviceSdmaTest<DispatchTest>::CheckTransition(
     const amdf_cache_transition_t& transition,
     amdf_cache_operation_t operation) {
   ASSERT_EQ(transition.kind, operation == AMDF_CACHE_OPERATION_NONE
@@ -63,7 +66,8 @@ void DeviceGeneratedSdmaTest::CheckTransition(
   ASSERT_EQ(transition.range_granularity, 0u);
 }
 
-void DeviceGeneratedSdmaTest::ResolveSdmaTransition(
+template <typename DispatchTest>
+void DeviceSdmaTest<DispatchTest>::ResolveSdmaTransition(
     const amdf_cache_transition_t& transition, amdf_cache_operation_t operation,
     uint32_t* inout_cache_flags) {
   if (transition.kind == AMDF_CACHE_TRANSITION_KIND_NONE) {
@@ -82,10 +86,10 @@ void DeviceGeneratedSdmaTest::ResolveSdmaTransition(
       operation == AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM ? 1u : 2u;
 }
 
-void DeviceGeneratedSdmaTest::QueryTransferCacheFlags(GpuMemory* source,
-                                                      GpuMemory* destination,
-                                                      GpuMemory* records,
-                                                      uint32_t* out_flags) {
+template <typename DispatchTest>
+void DeviceSdmaTest<DispatchTest>::QueryTransferCacheFlags(
+    GpuMemory* source, GpuMemory* destination, GpuMemory* records,
+    uint32_t* out_flags) {
   amdf_memory_pair_info_t ingress = {};
   amdf_memory_pair_info_t copied = {};
   amdf_memory_pair_info_t egress = {};
@@ -110,9 +114,9 @@ void DeviceGeneratedSdmaTest::QueryTransferCacheFlags(GpuMemory* source,
       copied.release, AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM, out_flags));
 }
 
-void DeviceGeneratedSdmaTest::QueryDownloadCacheFlags(GpuMemory* output,
-                                                      GpuMemory* readback,
-                                                      uint32_t* out_flags) {
+template <typename DispatchTest>
+void DeviceSdmaTest<DispatchTest>::QueryDownloadCacheFlags(
+    GpuMemory* output, GpuMemory* readback, uint32_t* out_flags) {
   amdf_memory_pair_info_t produced = {};
   amdf_memory_pair_info_t copied = {};
   amdf_memory_pair_info_t egress = {};
@@ -137,3 +141,6 @@ void DeviceGeneratedSdmaTest::QueryDownloadCacheFlags(GpuMemory* output,
   ASSERT_NO_FATAL_FAILURE(ResolveSdmaTransition(
       egress.release, AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM, out_flags));
 }
+
+template class DeviceSdmaTest<AqlDispatchTest>;
+template class DeviceSdmaTest<Pm4DispatchTest>;

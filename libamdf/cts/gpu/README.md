@@ -198,22 +198,26 @@ without inventing native work for unused preparation. Full backing, guard and
 control checks include inactive slots and unaccepted result sentinels. Every
 stream retires all three native frontiers before its backing is reset.
 
-The [device-generated SDMA case](recipes/device_sdma_test.cc) requests the
-queue's device-producer capability at creation and borrows its exact owning
+The [device-generated SDMA cases](recipes/device_sdma_serial_test.cc) request the
+queue's device-producer capability at creation and borrow its exact owning
 GPU's ring, indices and notification addresses. One Loom workitem computes
 each source page, destination slot and transfer length from the preceding
 copied result, emits COPY/FENCE packets with queried cache transitions, and
-publishes through system-release WPTR and doorbell stores. The host initializes
-resources and joins the final AQL completion; no host publication or completion
-wait separates the 257 transfers. The shader acquires the SDMA completion and
-records all destination payload words after every copy. An independent CPU
-simulation checks that transcript, unchanged inputs, complete destination
-backing and guards before command retirement. This serial dependent chain
-exercises command-ring wrap and destination reuse.
+publishes through system-release WPTR and doorbell stores. AQL and PM4 launch
+the same target-selected shader with the same arguments and transfer oracle.
+AQL uses its native decrementing completion signal; PM4 acquires the executable
+and arguments before dispatch and publishes a system-release completion word.
+The host initializes resources and joins only that final compute completion;
+no host publication or completion wait separates the 257 transfers. The shader
+acquires the SDMA completion and records all destination payload words after
+every copy. An independent CPU simulation checks that transcript, unchanged
+inputs, complete destination backing and guards before command retirement.
+This serial dependent chain exercises command-ring wrap and destination reuse.
 
-The batched cases keep command capacity and payload ownership independent.
-One cooperative workitem fills an available command prefix, publishes it once,
-then consumes one copied result before returning that destination credit. SDMA
+The [batched AQL cases](recipes/device_sdma_test.cc) keep command capacity and
+payload ownership independent. One cooperative workitem fills an available
+command prefix, publishes it once, then consumes one copied result before
+returning that destination credit. SDMA
 continues asynchronously; the publisher can append while other payloads remain
 owned by the consumer. Small credit windows encounter payload backpressure;
 the large window fills the unpublished ring prefix and encounters command-space

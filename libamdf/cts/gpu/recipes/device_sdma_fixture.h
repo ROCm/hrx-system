@@ -8,11 +8,16 @@
 #define AMDF_CTS_GPU_RECIPES_DEVICE_SDMA_FIXTURE_H_
 
 #include "libamdf/cts/gpu/aql/dispatch_fixture.h"
+#include "libamdf/cts/gpu/pm4/dispatch_fixture.h"
 
 // Shares passive device-publication admission and queried cache transitions.
 // Each recipe owns its queues, publication protocol and payload lifetimes.
-class DeviceGeneratedSdmaTest : public AqlDispatchTest {
+template <typename DispatchTest>
+class DeviceSdmaTest : public DispatchTest {
  protected:
+  using DispatchTest::api_;
+  using DispatchTest::family_;
+
   amdf_status_t MatchGpuEndpoint(amdf_endpoint_t* endpoint,
                                  bool* out_matches) override;
 
@@ -36,5 +41,11 @@ class DeviceGeneratedSdmaTest : public AqlDispatchTest {
   // Exact transfer family selected before borrowing the cached native device.
   amdf_queue_family_info_t sdma_family_ = {};
 };
+
+extern template class DeviceSdmaTest<AqlDispatchTest>;
+extern template class DeviceSdmaTest<Pm4DispatchTest>;
+
+// AQL recipes retain their native executable and completion ownership.
+using DeviceGeneratedSdmaTest = DeviceSdmaTest<AqlDispatchTest>;
 
 #endif  // AMDF_CTS_GPU_RECIPES_DEVICE_SDMA_FIXTURE_H_

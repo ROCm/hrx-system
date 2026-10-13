@@ -21,6 +21,7 @@ iree_cc_library(
     amdf::headers
     iree::third_party::google_test
     libamdf::cts::gpu::aql::dispatch_fixture
+    libamdf::cts::gpu::pm4::dispatch_fixture
   TESTONLY
   PUBLIC
 )
@@ -52,6 +53,7 @@ iree_cc_library(
   SRCS
     "copy_dispatch_test.cc"
     "device_sdma_lookahead_test.cc"
+    "device_sdma_serial_test.cc"
     "device_sdma_test.cc"
     "memory_pair_test.cc"
     "pm4_reader_reuse_test.cc"
