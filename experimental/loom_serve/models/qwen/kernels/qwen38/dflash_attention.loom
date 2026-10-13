@@ -1,0 +1,348 @@
+config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
+
+config.decl @qwen38.attention.pool_capacity : %value: index where [range(%value, 0, 4194304)]
+
+func.decl @qwen38_span_active(%epoch: buffer, %span: index) -> (i1)
+
+func.decl @qwen38_span_binding(%epoch: buffer, %span: index) -> (offset, index, index)
+
+func.decl @qwen38_row_kv_origin(%rows: buffer, %row: index, %layer_origin: offset) -> (offset)
+
+func.decl @qwen38_row_kv_map_origin(%logical_capacity: index, %row: index) -> (offset)
+
+func.decl @qwen38_kv_position(%logical_capacity: index, %map: buffer, %map_origin: offset, %position: index, %pool_capacity: index) -> (index)
+
+amdgpu.target<gfx11-generic> @dflash_wave32 {subgroup_size = 32}
+
+// A 64-thread workgroup owns one 128-channel head. Each lane retains both
+// halves before the reduction, so normalization and full-width NEOX rotation
+// need neither a global intermediate nor a workgroup-memory transpose.
+func.def inline @dflash_normalize_rotate(%tokens: index, %heads: index, %token: index, %head: index, %position: index, %input: buffer, %weight: buffer) -> (vector<2xf32>) {
+  %origin = index.constant 0 : offset
+  %half = index.constant 64 : index
+  %left = kernel.workitem.id<x> : index
+  %right = index.add %left, %half : index
+  %x = buffer.view %input[%origin] : buffer -> view<[%tokens]x[%heads]x128xf32>
+  %w = buffer.view %weight[%origin] : buffer -> view<128xf32>
+  %a = view.load %x[%token, %head, %left] : view<[%tokens]x[%heads]x128xf32> -> f32
+  %b = view.load %x[%token, %head, %right] : view<[%tokens]x[%heads]x128xf32> -> f32
+  %aa = scalar.mulf %a, %a : f32
+  %bb = scalar.mulf %b, %b : f32
+  %squares = scalar.addf %aa, %bb : f32
+  %sum = kernel.workgroup.reduce<addf> %squares : f32
+  %scale = scalar.constant 0.0078125 : f32
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+  %mean = scalar.mulf %sum, %scale : f32
+  %variance = scalar.addf %mean, %epsilon : f32
+  %inverse = scalar.rsqrtf<afn> %variance : f32
+  %wa = view.load %w[%left] : view<128xf32> -> f32
+  %wb = view.load %w[%right] : view<128xf32> -> f32
+  %na = scalar.mulf %a, %inverse : f32
+  %nb = scalar.mulf %b, %inverse : f32
+  %sa = scalar.mulf %na, %wa : f32
+  %sb = scalar.mulf %nb, %wb : f32
+  %pair_word = index.cast %left : index to i32
+  %position_word = index.cast %position : index to i32
+  %pair_f = scalar.uitofp %pair_word : i32 to f32
+  %position_f = scalar.uitofp %position_word : i32 to f32
+  %log_step = scalar.constant -0.25184524454622376 : f32
+  %log_frequency = scalar.mulf %pair_f, %log_step : f32
+  %frequency = scalar.expf<afn> %log_frequency : f32
+  %angle = scalar.mulf %position_f, %frequency : f32
+  %sine = scalar.sinf<afn> %angle : f32
+  %cosine = scalar.cosf<afn> %angle : f32
+  %ac = scalar.mulf %sa, %cosine : f32
+  %bs = scalar.mulf %sb, %sine : f32
+  %bc = scalar.mulf %sb, %cosine : f32
+  %as = scalar.mulf %sa, %sine : f32
+  %out_a = scalar.subf %ac, %bs : f32
+  %out_b = scalar.addf %bc, %as : f32
+  %result = vector.from_elements %out_a, %out_b : vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// Query and block K/V are private to this proposal. Committed K/V is generated
+// separately from target features, never copied from these noisy block inputs.
+kernel.def target(@dflash_wave32) @qwen38_dflash_query_prepare(%tokens: index, %spans: index) {
+  %c8 = index.constant 8 : index
+  %heads = index.constant 32 : index
+  %threads = index.constant 64 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c8, %heads, %spans) workgroup_size(%threads, %c1, %c1) : index
+} launch(%capacity: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %span = kernel.workgroup.id<z> : index
+  %active = func.call @qwen38_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %control_origin, %begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
+    %control = buffer.view %epoch[%control_origin] : buffer -> view<5xi32>
+    %position_word = view.load %control[1] : view<5xi32> -> i32
+    %position = index.cast %position_word : i32 to index
+    %relative = kernel.workgroup.id<x> : index
+    %token_value = index.add %begin, %relative : index
+    %token = index.assume %token_value [ge(%token_value, 0), lt(%token_value, %capacity)] : index
+    %absolute = index.add %position, %relative : index
+    %head = kernel.workgroup.id<y> : index
+    %heads = index.constant 32 : index
+    %pair = func.call @dflash_normalize_rotate(%capacity, %heads, %token, %head, %absolute, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<2xf32>)
+    %a = vector.extract %pair[0] : vector<2xf32> -> f32
+    %b = vector.extract %pair[1] : vector<2xf32> -> f32
+    %left = kernel.workitem.id<x> : index
+    %half = index.constant 64 : index
+    %right = index.add %left, %half : index
+    %origin = index.constant 0 : offset
+    %y = buffer.view %output[%origin] : buffer -> view<[%capacity]x32x128xf32>
+    view.store %a, %y[%token, %head, %left] : f32, view<[%capacity]x32x128xf32>
+    view.store %b, %y[%token, %head, %right] : f32, view<[%capacity]x32x128xf32>
+  }
+  kernel.return
+}
+
+// Both destinations are explicit. Dense block preparation uses the input token
+// as its destination; accepted feature preparation resolves the retained page
+// map. The helper itself has no model configuration or publication policy.
+func.def inline @dflash_prepare_key_value(%tokens: index, %storage: index, %token: index, %destination: index, %head: index, %position: index, %key_origin: offset, %value_origin: offset, %key: buffer, %value: buffer, %weight: buffer, %cache: buffer) {
+  %heads = index.constant 8 : index
+  %pair = func.call @dflash_normalize_rotate(%tokens, %heads, %token, %head, %position, %key, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<2xf32>)
+  %a = vector.extract %pair[0] : vector<2xf32> -> f32
+  %b = vector.extract %pair[1] : vector<2xf32> -> f32
+  %left = kernel.workitem.id<x> : index
+  %half = index.constant 64 : index
+  %right = index.add %left, %half : index
+  %origin = index.constant 0 : offset
+  %input = buffer.view %value[%origin] : buffer -> view<[%tokens]x8x128xf32>
+  %ka = scalar.fptrunc %a : f32 to f16
+  %kb = scalar.fptrunc %b : f32 to f16
+  %va = view.load %input[%token, %head, %left] : view<[%tokens]x8x128xf32> -> f32
+  %vb = view.load %input[%token, %head, %right] : view<[%tokens]x8x128xf32> -> f32
+  %va16 = scalar.fptrunc %va : f32 to f16
+  %vb16 = scalar.fptrunc %vb : f32 to f16
+  %keys = buffer.view %cache[%key_origin] : buffer -> view<[%storage]x8x128xf16>
+  %values = buffer.view %cache[%value_origin] : buffer -> view<[%storage]x8x128xf16>
+  view.store %ka, %keys[%destination, %head, %left] : f16, view<[%storage]x8x128xf16>
+  view.store %kb, %keys[%destination, %head, %right] : f16, view<[%storage]x8x128xf16>
+  view.store %va16, %values[%destination, %head, %left] : f16, view<[%storage]x8x128xf16>
+  view.store %vb16, %values[%destination, %head, %right] : f16, view<[%storage]x8x128xf16>
+  func.return
+}
+
+kernel.def target(@dflash_wave32) @qwen38_dflash_block_prepare(%tokens: index, %spans: index) {
+  %c8 = index.constant 8 : index
+  %threads = index.constant 64 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c8, %c8, %spans) workgroup_size(%threads, %c1, %c1) : index
+} launch(%capacity: index, %epoch: buffer, %key: buffer, %value: buffer, %weight: buffer, %cache: buffer) {
+  %span = kernel.workgroup.id<z> : index
+  %active = func.call @qwen38_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %control_origin, %begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
+    %control = buffer.view %epoch[%control_origin] : buffer -> view<5xi32>
+    %position_word = view.load %control[1] : view<5xi32> -> i32
+    %position = index.cast %position_word : i32 to index
+    %relative = kernel.workgroup.id<x> : index
+    %token_value = index.add %begin, %relative : index
+    %token = index.assume %token_value [ge(%token_value, 0), lt(%token_value, %capacity)] : index
+    %absolute = index.add %position, %relative : index
+    %head = kernel.workgroup.id<y> : index
+    %origin = index.constant 0 : offset
+    %token_bytes = index.constant 2048 : offset
+    %values = index.scale %capacity, %token_bytes : index, offset -> offset
+    func.call @dflash_prepare_key_value(%capacity, %capacity, %token, %token, %head, %absolute, %origin, %values, %key, %value, %weight, %cache) : (index, index, index, index, index, index, offset, offset, buffer, buffer, buffer, buffer)
+  }
+  kernel.return
+}
+
+kernel.def target(@dflash_wave32) @qwen38_dflash_context_prepare(%tokens: index, %spans: index) {
+  %heads = index.constant 8 : index
+  %threads = index.constant 64 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tokens, %heads, %spans) workgroup_size(%threads, %c1, %c1) : index
+} launch(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %key: buffer, %value: buffer, %weight: buffer, %cache: buffer) {
+  %span = kernel.workgroup.id<z> : index
+  %active = func.call @qwen38_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %control_origin, %begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
+    %control = buffer.view %epoch[%control_origin] : buffer -> view<5xi32>
+    %count_word = view.load %control[0] : view<5xi32> -> i32
+    %position_word = view.load %control[1] : view<5xi32> -> i32
+    %count = index.cast %count_word : i32 to index
+    %position = index.cast %position_word : i32 to index
+    %relative = kernel.workgroup.id<x> : index
+    %valid = index.cmp ult, %relative, %count : index
+    scf.if %valid {
+      %token_value = index.add %begin, %relative : index
+      %token = index.assume %token_value [ge(%token_value, 0), lt(%token_value, %capacity)] : index
+      %absolute = index.add %position, %relative : index
+      %head = kernel.workgroup.id<y> : index
+      %logical = config.get @qwen38.attention.cache_capacity : index
+      %pool = config.get @qwen38.attention.pool_capacity : index
+      %c0 = index.constant 0 : index
+      %paged = index.cmp ne, %pool, %c0 : index
+      %storage = scf.select %paged, %pool, %logical : index
+      %key_origin = func.call @qwen38_row_kv_origin(%rows, %row, %layer_origin) : (buffer, index, offset) -> (offset)
+      %token_bytes = index.constant 2048 : offset
+      %plane_bytes = index.scale %storage, %token_bytes : index, offset -> offset
+      %value_origin = index.add %key_origin, %plane_bytes : offset
+      %map_origin = func.call @qwen38_row_kv_map_origin(%logical, %row) : (index, index) -> (offset)
+      %logical_position = index.assume %absolute [ge(%absolute, 0), lt(%absolute, %logical)] : index
+      %destination_value = func.call @qwen38_kv_position(%logical, %rows, %map_origin, %logical_position, %pool) : (index, buffer, offset, index, index) -> (index)
+      %destination = index.assume %destination_value [ge(%destination_value, 0), lt(%destination_value, %storage)] : index
+      func.call @dflash_prepare_key_value(%capacity, %storage, %token, %destination, %head, %absolute, %key_origin, %value_origin, %key, %value, %weight, %cache) : (index, index, index, index, index, index, offset, offset, buffer, buffer, buffer, buffer)
+    }
+  }
+  kernel.return
+}
+
+// Each workgroup owns one query/head. Eight waves partition the visible keys;
+// each lane loads four adjacent head elements. Logits and softmax remain in
+// LDS. Only accepted target-feature K/V is read from the pooled context; the
+// entire noncausal proposal block is read from separate transient planes.
+kernel.def target(@dflash_wave32) @qwen38_dflash_attention(%tokens: index, %spans: index) {
+  %c8 = index.constant 8 : index
+  %heads = index.constant 32 : index
+  %threads = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c8, %heads, %spans) workgroup_size(%threads, %c1, %c1) : index
+} launch(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %block_cache: buffer, %context: buffer, %output: buffer) {
+  %span = kernel.workgroup.id<z> : index
+  %header_origin = index.constant 0 : offset
+  %metadata = buffer.assume.memory_space<constant> %epoch : buffer
+  %header = buffer.view %metadata[%header_origin] : buffer -> view<3xi32>
+  %span_word = view.load %header[1] : view<3xi32> -> i32
+  %span_count = index.cast %span_word : i32 to index
+  %active = index.cmp ult, %span, %span_count : index
+  scf.if %active {
+    %control_origin, %begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
+    %control = buffer.view %epoch[%control_origin] : buffer -> view<5xi32>
+    %position_word = view.load %control[1] : view<5xi32> -> i32
+    %position = index.cast %position_word : i32 to index
+    %relative = kernel.workgroup.id<x> : index
+    %token_value = index.add %begin, %relative : index
+    %token = index.assume %token_value [ge(%token_value, 0), lt(%token_value, %capacity)] : index
+    %absolute = index.add %position, %relative : index
+    %head = kernel.workgroup.id<y> : index
+    %thread = kernel.workitem.id<x> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c4 = index.constant 4 : index
+    %c8 = index.constant 8 : index
+    %threads = index.constant 256 : index
+    %window_tail = index.constant 2047 : index
+    %c0_0 = scalar.constant 0.0 : f32
+    %c0_0_2 = vector.constant 0.0 : vector<4xf32>
+    %negative = scalar.constant -inf : f32
+    %scale = scalar.constant 0.088388347648318447 : f32
+    %origin = index.constant 0 : offset
+    %channel = index.mul %lane, %c4 : index
+    %kv_head = index.div %head, %c4 : index
+    %earliest = index.max %absolute, %window_tail : index
+    %start = index.sub %earliest, %window_tail : index
+    %history = index.sub %position, %start : index
+    %visible_value = index.add %history, %c8 : index
+    %visible = index.assume %visible_value [range(%visible_value, 8, 2055)] : index
+    %logical = config.get @qwen38.attention.cache_capacity : index
+    %pool = config.get @qwen38.attention.pool_capacity : index
+    %paged = index.cmp ne, %pool, %c0 : index
+    %storage = scf.select %paged, %pool, %logical : index
+    %key_origin = func.call @qwen38_row_kv_origin(%rows, %row, %layer_origin) : (buffer, index, offset) -> (offset)
+    %token_bytes = index.constant 2048 : offset
+    %plane_bytes = index.scale %storage, %token_bytes : index, offset -> offset
+    %value_origin = index.add %key_origin, %plane_bytes : offset
+    %map_origin = func.call @qwen38_row_kv_map_origin(%logical, %row) : (index, index) -> (offset)
+    %block_value_origin = index.scale %capacity, %token_bytes : index, offset -> offset
+    %q = buffer.view %query[%origin] : buffer -> view<[%capacity]x32x128xf32>
+    %block_k = buffer.view %block_cache[%origin] : buffer -> view<[%capacity]x8x128xf16>
+    %block_v = buffer.view %block_cache[%block_value_origin] : buffer -> view<[%capacity]x8x128xf16>
+    %context_k = buffer.view %context[%key_origin] : buffer -> view<[%storage]x8x128xf16>
+    %context_v = buffer.view %context[%value_origin] : buffer -> view<[%storage]x8x128xf16>
+    %y = buffer.view %output[%origin] : buffer -> view<[%capacity]x32x128xf32>
+    %query_values = vector.load %q[%token, %head, %channel] : view<[%capacity]x32x128xf32> -> vector<4xf32>
+    %score_bytes = index.constant 8256 : offset
+    %partial_bytes = index.constant 4096 : offset
+    %scores = buffer.alloca<workgroup> align(16) %score_bytes : buffer
+    %partials = buffer.alloca<workgroup> align(16) %partial_bytes : buffer
+    %score_view = buffer.view %scores[%origin] : buffer -> view<2064xf32>
+    %partial_view = buffer.view %partials[%origin] : buffer -> view<8x128xf32>
+    %leader = index.cmp eq, %lane, %c0 : index
+    scf.for %key = [%wave to %visible step %c8] {
+      %old = index.cmp ult, %key, %history : index
+      %key_values = scf.if %old -> (vector<4xf16>) {
+        %logical_value = index.add %start, %key : index
+        %logical_position = index.assume %logical_value [ge(%logical_value, 0), lt(%logical_value, %logical)] : index
+        %physical_value = func.call @qwen38_kv_position(%logical, %rows, %map_origin, %logical_position, %pool) : (index, buffer, offset, index, index) -> (index)
+        %physical = index.assume %physical_value [ge(%physical_value, 0), lt(%physical_value, %storage)] : index
+        %values = vector.load %context_k[%physical, %kv_head, %channel] : view<[%storage]x8x128xf16> -> vector<4xf16>
+        scf.yield %values : vector<4xf16>
+      } else {
+        %within = index.sub %key, %history : index
+        %block_token_value = index.add %begin, %within : index
+        %block_token = index.assume %block_token_value [ge(%block_token_value, 0), lt(%block_token_value, %capacity)] : index
+        %values = vector.load %block_k[%block_token, %kv_head, %channel] : view<[%capacity]x8x128xf16> -> vector<4xf16>
+        scf.yield %values : vector<4xf16>
+      }
+      %key_f32 = vector.extf %key_values : vector<4xf16> to vector<4xf32>
+      %products = vector.mulf %query_values, %key_f32 : vector<4xf32>
+      %partial = vector.reduce<addf> %products, %c0_0 : vector<4xf32>, f32
+      %dot = kernel.subgroup.reduce<addf> %partial : f32
+      %score = scalar.mulf %dot, %scale : f32
+      scf.if %leader {
+        view.store %score, %score_view[%key] : f32, view<2064xf32>
+      }
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %local_max = scf.for %key = [%thread to %visible step %threads](%maximum = %negative : f32) -> (f32) {
+      %score = view.load %score_view[%key] : view<2064xf32> -> f32
+      %next = scalar.maxnumf %score, %maximum : f32
+      scf.yield %next : f32
+    }
+    %maximum = kernel.workgroup.reduce<maxnumf> %local_max : f32
+    %local_sum = scf.for %key = [%thread to %visible step %threads](%sum = %c0_0 : f32) -> (f32) {
+      %score = view.load %score_view[%key] : view<2064xf32> -> f32
+      %centered = scalar.subf %score, %maximum : f32
+      %weight = scalar.expf<afn> %centered : f32
+      view.store %weight, %score_view[%key] : f32, view<2064xf32>
+      %next = scalar.addf %sum, %weight : f32
+      scf.yield %next : f32
+    }
+    %sum = kernel.workgroup.reduce<addf> %local_sum : f32
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %accumulated = scf.for %key = [%wave to %visible step %c8](%acc = %c0_0_2 : vector<4xf32>) -> (vector<4xf32>) {
+      %old = index.cmp ult, %key, %history : index
+      %value_values = scf.if %old -> (vector<4xf16>) {
+        %logical_value = index.add %start, %key : index
+        %logical_position = index.assume %logical_value [ge(%logical_value, 0), lt(%logical_value, %logical)] : index
+        %physical_value = func.call @qwen38_kv_position(%logical, %rows, %map_origin, %logical_position, %pool) : (index, buffer, offset, index, index) -> (index)
+        %physical = index.assume %physical_value [ge(%physical_value, 0), lt(%physical_value, %storage)] : index
+        %values = vector.load %context_v[%physical, %kv_head, %channel] : view<[%storage]x8x128xf16> -> vector<4xf16>
+        scf.yield %values : vector<4xf16>
+      } else {
+        %within = index.sub %key, %history : index
+        %block_token_value = index.add %begin, %within : index
+        %block_token = index.assume %block_token_value [ge(%block_token_value, 0), lt(%block_token_value, %capacity)] : index
+        %values = vector.load %block_v[%block_token, %kv_head, %channel] : view<[%capacity]x8x128xf16> -> vector<4xf16>
+        scf.yield %values : vector<4xf16>
+      }
+      %values_f32 = vector.extf %value_values : vector<4xf16> to vector<4xf32>
+      %weight = view.load %score_view[%key] : view<2064xf32> -> f32
+      %weight_vector = vector.splat %weight : vector<4xf32>
+      %product = vector.mulf<contract> %values_f32, %weight_vector : vector<4xf32>
+      %next = vector.addf<contract> %product, %acc : vector<4xf32>
+      scf.yield %next : vector<4xf32>
+    }
+    vector.store %accumulated, %partial_view[%wave, %channel] : vector<4xf32>, view<8x128xf32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %first_wave = index.cmp eq, %wave, %c0 : index
+    scf.if %first_wave {
+      %total = scf.for %part = [%c0 to %c8 step %c1](%acc = %c0_0_2 : vector<4xf32>) -> (vector<4xf32>) unroll {
+        %partial = vector.load %partial_view[%part, %channel] : view<8x128xf32> -> vector<4xf32>
+        %next = vector.addf %acc, %partial : vector<4xf32>
+        scf.yield %next : vector<4xf32>
+      }
+      %normalizer = vector.splat %sum : vector<4xf32>
+      %normalized = vector.divf %total, %normalizer : vector<4xf32>
+      vector.store %normalized, %y[%token, %head, %channel] : vector<4xf32>, view<[%capacity]x32x128xf32>
+    }
+  }
+  kernel.return
+}

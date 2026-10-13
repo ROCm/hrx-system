@@ -1,0 +1,219 @@
+config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
+
+config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
+
+amdgpu.target<gfx11-generic> @vae_attention_wave32 {subgroup_size = 32}
+
+template.decl @image.channel_norm_f32(%pixels: index, %channels: index, %silu: i1, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+
+template.decl @image.convolution_nchw_element_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %channel: index, %pixel: index, %input: buffer, %weight: buffer, %bias: buffer) -> (f32)
+
+template.decl @attention.single_head_nchw_f32(%tokens: index, %channels: index, %qkv: buffer, %output: buffer)
+
+template.decl @attention.single_head_384_matrix_nchw_f32(%tokens: index, %qkv: buffer, %output: buffer)
+
+command.program.decl @vae_input_residual() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer)
+
+kernel.def target(@vae_attention_wave32) @krea_vae_attention_norm() {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 1 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %channels = index.constant 384 : index
+  %silu = scalar.constant false : i1
+  template.apply<@image.channel_norm_f32>(%pixels, %channels, %silu, %input, %weight, %output) : (index, index, i1, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_attention_wave32) @krea_vae_attention_qkv() {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 1152 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %inputs = index.constant 384 : index
+  %outputs = index.constant 1152 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %threads = index.constant 128 : index
+  %origin = index.constant 0 : offset
+  %group = kernel.workgroup.id<x> : index
+  %channel = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %pixel = index.madd %group, %threads, %lane : index
+  %pixels = index.mul %height, %width : index
+  %live = index.cmp ult, %pixel, %pixels : index
+  scf.if %live {
+    %value = template.apply<@image.convolution_nchw_element_f32>(%height, %width, %inputs, %outputs, %c1, %c1, %c1, %channel, %pixel, %input, %weight, %bias) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer) -> (f32)
+    // Q/K preserve their coalesced token lanes. V is written token-first for
+    // channel-owned attention accumulation, directly in its existing plane.
+    %query_key_channels = index.mul %c2, %inputs : index
+    %is_value = index.cmp uge, %channel, %query_key_channels : index
+    scf.if %is_value {
+      %value_channel = index.sub %channel, %query_key_channels : index
+      %value_start = index.mul %query_key_channels, %pixels : index
+      %element_bytes = index.constant 4 : offset
+      %value_base = index.scale %value_start, %element_bytes : index, offset -> offset
+      %value_view = buffer.view %output[%value_base] : buffer -> view<[%pixels]x[%inputs]xf32>
+      view.store %value, %value_view[%pixel, %value_channel] : f32, view<[%pixels]x[%inputs]xf32>
+    } else {
+      %query_key_view = buffer.view %output[%origin] : buffer -> view<[%query_key_channels]x[%pixels]xf32>
+      view.store %value, %query_key_view[%channel, %pixel] : f32, view<[%query_key_channels]x[%pixels]xf32>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@vae_attention_wave32) @krea_vae_attention_projection() {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 384 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %inputs = index.constant 384 : index
+  %outputs = index.constant 384 : index
+  %c1 = index.constant 1 : index
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %c1, %c1, %c1, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_attention_wave32) @krea_vae_attention_projection_add() {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 384 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %inputs = index.constant 384 : index
+  %outputs = index.constant 384 : index
+  %c1 = index.constant 1 : index
+  %add_residual = scalar.constant true : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %c1, %c1, %c1, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_attention_wave32) @krea_vae_attention_core() {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %c0 = index.constant 0 : index
+  %tile = index.constant 16 : index
+  %tail = index.rem %pixels, %tile : index
+  %matrix = index.cmp eq, %tail, %c0 : index
+  %matrix_groups = index.div %pixels, %tile : index
+  %groups = scf.select %matrix, %matrix_groups, %pixels : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %channels = index.constant 384 : index
+  %c0 = index.constant 0 : index
+  %tile = index.constant 16 : index
+  %tail = index.rem %pixels, %tile : index
+  %matrix = index.cmp eq, %tail, %c0 : index
+  scf.if %matrix {
+    template.apply<@attention.single_head_384_matrix_nchw_f32>(%pixels, %input, %output) : (index, buffer, buffer)
+  } else {
+    template.apply<@attention.single_head_nchw_f32>(%pixels, %channels, %input, %output) : (index, index, buffer, buffer)
+  }
+  kernel.return
+}
+
+command.program.def public @krea2.vae_attention_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "decoder.mid_block.attentions.0.norm.gamma" : view<384x1x1xf32>
+  kernel.launch @krea_vae_attention_norm(%input, %weight, %output) : (buffer, view<384x1x1xf32>, buffer)
+  command.return
+}
+
+// Packed Q/K are channel-first; the third equally sized V plane is token-first.
+command.program.def public @krea2.vae_attention_qkv() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "decoder.mid_block.attentions.0.to_qkv.weight" : view<1152x384x1x1xf32>
+  %bias = command.parameter %parameters, "decoder.mid_block.attentions.0.to_qkv.bias" : view<1152xf32>
+  kernel.launch @krea_vae_attention_qkv(%input, %weight, %bias, %output) : (buffer, view<1152x384x1x1xf32>, view<1152xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.vae_attention_core() launch(%input: buffer, %output: buffer) {
+  kernel.launch @krea_vae_attention_core(%input, %output) : (buffer, buffer)
+  command.return
+}
+
+command.program.def public @krea2.vae_attention_projection() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "decoder.mid_block.attentions.0.proj.weight" : view<384x384x1x1xf32>
+  %bias = command.parameter %parameters, "decoder.mid_block.attentions.0.proj.bias" : view<384xf32>
+  kernel.launch @krea_vae_attention_projection(%input, %weight, %bias, %output) : (buffer, view<384x384x1x1xf32>, view<384xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.vae_attention_projection_add() launch(%parameters: buffer, %input: buffer, %residual: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "decoder.mid_block.attentions.0.proj.weight" : view<384x384x1x1xf32>
+  %bias = command.parameter %parameters, "decoder.mid_block.attentions.0.proj.bias" : view<384xf32>
+  kernel.launch @krea_vae_attention_projection_add(%input, %weight, %bias, %residual, %output) : (buffer, view<384x384x1x1xf32>, view<384xf32>, buffer, buffer)
+  command.return
+}
+
+// QKV retains the normalized source until its projection completes. The
+// attention output can then reuse normalization storage; the final projection
+// may overwrite the original residual after all original-state readers finish.
+command.program.def public @vae_spatial_attention() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %feature_pixel_bytes = index.constant 1536 : offset
+  %qkv_pixel_bytes = index.constant 4608 : offset
+  %feature_bytes = index.scale %pixels, %feature_pixel_bytes : index, offset -> offset
+  %qkv_bytes = index.scale %pixels, %qkv_pixel_bytes : index, offset -> offset
+  %normalized = buffer.alloca<global> align(256) %feature_bytes : buffer
+  command.program.launch @krea2.vae_attention_norm(%parameters, %input, %normalized) : (buffer, buffer, buffer)
+  %qkv = buffer.alloca<global> align(256) %qkv_bytes : buffer
+  command.program.launch @krea2.vae_attention_qkv(%parameters, %normalized, %qkv) : (buffer, buffer, buffer)
+  %attended = buffer.alloca<global> align(256) %feature_bytes : buffer
+  command.program.launch @krea2.vae_attention_core(%qkv, %attended) : (buffer, buffer)
+  command.program.launch @krea2.vae_attention_projection_add(%parameters, %attended, %input, %output) : (buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @vae_input_attention() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer) {
+  command.program.launch @vae_input_residual(%parameters, %input, %affine, %output) : (buffer, buffer, buffer, buffer)
+  command.program.launch @vae_spatial_attention(%parameters, %output, %output) : (buffer, buffer, buffer)
+  command.return
+}

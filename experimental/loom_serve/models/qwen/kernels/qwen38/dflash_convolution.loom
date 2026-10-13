@@ -1,0 +1,37 @@
+template.decl @convolution.grouped_causal_f32(%blocks: index, %length: index, %channels: index, %group_width: index, %branches: index, %taps: index, %branch: index, %input: buffer, %dynamic: buffer, %base: buffer, %output: buffer)
+
+template.decl @convolution.grouped_causal_add_f32(%blocks: index, %length: index, %channels: index, %group_width: index, %branches: index, %taps: index, %branch: index, %input: buffer, %dynamic: buffer, %base: buffer, %residual: buffer)
+
+kernel.def @qwen38_dflash_convolve_prepare(%blocks: index) {
+  %tiles = index.constant 10 : index
+  %length = index.constant 8 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tiles, %length, %blocks) workgroup_size(%threads, %c1, %c1) : index
+} launch(%blocks: index, %input: buffer, %dynamic: buffer, %base: buffer, %output: buffer) {
+  %length = index.constant 8 : index
+  %channels = index.constant 5120 : index
+  %group = index.constant 16 : index
+  %branches = index.constant 2 : index
+  %taps = index.constant 2 : index
+  %branch = index.constant 0 : index
+  template.apply<@convolution.grouped_causal_f32>(%blocks, %length, %channels, %group, %branches, %taps, %branch, %input, %dynamic, %base, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def @qwen38_dflash_convolve_finish(%blocks: index) {
+  %tiles = index.constant 10 : index
+  %length = index.constant 8 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tiles, %length, %blocks) workgroup_size(%threads, %c1, %c1) : index
+} launch(%blocks: index, %input: buffer, %dynamic: buffer, %base: buffer, %output: buffer) {
+  %length = index.constant 8 : index
+  %channels = index.constant 5120 : index
+  %group = index.constant 16 : index
+  %branches = index.constant 2 : index
+  %taps = index.constant 2 : index
+  %branch = index.constant 1 : index
+  template.apply<@convolution.grouped_causal_add_f32>(%blocks, %length, %channels, %group, %branches, %taps, %branch, %input, %dynamic, %base, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
