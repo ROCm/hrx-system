@@ -7,7 +7,10 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <future>
+#include <memory>
 
+#include "iree/hal/cts/util/pool_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/memory/fixed_block_pool.h"
 #include "iree/hal/memory/maintenance.h"
@@ -16,28 +19,6 @@
 
 namespace iree::hal::cts {
 namespace {
-
-struct ImportedHostAllocation {
-  // Pointer released after the ROCr attachment is retired.
-  void* pointer = nullptr;
-  // True when the transport callback observed the original host pointer.
-  bool payload_matches = false;
-  // True after the transport callback releases the host allocation.
-  bool released = false;
-};
-
-static void ReleaseImportedHostAllocation(
-    void* user_data, iree_hal_external_storage_class_t storage_class,
-    iree_hal_external_storage_payload_t payload) {
-  auto* allocation = static_cast<ImportedHostAllocation*>(user_data);
-  allocation->payload_matches =
-      storage_class.type == IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER &&
-      storage_class.provenance[0] == 0 && storage_class.provenance[1] == 0 &&
-      payload.host_pointer == allocation->pointer;
-  iree_allocator_free_aligned(iree_allocator_system(), allocation->pointer);
-  allocation->pointer = nullptr;
-  allocation->released = true;
-}
 
 class AmdgpuSlabPoolTest : public CtsTestBase<> {
  protected:
@@ -546,25 +527,31 @@ TEST_P(AmdgpuSlabPoolTest, ImportsHostStorageWithExactRangeAndOwnership) {
   const iree_device_size_t allocation_length =
       storage_alignment + storage_length;
   ASSERT_LE(allocation_length, IREE_HOST_SIZE_MAX);
-  ImportedHostAllocation allocation;
+  auto allocation = std::make_unique<ImportedHostAllocation>();
+  allocation->host_allocator = iree_allocator_system();
+  allocation->storage_class = host_pointer_class;
+  std::future<ImportedHostAllocationReleaseResult> release_result =
+      allocation->release_result.get_future();
   IREE_ASSERT_OK(iree_allocator_malloc_aligned(
-      iree_allocator_system(), static_cast<iree_host_size_t>(allocation_length),
+      allocation->host_allocator,
+      static_cast<iree_host_size_t>(allocation_length),
       static_cast<iree_host_size_t>(storage_alignment), /*offset=*/0,
-      &allocation.pointer));
-  std::memset(allocation.pointer, 0, static_cast<size_t>(allocation_length));
+      &allocation->pointer));
+  void* host_pointer = allocation->pointer;
+  std::memset(host_pointer, 0, static_cast<size_t>(allocation_length));
 
   constexpr iree_device_size_t kLogicalOffset = 256;
   constexpr iree_device_size_t kLogicalLength = 1024;
   iree_hal_external_storage_t storage = {
       .storage_class = host_pointer_class,
-      .payload = {.host_pointer = allocation.pointer},
+      .payload = {.host_pointer = host_pointer},
       .byte_length = allocation_length,
       .host_cacheability = IREE_HAL_HOST_CACHEABILITY_WRITE_BACK,
       .maintenance_range =
           iree_hal_make_buffer_range(storage_alignment, storage_length),
       .physical_backing_id = {{0xA11C, 0xBACC}},
       .release = ReleaseImportedHostAllocation,
-      .release_user_data = &allocation,
+      .release_user_data = allocation.get(),
   };
   Ref<iree_hal_buffer_t> buffer;
   IREE_ASSERT_OK(iree_hal_pool_import_buffer(
@@ -572,6 +559,7 @@ TEST_P(AmdgpuSlabPoolTest, ImportsHostStorageWithExactRangeAndOwnership) {
       iree_hal_make_buffer_range(storage_alignment + kLogicalOffset,
                                  kLogicalLength),
       buffer.out()));
+  allocation.release();
   EXPECT_EQ(storage.storage_class.type, IREE_HAL_EXTERNAL_STORAGE_TYPE_NONE);
   EXPECT_EQ(iree_hal_buffer_allocation_size(buffer), storage_length);
   EXPECT_EQ(iree_hal_buffer_byte_offset(buffer), kLogicalOffset);
@@ -607,7 +595,7 @@ TEST_P(AmdgpuSlabPoolTest, ImportsHostStorageWithExactRangeAndOwnership) {
       buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
       IREE_HAL_BUFFER_MAP_FLAG_NONE, 0, sizeof(value), &mapping));
   EXPECT_EQ(*reinterpret_cast<const uint32_t*>(mapping.contents.data), value);
-  EXPECT_EQ(mapping.contents.data, static_cast<uint8_t*>(allocation.pointer) +
+  EXPECT_EQ(mapping.contents.data, static_cast<uint8_t*>(host_pointer) +
                                        storage_alignment + kLogicalOffset);
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
@@ -623,7 +611,7 @@ TEST_P(AmdgpuSlabPoolTest, ImportsHostStorageWithExactRangeAndOwnership) {
       nested, iree_hal_make_buffer_range(0, IREE_HAL_WHOLE_BUFFER),
       host_pointer_class, &exported_host, &exported_host_range));
   EXPECT_EQ(exported_host.payload.host_pointer,
-            static_cast<uint8_t*>(allocation.pointer) + storage_alignment);
+            static_cast<uint8_t*>(host_pointer) + storage_alignment);
   EXPECT_EQ(exported_host.byte_length, storage_length);
   EXPECT_EQ(exported_host.host_cacheability,
             IREE_HAL_HOST_CACHEABILITY_WRITE_BACK);
@@ -648,10 +636,10 @@ TEST_P(AmdgpuSlabPoolTest, ImportsHostStorageWithExactRangeAndOwnership) {
 
   nested.reset();
   buffer.reset();
-  EXPECT_FALSE(allocation.released);
   JoinMaintenance(source);
-  EXPECT_TRUE(allocation.payload_matches);
-  EXPECT_TRUE(allocation.released);
+  const ImportedHostAllocationReleaseResult released = release_result.get();
+  EXPECT_TRUE(released.storage_class_matches);
+  EXPECT_TRUE(released.payload_matches);
 }
 
 TEST_P(AmdgpuSlabPoolTest, BroadImportPoolUsesCommonRouteGuarantees) {

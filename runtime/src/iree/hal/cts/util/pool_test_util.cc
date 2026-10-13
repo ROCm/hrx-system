@@ -6,9 +6,32 @@
 
 #include "iree/hal/cts/util/pool_test_util.h"
 
+#include <memory>
+
 #include "iree/hal/slab_pool.h"
 
 namespace iree::hal::cts {
+
+ImportedHostAllocation::~ImportedHostAllocation() {
+  if (pointer) {
+    iree_allocator_free_aligned(host_allocator, pointer);
+  }
+}
+
+void ReleaseImportedHostAllocation(
+    void* user_data, iree_hal_external_storage_class_t storage_class,
+    iree_hal_external_storage_payload_t payload) {
+  std::unique_ptr<ImportedHostAllocation> allocation(
+      static_cast<ImportedHostAllocation*>(user_data));
+  const ImportedHostAllocationReleaseResult result = {
+      .storage_class_matches = iree_hal_external_storage_class_equal(
+          storage_class, allocation->storage_class),
+      .payload_matches = payload.host_pointer == allocation->pointer,
+  };
+  iree_allocator_free_aligned(allocation->host_allocator, allocation->pointer);
+  allocation->pointer = nullptr;
+  allocation->release_result.set_value(result);
+}
 
 iree_status_t CreateQueueSlabPool(iree_hal_device_group_t* device_group,
                                   const iree_hal_queue_family_t* queue_family,

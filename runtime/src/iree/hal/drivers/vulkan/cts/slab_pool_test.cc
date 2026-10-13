@@ -8,8 +8,10 @@
 #include <array>
 #include <cstring>
 #include <future>
+#include <memory>
 #include <vector>
 
+#include "iree/hal/cts/util/pool_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/memory/fixed_block_pool.h"
 #include "iree/hal/memory/maintenance.h"
@@ -18,17 +20,6 @@
 
 namespace iree::hal::cts {
 namespace {
-
-struct ImportedHostAllocation {
-  // Pointer released after the Vulkan attachment is retired.
-  void* pointer = nullptr;
-  // True when the transport callback observed the expected storage class.
-  bool storage_class_matches = false;
-  // True when the transport callback observed the original host pointer.
-  bool payload_matches = false;
-  // True after the external transport release callback runs.
-  bool released = false;
-};
 
 struct ResourceRefCountObservation {
   // Borrowed resource kept live by the test until observation completes.
@@ -46,19 +37,6 @@ static void ObserveResourceRefCount(void* user_data,
       iree_atomic_ref_count_load(&observation->resource->ref_count);
   iree_status_free(status);
   observation->result.set_value(ref_count);
-}
-
-static void ReleaseImportedHostAllocation(
-    void* user_data, iree_hal_external_storage_class_t storage_class,
-    iree_hal_external_storage_payload_t payload) {
-  auto* allocation = static_cast<ImportedHostAllocation*>(user_data);
-  allocation->storage_class_matches = iree_hal_external_storage_class_equal(
-      storage_class, iree_hal_make_external_storage_class(
-                         IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER));
-  allocation->payload_matches = payload.host_pointer == allocation->pointer;
-  iree_allocator_free_aligned(iree_allocator_system(), allocation->pointer);
-  allocation->pointer = nullptr;
-  allocation->released = true;
 }
 
 class VulkanSlabPoolTest : public CtsTestBase<> {
@@ -456,28 +434,34 @@ TEST_P(VulkanSlabPoolTest, ImportsHostStorageThroughSelectedNativeRoute) {
   const iree_device_size_t storage_length =
       allocation_alignment + allocation_size;
   ASSERT_LE(storage_length, IREE_HOST_SIZE_MAX);
-  ImportedHostAllocation allocation;
+  auto allocation = std::make_unique<ImportedHostAllocation>();
+  allocation->host_allocator = iree_allocator_system();
+  allocation->storage_class = import_class.storage_class;
+  std::future<ImportedHostAllocationReleaseResult> release_result =
+      allocation->release_result.get_future();
   IREE_ASSERT_OK(iree_allocator_malloc_aligned(
-      iree_allocator_system(), static_cast<iree_host_size_t>(storage_length),
+      allocation->host_allocator, static_cast<iree_host_size_t>(storage_length),
       static_cast<iree_host_size_t>(allocation_alignment), /*offset=*/0,
-      &allocation.pointer));
-  std::memset(allocation.pointer, 0, static_cast<size_t>(storage_length));
+      &allocation->pointer));
+  void* host_pointer = allocation->pointer;
+  std::memset(host_pointer, 0, static_cast<size_t>(storage_length));
 
   iree_hal_external_storage_t storage = {
       .storage_class = import_class.storage_class,
       .byte_length = storage_length,
   };
-  storage.payload.host_pointer = allocation.pointer;
+  storage.payload.host_pointer = host_pointer;
   storage.host_cacheability = IREE_HAL_HOST_CACHEABILITY_WRITE_BACK;
   storage.maintenance_range =
       iree_hal_make_buffer_range(allocation_alignment, allocation_size);
   storage.release = ReleaseImportedHostAllocation;
-  storage.release_user_data = &allocation;
+  storage.release_user_data = allocation.get();
   Ref<iree_hal_buffer_t> buffer;
   IREE_ASSERT_OK(iree_hal_pool_import_buffer(
       source, &storage,
       iree_hal_make_buffer_range(allocation_alignment, allocation_size),
       buffer.out()));
+  allocation.release();
   EXPECT_EQ(storage.storage_class.type, IREE_HAL_EXTERNAL_STORAGE_TYPE_NONE);
 
   const uint32_t value = 0xABCD1234;
@@ -497,15 +481,14 @@ TEST_P(VulkanSlabPoolTest, ImportsHostStorageThroughSelectedNativeRoute) {
   std::memcpy(&result, mapping.contents.data, sizeof(result));
   EXPECT_EQ(result, value);
   EXPECT_EQ(mapping.contents.data,
-            static_cast<uint8_t*>(allocation.pointer) + allocation_alignment);
+            static_cast<uint8_t*>(host_pointer) + allocation_alignment);
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
   buffer.reset();
-  EXPECT_FALSE(allocation.released);
   JoinMaintenance(source);
-  EXPECT_TRUE(allocation.storage_class_matches);
-  EXPECT_TRUE(allocation.payload_matches);
-  EXPECT_TRUE(allocation.released);
+  const ImportedHostAllocationReleaseResult released = release_result.get();
+  EXPECT_TRUE(released.storage_class_matches);
+  EXPECT_TRUE(released.payload_matches);
 }
 
 TEST_P(VulkanSlabPoolTest, NativeOnlyAndHostOnlyDoNotGrantQueueOperations) {

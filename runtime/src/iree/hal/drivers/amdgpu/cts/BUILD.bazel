@@ -281,6 +281,7 @@ iree_runtime_cc_test(
     deps = [
         ":backends",
         ":testdata_amdgpu",
+        "//runtime/src/iree/hal/cts/util:pool_test_util",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/cts/util:test_main",
         "//runtime/src/iree/hal/memory:fixed_block_pool",

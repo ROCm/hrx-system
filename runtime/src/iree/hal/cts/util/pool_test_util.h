@@ -7,10 +7,44 @@
 #ifndef IREE_HAL_CTS_UTIL_POOL_TEST_UTIL_H_
 #define IREE_HAL_CTS_UTIL_POOL_TEST_UTIL_H_
 
+#include <future>
+
 #include "iree/hal/device_group.h"
 #include "iree/hal/memory/fixed_block_pool.h"
 
 namespace iree::hal::cts {
+
+// Facts captured while releasing an imported host allocation.
+struct ImportedHostAllocationReleaseResult {
+  // True when the callback received the expected external storage class.
+  bool storage_class_matches = false;
+  // True when the callback received the original host pointer.
+  bool payload_matches = false;
+};
+
+// Heap-owned state retained until an asynchronous imported host allocation is
+// released. After a successful import, ownership transfers to
+// ReleaseImportedHostAllocation.
+struct ImportedHostAllocation {
+  ~ImportedHostAllocation();
+
+  // Allocator that owns |pointer|.
+  iree_allocator_t host_allocator = iree_allocator_null();
+  // Host allocation transferred to the external storage owner.
+  void* pointer = nullptr;
+  // External storage class expected by the release callback.
+  iree_hal_external_storage_class_t storage_class = {};
+  // Result fulfilled after the callback releases |pointer|.
+  std::promise<ImportedHostAllocationReleaseResult> release_result;
+};
+
+// Takes ownership of a heap-allocated ImportedHostAllocation, releases its host
+// pointer, and publishes the observed transport payload. A future obtained
+// from |release_result| is the completion edge for asynchronous native
+// retirement.
+void ReleaseImportedHostAllocation(
+    void* user_data, iree_hal_external_storage_class_t storage_class,
+    iree_hal_external_storage_payload_t payload);
 
 // Creates a native slab pool scoped to one queue family.
 iree_status_t CreateQueueSlabPool(iree_hal_device_group_t* device_group,
