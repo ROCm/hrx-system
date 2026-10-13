@@ -110,6 +110,11 @@ extern "C" {
 iree_hal_amdxdna_device* iree_hal_amdxdna_device_cast(
     iree_hal_device_t* base_device);
 
+// Drops hardware contexts no executable still leases. Command caches keyed by
+// those contexts are invalidated as each context is released.
+void iree_hal_amdxdna_device_drop_unleased_contexts(
+    iree_hal_amdxdna_device* device);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

@@ -92,6 +92,10 @@ typedef struct iree_hal_amdxdna_executable {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
   iree_hal_amdxdna_native_device_t* native_device;
+  // HAL device that loaded this executable. NULL for executables created
+  // directly in tests. Destruction uses it to end buffer reuse and drop
+  // hardware contexts that no executable still leases.
+  struct iree_hal_amdxdna_device* hal_device;
   // Process-unique identity used by native command caches. Unlike the object
   // address this is never reused after destruction, so cached immutable
   // entry-point descriptors cannot alias a later executable allocation.

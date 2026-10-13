@@ -251,6 +251,11 @@ static iree_status_t iree_hal_amdxdna_device_load_executable(
   iree_status_t status = iree_hal_amdxdna_native_executable_create(
       device->native_device, load_params, device->host_allocator,
       out_executable);
+  if (iree_status_is_ok(status)) {
+    iree_hal_amdxdna_executable_bind_device(*out_executable, device);
+    iree_hal_amdxdna_allocator_set_model_reuse(device->device_allocator,
+                                               /*active=*/1);
+  }
   if (iree_status_is_ok(status) &&
       device->native_caps.requires_executable_context_cache) {
     status =
@@ -798,8 +803,9 @@ static void iree_hal_amdxdna_device_replace_channel_provider(
 
 static iree_status_t iree_hal_amdxdna_device_trim(
     iree_hal_device_t* base_device) {
-  (void)base_device;
-  return iree_ok_status();
+  iree_hal_amdxdna_device* device = IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
+      base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
+  return iree_hal_allocator_trim(device->device_allocator);
 }
 
 static const iree_hal_device_spec_t* iree_hal_amdxdna_device_spec(
@@ -1801,6 +1807,12 @@ iree_hal_amdxdna_device* iree_hal_amdxdna_device_cast(
     iree_hal_device_t* base_device) {
   return IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
       base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
+}
+
+void iree_hal_amdxdna_device_drop_unleased_contexts(
+    iree_hal_amdxdna_device* device) {
+  if (!device || !device->context_cache) return;
+  iree_hal_amdxdna_device_context_cache_drop_unleased(device->context_cache);
 }
 
 static iree_allocator_t iree_hal_amdxdna_device_host_allocator(

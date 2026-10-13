@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amdxdna/completion_queue.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "iree/base/internal/atomics.h"
@@ -232,6 +233,52 @@ static void iree_hal_amdxdna_completion_batch_clear_native_signals(
   }
 }
 
+// ERT_CMD_STATE_ERROR, ABORT, and TIMEOUT. The scheduler finished the
+// command. TIMEOUT includes a reset, so the stream can take another command.
+// ERT_CMD_STATE_NORESPONSE (9) means the reset failed and stays fatal.
+static bool iree_hal_amdxdna_ert_state_is_command_scoped(uint32_t state) {
+  return state == 5 || state == 6 || state == 8;
+}
+
+static bool iree_hal_amdxdna_status_ert_state(iree_status_t status,
+                                             uint32_t* out_state) {
+  char buffer[4096];
+  iree_host_size_t length = 0;
+  if (!iree_status_format(status, sizeof(buffer), buffer, &length)) {
+    return false;
+  }
+  const char* marker = strstr(buffer, "ert state ");
+  if (!marker) return false;
+  marker += sizeof("ert state ") - 1;
+  char* end = NULL;
+  unsigned long state = strtoul(marker, &end, 10);
+  if (end == marker) return false;
+  *out_state = (uint32_t)state;
+  return true;
+}
+
+static bool iree_hal_amdxdna_status_is_command_completion(iree_status_t status) {
+  uint32_t state = 0;
+  return iree_hal_amdxdna_status_ert_state(status, &state) &&
+         iree_hal_amdxdna_ert_state_is_command_scoped(state);
+}
+
+static void iree_hal_amdxdna_semaphore_list_record_command_completion(
+    iree_hal_semaphore_list_t list, iree_status_t status) {
+  for (iree_host_size_t i = 0; i < list.count; ++i) {
+    iree_hal_amdxdna_semaphore_record_command_completion(
+        list.semaphores[i], list.payload_values[i], iree_status_clone(status));
+  }
+}
+
+static void iree_hal_amdxdna_semaphore_list_clear_command_completion(
+    iree_hal_semaphore_list_t list) {
+  for (iree_host_size_t i = 0; i < list.count; ++i) {
+    iree_hal_amdxdna_semaphore_clear_command_completion(
+        list.semaphores[i], list.payload_values[i]);
+  }
+}
+
 static void iree_hal_amdxdna_completion_batch_finish(
     iree_hal_amdxdna_completion_batch_t* batch) {
   iree_status_t status = iree_status_clone(batch->status);
@@ -270,7 +317,24 @@ static void iree_hal_amdxdna_completion_batch_finish(
       iree_hal_amdxdna_completion_queue_advance_frontier(batch->queue);
     }
   }
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status) &&
+      iree_hal_amdxdna_status_is_command_completion(status)) {
+    // Advance the timeline and hand the command status to the host waiter
+    // of this point. Do not fail the semaphore: a failed IREE semaphore
+    // rejects every later wait, including buffer allocation.
+    iree_hal_amdxdna_semaphore_list_record_command_completion(
+        batch->signal_list, status);
+    iree_status_ignore(status);
+    status =
+        iree_hal_semaphore_list_signal(batch->signal_list, /*frontier=*/NULL);
+    if (iree_status_is_ok(status)) {
+      iree_hal_amdxdna_completion_queue_advance_frontier(batch->queue);
+    } else {
+      iree_hal_amdxdna_semaphore_list_clear_command_completion(
+          batch->signal_list);
+      iree_hal_semaphore_list_fail(batch->signal_list, status);
+    }
+  } else if (!iree_status_is_ok(status)) {
     iree_hal_semaphore_list_fail(batch->signal_list, status);
   }
   iree_hal_amdxdna_completion_batch_clear_native_signals(batch);

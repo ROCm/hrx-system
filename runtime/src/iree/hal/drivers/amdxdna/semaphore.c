@@ -25,6 +25,11 @@ typedef struct iree_hal_amdxdna_semaphore_t {
   iree_slim_mutex_t mutex;
   iree_hal_amdxdna_completion_batch_t* native_signal_batch;
   uint64_t native_signal_value;
+  // Command-scoped ERT failure for one payload. Not a sticky semaphore
+  // failure: the timeline still advances, and a host wait for this exact
+  // value observes the status once.
+  iree_status_t command_status;
+  uint64_t command_status_value;
   iree_allocator_t host_allocator;
 } iree_hal_amdxdna_semaphore_t;
 
@@ -75,6 +80,8 @@ iree_status_t iree_hal_amdxdna_semaphore_create(
   iree_slim_mutex_initialize(&semaphore->mutex);
   semaphore->native_signal_batch = NULL;
   semaphore->native_signal_value = 0;
+  semaphore->command_status = iree_ok_status();
+  semaphore->command_status_value = 0;
   semaphore->host_allocator = host_allocator;
   *out_semaphore = iree_hal_semaphore_cast(&semaphore->async);
 
@@ -90,11 +97,16 @@ static void iree_hal_amdxdna_semaphore_destroy(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_amdxdna_completion_batch_t* native_signal_batch = NULL;
+  iree_status_t command_status = iree_ok_status();
   iree_slim_mutex_lock(&semaphore->mutex);
   native_signal_batch = semaphore->native_signal_batch;
   semaphore->native_signal_batch = NULL;
   semaphore->native_signal_value = 0;
+  command_status = semaphore->command_status;
+  semaphore->command_status = iree_ok_status();
+  semaphore->command_status_value = 0;
   iree_slim_mutex_unlock(&semaphore->mutex);
+  iree_status_ignore(command_status);
   iree_hal_amdxdna_completion_batch_destroy(native_signal_batch);
   iree_slim_mutex_deinitialize(&semaphore->mutex);
   iree_async_semaphore_deinitialize(&semaphore->async);
@@ -142,6 +154,62 @@ void iree_hal_amdxdna_semaphore_clear_native_signal(
   iree_hal_amdxdna_completion_batch_destroy(old_batch);
 }
 
+void iree_hal_amdxdna_semaphore_record_command_completion(
+    iree_hal_semaphore_t* base_semaphore, uint64_t value,
+    iree_status_t status) {
+  if (!iree_hal_amdxdna_semaphore_isa(base_semaphore) ||
+      iree_status_is_ok(status)) {
+    iree_status_ignore(status);
+    return;
+  }
+  iree_hal_amdxdna_semaphore_t* semaphore =
+      iree_hal_amdxdna_semaphore_cast(base_semaphore);
+  iree_slim_mutex_lock(&semaphore->mutex);
+  iree_status_ignore(semaphore->command_status);
+  semaphore->command_status = status;
+  semaphore->command_status_value = value;
+  iree_slim_mutex_unlock(&semaphore->mutex);
+}
+
+void iree_hal_amdxdna_semaphore_clear_command_completion(
+    iree_hal_semaphore_t* base_semaphore, uint64_t value) {
+  if (!iree_hal_amdxdna_semaphore_isa(base_semaphore)) return;
+  iree_hal_amdxdna_semaphore_t* semaphore =
+      iree_hal_amdxdna_semaphore_cast(base_semaphore);
+  iree_status_t command_status = iree_ok_status();
+  iree_slim_mutex_lock(&semaphore->mutex);
+  if (!iree_status_is_ok(semaphore->command_status) &&
+      semaphore->command_status_value == value) {
+    command_status = semaphore->command_status;
+    semaphore->command_status = iree_ok_status();
+    semaphore->command_status_value = 0;
+  }
+  iree_slim_mutex_unlock(&semaphore->mutex);
+  iree_status_ignore(command_status);
+}
+
+// Returns the command status recorded for |value|, or OK. A wait for a later
+// point drops an unconsumed earlier command status so buffer allocation and
+// the next submission are not stuck behind it.
+static iree_status_t iree_hal_amdxdna_semaphore_take_command_status(
+    iree_hal_amdxdna_semaphore_t* semaphore, uint64_t value) {
+  iree_status_t command_status = iree_ok_status();
+  iree_slim_mutex_lock(&semaphore->mutex);
+  if (!iree_status_is_ok(semaphore->command_status)) {
+    if (semaphore->command_status_value == value) {
+      command_status = semaphore->command_status;
+      semaphore->command_status = iree_ok_status();
+      semaphore->command_status_value = 0;
+    } else if (value > semaphore->command_status_value) {
+      iree_status_ignore(semaphore->command_status);
+      semaphore->command_status = iree_ok_status();
+      semaphore->command_status_value = 0;
+    }
+  }
+  iree_slim_mutex_unlock(&semaphore->mutex);
+  return command_status;
+}
+
 static uint64_t iree_hal_amdxdna_semaphore_query(
     iree_async_semaphore_t* base_semaphore) {
   // Same as iree_hal_sync_semaphore_query: failure_status is stored as intptr.
@@ -174,7 +242,7 @@ static iree_status_t iree_hal_amdxdna_semaphore_wait(
     return iree_hal_semaphore_failure_as_status(current);
   }
   if (current >= value) {
-    return iree_ok_status();
+    return iree_hal_amdxdna_semaphore_take_command_status(semaphore, value);
   }
 
   iree_hal_amdxdna_completion_batch_t* native_signal_batch = NULL;
@@ -195,13 +263,15 @@ static iree_status_t iree_hal_amdxdna_semaphore_wait(
       return iree_hal_semaphore_failure_as_status(current);
     }
     if (current >= value) {
-      return iree_ok_status();
+      return iree_hal_amdxdna_semaphore_take_command_status(semaphore, value);
     }
   }
 
-  return iree_async_semaphore_multi_wait(
+  iree_status_t status = iree_async_semaphore_multi_wait(
       IREE_ASYNC_WAIT_MODE_ALL, (iree_async_semaphore_t**)&base_semaphore,
       &value, 1, timeout, flags, iree_allocator_system());
+  if (!iree_status_is_ok(status)) return status;
+  return iree_hal_amdxdna_semaphore_take_command_status(semaphore, value);
 }
 
 static iree_status_t iree_hal_amdxdna_semaphore_import_timepoint(

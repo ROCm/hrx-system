@@ -346,6 +346,11 @@ uint64_t iree_hal_amdxdna_native_buffer_c_device_address(
 iree_device_size_t iree_hal_amdxdna_native_buffer_c_size(
     iree_hal_amdxdna_native_buffer_t* buffer);
 
+// False when |buffer| was allocated on a KMT device that has since been
+// destroyed. The reuse cache must not hand that wrapper out again.
+bool iree_hal_amdxdna_native_buffer_c_is_device_current(
+    const iree_hal_amdxdna_native_buffer_t* buffer);
+
 iree_status_t iree_hal_amdxdna_native_device_c_create_context_ref(
     iree_hal_amdxdna_native_device_t* device,
     const iree_hal_amdxdna_native_c_context_image_t* image,
