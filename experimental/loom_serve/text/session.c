@@ -10,6 +10,20 @@
 
 #include "loom/util/json.h"
 
+bool loom_serve_text_session_name_valid(iree_string_view_t name) {
+  if (name.size > 64) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < name.size; ++i) {
+    const char c = name.data[i];
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.')) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static iree_status_t text_quote(iree_string_builder_t* output,
                                 iree_string_view_t value) {
   loom_output_stream_t stream;

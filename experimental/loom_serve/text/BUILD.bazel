@@ -321,6 +321,40 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "response",
+    srcs = ["response.c"],
+    hdrs = ["response.h"],
+    visibility = [":__pkg__"],
+    deps = [
+        ":telemetry",
+        "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "checkpoint_request",
+    srcs = ["checkpoint_request.c"],
+    hdrs = ["checkpoint_request.h"],
+    visibility = [":__pkg__"],
+    deps = [
+        ":checkpoint_registry",
+        ":model",
+        ":response",
+        ":session",
+        ":telemetry",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/serve/transport/http:request",
+        "//loom/src/loom/serve/transport/http:server",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "service",
     srcs = ["service.c"],
     hdrs = ["service.h"],
@@ -331,11 +365,13 @@ loom_cc_library(
         ":admission",
         ":chat",
         ":checkpoint_registry",
+        ":checkpoint_request",
         ":epoch",
         ":heartbeat",
         ":input",
         ":model",
         ":prefix_cache",
+        ":response",
         ":schedule",
         ":session",
         ":session_cache",
@@ -351,8 +387,6 @@ loom_cc_library(
         "//loom/src/loom/serve/telemetry:stream",
         "//loom/src/loom/serve/transport/http:request",
         "//loom/src/loom/serve/transport/http:server",
-        "//loom/src/loom/util:json",
-        "//loom/src/loom/util:stream",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",

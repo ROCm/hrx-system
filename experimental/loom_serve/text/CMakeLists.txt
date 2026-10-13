@@ -354,6 +354,44 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    response
+  HDRS
+    "response.h"
+  SRCS
+    "response.c"
+  DEPS
+    ::telemetry
+    iree::base
+    loom::serve::telemetry::record
+    loom::serve::transport::http::server
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    checkpoint_request
+  HDRS
+    "checkpoint_request.h"
+  SRCS
+    "checkpoint_request.c"
+  DEPS
+    ::checkpoint_registry
+    ::model
+    ::response
+    ::session
+    ::telemetry
+    iree::base
+    loom::serve::runtime::execution
+    loom::serve::telemetry::record
+    loom::serve::transport::http::request
+    loom::serve::transport::http::server
+  PUBLIC
+)
+
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
@@ -366,11 +404,13 @@ loom_cc_library(
     ::admission
     ::chat
     ::checkpoint_registry
+    ::checkpoint_request
     ::epoch
     ::heartbeat
     ::input
     ::model
     ::prefix_cache
+    ::response
     ::schedule
     ::session
     ::session_cache
@@ -393,8 +433,6 @@ loom_cc_library(
     loom::serve::telemetry::stream
     loom::serve::transport::http::request
     loom::serve::transport::http::server
-    loom::util::json
-    loom::util::stream
   PUBLIC
 )
 endif()

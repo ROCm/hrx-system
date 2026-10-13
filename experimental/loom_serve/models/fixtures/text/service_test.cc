@@ -89,6 +89,87 @@ TEST_P(SourceTextServiceTest, NonstreamingDisconnectRetiresAnAcceptedEpoch) {
   interface.set_observer(interface.self, {});
 }
 
+TEST_P(SourceTextServiceTest, CheckpointClaimSurvivesDisconnectAndStopping) {
+  for (const bool stopping : {false, true}) {
+    SCOPED_TRACE(stopping ? "stopping" : "disconnected");
+    const auto options = ServiceOptions();
+    loom_serve_text_service_t* value = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_service_create(model_, &options, nullptr,
+                                                  &value, allocator_));
+    auto destroy = [](loom_serve_text_service_t* service) {
+      loom_serve_text_service_destroy(service, IREE_STATUS_OK);
+    };
+    std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
+        value, destroy);
+    const auto interface = loom_serve_text_service_interface(value);
+    Observe(interface);
+    const auto idle = [&] {
+      return !interface.is_pending(interface.self) &&
+             !interface.is_active(interface.self) &&
+             !interface.snapshot(interface.self).queued_requests;
+    };
+    loom_serve_http_connection_t* connection = nullptr;
+    const int generation =
+        Send(Request(Message("user", "abxa"), 2), "X-Loom-Session: root\r\n");
+    ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, idle));
+    const auto first = Content(Read(generation));
+    ASSERT_EQ(first, Oracle::Complete("abxa", 2));
+
+    const int pin =
+        Send("", "X-Loom-Session: root\r\n", "/v1/checkpoints/base");
+    ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
+    // Pin ownership has been accepted. The owner has not consumed readiness,
+    // even if the device/proactor has already completed its work.
+    // Request-backed names must survive peer failure until the endpoint can be
+    // published.
+    ASSERT_TRUE(interface.is_pending(interface.self));
+    EXPECT_EQ(interface.snapshot(interface.self).active_requests, 1u);
+    char byte = 0;
+    EXPECT_EQ(recv(pin, &byte, 1, MSG_DONTWAIT), -1);
+    EXPECT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK);
+    if (!stopping) {
+      const linger reset = {1, 0};
+      ASSERT_EQ(setsockopt(pin, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+                0);
+      ASSERT_EQ(close(pin), 0);
+      ASSERT_TRUE(iree_notification_await(
+          loom_serve_http_server_notification(server_),
+          [](void* self) {
+            return loom_serve_http_connection_failed(
+                static_cast<loom_serve_http_connection_t*>(self));
+          },
+          connection, iree_infinite_timeout()));
+    }
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+        interface, idle, stopping ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING : 0));
+    EXPECT_EQ(interface.telemetry.counters->completed, 1u);
+    EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
+    EXPECT_EQ(interface.telemetry.counters->failed, 0u);
+    if (stopping) {
+      EXPECT_TRUE(Read(pin).empty());
+    } else {
+      const int resumed = Send(
+          Request(Message("user", "abxa") + "," + Message("assistant", first) +
+                      "," + Message("user", "b"),
+                  2),
+          "X-Loom-Session: fork\r\nX-Loom-Checkpoint: base\r\n");
+      ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
+      ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, idle));
+      const auto response = Read(resumed);
+      EXPECT_EQ(Content(response), Oracle::Complete("abxa" + first + "#b", 2));
+      EXPECT_NE(response.find(R"("cached_tokens":5)"), std::string::npos);
+      const int released = Send("", "", "/v1/checkpoints/base", "DELETE");
+      ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
+      ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, idle));
+      EXPECT_EQ(Read(released).find("HTTP/1.1 200"), 0u);
+      EXPECT_EQ(interface.telemetry.counters->completed, 3u);
+      EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
+    }
+    interface.set_observer(interface.self, {});
+  }
+}
+
 TEST_P(SourceTextServiceTest,
        PreparedInputSurvivesScratchReuseAndHistoryEviction) {
   const auto* policy = loom_serve_text_model_chat_policy(model_);

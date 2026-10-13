@@ -18,6 +18,12 @@
 extern "C" {
 #endif
 
+// Whether a retained-session identifier contains at most 64 ASCII letters,
+// digits, underscores, hyphens or periods. Empty names denote untagged
+// requests; operations requiring a named session check nonemptiness at their
+// boundary.
+bool loom_serve_text_session_name_valid(iree_string_view_t name);
+
 typedef enum loom_serve_text_request_phase_e {
   LOOM_SERVE_TEXT_REQUEST_PREFILL,
   LOOM_SERVE_TEXT_REQUEST_DECODE,
