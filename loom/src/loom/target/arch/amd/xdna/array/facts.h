@@ -342,26 +342,14 @@ iree_status_t loom_xdna_array_resolve_load_memory(
     uint32_t address, uint32_t byte_length,
     loom_xdna_memory_placement_t* out_placement);
 
-// Forms a tile-relative load address for canonical physical storage.
-//
-// |owner_offset| is relative to the owner's program or local-data allocation,
-// matching loom_xdna_memory_placement_t. The owner must be visible through one
-// of the accessor's architectural load windows.
-iree_status_t loom_xdna_array_form_load_address(
+// Returns the immutable data-memory aperture mapping |owner| into |accessor|,
+// or NULL when the owner is not directly visible. Coordinates are already
+// admitted by the selecting owner. The result carries both load-address and
+// lock-selector bases; consumers retain it instead of selecting the same
+// relationship again. Storage extent and capacity are admitted separately.
+const loom_xdna_address_window_t* loom_xdna_array_load_window(
     const loom_xdna_array_family_t* family,
-    loom_xdna_tile_coordinate_t accessor, loom_xdna_memory_space_t memory_space,
-    loom_xdna_tile_coordinate_t owner, uint32_t owner_offset,
-    uint32_t byte_length, uint32_t* out_address);
-
-// Forms an accessor-relative lock selector for a physical owner lock.
-//
-// The owner lock ordinal is relative to its physical tile. The returned
-// selector is relative to the accessor's architectural lock namespace and can
-// be encoded directly in an accessor core instruction.
-iree_status_t loom_xdna_array_form_lock_selector(
-    const loom_xdna_array_family_t* family,
-    loom_xdna_tile_coordinate_t accessor, loom_xdna_tile_coordinate_t owner,
-    uint16_t owner_lock_ordinal, uint16_t* out_selector);
+    loom_xdna_tile_coordinate_t accessor, loom_xdna_tile_coordinate_t owner);
 
 #ifdef __cplusplus
 }  // extern "C"

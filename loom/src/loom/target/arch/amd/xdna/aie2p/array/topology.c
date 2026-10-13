@@ -47,28 +47,6 @@ static const loom_op_t* loom_aie2p_array_topology_defining_op(
   return loom_value_def_op(loom_module_value(topology->module, value_id));
 }
 
-// Returns the generated receiver-relative base for adjacent owner memory.
-// Family validation guarantees one complete window for every visible compute
-// owner. Topology retains the result with its transport decision so physical
-// planning never rediscovers the relationship.
-static uint32_t loom_aie2p_array_topology_neighbor_load_address_base(
-    const loom_xdna_array_family_t* family,
-    loom_xdna_tile_coordinate_t receiver, loom_xdna_tile_coordinate_t owner) {
-  const loom_xdna_tile_facts_t* receiver_facts =
-      loom_xdna_array_tile_facts(family, receiver);
-  for (uint8_t i = 0; i < receiver_facts->memory.window_count; ++i) {
-    const loom_xdna_address_window_t* window =
-        &family->address_windows[receiver_facts->memory.window_start + i];
-    if (window->owner_kind == LOOM_XDNA_TILE_KIND_COMPUTE &&
-        (int32_t)receiver.column + window->owner_column_delta == owner.column &&
-        (int32_t)receiver.row + window->owner_row_delta == owner.row) {
-      return window->base;
-    }
-  }
-  IREE_ASSERT_UNREACHABLE("adjacent compute owner has a generated load window");
-  return 0;
-}
-
 // Retains exact physical ownership after transport and canonical multicast
 // selection. Worker sender ownership crosses external and routed branches, so
 // it is classified once here instead of independently by later consumers.
@@ -1096,10 +1074,9 @@ iree_status_t loom_aie2p_array_topology_validate(
           (row_delta == -1 || row_delta == 1);
       if (workers_are_vertical_neighbors) {
         channel->transport = LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_NEIGHBOR_MEMORY;
-        channel->neighbor_receiver_load_address_base =
-            loom_aie2p_array_topology_neighbor_load_address_base(
-                topology->plan->family, receiver_worker->coordinate,
-                sender_worker->coordinate);
+        channel->neighbor_receiver_window = loom_xdna_array_load_window(
+            topology->plan->family, receiver_worker->coordinate,
+            sender_worker->coordinate);
       } else {
         channel->transport = LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_ROUTED_DMA;
       }

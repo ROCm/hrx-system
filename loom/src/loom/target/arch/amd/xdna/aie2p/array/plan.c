@@ -572,7 +572,7 @@ static void loom_aie2p_array_extract_channel(
   channel->record_count =
       (uint32_t)loom_aie2p_array_constant(builder, loom_op_operands(op)[3]);
   channel->record_byte_length = 0;
-  channel->neighbor_receiver_load_address_base = 0;
+  channel->neighbor_receiver_window = NULL;
   channel->resource_flags = 0;
   ++builder->channel_cursor;
 }
@@ -775,7 +775,7 @@ static bool loom_aie2p_array_try_compute_endpoint(
 // visible to |worker_coordinate|. The worker's own tile remains first. Visible
 // worker-free tiles precede occupied tiles so resident workers retain their
 // local DMA capacity. A selected proposal retains every cursor transition and
-// load-window base needed by infallible commit.
+// load-window facts needed by infallible commit.
 static bool loom_aie2p_array_select_compute_endpoint(
     loom_aie2p_array_plan_builder_t* builder,
     loom_xdna_tile_coordinate_t worker_coordinate,
@@ -787,8 +787,8 @@ static bool loom_aie2p_array_select_compute_endpoint(
       loom_aie2p_array_tile_state(builder, worker_coordinate);
   loom_aie2p_array_compute_endpoint_request_t request = {
       .coordinate = worker_coordinate,
-      .load_address_base =
-          worker_state->resources.facts->memory.local_load_base,
+      .load_window = loom_xdna_array_load_window(
+          builder->family, worker_coordinate, worker_coordinate),
       .record_count = record_count,
       .record_byte_length = record_byte_length,
       .direction = direction,
@@ -822,7 +822,7 @@ static bool loom_aie2p_array_select_compute_endpoint(
           .column = (uint16_t)candidate_column,
           .row = (uint16_t)candidate_row,
       };
-      request.load_address_base = window->base;
+      request.load_window = window;
       const loom_aie2p_array_tile_state_t* candidate_state =
           loom_aie2p_array_tile_state(builder, request.coordinate);
       const bool candidate_has_worker =
@@ -1489,7 +1489,7 @@ static iree_status_t loom_aie2p_array_plan_fold_states(
 static void loom_aie2p_array_bind_worker_port(
     loom_aie2p_array_plan_builder_t* builder,
     const loom_aie2p_array_endpoint_t* endpoint, uint32_t channel_index,
-    uint32_t credit_lock_index) {
+    uint32_t credit_lock_index, const loom_xdna_address_window_t* load_window) {
   if (endpoint->owner_kind != LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER) {
     return;
   }
@@ -1507,7 +1507,13 @@ static void loom_aie2p_array_bind_worker_port(
       .port = endpoint->port,
       .direction = endpoint->direction,
       .channel_index = channel_index,
-      .credit_lock_index = credit_lock_index,
+      .lock_selectors =
+          {
+              load_window->lock_selector_base +
+                  builder->locks[credit_lock_index].lock_id,
+              load_window->lock_selector_base +
+                  builder->locks[credit_lock_index + 1].lock_id,
+          },
       .resident_state_ordinal = endpoint->worker_resource_ordinal,
   };
 }
@@ -1587,7 +1593,7 @@ static void loom_aie2p_array_plan_channel_slots(
         channel_slot->sender_storage.owner = sender_proposal->coordinate;
         channel_slot->sender_storage.owner_offset = owner_offset;
         channel_slot->sender_storage.load_address =
-            sender_proposal->load_address_base + owner_offset;
+            sender_proposal->load_window->base + owner_offset;
       }
     }
     if (receiver->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER) {
@@ -1605,8 +1611,9 @@ static void loom_aie2p_array_plan_channel_slots(
                          : receiver_proposal->coordinate;
       channel_slot->receiver_storage.owner_offset = owner_offset;
       channel_slot->receiver_storage.load_address =
-          (aliases_sender ? channel->neighbor_receiver_load_address_base
-                          : receiver_proposal->load_address_base) +
+          (aliases_sender ? channel->neighbor_receiver_window
+                          : receiver_proposal->load_window)
+              ->base +
           owner_offset;
     }
   }
@@ -1951,7 +1958,8 @@ static iree_status_t loom_aie2p_array_plan_external_channel(
   }
   if (owns_compute_dma) {
     loom_aie2p_array_bind_worker_port(builder, worker_endpoint, channel_index,
-                                      committed_compute.credit_lock_index);
+                                      committed_compute.credit_lock_index,
+                                      compute_proposal.ring.load_window);
   }
   return iree_ok_status();
 }
@@ -1969,7 +1977,7 @@ static iree_status_t loom_aie2p_array_plan_neighbor_channel(
   const loom_aie2p_array_channel_resource_failure_t failure =
       loom_aie2p_array_channel_resources_propose_neighbor(
           &owner_state->resources, owner,
-          owner_state->resources.facts->memory.local_load_base,
+          loom_xdna_array_load_window(builder->family, owner, owner),
           (uint8_t)channel->capacity, channel->record_byte_length, &proposal);
   if (failure != LOOM_AIE2P_ARRAY_CHANNEL_RESOURCE_FAILURE_NONE) {
     const iree_string_view_t reason =
@@ -1989,9 +1997,10 @@ static iree_status_t loom_aie2p_array_plan_neighbor_channel(
                                       &proposal,
                                       /*receiver_proposal=*/NULL);
   loom_aie2p_array_bind_worker_port(builder, sender, channel_index,
-                                    credit_lock_index);
+                                    credit_lock_index, proposal.load_window);
   loom_aie2p_array_bind_worker_port(builder, receiver, channel_index,
-                                    credit_lock_index);
+                                    credit_lock_index,
+                                    channel->neighbor_receiver_window);
   return iree_ok_status();
 }
 
@@ -2076,10 +2085,12 @@ static iree_status_t loom_aie2p_array_plan_routed_channel(
   }
   if (owns_sender_dma) {
     loom_aie2p_array_bind_worker_port(builder, sender, channel_index,
-                                      committed_sender.credit_lock_index);
+                                      committed_sender.credit_lock_index,
+                                      sender_proposal.ring.load_window);
   }
   loom_aie2p_array_bind_worker_port(builder, receiver, channel_index,
-                                    committed_receiver.credit_lock_index);
+                                    committed_receiver.credit_lock_index,
+                                    receiver_proposal.ring.load_window);
   return iree_ok_status();
 }
 

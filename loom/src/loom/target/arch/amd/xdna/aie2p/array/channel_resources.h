@@ -68,8 +68,8 @@ typedef enum loom_aie2p_array_channel_resource_failure_e {
 typedef struct loom_aie2p_array_ring_resource_proposal_t {
   // Physical tile owning the ring and lock pair.
   loom_xdna_tile_coordinate_t coordinate;
-  // Tile-relative load base selected for the endpoint's worker.
-  uint32_t load_address_base;
+  // Admitted owner aperture supplying the endpoint's address and lock bases.
+  const loom_xdna_address_window_t* load_window;
   // Byte offset selected for each ring record in allocation order.
   uint32_t owner_offsets[LOOM_AIE2P_ARRAY_CHANNEL_PROPOSAL_MAX_RECORD_COUNT];
   // Exact bank cursors following all ring allocations.
@@ -96,8 +96,8 @@ enum loom_aie2p_array_compute_endpoint_request_flag_bits_e {
 typedef struct loom_aie2p_array_compute_endpoint_request_t {
   // Physical compute tile considered for the endpoint.
   loom_xdna_tile_coordinate_t coordinate;
-  // Tile-relative load base visible to the endpoint's worker.
-  uint32_t load_address_base;
+  // Admitted owner aperture visible to the endpoint's worker.
+  const loom_xdna_address_window_t* load_window;
   // Number of records and DMA buffer descriptors in the ring.
   uint8_t record_count;
   // Byte length of each ring record.
@@ -151,8 +151,9 @@ typedef struct loom_aie2p_array_shim_endpoint_proposal_t {
 loom_aie2p_array_channel_resource_failure_t
 loom_aie2p_array_channel_resources_propose_neighbor(
     const loom_aie2p_array_tile_resources_t* resources,
-    loom_xdna_tile_coordinate_t coordinate, uint32_t load_address_base,
-    uint8_t record_count, uint32_t record_byte_length,
+    loom_xdna_tile_coordinate_t coordinate,
+    const loom_xdna_address_window_t* load_window, uint8_t record_count,
+    uint32_t record_byte_length,
     loom_aie2p_array_ring_resource_proposal_t* out_proposal);
 
 // Selects one compute DMA endpoint without mutating |resources|. When

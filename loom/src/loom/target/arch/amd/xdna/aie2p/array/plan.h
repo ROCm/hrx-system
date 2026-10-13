@@ -198,8 +198,8 @@ typedef struct loom_aie2p_array_channel_t {
   uint32_t encoded_dma_record_length;
   // Physical transport selected by planning.
   loom_aie2p_array_channel_transport_t transport;
-  // Receiver-relative load base retained for neighbor-memory transport.
-  uint32_t neighbor_receiver_load_address_base;
+  // Receiver-relative aperture retained for neighbor-memory transport, or NULL.
+  const loom_xdna_address_window_t* neighbor_receiver_window;
   // Exact physical resources owned after transport and multicast selection.
   loom_aie2p_array_channel_resource_flags_t resource_flags;
 } loom_aie2p_array_channel_t;
@@ -307,8 +307,8 @@ typedef struct loom_aie2p_array_worker_port_plan_t {
   loom_aie2p_array_endpoint_direction_t direction;
   // Index of the logical channel bound to the port.
   uint32_t channel_index;
-  // First row of the credit/ready lock pair used by the resident worker.
-  uint32_t credit_lock_index;
+  // Worker-visible credit and ready selectors in lock-plan order.
+  uint16_t lock_selectors[2];
   // Worker-local resident state ordinal carrying the ring position, or
   // UINT32_MAX when neither the leaf nor generated code consumes its address.
   uint32_t resident_state_ordinal;

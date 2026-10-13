@@ -595,9 +595,13 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
       } else if (ingress) {
         selected->completion_lock = local_tile->next_lock++;
         if (!configuration) {
-          IREE_RETURN_IF_ERROR(loom_xdna_array_form_lock_selector(
-              context->family, worker->tile->coordinate, local_tile->coordinate,
-              selected->completion_lock, &selected->completion_selector));
+          const uint32_t channel_index =
+              (uint32_t)(borrow.channel - context->channels);
+          const loom_aie2p_native_channel_access_t* access =
+              &worker->channels
+                   .accesses[worker->channels.indices[channel_index]];
+          selected->completion_selector =
+              access->window->lock_selector_base + selected->completion_lock;
         }
         selected->local_words[5] |=
             loom_xdna_register_field_encode_admitted(
@@ -636,10 +640,9 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
         IREE_RETURN_IF_ERROR(loom_source_storage_packing_reserve(
             context->inventory.pools[worker->tile->pool_index].packing, 8, 8,
             NULL, 0, &selected->base_storage_offset));
-        IREE_RETURN_IF_ERROR(loom_xdna_array_form_load_address(
-            context->family, worker->tile->coordinate,
-            LOOM_XDNA_MEMORY_SPACE_DATA, worker->tile->coordinate,
-            selected->base_storage_offset, 8, &selected->base_load_address));
+        selected->base_load_address =
+            worker->tile->facts->memory.local_load_base +
+            (uint32_t)selected->base_storage_offset;
       }
       loom_aie2p_native_binding_t* binding =
           &context->bindings[selected->binding];

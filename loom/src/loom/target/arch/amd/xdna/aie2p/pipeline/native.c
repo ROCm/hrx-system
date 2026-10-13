@@ -148,7 +148,9 @@ static iree_status_t loom_aie2p_native_select_channels(
 static iree_status_t loom_aie2p_native_select_channel_accesses(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,
-    const loom_pipeline_worker_t* source, loom_aie2p_native_worker_t* worker) {
+    const loom_pipeline_worker_t* source, loom_aie2p_native_worker_t* worker,
+    bool* out_valid) {
+  *out_valid = false;
   iree_arena_allocator_t* arena = context->pass->arena;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, realization->resources.channel_count,
@@ -172,29 +174,32 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
     access->channel = channel;
     const loom_xdna_tile_coordinate_t owner =
         context->pool_tiles[channel->pool_index]->coordinate;
-    IREE_RETURN_IF_ERROR(loom_xdna_array_form_load_address(
-        context->family, worker->tile->coordinate, LOOM_XDNA_MEMORY_SPACE_DATA,
-        owner, channel->byte_offset,
-        channel->byte_stride * (channel->source->capacity - 1) +
-            channel->record_byte_length,
-        &access->address));
+    access->window = loom_xdna_array_load_window(
+        context->family, worker->tile->coordinate, owner);
+    if (!access->window) {
+      return loom_aie2p_native_reject(
+          context, source->source->declaration,
+          IREE_SV("channel storage directly visible from its consuming core"));
+    }
+    access->address = access->window->base + channel->byte_offset;
     const uint64_t alignment_bits = access->address | channel->byte_stride;
     access->alignment =
         alignment_bits ? alignment_bits & (~alignment_bits + 1) : 64;
-    IREE_RETURN_IF_ERROR(loom_xdna_array_form_lock_selector(
-        context->family, worker->tile->coordinate, owner, channel->free_lock,
-        &access->locks.free));
-    IREE_RETURN_IF_ERROR(loom_xdna_array_form_lock_selector(
-        context->family, worker->tile->coordinate, owner, channel->ready_lock,
-        &access->locks.ready));
+    access->locks.free =
+        access->window->lock_selector_base + channel->free_lock;
+    access->locks.ready =
+        access->window->lock_selector_base + channel->ready_lock;
   }
+  *out_valid = true;
   return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_native_select_buffer_accesses(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,
-    const loom_pipeline_worker_t* source, loom_aie2p_native_worker_t* worker) {
+    const loom_pipeline_worker_t* source, loom_aie2p_native_worker_t* worker,
+    bool* out_valid) {
+  *out_valid = false;
   uint16_t argument_count = 0;
   const loom_value_id_t* arguments =
       loom_func_like_arg_ids(source->function, &argument_count);
@@ -234,17 +239,22 @@ static iree_status_t loom_aie2p_native_select_buffer_accesses(
           IREE_SV("an invocation-owned finite local allocation for each core "
                   "buffer capture"));
     }
-    const loom_xdna_tile_coordinate_t owner =
-        context->pool_tiles[allocation->pool_index]->coordinate;
+    const loom_aie2p_native_tile_t* owner =
+        context->pool_tiles[allocation->pool_index];
+    const loom_xdna_address_window_t* window = loom_xdna_array_load_window(
+        context->family, worker->tile->coordinate, owner->coordinate);
+    if (!window) {
+      return loom_aie2p_native_reject(
+          context, source->source->call,
+          IREE_SV("captured storage directly visible from its consuming core"));
+    }
     loom_aie2p_native_buffer_access_t* access =
         &worker->buffers.accesses[worker->buffers.count++];
     access->argument = argument;
     access->alignment = allocation->byte_alignment;
-    IREE_RETURN_IF_ERROR(loom_xdna_array_form_load_address(
-        context->family, worker->tile->coordinate, LOOM_XDNA_MEMORY_SPACE_DATA,
-        owner, (uint32_t)allocation->byte_offset,
-        (uint32_t)allocation->byte_length, &access->address));
+    access->address = window->base + (uint32_t)allocation->byte_offset;
   }
+  *out_valid = true;
   return iree_ok_status();
 }
 
@@ -550,13 +560,21 @@ static iree_status_t loom_aie2p_native_select(
     }
     tile->has_worker = true;
     worker->completion_lock = tile->next_lock++;
-    IREE_RETURN_IF_ERROR(loom_xdna_array_form_lock_selector(
-        context->family, tile->coordinate, tile->coordinate,
-        worker->completion_lock, &worker->completion_selector));
+    const loom_xdna_address_window_t* self_window = loom_xdna_array_load_window(
+        context->family, tile->coordinate, tile->coordinate);
+    worker->completion_selector =
+        self_window->lock_selector_base + worker->completion_lock;
+    bool valid = false;
     IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channel_accesses(
-        context, realization, source, worker));
+        context, realization, source, worker, &valid));
+    if (!valid) {
+      return iree_ok_status();
+    }
     IREE_RETURN_IF_ERROR(loom_aie2p_native_select_buffer_accesses(
-        context, realization, source, worker));
+        context, realization, source, worker, &valid));
+    if (!valid) {
+      return iree_ok_status();
+    }
   }
   IREE_RETURN_IF_ERROR(
       loom_aie2p_native_select_transfers(context, realization, out_valid));

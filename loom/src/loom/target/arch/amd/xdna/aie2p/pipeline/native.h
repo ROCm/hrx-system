@@ -52,6 +52,8 @@ typedef struct loom_aie2p_native_channel_t {
 typedef struct loom_aie2p_native_channel_access_t {
   // Protocol instance whose storage is addressed through this access window.
   const loom_aie2p_native_channel_t* channel;
+  // Admitted owner aperture shared by payload addresses and lock selectors.
+  const loom_xdna_address_window_t* window;
   // First record's load address as seen by this worker.
   uint32_t address;
   // Minimum alignment of every record address.

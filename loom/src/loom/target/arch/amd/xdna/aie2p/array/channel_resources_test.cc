@@ -33,7 +33,8 @@ loom_aie2p_array_compute_endpoint_request_t MakeRequest(
     loom_xdna_dma_direction_t direction) {
   loom_aie2p_array_compute_endpoint_request_t request = {
       .coordinate = {0, 2},
-      .load_address_base = ComputeFacts()->memory.local_load_base,
+      .load_window = loom_xdna_array_load_window(loom_xdna_npu2_array_family(),
+                                                 {0, 2}, {0, 2}),
       .record_count = 2,
       .record_byte_length = 64,
       .direction = direction,
@@ -62,6 +63,7 @@ TEST(Aie2pArrayChannelResourcesTest, ComputeProposalRetainsExactTransition) {
   EXPECT_EQ(proposal.dma_channel, 0u);
   EXPECT_EQ(proposal.buffer_descriptor_start, 0u);
   EXPECT_EQ(proposal.buffer_descriptor_count, 2u);
+  EXPECT_EQ(proposal.ring.load_window, request.load_window);
   EXPECT_EQ(proposal.ring.owner_offsets[0], 0u);
   EXPECT_EQ(proposal.ring.owner_offsets[1], 16u * 1024u);
   EXPECT_EQ(proposal.ring.credit_lock, 0u);
@@ -144,9 +146,11 @@ TEST(Aie2pArrayChannelResourcesTest, NeighborReportsOwningResource) {
   uint32_t bank_cursors[4] = {0};
   loom_aie2p_array_tile_resources_t resources = MakeResources(bank_cursors);
   loom_aie2p_array_ring_resource_proposal_t proposal = {};
+  const loom_xdna_address_window_t* window = loom_xdna_array_load_window(
+      loom_xdna_npu2_array_family(), {0, 2}, {0, 2});
 
   EXPECT_EQ(loom_aie2p_array_channel_resources_propose_neighbor(
-                &resources, {0, 2}, ComputeFacts()->memory.local_load_base,
+                &resources, {0, 2}, window,
                 /*record_count=*/2,
                 /*record_byte_length=*/ComputeFacts()->memory.local_capacity,
                 &proposal),
@@ -158,13 +162,31 @@ TEST(Aie2pArrayChannelResourcesTest, NeighborReportsOwningResource) {
 
   resources.next_lock = ComputeFacts()->lock_count - 1u;
   EXPECT_EQ(loom_aie2p_array_channel_resources_propose_neighbor(
-                &resources, {0, 2}, ComputeFacts()->memory.local_load_base,
+                &resources, {0, 2}, window,
                 /*record_count=*/1, /*record_byte_length=*/64, &proposal),
             LOOM_AIE2P_ARRAY_CHANNEL_RESOURCE_FAILURE_LOCK_PAIR);
   EXPECT_EQ(resources.next_lock, ComputeFacts()->lock_count - 1u);
   for (uint32_t cursor : bank_cursors) {
     EXPECT_EQ(cursor, 0u);
   }
+}
+
+TEST(Aie2pArrayChannelResourcesTest, ComputeProposalRetainsNeighborWindow) {
+  uint32_t bank_cursors[4] = {0};
+  loom_aie2p_array_tile_resources_t resources = MakeResources(bank_cursors);
+  loom_aie2p_array_compute_endpoint_request_t request =
+      MakeRequest(LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY);
+  request.coordinate = {0, 3};
+  request.load_window = loom_xdna_array_load_window(
+      loom_xdna_npu2_array_family(), {1, 3}, request.coordinate);
+  loom_aie2p_array_compute_endpoint_proposal_t proposal = {};
+
+  ASSERT_EQ(loom_aie2p_array_channel_resources_propose_compute(
+                &resources, /*predecessor=*/nullptr, &request, &proposal),
+            LOOM_AIE2P_ARRAY_CHANNEL_RESOURCE_FAILURE_NONE);
+  EXPECT_EQ(proposal.ring.load_window, request.load_window);
+  EXPECT_EQ(proposal.ring.load_window->base, 0x50000u);
+  EXPECT_EQ(proposal.ring.load_window->lock_selector_base, 16u);
 }
 
 TEST(Aie2pArrayChannelResourcesTest, ShimProposalRetainsExactTransition) {

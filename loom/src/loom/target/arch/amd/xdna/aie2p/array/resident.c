@@ -888,18 +888,12 @@ static iree_status_t loom_aie2p_array_resident_build_lock_op(
 
 static iree_status_t loom_aie2p_array_resident_build_port_lock(
     loom_aie2p_array_resident_builder_t* builder, loom_builder_t* ir_builder,
-    uint32_t worker_index, const loom_aie2p_array_worker_port_plan_t* port,
+    const loom_aie2p_array_worker_port_plan_t* port,
     loom_aie2p_array_lock_role_t role, uint32_t descriptor_ordinal,
     loom_value_id_t delta, loom_location_id_t location) {
-  const loom_aie2p_array_lock_plan_t* lock =
-      &builder->plan->locks[port->credit_lock_index + role];
-  uint16_t selector = 0;
-  IREE_RETURN_IF_ERROR(loom_xdna_array_form_lock_selector(
-      builder->plan->family,
-      builder->plan->worker_plans[worker_index].coordinate, lock->coordinate,
-      lock->lock_id, &selector));
   return loom_aie2p_array_resident_build_lock_op(
-      builder, ir_builder, descriptor_ordinal, delta, selector, location);
+      builder, ir_builder, descriptor_ordinal, delta,
+      port->lock_selectors[role], location);
 }
 
 static iree_status_t loom_aie2p_array_resident_build_acquires(
@@ -930,7 +924,7 @@ static iree_status_t loom_aie2p_array_resident_build_acquires(
               ? LOOM_AIE2P_ARRAY_LOCK_ROLE_READY
               : LOOM_AIE2P_ARRAY_LOCK_ROLE_CREDIT;
       IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_port_lock(
-          builder, ir_builder, worker_index, port, role,
+          builder, ir_builder, port, role,
           AIE2P_CORE_DESCRIPTOR_REF_LOCK_ACQUIRE_IMMEDIATE, delta, location));
     }
   }
@@ -965,7 +959,7 @@ static iree_status_t loom_aie2p_array_resident_build_releases(
               ? LOOM_AIE2P_ARRAY_LOCK_ROLE_READY
               : LOOM_AIE2P_ARRAY_LOCK_ROLE_CREDIT;
       IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_port_lock(
-          builder, ir_builder, worker_index, port, role,
+          builder, ir_builder, port, role,
           AIE2P_CORE_DESCRIPTOR_REF_LOCK_RELEASE_IMMEDIATE, delta, location));
     }
   }

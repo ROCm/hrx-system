@@ -212,3 +212,118 @@ pipeline.def<kernel> public retain target(@device) @selected_retirement_order() 
     channel.release %remaining : read<tile<1xi32>>
   }
 }
+
+// ====
+
+aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
+
+// Compute tiles have no east-facing load window.
+pipeline.def<kernel> public retain target(@device) @captured_east_buffer() run() {
+  %memory = pipeline.memory<workgroup>[1, 2] : pool
+  %bytes = index.constant 64 : offset
+  %origin = index.constant 0 : offset
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  // ERROR@+1: XDNA/051 {requirement="captured storage directly visible from its consuming core"}
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %payload = buffer.view %storage[%origin] : buffer -> view<16xi32>
+    %values = vector.constant 42 : vector<16xi32>
+    vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+  }
+}
+
+// ====
+
+aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
+
+// A west-facing load window reaches only the immediate neighbor.
+pipeline.def<kernel> public retain target(@device) @captured_distant_buffer() run() {
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %bytes = index.constant 64 : offset
+  %origin = index.constant 0 : offset
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  // ERROR@+1: XDNA/051 {requirement="captured storage directly visible from its consuming core"}
+  pipeline.strand workers([2, 2], [1, 1], [1, 1]) {
+    %payload = buffer.view %storage[%origin] : buffer -> view<16xi32>
+    %values = vector.constant 42 : vector<16xi32>
+    vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+  }
+}
+
+// ====
+
+aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
+
+pipeline.def<kernel> public retain target(@device) @east_channel_storage() run() {
+  %memory = pipeline.memory<workgroup>[1, 2] : pool
+  %bytes = index.constant 64 : offset
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x16xi32>
+  %channel = channel.bind<fifo> %slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  // ERROR@+1: XDNA/051 {requirement="channel storage directly visible from its consuming core"}
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %write, %payload = channel.reserve %channel : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %values = vector.constant 42 : vector<16xi32>
+    vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+    channel.publish %write : write<tile<16xi32>>
+  }
+}
+
+// ====
+
+aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
+
+// The selected aperture is valid; final pool admission owns its byte limit.
+// ERROR@+1: LOWERING/067 {required_bytes="65540", capacity_bytes="65536"}
+pipeline.def<kernel> public retain target(@device) @captured_buffer_capacity() run() {
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %bytes = index.constant 65540 : offset
+  %origin = index.constant 0 : offset
+  %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %payload = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    %value = scalar.constant 42 : i32
+    view.store %value, %payload[0] : i32, view<1xi32>
+  }
+}
+
+// ====
+
+aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
+
+// Authored storage exactly fills the tile. Dynamic input and output addresses
+// add two eight-byte reservations before the single final capacity admission.
+// ERROR@+1: LOWERING/067 {required_bytes="65552", capacity_bytes="65536"}
+pipeline.def<kernel> public retain target(@device) @transfer_scratch_capacity() run(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 4} : buffer, buffer
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %bytes = index.constant 65536 : offset
+  %origin = index.constant 0 : offset
+  %slots = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+  %records = buffer.view %storage[%origin] : buffer -> view<1x1xi32>
+  %channel = channel.bind<fifo> %records, %slots : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %begin = index.constant 0 : index
+    %record_count = index.constant 3 : index
+    %step = index.constant 1 : index
+    %word_bytes = index.constant 4 : index
+    scf.for %record_index = [%begin to %record_count step %step] {
+      %byte_index = index.mul %record_index, %word_bytes : index
+      %offset = index.cast %byte_index : index to offset
+      %external_input = buffer.view %source[%offset] : buffer -> view<1xi32>
+      %write, %record = channel.reserve %channel : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+      %ingress = kernel.async.copy %external_input to %record {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<1xi32> to view<1xi32> -> kernel.async.token
+      %incoming = kernel.async.group %ingress : kernel.async.token -> kernel.async.group
+      kernel.async.wait %incoming {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<1xi32>>
+      %read, %ready = channel.acquire %channel : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+      %external_output = buffer.view %destination[%offset] : buffer -> view<1xi32>
+      %egress = kernel.async.copy %ready to %external_output {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<1xi32> to view<1xi32> -> kernel.async.token
+      %outgoing = kernel.async.group %egress : kernel.async.token -> kernel.async.group
+      kernel.async.wait %outgoing {newer_groups = 0} : kernel.async.group
+      channel.release %read : read<tile<1xi32>>
+    }
+  }
+}

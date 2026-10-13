@@ -2,64 +2,87 @@
 
 aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
 
-// A core addresses the complete allocation through a neighboring tile's load
-// window while the owning tile retains the storage reservation.
+// One core reaches self, south, west, and north allocations through distinct
+// load windows while each physical owner retains its storage reservation.
 pipeline.def<kernel> public retain target(@device) @local_capture() run() {
-  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %self_memory = pipeline.memory<workgroup>[1, 3] : pool
+  %south_memory = pipeline.memory<workgroup>[1, 2] : pool
+  %west_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %north_memory = pipeline.memory<workgroup>[1, 4] : pool
   %bytes = index.constant 64 : offset
   %origin = index.constant 0 : offset
-  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
-  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
-    %view = buffer.view %storage[%origin] : buffer -> view<16xi32>
+  %self_storage = buffer.alloca<workgroup> pool(%self_memory) align(64) %bytes : buffer
+  %south_storage = buffer.alloca<workgroup> pool(%south_memory) align(64) %bytes : buffer
+  %west_storage = buffer.alloca<workgroup> pool(%west_memory) align(64) %bytes : buffer
+  %north_storage = buffer.alloca<workgroup> pool(%north_memory) align(64) %bytes : buffer
+  pipeline.strand workers([1, 3], [1, 1], [1, 1]) {
+    %self_view = buffer.view %self_storage[%origin] : buffer -> view<16xi32>
+    %south_view = buffer.view %south_storage[%origin] : buffer -> view<16xi32>
+    %west_view = buffer.view %west_storage[%origin] : buffer -> view<16xi32>
+    %north_view = buffer.view %north_storage[%origin] : buffer -> view<16xi32>
     %value = vector.constant 42 : vector<16xi32>
-    vector.store %value, %view[0] : vector<16xi32>, view<16xi32>
+    vector.store %value, %self_view[0] : vector<16xi32>, view<16xi32>
+    vector.store %value, %south_view[0] : vector<16xi32>, view<16xi32>
+    vector.store %value, %west_view[0] : vector<16xi32>, view<16xi32>
+    vector.store %value, %north_view[0] : vector<16xi32>, view<16xi32>
   }
 }
 
 // ----
 low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_0() asm {
-  %view = mov.local-address 262144
-  %34 = mov.short 42
-  %value = vbcst.32 %34
-  vst.512.i32x16 %value, %view, 0
-  %12 = mov.i32 1
-  rel %12, 48
+  %west_view = mov.local-address 327680
+  %self_view = mov.local-address 458752
+  %north_view = mov.local-address 393216
+  %south_view = mov.local-address 262144
+  %69 = mov.short 42
+  %value = vbcst.32 %69
+  vst.512.i32x16 %value, %self_view, 0
+  vst.512.i32x16 %value, %south_view, 0
+  vst.512.i32x16 %value, %west_view, 0
+  vst.512.i32x16 %value, %north_view, 0
+  %30 = mov.i32 1
+  rel %30, 48
   low.br ^_bb1
 ^_bb1:
-  %13 = mov.ss
+  %31 = mov.ss
   low.br ^_bb1
 }
 
-low.func.def target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_2) @__aie2p_worker_helper_3() asm {
-  %20 = constant 3350528 : reg<aie2p.config.scalar : i64>
-  %21 = constant 3 : reg<aie2p.config.scalar : i64>
-  %22 = constant 2 : reg<aie2p.config.scalar : i64>
-  write.mask32 %20, %21, %22
-  %23 = constant 0 : reg<aie2p.config.scalar : i64>
-  program.load %23, %21, @__pipeline_worker_0
-  %24 = constant 64 : reg<aie2p.config.scalar : i64>
-  data.reserve %23, %22, %23, %24
+low.func.def target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_5) @__aie2p_worker_helper_6() asm {
+  %50 = constant 36904960 : reg<aie2p.config.scalar : i64>
+  %51 = constant 3 : reg<aie2p.config.scalar : i64>
+  %52 = constant 2 : reg<aie2p.config.scalar : i64>
+  write.mask32 %50, %51, %52
+  %53 = constant 1 : reg<aie2p.config.scalar : i64>
+  program.load %53, %51, @__pipeline_worker_0
+  %54 = constant 0 : reg<aie2p.config.scalar : i64>
+  %55 = constant 64 : reg<aie2p.config.scalar : i64>
+  data.reserve %54, %51, %54, %55
+  data.reserve %53, %52, %54, %55
+  data.reserve %53, %51, %54, %55
+  %56 = constant 4 : reg<aie2p.config.scalar : i64>
+  data.reserve %53, %56, %54, %55
   return
 }
 
-low.func.def target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_2) @__aie2p_worker_helper_4() asm {
-  %25 = constant 3272704 : reg<aie2p.config.scalar : i64>
-  %26 = constant 0 : reg<aie2p.config.scalar : i64>
-  write32 %25, %26
-  %27 = constant 3350528 : reg<aie2p.config.scalar : i64>
-  %28 = constant 2 : reg<aie2p.config.scalar : i64>
-  write.mask32 %27, %28, %26
-  %29 = constant 1 : reg<aie2p.config.scalar : i64>
-  write.mask32 %27, %29, %29
-  %30 = constant 63 : reg<aie2p.config.scalar : i64>
-  wait.mask32 %25, %30, %29
-  %31 = constant 3 : reg<aie2p.config.scalar : i64>
-  write.mask32 %27, %31, %28
+low.func.def target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_5) @__aie2p_worker_helper_7() asm {
+  %57 = constant 36827136 : reg<aie2p.config.scalar : i64>
+  %58 = constant 0 : reg<aie2p.config.scalar : i64>
+  write32 %57, %58
+  %59 = constant 36904960 : reg<aie2p.config.scalar : i64>
+  %60 = constant 2 : reg<aie2p.config.scalar : i64>
+  write.mask32 %59, %60, %58
+  %61 = constant 1 : reg<aie2p.config.scalar : i64>
+  write.mask32 %59, %61, %61
+  %62 = constant 63 : reg<aie2p.config.scalar : i64>
+  wait.mask32 %57, %62, %61
+  %63 = constant 3 : reg<aie2p.config.scalar : i64>
+  write.mask32 %59, %63, %60
   return
 }
 
-low.func.def public retain target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_2) abi(array_program) @local_capture() asm {
-  %32 = constant 1 : reg<aie2p.config.scalar : i64>
-  entry %32, @__aie2p_worker_helper_3, @__aie2p_worker_helper_4
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_5) abi(array_program) @local_capture() asm {
+  %64 = constant 2 : reg<aie2p.config.scalar : i64>
+  entry %64, @__aie2p_worker_helper_6, @__aie2p_worker_helper_7
   return
 }

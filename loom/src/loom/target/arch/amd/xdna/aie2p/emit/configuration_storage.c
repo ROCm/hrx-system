@@ -37,10 +37,8 @@ iree_status_t loom_aie2p_configuration_storage_place(
     storage[i] = (loom_aie2p_tile_storage_placement_t){
         .storage_space = space,
         .owner_offset = (uint32_t)offset,
+        .load_address = tile->memory.local_load_base + (uint32_t)offset,
     };
-    IREE_RETURN_IF_ERROR(loom_xdna_array_form_load_address(
-        family, coordinate, LOOM_XDNA_MEMORY_SPACE_DATA, coordinate, offset,
-        requirement->byte_length, &storage[i].load_address));
   }
   loom_aie2p_tile_read_only_data_placement_t* read_only = NULL;
   IREE_RETURN_IF_ERROR(
@@ -82,11 +80,9 @@ iree_status_t loom_aie2p_configuration_storage_place(
     }
     read_only[i] = (loom_aie2p_tile_read_only_data_placement_t){
         .owner_offset = (uint32_t)offset,
+        .load_address = tile->memory.local_load_base + (uint32_t)offset,
         .byte_length = (uint32_t)length,
     };
-    IREE_RETURN_IF_ERROR(loom_xdna_array_form_load_address(
-        family, coordinate, LOOM_XDNA_MEMORY_SPACE_DATA, coordinate, offset,
-        length, &read_only[i].load_address));
   }
   *out_layout = (loom_aie2p_tile_link_layout_t){
       .program_address = tile->memory.program_base,

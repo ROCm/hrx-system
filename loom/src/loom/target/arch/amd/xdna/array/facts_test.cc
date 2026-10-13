@@ -110,53 +110,50 @@ TEST(XdnaArrayFactsTest, CanonicalizesComputeNeighborAliases) {
   EXPECT_EQ(owner_self.owner_offset, west.owner_offset);
 }
 
-TEST(XdnaArrayFactsTest, FormsLoadAddressesFromCanonicalStorage) {
+TEST(XdnaArrayFactsTest, SelectsLoadWindowsWithMemoryAndLockBases) {
   const loom_xdna_array_family_t* family = loom_xdna_npu2_array_family();
-  uint32_t address = 0;
-  IREE_ASSERT_OK(loom_xdna_array_form_load_address(
-      family, {1, 3}, LOOM_XDNA_MEMORY_SPACE_DATA, {0, 3}, 0x40, 64, &address));
-  EXPECT_EQ(address, 0x50040u);
-  IREE_ASSERT_OK(loom_xdna_array_form_load_address(
-      family, {0, 3}, LOOM_XDNA_MEMORY_SPACE_DATA, {0, 3}, 0x40, 64, &address));
-  EXPECT_EQ(address, 0x70040u);
-  IREE_ASSERT_OK(loom_xdna_array_form_load_address(
-      family, {4, 2}, LOOM_XDNA_MEMORY_SPACE_PROGRAM, {4, 2}, 0x80, 64,
-      &address));
-  EXPECT_EQ(address, 0x80u);
-
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_xdna_array_form_load_address(
-                            family, {0, 3}, LOOM_XDNA_MEMORY_SPACE_DATA, {1, 3},
-                            0, 64, &address));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_xdna_array_form_load_address(
-                            family, {4, 2}, LOOM_XDNA_MEMORY_SPACE_PROGRAM,
-                            {4, 3}, 0, 64, &address));
+  struct TestCase {
+    // Tile whose instruction or DMA accesses the owner.
+    loom_xdna_tile_coordinate_t accessor;
+    // Physical tile whose memory and locks are mapped.
+    loom_xdna_tile_coordinate_t owner;
+    // Accessor-relative data-memory base.
+    uint32_t base;
+    // Number of bytes mapped from the owner.
+    uint32_t capacity;
+    // Accessor-relative first lock selector.
+    uint16_t lock_selector_base;
+  };
+  const TestCase cases[] = {
+      {{1, 3}, {1, 2}, 0x40000, 64 * 1024, 0},
+      {{1, 3}, {0, 3}, 0x50000, 64 * 1024, 16},
+      {{1, 3}, {1, 4}, 0x60000, 64 * 1024, 32},
+      {{1, 3}, {1, 3}, 0x70000, 64 * 1024, 48},
+      {{1, 1}, {0, 1}, 0x00000, 512 * 1024, 0},
+      {{1, 1}, {1, 1}, 0x80000, 512 * 1024, 64},
+      {{1, 1}, {2, 1}, 0x100000, 512 * 1024, 128},
+  };
+  for (const TestCase& test_case : cases) {
+    SCOPED_TRACE(test_case.base);
+    const loom_xdna_address_window_t* window = loom_xdna_array_load_window(
+        family, test_case.accessor, test_case.owner);
+    ASSERT_NE(window, nullptr);
+    EXPECT_EQ(window->base, test_case.base);
+    EXPECT_EQ(window->capacity, test_case.capacity);
+    EXPECT_EQ(window->lock_selector_base, test_case.lock_selector_base);
+    EXPECT_EQ(window->owner_kind,
+              loom_xdna_array_tile_facts(family, test_case.owner)->kind);
+  }
 }
 
-TEST(XdnaArrayFactsTest, FormsCoreRelativeLockSelectors) {
+TEST(XdnaArrayFactsTest, OmitsUnavailableLoadWindows) {
   const loom_xdna_array_family_t* family = loom_xdna_npu2_array_family();
-  uint16_t selector = 0;
-
-  IREE_ASSERT_OK(
-      loom_xdna_array_form_lock_selector(family, {0, 3}, {0, 2}, 7, &selector));
-  EXPECT_EQ(selector, 7u);
-  IREE_ASSERT_OK(
-      loom_xdna_array_form_lock_selector(family, {1, 3}, {0, 3}, 7, &selector));
-  EXPECT_EQ(selector, 23u);
-  IREE_ASSERT_OK(
-      loom_xdna_array_form_lock_selector(family, {0, 3}, {0, 4}, 7, &selector));
-  EXPECT_EQ(selector, 39u);
-  IREE_ASSERT_OK(
-      loom_xdna_array_form_lock_selector(family, {0, 3}, {0, 3}, 7, &selector));
-  EXPECT_EQ(selector, 55u);
-
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_OUT_OF_RANGE,
-      loom_xdna_array_form_lock_selector(family, {0, 3}, {1, 3}, 0, &selector));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_xdna_array_form_lock_selector(
-                            family, {0, 3}, {0, 3}, 16, &selector));
+  EXPECT_EQ(loom_xdna_array_load_window(family, {0, 3}, {1, 3}), nullptr);
+  EXPECT_EQ(loom_xdna_array_load_window(family, {2, 3}, {0, 3}), nullptr);
+  EXPECT_EQ(loom_xdna_array_load_window(family, {0, 2}, {0, 1}), nullptr);
+  EXPECT_EQ(loom_xdna_array_load_window(family, {0, 1}, {0, 2}), nullptr);
+  EXPECT_EQ(loom_xdna_array_load_window(family, {0, 1}, {2, 1}), nullptr);
+  EXPECT_EQ(loom_xdna_array_load_window(family, {0, 0}, {0, 0}), nullptr);
 }
 
 TEST(XdnaArrayFactsTest, RejectsMissingOrCrossKindNeighbors) {
