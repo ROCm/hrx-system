@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <mutex>
@@ -533,6 +534,8 @@ struct iree_hal_amdxdna_native_buffer_t {
   size_t pathb_aperture_first_slot = 0;
   size_t pathb_aperture_slot_count = 0;
   std::vector<PathBPdiReference> pathb_pdi_references;
+  // KMT device that created |buffer|. Empty until the BO is allocated.
+  mcdm::Device kmt = {};
 };
 
 struct iree_hal_amdxdna_native_queue_t {
@@ -578,6 +581,8 @@ struct iree_hal_amdxdna_native_context_t {
   size_t pathb_next_completion_slot = 0;
   mcdm::ContextBlobInfo info;
   iree_hal_amdxdna_native_queue_t queue;
+  // KMT device that created this context.
+  mcdm::Device kmt = {};
 };
 
 struct iree_hal_amdxdna_native_command_t {
@@ -860,6 +865,7 @@ iree_status_t create_native_buffer_from_mcdm(
   IREE_RETURN_IF_ERROR(allocate_native_buffer(device, out_buffer));
   (*out_buffer)->buffer = buffer;
   (*out_buffer)->type = type;
+  (*out_buffer)->kmt = device->device;
   return iree_ok_status();
 }
 
@@ -925,6 +931,37 @@ iree_status_t create_deferred_native_buffer_with_kind(
   return iree_ok_status();
 }
 
+const mcdm::Device& buffer_kmt(
+    const iree_hal_amdxdna_native_buffer_t* buffer) {
+  if (buffer->kmt.device) return buffer->kmt;
+  return buffer->device->device;
+}
+
+const mcdm::Device& context_kmt(
+    const iree_hal_amdxdna_native_context_t* context) {
+  if (context->kmt.device) return context->kmt;
+  return context->device->device;
+}
+
+bool kmt_handle_is_current_device(const iree_hal_amdxdna_native_device_t* device,
+                                  D3DKMT_HANDLE kmt_device) {
+  return device && kmt_device != 0 && kmt_device == device->device.device;
+}
+
+iree_status_t create_buffer_on_live_device(
+    iree_hal_amdxdna_native_device_t* device, mcdm::BufferKind kind,
+    uint64_t size, mcdm::Buffer* out_buffer, mcdm::Device* out_kmt,
+    uint8_t slot_index = 0) {
+  mcdm::Error error;
+  if (!mcdm::CreateBuffer(device->api, device->device, kind, size, out_buffer,
+                          &error, slot_index)) {
+    return status_from_mcdm_error("amdxdna Windows MCDM BO allocation failed",
+                                  error);
+  }
+  *out_kmt = device->device;
+  return iree_ok_status();
+}
+
 namespace {
 
 const WindowsMcdmOpcodeHandler& command_opcode_handler(
@@ -970,13 +1007,15 @@ iree_status_t close_pathb_single_code_ranges(
     const bool released =
         queue_ordered_release
             ? mcdm::QueuePathBCodeRangeRelease(
-                  queue->context->device->api, queue->context->device->device,
-                  &queue->context->context, queue->context->command_aperture,
-                  range.offset, range.size, &error)
+                  queue->context->device->api,
+                  queue->context->kmt, &queue->context->context,
+                  queue->context->command_aperture, range.offset, range.size,
+                  &error)
             : mcdm::ReleasePathBCodeRange(
-                  queue->context->device->api, queue->context->device->device,
-                  &queue->context->context, queue->context->command_aperture,
-                  range.offset, range.size, &error);
+                  queue->context->device->api,
+                  queue->context->kmt, &queue->context->context,
+                  queue->context->command_aperture, range.offset, range.size,
+                  &error);
     if (!released) {
       return status_from_mcdm_error(
           "amdxdna Windows MCDM pathb single-session code release failed",
@@ -991,14 +1030,14 @@ iree_status_t close_pathb_single_code_range(
     iree_hal_amdxdna_native_queue_t* queue, uint64_t offset) {
   if (!queue || !queue->context) return iree_ok_status();
   auto& ranges = queue->context->pathb_active_single_code_ranges;
-  const auto it = std::find_if(ranges.begin(), ranges.end(),
-                               [=](const PathBActiveCodeRange& range) {
-                                 return range.offset == offset;
-                               });
+  const auto it = std::find_if(
+      ranges.begin(), ranges.end(), [=](const PathBActiveCodeRange& range) {
+        return range.offset == offset;
+      });
   if (it == ranges.end()) return iree_ok_status();
   mcdm::Error error;
   if (!mcdm::ReleasePathBCodeRange(
-          queue->context->device->api, queue->context->device->device,
+          queue->context->device->api, queue->context->kmt,
           &queue->context->context, queue->context->command_aperture, offset,
           it->size, &error)) {
     return status_from_mcdm_error(
@@ -1028,7 +1067,7 @@ iree_status_t retire_pathb_active_context_locked(
   iree_hal_amdxdna_native_context_t* active = device->pathb_active_context;
   if (!active || active == next_context) return iree_ok_status();
   const mcdm::McdmAbiInfo abi =
-      mcdm::GetMcdmAbiInfo(active->device->device.mcdm_abi);
+      mcdm::GetMcdmAbiInfo(active->kmt.mcdm_abi);
   if (!abi.retain_command_aperture_session_across_contexts) {
     IREE_RETURN_IF_ERROR(close_pathb_single_code_ranges(&active->queue));
     reset_pathb_context_cached_aperture_state(active);
@@ -1037,7 +1076,7 @@ iree_status_t retire_pathb_active_context_locked(
       !abi.retain_command_aperture_mapping_across_contexts) {
     mcdm::Error error;
     if (!mcdm::ReleaseCommandApertureGpuMapping(
-            active->device->api, active->device->device,
+            active->device->api, active->kmt,
             &active->command_aperture, &error)) {
       return status_from_mcdm_error(
           "amdxdna Windows MCDM command aperture release failed", error);
@@ -1055,7 +1094,7 @@ iree_status_t activate_pathb_context_for_submit_locked(
   if (device->pathb_active_context == context) return iree_ok_status();
   IREE_RETURN_IF_ERROR(retire_pathb_active_context_locked(device, context));
   const mcdm::McdmAbiInfo abi =
-      mcdm::GetMcdmAbiInfo(context->device->device.mcdm_abi);
+      mcdm::GetMcdmAbiInfo(context->kmt.mcdm_abi);
   if (!abi.retain_command_aperture_session_across_contexts) {
     reset_pathb_context_cached_aperture_state(context);
   }
@@ -1085,7 +1124,7 @@ iree_status_t ensure_pathb_single_code_range_active(
   mcdm::Error error;
   const mcdm::CommandAperture& aperture = queue->context->command_aperture;
   if (!mcdm::AcquirePathBCodeRange(
-          queue->context->device->api, queue->context->device->device,
+          queue->context->device->api, queue->context->kmt,
           &queue->context->context, aperture, offset, size, &error)) {
     return status_from_mcdm_error(
         "amdxdna Windows MCDM pathb single-session code acquire failed", error);
@@ -1102,7 +1141,7 @@ iree_status_t acquire_pathb_code_range(iree_hal_amdxdna_native_queue_t* queue,
   mcdm::CommandAperture& aperture = queue->context->command_aperture;
   mcdm::Error error;
   if (!mcdm::AcquirePathBCodeRange(queue->context->device->api,
-                                   queue->context->device->device,
+                                   queue->context->kmt,
                                    &queue->context->context, aperture,
                                    mapping_offset, code_size, &error)) {
     return status_from_mcdm_error(
@@ -1118,7 +1157,7 @@ iree_status_t publish_pathb_code_write(iree_hal_amdxdna_native_queue_t* queue,
   mcdm::CommandAperture& aperture = queue->context->command_aperture;
   mcdm::Error error;
   if (!mcdm::PublishPathBCodeWrite(queue->context->device->api,
-                                   queue->context->device->device,
+                                   queue->context->kmt,
                                    &queue->context->context, aperture,
                                    mapping_offset, code_size, &error)) {
     return status_from_mcdm_error(
@@ -1133,10 +1172,10 @@ iree_status_t publish_pathb_code_end_marker(
   if (!queue || !queue->context || code_size == 0) return iree_ok_status();
   mcdm::CommandAperture& aperture = queue->context->command_aperture;
   mcdm::Error error;
-  if (!mcdm::PublishPathBCodeEndMarker(queue->context->device->api,
-                                       queue->context->device->device,
-                                       &queue->context->context, aperture,
-                                       mapping_offset, code_size, &error)) {
+  if (!mcdm::PublishPathBCodeEndMarker(
+          queue->context->device->api, queue->context->kmt,
+          &queue->context->context, aperture, mapping_offset, code_size,
+          &error)) {
     return status_from_mcdm_error(
         "amdxdna Windows MCDM pathb code end-marker publish failed", error);
   }
@@ -2390,7 +2429,7 @@ iree_status_t sync_prepared_pathb_chain_batch(
   mcdm::Error error;
   if (code_bytes) {
     if (!mcdm::PublishPathBCodeWrite(
-            queue->context->device->api, queue->context->device->device,
+            queue->context->device->api, queue->context->kmt,
             &queue->context->context, aperture,
             static_cast<uint64_t>(code_offset), code_bytes, &error)) {
       return status_from_mcdm_error(
@@ -2399,14 +2438,14 @@ iree_status_t sync_prepared_pathb_chain_batch(
   }
   if (descriptor_bytes) {
     if (!mcdm::CommitPathBCodeWrite(
-            queue->context->device->api, queue->context->device->device,
+            queue->context->device->api, queue->context->kmt,
             aperture, static_cast<uint64_t>(descriptor_offset),
             static_cast<uint64_t>(descriptor_bytes), &error)) {
       return status_from_mcdm_error(
           "amdxdna Windows MCDM path-B batch descriptor commit failed", error);
     }
     if (!mcdm::SyncCommandApertureCode(
-            queue->context->device->api, queue->context->device->device,
+            queue->context->device->api, queue->context->kmt,
             aperture, static_cast<uint64_t>(descriptor_offset),
             static_cast<uint64_t>(descriptor_bytes), &error)) {
       return status_from_mcdm_error(
@@ -2415,9 +2454,9 @@ iree_status_t sync_prepared_pathb_chain_batch(
     }
   }
   if ((code_bytes || descriptor_bytes) &&
-      !mcdm::RefreshPathBCodeMappingAfterWrite(queue->context->device->api,
-                                               queue->context->device->device,
-                                               &aperture, &error)) {
+      !mcdm::RefreshPathBCodeMappingAfterWrite(
+          queue->context->device->api, queue->context->kmt,
+          &aperture, &error)) {
     return status_from_mcdm_error(
         "amdxdna Windows MCDM path-B batch aperture refresh failed", error);
   }
@@ -2572,16 +2611,12 @@ iree_status_t materialize_deferred_buffer_impl(
 
   mcdm::Buffer real_buffer;
   mcdm::Error error;
-  if (!mcdm::CreateBuffer(buffer->device->api, buffer->device->device,
-                          buffer->buffer.kind, buffer->buffer.size,
-                          &real_buffer, &error,
-                          context ? context->context.slot_index : 0)) {
-    const char* label =
-        buffer->type == IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_INSTRUCTION
-            ? "amdxdna Windows MCDM deferred instruction BO allocation failed"
-            : "amdxdna Windows MCDM deferred cacheable BO allocation failed";
-    return status_from_mcdm_error(label, error);
-  }
+  mcdm::Device created_on;
+  iree_status_t create_status = create_buffer_on_live_device(
+      buffer->device, buffer->buffer.kind, buffer->buffer.size, &real_buffer,
+      &created_on, context ? context->context.slot_index : 0);
+  if (!iree_status_is_ok(create_status)) return create_status;
+  buffer->kmt = created_on;
   if (real_buffer.cpu_ptr && buffer->deferred_storage_size > 0) {
     const uint64_t copy_size = std::min<uint64_t>(
         buffer->buffer.size,
@@ -2593,8 +2628,7 @@ iree_status_t materialize_deferred_buffer_impl(
     // before any command can make the new device address visible to firmware.
     if (!mcdm::PublishBufferCpuWrites(real_buffer, /*offset=*/0, copy_size,
                                       &error)) {
-      mcdm::DestroyBuffer(buffer->device->api, buffer->device->device,
-                          &real_buffer);
+      mcdm::DestroyBuffer(buffer->device->api, buffer->kmt, &real_buffer);
       return status_from_mcdm_error(
           "amdxdna Windows MCDM deferred BO publication failed", error);
     }
@@ -3016,6 +3050,8 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
       IREE_HAL_AMDXDNA_NATIVE_C_COMPLETION_MODEL_SYNCHRONOUS_WAIT |
       IREE_HAL_AMDXDNA_NATIVE_C_COMPLETION_MODEL_PROGRESS_FENCE |
       IREE_HAL_AMDXDNA_NATIVE_C_COMPLETION_MODEL_COMPLETION_SLOT;
+  // Exact-size reuse stays on while a model owns executables. The last
+  // executable release drops the cache so the next model does not inherit it.
   caps.supports_host_buffer_reuse =
       mcdm::SupportsHostBufferReuse(device->device.mcdm_abi);
   caps.native_owns_control_code_publication = true;
@@ -3063,14 +3099,14 @@ iree_status_t iree_hal_amdxdna_native_device_alloc_buffer(
   }
 
   mcdm::Buffer buffer;
-  mcdm::Error error;
-  if (!mcdm::CreateBuffer(device->api, device->device,
-                          to_mcdm_buffer_kind(type),
-                          static_cast<uint64_t>(size), &buffer, &error)) {
-    return status_from_mcdm_error("amdxdna Windows MCDM BO allocation failed",
-                                  error);
-  }
-  return create_native_buffer_from_mcdm(device, buffer, type, out_buffer);
+  mcdm::Device created_on;
+  IREE_RETURN_IF_ERROR(create_buffer_on_live_device(
+      device, to_mcdm_buffer_kind(type), static_cast<uint64_t>(size), &buffer,
+      &created_on));
+  IREE_RETURN_IF_ERROR(
+      create_native_buffer_from_mcdm(device, buffer, type, out_buffer));
+  (*out_buffer)->kmt = created_on;
+  return iree_ok_status();
 }
 
 iree_status_t iree_hal_amdxdna_native_device_create_context(
@@ -3181,6 +3217,7 @@ iree_status_t iree_hal_amdxdna_native_device_create_context(
   }
   new (native_context) iree_hal_amdxdna_native_context_t();
   native_context->device = device;
+  native_context->kmt = device->device;
   native_context->context = context;
   native_context->command_aperture = command_aperture;
   native_context->has_command_aperture = has_command_aperture;
@@ -3230,10 +3267,15 @@ void iree_hal_amdxdna_native_context_destroy(
   if (!context) return;
   iree_hal_amdxdna_native_device_t* device = context->device;
   std::unique_lock<std::mutex> context_lock(device->pathb_context_mutex);
-  device->pathb_context_cv.wait(context_lock, [&]() {
-    return device->pathb_active_submission_count == 0;
-  });
-  iree_status_ignore(close_pathb_single_code_ranges(&context->queue));
+  device->pathb_context_cv.wait(
+      context_lock,
+      [&]() { return device->pathb_active_submission_count == 0; });
+  const bool kmt_alive =
+      context->kmt.device == 0 ||
+      kmt_handle_is_current_device(device, context->kmt.device);
+  if (kmt_alive) {
+    iree_status_ignore(close_pathb_single_code_ranges(&context->queue));
+  }
   if (device->pathb_active_context == context) {
     device->pathb_active_context = nullptr;
   }
@@ -3266,12 +3308,12 @@ void iree_hal_amdxdna_native_context_destroy(
     }
   }
   context->pathb_pdi_allocations.clear();
-  if (context->has_command_aperture) {
+  if (kmt_alive && context->has_command_aperture) {
     mcdm::DestroyContextWithCommandAperture(
-        context->device->api, context->device->device, &context->context,
+        context->device->api, context->kmt, &context->context,
         &context->command_aperture);
-  } else {
-    mcdm::DestroyContext(context->device->api, context->device->device,
+  } else if (kmt_alive) {
+    mcdm::DestroyContext(context->device->api, context->kmt,
                          &context->context);
   }
   mcdm::ContextBlobInfoDeinitialize(&context->info);
@@ -3374,8 +3416,11 @@ void iree_hal_amdxdna_native_buffer_destroy(
   buffer->host_mirror = nullptr;
   release_deferred_buffer_storage(buffer);
   if (!buffer->deferred) {
-    mcdm::DestroyBuffer(buffer->device->api, buffer->device->device,
-                        &buffer->buffer);
+    if (buffer->kmt.device == 0 ||
+        kmt_handle_is_current_device(buffer->device, buffer->kmt.device)) {
+      mcdm::DestroyBuffer(buffer->device->api, buffer_kmt(buffer),
+                          &buffer->buffer);
+    }
   }
   buffer->~iree_hal_amdxdna_native_buffer_t();
   iree_allocator_free(host_allocator, buffer);
@@ -3433,7 +3478,7 @@ iree_status_t iree_hal_amdxdna_native_buffer_sync(
       // the driver's allocation-level coherency boundary in both directions,
       // matching XRT BO sync. CPU cache-line operations alone cannot invalidate
       // NPU-side cache state and scale linearly with large immutable weights.
-      if (!mcdm::SyncBuffer(buffer->device->api, buffer->device->device,
+      if (!mcdm::SyncBuffer(buffer->device->api, buffer_kmt(buffer),
                             buffer->buffer, sync_offset, sync_size, &error)) {
         return status_from_mcdm_error(
             direction == IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE
@@ -3447,7 +3492,7 @@ iree_status_t iree_hal_amdxdna_native_buffer_sync(
     if (direction == IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE) {
       if (buffer->native_mapping_stale) {
         if (!mcdm::RefreshBufferCpuMapping(buffer->device->api,
-                                           buffer->device->device,
+                                           buffer_kmt(buffer),
                                            &buffer->buffer, &error)) {
           return status_from_mcdm_error(
               "amdxdna Windows MCDM host BO CPU mapping refresh failed", error);
@@ -3459,7 +3504,7 @@ iree_status_t iree_hal_amdxdna_native_buffer_sync(
                     buffer->host_mirror + sync_offset,
                     static_cast<size_t>(sync_size));
       }
-      if (!mcdm::SyncBuffer(buffer->device->api, buffer->device->device,
+      if (!mcdm::SyncBuffer(buffer->device->api, buffer_kmt(buffer),
                             buffer->buffer, sync_offset, sync_size, &error)) {
         return status_from_mcdm_error(
             "amdxdna Windows MCDM host BO publication failed", error);
@@ -3473,7 +3518,7 @@ iree_status_t iree_hal_amdxdna_native_buffer_sync(
     }
     if (buffer->native_mapping_stale) {
       if (!mcdm::RefreshBufferCpuMapping(buffer->device->api,
-                                         buffer->device->device,
+                                         buffer_kmt(buffer),
                                          &buffer->buffer, &error)) {
         return status_from_mcdm_error(
             "amdxdna Windows MCDM host BO CPU mapping refresh failed", error);
@@ -3493,14 +3538,14 @@ iree_status_t iree_hal_amdxdna_native_buffer_sync(
     // Publish the requested range after all packet and BO-table updates, just
     // as XRT's host-only BO sync does before run.start(). A process write
     // barrier alone does not evict dirty cache lines from that mapping.
-    if (!mcdm::SyncBuffer(buffer->device->api, buffer->device->device,
+    if (!mcdm::SyncBuffer(buffer->device->api, buffer_kmt(buffer),
                           buffer->buffer, sync_offset, sync_size, &error)) {
       return status_from_mcdm_error(
           "amdxdna Windows MCDM BO publication failed", error);
     }
     return iree_ok_status();
   }
-  if (!mcdm::SyncBuffer(buffer->device->api, buffer->device->device,
+  if (!mcdm::SyncBuffer(buffer->device->api, buffer_kmt(buffer),
                         buffer->buffer, sync_offset, sync_size, &error)) {
     return status_from_mcdm_error("amdxdna Windows MCDM BO sync failed", error);
   }
@@ -4561,7 +4606,7 @@ static iree_status_t iree_hal_amdxdna_native_submit_all_issue(
   if (dirty_code_begin != std::numeric_limits<size_t>::max()) {
     mcdm::Error acquire_error;
     if (!mcdm::AcquirePathBCodeRange(
-            queue->context->device->api, queue->context->device->device,
+            queue->context->device->api, queue->context->kmt,
             &queue->context->context, aperture,
             aperture.code_offset + dirty_code_begin,
             dirty_code_end - dirty_code_begin, &acquire_error)) {
@@ -4729,12 +4774,13 @@ static iree_status_t iree_hal_amdxdna_native_submit_all_wait(
         IREE_STATUS_INTERNAL,
         "amdxdna %.*s batch command %" PRIhsz
         " did not complete: ert state %u (error_index %u, submit_index %u, "
-        "fence=%" PRIu64 ", completion_slot=0x%x, code_offset=0x%" PRIx64
-        ", code_size=0x%" PRIx64
-        ", prepared=%u, code_dirty=%u, "
+        "ctx=%p, fence=%" PRIu64 ", next_fence=%" PRIu64
+        ", completion_slot=0x%x, code_offset=0x%" PRIx64
+        ", code_size=0x%" PRIx64 ", prepared=%u, code_dirty=%u, "
         "descriptor_dirty=%u, generation=%" PRIu64 ")",
         static_cast<int>(s->label_size), s->label, command_index, packet->state,
-        chain_data->error_index, chain_data->submit_index, pending.fence_id,
+        chain_data->error_index, chain_data->submit_index, queue->context,
+        pending.fence_id, queue->context->context.next_fence_id,
         pending.slot_offset, command->pathb_chain_code_aperture_offset,
         command->pathb_chain_code_used_size,
         command->pathb_chain_prepared_valid ? 1u : 0u,
@@ -4799,11 +4845,12 @@ static iree_status_t iree_hal_amdxdna_native_submit_wait(
     }
     return iree_make_status(
         IREE_STATUS_INTERNAL,
-        "amdxdna %.*s did not complete: ert state %u (fence=%" PRIu64
-        ", completion_slot=0x%x, code_offset=0x%" PRIx64
+        "amdxdna %.*s did not complete: ert state %u (ctx=%p, fence=%" PRIu64
+        ", next_fence=%" PRIu64 ", completion_slot=0x%x, code_offset=0x%" PRIx64
         ", code_capacity=0x%" PRIx64 ", active_code_ranges=%zu)",
         static_cast<int>(s->label_size), s->label, packet->state,
-        s->pending.fence_id, s->pending.slot_offset,
+        static_cast<const void*>(queue->context), s->pending.fence_id,
+        queue->context->context.next_fence_id, s->pending.slot_offset,
         command->pathb_single_code_aperture_offset,
         command->pathb_single_code_aperture_capacity,
         queue->context->pathb_active_single_code_ranges.size());
@@ -5151,6 +5198,13 @@ extern "C" uint64_t iree_hal_amdxdna_native_buffer_c_device_address(
 extern "C" iree_device_size_t iree_hal_amdxdna_native_buffer_c_size(
     iree_hal_amdxdna_native_buffer_t* buffer) {
   return iree_hal_amdxdna_native_buffer_size(buffer);
+}
+
+extern "C" bool iree_hal_amdxdna_native_buffer_c_is_device_current(
+    const iree_hal_amdxdna_native_buffer_t* buffer) {
+  if (!buffer || !buffer->device) return false;
+  if (buffer->deferred || buffer->kmt.device == 0) return true;
+  return kmt_handle_is_current_device(buffer->device, buffer->kmt.device);
 }
 
 extern "C" iree_status_t iree_hal_amdxdna_native_device_c_create_context_ref(

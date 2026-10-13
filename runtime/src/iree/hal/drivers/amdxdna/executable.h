@@ -23,6 +23,12 @@ iree_string_view_t iree_hal_amdxdna_executable_format();
 bool iree_hal_amdxdna_executable_format_supported(
     iree_string_view_t executable_format);
 
+// Records the HAL device that owns this executable's buffer and context
+// caches. Call it after a successful create and before any failure path that
+// releases the executable.
+void iree_hal_amdxdna_executable_bind_device(
+    iree_hal_executable_t* executable, struct iree_hal_amdxdna_device* device);
+
 // `out_executable` must be released by the caller (see
 // iree_hal_executable_release).
 iree_status_t iree_hal_amdxdna_native_executable_create(

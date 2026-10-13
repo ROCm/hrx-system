@@ -120,6 +120,13 @@ void iree_hal_amdxdna_device_context_cache_destroy(
 void iree_hal_amdxdna_device_context_cache_clear(
     iree_hal_amdxdna_device_context_cache_t* context_cache);
 
+// Drops entries no executable still leases. Leased entries stay.
+void iree_hal_amdxdna_device_context_cache_drop_unleased(
+    iree_hal_amdxdna_device_context_cache_t* context_cache);
+
+iree_host_size_t iree_hal_amdxdna_device_context_cache_count(
+    iree_hal_amdxdna_device_context_cache_t* context_cache);
+
 // Sum of native context-image bytes represented by cache entries. Exported for
 // hermetic policy tests; production admission uses native live ownership so
 // evicted contexts retained by in-flight work remain charged.

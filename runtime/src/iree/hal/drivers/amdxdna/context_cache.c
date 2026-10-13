@@ -268,6 +268,15 @@ void iree_hal_amdxdna_device_context_cache_destroy(
   iree_allocator_free(host_allocator, context_cache);
 }
 
+iree_host_size_t iree_hal_amdxdna_device_context_cache_count(
+    iree_hal_amdxdna_device_context_cache_t* context_cache) {
+  if (!context_cache) return 0;
+  iree_slim_mutex_lock(&context_cache->mutex);
+  const iree_host_size_t count = context_cache->count;
+  iree_slim_mutex_unlock(&context_cache->mutex);
+  return count;
+}
+
 void iree_hal_amdxdna_device_context_cache_clear(
     iree_hal_amdxdna_device_context_cache_t* context_cache) {
   if (!context_cache) return;
@@ -281,6 +290,32 @@ void iree_hal_amdxdna_device_context_cache_clear(
     iree_hal_amdxdna_context_cache_entry_t* next = entry->next;
     iree_hal_amdxdna_context_cache_entry_destroy(context_cache, entry);
     entry = next;
+  }
+}
+
+void iree_hal_amdxdna_device_context_cache_drop_unleased(
+    iree_hal_amdxdna_device_context_cache_t* context_cache) {
+  if (!context_cache) return;
+  iree_hal_amdxdna_context_cache_entry_t* dropped = NULL;
+  iree_slim_mutex_lock(&context_cache->mutex);
+  iree_hal_amdxdna_context_cache_entry_t** link = &context_cache->head;
+  while (*link) {
+    iree_hal_amdxdna_context_cache_entry_t* entry = *link;
+    if (entry->lease_count == 0) {
+      *link = entry->next;
+      if (context_cache->count > 0) context_cache->count--;
+      entry->next = dropped;
+      dropped = entry;
+    } else {
+      link = &entry->next;
+    }
+  }
+  iree_slim_mutex_unlock(&context_cache->mutex);
+
+  while (dropped) {
+    iree_hal_amdxdna_context_cache_entry_t* next = dropped->next;
+    iree_hal_amdxdna_context_cache_entry_destroy(context_cache, dropped);
+    dropped = next;
   }
 }
 

@@ -9,8 +9,10 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/flatcc/parsing.h"
+#include "iree/hal/drivers/amdxdna/allocator.h"
 #include "iree/hal/drivers/amdxdna/context_cache.h"
 #include "iree/hal/drivers/amdxdna/ctrlcode_elf.h"
+#include "iree/hal/drivers/amdxdna/device.h"
 #include "iree/hal/drivers/amdxdna/executable_internal.h"
 #include "iree/hal/drivers/amdxdna/util.h"
 #include "iree/hal/drivers/amdxdna/xclbin_util.h"
@@ -54,6 +56,14 @@ iree_hal_amdxdna_executable* iree_hal_amdxdna_executable_cast(
   return IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
       base_executable, iree_hal_amdxdna_executable_vtable,
       iree_hal_amdxdna_executable);
+}
+
+void iree_hal_amdxdna_executable_bind_device(
+    iree_hal_executable_t* base_executable, iree_hal_amdxdna_device* device) {
+  iree_hal_amdxdna_executable* executable =
+      iree_hal_amdxdna_executable_cast(base_executable);
+  if (!executable) return;
+  executable->hal_device = device;
 }
 
 iree_hal_amdxdna_native_context_t*
@@ -1545,7 +1555,16 @@ static void iree_hal_amdxdna_native_executable_destroy(
                                            iree_hal_amdxdna_executable_vtable,
                                            iree_hal_amdxdna_executable);
   iree_allocator_t host_allocator = executable->host_allocator;
+  iree_hal_amdxdna_device* hal_device = executable->hal_device;
+  // Deinitialize first. That releases this executable's context leases and
+  // destroys its PDI buffers, which frees code slots while the context cache
+  // still holds the hardware context.
   iree_hal_amdxdna_executable_deinitialize(executable);
+  if (hal_device) {
+    iree_hal_amdxdna_device_drop_unleased_contexts(hal_device);
+    iree_hal_amdxdna_allocator_set_model_reuse(hal_device->device_allocator,
+                                               /*active=*/0);
+  }
   iree_allocator_free(host_allocator, executable);
 
   IREE_TRACE_ZONE_END(z0);

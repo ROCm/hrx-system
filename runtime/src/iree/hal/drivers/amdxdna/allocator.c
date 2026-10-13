@@ -30,6 +30,11 @@ typedef struct iree_hal_amdxdna_allocator_t {
       cached_buffers[kAmdxdnaAllocatorCacheCapacity];
   iree_host_size_t cached_buffer_count;
   iree_host_size_t cached_buffer_capacity;
+  // Executables still owned by the current model. Reuse stays on while this
+  // is non-zero. The last release drops the cache and later releases of that
+  // model's buffers are not admitted.
+  int32_t live_executable_count;
+  bool reuse_active;
   IREE_STATISTICS(iree_hal_allocator_statistics_t statistics;)
 } iree_hal_amdxdna_allocator_t;
 
@@ -64,7 +69,8 @@ static void iree_hal_amdxdna_allocator_release_cached_buffer(
       iree_hal_amdxdna_buffer_steal_native_buffer(base_buffer);
   if (native_buffer) {
     iree_slim_mutex_lock(&allocator->cache_mutex);
-    if (allocator->cached_buffer_count < allocator->cached_buffer_capacity) {
+    if (allocator->reuse_active &&
+        allocator->cached_buffer_count < allocator->cached_buffer_capacity) {
       allocator->cached_buffers[allocator->cached_buffer_count++] =
           native_buffer;
       native_buffer = NULL;
@@ -112,11 +118,55 @@ static void iree_hal_amdxdna_allocator_trim_cache(
   }
 }
 
+int iree_hal_amdxdna_allocator_set_model_reuse(
+    iree_hal_allocator_t* base_allocator, int active) {
+  if (!base_allocator) return 0;
+  const iree_hal_resource_t* resource =
+      (const iree_hal_resource_t*)base_allocator;
+  if (resource->vtable != &iree_hal_amdxdna_allocator_vtable) return 0;
+
+  iree_hal_amdxdna_allocator_t* allocator =
+      (iree_hal_amdxdna_allocator_t*)base_allocator;
+  bool drop = false;
+  iree_slim_mutex_lock(&allocator->cache_mutex);
+  if (active) {
+    ++allocator->live_executable_count;
+    allocator->reuse_active = allocator->cached_buffer_capacity > 0;
+  } else if (allocator->live_executable_count > 0) {
+    --allocator->live_executable_count;
+    if (allocator->live_executable_count == 0) {
+      allocator->reuse_active = false;
+      drop = true;
+    }
+  }
+  iree_slim_mutex_unlock(&allocator->cache_mutex);
+  if (!drop) return 0;
+  iree_hal_amdxdna_allocator_trim_cache(allocator);
+  return 1;
+}
+
 static iree_status_t iree_hal_amdxdna_allocator_take_cached_buffer(
     iree_hal_amdxdna_allocator_t* allocator, iree_device_size_t allocation_size,
     iree_hal_amdxdna_native_buffer_t** out_buffer) {
   *out_buffer = NULL;
+  iree_hal_amdxdna_native_buffer_t* stale[kAmdxdnaAllocatorCacheCapacity];
+  iree_host_size_t stale_count = 0;
   iree_slim_mutex_lock(&allocator->cache_mutex);
+  for (iree_host_size_t i = 0; i < allocator->cached_buffer_count;) {
+    iree_hal_amdxdna_native_buffer_t* candidate = allocator->cached_buffers[i];
+    if (iree_hal_amdxdna_native_buffer_c_is_device_current(candidate)) {
+      ++i;
+      continue;
+    }
+    stale[stale_count++] = candidate;
+    const iree_host_size_t tail_count = allocator->cached_buffer_count - i - 1;
+    if (tail_count > 0) {
+      memmove(&allocator->cached_buffers[i], &allocator->cached_buffers[i + 1],
+              tail_count * sizeof(allocator->cached_buffers[0]));
+    }
+    --allocator->cached_buffer_count;
+    allocator->cached_buffers[allocator->cached_buffer_count] = NULL;
+  }
   for (iree_host_size_t i = 0; i < allocator->cached_buffer_count; ++i) {
     iree_hal_amdxdna_native_buffer_t* candidate = allocator->cached_buffers[i];
     if (iree_hal_amdxdna_native_buffer_c_size(candidate) != allocation_size) {
@@ -133,6 +183,9 @@ static iree_status_t iree_hal_amdxdna_allocator_take_cached_buffer(
     break;
   }
   iree_slim_mutex_unlock(&allocator->cache_mutex);
+  for (iree_host_size_t i = 0; i < stale_count; ++i) {
+    iree_hal_amdxdna_native_buffer_c_destroy(stale[i]);
+  }
   return iree_ok_status();
 }
 

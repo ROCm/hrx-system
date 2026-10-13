@@ -38,6 +38,16 @@ void iree_hal_amdxdna_semaphore_clear_native_signal(
     iree_hal_semaphore_t* semaphore, uint64_t value,
     struct iree_hal_amdxdna_completion_batch_t* batch);
 
+// Records a command-scoped completion error for one timeline point.
+// The timeline itself stays usable: a host wait for |value| observes
+// |status| once, and later points are not failed. Consumes |status|.
+void iree_hal_amdxdna_semaphore_record_command_completion(
+    iree_hal_semaphore_t* semaphore, uint64_t value, iree_status_t status);
+
+// Drops a command-completion status previously recorded at |value|.
+void iree_hal_amdxdna_semaphore_clear_command_completion(
+    iree_hal_semaphore_t* semaphore, uint64_t value);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

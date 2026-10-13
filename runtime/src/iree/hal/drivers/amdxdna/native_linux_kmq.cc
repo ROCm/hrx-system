@@ -1760,6 +1760,12 @@ extern "C" iree_device_size_t iree_hal_amdxdna_native_buffer_c_size(
   return iree_hal_amdxdna_native_buffer_size(buffer);
 }
 
+extern "C" bool iree_hal_amdxdna_native_buffer_c_is_device_current(
+    const iree_hal_amdxdna_native_buffer_t* buffer) {
+  (void)buffer;
+  return true;
+}
+
 extern "C" iree_status_t iree_hal_amdxdna_native_device_c_create_context_ref(
     iree_hal_amdxdna_native_device_t* device,
     const iree_hal_amdxdna_native_c_context_image_t* image,
