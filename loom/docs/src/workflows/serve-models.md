@@ -133,3 +133,6 @@ TCP/Unix listeners and process limits. [Operation](operate-model-server.md) and
 and log streams. HTTP administration and model loading
 assume trusted clients and programs; deployment-owned isolation or tunnels
 supply any access-control boundary.
+
+[HTTP profiles](../reference/serving-http.md) enumerate the supported request
+fields, raw tokenizer utilities and retained-text checkpoint controls.

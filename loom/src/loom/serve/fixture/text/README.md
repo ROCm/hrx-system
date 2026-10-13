@@ -119,7 +119,7 @@ curl --fail --silent --show-error -X POST \
 The stream contains `bx` with finish reason `length`; the next request pins
 position 5. Subsequent requests send full history and can select
 `X-Loom-Checkpoint: base` to fork or rewind. The
-[text HTTP contract](../../../../../../experimental/loom_serve/text/README.md#named-http-checkpoints) details
+[text HTTP contract](../../../../../docs/src/reference/serving-http.md#named-checkpoints) details
 ownership and error behavior.
 
 For wrappers expecting a complete JSON response, omit `stream` or set it to

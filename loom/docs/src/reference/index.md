@@ -21,3 +21,4 @@ headers.
 - [C API reference](c-api/index.md)
 - [loom-serve command](loom-serve.md)
 - [Serving model documents](serving-models.md)
+- [Serving HTTP profiles](serving-http.md)

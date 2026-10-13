@@ -111,6 +111,7 @@ nav:
       - Reference map: reference/index.md
       - loom-serve: reference/loom-serve.md
       - Serving model documents: reference/serving-models.md
+      - Serving HTTP profiles: reference/serving-http.md
       - Dialects: reference/dialects/index.md
       - Types: reference/types/index.md
       - Attributes: reference/attributes/index.md
