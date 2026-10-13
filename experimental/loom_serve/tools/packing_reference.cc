@@ -11,7 +11,7 @@
 #include <iostream>
 #include <vector>
 
-#include "experimental/loom_serve/scheduling/packing.h"
+#include "loom/serve/service/text/packing.h"
 
 int main() {
   iree_host_size_t row_count = 0;

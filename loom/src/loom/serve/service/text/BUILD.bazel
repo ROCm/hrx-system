@@ -1,0 +1,412 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//loom/src/loom/serve:implementation"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "admission",
+    srcs = ["admission.c"],
+    hdrs = ["admission.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "admission_test",
+    srcs = ["admission_test.cc"],
+    deps = [
+        ":admission",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "chat",
+    srcs = ["chat.c"],
+    hdrs = ["chat.h"],
+    deps = [
+        "//loom/src/loom/serve/runtime/program",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "input",
+    srcs = ["input.c"],
+    hdrs = ["input.h"],
+    deps = [
+        ":chat",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "chat_test",
+    srcs = ["chat_test.cc"],
+    deps = [
+        ":chat",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "storage",
+    srcs = ["storage.c"],
+    hdrs = ["storage.h"],
+    deps = [
+        "//loom/src/loom/serve/runtime/storage:relocation",
+        "//loom/src/loom/serve/runtime/storage:snapshot",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "model",
+    srcs = [
+        "model.c",
+        "source.c",
+        "stages.c",
+        "state.c",
+    ],
+    hdrs = [
+        "model.h",
+        "source.h",
+        "stages.h",
+        "state.h",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    deps = [
+        ":chat",
+        ":packing",
+        ":storage",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/execution:retirement",
+        "//loom/src/loom/serve/runtime/parameter:residency",
+        "//loom/src/loom/serve/runtime/parameter:weights",
+        "//loom/src/loom/serve/runtime/program",
+        "//loom/src/loom/serve/runtime/program:command",
+        "//loom/src/loom/serve/runtime/program:compilation",
+        "//loom/src/loom/serve/runtime/program:input",
+        "//loom/src/loom/serve/runtime/program:jit",
+        "//loom/src/loom/serve/runtime/program:json",
+        "//loom/src/loom/serve/runtime/program:module",
+        "//loom/src/loom/serve/runtime/program:preparation",
+        "//loom/src/loom/serve/runtime/program:sources",
+        "//loom/src/loom/serve/runtime/storage:block_pool",
+        "//loom/src/loom/serve/runtime/storage:memory",
+        "//loom/src/loom/serve/runtime/storage:relocation",
+        "//loom/src/loom/serve/runtime/storage:snapshot",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+        "//runtime/src/iree/tokenizer/vocab",
+        "//runtime/src/iree/tooling:device_util",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "storage_test",
+    srcs = ["storage_test.cc"],
+    deps = [
+        ":storage",
+        "//loom/src/loom/serve/runtime/storage:snapshot",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:heap_pool",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "schedule",
+    srcs = ["schedule.c"],
+    hdrs = ["schedule.h"],
+    deps = [
+        ":packing",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "telemetry",
+    srcs = ["telemetry.c"],
+    hdrs = ["telemetry.h"],
+    deps = [
+        ":epoch",
+        ":heartbeat",
+        ":model",
+        ":schedule",
+        ":session",
+        "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/serve/telemetry:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+loom_cc_library(
+    name = "heartbeat",
+    srcs = ["heartbeat.c"],
+    hdrs = ["heartbeat.h"],
+    deps = [
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/host:timer",
+        "//loom/src/loom/serve/runtime/parameter:telemetry",
+        "//loom/src/loom/serve/runtime/parameter:weights",
+        "//loom/src/loom/serve/runtime/storage:memory",
+        "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/serve/telemetry:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+loom_cc_test(
+    name = "heartbeat_test",
+    srcs = ["heartbeat_test.cc"],
+    deps = [
+        ":heartbeat",
+        "//loom/src/loom/serve/runtime/host:timer",
+        "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/serve/telemetry:stream",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "session",
+    srcs = ["session.c"],
+    hdrs = ["session.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    deps = [
+        ":chat",
+        ":model",
+        "//loom/src/loom/serve/service:inspection",
+        "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_library(
+    name = "checkpoint_registry",
+    srcs = ["checkpoint_registry.c"],
+    hdrs = ["checkpoint_registry.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    visibility = ["//visibility:private"],
+    deps = [
+        ":chat",
+        ":model",
+        "//loom/src/loom/serve/runtime/execution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "epoch",
+    srcs = ["epoch.c"],
+    hdrs = ["epoch.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    visibility = ["//visibility:private"],
+    deps = [
+        ":model",
+        ":packing",
+        ":schedule",
+        "//loom/src/loom/serve/runtime/execution",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "epoch_test",
+    srcs = ["epoch_test.cc"],
+    deps = [
+        ":epoch",
+        ":model",
+        ":packing",
+        ":schedule",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "session_cache",
+    srcs = ["session_cache.c"],
+    hdrs = ["session_cache.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":chat",
+        ":checkpoint_registry",
+        ":model",
+        ":session",
+        ":telemetry",
+        "//loom/src/loom/serve/runtime/execution",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "prefix_cache",
+    srcs = ["prefix_cache.c"],
+    hdrs = ["prefix_cache.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":model",
+        "//loom/src/loom/serve/runtime/execution",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "response",
+    srcs = ["response.c"],
+    hdrs = ["response.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":telemetry",
+        "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "checkpoint_request",
+    srcs = ["checkpoint_request.c"],
+    hdrs = ["checkpoint_request.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":checkpoint_registry",
+        ":model",
+        ":response",
+        ":session",
+        ":telemetry",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/serve/transport/http:request",
+        "//loom/src/loom/serve/transport/http:server",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "service",
+    srcs = ["service.c"],
+    hdrs = ["service.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    deps = [
+        ":admission",
+        ":chat",
+        ":checkpoint_registry",
+        ":checkpoint_request",
+        ":epoch",
+        ":heartbeat",
+        ":input",
+        ":model",
+        ":packing",
+        ":prefix_cache",
+        ":response",
+        ":schedule",
+        ":session",
+        ":session_cache",
+        ":telemetry",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/host:timer",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/service",
+        "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/serve/telemetry:stream",
+        "//loom/src/loom/serve/transport/http:request",
+        "//loom/src/loom/serve/transport/http:server",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "schedule_test",
+    srcs = ["schedule_test.cc"],
+    deps = [
+        ":packing",
+        ":schedule",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "packing",
+    srcs = ["packing.c"],
+    hdrs = ["packing.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "packing_test",
+    srcs = ["packing_test.cc"],
+    deps = [
+        ":packing",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

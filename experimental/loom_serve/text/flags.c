@@ -7,8 +7,8 @@
 #include "experimental/loom_serve/text/flags.h"
 
 #include "experimental/loom_serve/serving/configuration.h"
-#include "experimental/loom_serve/text/schedule.h"
 #include "iree/base/tooling/flags.h"
+#include "loom/serve/service/text/schedule.h"
 
 IREE_FLAG(string, model, "",
           "Model JSON document; source programs are JIT compiled for the live "

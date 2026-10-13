@@ -46,6 +46,10 @@ The shared foundation consists of:
   source-owned preparation and submission control. The service owns bounded
   admission, asynchronous completion and output encoding; slow clients retain
   copied responses independently of model buffers and parameter pins.
+- [`service/text`](service/text/README.md): retained sessions over one prepared
+  model, with bounded admission, mixed prompt/decode epochs and shared caches.
+  Source defines model stages and chat policy; native owners retain claims and
+  storage through actual CPU/device retirement.
 - [`server/http`](server/http/logs.h): endpoint projections for telemetry and
   raw tokenization. Log readers keep independent cursors; tokenizer requests
   use independent CPU states without advancing a model's execution timeline.

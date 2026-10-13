@@ -8,12 +8,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "experimental/loom_serve/text/chat.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "loom/serve/runtime/program/input.h"
 #include "loom/serve/runtime/program/json.h"
+#include "loom/serve/service/text/chat.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
 

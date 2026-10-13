@@ -11,431 +11,20 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
-    admission
-  HDRS
-    "admission.h"
-  SRCS
-    "admission.c"
-  DEPS
-    iree::base
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    admission_test
-  SRCS
-    "admission_test.cc"
-  DEPS
-    ::admission
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-loom_cc_library(
-  NAME
-    chat
-  HDRS
-    "chat.h"
-  SRCS
-    "chat.c"
-  DEPS
-    iree::base
-    iree::base::internal::json
-    iree::base::internal::unicode
-    iree::vm
-    loom::serve::runtime::program
-    loom::util::json
-    loom::util::stream
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    input
-  HDRS
-    "input.h"
-  SRCS
-    "input.c"
-  DEPS
-    ::chat
-    iree::base
-    iree::vm
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    chat_test
-  SRCS
-    "chat_test.cc"
-  DEPS
-    ::chat
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-loom_cc_library(
-  NAME
-    storage
-  HDRS
-    "storage.h"
-  SRCS
-    "storage.c"
-  DEPS
-    iree::base
-    iree::hal
-    iree::vm
-    loom::serve::runtime::storage::relocation
-    loom::serve::runtime::storage::snapshot
-  PUBLIC
-)
-
-if(LOOM_TARGET_ARCH_VM)
-loom_cc_library(
-  NAME
-    model
-  HDRS
-    "model.h"
-    "source.h"
-    "stages.h"
-    "state.h"
-  SRCS
-    "model.c"
-    "source.c"
-    "stages.c"
-    "state.c"
-  DEPS
-    ::chat
-    ::storage
-    iree::async
-    iree::async::util::proactor_pool
-    iree::base
-    iree::experimental::loom_serve::scheduling::packing
-    iree::hal
-    iree::io::file_handle
-    iree::module::hal::types
-    iree::tokenizer
-    iree::tokenizer::format::huggingface::tokenizer_json
-    iree::tokenizer::vocab
-    iree::tooling::device_util
-    iree::vm
-    loom::binding::c::loomc
-    loom::serve::runtime::device
-    loom::serve::runtime::execution
-    loom::serve::runtime::execution::retirement
-    loom::serve::runtime::parameter::residency
-    loom::serve::runtime::parameter::weights
-    loom::serve::runtime::program
-    loom::serve::runtime::program::command
-    loom::serve::runtime::program::compilation
-    loom::serve::runtime::program::input
-    loom::serve::runtime::program::jit
-    loom::serve::runtime::program::json
-    loom::serve::runtime::program::module
-    loom::serve::runtime::program::preparation
-    loom::serve::runtime::program::sources
-    loom::serve::runtime::storage::block_pool
-    loom::serve::runtime::storage::memory
-    loom::serve::runtime::storage::relocation
-    loom::serve::runtime::storage::snapshot
-    loom::util::stream
-  PUBLIC
-)
-endif()
-
-loom_cc_test(
-  NAME
-    storage_test
-  SRCS
-    "storage_test.cc"
-  DEPS
-    ::storage
-    iree::base
-    iree::hal
-    iree::hal::memory::heap_pool
-    iree::testing::gtest
-    iree::testing::gtest_main
-    iree::vm
-    loom::serve::runtime::storage::snapshot
-)
-
-loom_cc_library(
-  NAME
     flags
   HDRS
     "flags.h"
   SRCS
     "flags.c"
   DEPS
-    ::model
-    ::schedule
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::serving::configuration
     loom::binding::c::loomc
+    loom::serve::service::text::model
+    loom::serve::service::text::schedule
   PUBLIC
 )
-
-loom_cc_library(
-  NAME
-    schedule
-  HDRS
-    "schedule.h"
-  SRCS
-    "schedule.c"
-  DEPS
-    iree::base
-    iree::experimental::loom_serve::scheduling::packing
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    telemetry
-  HDRS
-    "telemetry.h"
-  SRCS
-    "telemetry.c"
-  DEPS
-    ::epoch
-    ::heartbeat
-    ::model
-    ::schedule
-    ::session
-    iree::base
-    iree::base::threading
-    loom::serve::telemetry::record
-    loom::serve::telemetry::stream
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    heartbeat
-  HDRS
-    "heartbeat.h"
-  SRCS
-    "heartbeat.c"
-  DEPS
-    iree::base
-    iree::base::threading
-    loom::serve::runtime::device
-    loom::serve::runtime::host::timer
-    loom::serve::runtime::parameter::telemetry
-    loom::serve::runtime::parameter::weights
-    loom::serve::runtime::storage::memory
-    loom::serve::telemetry::record
-    loom::serve::telemetry::stream
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    heartbeat_test
-  SRCS
-    "heartbeat_test.cc"
-  DEPS
-    ::heartbeat
-    iree::async
-    iree::async::util::proactor_pool
-    iree::base
-    iree::base::threading
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::serve::runtime::host::timer
-    loom::serve::telemetry::record
-    loom::serve::telemetry::stream
-)
-
-if(LOOM_TARGET_ARCH_VM)
-loom_cc_library(
-  NAME
-    session
-  HDRS
-    "session.h"
-  SRCS
-    "session.c"
-  DEPS
-    ::chat
-    ::model
-    iree::base
-    iree::tokenizer
-    loom::serve::service::inspection
-    loom::serve::telemetry::record
-    loom::serve::transport::http::server
-    loom::util::json
-    loom::util::stream
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_VM)
-loom_cc_library(
-  NAME
-    checkpoint_registry
-  HDRS
-    "checkpoint_registry.h"
-  SRCS
-    "checkpoint_registry.c"
-  DEPS
-    ::chat
-    ::model
-    iree::base
-    iree::vm
-    loom::serve::runtime::execution
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_VM)
-loom_cc_library(
-  NAME
-    epoch
-  HDRS
-    "epoch.h"
-  SRCS
-    "epoch.c"
-  DEPS
-    ::model
-    ::schedule
-    iree::base
-    iree::experimental::loom_serve::scheduling::packing
-    loom::serve::runtime::execution
-  PUBLIC
-)
-endif()
-
-loom_cc_test(
-  NAME
-    epoch_test
-  SRCS
-    "epoch_test.cc"
-  DEPS
-    ::epoch
-    ::model
-    ::schedule
-    iree::base
-    iree::experimental::loom_serve::scheduling::packing
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-loom_cc_library(
-  NAME
-    session_cache
-  HDRS
-    "session_cache.h"
-  SRCS
-    "session_cache.c"
-  DEPS
-    ::chat
-    ::checkpoint_registry
-    ::model
-    ::session
-    ::telemetry
-    iree::base
-    loom::serve::runtime::execution
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    prefix_cache
-  HDRS
-    "prefix_cache.h"
-  SRCS
-    "prefix_cache.c"
-  DEPS
-    ::model
-    iree::base
-    loom::serve::runtime::execution
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    response
-  HDRS
-    "response.h"
-  SRCS
-    "response.c"
-  DEPS
-    ::telemetry
-    iree::base
-    loom::serve::telemetry::record
-    loom::serve::transport::http::server
-    loom::util::json
-    loom::util::stream
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    checkpoint_request
-  HDRS
-    "checkpoint_request.h"
-  SRCS
-    "checkpoint_request.c"
-  DEPS
-    ::checkpoint_registry
-    ::model
-    ::response
-    ::session
-    ::telemetry
-    iree::base
-    loom::serve::runtime::execution
-    loom::serve::telemetry::record
-    loom::serve::transport::http::request
-    loom::serve::transport::http::server
-  PUBLIC
-)
-
-if(LOOM_TARGET_ARCH_VM)
-loom_cc_library(
-  NAME
-    service
-  HDRS
-    "service.h"
-  SRCS
-    "service.c"
-  DEPS
-    ::admission
-    ::chat
-    ::checkpoint_registry
-    ::checkpoint_request
-    ::epoch
-    ::heartbeat
-    ::input
-    ::model
-    ::prefix_cache
-    ::response
-    ::schedule
-    ::session
-    ::session_cache
-    ::telemetry
-    iree::async
-    iree::async::util::proactor_pool
-    iree::base
-    iree::base::threading
-    iree::experimental::loom_serve::scheduling::packing
-    iree::task
-    iree::tokenizer
-    iree::vm
-    loom::serve::runtime::device
-    loom::serve::runtime::execution
-    loom::serve::runtime::host
-    loom::serve::runtime::host::timer
-    loom::serve::runtime::host::wake
-    loom::serve::service
-    loom::serve::telemetry::record
-    loom::serve::telemetry::stream
-    loom::serve::transport::http::request
-    loom::serve::transport::http::server
-  PUBLIC
-)
-endif()
 
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_binary(
@@ -445,8 +34,6 @@ loom_cc_binary(
     "server.c"
   DEPS
     ::flags
-    ::model
-    ::service
     iree::async
     iree::base
     iree::base::tooling::flags
@@ -455,6 +42,8 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::signals
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    loom::serve::service::text::model
+    loom::serve::service::text::service
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
 )
@@ -467,29 +56,17 @@ loom_cc_binary(
   SRCS
     "generate.c"
   DEPS
-    ::chat
     ::flags
-    ::model
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::io::file_handle
     iree::tokenizer
+    loom::serve::service::text::chat
+    loom::serve::service::text::model
 )
 endif()
-
-loom_cc_test(
-  NAME
-    schedule_test
-  SRCS
-    "schedule_test.cc"
-  DEPS
-    ::schedule
-    iree::experimental::loom_serve::scheduling::packing
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
 
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_binary(
@@ -498,9 +75,7 @@ loom_cc_binary(
   SRCS
     "epoch_check.cc"
   DEPS
-    ::chat
     ::flags
-    ::model
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -509,6 +84,8 @@ loom_cc_binary(
     iree::hal
     iree::task
     loom::serve::runtime::host
+    loom::serve::service::text::chat
+    loom::serve::service::text::model
   TESTONLY
 )
 endif()
@@ -520,7 +97,6 @@ loom_cc_binary(
   SRCS
     "request_check.c"
   DEPS
-    ::chat
     iree::base
     iree::base::tooling::flags
     iree::io::file_handle
@@ -531,6 +107,7 @@ loom_cc_binary(
     loom::serve::runtime::program::compilation
     loom::serve::runtime::program::input
     loom::serve::runtime::program::json
+    loom::serve::service::text::chat
     loom::util::json
     loom::util::stream
   TESTONLY

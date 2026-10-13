@@ -188,7 +188,7 @@ build_tools/bin/iree-bazel-test --config=asan \
   //loom/src/loom/serve/transport/http:server_test \
   //experimental/loom_serve/models/qwen:chat_test \
   //loom/src/loom/serve/runtime/storage:block_pool_test \
-  //experimental/loom_serve/text:schedule_test \
+  //loom/src/loom/serve/service/text:schedule_test \
   //experimental/loom_serve/models/qwen:weights_test \
   //experimental/loom_serve/models/qwen:benchmark_service_test
 ```

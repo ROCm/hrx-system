@@ -961,9 +961,6 @@ loom_cc_test(
   DEPS
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::scheduling::packing
-    iree::experimental::loom_serve::text::model
-    iree::experimental::loom_serve::text::schedule
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm
@@ -973,6 +970,9 @@ loom_cc_test(
     loom::serve::runtime::program::input
     loom::serve::runtime::program::json
     loom::serve::runtime::program::preparation
+    loom::serve::service::text::model
+    loom::serve::service::text::packing
+    loom::serve::service::text::schedule
   ARGS
     "--prepare_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/prepare.loom}}"
 )
@@ -1031,9 +1031,9 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::text::flags
-    iree::experimental::loom_serve::text::model
     iree::tokenizer
     loom::serve::runtime::parameter::residency
+    loom::serve::service::text::model
   TESTONLY
 )
 endif()
@@ -1050,9 +1050,9 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::text::flags
-    iree::experimental::loom_serve::text::model
     iree::io::file_handle
     iree::tokenizer
+    loom::serve::service::text::model
   TESTONLY
 )
 endif()
@@ -1069,12 +1069,12 @@ loom_cc_binary(
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
-    iree::experimental::loom_serve::scheduling::packing
-    iree::experimental::loom_serve::text::chat
     iree::experimental::loom_serve::text::flags
-    iree::experimental::loom_serve::text::model
     iree::io::file_handle
     iree::tokenizer
+    loom::serve::service::text::chat
+    loom::serve::service::text::model
+    loom::serve::service::text::packing
   TESTONLY
 )
 endif()
@@ -1092,8 +1092,6 @@ loom_cc_test(
   DEPS
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::text::chat
-    iree::experimental::loom_serve::text::input
     iree::testing::gtest
     iree::testing::gtest_main
     iree::tokenizer
@@ -1102,6 +1100,8 @@ loom_cc_test(
     loom::serve::runtime::program
     loom::serve::runtime::program::input
     loom::serve::runtime::program::json
+    loom::serve::service::text::chat
+    loom::serve::service::text::input
   ARGS
     "--chat_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/control.loom}}"
     "--alias_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/testdata/chat_alias.loom}}"

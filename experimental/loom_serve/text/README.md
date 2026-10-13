@@ -91,17 +91,17 @@ invocation; rows retain only their pending prediction, not padded host inputs.
 
 ### Native ownership boundaries
 
-The [service](service.c) owns HTTP claims, queued admission, session phases and
+The [service](../../../loom/src/loom/serve/service/text/service.c) owns HTTP claims, queued admission, session phases and
 one asynchronous completion handoff. Neither device readiness callbacks nor
 CPU release callbacks destroy model state; they wake this serialized owner.
 
-The [checkpoint registry](checkpoint_registry.h) owns named endpoint records,
+The [checkpoint registry](../../../loom/src/loom/serve/service/text/checkpoint_registry.h) owns named endpoint records,
 retained canonical transcripts and completed snapshot-byte accounting. The
 service publishes a name only after successful pin readiness and tracks queued
 borrowers before permitting deletion. Failed device readiness leaves native
 handles with model retirement, rather than releasing possibly active storage.
 
-The [epoch planner](epoch.h) receives snapshots of already-credited rows and a
+The [epoch planner](../../../loom/src/loom/serve/service/text/epoch.h) receives snapshots of already-credited rows and a
 selected packing shape. It produces retained spans, output limits and an
 optional device-fed continuation without allocation, synchronization or HTTP
 access. Packed completion consumes the model program's authoritative progress;
@@ -568,7 +568,7 @@ DeltaNet layout. The current materializer requires a nonempty recurrent slot
 even for an attention-only model. Such a port must explicitly account for that
 resettable span in its storage plan;
 the contract does not allocate a Qwen-sized state behind the model's back.
-This exact contract is implemented by [model.c](model.c) and exercised with
+This exact contract is implemented by [model.c](../../../loom/src/loom/serve/service/text/model.c) and exercised with
 the real [bootstrap](../models/qwen/prepare.loom) and its
 [layout checks](../models/qwen/prepare_test.cc).
 

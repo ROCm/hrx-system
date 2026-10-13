@@ -7,7 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_MODELS_TEXT_FLAGS_H_
 #define EXPERIMENTAL_LOOM_SERVE_MODELS_TEXT_FLAGS_H_
 
-#include "experimental/loom_serve/text/model.h"
+#include "loom/serve/service/text/model.h"
 
 #ifdef __cplusplus
 extern "C" {

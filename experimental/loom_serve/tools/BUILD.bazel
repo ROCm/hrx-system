@@ -113,7 +113,7 @@ loom_cc_binary(
     name = "packing_reference",
     testonly = True,
     srcs = ["packing_reference.cc"],
-    deps = ["//experimental/loom_serve/scheduling:packing"],
+    deps = ["//loom/src/loom/serve/service/text:packing"],
 )
 
 py_test(

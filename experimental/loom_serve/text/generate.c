@@ -12,10 +12,10 @@
 
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
-#include "experimental/loom_serve/text/chat.h"
 #include "experimental/loom_serve/text/flags.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
+#include "loom/serve/service/text/chat.h"
 
 IREE_FLAG_LIST(string, prompt, "User prompt; repeat for independent rows.");
 IREE_FLAG(string, prompt_file, "",

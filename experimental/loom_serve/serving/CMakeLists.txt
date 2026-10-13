@@ -179,9 +179,6 @@ loom_cc_library(
     ::configuration
     ::registry
     iree::base
-    iree::experimental::loom_serve::text::model
-    iree::experimental::loom_serve::text::schedule
-    iree::experimental::loom_serve::text::service
     loom::serve::runtime::device
     loom::serve::runtime::host
     loom::serve::runtime::host::wake
@@ -196,6 +193,9 @@ loom_cc_library(
     loom::serve::service::finite::service
     loom::serve::service::image::model
     loom::serve::service::image::service
+    loom::serve::service::text::model
+    loom::serve::service::text::schedule
+    loom::serve::service::text::service
   PUBLIC
 )
 

@@ -192,7 +192,7 @@ them; it does not put image requests through Qwen's token scheduler.
 
 ## Shared text execution
 
-[`text/model.{h,c}`](text/model.h) owns a source-defined text residency: shared
+[`text/model.{h,c}`](../../loom/src/loom/serve/service/text/model.h) owns a source-defined text residency: shared
 parameter storage prepared in place on activation, cached prefill/decode commands,
 model VM process, residual buffer and packed workspace. One stable arena
 partitions private recurrent state among up to sixteen rows. With
@@ -237,7 +237,7 @@ and caches these shapes from the same source and live device profile. Cached
 commands share the same weights, retained rows, residual storage, maximum-sized
 workspace, and VM process. Each occupies one immutable command-table slot;
 selecting another shape allocates no device backing and copies no retained
-state. The shared [packer](scheduling/packing.h) evaluates ready spans against
+state. The shared [packer](../../loom/src/loom/serve/service/text/packing.h) evaluates ready spans against
 each shape and chooses the most input tokens, then the most participating spans,
 then smaller capacities. This occupancy policy is intentionally distinct from
 measured cost-based selection.
@@ -420,7 +420,7 @@ to admission, but active completion guarantees are never overcommitted.
 The [model guide](models/qwen/README.md#pooled-kv-and-reserved-admission)
 describes the layout, memory accounting, and real-model correctness witness.
 
-[`text/chat.{h,c}`](text/chat.h) owns bounded OpenAI request decoding, canonical
+[`text/chat.{h,c}`](../../loom/src/loom/serve/service/text/chat.h) owns bounded OpenAI request decoding, canonical
 history retention and SSE serialization. The source program owns model identity,
 role templates, tool grammar selection and completion text. The supported
 endpoint is `POST /v1/chat/completions`, with `stream: true`, greedy generation

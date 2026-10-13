@@ -13,9 +13,9 @@
 #include "experimental/loom_serve/runtime/signals.h"
 #include "experimental/loom_serve/serving/router.h"
 #include "experimental/loom_serve/text/flags.h"
-#include "experimental/loom_serve/text/service.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
+#include "loom/serve/service/text/service.h"
 #include "loom/serve/transport/http/listener.h"
 
 IREE_FLAG(string, scheduler, "packed",

@@ -57,17 +57,10 @@ loom_cc_test(
     iree::base::threading
     iree::base::tooling::flags
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
-    iree::experimental::loom_serve::text::chat
-    iree::experimental::loom_serve::text::input
-    iree::experimental::loom_serve::text::model
-    iree::experimental::loom_serve::text::schedule
-    iree::experimental::loom_serve::text::service
-    iree::experimental::loom_serve::text::telemetry
     iree::net::carrier
     iree::net::carrier::loopback
     iree::task
@@ -76,6 +69,13 @@ loom_cc_test(
     iree::testing::temp_file
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::service::text::chat
+    loom::serve::service::text::input
+    loom::serve::service::text::model
+    loom::serve::service::text::packing
+    loom::serve::service::text::schedule
+    loom::serve::service::text::service
+    loom::serve::service::text::telemetry
     loom::serve::telemetry::stream
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
@@ -117,17 +117,10 @@ loom_cc_test(
     iree::base::threading
     iree::base::tooling::flags
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
-    iree::experimental::loom_serve::text::chat
-    iree::experimental::loom_serve::text::input
-    iree::experimental::loom_serve::text::model
-    iree::experimental::loom_serve::text::schedule
-    iree::experimental::loom_serve::text::service
-    iree::experimental::loom_serve::text::telemetry
     iree::net::carrier
     iree::net::carrier::loopback
     iree::task
@@ -136,6 +129,13 @@ loom_cc_test(
     iree::testing::temp_file
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::service::text::chat
+    loom::serve::service::text::input
+    loom::serve::service::text::model
+    loom::serve::service::text::packing
+    loom::serve::service::text::schedule
+    loom::serve::service::text::service
+    loom::serve::service::text::telemetry
     loom::serve::telemetry::stream
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
@@ -178,17 +178,10 @@ loom_cc_test(
     iree::base::threading
     iree::base::tooling::flags
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
-    iree::experimental::loom_serve::text::chat
-    iree::experimental::loom_serve::text::input
-    iree::experimental::loom_serve::text::model
-    iree::experimental::loom_serve::text::schedule
-    iree::experimental::loom_serve::text::service
-    iree::experimental::loom_serve::text::telemetry
     iree::net::carrier
     iree::net::carrier::loopback
     iree::task
@@ -197,6 +190,13 @@ loom_cc_test(
     iree::testing::temp_file
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::service::text::chat
+    loom::serve::service::text::input
+    loom::serve::service::text::model
+    loom::serve::service::text::packing
+    loom::serve::service::text::schedule
+    loom::serve::service::text::service
+    loom::serve::service::text::telemetry
     loom::serve::telemetry::stream
     loom::serve::transport::http::listener
     loom::serve::transport::http::server

@@ -8,8 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "experimental/loom_serve/text/model.h"
-#include "experimental/loom_serve/text/schedule.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -19,6 +17,8 @@
 #include "loom/serve/runtime/program/input.h"
 #include "loom/serve/runtime/program/json.h"
 #include "loom/serve/runtime/program/preparation.h"
+#include "loom/serve/service/text/model.h"
+#include "loom/serve/service/text/schedule.h"
 
 IREE_FLAG(string, prepare_source, "", "Production model bootstrap source.");
 

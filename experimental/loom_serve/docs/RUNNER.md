@@ -28,14 +28,14 @@ state and canonical checkpoints without naming a model.
 | [`module`](../../../loom/src/loom/serve/runtime/program/module.h) | Indexed prepared commands, typed execute imports and registered host feedback spans | Per-session VM state, model stages, or a general HAL instruction set |
 | [`program`](../../../loom/src/loom/serve/runtime/program/program.h) | Source-JIT bytecode, linked libraries, one process and serialized invocation | Model geometry or the lifetime of asynchronously borrowed host payloads |
 | [`preparation`](../../../loom/src/loom/serve/runtime/program/preparation.h) | Cold source declarations of commands, configuration and checkpoint domains, copied independently of the bootstrap process | Model geometry, stage semantics, or GPU allocation |
-| [`text_model`](../text/model.h) | Source-declared storage materialization, physical page ownership, scratch, source packet invocation, numerical progress | HTTP or tool semantics |
+| [`text_model`](../../../loom/src/loom/serve/service/text/model.h) | Source-declared storage materialization, physical page ownership, scratch, source packet invocation, numerical progress | HTTP or tool semantics |
 | [`weights`](../../../loom/src/loom/serve/runtime/parameter/weights.h) | Shared parameter residency, source policy queries, cached preparers, file-read/preparation readiness | Tensor naming rules, model geometry, or ordering from submission order |
 | [`residency`](../../../loom/src/loom/serve/runtime/parameter/residency.h) | Whole-model parameter admission, nested operation/retention pins, idle LRU eviction under the shared physical budget | Which mutable state can be discarded or which workflow should run next |
 | [`memory`](../../../loom/src/loom/serve/runtime/storage/memory.h) | Stable virtual roots, unique physical slab commitment, shared byte budget and retired-range trimming | Logical block identities, model geometry or eviction priority |
 | [`snapshot`](../../../loom/src/loom/serve/runtime/storage/snapshot.h) | Logical-order host image and retirement-safe gather/scatter transfers over supplied ranges | Tokens, recurrent geometry, session policy or checkpoint files |
-| [`packing`](../scheduling/packing.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Token values, model identity, attention state, measured kernel cost |
-| [`text_schedule`](../text/schedule.h) | Default model shape catalog and completion-reservation extent | HTTP output credit or committed model progress |
-| [`text_service`](../text/service.h) | Validated chat, session keys, canonical history, output credit, scheduling policy | Kernel layout decisions |
+| [`packing`](../../../loom/src/loom/serve/service/text/packing.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Token values, model identity, attention state, measured kernel cost |
+| [`text_schedule`](../../../loom/src/loom/serve/service/text/schedule.h) | Default model shape catalog and completion-reservation extent | HTTP output credit or committed model progress |
+| [`text_service`](../../../loom/src/loom/serve/service/text/service.h) | Validated chat, session keys, canonical history, output credit, scheduling policy | Kernel layout decisions |
 | [`http_server`](../../../loom/src/loom/serve/transport/http/server.h) | Bounded HTTP framing and copied response bytes over IREE TCP carriers | Model sessions or sampling |
 
 These are runner-private seams, not a proposed public serving ABI. The
@@ -222,7 +222,7 @@ LRU policy. Mutable row state remains owned until its caller resets, suspends
 or destroys it; weight eviction cannot infer permission to discard a session.
 
 Source bootstrap declares cache planes, recurrent slots and row-private views.
-[`text/storage`](../text/storage.h) validates those records once and keeps their
+[`text/storage`](../../../loom/src/loom/serve/service/text/storage.h) validates those records once and keeps their
 geometry after the initialization payloads retire. Logical block IDs come from
 the model's private free-ID pool, while their physical slabs share the device
 owner's byte budget with other models' weights and state. These are different

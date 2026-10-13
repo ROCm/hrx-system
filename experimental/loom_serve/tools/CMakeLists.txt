@@ -15,7 +15,7 @@ loom_cc_binary(
   SRCS
     "packing_reference.cc"
   DEPS
-    iree::experimental::loom_serve::scheduling::packing
+    loom::serve::service::text::packing
   TESTONLY
 )
 

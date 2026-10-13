@@ -1,0 +1,625 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef LOOM_SERVE_SERVICE_TEXT_MODEL_H_
+#define LOOM_SERVE_SERVICE_TEXT_MODEL_H_
+
+#include "iree/base/api.h"
+#include "iree/tokenizer/tokenizer.h"
+#include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/parameter/weights.h"
+#include "loom/serve/runtime/program/compilation.h"
+#include "loom/serve/runtime/program/sources.h"
+#include "loom/serve/runtime/storage/memory.h"
+#include "loom/serve/service/text/chat.h"
+#include "loom/serve/service/text/packing.h"
+#include "loomc/sanitizer.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// One packed autoregressive model residency. A single host owner multiplexes
+// retained rows through the same VM process, commands and weights. Private
+// command workspace is borrowed from the shared device execution pool.
+// Packed epochs separate submission from successful completion; no row-local
+// VM or thread is required. The owner excludes other model mutation until
+// completion, but independent models may execute concurrently. Synchronous
+// convenience calls join only on an outer application thread.
+// This runner-private interface exposes model work and shared source policy,
+// not network sessions. Input-capacity rejection submits no work. An execution
+// or submission failure ends the run: destroy drains accepted work before any
+// host payload is reused.
+typedef struct loom_serve_text_model_t loom_serve_text_model_t;
+typedef struct loom_serve_text_row_t loom_serve_text_row_t;
+typedef struct loom_serve_text_checkpoint_t loom_serve_text_checkpoint_t;
+
+// Retained arenas are sized to row_count, not this control-payload bound.
+enum { LOOM_SERVE_TEXT_ROW_CAPACITY = 16 };
+
+typedef struct loom_serve_text_options_t {
+  // Explicit program inputs and local base, borrowed through load completion.
+  loom_serve_sources_t sources;
+  // Maximum input count specialized into isolated prefill.
+  iree_host_size_t prefill_capacity;
+  // Logical attention-position ceiling per row, not a pooled reservation.
+  iree_host_size_t context_capacity;
+  // Shared cache slot capacity, divisible by the source-declared page
+  // size. Nonzero selects paged packed execution; zero uses dense addressing.
+  // This is independent of the logical context ceiling and requires epochs.
+  iree_host_size_t pool_capacity;
+  // Number of host packed token/span shape buckets; zero selects isolated
+  // execution. Source may map several buckets to the same command.
+  iree_host_size_t epoch_count;
+  // Borrowed scheduling shapes supplied to the source bootstrap.
+  const loom_serve_packing_shape_t* epoch_shapes;
+  // Proposed tokens after each known anchor (0-7). Zero disables drafting;
+  // the source bootstrap validates its supported nonzero depths.
+  iree_host_size_t draft_depth;
+  // Device assertion classes/reporting applied to every JIT kernel pipeline.
+  // Initialize structure type and size even when no checks are enabled.
+  loomc_sanitizer_options_t kernel_sanitizer;
+  // Parameter file indexed here and streamed on activation.
+  iree_string_view_t weights_path;
+  // Hugging Face tokenizer.json loaded once during creation.
+  iree_string_view_t tokenizer_path;
+  // Number of addressable retained rows in one stable state arena (1-16).
+  iree_host_size_t row_count;
+  // Maximum explicitly retained endpoints; zero keeps no checkpoint reserve.
+  // Requires pooled execution. Source reserves reader/writer slot headroom;
+  // elastic backing commits only used ranges, fixed backing reserves it all.
+  iree_host_size_t checkpoint_capacity;
+  // Opaque bootstrap JSON object interpreted by source; empty means {}.
+  // Borrowed through load completion, independently of per-request options.
+  iree_string_view_t options;
+} loom_serve_text_options_t;
+
+enum loom_serve_text_span_flag_bits_e {
+  // Select the next token after consuming this span. An intermediate input
+  // chunk can omit this flag; its previous prediction then becomes invalid.
+  LOOM_SERVE_TEXT_SPAN_FLAG_SELECT = 1u << 0,
+  // Generate candidates on device before verification. The span reserves
+  // draft_depth + 1 inputs but token_ids supplies only the pending anchor.
+  // Requires SELECT and a nonzero output limit in the epoch plan.
+  LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE = 1u << 1,
+};
+typedef uint32_t loom_serve_text_span_flags_t;
+
+// One ready input span. Decode is an ordinary length-one span containing the
+// row's previously selected token; model math does not distinguish its source.
+typedef struct loom_serve_text_span_t {
+  // Resident row index, independent of this span's packed activation position.
+  iree_host_size_t row_index;
+  // Nonempty prefix appended at the row's current consumed position.
+  iree_host_size_t token_count;
+  // Borrowed known IDs, copied before submission. PROPOSE supplies one anchor;
+  // the remaining reserved inputs are generated and consumed on device.
+  const int32_t* token_ids;
+  // Output selection and optional device proposal generation for this span.
+  loom_serve_text_span_flags_t flags;
+} loom_serve_text_span_t;
+
+// A pre-issued second plan borrowing rows from the first plan. Known spans
+// append new input after an unselected first chunk. Speculative spans require
+// SELECT|PROPOSE and consume the first result's final prediction on device;
+// their token_ids is unused. The producer compacts survivors without a host
+// wait. The shape bounds all entries before EOS/credit filtering.
+typedef struct loom_serve_text_continuation_t {
+  // Cached shape admitting the second plan's worst-case inputs and spans.
+  iree_host_size_t shape_index;
+  // Nonempty subset of distinct rows present in the first plan.
+  iree_host_size_t span_count;
+  // Borrowed next input chunks or device-produced speculative anchors.
+  const loom_serve_text_span_t* spans;
+  // Zero for known input; otherwise total output credit including the first
+  // plan's outputs. Device acceptance subtracts those before continuing.
+  const uint32_t* output_limits;
+} loom_serve_text_continuation_t;
+
+// Committed progress for one known or speculative span. A speculative span
+// consumes its pending anchor plus matched drafts; its final output stays
+// pending. Consumed and output counts therefore agree for speculative spans.
+typedef struct loom_serve_text_result_t {
+  // Inputs consumed into retained target and draft state.
+  iree_host_size_t consumed_count;
+  // Consumed caller-supplied inputs, excluding speculative anchor/draft work.
+  // This separates prompt progress when a cohort also starts generation.
+  iree_host_size_t known_count;
+  // Selected output IDs, including an EOS or the first rejected replacement.
+  iree_host_size_t output_count;
+  // Number of speculative verifications that advanced this span.
+  iree_host_size_t verification_count;
+  // Valid prefix of output_count IDs across at most two device-fed epochs.
+  int32_t tokens[16];
+} loom_serve_text_result_t;
+
+typedef struct loom_serve_text_metrics_t {
+  // Active input tokens consumed since the last reset.
+  uint64_t prefill_tokens;
+  // Completed prefill invocations, including non-final chunks.
+  uint64_t prefill_steps;
+  // Host-observed upload, VM submission, execution and readback nanoseconds.
+  iree_duration_t prefill_duration;
+  // Completed decode invocations; excludes predictions made by prefill.
+  uint64_t decode_steps;
+  // Host-observed decode submission, execution and readback nanoseconds.
+  iree_duration_t decode_duration;
+} loom_serve_text_metrics_t;
+
+// Logical pool capacity measured in token positions, including page
+// rounding. Dense comparison storage reports zero capacity and availability.
+typedef struct loom_serve_text_pool_usage_t {
+  // Number of positions in one indivisible cache page.
+  iree_host_size_t block_size;
+  // Total addressable positions in target and optional draft storage.
+  iree_host_size_t capacity;
+  // Positions in pages not owned by any row, checkpoint or retiring use.
+  iree_host_size_t available;
+  // Owned positions beyond consumed frontiers, reserved for active requests.
+  // These are disjoint from available and from positions retaining live KV.
+  iree_host_size_t pending;
+} loom_serve_text_pool_usage_t;
+
+// Starting frontier of a request-scoped completion reservation.
+typedef enum loom_serve_text_reserve_mode_e {
+  LOOM_SERVE_TEXT_RESERVE_FRESH,
+  LOOM_SERVE_TEXT_RESERVE_CONTINUE,
+  LOOM_SERVE_TEXT_RESERVE_CHECKPOINT,
+} loom_serve_text_reserve_mode_t;
+
+// Submits the complete consumed-position high-water for one request, including
+// caller-computed speculative slack. CHECKPOINT supplies a same-model endpoint;
+// other modes supply NULL. Fresh replaces the selected row, CONTINUE preserves
+// it, and CHECKPOINT restores then branches. Starts at a successfully completed
+// model frontier. No model-completion wait occurs; native allocation/remapping
+// remains synchronous cold work. Only one reservation may own a row.
+//
+// CAPACITY/DEFERRED mean parameter admission is pending without a pin or state
+// change; abandoning the request cancels its residency admission interest.
+// ACQUIRED owns a parameter pin through successful ALL
+// readiness on the borrowed frontier and complete_reserve, even if subsequent
+// state admission was denied. The owner excludes model mutation until then;
+// request cancellation defers storage release until completion. Submission or
+// readiness failure is terminal and retains ownership for outer destruction.
+// Checkpoint semantic inputs are copied before return. Physical backing is
+// committed at this cold boundary, not per epoch; extent is not a context-size
+// allocation.
+iree_status_t loom_serve_text_row_submit_reserve(
+    loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
+    const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
+    loom_serve_residency_admission_t* out_admission,
+    loom_serve_execution_frontier_t* out_frontier);
+
+// Consumes a submitted reservation after successful ALL readiness. True owns
+// the parameter pin and exact target/draft pages, private views and recurrent
+// writer until release_reservation. False releases the activation-only pin and
+// preserves both selected row and checkpoint. Idle owners may be reclaimed
+// before retrying. No allocation or wait occurs. An already-cancelled request
+// completes normally, then releases any admitted reservation.
+bool loom_serve_text_row_complete_reserve(loom_serve_text_row_t* row);
+
+// Synchronous outer-thread wrapper over reservation submission/completion.
+iree_status_t loom_serve_text_row_try_reserve(
+    loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
+    const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
+    bool* out_admitted);
+
+// After all request work retires, returns unused page credit and the parameter
+// pin. Retains the consumed frontier for later continuation. No allocation or
+// wait occurs. Reset/destruction also retire reservation ownership.
+void loom_serve_text_row_release_reservation(loom_serve_text_row_t* row);
+
+typedef struct loom_serve_text_trim_result_t {
+  // Logical blocks moved across every target/draft plane.
+  uint32_t moved_blocks;
+  // Device bytes copied to compact surviving state.
+  uint64_t copied_bytes;
+  // Physical bytes returned to the allocator during this maintenance cut.
+  uint64_t released_bytes;
+} loom_serve_text_trim_result_t;
+
+// Starts maintenance at a successfully completed model frontier, releasing
+// unowned slabs and enqueuing compaction when the temporary destination union
+// fits. Target/draft map uploads follow the copies on the model timeline; no
+// model-completion wait occurs. Native allocation/remapping calls are still
+// synchronous cold operations. The owner excludes other model mutation until
+// the returned borrowed frontier succeeds and complete_trim consumes the
+// result. Live rows and cached commands survive; reset rows can regrow in the
+// same VA. Fixed/dense backing is unchanged and reports zero reclamation.
+// Submission failure is terminal and preserves accepted work for outer model
+// destruction.
+iree_status_t loom_serve_text_model_submit_trim(
+    loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result,
+    loom_serve_execution_frontier_t* out_frontier);
+
+// After successful ALL readiness, commits block ownership and reclaims old
+// backing. Consumes the unchanged submission record and adds final reclaimed
+// bytes. Failed readiness never calls this entry. No model-completion wait
+// occurs; native unmapping/allocation failures remain terminal.
+iree_status_t loom_serve_text_model_complete_trim(
+    loom_serve_text_model_t* model, loom_serve_text_trim_result_t* result);
+
+// Synchronous outer-thread wrapper over submission and completion. Explicit
+// maintenance, not ordinary decoding or a task-worker entry point.
+iree_status_t loom_serve_text_model_trim(
+    loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result);
+
+// Owner-driven preparation on shared CPU/JIT workers and proactor waits.
+typedef struct loom_serve_text_load_t loom_serve_text_load_t;
+
+// Nonblocking notification only: schedules the serialized owner without
+// reentering the load. Payload and borrowed options outlive terminal advance.
+typedef void (*loom_serve_text_load_wake_fn_t)(void* user_data);
+
+// Allocates an unstarted operation without source I/O, device reservation or
+// task submission. Option views remain borrowed until terminal advance.
+iree_status_t loom_serve_text_load_create(
+    loom_serve_device_t* device, const loom_serve_text_options_t* options,
+    loom_serve_text_load_wake_fn_t wake, void* user_data,
+    loom_serve_text_load_t** out_load, iree_allocator_t host_allocator);
+
+enum loom_serve_text_load_flag_bits_e {
+  // Irreversible cancellation stops new phases after accepted work returns.
+  LOOM_SERVE_TEXT_LOAD_FLAG_CANCEL = 1u << 0,
+};
+typedef uint32_t loom_serve_text_load_flags_t;
+
+// Serialized owner turn. Never joins CPU or device work. Terminal advance
+// joins every load callback, but a failed initialization can still own queue
+// consumers. Success means initialization readiness and a fully linked model.
+iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
+                                           loom_serve_text_load_flags_t flags,
+                                           bool* out_complete);
+
+// Terminal-only evidence, borrowed until take_model or destruction.
+const loom_serve_compilation_report_t* loom_serve_text_load_report(
+    const loom_serve_text_load_t* load);
+
+// Transfers partial or complete model ownership on EVERY terminal outcome.
+// Failure/cancellation still requires model_retire and destroy_retired; neither
+// a failed readiness wait nor a cancelled load proves consumer retirement.
+loom_serve_text_model_t* loom_serve_text_load_take_model(
+    loom_serve_text_load_t* load);
+
+// Releases terminal operation metadata after take_model, without any wait.
+void loom_serve_text_load_destroy(loom_serve_text_load_t* load);
+
+// Cold outer-thread wrapper drives the same asynchronous preparation. Compiles
+// stages, records commands and indexes parameters without loading weight
+// payloads. The shared device owner outlives the model and
+// serializes model calls; its pool supplies elastic backing or explicit fixed
+// allocations. Pooled state grows on row/page activation. Options strings are
+// borrowed only for this call. Failure releases partial ownership.
+iree_status_t loom_serve_text_model_create(
+    loom_serve_device_t* device, const loom_serve_text_options_t* options,
+    loom_serve_text_model_t** out_model, iree_allocator_t host_allocator);
+
+// Begins irreversible removal after service CPU tasks, waits and external
+// tokenizer borrowers retire. No model, row or checkpoint mutation is allowed
+// afterward. Installs nonblocking wakes before releasing cached VM/command and
+// buffer consumers. Host packets and backing survive actual queue retirement.
+// The wake only schedules the serialized owner, never reenters or tears down.
+void loom_serve_text_model_retire(loom_serve_text_model_t* model,
+                                  void (*wake)(void* user_data),
+                                  void* user_data);
+
+// Query after retire; NULL is retired. True authorizes destroy_retired without
+// any semaphore wait. Failed readiness alone does not satisfy this condition.
+bool loom_serve_text_model_is_retired(loom_serve_text_model_t* model);
+
+// Consumes a retired model on success. A platform release failure preserves
+// remaining handles and metadata for owner-side retry. NULL is accepted.
+iree_status_t loom_serve_text_model_destroy_retired(
+    loom_serve_text_model_t* model);
+
+// Cold outer-owner teardown. Begins retirement and joins actual queue ownership
+// before final destruction; live removal uses the wake/query path. All borrowed
+// row/tokenizer pointers become invalid. NULL is accepted.
+iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model);
+
+// Borrowed shared device owner, including other models' backing and workspace.
+// Its cold pressure operations require the same serialized host ownership as
+// model invocation; this is not a model-private allocation domain.
+loom_serve_device_t* loom_serve_text_model_device(
+    const loom_serve_text_model_t* model);
+
+// At a serialized model boundary, release/reload parameter backing while
+// preserving compiled commands and all retained row state. Deactivation
+// requires unpinned elastic backing. Inference pins through retirement and
+// activates on demand; explicit activation warms without retaining a pin.
+// Admission can reclaim idle weights of other models, never mutable state.
+// Execution/I/O failure is terminal.
+iree_status_t loom_serve_text_model_activate(loom_serve_text_model_t* model);
+iree_status_t loom_serve_text_model_deactivate(loom_serve_text_model_t* model);
+
+// Borrowed admission/retention handle. A caller can try_acquire before choosing
+// work, retaining the returned pin across invocations until release. Ordinary
+// capacity backpressure leaves all model state unchanged.
+loom_serve_residency_t* loom_serve_text_model_residency(
+    const loom_serve_text_model_t* model);
+
+// Parameter-only virtual/physical statistics, excluding mutable state.
+loom_serve_memory_statistics_t loom_serve_text_model_weight_statistics(
+    const loom_serve_text_model_t* model);
+
+// Accepted parameter streaming/preparation work, including reactivation.
+loom_serve_weight_activity_t loom_serve_text_model_weight_activity(
+    const loom_serve_text_model_t* model);
+
+// Queries return borrowed state owned by model. The row index is below the
+// configured row count. The tokenizer can be shared by independent encoders.
+loom_serve_text_row_t* loom_serve_text_model_row(loom_serve_text_model_t* model,
+                                                 iree_host_size_t index);
+iree_tokenizer_t* loom_serve_text_model_tokenizer(
+    loom_serve_text_model_t* model);
+// Borrowed source policy; uses the same serialized invocation as model work.
+const loom_serve_text_chat_policy_t* loom_serve_text_model_chat_policy(
+    const loom_serve_text_model_t* model);
+iree_host_size_t loom_serve_text_model_context_capacity(
+    const loom_serve_text_model_t* model);
+
+// Prepared proposal count after each anchor; zero disables drafting.
+iree_host_size_t loom_serve_text_model_draft_depth(
+    const loom_serve_text_model_t* model);
+// Number of distinct native endpoints reserved at model creation. Several
+// logical owners may retain one endpoint without consuming additional slots.
+iree_host_size_t loom_serve_text_model_checkpoint_capacity(
+    const loom_serve_text_model_t* model);
+// Copies logical page ownership at the single owner's completed-stage boundary,
+// separating consumed state from assigned request-completion capacity.
+loom_serve_text_pool_usage_t loom_serve_text_model_pool_usage(
+    const loom_serve_text_model_t* model);
+// Mutable virtual state only; immutable weights and shared workspace are
+// separate allocations. Fixed backing reports zero virtual-pool statistics.
+loom_serve_memory_statistics_t loom_serve_text_model_memory_statistics(
+    const loom_serve_text_model_t* model);
+// Positions in the row's owned pages; zero for dense comparison storage.
+iree_host_size_t loom_serve_text_row_pool_usage(
+    const loom_serve_text_row_t* row);
+// Additional physical positions required to reach a page-rounded final extent,
+// including detachment of a shared partial tail. The caller supplies an extent
+// at or beyond the resident row's current position. Dense storage returns zero.
+// This completed-boundary query is constant time and does not reserve credit.
+iree_host_size_t loom_serve_text_row_pool_growth(
+    const loom_serve_text_row_t* row, iree_host_size_t extent);
+// Physical positions whose last owner is this row. Reset would release exactly
+// these IDs; other shared pages remain live. Cold admission query walks the
+// row's logical map; it belongs outside ordinary epoch scheduling.
+iree_host_size_t loom_serve_text_row_pool_reclaimable(
+    const loom_serve_text_row_t* row);
+// Maximum chunk accepted by row_prefill. Pooled/draft execution is also bounded
+// by the largest packed shape, which owns mapped target/draft state updates.
+iree_host_size_t loom_serve_text_model_prefill_capacity(
+    const loom_serve_text_model_t* model);
+// Shapes are in option order and borrow model-owned immutable storage.
+// Zero means no packed-epoch stages were prepared.
+iree_host_size_t loom_serve_text_model_shape_count(
+    const loom_serve_text_model_t* model);
+const loom_serve_packing_shape_t* loom_serve_text_model_shapes(
+    const loom_serve_text_model_t* model);
+
+// Enqueues distinct resident rows in one packed traversal without a host wait.
+// The nonempty span list and total token count must fit the prepared shape,
+// and each span must fit its row's remaining context. Validation rejects the
+// whole plan before submission. NULL output_limits selects ordinary known
+// input and requires NULL continuation. Non-NULL output_limits requires
+// drafting and mixes known input with spans of draft_depth + 1 speculative
+// inputs. An optional continuation enqueues a second mixed plan without an
+// intermediate host wait. A zero output limit denotes known input. Limits 1
+// through draft_depth + 1 (twice that with continuation) denote speculative
+// input, require SELECT and a pending non-EOS prediction, and cap the number of
+// new selected outputs. PROPOSE spans supply only the pending token: source
+// draft commands publish directly into the verifier input buffer. Other
+// speculative spans supply the pending token followed by proposals themselves.
+// Greedy acceptance stops at the first mismatch, EOS, or limit. Only accepted
+// state is published; catch-up pairs accepted inputs with target hidden state.
+// Proposal, verification, commit and catch-up have no intermediate host wait or
+// readback. Each known input chunk executes once. Continuation advances known
+// chunks or promotes a selected first result to speculation, stopping
+// speculative work at EOS, output credit or context bound.
+//
+// Accepted inputs and publication metadata are copied before return. Caller
+// storage may be reused immediately, even on submission failure. Success
+// returns a borrowed work/feedback frontier, not completed row state. The model
+// owns one outstanding invocation and its parameter pin until complete_epoch.
+// The owner excludes other model mutation and retains the model through both
+// the asynchronous ALL wait and completion consumption. Failure preserves
+// accepted work and ownership for
+// outer model destruction; it never waits or releases pins from this call.
+// Weights, commands and VM state are reused. Elastic backing grows only when
+// activating new row/page ranges; resident work allocates no physical memory.
+iree_status_t loom_serve_text_model_submit_epoch(
+    loom_serve_text_model_t* model, iree_host_size_t shape_index,
+    iree_host_size_t span_count, const loom_serve_text_span_t* spans,
+    const uint32_t* output_limits,
+    const loom_serve_text_continuation_t* continuation,
+    loom_serve_execution_frontier_t* out_frontier);
+
+// Consumes one successfully completed epoch after both submitted frontiers
+// signal success. Source VM publication commits row positions, returns rejected
+// state, and releases the invocation's parameter pin. Optional out_results has
+// the submitted span count and receives progress in caller order. No device
+// wait occurs. A failed wait must not call this entry; a VM publication error
+// also ends the run and preserves ownership for outer model destruction.
+iree_status_t loom_serve_text_model_complete_epoch(
+    loom_serve_text_model_t* model, loom_serve_text_result_t* out_results);
+
+// Synchronous outer-thread joins over submit_epoch and complete_epoch. Epoch
+// selects ordinary input; verify requires drafting and returns semantic
+// progress. These entry points are for CLI consumers, not task-worker
+// execution.
+iree_status_t loom_serve_text_model_epoch(loom_serve_text_model_t* model,
+                                          iree_host_size_t shape_index,
+                                          iree_host_size_t span_count,
+                                          const loom_serve_text_span_t* spans);
+iree_status_t loom_serve_text_model_verify(
+    loom_serve_text_model_t* model, iree_host_size_t shape_index,
+    iree_host_size_t span_count, const loom_serve_text_span_t* spans,
+    const uint32_t* output_limits,
+    const loom_serve_text_continuation_t* continuation,
+    loom_serve_text_result_t* out_results);
+
+// Releases the row's recurrent/KV references, request pin and host frontier at
+// a successfully completed model boundary. No allocation or wait occurs.
+// Physical backing stays warm until model_trim. Attention beyond the new prefix
+// is inaccessible and need not clear before its pages are assigned again.
+void loom_serve_text_row_reset_retired(loom_serve_text_row_t* row);
+
+// Synchronous outer-thread join followed by reset_retired.
+iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row);
+
+// Retains the exact consumed endpoint by sharing recurrent state and KV.
+// The pending prediction, if any, remains unconsumed. Requires a nonempty
+// resident row at a successfully completed model boundary. An active request
+// keeps its completion reservation: the pin admits a private recurrent writer
+// and partial-tail COW before sharing consumed state. Unused reserved pages are
+// not retained by the endpoint. Capacity refusal succeeds with a null output,
+// empty frontier and no mutation, including the active reservation.
+// Optional source-sized draft carry is copied on the existing queue timeline.
+// A returned handle is pending: the owner excludes model mutation and waits
+// asynchronously for successful ALL readiness before publishing, querying,
+// restoring or releasing it. No completion call is needed. Cancellation also
+// defers release until readiness. Submission/readiness failure is terminal and
+// retains accepted ownership for outer model destruction. The ready handle
+// belongs to the caller until release and borrows the model; destruction
+// invalidates all outstanding handles.
+iree_status_t loom_serve_text_row_submit_pin(
+    loom_serve_text_row_t* row, loom_serve_text_checkpoint_t** out_checkpoint,
+    loom_serve_execution_frontier_t* out_frontier);
+
+// Synchronous outer-thread join over pin submission. Publishes a ready handle
+// only on successful completion; capacity denial and failure leave NULL.
+iree_status_t loom_serve_text_row_try_pin(
+    loom_serve_text_row_t* row, loom_serve_text_checkpoint_t** out_checkpoint);
+
+// Restores an endpoint into any row of the same model, replacing that row's
+// continuation. A suspended endpoint first materializes into fresh pool IDs.
+// Both owners then share immutable state until advancement. Logical/physical
+// admission refusal succeeds with restored=false and leaves both the row and
+// cold image intact. Admission includes the destination's private storage and
+// requires free capacity before replacing its existing continuation.
+// Metrics continue to count effort already spent; they are not rewound.
+// Source/transfer/platform failures remain terminal, as with model_epoch.
+iree_status_t loom_serve_text_row_try_restore(
+    loom_serve_text_row_t* row, const loom_serve_text_checkpoint_t* checkpoint,
+    bool* out_restored);
+
+// Shares a ready immutable endpoint at the serialized completed-call boundary.
+// No device transfer occurs. Aliases share physical suspension/wake state, not
+// mutable row advancement. Each owner releases once; null is accepted.
+void loom_serve_text_checkpoint_retain(
+    loom_serve_text_checkpoint_t* checkpoint);
+
+// Drops one handle owner at the serialized completed-call boundary. The last
+// release returns endpoint storage; live row branches retain independent refs.
+// Null is accepted. The last release invalidates the reusable handle.
+void loom_serve_text_checkpoint_release(
+    loom_serve_text_checkpoint_t* checkpoint);
+
+// Queues capture of immutable recurrence, target/draft KV and source-sized
+// carry into DRAM at a successfully completed model boundary. Source IDs stay
+// retained until complete_suspend. Requires elastic pooled storage; an already
+// suspended endpoint submits no transfer. The owner excludes model mutation
+// until successful ALL readiness and completion, including on cancellation.
+// Submission/readiness failure retains source backing for outer destruction.
+iree_status_t loom_serve_text_checkpoint_submit_suspend(
+    loom_serve_text_checkpoint_t* checkpoint,
+    loom_serve_execution_frontier_t* out_frontier);
+
+// Consumes successful ALL readiness and releases this endpoint's device IDs.
+// Other branches retain their own references. No allocation or wait occurs.
+// The DRAM image occupies no active row. model_trim can reclaim dead backing.
+void loom_serve_text_checkpoint_complete_suspend(
+    loom_serve_text_checkpoint_t* checkpoint);
+
+// Synchronous outer-thread join over capture submission/completion.
+iree_status_t loom_serve_text_checkpoint_suspend(
+    loom_serve_text_checkpoint_t* checkpoint);
+
+// Retained host payload bytes, separate from device pool accounting. Warm
+// restore or release destroys the image. Resident endpoints report zero.
+iree_host_size_t loom_serve_text_checkpoint_suspended_bytes(
+    const loom_serve_text_checkpoint_t* checkpoint);
+
+// Total host snapshot payload across unique native endpoints, independent of
+// the number of names/owners retaining each handle. Cold observation query at
+// the serialized completed-call boundary; walks the fixed endpoint table.
+iree_host_size_t loom_serve_text_model_checkpoint_suspended_bytes(
+    const loom_serve_text_model_t* model);
+
+// Captures an idle row's retained private/target/draft state into one DRAM
+// image, then returns its physical block IDs. Host frontier, pending prediction
+// and metrics survive. Requires elastic pooled storage; reset/empty rows are
+// already inactive. model_trim can reclaim the released device backing.
+// Suspended rows cannot be scheduled until try_resume succeeds. Calls retire
+// their transfers before returning; platform/IO failures remain terminal.
+iree_status_t loom_serve_text_row_suspend(loom_serve_text_row_t* row);
+
+// Admits fresh logical IDs and physical slabs, restores logical-order contents
+// and publishes the maps before making the row runnable. False is ordinary
+// capacity backpressure and preserves the image, frontier and prediction.
+// Already resident rows report true without work. The single host owner
+// excludes other admission/mutation until return; no weights are required.
+iree_status_t loom_serve_text_row_try_resume(loom_serve_text_row_t* row,
+                                             bool* out_resumed);
+
+// Retained DRAM payload bytes while suspended, or zero while resident/empty.
+// This is separate from device pool statistics, not extra machine capacity on
+// unified-memory devices. Reset and successful resume release the image.
+iree_host_size_t loom_serve_text_row_suspended_bytes(
+    const loom_serve_text_row_t* row);
+
+// Submits one active chunk at the retained absolute position and selects the
+// next token. Input count is in [1, prefill_capacity] and fits the context.
+// Input is copied into model-owned storage and not borrowed after return, even
+// on failure. Pooled/draft storage uses one packed span; dense storage uses the
+// source's isolated prefill command. The model owns one outstanding invocation
+// and its parameter pin through successful ALL readiness and complete_step.
+// The owner excludes model mutation and prediction queries until completion.
+// Position and metrics remain at their last completed boundary. Failure
+// retains accepted ownership for outer model destruction, never worker waits.
+// The selected token is not consumed into KV/recurrent state. A later prefill
+// may discard that prediction; decode consumes it.
+iree_status_t loom_serve_text_row_submit_prefill(
+    loom_serve_text_row_t* row, iree_host_size_t count,
+    const int32_t* token_ids, loom_serve_execution_frontier_t* out_frontier);
+
+// Consumes the previously selected token and selects its successor using the
+// same ownership contract as submit_prefill. The caller has consumed successful
+// completion and chosen to continue; EOS policy belongs to it. Dense storage
+// uses the source's isolated decode command, not a one-token prefill.
+iree_status_t loom_serve_text_row_submit_decode(
+    loom_serve_text_row_t* row, loom_serve_execution_frontier_t* out_frontier);
+
+// Publishes a submitted single-row step after successful ALL readiness and
+// releases its parameter pin. No device wait occurs. Failure is terminal and
+// preserves accepted ownership for outer destruction.
+iree_status_t loom_serve_text_row_complete_step(loom_serve_text_row_t* row);
+
+// Synchronous outer-thread joins over submission and complete_step. Task
+// workers use the phases above, not these CLI convenience entry points.
+iree_status_t loom_serve_text_row_prefill(loom_serve_text_row_t* row,
+                                          iree_host_size_t count,
+                                          const int32_t* token_ids);
+
+iree_status_t loom_serve_text_row_decode(loom_serve_text_row_t* row);
+
+// Token/EOS queries require a successfully selected prediction, not a reset or
+// an epoch span that omitted SELECT. Position counts consumed tokens, excluding
+// the currently selected token. Metrics cover isolated prefill/decode calls;
+// a shared epoch's duration belongs to the batch, not to each constituent row.
+int32_t loom_serve_text_row_token(const loom_serve_text_row_t* row);
+bool loom_serve_text_row_is_eos(const loom_serve_text_row_t* row);
+iree_host_size_t loom_serve_text_row_position(const loom_serve_text_row_t* row);
+loom_serve_text_metrics_t loom_serve_text_row_metrics(
+    const loom_serve_text_row_t* row);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif  // LOOM_SERVE_SERVICE_TEXT_MODEL_H_

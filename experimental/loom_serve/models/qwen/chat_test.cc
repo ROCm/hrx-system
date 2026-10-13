@@ -4,20 +4,20 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/text/chat.h"
+#include "loom/serve/service/text/chat.h"
 
 #include <cstdio>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "experimental/loom_serve/text/input.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "loom/serve/runtime/program/input.h"
 #include "loom/serve/runtime/program/json.h"
+#include "loom/serve/service/text/input.h"
 
 IREE_FLAG(string, chat_source, "", "Production chat policy source.");
 IREE_FLAG(string, alias_source, "", "Source returning retained input aliases.");
