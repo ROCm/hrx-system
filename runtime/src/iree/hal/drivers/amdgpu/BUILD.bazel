@@ -967,6 +967,7 @@ iree_runtime_cc_test(
         ":amdgpu",
         ":headers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/drivers/amdgpu/util:packet",

@@ -5,6 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstdint>
+#include <cstring>
+#include <string>
 #include <thread>
 
 #include "iree/base/internal/atomics.h"
@@ -35,6 +37,69 @@ constexpr iree_status_code_t kLateFailureCode = IREE_STATUS_UNKNOWN;
 // capacity. Generous against the configured ring sizes so the bound is only
 // ever reached if capacity accounting stopped working.
 constexpr uint64_t kMaxCapacityFillAttempts = 4096;
+
+class DriverFailureCapture {
+ public:
+  DriverFailureCapture() { iree_notification_initialize(&notification_); }
+  ~DriverFailureCapture() { iree_notification_deinitialize(&notification_); }
+
+  iree_hal_device_event_sink_t sink() {
+    return iree_hal_device_event_sink_t{CaptureEvent, this};
+  }
+
+  void Await() {
+    iree_notification_await(
+        &notification_,
+        [](void* user_data) {
+          auto* capture = static_cast<DriverFailureCapture*>(user_data);
+          return iree_atomic_load(&capture->state_,
+                                  iree_memory_order_acquire) == 2;
+        },
+        this, iree_infinite_timeout());
+  }
+
+  iree_status_code_t status_code() const { return status_code_; }
+  std::string message() const { return std::string(message_, message_length_); }
+
+ private:
+  static void CaptureEvent(void* user_data,
+                           const iree_hal_device_event_t* event) {
+    if (event->type != IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE ||
+        event->payload.data_length <
+            sizeof(iree_hal_device_driver_failure_event_t)) {
+      return;
+    }
+    auto* capture = static_cast<DriverFailureCapture*>(user_data);
+    int32_t expected = 0;
+    if (!iree_atomic_compare_exchange_strong(&capture->state_, &expected, 1,
+                                             iree_memory_order_acq_rel,
+                                             iree_memory_order_acquire)) {
+      return;
+    }
+
+    const auto* payload =
+        reinterpret_cast<const iree_hal_device_driver_failure_event_t*>(
+            event->payload.data);
+    capture->status_code_ = payload->status_code;
+    capture->message_length_ =
+        payload->message.size < sizeof(capture->message_) - 1
+            ? payload->message.size
+            : sizeof(capture->message_) - 1;
+    if (capture->message_length_ != 0) {
+      memcpy(capture->message_, payload->message.data,
+             capture->message_length_);
+    }
+    capture->message_[capture->message_length_] = 0;
+    iree_atomic_store(&capture->state_, 2, iree_memory_order_release);
+    iree_notification_post(&capture->notification_, IREE_ALL_WAITERS);
+  }
+
+  iree_notification_t notification_;
+  iree_atomic_int32_t state_ = IREE_ATOMIC_VAR_INIT(0);
+  iree_status_code_t status_code_ = IREE_STATUS_OK;
+  iree_host_size_t message_length_ = 0;
+  char message_[512] = {0};
+};
 
 class HostQueueFailureTest : public ::testing::Test {
  protected:
@@ -81,8 +146,11 @@ class TestLogicalDevice {
       const iree_hal_amdgpu_logical_device_options_t* options,
       const iree_hal_amdgpu_libhsa_t* libhsa,
       const iree_hal_amdgpu_topology_t* topology,
-      iree_allocator_t host_allocator) {
-    IREE_RETURN_IF_ERROR(create_context_.Initialize(host_allocator));
+      iree_allocator_t host_allocator,
+      iree_hal_device_event_sink_t event_sink =
+          iree_hal_device_event_sink_discard()) {
+    IREE_RETURN_IF_ERROR(
+        create_context_.Initialize(host_allocator, event_sink));
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_create(
         IREE_SV("amdgpu"), options, libhsa, topology, create_context_.params(),
         host_allocator, &base_device_));
@@ -355,6 +423,80 @@ TEST_F(HostQueueFailureTest, LaterQueueFailureDoesNotReplaceTheFirst) {
   iree_hal_amdgpu_host_queue_record_failure(
       queue, iree_make_status(kLateFailureCode, "late queue failure"));
   EXPECT_EQ(HostQueueErrorStatusCode(queue), kInjectedFailureCode);
+}
+
+// A completion epoch that remains ahead after quiescing the sole host
+// publisher cannot belong to any admitted submission. It must fail the queue
+// instead of leaving the completion service spinning on an unretirable epoch.
+TEST_F(HostQueueFailureTest, UnpublishedHardwareCompletionFailsQueue) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+
+  DriverFailureCapture failure_capture;
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(
+      &options, &libhsa_, &topology_, host_allocator_, failure_capture.sink()));
+  iree_hal_amdgpu_host_queue_t* queue = test_device.first_host_queue();
+  ASSERT_NE(queue, nullptr);
+
+  // Establish a normally submitted, published, completed, and drained epoch
+  // before corrupting only the hardware completion count.
+  Ref<iree_hal_semaphore_t> signal_semaphore;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), signal_semaphore.out()));
+  uint64_t signal_value = 1;
+  iree_hal_semaphore_t* signal_semaphore_ptr = signal_semaphore.get();
+  const iree_hal_semaphore_list_t signal_list =
+      MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
+  IREE_ASSERT_OK(iree_hal_queue_barrier(
+      test_device.queue(), iree_hal_semaphore_list_empty(), signal_list,
+      /*barriers=*/NULL, IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(signal_semaphore, signal_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  iree_hal_amdgpu_notification_ring_t* ring = &queue->notification_ring;
+  const iree_hal_amdgpu_notification_epoch_snapshot_t stable_snapshot =
+      iree_hal_amdgpu_notification_ring_query_epoch_snapshot(ring);
+  ASSERT_EQ(stable_snapshot.completed_epoch, stable_snapshot.published_epoch);
+  ASSERT_EQ(stable_snapshot.published_epoch, ring->epoch.next_submission);
+  const hsa_signal_value_t stable_signal_value =
+      (hsa_signal_value_t)(IREE_HAL_AMDGPU_EPOCH_INITIAL_VALUE -
+                           stable_snapshot.completed_epoch);
+
+  // Model the captured failure exactly: hardware reports one more completion
+  // than the host ever submitted. Restore the signal before making assertions
+  // so a regression fails normally instead of stranding the service thread on
+  // the deliberately malformed state.
+  iree_hsa_signal_store_screlease(IREE_LIBHSA(&libhsa_), ring->epoch.signal,
+                                  stable_signal_value - 1);
+  iree_hal_amdgpu_host_queue_drain_completions_for_waiter(queue);
+  iree_hsa_signal_store_screlease(IREE_LIBHSA(&libhsa_), ring->epoch.signal,
+                                  stable_signal_value);
+
+  ASSERT_EQ(HostQueueErrorStatusCode(queue), IREE_STATUS_INTERNAL);
+  failure_capture.Await();
+  iree_status_t queue_error =
+      iree_hal_amdgpu_host_queue_clone_error_status(queue);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL, iree_status_clone(queue_error));
+  const iree_string_view_t queue_error_message =
+      iree_status_message(queue_error);
+  const std::string queue_error_text(queue_error_message.data,
+                                     queue_error_message.size);
+  EXPECT_NE(queue_error_text.find("hardware completion epoch"),
+            std::string::npos);
+  EXPECT_NE(queue_error_text.find("exceeds host publication epoch"),
+            std::string::npos);
+  EXPECT_NE(queue_error_text.find("submitted="), std::string::npos);
+  EXPECT_NE(queue_error_text.find("drained="), std::string::npos);
+  EXPECT_EQ(failure_capture.status_code(), IREE_STATUS_INTERNAL);
+  EXPECT_EQ(failure_capture.message(), queue_error_text);
+  iree_status_free(queue_error);
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
+                        iree_hal_amdgpu_logical_device_check_failure(
+                            test_device.logical_device()));
 }
 
 // A queue that has finished its terminal transition rejects further work

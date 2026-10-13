@@ -1252,6 +1252,7 @@ iree_cc_test(
     ::amdgpu
     ::headers
     iree::base
+    iree::base::threading
     iree::hal
     iree::hal::cts::util::test_base
     iree::hal::drivers::amdgpu::util::packet

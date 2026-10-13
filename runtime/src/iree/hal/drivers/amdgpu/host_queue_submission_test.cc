@@ -9,7 +9,9 @@
 #include <atomic>
 #include <cstdint>
 #include <initializer_list>
+#include <thread>
 
+#include "iree/base/threading/notification.h"
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amdgpu/host_queue.h"
@@ -335,20 +337,36 @@ TEST_F(HostQueueSubmissionTest, HostWaitRequiresPublishedProducerRetirement) {
         iree_async_single_frontier_as_const_frontier(&producer_frontier),
         producer_epoch, /*producer_value=*/1));
   }
-  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
+  if (!iree_status_is_ok(status)) {
+    iree_slim_mutex_unlock(&queue->locks.submission_mutex);
+  }
   IREE_ASSERT_OK(status);
 
-  // Hardware completion alone cannot authorize host-visible completion. The
-  // immediate timeout checks that contract without blocking valid queue work.
-  iree_hsa_signal_store_screlease(
-      IREE_LIBHSA(&libhsa_), ring->epoch.signal,
-      (hsa_signal_value_t)(IREE_HAL_AMDGPU_EPOCH_INITIAL_VALUE -
-                           producer_epoch));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEADLINE_EXCEEDED,
-      iree_hal_semaphore_wait(completed.semaphores[0], /*value=*/1,
-                              iree_immediate_timeout(),
-                              IREE_ASYNC_WAIT_FLAG_NONE));
+  // Let hardware complete while the publisher still owns submission_mutex.
+  // Both the direct waiter below and the queue completion thread may observe
+  // the completed epoch, but neither may classify it or publish the semaphore
+  // until this submitter either publishes or leaves the critical section.
+  iree_notification_t hardware_completion_notification;
+  iree_notification_initialize(&hardware_completion_notification);
+  std::atomic<bool> hardware_completed{false};
+  std::thread waiter_thread([&]() {
+    iree_hsa_signal_store_screlease(
+        IREE_LIBHSA(&libhsa_), ring->epoch.signal,
+        (hsa_signal_value_t)(IREE_HAL_AMDGPU_EPOCH_INITIAL_VALUE -
+                             producer_epoch));
+    hardware_completed.store(true, std::memory_order_release);
+    iree_notification_post(&hardware_completion_notification, IREE_ALL_WAITERS);
+    iree_hal_amdgpu_host_queue_drain_completions_for_waiter(queue);
+  });
+  iree_notification_await(
+      &hardware_completion_notification,
+      [](void* user_data) {
+        return static_cast<std::atomic<bool>*>(user_data)->load(
+            std::memory_order_acquire);
+      },
+      &hardware_completed, iree_infinite_timeout());
+
+  // Hardware completion alone cannot authorize host-visible completion.
   uint64_t value = 0;
   IREE_EXPECT_OK(iree_hal_semaphore_query(completed.semaphores[0], &value));
   EXPECT_EQ(value, 0u);
@@ -356,7 +374,10 @@ TEST_F(HostQueueSubmissionTest, HostWaitRequiresPublishedProducerRetirement) {
             0u);
 
   iree_hal_amdgpu_notification_ring_publish_epoch(ring, producer_epoch);
-  iree_hal_amdgpu_host_queue_drain_completions_for_waiter(queue);
+  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
+  waiter_thread.join();
+  iree_notification_deinitialize(&hardware_completion_notification);
+
   IREE_EXPECT_OK(iree_hal_semaphore_wait(completed.semaphores[0], /*value=*/1,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
@@ -364,6 +385,7 @@ TEST_F(HostQueueSubmissionTest, HostWaitRequiresPublishedProducerRetirement) {
             1u);
   EXPECT_EQ(completion_state.observed_value.load(std::memory_order_acquire),
             0u);
+  EXPECT_FALSE(iree_hal_amdgpu_host_queue_has_error(queue));
 }
 
 class HostQueueHsaProfilingScope {

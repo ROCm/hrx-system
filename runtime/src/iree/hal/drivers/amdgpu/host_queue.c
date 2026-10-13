@@ -426,11 +426,99 @@ void iree_hal_amdgpu_host_queue_query_scope(
   };
 }
 
+static bool iree_hal_amdgpu_host_queue_store_error(
+    iree_hal_amdgpu_host_queue_t* queue, iree_status_t error) {
+  intptr_t expected = 0;
+  if (iree_atomic_compare_exchange_strong(
+          &queue->error_status, &expected, (intptr_t)error,
+          iree_memory_order_release, iree_memory_order_acquire)) {
+    return true;
+  }
+  iree_status_free(error);
+  return false;
+}
+
+static void iree_hal_amdgpu_host_queue_request_completion_thread_stop(
+    iree_hal_amdgpu_host_queue_t* queue) {
+  if (queue->completion.stop_signal.handle) {
+    iree_hsa_signal_store_screlease(IREE_LIBHSA(queue->libhsa),
+                                    queue->completion.stop_signal, 1);
+  }
+}
+
+static void iree_hal_amdgpu_host_queue_publish_driver_failure(
+    iree_hal_amdgpu_host_queue_t* queue, const iree_status_t status) {
+  iree_hal_amdgpu_logical_device_t* logical_device =
+      (iree_hal_amdgpu_logical_device_t*)queue->logical_device;
+  const iree_hal_device_driver_failure_event_t payload = {
+      .record_length = sizeof(payload),
+      .abi_version = IREE_HAL_DEVICE_DRIVER_FAILURE_EVENT_ABI_VERSION_0,
+      .status_code = iree_status_code(status),
+      .message = iree_status_message(status),
+  };
+  iree_hal_device_event_t event = iree_hal_device_event_default();
+  event.type = IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE;
+  event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
+  event.source.device = queue->logical_device;
+  event.source.device_id = logical_device->identifier;
+  event.source.driver_id = IREE_SV("amdgpu");
+  event.source.physical_device_ordinal = (uint32_t)queue->device_ordinal;
+  event.source.queue_ordinal = (uint32_t)queue->physical_queue_ordinal;
+  event.payload = iree_make_const_byte_span(&payload, sizeof(payload));
+  iree_hal_device_event_sink_publish(logical_device->event_sink, &event);
+}
+
+// Distinguishes a valid fast-completion race from hardware completion that no
+// host submission owns. The drain cannot decide this from its first snapshot:
+// a submitter may still hold submission_mutex while finishing host resource
+// accesses and publishing the epoch. Taking that mutex waits out the publisher
+// without nesting it under completion_drain_mutex, whose callbacks may submit.
+static void iree_hal_amdgpu_host_queue_validate_completion_epoch(
+    iree_hal_amdgpu_host_queue_t* queue,
+    iree_hal_amdgpu_notification_epoch_snapshot_t drain_snapshot) {
+  if (IREE_LIKELY(drain_snapshot.completed_epoch <=
+                  drain_snapshot.published_epoch)) {
+    return;
+  }
+
+  iree_slim_mutex_lock(&queue->locks.submission_mutex);
+  const iree_hal_amdgpu_notification_epoch_snapshot_t stable_snapshot =
+      iree_hal_amdgpu_notification_ring_query_epoch_snapshot(
+          &queue->notification_ring);
+  const uint64_t submitted_epoch =
+      queue->notification_ring.epoch.next_submission;
+  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
+  if (stable_snapshot.completed_epoch <= stable_snapshot.published_epoch) {
+    return;
+  }
+
+  const uint64_t drained_epoch = (uint64_t)iree_atomic_load(
+      &queue->notification_ring.epoch.last_drained, iree_memory_order_acquire);
+  iree_status_t error = iree_make_status(
+      IREE_STATUS_INTERNAL,
+      "AMDGPU physical queue %" PRIhsz ":%" PRIu32
+      " hardware completion epoch %" PRIu64
+      " exceeds host publication epoch %" PRIu64
+      " after submission quiescence (submitted=%" PRIu64 ", drained=%" PRIu64
+      ")",
+      queue->device_ordinal, (uint32_t)queue->physical_queue_ordinal,
+      stable_snapshot.completed_epoch, stable_snapshot.published_epoch,
+      submitted_epoch, drained_epoch);
+  if (iree_hal_amdgpu_host_queue_store_error(queue, error)) {
+    iree_hal_amdgpu_host_queue_publish_driver_failure(queue, error);
+    iree_hal_amdgpu_logical_device_error_handler(queue->logical_device,
+                                                 iree_status_clone(error));
+    iree_hal_amdgpu_host_queue_request_completion_thread_stop(queue);
+  }
+}
+
 // Drains completed notification entries and reclaims kernarg space. If the GPU
 // queue has faulted (error_status is set), fails all pending entries instead of
 // draining normally. Caller must hold completion_drain_mutex.
 static iree_host_size_t iree_hal_amdgpu_host_queue_drain_completions_locked(
-    iree_hal_amdgpu_host_queue_t* queue) {
+    iree_hal_amdgpu_host_queue_t* queue,
+    iree_hal_amdgpu_notification_epoch_snapshot_t* out_epoch_snapshot) {
+  memset(out_epoch_snapshot, 0, sizeof(*out_epoch_snapshot));
   // Check for GPU queue error (set by the HSA error callback on another
   // thread). If the queue has faulted, no further epochs will advance;
   // fail all pending entries so waiters get the actual GPU error instead
@@ -455,7 +543,7 @@ static iree_host_size_t iree_hal_amdgpu_host_queue_drain_completions_locked(
         &queue->notification_ring,
         /*fallback_frontier=*/NULL,
         iree_hal_amdgpu_host_queue_reclaim_retire_fn(queue), queue,
-        &reclaim_positions);
+        &reclaim_positions, out_epoch_snapshot);
     const uint64_t current_epoch =
         (uint64_t)iree_atomic_load(&queue->notification_ring.epoch.last_drained,
                                    iree_memory_order_acquire);
@@ -472,39 +560,23 @@ static iree_host_size_t iree_hal_amdgpu_host_queue_drain_completions_locked(
 // Returns the retirement epoch whose post-drain continuations were serviced.
 static uint64_t iree_hal_amdgpu_host_queue_drain_completions(
     iree_hal_amdgpu_host_queue_t* queue) {
+  iree_hal_amdgpu_notification_epoch_snapshot_t epoch_snapshot = {0};
   iree_slim_mutex_lock(&queue->locks.completion_drain_mutex);
-  iree_hal_amdgpu_host_queue_drain_completions_locked(queue);
+  iree_hal_amdgpu_host_queue_drain_completions_locked(queue, &epoch_snapshot);
   iree_slim_mutex_unlock(&queue->locks.completion_drain_mutex);
+  iree_hal_amdgpu_host_queue_validate_completion_epoch(queue, epoch_snapshot);
   return iree_hal_amdgpu_host_queue_run_post_drain_actions(queue);
 }
 
 iree_host_size_t iree_hal_amdgpu_host_queue_drain_completions_for_waiter(
     iree_hal_amdgpu_host_queue_t* queue) {
+  iree_hal_amdgpu_notification_epoch_snapshot_t epoch_snapshot = {0};
   iree_slim_mutex_lock(&queue->locks.completion_drain_mutex);
-  iree_host_size_t count =
-      iree_hal_amdgpu_host_queue_drain_completions_locked(queue);
+  iree_host_size_t count = iree_hal_amdgpu_host_queue_drain_completions_locked(
+      queue, &epoch_snapshot);
   iree_slim_mutex_unlock(&queue->locks.completion_drain_mutex);
+  iree_hal_amdgpu_host_queue_validate_completion_epoch(queue, epoch_snapshot);
   return count;
-}
-
-static bool iree_hal_amdgpu_host_queue_store_error(
-    iree_hal_amdgpu_host_queue_t* queue, iree_status_t error) {
-  intptr_t expected = 0;
-  if (iree_atomic_compare_exchange_strong(
-          &queue->error_status, &expected, (intptr_t)error,
-          iree_memory_order_release, iree_memory_order_acquire)) {
-    return true;
-  }
-  iree_status_free(error);
-  return false;
-}
-
-static void iree_hal_amdgpu_host_queue_request_completion_thread_stop(
-    iree_hal_amdgpu_host_queue_t* queue) {
-  if (queue->completion.stop_signal.handle) {
-    iree_hsa_signal_store_screlease(IREE_LIBHSA(queue->libhsa),
-                                    queue->completion.stop_signal, 1);
-  }
 }
 
 // Permanently closes the queue to further submission. Idempotent, and the only
@@ -1235,11 +1307,12 @@ void iree_hal_amdgpu_host_queue_finish_deinitialize(
     iree_hal_amdgpu_host_queue_clear_profile_events(queue);
     iree_status_free(error);
   } else {
+    iree_hal_amdgpu_notification_epoch_snapshot_t epoch_snapshot = {0};
     iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
         &queue->notification_ring,
         /*fallback_frontier=*/NULL,
         iree_hal_amdgpu_host_queue_reclaim_retire_fn(queue), queue,
-        &reclaim_positions);
+        &reclaim_positions, &epoch_snapshot);
   }
   iree_hal_amdgpu_host_queue_reclaim_queue_owned_positions(queue,
                                                            reclaim_positions);

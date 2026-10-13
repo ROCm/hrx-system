@@ -742,12 +742,15 @@ TEST_F(NotificationRingTest, QueueOwnedReclaimPositionReporting) {
 
   SimulateCompletions(ring.get(), 2);
   iree_hal_amdgpu_reclaim_positions_t reclaim_positions = {0};
-  EXPECT_EQ(
-      iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
-          ring.get(), EmptyFrontier(), nullptr, nullptr, &reclaim_positions),
-      0u);
+  iree_hal_amdgpu_notification_epoch_snapshot_t epoch_snapshot = {0};
+  EXPECT_EQ(iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
+                ring.get(), EmptyFrontier(), nullptr, nullptr,
+                &reclaim_positions, &epoch_snapshot),
+            0u);
   EXPECT_EQ(reclaim_positions.kernarg_write_position, 192u);
   EXPECT_EQ(reclaim_positions.queue_upload_write_position, 256u);
+  EXPECT_EQ(epoch_snapshot.completed_epoch, 2u);
+  EXPECT_EQ(epoch_snapshot.published_epoch, 2u);
 }
 
 TEST_F(NotificationRingTest, KernargPositionReportingForZeroSignalEpochs) {

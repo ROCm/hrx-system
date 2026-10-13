@@ -171,6 +171,14 @@ typedef struct iree_hal_amdgpu_reclaim_positions_t {
   uint64_t queue_upload_write_position;
 } iree_hal_amdgpu_reclaim_positions_t;
 
+// Hardware and host publication epochs observed by one notification drain.
+typedef struct iree_hal_amdgpu_notification_epoch_snapshot_t {
+  // Epoch completed by the hardware according to the queue's HSA signal.
+  uint64_t completed_epoch;
+  // Epoch whose host-owned notification metadata has been published.
+  uint64_t published_epoch;
+} iree_hal_amdgpu_notification_epoch_snapshot_t;
+
 typedef uint32_t iree_hal_amdgpu_reclaim_retire_flags_t;
 enum iree_hal_amdgpu_reclaim_retire_flag_bits_t {
   IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_NONE = 0u,
@@ -355,6 +363,15 @@ void iree_hal_amdgpu_notification_ring_deinitialize(
 hsa_signal_t iree_hal_amdgpu_notification_ring_epoch_signal(
     const iree_hal_amdgpu_notification_ring_t* ring);
 
+// Acquires the hardware completion and host publication epochs.
+//
+// A completed epoch may transiently exceed the published epoch while a host
+// submitter finishes its final resource accesses. Callers that need to decide
+// whether the relationship is valid must first quiesce that publisher.
+iree_hal_amdgpu_notification_epoch_snapshot_t
+iree_hal_amdgpu_notification_ring_query_epoch_snapshot(
+    const iree_hal_amdgpu_notification_ring_t* ring);
+
 // Advances the submission epoch counter and returns the assigned one-based
 // frontier epoch. Called by the submission path after all AQL packets for a
 // submission have been written to the hardware queue.
@@ -446,6 +463,8 @@ void iree_hal_amdgpu_notification_ring_push_frontier_snapshot(
 //
 // Stores the highest queue-owned ring positions across all retired epochs in
 // |out_reclaim_positions|. Positions are set to 0 if no epochs were retired.
+// Stores the hardware completion and host publication epochs acquired by this
+// drain in |out_epoch_snapshot|, including when no epochs were retired.
 //
 // |retire_fn|, when provided, is called once per normally retired epoch before
 // user-visible semaphore publication with
@@ -457,7 +476,8 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
     iree_hal_amdgpu_notification_ring_t* ring,
     const iree_async_frontier_t* fallback_frontier,
     iree_hal_amdgpu_reclaim_retire_fn_t retire_fn, void* retire_user_data,
-    iree_hal_amdgpu_reclaim_positions_t* out_reclaim_positions);
+    iree_hal_amdgpu_reclaim_positions_t* out_reclaim_positions,
+    iree_hal_amdgpu_notification_epoch_snapshot_t* out_epoch_snapshot);
 
 // Stores the highest kernarg_write_position across all retired epochs in
 // |out_kernarg_reclaim_position|. Set to 0 if no epochs were retired.

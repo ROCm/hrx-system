@@ -276,6 +276,25 @@ hsa_signal_t iree_hal_amdgpu_notification_ring_epoch_signal(
   return ring->epoch.signal;
 }
 
+iree_hal_amdgpu_notification_epoch_snapshot_t
+iree_hal_amdgpu_notification_ring_query_epoch_snapshot(
+    const iree_hal_amdgpu_notification_ring_t* ring) {
+  IREE_ASSERT_ARGUMENT(ring);
+  IREE_ASSERT(ring->epoch.signal.handle,
+              "notification epoch signal must be initialized");
+
+  const hsa_signal_value_t signal_value = iree_hsa_signal_load_scacquire(
+      IREE_LIBHSA(ring->libhsa), ring->epoch.signal);
+  const uint64_t completed_epoch =
+      (uint64_t)IREE_HAL_AMDGPU_EPOCH_INITIAL_VALUE - (uint64_t)signal_value;
+  const uint64_t published_epoch = (uint64_t)iree_atomic_load(
+      &ring->epoch.last_published, iree_memory_order_acquire);
+  return (iree_hal_amdgpu_notification_epoch_snapshot_t){
+      .completed_epoch = completed_epoch,
+      .published_epoch = published_epoch,
+  };
+}
+
 uint64_t iree_hal_amdgpu_notification_ring_advance_epoch(
     iree_hal_amdgpu_notification_ring_t* ring) {
   return ++ring->epoch.next_submission;
@@ -579,25 +598,25 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
     iree_hal_amdgpu_notification_ring_t* ring,
     const iree_async_frontier_t* fallback_frontier,
     iree_hal_amdgpu_reclaim_retire_fn_t retire_fn, void* retire_user_data,
-    iree_hal_amdgpu_reclaim_positions_t* out_reclaim_positions) {
+    iree_hal_amdgpu_reclaim_positions_t* out_reclaim_positions,
+    iree_hal_amdgpu_notification_epoch_snapshot_t* out_epoch_snapshot) {
   IREE_ASSERT_ARGUMENT(ring);
   IREE_ASSERT_ARGUMENT(out_reclaim_positions);
+  IREE_ASSERT_ARGUMENT(out_epoch_snapshot);
 
   memset(out_reclaim_positions, 0, sizeof(*out_reclaim_positions));
+  memset(out_epoch_snapshot, 0, sizeof(*out_epoch_snapshot));
 
   // Early out if the ring was never initialized or already deinitialized.
   if (!ring->epoch.signal.handle) {
     return 0;
   }
 
-  hsa_signal_value_t signal_value = iree_hsa_signal_load_scacquire(
-      IREE_LIBHSA(ring->libhsa), ring->epoch.signal);
-  uint64_t current_epoch =
-      (uint64_t)(IREE_HAL_AMDGPU_EPOCH_INITIAL_VALUE - signal_value);
-  const uint64_t last_published = (uint64_t)iree_atomic_load(
-      &ring->epoch.last_published, iree_memory_order_acquire);
-  if (current_epoch > last_published) {
-    current_epoch = last_published;
+  *out_epoch_snapshot =
+      iree_hal_amdgpu_notification_ring_query_epoch_snapshot(ring);
+  uint64_t current_epoch = out_epoch_snapshot->completed_epoch;
+  if (current_epoch > out_epoch_snapshot->published_epoch) {
+    current_epoch = out_epoch_snapshot->published_epoch;
   }
 
   uint64_t previous_drained = (uint64_t)iree_atomic_load(
@@ -738,10 +757,11 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_drain(
     uint64_t* out_kernarg_reclaim_position) {
   IREE_ASSERT_ARGUMENT(out_kernarg_reclaim_position);
   iree_hal_amdgpu_reclaim_positions_t reclaim_positions = {0};
+  iree_hal_amdgpu_notification_epoch_snapshot_t epoch_snapshot = {0};
   iree_host_size_t drained_count =
       iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
           ring, fallback_frontier, retire_fn, retire_user_data,
-          &reclaim_positions);
+          &reclaim_positions, &epoch_snapshot);
   *out_kernarg_reclaim_position = reclaim_positions.kernarg_write_position;
   return drained_count;
 }
