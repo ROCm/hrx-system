@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/serve/service/image/service.h"
-
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -28,6 +26,7 @@
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/image/model.h"
 #include "loom/serve/service/image/output.h"
+#include "loom/serve/service/image/service.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/stalled_stderr.h"
 #include "loom/serve/transport/http/listener.h"

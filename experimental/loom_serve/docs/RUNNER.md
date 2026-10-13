@@ -519,7 +519,7 @@ weights through the coordinator. These are integration requirements, not
 claims about the current executable.
 
 The existing
-[`EmbeddingsCompleteBeforeOtherDeviceRetires`](../models/fixtures/embedding/service_test.cc)
+[`EmbeddingsCompleteBeforeOtherDeviceRetires`](../../../loom/src/loom/serve/service/finite/embedding/source_service_test.cc)
 test gives the relevant single-node witness: a source-JIT model returns exact
 HTTP embedding values while another domain's final GPU reader remains held.
 Trimming preserves that reader's workspace until release. It runs with one and

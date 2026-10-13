@@ -29,6 +29,59 @@ loom_cc_test(
     ],
 )
 
+# Compiled suite shared by physical target registrations; helpers stay private.
+loom_cc_library(
+    name = "source_service_tests",
+    testonly = True,
+    srcs = [
+        "admission_service_test.cc",
+        "checkpoint_test.cc",
+        "owner_turn_test_util.h",
+        "prefix_service_test.cc",
+        "service_test_fixture.h",
+        "source_service_test.cc",
+        "source_test_oracle.h",
+        "stalled_client_test_util.h",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/server:model_registration",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/server:router",
+        "//loom/src/loom/serve/service/text:chat",
+        "//loom/src/loom/serve/service/text:input",
+        "//loom/src/loom/serve/service/text:model",
+        "//loom/src/loom/serve/service/text:packing",
+        "//loom/src/loom/serve/service/text:schedule",
+        "//loom/src/loom/serve/service/text:service",
+        "//loom/src/loom/serve/service/text:telemetry",
+        "//loom/src/loom/serve/telemetry:stream",
+        "//loom/src/loom/serve/testing:model",
+        "//loom/src/loom/serve/testing:stalled_stderr",
+        "//loom/src/loom/serve/transport/http:listener",
+        "//loom/src/loom/serve/transport/http:server",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/net:carrier",
+        "//runtime/src/iree/net/carrier/loopback",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+    alwayslink = True,
+)
+
 loom_cc_library(
     name = "chat",
     srcs = ["chat.c"],

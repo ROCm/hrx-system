@@ -1,0 +1,111 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_test", "loom_config_compatible_with")
+
+package(default_visibility = ["//visibility:private"])
+
+loom_cc_test(
+    name = "source_image_service_test",
+    args = [
+        "--model_source=$(rootpath //loom/src/loom/serve/fixture/image:prepare.loom)",
+        "--test_device=task",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/image:prepare.loom",
+        "//loom/src/loom/serve/fixture/image:sources",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/target/arch:x86",
+        "//loom/config/execute:task_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/src/loom/serve/service/image:source_service_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_decision_service_test",
+    args = [
+        "--model_source=$(rootpath //loom/src/loom/serve/fixture/decision:prepare.loom)",
+        "--embedding_source=$(rootpath //loom/src/loom/serve/fixture/embedding:prepare.loom)",
+        "--test_device=task",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/decision:prepare.loom",
+        "//loom/src/loom/serve/fixture/decision:sources",
+        "//loom/src/loom/serve/fixture/embedding:prepare.loom",
+        "//loom/src/loom/serve/fixture/embedding:sources",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/target/arch:x86",
+        "//loom/config/execute:task_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/src/loom/serve/service/finite/decision:source_service_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_embedding_service_test",
+    args = [
+        "--model_source=$(rootpath //loom/src/loom/serve/fixture/embedding:prepare.loom)",
+        "--test_device=task",
+        "--gtest_filter=Workers/SourceEmbeddingServiceTest.*",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/embedding:prepare.loom",
+        "//loom/src/loom/serve/fixture/embedding:sources",
+        "//loom/src/loom/serve/fixture/embedding:variant_sources",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/target/arch:x86",
+        "//loom/config/execute:task_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/src/loom/serve/service/finite/embedding:source_service_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_text_service_test",
+    args = [
+        "--model_source=$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+        "--test_device=task",
+        "--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*:SharedWorkers/PrefixServiceTest.*",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/text:prepare.loom",
+        "//loom/src/loom/serve/fixture/text:sources",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/target/arch:x86",
+        "//loom/config/execute:task_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/src/loom/serve/service/text:source_service_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

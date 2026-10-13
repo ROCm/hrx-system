@@ -70,6 +70,118 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "source_decision_service_test",
+    args = [
+        "--model_source=$(rootpath //loom/src/loom/serve/fixture/decision:prepare.loom)",
+        "--embedding_source=$(rootpath //loom/src/loom/serve/fixture/embedding:prepare.loom)",
+        "--test_device=amdgpu",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/decision:prepare.loom",
+        "//loom/src/loom/serve/fixture/decision:sources",
+        "//loom/src/loom/serve/fixture/embedding:prepare.loom",
+        "//loom/src/loom/serve/fixture/embedding:sources",
+    ],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/src/loom/serve/service/finite/decision:source_service_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_embedding_service_test",
+    args = [
+        "--model_source=$(rootpath //loom/src/loom/serve/fixture/embedding:prepare.loom)",
+        "--test_device=amdgpu",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/embedding:prepare.loom",
+        "//loom/src/loom/serve/fixture/embedding:sources",
+        "//loom/src/loom/serve/fixture/embedding:variant_sources",
+    ],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/src/loom/serve/service/finite/embedding:source_service_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_text_service_test",
+    args = [
+        "--model_source=$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+        "--test_device=amdgpu",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/text:prepare.loom",
+        "//loom/src/loom/serve/fixture/text:sources",
+    ],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/src/loom/serve/service/text:source_service_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_image_service_test",
+    args = [
+        "--model_source=$(rootpath //loom/src/loom/serve/fixture/image:prepare.loom)",
+        "--test_device=amdgpu",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/image:prepare.loom",
+        "//loom/src/loom/serve/fixture/image:sources",
+    ],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/src/loom/serve/service/image:source_service_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "image_service_test",
     srcs = ["//loom/src/loom/serve/service/image:service_test.cc"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,

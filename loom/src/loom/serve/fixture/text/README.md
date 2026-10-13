@@ -26,7 +26,7 @@ prediction = #                         if position % 11 == 0
 
 Selection reads the complete paged history; the next chunk reads both its
 recurrent anchor and last cached value. The CPU oracle in
-[service_test.cc](../../../../../../experimental/loom_serve/models/fixtures/text/service_test.cc) maintains a dense running sum instead of
+[source_test_oracle.h](../../service/text/source_test_oracle.h) maintains a dense running sum instead of
 interpreting device packets or physical page IDs. A pending prediction remains
 unconsumed until the next step.
 
@@ -150,9 +150,9 @@ format does not change this path or ownership contract.
 build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/models/fixtures/text:request_test \
   //experimental/loom_serve/models/fixtures/text:client_test \
-  //experimental/loom_serve/models/fixtures/text:service_cpu_test \
-  //experimental/loom_serve/models/fixtures/text:service_test \
-  //experimental/loom_serve/models/fixtures/text:service_vulkan_test
+  //loom/src/loom/tooling/target/cpu/serve:source_text_service_test \
+  //loom/src/loom/tooling/target/amdgpu/serve:source_text_service_test \
+  //loom/src/loom/tooling/target/spirv/serve:source_text_service_test
 ```
 
 The native CPU, AMDGPU and Vulkan service tests use one and four shared workers.

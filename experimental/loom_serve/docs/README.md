@@ -152,10 +152,10 @@ build_tools/bin/iree-bazel-test --config=asan \
   --//loom/config/target:enable=vm,x86 \
   --//loom/config/execute:enable=iree_hal \
   --//runtime/config/hal:drivers=task \
-  //experimental/loom_serve/models/fixtures/text:service_cpu_test \
-  //experimental/loom_serve/models/fixtures/image:service_cpu_test \
-  //experimental/loom_serve/models/fixtures/embedding:service_cpu_test \
-  //experimental/loom_serve/models/fixtures/decision:service_cpu_test
+  //loom/src/loom/tooling/target/cpu/serve:source_text_service_test \
+  //loom/src/loom/tooling/target/cpu/serve:source_image_service_test \
+  //loom/src/loom/tooling/target/cpu/serve:source_embedding_service_test \
+  //loom/src/loom/tooling/target/cpu/serve:source_decision_service_test
 ```
 
 ### GPU model configuration

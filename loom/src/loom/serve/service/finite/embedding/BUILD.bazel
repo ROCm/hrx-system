@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 
 package(
     default_visibility = ["//loom/src/loom/serve:implementation"],
@@ -26,6 +26,48 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:unicode",
         "//runtime/src/iree/vm",
     ],
+)
+
+# Compiled suite shared by physical target registrations; helpers stay private.
+loom_cc_library(
+    name = "source_service_tests",
+    testonly = True,
+    srcs = [
+        "source_service_test.cc",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/parameter:residency",
+        "//loom/src/loom/serve/runtime/program:compilation",
+        "//loom/src/loom/serve/server:model_registration",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/server:router",
+        "//loom/src/loom/serve/service/finite:model",
+        "//loom/src/loom/serve/service/finite:service",
+        "//loom/src/loom/serve/service/finite/embedding:protocol",
+        "//loom/src/loom/serve/testing:model",
+        "//loom/src/loom/serve/testing:stalled_stderr",
+        "//loom/src/loom/serve/transport/http:listener",
+        "//loom/src/loom/serve/transport/http:server",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+    alwayslink = True,
 )
 
 loom_cc_test(

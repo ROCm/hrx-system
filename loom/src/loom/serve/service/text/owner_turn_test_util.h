@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_TEXT_OWNER_TURN_H_
-#define EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_TEXT_OWNER_TURN_H_
+#ifndef LOOM_SERVE_SERVICE_TEXT_OWNER_TURN_TEST_UTIL_H_
+#define LOOM_SERVE_SERVICE_TEXT_OWNER_TURN_TEST_UTIL_H_
 
 #include <condition_variable>
 #include <functional>
@@ -63,4 +63,4 @@ class OwnerTurn {
 
 }  // namespace loom_serve::testing::text
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_TEXT_OWNER_TURN_H_
+#endif  // LOOM_SERVE_SERVICE_TEXT_OWNER_TURN_TEST_UTIL_H_

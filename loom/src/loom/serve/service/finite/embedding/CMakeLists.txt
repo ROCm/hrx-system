@@ -28,6 +28,42 @@ loom_cc_library(
   PUBLIC
 )
 
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_library(
+  NAME
+    source_service_tests
+  SRCS
+    "source_service_test.cc"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::base::tooling::flags
+    iree::hal
+    iree::task
+    iree::testing::gtest
+    iree::testing::temp_file
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::host
+    loom::serve::runtime::parameter::residency
+    loom::serve::runtime::program::compilation
+    loom::serve::server::model_registration
+    loom::serve::server::registry
+    loom::serve::server::router
+    loom::serve::service::finite::embedding::protocol
+    loom::serve::service::finite::model
+    loom::serve::service::finite::service
+    loom::serve::testing::model
+    loom::serve::testing::stalled_stderr
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
 loom_cc_test(
   NAME
     protocol_test

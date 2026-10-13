@@ -39,9 +39,9 @@ policy:
 ```sh
 iree-bazel-test --config=asan \
   //loom/src/loom/serve/service/finite/decision:protocol_test \
-  //experimental/loom_serve/models/fixtures/decision:service_cpu_test \
-  //experimental/loom_serve/models/fixtures/decision:service_test \
-  //experimental/loom_serve/models/fixtures/decision:service_vulkan_test
+  //loom/src/loom/tooling/target/cpu/serve:source_decision_service_test \
+  //loom/src/loom/tooling/target/amdgpu/serve:source_decision_service_test \
+  //loom/src/loom/tooling/target/spirv/serve:source_decision_service_test
 ```
 
 The actual native-device/HTTP cases run with one and four shared task workers.

@@ -159,9 +159,9 @@ association and lifetime across client reset:
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve/models/fixtures/image:service_test \
-  //experimental/loom_serve/models/fixtures/embedding:service_test \
-  //experimental/loom_serve/models/fixtures/decision:service_test
+  //loom/src/loom/tooling/target/amdgpu/serve:source_image_service_test \
+  //loom/src/loom/tooling/target/amdgpu/serve:source_embedding_service_test \
+  //loom/src/loom/tooling/target/amdgpu/serve:source_decision_service_test
 ```
 
 The [held-device service check](../service/image/service_test.cc) separately verifies

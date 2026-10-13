@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/models/fixtures/text/service_test_fixture.h"
+#include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/telemetry.h"
 
 namespace {

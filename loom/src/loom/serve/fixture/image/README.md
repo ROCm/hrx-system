@@ -21,9 +21,9 @@ AMDGPU and Vulkan use the same source and output oracle:
 
 ```sh
 iree-bazel-test --config=asan \
-  //experimental/loom_serve/models/fixtures/image:service_cpu_test \
-  //experimental/loom_serve/models/fixtures/image:service_test \
-  //experimental/loom_serve/models/fixtures/image:service_vulkan_test
+  //loom/src/loom/tooling/target/cpu/serve:source_image_service_test \
+  //loom/src/loom/tooling/target/amdgpu/serve:source_image_service_test \
+  //loom/src/loom/tooling/target/spirv/serve:source_image_service_test
 ```
 
 The ordinary server can load this package without any model-specific native

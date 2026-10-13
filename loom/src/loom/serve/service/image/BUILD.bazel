@@ -146,3 +146,44 @@ loom_cc_library(
         "//runtime/src/iree/vm",
     ],
 )
+
+# Compiled suite shared by physical target registrations; helpers stay private.
+loom_cc_library(
+    name = "source_service_tests",
+    testonly = True,
+    srcs = [
+        "source_service_test.cc",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/parameter:residency",
+        "//loom/src/loom/serve/server:model_registration",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/server:router",
+        "//loom/src/loom/serve/service/image:model",
+        "//loom/src/loom/serve/service/image:output",
+        "//loom/src/loom/serve/service/image:request",
+        "//loom/src/loom/serve/service/image:service",
+        "//loom/src/loom/serve/testing:model",
+        "//loom/src/loom/serve/testing:stalled_stderr",
+        "//loom/src/loom/serve/transport/http:listener",
+        "//loom/src/loom/serve/transport/http:server",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:base64",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+    alwayslink = True,
+)

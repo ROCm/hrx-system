@@ -67,7 +67,7 @@ paths without learned checkpoints; they are runtime inputs rather than linked
 server dependencies. Shared test clients and native harnesses live in
 [`testing/`](testing/README.md), separately from production libraries.
 
-Physical AMDGPU test registrations live with target tooling; their native
-test sources and source-program inputs remain beside the component they
-exercise. Execution facilities have no transport, service, or learned-model
-dependency.
+Physical CPU, AMDGPU, Vulkan and XDNA test registrations live with target
+tooling. Source-model integration suites are compiled once beside their service
+owners; provider tests link those suites without acquiring private headers.
+Execution facilities have no transport, service, or learned-model dependency.

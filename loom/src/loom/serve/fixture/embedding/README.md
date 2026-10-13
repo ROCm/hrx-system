@@ -53,10 +53,10 @@ through the package's tokenizer without activating its model commands.
 
 ```sh
 iree-bazel-test --config=asan \
-  //experimental/loom_serve/models/fixtures/embedding:service_cpu_test \
-  //experimental/loom_serve/models/fixtures/embedding:service_test \
-  //experimental/loom_serve/models/fixtures/embedding:service_vulkan_test \
-  //experimental/loom_serve/models/fixtures/embedding:service_xdna_test
+  //loom/src/loom/tooling/target/cpu/serve:source_embedding_service_test \
+  //loom/src/loom/tooling/target/amdgpu/serve:source_embedding_service_test \
+  //loom/src/loom/tooling/target/spirv/serve:source_embedding_service_test \
+  //loom/src/loom/tooling/target/amd/xdna/serve:source_embedding_service_test
 ```
 
 The tests cover ragged cross-request coalescing, distinct output dimensions,

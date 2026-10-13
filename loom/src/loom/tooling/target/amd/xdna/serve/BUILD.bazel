@@ -4,9 +4,44 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_test", "loom_config_compatible_with")
+
 package(default_visibility = ["//visibility:private"])
 
 exports_files(
     ["testdata/resident_embedding.loom"],
     visibility = ["//visibility:public"],
+)
+
+loom_cc_test(
+    name = "source_embedding_service_test",
+    args = [
+        "--model_source=$(rootpath //loom/src/loom/serve/fixture/embedding:prepare.loom)",
+        "--test_device=xdna",
+        "--direct_stage_source=$(rootpath //loom/src/loom/tooling/target/amd/xdna/serve:testdata/resident_embedding.loom)",
+        "--gtest_filter=*DirectDispatch*",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/embedding:prepare.loom",
+        "//loom/src/loom/serve/fixture/embedding:sources",
+        "//loom/src/loom/serve/fixture/embedding:variant_sources",
+        "//loom/src/loom/tooling/target/amd/xdna/serve:testdata/resident_embedding.loom",
+    ],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=libamdf.resource.xdna",
+        "runtime-resource=amd-xdna",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:xdna_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/src/loom/serve/service/finite/embedding:source_service_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )

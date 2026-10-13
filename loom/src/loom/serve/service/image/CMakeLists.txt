@@ -159,4 +159,39 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_library(
+  NAME
+    source_service_tests
+  SRCS
+    "source_service_test.cc"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::internal::base64
+    iree::base::tooling::flags
+    iree::hal
+    iree::testing::gtest
+    iree::testing::temp_file
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::host
+    loom::serve::runtime::parameter::residency
+    loom::serve::server::model_registration
+    loom::serve::server::registry
+    loom::serve::server::router
+    loom::serve::service::image::model
+    loom::serve::service::image::output
+    loom::serve::service::image::request
+    loom::serve::service::image::service
+    loom::serve::testing::model
+    loom::serve::testing::stalled_stderr
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

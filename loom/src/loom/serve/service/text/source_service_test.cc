@@ -6,7 +6,19 @@
 
 #include <cerrno>
 
-#include "experimental/loom_serve/models/fixtures/text/service_test_fixture.h"
+#include "iree/base/tooling/flags.h"
+#include "loom/serve/service/text/service_test_fixture.h"
+
+IREE_FLAG(string, model_source, "", "Deterministic text bootstrap source.");
+IREE_FLAG(string, test_device, "amdgpu",
+          "HAL device URI for the source model.");
+
+namespace loom_serve::testing::text {
+
+const char* ServiceTestSource() { return FLAG_model_source; }
+const char* ServiceTestDevice() { return FLAG_test_device; }
+
+}  // namespace loom_serve::testing::text
 
 namespace {
 

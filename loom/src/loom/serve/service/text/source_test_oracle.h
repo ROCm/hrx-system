@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_TEXT_ORACLE_H_
-#define EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_TEXT_ORACLE_H_
+#ifndef LOOM_SERVE_SERVICE_TEXT_SOURCE_TEST_ORACLE_H_
+#define LOOM_SERVE_SERVICE_TEXT_SOURCE_TEST_ORACLE_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -75,4 +75,4 @@ class Oracle {
 
 }  // namespace loom_serve::testing::text
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_MODELS_FIXTURES_TEXT_ORACLE_H_
+#endif  // LOOM_SERVE_SERVICE_TEXT_SOURCE_TEST_ORACLE_H_

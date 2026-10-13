@@ -9,4 +9,29 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    source_embedding_service_test
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amd/xdna/serve/testdata/resident_embedding.loom"
+    "loom::serve::fixture::embedding::sources"
+    "loom::serve::fixture::embedding::variant_sources"
+  DEPS
+    iree::testing::gtest_main
+    loom::serve::service::finite::embedding::source_service_tests
+  ARGS
+    "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom}}"
+    "--test_device=xdna"
+    "--direct_stage_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amd/xdna/serve/testdata/resident_embedding.loom}}"
+    "--gtest_filter=*DirectDispatch*"
+  LABELS
+    "iree-run-requirement=libamdf.resource.xdna"
+    "runtime-resource=amd-xdna"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

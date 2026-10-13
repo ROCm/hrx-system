@@ -32,6 +32,53 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_library(
+  NAME
+    source_service_tests
+  SRCS
+    "admission_service_test.cc"
+    "checkpoint_test.cc"
+    "owner_turn_test_util.h"
+    "prefix_service_test.cc"
+    "service_test_fixture.h"
+    "source_service_test.cc"
+    "source_test_oracle.h"
+    "stalled_client_test_util.h"
+  DEPS
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::base::threading
+    iree::base::tooling::flags
+    iree::net::carrier
+    iree::net::carrier::loopback
+    iree::task
+    iree::testing::gtest
+    iree::testing::temp_file
+    loom::serve::runtime::device
+    loom::serve::runtime::host
+    loom::serve::server::model_registration
+    loom::serve::server::registry
+    loom::serve::server::router
+    loom::serve::service::text::chat
+    loom::serve::service::text::input
+    loom::serve::service::text::model
+    loom::serve::service::text::packing
+    loom::serve::service::text::schedule
+    loom::serve::service::text::service
+    loom::serve::service::text::telemetry
+    loom::serve::telemetry::stream
+    loom::serve::testing::model
+    loom::serve::testing::stalled_stderr
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
 loom_cc_library(
   NAME
     chat
