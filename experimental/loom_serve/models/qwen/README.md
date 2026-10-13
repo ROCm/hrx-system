@@ -39,14 +39,20 @@ bazel-bin/loom/src/loom/tools/loom-serve/loom-serve \
 # From another terminal:
 curl --fail --silent --show-error http://127.0.0.1:8080/v1/chat/completions \
   -H 'Content-Type: application/json' -H 'X-Loom-Session: example' \
-  -d '{"model":"qwen","messages":[{"role":"user","content":"What is 2+2?"}],"temperature":0,"max_tokens":64}'
+  -d '{"model":"qwen","messages":[{"role":"user","content":"What is 2+2?"}],"enable_thinking":false,"temperature":0,"max_tokens":64}'
 ```
 
 The registration name is the HTTP routing alias. Reusing `X-Loom-Session` with
 the complete matching conversation allows the server to reuse retained state.
-Current token selection is greedy (`temperature: 0`), and this chat policy uses
-non-thinking framing. Nonzero temperature and `enable_thinking: true` are rejected,
-not silently ignored. Tool definitions and tool-result turns use the chat endpoint;
+Current token selection is greedy (`temperature: 0`); nonzero temperature is
+rejected. Thinking is enabled by default, using the checkpoint's xhigh reasoning
+instruction. `enable_thinking: false` selects the closed, empty reasoning prefix
+used in the short example above. Streamed deltas and complete messages carry
+reasoning in `reasoning_content`, independently of answer `content` and tool calls.
+Include that reasoning field in subsequent assistant history to retain the exact
+conversation. A generation truncated inside its reasoning block remains valid
+output but requires replay instead of reusing a falsely closed device prefix.
+Tool definitions and tool-result turns use the chat endpoint;
 the source policy formats and parses the model's XML tool-call protocol.
 
 ## Scheduling and state

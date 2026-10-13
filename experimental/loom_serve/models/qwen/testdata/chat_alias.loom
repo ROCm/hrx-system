@@ -1,13 +1,15 @@
 // A model policy may retain input storage instead of constructing new bytes.
 // This fixture exercises the native completion owner through that legal case.
-func.def public @complete_text(%prompt: buffer, %content: buffer, %tools: buffer) -> (buffer) {
-  func.return %content : buffer
+func.def public @complete_text(%prompt: buffer, %content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
+  %reusable = scalar.constant 1 : i32
+  func.return %content, %reusable : buffer, i32
 }
 
-func.def public @text_end(%response: buffer, %previous: i64, %phase: i32) -> (i64) {
+func.def public @output_next(%response: buffer, %previous: i64, %state: i64, %phase: i32) -> (i64, i64, i64, i64) {
   %length = buffer.length %response
   %result = index.cast %length : offset to i64
-  func.return %result : i64
+  %content = scalar.constant 1 : i64
+  func.return %content, %previous, %result, %state : i64, i64, i64, i64
 }
 
 global.rodata.def @empty_tools = bytes("5b5d")
