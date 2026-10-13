@@ -1,0 +1,294 @@
+template.decl @random.philox4x32(%counter0: i32, %counter1: i32, %counter2: i32, %counter3: i32, %seed0: i32, %seed1: i32) -> (i32, i32, i32, i32)
+
+template.decl @sampling.cutoff_f32(%columns: index, %logits: buffer, %logits_origin: offset, %minimum: i64, %maximum: i64, %target: f32, %weighted: i1, %maximum_logit: f32, %temperature: f32) -> (i64)
+
+template.decl @sampling.categorical_f32(%columns: index, %logits: buffer, %logits_origin: offset, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64) -> (i32)
+
+template.decl @sampling.reduce_key(%key: i64, %minimum: i1) -> (i64)
+
+// A strict descending-logit/ascending-ID order, including signed zero ties.
+// Inputs are finite F32 logits and nonnegative I32 vocabulary IDs.
+func.def @sampling_key(%value: f32, %id: i32) -> (i64) {
+  %zero = scalar.constant 0.0 : f32
+  %is_zero = scalar.cmpf oeq, %value, %zero : f32
+  %canonical = scf.select %is_zero, %zero, %value : f32
+  %bits = scalar.bitcast %canonical : f32 to i32
+  %zero32 = scalar.constant 0 : i32
+  %sign = scalar.constant -2147483648 : i32
+  %ones = scalar.constant -1 : i32
+  %negative = scalar.cmpi slt, %bits, %zero32 : i32
+  %mask = scf.select %negative, %ones, %sign : i32
+  %ordered = scalar.xori %bits, %mask : i32
+  %inverse = scalar.xori %id, %ones : i32
+  %high = scalar.extui %ordered : i32 to i64
+  %low = scalar.extui %inverse : i32 to i64
+  %shift = scalar.constant 32 : i64
+  %shifted = scalar.shli %high, %shift : i64
+  %key = scalar.ori %shifted, %low : i64
+  func.return %key : i64
+}
+
+// Independent per-token exponential races implement a categorical draw.
+// Request seed, absolute target position and token ID fully determine the
+// counter. Packed rows, dispatch shape and speculative depth are absent.
+func.def @sampling_race(%logit: f32, %maximum: f32, %temperature: f32, %seed: i64, %position: i64, %id: i32) -> (f32) {
+  %shift64 = scalar.constant 32 : i64
+  %seed_high = scalar.shrui %seed, %shift64 : i64
+  %position_high = scalar.shrui %position, %shift64 : i64
+  %key0 = scalar.trunci %seed : i64 to i32
+  %key1 = scalar.trunci %seed_high : i64 to i32
+  %counter1 = scalar.trunci %position : i64 to i32
+  %counter2 = scalar.trunci %position_high : i64 to i32
+  %domain = scalar.constant 0 : i32
+  %word, %unused1, %unused2, %unused3 = template.apply<@random.philox4x32>(%id, %counter1, %counter2, %domain, %key0, %key1) : (i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  %shift = scalar.constant 8 : i32
+  %mantissa = scalar.shrui %word, %shift : i32
+  %number = scalar.uitofp %mantissa : i32 to f32
+  %half = scalar.constant 0.5 : f32
+  %scale = scalar.constant 5.9604644775390625e-08 : f32
+  %upper = scalar.constant 0.99999994039535522 : f32
+  %offset = scalar.addf %number, %half : f32
+  %unit = scalar.mulf %offset, %scale : f32
+  %uniform = scalar.minnumf %unit, %upper : f32
+  %log_uniform = scalar.logf<afn> %uniform : f32
+  %exponential = scalar.negf %log_uniform : f32
+  %noise = scalar.logf<afn> %exponential : f32
+  %centered = scalar.subf %logit, %maximum : f32
+  %scaled = scalar.divf<arcp> %centered, %temperature : f32
+  %race = scalar.subf %scaled, %noise : f32
+  func.return %race : f32
+}
+
+// Lexicographic pair reduction using the native 32-bit collective payload.
+template.def<@sampling.reduce_key> device @sampling_reduce_key(%key: i64, %minimum: i1) -> (i64) {
+  %shift = scalar.constant 32 : i64
+  %high64 = scalar.shrui %key, %shift : i64
+  %high = scalar.trunci %high64 : i64 to i32
+  %low = scalar.trunci %key : i64 to i32
+  %zero = scalar.constant 0 : i32
+  %ones = scalar.constant -1 : i32
+  %result_high, %result_low = scf.if %minimum -> (i32, i32) {
+    %best_high = kernel.workgroup.reduce<minui> %high : i32
+    %matches = scalar.cmpi eq, %high, %best_high : i32
+    %candidate = scf.select %matches, %low, %ones : i32
+    %best_low = kernel.workgroup.reduce<minui> %candidate : i32
+    scf.yield %best_high, %best_low : i32, i32
+  } else {
+    %best_high = kernel.workgroup.reduce<maxui> %high : i32
+    %matches = scalar.cmpi eq, %high, %best_high : i32
+    %candidate = scf.select %matches, %low, %zero : i32
+    %best_low = kernel.workgroup.reduce<maxui> %candidate : i32
+    scf.yield %best_high, %best_low : i32, i32
+  }
+  %upper = scalar.extui %result_high : i32 to i64
+  %lower = scalar.extui %result_low : i32 to i64
+  %shifted = scalar.shli %upper, %shift : i64
+  %result = scalar.ori %shifted, %lower : i64
+  template.return %result : i64
+}
+
+// Exact support selection over a total order, without a candidate-count cap.
+// Each iteration partitions the remaining key interval and keeps the side
+// containing the requested rank or cumulative probability. Retaining actual
+// extrema skips empty key ranges; strict progress bounds the loop by 64 bits.
+// One 256-thread workgroup owns a row. All threads receive the same result.
+template.def<@sampling.cutoff_f32> device @sampling_cutoff_f32(%columns_value: index, %logits: buffer, %logits_origin: offset, %minimum: i64, %maximum: i64, %target: f32, %weighted: i1, %maximum_logit: f32, %temperature: f32) -> (i64) {
+  %columns = index.assume %columns_value [range(%columns_value, 1, 16777216)] : index
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %one_index = index.constant 1 : index
+  %last = index.sub %columns, %one_index : index
+  %thread = kernel.workitem.id<x> : index
+  %threads = index.constant 256 : index
+  %zero64 = scalar.constant 0 : i64
+  %ones64 = scalar.constant -1 : i64
+  %one64 = scalar.constant 1 : i64
+  %zero = scalar.constant 0.0 : f32
+  %one = scalar.constant 1.0 : f32
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  %input = buffer.view %logits[%logits_origin] : buffer -> view<[%columns]xf32>
+  %cutoff, %last_high, %last_target = scf.while(%low = %minimum : i64, %high = %maximum : i64, %remaining = %target : f32) -> (i64, i64, f32) {
+    %more = scalar.cmpi ult, %low, %high : i64
+    scf.condition %more, %low, %high, %remaining : i1, i64, i64, f32
+  } do(%low: i64, %high: i64, %remaining: f32) {
+    %distance = scalar.subi %high, %low : i64
+    %half = scalar.shrui %distance, %one64 : i64
+    %pivot = scalar.addi %low, %half : i64
+    %upper_mass, %upper_min, %upper_max, %lower_min, %lower_max = scf.for %base = [%begin to %columns step %threads](%mass = %zero : f32, %umin = %ones64 : i64, %umax = %zero64 : i64, %lmin = %ones64 : i64, %lmax = %zero64 : i64) -> (f32, i64, i64, i64, i64) {
+      %candidate = index.add %base, %thread : index
+      %live = index.cmp ult, %candidate, %columns : index
+      %clamped = index.min %candidate, %last : index
+      %column = index.assume %clamped [ge(%clamped, 0), lt(%clamped, %columns)] : index
+      %value = view.load %input[%column] : view<[%columns]xf32> -> f32
+      %id = index.cast %column : index to i32
+      %key = func.call @sampling_key(%value, %id) : (f32, i32) -> (i64)
+      %after = scalar.cmpi uge, %key, %low : i64
+      %before = scalar.cmpi ule, %key, %high : i64
+      %bounded = scalar.andi %after, %before : i1
+      %inside = scalar.andi %bounded, %live : i1
+      %above = scalar.cmpi ugt, %key, %pivot : i64
+      %below = scalar.cmpi ule, %key, %pivot : i64
+      %upper = scalar.andi %inside, %above : i1
+      %lower = scalar.andi %inside, %below : i1
+      %contribution = scf.if %upper -> (f32) {
+        %weight = scf.if %weighted -> (f32) {
+          %difference = scalar.subf %value, %maximum_logit : f32
+          %scaled = scalar.divf<arcp> %difference, %temperature : f32
+          %weight = scalar.expf<afn> %scaled : f32
+          scf.yield %weight : f32
+        } else {
+          scf.yield %one : f32
+        }
+        scf.yield %weight : f32
+      } else {
+        scf.yield %zero : f32
+      }
+      %u_low = scf.select %upper, %key, %ones64 : i64
+      %u_high = scf.select %upper, %key, %zero64 : i64
+      %l_low = scf.select %lower, %key, %ones64 : i64
+      %l_high = scf.select %lower, %key, %zero64 : i64
+      %next_mass = scalar.addf %mass, %contribution : f32
+      %next_umin = scalar.minui %umin, %u_low : i64
+      %next_umax = scalar.maxui %umax, %u_high : i64
+      %next_lmin = scalar.minui %lmin, %l_low : i64
+      %next_lmax = scalar.maxui %lmax, %l_high : i64
+      scf.yield %next_mass, %next_umin, %next_umax, %next_lmin, %next_lmax : f32, i64, i64, i64, i64
+    }
+    %mass = kernel.workgroup.reduce<addf> %upper_mass : f32
+    %umin = template.apply<@sampling.reduce_key>(%upper_min, %true) : (i64, i1) -> (i64)
+    %umax = template.apply<@sampling.reduce_key>(%upper_max, %false) : (i64, i1) -> (i64)
+    %lmin = template.apply<@sampling.reduce_key>(%lower_min, %true) : (i64, i1) -> (i64)
+    %lmax = template.apply<@sampling.reduce_key>(%lower_max, %false) : (i64, i1) -> (i64)
+    %take_upper = scalar.cmpf oge, %mass, %remaining : f32
+    %next_low = scf.select %take_upper, %umin, %lmin : i64
+    %next_high = scf.select %take_upper, %umax, %lmax : i64
+    %rest = scalar.subf %remaining, %mass : f32
+    %next_target = scf.select %take_upper, %remaining, %rest : f32
+    scf.yield %next_low, %next_high, %next_target : i64, i64, f32
+  }
+  template.return %cutoff : i64
+}
+
+// Temperature -> top-k -> nucleus -> categorical selection. top_k=0 keeps
+// the vocabulary; top_p=1 keeps all top-k candidates. Temperature zero is
+// greedy with the same stable lowest-ID tie rule. No scratch allocation or
+// host-visible probability state is required. Callers validate parameters.
+// Vocabulary size is 1..2^24, keeping integer rank sums exact in F32. Every
+// thread in the owning 256-thread workgroup participates with identical policy.
+template.def<@sampling.categorical_f32> device @sampling_categorical_f32(%columns_value: index, %logits: buffer, %logits_origin: offset, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64) -> (i32) {
+  %columns = index.assume %columns_value [range(%columns_value, 1, 16777216)] : index
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %one_index = index.constant 1 : index
+  %last = index.sub %columns, %one_index : index
+  %thread = kernel.workitem.id<x> : index
+  %threads = index.constant 256 : index
+  %zero64 = scalar.constant 0 : i64
+  %ones64 = scalar.constant -1 : i64
+  %zero32 = scalar.constant 0 : i32
+  %one32 = scalar.constant 1 : i32
+  %largest = scalar.constant 2147483647 : i32
+  %zero = scalar.constant 0.0 : f32
+  %one = scalar.constant 1.0 : f32
+  %negative = scalar.constant -inf : f32
+  %input = buffer.view %logits[%logits_origin] : buffer -> view<[%columns]xf32>
+  %local_min, %local_max, %local_logit = scf.for %base = [%begin to %columns step %threads](%minimum = %ones64 : i64, %maximum = %zero64 : i64, %greatest = %negative : f32) -> (i64, i64, f32) {
+    %candidate = index.add %base, %thread : index
+    %live = index.cmp ult, %candidate, %columns : index
+    %clamped = index.min %candidate, %last : index
+    %column = index.assume %clamped [ge(%clamped, 0), lt(%clamped, %columns)] : index
+    %value = view.load %input[%column] : view<[%columns]xf32> -> f32
+    %id = index.cast %column : index to i32
+    %key = func.call @sampling_key(%value, %id) : (f32, i32) -> (i64)
+    %low = scf.select %live, %key, %ones64 : i64
+    %high = scf.select %live, %key, %zero64 : i64
+    %next_min = scalar.minui %minimum, %low : i64
+    %next_max = scalar.maxui %maximum, %high : i64
+    %next_logit = scalar.maxnumf %greatest, %value : f32
+    scf.yield %next_min, %next_max, %next_logit : i64, i64, f32
+  }
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  %minimum = template.apply<@sampling.reduce_key>(%local_min, %true) : (i64, i1) -> (i64)
+  %maximum = template.apply<@sampling.reduce_key>(%local_max, %false) : (i64, i1) -> (i64)
+  %maximum_logit = kernel.workgroup.reduce<maxnumf> %local_logit : f32
+  %greedy = scalar.cmpf oeq, %temperature, %zero : f32
+  %single = scalar.cmpi eq, %top_k, %one32 : i32
+  %deterministic = scalar.ori %greedy, %single : i1
+  %selected = scf.if %deterministic -> (i32) {
+    %inverse = scalar.trunci %maximum : i64 to i32
+    %ones = scalar.constant -1 : i32
+    %id = scalar.xori %inverse, %ones : i32
+    scf.yield %id : i32
+  } else {
+    %bounded = scalar.cmpi ne, %top_k, %zero32 : i32
+    %vocabulary = index.cast %columns : index to i32
+    %effective_k = scalar.minui %top_k, %vocabulary : i32
+    %rank = scalar.uitofp %effective_k : i32 to f32
+    %topk_cutoff = scf.if %bounded -> (i64) {
+      %cutoff = template.apply<@sampling.cutoff_f32>(%columns, %logits, %logits_origin, %minimum, %maximum, %rank, %false, %maximum_logit, %temperature) : (index, buffer, offset, i64, i64, f32, i1, f32, f32) -> (i64)
+      scf.yield %cutoff : i64
+    } else {
+      scf.yield %minimum : i64
+    }
+    %nucleus = scalar.cmpf olt, %top_p, %one : f32
+    %cutoff = scf.if %nucleus -> (i64) {
+      %local_mass = scf.for %base = [%begin to %columns step %threads](%mass = %zero : f32) -> (f32) {
+        %candidate = index.add %base, %thread : index
+        %live = index.cmp ult, %candidate, %columns : index
+        %clamped = index.min %candidate, %last : index
+        %column = index.assume %clamped [ge(%clamped, 0), lt(%clamped, %columns)] : index
+        %value = view.load %input[%column] : view<[%columns]xf32> -> f32
+        %id = index.cast %column : index to i32
+        %key = func.call @sampling_key(%value, %id) : (f32, i32) -> (i64)
+        %included = scalar.cmpi uge, %key, %topk_cutoff : i64
+        %eligible = scalar.andi %included, %live : i1
+        %difference = scalar.subf %value, %maximum_logit : f32
+        %scaled = scalar.divf<arcp> %difference, %temperature : f32
+        %weight = scalar.expf<afn> %scaled : f32
+        %contribution = scf.select %eligible, %weight, %zero : f32
+        %next = scalar.addf %mass, %contribution : f32
+        scf.yield %next : f32
+      }
+      %mass = kernel.workgroup.reduce<addf> %local_mass : f32
+      %target = scalar.mulf %mass, %top_p : f32
+      %cutoff = template.apply<@sampling.cutoff_f32>(%columns, %logits, %logits_origin, %topk_cutoff, %maximum, %target, %true, %maximum_logit, %temperature) : (index, buffer, offset, i64, i64, f32, i1, f32, f32) -> (i64)
+      scf.yield %cutoff : i64
+    } else {
+      scf.yield %topk_cutoff : i64
+    }
+    %local_race, %local_id = scf.for %base = [%begin to %columns step %threads](%best = %negative : f32, %best_id = %largest : i32) -> (f32, i32) {
+      %candidate = index.add %base, %thread : index
+      %live = index.cmp ult, %candidate, %columns : index
+      %clamped = index.min %candidate, %last : index
+      %column = index.assume %clamped [ge(%clamped, 0), lt(%clamped, %columns)] : index
+      %value = view.load %input[%column] : view<[%columns]xf32> -> f32
+      %id = index.cast %column : index to i32
+      %key = func.call @sampling_key(%value, %id) : (f32, i32) -> (i64)
+      %included = scalar.cmpi uge, %key, %cutoff : i64
+      %eligible = scalar.andi %included, %live : i1
+      %race = scf.if %eligible -> (f32) {
+        %score = func.call @sampling_race(%value, %maximum_logit, %temperature, %seed, %position, %id) : (f32, f32, f32, i64, i64, i32) -> (f32)
+        scf.yield %score : f32
+      } else {
+        scf.yield %negative : f32
+      }
+      %greater = scalar.cmpf ogt, %race, %best : f32
+      %tie = scalar.cmpf oeq, %race, %best : f32
+      %earlier = scalar.cmpi slt, %id, %best_id : i32
+      %earlier_tie = scalar.andi %tie, %earlier : i1
+      %better = scalar.ori %greater, %earlier_tie : i1
+      %take = scalar.andi %eligible, %better : i1
+      %next = scf.select %take, %race, %best : f32
+      %next_id = scf.select %take, %id, %best_id : i32
+      scf.yield %next, %next_id : f32, i32
+    }
+    %winning = kernel.workgroup.reduce<maxnumf> %local_race : f32
+    %owns = scalar.cmpf oeq, %local_race, %winning : f32
+    %candidate = scf.select %owns, %local_id, %largest : i32
+    %id = kernel.workgroup.reduce<minsi> %candidate : i32
+    scf.yield %id : i32
+  }
+  template.return %selected : i32
+}
