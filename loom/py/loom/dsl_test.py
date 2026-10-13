@@ -1319,6 +1319,67 @@ class TestOperandDictionaryDeclaration:
             )
 
 
+class TestOperandTreeDeclaration:
+    def test_semantic_pair_does_not_require_tree_text_format(self):
+        dsl.Op(
+            "test.tree",
+            operands=[dsl.Operand("values", dsl.TypeConstraint.ANY, variadic=True)],
+            attrs=[dsl.AttrDef("shape", dsl.ATTR_TYPE_I64_ARRAY)],
+            constraints=[dsl.OperandTree("values", "shape")],
+        )
+
+    def test_operand_must_be_required_and_variadic(self):
+        for operand in (
+            dsl.Operand("values", dsl.TypeConstraint.ANY),
+            dsl.Operand("values", dsl.TypeConstraint.ANY, optional=True),
+        ):
+            with _raises(ValueError, match="requires a variadic operand"):
+                dsl.Op(
+                    "test.tree",
+                    operands=[operand],
+                    attrs=[dsl.AttrDef("shape", dsl.ATTR_TYPE_I64_ARRAY)],
+                    constraints=[dsl.OperandTree("values", "shape")],
+                )
+
+    def test_shape_must_be_required_i64_array(self):
+        for shape in (
+            dsl.AttrDef("shape", dsl.ATTR_TYPE_I64),
+            dsl.AttrDef("shape", dsl.ATTR_TYPE_I64_ARRAY, optional=True),
+        ):
+            with _raises(ValueError, match="required i64_array shape"):
+                dsl.Op(
+                    "test.tree",
+                    operands=[
+                        dsl.Operand("values", dsl.TypeConstraint.ANY, variadic=True)
+                    ],
+                    attrs=[shape],
+                    constraints=[dsl.OperandTree("values", "shape")],
+                )
+
+    def test_format_requires_semantic_constraint(self):
+        from loom.assembly import TreeRefs
+
+        with _raises(ValueError, match="matching OperandTree constraint"):
+            dsl.Op(
+                "test.tree",
+                operands=[dsl.Operand("values", dsl.TypeConstraint.ANY, variadic=True)],
+                attrs=[dsl.AttrDef("shape", dsl.ATTR_TYPE_I64_ARRAY)],
+                format=[TreeRefs("values", "shape")],
+            )
+
+    def test_pair_ownership_is_unique(self):
+        with _raises(ValueError, match="unique ownership"):
+            dsl.Op(
+                "test.tree",
+                operands=[dsl.Operand("values", dsl.TypeConstraint.ANY, variadic=True)],
+                attrs=[dsl.AttrDef("shape", dsl.ATTR_TYPE_I64_ARRAY)],
+                constraints=[
+                    dsl.OperandTree("values", "shape"),
+                    dsl.OperandTree("values", "shape"),
+                ],
+            )
+
+
 class TestConstraints:
     def test_same_type_repr(self) -> None:
         c = SameType("lhs", "rhs")

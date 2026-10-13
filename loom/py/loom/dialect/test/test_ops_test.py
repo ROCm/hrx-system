@@ -27,6 +27,7 @@ from loom.assembly import (
     ResultTypeList,
     Scope,
     SymbolRef,
+    TreeRefs,
     TypedRefs,
     TypeOf,
     TypesOf,
@@ -62,6 +63,9 @@ class TestFormatFieldsMatchDeclarations:
                 case OperandDict(operands=operands, names=names):
                     fields.add(operands)
                     fields.add(names)
+                case TreeRefs(operands=operands, shape=shape):
+                    fields.add(operands)
+                    fields.add(shape)
                 case AttrTable(keys=keys, values=values):
                     fields.add(keys)
                     fields.add(values)

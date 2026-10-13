@@ -315,7 +315,8 @@ enum {
   LOOM_OP_TEST_RESULT_PAIR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 118),
   LOOM_OP_TEST_BLOCK_ARG_GROUPS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 119),
   LOOM_OP_TEST_SIGNATURE_SINK = LOOM_OP_KIND(LOOM_DIALECT_TEST, 120),
-  LOOM_OP_TEST_COUNT_ = 121,
+  LOOM_OP_TEST_OPERAND_TREE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 121),
+  LOOM_OP_TEST_COUNT_ = 122,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -2406,6 +2407,26 @@ iree_status_t loom_test_signature_sink_build(
     iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,
     iree_host_size_t tied_result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_TEST_OPERAND_TREE: Test independent static operand trees with ragged record/list grouping.
+// test.operand_tree [(%semaphore, %value), (%other, %next)] (none, [], ())
+LOOM_DEFINE_ISA(loom_test_operand_tree_isa, LOOM_OP_TEST_OPERAND_TREE)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_test_operand_tree_first, 0)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_test_operand_tree_second, 1)
+LOOM_DEFINE_ATTR_I64_ARRAY(loom_test_operand_tree_first_shape, 0)
+LOOM_DEFINE_ATTR_I64_ARRAY(loom_test_operand_tree_second_shape, 1)
+iree_status_t loom_test_operand_tree_build(
+    loom_builder_t* builder,
+    const int64_t* first_shape,
+    iree_host_size_t first_shape_count,
+    const loom_value_id_t* first,
+    iree_host_size_t first_count,
+    const int64_t* second_shape,
+    iree_host_size_t second_shape_count,
+    const loom_value_id_t* second,
+    iree_host_size_t second_count,
     loom_location_id_t location,
     loom_op_t** out_op);
 

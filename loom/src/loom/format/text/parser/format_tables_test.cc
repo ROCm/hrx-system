@@ -221,5 +221,88 @@ TEST_F(OperandDictionaryParseTest, DiagnosticSinkFailureAfterSpillPropagates) {
   EXPECT_EQ(module, nullptr);
 }
 
+class OperandTreeParseTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    iree_arena_block_pool_initialize(32768, iree_allocator_system(), &pool_);
+    loom_context_initialize(iree_allocator_system(), &context_);
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
+    IREE_ASSERT_OK(loom_context_finalize(&context_));
+    IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("tree"), &pool_,
+                                        nullptr, iree_allocator_system(),
+                                        &module_));
+    parser_.module = module_;
+    parser_.context = &context_;
+    parser_.definition_scope.pop_at = UINT16_MAX;
+    iree_arena_initialize(&pool_, &parser_.parser_arena);
+    vtable_ = loom_context_resolve_op(&context_, LOOM_OP_TEST_OPERAND_TREE);
+    element_ = &vtable_->format_elements[0];
+    ASSERT_EQ(element_->kind, LOOM_FORMAT_KIND_TREE_REFS);
+    loom_parsed_op_initialize(&parsed_);
+  }
+
+  void TearDown() override {
+    iree_arena_deinitialize(&parser_.parser_arena);
+    loom_module_free(module_);
+    loom_context_deinitialize(&context_);
+    iree_arena_block_pool_deinitialize(&pool_);
+  }
+
+  iree_status_t Parse(const std::string& source) {
+    loom_parsed_op_reset(&parsed_);
+    loom_tokenizer_initialize(
+        iree_make_string_view(source.data(), source.size()),
+        IREE_SV("tree.loom"), &parser_.parser_arena, &parser_.tokenizer);
+    iree_status_t status =
+        loom_parse_format_tree_refs(&parser_, vtable_, element_, &parsed_);
+    if (iree_status_is_ok(status)) {
+      EXPECT_TRUE(loom_tokenizer_at(&parser_.tokenizer, LOOM_TOKEN_EOF));
+    }
+    loom_tokenizer_deinitialize(&parser_.tokenizer);
+    return status;
+  }
+
+  // Shared blocks for persistent shapes and short-lived parse stacks.
+  iree_arena_block_pool_t pool_ = {};
+  // Canonical parser metadata.
+  loom_context_t context_ = {};
+  // Owner of the copied shape attributes.
+  loom_module_t* module_ = nullptr;
+  // Reused parser state, excluding per-tree scratch.
+  loom_parser_t parser_ = {};
+  // Reused operation accumulator.
+  loom_parsed_op_t parsed_ = {};
+  // Borrowed generated operation metadata.
+  const loom_op_vtable_t* vtable_ = nullptr;
+  // First tree field from the generated format.
+  const loom_format_element_t* element_ = nullptr;
+};
+
+TEST_F(OperandTreeParseTest, DeepGroupScratchEndsBeforeTheNextField) {
+  const std::string source =
+      std::string(4096, '[') + "none" + std::string(4096, ']');
+  iree_host_size_t retained_scratch = 0;
+  for (int iteration = 0; iteration < 16; ++iteration) {
+    IREE_ASSERT_OK(Parse(source));
+    ASSERT_EQ(parsed_.attribute_count, 1u);
+    const auto shape = parsed_.attributes[0];
+    ASSERT_EQ(shape.count, 4097u);
+    for (uint16_t i = 0; i < 4096; ++i) {
+      EXPECT_EQ(shape.i64_array[i], 7);
+    }
+    EXPECT_EQ(shape.i64_array[4096], 1);
+    if (!iteration) {
+      retained_scratch = parser_.parser_arena.used_allocation_size;
+    }
+    EXPECT_EQ(parser_.parser_arena.used_allocation_size, retained_scratch);
+  }
+}
+
+TEST_F(OperandTreeParseTest, OversizedShapeFailsAtTheFieldBoundary) {
+  const std::string source =
+      std::string(UINT16_MAX, '[') + "none" + std::string(UINT16_MAX, ']');
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Parse(source));
+}
+
 }  // namespace
 }  // namespace loom

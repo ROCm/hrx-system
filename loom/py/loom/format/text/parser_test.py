@@ -1209,6 +1209,35 @@ class TestParseScopedEnumRef:
         assert printer.print_operation(op, module) == "test.packet<amdgpu.v_add_u32>"
 
 
+class TestParseOperandTrees:
+    @pytest.mark.parametrize(
+        ("first", "second", "counts"),
+        [
+            ("[(%a, [%b]), (%b, [%a, %b])]", "(none, [], ())", [5, 0]),
+            ("none", "[]", [0, 0]),
+            ("()", "[%a, %a]", [0, 2]),
+        ],
+    )
+    def test_grouping_roundtrip(self, first, second, counts) -> None:
+        source = f"test.operand_tree {first} {second}"
+        module, scope = _setup_scope(("a", I32), ("b", I64))
+        op = _parse_op(source, module=module, scope=scope)
+        assert _op_printer().print_operation(op, module) == source
+        from loom import value_tree
+
+        assert list(op.operand_segment_counts) == counts
+        for name, count in zip(("first", "second"), counts, strict=True):
+            value_tree.validate(op.attributes[f"{name}_shape"], count)
+
+    @pytest.mark.parametrize(
+        "text", ["[(%a,)] []", "[(%missing)] []", "[()]", "[none []] []"]
+    )
+    def test_malformed_tree(self, text) -> None:
+        module, scope = _setup_scope(("a", I32))
+        with pytest.raises(ParseError):
+            _parse_op(f"test.operand_tree {text}", module=module, scope=scope)
+
+
 class TestParseAttrDictOp:
     def test_with_attrs(self) -> None:
         module, scope = _setup_scope(("x", F32))

@@ -21,6 +21,23 @@ type ValidateFn = Callable[[dict[str, Any]], tuple[bool, str]]
 type TypeSatisfiesFn = Callable[[Any, Any], bool]
 
 
+def operand_tree(operands: str, shape: str) -> ValidateFn:
+    """Checks the static tree's exact coverage of its ordinary operands."""
+    from loom import value_tree
+
+    def validate(values: dict[str, Any]) -> tuple[bool, str]:
+        structure = values.get(shape)
+        if not isinstance(structure, (tuple, list)):
+            return False, f"'{shape}' must be a value tree shape"
+        try:
+            value_tree.validate(structure, len(values[operands]))
+        except ValueError as error:
+            return False, str(error)
+        return True, ""
+
+    return validate
+
+
 def operand_dictionary(operands: str, names: str) -> ValidateFn:
     """Checks a canonical name dictionary's relative operand permutation."""
 

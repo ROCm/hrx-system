@@ -17,6 +17,7 @@ loom_check_test_suite(
     "error_recovery.loom-test"
     "instance_flags.loom-test"
     "operand_dictionaries.loom-test"
+    "operand_trees.loom-test"
     "predicate_attributes.loom-test"
     "signature_binders.loom-test"
     "ssa_names.loom-test"

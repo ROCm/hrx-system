@@ -74,6 +74,7 @@ loom_cc_library(
     "types.h"
     "value_refs.h"
     "value_replacement.h"
+    "value_tree.h"
   TEXTUAL_HDRS
     "location_tag_table.inc"
     "scalar_type_table.inc"
@@ -97,6 +98,7 @@ loom_cc_library(
     "types.c"
     "value_refs.c"
     "value_replacement.c"
+    "value_tree.c"
   DEPS
     iree::base
     iree::base::internal
@@ -107,6 +109,17 @@ loom_cc_library(
     loom::util::bstring
     loom::util::segmented_storage
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    value_tree_test
+  SRCS
+    "value_tree_test.cc"
+  DEPS
+    ::ir
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_library(

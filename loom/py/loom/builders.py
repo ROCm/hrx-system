@@ -448,6 +448,12 @@ class OpCallable:
                         )
                 static_field = _require_param_field(operand_param, "static_field")
                 attributes[static_field] = static_offsets
+            case BuilderParamKind.OPERAND_TREE:
+                from loom.value_tree import flatten
+
+                leaves, shape = flatten(value)
+                operands.extend(leaves)
+                attributes[_require_param_field(operand_param, "static_field")] = shape
             case BuilderParamKind.OPERAND_DICT:
                 operand_dict = value or {}
                 if operand_dict:
@@ -469,6 +475,7 @@ _OPERAND_PARAM_KINDS = frozenset(
         BuilderParamKind.INDEX_LIST,
         BuilderParamKind.OPERAND,
         BuilderParamKind.OPERAND_DICT,
+        BuilderParamKind.OPERAND_TREE,
         BuilderParamKind.OPERAND_VARIADIC,
     }
 )

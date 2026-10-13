@@ -66,6 +66,7 @@ from loom.assembly import (
     SymbolRef,
     TemplateParam,
     TemplateParamFlags,
+    TreeRefs,
     TypedRefs,
     TypeOf,
     TypesOf,
@@ -2014,6 +2015,21 @@ class Printer:
                         self._indent -= 1
                         stream = TokenStream()
                         stream.emit("}")
+
+                case TreeRefs(operands=operand_field, shape=shape_field):
+                    from loom.value_tree import format_tree
+
+                    assert isinstance(fields, ResolvedFields)
+                    covered_attrs.add(shape_field)
+                    stream.emit(
+                        format_tree(
+                            fields.attr(shape_field),
+                            [
+                                self._value_name(value_id)
+                                for value_id in fields.value_ids(operand_field)
+                            ],
+                        )
+                    )
 
                 case OperandDict(operands=operand_field, names=names_field):
                     assert isinstance(fields, ResolvedFields)

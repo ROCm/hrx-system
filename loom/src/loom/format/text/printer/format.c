@@ -420,6 +420,10 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         IREE_RETURN_IF_ERROR(loom_print_operand_dict(ctx, op, vtable, element));
         break;
       }
+      case LOOM_FORMAT_KIND_TREE_REFS: {
+        IREE_RETURN_IF_ERROR(loom_print_tree_refs(ctx, op, vtable, element));
+        break;
+      }
       case LOOM_FORMAT_KIND_ATTR_TABLE: {
         IREE_RETURN_IF_ERROR(loom_print_attr_table(ctx, op, vtable, element));
         break;

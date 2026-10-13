@@ -165,6 +165,7 @@ TRAIT_MAP: dict[str, str] = {
 # Maps Python constraint names to (relation, property) C enum pairs.
 CONSTRAINT_MAP: dict[str, tuple[str, str]] = {
     "OperandDictionary": ("LOOM_RELATION_OPERAND_DICTIONARY", "0"),
+    "OperandTree": ("LOOM_RELATION_OPERAND_TREE", "0"),
     "SameType": ("LOOM_RELATION_PAIRWISE_EQ", "LOOM_PROPERTY_TYPE"),
     "SameKind": ("LOOM_RELATION_PAIRWISE_EQ", "LOOM_PROPERTY_KIND"),
     "SameRegisterClass": (

@@ -44,6 +44,7 @@ iree_py_library(
     "stable_id.py"
     "type_binding.py"
     "type_identity.py"
+    "value_tree.py"
     "verify.py"
   IMPORTS
     ".."
@@ -67,6 +68,7 @@ iree_py_test(
     "projected_region_test.py"
     "type_binding_test.py"
     "type_identity_test.py"
+    "value_tree_test.py"
     "verify_test.py"
     "tools/pytest_style_runner.py"
   ARGS
@@ -82,6 +84,7 @@ iree_py_test(
     "loom.projected_region_test"
     "loom.type_binding_test"
     "loom.type_identity_test"
+    "loom.value_tree_test"
     "loom.verify_test"
   DEPS
     loom::py::loom::package

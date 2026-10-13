@@ -278,6 +278,10 @@ enum loom_constraint_relation_e {
   // structural verification, before the ordinary relation interpreter.
   LOOM_RELATION_OPERAND_DICTIONARY,
 
+  // One static tree describes every value of a variadic operand field exactly
+  // once. Args: (variadic operand field, required i64-array shape attribute).
+  LOOM_RELATION_OPERAND_TREE,
+
   LOOM_RELATION_COUNT_,
 };
 typedef uint8_t loom_constraint_relation_t;

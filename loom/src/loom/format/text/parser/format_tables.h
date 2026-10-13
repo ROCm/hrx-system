@@ -28,6 +28,11 @@ iree_status_t loom_parse_format_apply_elided_attr_defaults(
 iree_status_t loom_parse_format_operand_dict(
     loom_parser_t* parser, const loom_op_vtable_t* vtable,
     const loom_format_element_t* element, loom_parsed_op_t* parsed);
+// Parses static grouping, keeping leaves in the ordinary operand span.
+iree_status_t loom_parse_format_tree_refs(loom_parser_t* parser,
+                                          const loom_op_vtable_t* vtable,
+                                          const loom_format_element_t* element,
+                                          loom_parsed_op_t* parsed);
 iree_status_t loom_parse_format_attr_table(loom_parser_t* parser,
                                            const loom_op_vtable_t* vtable,
                                            const loom_format_element_t* element,

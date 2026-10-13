@@ -280,6 +280,16 @@ Common elements:
 
 - `Ref("field")`, `Refs("field")`, and `TypedRefs("field")` reference SSA
   operands or use-side values.
+- `TreeRefs("values", "shape")` renders a structured operand tree: positional
+  records use `(...)`, ranges use `[...]`, and absence uses `none`. The paired
+  `OperandTree("values", "shape")` constraint owns the representation: a
+  required variadic operand span plus a required `i64_array` shape. Values stay
+  ordinary SSA operands in leaf order, so cloning and replacement preserve
+  their normal ownership and use tracking. Shape contains only group kinds and
+  child counts, not SSA identities. Python builders accept tuples, lists, and
+  `None` directly; for example `[(semaphore, value), (other, next_value)]`.
+  Semantic field types and record arities belong to the owning dialect;
+  `OperandTree` verifies geometry and exact coverage of the operand span.
 - `Attr("field")` prints one attribute value.
 - `AttrDict()` prints uncovered declared attributes in a dictionary.
 - `Param("field")` prints one typed parameter of a descriptor-backed type.

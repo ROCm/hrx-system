@@ -8,9 +8,38 @@
 
 #include "loom/error/error_catalog.h"
 #include "loom/ir/scalar_type.h"
+#include "loom/ir/value_tree.h"
 #include "loom/target/registers.h"
 #include "loom/verify/verify_diagnostics.h"
 #include "loom/verify/verify_structure.h"
+
+static void loom_verify_operand_tree(loom_verify_state_t* state,
+                                     const loom_op_t* op,
+                                     const loom_op_vtable_t* vtable,
+                                     const loom_constraint_t* constraint) {
+  uint8_t attr_index = LOOM_FIELD_REF_INDEX(constraint->args[1]);
+  if (attr_index >= op->attribute_count) {
+    return;
+  }
+  loom_attribute_t shape = loom_op_attrs(op)[attr_index];
+  if (shape.kind != LOOM_ATTR_I64_ARRAY) {
+    return;
+  }
+  loom_value_slice_t values = loom_op_operand_field_span(
+      vtable, op, LOOM_FIELD_REF_INDEX(constraint->args[0]));
+  if (loom_value_tree_validate(shape.i64_array, shape.count, values.count)) {
+    return;
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(
+          loom_attr_descriptor_name(&vtable->attr_descriptors[attr_index])),
+      loom_param_i64(shape.count),
+      loom_param_string(IREE_SV(
+          "one complete operand tree covering every operand exactly once")),
+  };
+  loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_014, params,
+                              IREE_ARRAYSIZE(params));
+}
 
 static bool loom_constraint_property_equals(
     loom_type_t a, loom_type_t b, loom_constraint_property_t property) {
@@ -2074,6 +2103,7 @@ static const loom_verify_relation_fn_t kVerifyRelationFns[] = {
         loom_verify_relation_register_unit_count_sum,
     // Generated dictionary prefixes are consumed by structural verification.
     [LOOM_RELATION_OPERAND_DICTIONARY] = NULL,
+    [LOOM_RELATION_OPERAND_TREE] = loom_verify_operand_tree,
 };
 static_assert(IREE_ARRAYSIZE(kVerifyRelationFns) == LOOM_RELATION_COUNT_,
               "verify relation dispatch table out of sync with enum");

@@ -69,6 +69,7 @@ loom_cc_library(
         "types.c",
         "value_refs.c",
         "value_replacement.c",
+        "value_tree.c",
     ],
     hdrs = [
         "ancestry.h",
@@ -99,6 +100,7 @@ loom_cc_library(
         "types.h",
         "value_refs.h",
         "value_replacement.h",
+        "value_tree.h",
     ],
     textual_hdrs = [
         "location_tag_table.inc",
@@ -113,6 +115,16 @@ loom_cc_library(
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_test(
+    name = "value_tree_test",
+    srcs = ["value_tree_test.cc"],
+    deps = [
+        ":ir",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

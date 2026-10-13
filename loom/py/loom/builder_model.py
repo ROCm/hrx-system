@@ -48,6 +48,7 @@ from loom.assembly import (
     SymbolRef,
     TemplateParam,
     TemplateParamFlags,
+    TreeRefs,
     TypedRefs,
     TypeOf,
     TypesOf,
@@ -106,6 +107,7 @@ class BuilderParamKind(Enum):
     INDEX_LIST = auto()
     OPERAND = auto()
     OPERAND_DICT = auto()
+    OPERAND_TREE = auto()
     OPERAND_VARIADIC = auto()
     PREDICATE_LIST = auto()
     REGION = auto()
@@ -544,6 +546,18 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                         )
                     )
                     covered_attrs.add(names_field)
+
+                case TreeRefs(operands=operand_field, shape=shape_field):
+                    params.append(
+                        BuilderParam(
+                            name=operand_field,
+                            kind=BuilderParamKind.OPERAND_TREE,
+                            type_hint="Any",
+                            static_field=shape_field,
+                            doc=f"Structured operands: {operand_field}",
+                        )
+                    )
+                    covered_attrs.add(shape_field)
 
                 case AttrTable(keys=keys_field, values=values_field):
                     append_attr_param(keys_field)

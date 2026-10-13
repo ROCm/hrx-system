@@ -1176,3 +1176,10 @@ class TestBuilder(DialectBuilder):
         results: list[Type | TiedResultSpec],
         location_id: int | None = ...,
     ) -> None: ...
+    def operand_tree(
+        self,
+        *,
+        first: Any,
+        second: Any,
+        location_id: int | None = ...,
+    ) -> None: ...

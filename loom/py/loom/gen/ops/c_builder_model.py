@@ -42,6 +42,7 @@ from loom.assembly import (
     SymbolRef,
     TemplateParam,
     TemplateParamFlags,
+    TreeRefs,
     TypedRefs,
     TypeOf,
     TypesOf,
@@ -429,6 +430,18 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                         }
                     )
                     covered_attrs.add(names_field)
+
+                case TreeRefs(operands=operand_field, shape=shape_field):
+                    append_attr_param(shape_field)
+                    params.append(
+                        {
+                            "name": operand_field,
+                            "kind": "operand_variadic",
+                            "c_type": "const loom_value_id_t*",
+                            "may_consume": has_result_type_list,
+                        }
+                    )
+                    covered_attrs.add(shape_field)
 
                 case AttrTable(keys=keys_field, values=values_field):
                     append_attr_param(keys_field)

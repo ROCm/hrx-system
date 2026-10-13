@@ -206,6 +206,7 @@ __all__ = [
     # Constraints.
     "Constraint",
     "OperandDictionary",
+    "OperandTree",
     "SameType",
     "SameKind",
     "SameRegisterClass",
@@ -1811,6 +1812,22 @@ class Constraint:
 
     def __repr__(self) -> str:
         return f"{self.name}({', '.join(self.args)})"
+
+
+def OperandTree(operands: str, shape: str) -> Constraint:
+    """Static record/range structure covers every ordinary operand exactly once.
+
+    The required i64-array shape is a preorder tree with leaf, absent, record,
+    and range nodes. It contains no SSA identities or native ABI positions.
+    """
+    from loom.error.structure import ERR_STRUCTURE_014
+
+    return Constraint(
+        "OperandTree",
+        (operands, shape),
+        error=ERR_STRUCTURE_014,
+        validate=constraint_validation.operand_tree(operands, shape),
+    )
 
 
 def OperandDictionary(operands: str, names: str) -> Constraint:
@@ -4698,6 +4715,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         SymbolRef,
         TemplateParam,
         TemplateParamFlags,
+        TreeRefs,
         TypedRefs,
         TypeOf,
         TypesOf,
@@ -4759,6 +4777,9 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
             case OperandDict(operands=operands, names=names):
                 fields.add(operands)
                 fields.add(names)
+            case TreeRefs(operands=operands, shape=shape):
+                fields.add(operands)
+                fields.add(shape)
             case AttrTable(keys=keys, values=values):
                 fields.add(keys)
                 fields.add(values)
@@ -5075,6 +5096,62 @@ def _validate_operand_dictionaries(
     check_format(format_elements)
 
 
+def _validate_operand_trees(
+    op_name: str,
+    operands: tuple[Operand, ...],
+    attrs: tuple[AttrDef, ...],
+    constraints: tuple[Constraint, ...],
+    format_elements: tuple[FormatElement, ...],
+) -> None:
+    """Establishes tree field ownership independently of its textual spelling."""
+    from loom.assembly import Clause, OptionalGroup, Scope, TreeRefs
+
+    operands_by_name = {operand.name: operand for operand in operands}
+    attrs_by_name = {attr.name: attr for attr in attrs}
+    pairs: set[tuple[str, str]] = set()
+    owned_operands: set[str] = set()
+    owned_shapes: set[str] = set()
+    for constraint in constraints:
+        if constraint.name != "OperandTree":
+            continue
+        if len(constraint.args) != 2:
+            raise ValueError(f"Op '{op_name}': OperandTree requires two fields")
+        operand_field, shape_field = constraint.args
+        operand = operands_by_name.get(operand_field)
+        shape = attrs_by_name.get(shape_field)
+        if operand is None or not operand.variadic or operand.optional:
+            raise ValueError(f"Op '{op_name}': OperandTree requires a variadic operand")
+        if shape is None or shape.attr_type != ATTR_TYPE_I64_ARRAY or shape.optional:
+            raise ValueError(
+                f"Op '{op_name}': OperandTree requires a required i64_array shape"
+            )
+        if operand_field in owned_operands or shape_field in owned_shapes:
+            raise ValueError(
+                f"Op '{op_name}': OperandTree fields must have unique ownership"
+            )
+        owned_operands.add(operand_field)
+        owned_shapes.add(shape_field)
+        pairs.add((operand_field, shape_field))
+
+    def check_format(elements: tuple[FormatElement, ...]) -> None:
+        for element in elements:
+            match element:
+                case TreeRefs(operands=operand_field, shape=shape_field):
+                    if (operand_field, shape_field) not in pairs:
+                        raise ValueError(
+                            f"Op '{op_name}': TreeRefs requires a matching "
+                            "OperandTree constraint"
+                        )
+                case (
+                    Clause(elements=nested)
+                    | OptionalGroup(elements=nested)
+                    | Scope(elements=nested)
+                ):
+                    check_format(nested)
+
+    check_format(format_elements)
+
+
 def _validate_no_nested_scope(
     op_name: str,
     elements: tuple[FormatElement, ...],
@@ -5206,6 +5283,9 @@ def _validate_op_formats(op: Op) -> None:
         _validate_func_args_partitions(op.name, elements, op.attrs)
         _validate_block_args_partitions(op.name, elements, op.attrs, op.regions)
         _validate_operand_dictionaries(
+            op.name, op.operands, op.attrs, op.constraints, elements
+        )
+        _validate_operand_trees(
             op.name, op.operands, op.attrs, op.constraints, elements
         )
         _validate_format_fields(

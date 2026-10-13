@@ -12,6 +12,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/format/text/printer/atoms.h"
 #include "loom/ir/module.h"
+#include "loom/ir/value_tree.h"
 #include "loom/ops/op_defs.h"
 
 //===----------------------------------------------------------------------===//
@@ -37,6 +38,7 @@ static bool loom_print_format_element_covers_attr(
       return LOOM_FORMAT_INDEX_LIST_STATIC_ATTR_INDEX(element->data) ==
              attr_index;
     case LOOM_FORMAT_KIND_OPERAND_DICT:
+    case LOOM_FORMAT_KIND_TREE_REFS:
       return element->data == attr_index;
     case LOOM_FORMAT_KIND_ATTR_TABLE:
       return element->data == attr_index;
@@ -331,6 +333,97 @@ iree_status_t loom_print_operand_dict(loom_print_context_t* ctx,
     memset(ordinal_bits, 0, word_count * sizeof(*ordinal_bits));
     status = loom_print_operand_dict_entries(ctx, op, element, operand_span,
                                              names_attr, ordinal_bits);
+  }
+  iree_arena_deinitialize(&arena);
+  return status;
+}
+
+static iree_status_t loom_print_tree_values(
+    loom_print_context_t* ctx, const loom_op_t* op, loom_value_slice_t values,
+    loom_attribute_t shape, uint16_t shape_index, uint32_t* groups) {
+  IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
+  iree_host_size_t tree_start = ctx->stream->offset;
+  uint16_t depth = 0;
+  uint16_t value_position = 0;
+  for (uint32_t i = 0; i < shape.count; ++i) {
+    if (depth) {
+      groups[depth - 1] -= 4;
+    }
+    uint32_t token = (uint32_t)shape.i64_array[i];
+    uint32_t kind = token & 3;
+    if (kind == LOOM_VALUE_TREE_VALUE) {
+      const loom_value_id_t* value = &values.values[value_position++];
+      iree_host_size_t start = ctx->stream->offset;
+      IREE_RETURN_IF_ERROR(loom_print_value_ref(ctx, *value));
+      loom_print_report_field(
+          ctx,
+          loom_print_field_ref(LOOM_PRINT_FIELD_OPERAND,
+                               (uint16_t)(value - loom_op_const_operands(op))),
+          start, ctx->stream->offset);
+    } else if (kind == LOOM_VALUE_TREE_ABSENT) {
+      IREE_RETURN_IF_ERROR(
+          loom_output_stream_write_cstring(ctx->stream, "none"));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(
+          ctx->stream, kind == LOOM_VALUE_TREE_RECORD ? '(' : '['));
+      groups[depth++] = token;
+      if (token >> 2) {
+        continue;
+      }
+    }
+    while (depth && !(groups[depth - 1] >> 2)) {
+      uint32_t group = groups[--depth];
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(
+          ctx->stream, (group & 3) == LOOM_VALUE_TREE_RECORD ? ')' : ']'));
+    }
+    if (depth) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, ", "));
+    }
+  }
+  loom_print_report_field(
+      ctx, loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, shape_index), tree_start,
+      ctx->stream->offset);
+  loom_print_did_write(ctx);
+  return iree_ok_status();
+}
+
+iree_status_t loom_print_tree_refs(loom_print_context_t* ctx,
+                                   const loom_op_t* op,
+                                   const loom_op_vtable_t* vtable,
+                                   const loom_format_element_t* element) {
+  loom_value_slice_t values =
+      loom_op_operand_field_span(vtable, op, element->field_index);
+  const loom_value_id_t* operand_base = loom_op_const_operands(op);
+  if (values.count &&
+      (values.values < operand_base ||
+       values.values + values.count > operand_base + op->operand_count)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "operand tree span exceeds operation operands");
+  }
+  if (element->data >= op->attribute_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "missing operand tree shape");
+  }
+  loom_attribute_t shape = loom_op_attrs(op)[element->data];
+  if (shape.kind != LOOM_ATTR_I64_ARRAY ||
+      !loom_value_tree_validate(shape.i64_array, shape.count, values.count)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "operand tree shape must describe every operand exactly once");
+  }
+  uint32_t inline_groups[32];
+  if (shape.count <= IREE_ARRAYSIZE(inline_groups)) {
+    return loom_print_tree_values(ctx, op, values, shape, element->data,
+                                  inline_groups);
+  }
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(ctx->module->arena.block_pool, &arena);
+  uint32_t* groups = NULL;
+  iree_status_t status = iree_arena_allocate_array(
+      &arena, shape.count, sizeof(*groups), (void**)&groups);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_print_tree_values(ctx, op, values, shape, element->data, groups);
   }
   iree_arena_deinitialize(&arena);
   return status;

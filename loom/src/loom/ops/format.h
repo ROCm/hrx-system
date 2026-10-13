@@ -161,6 +161,11 @@ enum loom_format_kind_e {
   // [align(16) %a, align(256) %b]. field_index references the variadic
   // operand field and data references its i64 array alignment attribute.
   LOOM_FORMAT_KIND_ALIGNED_REFS = 32,
+
+  // Structured operands: (%value, [(%value, %value)], none).
+  // field_index is the variadic operand field. data is the i64-array shape
+  // attribute governed by the operation's OperandTree semantic constraint.
+  LOOM_FORMAT_KIND_TREE_REFS = 33,
 };
 typedef uint8_t loom_format_kind_t;
 

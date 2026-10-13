@@ -104,6 +104,29 @@ def test_dynamic_builder_constructs_binary_op_with_result_name() -> None:
     assert block.ops[0].operands == [lhs.id, rhs.id]
 
 
+def test_dynamic_builder_preserves_operand_tree_shape() -> None:
+    block, builder = _builder()
+    first = builder.value("first", I32)
+    second = builder.value("second", I32)
+
+    builder.test.operand_tree(
+        first=[(first, [second]), (second, [first, second])],
+        second=(None, [], ()),
+    )
+
+    operation = block.ops[0]
+    assert operation.operands == [first.id, second.id, second.id, first.id, second.id]
+    assert operation.operand_segment_counts == (5, 0)
+    assert operation.attributes["first_shape"] == [11, 10, 0, 7, 0, 10, 0, 11, 0, 0]
+    assert operation.attributes["second_shape"] == [14, 1, 3, 2]
+
+
+def test_dynamic_builder_rejects_non_value_tree_leaf() -> None:
+    _block, builder = _builder()
+    with pytest.raises(TypeError):
+        builder.test.operand_tree(first=[object()], second=None)
+
+
 def test_dynamic_builder_synthesizes_exact_result_type() -> None:
     op = Op(
         "fixed.result",

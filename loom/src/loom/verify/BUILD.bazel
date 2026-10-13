@@ -103,6 +103,7 @@ loom_cc_test(
     srcs = [
         "verify_structure_test.cc",
         "verify_test.cc",
+        "verify_value_tree_test.cc",
     ],
     deps = [
         ":verify",

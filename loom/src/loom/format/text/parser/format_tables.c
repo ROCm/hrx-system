@@ -14,6 +14,7 @@
 #include "loom/format/text/parser/diagnostics.h"
 #include "loom/format/text/parser/regions.h"
 #include "loom/format/text/parser/types.h"
+#include "loom/ir/value_tree.h"
 #include "loom/ops/op_defs.h"
 
 //===----------------------------------------------------------------------===//
@@ -105,6 +106,7 @@ static bool loom_parse_format_element_covers_attr(
       return LOOM_FORMAT_INDEX_LIST_STATIC_ATTR_INDEX(element->data) ==
              attr_index;
     case LOOM_FORMAT_KIND_OPERAND_DICT:
+    case LOOM_FORMAT_KIND_TREE_REFS:
       return element->data == attr_index;
     case LOOM_FORMAT_KIND_ATTR_TABLE:
       return element->data == attr_index;
@@ -287,7 +289,8 @@ static void loom_parsed_i64_values_initialize(
 }
 
 static iree_status_t loom_parsed_i64_values_add(
-    loom_parser_t* parser, loom_parsed_i64_values_t* values, int64_t value) {
+    iree_arena_allocator_t* arena, loom_parsed_i64_values_t* values,
+    int64_t value) {
   if (values->count >= UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "parsed i64 list has more than %u values",
@@ -297,15 +300,117 @@ static iree_status_t loom_parsed_i64_values_add(
     iree_host_size_t old_capacity = values->capacity;
     iree_host_size_t new_capacity = old_capacity * 2;
     int64_t* new_values = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(&parser->parser_arena, new_capacity,
-                                  sizeof(*new_values), (void**)&new_values));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, new_capacity, sizeof(*new_values), (void**)&new_values));
     memcpy(new_values, values->values, old_capacity * sizeof(*new_values));
     values->values = new_values;
     values->capacity = new_capacity;
   }
   values->values[values->count++] = value;
   return iree_ok_status();
+}
+
+static iree_status_t loom_parse_format_tree_values(
+    loom_parser_t* parser, const loom_op_vtable_t* vtable,
+    const loom_format_element_t* element, loom_parsed_op_t* parsed,
+    iree_arena_allocator_t* scratch_arena) {
+  loom_token_t start_token = loom_tokenizer_peek(&parser->tokenizer);
+  loom_parsed_i64_values_t shape;
+  loom_parsed_i64_values_initialize(&shape);
+  loom_parsed_i64_values_t groups;
+  loom_parsed_i64_values_initialize(&groups);
+  uint16_t value_count = 0;
+  do {
+    if (groups.count) {
+      shape.values[groups.values[groups.count - 1]] += 4;
+    }
+    bool record = loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_LPAREN);
+    bool range = loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_LBRACKET);
+    if (record || range) {
+      loom_tokenizer_next(&parser->tokenizer);
+      iree_host_size_t position = shape.count;
+      IREE_RETURN_IF_ERROR(loom_parsed_i64_values_add(
+          scratch_arena, &shape,
+          record ? LOOM_VALUE_TREE_RECORD : LOOM_VALUE_TREE_RANGE));
+      loom_token_kind_t close =
+          record ? LOOM_TOKEN_RPAREN : LOOM_TOKEN_RBRACKET;
+      if (!loom_tokenizer_try_consume(&parser->tokenizer, close)) {
+        IREE_RETURN_IF_ERROR(
+            loom_parsed_i64_values_add(scratch_arena, &groups, position));
+        continue;
+      }
+    } else if (loom_tokenizer_try_consume_keyword(&parser->tokenizer,
+                                                  IREE_SV("none"))) {
+      IREE_RETURN_IF_ERROR(loom_parsed_i64_values_add(scratch_arena, &shape,
+                                                      LOOM_VALUE_TREE_ABSENT));
+    } else {
+      loom_token_t value_token = loom_token_none();
+      LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_SSA_VALUE, &value_token);
+      loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
+      LOOM_PARSE_RESOLVE_VALUE(parser, value_token, &value_id);
+      IREE_RETURN_IF_ERROR(loom_parsed_i64_values_add(scratch_arena, &shape,
+                                                      LOOM_VALUE_TREE_VALUE));
+      uint16_t operand_index = 0;
+      if (loom_op_vtable_has_segmented_operands(vtable)) {
+        IREE_RETURN_IF_ERROR(loom_parsed_op_add_segmented_operand(
+            parsed, &parser->parser_arena, element->field_index, value_id,
+            &operand_index));
+      } else {
+        uint32_t index = (uint32_t)element->field_index + value_count;
+        if (index >= UINT16_MAX) {
+          return iree_make_status(
+              IREE_STATUS_RESOURCE_EXHAUSTED,
+              "operand tree exceeds the u16 operand domain");
+        }
+        operand_index = (uint16_t)index;
+        IREE_RETURN_IF_ERROR(loom_parsed_op_set_operand(
+            parsed, &parser->parser_arena, operand_index, value_id));
+      }
+      IREE_RETURN_IF_ERROR(loom_parsed_op_add_field_span(
+          parsed, &parser->parser_arena, LOOM_LOCATION_FIELD_OPERAND,
+          operand_index, value_token, value_token.line,
+          value_token.end_column));
+      ++value_count;
+    }
+    while (groups.count) {
+      bool parent_record = (shape.values[groups.values[groups.count - 1]] &
+                            3) == LOOM_VALUE_TREE_RECORD;
+      loom_token_kind_t close =
+          parent_record ? LOOM_TOKEN_RPAREN : LOOM_TOKEN_RBRACKET;
+      if (!loom_tokenizer_try_consume(&parser->tokenizer, close)) {
+        break;
+      }
+      --groups.count;
+    }
+    if (groups.count) {
+      LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_COMMA, NULL);
+    }
+  } while (groups.count);
+  int64_t* owned_shape = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(&parser->module->arena, shape.count,
+                                sizeof(*owned_shape), (void**)&owned_shape));
+  memcpy(owned_shape, shape.values, shape.count * sizeof(*owned_shape));
+  IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
+      parsed, &parser->parser_arena, (uint8_t)element->data,
+      loom_attr_i64_array(owned_shape, (uint16_t)shape.count)));
+  return loom_parse_format_add_field_span(parser, parsed,
+                                          LOOM_LOCATION_FIELD_ATTRIBUTE,
+                                          (uint8_t)element->data, start_token);
+}
+
+iree_status_t loom_parse_format_tree_refs(loom_parser_t* parser,
+                                          const loom_op_vtable_t* vtable,
+                                          const loom_format_element_t* element,
+                                          loom_parsed_op_t* parsed) {
+  // Only the canonical shape survives parsing. Reclaim growth buffers and the
+  // iterative parser's group stack on both success and failure.
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(parser->parser_arena.block_pool, &scratch_arena);
+  iree_status_t status = loom_parse_format_tree_values(parser, vtable, element,
+                                                       parsed, &scratch_arena);
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
 }
 
 static iree_status_t loom_parse_format_i64(loom_parser_t* parser,
@@ -365,8 +470,8 @@ iree_status_t loom_parse_format_aligned_refs(
     IREE_RETURN_IF_ERROR(loom_parsed_op_add_field_span(
         parsed, &parser->parser_arena, LOOM_LOCATION_FIELD_OPERAND,
         operand_index, value_token, value_token.line, value_token.end_column));
-    IREE_RETURN_IF_ERROR(
-        loom_parsed_i64_values_add(parser, &alignments, alignment));
+    IREE_RETURN_IF_ERROR(loom_parsed_i64_values_add(&parser->parser_arena,
+                                                    &alignments, alignment));
   }
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RBRACKET, NULL);
 
@@ -474,7 +579,8 @@ iree_status_t loom_parse_format_attr_table(loom_parser_t* parser,
     loom_token_t key_token = loom_token_none();
     int64_t key = 0;
     IREE_RETURN_IF_ERROR(loom_parse_format_i64(parser, &key_token, &key));
-    IREE_RETURN_IF_ERROR(loom_parsed_i64_values_add(parser, &keys, key));
+    IREE_RETURN_IF_ERROR(
+        loom_parsed_i64_values_add(&parser->parser_arena, &keys, key));
     LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_EQUALS, NULL);
 
     uint16_t row_width = 0;
@@ -567,7 +673,8 @@ iree_status_t loom_parse_format_region_table(
     loom_token_t key_token = loom_token_none();
     int64_t key = 0;
     IREE_RETURN_IF_ERROR(loom_parse_format_i64(parser, &key_token, &key));
-    IREE_RETURN_IF_ERROR(loom_parsed_i64_values_add(parser, &keys, key));
+    IREE_RETURN_IF_ERROR(
+        loom_parsed_i64_values_add(&parser->parser_arena, &keys, key));
 
     loom_region_t* case_region = NULL;
     IREE_RETURN_IF_ERROR(

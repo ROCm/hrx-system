@@ -1,0 +1,26 @@
+// RUN: roundtrip
+
+func.def @grouped(%buffer: buffer, %first: i64, %second: i64) {
+  test.operand_tree [(%buffer, [%first]), (%buffer, [%first, %second])] (none, [], ())
+  test.operand_tree [] none
+  test.operand_tree () [(%buffer, %first), (%buffer, %second)]
+  func.return
+}
+
+// ======
+// RUN: format bytecode
+
+func.def @grouped(%buffer: buffer, %first: i64, %second: i64) {
+  test.operand_tree [(%buffer, [%first]), (%buffer, [%first, %second])] (none, [], ())
+  test.operand_tree [] none
+  test.operand_tree () [(%buffer, %first), (%buffer, %second)]
+  func.return
+}
+
+// ----
+func.def @grouped(%buffer: buffer, %first: i64, %second: i64) {
+  test.operand_tree [(%buffer, [%first]), (%buffer, [%first, %second])] (none, [], ())
+  test.operand_tree [] none
+  test.operand_tree () [(%buffer, %first), (%buffer, %second)]
+  func.return
+}

@@ -51,6 +51,7 @@ from loom.assembly import (
     SymbolRef,
     TemplateParam,
     TemplateParamFlags,
+    TreeRefs,
     TypedRefs,
     TypeOf,
     TypesOf,
@@ -123,6 +124,7 @@ from loom.dsl import (
     Operand,
     OperandDictionary,
     OperandRole,
+    OperandTree,
     ParameterizedAttrDef,
     Reads,
     ReadWrites,
@@ -2484,6 +2486,23 @@ test_module_metadata = Op(
 )
 
 # ============================================================================
+# test.operand_tree — static record and range grouping of SSA operands
+# ============================================================================
+
+test_operand_tree = Op(
+    "test.operand_tree",
+    group=test_ops,
+    doc="Test independent static operand trees with ragged record/list grouping.",
+    operands=[Operand("first", ANY, variadic=True), Operand("second", ANY, variadic=True)],
+    attrs=[AttrDef("first_shape", ATTR_TYPE_I64_ARRAY), AttrDef("second_shape", ATTR_TYPE_I64_ARRAY)],
+    constraints=[OperandTree("first", "first_shape"), OperandTree("second", "second_shape")],
+    traits=[UNKNOWN_EFFECTS],
+    format=[TreeRefs("first", "first_shape"), TreeRefs("second", "second_shape")],
+    examples=["test.operand_tree [(%semaphore, %value), (%other, %next)] (none, [], ())"],
+)
+
+
+# ============================================================================
 # test.operand_dict — op with keyed SSA operand dictionary
 # ============================================================================
 
@@ -3278,4 +3297,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_result_pair,
     test_block_arg_groups,
     test_signature_sink,
+    test_operand_tree,
 )

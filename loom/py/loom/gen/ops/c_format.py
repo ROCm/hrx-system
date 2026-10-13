@@ -39,6 +39,7 @@ from loom.assembly import (
     SymbolRef,
     TemplateParam,
     TemplateParamFlags,
+    TreeRefs,
     TypedRefs,
     TypeOf,
     TypesOf,
@@ -218,6 +219,11 @@ def translate_format_elements(op: Op, format_elements: tuple[FormatElement, ...]
                     _, operand_index = resolve_field(operand_field)
                     _, names_index = resolve_field(names_field)
                     elements.append(("LOOM_FORMAT_KIND_OPERAND_DICT", operand_index, str(names_index)))
+
+                case TreeRefs(operands=operand_field, shape=shape_field):
+                    _, operand_index = resolve_field(operand_field)
+                    _, shape_index = resolve_field(shape_field)
+                    elements.append(("LOOM_FORMAT_KIND_TREE_REFS", operand_index, str(shape_index)))
 
                 case AttrTable(keys=keys_field, values=values_field):
                     values_kind, values_index = resolve_field(values_field)
@@ -441,6 +447,7 @@ def translate_format_elements(op: Op, format_elements: tuple[FormatElement, ...]
             "LOOM_FORMAT_KIND_OPERAND_TYPED_REFS",
             "LOOM_FORMAT_KIND_ALIGNED_REFS",
             "LOOM_FORMAT_KIND_OPERAND_DICT",
+            "LOOM_FORMAT_KIND_TREE_REFS",
             "LOOM_FORMAT_KIND_ATTR_TABLE",
             "LOOM_FORMAT_KIND_INDEX_LIST",
             "LOOM_FORMAT_KIND_BINDING_LIST",

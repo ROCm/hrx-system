@@ -1316,6 +1316,12 @@ iree_status_t loom_parser_walk_format(
         break;
       }
 
+      case LOOM_FORMAT_KIND_TREE_REFS: {
+        IREE_RETURN_IF_ERROR(
+            loom_parse_format_tree_refs(parser, vtable, element, parsed));
+        break;
+      }
+
       case LOOM_FORMAT_KIND_ATTR_TABLE: {
         IREE_RETURN_IF_ERROR(
             loom_parse_format_attr_table(parser, vtable, element, parsed));

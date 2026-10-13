@@ -75,6 +75,7 @@ __all__ = [
     "Region",
     "IndexList",
     "OperandDict",
+    "TreeRefs",
     "BindingList",
     "BlockArgs",
     "FuncArgs",
@@ -450,6 +451,23 @@ class OperandDict:
 
     operands: str
     names: str
+
+
+@dataclass(frozen=True, slots=True)
+class TreeRefs:
+    """Records, ranges, absent groups, and ordinary SSA references.
+
+    Prints/parses: [(%semaphore, %value), (%other, %next)]
+
+    Parentheses describe records, brackets describe ranges, and `none` is
+    distinct from an empty record or range. Leaves belong to the ordinary
+    variadic operand field; the i64-array shape stores only the static tree.
+    The matching OperandTree constraint owns structural validity independently
+    of the textual spelling.
+    """
+
+    operands: str
+    shape: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -964,6 +982,7 @@ type FormatElement = (
     | Region
     | IndexList
     | OperandDict
+    | TreeRefs
     | BindingList
     | BlockArgs
     | FuncArgs
