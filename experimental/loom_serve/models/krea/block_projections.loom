@@ -1,0 +1,349 @@
+config.decl @krea2.dit_int8 : %value: index where [range(%value, 0, 1)]
+
+command.program.decl @krea2.block_query_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer)
+
+command.program.decl @krea2.block_key_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer)
+
+command.program.decl @krea2.block_value_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer)
+
+command.program.decl @krea2.block_gate_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer)
+
+command.program.decl @krea2.block_attention_output_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer)
+
+command.program.decl @krea2.block_feed_forward_gate_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer)
+
+command.program.decl @krea2.block_feed_forward_up_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer)
+
+command.program.decl @krea2.block_feed_forward_down_i8(%layer: index) launch(%parameters: buffer, %input: buffer, %scales: buffer, %output: buffer)
+
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+
+amdgpu.target<gfx11-generic> @block_projection_wave32 {subgroup_size = 32}
+
+template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @projection.linear_temporal_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %rhs_read_ahead: i1, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @krea2.projection_row_group_size(%rows: index, %minimum_grouped_rows: index) -> (index)
+
+// Traversal selection belongs to the model's concrete contraction shapes.
+// Whole-height traversal retains input reuse at small row counts; bounded
+// groups reduce the revisited input panel for larger contractions. Both the
+// selection and its coordinate arithmetic specialize before device execution.
+template.def<@krea2.projection_row_group_size> device @block_projection_row_group_size(%rows: index, %minimum_grouped_rows: index) -> (index) {
+  %use_grouped = index.cmp uge, %rows, %minimum_grouped_rows : index
+  %group_size = scf.if %use_grouped -> (index) {
+    %group = index.constant 8 : index
+    scf.yield %group : index
+  } else {
+    %rounding = index.constant 63 : index
+    %tile = index.constant 64 : index
+    %padded_rows = index.add %rows, %rounding : index
+    %row_tiles = index.div %padded_rows, %tile : index
+    scf.yield %row_tiles : index
+  }
+  template.return %group_size : index
+}
+
+kernel.def target(@block_projection_wave32) @block_linear_6144_6144() {
+  %rows = config.get @krea2.block_tokens : index
+  %short_text_rows = index.constant 4224 : index
+  %temporal = index.cmp eq, %rows, %short_text_rows : index
+  %temporal_row_tile = index.constant 128 : index
+  %baseline_row_tile = index.constant 64 : index
+  %tile = scf.select %temporal, %temporal_row_tile, %baseline_row_tile : index
+  %c1 = index.constant 1 : index
+  %rounding = index.sub %tile, %c1 : index
+  %padded_rows = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded_rows, %tile : index
+  %temporal_output_tiles = index.constant 64 : index
+  %baseline_output_tiles = index.constant 96 : index
+  %output_tiles = scf.select %temporal, %temporal_output_tiles, %baseline_output_tiles : index
+  %temporal_threads = index.constant 128 : index
+  %baseline_threads = index.constant 256 : index
+  %threads = scf.select %temporal, %temporal_threads, %baseline_threads : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %width = index.constant 6144 : index
+  %short_text_rows = index.constant 4224 : index
+  %temporal = index.cmp eq, %rows, %short_text_rows : index
+  scf.if %temporal {
+    %group_size = index.constant 8 : index
+    %rhs_read_ahead = scalar.constant true : i1
+    template.apply<@projection.linear_temporal_bf16>(%rows, %width, %width, %group_size, %rhs_read_ahead, %input, %weight, %output) : (index, index, index, index, i1, buffer, buffer, buffer)
+  } else {
+    %minimum_grouped_rows = index.constant 2560 : index
+    %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
+    %output_layout = encoding.layout.dense : encoding<layout>
+    template.apply<@projection.linear_tiled_bf16>(%rows, %width, %width, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+  }
+  kernel.return
+}
+
+kernel.def target(@block_projection_wave32) @block_linear_6144_1536() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %padded_rows = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded_rows, %tile : index
+  %output_tiles = index.constant 24 : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 6144 : index
+  %outputs = index.constant 1536 : index
+  %minimum_grouped_rows = index.constant 2560 : index
+  %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+  kernel.return
+}
+
+// V publishes the same logical result in the consumer's channel-major layout.
+kernel.def target(@block_projection_wave32) @block_linear_6144_1536_column_major() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %padded_rows = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded_rows, %tile : index
+  %output_tiles = index.constant 24 : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 6144 : index
+  %outputs = index.constant 1536 : index
+  %minimum_grouped_rows = index.constant 2560 : index
+  %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
+  %output_layout = encoding.layout.strided [1, %rows] : encoding<layout>
+  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_projection_wave32) @block_linear_6144_16384() {
+  %rows = config.get @krea2.block_tokens : index
+  %image_short_text = index.constant 4224 : index
+  %image_full_text = index.constant 4608 : index
+  %short_text = index.cmp eq, %rows, %image_short_text : index
+  %full_text = index.cmp eq, %rows, %image_full_text : index
+  %temporal = scalar.ori %short_text, %full_text : i1
+  %temporal_row_tile = index.constant 128 : index
+  %baseline_row_tile = index.constant 64 : index
+  %tile = scf.select %temporal, %temporal_row_tile, %baseline_row_tile : index
+  %c1 = index.constant 1 : index
+  %rounding = index.sub %tile, %c1 : index
+  %padded_rows = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded_rows, %tile : index
+  %temporal_output_tiles = index.constant 171 : index
+  %baseline_output_tiles = index.constant 256 : index
+  %output_tiles = scf.select %temporal, %temporal_output_tiles, %baseline_output_tiles : index
+  %temporal_threads = index.constant 128 : index
+  %baseline_threads = index.constant 256 : index
+  %threads = scf.select %temporal, %temporal_threads, %baseline_threads : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 6144 : index
+  %outputs = index.constant 16384 : index
+  %image_short_text = index.constant 4224 : index
+  %image_full_text = index.constant 4608 : index
+  %short_text = index.cmp eq, %rows, %image_short_text : index
+  %full_text = index.cmp eq, %rows, %image_full_text : index
+  %temporal = scalar.ori %short_text, %full_text : i1
+  scf.if %temporal {
+    %short_text_group = index.constant 8 : index
+    %full_text_group = index.constant 4 : index
+    %group_size = scf.select %short_text, %short_text_group, %full_text_group : index
+    %rhs_read_ahead = scalar.constant true : i1
+    template.apply<@projection.linear_temporal_bf16>(%rows, %inputs, %outputs, %group_size, %rhs_read_ahead, %input, %weight, %output) : (index, index, index, index, i1, buffer, buffer, buffer)
+  } else {
+    %minimum_grouped_rows = index.constant 2048 : index
+    %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
+    %output_layout = encoding.layout.dense : encoding<layout>
+    template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+  }
+  kernel.return
+}
+
+kernel.def target(@block_projection_wave32) @block_linear_16384_6144() {
+  %rows = config.get @krea2.block_tokens : index
+  %image_short_text = index.constant 4224 : index
+  %image_full_text = index.constant 4608 : index
+  %short_text = index.cmp eq, %rows, %image_short_text : index
+  %full_text = index.cmp eq, %rows, %image_full_text : index
+  %temporal = scalar.ori %short_text, %full_text : i1
+  %temporal_row_tile = index.constant 128 : index
+  %baseline_row_tile = index.constant 64 : index
+  %tile = scf.select %temporal, %temporal_row_tile, %baseline_row_tile : index
+  %c1 = index.constant 1 : index
+  %rounding = index.sub %tile, %c1 : index
+  %padded_rows = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded_rows, %tile : index
+  %temporal_output_tiles = index.constant 64 : index
+  %baseline_output_tiles = index.constant 96 : index
+  %output_tiles = scf.select %temporal, %temporal_output_tiles, %baseline_output_tiles : index
+  %temporal_threads = index.constant 128 : index
+  %baseline_threads = index.constant 256 : index
+  %threads = scf.select %temporal, %temporal_threads, %baseline_threads : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 16384 : index
+  %outputs = index.constant 6144 : index
+  %image_short_text = index.constant 4224 : index
+  %image_full_text = index.constant 4608 : index
+  %short_text = index.cmp eq, %rows, %image_short_text : index
+  %full_text = index.cmp eq, %rows, %image_full_text : index
+  %temporal = scalar.ori %short_text, %full_text : i1
+  scf.if %temporal {
+    %group_size = index.constant 4 : index
+    %rhs_read_ahead = scalar.constant false : i1
+    template.apply<@projection.linear_temporal_bf16>(%rows, %inputs, %outputs, %group_size, %rhs_read_ahead, %input, %weight, %output) : (index, index, index, index, i1, buffer, buffer, buffer)
+  } else {
+    %minimum_grouped_rows = index.constant 1088 : index
+    %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
+    %output_layout = encoding.layout.dense : encoding<layout>
+    template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+  }
+  kernel.return
+}
+
+command.program.def public @krea2.block_query(%layer: index) launch(%parameters: buffer, %input: buffer, %quantized: buffer, %input_scales: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %use_int8 = index.cmp ne, %storage, %storage_zero : index
+  scf.if %use_int8 {
+    command.program.launch @krea2.block_query_i8[%layer](%parameters, %quantized, %input_scales, %output) : [index](buffer, buffer, buffer, buffer)
+  } else {
+    %rows = config.get @krea2.block_tokens : index
+    %origin = index.constant 0 : offset
+    %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
+    %weight = command.parameter %parameters, "blocks.{}.attn.wq.weight"[%layer] : view<6144x6144xbf16>
+    kernel.launch @block_linear_6144_6144(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<6144x6144xbf16>, view<[%rows]x6144xbf16>)
+  }
+  command.return
+}
+
+command.program.def public @krea2.block_key(%layer: index) launch(%parameters: buffer, %input: buffer, %quantized: buffer, %input_scales: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %use_int8 = index.cmp ne, %storage, %storage_zero : index
+  scf.if %use_int8 {
+    command.program.launch @krea2.block_key_i8[%layer](%parameters, %quantized, %input_scales, %output) : [index](buffer, buffer, buffer, buffer)
+  } else {
+    %rows = config.get @krea2.block_tokens : index
+    %origin = index.constant 0 : offset
+    %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x1536xbf16>
+    %weight = command.parameter %parameters, "blocks.{}.attn.wk.weight"[%layer] : view<1536x6144xbf16>
+    kernel.launch @block_linear_6144_1536(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<1536x6144xbf16>, view<[%rows]x1536xbf16>)
+  }
+  command.return
+}
+
+command.program.def public @krea2.block_value(%layer: index) launch(%parameters: buffer, %input: buffer, %quantized: buffer, %input_scales: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %use_int8 = index.cmp ne, %storage, %storage_zero : index
+  scf.if %use_int8 {
+    command.program.launch @krea2.block_value_i8[%layer](%parameters, %quantized, %input_scales, %output) : [index](buffer, buffer, buffer, buffer)
+  } else {
+    %rows = config.get @krea2.block_tokens : index
+    %origin = index.constant 0 : offset
+    %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+    %output_view = buffer.view %output[%origin] : buffer -> view<1536x[%rows]xbf16>
+    %weight = command.parameter %parameters, "blocks.{}.attn.wv.weight"[%layer] : view<1536x6144xbf16>
+    kernel.launch @block_linear_6144_1536_column_major(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<1536x6144xbf16>, view<1536x[%rows]xbf16>)
+  }
+  command.return
+}
+
+command.program.def public @krea2.block_gate(%layer: index) launch(%parameters: buffer, %input: buffer, %quantized: buffer, %input_scales: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %use_int8 = index.cmp ne, %storage, %storage_zero : index
+  scf.if %use_int8 {
+    command.program.launch @krea2.block_gate_i8[%layer](%parameters, %quantized, %input_scales, %output) : [index](buffer, buffer, buffer, buffer)
+  } else {
+    %rows = config.get @krea2.block_tokens : index
+    %origin = index.constant 0 : offset
+    %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
+    %weight = command.parameter %parameters, "blocks.{}.attn.gate.weight"[%layer] : view<6144x6144xbf16>
+    kernel.launch @block_linear_6144_6144(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<6144x6144xbf16>, view<[%rows]x6144xbf16>)
+  }
+  command.return
+}
+
+command.program.def public @krea2.block_attention_output(%layer: index) launch(%parameters: buffer, %input: buffer, %quantized: buffer, %input_scales: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %use_int8 = index.cmp ne, %storage, %storage_zero : index
+  scf.if %use_int8 {
+    command.program.launch @krea2.block_attention_output_i8[%layer](%parameters, %quantized, %input_scales, %output) : [index](buffer, buffer, buffer, buffer)
+  } else {
+    %rows = config.get @krea2.block_tokens : index
+    %origin = index.constant 0 : offset
+    %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
+    %weight = command.parameter %parameters, "blocks.{}.attn.wo.weight"[%layer] : view<6144x6144xbf16>
+    kernel.launch @block_linear_6144_6144(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<6144x6144xbf16>, view<[%rows]x6144xbf16>)
+  }
+  command.return
+}
+
+command.program.def public @krea2.block_feed_forward_gate(%layer: index) launch(%parameters: buffer, %input: buffer, %quantized: buffer, %input_scales: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %use_int8 = index.cmp ne, %storage, %storage_zero : index
+  scf.if %use_int8 {
+    command.program.launch @krea2.block_feed_forward_gate_i8[%layer](%parameters, %quantized, %input_scales, %output) : [index](buffer, buffer, buffer, buffer)
+  } else {
+    %rows = config.get @krea2.block_tokens : index
+    %origin = index.constant 0 : offset
+    %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x16384xbf16>
+    %weight = command.parameter %parameters, "blocks.{}.mlp.gate.weight"[%layer] : view<16384x6144xbf16>
+    kernel.launch @block_linear_6144_16384(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<16384x6144xbf16>, view<[%rows]x16384xbf16>)
+  }
+  command.return
+}
+
+command.program.def public @krea2.block_feed_forward_up(%layer: index) launch(%parameters: buffer, %input: buffer, %quantized: buffer, %input_scales: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %use_int8 = index.cmp ne, %storage, %storage_zero : index
+  scf.if %use_int8 {
+    command.program.launch @krea2.block_feed_forward_up_i8[%layer](%parameters, %quantized, %input_scales, %output) : [index](buffer, buffer, buffer, buffer)
+  } else {
+    %rows = config.get @krea2.block_tokens : index
+    %origin = index.constant 0 : offset
+    %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x16384xbf16>
+    %weight = command.parameter %parameters, "blocks.{}.mlp.up.weight"[%layer] : view<16384x6144xbf16>
+    kernel.launch @block_linear_6144_16384(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<16384x6144xbf16>, view<[%rows]x16384xbf16>)
+  }
+  command.return
+}
+
+command.program.def public @krea2.block_feed_forward_down(%layer: index) launch(%parameters: buffer, %input: buffer, %quantized: buffer, %input_scales: buffer, %output: buffer) {
+  %storage = config.get @krea2.dit_int8 : index
+  %storage_zero = index.constant 0 : index
+  %use_int8 = index.cmp ne, %storage, %storage_zero : index
+  scf.if %use_int8 {
+    command.program.launch @krea2.block_feed_forward_down_i8[%layer](%parameters, %quantized, %input_scales, %output) : [index](buffer, buffer, buffer, buffer)
+  } else {
+    %rows = config.get @krea2.block_tokens : index
+    %origin = index.constant 0 : offset
+    %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x16384xbf16>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
+    %weight = command.parameter %parameters, "blocks.{}.mlp.down.weight"[%layer] : view<6144x16384xbf16>
+    kernel.launch @block_linear_16384_6144(%input_view, %weight, %output_view) : (view<[%rows]x16384xbf16>, view<6144x16384xbf16>, view<[%rows]x6144xbf16>)
+  }
+  command.return
+}
