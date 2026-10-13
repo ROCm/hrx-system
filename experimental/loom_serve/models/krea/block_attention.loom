@@ -1,0 +1,80 @@
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+
+amdgpu.target<gfx11-generic> @shared_four_head_wave32 {subgroup_size = 32}
+
+template.decl @attention.shared_four_head_bf16(%tokens: index, %key_value_heads: index, %gated: i1, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer)
+
+template.decl @attention.shared_four_head_k32_bf16(%tokens: index, %key_value_heads: index, %gated: i1, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer)
+
+kernel.def target(@shared_four_head_wave32) @shared_four_head() {
+  %tokens = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %groups = index.div %tokens, %tile : index
+  %key_value_heads = index.constant 12 : index
+  %unit = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %key_value_heads, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %key_value_heads = index.constant 12 : index
+  %gated = scalar.constant false : i1
+  %key_tile = index.constant 32 : index
+  %c0 = index.constant 0 : index
+  %remainder = index.rem %tokens, %key_tile : index
+  %paired_keys = index.cmp eq, %remainder, %c0 : index
+  scf.if %paired_keys {
+    template.apply<@attention.shared_four_head_k32_bf16>(%tokens, %key_value_heads, %gated, %query, %key, %value, %mask, %output, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  } else {
+    template.apply<@attention.shared_four_head_bf16>(%tokens, %key_value_heads, %gated, %query, %key, %value, %mask, %output, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  }
+  kernel.return
+}
+
+kernel.def target(@shared_four_head_wave32) @shared_four_head_gated() {
+  %tokens = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %groups = index.div %tokens, %tile : index
+  %key_value_heads = index.constant 12 : index
+  %unit = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %key_value_heads, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %key_value_heads = index.constant 12 : index
+  %gated = scalar.constant true : i1
+  %key_tile = index.constant 32 : index
+  %c0 = index.constant 0 : index
+  %remainder = index.rem %tokens, %key_tile : index
+  %paired_keys = index.cmp eq, %remainder, %c0 : index
+  scf.if %paired_keys {
+    template.apply<@attention.shared_four_head_k32_bf16>(%tokens, %key_value_heads, %gated, %query, %key, %value, %mask, %gate, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  } else {
+    template.apply<@attention.shared_four_head_bf16>(%tokens, %key_value_heads, %gated, %query, %key, %value, %mask, %gate, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  }
+  kernel.return
+}
+
+command.program.def public @krea2.block_attention_ungated() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %query_view = buffer.view %query[%origin] : buffer -> view<[%tokens]x6144xbf16>
+  %key_view = buffer.view %key[%origin] : buffer -> view<[%tokens]x1536xbf16>
+  %value_view = buffer.view %value[%origin] : buffer -> view<1536x[%tokens]xbf16>
+  %mask_view = buffer.view %mask[%origin] : buffer -> view<[%tokens]xi8>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x6144xbf16>
+  kernel.launch @shared_four_head(%query_view, %key_view, %value_view, %mask_view, %output_view) : (view<[%tokens]x6144xbf16>, view<[%tokens]x1536xbf16>, view<1536x[%tokens]xbf16>, view<[%tokens]xi8>, view<[%tokens]x6144xbf16>)
+  command.return
+}
+
+command.program.def public @krea2.block_attention_context() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %query_view = buffer.view %query[%origin] : buffer -> view<[%tokens]x6144xbf16>
+  %key_view = buffer.view %key[%origin] : buffer -> view<[%tokens]x1536xbf16>
+  %value_view = buffer.view %value[%origin] : buffer -> view<1536x[%tokens]xbf16>
+  %mask_view = buffer.view %mask[%origin] : buffer -> view<[%tokens]xi8>
+  %gate_view = buffer.view %gate[%origin] : buffer -> view<[%tokens]x6144xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x6144xbf16>
+  kernel.launch @shared_four_head_gated(%query_view, %key_view, %value_view, %mask_view, %gate_view, %output_view) : (view<[%tokens]x6144xbf16>, view<[%tokens]x1536xbf16>, view<1536x[%tokens]xbf16>, view<[%tokens]xi8>, view<[%tokens]x6144xbf16>, view<[%tokens]x6144xbf16>)
+  command.return
+}
