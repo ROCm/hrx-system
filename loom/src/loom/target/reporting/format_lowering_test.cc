@@ -12,6 +12,7 @@
 #include "loom/ir/types.h"
 #include "loom/target/math_policy.h"
 #include "loom/target/reporting/format.h"
+#include "loom/target/reporting/memory_summary_test_util.h"
 
 namespace loom {
 namespace {
@@ -144,6 +145,7 @@ static iree_string_view_t LookupArrayElement(iree_string_view_t array,
 TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
+  testing::MemoryReportBatch report_memory(&report);
   report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS;
   report.source_low_selected_op_count = 4;
@@ -238,8 +240,8 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   memory.subgroup_access.distinct_lane_address_count = 32;
   memory.subgroup_access.contiguous_region_count = 32;
   memory.execution_count_plus_one = 2;
-  IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
-      &report, &memory));
+  IREE_ASSERT_OK(report_memory.Append(&memory));
+  IREE_ASSERT_OK(report_memory.Finish());
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -532,6 +534,7 @@ TEST(CompileReportFormatTest, LegalizationPeaksDoNotRequireDetailedRows) {
 TEST(CompileReportFormatTest, KeepsUnmodeledBankCoverageWithoutAModel) {
   loom_target_compile_report_t entry_report = {};
   loom_target_compile_report_initialize(&entry_report, iree_allocator_system());
+  testing::MemoryReportBatch entry_report_memory(&entry_report);
   entry_report.function_name = IREE_SVL("kernel");
   loom_target_compile_report_source_low_memory_row_t memory = {
       .function_name = entry_report.function_name,
@@ -548,8 +551,8 @@ TEST(CompileReportFormatTest, KeepsUnmodeledBankCoverageWithoutAModel) {
   memory.bank_service.proof = IREE_SVL("unmodeled");
   memory.bank_service.unknown_reason = IREE_SVL("target-model-unavailable");
   memory.bank_service.wave_size = 32;
-  IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
-      &entry_report, &memory));
+  IREE_ASSERT_OK(entry_report_memory.Append(&memory));
+  IREE_ASSERT_OK(entry_report_memory.Finish());
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   IREE_ASSERT_OK(

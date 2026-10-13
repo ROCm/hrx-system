@@ -2379,11 +2379,6 @@ iree_status_t loom_target_compile_report_record_source_boundary_projection_row(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_source_boundary_projection_row_t* row);
 
-// Records one emitted source-memory packet row.
-iree_status_t loom_target_compile_report_record_source_low_memory_row(
-    loom_target_compile_report_t* report,
-    const loom_target_compile_report_source_low_memory_row_t* row);
-
 // Records one target math-legalization row.
 iree_status_t loom_target_compile_report_record_math_row(
     loom_target_compile_report_t* report,

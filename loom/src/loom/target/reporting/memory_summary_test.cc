@@ -6,11 +6,17 @@
 
 #include <stdint.h>
 
+#include <algorithm>
+#include <bitset>
+#include <random>
+#include <vector>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/types.h"
 #include "loom/target/math_policy.h"
 #include "loom/target/reporting/format.h"
+#include "loom/target/reporting/memory_summary_test_util.h"
 
 namespace loom {
 namespace {
@@ -151,6 +157,7 @@ GetOnlySourceLowMemoryRootSummary(const loom_target_compile_report_t* report) {
 TEST(CompileReportFormatTest, PreservesBankServiceProofAndDynamicCoverage) {
   loom_target_compile_report_t entry_report;
   loom_target_compile_report_initialize(&entry_report, iree_allocator_system());
+  testing::MemoryReportBatch entry_report_memory(&entry_report);
   entry_report.function_name = IREE_SVL("kernel_v0");
   entry_report.lowered_symbol = IREE_SVL("kernel");
 
@@ -214,8 +221,7 @@ TEST(CompileReportFormatTest, PreservesBankServiceProofAndDynamicCoverage) {
                     /*requested_byte_count=*/0, /*unique_byte_count=*/0,
                     /*span_byte_count=*/0, &rows[2]);
   for (const auto& row : rows) {
-    IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
-        &entry_report, &row));
+    IREE_ASSERT_OK(entry_report_memory.Append(&row));
   }
 
   const loom_target_compile_report_bank_service_summary_t* summary =
@@ -275,10 +281,9 @@ TEST(CompileReportFormatTest, PreservesBankServiceProofAndDynamicCoverage) {
   unmodeled.bank_service.unknown_reason =
       IREE_SVL("packet-wave-model-unavailable");
   unmodeled.bank_service.wave_size = 32;
-  IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
-      &entry_report, &unmodeled));
-  IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
-      &entry_report, &unmodeled));
+  IREE_ASSERT_OK(entry_report_memory.Append(&unmodeled));
+  IREE_ASSERT_OK(entry_report_memory.Append(&unmodeled));
+  IREE_ASSERT_OK(entry_report_memory.Finish());
   EXPECT_EQ(entry_report.bank_service_summary.unmodeled_packet_count, 2u);
   EXPECT_EQ(entry_report.bank_service_summary.modeled_packet_count, 3u);
   EXPECT_EQ(entry_report.bank_service_summary.unknown_dynamic_packet_count, 3u);
@@ -334,8 +339,9 @@ TEST(CompileReportFormatTest, MergesSourceLowMemorySummariesFromEntries) {
     loom_target_compile_report_t entry_report;
     loom_target_compile_report_initialize(&entry_report,
                                           iree_allocator_system());
-    IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
-        &entry_report, &rows[i]));
+    testing::MemoryReportBatch entry_report_memory(&entry_report);
+    IREE_ASSERT_OK(entry_report_memory.Append(&rows[i]));
+    IREE_ASSERT_OK(entry_report_memory.Finish());
     IREE_ASSERT_OK(
         loom_target_compile_report_record_entry_report(&report, &entry_report));
     loom_target_compile_report_deinitialize(&entry_report);
@@ -442,6 +448,7 @@ TEST(CompileReportFormatTest, MergesSourceLowMemorySummariesFromEntries) {
 TEST(CompileReportFormatTest, SeparatesSourceLowMemoryStrategiesByPacket) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
+  testing::MemoryReportBatch report_memory(&report);
 
   loom_target_compile_report_source_low_memory_row_t rows[] = {
       MakeMemoryRow(IREE_SVL("vector.load"), /*source_op_kind=*/43,
@@ -469,9 +476,9 @@ TEST(CompileReportFormatTest, SeparatesSourceLowMemoryStrategiesByPacket) {
   rows[1].strategy_key = IREE_SVL("test.wide-load");
 
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(rows); ++i) {
-    IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
-        &report, &rows[i]));
+    IREE_ASSERT_OK(report_memory.Append(&rows[i]));
   }
+  IREE_ASSERT_OK(report_memory.Finish());
 
   ASSERT_EQ(report.source_low_memory_strategy_summaries.count, 2u);
   ASSERT_NE(report.source_low_memory_strategy_summaries.head, nullptr);
@@ -506,6 +513,7 @@ TEST(CompileReportFormatTest, SeparatesSourceLowMemoryStrategiesByPacket) {
 TEST(CompileReportFormatTest, MergesOverlappingSourceLowMemoryIntervals) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
+  testing::MemoryReportBatch report_memory(&report);
 
   const loom_target_compile_report_source_low_memory_row_t rows[] = {
       MakeMemoryRow(IREE_SVL("vector.load"), /*source_op_kind=*/43,
@@ -541,9 +549,9 @@ TEST(CompileReportFormatTest, MergesOverlappingSourceLowMemoryIntervals) {
   };
 
   for (const auto& row : rows) {
-    IREE_ASSERT_OK(
-        loom_target_compile_report_record_source_low_memory_row(&report, &row));
+    IREE_ASSERT_OK(report_memory.Append(&row));
   }
+  IREE_ASSERT_OK(report_memory.Finish());
 
   const loom_target_compile_report_source_low_memory_summary_t* summary =
       &report.source_low_memory_summary;
@@ -604,6 +612,7 @@ TEST(CompileReportFormatTest, MergesOverlappingSourceLowMemoryIntervals) {
 TEST(CompileReportFormatTest, MergesDuplicateSymbolicSourceLowMemoryIntervals) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
+  testing::MemoryReportBatch report_memory(&report);
 
   const loom_target_compile_report_source_low_memory_row_t rows[] = {
       MakeMemoryRow(IREE_SVL("vector.load"), /*source_op_kind=*/43,
@@ -634,9 +643,9 @@ TEST(CompileReportFormatTest, MergesDuplicateSymbolicSourceLowMemoryIntervals) {
                         /*end_expr_id=*/2)),
   };
   for (const auto& row : rows) {
-    IREE_ASSERT_OK(
-        loom_target_compile_report_record_source_low_memory_row(&report, &row));
+    IREE_ASSERT_OK(report_memory.Append(&row));
   }
+  IREE_ASSERT_OK(report_memory.Finish());
 
   const loom_target_compile_report_source_low_memory_summary_t* root_summary =
       GetOnlySourceLowMemoryRootSummary(&report);
@@ -657,6 +666,7 @@ TEST(CompileReportFormatTest, MergesDuplicateSymbolicSourceLowMemoryIntervals) {
 TEST(CompileReportFormatTest, MergesAdjacentSymbolicSourceLowMemoryIntervals) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
+  testing::MemoryReportBatch report_memory(&report);
 
   const loom_target_compile_report_source_low_memory_row_t rows[] = {
       MakeMemoryRow(IREE_SVL("vector.load"), /*source_op_kind=*/43,
@@ -687,9 +697,9 @@ TEST(CompileReportFormatTest, MergesAdjacentSymbolicSourceLowMemoryIntervals) {
                         /*end_expr_id=*/3)),
   };
   for (const auto& row : rows) {
-    IREE_ASSERT_OK(
-        loom_target_compile_report_record_source_low_memory_row(&report, &row));
+    IREE_ASSERT_OK(report_memory.Append(&row));
   }
+  IREE_ASSERT_OK(report_memory.Finish());
 
   const loom_target_compile_report_source_low_memory_summary_t* root_summary =
       GetOnlySourceLowMemoryRootSummary(&report);
@@ -709,6 +719,7 @@ TEST(CompileReportFormatTest, MergesAdjacentSymbolicSourceLowMemoryIntervals) {
 TEST(CompileReportFormatTest, KeepsAmbiguousMixedSourceLowMemoryIntervals) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
+  testing::MemoryReportBatch report_memory(&report);
 
   const loom_target_compile_report_source_low_memory_row_t rows[] = {
       MakeMemoryRow(IREE_SVL("vector.load"), /*source_op_kind=*/43,
@@ -736,9 +747,9 @@ TEST(CompileReportFormatTest, KeepsAmbiguousMixedSourceLowMemoryIntervals) {
                         /*end_expr_id=*/12)),
   };
   for (const auto& row : rows) {
-    IREE_ASSERT_OK(
-        loom_target_compile_report_record_source_low_memory_row(&report, &row));
+    IREE_ASSERT_OK(report_memory.Append(&row));
   }
+  IREE_ASSERT_OK(report_memory.Finish());
 
   const loom_target_compile_report_source_low_memory_summary_t* root_summary =
       GetOnlySourceLowMemoryRootSummary(&report);
@@ -782,6 +793,7 @@ TEST(CompileReportFormatTest, KeepsAmbiguousMixedSourceLowMemoryIntervals) {
 TEST(CompileReportFormatTest, KeepsImpreciseSourceLowMemoryIntervalEnvelopes) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
+  testing::MemoryReportBatch report_memory(&report);
 
   loom_target_compile_report_memory_interval_t imprecise_interval = {
       .flags = LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
@@ -797,8 +809,8 @@ TEST(CompileReportFormatTest, KeepsImpreciseSourceLowMemoryIntervalEnvelopes) {
       /*vector_lane_count=*/1, /*issued_read_byte_count=*/4,
       /*issued_write_byte_count=*/0, /*dynamic_stride_bytes=*/4,
       /*vector_lane_stride_bytes=*/4, imprecise_interval);
-  IREE_ASSERT_OK(
-      loom_target_compile_report_record_source_low_memory_row(&report, &row));
+  IREE_ASSERT_OK(report_memory.Append(&row));
+  IREE_ASSERT_OK(report_memory.Finish());
 
   const loom_target_compile_report_source_low_memory_summary_t* root_summary =
       GetOnlySourceLowMemoryRootSummary(&report);
@@ -815,6 +827,7 @@ TEST(CompileReportFormatTest, KeepsImpreciseSourceLowMemoryIntervalEnvelopes) {
 TEST(CompileReportFormatTest, FormatsSourceLowMemoryIntervals) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
+  testing::MemoryReportBatch report_memory(&report);
 
   loom_target_compile_report_source_low_memory_row_t row = {
       .function_name = IREE_SVL("kernel"),
@@ -844,8 +857,8 @@ TEST(CompileReportFormatTest, FormatsSourceLowMemoryIntervals) {
               .exact_length_bytes = 8,
           },
   };
-  IREE_ASSERT_OK(
-      loom_target_compile_report_record_source_low_memory_row(&report, &row));
+  IREE_ASSERT_OK(report_memory.Append(&row));
+  IREE_ASSERT_OK(report_memory.Finish());
 
   const loom_target_compile_report_format_options_t options = {
       .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
@@ -905,6 +918,7 @@ TEST(CompileReportFormatTest, FormatsSourceLowMemoryIntervals) {
 TEST(CompileReportFormatTest, FormatsSourceLowMemorySummaryEconomics) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
+  testing::MemoryReportBatch report_memory(&report);
 
   loom_target_compile_report_workload_t workload = {
       .flags = LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT,
@@ -934,10 +948,9 @@ TEST(CompileReportFormatTest, FormatsSourceLowMemorySummaryEconomics) {
                     /*vector_lane_stride_bytes=*/4,
                     MakeExactSourceInterval(/*begin_bytes=*/8,
                                             /*end_bytes=*/12));
-  IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
-      &report, &load_row));
-  IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
-      &report, &store_row));
+  IREE_ASSERT_OK(report_memory.Append(&load_row));
+  IREE_ASSERT_OK(report_memory.Append(&store_row));
+  IREE_ASSERT_OK(report_memory.Finish());
 
   const loom_target_compile_report_format_options_t options = {
       .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
@@ -999,6 +1012,7 @@ TEST(CompileReportFormatTest, FormatsSourceLowMemorySummaryEconomics) {
 TEST(CompileReportFormatTest, FormatsExactSymbolicSourceLowMemoryIntervals) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
+  testing::MemoryReportBatch report_memory(&report);
 
   const loom_target_compile_report_source_low_memory_row_t row = MakeMemoryRow(
       IREE_SVL("vector.load"), /*source_op_kind=*/43, IREE_SVL("load"),
@@ -1012,8 +1026,8 @@ TEST(CompileReportFormatTest, FormatsExactSymbolicSourceLowMemoryIntervals) {
                                 /*end_max_bytes=*/72,
                                 /*exact_length_bytes=*/8,
                                 /*begin_expr_id=*/1, /*end_expr_id=*/2));
-  IREE_ASSERT_OK(
-      loom_target_compile_report_record_source_low_memory_row(&report, &row));
+  IREE_ASSERT_OK(report_memory.Append(&row));
+  IREE_ASSERT_OK(report_memory.Finish());
 
   const loom_target_compile_report_format_options_t options = {
       .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
@@ -1059,6 +1073,7 @@ TEST(CompileReportFormatTest, FormatsExactSymbolicSourceLowMemoryIntervals) {
 TEST(CompileReportFormatTest, FormatsExactStaticSourceLowMemoryIntervals) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
+  testing::MemoryReportBatch report_memory(&report);
 
   const loom_target_compile_report_source_low_memory_row_t row = MakeMemoryRow(
       IREE_SVL("vector.load"), /*source_op_kind=*/43, IREE_SVL("load"),
@@ -1067,8 +1082,8 @@ TEST(CompileReportFormatTest, FormatsExactStaticSourceLowMemoryIntervals) {
       /*issued_write_byte_count=*/0, /*dynamic_stride_bytes=*/0,
       /*vector_lane_stride_bytes=*/4,
       MakeExactSourceInterval(/*begin_bytes=*/4, /*end_bytes=*/12));
-  IREE_ASSERT_OK(
-      loom_target_compile_report_record_source_low_memory_row(&report, &row));
+  IREE_ASSERT_OK(report_memory.Append(&row));
+  IREE_ASSERT_OK(report_memory.Finish());
 
   const loom_target_compile_report_format_options_t options = {
       .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
@@ -1105,6 +1120,358 @@ TEST(CompileReportFormatTest, FormatsExactStaticSourceLowMemoryIntervals) {
   iree_string_builder_deinitialize(&builder);
 
   loom_target_compile_report_deinitialize(&report);
+}
+
+static uint32_t IntervalProofKind(
+    const loom_target_compile_report_memory_interval_t& interval) {
+  if (interval.begin_min_bytes == interval.begin_max_bytes &&
+      interval.end_min_bytes == interval.end_max_bytes) {
+    return 1;
+  }
+  const auto symbolic = LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_EXPR |
+                        LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_EXPR |
+                        LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH;
+  return (interval.flags & symbolic) == symbolic ? 2 : 0;
+}
+
+// Direct finite-byte oracle for these small fixtures. It deliberately retains
+// encounter order: the first duplicate or ambiguous predecessor is decisive.
+static loom_target_compile_report_memory_interval_summary_t ReferenceIntervals(
+    const std::vector<loom_target_compile_report_source_low_memory_row_t>& rows,
+    iree_string_view_t operation) {
+  loom_target_compile_report_memory_interval_summary_t result = {};
+  for (size_t i = 0; i < rows.size(); ++i) {
+    if (!iree_string_view_is_empty(operation) &&
+        !iree_string_view_equal(rows[i].operation_kind, operation)) {
+      continue;
+    }
+    const auto& interval = rows[i].source_interval;
+    const auto kind = IntervalProofKind(interval);
+    if (!kind) {
+      continue;
+    }
+    std::bitset<64> covered;
+    bool ambiguous = false;
+    bool duplicate = false;
+    for (size_t j = 0; j < i; ++j) {
+      if (!iree_string_view_is_empty(operation) &&
+          !iree_string_view_equal(rows[j].operation_kind, operation)) {
+        continue;
+      }
+      const auto& prior = rows[j].source_interval;
+      const auto prior_kind = IntervalProofKind(prior);
+      if (!prior_kind) {
+        continue;
+      }
+      const bool disjoint = prior.end_max_bytes <= interval.begin_min_bytes ||
+                            interval.end_max_bytes <= prior.begin_min_bytes;
+      if (kind == 1 && prior_kind == 1) {
+        for (uint64_t byte = 0; byte < interval.exact_length_bytes; ++byte) {
+          const int64_t address =
+              interval.begin_min_bytes + static_cast<int64_t>(byte);
+          if (address >= prior.begin_min_bytes &&
+              address < prior.end_max_bytes) {
+            covered.set(byte);
+          }
+        }
+      } else if (kind == 1 || prior_kind == 1) {
+        ambiguous = !disjoint;
+      } else if (prior.begin_expr_id == interval.begin_expr_id &&
+                 prior.end_expr_id == interval.end_expr_id) {
+        duplicate = true;
+      } else if (prior.end_expr_id != interval.begin_expr_id &&
+                 prior.begin_expr_id != interval.end_expr_id) {
+        ambiguous = !disjoint;
+      }
+      if (ambiguous || duplicate) {
+        break;
+      }
+    }
+    if (ambiguous) {
+      continue;
+    }
+    result.exact_static_packet_count += kind == 1;
+    result.exact_symbolic_packet_count += kind == 2;
+    if (!duplicate) {
+      result.unique_byte_count += interval.exact_length_bytes - covered.count();
+    }
+  }
+  return result;
+}
+
+TEST(CompileReportMemoryTest, PreservesMixedIntervalProofsAndDirectionOrder) {
+  std::mt19937 random(27);
+  for (size_t trial = 0; trial < 32; ++trial) {
+    SCOPED_TRACE(trial);
+    loom_target_compile_report_t report;
+    loom_target_compile_report_initialize(&report, iree_allocator_system());
+    testing::MemoryReportBatch batch(&report);
+    std::vector<loom_target_compile_report_source_low_memory_row_t> rows;
+    for (size_t i = 0; i < 96; ++i) {
+      const uint32_t base = random() % 5;
+      const int64_t offset = static_cast<int64_t>(random() % 32) * 4 - 64;
+      const uint32_t lane_count = 1 + random() % 8;
+      const int64_t length = lane_count * 4;
+      const int64_t begin =
+          offset + (base ? 4 * static_cast<int64_t>(random() % 32) : 0);
+      auto interval =
+          base == 0
+              ? MakeExactSourceInterval(begin, begin + length)
+              : MakeExactSymbolicInterval(
+                    begin, begin + 16, begin + length, begin + 16 + length,
+                    length,
+                    base * 256 + static_cast<uint32_t>((offset + 64) / 4),
+                    base * 256 +
+                        static_cast<uint32_t>((offset + length + 64) / 4));
+      if (base == 4) {
+        interval.flags &=
+            ~(LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_EXPR |
+              LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_EXPR);
+      }
+      const bool read = random() % 3 != 0;
+      rows.push_back(MakeMemoryRow(
+          read ? IREE_SV("vector.load") : IREE_SV("vector.store"),
+          read ? 43 : 44, read ? IREE_SV("load") : IREE_SV("store"),
+          read ? IREE_SV("test.load") : IREE_SV("test.store"), begin,
+          lane_count, read ? static_cast<uint32_t>(length) : 0,
+          read ? 0 : static_cast<uint32_t>(length), 4, 4, interval));
+      IREE_ASSERT_OK(batch.Append(&rows.back()));
+    }
+    IREE_ASSERT_OK(batch.Finish());
+    const auto* summary = GetOnlySourceLowMemoryRootSummary(&report);
+    ASSERT_NE(summary, nullptr);
+    const loom_target_compile_report_memory_interval_summary_t* actual[] = {
+        &summary->interval_envelope, &summary->read_interval_envelope,
+        &summary->write_interval_envelope};
+    const iree_string_view_t operations[] = {
+        {}, IREE_SV("load"), IREE_SV("store")};
+    for (size_t direction = 0; direction < IREE_ARRAYSIZE(actual);
+         ++direction) {
+      SCOPED_TRACE(direction);
+      const auto expected = ReferenceIntervals(rows, operations[direction]);
+      EXPECT_EQ(actual[direction]->exact_static_packet_count,
+                expected.exact_static_packet_count);
+      EXPECT_EQ(actual[direction]->exact_symbolic_packet_count,
+                expected.exact_symbolic_packet_count);
+      EXPECT_EQ(actual[direction]->unique_byte_count,
+                expected.unique_byte_count);
+    }
+    loom_target_compile_report_deinitialize(&report);
+  }
+}
+
+TEST(CompileReportMemoryTest, FindsConflictAfterBothAdjacencyExclusions) {
+  // [20,24) and [12,16) are each adjacent to [16,20). An intervening
+  // [12,24) remains a conflict even after both adjacent witnesses are skipped.
+  for (bool reverse : {false, true}) {
+    for (bool include_conflict : {false, true}) {
+      SCOPED_TRACE(reverse);
+      SCOPED_TRACE(include_conflict);
+      loom_target_compile_report_t report;
+      loom_target_compile_report_initialize(&report, iree_allocator_system());
+      testing::MemoryReportBatch batch(&report);
+      const int64_t intervals[][2] = {
+          {reverse ? 12 : 20, reverse ? 16 : 24},
+          {reverse ? 20 : 12, reverse ? 24 : 16},
+          {12, 24},
+          {16, 20},
+      };
+      for (size_t i = 0; i < IREE_ARRAYSIZE(intervals); ++i) {
+        if (i == 2 && !include_conflict) {
+          continue;
+        }
+        const int64_t begin = intervals[i][0];
+        const int64_t end = intervals[i][1];
+        auto row = MakeMemoryRow(
+            IREE_SV("vector.load"), 43, IREE_SV("load"), IREE_SV("test.load"),
+            begin, (end - begin) / 4, end - begin, 0, 4, 4,
+            MakeExactSymbolicInterval(begin, begin + 64, end, end + 64,
+                                      end - begin, begin / 4, end / 4));
+        IREE_ASSERT_OK(batch.Append(&row));
+      }
+      IREE_ASSERT_OK(batch.Finish());
+      const auto* summary = GetOnlySourceLowMemoryRootSummary(&report);
+      ASSERT_NE(summary, nullptr);
+      EXPECT_EQ(summary->interval_envelope.exact_symbolic_packet_count,
+                include_conflict ? 1u : 2u);
+      EXPECT_EQ(summary->interval_envelope.unique_byte_count,
+                include_conflict ? 4u : 8u);
+      loom_target_compile_report_deinitialize(&report);
+    }
+  }
+}
+
+TEST(CompileReportMemoryTest, OrdersDuplicatesBeforeOrAfterConflictingPackets) {
+  // The same expression can have different range facts at different accesses.
+  // Its first duplicate still wins before a later conflicting packet, even
+  // when coordinate overlap alone cannot find that duplicate.
+  for (bool conflict_first : {false, true}) {
+    SCOPED_TRACE(conflict_first);
+    loom_target_compile_report_t report;
+    loom_target_compile_report_initialize(&report, iree_allocator_system());
+    testing::MemoryReportBatch batch(&report);
+    const loom_target_compile_report_memory_interval_t intervals[] = {
+        MakeExactSymbolicInterval(0, 12, 4, 16, 4, 10, 11),
+        MakeExactSourceInterval(32, 36),
+        MakeExactSymbolicInterval(28, 36, 32, 40, 4, 10, 11),
+    };
+    for (size_t i = 0; i < IREE_ARRAYSIZE(intervals); ++i) {
+      const auto& interval = intervals[conflict_first && i < 2 ? 1 - i : i];
+      auto row =
+          MakeMemoryRow(IREE_SV("vector.load"), 43, IREE_SV("load"),
+                        IREE_SV("test.load"), 0, 1, 4, 0, 4, 4, interval);
+      IREE_ASSERT_OK(batch.Append(&row));
+    }
+    IREE_ASSERT_OK(batch.Finish());
+    const auto* summary = GetOnlySourceLowMemoryRootSummary(&report);
+    ASSERT_NE(summary, nullptr);
+    EXPECT_EQ(summary->interval_envelope.exact_static_packet_count, 1u);
+    EXPECT_EQ(summary->interval_envelope.exact_symbolic_packet_count,
+              conflict_first ? 1u : 2u);
+    EXPECT_EQ(summary->interval_envelope.unique_byte_count, 8u);
+    loom_target_compile_report_deinitialize(&report);
+  }
+}
+
+TEST(CompileReportMemoryTest, CountsWithoutRetainingDisabledDetails) {
+  loom_target_compile_report_t report;
+  loom_target_compile_report_initialize(&report, iree_allocator_null());
+  testing::MemoryReportBatch batch(&report);
+  auto row = MakeMemoryRow(IREE_SV("vector.load"), 43, IREE_SV("load"),
+                           IREE_SV("test.load"), 0, 1, 4, 0, 0, 4,
+                           MakeExactSourceInterval(0, 4));
+  IREE_ASSERT_OK(batch.Append(&row));
+  IREE_ASSERT_OK(batch.Finish());
+  EXPECT_EQ(report.source_low_memory_summary.packet_count, 1u);
+  EXPECT_EQ(report.source_low_memory_summary.interval_envelope.packet_count,
+            1u);
+  EXPECT_EQ(report.source_low_memory_rows.count, 0u);
+  EXPECT_EQ(report.source_low_memory_root_summaries.count, 0u);
+  loom_target_compile_report_deinitialize(&report);
+}
+
+struct MemoryReportAllocator {
+  // Successful allocation requests allowed before injecting exhaustion.
+  size_t remaining = SIZE_MAX;
+  // Live allocations requiring teardown.
+  size_t live = 0;
+  // Total successful backing allocations; pool reuse makes no requests here.
+  size_t requests = 0;
+  // Total requested bytes, bounding retained and temporary growth together.
+  size_t bytes = 0;
+  // Largest request, distinguishing pooled blocks from oversized allocation.
+  size_t maximum_request = 0;
+
+  static iree_status_t Control(void* self, iree_allocator_command_t command,
+                               const void* params, void** pointer) {
+    auto& state = *static_cast<MemoryReportAllocator*>(self);
+    if (command != IREE_ALLOCATOR_COMMAND_FREE && !state.remaining) {
+      return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+    }
+    auto backing = iree_allocator_system();
+    IREE_RETURN_IF_ERROR(backing.ctl(backing.self, command, params, pointer));
+    if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+      --state.live;
+    } else {
+      --state.remaining;
+      ++state.live;
+      ++state.requests;
+      const auto size =
+          static_cast<const iree_allocator_alloc_params_t*>(params)
+              ->byte_length;
+      state.bytes += size;
+      state.maximum_request = std::max(state.maximum_request, size);
+    }
+    return iree_ok_status();
+  }
+};
+
+TEST(CompileReportMemoryTest, BoundsScratchAndReusesPooledStorage) {
+  MemoryReportAllocator storage;
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(
+      64 * 1024, {&storage, MemoryReportAllocator::Control}, &pool);
+  size_t warm_requests = 0;
+  for (size_t iteration = 0; iteration < 2; ++iteration) {
+    iree_arena_allocator_t result_arena;
+    iree_arena_initialize(&pool, &result_arena);
+    iree_arena_allocator_t scratch;
+    iree_arena_initialize(&pool, &scratch);
+    loom_target_compile_report_t report;
+    loom_target_compile_report_initialize(&report,
+                                          iree_arena_allocator(&result_arena));
+    loom_target_compile_report_memory_batch_t batch;
+    loom_target_compile_report_memory_batch_initialize(&report, &scratch,
+                                                       &batch);
+    constexpr size_t kPacketCount = 8192;
+    for (size_t i = 0; i < kPacketCount; ++i) {
+      auto row = MakeMemoryRow(IREE_SV("vector.load"), 43, IREE_SV("load"),
+                               IREE_SV("test.load"), 8 * i, 1, 4, 0, 0, 4,
+                               MakeExactSourceInterval(8 * i, 8 * i + 4));
+      IREE_ASSERT_OK(
+          loom_target_compile_report_memory_batch_append(&batch, &row));
+    }
+    IREE_ASSERT_OK(loom_target_compile_report_memory_batch_finish(&batch));
+    iree_arena_deinitialize(&scratch);
+    const auto* summary = GetOnlySourceLowMemoryRootSummary(&report);
+    ASSERT_NE(summary, nullptr);
+    EXPECT_EQ(summary->interval_envelope.exact_static_packet_count,
+              kPacketCount);
+    EXPECT_EQ(summary->interval_envelope.unique_byte_count, kPacketCount * 4);
+    EXPECT_LE(storage.maximum_request, 64 * 1024u);
+    EXPECT_LT(storage.bytes, 12 * 1024 * 1024u);
+    if (iteration == 0) {
+      warm_requests = storage.requests;
+    } else {
+      EXPECT_EQ(storage.requests, warm_requests);
+    }
+    loom_target_compile_report_deinitialize(&report);
+    iree_arena_deinitialize(&result_arena);
+  }
+  iree_arena_block_pool_deinitialize(&pool);
+  EXPECT_EQ(storage.live, 0u);
+}
+
+TEST(CompileReportMemoryTest, ReleasesPartialIndexOnAllocationFailure) {
+  bool observed_failure = false;
+  bool observed_success = false;
+  for (size_t allowance = 0; allowance < 6; ++allowance) {
+    SCOPED_TRACE(allowance);
+    MemoryReportAllocator storage;
+    const iree_allocator_t allocator = {&storage,
+                                        MemoryReportAllocator::Control};
+    iree_arena_block_pool_t pool;
+    iree_arena_block_pool_initialize(64 * 1024, allocator, &pool);
+    iree_arena_allocator_t scratch;
+    iree_arena_initialize(&pool, &scratch);
+    loom_target_compile_report_t report;
+    loom_target_compile_report_initialize(&report, allocator);
+    loom_target_compile_report_memory_batch_t batch;
+    loom_target_compile_report_memory_batch_initialize(&report, &scratch,
+                                                       &batch);
+    for (size_t i = 0; i < 512; ++i) {
+      auto row = MakeMemoryRow(IREE_SV("vector.load"), 43, IREE_SV("load"),
+                               IREE_SV("test.load"), 8 * i, 1, 4, 0, 0, 4,
+                               MakeExactSourceInterval(8 * i, 8 * i + 4));
+      IREE_ASSERT_OK(
+          loom_target_compile_report_memory_batch_append(&batch, &row));
+    }
+    storage.remaining = allowance;
+    iree_status_t status =
+        loom_target_compile_report_memory_batch_finish(&batch);
+    if (iree_status_is_ok(status)) {
+      observed_success = true;
+    } else {
+      observed_failure = true;
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    }
+    loom_target_compile_report_deinitialize(&report);
+    iree_arena_deinitialize(&scratch);
+    iree_arena_block_pool_deinitialize(&pool);
+    EXPECT_EQ(storage.live, 0u);
+  }
+  EXPECT_TRUE(observed_failure);
+  EXPECT_TRUE(observed_success);
 }
 
 }  // namespace

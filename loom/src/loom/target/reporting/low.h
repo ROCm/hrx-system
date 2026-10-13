@@ -9,6 +9,7 @@
 #ifndef LOOM_TARGET_REPORTING_LOW_H_
 #define LOOM_TARGET_REPORTING_LOW_H_
 
+#include "iree/base/internal/arena.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/target/reporting/report.h"
@@ -37,10 +38,12 @@ iree_status_t loom_target_compile_report_record_low_allocation(
     const loom_low_allocation_table_t* allocation);
 
 // Records source-to-low selection and emission summaries for one lowered
-// source function.
+// source function. Construction-only memory indexes use |scratch_block_pool|
+// and are released before returning.
 iree_status_t loom_target_compile_report_record_low_lowering(
     loom_target_compile_report_t* report,
-    const loom_low_lower_result_t* lower_result);
+    const loom_low_lower_result_t* lower_result,
+    iree_arena_block_pool_t* scratch_block_pool);
 
 // Records workload facts preserved on one target-low kernel function.
 void loom_target_compile_report_record_low_kernel_workload(

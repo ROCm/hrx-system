@@ -20,6 +20,7 @@
 #include "loom/target/reporting/low_allocation.h"
 #include "loom/target/reporting/low_mix.h"
 #include "loom/target/reporting/low_names.h"
+#include "loom/target/reporting/memory_summary.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/fact_table.h"
 
@@ -456,7 +457,8 @@ void loom_target_compile_report_record_low_kernel_workload(
 
 iree_status_t loom_target_compile_report_record_low_lowering(
     loom_target_compile_report_t* report,
-    const loom_low_lower_result_t* lower_result) {
+    const loom_low_lower_result_t* lower_result,
+    iree_arena_block_pool_t* scratch_block_pool) {
   loom_target_compile_report_record_low_workload(report, lower_result);
   const loom_low_lower_report_t* lowering_report = lower_result->report;
   if (lowering_report == NULL) {
@@ -495,7 +497,15 @@ iree_status_t loom_target_compile_report_record_low_lowering(
           loom_target_compile_report_record_source_low_row(report, &row));
     }
   }
-  for (iree_host_size_t i = 0; i < lowering_report->memory_rows.count; ++i) {
+  iree_arena_allocator_t memory_arena;
+  iree_arena_initialize(scratch_block_pool, &memory_arena);
+  loom_target_compile_report_memory_batch_t memory_batch;
+  loom_target_compile_report_memory_batch_initialize(report, &memory_arena,
+                                                     &memory_batch);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < lowering_report->memory_rows.count && iree_status_is_ok(status);
+       ++i) {
     const loom_low_lower_memory_report_row_t* source_row =
         &lowering_report->memory_rows.rows[i];
     const loom_target_compile_report_memory_interval_t source_interval =
@@ -542,10 +552,14 @@ iree_status_t loom_target_compile_report_record_low_lowering(
         .source_interval = source_interval,
         .execution_count_plus_one = source_row->execution_count_plus_one,
     };
-    IREE_RETURN_IF_ERROR(
-        loom_target_compile_report_record_source_low_memory_row(report, &row));
+    status =
+        loom_target_compile_report_memory_batch_append(&memory_batch, &row);
   }
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    status = loom_target_compile_report_memory_batch_finish(&memory_batch);
+  }
+  iree_arena_deinitialize(&memory_arena);
+  return status;
 }
 
 void loom_target_compile_report_record_low_planning(

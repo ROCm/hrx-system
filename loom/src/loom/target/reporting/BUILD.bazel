@@ -52,7 +52,6 @@ loom_cc_library(
         "config_bindings.h",
         "loop_pipeline.c",
         "memory_summary.c",
-        "memory_summary.h",
         "pipeline_plan.c",
         "report.c",
         "residency.c",
@@ -62,6 +61,7 @@ loom_cc_library(
     ],
     hdrs = [
         "loop_pipeline.h",
+        "memory_summary.h",
         "pipeline_plan.h",
         "report.h",
         "residency.h",
@@ -75,8 +75,11 @@ loom_cc_library(
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:residency",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -159,6 +162,7 @@ loom_cc_library(
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -222,6 +226,7 @@ loom_cc_test(
         "format_planning_test.cc",
         "format_test.cc",
         "memory_summary_test.cc",
+        "memory_summary_test_util.h",
         "selection_summary_test.cc",
     ],
     deps = [

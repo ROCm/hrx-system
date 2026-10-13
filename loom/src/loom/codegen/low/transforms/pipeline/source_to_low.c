@@ -572,8 +572,8 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     const loom_low_source_selection_t* selection = plan->selection;
     status = loom_low_lower_emit_function(plan->function, &plan->result);
     if (iree_status_is_ok(status) && compile_report != NULL) {
-      status = loom_target_compile_report_record_low_lowering(compile_report,
-                                                              &plan->result);
+      status = loom_target_compile_report_record_low_lowering(
+          compile_report, &plan->result, module->arena.block_pool);
     }
     if (iree_status_is_ok(status)) {
       if (selection->version_handle != NULL) {
