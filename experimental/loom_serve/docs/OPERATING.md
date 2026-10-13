@@ -443,9 +443,9 @@ boundary. Binding a public address does not add an authentication layer.
 build_tools/bin/iree-bazel-test --config=asan \
   //loom/src/loom/serve/server:configuration_test \
   //loom/src/loom/serve/server:router_test \
-  //experimental/loom_serve/models/fixtures:catalog_test \
-  //experimental/loom_serve/models/fixtures:catalog_elastic_test \
-  //experimental/loom_serve/models/fixtures:catalog_vulkan_test
+  //loom/src/loom/tooling/target/amdgpu/serve:catalog_test \
+  //loom/src/loom/tooling/target/amdgpu/serve:catalog_elastic_test \
+  //loom/src/loom/tooling/target/spirv/serve:catalog_test
 ```
 
 The GPU-backed catalog check runs the actual shared executable from an external

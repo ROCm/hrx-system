@@ -33,7 +33,6 @@ py_library(
     name = "observe_lib",
     testonly = True,
     srcs = ["observe.py"],
-    visibility = ["//experimental/loom_serve/models/fixtures:__pkg__"],
     deps = [
         ":system_stats",
         "//loom/src/loom/serve/testing:logs",
@@ -183,4 +182,136 @@ py_test(
         "//loom/config/target/arch:vm",
         "//loom/config/execute:amdgpu_hal",
     ]),
+)
+
+py_test(
+    name = "observe_service_test",
+    size = "medium",
+    srcs = ["observe_service_test.py"],
+    args = [
+        "--server=$(rootpath //loom/src/loom/tools/loom-serve:loom-serve)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/image:model.json)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/embedding:model.json)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/decision:model.json)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
+        "--device=amdgpu",
+        "--pool_backing=fixed",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/decision:model.json",
+        "//loom/src/loom/serve/fixture/decision:sources",
+        "//loom/src/loom/serve/fixture/embedding:model.json",
+        "//loom/src/loom/serve/fixture/embedding:sources",
+        "//loom/src/loom/serve/fixture/image:model.json",
+        "//loom/src/loom/serve/fixture/image:sources",
+        "//loom/src/loom/serve/fixture/text:model.json",
+        "//loom/src/loom/serve/fixture/text:sources",
+        "//loom/src/loom/tools/loom-serve",
+    ],
+    main = "observe_service_test.py",
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "resource_group:" + GPU_DEVICE_RESOURCE_GROUP,
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":observe_lib",
+        "//loom/src/loom/serve/server:catalog_test_util",
+        "//loom/src/loom/serve/testing:http",
+        "//loom/src/loom/serve/testing:logs",
+    ],
+)
+
+py_test(
+    name = "observe_service_elastic_test",
+    size = "medium",
+    srcs = ["observe_service_test.py"],
+    args = [
+        "--server=$(rootpath //loom/src/loom/tools/loom-serve:loom-serve)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/image:model.json)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/embedding:model.json)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/decision:model.json)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
+        "--device=amdgpu",
+        "--pool_backing=elastic",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/decision:model.json",
+        "//loom/src/loom/serve/fixture/decision:sources",
+        "//loom/src/loom/serve/fixture/embedding:model.json",
+        "//loom/src/loom/serve/fixture/embedding:sources",
+        "//loom/src/loom/serve/fixture/image:model.json",
+        "//loom/src/loom/serve/fixture/image:sources",
+        "//loom/src/loom/serve/fixture/text:model.json",
+        "//loom/src/loom/serve/fixture/text:sources",
+        "//loom/src/loom/tools/loom-serve",
+    ],
+    main = "observe_service_test.py",
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "resource_group:" + GPU_DEVICE_RESOURCE_GROUP,
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":observe_lib",
+        "//loom/src/loom/serve/server:catalog_test_util",
+        "//loom/src/loom/serve/testing:http",
+        "//loom/src/loom/serve/testing:logs",
+    ],
+)
+
+py_test(
+    name = "observe_service_vulkan_test",
+    size = "medium",
+    srcs = ["observe_service_test.py"],
+    args = [
+        "--server=$(rootpath //loom/src/loom/tools/loom-serve:loom-serve)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/image:model.json)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/embedding:model.json)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/decision:model.json)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
+        "--device=vulkan",
+        "--pool_backing=fixed",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/decision:model.json",
+        "//loom/src/loom/serve/fixture/decision:sources",
+        "//loom/src/loom/serve/fixture/embedding:model.json",
+        "//loom/src/loom/serve/fixture/embedding:sources",
+        "//loom/src/loom/serve/fixture/image:model.json",
+        "//loom/src/loom/serve/fixture/image:sources",
+        "//loom/src/loom/serve/fixture/text:model.json",
+        "//loom/src/loom/serve/fixture/text:sources",
+        "//loom/src/loom/tools/loom-serve",
+    ],
+    main = "observe_service_test.py",
+    tags = [
+        "iree-run-requirement=vulkan.resource.device",
+        "resource_group:" + GPU_DEVICE_RESOURCE_GROUP,
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:spirv_vulkan_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":observe_lib",
+        "//loom/src/loom/serve/server:catalog_test_util",
+        "//loom/src/loom/serve/testing:http",
+        "//loom/src/loom/serve/testing:logs",
+    ],
 )

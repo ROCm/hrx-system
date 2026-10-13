@@ -830,7 +830,7 @@ The router tests use actual TCP carriers and borrowed request ownership.
 Configuration tests exercise parsing and partial-initialization cleanup;
 source-policy tests check that deployment aliases preserve rendered prompts.
 
-`//experimental/loom_serve/models/fixtures:catalog_test` exercises the shared
+`//loom/src/loom/tooling/target/amdgpu/serve:catalog_test` exercises the shared
 executable with source-JIT text, image, embedding and decision packages using
 independent arithmetic oracles, without downloading learned-model weights.
 Its dynamic witness starts empty, registers twelve initially drained models,

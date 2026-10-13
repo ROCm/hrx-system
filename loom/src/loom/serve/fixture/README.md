@@ -173,7 +173,7 @@ assertion. Real model quality and controlled performance runs follow the
 
 ## Mixed lifecycle churn
 
-The [catalog workload](../../../../../experimental/loom_serve/models/fixtures/catalog_test.py) launches the actual shared executable
+The [catalog workload](../server/catalog_test.py) launches the actual shared executable
 with all four source-model families and a temporary 76-byte text checkpoint.
 It copies the source packages into an external deployment root, dereferencing
 runfiles symlinks, and moves numerical providers into sibling library directories
@@ -215,8 +215,8 @@ round. No model download or production test hook is involved.
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve/models/fixtures:catalog_test \
-  //experimental/loom_serve/models/fixtures:catalog_vulkan_test
+  //loom/src/loom/tooling/target/amdgpu/serve:catalog_test \
+  //loom/src/loom/tooling/target/spirv/serve:catalog_test
 ```
 
 Both backend targets run the same workload, including twelve dynamic models and

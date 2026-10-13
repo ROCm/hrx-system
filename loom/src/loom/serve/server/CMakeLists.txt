@@ -9,6 +9,18 @@
 
 iree_add_all_subdirs()
 
+iree_py_library(
+  NAME
+    catalog_test_util
+  SRCS
+    "catalog_test_util.py"
+  IMPORTS
+    "."
+  DEPS
+    loom::serve::testing::http
+    loom::serve::testing::logs
+)
+
 loom_cc_library(
   NAME
     router

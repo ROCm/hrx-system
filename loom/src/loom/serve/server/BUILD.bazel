@@ -4,12 +4,33 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@rules_python//python:defs.bzl", "py_library")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 
 package(
     default_visibility = ["//loom/src/loom/serve:implementation"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+exports_files(
+    [
+        "catalog_test.py",
+        "pressure_test.py",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+py_library(
+    name = "catalog_test_util",
+    testonly = True,
+    srcs = ["catalog_test_util.py"],
+    imports = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/serve/testing:http",
+        "//loom/src/loom/serve/testing:logs",
+    ],
 )
 
 loom_cc_library(

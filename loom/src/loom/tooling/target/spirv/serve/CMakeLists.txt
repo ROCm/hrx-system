@@ -31,6 +31,48 @@ loom_cc_test(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_py_test(
+  NAME
+    catalog_test
+  MAIN
+    "../../../../serve/server/catalog_test.py"
+  SRCS
+    "../../../../serve/server/catalog_test.py"
+  ARGS
+    "--server={{$<TARGET_FILE:loom::tools::loom-serve::loom-serve>}}"
+    "--fixture={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/image/model.json}}"
+    "--fixture={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/model.json}}"
+    "--fixture={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/model.json}}"
+    "--fixture={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/model.json}}"
+    "--device=vulkan"
+    "--pool_backing=fixed"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/model.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/model.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/image/model.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/model.json"
+    "loom::serve::fixture::decision::sources"
+    "loom::serve::fixture::embedding::sources"
+    "loom::serve::fixture::image::sources"
+    "loom::serve::fixture::text::sources"
+    "loom::tools::loom-serve::loom-serve"
+  DEPS
+    loom::serve::server::catalog_test_util
+    loom::serve::testing::http
+    loom::serve::testing::logs
+  LABELS
+    "iree-run-requirement=vulkan.resource.device"
+    "resource_group:gpu-device"
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    300
+)
+endif()
+
 if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME

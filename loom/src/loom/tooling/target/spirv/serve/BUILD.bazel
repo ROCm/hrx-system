@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@rules_python//python:defs.bzl", "py_test")
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_test", "loom_config_compatible_with")
 
@@ -33,6 +34,49 @@ loom_cc_test(
     deps = [
         "//loom/src/loom/serve/service/image:source_service_tests",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+py_test(
+    name = "catalog_test",
+    size = "medium",
+    srcs = ["//loom/src/loom/serve/server:catalog_test.py"],
+    args = [
+        "--server=$(rootpath //loom/src/loom/tools/loom-serve:loom-serve)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/image:model.json)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/embedding:model.json)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/decision:model.json)",
+        "--fixture=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
+        "--device=vulkan",
+        "--pool_backing=fixed",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/decision:model.json",
+        "//loom/src/loom/serve/fixture/decision:sources",
+        "//loom/src/loom/serve/fixture/embedding:model.json",
+        "//loom/src/loom/serve/fixture/embedding:sources",
+        "//loom/src/loom/serve/fixture/image:model.json",
+        "//loom/src/loom/serve/fixture/image:sources",
+        "//loom/src/loom/serve/fixture/text:model.json",
+        "//loom/src/loom/serve/fixture/text:sources",
+        "//loom/src/loom/tools/loom-serve",
+    ],
+    main = "catalog_test.py",
+    tags = [
+        "iree-run-requirement=vulkan.resource.device",
+        "resource_group:" + GPU_DEVICE_RESOURCE_GROUP,
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:spirv_vulkan_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/src/loom/serve/server:catalog_test_util",
+        "//loom/src/loom/serve/testing:http",
+        "//loom/src/loom/serve/testing:logs",
     ],
 )
 
