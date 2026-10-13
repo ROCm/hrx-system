@@ -148,9 +148,10 @@ TEST(NativeCall, LocalScalarResultsCannotPartiallyOverlap) {
 TEST(NativeCall, ScalarAccessPreservesCompleteUnalignedCells) {
   uint64_t values[2] = {};
   uint8_t local_bytes[16] = {};
-  iree_vm_native_call_t call = {};
-  call.values = values;
-  call.local_bytes = local_bytes;
+  iree_vm_native_call_t call = {
+      .values = values,
+      .local_bytes = local_bytes,
+  };
   for (uint32_t selector : {1u, IREE_VM_NATIVE_CALL_LOCAL_VALUE | 3}) {
     iree_vm_native_call_store_value(&call, selector,
                                     UINT64_C(0xFEDCBA9876543210));

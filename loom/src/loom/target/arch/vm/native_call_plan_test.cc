@@ -76,8 +76,9 @@ TEST_F(VMNativeCallPlanTest, RetainsIndexedLayoutAndPartitionsCallsites) {
   IREE_ASSERT_OK(Build());
   call_template_->module_name = 3;
   call_template_->export_name = 4;
-  loom_vm_native_call_plan_t plan = {};
-  plan.arena = &arena_;
+  loom_vm_native_call_plan_t plan = {
+      .arena = &arena_,
+  };
   for (uint32_t i = 0; i < 3; ++i) {
     uint32_t ordinal = UINT32_MAX;
     uint32_t* words = nullptr;

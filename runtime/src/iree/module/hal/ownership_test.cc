@@ -103,12 +103,12 @@ class HALModuleOwnershipTest : public ::testing::TestWithParam<int> {
       }
       case IREE_HAL_MODULE_TYPE_POOL: {
         const iree_hal_pool_family_access_t family = {
-            /*.family=*/iree_hal_queue_family(queue),
-            /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
+            .family = iree_hal_queue_family(queue),
+            .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
         };
         const iree_hal_pool_scope_t scope = {
-            /*.family_count=*/1,
-            /*.families=*/&family,
+            .family_count = 1,
+            .families = &family,
         };
         iree_hal_slab_pool_options_t options;
         iree_hal_slab_pool_options_initialize(&options);
