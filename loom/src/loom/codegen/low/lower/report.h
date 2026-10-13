@@ -11,8 +11,8 @@
 // instruction counts are execution outcomes populated afterward. Memory
 // rows retain target-provided packet geometry and source interval evidence.
 // Row storage is owned by loom_low_lower_result_t and remains valid until the
-// result is deinitialized. Per-function analysis state is arena-backed and
-// lives only for the active lowering call.
+// result is deinitialized. Per-function expression indexing is analysis-arena
+// scratch retired before emission; only expression IDs survive in report rows.
 
 #ifndef LOOM_CODEGEN_LOW_LOWER_REPORT_H_
 #define LOOM_CODEGEN_LOW_LOWER_REPORT_H_
@@ -43,12 +43,13 @@ typedef struct loom_low_lower_report_state_t {
   loom_low_lower_report_row_vec_t* selection_cursor;
   // Next row within |selection_cursor|, excluding claimed source operations.
   iree_host_size_t selection_index;
-  // Interned symbolic byte expressions used by memory interval rows.
-  loom_low_lower_memory_expression_entry_t* memory_expression_entries;
-  // Number of populated entries in |memory_expression_entries|.
-  iree_host_size_t memory_expression_entry_count;
-  // Number of allocated entries in |memory_expression_entries|.
-  iree_host_size_t memory_expression_entry_capacity;
+  // Function-local symbolic byte expressions used by memory interval rows.
+  struct {
+    // Root of the analysis-arena-owned balanced expression tree.
+    loom_low_lower_memory_expression_entry_t* root;
+    // Number of unique expressions; also the next first-seen expression ID.
+    uint32_t count;
+  } memory_expressions;
 } loom_low_lower_report_state_t;
 
 // Installs emission accounting on the initialized function builder when
