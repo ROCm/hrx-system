@@ -27,6 +27,20 @@ loom_test(
 )
 
 loom_test(
+    name = "sampling_test",
+    srcs = [
+        "random.loom",
+        "sampling.loom",
+        "tests/sampling.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "grouped_convolution_test",
     srcs = [
         "grouped_convolution.loom",
