@@ -29,6 +29,20 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+loom_test(
+    name = "sampling_test",
+    srcs = [
+        "kernels/qwen38/sampling.loom",
+        "tests/sampling.loom",
+        "//experimental/loom_serve/motifs/tensor:sources",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
 loom_library(
     name = "projection_kernels",
     srcs = [

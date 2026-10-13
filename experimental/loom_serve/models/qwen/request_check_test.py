@@ -7,6 +7,7 @@
 """The authoring CLI uses the production caller with two real source policies."""
 
 import json
+import struct
 import subprocess
 import sys
 import tempfile
@@ -70,10 +71,17 @@ class RequestCheckTest(unittest.TestCase):
         self.model = self.directory / "model"
         self.model.mkdir()
 
-    def execute(self, source, request, response=None, capacity=4096, chunk_size=0):
+    def execute(
+        self, source, request, response=None, capacity=4096, chunk_size=0, defaults=None
+    ):
         (self.model / "control.loom").write_bytes(source.read_bytes())
         request_path = self.directory / "request.json"
-        request_path.write_text(json.dumps(request))
+        request_path.write_text(
+            request if isinstance(request, str) else json.dumps(request)
+        )
+        defaults_json = (
+            defaults if isinstance(defaults, str) else json.dumps(defaults or {})
+        )
         command = [
             str(CHECKER),
             f"--control={self.model / 'control.loom'}",
@@ -81,6 +89,7 @@ class RequestCheckTest(unittest.TestCase):
             f"--request={request_path}",
             f"--capacity={capacity}",
             f"--response_chunk_size={chunk_size}",
+            f"--options={defaults_json}",
         ]
         if response is not None:
             response_path = self.directory / "response.txt"
@@ -246,6 +255,89 @@ class RequestCheckTest(unittest.TestCase):
             self.assertEqual(value["reasoning_content"], "")
             self.assertEqual(value["content"], "Use <tool_ca")
             self.assertTrue(value["reusable"])
+
+    def test_source_sampling_defaults_and_request_overrides(self):
+        source = PACKAGE / "control.loom"
+        defaults = {
+            "sampling": {
+                "temperature": 0.7,
+                "top_p": 0.95,
+                "top_k": 20,
+                "seed": 9007199254740993,
+            }
+        }
+        value = self.success(self.execute(source, self.request(), defaults=defaults))
+        temperature, top_p, top_k, explicit_seed, seed = struct.unpack(
+            "<ffiiq", bytes(value["request_options"])
+        )
+        self.assertAlmostEqual(temperature, 0.7)
+        self.assertAlmostEqual(top_p, 0.95)
+        self.assertEqual((top_k, explicit_seed, seed), (20, 1, 9007199254740993))
+        value = self.success(
+            self.execute(
+                source,
+                self.request(
+                    temperature=0, top_p=1, top_k=0, seed=-9223372036854775808
+                ),
+                defaults=defaults,
+            )
+        )
+        self.assertEqual(
+            struct.unpack("<ffiiq", bytes(value["request_options"])),
+            (0, 1, 0, 1, -9223372036854775808),
+        )
+        value = self.success(self.execute(source, self.request()))
+        self.assertEqual(
+            struct.unpack("<ffiiq", bytes(value["request_options"])), (0, 1, 0, 0, 1)
+        )
+
+    def test_invalid_sampling_fails_before_admission(self):
+        source = PACKAGE / "control.loom"
+        for field, values in {
+            "temperature": [-1, 1e100, 1e-45, None, "0.7"],
+            "top_p": [0, -1, 1.01, 1e-45, None],
+            "top_k": [-1, 1.5, 2147483648],
+            "seed": [1.5, 9223372036854775808, -9223372036854775809],
+        }.items():
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    result = self.execute(source, self.request(**{field: value}))
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, "")
+        for defaults in (
+            {"sampling": {"top_p": 0}},
+            {"sampling": {"typo": 1}},
+            {"samplng": {}},
+            {"sampling": []},
+        ):
+            with self.subTest(defaults=defaults):
+                result = self.execute(source, self.request(), defaults=defaults)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+
+    def test_sampling_spelling_and_extreme_exponents(self):
+        source = PACKAGE / "control.loom"
+        request = json.dumps(
+            self.request(temperature=0.7, top_p=0.95, seed=9007199254740993)
+        )
+        ordinary = self.success(self.execute(source, request))
+        defaults = '{"sampl\\u0069ng":{"temperat\\u0075re":0.7,"top_p":0.95,"s\\u0065ed":9007199254740993}}'
+        self.assertEqual(
+            self.success(self.execute(source, self.request(), defaults=defaults)),
+            ordinary,
+        )
+        for literal in ("1e-999", "1e999", "-1e-999", "5e-324"):
+            with self.subTest(literal=literal):
+                result = self.execute(
+                    source,
+                    request.replace('"temperature": 0.7', f'"temperature": {literal}'),
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+        duplicate = '{"sampling":{"temperature":0.7,"temperat\\u0075re":0.5}}'
+        result = self.execute(source, self.request(), defaults=duplicate)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
 
     def test_rejections_publish_no_partial_observation(self):
         source = PACKAGE / "testdata/portable_chat.loom"

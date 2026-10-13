@@ -1,0 +1,279 @@
+amdgpu.target<gfx11-generic> @sampling_wave32 {subgroup_size = 32}
+
+template.decl @sampling.categorical_f32(%columns: index, %logits: buffer, %logits_origin: offset, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64) -> (i32)
+
+func.decl @sampling_race(%logit: f32, %maximum: f32, %temperature: f32, %seed: i64, %position: i64, %id: i32) -> (f32)
+
+kernel.def target(@sampling_wave32) @sample(%columns: index) {
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%columns: index, %logits: buffer, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64, %output: buffer) {
+  %logits_origin = index.constant 0 : offset
+  %token = template.apply<@sampling.categorical_f32>(%columns, %logits, %logits_origin, %temperature, %top_p, %top_k, %seed, %position) : (index, buffer, offset, f32, f32, i32, i64, i64) -> (i32)
+  %thread = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : index
+  %leader = index.cmp eq, %thread, %zero : index
+  scf.if %leader {
+    %origin = index.constant 0 : offset
+    %result = buffer.view %output[%origin] : buffer -> view<1xi32>
+    view.store %token, %result[0] : i32, view<1xi32>
+  }
+  kernel.return
+}
+
+// Independent ordinal-rank oracle. Each candidate counts its predecessors
+// directly instead of using the device's key interval or partition algorithm.
+func.def @reference(%columns: index, %logits: buffer, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %zero = scalar.constant 0.0 : f32
+  %negative = scalar.constant -inf : f32
+  %zero32 = scalar.constant 0 : i32
+  %one32 = scalar.constant 1 : i32
+  %largest = scalar.constant 2147483647 : i32
+  %input = buffer.view %logits[%origin] : buffer -> view<[%columns]xf32>
+  %result = buffer.view %output[%origin] : buffer -> view<1xi32>
+  %bytes_per_element = index.constant 4 : offset
+  %bytes = index.scale %columns, %bytes_per_element : index, offset -> offset
+  %rank_storage = buffer.alloca<private> align(4) %bytes : buffer
+  %weight_storage = buffer.alloca<private> align(4) %bytes : buffer
+  %ranks = buffer.view %rank_storage[%origin] : buffer -> view<[%columns]xi32>
+  %weights = buffer.view %weight_storage[%origin] : buffer -> view<[%columns]xf32>
+  %maximum = scf.for %column = [%c0 to %columns step %c1](%best = %negative : f32) -> (f32) {
+    %value = view.load %input[%column] : view<[%columns]xf32> -> f32
+    %next = scalar.maxnumf %best, %value : f32
+    scf.yield %next : f32
+  }
+  %vocabulary = index.cast %columns : index to i32
+  %unbounded = scalar.cmpi eq, %top_k, %zero32 : i32
+  %limit = scf.select %unbounded, %vocabulary, %top_k : i32
+  %greedy = scalar.cmpf oeq, %temperature, %zero : f32
+  %one = scalar.constant 1.0 : f32
+  %safe_temperature = scf.select %greedy, %one, %temperature : f32
+  %total = scf.for %column = [%c0 to %columns step %c1](%total = %zero : f32) -> (f32) {
+    %value = view.load %input[%column] : view<[%columns]xf32> -> f32
+    %rank = scf.for %other = [%c0 to %columns step %c1](%rank = %zero32 : i32) -> (i32) {
+      %candidate = view.load %input[%other] : view<[%columns]xf32> -> f32
+      %greater = scalar.cmpf ogt, %candidate, %value : f32
+      %equal = scalar.cmpf oeq, %candidate, %value : f32
+      %earlier = index.cmp ult, %other, %column : index
+      %tie = scalar.andi %equal, %earlier : i1
+      %before = scalar.ori %greater, %tie : i1
+      %increment = scalar.extui %before : i1 to i32
+      %next = scalar.addi %rank, %increment : i32
+      scf.yield %next : i32
+    }
+    view.store %rank, %ranks[%column] : i32, view<[%columns]xi32>
+    %eligible = scalar.cmpi slt, %rank, %limit : i32
+    %difference = scalar.subf %value, %maximum : f32
+    %scaled = scalar.divf %difference, %safe_temperature : f32
+    %exponential = scalar.expf<afn> %scaled : f32
+    %weight = scf.select %eligible, %exponential, %zero : f32
+    view.store %weight, %weights[%column] : f32, view<[%columns]xf32>
+    %next = scalar.addf %total, %weight : f32
+    scf.yield %next : f32
+  }
+  %target = scalar.mulf %total, %top_p : f32
+  %best, %token = scf.for %column = [%c0 to %columns step %c1](%best = %negative : f32, %id = %largest : i32) -> (f32, i32) {
+    %rank = view.load %ranks[%column] : view<[%columns]xi32> -> i32
+    %prefix = scf.for %other = [%c0 to %columns step %c1](%mass = %zero : f32) -> (f32) {
+      %other_rank = view.load %ranks[%other] : view<[%columns]xi32> -> i32
+      %weight = view.load %weights[%other] : view<[%columns]xf32> -> f32
+      %earlier = scalar.cmpi slt, %other_rank, %rank : i32
+      %contribution = scf.select %earlier, %weight, %zero : f32
+      %next = scalar.addf %mass, %contribution : f32
+      scf.yield %next : f32
+    }
+    %within_k = scalar.cmpi slt, %rank, %limit : i32
+    %within_p = scalar.cmpf olt, %prefix, %target : f32
+    %first = scalar.cmpi eq, %rank, %zero32 : i32
+    %selected = scalar.andi %within_k, %within_p : i1
+    %eligible = scf.select %greedy, %first, %selected : i1
+    %next_best, %next_id = scf.if %eligible -> (f32, i32) {
+      %value = view.load %input[%column] : view<[%columns]xf32> -> f32
+      %candidate_id = index.cast %column : index to i32
+      %race = scf.if %greedy -> (f32) {
+        scf.yield %value : f32
+      } else {
+        %race = func.call @sampling_race(%value, %maximum, %temperature, %seed, %position, %candidate_id) : (f32, f32, f32, i64, i64, i32) -> (f32)
+        scf.yield %race : f32
+      }
+      %better = scalar.cmpf ogt, %race, %best : f32
+      %next = scf.select %better, %race, %best : f32
+      %next_id = scf.select %better, %candidate_id, %id : i32
+      scf.yield %next, %next_id : f32, i32
+    } else {
+      scf.yield %best, %id : f32, i32
+    }
+    scf.yield %next_best, %next_id : f32, i32
+  }
+  view.store %token, %result[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario public @sampling_greedy {
+  check.trial[12](%trial: index, %entropy: check.entropy) {
+    %columns = check.literal value(67) : index
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %position = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<67xf32>
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    %temperature = check.literal value(0.0) : f32
+    %top_p = check.literal value(1.0) : f32
+    %top_k = check.literal value(0) : i32
+    check.compare<@sample, @reference>[%columns](%columns, %input, %temperature, %top_p, %top_k, %seed, %position, %output) : [index](index, tensor<67xf32>, f32, f32, i32, i64, i64, tensor<1xi32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @sampling_full {
+  check.trial[12](%trial: index, %entropy: check.entropy) {
+    %columns = check.literal value(67) : index
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %position = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<67xf32>
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    %temperature = check.literal value(0.69999999999999996) : f32
+    %top_p = check.literal value(1.0) : f32
+    %top_k = check.literal value(0) : i32
+    check.compare<@sample, @reference>[%columns](%columns, %input, %temperature, %top_p, %top_k, %seed, %position, %output) : [index](index, tensor<67xf32>, f32, f32, i32, i64, i64, tensor<1xi32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @sampling_nucleus {
+  check.trial[12](%trial: index, %entropy: check.entropy) {
+    %columns = check.literal value(67) : index
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %position = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<67xf32>
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    %temperature = check.literal value(0.69999999999999996) : f32
+    %top_p = check.literal value(0.72999999999999998) : f32
+    %top_k = check.literal value(0) : i32
+    check.compare<@sample, @reference>[%columns](%columns, %input, %temperature, %top_p, %top_k, %seed, %position, %output) : [index](index, tensor<67xf32>, f32, f32, i32, i64, i64, tensor<1xi32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @sampling_single {
+  check.trial[12](%trial: index, %entropy: check.entropy) {
+    %columns = check.literal value(67) : index
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %position = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<67xf32>
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    %temperature = check.literal value(0.69999999999999996) : f32
+    %top_p = check.literal value(0.72999999999999998) : f32
+    %top_k = check.literal value(1) : i32
+    check.compare<@sample, @reference>[%columns](%columns, %input, %temperature, %top_p, %top_k, %seed, %position, %output) : [index](index, tensor<67xf32>, f32, f32, i32, i64, i64, tensor<1xi32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @sampling_small {
+  check.trial[12](%trial: index, %entropy: check.entropy) {
+    %columns = check.literal value(67) : index
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %position = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<67xf32>
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    %temperature = check.literal value(0.69999999999999996) : f32
+    %top_p = check.literal value(0.72999999999999998) : f32
+    %top_k = check.literal value(20) : i32
+    check.compare<@sample, @reference>[%columns](%columns, %input, %temperature, %top_p, %top_k, %seed, %position, %output) : [index](index, tensor<67xf32>, f32, f32, i32, i64, i64, tensor<1xi32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @sampling_large {
+  check.trial[12](%trial: index, %entropy: check.entropy) {
+    %columns = check.literal value(67) : index
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %position = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<67xf32>
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    %temperature = check.literal value(0.69999999999999996) : f32
+    %top_p = check.literal value(1.0) : f32
+    %top_k = check.literal value(66) : i32
+    check.compare<@sample, @reference>[%columns](%columns, %input, %temperature, %top_p, %top_k, %seed, %position, %output) : [index](index, tensor<67xf32>, f32, f32, i32, i64, i64, tensor<1xi32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @sampling_beyond {
+  check.trial[12](%trial: index, %entropy: check.entropy) {
+    %columns = check.literal value(67) : index
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %position = check.entropy.read %entropy[1] : check.entropy -> i64
+    %input = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<67xf32>
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    %temperature = check.literal value(0.69999999999999996) : f32
+    %top_p = check.literal value(0.72999999999999998) : f32
+    %top_k = check.literal value(100) : i32
+    check.compare<@sample, @reference>[%columns](%columns, %input, %temperature, %top_p, %top_k, %seed, %position, %output) : [index](index, tensor<67xf32>, f32, f32, i32, i64, i64, tensor<1xi32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+// The first twenty repeated maxima are top-k; p=.95 retains nineteen of
+// them. This analytic support avoids a quadratic oracle over the vocabulary.
+func.def @vocabulary_reference(%columns: index, %logits: buffer, %temperature_argument: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c19 = index.constant 19 : index
+  %period = scalar.constant 1009 : i32
+  %first = scalar.constant 1008 : i32
+  %negative = scalar.constant -inf : f32
+  %one = scalar.constant 1.0 : f32
+  %temperature = scalar.constant 0.69999999999999996 : f32
+  %score, %winner = scf.for %i = [%c0 to %c19 step %c1](%best = %negative : f32, %id = %first : i32) -> (f32, i32) {
+    %ordinal = index.cast %i : index to i32
+    %offset = scalar.muli %ordinal, %period : i32
+    %token = scalar.addi %first, %offset : i32
+    %race = func.call @sampling_race(%one, %one, %temperature, %seed, %position, %token) : (f32, f32, f32, i64, i64, i32) -> (f32)
+    %better = scalar.cmpf ogt, %race, %best : f32
+    %next = scf.select %better, %race, %best : f32
+    %next_id = scf.select %better, %token, %id : i32
+    scf.yield %next, %next_id : f32, i32
+  }
+  %result = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %winner, %result[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario public @sampling_vocabulary {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %columns = check.literal value(248320) : index
+    %seed = check.literal value(1234567890123) : i64
+    %position = check.literal value(1234) : i64
+    %input = check.generate.iota offset(-1.0) step(0.001) period(1009) : tensor<248320xf32>
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    %temperature = check.literal value(0.69999999999999996) : f32
+    %top_p = check.literal value(0.94999999999999996) : f32
+    %top_k = check.literal value(20) : i32
+    check.compare<@sample, @vocabulary_reference>[%columns](%columns, %input, %temperature, %top_p, %top_k, %seed, %position, %output) : [index](index, tensor<248320xf32>, f32, f32, i32, i64, i64, tensor<1xi32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+check.benchmark<@sampling_vocabulary> @sampling_vocabulary_benchmark
