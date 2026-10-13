@@ -209,8 +209,9 @@ iree_vm_native_call_verify(const iree_vm_native_callsite_t* callsite,
   iree_host_size_t storage_size = 0, stack_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       destination_count, &storage_size,
-      IREE_STRUCT_FIELD(stack_count, iree_vm_native_call_record_frame_t,
-                        &stack_offset)));
+      IREE_STRUCT_FIELD_ALIGNED(
+          stack_count, iree_vm_native_call_record_frame_t,
+          iree_alignof(iree_vm_native_call_record_frame_t), &stack_offset)));
   uint8_t* storage = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, storage_size, (void**)&storage));

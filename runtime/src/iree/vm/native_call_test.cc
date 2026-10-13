@@ -117,6 +117,27 @@ TEST_F(NativeCallTest, AdmitsWholeLocalScalarCells) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, Verify(words_, &size));
 }
 
+TEST_F(NativeCallTest, UnalignedLocalCellsPreserveVerifierAlignment) {
+  // Local scalar storage is byte-addressed. Its extent also sizes the result
+  // destination bitmap, which must not misalign the following traversal stack.
+  for (uint32_t offset = 0; offset < iree_max_align_t; ++offset) {
+    SCOPED_TRACE(offset);
+    words_[7] = IREE_VM_NATIVE_CALL_LOCAL_VALUE | offset;
+    const iree_vm_native_callsite_t callsite = {
+        .module_name = IREE_SV("native"),
+        .export_name = IREE_SV("submit"),
+        .version = 7,
+        .schema = kSchema,
+        .record = words_.data(),
+        .word_count = static_cast<uint32_t>(words_.size()),
+        .storage = {4, 4, offset + 8},
+    };
+    iree_host_size_t size = 0;
+    IREE_ASSERT_OK(VerifyAndLink(&kExport, &callsite, &size));
+    EXPECT_EQ(size, 3 * 16 + 2 * 8);
+  }
+}
+
 TEST_F(NativeCallTest, EmptyRangesHaveCanonicalOffsets) {
   words_ = {0, 6, 0, 6, 0, 6};
   iree_host_size_t size = 123;
