@@ -573,10 +573,9 @@ static iree_status_t iree_hal_replay_recorder_buffer_unmap_range(
           capture_data ? sizeof(data_payload) : sizeof(payload)),
       data_span,
   };
-  iree_hal_replay_pending_record_t pending_record;
-  bool recording = false;
+  iree_hal_replay_pending_record_t pending_record = {0};
   if (iree_status_is_ok(status)) {
-    recording = iree_hal_replay_recorder_try_begin_operation(
+    iree_hal_replay_recorder_try_begin_operation(
         buffer->recorder, buffer->device_id, buffer->buffer_id,
         buffer->mapping.id, IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER,
         IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_UNMAP_RANGE,
@@ -585,17 +584,16 @@ static iree_status_t iree_hal_replay_recorder_buffer_unmap_range(
         &pending_record);
   } else {
     iree_hal_replay_recorder_fail(buffer->recorder, iree_status_code(status));
+    // The capture failure is now owned by the recorder and reported at close.
+    iree_status_free(status);
   }
-  // Unmap consumes the native mapping even after capture has stopped or failed.
-  status = iree_status_join(
-      status,
-      IREE_HAL_REPLAY_VTABLE_DISPATCH(buffer->base_buffer, iree_hal_buffer,
-                                      unmap_range)(
-          buffer->base_buffer, local_byte_offset, local_byte_length, mapping));
-  if (recording) {
-    status = iree_hal_replay_recorder_end_operation_with_payload(
-        &pending_record, status, capture_data ? 2 : 1, iovecs);
-  }
+  // Public unmap consumes the mapping on every path. Capture cannot prevent
+  // native teardown or replace its status with an observation failure.
+  status = IREE_HAL_REPLAY_VTABLE_DISPATCH(buffer->base_buffer, iree_hal_buffer,
+                                           unmap_range)(
+      buffer->base_buffer, local_byte_offset, local_byte_length, mapping);
+  status = iree_hal_replay_recorder_end_passthrough_operation_with_payload(
+      &pending_record, status, capture_data ? 2 : 1, iovecs);
   iree_allocator_free(buffer->host_allocator, data_snapshot);
   return status;
 }

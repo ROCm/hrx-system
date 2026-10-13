@@ -81,10 +81,11 @@ iree_status_t iree_hal_replay_recorder_begin_operation(
     iree_hal_replay_payload_type_t payload_type,
     iree_hal_replay_pending_record_t* out_pending_record);
 
-// Begins a void passthrough operation when capture is still available. Returns
-// false without constructing a status when the recorder is closed or terminal;
-// the backend operation must still proceed in that case. A true result leaves
-// the recorder mutex owned by |out_pending_record| until an end call.
+// Begins a stateful passthrough operation when capture is still available.
+// Returns false without constructing a status when the recorder is closed or
+// terminal; the backend operation must still proceed in that case. A true
+// result leaves the recorder mutex owned by |out_pending_record| until an end
+// call.
 bool iree_hal_replay_recorder_try_begin_operation(
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
     iree_hal_replay_object_id_t object_id,
@@ -152,7 +153,7 @@ void iree_hal_replay_recorder_end_void_operation_with_payload(
 // the recorder and are reported by iree_hal_replay_recorder_close.
 //
 // A zero-initialized |pending_record| skips recording so stateful teardown can
-// still reach the wrapped allocator after capture has become terminal.
+// still reach the wrapped resource after capture has become terminal.
 iree_status_t iree_hal_replay_recorder_end_passthrough_operation_with_payload(
     iree_hal_replay_pending_record_t* pending_record,
     iree_status_t operation_status, iree_host_size_t iovec_count,
