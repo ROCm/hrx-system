@@ -447,7 +447,6 @@ int main(int argc, char** argv) {
   const loom_serve_text_flag_defaults_t defaults = {.row_count = row_count};
   loom_serve_text_model_t* model = NULL;
   loom_serve_device_group_t* group = NULL;
-  loom_serve_device_t* device = NULL;
   loom_serve_host_t* host = NULL;
   qwen_replay_row_t rows[QWEN_REPLAY_ROWS] = {0};
   qwen_replay_window_t* policies = NULL;
@@ -458,8 +457,7 @@ int main(int argc, char** argv) {
     status = loom_serve_device_group_create_from_flags(host, &group, allocator);
   }
   if (iree_status_is_ok(status)) {
-    device = loom_serve_device_group_at(group, 0);
-    status = loom_serve_text_model_create_from_flags(device, &defaults, &model,
+    status = loom_serve_text_model_create_from_flags(group, &defaults, &model,
                                                      allocator);
   }
   if (iree_status_is_ok(status)) {

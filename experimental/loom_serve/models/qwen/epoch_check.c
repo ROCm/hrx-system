@@ -124,9 +124,10 @@ static iree_status_t qwen_check_residency_continuation(
   return status;
 }
 
-static iree_status_t qwen_check_shared_residency(loom_serve_device_t* device,
-                                                 loom_serve_text_model_t* first,
-                                                 iree_allocator_t allocator) {
+static iree_status_t qwen_check_shared_residency(
+    loom_serve_device_group_t* group, loom_serve_text_model_t* first,
+    iree_allocator_t allocator) {
+  loom_serve_device_t* device = loom_serve_text_model_device(first);
   if (!loom_serve_device_memory_pool(device)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -137,7 +138,7 @@ static iree_status_t qwen_check_shared_residency(loom_serve_device_t* device,
       loom_serve_device_memory_statistics(device).workspace;
   loom_serve_text_model_t* second = NULL;
   iree_status_t status = loom_serve_text_model_create_from_flags(
-      device, &defaults, &second, allocator);
+      group, &defaults, &second, allocator);
   if (iree_status_is_ok(status) &&
       loom_serve_text_model_weight_statistics(second).committed_bytes) {
     status = iree_make_status(IREE_STATUS_DATA_LOSS,
@@ -1958,15 +1959,13 @@ int main(int argc, char** argv) {
   const loom_serve_text_flag_defaults_t defaults = {.row_count = 8};
   loom_serve_text_model_t* model = NULL;
   loom_serve_device_group_t* group = NULL;
-  loom_serve_device_t* device = NULL;
   loom_serve_host_t* host = NULL;
   iree_status_t status = loom_serve_host_create_from_flags(&host, allocator);
   if (iree_status_is_ok(status)) {
     status = loom_serve_device_group_create_from_flags(host, &group, allocator);
   }
   if (iree_status_is_ok(status)) {
-    device = loom_serve_device_group_at(group, 0);
-    status = loom_serve_text_model_create_from_flags(device, &defaults, &model,
+    status = loom_serve_text_model_create_from_flags(group, &defaults, &model,
                                                      allocator);
   }
   if (iree_status_is_ok(status)) {
@@ -1989,7 +1988,7 @@ int main(int argc, char** argv) {
     status = qwen_check_trim(model, allocator);
   }
   if (iree_status_is_ok(status) && FLAG_shared_residency) {
-    status = qwen_check_shared_residency(device, model, allocator);
+    status = qwen_check_shared_residency(group, model, allocator);
   }
   if (iree_status_is_ok(status) &&
       (FLAG_checkpoints || FLAG_suspend_checkpoints)) {

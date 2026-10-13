@@ -141,6 +141,9 @@ iree_status_t loom_serve_registry_register(
         IREE_STATUS_UNIMPLEMENTED,
         "this modality has no asynchronous registration provider");
   }
+  iree_host_size_t device_index = 0;
+  IREE_RETURN_IF_ERROR(loom_serve_model_configuration_resolve_device(
+      configuration, registry->factory.device_count, &device_index));
   iree_host_size_t available = registry->capacity;
   for (iree_host_size_t i = 0; i < registry->capacity; ++i) {
     const iree_string_view_t name = registry->models[i].service.name;
@@ -160,6 +163,7 @@ iree_status_t loom_serve_registry_register(
   IREE_RETURN_IF_ERROR(loom_serve_telemetry_stream_create(128, &model->stream,
                                                           registry->allocator));
   model->configuration = *configuration;
+  model->configuration.device_index = device_index;
   memset(configuration, 0, sizeof(*configuration));
   model->closed = model->configuration.start_drained;
   model->incarnation = registry->next_incarnation++;

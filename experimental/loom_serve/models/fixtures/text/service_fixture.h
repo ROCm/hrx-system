@@ -163,7 +163,7 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     model_ = nullptr;
     service_ = std::thread([this] {
       const loom_serve_model_registration_options_t options = {
-          .device = device_, .heartbeat_interval = 0};
+          .device_group = group_, .heartbeat_interval = 0};
       loom_serve_registry_t* registry = nullptr;
       IREE_ASSERT_OK(loom_serve_registry_create(
           0, nullptr, 3, loom_serve_model_registration_factory(&options),

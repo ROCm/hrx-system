@@ -12,9 +12,12 @@
 extern "C" {
 #endif
 
-// CLI leaf constructing a single-device application group from the required
-// device URI, backing strategy and physical budget flags. Models borrow its
-// first record; the entry point destroys the group after every model retires.
+// CLI leaf constructing the application group from ordered, explicit device
+// URIs. Backing strategy and slab size apply to every record. A nonzero
+// physical byte limit requires a single device. Models resolve their own
+// bindings; the entry point destroys the group after every model retires. URI
+// interpretation belongs to the HAL driver, with no implicit local device or
+// backend fallback.
 iree_status_t loom_serve_device_group_create_from_flags(
     loom_serve_host_t* host, loom_serve_device_group_t** out_group,
     iree_allocator_t host_allocator);

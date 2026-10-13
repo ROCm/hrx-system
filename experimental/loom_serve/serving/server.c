@@ -111,7 +111,6 @@ int main(int argc, char** argv) {
     status = iree_async_signal_ignore_broken_pipe();
   }
   loom_serve_device_group_t* group = NULL;
-  loom_serve_device_t* device = NULL;
   loom_serve_host_t* host = NULL;
   loom_serve_http_server_t* server = NULL;
   loom_serve_http_listener_t** listeners = NULL;
@@ -129,10 +128,7 @@ int main(int argc, char** argv) {
     status = loom_serve_device_group_create_from_flags(host, &group, allocator);
   }
   if (iree_status_is_ok(status)) {
-    device = loom_serve_device_group_at(group, 0);
-  }
-  if (iree_status_is_ok(status)) {
-    registration_options.device = device;
+    registration_options.device_group = group;
     registration_options.heartbeat_interval =
         (iree_duration_t)FLAG_heartbeat_ms * 1000000;
     status = loom_serve_registry_create(

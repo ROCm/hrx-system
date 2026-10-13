@@ -412,7 +412,7 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
     }
     router_ = std::thread([this, capacity] {
       const loom_serve_model_registration_options_t options = {
-          .device = device_, .heartbeat_interval = 1000000};
+          .device_group = group_, .heartbeat_interval = 1000000};
       loom_serve_registry_t* registry = nullptr;
       IREE_ASSERT_OK(loom_serve_registry_create(
           service_ ? 1 : 0, &interface_, capacity,

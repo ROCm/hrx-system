@@ -67,6 +67,8 @@ typedef struct loom_serve_registration_factory_t {
   void* self;
   // Supported configuration kinds as bit positions; zero disables management.
   uint32_t kinds;
+  // Immutable group cardinality used to resolve deployment device bindings.
+  iree_host_size_t device_count;
   // Allocates an unstarted operation; performs no source I/O, model allocation
   // or submission. Failure returns no operation. Invoked after admission opens
   // or explicit activation, never for metadata-only registration alone.
@@ -181,7 +183,8 @@ loom_serve_registered_model_t* loom_serve_registry_at(
 
 // Moves a validated declaration, including its owning allocator, into a
 // stable slot on success, zeroing the caller's value. Failure changes neither.
-// Rejects unsupported kinds, duplicate names and exhausted registration credit.
+// Resolves device binding before moving the declaration. Rejects unsupported
+// kinds, ambiguous/missing devices, duplicate names and exhausted credit.
 iree_status_t loom_serve_registry_register(
     loom_serve_registry_t* registry,
     loom_serve_model_configuration_t* configuration,

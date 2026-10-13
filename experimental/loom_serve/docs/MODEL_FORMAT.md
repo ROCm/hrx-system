@@ -29,6 +29,15 @@ asynchronous preparation. Requests can wait for that preparation within the
 server's bounded holding budget. Duplicate aliases reject instead of replacing
 a live registration.
 
+An optional top-level `device` is a nonnegative index into the ordered
+`--device` group, also shown in `/v1/status` under `server.resources.devices`.
+It may be omitted only when the group contains exactly one device. Multiple
+devices require explicit placement, including for drained registrations;
+out-of-range indices reject before publication or model I/O. For example,
+`"device": 1` selects the second CLI device. Placement belongs to the deployment,
+not its reusable `definition`. Each model currently executes on one selected
+device; registration does not imply cross-device weight or state sharing.
+
 ## Programs and dependency resolution
 
 Every definition contains `kind`, `prepare`, `control` and a nonempty `sources`

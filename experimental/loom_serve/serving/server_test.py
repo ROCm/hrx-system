@@ -24,7 +24,7 @@ FORMAT = Path(sys.argv.pop(1)).resolve()
 
 class ServerTest(unittest.TestCase):
     def test_device_is_required_before_listening(self):
-        for arguments in ([], ["--device="]):
+        for arguments in ([], ["--device="], ["--device=task", "--device="]):
             with self.subTest(arguments=arguments):
                 result = subprocess.run(
                     [
@@ -40,6 +40,23 @@ class ServerTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0, result.stderr)
                 self.assertIn("--device is required", result.stderr)
                 self.assertNotIn('"event":"ready"', result.stderr)
+
+    def test_shared_byte_limit_requires_one_device(self):
+        result = subprocess.run(
+            [
+                str(SERVER),
+                "--device=task",
+                "--device=task",
+                "--memory_bytes=4096",
+                "--workers=1",
+                "--listen=127.0.0.1:0",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--memory_bytes requires one device", result.stderr)
+        self.assertNotIn('"event":"ready"', result.stderr)
 
     def test_positional_model_is_rejected_before_listening(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -205,11 +222,12 @@ class ServerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             documents = []
-            for name in ("alpha", "beta"):
+            for index, name in enumerate(("alpha", "beta")):
                 package = directory / "models" / name
                 shutil.copytree(PACKAGE, package, copy_function=shutil.copyfile)
                 document = json.loads((package / "model.json").read_text())
                 document["name"] = name
+                document["device"] = index
                 (package / "model.json").write_text(json.dumps(document))
                 documents.append((package, document))
             settings = directory / "settings"
@@ -227,19 +245,62 @@ class ServerTest(unittest.TestCase):
                     "--listen=127.0.0.1:0",
                     "--flagfile=settings/server.flags",
                     "--model=models/beta/model.json",
+                    "--device=task",
                 ],
                 log,
                 cwd=directory,
             ) as (process, bound_address):
                 self.assertIsNotNone(bound_address, log.read_text())
                 address = urlsplit(f"http://{bound_address}")
-                for name in ("alpha", "beta"):
+                snapshot = control(address, "GET", "/v1/status", 200)
+                devices = snapshot["server"]["resources"]["devices"]
+                self.assertEqual([device["index"] for device in devices], [0, 1])
+                self.assertEqual(
+                    [device["driver"] for device in devices], ["task", "task"]
+                )
+                self.assertEqual(
+                    {
+                        entry["id"]: entry["loom"]["device"]
+                        for entry in snapshot["data"]
+                    },
+                    {"alpha": 0, "beta": 1},
+                )
+
+                # Both admission modes reject ambiguous/out-of-group bindings
+                # before publishing a slot, even when no model I/O is needed.
+                for admission in ("open", "drained"):
+                    for binding in ({}, {"device": 2}):
+                        invalid = dict(documents[0][1])
+                        invalid.pop("device")
+                        invalid.update(
+                            name="invalid",
+                            admission=admission,
+                            base_directory=str(documents[0][0]),
+                            **binding,
+                        )
+                        self.post(address, "/v1/models/register", invalid, expected=400)
+                self.assertEqual(
+                    len(control(address, "GET", "/v1/status", 200)["data"]), 2
+                )
+
+                def reservations():
+                    snapshot = control(address, "GET", "/v1/status", 200)
+                    return [
+                        device["memory"]["workspace"]["reserve_count"]
+                        for device in snapshot["server"]["resources"]["devices"]
+                    ]
+
+                for index, name in enumerate(("alpha", "beta")):
+                    before = reservations()
                     result = self.post(
                         address,
                         "/v1/embeddings",
                         {"model": name, "input": "ab", "dimensions": 2},
                     )
                     self.assertEqual(result["data"][0]["embedding"], [3, 2])
+                    after = reservations()
+                    self.assertGreater(after[index], before[index])
+                    self.assertEqual(after[1 - index], before[1 - index])
                 self.post(
                     address, "/v1/models/unregister", {"model": "alpha"}, expected=202
                 )
@@ -248,6 +309,16 @@ class ServerTest(unittest.TestCase):
                     for entry in control(address, "GET", "/v1/status", 200)["data"]
                 ):
                     pass
+                before = reservations()
+                result = self.post(
+                    address,
+                    "/v1/embeddings",
+                    {"model": "beta", "input": "bbb", "dimensions": 2},
+                )
+                self.assertEqual(result["data"][0]["embedding"], [6, 3])
+                after = reservations()
+                self.assertEqual(after[0], before[0])
+                self.assertGreater(after[1], before[1])
                 package, document = documents[0]
                 # HTTP has no file containing the object to supply its base.
                 self.post(address, "/v1/models/register", document, expected=400)

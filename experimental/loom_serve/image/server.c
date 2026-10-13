@@ -90,8 +90,13 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = loom_serve_device_group_create_from_flags(host, &group, allocator);
   }
+  iree_host_size_t device_index = 0;
   if (iree_status_is_ok(status)) {
-    device = loom_serve_device_group_at(group, 0);
+    status = loom_serve_model_configuration_resolve_device(
+        &configuration, loom_serve_device_group_count(group), &device_index);
+  }
+  if (iree_status_is_ok(status)) {
+    device = loom_serve_device_group_at(group, device_index);
     const loom_serve_image_model_options_t options = {
         .sources = configuration.sources,
         .options = configuration.options,

@@ -241,6 +241,7 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
     managed_capacity_ = 1;
     factory_ = {.self = &managed_,
                 .kinds = 1u << LOOM_SERVE_MODEL_KIND_EMBEDDING,
+                .device_count = 1,
                 .create = RegistrationDependency::Create,
                 .query_status = RegistrationDependency::QueryStatus};
     HttpRouterTest::SetUp();

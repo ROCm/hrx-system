@@ -99,7 +99,7 @@ iree_host_size_t loom_serve_text_draft_depth_from_flags(void) {
 }
 
 iree_status_t loom_serve_text_model_create_from_flags(
-    loom_serve_device_t* device,
+    loom_serve_device_group_t* group,
     const loom_serve_text_flag_defaults_t* defaults,
     loom_serve_text_model_t** out_model, iree_allocator_t host_allocator) {
   *out_model = NULL;
@@ -154,6 +154,11 @@ iree_status_t loom_serve_text_model_create_from_flags(
     status = loom_serve_model_configuration_load(
         iree_make_cstring_view(FLAG_model), &configuration, host_allocator);
   }
+  iree_host_size_t device_index = 0;
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_model_configuration_resolve_device(
+        &configuration, loom_serve_device_group_count(group), &device_index);
+  }
   const loom_serve_text_options_t options = {
       .sources = configuration.sources,
       .prefill_capacity = (iree_host_size_t)FLAG_prefill_capacity,
@@ -172,8 +177,9 @@ iree_status_t loom_serve_text_model_create_from_flags(
       .checkpoint_capacity = (iree_host_size_t)FLAG_checkpoint_capacity,
   };
   if (iree_status_is_ok(status)) {
-    status = loom_serve_text_model_create(device, &options, out_model,
-                                          host_allocator);
+    status = loom_serve_text_model_create(
+        loom_serve_device_group_at(group, device_index), &options, out_model,
+        host_allocator);
   }
   iree_allocator_free(host_allocator, shapes);
   loom_serve_model_configuration_deinitialize(&configuration);

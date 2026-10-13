@@ -400,8 +400,10 @@ void loom_serve_model_configuration_deinitialize(
 static iree_status_t configuration_model_parse(
     iree_string_view_t json, iree_string_view_t document_directory,
     loom_serve_model_configuration_t* model, iree_allocator_t allocator) {
-  *model = (loom_serve_model_configuration_t){.allocator = allocator,
-                                              .pending_requests = 32};
+  *model =
+      (loom_serve_model_configuration_t){.allocator = allocator,
+                                         .device_index = IREE_HOST_SIZE_MAX,
+                                         .pending_requests = 32};
   iree_string_view_t object;
   IREE_RETURN_IF_ERROR(iree_json_consume_object(&json, &object));
   IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(&json));
@@ -413,12 +415,15 @@ static iree_status_t configuration_model_parse(
       {"name", IREE_JSON_VALUE_TYPE_STRING},
       {"definition", IREE_JSON_VALUE_TYPE_OBJECT},
       {"admission", IREE_JSON_VALUE_TYPE_STRING},
-      {"base_directory", IREE_JSON_VALUE_TYPE_STRING}};
+      {"base_directory", IREE_JSON_VALUE_TYPE_STRING},
+      {"device", IREE_JSON_VALUE_TYPE_NUMBER}};
   configuration_fields_t context = {IREE_ARRAYSIZE(fields), fields};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
       object, configuration_field_visit, &context));
   IREE_RETURN_IF_ERROR(
       configuration_string(&fields[0], &model->name, allocator));
+  IREE_RETURN_IF_ERROR(configuration_size(&fields[4], 0, IREE_HOST_SIZE_MAX - 1,
+                                          &model->device_index));
   for (iree_host_size_t i = 0; i < model->name.size; ++i) {
     const uint8_t c = (uint8_t)model->name.data[i];
     if (c < 0x21 || c > 0x7e) {
@@ -507,4 +512,28 @@ iree_status_t loom_serve_model_configuration_load(
       directory, out_model, host_allocator);
   iree_io_file_contents_free(contents);
   return status;
+}
+
+iree_status_t loom_serve_model_configuration_resolve_device(
+    const loom_serve_model_configuration_t* model,
+    iree_host_size_t device_count, iree_host_size_t* out_device_index) {
+  iree_host_size_t index = model->device_index;
+  if (index == IREE_HOST_SIZE_MAX) {
+    if (device_count != 1) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "model '%.*s' requires an explicit device "
+                              "ordinal for a %zu-device group",
+                              (int)model->name.size, model->name.data,
+                              device_count);
+    }
+    index = 0;
+  }
+  if (index >= device_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "model '%.*s' selects device %zu, but the group has %zu devices",
+        (int)model->name.size, model->name.data, index, device_count);
+  }
+  *out_device_index = index;
+  return iree_ok_status();
 }

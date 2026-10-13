@@ -15,15 +15,17 @@ extern "C" {
 #endif
 
 typedef struct loom_serve_model_registration_options_t {
-  // Borrowed shared device and host, surviving every registration operation.
-  loom_serve_device_t* device;
+  // Borrowed application group and host, surviving every registration
+  // operation.
+  loom_serve_device_group_t* device_group;
   // Nonnegative periodic observation interval; zero disables periodic samples.
   iree_duration_t heartbeat_interval;
 } loom_serve_model_registration_options_t;
 
 // The options remain borrowed until the registry is successfully destroyed.
 // Source-defined text, image and finite-vector adapters share the same task
-// pool, device and registration ownership contract.
+// pool and registration ownership contract. Each declaration supplies its
+// resolved device index within this group; no default placement occurs here.
 loom_serve_registration_factory_t loom_serve_model_registration_factory(
     const loom_serve_model_registration_options_t* options);
 

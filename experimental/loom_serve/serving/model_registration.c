@@ -47,6 +47,9 @@ typedef struct finite_registration_t {
   iree_allocator_t allocator;
   // Borrowed server capabilities and reporting policy.
   const loom_serve_model_registration_options_t* options;
+  // Borrowed device resolved at declaration admission, alive through
+  // retirement.
+  loom_serve_device_t* device;
   // Borrowed immutable declaration owned by the stable registration slot.
   const loom_serve_model_configuration_t* configuration;
   // Owner scheduling callback, never an inline model operation.
@@ -88,8 +91,7 @@ static iree_status_t finite_registration_prepare(
     const loom_serve_model_configuration_t* configuration =
         registration->configuration;
     status = loom_serve_finite_service_create(
-        loom_serve_device_host(registration->options->device),
-        registration->model,
+        loom_serve_device_host(registration->device), registration->model,
         configuration->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING
             ? loom_serve_embedding_protocol()
             : loom_serve_decision_protocol(),
@@ -160,8 +162,8 @@ static iree_status_t finite_registration_activate(
   return registration_activate(
       &registration->activation,
       loom_serve_finite_model_residency(registration->model),
-      loom_serve_device_host(registration->options->device),
-      registration->observer, flags, out_phase, registration->allocator);
+      loom_serve_device_host(registration->device), registration->observer,
+      flags, out_phase, registration->allocator);
 }
 
 static iree_status_t finite_registration_create(
@@ -174,6 +176,8 @@ static iree_status_t finite_registration_create(
                                              (void**)&registration));
   registration->allocator = allocator;
   registration->options = options;
+  registration->device = loom_serve_device_group_at(
+      options->device_group, configuration->device_index);
   registration->configuration = configuration;
   registration->observer = observer;
   registration->stream = stream;
@@ -182,7 +186,7 @@ static iree_status_t finite_registration_create(
       .asset_directory = configuration->finite.assets,
       .options = configuration->options};
   iree_status_t status = loom_serve_finite_load_create(
-      options->device, &model_options, observer.wake, observer.user_data,
+      registration->device, &model_options, observer.wake, observer.user_data,
       &registration->load, allocator);
   if (iree_status_is_ok(status)) {
     *out_registration = (loom_serve_registration_t){
@@ -205,6 +209,9 @@ typedef struct image_registration_t {
   iree_allocator_t allocator;
   // Borrowed server capabilities and reporting policy.
   const loom_serve_model_registration_options_t* options;
+  // Borrowed device resolved at declaration admission, alive through
+  // retirement.
+  loom_serve_device_t* device;
   // Borrowed immutable declaration owned by the stable registration slot.
   const loom_serve_model_configuration_t* configuration;
   // Owner scheduling callback, never an inline model operation.
@@ -253,7 +260,7 @@ static iree_status_t image_registration_prepare(
         .pending_capacity = configuration->pending_requests,
         .heartbeat_interval = registration->options->heartbeat_interval};
     status = loom_serve_image_service_create(
-        loom_serve_device_host(registration->options->device),
+        loom_serve_device_host(registration->device),
         loom_serve_image_model_generator(registration->model), &service_options,
         registration->stream, &registration->service, registration->allocator);
   }
@@ -318,8 +325,8 @@ static iree_status_t image_registration_activate(
   return registration_activate(
       &registration->activation,
       loom_serve_image_model_residency(registration->model),
-      loom_serve_device_host(registration->options->device),
-      registration->observer, flags, out_phase, registration->allocator);
+      loom_serve_device_host(registration->device), registration->observer,
+      flags, out_phase, registration->allocator);
 }
 
 static iree_status_t image_registration_create(
@@ -332,6 +339,8 @@ static iree_status_t image_registration_create(
                                              (void**)&registration));
   registration->allocator = allocator;
   registration->options = options;
+  registration->device = loom_serve_device_group_at(
+      options->device_group, configuration->device_index);
   registration->configuration = configuration;
   registration->observer = observer;
   registration->stream = stream;
@@ -345,7 +354,7 @@ static iree_status_t image_registration_create(
       .text_tokens = configuration->image.text_tokens,
       .command_quantum = configuration->image.command_quantum};
   iree_status_t status = loom_serve_image_load_create(
-      options->device, &model_options, observer.wake, observer.user_data,
+      registration->device, &model_options, observer.wake, observer.user_data,
       &registration->load, allocator);
   if (iree_status_is_ok(status)) {
     *out_registration =
@@ -368,6 +377,9 @@ typedef struct text_registration_t {
   iree_allocator_t allocator;
   // Borrowed server capabilities and reporting policy.
   const loom_serve_model_registration_options_t* options;
+  // Borrowed device resolved at declaration admission, alive through
+  // retirement.
+  loom_serve_device_t* device;
   // Immutable declaration retained by the stable registry slot.
   const loom_serve_model_configuration_t* configuration;
   // Owner scheduling callback; no destruction occurs on its calling thread.
@@ -481,8 +493,8 @@ static iree_status_t text_registration_activate(
   return registration_activate(
       &registration->activation,
       loom_serve_text_model_residency(registration->model),
-      loom_serve_device_host(registration->options->device),
-      registration->observer, flags, out_phase, registration->allocator);
+      loom_serve_device_host(registration->device), registration->observer,
+      flags, out_phase, registration->allocator);
 }
 
 static iree_status_t text_registration_create(
@@ -495,6 +507,8 @@ static iree_status_t text_registration_create(
                                              (void**)&registration));
   registration->allocator = allocator;
   registration->options = options;
+  registration->device = loom_serve_device_group_at(
+      options->device_group, configuration->device_index);
   registration->configuration = configuration;
   registration->observer = observer;
   registration->stream = stream;
@@ -519,7 +533,7 @@ static iree_status_t text_registration_create(
           (text->session_cache_capacity ? text->session_cache_capacity + 1 : 0),
       .options = configuration->options};
   iree_status_t status = loom_serve_text_load_create(
-      options->device, &model_options, observer.wake, observer.user_data,
+      registration->device, &model_options, observer.wake, observer.user_data,
       &registration->load, allocator);
   if (iree_status_is_ok(status)) {
     *out_registration =
@@ -555,9 +569,16 @@ static iree_status_t model_registration_create(
 
 static iree_status_t model_registration_query_status(void* self) {
   const loom_serve_model_registration_options_t* options = self;
-  loom_serve_memory_pool_t* pool =
-      loom_serve_device_memory_pool(options->device);
-  return pool ? loom_serve_memory_pool_query_status(pool) : iree_ok_status();
+  const iree_host_size_t device_count =
+      loom_serve_device_group_count(options->device_group);
+  for (iree_host_size_t i = 0; i < device_count; ++i) {
+    loom_serve_memory_pool_t* pool = loom_serve_device_memory_pool(
+        loom_serve_device_group_at(options->device_group, i));
+    if (pool) {
+      IREE_RETURN_IF_ERROR(loom_serve_memory_pool_query_status(pool));
+    }
+  }
+  return iree_ok_status();
 }
 
 loom_serve_registration_factory_t loom_serve_model_registration_factory(
@@ -568,6 +589,7 @@ loom_serve_registration_factory_t loom_serve_model_registration_factory(
                (1u << LOOM_SERVE_MODEL_KIND_DECISION) |
                (1u << LOOM_SERVE_MODEL_KIND_IMAGE) |
                (1u << LOOM_SERVE_MODEL_KIND_TEXT),
+      .device_count = loom_serve_device_group_count(options->device_group),
       .create = model_registration_create,
       .query_status = model_registration_query_status};
 }

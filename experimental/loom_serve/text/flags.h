@@ -31,7 +31,7 @@ typedef struct loom_serve_text_flag_defaults_t {
 iree_host_size_t loom_serve_text_explicit_shape_count_from_flags(void);
 iree_host_size_t loom_serve_text_draft_depth_from_flags(void);
 iree_status_t loom_serve_text_model_create_from_flags(
-    loom_serve_device_t* device,
+    loom_serve_device_group_t* group,
     const loom_serve_text_flag_defaults_t* defaults,
     loom_serve_text_model_t** out_model, iree_allocator_t host_allocator);
 

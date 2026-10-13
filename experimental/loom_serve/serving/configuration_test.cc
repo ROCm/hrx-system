@@ -89,6 +89,55 @@ TEST_F(ConfigurationTest, AdmissionIsAnIndependentRegistrationSetting) {
   }
 }
 
+TEST_F(ConfigurationTest, OmittedDeviceRequiresExactlyOneGroupMember) {
+  IREE_ASSERT_OK(Parse(Document("embedding", R"(,"assets":".")")));
+  EXPECT_EQ(model_.device_index, IREE_HOST_SIZE_MAX);
+  iree_host_size_t index = 17;
+  for (iree_host_size_t count : {0u, 2u}) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_serve_model_configuration_resolve_device(&model_, count, &index));
+    EXPECT_EQ(index, 17u);
+  }
+  IREE_ASSERT_OK(
+      loom_serve_model_configuration_resolve_device(&model_, 1, &index));
+  EXPECT_EQ(index, 0u);
+  EXPECT_EQ(model_.device_index, IREE_HOST_SIZE_MAX);
+}
+
+TEST_F(ConfigurationTest, ExplicitDeviceResolvesAtGroupAdmission) {
+  for (iree_host_size_t index : {0u, 1u, 31u}) {
+    IREE_ASSERT_OK(Parse(Document("embedding", R"(,"assets":".")",
+                                  ",\"device\":" + std::to_string(index))));
+    EXPECT_EQ(model_.device_index, index);
+    iree_host_size_t resolved = IREE_HOST_SIZE_MAX;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          loom_serve_model_configuration_resolve_device(
+                              &model_, index, &resolved));
+    EXPECT_EQ(resolved, IREE_HOST_SIZE_MAX);
+    IREE_ASSERT_OK(loom_serve_model_configuration_resolve_device(
+        &model_, index + 1, &resolved));
+    EXPECT_EQ(resolved, index);
+  }
+}
+
+TEST_F(ConfigurationTest, InvalidDeviceOrdinalsRejectBeforeIo) {
+  for (const char* field :
+       {R"(,"device":-1)", R"(,"device":1.5)", R"(,"device":"0")",
+        R"(,"device":null)", R"(,"device":false)",
+        R"(,"device":18446744073709551615)", R"(,"device":0,"device":1)"}) {
+    SCOPED_TRACE(field);
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        Parse(Document("embedding", R"(,"assets":".")", field)));
+    EXPECT_EQ(model_.name.data, nullptr);
+  }
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        Parse(Document("embedding", R"(,"assets":".")",
+                                       R"(,"device":18446744073709551616)")));
+  EXPECT_EQ(model_.name.data, nullptr);
+}
+
 TEST_F(ConfigurationTest, HttpRelativePathsRequireAnExplicitBase) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse(Document("embedding", R"(,"assets":".")"), {}));

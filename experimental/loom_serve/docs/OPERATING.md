@@ -9,10 +9,13 @@ model development, but are not required to operate this server.
 
 The learned-model deployments use Linux with ROCr and an AMD gfx11 GPU. The CLI
 requires an explicit HAL device URI with `--device`; no backend is selected by
-default. The CLI currently selects one device; source text, embedding and decision
-fixtures also run on x86 CPU and Vulkan, and the image fixture runs on Vulkan.
-CPU and Vulkan use `--pool_backing=fixed`. The device-group foundation is not
-yet a multi-device placement interface.
+default. Repeat `--device` to construct an ordered group, and set each model
+document's top-level `device` index when the group has several members. Source
+text, embedding and decision fixtures also run on x86 CPU and Vulkan, and the
+image fixture runs on Vulkan. CPU and Vulkan use `--pool_backing=fixed`.
+All URIs pass to HAL unchanged. No local inference device is added implicitly;
+available URI schemes depend on the linked drivers. Each model currently uses
+one device, with independent device pools rather than cross-device sharing.
 The [resident embedding fixture](../models/fixtures/embedding/README.md#verification)
 also exercises actual XDNA HTTP execution with a target-specific source variant;
 the ordinary command-based catalog is not an NPU deployment recipe.
@@ -111,16 +114,16 @@ startup. Unknown, duplicate, wrongly typed and wrong-modality fields reject.
 
 | Process option | Default and scope |
 | --- | --- |
-| `--device` | Required; one explicit HAL device URI for all deployments |
+| `--device` | Required; repeat HAL device URIs in group order. Multi-device model documents require a `device` index |
 | `--listen` | `127.0.0.1:8080`; repeat for numeric IPv4, `[IPv6]:port` or `unix:path` listeners |
 | `--workers` | `8`; shared CPU task workers for JIT, scheduling and media work, not one thread per connection |
 | `--connections` | `64`; admitted connections across all listeners, including SSE, incomplete and draining requests. Each listener may park one additional unadmitted peer; further arrivals stay in its kernel backlog |
 | `--held_requests` | Half the connection limit; requests held outside closed/preparing model admission. Must be smaller than `connections`; zero rejects instead of holding |
 | `--model_capacity` | `32`; all registered names, including drained, failed and retiring entries |
 | `--request_body_bytes` | `8388608`; maximum HTTP body per connection, independent of tokenizer/model limits |
-| `--pool_backing` | `elastic`; demand-committed parameter/state slabs. `fixed` eagerly backs storage and supports device address sanitization |
-| `--slab_bytes` | `2097152`; physical slab granularity. Zero selects the allocator recommendation |
-| `--memory_bytes` | `0`; no serving-imposed retained parameter/state budget. A nonzero byte limit requires elastic backing |
+| `--pool_backing` | `elastic`; demand-committed parameter/state slabs on each device. `fixed` eagerly backs storage and supports device address sanitization |
+| `--slab_bytes` | `2097152`; physical slab granularity on each device. Zero selects the allocator recommendation |
+| `--memory_bytes` | `0`; no serving-imposed retained parameter/state budget. A nonzero byte limit requires elastic backing and exactly one device |
 | `--heartbeat_ms` | `1000`; periodic model telemetry. Zero disables periodic samples, not counters or request events |
 
 The memory limit is **not a process-RAM or total-VRAM limit**. Private command

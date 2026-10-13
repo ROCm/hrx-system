@@ -528,8 +528,9 @@ static iree_status_t router_describe_service(
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         output,
         ",\"incarnation\":%" PRIu64
-        ",\"registration\":\"%s\",\"parameter_pinned\":%s",
-        admission->incarnation, loom_serve_registry_phase(admission),
+        ",\"device\":%zu,\"registration\":\"%s\",\"parameter_pinned\":%s",
+        admission->incarnation, admission->configuration.device_index,
+        loom_serve_registry_phase(admission),
         admission->pinned ? "true" : "false"));
     if (!iree_status_is_ok(admission->status)) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(

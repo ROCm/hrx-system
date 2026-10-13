@@ -101,7 +101,6 @@ int main(int argc, char** argv) {
   }
   loom_serve_text_model_t* model = NULL;
   loom_serve_device_group_t* group = NULL;
-  loom_serve_device_t* device = NULL;
   loom_serve_host_t* host = NULL;
   loom_serve_http_server_t* server = NULL;
   loom_serve_http_listener_t* listener = NULL;
@@ -119,8 +118,7 @@ int main(int argc, char** argv) {
     status = loom_serve_device_group_create_from_flags(host, &group, allocator);
   }
   if (iree_status_is_ok(status)) {
-    device = loom_serve_device_group_at(group, 0);
-    status = loom_serve_text_model_create_from_flags(device, &defaults, &model,
+    status = loom_serve_text_model_create_from_flags(group, &defaults, &model,
                                                      allocator);
   }
   iree_host_size_t epoch_count = 0;

@@ -73,7 +73,7 @@ typedef struct loom_serve_finite_configuration_t {
 } loom_serve_finite_configuration_t;
 
 // One source-defined deployment. Entries have independent logical state and
-// admission capacity; the executable supplies their shared device. Authored
+// admission capacity; the executable supplies their device group. Authored
 // paths are retained unchanged, with a separate local directory base.
 typedef struct loom_serve_model_configuration_t {
   // Allocator owning decoded strings, retained when this declaration is moved.
@@ -82,6 +82,9 @@ typedef struct loom_serve_model_configuration_t {
   loom_serve_model_kind_t kind;
   // Owned visible ASCII identifier used in JSON and HTTP header selectors.
   iree_string_view_t name;
+  // Device-group ordinal, or IREE_HOST_SIZE_MAX when the document omits it.
+  // The registry replaces omission with zero only for a one-device group.
+  iree_host_size_t device_index;
   // Owned program role paths, provider array/strings, and local directory base.
   loom_serve_sources_t sources;
   // Owned JSON object interpreted by the source prepare program.
@@ -102,11 +105,12 @@ typedef struct loom_serve_model_configuration_t {
   };
 } loom_serve_model_configuration_t;
 
-// Parses a complete {name, definition, admission?, base_directory?} model
-// document. The definition owns kind, prepare/control paths, sources array,
-// modality-specific inputs/capacities, and source-owned options. Unknown,
-// duplicate, wrong-kind and invalid fields reject before any model I/O.
-// Admission defaults to "open"; "drained" defers preparation.
+// Parses a complete {name, definition, device?, admission?, base_directory?}
+// model document. The definition owns kind, prepare/control paths, sources
+// array, modality-specific inputs/capacities, and source-owned options.
+// Unknown, duplicate, wrong-kind and invalid fields reject before any model
+// I/O. Admission defaults to "open"; "drained" defers preparation. Device
+// selection is a nonnegative group ordinal; membership is resolved separately.
 // document_directory supplies the local base for file input. HTTP passes an
 // empty base: relative references then require an explicit absolute
 // base_directory in the document. That explicit base overrides the file base.
@@ -124,6 +128,15 @@ void loom_serve_model_configuration_deinitialize(
 iree_status_t loom_serve_model_configuration_load(
     iree_string_view_t path, loom_serve_model_configuration_t* out_model,
     iree_allocator_t host_allocator);
+
+// Resolves this deployment's device against the caller's immutable group size.
+// Omission is accepted only with exactly one device. Both explicit and implied
+// bindings must name an available ordinal. Does not mutate the declaration or
+// access source files/devices. Call once at admission, before publishing a
+// model.
+iree_status_t loom_serve_model_configuration_resolve_device(
+    const loom_serve_model_configuration_t* model,
+    iree_host_size_t device_count, iree_host_size_t* out_device_index);
 
 #ifdef __cplusplus
 }  // extern "C"

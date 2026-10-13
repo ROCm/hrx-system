@@ -1073,19 +1073,15 @@ int main(int argc, char** argv) {
   const auto allocator = iree_allocator_system();
   loom_serve_host_t* host = nullptr;
   loom_serve_device_group_t* group = nullptr;
-  loom_serve_device_t* device = nullptr;
   loom_serve_text_model_t* model = nullptr;
   iree_status_code_t terminal_code = IREE_STATUS_OK;
   auto status = loom_serve_host_create(1, &host, allocator);
   if (iree_status_is_ok(status)) {
     status = loom_serve_device_group_create_from_flags(host, &group, allocator);
   }
-  if (iree_status_is_ok(status)) {
-    device = loom_serve_device_group_at(group, 0);
-  }
   const loom_serve_text_flag_defaults_t defaults = {.row_count = 8};
   if (iree_status_is_ok(status)) {
-    status = loom_serve_text_model_create_from_flags(device, &defaults, &model,
+    status = loom_serve_text_model_create_from_flags(group, &defaults, &model,
                                                      allocator);
   }
   if (iree_status_is_ok(status)) {

@@ -6,8 +6,9 @@ details the serving and ownership contracts behind that flow.
 
 `//experimental/loom_serve/serving:server` serves named text, image, embedding and
 decision deployments through one logical HTTP server with independently owned
-TCP, IPv6, and Unix-domain listeners. All deployments borrow
-one device, parameter residency cache and private command workspace backing.
+TCP, IPv6, and Unix-domain listeners. Deployments borrow their selected device
+record from one application group. Models on the same record share its parameter
+residency cache and private command workspace backing.
 Each owns its work and
 feedback timelines, source-JIT programs and weights. Text deployments own their
 logical KV pool, sessions and checkpoints; image deployments own their finite
@@ -46,7 +47,7 @@ model-specific C in the executable.
 
 ## Launch
 
-The server starts empty when no `--model` is supplied. It still owns its configured device and shared task/I/O infrastructure;
+The server starts empty when no `--model` is supplied. It still owns its configured devices and shared task/I/O infrastructure;
 health, model discovery, status, metrics and diagnostic endpoints remain live.
 An empty server publishes empty model/status lists and zero model-work totals.
 Unknown-model inference and tokenization requests return HTTP 404. Text, image,
@@ -92,8 +93,13 @@ build_tools/bin/iree-bazel-run --config=opt \
   --pool_backing=elastic --memory_bytes=38654705664
 ~~~
 
-The repository's build and hardware-execution policy applies. Required `--device`,
-`--slab_bytes` and `--memory_bytes` configure the shared device. `--workers`
+The repository's build and hardware-execution policy applies. Required `--device`
+is repeatable in group order. A deployment's top-level `device` index selects
+its record; omission is valid only with one device, including for drained
+registrations. `--slab_bytes` applies to each record; nonzero `--memory_bytes`
+requires exactly one device until shared multi-device budgets are supported.
+URI interpretation belongs to HAL and never adds an implicit local device.
+`--workers`
 sets the shared CPU worker maximum (eight by default). Connections
 and HTTP body storage have independent bounds through `--connections` and
 `--request_body_bytes`. Each model's `pending_requests` defaults to 32 and

@@ -461,11 +461,13 @@ owner with actual queues.
 
 ## Single-node scope and remote execution
 
-The current executable serves source-defined models on one selected device in
-one node. Its startup creates one application device group, then passes member
-zero to the model registration factory. A model package needs no rank or
-placement description. Neither changing the device URI nor adding another
-group member partitions a model or enables tensor/pipeline parallelism.
+The executable creates one application group from repeated `--device` URIs.
+Each deployment selects a record through its top-level `device` index; only a
+one-device group permits omission. The registry resolves that binding before
+publication, including drained registrations, and the factory passes the
+selected record to the model. Each model still uses one execution domain.
+Neither changing the device URI nor adding another group member partitions a
+model or enables tensor/pipeline parallelism.
 
 The intended extension is one serving authority controlling cooperating local
 and remote HAL devices in that same application group. Remote workers execute
@@ -494,7 +496,7 @@ The single-device materialization is localized, but has not been generalized:
 
 | Current assumption | Extension boundary |
 | --- | --- |
-| The registration factory receives one device record | Bind a model's required execution and memory resources during preparation; retain the same opaque service lifecycle |
+| Each deployment selects one device record from the group | Bind a model's required execution and memory resources during preparation; retain the same opaque service lifecycle |
 | Each JIT catalog binds one exact queue/profile pair and the parameter loader indexes host-local files | Bind each compiled product to its actual execution resource and resolve asset metadata separately from remote-local parameter payloads |
 | One `runner` module binds every command and feedback slot to one execution | Use the HAL-enabled VM's explicit resources and completion identities; a stage index or returned `i64` alone cannot identify another domain |
 | Model adapters bind commands, storage and completion to one execution | Join the actual producers, transfers and final readers for that invocation without waiting for unrelated work |
