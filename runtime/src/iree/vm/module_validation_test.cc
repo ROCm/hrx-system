@@ -145,7 +145,58 @@ TEST(VMModuleValidationTest, RejectsIncompleteOrIncompatibleVtables) {
 
   module.vtable().abi_version = IREE_VM_MODULE_ABI_VERSION_0;
   module.vtable().query_export = nullptr;
+  module.descriptor().counts.export_count = 1;
   ExpectRejected(module);
+}
+
+TEST(VMModuleValidationTest, EmptyDomainsNeedNoCallbacks) {
+  TableModule module;
+  module.vtable().function_start = nullptr;
+  module.vtable().function_resume = nullptr;
+  module.vtable().query_import_group = nullptr;
+  module.vtable().query_import = nullptr;
+  module.vtable().query_export = nullptr;
+  module.vtable().query_callable_type = nullptr;
+  IREE_ASSERT_OK(module.Publish());
+  iree_vm_export_t export_value;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        iree_vm_module_lookup_export(
+                            module.module(), IREE_SV("absent"), &export_value));
+  module.ReleaseOwner();
+  EXPECT_EQ(module.destruction_count(), 1);
+}
+
+TEST(VMModuleValidationTest, NonemptyDomainsRequireCallbacks) {
+  for (unsigned domain = 0; domain < 6; ++domain) {
+    TableModule module;
+    switch (domain) {
+      case 0:
+        module.descriptor().counts.function_count = 1;
+        module.vtable().function_start = nullptr;
+        break;
+      case 1:
+        module.descriptor().counts.function_count = 1;
+        module.vtable().function_resume = nullptr;
+        break;
+      case 2:
+        module.descriptor().counts.import_group_count = 1;
+        module.vtable().query_import_group = nullptr;
+        break;
+      case 3:
+        module.descriptor().counts.import_count = 1;
+        module.vtable().query_import = nullptr;
+        break;
+      case 4:
+        module.descriptor().counts.export_count = 1;
+        module.vtable().query_export = nullptr;
+        break;
+      case 5:
+        module.descriptor().counts.callable_type_count = 1;
+        module.vtable().query_callable_type = nullptr;
+        break;
+    }
+    ExpectRejected(module);
+  }
 }
 
 TEST(VMModuleValidationTest, RejectsMalformedSemanticTables) {

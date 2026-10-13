@@ -46,10 +46,8 @@ static iree_status_t iree_vm_module_validate_vtable(
                             "module ABI version %" PRIu32 " is unsupported",
                             vtable->abi_version);
   }
-  if (!vtable->destroy || !vtable->function_start || !vtable->function_resume ||
-      !vtable->query_import_group || !vtable->query_import ||
-      !vtable->query_export || !vtable->query_callable_type ||
-      !vtable->query_presentation || !vtable->metadata_by_ordinal) {
+  if (!vtable->destroy || !vtable->query_presentation ||
+      !vtable->metadata_by_ordinal) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "module vtable is missing a required callback");
   }
@@ -592,6 +590,16 @@ iree_vm_module_initialize(const iree_vm_module_vtable_t* vtable,
   out_module->descriptor = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_module_validate_vtable(vtable));
   IREE_RETURN_IF_ERROR(iree_vm_module_validate_descriptor(descriptor));
+  const iree_vm_module_counts_t* counts = &descriptor->counts;
+  if ((counts->function_count &&
+       (!vtable->function_start || !vtable->function_resume)) ||
+      (counts->import_group_count && !vtable->query_import_group) ||
+      (counts->import_count && !vtable->query_import) ||
+      (counts->export_count && !vtable->query_export) ||
+      (counts->callable_type_count && !vtable->query_callable_type)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "nonempty module domain requires its callbacks");
+  }
   IREE_RETURN_IF_ERROR(iree_vm_module_validate_native(descriptor));
 
   out_module->vtable = vtable;

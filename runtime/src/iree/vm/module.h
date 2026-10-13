@@ -324,9 +324,11 @@ typedef void(IREE_API_PTR* iree_vm_module_metadata_by_ordinal_fn_t)(
 enum { IREE_VM_MODULE_ABI_VERSION_0 = 0 };
 
 // Versioned generic module implementation interface. State lifecycle callbacks
-// are independently nullable identity operations; every other callback is
-// required in version zero. Common VM code allocates and routes process storage
-// but never interprets it.
+// are independently nullable identity operations. Execution and ordinal-query
+// callbacks are required only when their corresponding descriptor count is
+// nonzero. Native-only modules need no ordinary callable implementation.
+// Destruction and reflection callbacks are always required. Common VM code
+// allocates and routes process storage but never interprets it.
 struct iree_vm_module_vtable_t {
   // Accessible bytes in this vtable.
   uint32_t structure_size;
