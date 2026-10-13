@@ -1,0 +1,135 @@
+template.decl @normalization.row_inverse(%rows: index, %width: index, %threads: index, %row: index, %input: buffer, %epsilon: f32) -> (f32)
+
+template.decl @normalization.zero_centered_bf16(%value: bf16, %weight: f32, %inverse: f32) -> (bf16)
+
+template.decl @normalization.zero_centered_rows_bf16(%rows: index, %width: index, %threads: index, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @normalization.scaled_bf16(%value: bf16, %weight: bf16, %inverse: f32) -> (bf16)
+
+template.decl @normalization.scaled_rows_bf16(%rows: index, %width: index, %threads: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @modulation.affine_bf16(%value: bf16, %scale: bf16, %scale_table: f32, %shift: bf16, %shift_table: f32) -> (bf16)
+
+template.decl @modulation.combine_bf16(%value: bf16, %table: f32) -> (bf16)
+
+// One workgroup reduces one row. Input width is divisible by the supplied
+// workgroup size; concrete wrappers establish shape and launch facts.
+template.def<@normalization.row_inverse> device @normalization_row_inverse(%rows: index, %width: index, %threads: index, %row: index, %input: buffer, %epsilon: f32) -> (f32) {
+  %origin = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %c0_0 = scalar.constant 0.0 : f32
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %partial = scf.for %column = [%lane to %width step %threads](%acc = %c0_0 : f32) -> (f32) {
+    %stored = view.load %input_view[%row, %column] : view<[%rows]x[%width]xbf16> -> bf16
+    %value = scalar.extf %stored : bf16 to f32
+    %square = scalar.mulf %value, %value : f32
+    %sum = scalar.addf %acc, %square : f32
+    scf.yield %sum : f32
+  }
+  %sum = kernel.workgroup.reduce<addf> %partial : f32
+  %width_i32 = index.cast %width : index to i32
+  %width_f32 = scalar.uitofp %width_i32 : i32 to f32
+  %mean = scalar.divf %sum, %width_f32 : f32
+  %variance = scalar.addf %mean, %epsilon : f32
+  %inverse = scalar.rsqrtf<afn> %variance : f32
+  template.return %inverse : f32
+}
+
+// Matches a BF16-loaded zero-centered scale with F32 RMS arithmetic. The
+// scale-plus-one operation rounds to BF16 before its F32 multiplication.
+template.def<@normalization.zero_centered_bf16> device @normalization_zero_centered_bf16(%value: bf16, %weight: f32, %inverse: f32) -> (bf16) {
+  %weight_bf16 = scalar.fptrunc %weight : f32 to bf16
+  %weight_f32 = scalar.extf %weight_bf16 : bf16 to f32
+  %c1_0 = scalar.constant 1.0 : f32
+  %scale_f32 = scalar.addf %weight_f32, %c1_0 : f32
+  %scale_bf16 = scalar.fptrunc %scale_f32 : f32 to bf16
+  %scale = scalar.extf %scale_bf16 : bf16 to f32
+  %value_f32 = scalar.extf %value : bf16 to f32
+  %normalized = scalar.mulf %value_f32, %inverse : f32
+  %result_f32 = scalar.mulf %normalized, %scale : f32
+  %result = scalar.fptrunc %result_f32 : f32 to bf16
+  template.return %result : bf16
+}
+
+// Row-wise zero-centered RMS normalization. A row may be a complete token
+// or one attention head; the caller supplies its shape and workgroup width.
+template.def<@normalization.zero_centered_rows_bf16> device @normalization_zero_centered_rows_bf16(%rows: index, %width: index, %threads: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %row = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  %inverse = template.apply<@normalization.row_inverse>(%rows, %width, %threads, %row, %input, %epsilon) : (index, index, index, index, buffer, f32) -> (f32)
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<[%width]xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  scf.for %column = [%lane to %width step %threads] {
+    %value = view.load %input_view[%row, %column] : view<[%rows]x[%width]xbf16> -> bf16
+    %scale = view.load %weight_view[%column] : view<[%width]xf32> -> f32
+    %result = template.apply<@normalization.zero_centered_bf16>(%value, %scale, %inverse) : (bf16, f32, f32) -> (bf16)
+    view.store %result, %output_view[%row, %column] : bf16, view<[%rows]x[%width]xbf16>
+  }
+  template.return
+}
+
+// Scaled RMS rounds the normalized value before multiplying the BF16 weight.
+// There is no zero-centered scale offset.
+template.def<@normalization.scaled_bf16> device @normalization_scaled_bf16(%value: bf16, %weight: bf16, %inverse: f32) -> (bf16) {
+  %input = scalar.extf %value : bf16 to f32
+  %normalized_f32 = scalar.mulf %input, %inverse : f32
+  %normalized = scalar.fptrunc %normalized_f32 : f32 to bf16
+  %rounded = scalar.extf %normalized : bf16 to f32
+  %scale = scalar.extf %weight : bf16 to f32
+  %scaled = scalar.mulf %rounded, %scale : f32
+  %result = scalar.fptrunc %scaled : f32 to bf16
+  template.return %result : bf16
+}
+
+// One workgroup owns one complete row. The row reduction finishes before
+// any output write, allowing source-owned input/output storage to coincide.
+template.def<@normalization.scaled_rows_bf16> device @normalization_scaled_rows_bf16(%rows: index, %width: index, %threads: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %row = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %inverse = template.apply<@normalization.row_inverse>(%rows, %width, %threads, %row, %input, %epsilon) : (index, index, index, index, buffer, f32) -> (f32)
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<[%width]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  scf.for %column = [%lane to %width step %threads] {
+    %value = view.load %input_view[%row, %column] : view<[%rows]x[%width]xbf16> -> bf16
+    %scale = view.load %weight_view[%column] : view<[%width]xbf16> -> bf16
+    %result = template.apply<@normalization.scaled_bf16>(%value, %scale, %inverse) : (bf16, bf16, f32) -> (bf16)
+    view.store %result, %output_view[%row, %column] : bf16, view<[%rows]x[%width]xbf16>
+  }
+  template.return
+}
+
+// Fuses pointwise modulation without removing tensor-rounding boundaries:
+// tables are loaded as BF16, each addition and multiply produces BF16.
+template.def<@modulation.affine_bf16> device @modulation_affine_bf16(%value: bf16, %scale: bf16, %scale_table: f32, %shift: bf16, %shift_table: f32) -> (bf16) {
+  %scale_sum_bf16 = template.apply<@modulation.combine_bf16>(%scale, %scale_table) : (bf16, f32) -> (bf16)
+  %shift_sum_bf16 = template.apply<@modulation.combine_bf16>(%shift, %shift_table) : (bf16, f32) -> (bf16)
+  %scale_sum_f32 = scalar.extf %scale_sum_bf16 : bf16 to f32
+  %shift_sum_f32 = scalar.extf %shift_sum_bf16 : bf16 to f32
+  %c1_0 = scalar.constant 1.0 : f32
+  %affine_scale = scalar.addf %scale_sum_f32, %c1_0 : f32
+  %affine_scale_bf16 = scalar.fptrunc %affine_scale : f32 to bf16
+  %affine_scale_f32 = scalar.extf %affine_scale_bf16 : bf16 to f32
+  %value_f32 = scalar.extf %value : bf16 to f32
+  %scaled = scalar.mulf %value_f32, %affine_scale_f32 : f32
+  %scaled_bf16 = scalar.fptrunc %scaled : f32 to bf16
+  %scaled_f32 = scalar.extf %scaled_bf16 : bf16 to f32
+  %result_f32 = scalar.addf %scaled_f32, %shift_sum_f32 : f32
+  %result = scalar.fptrunc %result_f32 : f32 to bf16
+  template.return %result : bf16
+}
+
+// Checkpoint tables round to BF16 on model load, and their sum with the shared
+// time modulation rounds to BF16 before any affine or residual arithmetic.
+template.def<@modulation.combine_bf16> device @modulation_combine_bf16(%value: bf16, %table: f32) -> (bf16) {
+  %table_bf16 = scalar.fptrunc %table : f32 to bf16
+  %table_f32 = scalar.extf %table_bf16 : bf16 to f32
+  %value_f32 = scalar.extf %value : bf16 to f32
+  %sum = scalar.addf %value_f32, %table_f32 : f32
+  %result = scalar.fptrunc %sum : f32 to bf16
+  template.return %result : bf16
+}
