@@ -304,14 +304,15 @@ iree_status_t iree_hal_amdgpu_staging_pool_initialize(
   out_pool->slot_mask = options->slot_count - 1u;
   iree_slim_mutex_initialize(&out_pool->mutex);
 
-  hsa_amd_memory_pool_t memory_pool = host_memory_pools->coarse_pool;
-  if (options->force_fine_host_memory || !memory_pool.handle) {
-    memory_pool = host_memory_pools->fine_pool;
-  }
+  // Slots alternate between CPU-authored uploads and GPU-authored downloads.
+  // Fine-grained memory lets each consumer observe the preceding writer
+  // without an explicit HSA ownership transfer at every reuse.
+  hsa_amd_memory_pool_t memory_pool = host_memory_pools->fine_pool;
   iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!memory_pool.handle)) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "AMDGPU staging requires a host memory pool");
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU staging requires a fine-grained host memory pool");
   }
 
   iree_hal_amdgpu_slab_provider_memory_pool_properties_t memory_pool_properties;

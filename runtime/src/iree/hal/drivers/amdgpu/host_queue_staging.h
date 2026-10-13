@@ -42,11 +42,6 @@ typedef struct iree_hal_amdgpu_staging_pool_options_t {
   iree_host_size_t slot_size;
   // Number of staging slots. Must be non-zero and a power of two.
   uint32_t slot_count;
-  // Forces the staging allocation to use the fine-grained host pool instead of
-  // the preferred coarse-grained host pool.
-  uint32_t force_fine_host_memory : 1;
-  // Reserved for future staging allocation policy bits.
-  uint32_t reserved : 31;
 } iree_hal_amdgpu_staging_pool_options_t;
 
 // Fixed-size host/device-visible staging pool shared by one physical device.

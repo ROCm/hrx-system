@@ -912,6 +912,101 @@ TEST_F(HostQueueStagingTest,
   ExpectByteRangeMatches(output_data, file_data);
 }
 
+TEST_F(HostQueueStagingTest, BidirectionalTransferCyclesObserveDeviceWrites) {
+  static constexpr size_t kIterationCount = 256;
+  static constexpr std::array<iree_device_size_t, 3> kBufferSizes = {136, 136,
+                                                                     20};
+  static constexpr std::array<uint8_t, 3> kUploadPatterns = {17, 93, 0xFF};
+  static constexpr uint8_t kDispatchPattern = 0xA5;
+  static constexpr std::array<uint8_t, 3> kExpectedPatterns = {
+      kUploadPatterns[0], kUploadPatterns[1], kDispatchPattern};
+
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+
+  std::array<Ref<iree_hal_buffer_t>, 3> buffers;
+  for (size_t i = 0; i < buffers.size(); ++i) {
+    IREE_ASSERT_OK(CreatePatternedDeviceBuffer(
+        test_device.allocator(), test_device.base_device(), test_device.queue(),
+        kBufferSizes[i], /*pattern=*/0, buffers[i].out()));
+  }
+
+  Ref<iree_hal_semaphore_t> progress_semaphore;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), progress_semaphore.out()));
+  iree_hal_semaphore_t* progress_semaphore_ptr = progress_semaphore.get();
+  uint64_t progress_value = 0;
+
+  for (size_t iteration = 0; iteration < kIterationCount; ++iteration) {
+    SCOPED_TRACE(iteration);
+    std::array<std::vector<uint8_t>, 3> host_buffers = {
+        std::vector<uint8_t>(static_cast<size_t>(kBufferSizes[0]),
+                             kUploadPatterns[0]),
+        std::vector<uint8_t>(static_cast<size_t>(kBufferSizes[1]),
+                             kUploadPatterns[1]),
+        std::vector<uint8_t>(static_cast<size_t>(kBufferSizes[2]),
+                             kUploadPatterns[2]),
+    };
+
+    std::array<iree_hal_transfer_operation_t, 3> operations;
+    for (size_t i = 0; i < operations.size(); ++i) {
+      operations[i] = iree_hal_transfer_operation_t{
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+          .upload =
+              {
+                  .source = host_buffers[i].data(),
+                  .target_buffer = buffers[i],
+                  .length = kBufferSizes[i],
+              },
+      };
+    }
+    uint64_t upload_value = ++progress_value;
+    IREE_ASSERT_OK(iree_hal_queue_transfer(
+        test_device.queue(), iree_hal_semaphore_list_empty(),
+        MakeSemaphoreList(&progress_semaphore_ptr, &upload_value),
+        operations.size(), operations.data(), /*barriers=*/nullptr));
+
+    uint64_t dispatch_value = ++progress_value;
+    IREE_ASSERT_OK(iree_hal_queue_fill(
+        test_device.queue(),
+        MakeSemaphoreList(&progress_semaphore_ptr, &upload_value),
+        MakeSemaphoreList(&progress_semaphore_ptr, &dispatch_value), buffers[2],
+        /*target_offset=*/0, kBufferSizes[2], &kDispatchPattern,
+        sizeof(kDispatchPattern), /*barriers=*/nullptr,
+        IREE_HAL_FILL_FLAG_NONE));
+
+    for (size_t i = 0; i < operations.size(); ++i) {
+      operations[i] = iree_hal_transfer_operation_t{
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+          .download =
+              {
+                  .source_buffer = buffers[i],
+                  .target = host_buffers[i].data(),
+                  .length = kBufferSizes[i],
+              },
+      };
+    }
+    uint64_t download_value = ++progress_value;
+    IREE_ASSERT_OK(iree_hal_queue_transfer(
+        test_device.queue(),
+        MakeSemaphoreList(&progress_semaphore_ptr, &dispatch_value),
+        MakeSemaphoreList(&progress_semaphore_ptr, &download_value),
+        operations.size(), operations.data(), /*barriers=*/nullptr));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(progress_semaphore, download_value,
+                                           iree_infinite_timeout(),
+                                           IREE_ASYNC_WAIT_FLAG_NONE));
+
+    for (size_t i = 0; i < host_buffers.size(); ++i) {
+      ExpectByteRangeRepeated(host_buffers[i], kExpectedPatterns[i]);
+    }
+  }
+}
+
 TEST_F(HostQueueStagingTest, OneSlotLargeWriteCompletesThroughSlotWaiter) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
