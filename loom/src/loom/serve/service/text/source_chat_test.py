@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""CPU-only checks use the actual source policy and public request observer."""
+"""Source chat-policy checks through the actual VM and tokenizer."""
 
 import json
 import subprocess

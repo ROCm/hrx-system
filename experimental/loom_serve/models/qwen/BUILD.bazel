@@ -447,11 +447,11 @@ py_test(
     name = "request_check_test",
     size = "small",
     srcs = ["request_check_test.py"],
-    args = ["$(rootpath //experimental/loom_serve/text:request_check)"],
+    args = ["$(rootpath //loom/src/loom/serve/testing:text_request_check)"],
     data = [
         "control.loom",
         "testdata/portable_chat.loom",
-        "//experimental/loom_serve/text:request_check",
+        "//loom/src/loom/serve/testing:text_request_check",
     ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",

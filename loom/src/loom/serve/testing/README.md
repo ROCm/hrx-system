@@ -8,6 +8,11 @@ SDK. Integration tests stay beside the server or service they exercise.
 reproduces a full Linux stderr pipe so a lifecycle test can prove that a blocked
 diagnostic sink cannot stop inference on its only worker.
 
+The test-only native text request observer loads a source VM policy and
+tokenizer, prepares a real chat request and reports its tokens and completed
+transcript. Both the deterministic text fixture and external model checks use
+this path without loading numerical weights or acquiring a device.
+
 The local `loom_serve_testing` Python package contains three independent helpers:
 
 - `http` owns child-process startup, HTTP control calls, joined shutdown and

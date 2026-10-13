@@ -148,8 +148,8 @@ format does not change this path or ownership contract.
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve/models/fixtures/text:request_test \
-  //experimental/loom_serve/models/fixtures/text:client_test \
+  //loom/src/loom/serve/service/text:source_chat_test \
+  //loom/src/loom/tooling/target/cpu/serve:text_client_test \
   //loom/src/loom/tooling/target/cpu/serve:source_text_service_test \
   //loom/src/loom/tooling/target/amdgpu/serve:source_text_service_test \
   //loom/src/loom/tooling/target/spirv/serve:source_text_service_test

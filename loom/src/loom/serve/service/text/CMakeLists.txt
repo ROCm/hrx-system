@@ -9,6 +9,30 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_VM)
+iree_py_test(
+  NAME
+    source_chat_test
+  MAIN
+    "source_chat_test.py"
+  SRCS
+    "source_chat_test.py"
+  ARGS
+    "{{$<TARGET_FILE:loom::serve::testing::text_request_check>}}"
+    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/control.loom}}"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/control.loom"
+    "loom::serve::fixture::text::sources"
+    "loom::serve::testing::text_request_check"
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
+)
+endif()
+
 loom_cc_library(
   NAME
     admission

@@ -45,6 +45,30 @@ iree_py_library(
     "."
 )
 
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_binary(
+  NAME
+    text_request_check
+  SRCS
+    "text_request.c"
+  DEPS
+    iree::base
+    iree::base::tooling::flags
+    iree::io::file_handle
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
+    iree::vm
+    loom::serve::runtime::program
+    loom::serve::runtime::program::compilation
+    loom::serve::runtime::program::input
+    loom::serve::runtime::program::json
+    loom::serve::service::text::chat
+    loom::util::json
+    loom::util::stream
+  TESTONLY
+)
+endif()
+
 iree_py_test(
   NAME
     chat_test

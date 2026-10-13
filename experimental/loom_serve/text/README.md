@@ -696,7 +696,7 @@ without loading model weights or creating a device:
 
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \
-  //experimental/loom_serve/text:request_check -- \
+  //loom/src/loom/serve/testing:text_request_check -- \
   --control=/path/to/source/package/control.loom --tokenizer=/path/to/tokenizer.json \
   --request=/path/to/request.json --capacity=8192
 ```

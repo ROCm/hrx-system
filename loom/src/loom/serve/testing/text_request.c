@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Observes the actual source chat/input/completion path without GPU residency.
+// Observes the source chat/input/completion path without device execution.
 #include <stdio.h>
 #include <stdlib.h>
 

@@ -88,28 +88,4 @@ loom_cc_binary(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_VM)
-loom_cc_binary(
-  NAME
-    request_check
-  SRCS
-    "request_check.c"
-  DEPS
-    iree::base
-    iree::base::tooling::flags
-    iree::io::file_handle
-    iree::tokenizer
-    iree::tokenizer::format::huggingface::tokenizer_json
-    iree::vm
-    loom::serve::runtime::program
-    loom::serve::runtime::program::compilation
-    loom::serve::runtime::program::input
-    loom::serve::runtime::program::json
-    loom::serve::service::text::chat
-    loom::util::json
-    loom::util::stream
-  TESTONLY
-)
-endif()
-
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

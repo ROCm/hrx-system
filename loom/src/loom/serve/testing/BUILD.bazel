@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_library", "loom_config_compatible_with")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -44,6 +44,31 @@ py_library(
     srcs = ["loom_serve_testing/chat.py"],
     imports = ["."],
     visibility = ["//visibility:public"],
+)
+
+loom_cc_binary(
+    name = "text_request_check",
+    testonly = True,
+    srcs = ["text_request.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/serve/runtime/program",
+        "//loom/src/loom/serve/runtime/program:compilation",
+        "//loom/src/loom/serve/runtime/program:input",
+        "//loom/src/loom/serve/runtime/program:json",
+        "//loom/src/loom/serve/service/text:chat",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+        "//runtime/src/iree/vm",
+    ],
 )
 
 py_test(
