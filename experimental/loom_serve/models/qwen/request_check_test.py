@@ -70,7 +70,7 @@ class RequestCheckTest(unittest.TestCase):
         self.model = self.directory / "model"
         self.model.mkdir()
 
-    def execute(self, source, request, response=None, capacity=4096):
+    def execute(self, source, request, response=None, capacity=4096, chunk_size=0):
         (self.model / "control.loom").write_bytes(source.read_bytes())
         request_path = self.directory / "request.json"
         request_path.write_text(json.dumps(request))
@@ -80,6 +80,7 @@ class RequestCheckTest(unittest.TestCase):
             f"--tokenizer={self.tokenizer}",
             f"--request={request_path}",
             f"--capacity={capacity}",
+            f"--response_chunk_size={chunk_size}",
         ]
         if response is not None:
             response_path = self.directory / "response.txt"
@@ -103,6 +104,7 @@ class RequestCheckTest(unittest.TestCase):
         return {
             "model": model,
             "stream": True,
+            "enable_thinking": False,
             "messages": [{"role": "user", "content": "Hello λ."}],
             **options,
         }
@@ -116,7 +118,7 @@ class RequestCheckTest(unittest.TestCase):
         self.assertNotIn("checkpoint", value)
         value = self.success(self.execute(PACKAGE / "control.loom", request, "Hi."))
         self.assertEqual(value["checkpoint"], prompt + "Hi.<|im_end|>\n")
-        self.assertEqual(value["text_end"], 3)
+        self.assertEqual(value["output_cursor"], 3)
         self.assertEqual(value["tool_calls"], [])
 
     def test_production_xml_completion(self):
@@ -126,7 +128,7 @@ class RequestCheckTest(unittest.TestCase):
                 PACKAGE / "control.loom", self.request(tools=TOOLS), "Ready.\n\n" + call
             )
         )
-        self.assertEqual(value["text_end"], len("Ready.\n\n"))
+        self.assertEqual(value["output_cursor"], len("Ready.\n\n"))
         self.assertEqual(
             value["checkpoint"], value["prompt"] + "Ready.\n\n" + call + "<|im_end|>\n"
         )
@@ -160,10 +162,90 @@ class RequestCheckTest(unittest.TestCase):
         self.assertEqual(value["model"], "portable-chat")
         self.assertEqual(value["prompt"], "developer: Hi.\nassistant: ")
         self.assertEqual(value["checkpoint"], value["prompt"] + '{"path":"a"}\n')
-        self.assertEqual(value["text_end"], 0)
+        self.assertEqual(value["output_cursor"], 0)
         self.assertEqual(
             value["tool_calls"][0]["function"]["arguments"], '{"path":"a"}'
         )
+
+    def test_thinking_stream_fragments_and_retained_tool_history(self):
+        call = "<tool_call>\n<function=read>\n<parameter=path>\na.txt\n</parameter>\n</function>\n</tool_call>"
+        request = self.request(enable_thinking=True, tools=TOOLS)
+        response = "Check λ first.\n</think>\n\nReady.\n\n" + call
+        reference = self.success(
+            self.execute(PACKAGE / "control.loom", request, response)
+        )
+        self.assertEqual(reference["reasoning_content"], "Check λ first.\n")
+        self.assertEqual(reference["content"], "Ready.\n\n")
+        self.assertTrue(reference["reusable"])
+        self.assertIn("Reasoning effort is set to xhigh.", reference["prompt"])
+        self.assertTrue(
+            reference["prompt"].endswith("<|im_start|>assistant\n<think>\n")
+        )
+        for chunk_size in (1, 2, 3, 7, 8, 13, 64):
+            with self.subTest(chunk_size=chunk_size):
+                value = self.success(
+                    self.execute(
+                        PACKAGE / "control.loom",
+                        request,
+                        response,
+                        chunk_size=chunk_size,
+                    )
+                )
+                self.assertEqual(value, reference)
+        following = self.request(
+            enable_thinking=True,
+            tools=TOOLS,
+            messages=[
+                *request["messages"],
+                {
+                    "role": "assistant",
+                    "content": reference["content"],
+                    "reasoning_content": reference["reasoning_content"],
+                    "tool_calls": [
+                        {key: value for key, value in call.items() if key != "index"}
+                        for call in reference["tool_calls"]
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_1_0", "content": "Found it."},
+            ],
+        )
+        value = self.success(self.execute(PACKAGE / "control.loom", following))
+        self.assertTrue(value["prompt"].startswith(reference["checkpoint"]))
+
+    def test_truncated_thinking_cannot_reuse_closed_history(self):
+        for response in (
+            "still thinking",
+            "unfinished </thin",
+            "<tool_call> is an example",
+        ):
+            for chunk_size in (0, 1, 7):
+                with self.subTest(response=response, chunk_size=chunk_size):
+                    value = self.success(
+                        self.execute(
+                            PACKAGE / "control.loom",
+                            self.request(enable_thinking=True),
+                            response,
+                            chunk_size=chunk_size,
+                        )
+                    )
+                    self.assertEqual(value["reasoning_content"], response)
+                    self.assertEqual(value["content"], "")
+                    self.assertEqual(value["tool_calls"], [])
+                    self.assertFalse(value["reusable"])
+
+    def test_empty_reasoning_and_incomplete_answer_marker(self):
+        for chunk_size in (0, 1, 7):
+            value = self.success(
+                self.execute(
+                    PACKAGE / "control.loom",
+                    self.request(enable_thinking=True),
+                    "</think>\n\nUse <tool_ca",
+                    chunk_size=chunk_size,
+                )
+            )
+            self.assertEqual(value["reasoning_content"], "")
+            self.assertEqual(value["content"], "Use <tool_ca")
+            self.assertTrue(value["reusable"])
 
     def test_rejections_publish_no_partial_observation(self):
         source = PACKAGE / "testdata/portable_chat.loom"
@@ -181,6 +263,34 @@ class RequestCheckTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("INVALID_ARGUMENT", result.stderr)
         self.assertEqual(result.stdout, "")
+
+    def test_invalid_source_output_spans_fail_at_the_boundary(self):
+        source = (PACKAGE / "testdata/portable_chat.loom").read_text()
+        begin = source.index("func.def public @output_next(")
+        end = source.index("func.def public @parse_tools(", begin)
+        invalid = self.directory / "invalid.loom"
+        for kind, start, stop, state in (
+            (3, 0, 1, 1),
+            (1, -1, 1, 1),
+            (1, 2, 1, 1),
+            (1, 0, 4, 1),
+            (1, 0, 0, 2),
+        ):
+            with self.subTest(kind=kind, start=start, stop=stop, state=state):
+                output = f"""func.def public @output_next(%response: buffer, %previous: i64, %state: i64, %phase: i32) -> (i64, i64, i64, i64) {{
+  %kind = scalar.constant {kind} : i64
+  %begin = scalar.constant {start} : i64
+  %end = scalar.constant {stop} : i64
+  %next = scalar.constant {state} : i64
+  func.return %kind, %begin, %end, %next : i64, i64, i64, i64
+}}
+
+"""
+                invalid.write_text(source[:begin] + output + source[end:])
+                result = self.execute(invalid, self.request("portable-chat"), "abc")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("invalid output span", result.stderr)
+                self.assertEqual(result.stdout, "")
 
 
 if __name__ == "__main__":
