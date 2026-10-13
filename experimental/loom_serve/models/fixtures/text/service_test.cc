@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cerrno>
+
 #include "experimental/loom_serve/models/fixtures/text/service_fixture.h"
 
 namespace {
@@ -21,6 +23,70 @@ TEST_P(SourceTextServiceTest, DiscoveryReportsConfiguredSessionCapacity) {
           R"("input_modalities":["text"],"output_modalities":["text"],"context_length":96,"limits":{"max_output_tokens":96})"),
       std::string::npos)
       << models;
+}
+
+TEST_P(SourceTextServiceTest, NonstreamingDisconnectRetiresAnAcceptedEpoch) {
+  const auto options = ServiceOptions();
+  loom_serve_text_service_t* value = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_service_create(model_, &options, nullptr,
+                                                &value, allocator_));
+  auto destroy = [](loom_serve_text_service_t* service) {
+    loom_serve_text_service_destroy(service, IREE_STATUS_OK);
+  };
+  std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
+      value, destroy);
+  const auto interface = loom_serve_text_service_interface(value);
+  Observe(interface);
+  const std::string request =
+      R"({"model":"fixture-text","messages":[{"role":"user","content":"abxa"}],"max_tokens":2})";
+  const int client = Send(request);
+  loom_serve_http_connection_t* connection = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+    return std::string(interface.snapshot(interface.self).phase) == "execute";
+  }));
+  // The owner has submitted a real epoch but cannot consume its completion
+  // until it runs again. Nonstreaming output must not have published headers.
+  char byte = 0;
+  EXPECT_EQ(recv(client, &byte, 1, MSG_DONTWAIT), -1);
+  EXPECT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK);
+  const linger reset = {1, 0};
+  ASSERT_EQ(setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+            0);
+  ASSERT_EQ(close(client), 0);
+  iree_notification_await(
+      loom_serve_http_server_notification(server_),
+      [](void* self) {
+        return loom_serve_http_connection_failed(
+            static_cast<loom_serve_http_connection_t*>(self));
+      },
+      connection, iree_infinite_timeout());
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+    return !interface.is_pending(interface.self) &&
+           !interface.is_active(interface.self) &&
+           !interface.snapshot(interface.self).queued_requests;
+  }));
+  EXPECT_EQ(interface.telemetry.counters->completed, 0u);
+  EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
+  EXPECT_EQ(loom_serve_text_model_pool_usage(model_).pending, 0u);
+
+  const int next = Send(request);
+  ASSERT_NO_FATAL_FAILURE(Accept(interface, &connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+    return !interface.is_pending(interface.self) &&
+           !interface.is_active(interface.self) &&
+           !interface.snapshot(interface.self).queued_requests;
+  }));
+  const std::string response = Read(next);
+  EXPECT_EQ(response.find("HTTP/1.1 200"), 0u) << response;
+  EXPECT_NE(response.find("Content-Type: application/json"), std::string::npos);
+  EXPECT_NE(response.find(R"("message":{"role":"assistant","content":"bx"})"),
+            std::string::npos);
+  EXPECT_EQ(response.find("data:"), std::string::npos);
+  EXPECT_EQ(interface.telemetry.counters->completed, 1u);
+  EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
+  EXPECT_EQ(interface.telemetry.counters->failed, 0u);
+  interface.set_observer(interface.self, {});
 }
 
 TEST_P(SourceTextServiceTest,

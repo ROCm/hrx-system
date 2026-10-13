@@ -1404,19 +1404,26 @@ static iree_status_t text_selected_tokens(loom_serve_text_service_t* service,
       &service->tool_calls);
   if (!iree_status_is_ok(status)) {
     // Device work completed, but translation cannot establish a client history.
-    // Preserve prior streamed text and terminate with a real SSE error.
+    // Streamed headers are already published; JSON headers are not. Keep the
+    // wire format honest without changing request or row retirement.
     loom_serve_text_chat_completion_deinitialize(&session->completion);
     loom_serve_telemetry_diagnostic_capture(status,
                                             &session->request.diagnostic);
     iree_string_builder_reset(&session->packet);
-    iree_status_t packet_status =
-        iree_string_builder_append_cstring(&session->packet, "data: ");
+    const bool streaming = iree_any_bit_set(session->request.chat.flags,
+                                            LOOM_SERVE_TEXT_CHAT_FLAG_STREAM);
+    iree_status_t packet_status = iree_string_builder_append_cstring(
+        &session->packet,
+        streaming
+            ? "data: "
+            : "HTTP/1.1 500 Internal Server Error\r\n"
+              "Content-Type: application/json\r\nConnection: close\r\n\r\n");
     if (iree_status_is_ok(packet_status)) {
       packet_status = text_error_json(status, &session->packet);
     } else {
       packet_status = iree_status_join(packet_status, status);
     }
-    if (iree_status_is_ok(packet_status)) {
+    if (iree_status_is_ok(packet_status) && streaming) {
       packet_status = iree_string_builder_append_cstring(
           &session->packet, "\n\ndata: [DONE]\n\n");
     }

@@ -64,6 +64,18 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    chat_test
+  SRCS
+    "chat_test.cc"
+  DEPS
+    ::chat
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_library(
   NAME
     storage

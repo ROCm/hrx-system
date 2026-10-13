@@ -63,7 +63,8 @@ typedef struct loom_serve_text_session_t {
   int32_t* tokens;
   // Accumulated decoded response, preserving the original model text.
   iree_string_builder_t response;
-  // Copied SSE bytes waiting for one carrier credit; no unbounded send queue.
+  // Copied SSE or complete JSON bytes waiting for one carrier credit; no
+  // unbounded send queue. Nonstreaming requests publish only at completion.
   iree_string_builder_t packet;
   // Active request and its borrowed HTTP storage. A null connection means idle.
   struct {
@@ -126,8 +127,9 @@ void loom_serve_text_session_deinitialize(loom_serve_text_session_t* session);
 
 // Starts output for the request already transferred into session->request.
 // Discards the previous canonical completion and initializes the
-// shared-tokenizer decoder and initial SSE packet. Failure leaves request
-// cleanup to the owner.
+// shared-tokenizer decoder. Streaming requests also produce the initial SSE
+// packet; nonstreaming headers remain unpublished until completion. Failure
+// leaves request cleanup to the owner.
 iree_status_t loom_serve_text_session_begin(loom_serve_text_session_t* session,
                                             const iree_tokenizer_t* tokenizer,
                                             iree_string_view_t model_name);
@@ -137,11 +139,11 @@ iree_status_t loom_serve_text_session_begin(loom_serve_text_session_t* session,
 void loom_serve_text_session_release_request(
     loom_serve_text_session_t* session);
 
-// Decodes completed selected tokens and appends bounded SSE output. Source VM
-// calls use the request's policy; scratch/tool_calls are exclusive shared model
-// builders, not per-row caches. No transport send or native release occurs.
-// On failure, the caller translates the error and invalidates the continuation;
-// the partially modified packet is not a valid complete response.
+// Decodes selected tokens and produces bounded SSE or final JSON output. Source
+// VM calls use the request's policy; scratch/tool_calls are exclusive shared
+// model builders, not per-row caches. No transport send or native release
+// occurs. On failure, the caller translates the error and invalidates the
+// continuation; the partially modified packet is not a valid complete response.
 iree_status_t loom_serve_text_session_append_tokens(
     loom_serve_text_session_t* session, iree_string_view_t model_name,
     iree_host_size_t count, const int32_t* tokens,

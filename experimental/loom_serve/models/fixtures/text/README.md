@@ -117,6 +117,21 @@ position 5. Subsequent requests send full history and can select
 [text HTTP contract](../../../text/README.md#named-http-checkpoints) details
 ownership and error behavior.
 
+For wrappers expecting a complete JSON response, omit `stream` or set it to
+false. The same model and scheduler produce the same tokens:
+
+```sh
+curl --fail --silent --show-error http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"fixture-text","max_tokens":2,"messages":[{"role":"user","content":"abxa"}]}'
+```
+
+`choices[0].message` is `{"role":"assistant","content":"bx"}`, finish reason
+is `length`, and usage reports four prompt tokens and two completion tokens.
+With `max_tokens:16`, content is `bxaaaxb`, finish reason is `stop`, and usage
+counts eight completion tokens including EOS. Streaming and nonstreaming turns
+can share one `X-Loom-Session`; neither changes the retained transcript.
+
 The shared server accepts the same package alongside [catalog.json](../catalog.json):
 
 ```json
@@ -141,6 +156,7 @@ The shared server accepts the same package alongside [catalog.json](../catalog.j
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/models/fixtures/text:request_test \
+  //experimental/loom_serve/models/fixtures/text:client_test \
   //experimental/loom_serve/models/fixtures/text:service_cpu_test \
   //experimental/loom_serve/models/fixtures/text:service_test \
   //experimental/loom_serve/models/fixtures/text:service_vulkan_test
@@ -156,3 +172,10 @@ request test exercises source framing, exact token IDs and rejection before any
 device or checkpoint is needed.
 Exact output, not compilation alone, establishes the boundary. Real Qwen
 remains the numerical/performance reference for its architecture.
+
+The CPU-only client test starts the public shared-server executable and checks
+actual HTTP JSON/SSE parsing, usage, concurrent output modes, retained turns
+across those modes, EOS, unsupported options and malformed source output. It
+creates only the tiny checkpoint above. The service tests also disconnect a
+nonstreaming request with a real epoch accepted, verify retirement and reuse,
+and check that no successful headers escaped before completion.

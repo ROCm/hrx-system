@@ -357,7 +357,8 @@ explicit pins, idle completed histories and optional consumed-token prefixes.
 
 `session.h` owns reusable host token/decoder storage, canonical continuation
 text and bounded output packets. It performs source-directed token decoding and
-SSE formatting without sending transport data or releasing native reservations.
+SSE or complete JSON formatting without sending transport data or releasing
+native reservations.
 The service owns those claim/admission policies and serializes session CPU work
 against the model's shared VM invocation. Scratch builders are shared by the
 exclusive model owner, not multiplied per retained session.
@@ -636,16 +637,32 @@ represented in the decoded text. `chat_begin` receives the whole request;
 a policy requiring whole-history traversal can render there and return empty
 per-message fragments. C does not interpret its rendering state.
 
-The current HTTP protocol is streaming greedy text, with up to 256 messages
-and 16 function tools. Text content may be a string, null, or an array of text
-parts. Unsupported sampling, strict constrained output, stored responses and
+The current HTTP protocol is greedy Chat Completions, with up to 256 messages
+and 16 function tools. Omitted, null or false `stream` returns one JSON
+`chat.completion`; `stream:true` returns incremental SSE chunks followed by
+`[DONE]`. Both forms use the same admission, epochs, retained history and
+cancellation ownership. Nonstreaming reuses the session's bounded decoded
+response and withholds HTTP headers until translation completes, so a failed
+completion returns an HTTP error rather than partial success. Streaming
+translation errors appear as an error event before `[DONE]`.
+
+Every chunk has the same request ID, deployment name and creation timestamp.
+Complete JSON responses include usage. Streaming requests can select
+`stream_options.include_usage:true`: ordinary chunks then have `usage:null`,
+followed by one usage-only chunk with empty `choices`. Usage counts the full
+input transcript, reports reused input as `prompt_tokens_details.cached_tokens`,
+and includes terminal EOS in completion tokens. Rejected speculative tokens
+are not output tokens. A non-null `stream_options` requires `stream:true`.
+
+Text content may be a string, null, or an array of text parts.
+Unsupported sampling, strict constrained output, stored responses and
 image parts fail explicitly. `model_options` is an opaque JSON object for
 model policy; `enable_thinking` is forwarded too. The Qwen policy rejects
 thinking and nonempty model options; another source policy may implement them.
 
 Tool parsing returns records of the form
 `{"type":"function","function":{"name":"read","arguments":"{\"path\":\"a\"}"}}`.
-The host assigns IDs and serializes SSE; source owns generated grammar and
+The host assigns IDs and serializes JSON/SSE; source owns generated grammar and
 canonical separators. `tools.parse_xml` is an optional bulk codec selected
 explicitly by the Qwen program, not the default interpretation of text.
 The independent [plain-text/JSON policy](../models/qwen/testdata/portable_chat.loom)

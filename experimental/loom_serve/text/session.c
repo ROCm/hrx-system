@@ -75,34 +75,47 @@ loom_serve_http_request_snapshot_t loom_serve_text_session_request_snapshot(
       .counters = session->request.counters};
 }
 
+static loom_serve_text_chat_response_t text_response_metadata(
+    const loom_serve_text_session_t* session, iree_string_view_t model_name) {
+  return (loom_serve_text_chat_response_t){
+      .model_name = model_name,
+      .request_id = session->lifetime.serial,
+      .creation_time = session->request.start_time,
+      .flags = session->request.chat.flags,
+      .usage = {.input_tokens = session->request.retained_count +
+                                session->request.input_count,
+                .cached_tokens = session->request.retained_count,
+                .output_tokens = session->request.output_count}};
+}
+
 iree_status_t loom_serve_text_session_begin(loom_serve_text_session_t* session,
                                             const iree_tokenizer_t* tokenizer,
                                             iree_string_view_t model_name) {
   iree_string_builder_reset(&session->response);
   loom_serve_text_chat_completion_deinitialize(&session->completion);
-  iree_status_t status = iree_tokenizer_decode_state_initialize(
+  IREE_RETURN_IF_ERROR(iree_tokenizer_decode_state_initialize(
       tokenizer, IREE_TOKENIZER_DECODE_FLAG_SKIP_SPECIAL_TOKENS,
-      session->decoder_storage, &session->decoder);
-  if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_cstring(
+      session->decoder_storage, &session->decoder));
+  if (iree_any_bit_set(session->request.chat.flags,
+                       LOOM_SERVE_TEXT_CHAT_FLAG_STREAM)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
         &session->packet,
         "HTTP/1.1 200 OK\r\nContent-Type: "
         "text/event-stream\r\nCache-Control: "
-        "no-cache\r\nConnection: close\r\n\r\n");
+        "no-cache\r\nConnection: close\r\n\r\n"));
+    const loom_serve_text_chat_response_t response =
+        text_response_metadata(session, model_name);
+    IREE_RETURN_IF_ERROR(loom_serve_text_chat_event(
+        &response, IREE_SV("{\"role\":\"assistant\"}"),
+        iree_string_view_empty(), &session->packet));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        loom_serve_text_chat_event(model_name, session->lifetime.serial,
-                                   IREE_SV("{\"role\":\"assistant\"}"),
-                                   iree_string_view_empty(), &session->packet);
-  }
-  return status;
+  return iree_ok_status();
 }
 
-static iree_status_t text_emit_text(loom_serve_text_session_t* session,
-                                    iree_string_view_t model_name,
-                                    iree_host_size_t end,
-                                    iree_string_builder_t* scratch) {
+static iree_status_t text_emit_text(
+    loom_serve_text_session_t* session,
+    const loom_serve_text_chat_response_t* response, iree_host_size_t end,
+    iree_string_builder_t* scratch) {
   const iree_host_size_t start = session->request.emitted_length;
   if (start == end) {
     return iree_ok_status();
@@ -115,9 +128,9 @@ static iree_status_t text_emit_text(loom_serve_text_session_t* session,
       iree_string_view_substr(iree_string_builder_view(&session->response),
                               start, end - start)));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(scratch, "}"));
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_event(
-      model_name, session->lifetime.serial, iree_string_builder_view(scratch),
-      iree_string_view_empty(), &session->packet));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_chat_event(response, iree_string_builder_view(scratch),
+                                 iree_string_view_empty(), &session->packet));
   session->request.emitted_length = end;
   return iree_ok_status();
 }
@@ -131,10 +144,10 @@ static iree_status_t text_append_response(loom_serve_text_session_t* session,
   return iree_string_builder_append_string(&session->response, text);
 }
 
-static iree_status_t text_complete(loom_serve_text_session_t* session,
-                                   iree_string_view_t model_name,
-                                   iree_string_builder_t* scratch,
-                                   iree_string_builder_t* tool_calls) {
+static iree_status_t text_complete(
+    loom_serve_text_session_t* session,
+    const loom_serve_text_chat_response_t* response,
+    iree_string_builder_t* scratch, iree_string_builder_t* tool_calls) {
   char text[8192];
   iree_host_size_t length = 0;
   IREE_RETURN_IF_ERROR(iree_tokenizer_decode_state_finalize(
@@ -147,36 +160,50 @@ static iree_status_t text_complete(loom_serve_text_session_t* session,
       &session->request.chat, iree_string_builder_view(&session->response),
       session->request.emitted_length, session->lifetime.serial, tool_calls,
       &session->completion));
-  IREE_RETURN_IF_ERROR(text_emit_text(session, model_name,
-                                      session->completion.text_end, scratch));
   const iree_host_size_t tool_count = session->completion.tool_count;
-  if (tool_count) {
-    iree_string_builder_reset(scratch);
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        scratch, "{\"tool_calls\":%.*s}",
-        (int)iree_string_builder_size(tool_calls),
-        iree_string_builder_buffer(tool_calls)));
-    IREE_RETURN_IF_ERROR(loom_serve_text_chat_event(
-        model_name, session->lifetime.serial, iree_string_builder_view(scratch),
-        iree_string_view_empty(), &session->packet));
-  }
   session->request.finish_reason = tool_count ? "tool_calls"
                                    : loom_serve_text_row_is_eos(session->row)
                                        ? "stop"
                                        : "length";
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_event(
-      model_name, session->lifetime.serial, IREE_SV("{}"),
-      iree_make_cstring_view(session->request.finish_reason),
-      &session->packet));
-  if (session->request.chat.include_usage) {
-    IREE_RETURN_IF_ERROR(loom_serve_text_chat_usage(
-        model_name, session->lifetime.serial,
-        session->request.retained_count + session->request.input_count,
-        session->request.retained_count, session->request.output_count,
-        &session->packet));
+  const iree_string_view_t finish_reason =
+      iree_make_cstring_view(session->request.finish_reason);
+  if (iree_any_bit_set(response->flags, LOOM_SERVE_TEXT_CHAT_FLAG_STREAM)) {
+    IREE_RETURN_IF_ERROR(text_emit_text(session, response,
+                                        session->completion.text_end, scratch));
+    if (tool_count) {
+      iree_string_builder_reset(scratch);
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          scratch, "{\"tool_calls\":%.*s}",
+          (int)iree_string_builder_size(tool_calls),
+          iree_string_builder_buffer(tool_calls)));
+      IREE_RETURN_IF_ERROR(loom_serve_text_chat_event(
+          response, iree_string_builder_view(scratch), iree_string_view_empty(),
+          &session->packet));
+    }
+    IREE_RETURN_IF_ERROR(loom_serve_text_chat_event(
+        response, IREE_SV("{}"), finish_reason, &session->packet));
+    if (iree_any_bit_set(response->flags,
+                         LOOM_SERVE_TEXT_CHAT_FLAG_INCLUDE_USAGE)) {
+      IREE_RETURN_IF_ERROR(
+          loom_serve_text_chat_usage(response, &session->packet));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+        &session->packet, "data: [DONE]\n\n"));
+  } else {
+    // No headers have been published. Translation failures can still become
+    // an HTTP error instead of being hidden inside a successful response.
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+        &session->packet,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+        "Connection: close\r\n\r\n"));
+    IREE_RETURN_IF_ERROR(loom_serve_text_chat_response(
+        response,
+        iree_string_view_substr(iree_string_builder_view(&session->response), 0,
+                                session->completion.text_end),
+        tool_count ? iree_string_builder_view(tool_calls)
+                   : iree_string_view_empty(),
+        finish_reason, &session->packet));
   }
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(&session->packet, "data: [DONE]\n\n"));
   session->request.phase = LOOM_SERVE_TEXT_REQUEST_FINISHING;
   return iree_ok_status();
 }
@@ -210,12 +237,15 @@ iree_status_t loom_serve_text_session_append_tokens(
     }
   }
   if (iree_status_is_ok(status)) {
+    const loom_serve_text_chat_response_t response =
+        text_response_metadata(session, model_name);
     const bool complete =
         loom_serve_text_row_is_eos(session->row) ||
         session->request.output_count == session->request.chat.max_tokens;
     if (complete) {
-      status = text_complete(session, model_name, scratch, tool_calls);
-    } else {
+      status = text_complete(session, &response, scratch, tool_calls);
+    } else if (iree_any_bit_set(response.flags,
+                                LOOM_SERVE_TEXT_CHAT_FLAG_STREAM)) {
       iree_host_size_t text_end = 0;
       status = loom_serve_text_chat_text_end(
           session->request.chat.policy,
@@ -223,7 +253,7 @@ iree_status_t loom_serve_text_session_append_tokens(
           session->request.emitted_length,
           LOOM_SERVE_TEXT_CHAT_OUTPUT_STREAMING, &text_end, session->allocator);
       if (iree_status_is_ok(status)) {
-        status = text_emit_text(session, model_name, text_end, scratch);
+        status = text_emit_text(session, &response, text_end, scratch);
       }
     }
   }

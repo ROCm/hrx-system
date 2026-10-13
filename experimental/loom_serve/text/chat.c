@@ -552,13 +552,18 @@ static iree_status_t chat_request_render(iree_string_view_t body,
   if (cursor.size) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "trailing chat JSON");
   }
-  chat_field_t fields[] = {
-      {"model", CHAT_STRING},         {"messages", CHAT_ARRAY},
-      {"stream", CHAT_BOOL},          {"tools", CHAT_ARRAY},
-      {"max_tokens", CHAT_NUMBER},    {"max_completion_tokens", CHAT_NUMBER},
-      {"temperature", CHAT_NUMBER},   {"stream_options", CHAT_OBJECT},
-      {"store", CHAT_BOOL},           {"tool_choice", CHAT_STRING},
-      {"enable_thinking", CHAT_BOOL}, {"model_options", CHAT_OBJECT}};
+  chat_field_t fields[] = {{"model", CHAT_STRING},
+                           {"messages", CHAT_ARRAY},
+                           {"stream", CHAT_BOOL | CHAT_NULL},
+                           {"tools", CHAT_ARRAY},
+                           {"max_tokens", CHAT_NUMBER},
+                           {"max_completion_tokens", CHAT_NUMBER},
+                           {"temperature", CHAT_NUMBER},
+                           {"stream_options", CHAT_OBJECT | CHAT_NULL},
+                           {"store", CHAT_BOOL},
+                           {"tool_choice", CHAT_STRING},
+                           {"enable_thinking", CHAT_BOOL},
+                           {"model_options", CHAT_OBJECT}};
   IREE_RETURN_IF_ERROR(
       chat_fields_read(object, IREE_ARRAYSIZE(fields), fields, 0));
   IREE_RETURN_IF_ERROR(chat_required(&fields[1]));
@@ -566,11 +571,13 @@ static iree_status_t chat_request_render(iree_string_view_t body,
   iree_string_builder_reset(&history->scratch);
   IREE_RETURN_IF_ERROR(chat_append_decoded(&history->scratch, fields[0].value));
   if (!iree_string_view_equal(iree_string_builder_view(&history->scratch),
-                              history->model_name) ||
-      fields[2].type != IREE_JSON_VALUE_TYPE_TRUE || !fields[2].value.data) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT, "select model %.*s and stream=true",
-        (int)history->model_name.size, history->model_name.data);
+                              history->model_name)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "select model %.*s",
+                            (int)history->model_name.size,
+                            history->model_name.data);
+  }
+  if (fields[2].value.data && fields[2].type == IREE_JSON_VALUE_TYPE_TRUE) {
+    history->chat->flags |= LOOM_SERVE_TEXT_CHAT_FLAG_STREAM;
   }
   if ((fields[8].value.data && fields[8].type != IREE_JSON_VALUE_TYPE_FALSE) ||
       (fields[9].value.data &&
@@ -603,12 +610,18 @@ static iree_status_t chat_request_render(iree_string_view_t body,
     }
     history->chat->max_tokens = (iree_host_size_t)max_tokens;
   }
-  if (fields[7].value.data) {
+  if (fields[7].value.data && fields[7].type != IREE_JSON_VALUE_TYPE_NULL) {
+    if (!iree_any_bit_set(history->chat->flags,
+                          LOOM_SERVE_TEXT_CHAT_FLAG_STREAM)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "stream_options requires stream=true");
+    }
     chat_field_t options[] = {{"include_usage", CHAT_BOOL}};
     IREE_RETURN_IF_ERROR(
         chat_fields_read(fields[7].value, IREE_ARRAYSIZE(options), options, 0));
-    history->chat->include_usage =
-        options[0].value.data && options[0].type == IREE_JSON_VALUE_TYPE_TRUE;
+    if (options[0].value.data && options[0].type == IREE_JSON_VALUE_TYPE_TRUE) {
+      history->chat->flags |= LOOM_SERVE_TEXT_CHAT_FLAG_INCLUDE_USAGE;
+    }
   }
   history->chat->tool_schemas =
       fields[3].value.data ? fields[3].value : IREE_SV("[]");
@@ -1005,9 +1018,11 @@ typedef struct chat_completion_tools_t {
   const loom_serve_text_chat_policy_t* policy;
   // Request-unique namespace for transport tool IDs.
   uint64_t request_id;
+  // Transport options controlling whether calls carry streaming indexes.
+  loom_serve_text_chat_flags_t flags;
   // Number of fully parsed calls.
   iree_host_size_t count;
-  // Standard tool-call delta destination.
+  // Standard tool-call array destination.
   iree_string_builder_t* output;
   // Canonical model-format call fragments.
   iree_string_builder_t rendered;
@@ -1020,10 +1035,11 @@ static iree_status_t chat_completion_tool(void* user_data,
                                           iree_json_value_type_t type,
                                           iree_string_view_t value) {
   chat_completion_tools_t* tools = user_data;
-  if (type != IREE_JSON_VALUE_TYPE_OBJECT || index >= 16) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "source tool calls must contain at most 16 objects");
+  if (type != IREE_JSON_VALUE_TYPE_OBJECT ||
+      index >= LOOM_SERVE_TEXT_CHAT_TOOL_CAPACITY) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "source tool calls must contain at most %d objects",
+                            LOOM_SERVE_TEXT_CHAT_TOOL_CAPACITY);
   }
   chat_field_t call[] = {{"type", CHAT_STRING}, {"function", CHAT_OBJECT}};
   IREE_RETURN_IF_ERROR(chat_fields_read(value, IREE_ARRAYSIZE(call), call, 0));
@@ -1043,11 +1059,17 @@ static iree_status_t chat_completion_tool(void* user_data,
   IREE_RETURN_IF_ERROR(chat_function_render(
       tools->policy, function[0].value,
       iree_string_builder_view(&tools->arguments), index, &tools->rendered));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(tools->output, "%s{",
+                                                         index ? "," : ""));
+  if (iree_any_bit_set(tools->flags, LOOM_SERVE_TEXT_CHAT_FLAG_STREAM)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        tools->output, "\"index\":%zu,", index));
+  }
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       tools->output,
-      "%s{\"index\":%zu,\"id\":\"call_%" PRIu64
+      "\"id\":\"call_%" PRIu64
       "_%zu\",\"type\":\"function\",\"function\":{\"name\":",
-      index ? "," : "", index, tools->request_id, index));
+      tools->request_id, index));
   // Source records preserve JSON escaping of names and arguments.
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(tools->output, "\""));
   IREE_RETURN_IF_ERROR(
@@ -1079,8 +1101,10 @@ iree_status_t loom_serve_text_chat_complete(
       iree_string_view_substr(response, result.text_end, IREE_HOST_SIZE_MAX)};
   iree_string_builder_t parsed;
   iree_string_builder_initialize(tool_calls->allocator, &parsed);
-  chat_completion_tools_t tools = {
-      .policy = chat->policy, .request_id = request_id, .output = tool_calls};
+  chat_completion_tools_t tools = {.policy = chat->policy,
+                                   .request_id = request_id,
+                                   .flags = chat->flags,
+                                   .output = tool_calls};
   iree_string_builder_initialize(tool_calls->allocator, &tools.rendered);
   iree_string_builder_initialize(tool_calls->allocator, &tools.arguments);
   iree_status_t status =
@@ -1115,17 +1139,35 @@ iree_status_t loom_serve_text_chat_complete(
   return status;
 }
 
-iree_status_t loom_serve_text_chat_event(iree_string_view_t model_name,
-                                         uint64_t request_id,
-                                         iree_string_view_t delta,
-                                         iree_string_view_t finish_reason,
-                                         iree_string_builder_t* output) {
+static iree_status_t chat_response_begin(
+    const loom_serve_text_chat_response_t* response, const char* object,
+    iree_string_builder_t* output) {
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output,
-      "data: {\"id\":\"loom-%" PRIu64
-      "\",\"object\":\"chat.completion.chunk\",\"model\":",
-      request_id));
-  IREE_RETURN_IF_ERROR(chat_quote(output, model_name));
+      "{\"id\":\"loom-%" PRIu64 "\",\"object\":\"%s\",\"created\":%" PRId64
+      ",\"model\":",
+      response->request_id, object, response->creation_time / 1000000000));
+  return chat_quote(output, response->model_name);
+}
+
+static iree_status_t chat_response_usage(
+    const loom_serve_text_chat_response_t* response,
+    iree_string_builder_t* output) {
+  return iree_string_builder_append_format(
+      output,
+      "{\"prompt_tokens\":%zu,\"completion_tokens\":%zu,\"total_tokens\":%zu,"
+      "\"prompt_tokens_details\":{\"cached_tokens\":%zu}}",
+      response->usage.input_tokens, response->usage.output_tokens,
+      response->usage.input_tokens + response->usage.output_tokens,
+      response->usage.cached_tokens);
+}
+
+iree_status_t loom_serve_text_chat_event(
+    const loom_serve_text_chat_response_t* response, iree_string_view_t delta,
+    iree_string_view_t finish_reason, iree_string_builder_t* output) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "data: "));
+  IREE_RETURN_IF_ERROR(
+      chat_response_begin(response, "chat.completion.chunk", output));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, ",\"choices\":[{\"index\":0,\"delta\":%.*s,\"finish_reason\":",
       (int)delta.size, delta.data));
@@ -1134,28 +1176,55 @@ iree_status_t loom_serve_text_chat_event(iree_string_view_t model_name,
   } else {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "null"));
   }
-  return iree_string_builder_append_cstring(output, "}]}\n\n");
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(output, ",\"logprobs\":null}]"));
+  if (iree_any_bit_set(response->flags,
+                       LOOM_SERVE_TEXT_CHAT_FLAG_INCLUDE_USAGE)) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(output, ",\"usage\":null"));
+  }
+  return iree_string_builder_append_cstring(output, "}\n\n");
 }
 
-iree_status_t loom_serve_text_chat_usage(iree_string_view_t model_name,
-                                         uint64_t request_id,
-                                         iree_host_size_t input_tokens,
-                                         iree_host_size_t retained_tokens,
-                                         iree_host_size_t output_tokens,
-                                         iree_string_builder_t* output) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+iree_status_t loom_serve_text_chat_usage(
+    const loom_serve_text_chat_response_t* response,
+    iree_string_builder_t* output) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "data: "));
+  IREE_RETURN_IF_ERROR(
+      chat_response_begin(response, "chat.completion.chunk", output));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(output, ",\"choices\":[],\"usage\":"));
+  IREE_RETURN_IF_ERROR(chat_response_usage(response, output));
+  return iree_string_builder_append_cstring(output, "}\n\n");
+}
+
+iree_status_t loom_serve_text_chat_response(
+    const loom_serve_text_chat_response_t* response, iree_string_view_t content,
+    iree_string_view_t tool_calls, iree_string_view_t finish_reason,
+    iree_string_builder_t* output) {
+  IREE_RETURN_IF_ERROR(
+      chat_response_begin(response, "chat.completion", output));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
       output,
-      "data: {\"id\":\"loom-%" PRIu64
-      "\",\"object\":\"chat.completion.chunk\",\"model\":",
-      request_id));
-  IREE_RETURN_IF_ERROR(chat_quote(output, model_name));
-  return iree_string_builder_append_format(
-      output,
-      ",\"choices\":[],\"usage\":{\"prompt_tokens\":%zu,"
-      "\"completion_tokens\":%zu,\"total_tokens\":%zu,"
-      "\"prompt_tokens_details\":{\"cached_tokens\":%zu}}}\n\n",
-      input_tokens, output_tokens, input_tokens + output_tokens,
-      retained_tokens);
+      ",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+      "\"content\":"));
+  if (tool_calls.size && !content.size) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "null"));
+  } else {
+    IREE_RETURN_IF_ERROR(chat_quote(output, content));
+  }
+  if (tool_calls.size) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(output, ",\"tool_calls\":"));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_string(output, tool_calls));
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(output, "},\"finish_reason\":"));
+  IREE_RETURN_IF_ERROR(chat_quote(output, finish_reason));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      output, ",\"logprobs\":null}],\"usage\":"));
+  IREE_RETURN_IF_ERROR(chat_response_usage(response, output));
+  return iree_string_builder_append_cstring(output, "}");
 }
 
 typedef struct chat_tools_module_t {

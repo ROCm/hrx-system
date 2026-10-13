@@ -21,7 +21,7 @@
 IREE_FLAG(string, model, "",
           "Source package directory containing control.loom.");
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json path.");
-IREE_FLAG(string, request, "", "OpenAI streaming request JSON file.");
+IREE_FLAG(string, request, "", "Chat Completions request JSON file.");
 IREE_FLAG(string, response, "",
           "Optional raw generated text file to complete.");
 IREE_FLAG(int32_t, capacity, 262144, "Maximum complete prompt token count.");

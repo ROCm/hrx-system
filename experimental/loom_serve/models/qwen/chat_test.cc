@@ -217,7 +217,8 @@ TEST_F(QwenChatTest, TextPartsAndNullHaveDistinctMeanings) {
       R"([{"role":"system","content":" Be concise. "},{"role":"user","content":[{"type":"text","text":"Say "},{"type":"text","text":"\u03bb"}]},{"role":"assistant","content":null},{"role":"user","content":"null"}])",
       R"(,"max_tokens":17,"temperature":0,"stream_options":{"include_usage":true})")));
   EXPECT_EQ(chat_.max_tokens, 17u);
-  EXPECT_TRUE(chat_.include_usage);
+  EXPECT_EQ(chat_.flags, LOOM_SERVE_TEXT_CHAT_FLAG_STREAM |
+                             LOOM_SERVE_TEXT_CHAT_FLAG_INCLUDE_USAGE);
   EXPECT_EQ(View(chat_.prompt),
             "<|im_start|>system\nBe concise.<|im_end|>\n"
             "<|im_start|>user\nSay λ<|im_end|>\n"
@@ -275,6 +276,34 @@ TEST_F(QwenChatTest, MultipleGeneratedCallsHaveDistinctIdsAndCanonicalOrder) {
   EXPECT_NE(View(calls_).find("call_7_1"), std::string::npos);
   EXPECT_NE(View(checkpoint_).find("</tool_call>\n<tool_call>"),
             std::string::npos);
+}
+
+TEST_F(QwenChatTest, NonstreamingToolsUseTheSameCanonicalHistory) {
+  IREE_ASSERT_OK(Initialize(
+      R"({"model":"qwen3.8-27b","stream":false,"messages":[{"role":"user","content":"Read both."}],"tools":)" +
+      std::string(kTools) + "}"));
+  EXPECT_EQ(chat_.flags, 0u);
+  IREE_ASSERT_OK(
+      Complete("<tool_call><function=read><parameter=path>a</parameter></"
+               "function></tool_call>\n"
+               "<tool_call><function=read><parameter=path>b</parameter></"
+               "function></tool_call>"));
+  EXPECT_EQ(checkpoint_.tool_count, 2u);
+  EXPECT_EQ(
+      View(calls_),
+      R"([{"id":"call_7_0","type":"function","function":{"name":"read","arguments":"{\"path\":\"a\"}"}},{"id":"call_7_1","type":"function","function":{"name":"read","arguments":"{\"path\":\"b\"}"}}])");
+  const std::string retained = View(checkpoint_);
+  const std::string followup =
+      R"({"model":"qwen3.8-27b","messages":[{"role":"user","content":"Read both."},{"role":"assistant","content":null,"tool_calls":)" +
+      View(calls_) +
+      R"(},{"role":"tool","tool_call_id":"call_7_0","content":"first"},{"role":"tool","tool_call_id":"call_7_1","content":"second"}],"tools":)" +
+      kTools + "}";
+  loom_serve_text_chat_t next;
+  IREE_ASSERT_OK(loom_serve_text_chat_initialize(
+      &policy_, policy_.name, iree_make_cstring_view(followup.c_str()), 128,
+      iree_allocator_system(), &next));
+  EXPECT_EQ(View(next.prompt).substr(0, retained.size()), retained);
+  loom_serve_text_chat_deinitialize(&next);
 }
 
 TEST_F(QwenChatTest, NestedToolJsonSpacingDoesNotInvalidateRetainedHistory) {
@@ -646,7 +675,9 @@ TEST_F(QwenChatTest, IndependentPolicyOwnsRolesToolsAndRetainedTranscript) {
   EXPECT_EQ(View(chat_.prompt), retained + "tool: COBALT\nassistant: ");
   IREE_ASSERT_OK(Complete("COBALT"));
   EXPECT_EQ(View(checkpoint_), View(chat_.prompt) + "COBALT\n");
-  IREE_ASSERT_OK(loom_serve_text_chat_event(policy_.name, 8, IREE_SV("{}"),
+  const loom_serve_text_chat_response_t response = {
+      .model_name = policy_.name, .request_id = 8, .creation_time = 1000000000};
+  IREE_ASSERT_OK(loom_serve_text_chat_event(&response, IREE_SV("{}"),
                                             IREE_SV("stop"), &calls_));
   EXPECT_NE(View(calls_).find("\"model\":\"portable-chat\""),
             std::string::npos);
@@ -676,11 +707,16 @@ TEST_F(QwenChatTest, SourceRejectsMalformedRoleOrderBeforeRetainedMutation) {
 }
 
 TEST_F(QwenChatTest, EventsCarryFinishReasonAndRetainedUsage) {
-  IREE_ASSERT_OK(loom_serve_text_chat_event(policy_.name, 7,
-                                            IREE_SV("{\"content\":\"hello\"}"),
-                                            IREE_SV("stop"), &calls_));
-  IREE_ASSERT_OK(
-      loom_serve_text_chat_usage(policy_.name, 7, 120, 100, 4, &calls_));
+  const loom_serve_text_chat_response_t response = {
+      .model_name = policy_.name,
+      .request_id = 7,
+      .creation_time = 1000000000,
+      .flags = LOOM_SERVE_TEXT_CHAT_FLAG_STREAM |
+               LOOM_SERVE_TEXT_CHAT_FLAG_INCLUDE_USAGE,
+      .usage = {.input_tokens = 120, .cached_tokens = 100, .output_tokens = 4}};
+  IREE_ASSERT_OK(loom_serve_text_chat_event(
+      &response, IREE_SV("{\"content\":\"hello\"}"), IREE_SV("stop"), &calls_));
+  IREE_ASSERT_OK(loom_serve_text_chat_usage(&response, &calls_));
   EXPECT_NE(View(calls_).find("\"finish_reason\":\"stop\""), std::string::npos);
   EXPECT_NE(
       View(calls_).find(

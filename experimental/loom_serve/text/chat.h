@@ -108,7 +108,15 @@ typedef struct loom_serve_text_chat_tool_t {
   iree_string_view_t required;
 } loom_serve_text_chat_tool_t;
 
-// One validated text-only, greedy streaming chat request. The
+enum loom_serve_text_chat_flag_bits_e {
+  // Publish incremental SSE output instead of one JSON completion.
+  LOOM_SERVE_TEXT_CHAT_FLAG_STREAM = 1u << 0,
+  // Append a final usage chunk and include usage:null on preceding chunks.
+  LOOM_SERVE_TEXT_CHAT_FLAG_INCLUDE_USAGE = 1u << 1,
+};
+typedef uint32_t loom_serve_text_chat_flags_t;
+
+// One validated text-only, greedy chat request. The
 // prompt owns its canonical rendered text; tool views borrow the HTTP body.
 typedef struct loom_serve_text_chat_t {
   // Source policy borrowed from the model for the request lifetime.
@@ -117,8 +125,8 @@ typedef struct loom_serve_text_chat_t {
   iree_string_builder_t prompt;
   // Maximum selected output tokens, including a terminal EOS prediction.
   iree_host_size_t max_tokens;
-  // Whether the client requested a final usage event.
-  bool include_usage;
+  // Validated transport and usage options; inference is independent of these.
+  loom_serve_text_chat_flags_t flags;
   // Original tool declarations borrowing the HTTP body, or the literal [].
   iree_string_view_t tool_schemas;
   // Number of populated tool descriptors.
@@ -174,7 +182,8 @@ void loom_serve_text_chat_completion_deinitialize(
 
 // Invokes source parsing of the generated suffix into typed function calls.
 // Returns the source-owned canonical completed transcript and appends an OpenAI
-// tool_calls delta array (including indexes and stable IDs) to tool_calls.
+// tool_calls array to tool_calls. IDs are stable across both output forms;
+// streaming calls also carry their delta indexes.
 // previous_end is the already published ordinary-text extent in response.
 // Plain text responses produce an empty array. Source parser failures never
 // submit a partial executable call to the agent.
@@ -188,20 +197,46 @@ iree_status_t loom_serve_text_chat_complete(
     iree_string_builder_t* tool_calls,
     loom_serve_text_chat_completion_t* completion);
 
-// Appends one SSE chat event. Delta is an already serialized JSON object;
-// finish_reason is empty for nonterminal events. Usage belongs to the complete
-// client transcript, with retained_tokens reported as cached input tokens.
-iree_status_t loom_serve_text_chat_event(iree_string_view_t model_name,
-                                         uint64_t request_id,
-                                         iree_string_view_t delta,
-                                         iree_string_view_t finish_reason,
-                                         iree_string_builder_t* output);
-iree_status_t loom_serve_text_chat_usage(iree_string_view_t model_name,
-                                         uint64_t request_id,
-                                         iree_host_size_t input_tokens,
-                                         iree_host_size_t retained_tokens,
-                                         iree_host_size_t output_tokens,
-                                         iree_string_builder_t* output);
+// Borrowed wire metadata copied from a session at each publication. Identity
+// and creation time remain fixed across a response; counters include only
+// committed tokens, never rejected speculative predictions.
+typedef struct loom_serve_text_chat_response_t {
+  // Deployment identity borrowed for the encoder call.
+  iree_string_view_t model_name;
+  // Server-assigned request identity shared by every chunk and tool call.
+  uint64_t request_id;
+  // Wall-clock admission time in nanoseconds; the wire uses whole seconds.
+  iree_time_t creation_time;
+  // Validated request output options.
+  loom_serve_text_chat_flags_t flags;
+  // Complete client transcript accounting, independent of output format.
+  struct {
+    // Total input tokens, including any retained prefix.
+    iree_host_size_t input_tokens;
+    // Input tokens reused from retained state.
+    iree_host_size_t cached_tokens;
+    // Selected output tokens, including a terminal EOS prediction.
+    iree_host_size_t output_tokens;
+  } usage;
+} loom_serve_text_chat_response_t;
+
+// Appends one SSE chat event. Delta is already serialized JSON; finish_reason
+// is empty for nonterminal events. Requested usage is null until the final
+// usage-only chunk, emitted by chat_usage.
+iree_status_t loom_serve_text_chat_event(
+    const loom_serve_text_chat_response_t* response, iree_string_view_t delta,
+    iree_string_view_t finish_reason, iree_string_builder_t* output);
+iree_status_t loom_serve_text_chat_usage(
+    const loom_serve_text_chat_response_t* response,
+    iree_string_builder_t* output);
+
+// Appends a complete JSON chat response, without HTTP headers. Content is
+// decoded text; tool_calls is a serialized array from chat_complete or empty
+// when no tools were produced. Nonstreamed completions always include usage.
+iree_status_t loom_serve_text_chat_response(
+    const loom_serve_text_chat_response_t* response, iree_string_view_t content,
+    iree_string_view_t tool_calls, iree_string_view_t finish_reason,
+    iree_string_builder_t* output);
 
 #ifdef __cplusplus
 }  // extern "C"

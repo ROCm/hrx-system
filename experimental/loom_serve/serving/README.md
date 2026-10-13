@@ -468,7 +468,15 @@ Chat requests use deployment names, not the model source's intrinsic identity:
 }
 ~~~
 
-SSE responses report the selected deployment name. `X-Loom-Session` and
+Omit `stream` or set it to false for one JSON `chat.completion` with a complete
+assistant message, finish reason and usage. Streaming sends incremental
+`chat.completion.chunk` events; `stream_options.include_usage:true` adds the
+final usage-only event. Both forms preserve the same session/checkpoint
+semantics and reject unsupported execution options rather than ignoring them.
+The [text protocol](../text/README.md#chat-policy-entries)
+describes output, tool and token-accounting contracts.
+
+Responses report the selected deployment name. `X-Loom-Session` and
 `X-Loom-Checkpoint` are scoped to that deployment, so two models can use the
 same session/checkpoint string without sharing state. Explicit checkpoint
 creation, deletion and suspension select their model with

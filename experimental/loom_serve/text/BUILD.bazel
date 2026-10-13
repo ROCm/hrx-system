@@ -55,6 +55,17 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "chat_test",
+    srcs = ["chat_test.cc"],
+    deps = [
+        ":chat",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "storage",
     srcs = ["storage.c"],
