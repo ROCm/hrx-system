@@ -6,7 +6,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_RUNTIME_DEVICE_FLAGS_H_
 #define EXPERIMENTAL_LOOM_SERVE_RUNTIME_DEVICE_FLAGS_H_
 
-#include "experimental/loom_serve/runtime/device.h"
+#include "loom/serve/runtime/device/device.h"
 
 #ifdef __cplusplus
 extern "C" {

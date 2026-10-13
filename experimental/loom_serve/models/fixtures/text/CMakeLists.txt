@@ -59,7 +59,6 @@ loom_cc_test(
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
@@ -77,6 +76,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
+    loom::serve::runtime::device
     loom::serve::runtime::host
     loom::serve::telemetry::stream
   ARGS
@@ -119,7 +119,6 @@ loom_cc_test(
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
@@ -137,6 +136,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
+    loom::serve::runtime::device
     loom::serve::runtime::host
     loom::serve::telemetry::stream
   ARGS
@@ -180,7 +180,6 @@ loom_cc_test(
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
@@ -198,6 +197,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
+    loom::serve::runtime::device
     loom::serve::runtime::host
     loom::serve::telemetry::stream
   ARGS

@@ -8,9 +8,9 @@
 
 #include <string.h>
 
-#include "experimental/loom_serve/runtime/execution.h"
-#include "experimental/loom_serve/storage/relocation.h"
-#include "experimental/loom_serve/storage/snapshot.h"
+#include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/storage/relocation.h"
+#include "loom/serve/runtime/storage/snapshot.h"
 
 void loom_serve_text_state_initialize(const loom_serve_text_options_t* options,
                                       loom_serve_text_state_t* out_state,

@@ -8,12 +8,12 @@
 
 #include <string.h>
 
-#include "experimental/loom_serve/runtime/input.h"
-#include "experimental/loom_serve/runtime/json.h"
-#include "experimental/loom_serve/runtime/program.h"
 #include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "iree/tokenizer/vocab/vocab.h"
+#include "loom/serve/runtime/program/input.h"
+#include "loom/serve/runtime/program/json.h"
+#include "loom/serve/runtime/program/program.h"
 
 static iree_string_view_t text_file_text(iree_io_file_contents_t* contents) {
   return iree_make_string_view((const char*)contents->const_buffer.data,

@@ -7,9 +7,9 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_TEXT_STAGES_H_
 #define EXPERIMENTAL_LOOM_SERVE_TEXT_STAGES_H_
 
-#include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/preparation.h"
-#include "experimental/loom_serve/runtime/weights.h"
+#include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/parameter/weights.h"
+#include "loom/serve/runtime/program/preparation.h"
 
 #ifdef __cplusplus
 extern "C" {

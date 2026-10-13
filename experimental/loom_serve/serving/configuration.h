@@ -7,7 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_SERVING_CONFIGURATION_H_
 #define EXPERIMENTAL_LOOM_SERVE_SERVING_CONFIGURATION_H_
 
-#include "experimental/loom_serve/runtime/sources.h"
+#include "loom/serve/runtime/program/sources.h"
 
 #ifdef __cplusplus
 extern "C" {

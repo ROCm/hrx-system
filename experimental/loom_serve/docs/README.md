@@ -187,7 +187,7 @@ build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/http:request_test \
   //experimental/loom_serve/http:server_test \
   //experimental/loom_serve/models/qwen:chat_test \
-  //experimental/loom_serve/storage:block_pool_test \
+  //loom/src/loom/serve/runtime/storage:block_pool_test \
   //experimental/loom_serve/text:schedule_test \
   //experimental/loom_serve/models/qwen:weights_test \
   //experimental/loom_serve/models/qwen:benchmark_service_test
@@ -197,9 +197,9 @@ Then, with the GPU runner available:
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve/runtime:jit_test \
-  //experimental/loom_serve/runtime:weights_test \
-  //experimental/loom_serve/runtime:control_test
+  //loom/src/loom/tooling/target/amdgpu/serve:jit_test \
+  //loom/src/loom/tooling/target/amdgpu/serve:weights_test \
+  //loom/src/loom/tooling/target/amdgpu/serve:control_test
 ```
 
 Success means all named GPU targets pass without hardware skips. The JIT cases
@@ -217,11 +217,11 @@ failure, and the separate cases cover invalid configuration and a command with
 no native requests. A compiler that merely accepts the source does not satisfy
 this gate.
 
-[`jit_test.cc`](../runtime/jit_test.cc) is the smallest complete embedding example:
+[`jit_test.cc`](../../../loom/src/loom/serve/runtime/program/jit_test.cc) is the smallest complete embedding example:
 source catalog, source defaults and binding overrides, actual device-profile
 specialization, native code loading, JIT VM invocation, and shared GPU state.
 It destroys compiler storage before executing the prepared commands.
-[`control_test.cc`](../runtime/control_test.cc) adds retained rows, explicit timeline
+[`control_test.cc`](../../../loom/src/loom/serve/runtime/program/control_test.cc) adds retained rows, explicit timeline
 edges, feedback branching, and
 device-produced indirect counts. Neither test needs model downloads.
 

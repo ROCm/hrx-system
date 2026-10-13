@@ -9,13 +9,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/input.h"
-#include "experimental/loom_serve/runtime/json.h"
-#include "experimental/loom_serve/runtime/module.h"
-#include "experimental/loom_serve/runtime/preparation.h"
-#include "experimental/loom_serve/runtime/program.h"
-#include "experimental/loom_serve/runtime/weights.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "iree/io/file_contents.h"
@@ -23,6 +16,13 @@
 #include "iree/tooling/device_util.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
+#include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/parameter/weights.h"
+#include "loom/serve/runtime/program/input.h"
+#include "loom/serve/runtime/program/json.h"
+#include "loom/serve/runtime/program/module.h"
+#include "loom/serve/runtime/program/preparation.h"
+#include "loom/serve/runtime/program/program.h"
 #include "loomc/iree.h"
 
 typedef struct finite_model_stage_t {

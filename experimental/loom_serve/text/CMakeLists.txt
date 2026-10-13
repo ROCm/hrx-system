@@ -43,8 +43,8 @@ loom_cc_library(
     iree::base
     iree::base::internal::json
     iree::base::internal::unicode
-    iree::experimental::loom_serve::runtime::program
     iree::vm
+    loom::serve::runtime::program
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -85,10 +85,10 @@ loom_cc_library(
     "storage.c"
   DEPS
     iree::base
-    iree::experimental::loom_serve::storage::relocation
-    iree::experimental::loom_serve::storage::snapshot
     iree::hal
     iree::vm
+    loom::serve::runtime::storage::relocation
+    loom::serve::runtime::storage::snapshot
   PUBLIC
 )
 
@@ -112,25 +112,7 @@ loom_cc_library(
     iree::async
     iree::async::util::proactor_pool
     iree::base
-    iree::experimental::loom_serve::runtime::command
-    iree::experimental::loom_serve::runtime::compilation
-    iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::input
-    iree::experimental::loom_serve::runtime::jit
-    iree::experimental::loom_serve::runtime::json
-    iree::experimental::loom_serve::runtime::module
-    iree::experimental::loom_serve::runtime::preparation
-    iree::experimental::loom_serve::runtime::program
-    iree::experimental::loom_serve::runtime::residency
-    iree::experimental::loom_serve::runtime::retirement
-    iree::experimental::loom_serve::runtime::sources
-    iree::experimental::loom_serve::runtime::weights
     iree::experimental::loom_serve::scheduling::packing
-    iree::experimental::loom_serve::storage::block_pool
-    iree::experimental::loom_serve::storage::memory
-    iree::experimental::loom_serve::storage::relocation
-    iree::experimental::loom_serve::storage::snapshot
     iree::hal
     iree::io::file_handle
     iree::module::hal::types
@@ -140,6 +122,24 @@ loom_cc_library(
     iree::tooling::device_util
     iree::vm
     loom::binding::c::loomc
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::execution::retirement
+    loom::serve::runtime::parameter::residency
+    loom::serve::runtime::parameter::weights
+    loom::serve::runtime::program
+    loom::serve::runtime::program::command
+    loom::serve::runtime::program::compilation
+    loom::serve::runtime::program::input
+    loom::serve::runtime::program::jit
+    loom::serve::runtime::program::json
+    loom::serve::runtime::program::module
+    loom::serve::runtime::program::preparation
+    loom::serve::runtime::program::sources
+    loom::serve::runtime::storage::block_pool
+    loom::serve::runtime::storage::memory
+    loom::serve::runtime::storage::relocation
+    loom::serve::runtime::storage::snapshot
     loom::util::stream
   PUBLIC
 )
@@ -153,12 +153,12 @@ loom_cc_test(
   DEPS
     ::storage
     iree::base
-    iree::experimental::loom_serve::storage::snapshot
     iree::hal
     iree::hal::memory::heap_pool
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm
+    loom::serve::runtime::storage::snapshot
 )
 
 loom_cc_library(
@@ -221,11 +221,11 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::weights
-    iree::experimental::loom_serve::storage::memory
-    iree::experimental::loom_serve::telemetry::weights
+    loom::serve::runtime::device
     loom::serve::runtime::host::timer
+    loom::serve::runtime::parameter::telemetry
+    loom::serve::runtime::parameter::weights
+    loom::serve::runtime::storage::memory
     loom::serve::telemetry::record
     loom::serve::telemetry::stream
   PUBLIC
@@ -283,8 +283,8 @@ loom_cc_library(
     ::chat
     ::model
     iree::base
-    iree::experimental::loom_serve::runtime::execution
     iree::vm
+    loom::serve::runtime::execution
   PUBLIC
 )
 endif()
@@ -301,8 +301,8 @@ loom_cc_library(
     ::model
     ::schedule
     iree::base
-    iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::scheduling::packing
+    loom::serve::runtime::execution
   PUBLIC
 )
 endif()
@@ -336,7 +336,7 @@ loom_cc_library(
     ::session
     ::telemetry
     iree::base
-    iree::experimental::loom_serve::runtime::execution
+    loom::serve::runtime::execution
   PUBLIC
 )
 
@@ -350,7 +350,7 @@ loom_cc_library(
   DEPS
     ::model
     iree::base
-    iree::experimental::loom_serve::runtime::execution
+    loom::serve::runtime::execution
   PUBLIC
 )
 
@@ -382,12 +382,12 @@ loom_cc_library(
     iree::experimental::loom_serve::http::request
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::http::service
-    iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::scheduling::packing
     iree::task
     iree::tokenizer
     iree::vm
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
     loom::serve::runtime::host
     loom::serve::runtime::host::timer
     loom::serve::runtime::host::wake
@@ -485,14 +485,14 @@ loom_cc_binary(
     ::chat
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::compilation
-    iree::experimental::loom_serve::runtime::input
-    iree::experimental::loom_serve::runtime::json
-    iree::experimental::loom_serve::runtime::program
     iree::io::file_handle
     iree::tokenizer
     iree::tokenizer::format::huggingface::tokenizer_json
     iree::vm
+    loom::serve::runtime::program
+    loom::serve::runtime::program::compilation
+    loom::serve::runtime::program::input
+    loom::serve::runtime::program::json
     loom::util::json
     loom::util::stream
   TESTONLY

@@ -7,11 +7,11 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_FINITE_MODEL_H_
 #define EXPERIMENTAL_LOOM_SERVE_FINITE_MODEL_H_
 
-#include "experimental/loom_serve/runtime/compilation.h"
-#include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/sources.h"
 #include "iree/tokenizer/tokenizer.h"
 #include "iree/vm/buffer.h"
+#include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/program/compilation.h"
+#include "loom/serve/runtime/program/sources.h"
 
 #ifdef __cplusplus
 extern "C" {

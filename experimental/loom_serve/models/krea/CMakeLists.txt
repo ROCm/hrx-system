@@ -38,13 +38,13 @@ loom_cc_test(
   DEPS
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::input
-    iree::experimental::loom_serve::runtime::json
-    iree::experimental::loom_serve::runtime::preparation
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm
     loom::binding::c::loomc
+    loom::serve::runtime::program::input
+    loom::serve::runtime::program::json
+    loom::serve::runtime::program::preparation
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/krea/prepare.loom}}"
 )
@@ -61,11 +61,11 @@ loom_cc_test(
   DEPS
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::input
-    iree::experimental::loom_serve::runtime::program
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm
+    loom::serve::runtime::program
+    loom::serve::runtime::program::input
   ARGS
     "--control_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/krea/control.loom}}"
 )
@@ -83,9 +83,9 @@ loom_cc_test(
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::image::model
-    iree::experimental::loom_serve::runtime::device
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::device
     loom::serve::runtime::host
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/krea/prepare.loom}}"
@@ -106,15 +106,15 @@ loom_cc_binary(
     iree::base
     iree::base::internal
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::compilation
-    iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::jit
-    iree::experimental::loom_serve::runtime::weights
     iree::experimental::loom_serve::serving::configuration
     iree::hal
     iree::io::file_handle
     loom::binding::c::loomc
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::parameter::weights
+    loom::serve::runtime::program::compilation
+    loom::serve::runtime::program::jit
     loom::util::stream
   TESTONLY
 )

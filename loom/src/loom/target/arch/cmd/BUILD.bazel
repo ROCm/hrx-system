@@ -42,7 +42,7 @@ loom_cc_library(
         "program.h",
     ],
     visibility = [
-        "//experimental/loom_serve/runtime:__pkg__",
+        "//loom/src/loom/serve/runtime/program:__pkg__",
         "//loom/src/loom/target/arch/cmd:__subpackages__",
     ],
     deps = [

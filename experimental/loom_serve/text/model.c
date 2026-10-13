@@ -12,16 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "experimental/loom_serve/runtime/command.h"
-#include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/execution.h"
-#include "experimental/loom_serve/runtime/input.h"
-#include "experimental/loom_serve/runtime/jit.h"
-#include "experimental/loom_serve/runtime/json.h"
-#include "experimental/loom_serve/runtime/module.h"
-#include "experimental/loom_serve/runtime/preparation.h"
-#include "experimental/loom_serve/runtime/program.h"
-#include "experimental/loom_serve/runtime/weights.h"
 #include "experimental/loom_serve/text/source.h"
 #include "experimental/loom_serve/text/stages.h"
 #include "experimental/loom_serve/text/state.h"
@@ -30,6 +20,16 @@
 #include "iree/tooling/device_util.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
+#include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/parameter/weights.h"
+#include "loom/serve/runtime/program/command.h"
+#include "loom/serve/runtime/program/input.h"
+#include "loom/serve/runtime/program/jit.h"
+#include "loom/serve/runtime/program/json.h"
+#include "loom/serve/runtime/program/module.h"
+#include "loom/serve/runtime/program/preparation.h"
+#include "loom/serve/runtime/program/program.h"
 #include "loomc/iree.h"
 
 enum {

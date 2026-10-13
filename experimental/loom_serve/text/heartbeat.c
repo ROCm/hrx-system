@@ -9,7 +9,7 @@
 #include <inttypes.h>
 #include <string.h>
 
-#include "experimental/loom_serve/telemetry/weights.h"
+#include "loom/serve/runtime/parameter/telemetry.h"
 
 // Related records share a timestamp but remain independently readable after
 // overwrite. Shared device memory is labeled separately from model ownership.

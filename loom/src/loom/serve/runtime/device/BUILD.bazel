@@ -1,0 +1,80 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "iree_select", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//loom/src/loom/serve:implementation"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+exports_files(
+    [
+        "device_group_test.cc",
+    ],
+    visibility = ["//loom/src/loom/serve:implementation"],
+)
+
+loom_cc_library(
+    name = "device",
+    srcs = ["device.c"],
+    hdrs = ["device.h"],
+    copts = iree_select({
+        "//runtime/config/hal:driver_task": ["-DLOOM_SERVE_DRIVER_TASK=1"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/execution:workspace",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/parameter:residency",
+        "//loom/src/loom/serve/runtime/storage:memory",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers",
+        "//runtime/src/iree/tooling:device_util",
+    ] + iree_select({
+        "//runtime/config/hal:driver_task": [
+            "//runtime/src/iree/hal/drivers/task:driver",
+            "//runtime/src/iree/hal/drivers/task/executable:loader",
+            "//runtime/src/iree/hal/drivers/task/executable/loaders/registration",
+        ],
+        "//conditions:default": [],
+    }),
+)
+
+loom_cc_test(
+    name = "device_test",
+    srcs = ["device_test.cc"],
+    deps = [
+        ":device",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "device_cpu_test",
+    srcs = ["device_cpu_test.cc"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_task",
+    ]),
+    deps = [
+        ":device",
+        "//loom/src/loom/serve/runtime/host",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

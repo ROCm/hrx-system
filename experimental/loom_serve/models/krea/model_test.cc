@@ -8,10 +8,10 @@
 
 #include <string>
 
-#include "experimental/loom_serve/runtime/device.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/host/host.h"
 
 IREE_FLAG(string, model_source, "", "Production image bootstrap source.");

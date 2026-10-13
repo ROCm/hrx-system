@@ -7,9 +7,9 @@
 #ifndef IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_CHAT_H_
 #define IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_CHAT_H_
 
-#include "experimental/loom_serve/runtime/program.h"
 #include "iree/base/api.h"
 #include "iree/vm/buffer.h"
+#include "loom/serve/runtime/program/program.h"
 
 #ifdef __cplusplus
 extern "C" {

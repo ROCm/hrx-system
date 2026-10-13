@@ -8,17 +8,17 @@
 #include <string>
 #include <vector>
 
-#include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/input.h"
-#include "experimental/loom_serve/runtime/json.h"
-#include "experimental/loom_serve/runtime/preparation.h"
 #include "experimental/loom_serve/text/model.h"
 #include "experimental/loom_serve/text/schedule.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
+#include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/host/host.h"
+#include "loom/serve/runtime/program/input.h"
+#include "loom/serve/runtime/program/json.h"
+#include "loom/serve/runtime/program/preparation.h"
 
 IREE_FLAG(string, prepare_source, "", "Production model bootstrap source.");
 

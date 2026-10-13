@@ -37,14 +37,14 @@ loom_cc_library(
     iree::experimental::loom_serve::http::request
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::http::service
-    iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::residency
     iree::hal
     iree::task
     iree::vm
+    loom::serve::runtime::execution
     loom::serve::runtime::host
     loom::serve::runtime::host::timer
     loom::serve::runtime::host::wake
+    loom::serve::runtime::parameter::residency
     loom::serve::telemetry::stream
     loom::util::json
     loom::util::stream
@@ -62,19 +62,6 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::runtime::compilation
-    iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::dispatch
-    iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::input
-    iree::experimental::loom_serve::runtime::jit
-    iree::experimental::loom_serve::runtime::json
-    iree::experimental::loom_serve::runtime::module
-    iree::experimental::loom_serve::runtime::preparation
-    iree::experimental::loom_serve::runtime::program
-    iree::experimental::loom_serve::runtime::residency
-    iree::experimental::loom_serve::runtime::sources
-    iree::experimental::loom_serve::runtime::weights
     iree::hal
     iree::io::file_handle
     iree::module::hal::types
@@ -83,7 +70,20 @@ loom_cc_library(
     iree::tooling::device_util
     iree::vm
     loom::binding::c::loomc
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::execution::dispatch
     loom::serve::runtime::host
+    loom::serve::runtime::parameter::residency
+    loom::serve::runtime::parameter::weights
+    loom::serve::runtime::program
+    loom::serve::runtime::program::compilation
+    loom::serve::runtime::program::input
+    loom::serve::runtime::program::jit
+    loom::serve::runtime::program::json
+    loom::serve::runtime::program::module
+    loom::serve::runtime::program::preparation
+    loom::serve::runtime::program::sources
     loom::util::stream
   PUBLIC
 )

@@ -191,7 +191,7 @@ experiment, not a blanket optimization rule.
 The [model document](MODEL_FORMAT.md) names cold/warm VM programs and lists
 native providers in `definition.sources`. The
 [Qwen document](../models/qwen/model.json) shows a complete learned-model
-closure; the small [JIT test](../runtime/jit_test.cc) directly supplies
+closure; the small [JIT test](../../../loom/src/loom/serve/runtime/program/jit_test.cc) directly supplies
 `testdata/jit/config.loom` and `stage.loom`.
 
 Provider paths resolve relative to the model document, or its explicit local
@@ -201,7 +201,7 @@ A provider carries declarations for the configuration, templates, kernels and
 commands it references from other providers, and the target definitions needed
 to verify its own kernels. The declarations describe imported contracts; their
 definitions remain with the owning provider. For example,
-[`stage.loom`](../runtime/testdata/jit/stage.loom) declares the configuration supplied by
+[`stage.loom`](../../../loom/src/loom/serve/runtime/program/testdata/jit/stage.loom) declares the configuration supplied by
 its neighboring `config.loom` and defines its kernel target locally.
 
 A flattened kernel benchmark does not exercise this provider boundary. Building
@@ -210,7 +210,7 @@ per-file declarations and reachable definitions before device execution. That
 is part of the first real-weight component witness, alongside native code and
 numerical checks.
 
-The source compilation sequence in [`jit.c`](../runtime/jit.c) is:
+The source compilation sequence in [`jit.c`](../../../loom/src/loom/serve/runtime/program/jit.c) is:
 
 1. Create the target environment, context, prepared compiler and pipeline;
    select the exact live HAL loader/profile pair and freeze the source index.
@@ -260,7 +260,7 @@ IO machinery, but its model source must establish names, encoding, orientation,
 and size rather than treating a matching byte count as numerical equivalence.
 
 Checkpoint encoding and inference layout need not be identical.
-[`weights.c`](../runtime/weights.c) loads each unique tensor into final
+[`weights.c`](../../../loom/src/loom/serve/runtime/parameter/weights.c) loads each unique tensor into final
 residency. It calls the model's source-JIT weight policy with the tensor name as
 a read-only, non-NUL-terminated VM buffer. `prepare_weight` returns a command
 root buffer and its required tensor byte length; an empty root and zero length
@@ -295,7 +295,7 @@ startup ownership path, including byte copies and peak residency. A faster
 projection alone does not establish a better serving configuration.
 
 This is a cold policy query, not a graph language interpreted by C. The same
-[`program`](../runtime/program.h) owner handles pure startup queries and the inference
+[`program`](../../../loom/src/loom/serve/runtime/program/program.h) owner handles pure startup queries and the inference
 VM linked against native submission exports. The startup query process is gone
 before inference begins. Common native pipelines can consume model-owned query
 results while additional control moves into VM source; modality-specific state
@@ -304,7 +304,7 @@ and scheduling contracts still need an actual caller before being generalized.
 The inference program exposes both `step` and `epoch` from one source-JIT image.
 Qwen's cold [`prepare.loom`](../models/qwen/prepare.loom) declares the commands,
 run-dependent specialization and checkpoint bindings through the same
-[`preparation`](../runtime/preparation.h) module used by image models. The
+[`preparation`](../../../loom/src/loom/serve/runtime/program/preparation.h) module used by image models. The
 returned opaque control buffer belongs to the residency, outlives the cold
 process, and is interpreted only by the warm source. Native code consumes
 declarations and command reflection instead of naming model commands. The
@@ -329,7 +329,7 @@ joining accepted work before the host recycles payloads. The
 ## Image and audio entry points
 
 The reusable runner accepts command programs or direct native stages and buffer
-bindings, not text tokens. [`jit_test.cc`](../runtime/jit_test.cc) exercises it without a tokenizer, chat
+bindings, not text tokens. [`jit_test.cc`](../../../loom/src/loom/serve/runtime/program/jit_test.cc) exercises it without a tokenizer, chat
 request, KV cache, or Qwen adapter. That is the smaller starting point for an
 image or audio port. The [Krea image port](../models/krea/README.md) adds
 real checkpoint and adapter evidence: one source-JIT command now composes
@@ -367,7 +367,7 @@ shared workspace pool. Its output view lasts until the next call; the consumer
 copies or encodes it before then. It requires no external encoder or captured
 tensors. [Krea's control source](../models/krea/control.loom) owns prompt framing,
 token validation, stage selection and payload layout. The generic native
-[input module](../runtime/input.h) supplies bounded tokenization and vocabulary
+[input module](../../../loom/src/loom/serve/runtime/program/input.h) supplies bounded tokenization and vocabulary
 lookup, not model conventions. Its [command source](../models/krea/generate.loom)
 creates noise, rotary tables, schedule and affine inputs on the device. Numerical
 checks use independently justified BF16/F32 envelopes rather than host libm bits.
@@ -437,7 +437,7 @@ and strength. Its `input.encode(text, flags, capacity)` capability returns
 bounded little-endian i32 tokens plus their live count. Source chooses raw
 encoding, tokenizer-defined special-token insertion, literal special-token
 spelling, or their combination using the flags documented in
-[`input.h`](../runtime/input.h). Krea explicitly selects special-token insertion.
+[`input.h`](../../../loom/src/loom/serve/runtime/program/input.h). Krea explicitly selects special-token insertion.
 A text policy requiring the complete input can request one token beyond its
 limit and reject an excess count; a bounded prefix alone cannot establish that
 the entire prompt fit. Qwen's `prepare_input` demonstrates this complete-input
@@ -485,7 +485,7 @@ download. A compatible port supplies source and assets, not another C adapter.
 A model outside the existing text/image/finite-vector contracts first needs a
 concrete caller with a different ownership flow. The shared substrate is:
 
-1. It borrows the caller's [`loom_serve_device_t`](../runtime/device.h), which owns
+1. It borrows the caller's [`loom_serve_device_t`](../../../loom/src/loom/serve/runtime/device/device.h), which owns
    the device, asynchronous services, exact queues, execution timelines and
    optional shared physical pool. Borrowed
    device/queue handles create a source catalog with `loom_serve_jit_create`
@@ -523,7 +523,7 @@ concrete caller with a different ownership flow. The shared substrate is:
    frontiers before publishing output. `runner.execute_N` returns an accepted
    submission value, not a completed tensor. An error after an earlier accepted
    submission still requires draining both execution timelines before reuse or
-   teardown. [`control_test.cc`](../runtime/control_test.cc) exercises that failure path.
+   teardown. [`control_test.cc`](../../../loom/src/loom/serve/runtime/program/control_test.cc) exercises that failure path.
    The device owner is destroyed only after model commands, buffers, VM state,
    and accepted host payloads have retired; destroying it is not an implicit
    completion wait.

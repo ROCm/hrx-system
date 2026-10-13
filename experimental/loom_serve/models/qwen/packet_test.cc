@@ -8,13 +8,13 @@
 #include <array>
 #include <vector>
 
-#include "experimental/loom_serve/runtime/program.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
 #include "iree/vm/test_allocator.h"
+#include "loom/serve/runtime/program/program.h"
 
 IREE_FLAG(string, control_source, "", "Production token control source.");
 

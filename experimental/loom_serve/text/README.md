@@ -124,7 +124,7 @@ prepare(prefill:i64, context:i64, pool:i64, rows:i64, pins:i64, draft_depth:i32,
 
 `shapes` contains little-endian i64 `{token_capacity, span_capacity}`
 pairs. The source declares command roots, configuration overrides and
-checkpoint bindings through the [preparation capability](../runtime/preparation.h).
+checkpoint bindings through the [preparation capability](../../../loom/src/loom/serve/runtime/program/preparation.h).
 The existing `input.require` capability accepts source-specific configuration
 checks during bootstrap; tokenization is available only in the warm program.
 The first `shared_stage_count` stages have identical target parameter
@@ -669,7 +669,7 @@ explicitly by the Qwen program, not the default interpretation of text.
 The independent [plain-text/JSON policy](../models/qwen/testdata/portable_chat.loom)
 is tested through the same native caller without linking that codec.
 
-Qwen uses the generic [`json.compact`](../runtime/json.h) capability before
+Qwen uses the generic [`json.compact`](../../../loom/src/loom/serve/runtime/program/json.h) capability before
 rendering tool arguments. Clients commonly parse and reserialize generated
 arguments; insignificant spacing inside nested objects or arrays then changes
 without changing the tool call. Compaction makes those histories share the

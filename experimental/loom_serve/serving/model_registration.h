@@ -7,8 +7,8 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_SERVING_MODEL_REGISTRATION_H_
 #define EXPERIMENTAL_LOOM_SERVE_SERVING_MODEL_REGISTRATION_H_
 
-#include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/serving/registry.h"
+#include "loom/serve/runtime/device/device.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -20,19 +20,19 @@ state and canonical checkpoints without naming a model.
 
 | Component | Receives and owns | Does not infer |
 | --- | --- | --- |
-| [`device`](../runtime/device.h) | HAL device URIs, application group, exact queue defaults, per-device admission and profiling | Compiler target support, logical model state or request lifetimes |
-| [`jit`](../runtime/jit.h) | Source catalog, configuration, live device profile; compiled command images and native entries | Session identity, cache lifetime, chat semantics |
-| [`command`](../runtime/command.h) | Compiler-produced parameter/binding requirements, executable reflection; reusable HAL command recording | Model graph from buffer contents or filenames |
-| [`execution`](../runtime/execution.h) | Exact dispatch/transfer queues and explicit work/feedback timelines | Ordering from FIFO submission or alias inspection |
-| [`workspace`](../runtime/workspace.h) | Qualified backing pool, slab geometry and raw allocation captures across execution domains | Shared access from group membership, implicit visibility or final-reader dependencies |
-| [`module`](../runtime/module.h) | Indexed prepared commands, typed execute imports and registered host feedback spans | Per-session VM state, model stages, or a general HAL instruction set |
-| [`program`](../runtime/program.h) | Source-JIT bytecode, linked libraries, one process and serialized invocation | Model geometry or the lifetime of asynchronously borrowed host payloads |
-| [`preparation`](../runtime/preparation.h) | Cold source declarations of commands, configuration and checkpoint domains, copied independently of the bootstrap process | Model geometry, stage semantics, or GPU allocation |
+| [`device`](../../../loom/src/loom/serve/runtime/device/device.h) | HAL device URIs, application group, exact queue defaults, per-device admission and profiling | Compiler target support, logical model state or request lifetimes |
+| [`jit`](../../../loom/src/loom/serve/runtime/program/jit.h) | Source catalog, configuration, live device profile; compiled command images and native entries | Session identity, cache lifetime, chat semantics |
+| [`command`](../../../loom/src/loom/serve/runtime/program/command.h) | Compiler-produced parameter/binding requirements, executable reflection; reusable HAL command recording | Model graph from buffer contents or filenames |
+| [`execution`](../../../loom/src/loom/serve/runtime/execution/execution.h) | Exact dispatch/transfer queues and explicit work/feedback timelines | Ordering from FIFO submission or alias inspection |
+| [`workspace`](../../../loom/src/loom/serve/runtime/execution/workspace.h) | Qualified backing pool, slab geometry and raw allocation captures across execution domains | Shared access from group membership, implicit visibility or final-reader dependencies |
+| [`module`](../../../loom/src/loom/serve/runtime/program/module.h) | Indexed prepared commands, typed execute imports and registered host feedback spans | Per-session VM state, model stages, or a general HAL instruction set |
+| [`program`](../../../loom/src/loom/serve/runtime/program/program.h) | Source-JIT bytecode, linked libraries, one process and serialized invocation | Model geometry or the lifetime of asynchronously borrowed host payloads |
+| [`preparation`](../../../loom/src/loom/serve/runtime/program/preparation.h) | Cold source declarations of commands, configuration and checkpoint domains, copied independently of the bootstrap process | Model geometry, stage semantics, or GPU allocation |
 | [`text_model`](../text/model.h) | Source-declared storage materialization, physical page ownership, scratch, source packet invocation, numerical progress | HTTP or tool semantics |
-| [`weights`](../runtime/weights.h) | Shared parameter residency, source policy queries, cached preparers, file-read/preparation readiness | Tensor naming rules, model geometry, or ordering from submission order |
-| [`residency`](../runtime/residency.h) | Whole-model parameter admission, nested operation/retention pins, idle LRU eviction under the shared physical budget | Which mutable state can be discarded or which workflow should run next |
-| [`memory`](../storage/memory.h) | Stable virtual roots, unique physical slab commitment, shared byte budget and retired-range trimming | Logical block identities, model geometry or eviction priority |
-| [`snapshot`](../storage/snapshot.h) | Logical-order host image and retirement-safe gather/scatter transfers over supplied ranges | Tokens, recurrent geometry, session policy or checkpoint files |
+| [`weights`](../../../loom/src/loom/serve/runtime/parameter/weights.h) | Shared parameter residency, source policy queries, cached preparers, file-read/preparation readiness | Tensor naming rules, model geometry, or ordering from submission order |
+| [`residency`](../../../loom/src/loom/serve/runtime/parameter/residency.h) | Whole-model parameter admission, nested operation/retention pins, idle LRU eviction under the shared physical budget | Which mutable state can be discarded or which workflow should run next |
+| [`memory`](../../../loom/src/loom/serve/runtime/storage/memory.h) | Stable virtual roots, unique physical slab commitment, shared byte budget and retired-range trimming | Logical block identities, model geometry or eviction priority |
+| [`snapshot`](../../../loom/src/loom/serve/runtime/storage/snapshot.h) | Logical-order host image and retirement-safe gather/scatter transfers over supplied ranges | Tokens, recurrent geometry, session policy or checkpoint files |
 | [`packing`](../scheduling/packing.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Token values, model identity, attention state, measured kernel cost |
 | [`text_schedule`](../text/schedule.h) | Default model shape catalog and completion-reservation extent | HTTP output credit or committed model progress |
 | [`text_service`](../text/service.h) | Validated chat, session keys, canonical history, output credit, scheduling policy | Kernel layout decisions |
@@ -488,7 +488,7 @@ Several existing boundaries already accommodate that direction:
   preparation and retirement. A model owner retains accepted asynchronous
   obligations through cancellation and removal. The application group outlives
   those owners; a device error does not authorize callback-side destruction.
-* [`runtime/execution.h`](../runtime/execution.h) keeps work and feedback
+* [`runtime/execution.h`](../../../loom/src/loom/serve/runtime/execution/execution.h) keeps work and feedback
   frontiers on their actual execution domain. Dependencies are explicit
   semaphore edges, never submission order or a device-wide host wait.
 
@@ -527,7 +527,7 @@ four host workers over two logical device handles on one physical GPU. This
 proves independent progress and lifetime ownership, not multi-physical-device
 access, remote transport or a distributed model.
 
-[`workspace_test`](../runtime/workspace_test.cc) exercises a shared scoped pool
+[`workspace_test`](../../../loom/src/loom/serve/runtime/execution/workspace_test.cc) exercises a shared scoped pool
 across two CPU devices on the same application executor. Three timelines share
 one slab: a held cross-device final reader keeps its inputs alive while an
 independent timeline finishes, followed by exact output and trim to zero. The

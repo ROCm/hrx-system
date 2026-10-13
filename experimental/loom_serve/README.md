@@ -153,7 +153,7 @@ profile recording use the same emitted command artifact.
 From the worktree root:
 
 ```sh
-build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve/runtime:control_test
+build_tools/bin/iree-bazel-test --config=asan //loom/src/loom/tooling/target/amdgpu/serve:control_test
 ```
 
 The separate `jit_test` uses the serving compiler path itself: a source-defined
@@ -163,7 +163,7 @@ storage before executing the prepared commands and verifies the device result.
 It also checks that rejected configuration leaves the compiler reusable.
 
 ```sh
-build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve/runtime:jit_test
+build_tools/bin/iree-bazel-test --config=asan //loom/src/loom/tooling/target/amdgpu/serve:jit_test
 ```
 
 Weights, KV pools, model forward stages, scheduling policy, and transport are

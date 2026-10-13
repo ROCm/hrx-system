@@ -7,9 +7,9 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_TEXT_STORAGE_H_
 #define EXPERIMENTAL_LOOM_SERVE_TEXT_STORAGE_H_
 
-#include "experimental/loom_serve/storage/relocation.h"
-#include "experimental/loom_serve/storage/snapshot.h"
 #include "iree/vm/buffer.h"
+#include "loom/serve/runtime/storage/relocation.h"
+#include "loom/serve/runtime/storage/snapshot.h"
 
 #ifdef __cplusplus
 extern "C" {

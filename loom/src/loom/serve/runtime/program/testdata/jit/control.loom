@@ -1,0 +1,12 @@
+func.decl import("runner") @execute_1(%stage: i32, %storage: hal.buffer) -> (i64)
+
+func.def public @step(%storage: hal.buffer) -> (i64) {
+  %c0 = scalar.constant 0 : i32
+  %completion = func.call @execute_1(%c0, %storage) : (i32, hal.buffer) -> (i64)
+  func.return %completion : i64
+}
+
+func.def public @selected_step(%stage: i32, %storage: hal.buffer) -> (i64) {
+  %completion = func.call @execute_1(%stage, %storage) : (i32, hal.buffer) -> (i64)
+  func.return %completion : i64
+}

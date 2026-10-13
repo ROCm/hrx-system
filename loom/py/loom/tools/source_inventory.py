@@ -18,11 +18,12 @@ SOURCE_SUFFIXES = frozenset({".loom", ".loom-test"})
 REPOSITORY_SOURCE_SUFFIXES = frozenset({".c", ".cc", ".h"})
 REPOSITORY_SOURCE_ROOT = "loom/src/loom/"
 AUTHORING_CORPUS_ROOT = REPOSITORY_SOURCE_ROOT + "test/corpus/authoring/"
-# Syntax fixtures retain their exact parser/printer contract; the two semantic
-# error fixtures intentionally cannot pass canonical-source verification.
+# Syntax fixtures retain their exact parser/printer contract. Standalone syntax
+# and semantic error fixtures cannot pass canonical-source verification.
 FORMAT_EXCLUDED_PREFIXES = (REPOSITORY_SOURCE_ROOT + "test/corpus/text/",)
 FORMAT_EXCLUDED_PATHS = frozenset(
     {
+        "loom/src/loom/serve/runtime/program/testdata/compilation/invalid.loom",
         "loom/src/loom/tooling/target/amdgpu/test/amdgpu_bad_return.loom",
         "loom/src/loom/tools/iree-benchmark-loom/testdata/duplicate_symbol.loom",
     }

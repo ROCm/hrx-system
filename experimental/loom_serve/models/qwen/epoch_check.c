@@ -11,9 +11,9 @@
 
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
-#include "experimental/loom_serve/runtime/residency.h"
 #include "experimental/loom_serve/text/flags.h"
 #include "iree/base/tooling/flags.h"
+#include "loom/serve/runtime/parameter/residency.h"
 
 IREE_FLAG(string, compare, "",
           "Optional completed-work ABABA comparison: single, mixed, full or "

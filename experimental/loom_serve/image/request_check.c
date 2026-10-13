@@ -10,9 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "experimental/loom_serve/runtime/input.h"
-#include "experimental/loom_serve/runtime/preparation.h"
-#include "experimental/loom_serve/runtime/program.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/internal/path.h"
 #include "iree/base/tooling/flags.h"
@@ -20,6 +17,9 @@
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
+#include "loom/serve/runtime/program/input.h"
+#include "loom/serve/runtime/program/preparation.h"
+#include "loom/serve/runtime/program/program.h"
 
 IREE_FLAG(string, model, "", "Source model directory.");
 IREE_FLAG(string, checkpoint, "", "Checkpoint asset directory.");

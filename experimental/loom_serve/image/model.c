@@ -9,19 +9,19 @@
 #include <inttypes.h>
 #include <stdio.h>
 
-#include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/input.h"
-#include "experimental/loom_serve/runtime/json.h"
-#include "experimental/loom_serve/runtime/module.h"
-#include "experimental/loom_serve/runtime/preparation.h"
-#include "experimental/loom_serve/runtime/program.h"
-#include "experimental/loom_serve/runtime/retirement.h"
-#include "experimental/loom_serve/runtime/weights.h"
 #include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "iree/tooling/device_util.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
+#include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/execution/retirement.h"
+#include "loom/serve/runtime/parameter/weights.h"
+#include "loom/serve/runtime/program/input.h"
+#include "loom/serve/runtime/program/json.h"
+#include "loom/serve/runtime/program/module.h"
+#include "loom/serve/runtime/program/preparation.h"
+#include "loom/serve/runtime/program/program.h"
 #include "loomc/iree.h"
 
 typedef struct image_model_stage_t {

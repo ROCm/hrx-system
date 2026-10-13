@@ -7,13 +7,13 @@
 #include <map>
 #include <string>
 
-#include "experimental/loom_serve/runtime/input.h"
-#include "experimental/loom_serve/runtime/json.h"
-#include "experimental/loom_serve/runtime/preparation.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
+#include "loom/serve/runtime/program/input.h"
+#include "loom/serve/runtime/program/json.h"
+#include "loom/serve/runtime/program/preparation.h"
 
 IREE_FLAG(string, model_source, "", "Production Krea bootstrap source.");
 

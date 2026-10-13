@@ -11,12 +11,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/weights.h"
 #include "experimental/loom_serve/serving/configuration.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
+#include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/parameter/weights.h"
 
 IREE_FLAG(string, model, "experimental/loom_serve/models/krea/model.json",
           "Model JSON document.");

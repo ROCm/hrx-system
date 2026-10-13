@@ -12,6 +12,7 @@ package_group(
     packages = [
         "//experimental/loom_serve/...",
         "//loom/src/loom/serve/...",
+        "//loom/src/loom/tooling/target/amdgpu/serve",
         "//loom/src/loom/tools/loom-serve",
     ],
 )

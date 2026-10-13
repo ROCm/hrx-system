@@ -8,9 +8,9 @@
 #define EXPERIMENTAL_LOOM_SERVE_IMAGE_GENERATOR_H_
 
 #include "experimental/loom_serve/image/request.h"
-#include "experimental/loom_serve/runtime/execution.h"
-#include "experimental/loom_serve/runtime/residency.h"
 #include "iree/tokenizer/tokenizer.h"
+#include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/parameter/residency.h"
 
 #ifdef __cplusplus
 extern "C" {

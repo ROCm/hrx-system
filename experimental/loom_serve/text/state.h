@@ -7,10 +7,10 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_TEXT_STATE_H_
 #define EXPERIMENTAL_LOOM_SERVE_TEXT_STATE_H_
 
-#include "experimental/loom_serve/runtime/retirement.h"
-#include "experimental/loom_serve/storage/block_pool.h"
 #include "experimental/loom_serve/text/model.h"
 #include "experimental/loom_serve/text/storage.h"
+#include "loom/serve/runtime/execution/retirement.h"
+#include "loom/serve/runtime/storage/block_pool.h"
 
 #ifdef __cplusplus
 extern "C" {

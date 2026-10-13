@@ -54,12 +54,12 @@ loom_cc_test(
     iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::server
-    iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::device
     loom::serve::runtime::host
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom}}"
@@ -98,12 +98,12 @@ loom_cc_test(
     iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::server
-    iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::device
     loom::serve::runtime::host
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom}}"
@@ -142,12 +142,12 @@ loom_cc_test(
     iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::server
-    iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::device
     loom::serve::runtime::host
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom}}"

@@ -1,0 +1,293 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "iree_select", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//loom/src/loom/serve:implementation"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+exports_files(
+    [
+        "control_test.cc",
+        "jit_test.cc",
+        "testdata/compilation/invalid.loom",
+        "testdata/control/control.loom",
+        "testdata/control/kernels.loom",
+        "testdata/jit/config.loom",
+        "testdata/jit/control.loom",
+        "testdata/jit/stage.loom",
+    ],
+    visibility = ["//loom/src/loom/serve:implementation"],
+)
+
+loom_cc_test(
+    name = "sources_test",
+    srcs = ["sources_test.cc"],
+    deps = [
+        ":sources",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "command",
+    srcs = ["command.c"],
+    hdrs = ["command.h"],
+    deps = [
+        "//loom/src/loom/target/arch/cmd:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "module",
+    srcs = ["module.c"],
+    hdrs = ["module.h"],
+    deps = [
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/execution:dispatch",
+        "//loom/src/loom/target/arch/cmd:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "compilation",
+    srcs = ["compilation.c"],
+    hdrs = ["compilation.h"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "target",
+    srcs = ["target.c"],
+    hdrs = ["target.h"],
+    copts = iree_select({
+        "//loom/config/target:amdgpu_artifacts": ["-DLOOM_SERVE_TARGET_AMDGPU=1"],
+        "//conditions:default": [],
+    }) + iree_select({
+        "//loom/config/target:spirv_vulkan_artifacts": ["-DLOOM_SERVE_TARGET_SPIRV=1"],
+        "//conditions:default": [],
+    }) + iree_select({
+        "//loom/config/target:xdna_artifacts": ["-DLOOM_SERVE_TARGET_XDNA=1"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":compilation",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/cpu:iree_hal",
+        "//loom/binding/c/target/iree_hal",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ] + iree_select({
+        "//loom/config/target:amdgpu_artifacts": ["//loom/binding/c/target/amdgpu:iree_hal"],
+        "//conditions:default": [],
+    }) + iree_select({
+        "//loom/config/target:spirv_vulkan_artifacts": ["//loom/binding/c/target/spirv/iree_hal"],
+        "//conditions:default": [],
+    }) + iree_select({
+        "//loom/config/target:xdna_artifacts": ["//loom/binding/c/target/amd/xdna:iree_hal"],
+        "//conditions:default": [],
+    }),
+)
+
+loom_cc_library(
+    name = "sources",
+    srcs = ["sources.c"],
+    hdrs = ["sources.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+    ],
+)
+
+loom_cc_library(
+    name = "jit",
+    srcs = ["jit.c"],
+    hdrs = ["jit.h"],
+    deps = [
+        ":command",
+        ":compilation",
+        ":sources",
+        ":target",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c:task_pool",
+        "//loom/binding/c/target/cmd",
+        "//loom/binding/c/target/configured",
+        "//loom/binding/c/target/vm",
+        "//loom/src/loom/serve/runtime/execution:dispatch",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/target/arch/cmd:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_test(
+    name = "compilation_test",
+    srcs = ["compilation_test.cc"],
+    deps = [
+        ":compilation",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "program",
+    srcs = ["program.c"],
+    hdrs = ["program.h"],
+    deps = [
+        ":compilation",
+        ":jit",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode:module",
+    ],
+)
+
+loom_cc_library(
+    name = "json",
+    srcs = ["json.c"],
+    hdrs = ["json.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "input",
+    srcs = ["input.c"],
+    hdrs = ["input.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/vocab",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "json_test",
+    srcs = ["json_test.cc"],
+    deps = [
+        ":json",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "preparation",
+    srcs = ["preparation.c"],
+    hdrs = ["preparation.h"],
+    deps = [
+        ":compilation",
+        ":program",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "input_test",
+    srcs = ["input_test.cc"],
+    args = ["--input_source=$(rootpath :testdata/input/control.loom)"],
+    data = ["testdata/input/control.loom"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    deps = [
+        ":input",
+        ":program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "preparation_test",
+    srcs = ["preparation_test.cc"],
+    args = ["--boundary_source=$(rootpath :testdata/preparation/boundaries.loom)"],
+    data = ["testdata/preparation/boundaries.loom"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    deps = [
+        ":preparation",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+[
+    loom_cc_test(
+        name = "sources_" + platform + "_test",
+        srcs = ["sources_" + platform + "_test.cc"],
+        target_compatible_with = compatibility,
+        deps = [
+            ":sources",
+            "//runtime/src/iree/base",
+            "//runtime/src/iree/testing:gtest",
+            "//runtime/src/iree/testing:gtest_main",
+        ],
+    )
+    for platform, compatibility in [
+        (
+            "posix",
+            select({
+                "@platforms//os:android": [],
+                "@platforms//os:emscripten": [],
+                "@platforms//os:linux": [],
+                "@platforms//os:macos": [],
+                "@platforms//os:wasi": [],
+                "//conditions:default": ["@platforms//:incompatible"],
+            }),
+        ),
+        (
+            "windows",
+            select({
+                "@platforms//os:windows": [],
+                "//conditions:default": ["@platforms//:incompatible"],
+            }),
+        ),
+    ]
+]

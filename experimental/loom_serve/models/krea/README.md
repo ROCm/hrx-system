@@ -179,7 +179,7 @@ work without waiting. Native code retires both accepted queue frontiers before
 encoding the image or reusing request storage, including after partial failure.
 The VM's return is not a transfer of native storage ownership.
 
-The generic [`input` module](../../runtime/input.h) exposes bounded encoding,
+The generic [`input` module](../../../../loom/src/loom/serve/runtime/program/input.h) exposes bounded encoding,
 vocabulary lookup and explicit input rejection. It knows no prompt template,
 token IDs or embedding size. [`request.loom`](request.loom) owns numerical request
 preparation, composed by [`generate.loom`](generate.loom) with the independently

@@ -11,13 +11,13 @@
 #include <utility>
 #include <vector>
 
-#include "experimental/loom_serve/runtime/input.h"
-#include "experimental/loom_serve/runtime/json.h"
 #include "experimental/loom_serve/text/input.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
+#include "loom/serve/runtime/program/input.h"
+#include "loom/serve/runtime/program/json.h"
 
 IREE_FLAG(string, chat_source, "", "Production chat policy source.");
 IREE_FLAG(string, alias_source, "", "Source returning retained input aliases.");

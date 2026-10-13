@@ -7,10 +7,10 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_TEXT_HEARTBEAT_H_
 #define EXPERIMENTAL_LOOM_SERVE_TEXT_HEARTBEAT_H_
 
-#include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/weights.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/host/timer.h"
+#include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/telemetry/stream.h"
 
 #ifdef __cplusplus

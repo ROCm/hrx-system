@@ -7,14 +7,14 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_TEXT_SOURCE_H_
 #define EXPERIMENTAL_LOOM_SERVE_TEXT_SOURCE_H_
 
-#include "experimental/loom_serve/runtime/compilation.h"
-#include "experimental/loom_serve/runtime/preparation.h"
 #include "experimental/loom_serve/text/model.h"
 #include "experimental/loom_serve/text/storage.h"
 #include "iree/module/hal/types.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/environment.h"
 #include "iree/vm/module.h"
+#include "loom/serve/runtime/program/compilation.h"
+#include "loom/serve/runtime/program/preparation.h"
 
 #ifdef __cplusplus
 extern "C" {

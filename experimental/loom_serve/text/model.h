@@ -7,16 +7,16 @@
 #ifndef IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_MODEL_H_
 #define IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_MODEL_H_
 
-#include "experimental/loom_serve/runtime/compilation.h"
-#include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/execution.h"
-#include "experimental/loom_serve/runtime/sources.h"
-#include "experimental/loom_serve/runtime/weights.h"
 #include "experimental/loom_serve/scheduling/packing.h"
-#include "experimental/loom_serve/storage/memory.h"
 #include "experimental/loom_serve/text/chat.h"
 #include "iree/base/api.h"
 #include "iree/tokenizer/tokenizer.h"
+#include "loom/serve/runtime/device/device.h"
+#include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/parameter/weights.h"
+#include "loom/serve/runtime/program/compilation.h"
+#include "loom/serve/runtime/program/sources.h"
+#include "loom/serve/runtime/storage/memory.h"
 #include "loomc/sanitizer.h"
 
 #ifdef __cplusplus
