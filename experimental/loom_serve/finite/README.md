@@ -12,7 +12,7 @@ request. The HTTP consumers are [embeddings](../embedding/protocol.h) and
 The [source ABI](model.h) is implemented by the
 [deterministic embedding package](../models/fixtures/embedding/README.md).
 It uses the same task executor, parameter cache and queue workspace as text and
-image deployments. Source packages are loaded from directories at startup;
+image deployments. Model documents name source programs and assets at registration;
 replacing one does not require relinking the server. The
 [weight-free multimodal catalog](../models/fixtures/README.md) exercises both
 alongside an image model on the same listener.
@@ -31,8 +31,8 @@ contains:
 * A tokenizer asset path relative to `asset_root`, or an empty string.
 * A nonempty source name and an opaque source state buffer.
 
-Device kernels and command programs come from the ordinary `sources.txt`
-catalog. Weighted command stages use the same fixed parameter layout. The cold
+Device kernels and command programs come from the model document's
+`definition.sources` array. Weighted command stages use the same fixed parameter layout. The cold
 loader validates this before sharing checkpoint storage. It indexes weights
 without activating them; admission later streams them into their final storage.
 Direct stages currently accept only input/output buffers, without checkpoint

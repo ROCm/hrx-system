@@ -112,7 +112,6 @@ loom_cc_library(
     iree::async
     iree::async::util::proactor_pool
     iree::base
-    iree::base::internal::path
     iree::experimental::loom_serve::runtime::command
     iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
@@ -125,6 +124,7 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::program
     iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::runtime::retirement
+    iree::experimental::loom_serve::runtime::sources
     iree::experimental::loom_serve::runtime::weights
     iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::storage::block_pool
@@ -173,6 +173,7 @@ loom_cc_library(
     ::schedule
     iree::base
     iree::base::tooling::flags
+    iree::experimental::loom_serve::serving::configuration
     loom::binding::c::loomc
   PUBLIC
 )
@@ -482,7 +483,6 @@ loom_cc_binary(
   DEPS
     ::chat
     iree::base
-    iree::base::internal::path
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::input

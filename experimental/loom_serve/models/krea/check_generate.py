@@ -60,8 +60,8 @@ def main():
                 name + "-" + phase,
                 [
                     *args.native,
-                    f"--model={args.model}",
-                    f"--checkpoint={args.checkpoint}",
+                    f"--model={args.model / 'model.json'}",
+                    f"--checkpoint={args.checkpoint.resolve()}",
                     f"--prompt={request['prompt']}",
                     f"--seed={request['seed']}",
                     f"--height={request['height']}",
@@ -69,7 +69,7 @@ def main():
                     f"--text_tokens={request['maximum_text_tokens']}",
                     *(
                         [
-                            f"--adapter={args.adapter / 'softwatercolor.safetensors'}",
+                            f"--adapter={args.adapter.resolve() / 'softwatercolor.safetensors'}",
                             f"--strength={0 if phase == 'zero' else 1}",
                         ]
                         if adapted
@@ -109,7 +109,7 @@ def main():
             "-B",
             str(args.model / "reference_request.py"),
             f"--checkpoint={args.checkpoint}",
-            f"--adapter={args.adapter}",
+            f"--adapter={args.adapter.resolve()}",
             f"--requests={args.requests}",
             f"--output={reference}",
         ],
@@ -133,7 +133,7 @@ def main():
                 name + "-" + phase + "-component",
                 [
                     *args.checker,
-                    f"--model={args.model}",
+                    f"--model={args.model / 'model.json'}",
                     f"--root={'generate_image_adapted' if adapted else 'generate_image'}",
                     f"--weight_policy={args.model / 'weights.loom'}",
                     *[f"--weights={path}" for path in weights],

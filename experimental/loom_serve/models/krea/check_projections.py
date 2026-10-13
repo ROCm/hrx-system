@@ -121,7 +121,7 @@ for component, source, expected, weight_name, inputs, outputs in (
         subprocess.run(
             [
                 *args.checker,
-                "--model=" + str(args.model / "qualification"),
+                "--model=" + str(args.model / "qualification.json"),
                 "--weight_policy=" + str(args.model / "weights.loom"),
                 "--weights=" + str(args.checkpoint),
                 "--root=qualify.block_" + component,

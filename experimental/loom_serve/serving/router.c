@@ -1190,7 +1190,8 @@ static iree_status_t router_register(router_t* router,
                                      const loom_serve_http_request_t* request) {
   loom_serve_model_configuration_t configuration;
   iree_status_t status = loom_serve_model_configuration_initialize(
-      request->body, &configuration, router->allocator);
+      request->body, iree_string_view_empty(), &configuration,
+      router->allocator);
   iree_host_size_t index = 0;
   if (iree_status_is_ok(status)) {
     status =

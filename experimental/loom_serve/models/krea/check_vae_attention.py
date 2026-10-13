@@ -157,7 +157,7 @@ def main():
         result = subprocess.run(
             [
                 *arguments.checker,
-                f"--model={arguments.model / 'qualification'}",
+                f"--model={arguments.model / 'qualification.json'}",
                 f"--root={root}",
                 "--output_type=f32",
                 *[f"--config={key}={value}" for key, value in configuration.items()],

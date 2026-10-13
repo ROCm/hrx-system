@@ -7,7 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_SERVING_CONFIGURATION_H_
 #define EXPERIMENTAL_LOOM_SERVE_SERVING_CONFIGURATION_H_
 
-#include "iree/base/api.h"
+#include "experimental/loom_serve/runtime/sources.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,8 +73,8 @@ typedef struct loom_serve_finite_configuration_t {
 } loom_serve_finite_configuration_t;
 
 // One source-defined deployment. Entries have independent logical state and
-// admission capacity; the executable supplies their shared device. Paths are
-// interpreted relative to the process working directory.
+// admission capacity; the executable supplies their shared device. Authored
+// paths are retained unchanged, with a separate local directory base.
 typedef struct loom_serve_model_configuration_t {
   // Allocator owning decoded strings, retained when this declaration is moved.
   iree_allocator_t allocator;
@@ -82,10 +82,9 @@ typedef struct loom_serve_model_configuration_t {
   loom_serve_model_kind_t kind;
   // Owned visible ASCII identifier used in JSON and HTTP header selectors.
   iree_string_view_t name;
-  // Owned source package directory path.
-  iree_string_view_t source;
-  // Owned JSON object interpreted by finite/image source prepare. Text has no
-  // source options channel and keeps this empty.
+  // Owned program role paths, provider array/strings, and local directory base.
+  loom_serve_sources_t sources;
+  // Owned JSON object interpreted by the source prepare program.
   iree_string_view_t options;
   // Bounded host request credit. Text/image exclude the active invocation;
   // finite vector services include all requests in the active cohort.
@@ -103,39 +102,28 @@ typedef struct loom_serve_model_configuration_t {
   };
 } loom_serve_model_configuration_t;
 
-typedef struct loom_serve_configuration_t {
-  // Allocator owning the model array and decoded strings.
-  iree_allocator_t allocator;
-  // Number of initialized model records.
-  iree_host_size_t model_count;
-  // Owned deployment declarations; discovery order is not a priority contract.
-  loom_serve_model_configuration_t* models;
-} loom_serve_configuration_t;
-
-// Parses one complete model object with the catalog's schema. Optional
-// admission="open" (default) or "drained" selects initial admission only.
-// Strings are copied; failure releases partial state and zeros the output.
+// Parses a complete {name, definition, admission?, base_directory?} model
+// document. The definition owns kind, prepare/control paths, sources array,
+// modality-specific inputs/capacities, and source-owned options. Unknown,
+// duplicate, wrong-kind and invalid fields reject before any model I/O.
+// Admission defaults to "open"; "drained" defers preparation.
+// document_directory supplies the local base for file input. HTTP passes an
+// empty base: relative references then require an explicit absolute
+// base_directory in the document. That explicit base overrides the file base.
+// All strings are copied. Failure releases partial state and zeros the output.
 iree_status_t loom_serve_model_configuration_initialize(
-    iree_string_view_t json, loom_serve_model_configuration_t* out_model,
+    iree_string_view_t json, iree_string_view_t document_directory,
+    loom_serve_model_configuration_t* out_model,
     iree_allocator_t host_allocator);
 void loom_serve_model_configuration_deinitialize(
     loom_serve_model_configuration_t* model);
 
-// Parses one complete JSON/JSONC {"models":[...]} catalog; the array may be
-// empty. Every model declares kind="text", "image", "embedding" or "decision",
-// name and source. Text
-// entries require weights and tokenizer; image entries require a checkpoint
-// directory. Embedding/decision entries require assets and accept a
-// source-owned options object. Unknown/duplicate fields, fields from another
-// modality, duplicate names and invalid native options reject before model
-// creation. Model-specific geometry is validated by its source during creation.
-// Strings are decoded and owned independently of input. Failure releases
-// partial state.
-iree_status_t loom_serve_configuration_initialize(
-    iree_string_view_t json, loom_serve_configuration_t* out_configuration,
+// Reads one model document and supplies its directory to the shared parser.
+// This cold file-I/O entry belongs on a startup thread or preparation worker,
+// never on the HTTP owner. No program or parameter payload is read here.
+iree_status_t loom_serve_model_configuration_load(
+    iree_string_view_t path, loom_serve_model_configuration_t* out_model,
     iree_allocator_t host_allocator);
-void loom_serve_configuration_deinitialize(
-    loom_serve_configuration_t* configuration);
 
 #ifdef __cplusplus
 }  // extern "C"

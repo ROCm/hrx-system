@@ -27,27 +27,13 @@ workspace.
 
 ## Run through the shared server
 
-Use a catalog with this deployment (paths are relative to the server's working
-directory):
-
-```json
-{
-  "models": [{
-    "kind": "embedding",
-    "name": "vectors",
-    "source": "experimental/loom_serve/models/fixtures/embedding",
-    "assets": "experimental/loom_serve/models/fixtures/embedding",
-    "options": {"batch_units": 64},
-    "pending_requests": 16
-  }]
-}
-```
-
-On an x86 CPU runner, using the repository's normal build/execution policy:
+The complete [model document](model.json) supplies its VM programs, native
+providers, asset directory and default options. Paths inside it are relative
+to this directory. On an x86 CPU runner, using the repository's normal build/execution policy:
 
 ```sh
 iree-bazel-run //experimental/loom_serve/serving:server -- \
-  --models=/path/to/models.json --listen=127.0.0.1:8080 \
+  --model=experimental/loom_serve/models/fixtures/embedding/model.json --listen=127.0.0.1:8080 \
   --device=task --pool_backing=fixed
 ```
 

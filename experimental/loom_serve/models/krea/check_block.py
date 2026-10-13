@@ -64,7 +64,7 @@ for phase in ("base", "style"):
     rows = normalized.shape[0]
     common = [
         *args.checker,
-        "--model=" + str(args.model / "qualification"),
+        "--model=" + str(args.model / "qualification.json"),
         "--weight_policy=" + str(args.model / "weights.loom"),
         "--weights=" + str(args.checkpoint),
         f"--config=krea2.block_tokens={rows}",
@@ -166,7 +166,7 @@ for phase in ("base", "style"):
         subprocess.run(
             [
                 *args.checker,
-                "--model=" + str(args.model / "qualification"),
+                "--model=" + str(args.model / "qualification.json"),
                 "--weight_policy=" + str(args.model / "weights.loom"),
                 "--weights=" + str(args.checkpoint),
                 f"--config=krea2.block_tokens={rows}",
@@ -225,7 +225,7 @@ for phase in ("base", "style"):
             subprocess.run(
                 [
                     *args.checker,
-                    "--model=" + str(args.model / "qualification"),
+                    "--model=" + str(args.model / "qualification.json"),
                     "--weight_policy=" + str(args.model / "weights.loom"),
                     "--weights=" + str(args.checkpoint),
                     f"--config=krea2.block_tokens={count}",

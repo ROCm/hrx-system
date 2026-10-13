@@ -14,15 +14,18 @@ package(
     licenses = ["notice"],
 )
 
-exports_files(["prepare.loom"])
+exports_files([
+    "prepare.loom",
+    "model.json",
+])
 
 filegroup(
     name = "sources",
     srcs = [
         "advance.loom",
         "control.loom",
+        "model.json",
         "prepare.loom",
-        "sources.txt",
         "tokenizer.json",
         "weights.loom",
     ],
@@ -105,6 +108,7 @@ py_test(
             "//experimental/loom_serve/serving:registry",
             "//experimental/loom_serve/serving:router",
             "//experimental/loom_serve/telemetry:stream",
+            "//experimental/loom_serve/testing:model",
             "//experimental/loom_serve/text:chat",
             "//experimental/loom_serve/text:input",
             "//experimental/loom_serve/text:model",

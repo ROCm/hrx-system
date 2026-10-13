@@ -14,12 +14,15 @@
 
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/weights.h"
+#include "experimental/loom_serve/serving/configuration.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/string_util.h"
 #include "iree/io/file_contents.h"
 
-IREE_FLAG(string, model, "", "Source catalog directory.");
+IREE_FLAG(string, model, "", "Model JSON document providing source files.");
+IREE_FLAG_LIST(string, source,
+               "Isolated source provider; repeat instead of --model.");
 IREE_FLAG(string, root, "", "Command root to qualify.");
 IREE_FLAG_LIST(string, weights,
                "Checkpoint path; repeat in reflected parameter-root order.");
@@ -112,6 +115,11 @@ static iree_status_t component_compile(component_check_t* check,
 
 static iree_status_t component_initialize(component_check_t* check,
                                           iree_allocator_t allocator) {
+  const iree_flag_string_list_t providers = FLAG_source_list();
+  if (!!FLAG_model[0] == !!providers.count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "specify --model or repeated --source providers");
+  }
   if (!isfinite(FLAG_atol) || !isfinite(FLAG_rtol) ||
       !isfinite(FLAG_relative_l2_tolerance) || FLAG_atol < 0 || FLAG_rtol < 0 ||
       FLAG_relative_l2_tolerance < 0) {
@@ -170,10 +178,22 @@ static iree_status_t component_initialize(component_check_t* check,
       loom_serve_device_create_execution(check->owner, &check->execution));
   iree_hal_device_t* device = loom_serve_device_handle(check->owner);
   iree_hal_queue_t* dispatch = loom_serve_device_dispatch_queue(check->owner);
-  IREE_RETURN_IF_ERROR(loom_serve_jit_create(
-      device, dispatch, loom_serve_device_host(check->owner),
-      iree_make_cstring_view(FLAG_model), NULL, &check->compilation, allocator,
-      &check->jit));
+  loom_serve_model_configuration_t configuration = {0};
+  loom_serve_sources_t sources = {
+      .base_directory = IREE_SV("."),
+      .count = providers.count,
+      .values = providers.values,
+  };
+  if (FLAG_model[0]) {
+    IREE_RETURN_IF_ERROR(loom_serve_model_configuration_load(
+        iree_make_cstring_view(FLAG_model), &configuration, allocator));
+    sources = configuration.sources;
+  }
+  status = loom_serve_jit_create(
+      device, dispatch, loom_serve_device_host(check->owner), &sources, NULL,
+      &check->compilation, allocator, &check->jit);
+  loom_serve_model_configuration_deinitialize(&configuration);
+  IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(component_compile(check, allocator));
   const loom_cmd_program_t* program =
       loom_serve_jit_stage_program(check->stage);
@@ -228,7 +248,7 @@ static iree_status_t component_initialize(component_check_t* check,
       if (iree_status_is_ok(status)) {
         status = loom_serve_weights_prepare(
             check->weight_plans[r], loom_serve_device_host(check->owner),
-            check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+            check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_SV("."),
             checkpoints.values[r], iree_make_cstring_view(FLAG_weight_policy));
       }
       if (iree_status_is_ok(status)) {

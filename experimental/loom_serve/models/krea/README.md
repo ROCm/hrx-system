@@ -86,24 +86,21 @@ hf download Comfy-Org/Krea-2 \
 ```
 
 Register an image deployment through the
-[multi-model server](../../serving/README.md) using a catalog entry such as:
+[multi-model server](../../serving/README.md) using [model.json](model.json).
+Set its `definition.checkpoint` to the Krea asset directory, its
+`definition.width`/`height` to 1024 and its `definition.text_tokens` to 512.
+The source-owned `definition.options` object selects the prepared I8 checkpoint:
 
 ```json
 {
-  "models": [{
-    "kind": "image",
-    "name": "krea2-turbo-int8",
-    "source": "experimental/loom_serve/models/krea",
-    "checkpoint": "/path/to/models/krea-2-turbo",
-    "width": 1024,
-    "height": 1024,
-    "text_tokens": 512,
-    "options": {
-      "int8_convrot_checkpoint": "/path/to/models/krea-2-int8/diffusion_models/krea2_turbo_int8_convrot.safetensors"
-    }
-  }]
+  "int8_convrot_checkpoint": "/path/to/models/krea-2-int8/diffusion_models/krea2_turbo_int8_convrot.safetensors"
 }
 ```
+
+Pass the complete document with `--model=/path/to/krea/model.json`; an HTTP
+registration uses the same document with an absolute `base_directory` for its
+relative programs. The [model format](../../docs/MODEL_FORMAT.md) defines the
+shared path/registration contract.
 
 `prepare.loom` interprets that option and specializes the source at load time.
 Its absence selects the original checkpoint. Unknown, duplicate or malformed
@@ -543,7 +540,7 @@ commands need no checkpoint. This tool is not the image server.
 Component entry points live in the separate [`qualification/`](qualification)
 source catalog. The Python drivers select that catalog automatically; direct
 `component_check` calls use
-`--model=experimental/loom_serve/models/krea/qualification`. Commands loading
+`--model=experimental/loom_serve/models/krea/qualification.json`. Commands loading
 checkpoints also specify
 `--weight_policy=experimental/loom_serve/models/krea/weights.loom`,
 independently of the source catalog, so qualification uses the deployment's

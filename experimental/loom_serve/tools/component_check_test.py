@@ -48,7 +48,7 @@ def main():
             result = subprocess.run(
                 [
                     *arguments.checker,
-                    f"--model={model}",
+                    f"--source={model / 'copy.loom'}",
                     "--root=copy",
                     f"--config=copy.byte_count={len(values)}",
                     f"--input={work}/input",

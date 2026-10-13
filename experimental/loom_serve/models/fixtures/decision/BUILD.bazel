@@ -13,14 +13,16 @@ package(
     licenses = ["notice"],
 )
 
+exports_files(["model.json"])
+
 filegroup(
     name = "sources",
     srcs = [
         "config.loom",
         "control.loom",
         "decide.loom",
+        "model.json",
         "prepare.loom",
-        "sources.txt",
     ],
     visibility = ["//visibility:public"],
 )
@@ -59,6 +61,7 @@ filegroup(
             "//experimental/loom_serve/runtime:host",
             "//experimental/loom_serve/serving:registry",
             "//experimental/loom_serve/serving:router",
+            "//experimental/loom_serve/testing:model",
             "//runtime/src/iree/async",
             "//runtime/src/iree/base",
             "//runtime/src/iree/base/internal:json",

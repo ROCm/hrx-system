@@ -15,7 +15,6 @@ image composition is checked separately by check_generate.py.
 import argparse
 import json
 import math
-import os
 import struct
 import subprocess
 from pathlib import Path
@@ -80,16 +79,9 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     model = args.model.resolve()
-    catalog = args.output / "catalog"
-    catalog.mkdir()
-    sources = [
-        model / line
-        for line in (model / "sources.txt").read_text().splitlines()
-        if line
-    ] + [model / "tests/request.loom"]
-    (catalog / "sources.txt").write_text(
-        "".join(os.path.relpath(path, catalog) + "\n" for path in sources)
-    )
+    definition = json.loads((model / "model.json").read_text())["definition"]
+    sources = [model / name for name in definition["sources"]]
+    sources.append(model / "tests/request.loom")
     motifs = model.parent.parent / "motifs/tensor"
     integer_check = subprocess.run(
         [
@@ -126,7 +118,7 @@ def main():
         actual = directory / (actual_name or root + ".actual")
         command = [
             str(args.checker),
-            f"--model={catalog}",
+            *[f"--source={path}" for path in sources],
             f"--root={root}",
             *[f"--input={path}" for path in inputs],
             *[f"--config=krea2.{key}={value}" for key, value in config.items()],
@@ -222,8 +214,8 @@ def main():
             directory.mkdir()
             command = [
                 str(args.native),
-                f"--model={model}",
-                f"--checkpoint={args.checkpoint}",
+                f"--model={model / 'model.json'}",
+                f"--checkpoint={args.checkpoint.resolve()}",
                 f"--prompt={prompt}",
                 f"--seed={seed}",
                 f"--height={height}",

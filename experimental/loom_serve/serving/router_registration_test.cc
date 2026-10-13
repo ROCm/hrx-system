@@ -249,7 +249,7 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
         Read(
             Send(
                 "POST", "/v1/models/register",
-                R"({"kind":"embedding","name":"dynamic","source":"model","assets":"assets","admission":"drained"})"))
+                R"({"name":"dynamic","admission":"drained","definition":{"kind":"embedding","prepare":"/model/prepare.loom","control":"/model/control.loom","sources":["/model/kernel.loom"],"assets":"/assets"}})"))
             .find("HTTP/1.1 202"),
         0u);
     EXPECT_EQ(managed_.created.load(), 0u);
@@ -304,7 +304,7 @@ TEST_P(HttpRouterRegistrationTest, StalledObserverDoesNotRetainRemovedModel) {
       Read(
           Send(
               "POST", "/v1/models/register",
-              R"({"kind":"embedding","name":"dynamic","source":"model","assets":"assets","admission":"drained"})"))
+              R"({"name":"dynamic","admission":"drained","definition":{"kind":"embedding","prepare":"/model/prepare.loom","control":"/model/control.loom","sources":["/model/kernel.loom"],"assets":"/assets"}})"))
           .find("HTTP/1.1 202"),
       0u);
   const auto first = observer.Frame();
@@ -782,7 +782,7 @@ TEST_P(HttpRouterRegistrationTest,
       Read(
           Send(
               "POST", "/v1/models/register",
-              R"({"kind":"embedding","name":"dynamic","source":"model","assets":"assets"})"))
+              R"({"name":"dynamic","definition":{"kind":"embedding","prepare":"/model/prepare.loom","control":"/model/control.loom","sources":["/model/kernel.loom"],"assets":"/assets"}})"))
           .find("HTTP/1.1 409"),
       0u);
   EXPECT_EQ(

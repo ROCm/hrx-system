@@ -1,0 +1,15 @@
+{
+  "name": "vectors",
+  "definition": {
+    "kind": "embedding",
+    "prepare": "prepare.loom",
+    "control": "control.loom",
+    "sources": [
+      "config.loom",
+      "embed.loom"
+    ],
+    "assets": ".",
+    "options": {"batch_units": 64},
+    "pending_requests": 16
+  }
+}

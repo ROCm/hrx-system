@@ -1,0 +1,15 @@
+{
+  "name": "judge",
+  "definition": {
+    "kind": "decision",
+    "prepare": "prepare.loom",
+    "control": "control.loom",
+    "sources": [
+      "config.loom",
+      "decide.loom"
+    ],
+    "assets": ".",
+    "options": {"batch_units": 64},
+    "pending_requests": 16
+  }
+}

@@ -438,7 +438,7 @@ def running_server(server_command, directory, catalog, workers):
     with child_server(
         [
             *server_command,
-            f"--models={catalog.relative_to(directory)}",
+            f"--flagfile={catalog.relative_to(directory)}",
             "--listen=127.0.0.1:0",
             f"--workers={workers}",
             "--heartbeat_ms=0",
@@ -1000,8 +1000,8 @@ def copy_package(source, directory, kind):
     """Relocate a fixture with numerical providers outside its model directory.
 
     The separate prepare/control/weight-policy leaves and tokenizer stay in the
-    model package. Only sources.txt locates the sibling numerical providers;
-    neither the child's cwd nor its deployment catalog can supply that base.
+    model package. The model document locates the sibling numerical providers
+    independently of the child's working directory.
     Copies dereference runfiles symlinks without preserving their read-only cache
     permissions, so the child reads independent, editable deployment files.
     """
@@ -1009,37 +1009,49 @@ def copy_package(source, directory, kind):
     shutil.copytree(source, package, copy_function=shutil.copyfile)
     providers = directory / "providers" / kind
     providers.mkdir(parents=True)
-    catalog = package / "sources.txt"
-    names = [
-        line.strip()
-        for line in catalog.read_text().splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
+    catalog = package / "model.json"
+    model = json.loads(catalog.read_text())
+    names = model["definition"]["sources"]
     for name in names:
         (package / name).rename(providers / name)
-    catalog.write_text("".join(f"../../providers/{kind}/{name}\n" for name in names))
+    model["definition"]["sources"] = [
+        f"../../providers/{kind}/{name}" for name in names
+    ]
+    catalog.write_text(json.dumps(model))
     return package.relative_to(directory)
+
+
+def write_startup(path, catalog):
+    """Write ordinary process flags referencing complete individual documents."""
+    flags = []
+    for index, model in enumerate(catalog["models"]):
+        document = path.with_name(f"{path.stem}-{index}.json")
+        document.write_text(json.dumps(model))
+        flags.append(f"--model={document.resolve()}")
+    path.write_text("\n".join(flags) + "\n")
 
 
 def check_startup_failures(server_command, directory, catalog):
     """Keep an incomplete registration inspectable while peers serve output."""
     models = catalog["models"]
-    cases = [(model, Path(model["source"]) / "control.loom") for model in models]
+    cases = [
+        (model, Path(model["base_directory"]) / "control.loom") for model in models
+    ]
     cases.append((models[-1], Path("providers/text/advance.loom")))
     for model, missing in cases:
         source = directory / missing
         saved = source.with_suffix(".saved")
         broken = {"models": [entry for entry in models if entry is not model] + [model]}
-        name = f"missing-{model['kind']}-{missing.stem}"
+        name = f"missing-{model['definition']['kind']}-{missing.stem}"
         catalog_path = directory / "configuration" / f"{name}.json"
-        catalog_path.write_text(json.dumps(broken))
+        write_startup(catalog_path, broken)
         log_path = catalog_path.with_suffix(".log")
         source.rename(saved)
         try:
             with child_server(
                 [
                     *server_command,
-                    f"--models={catalog_path.relative_to(directory)}",
+                    f"--flagfile={catalog_path.relative_to(directory)}",
                     "--listen=127.0.0.1:0",
                     "--workers=1",
                 ],
@@ -1061,7 +1073,7 @@ def check_startup_failures(server_command, directory, catalog):
                 assert failed["error"]["code"] == 5, failed
                 assert client.request("/readyz") == {"status": "ready"}
                 # A failed source package does not terminate peer models.
-                if model["kind"] != "text":
+                if model["definition"]["kind"] != "text":
                     client.text(
                         "load-failure-peer", [{"role": "user", "content": "ab"}]
                     )
@@ -1093,7 +1105,9 @@ def check_startup_failures(server_command, directory, catalog):
 def check_dynamic_observer(server_command, directory, catalog):
     """The shipping observer follows real model registration, not a static list."""
     declaration = next(
-        model for model in catalog["models"] if model["kind"] == "embedding"
+        model
+        for model in catalog["models"]
+        if model["definition"]["kind"] == "embedding"
     )
     log_path = directory / "dynamic-observer.log"
     socket_path = directory / 'observer "local".sock'
@@ -1175,11 +1189,11 @@ def check_dynamic_observer(server_command, directory, catalog):
 
 
 def check_empty_server(server_command, directory, device, backing):
-    catalog = directory / "empty.json"
-    catalog.write_text('{"models":[]}')
+    catalog = directory / "empty.flags"
+    catalog.write_text("# No startup models\n")
     for mode, arguments in (
         ("omitted", []),
-        ("empty", [f"--models={catalog.name}"]),
+        ("empty", [f"--flagfile={catalog.name}"]),
     ):
         log_path = directory / f"{mode}-models.log"
         memory_limit = (
@@ -1410,7 +1424,11 @@ def check_sporadic_connections(process, client, model, workers):
 def check_dynamic_catalog(server_command, directory, catalog, workers):
     """Twelve real model owners share workers, clients and retirement accounting."""
     declarations = [
-        {**model, "name": f"{model['kind']}-{index}", "admission": "drained"}
+        {
+            **model,
+            "name": f"{model['definition']['kind']}-{index}",
+            "admission": "drained",
+        }
         for index in range(3)
         for model in catalog["models"]
     ]
@@ -1524,7 +1542,7 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
 
         def infer(declaration, iteration):
             model = declaration["name"]
-            kind = declaration["kind"]
+            kind = declaration["definition"]["kind"]
             if kind == "text":
                 messages = [{"role": "user", "content": "abx" * (iteration + 1)}]
                 result = client.request(
@@ -1573,7 +1591,9 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
         # Activate the shared device queue with one real request before checking
         # model-count scaling. Vulkan starts its queue completion thread lazily.
         # Names may change during native initialization; identities must remain.
-        first = next(item for item in declarations if item["kind"] == "embedding")
+        first = next(
+            item for item in declarations if item["definition"]["kind"] == "embedding"
+        )
         observer = observations.enter_context(
             telemetry_observation(http.client.HTTPConnection(address), first["name"])
         )
@@ -1743,7 +1763,7 @@ def check_multiple_bindings(server_command, directory, catalog):
     settings.write_text(
         "\n".join(
             [
-                f"--models={catalog.relative_to(directory)}",
+                f"--flagfile={catalog.relative_to(directory)}",
                 "--listen=127.0.0.1:0",
                 f"--listen=unix:{socket_path}",
                 "--workers=1",
@@ -1894,7 +1914,7 @@ def check_multiple_bindings(server_command, directory, catalog):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", type=Path, required=True)
-    parser.add_argument("--catalog", type=Path, required=True)
+    parser.add_argument("--fixture", type=Path, action="append", required=True)
     parser.add_argument("--device", default="amdgpu")
     parser.add_argument("--pool_backing", choices=("fixed", "elastic"), default="fixed")
     parser.add_argument("--rounds", type=int, default=4, choices=range(1, 17))
@@ -1915,34 +1935,24 @@ def main():
         weights.write_bytes(
             struct.pack("<Q", len(header)) + header + struct.pack("<I", 2)
         )
-        catalog = json.loads(arguments.catalog.read_text())
-        for model in catalog["models"]:
-            package = copy_package(Path(model["source"]), directory, model["kind"])
-            model["source"] = str(package)
-            for field in ("checkpoint", "assets"):
-                if field in model:
-                    model[field] = str(package)
-        text = copy_package(arguments.catalog.parent / "text", directory, "text")
-        catalog["models"].append(
-            {
-                "kind": "text",
-                "name": "fixture-text",
-                "source": str(text),
-                "weights": weights.name,
-                "tokenizer": str(text / "tokenizer.json"),
-                "rows": 2,
-                "context_capacity": 128,
-                "pool_capacity": 128,
-                "prefill_capacity": 32,
-                "checkpoint_capacity": 2,
-                "max_tokens": 16,
-                "draft_depth": 0,
-                "pending_requests": 32,
-            }
-        )
-        catalog_path = directory / "configuration" / "models.json"
+        catalog = {"models": []}
+        for fixture in arguments.fixture:
+            kind = json.loads(fixture.read_text())["definition"]["kind"]
+            package = copy_package(fixture.parent, directory, kind)
+            model = json.loads((directory / package / "model.json").read_text())
+            model["base_directory"] = str(directory / package)
+            if kind == "text":
+                model["definition"].update(
+                    weights=str(weights),
+                    rows=2,
+                    context_capacity=128,
+                    pool_capacity=128,
+                    checkpoint_capacity=2,
+                )
+            catalog["models"].append(model)
+        catalog_path = directory / "configuration" / "models.flags"
         catalog_path.parent.mkdir()
-        catalog_path.write_text(json.dumps(catalog))
+        write_startup(catalog_path, catalog)
         check_dynamic_observer(server_command, directory, catalog)
         check_startup_failures(server_command, directory, catalog)
         check_multiple_bindings(server_command, directory, catalog_path)

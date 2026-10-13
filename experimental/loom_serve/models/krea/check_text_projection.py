@@ -120,7 +120,7 @@ def main():
                 expected_path.write_bytes(encode(expected))
                 invocation = [
                     *arguments.checker,
-                    f"--model={arguments.model / 'qualification'}",
+                    f"--model={arguments.model / 'qualification.json'}",
                     f"--weight_policy={arguments.model / 'weights.loom'}",
                     *[f"--weights={path}" for path in checkpoints],
                     f"--root={root}",

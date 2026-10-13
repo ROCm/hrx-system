@@ -2,7 +2,7 @@
 
 `//experimental/loom_serve/text:server` and `:generate` are model-independent
 executables. They have no dependency on a model package or embedded source
-catalog. `--model=/path/to/package` is required. Model files are JIT inputs,
+catalog. `--model=/path/to/package/model.json` is required. Model files are JIT inputs,
 not build inputs to these binaries.
 
 The [tiny source fixture](../models/fixtures/text/README.md) exercises retained
@@ -20,7 +20,7 @@ From the repository root:
 
 ```sh
 build_tools/bin/iree-bazel-run //experimental/loom_serve/text:server -- \
-  --model=experimental/loom_serve/models/qwen \
+  --model=experimental/loom_serve/models/qwen/model.json \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
   --rows=4 --context_capacity=32768 --pool_capacity=65536 \
@@ -33,7 +33,7 @@ not a GPU check.
 The [reproduction packet](../docs/README.md) supplies assets, request examples
 and the generated-tool/retained-session witnesses.
 
-A new text model supplies `prepare.loom`, `control.loom`, `sources.txt`,
+A new text model supplies a complete `model.json`, explicit prepare/control programs,
 the providers named by that catalog, and its weight-policy source. Catalog
 paths are relative to the package; shared motif paths must travel with it.
 There is no native registration list. Editing the package changes the next
@@ -696,7 +696,7 @@ without loading model weights or creating a device:
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \
   //experimental/loom_serve/text:request_check -- \
-  --model=/path/to/source/package --tokenizer=/path/to/tokenizer.json \
+  --control=/path/to/source/package/control.loom --tokenizer=/path/to/tokenizer.json \
   --request=/path/to/request.json --capacity=8192
 ```
 

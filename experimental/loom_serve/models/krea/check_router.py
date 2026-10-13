@@ -228,9 +228,13 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     text = dict(
-        kind="text",
         name="scout",
-        source=str(args.text_source.resolve()),
+        base_directory=str(args.text_source.resolve()),
+        definition=json.loads((args.text_source / "model.json").read_text())[
+            "definition"
+        ],
+    )
+    text["definition"].update(
         weights=str(args.weights.resolve()),
         tokenizer=str(args.tokenizer.resolve()),
         rows=2,
@@ -242,9 +246,13 @@ def main():
         continuation_epochs=2,
     )
     image = dict(
-        kind="image",
         name="illustrator",
-        source=str(args.image_source.resolve()),
+        base_directory=str(args.image_source.resolve()),
+        definition=json.loads((args.image_source / "model.json").read_text())[
+            "definition"
+        ],
+    )
+    image["definition"].update(
         checkpoint=str(args.checkpoint.resolve()),
         adapter=str(args.adapter.resolve()),
         width=384,
@@ -259,11 +267,14 @@ def main():
     ):
         directory = args.output / name
         directory.mkdir()
-        catalog = directory / "models.json"
-        catalog.write_text(json.dumps({"models": models}, indent=2) + "\n")
+        documents = []
+        for model in models:
+            document = directory / f"{model['name']}.json"
+            document.write_text(json.dumps(model, indent=2) + "\n")
+            documents.append(document.resolve())
         command = [
             str(args.server.resolve()),
-            f"--models={catalog.resolve()}",
+            *[f"--model={path}" for path in documents],
             "--listen=127.0.0.1:0",
             "--heartbeat_ms=25",
             f"--workers={args.workers}",

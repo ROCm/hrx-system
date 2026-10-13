@@ -5,21 +5,12 @@ and [finite model ABI](../../../finite/README.md). It compiles ordinary Loom
 VM preparation/control and two native kernels on x86 CPU, AMDGPU and Vulkan.
 No downloaded model, native canned answer or model-specific C is involved.
 
-Catalog entry:
-
-```json
-{
-  "kind": "decision",
-  "name": "judge",
-  "source": "experimental/loom_serve/models/fixtures/decision",
-  "assets": "experimental/loom_serve/models/fixtures/decision",
-  "options": {"batch_units": 64},
-  "pending_requests": 16
-}
-```
-
-Use this entry in the shared server's `models` catalog. `batch_units` ranges
-from 1 through 256 and defaults to 64. Each question costs one unit plus its
+The complete [model document](model.json) names its prepare/control programs,
+native providers and asset base. Start it with
+`--model=experimental/loom_serve/models/fixtures/decision/model.json`, or
+register the same object over HTTP with an absolute `base_directory`.
+Its `definition.options.batch_units` ranges from 1 through 256 and defaults
+to 64. Each question costs one unit plus its
 option count. Requests that individually exceed the limit return 422; compatible
 requests already waiting can share one cohort. This byte-oriented fixture has
 no tokenizer and reports zero input and output tokens.

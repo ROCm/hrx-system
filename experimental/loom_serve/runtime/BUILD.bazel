@@ -29,6 +29,17 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "sources_test",
+    srcs = ["sources_test.cc"],
+    deps = [
+        ":sources",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "signals",
     srcs = ["signals.c"],
@@ -98,11 +109,10 @@ loom_cc_library(
 loom_cc_test(
     name = "control_test",
     srcs = ["control_test.cc"],
-    args = ["--control_sources=$(rootpath :testdata/control/sources.txt)"],
+    args = ["--control_sources=$(rootpath :testdata/control/kernels.loom)"],
     data = [
         "testdata/control/control.loom",
         "testdata/control/kernels.loom",
-        "testdata/control/sources.txt",
     ],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = ["iree-run-requirement=runtime.resource.amd_gpu"],
@@ -341,6 +351,16 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "sources",
+    srcs = ["sources.c"],
+    hdrs = ["sources.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+    ],
+)
+
+loom_cc_library(
     name = "jit",
     srcs = ["jit.c"],
     hdrs = ["jit.h"],
@@ -349,6 +369,7 @@ loom_cc_library(
         ":compilation",
         ":dispatch",
         ":host",
+        ":sources",
         ":target",
         "//loom/binding/c:loomc",
         "//loom/binding/c:task_pool",
@@ -357,10 +378,8 @@ loom_cc_library(
         "//loom/binding/c/target/vm",
         "//loom/src/loom/target/arch/cmd:program",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/io:file_handle",
     ],
 )
 
@@ -381,15 +400,13 @@ loom_cc_test(
     name = "jit_test",
     srcs = ["jit_test.cc"],
     args = [
-        "--jit_sources=$(rootpath :testdata/jit/sources.txt)",
-        "--invalid_sources=$(rootpath :testdata/compilation/sources.txt)",
+        "--jit_sources=$(rootpath :testdata/jit/config.loom)",
+        "--invalid_sources=$(rootpath :testdata/compilation/invalid.loom)",
     ],
     data = [
         "testdata/compilation/invalid.loom",
-        "testdata/compilation/sources.txt",
         "testdata/jit/config.loom",
         "testdata/jit/control.loom",
-        "testdata/jit/sources.txt",
         "testdata/jit/stage.loom",
     ],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
@@ -605,6 +622,7 @@ loom_cc_library(
         ":jit",
         ":program",
         ":retirement",
+        ":sources",
         "//experimental/loom_serve/storage:memory",
         "//loom/binding/c:loomc",
         "//loom/src/loom/target/arch/cmd:program",
@@ -622,10 +640,9 @@ loom_cc_library(
 loom_cc_test(
     name = "weights_test",
     srcs = ["weights_test.cc"],
-    args = ["--weight_sources=$(rootpath :testdata/weights/sources.txt)"],
+    args = ["--weight_sources=$(rootpath :testdata/weights/stages.loom)"],
     data = [
         "testdata/weights/policy.loom",
-        "testdata/weights/sources.txt",
         "testdata/weights/stages.loom",
     ],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
@@ -654,3 +671,37 @@ loom_cc_test(
         "//runtime/src/iree/testing:temp_file",
     ],
 )
+
+[
+    loom_cc_test(
+        name = "sources_" + platform + "_test",
+        srcs = ["sources_" + platform + "_test.cc"],
+        target_compatible_with = compatibility,
+        deps = [
+            ":sources",
+            "//runtime/src/iree/base",
+            "//runtime/src/iree/testing:gtest",
+            "//runtime/src/iree/testing:gtest_main",
+        ],
+    )
+    for platform, compatibility in [
+        (
+            "posix",
+            select({
+                "@platforms//os:android": [],
+                "@platforms//os:emscripten": [],
+                "@platforms//os:linux": [],
+                "@platforms//os:macos": [],
+                "@platforms//os:wasi": [],
+                "//conditions:default": ["@platforms//:incompatible"],
+            }),
+        ),
+        (
+            "windows",
+            select({
+                "@platforms//os:windows": [],
+                "//conditions:default": ["@platforms//:incompatible"],
+            }),
+        ),
+    ]
+]

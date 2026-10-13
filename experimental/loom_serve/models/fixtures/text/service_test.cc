@@ -228,7 +228,7 @@ TEST_P(SourceTextServiceTest, FailedTextSourceLeavesPeerAndDiagnosticsUsable) {
   const auto package = iree::testing::MakeTempFilePath("failed_text_source");
   ASSERT_TRUE(std::filesystem::create_directory(package));
   for (const char* file :
-       {"prepare.loom", "control.loom", "sources.txt", "weights.loom"}) {
+       {"prepare.loom", "control.loom", "model.json", "weights.loom"}) {
     ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/" + file,
                                            package + "/" + file));
   }
@@ -268,9 +268,8 @@ TEST_P(SourceTextServiceTest, FailedTextSourceLeavesPeerAndDiagnosticsUsable) {
 
 TEST_P(SourceTextServiceTest, IdleCacheExchangesFullRowsAndSharesExplicitPins) {
   StartManaged();
-  std::string declaration = Declaration("fixture-text", directory_);
-  declaration.pop_back();
-  declaration += ",\"session_cache_capacity\":2}";
+  std::string declaration = Declaration("fixture-text", directory_, "open",
+                                        R"(,"session_cache_capacity":2)");
   ASSERT_EQ(
       Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
       0u);
@@ -349,9 +348,8 @@ TEST_P(SourceTextServiceTest, InventoryTracksRetainedLifetimesAcrossRowReuse) {
     return Read(Send("", headers + extra, target, "GET"));
   };
   EXPECT_EQ(inspect("/v1/sessions").find("HTTP/1.1 404"), 0u);
-  auto declaration = Declaration("fixture-text", directory_, "drained");
-  declaration.pop_back();
-  declaration += ",\"session_cache_capacity\":64}";
+  auto declaration = Declaration("fixture-text", directory_, "drained",
+                                 R"(,"session_cache_capacity":64)");
   ASSERT_EQ(
       Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
       0u);
@@ -435,9 +433,8 @@ TEST_P(SourceTextServiceTest, ShutdownRetiresAcceptedRowExchange) {
 
 TEST_P(SourceTextServiceTest, IdleCacheEvictsLruButPreservesRejectedHistory) {
   StartManaged();
-  std::string declaration = Declaration("fixture-text", directory_);
-  declaration.pop_back();
-  declaration += ",\"session_cache_capacity\":1}";
+  std::string declaration = Declaration("fixture-text", directory_, "open",
+                                        R"(,"session_cache_capacity":1)");
   ASSERT_EQ(
       Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
       0u);
@@ -482,13 +479,12 @@ TEST_P(SourceTextServiceTest, IdleCacheEvictsLruButPreservesRejectedHistory) {
 
 TEST_P(SourceTextServiceTest, IdleCacheYieldsLogicalBlocksToAdmission) {
   StartManaged();
-  std::string declaration = Declaration("fixture-text", directory_);
+  std::string declaration = Declaration("fixture-text", directory_, "open",
+                                        R"(,"session_cache_capacity":2)");
   const auto pool = declaration.find("\"pool_capacity\":256");
   ASSERT_NE(pool, std::string::npos);
   declaration.replace(pool, strlen("\"pool_capacity\":256"),
                       "\"pool_capacity\":32");
-  declaration.pop_back();
-  declaration += ",\"session_cache_capacity\":2}";
   ASSERT_EQ(
       Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
       0u);
@@ -931,8 +927,8 @@ TEST_P(SourceTextServiceTest, CancelledPreparationRetainsPartialOwnership) {
 TEST_P(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
   const auto package = iree::testing::MakeTempFilePath("failed_text_link");
   ASSERT_TRUE(std::filesystem::create_directory(package));
-  for (const char* file :
-       {"prepare.loom", "advance.loom", "sources.txt", "weights.loom"}) {
+  for (const char* file : {"prepare.loom", "advance.loom", "model.json",
+                           "weights.loom", "tokenizer.json"}) {
     ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/" + file,
                                            package + "/" + file));
   }
@@ -949,7 +945,7 @@ TEST_P(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
   }
   const auto before = loom_serve_device_memory_statistics(device_);
   auto options = ModelOptions();
-  options.source_directory = iree_make_cstring_view(package.c_str());
+  options.sources.base_directory = iree_make_cstring_view(package.c_str());
   iree_notification_t notification;
   iree_notification_initialize(&notification);
   const auto wake = [](void* payload) {
@@ -972,6 +968,9 @@ TEST_P(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
                                     IREE_TIME_INFINITE_FUTURE);
     }
   }
+  EXPECT_NE(
+      iree::Status::ToString(status).find("requires missing module 'missing'"),
+      std::string::npos);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND, status);
   auto* partial = loom_serve_text_load_take_model(load);
   loom_serve_text_load_destroy(load);

@@ -21,7 +21,7 @@ Compiler, runtime and model examples travel together on that branch.
 ## Serving capabilities
 
 One shared HTTP server now loads text, image, embedding and decision source
-packages. The [weight-free catalog](../models/fixtures/catalog.json) exercises
+packages. The [weight-free model documents](../models/fixtures/README.md) exercise
 real image, embedding and decision VM/GPU/HTTP paths, including raw tokenization,
 through one executable. These deterministic fixtures prove ABI and ownership,
 not learned embedding/decision quality or NPU execution. The native services
@@ -273,7 +273,7 @@ not need `loom-compile`, Python model frameworks, or generated kernel files.
 
 ```sh
 bazel-bin/experimental/loom_serve/models/qwen/epoch_check \
-  --model=experimental/loom_serve/models/qwen \
+  --model=experimental/loom_serve/models/qwen/model.json \
   --prefill_capacity=128 --context_capacity=2048 --epoch=32:8 --draft_depth=3 \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
   --tokenizer="$model_dir/tokenizer.json"
@@ -294,7 +294,7 @@ token capacities:
 ```sh
 check_shapes() {
   bazel-bin/experimental/loom_serve/models/qwen/epoch_check \
-    --model=experimental/loom_serve/models/qwen \
+    --model=experimental/loom_serve/models/qwen/model.json \
     --prefill_capacity=512 --context_capacity=2048 --draft_depth=3 \
     --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
     --tokenizer="$model_dir/tokenizer.json" "$@"
@@ -313,7 +313,7 @@ After the check exits and releases the residency, start one server:
 
 ```sh
 bazel-bin/experimental/loom_serve/text/server \
-  --model=experimental/loom_serve/models/qwen \
+  --model=experimental/loom_serve/models/qwen/model.json \
   --context_capacity=2048 --pool_capacity=8192 --draft_depth=3 \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
   --tokenizer="$model_dir/tokenizer.json" \

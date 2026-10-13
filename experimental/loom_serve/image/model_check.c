@@ -13,13 +13,16 @@
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
+#include "experimental/loom_serve/serving/configuration.h"
 #include "iree/base/internal/path.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 
-IREE_FLAG(string, model, "", "Source catalog.");
-IREE_FLAG(string, checkpoint, "", "Official checkpoint directory.");
-IREE_FLAG(string, adapter, "", "Optional model-specific adapter asset.");
+IREE_FLAG(string, model, "", "Model JSON document.");
+IREE_FLAG(string, checkpoint, "",
+          "Checkpoint directory, relative to the model document.");
+IREE_FLAG(string, adapter, "",
+          "Optional adapter asset, relative to the model document.");
 IREE_FLAG(string, output, "",
           "Existing directory for completed F32 RGB files.");
 IREE_FLAG(bool, reload_weights, false,
@@ -32,8 +35,12 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   const iree_allocator_t allocator = iree_allocator_system();
+  loom_serve_model_configuration_t configuration = {0};
+  iree_status_t status = loom_serve_model_configuration_load(
+      iree_make_cstring_view(FLAG_model), &configuration, allocator);
   const loom_serve_image_model_options_t options = {
-      .source_directory = iree_make_cstring_view(FLAG_model),
+      .sources = configuration.sources,
+      .options = configuration.options,
       .checkpoint_directory = iree_make_cstring_view(FLAG_checkpoint),
       .adapter_path = iree_make_cstring_view(FLAG_adapter),
       .height = 384,
@@ -44,7 +51,9 @@ int main(int argc, char** argv) {
   loom_serve_device_group_t* group = NULL;
   loom_serve_device_t* device = NULL;
   loom_serve_host_t* host = NULL;
-  iree_status_t status = loom_serve_host_create_from_flags(&host, allocator);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_host_create_from_flags(&host, allocator);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_serve_device_group_create_from_flags(host, &group, allocator);
   }
@@ -154,6 +163,7 @@ int main(int argc, char** argv) {
   status = iree_status_join(status, loom_serve_image_model_destroy(model));
   status = iree_status_join(status, loom_serve_device_group_destroy(group));
   loom_serve_host_release(host);
+  loom_serve_model_configuration_deinitialize(&configuration);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

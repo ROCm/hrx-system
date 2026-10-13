@@ -67,7 +67,10 @@ TEST_F(Krea2ModelTest, MissingTokenizerReleasesPartialOwnership) {
   loom_serve_image_model_options_t options = {};
   const std::string catalog = FLAG_model_source;
   const std::string directory = catalog.substr(0, catalog.find_last_of('/'));
-  options.source_directory = iree_make_cstring_view(directory.c_str());
+  options.sources = {
+      .base_directory = iree_make_cstring_view(directory.c_str()),
+      .prepare = IREE_SV("prepare.loom"),
+      .control = IREE_SV("control.loom")};
   options.checkpoint_directory = IREE_SV("missing-krea-model-directory");
   options.height = options.width = 384;
   // Cover sole small/non-64-aligned maxima and both retained-stage maxima.

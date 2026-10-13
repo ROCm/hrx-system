@@ -17,6 +17,7 @@
 #include "experimental/loom_serve/embedding/protocol.h"
 #include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/serving/router.h"
+#include "experimental/loom_serve/testing/model.h"
 #include "iree/async/proactor.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/tooling/flags.h"
@@ -36,9 +37,11 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
   void CreateModel(const char* source, loom_serve_finite_model_t** output) {
     const std::string file = source;
     const std::string directory = file.substr(0, file.find_last_of('/'));
+    loom_serve::testing::ModelDocument document;
+    IREE_ASSERT_OK(document.Load(directory + "/model.json"));
     const loom_serve_finite_model_options_t options = {
-        .source_directory = iree_make_cstring_view(directory.c_str()),
-        .asset_directory = iree_make_cstring_view(directory.c_str()),
+        .sources = document.value().sources,
+        .asset_directory = IREE_SV("."),
         .options = IREE_SV("{\"batch_units\":64}")};
     IREE_ASSERT_OK(
         loom_serve_finite_model_create(device_, &options, output, allocator_));

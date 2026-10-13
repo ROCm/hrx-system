@@ -466,7 +466,9 @@ TEST_P(PrepareModelTest, InvalidPoolAndMissingTokenizerRetireSourceResults) {
   const std::string directory = source.substr(0, source.find_last_of('/'));
   const loom_serve_packing_shape_t shapes[] = {{32, 1}, {128, 3}};
   const loom_serve_text_options_t options = {
-      .source_directory = iree_make_cstring_view(directory.c_str()),
+      .sources = {.base_directory = iree_make_cstring_view(directory.c_str()),
+                  .prepare = IREE_SV("prepare.loom"),
+                  .control = IREE_SV("control.loom")},
       .prefill_capacity = 512,
       .context_capacity = 16384,
       .pool_capacity = 2048,

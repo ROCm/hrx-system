@@ -28,6 +28,18 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    sources_test
+  SRCS
+    "sources_test.cc"
+  DEPS
+    ::sources
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_library(
   NAME
     signals
@@ -112,7 +124,6 @@ loom_cc_test(
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/control/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/control/kernels.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/control/sources.txt"
   DEPS
     ::execution
     ::host
@@ -133,7 +144,7 @@ loom_cc_test(
     iree::vm::bytecode::module
     loom::binding::c::loomc
   ARGS
-    "--control_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/control/sources.txt}}"
+    "--control_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/control/kernels.loom}}"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
   RESOURCE_GROUP
@@ -384,6 +395,19 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    sources
+  HDRS
+    "sources.h"
+  SRCS
+    "sources.c"
+  DEPS
+    iree::base
+    iree::base::internal::path
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     jit
   HDRS
     "jit.h"
@@ -394,12 +418,11 @@ loom_cc_library(
     ::compilation
     ::dispatch
     ::host
+    ::sources
     ::target
     iree::base
-    iree::base::internal::path
     iree::base::threading
     iree::hal
-    iree::io::file_handle
     loom::binding::c::loomc
     loom::binding::c::target::cmd
     loom::binding::c::target::configured
@@ -431,10 +454,8 @@ loom_cc_test(
     "jit_test.cc"
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/compilation/invalid.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/compilation/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/jit/config.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/jit/control.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/jit/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/jit/stage.loom"
   DEPS
     ::device
@@ -452,8 +473,8 @@ loom_cc_test(
     iree::vm::bytecode::module
     loom::binding::c::loomc
   ARGS
-    "--jit_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/jit/sources.txt}}"
-    "--invalid_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/compilation/sources.txt}}"
+    "--jit_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/jit/config.loom}}"
+    "--invalid_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/compilation/invalid.loom}}"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
   RESOURCE_GROUP
@@ -681,6 +702,7 @@ loom_cc_library(
     ::jit
     ::program
     ::retirement
+    ::sources
     iree::base
     iree::base::threading
     iree::experimental::loom_serve::storage::memory
@@ -703,7 +725,6 @@ loom_cc_test(
     "weights_test.cc"
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/weights/policy.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/weights/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/weights/stages.loom"
   DEPS
     ::activation
@@ -724,11 +745,39 @@ loom_cc_test(
     iree::testing::temp_file
     loom::binding::c::loomc
   ARGS
-    "--weight_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/weights/sources.txt}}"
+    "--weight_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/weights/stages.loom}}"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
   RESOURCE_GROUP
     gpu-device
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten" OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "WASI")
+loom_cc_test(
+  NAME
+    sources_posix_test
+  SRCS
+    "sources_posix_test.cc"
+  DEPS
+    ::sources
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+loom_cc_test(
+  NAME
+    sources_windows_test
+  SRCS
+    "sources_windows_test.cc"
+  DEPS
+    ::sources
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 endif()
 

@@ -115,9 +115,9 @@ TEST_P(PrefixServiceTest, PressureReplaysWhenSelectedPrefixCannotFit) {
 
 TEST_P(PrefixServiceTest, DynamicDeclarationReservesIndependentEndpointQuotas) {
   StartManaged();
-  std::string declaration = Declaration("fixture-text", directory_);
-  declaration.pop_back();
-  declaration += ",\"prefix_cache_capacity\":2,\"session_cache_capacity\":2}";
+  std::string declaration =
+      Declaration("fixture-text", directory_, "open",
+                  R"(,"prefix_cache_capacity":2,"session_cache_capacity":2)");
   ASSERT_EQ(
       Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
       0u);

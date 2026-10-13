@@ -15,8 +15,8 @@ add_custom_command(OUTPUT sources.stamp
   DEPENDS
     "advance.loom"
     "control.loom"
+    "model.json"
     "prepare.loom"
-    "sources.txt"
     "tokenizer.json"
     "weights.loom"
 )
@@ -46,8 +46,8 @@ loom_cc_test(
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/control.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/model.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/weights.loom"
   DEPS
@@ -66,6 +66,7 @@ loom_cc_test(
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::telemetry::stream
+    iree::experimental::loom_serve::testing::model
     iree::experimental::loom_serve::text::chat
     iree::experimental::loom_serve::text::input
     iree::experimental::loom_serve::text::model
@@ -105,8 +106,8 @@ loom_cc_test(
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/control.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/model.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/weights.loom"
   DEPS
@@ -125,6 +126,7 @@ loom_cc_test(
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::telemetry::stream
+    iree::experimental::loom_serve::testing::model
     iree::experimental::loom_serve::text::chat
     iree::experimental::loom_serve::text::input
     iree::experimental::loom_serve::text::model
@@ -165,8 +167,8 @@ loom_cc_test(
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/control.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/model.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/weights.loom"
   DEPS
@@ -185,6 +187,7 @@ loom_cc_test(
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::telemetry::stream
+    iree::experimental::loom_serve::testing::model
     iree::experimental::loom_serve::text::chat
     iree::experimental::loom_serve::text::input
     iree::experimental::loom_serve::text::model

@@ -16,7 +16,7 @@ add_custom_command(OUTPUT sources.stamp
   DEPENDS
     "${IREE_BINARY_DIR}/experimental/loom_serve/motifs/tensor/sources.stamp"
     "${_GLOB_X_LOOM}"
-    "sources.txt"
+    "model.json"
 )
 
 add_custom_target(${_FILEGROUP_TARGET}
@@ -105,13 +105,13 @@ loom_cc_binary(
   DEPS
     iree::base
     iree::base::internal
-    iree::base::internal::path
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::jit
     iree::experimental::loom_serve::runtime::weights
+    iree::experimental::loom_serve::serving::configuration
     iree::hal
     iree::io::file_handle
     loom::binding::c::loomc

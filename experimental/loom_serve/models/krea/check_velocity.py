@@ -56,7 +56,7 @@ for phase, adapted in (("base", False), ("base", True), ("style", True)):
         inputs.append(head / "strength.f32")
     command = [
         *args.checker,
-        "--model=" + str(args.model),
+        "--model=" + str(args.model / "model.json"),
         "--weight_policy=" + str(args.model / "weights.loom"),
         *["--weights=" + str(path) for path in checkpoints],
         "--root=transformer_velocity" + ("_adapted" if adapted else ""),

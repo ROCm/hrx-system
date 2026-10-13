@@ -5,8 +5,8 @@ The prefill, greedy decode and packed epoch roots use command programs and kerne
 their artifacts are independent of the host scheduler. Parameter placement must
 match across roots so all stages share one resident weight slab.
 
-The runner consumes this directory directly with `--model`. Its
-`sources.txt` catalog indexes configuration, command and kernel providers once.
+The runner consumes [model.json](model.json) through `--model`. Its provider
+list indexes configuration, command and kernel providers once.
 `prepare.loom` is the cold VM entry: it declares command roots, run-dependent
 specialization and checkpoint bindings. `config.loom` owns fixed specialization
 bounds; `control.loom` contains isolated and packed inference VM entries;
@@ -480,7 +480,7 @@ From the repository root:
 build_tools/bin/iree-bazel-build --config=asan //experimental/loom_serve/text:generate
 # Run on a qualified GPU host with the source directory available.
 bazel-bin/experimental/loom_serve/text/generate \
-  --model=experimental/loom_serve/models/qwen \
+  --model=experimental/loom_serve/models/qwen/model.json \
   --prefill_capacity=512 --context_capacity=2048 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json --prompt='What is 2+2?' --max_tokens=16
@@ -889,7 +889,7 @@ complement the whole-state kernel differentials above.
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \
   //experimental/loom_serve/models/qwen:epoch_check -- \
-  --model=experimental/loom_serve/models/qwen \
+  --model=experimental/loom_serve/models/qwen/model.json \
   --prefill_capacity=32 --context_capacity=16384 --epoch=32:4 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json
@@ -942,7 +942,7 @@ example, after building the exact executable with the optimized flags below:
 
 ```sh
 benchmark-lock -- bazel-bin/experimental/loom_serve/models/qwen/workload \
-  --model=experimental/loom_serve/models/qwen \
+  --model=experimental/loom_serve/models/qwen/model.json \
   --prefill_capacity=32 --context_capacity=16384 --epoch=32:4 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \

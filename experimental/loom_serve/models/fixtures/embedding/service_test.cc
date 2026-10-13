@@ -26,6 +26,7 @@
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
 #include "experimental/loom_serve/serving/model_registration.h"
 #include "experimental/loom_serve/serving/router.h"
+#include "experimental/loom_serve/testing/model.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -198,9 +199,11 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
   }
 
   void CreateModel(const std::string& directory) {
+    loom_serve::testing::ModelDocument document;
+    IREE_ASSERT_OK(document.Load(directory + "/model.json"));
     const loom_serve_finite_model_options_t model_options = {
-        .source_directory = iree_make_cstring_view(directory.c_str()),
-        .asset_directory = iree_make_cstring_view(directory.c_str()),
+        .sources = document.value().sources,
+        .asset_directory = IREE_SV("."),
         .options = IREE_SV("{\"batch_units\":64}")};
     ModelLifecycle load;
     IREE_ASSERT_OK(load.Run(device_, model_options));
@@ -425,11 +428,13 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
   }
 
   std::string Declaration(const std::string& name, const std::string& source,
-                          const char* admission = "open") {
-    return "{\"kind\":\"embedding\",\"name\":\"" + name + "\",\"source\":\"" +
-           source + "\",\"assets\":\"" + source +
-           "\",\"options\":{\"batch_units\":64},\"admission\":\"" + admission +
-           "\"}";
+                          const char* admission = "open",
+                          const std::string& base = "") {
+    return "{\"name\":\"" + name + "\",\"base_directory\":\"" +
+           std::filesystem::absolute(base.empty() ? source : base).string() +
+           "\",\"admission\":\"" + admission +
+           "\",\"definition\":" + loom_serve::testing::ReadDefinition(source) +
+           "}";
   }
 
   std::string ModelStatus(const std::string& name) {
@@ -501,8 +506,9 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
     bootstrap << declarations << prepare;
     bootstrap.close();
     ASSERT_TRUE(bootstrap.good());
-    std::ofstream manifest(target + "/sources.txt");
-    manifest << "config.loom\nembed.loom\nweights.loom\n";
+    std::ofstream manifest(target + "/model.json");
+    manifest
+        << R"({"name":"weighted","definition":{"kind":"embedding","prepare":"prepare.loom","control":"control.loom","sources":["config.loom","embed.loom","weights.loom"],"assets":"."}})";
     manifest.close();
     ASSERT_TRUE(manifest.good());
     std::string header =
@@ -553,8 +559,9 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
     bootstrap << prepare;
     bootstrap.close();
     ASSERT_TRUE(bootstrap.good());
-    std::ofstream manifest(target + "/sources.txt");
-    manifest << "config.loom\ndirect.loom\n";
+    std::ofstream manifest(target + "/model.json");
+    manifest
+        << R"({"name":"direct","definition":{"kind":"embedding","prepare":"prepare.loom","control":"control.loom","sources":["config.loom","direct.loom"],"assets":"."}})";
     manifest.close();
     ASSERT_TRUE(manifest.good());
     if (service_) {
@@ -617,10 +624,11 @@ TEST_P(SourceEmbeddingServiceTest,
   EXPECT_NE(registered.find(R"("admission":"drained")"), std::string::npos);
   EXPECT_EQ(Read(Send(declaration, "/v1/models/register")).find("HTTP/1.1 409"),
             0u);
-  EXPECT_EQ(Read(Send(Declaration("cold", package + "/absent", "drained"),
-                      "/v1/models/register"))
-                .find("HTTP/1.1 202"),
-            0u);
+  EXPECT_EQ(
+      Read(Send(Declaration("cold", package, "drained", package + "/absent"),
+                "/v1/models/register"))
+          .find("HTTP/1.1 202"),
+      0u);
   EXPECT_EQ(Read(Send(Declaration("full", package), "/v1/models/register"))
                 .find("HTTP/1.1 429"),
             0u);
@@ -705,7 +713,7 @@ TEST_P(SourceEmbeddingServiceTest,
       iree::testing::MakeTempFilePath("invalid_feedback");
   ASSERT_TRUE(std::filesystem::create_directory(package));
   for (const char* file : {"config.loom", "control.loom", "embed.loom",
-                           "prepare.loom", "sources.txt", "tokenizer.json"}) {
+                           "prepare.loom", "model.json", "tokenizer.json"}) {
     ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/" + file,
                                            package + "/" + file));
   }
@@ -1288,9 +1296,11 @@ TEST_P(SourceEmbeddingServiceTest,
   const std::string package =
       iree::testing::MakeTempFilePath("live_weighted_embedding");
   ASSERT_NO_FATAL_FAILURE(WriteWeightedPackage(package));
+  loom_serve::testing::ModelDocument document;
+  IREE_ASSERT_OK(document.Load(package + "/model.json"));
   const loom_serve_finite_model_options_t options = {
-      .source_directory = iree_make_cstring_view(package.c_str()),
-      .asset_directory = iree_make_cstring_view(package.c_str()),
+      .sources = document.value().sources,
+      .asset_directory = IREE_SV("."),
       .options = IREE_SV("{}")};
   const int resident = Send(R"({"model":"fixture","input":"a"})");
   Accept();
@@ -1340,9 +1350,11 @@ TEST_P(SourceEmbeddingServiceTest,
   ASSERT_TRUE(invalid.good());
   for (bool cancel : {true, false}) {
     const auto& source = cancel ? directory_ : package;
+    loom_serve::testing::ModelDocument document;
+    IREE_ASSERT_OK(document.Load(source + "/model.json"));
     const loom_serve_finite_model_options_t options = {
-        .source_directory = iree_make_cstring_view(source.c_str()),
-        .asset_directory = iree_make_cstring_view(source.c_str()),
+        .sources = document.value().sources,
+        .asset_directory = IREE_SV("."),
         .options = IREE_SV("{}")};
     const int resident = Send(R"({"model":"fixture","input":"a"})");
     Accept();

@@ -180,9 +180,11 @@ for phase in ("base", "style"):
             *args.checker,
             "--model="
             + str(
-                args.model / "qualification"
-                if root.startswith("qualify.")
-                else args.model
+                (
+                    args.model / "qualification.json"
+                    if root.startswith("qualify.")
+                    else args.model / "model.json"
+                )
             ),
             "--weight_policy=" + str(args.model / "weights.loom"),
             *[

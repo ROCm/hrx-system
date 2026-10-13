@@ -181,15 +181,17 @@ through all subviews and address arithmetic. The packed attention sources show
 that distinction; changing an index width is a measured compiler/kernel
 experiment, not a blanket optimization rule.
 
-## Source catalog to executable commands
+## Source providers to executable commands
 
-[`sources.txt`](../models/qwen/sources.txt) contains relative source paths,
-one per line. The runner indexes providers once and requests a named command
-root. The minimal corresponding catalog and programs are in
-[`testdata/jit`](../runtime/testdata/jit/sources.txt).
+The [model document](MODEL_FORMAT.md) names cold/warm VM programs and lists
+native providers in `definition.sources`. The
+[Qwen document](../models/qwen/model.json) shows a complete learned-model
+closure; the small [JIT test](../runtime/jit_test.cc) directly supplies
+`testdata/jit/config.loom` and `stage.loom`.
 
-Paths are resolved relative to the model source directory. Each catalog entry
-is indexed as a separate provider, not concatenated into one source file.
+Provider paths resolve relative to the model document, or its explicit local
+base. Text and portable bytecode may mix. Each provider is indexed separately,
+not concatenated into one source file; order does not define dependencies.
 A provider carries declarations for the configuration, templates, kernels and
 commands it references from other providers, and the target definitions needed
 to verify its own kernels. The declarations describe imported contracts; their
@@ -386,9 +388,9 @@ The image binary's external contract is documented in
 
 | Source | Role |
 | --- | --- |
-| `sources.txt` | Relative catalog paths for model command programs, kernels and shared motifs. |
-| `prepare.loom` | Cold VM entry declaring commands, specialization and checkpoint domains; returns request capacity, tokenizer asset, public name and opaque state. |
-| `control.loom` | Warm VM entries preparing one request payload and advancing command parts through final feedback. |
+| `model.json` | Complete deployment definition, explicit VM role paths, native providers and asset/capacity settings. |
+| Prepare program (`.loom` or `.loombc`) | Cold VM entry declaring commands, specialization and checkpoint domains; returns request capacity, tokenizer asset, public name and opaque state. |
+| Control program (`.loom` or `.loombc`) | Warm VM entries preparing one request payload and advancing command parts through final feedback. |
 | Weight policy source | Cold preparation policy named by each checkpoint-domain declaration. |
 
 The caller passes dimensions, text capacity, asset paths and an owned JSON

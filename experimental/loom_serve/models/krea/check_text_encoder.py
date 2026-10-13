@@ -106,7 +106,7 @@ def main():
                 actual_path = working / "actual.bf16"
                 invocation = [
                     *arguments.checker,
-                    f"--model={arguments.model / 'qualification'}",
+                    f"--model={arguments.model / 'qualification.json'}",
                     f"--weight_policy={arguments.model / 'weights.loom'}",
                     f"--weights={checkpoint}",
                     f"--root={root}",

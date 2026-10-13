@@ -138,7 +138,7 @@ with (
                     )
                     command = [
                         *args.checker,
-                        "--model=" + str(args.model / "qualification"),
+                        "--model=" + str(args.model / "qualification.json"),
                         "--weight_policy=" + str(args.model / "weights.loom"),
                         *["--weights=" + str(path) for path in checkpoints],
                         "--root=qualify.block_"

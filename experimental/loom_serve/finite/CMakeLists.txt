@@ -60,7 +60,6 @@ loom_cc_library(
     "model.c"
   DEPS
     iree::base
-    iree::base::internal::path
     iree::base::threading
     iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
@@ -74,6 +73,7 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::preparation
     iree::experimental::loom_serve::runtime::program
     iree::experimental::loom_serve::runtime::residency
+    iree::experimental::loom_serve::runtime::sources
     iree::experimental::loom_serve::runtime::weights
     iree::hal
     iree::io::file_handle

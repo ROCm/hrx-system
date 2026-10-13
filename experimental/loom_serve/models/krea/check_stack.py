@@ -95,7 +95,9 @@ def execute(
     command = [
         *args.checker,
         "--model="
-        + str(args.model / "qualification" if layer is not None else args.model),
+        + str(
+            args.model / ("qualification.json" if layer is not None else "model.json")
+        ),
         "--weight_policy=" + str(args.model / "weights.loom"),
         "--weights=" + str(args.checkpoint / "turbo.safetensors"),
         "--root=" + root,

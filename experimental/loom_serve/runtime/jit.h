@@ -11,6 +11,7 @@
 #include "experimental/loom_serve/runtime/compilation.h"
 #include "experimental/loom_serve/runtime/dispatch.h"
 #include "experimental/loom_serve/runtime/host.h"
+#include "experimental/loom_serve/runtime/sources.h"
 #include "loomc/config.h"
 #include "loomc/sanitizer.h"
 
@@ -28,11 +29,10 @@ extern "C" {
 typedef struct loom_serve_jit_t loom_serve_jit_t;
 typedef struct loom_serve_jit_stage_t loom_serve_jit_stage_t;
 
-// Loads source_directory/sources.txt: one relative Loom source path per line,
-// with blank lines and lines beginning with # ignored. All providers are
-// indexed once. The selected queue family and device are retained until
-// destruction. host supplies the shared compiler sink and worker ordinals;
-// it outlives this catalog and every compilation completion.
+// Loads and indexes the explicit text/bytecode providers once. Source views
+// are borrowed only during this call. The selected queue family and device are
+// retained until destruction. host supplies the shared compiler sink and worker
+// ordinals; it outlives this catalog and every compilation completion.
 // Compilation uses the linked backend selected from immutable HAL device
 // facts, including its exact loader target and queue affinity. Source target
 // declarations are specialized to that profile at each command's kernel roots.
@@ -41,7 +41,7 @@ typedef struct loom_serve_jit_stage_t loom_serve_jit_stage_t;
 iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
                                     iree_hal_queue_t* dispatch,
                                     loom_serve_host_t* host,
-                                    iree_string_view_t source_directory,
+                                    const loom_serve_sources_t* sources,
                                     const loomc_sanitizer_options_t* sanitizer,
                                     loom_serve_compilation_report_t* report,
                                     iree_allocator_t host_allocator,

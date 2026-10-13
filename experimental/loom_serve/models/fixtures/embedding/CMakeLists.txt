@@ -16,8 +16,8 @@ add_custom_command(OUTPUT sources.stamp
     "config.loom"
     "control.loom"
     "embed.loom"
+    "model.json"
     "prepare.loom"
-    "sources.txt"
     "tokenizer.json"
 )
 
@@ -39,8 +39,8 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/config.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/embed.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/model.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/direct.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/policy.loom"
@@ -65,6 +65,7 @@ loom_cc_test(
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::task
     iree::testing::gtest
@@ -90,8 +91,8 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/config.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/embed.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/model.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/direct.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/policy.loom"
@@ -116,6 +117,7 @@ loom_cc_test(
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::task
     iree::testing::gtest
@@ -142,8 +144,8 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/config.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/embed.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/model.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/direct.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/policy.loom"
@@ -168,6 +170,7 @@ loom_cc_test(
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::task
     iree::testing::gtest
@@ -196,8 +199,8 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/config.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/embed.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/model.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/direct.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/policy.loom"
@@ -222,6 +225,7 @@ loom_cc_test(
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::task
     iree::testing::gtest

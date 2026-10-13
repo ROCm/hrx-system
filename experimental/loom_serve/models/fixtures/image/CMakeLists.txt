@@ -16,8 +16,8 @@ add_custom_command(OUTPUT sources.stamp
     "config.loom"
     "control.loom"
     "generate.loom"
+    "model.json"
     "prepare.loom"
-    "sources.txt"
     "tokenizer.json"
 )
 
@@ -39,8 +39,8 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/config.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/generate.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/model.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/tokenizer.json"
   DEPS
     iree::async
@@ -61,6 +61,7 @@ loom_cc_test(
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
@@ -85,8 +86,8 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/config.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/generate.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/model.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/tokenizer.json"
   DEPS
     iree::async
@@ -107,6 +108,7 @@ loom_cc_test(
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
@@ -131,8 +133,8 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/config.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/generate.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/model.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/tokenizer.json"
   DEPS
     iree::async
@@ -153,6 +155,7 @@ loom_cc_test(
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    iree::experimental::loom_serve::testing::model
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main

@@ -42,7 +42,10 @@ def main():
         return text
 
     prompts = ("a red fox in the snow", " ".join(["red"] * 65))
-    common = [f"--model={args.model}", f"--checkpoint={args.checkpoint}"]
+    common = [
+        f"--model={args.model / 'model.json'}",
+        f"--checkpoint={args.checkpoint.resolve()}",
+    ]
     isolated_cases = [
         (prompt, adapted) for adapted in (False, True) for prompt in (0, 1)
     ]
@@ -56,7 +59,11 @@ def main():
                 *common,
                 f"--prompt={prompts[prompt]}",
                 f"--seed={42 if prompt else 0}",
-                *([f"--adapter={args.adapter}", "--strength=1"] if adapted else []),
+                *(
+                    [f"--adapter={args.adapter.resolve()}", "--strength=1"]
+                    if adapted
+                    else []
+                ),
                 "--height=384",
                 "--width=384",
                 "--text_tokens=512",
@@ -68,7 +75,7 @@ def main():
         [
             *args.checker,
             *common,
-            *([f"--adapter={args.adapter}"] if args.adapter else []),
+            *([f"--adapter={args.adapter.resolve()}"] if args.adapter else []),
             f"--output={args.output}",
         ],
     )

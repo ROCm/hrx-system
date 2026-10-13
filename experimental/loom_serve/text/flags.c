@@ -6,11 +6,13 @@
 
 #include "experimental/loom_serve/text/flags.h"
 
+#include "experimental/loom_serve/serving/configuration.h"
 #include "experimental/loom_serve/text/schedule.h"
 #include "iree/base/tooling/flags.h"
 
 IREE_FLAG(string, model, "",
-          "Portable model source directory; JIT compiled for the live device.");
+          "Model JSON document; source programs are JIT compiled for the live "
+          "device.");
 IREE_FLAG(int32_t, prefill_capacity, 512,
           "Maximum automatic packed shape and isolated prefill capacity.");
 IREE_FLAG(int32_t, context_capacity, 16384,
@@ -30,10 +32,14 @@ IREE_FLAG(int32_t, draft_depth, 0,
 IREE_FLAG(int32_t, checkpoint_capacity, 0,
           "Explicitly pinned endpoint capacity; zero disables checkpoints. "
           "Requires pooled KV and reserves source-defined recurrent headroom.");
-IREE_FLAG(string, weights, "", "Parameter file selected by the model source.");
-IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json path.");
-IREE_FLAG(string, model_options, "{}",
-          "Model bootstrap JSON object interpreted by prepare.loom.");
+IREE_FLAG(
+    string, weights, "",
+    "Parameter file selected by the source; relative to the model document.");
+IREE_FLAG(string, tokenizer, "",
+          "Hugging Face tokenizer.json path, relative to the model document.");
+IREE_FLAG(
+    string, model_options, "",
+    "Optional bootstrap JSON override; otherwise use the model document.");
 IREE_FLAG(string, kernel_sanitizer, "none",
           "Device checks: none or access|value|operation|race.");
 IREE_FLAG(string, kernel_sanitizer_reporting, "default",
@@ -143,8 +149,13 @@ iree_status_t loom_serve_text_model_create_from_flags(
     }
     shapes[i] = (loom_serve_packing_shape_t){token_count, span_count};
   }
+  loom_serve_model_configuration_t configuration = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_model_configuration_load(
+        iree_make_cstring_view(FLAG_model), &configuration, host_allocator);
+  }
   const loom_serve_text_options_t options = {
-      .source_directory = iree_make_cstring_view(FLAG_model),
+      .sources = configuration.sources,
       .prefill_capacity = (iree_host_size_t)FLAG_prefill_capacity,
       .context_capacity = (iree_host_size_t)FLAG_context_capacity,
       .pool_capacity = pool_capacity,
@@ -154,7 +165,9 @@ iree_status_t loom_serve_text_model_create_from_flags(
       .kernel_sanitizer = sanitizer,
       .weights_path = iree_make_cstring_view(FLAG_weights),
       .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),
-      .options = iree_make_cstring_view(FLAG_model_options),
+      .options = FLAG_model_options[0]
+                     ? iree_make_cstring_view(FLAG_model_options)
+                     : configuration.options,
       .row_count = defaults->row_count,
       .checkpoint_capacity = (iree_host_size_t)FLAG_checkpoint_capacity,
   };
@@ -163,5 +176,6 @@ iree_status_t loom_serve_text_model_create_from_flags(
                                           host_allocator);
   }
   iree_allocator_free(host_allocator, shapes);
+  loom_serve_model_configuration_deinitialize(&configuration);
   return status;
 }

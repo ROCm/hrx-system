@@ -37,7 +37,7 @@ depending on the router, listener lifetime, or application run loop. The
 single-model executables use the same create, route, retire and destroy
 ownership sequence as the shared server.
 
-The catalog selects source packages and deployment options. Model math,
+Each model document selects source providers and deployment options. Model math,
 checkpoint interpretation, storage geometry and chat policy remain in the
 Loom sources described by the [text model contract](../text/README.md),
 [image model contract](../image/model.h), and
@@ -46,13 +46,12 @@ model-specific C in the executable.
 
 ## Launch
 
-The server can start without `--models`, or with an explicit `{"models":[]}`
-catalog. It still owns its configured device and shared task/I/O infrastructure;
+The server starts empty when no `--model` is supplied. It still owns its configured device and shared task/I/O infrastructure;
 health, model discovery, status, metrics and diagnostic endpoints remain live.
 An empty server publishes empty model/status lists and zero model-work totals.
 Unknown-model inference and tokenization requests return HTTP 404. Text, image,
 embedding and decision packages can be registered and removed over HTTP;
-startup catalog entries use the same asynchronous path. Source preparation and
+startup model documents use the same asynchronous path. Source preparation and
 JIT share the host workers. Initial device uploads use proactor readiness, not
 worker waits. A failed package remains inspectable while peers keep serving.
 
@@ -60,63 +59,13 @@ The [weight-free three-model catalog](../models/fixtures/README.md) is a complet
 first-output recipe for image, embedding and decision packages. The example
 below adds real text/image checkpoints; the same executable handles both.
 
-Create a JSON or JSONC catalog, for example:
+Pass one complete [model document](../docs/MODEL_FORMAT.md) per repeated
+`--model` flag. The fixture packages provide ready-to-load documents.
+Learned-model documents need their asset paths configured for the intended
+checkpoint. An ordinary `--flagfile` can list models and process settings.
 
-~~~json
-{
-  "models": [
-    {
-      "kind": "text",
-      "name": "scout",
-      "source": "experimental/loom_serve/models/qwen",
-      "weights": "/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf",
-      "tokenizer": "/path/to/tokenizer.json",
-      "rows": 4,
-      "admission_overtakes": 4,
-      "context_capacity": 8192,
-      "pool_capacity": 32768,
-      "prefill_capacity": 128,
-      "draft_depth": 3,
-      "continuation_epochs": 2,
-      "checkpoint_capacity": 2,
-      "session_cache_capacity": 8
-    },
-    {
-      "kind": "text",
-      "name": "researcher",
-      "source": "experimental/loom_serve/models/qwen",
-      "weights": "/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf",
-      "tokenizer": "/path/to/tokenizer.json",
-      "rows": 2,
-      "context_capacity": 131072,
-      "pool_capacity": 65536,
-      "prefill_capacity": 512,
-      "draft_depth": 0
-    },
-    {
-      "kind": "image",
-      "name": "illustrator",
-      "source": "experimental/loom_serve/models/krea",
-      "checkpoint": "/path/to/krea-2-turbo",
-      "adapter": "/path/to/style.safetensors",
-      "width": 384,
-      "height": 384,
-      "text_tokens": 512,
-      "pending_requests": 4
-    },
-    {
-      "kind": "embedding",
-      "name": "vectors",
-      "source": "experimental/loom_serve/models/fixtures/embedding",
-      "assets": "experimental/loom_serve/models/fixtures/embedding",
-      "options": {"batch_units": 64},
-      "pending_requests": 16
-    }
-  ]
-}
-~~~
-
-Paths resolve from the process working directory. Names are nonempty visible
+References inside each document resolve from its containing directory, or an
+explicit absolute `base_directory`. Names are nonempty visible
 ASCII identifiers, so the same value fits JSON requests and HTTP headers.
 Unknown, duplicate and wrong-modality fields reject instead of silently changing
 configuration. Image `checkpoint` is an asset directory, whereas text `weights`
@@ -137,7 +86,7 @@ not a learned embedding model.
 ~~~sh
 build_tools/bin/iree-bazel-run --config=opt \
   //experimental/loom_serve/serving:server -- \
-  --models=/path/to/models.json --listen=127.0.0.1:8080 \
+  --model=/path/to/scout/model.json --model=/path/to/illustrator/model.json --listen=127.0.0.1:8080 \
   --listen=unix:/path/to/loom-serve.sock \
   --pool_backing=elastic --memory_bytes=38654705664
 ~~~
@@ -171,20 +120,21 @@ curl --unix-socket /path/to/loom-serve.sock http://localhost/v1/models
 
 ## Registration and removal
 
-`POST /v1/models/register` takes one model object using the catalog schema.
+`POST /v1/models/register` takes the same complete model document used by the CLI.
 Optional `admission` is `"open"` by default or `"drained"`. The latter stores
 only registration metadata and a bounded observation ring: it does not create
 the model, read source/assets, reserve model storage or evict another model.
 Opening admission or requesting explicit activation starts preparation. The
-same setting is accepted for every modality in startup catalogs.
+same setting is accepted for every modality in startup documents.
 
 ~~~sh
 curl http://127.0.0.1:8080/v1/models/register \
   -H 'Content-Type: application/json' \
-  -d '{"kind":"embedding","name":"vectors",
-       "source":"experimental/loom_serve/models/fixtures/embedding",
-       "assets":"experimental/loom_serve/models/fixtures/embedding",
-       "admission":"drained","options":{"batch_units":64}}'
+  -d '{"name":"vectors","admission":"drained",
+       "base_directory":"/srv/models/vectors",
+       "definition":{"kind":"embedding","prepare":"prepare.loom",
+       "control":"control.loom","sources":["config.loom","embed.loom"],
+       "assets":".","options":{"batch_units":64}}}'
 curl http://127.0.0.1:8080/v1/models/undrain \
   -H 'Content-Type: application/json' -d '{"model":"vectors"}'
 curl http://127.0.0.1:8080/v1/status

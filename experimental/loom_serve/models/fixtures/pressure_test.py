@@ -94,35 +94,34 @@ def oracle(text):
 
 
 def check(server, source, directory, workers, memory_bytes, retention):
-    configuration = directory / "models.json"
+    configuration = directory / "models.flags"
     weights = directory / "weights.safetensors"
     header = b'{"bias":{"dtype":"I32","shape":[1],"data_offsets":[0,4]}}'
     header += b" " * (-len(header) % 8)
     weights.write_bytes(struct.pack("<Q", len(header)) + header + struct.pack("<I", 2))
-    configuration.write_text(
-        json.dumps(
-            {
-                "models": [
-                    {
-                        "kind": "text",
-                        "name": name,
-                        "source": str(source),
-                        "weights": str(weights),
-                        "tokenizer": str(source / "tokenizer.json"),
-                        "rows": 2,
-                        "context_capacity": 128,
-                        "pool_capacity": 128,
-                        "prefill_capacity": 32,
-                        "checkpoint_capacity": 2,
-                        "session_cache_capacity": 2,
-                        "max_tokens": 2,
-                        "draft_depth": 0,
-                    }
-                    for name in ("alpha", "beta")
-                ]
-            }
-        )
-    )
+    flags = []
+    for name in ("alpha", "beta"):
+        model = {
+            "name": name,
+            "base_directory": str(source.resolve()),
+            "definition": {
+                **json.loads((source / "model.json").read_text())["definition"],
+                "weights": str(weights),
+                "tokenizer": str(source / "tokenizer.json"),
+                "rows": 2,
+                "context_capacity": 128,
+                "pool_capacity": 128,
+                "prefill_capacity": 32,
+                "checkpoint_capacity": 2,
+                "session_cache_capacity": 2,
+                "max_tokens": 2,
+                "draft_depth": 0,
+            },
+        }
+        document = directory / f"{name}.json"
+        document.write_text(json.dumps(model))
+        flags.append(f"--model={document.resolve()}")
+    configuration.write_text("\n".join(flags) + "\n")
     command = [
         str(server),
         "--device=amdgpu",
@@ -130,7 +129,7 @@ def check(server, source, directory, workers, memory_bytes, retention):
         "--slab_bytes=2097152",
         f"--memory_bytes={memory_bytes}",
         f"--workers={workers}",
-        f"--models={configuration}",
+        f"--flagfile={configuration}",
         "--listen=127.0.0.1:0",
         "--heartbeat_ms=0",
     ]

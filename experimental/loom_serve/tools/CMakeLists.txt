@@ -35,6 +35,7 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::jit
     iree::experimental::loom_serve::runtime::weights
+    iree::experimental::loom_serve::serving::configuration
     iree::hal
     iree::io::file_handle
     loom::binding::c::loomc

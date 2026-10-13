@@ -93,7 +93,7 @@ def main():
                 expected_path.write_bytes(expected_bytes)
                 invocation = [
                     *arguments.checker,
-                    f"--model={arguments.model}",
+                    f"--model={arguments.model / 'model.json'}",
                     "--root=krea2.encoder_attention",
                     f"--config=krea2.text_tokens={texts}",
                     *[f"--input={path}" for path in paths],

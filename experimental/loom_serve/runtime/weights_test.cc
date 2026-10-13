@@ -35,8 +35,8 @@ struct Preparation {
     auto* self = static_cast<Preparation*>(process->user_data);
     auto status = loom_serve_weights_prepare_async(
         self->weights, self->host, self->jit,
-        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, self->checkpoint, self->policy,
-        Complete, self);
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_SV("."), self->checkpoint,
+        self->policy, Complete, self);
     if (!iree_status_is_ok(status)) {
       Complete(self, status);
     }
@@ -304,10 +304,14 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     pool_ = loom_serve_device_memory_pool(device_owner_);
     directory_ =
         std::filesystem::path(FLAG_weight_sources).parent_path().string();
+    const iree_string_view_t providers[] = {IREE_SV("stages.loom")};
+    const loom_serve_sources_t sources = {
+        .base_directory = iree_make_cstring_view(directory_.c_str()),
+        .count = IREE_ARRAYSIZE(providers),
+        .values = providers};
     IREE_ASSERT_OK(loom_serve_jit_create(
-        device_, dispatch_, loom_serve_device_host(device_owner_),
-        iree_make_cstring_view(directory_.c_str()), nullptr, &compilation_,
-        allocator_, &jit_));
+        device_, dispatch_, loom_serve_device_host(device_owner_), &sources,
+        nullptr, &compilation_, allocator_, &jit_));
     WriteCheckpoint(path_.path(), 0);
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
         loom_serve_device_storage_pool(device_owner_),

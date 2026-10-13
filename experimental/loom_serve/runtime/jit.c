@@ -9,10 +9,8 @@
 #include <string.h>
 
 #include "experimental/loom_serve/runtime/target.h"
-#include "iree/base/internal/path.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
-#include "iree/io/file_contents.h"
 #include "loomc/iree.h"
 #include "loomc/launch_config.h"
 #include "loomc/link.h"
@@ -149,31 +147,16 @@ static iree_status_t jit_read_source(iree_string_view_t path,
 }
 
 static iree_status_t jit_index_sources(loom_serve_jit_t* jit,
-                                       iree_string_view_t directory) {
-  char* path = NULL;
-  IREE_RETURN_IF_ERROR(iree_file_path_join(directory, IREE_SV("sources.txt"),
-                                           jit->allocator, &path));
-  iree_io_file_contents_t* catalog = NULL;
-  iree_status_t status = iree_io_file_contents_read(
-      iree_make_cstring_view(path), jit->allocator, &catalog);
-  iree_allocator_free(jit->allocator, path);
-  IREE_RETURN_IF_ERROR(status);
+                                       const loom_serve_sources_t* sources) {
   loomc_link_index_builder_t* builder = NULL;
-  status = iree_status_from_loomc(loomc_link_index_builder_create(
+  iree_status_t status = iree_status_from_loomc(loomc_link_index_builder_create(
       jit->kernel.context, NULL, loomc_allocator_from_iree(jit->allocator),
       &builder));
-  iree_string_view_t remaining =
-      iree_make_string_view((const char*)catalog->const_buffer.data,
-                            catalog->const_buffer.data_length);
-  while (!iree_string_view_is_empty(remaining) && iree_status_is_ok(status)) {
-    iree_string_view_t line;
-    iree_string_view_split(remaining, '\n', &line, &remaining);
-    line = iree_string_view_trim(line);
-    if (iree_string_view_is_empty(line) || line.data[0] == '#') {
-      continue;
-    }
-    path = NULL;
-    status = iree_file_path_join(directory, line, jit->allocator, &path);
+  for (iree_host_size_t i = 0; i < sources->count && iree_status_is_ok(status);
+       ++i) {
+    char* path = NULL;
+    status = loom_serve_path_resolve(sources->base_directory,
+                                     sources->values[i], jit->allocator, &path);
     loomc_source_t* source = NULL;
     if (iree_status_is_ok(status)) {
       status = jit_read_source(iree_make_cstring_view(path), jit->allocator,
@@ -181,7 +164,7 @@ static iree_status_t jit_index_sources(loom_serve_jit_t* jit,
     }
     if (iree_status_is_ok(status)) {
       const loomc_link_index_source_options_t options = {
-          .provider_name = loomc_string_view_from_iree(line),
+          .provider_name = loomc_string_view_from_iree(sources->values[i]),
           .role = LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
       };
       status = iree_status_from_loomc(
@@ -197,7 +180,6 @@ static iree_status_t jit_index_sources(loom_serve_jit_t* jit,
     status = loom_serve_compilation_result(operation, result, jit->report);
   }
   loomc_link_index_builder_release(builder);
-  iree_io_file_contents_free(catalog);
   return status;
 }
 
@@ -268,7 +250,7 @@ void loom_serve_jit_destroy(loom_serve_jit_t* jit) {
 iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
                                     iree_hal_queue_t* dispatch,
                                     loom_serve_host_t* host,
-                                    iree_string_view_t source_directory,
+                                    const loom_serve_sources_t* sources,
                                     const loomc_sanitizer_options_t* sanitizer,
                                     loom_serve_compilation_report_t* report,
                                     iree_allocator_t host_allocator,
@@ -302,7 +284,7 @@ iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
                                      host_allocator, report, &jit->kernel);
   }
   if (iree_status_is_ok(status)) {
-    status = jit_index_sources(jit, source_directory);
+    status = jit_index_sources(jit, sources);
   }
   if (iree_status_is_ok(status)) {
     status = iree_status_from_loomc(

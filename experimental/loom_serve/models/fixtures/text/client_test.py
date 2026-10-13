@@ -118,27 +118,29 @@ class ClientTest(unittest.TestCase):
                     struct.pack("<Q", len(header)) + header + struct.pack("<I", 2)
                 )
                 declaration = {
-                    "kind": "text",
                     "name": "text",
-                    "source": str(PACKAGE),
-                    "weights": "weights.safetensors",
-                    "tokenizer": str(PACKAGE / "tokenizer.json"),
-                    "rows": 4,
-                    "context_capacity": 96,
-                    "pool_capacity": 256,
-                    "prefill_capacity": 32,
-                    "checkpoint_capacity": 2,
-                    "max_tokens": 16,
-                    "draft_depth": 0,
+                    "base_directory": str(PACKAGE),
+                    "definition": {
+                        **json.loads((PACKAGE / "model.json").read_text())[
+                            "definition"
+                        ],
+                        "weights": str(directory / "weights.safetensors"),
+                        "tokenizer": str(PACKAGE / "tokenizer.json"),
+                        "rows": 4,
+                        "context_capacity": 96,
+                        "pool_capacity": 256,
+                        "prefill_capacity": 32,
+                        "checkpoint_capacity": 2,
+                        "max_tokens": 16,
+                        "draft_depth": 0,
+                    },
                 }
-                (directory / "models.json").write_text(
-                    json.dumps({"models": [declaration]})
-                )
+                (directory / "model.json").write_text(json.dumps(declaration))
                 log = directory / "server.log"
                 with running_server(
                     [
                         str(SERVER),
-                        "--models=models.json",
+                        "--model=model.json",
                         "--device=task",
                         "--pool_backing=fixed",
                         f"--workers={workers}",
@@ -266,7 +268,7 @@ class ClientTest(unittest.TestCase):
                         "advance.loom",
                         "control.loom",
                         "prepare.loom",
-                        "sources.txt",
+                        "model.json",
                         "tokenizer.json",
                         "weights.loom",
                     ):
@@ -284,7 +286,11 @@ class ClientTest(unittest.TestCase):
                         "/v1/models/register",
                         202,
                         body=json.dumps(
-                            {**declaration, "name": "broken", "source": str(broken)}
+                            {
+                                **declaration,
+                                "name": "broken",
+                                "base_directory": str(broken),
+                            }
                         ),
                     )
                     failed = self.request(

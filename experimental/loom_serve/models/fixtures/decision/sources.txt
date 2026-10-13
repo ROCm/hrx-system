@@ -1,2 +1,0 @@
-config.loom
-decide.loom

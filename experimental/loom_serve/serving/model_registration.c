@@ -177,7 +177,7 @@ static iree_status_t finite_registration_create(
   registration->observer = observer;
   registration->stream = stream;
   const loom_serve_finite_model_options_t model_options = {
-      .source_directory = configuration->source,
+      .sources = configuration->sources,
       .asset_directory = configuration->finite.assets,
       .options = configuration->options};
   iree_status_t status = loom_serve_finite_load_create(
@@ -335,7 +335,7 @@ static iree_status_t image_registration_create(
   registration->observer = observer;
   registration->stream = stream;
   const loom_serve_image_model_options_t model_options = {
-      .source_directory = configuration->source,
+      .sources = configuration->sources,
       .checkpoint_directory = configuration->image.checkpoint,
       .adapter_path = configuration->image.adapter,
       .options = configuration->options,
@@ -501,7 +501,7 @@ static iree_status_t text_registration_create(
   const iree_host_size_t shape_count = loom_serve_text_default_shapes(
       text->rows, text->prefill_capacity, registration->shapes);
   const loom_serve_text_options_t model_options = {
-      .source_directory = configuration->source,
+      .sources = configuration->sources,
       .prefill_capacity = text->prefill_capacity,
       .context_capacity = text->context_capacity,
       .pool_capacity = text->pool_capacity,

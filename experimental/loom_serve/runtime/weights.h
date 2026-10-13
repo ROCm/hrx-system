@@ -87,7 +87,9 @@ typedef void (*loom_serve_weights_completion_fn_t)(void* user_data,
 // run on the shared host. Payload reads wait for activation; open checkpoint
 // handles and recorded preparers remain cached, not a second weight copy.
 //
-// policy_path names source with the VM export:
+// Relative weights_path and policy_path locators use base_directory; absolute
+// paths ignore it. All three views are borrowed until completion.
+// policy_path names a text or bytecode source with the VM export:
 //   prepare_weight(buffer key) -> (buffer command_root, i64 byte_length)
 // The key is a read-only, non-NUL-terminated tensor name. Empty command_root
 // and zero byte_length preserve file bytes. Otherwise command_root names a
@@ -103,7 +105,8 @@ typedef void (*loom_serve_weights_completion_fn_t)(void* user_data,
 iree_status_t loom_serve_weights_prepare_async(
     loom_serve_weights_t* weights, loom_serve_host_t* host,
     loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
-    iree_string_view_t weights_path, iree_string_view_t policy_path,
+    iree_string_view_t base_directory, iree_string_view_t weights_path,
+    iree_string_view_t policy_path,
     loom_serve_weights_completion_fn_t completion, void* user_data);
 
 // Cold outer-application join over the same preparation. Never called by a
@@ -111,7 +114,8 @@ iree_status_t loom_serve_weights_prepare_async(
 iree_status_t loom_serve_weights_prepare(
     loom_serve_weights_t* weights, loom_serve_host_t* host,
     loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
-    iree_string_view_t weights_path, iree_string_view_t policy_path);
+    iree_string_view_t base_directory, iree_string_view_t weights_path,
+    iree_string_view_t policy_path);
 
 // Commits storage and streams/prepares directly into final roots through four
 // independent queue lanes, importing readiness into the consuming execution

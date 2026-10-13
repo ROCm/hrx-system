@@ -13,13 +13,13 @@
 
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/weights.h"
+#include "experimental/loom_serve/serving/configuration.h"
 #include "iree/base/internal/math.h"
-#include "iree/base/internal/path.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 
-IREE_FLAG(string, model, "experimental/loom_serve/models/krea",
-          "Krea source catalog directory.");
+IREE_FLAG(string, model, "experimental/loom_serve/models/krea/model.json",
+          "Model JSON document.");
 IREE_FLAG(string, weights, "", "Original Turbo safetensors checkpoint.");
 IREE_FLAG(string, adapter, "", "Official softwatercolor safetensors adapter.");
 IREE_FLAG(string, input, "", "Packed latent input as little-endian BF16.");
@@ -112,10 +112,21 @@ static iree_status_t projection_initialize(projection_check_t* check,
       loom_serve_device_create_execution(check->owner, &check->execution));
   iree_hal_device_t* device = loom_serve_device_handle(check->owner);
   iree_hal_queue_t* dispatch = loom_serve_device_dispatch_queue(check->owner);
-  IREE_RETURN_IF_ERROR(loom_serve_jit_create(
-      device, dispatch, loom_serve_device_host(check->owner),
-      iree_make_cstring_view(FLAG_model), NULL, &check->compilation, allocator,
-      &check->jit));
+  loom_serve_model_configuration_t configuration = {0};
+  IREE_RETURN_IF_ERROR(loom_serve_model_configuration_load(
+      iree_make_cstring_view(FLAG_model), &configuration, allocator));
+  status = loom_serve_jit_create(device, dispatch,
+                                 loom_serve_device_host(check->owner),
+                                 &configuration.sources, NULL,
+                                 &check->compilation, allocator, &check->jit);
+  char* policy_path = NULL;
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_path_resolve(configuration.sources.base_directory,
+                                     IREE_SV("weights.loom"), allocator,
+                                     &policy_path);
+  }
+  loom_serve_model_configuration_deinitialize(&configuration);
+  IREE_RETURN_IF_ERROR(status);
   char rows[32];
   snprintf(rows, sizeof(rows), "%d", FLAG_rows);
   const loomc_config_binding_t binding = {
@@ -126,10 +137,6 @@ static iree_status_t projection_initialize(projection_check_t* check,
   const iree_string_view_t roots[] = {IREE_SVL("image_projection"),
                                       IREE_SVL("image_projection_adapter")};
   const char* checkpoints[] = {FLAG_weights, FLAG_adapter};
-  char* policy_path = NULL;
-  IREE_RETURN_IF_ERROR(iree_file_path_join(iree_make_cstring_view(FLAG_model),
-                                           IREE_SV("weights.loom"), allocator,
-                                           &policy_path));
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(roots) && iree_status_is_ok(status); ++i) {
     status = loom_serve_jit_compile(check->jit, roots[i], &config,
@@ -156,7 +163,7 @@ static iree_status_t projection_initialize(projection_check_t* check,
     if (iree_status_is_ok(status)) {
       status = loom_serve_weights_prepare(
           check->weight_plans[i], loom_serve_device_host(check->owner),
-          check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+          check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_SV("."),
           iree_make_cstring_view(checkpoints[i]),
           iree_make_cstring_view(policy_path));
     }

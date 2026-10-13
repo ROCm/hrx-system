@@ -83,7 +83,7 @@ def main():
                     actual_path = working / "actual.bf16"
                     invocation = [
                         *arguments.checker,
-                        f"--model={arguments.model / 'qualification'}",
+                        f"--model={arguments.model / 'qualification.json'}",
                         f"--root=qualify.encoder_{name}",
                         f"--weight_policy={arguments.model / 'weights.loom'}",
                         *([f"--weights={checkpoint}"] if weight_bytes else []),

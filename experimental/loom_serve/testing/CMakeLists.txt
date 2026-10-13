@@ -9,4 +9,18 @@
 
 iree_add_all_subdirs()
 
+loom_cc_library(
+  NAME
+    model
+  HDRS
+    "model.h"
+  DEPS
+    iree::base
+    iree::base::internal::json
+    iree::experimental::loom_serve::serving::configuration
+    iree::io::file_handle
+  TESTONLY
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -87,9 +87,9 @@ PY
 
 build_tools/bin/iree-bazel-run --config=opt \
   //experimental/loom_serve/text:server -- \
-  --model=experimental/loom_serve/models/fixtures/text \
+  --model=experimental/loom_serve/models/fixtures/text/model.json \
   --weights=/tmp/fixture-text.safetensors \
-  --tokenizer=experimental/loom_serve/models/fixtures/text/tokenizer.json \
+  --tokenizer=tokenizer.json \
   --rows=4 --context_capacity=96 --pool_capacity=256 \
   --prefill_capacity=32 --checkpoint_capacity=2 --max_tokens=16 \
   --device=task --pool_backing=fixed --workers=1 --port=8080
@@ -132,24 +132,12 @@ With `max_tokens:16`, content is `bxaaaxb`, finish reason is `stop`, and usage
 counts eight completion tokens including EOS. Streaming and nonstreaming turns
 can share one `X-Loom-Session`; neither changes the retained transcript.
 
-The shared server accepts the same package alongside [catalog.json](../catalog.json):
-
-```json
-{
-  "kind": "text",
-  "name": "fixture-text",
-  "source": "experimental/loom_serve/models/fixtures/text",
-  "weights": "/tmp/fixture-text.safetensors",
-  "tokenizer": "experimental/loom_serve/models/fixtures/text/tokenizer.json",
-  "rows": 4,
-  "context_capacity": 96,
-  "pool_capacity": 256,
-  "prefill_capacity": 32,
-  "checkpoint_capacity": 2,
-  "max_tokens": 16,
-  "draft_depth": 0
-}
-```
+The shared server accepts [model.json](model.json) alongside other model
+documents. Set `definition.weights` to the generated checkpoint path and use
+`--model=experimental/loom_serve/models/fixtures/text/model.json`. For an
+external copy, preserve the referenced programs/tokenizer or use an absolute
+`base_directory` pointing at this package. The same complete document can be
+registered over HTTP with that explicit base.
 
 ## Verification
 

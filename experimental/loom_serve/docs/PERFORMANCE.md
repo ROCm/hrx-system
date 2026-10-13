@@ -219,7 +219,7 @@ first terminal:
 
 ```sh
 bazel-bin/experimental/loom_serve/text/server \
-  --model=experimental/loom_serve/models/qwen \
+  --model=experimental/loom_serve/models/qwen/model.json \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
   --tokenizer="$model_dir/tokenizer.json" \
   --prefill_capacity=512 --context_capacity=16384 --rows=8 \

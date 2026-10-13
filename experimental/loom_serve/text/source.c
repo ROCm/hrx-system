@@ -11,7 +11,6 @@
 #include "experimental/loom_serve/runtime/input.h"
 #include "experimental/loom_serve/runtime/json.h"
 #include "experimental/loom_serve/runtime/program.h"
-#include "iree/base/internal/path.h"
 #include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "iree/tokenizer/vocab/vocab.h"
@@ -22,13 +21,21 @@ static iree_string_view_t text_file_text(iree_io_file_contents_t* contents) {
 }
 
 static iree_status_t text_load_tokenizer(loom_serve_text_source_t* source,
-                                         iree_string_view_t path,
+                                         iree_string_view_t base_directory,
+                                         iree_string_view_t locator,
                                          iree_string_view_t terminal_marker) {
+  char* path = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_path_resolve(base_directory, locator,
+                                               source->allocator, &path));
   iree_io_file_contents_t* contents = NULL;
-  IREE_RETURN_IF_ERROR(iree_io_file_contents_map(path, IREE_IO_FILE_ACCESS_READ,
-                                                 source->allocator, &contents));
-  iree_status_t status = iree_tokenizer_from_huggingface_json(
-      text_file_text(contents), source->allocator, &source->tokenizer);
+  iree_status_t status = iree_io_file_contents_map(
+      iree_make_cstring_view(path), IREE_IO_FILE_ACCESS_READ, source->allocator,
+      &contents);
+  if (iree_status_is_ok(status)) {
+    status = iree_tokenizer_from_huggingface_json(
+        text_file_text(contents), source->allocator, &source->tokenizer);
+  }
+  iree_allocator_free(source->allocator, path);
   iree_io_file_contents_free(contents);
   IREE_RETURN_IF_ERROR(status);
   source->eos_token = iree_tokenizer_vocab_lookup(
@@ -53,8 +60,9 @@ static iree_status_t text_prepare(loom_serve_text_source_t* source,
                                     source->environment, IREE_SV("vm")),
                                 &source->vm_types));
   char* path = NULL;
-  IREE_RETURN_IF_ERROR(iree_file_path_join(
-      options->source_directory, IREE_SV("prepare.loom"), allocator, &path));
+  IREE_RETURN_IF_ERROR(loom_serve_path_resolve(options->sources.base_directory,
+                                               options->sources.prepare,
+                                               allocator, &path));
   iree_vm_buffer_t* shapes = NULL;
   iree_status_t status =
       iree_vm_buffer_create(options->epoch_count * 2 * sizeof(int64_t),
@@ -186,7 +194,7 @@ static iree_status_t text_prepare(loom_serve_text_source_t* source,
   }
   if (iree_status_is_ok(status)) {
     status = text_load_tokenizer(
-        source, options->tokenizer_path,
+        source, options->sources.base_directory, options->tokenizer_path,
         iree_make_string_view((const char*)terminal_bytes.data,
                               terminal_bytes.data_length));
   }
@@ -211,8 +219,9 @@ iree_status_t loom_serve_text_source_initialize(
   IREE_RETURN_IF_ERROR(
       iree_hal_module_types_resolve(table, &out_source->types));
   char* path = NULL;
-  IREE_RETURN_IF_ERROR(iree_file_path_join(
-      options->source_directory, IREE_SV("control.loom"), allocator, &path));
+  IREE_RETURN_IF_ERROR(loom_serve_path_resolve(options->sources.base_directory,
+                                               options->sources.control,
+                                               allocator, &path));
   const iree_string_view_t roots[] = {
       IREE_SVL("step"),          IREE_SVL("epoch"),
       IREE_SVL("encode_epoch"),  IREE_SVL("publish_epoch"),

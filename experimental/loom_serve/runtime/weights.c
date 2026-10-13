@@ -210,6 +210,9 @@ typedef struct weight_preparation_t {
   iree_hal_command_buffer_mode_t command_mode;
   // Borrowed checkpoint locator, retained by the load owner through completion.
   iree_string_view_t weights_path;
+  // Borrowed local base; locators remain model-authored until this worker opens
+  // them.
+  iree_string_view_t base_directory;
   // Borrowed source policy locator with the same lifetime.
   iree_string_view_t policy_path;
   // Owned distinct preparers, queried once before native compilation.
@@ -296,10 +299,16 @@ static iree_status_t weight_prepare_policy(weight_preparation_t* job) {
   IREE_RETURN_IF_ERROR(iree_vm_environment_allocate(allocator, &environment));
   loom_serve_program_t* program = NULL;
   const iree_string_view_t roots[] = {IREE_SVL("prepare_weight")};
-  iree_status_t status = loom_serve_program_create(
-      environment, job->policy_path, IREE_ARRAYSIZE(roots), roots,
-      iree_vm_module_span_empty(), loom_serve_jit_report(job->jit), allocator,
-      &program);
+  char* policy_path = NULL;
+  iree_status_t status = loom_serve_path_resolve(
+      job->base_directory, job->policy_path, allocator, &policy_path);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_program_create(
+        environment, iree_make_cstring_view(policy_path), IREE_ARRAYSIZE(roots),
+        roots, iree_vm_module_span_empty(), loom_serve_jit_report(job->jit),
+        allocator, &program);
+  }
+  iree_allocator_free(allocator, policy_path);
   iree_vm_ref_types_t types = {0};
   if (iree_status_is_ok(status)) {
     status = iree_vm_ref_types_resolve(
@@ -438,10 +447,16 @@ static void weight_preparation_execute(loomc_task_t* task,
   if (iree_status_is_ok(status)) {
     status = iree_io_parameter_index_create(allocator, &index);
   }
+  char* weights_path = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_tooling_append_parameter_file_to_index(job->weights_path,
-                                                         index, allocator);
+    status = loom_serve_path_resolve(job->base_directory, job->weights_path,
+                                     allocator, &weights_path);
   }
+  if (iree_status_is_ok(status)) {
+    status = iree_tooling_append_parameter_file_to_index(
+        iree_make_cstring_view(weights_path), index, allocator);
+  }
+  iree_allocator_free(allocator, weights_path);
   if (iree_status_is_ok(status)) {
     status = iree_io_parameter_index_provider_create(
         iree_string_view_empty(), index, WEIGHT_LANES, allocator,
@@ -468,7 +483,8 @@ static const loomc_task_vtable_t weight_preparation_vtable = {
 iree_status_t loom_serve_weights_prepare_async(
     loom_serve_weights_t* weights, loom_serve_host_t* host,
     loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
-    iree_string_view_t weights_path, iree_string_view_t policy_path,
+    iree_string_view_t base_directory, iree_string_view_t weights_path,
+    iree_string_view_t policy_path,
     loom_serve_weights_completion_fn_t completion, void* user_data) {
   weight_preparation_t* job = NULL;
   IREE_RETURN_IF_ERROR(
@@ -477,6 +493,7 @@ iree_status_t loom_serve_weights_prepare_async(
   job->weights = weights;
   job->jit = jit;
   job->command_mode = command_mode;
+  job->base_directory = base_directory;
   job->weights_path = weights_path;
   job->policy_path = policy_path;
   job->config.flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
@@ -521,13 +538,14 @@ static bool weight_preparation_is_ready(void* user_data) {
 iree_status_t loom_serve_weights_prepare(
     loom_serve_weights_t* weights, loom_serve_host_t* host,
     loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
-    iree_string_view_t weights_path, iree_string_view_t policy_path) {
+    iree_string_view_t base_directory, iree_string_view_t weights_path,
+    iree_string_view_t policy_path) {
   weight_preparation_join_t join = {0};
   iree_slim_mutex_initialize(&join.mutex);
   iree_notification_initialize(&join.notification);
   iree_status_t status = loom_serve_weights_prepare_async(
-      weights, host, jit, command_mode, weights_path, policy_path,
-      weight_preparation_ready, &join);
+      weights, host, jit, command_mode, base_directory, weights_path,
+      policy_path, weight_preparation_ready, &join);
   if (iree_status_is_ok(status)) {
     iree_notification_await(&join.notification, weight_preparation_is_ready,
                             &join, iree_infinite_timeout());

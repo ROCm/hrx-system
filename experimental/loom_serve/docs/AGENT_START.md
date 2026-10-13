@@ -112,8 +112,9 @@ The authoring loop is source-driven. Editing model `.loom` files changes the
 next registration of that package without rebuilding the C executable; an
 already-prepared registration keeps its cached code until removal. Editing
 shared native mechanisms requires building their exact target again.
-`sources.txt` lists source providers, while `prepare.loom`, `control.loom` and the cold weight policy
-are loaded separately. An added command/kernel library must be present in
+The [model document](MODEL_FORMAT.md) lists source providers and explicitly names
+cold/warm VM roles; its source-declared weight policy is loaded separately.
+Every role and provider can use `.loom` or `.loombc`. An added command/kernel library must be present in
 that catalog; a generated HSACO or compiler subprocess is not part of this
 deployment path.
 

@@ -25,7 +25,7 @@ class RequestTest(unittest.TestCase):
             request_path.write_text(request)
             command = [
                 str(CHECKER),
-                f"--model={PACKAGE}",
+                f"--control={PACKAGE / 'control.loom'}",
                 f"--tokenizer={PACKAGE / 'tokenizer.json'}",
                 f"--request={request_path}",
                 f"--capacity={capacity}",

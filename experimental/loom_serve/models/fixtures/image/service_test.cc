@@ -24,6 +24,7 @@
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
 #include "experimental/loom_serve/serving/model_registration.h"
 #include "experimental/loom_serve/serving/router.h"
+#include "experimental/loom_serve/testing/model.h"
 #include "iree/async/proactor.h"
 #include "iree/base/internal/base64.h"
 #include "iree/base/tooling/flags.h"
@@ -110,9 +111,11 @@ class SourceImageServiceTest
   }
 
   void CreateStandaloneModel() {
+    loom_serve::testing::ModelDocument document;
+    IREE_ASSERT_OK(document.Load(directory_ + "/model.json"));
     const loom_serve_image_model_options_t options = {
-        .source_directory = iree_make_cstring_view(directory_.c_str()),
-        .checkpoint_directory = iree_make_cstring_view(directory_.c_str()),
+        .sources = document.value().sources,
+        .checkpoint_directory = IREE_SV("."),
         .height = kHeight,
         .width = kWidth,
         .text_tokens = 32,
@@ -139,12 +142,17 @@ class SourceImageServiceTest
 
   std::string Declaration(const std::string& name, const std::string& source,
                           const char* admission = "open") {
-    return "{\"kind\":\"image\",\"name\":\"" + name + "\",\"source\":\"" +
-           source + "\",\"checkpoint\":\"" + directory_ +
-           "\",\"width\":7,\"height\":5,\"text_tokens\":32,\"admission\":\"" +
+    return "{\"name\":\"" + name + "\",\"base_directory\":\"" +
+           std::filesystem::absolute(source).string() + "\",\"admission\":\"" +
            admission +
-           "\",\"command_quantum\":" + std::to_string(std::get<1>(GetParam())) +
-           "}";
+           "\",\"definition\":{\"kind\":\"image\",\"prepare\":\"prepare.loom\","
+           "\"control\":\"control.loom\",\"sources\":[\"config.loom\","
+           "\"generate.loom\"],"
+           "\"checkpoint\":\"" +
+           std::filesystem::absolute(directory_).string() +
+           "\",\"width\":7,\"height\":5,\"text_tokens\":32,\"command_"
+           "quantum\":" +
+           std::to_string(std::get<1>(GetParam())) + "}}";
   }
 
   std::string ModelStatus(const std::string& name) {
@@ -642,7 +650,7 @@ TEST_P(SourceImageServiceTest, FailedImageSourceLeavesPeerUsable) {
   const auto package = iree::testing::MakeTempFilePath("failed_image_source");
   ASSERT_TRUE(std::filesystem::create_directory(package));
   for (const char* file :
-       {"config.loom", "control.loom", "prepare.loom", "sources.txt"}) {
+       {"config.loom", "control.loom", "prepare.loom", "model.json"}) {
     ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/" + file,
                                            package + "/" + file));
   }

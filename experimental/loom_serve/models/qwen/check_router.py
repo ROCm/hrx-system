@@ -206,25 +206,32 @@ def main():
     ):
         models.append(
             {
-                "kind": "text",
                 "name": name,
-                "source": str(arguments.model.resolve()),
-                "weights": str(arguments.weights.resolve()),
-                "tokenizer": str(arguments.tokenizer.resolve()),
-                "rows": 2,
-                "context_capacity": context,
-                "pool_capacity": 4096,
-                "prefill_capacity": prefill,
-                "checkpoint_capacity": 1,
-                "draft_depth": depth,
-                "continuation_epochs": 2 if depth else 1,
+                "base_directory": str(arguments.model.resolve()),
+                "definition": {
+                    **json.loads((arguments.model / "model.json").read_text())[
+                        "definition"
+                    ],
+                    "weights": str(arguments.weights.resolve()),
+                    "tokenizer": str(arguments.tokenizer.resolve()),
+                    "rows": 2,
+                    "context_capacity": context,
+                    "pool_capacity": 4096,
+                    "prefill_capacity": prefill,
+                    "checkpoint_capacity": 1,
+                    "draft_depth": depth,
+                    "continuation_epochs": 2 if depth else 1,
+                },
             }
         )
-    catalog = arguments.output / "models.json"
-    catalog.write_text(json.dumps({"models": models}, indent=2) + "\n")
+    documents = []
+    for model in models:
+        document = arguments.output / f"{model['name']}.json"
+        document.write_text(json.dumps(model, indent=2) + "\n")
+        documents.append(document.resolve())
     command = [
         str(arguments.server.resolve()),
-        f"--models={catalog.resolve()}",
+        *[f"--model={path}" for path in documents],
         "--listen=127.0.0.1:0",
         "--heartbeat_ms=250",
         f"--workers={arguments.workers}",

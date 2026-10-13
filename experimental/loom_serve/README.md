@@ -48,20 +48,21 @@ stable ABI. Production text and image binaries have no model package dependency.
 Only runtime consumes compiler-private command reflection; model callers use its serving
 interfaces. Each model's `:sources` target publishes its source-JIT catalog and
 shared motifs, not compiled artifacts. Both generic modality binaries require
-an explicit `--model` selecting an external source catalog. The catalog resolves
-paths relative to its model directory; copying that directory alone is not a
+an explicit `--model` selecting a complete JSON model document. References resolve
+relative to that document's directory; copying that directory alone is not a
 complete source package.
 The [motif guide](motifs/README.md) describes composition and shape contracts.
 
 The [shared server](serving/README.md) is
 `//experimental/loom_serve/serving:server`, with optional initial text, image,
-embedding and decision registrations from `--models=/path/to/catalog.json`.
+embedding and decision registrations from repeated `--model=/path/to/model.json`.
 It can start empty and manage registrations over HTTP. The single-model
 `//experimental/loom_serve/image:server` and
 `//experimental/loom_serve/text:server` remain development tools using the same
 native services.
-Deployment source and asset paths are relative to the process working directory;
-entries inside each source catalog are relative to its model directory.
+Deployment source and asset paths are relative to their model document;
+inline HTTP registrations supply an explicit absolute `base_directory`.
+The [model format](docs/MODEL_FORMAT.md) is shared by CLI and HTTP.
 The serving JIT selects the exact compiler profile and loader target from HAL
 device facts. Linked providers cover AMDGPU, Vulkan/SPIR-V, x86 CPU and XDNA;
 the source still needs to lower for the chosen target. The retained-text fixture
@@ -251,9 +252,9 @@ the same rows for repeated runs without reloading weights. This is stage-level
 interleaving, not batched model math. Greedy selection and device position/history
 updates are compiled stages. The host stops on EOS or its requested token limit.
 
-Model math arrives as portable text under `--model`, not native artifacts.
-The directory contains `sources.txt` (one relative source path per line),
-`control.loom` (the shared VM program), command roots, and kernel libraries.
+Model math arrives through a complete JSON document selected by `--model`.
+It names the prepare/control VM programs, command roots, kernel providers and
+asset inputs. Each program accepts portable text or bytecode.
 Editing these files changes the next process's model without rebuilding the
 server. The binary embeds the JIT; it never invokes `loom-link` or
 `loom-compile`, loads a prepared artifact directory, or falls back to stale code.
@@ -325,7 +326,7 @@ The CLI retains output tokens on the host while the fixed device ring wraps.
 
 ```sh
 build_tools/bin/iree-bazel-run --config=asan //experimental/loom_serve/text:generate -- \
-  --model=experimental/loom_serve/models/qwen \
+  --model=experimental/loom_serve/models/qwen/model.json \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
   --prompt='The secret word is MAPLE. Remember it and reply only READY.' \
@@ -466,7 +467,7 @@ performance data.
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \
   //experimental/loom_serve/text:server -- \
-  --model=experimental/loom_serve/models/qwen \
+  --model=experimental/loom_serve/models/qwen/model.json \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
   --draft_depth=3 --port=8080 --max_tokens=384

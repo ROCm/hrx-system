@@ -153,7 +153,7 @@ def main():
                             prefix = "qualify." if parameters else "krea2."
                             invocation = [
                                 *arguments.checker,
-                                f"--model={arguments.model / 'qualification'}",
+                                f"--model={arguments.model / 'qualification.json'}",
                                 f"--weight_policy={arguments.model / 'weights.loom'}",
                                 *[
                                     f"--weights={checkpoints[key]}"

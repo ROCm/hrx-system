@@ -10,6 +10,7 @@
 #include "experimental/loom_serve/runtime/compilation.h"
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/execution.h"
+#include "experimental/loom_serve/runtime/sources.h"
 #include "experimental/loom_serve/runtime/weights.h"
 #include "experimental/loom_serve/scheduling/packing.h"
 #include "experimental/loom_serve/storage/memory.h"
@@ -41,9 +42,8 @@ typedef struct loom_serve_text_checkpoint_t loom_serve_text_checkpoint_t;
 enum { LOOM_SERVE_TEXT_ROW_CAPACITY = 16 };
 
 typedef struct loom_serve_text_options_t {
-  // Portable source directory containing prepare.loom, control.loom and the
-  // sources.txt command/kernel catalog.
-  iree_string_view_t source_directory;
+  // Explicit program inputs and local base, borrowed through load completion.
+  loom_serve_sources_t sources;
   // Maximum input count specialized into isolated prefill.
   iree_host_size_t prefill_capacity;
   // Logical attention-position ceiling per row, not a pooled reservation.

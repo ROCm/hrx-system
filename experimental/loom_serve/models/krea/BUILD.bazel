@@ -16,7 +16,7 @@ package(
 filegroup(
     name = "sources",
     srcs = [
-        "sources.txt",
+        "model.json",
         "//experimental/loom_serve/motifs/tensor:sources",
     ] + glob(["*.loom"]),
     visibility = ["//visibility:public"],
@@ -98,11 +98,11 @@ loom_cc_binary(
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:jit",
         "//experimental/loom_serve/runtime:weights",
+        "//experimental/loom_serve/serving:configuration",
         "//loom/binding/c:loomc",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
-        "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:file_handle",

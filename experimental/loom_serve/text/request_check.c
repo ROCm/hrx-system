@@ -11,15 +11,13 @@
 #include "experimental/loom_serve/runtime/input.h"
 #include "experimental/loom_serve/runtime/json.h"
 #include "experimental/loom_serve/text/chat.h"
-#include "iree/base/internal/path.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
 
-IREE_FLAG(string, model, "",
-          "Source package directory containing control.loom.");
+IREE_FLAG(string, control, "", "Chat control VM program (.loom or .loombc).");
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json path.");
 IREE_FLAG(string, request, "", "Chat Completions request JSON file.");
 IREE_FLAG(string, response, "",
@@ -84,11 +82,12 @@ static iree_status_t report(const loom_serve_text_chat_t* chat,
 
 static iree_status_t run(iree_allocator_t allocator) {
   loom_serve_compilation_report_t compilation = {0};
-  if (!FLAG_model[0] || !FLAG_tokenizer[0] || !FLAG_request[0] ||
+  if (!FLAG_control[0] || !FLAG_tokenizer[0] || !FLAG_request[0] ||
       FLAG_capacity <= 0 || FLAG_capacity > 262144) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "--model, --tokenizer and --request are required; "
-                            "capacity is [1, 262144]");
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--control, --tokenizer and --request are required; "
+        "capacity is [1, 262144]");
   }
   iree_vm_environment_t* environment = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_environment_allocate(allocator, &environment));
@@ -114,11 +113,6 @@ static iree_status_t run(iree_allocator_t allocator) {
     status = loom_serve_text_chat_tools_module_create(environment,
                                                       &libraries[2], allocator);
   }
-  char* path = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_file_path_join(iree_make_cstring_view(FLAG_model),
-                                 IREE_SV("control.loom"), allocator, &path);
-  }
   const iree_string_view_t roots[] = {
       IREE_SVL("model_name"),    IREE_SVL("chat_begin"),
       IREE_SVL("chat_message"),  IREE_SVL("chat_end"),
@@ -128,11 +122,10 @@ static iree_status_t run(iree_allocator_t allocator) {
   loom_serve_program_t* program = NULL;
   if (iree_status_is_ok(status)) {
     status = loom_serve_program_create(
-        environment, iree_make_cstring_view(path), IREE_ARRAYSIZE(roots), roots,
-        iree_vm_module_span_from_array(libraries), &compilation, allocator,
-        &program);
+        environment, iree_make_cstring_view(FLAG_control),
+        IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_from_array(libraries),
+        &compilation, allocator, &program);
   }
-  iree_allocator_free(allocator, path);
   loom_serve_text_chat_policy_t policy = {0};
   if (iree_status_is_ok(status)) {
     status =

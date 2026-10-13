@@ -1,6 +1,7 @@
 # Three source models, one server, no downloaded weights
 
-[catalog.json](catalog.json) loads deterministic image, embedding and decision
+The `model.json` documents in [image](image/model.json),
+[embedding](embedding/model.json) and [decision](decision/model.json) load deterministic image, embedding and decision
 packages into the ordinary [shared server](../../serving/README.md). Each uses
 real source-JIT VM programs and two GPU kernels, compiler-reflected private
 workspace, normal admission and the actual HTTP response encoder. The native
@@ -22,14 +23,16 @@ from the repository root:
 ```sh
 build_tools/bin/iree-bazel-run --config=opt \
   //experimental/loom_serve/serving:server -- \
-  --models=experimental/loom_serve/models/fixtures/catalog.json \
+  --model=experimental/loom_serve/models/fixtures/image/model.json \
+  --model=experimental/loom_serve/models/fixtures/embedding/model.json \
+  --model=experimental/loom_serve/models/fixtures/decision/model.json \
   --listen=127.0.0.1:8080 --workers=1
 ```
 
 Managed build and hardware-runner policies still apply. When execution uses a
 separate runner, build the exact `serving:server` target first, transfer its
 runtime closure and this source directory, and preserve the root-relative
-catalog paths. No compiler CLI, generated model binaries or downloaded weights
+provider paths. No compiler CLI, generated model binaries or downloaded weights
 are required by the running process. One worker intentionally exercises shared
 CPU scheduling; it is not the recommended configuration for measuring speed.
 
@@ -119,7 +122,7 @@ its service test exercises load/admission/eviction rather than hiding weights
 in a native callback. A real model supplies its actual checkpoint file.
 
 `prepare.loom` declares model capacities, tokenizer and commands. `control.loom`
-owns request preparation, batch packing and result mapping. `sources.txt` lists
+owns request preparation, batch packing and result mapping. The model document's `definition.sources` lists
 the numerical providers and configuration. Compatible `.loom` edits take effect
 on the next registration without relinking or restarting the server. A prepared
 registration retains its compiled code until removal. Shapes, pooling,
@@ -172,12 +175,12 @@ The [catalog workload](catalog_test.py) launches the actual shared executable
 with all four source-model families and a temporary 76-byte text checkpoint.
 It copies the source packages into an external deployment root, dereferencing
 runfiles symlinks, and moves numerical providers into sibling library directories
-referenced by each `sources.txt`. The separate VM preparation/control programs,
+referenced by each model document. The separate VM preparation/control programs,
 weight policy and tokenizer assets remain in their packages. The child runs
-from that new root with relative model/asset paths and a nested deployment
-catalog; it cannot satisfy those paths through the original repository cwd.
-This checks source-package closure without adding a package format or changing
-the server's cwd-relative deployment semantics.
+from that new root with model-relative providers/assets and an ordinary
+startup flagfile. It cannot satisfy those references through the original
+repository cwd. The CLI test also combines flagfile and command-line model
+entries, then unregisters and re-registers the same document over HTTP.
 
 The workload removes each model's `control.loom` in turn, placing that deployment
 last in the catalog, and separately removes a sibling numerical provider. The

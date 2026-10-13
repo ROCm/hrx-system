@@ -28,6 +28,7 @@
 #include "experimental/loom_serve/serving/model_registration.h"
 #include "experimental/loom_serve/serving/router.h"
 #include "experimental/loom_serve/telemetry/stream.h"
+#include "experimental/loom_serve/testing/model.h"
 #include "experimental/loom_serve/text/input.h"
 #include "experimental/loom_serve/text/service.h"
 #include "iree/async/proactor.h"
@@ -44,6 +45,9 @@ const char* ServiceTestDevice();
 
 class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
  protected:
+  // Document ownership covers every asynchronous native load in this fixture.
+  loom_serve::testing::ModelDocument document_;
+
   void SetUp() override {
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
     const loom_serve_device_options_t device_options = {
@@ -53,6 +57,7 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     device_ = loom_serve_device_group_at(group_, 0);
     const std::string source = ServiceTestSource();
     directory_ = source.substr(0, source.find_last_of('/'));
+    IREE_ASSERT_OK(document_.Load(directory_ + "/model.json"));
     tokenizer_ = directory_ + "/tokenizer.json";
     weights_ = iree::testing::MakeTempFilePath("text_fixture", ".safetensors");
     ASSERT_NO_FATAL_FAILURE(WriteWeights(2));
@@ -86,7 +91,7 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
 
   virtual loom_serve_text_options_t ModelOptions() const {
     return {
-        .source_directory = iree_make_cstring_view(directory_.c_str()),
+        .sources = document_.value().sources,
         .prefill_capacity = 32,
         .context_capacity = 96,
         .pool_capacity = 256,
@@ -96,7 +101,7 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
                              .structure_size =
                                  sizeof(loomc_sanitizer_options_t)},
         .weights_path = iree_make_cstring_view(weights_.c_str()),
-        .tokenizer_path = iree_make_cstring_view(tokenizer_.c_str()),
+        .tokenizer_path = IREE_SV("tokenizer.json"),
         .row_count = 4,
         .checkpoint_capacity = 2,
     };
@@ -172,14 +177,20 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
   }
 
   std::string Declaration(const std::string& name, const std::string& source,
-                          const char* admission = "open") {
-    return "{\"kind\":\"text\",\"name\":\"" + name + "\",\"source\":\"" +
-           source + "\",\"weights\":\"" + weights_ + "\",\"tokenizer\":\"" +
-           tokenizer_ +
+                          const char* admission = "open",
+                          const std::string& definition_fields = "") {
+    return "{\"name\":\"" + name + "\",\"base_directory\":\"" +
+           std::filesystem::absolute(source).string() + "\",\"admission\":\"" +
+           admission +
+           "\",\"definition\":{\"kind\":\"text\",\"prepare\":\"prepare.loom\","
+           "\"control\":\"control.loom\",\"sources\":[\"advance.loom\"],"
+           "\"weights\":\"" +
+           weights_ + "\",\"tokenizer\":\"" +
+           std::filesystem::absolute(tokenizer_).string() +
            "\",\"rows\":4,\"context_capacity\":96,"
            "\"pool_capacity\":256,\"prefill_capacity\":32,"
-           "\"checkpoint_capacity\":2,\"draft_depth\":0,\"admission\":\"" +
-           admission + "\"}";
+           "\"checkpoint_capacity\":2,\"draft_depth\":0" +
+           definition_fields + "}}";
   }
 
   std::string WaitModel(const std::string& name, const std::string& marker) {

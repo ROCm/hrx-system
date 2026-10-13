@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_config_compatible_with")
 
 package(
@@ -148,6 +149,7 @@ loom_cc_binary(
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:jit",
         "//experimental/loom_serve/runtime:weights",
+        "//experimental/loom_serve/serving:configuration",
         "//loom/binding/c:loomc",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
@@ -157,4 +159,26 @@ loom_cc_binary(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:file_handle",
     ],
+)
+
+py_test(
+    name = "component_check_test",
+    size = "small",
+    srcs = ["component_check_test.py"],
+    args = [
+        "--checker",
+        "$(rootpath :component_check)",
+    ],
+    data = [
+        "testdata/component/copy.loom",
+        ":component_check",
+    ],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "resource_group:" + GPU_DEVICE_RESOURCE_GROUP,
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]),
 )

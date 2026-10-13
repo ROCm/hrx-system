@@ -114,7 +114,10 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::json
+    iree::base::internal::path
     iree::base::internal::unicode
+    iree::experimental::loom_serve::runtime::sources
+    iree::io::file_handle
   PUBLIC
 )
 
@@ -138,7 +141,6 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::runtime::signals
-    iree::io::file_handle
     loom::util::json
     loom::util::stream
 )

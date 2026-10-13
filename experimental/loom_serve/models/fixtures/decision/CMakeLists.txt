@@ -16,8 +16,8 @@ add_custom_command(OUTPUT sources.stamp
     "config.loom"
     "control.loom"
     "decide.loom"
+    "model.json"
     "prepare.loom"
-    "sources.txt"
 )
 
 add_custom_target(${_FILEGROUP_TARGET}
@@ -38,8 +38,8 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/config.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/decide.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/model.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
     "iree::experimental::loom_serve::models::fixtures::embedding::sources"
   DEPS
@@ -58,6 +58,7 @@ loom_cc_test(
     iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    iree::experimental::loom_serve::testing::model
     iree::testing::gtest
     iree::testing::gtest_main
   ARGS
@@ -81,8 +82,8 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/config.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/decide.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/model.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
     "iree::experimental::loom_serve::models::fixtures::embedding::sources"
   DEPS
@@ -101,6 +102,7 @@ loom_cc_test(
     iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    iree::experimental::loom_serve::testing::model
     iree::testing::gtest
     iree::testing::gtest_main
   ARGS
@@ -124,8 +126,8 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/config.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/decide.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/model.json"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
     "iree::experimental::loom_serve::models::fixtures::embedding::sources"
   DEPS
@@ -144,6 +146,7 @@ loom_cc_test(
     iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    iree::experimental::loom_serve::testing::model
     iree::testing::gtest
     iree::testing::gtest_main
   ARGS

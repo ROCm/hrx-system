@@ -1,0 +1,17 @@
+{
+  "name": "pixels",
+  "definition": {
+    "kind": "image",
+    "prepare": "prepare.loom",
+    "control": "control.loom",
+    "sources": [
+      "config.loom",
+      "generate.loom"
+    ],
+    "checkpoint": ".",
+    "width": 7,
+    "height": 5,
+    "text_tokens": 32,
+    "pending_requests": 4
+  }
+}

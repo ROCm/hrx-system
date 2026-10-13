@@ -56,15 +56,17 @@ curl --fail --silent --show-error http://127.0.0.1:8080/v1/models
 The results are `{"status":"ready"}` and `{"object":"list","data":[]}`.
 Listener readiness does not mean every registered model has finished loading.
 
-Register a small source-defined embedding fixture, initially drained:
+Copy the embedding fixture's complete source package to `/srv/models/vectors`
+on the server, then register it initially drained:
 
 ```sh
 curl --fail --silent --show-error http://127.0.0.1:8080/v1/models/register \
   -H 'Content-Type: application/json' \
-  -d '{"kind":"embedding","name":"vectors",
-       "source":"experimental/loom_serve/models/fixtures/embedding",
-       "assets":"experimental/loom_serve/models/fixtures/embedding",
-       "options":{"batch_units":64},"admission":"drained"}'
+  -d '{"name":"vectors","admission":"drained",
+       "base_directory":"/srv/models/vectors",
+       "definition":{"kind":"embedding","prepare":"prepare.loom",
+       "control":"control.loom","sources":["config.loom","embed.loom"],
+       "assets":".","options":{"batch_units":64}}}'
 curl --fail --silent --show-error http://127.0.0.1:8080/v1/status
 ```
 
@@ -99,12 +101,12 @@ model graph, weight policy and modality contract.
 
 ## Configuration and resource boundaries
 
-Process flags configure resources that outlive models. `--models=path.json`
-optionally supplies initial registrations as `{"models":[...]}`. Each entry
-uses exactly the same schema as `POST /v1/models/register`; an empty array or
-omitted catalog starts empty. Catalog and flag-file paths use `--models=path`
-and `--flagfile=path`; positional arguments are rejected before startup.
-Unknown, duplicate, wrongly typed and wrong-modality fields are rejected.
+Process flags configure resources that outlive models. Repeat
+`--model=path/model.json` for initial registrations; omitting it starts empty.
+Each file uses exactly the same [complete model document](MODEL_FORMAT.md) as
+`POST /v1/models/register`. Ordinary `--flagfile=path` inputs can list
+registrations and process settings. Positional arguments are rejected before
+startup. Unknown, duplicate, wrongly typed and wrong-modality fields reject.
 
 | Process option | Default and scope |
 | --- | --- |
@@ -202,13 +204,14 @@ not a recommendation for every machine or model. Files contain one literal
 flag per line, with no shell variable expansion. Repeated `--listen` entries
 add listeners; later scalar flags override earlier values.
 
-Deployment source/asset paths resolve from the **server process working
-directory**, not the catalog or flag-file directory and not the HTTP client's
-machine. Entries in a model's `sources.txt` resolve from the model package.
-External deployment copies include those referenced motif/provider files as
-well as cold/warm VM programs, tokenizer assets and weights. Runtime
-registration does not rewrite the startup catalog; persistence is the
-operator's catalog or management client.
+Relative `--model` and `--flagfile` arguments use the server's process working
+directory. References inside a model document use the document directory;
+inline HTTP documents require an explicit absolute `base_directory` when they
+contain relative paths. The [path contract](MODEL_FORMAT.md#local-path-binding)
+also covers source-declared parameter/policy paths. An external deployment
+includes every referenced provider, VM program, tokenizer asset and checkpoint.
+Runtime registration does not rewrite startup files; the management client
+owns persistence.
 
 ## Observe, drain, activate, deactivate and remove
 

@@ -83,7 +83,7 @@ def main():
                     prefix = "qualify" if parameters or name == "silu" else "krea2"
                     invocation = [
                         *arguments.checker,
-                        f"--model={arguments.model / 'qualification'}",
+                        f"--model={arguments.model / 'qualification.json'}",
                         f"--weight_policy={arguments.model / 'weights.loom'}",
                         *([f"--weights={checkpoint}"] if parameters else []),
                         f"--root={prefix}.encoder_{name}",

@@ -14,14 +14,17 @@
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
+#include "experimental/loom_serve/serving/configuration.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 
-IREE_FLAG(string, model, "", "Live source catalog directory.");
-IREE_FLAG(string, checkpoint, "", "Checkpoint asset directory.");
-IREE_FLAG(string, adapter, "", "Optional model-specific adapter asset.");
+IREE_FLAG(string, model, "", "Model JSON document.");
+IREE_FLAG(string, checkpoint, "",
+          "Checkpoint asset directory, relative to the model document.");
+IREE_FLAG(string, adapter, "",
+          "Optional adapter asset, relative to the model document.");
 IREE_FLAG(string, prompt, "", "Image prompt; the model supplies its template.");
 IREE_FLAG(string, seed, "0", "Unsigned decimal 64-bit native noise seed.");
 IREE_FLAG(int32_t, height, 384,
@@ -76,8 +79,12 @@ static iree_status_t image_run(iree_allocator_t allocator) {
   uint64_t seed = 0;
   IREE_RETURN_IF_ERROR(
       iree_json_parse_uint64(iree_make_cstring_view(FLAG_seed), &seed));
+  loom_serve_model_configuration_t configuration = {0};
+  IREE_RETURN_IF_ERROR(loom_serve_model_configuration_load(
+      iree_make_cstring_view(FLAG_model), &configuration, allocator));
   const loom_serve_image_model_options_t options = {
-      .source_directory = iree_make_cstring_view(FLAG_model),
+      .sources = configuration.sources,
+      .options = configuration.options,
       .checkpoint_directory = iree_make_cstring_view(FLAG_checkpoint),
       .adapter_path = iree_make_cstring_view(FLAG_adapter),
       .height = (uint32_t)FLAG_height,
@@ -88,9 +95,10 @@ static iree_status_t image_run(iree_allocator_t allocator) {
   loom_serve_device_group_t* group = NULL;
   loom_serve_device_t* device = NULL;
   loom_serve_host_t* host = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_host_create_from_flags(&host, allocator));
-  iree_status_t status =
-      loom_serve_device_group_create_from_flags(host, &group, allocator);
+  iree_status_t status = loom_serve_host_create_from_flags(&host, allocator);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_device_group_create_from_flags(host, &group, allocator);
+  }
   if (iree_status_is_ok(status)) {
     device = loom_serve_device_group_at(group, 0);
     status = loom_serve_image_model_create(device, &options, &model, allocator);
@@ -108,6 +116,7 @@ static iree_status_t image_run(iree_allocator_t allocator) {
   status = iree_status_join(status, loom_serve_image_model_destroy(model));
   status = iree_status_join(status, loom_serve_device_group_destroy(group));
   loom_serve_host_release(host);
+  loom_serve_model_configuration_deinitialize(&configuration);
   return status;
 }
 

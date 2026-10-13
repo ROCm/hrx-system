@@ -16,12 +16,14 @@
 #include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
-#include "iree/io/file_contents.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
 
-IREE_FLAG(string, models, "",
-          "Optional JSON deployment catalog; omitted starts with no models.");
+IREE_FLAG_LIST(
+    string, model,
+    "Model JSON document; repeat to register multiple models. "
+    "Omit to start empty. Relative arguments use the working directory; "
+    "paths within each document use its directory.");
 IREE_FLAG(int32_t, model_capacity, 32,
           "Maximum registered models, including drained, failed and removing "
           "entries.");
@@ -64,7 +66,7 @@ int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
   if (argc > 1) {
     fprintf(stderr,
-            "Unexpected positional argument '%s'; use --models=path or "
+            "Unexpected positional argument '%s'; use --model=path or "
             "--flagfile=path.\n",
             argv[1]);
     return EXIT_FAILURE;
@@ -85,24 +87,22 @@ int main(int argc, char** argv) {
   const iree_host_size_t listener_count = bindings.count ? bindings.count : 1;
   const iree_string_view_t* addresses =
       bindings.count ? bindings.values : &default_binding;
-  loom_serve_configuration_t configuration = {.allocator = allocator};
+  const iree_flag_string_list_t models = FLAG_model_list();
+  loom_serve_model_configuration_t* configurations = NULL;
   iree_status_t status = iree_ok_status();
-  if (FLAG_models[0]) {
-    iree_io_file_contents_t* contents = NULL;
-    status = iree_io_file_contents_read(iree_make_cstring_view(FLAG_models),
-                                        allocator, &contents);
-    if (iree_status_is_ok(status)) {
-      const iree_const_byte_span_t bytes = contents->const_buffer;
-      status = loom_serve_configuration_initialize(
-          iree_make_string_view((const char*)bytes.data, bytes.data_length),
-          &configuration, allocator);
-    }
-    iree_io_file_contents_free(contents);
-  }
-  if (iree_status_is_ok(status) &&
-      configuration.model_count > (iree_host_size_t)FLAG_model_capacity) {
+  if (models.count > (iree_host_size_t)FLAG_model_capacity) {
     status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "startup catalog exceeds model_capacity");
+                              "startup models exceed model_capacity");
+  }
+  if (iree_status_is_ok(status) && models.count) {
+    status = iree_allocator_malloc_array(allocator, models.count,
+                                         sizeof(*configurations),
+                                         (void**)&configurations);
+  }
+  for (iree_host_size_t i = 0; i < models.count && iree_status_is_ok(status);
+       ++i) {
+    status = loom_serve_model_configuration_load(models.values[i],
+                                                 &configurations[i], allocator);
   }
   if (iree_status_is_ok(status)) {
     status = iree_async_signal_block_default();
@@ -140,9 +140,9 @@ int main(int argc, char** argv) {
         loom_serve_model_registration_factory(&registration_options), &registry,
         allocator);
   }
-  for (iree_host_size_t i = 0;
-       i < configuration.model_count && iree_status_is_ok(status); ++i) {
-    loom_serve_model_configuration_t* entry = &configuration.models[i];
+  for (iree_host_size_t i = 0; i < models.count && iree_status_is_ok(status);
+       ++i) {
+    loom_serve_model_configuration_t* entry = &configurations[i];
     iree_host_size_t index = 0;
     status = loom_serve_registry_register(registry, entry, &index);
   }
@@ -172,7 +172,7 @@ int main(int argc, char** argv) {
   }
   for (iree_host_size_t i = 0; i < listener_count && iree_status_is_ok(status);
        ++i) {
-    status = serving_ready(listeners[i], configuration.model_count);
+    status = serving_ready(listeners[i], models.count);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_router_run(
@@ -206,8 +206,11 @@ int main(int argc, char** argv) {
   }
   if (!retained_resources) {
     loom_serve_host_release(host);
-    loom_serve_configuration_deinitialize(&configuration);
   }
+  for (iree_host_size_t i = 0; configurations && i < models.count; ++i) {
+    loom_serve_model_configuration_deinitialize(&configurations[i]);
+  }
+  iree_allocator_free(allocator, configurations);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

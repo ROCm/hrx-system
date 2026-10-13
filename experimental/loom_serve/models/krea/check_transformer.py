@@ -145,7 +145,7 @@ with (
             expected_path.write_bytes(encode(stored_expected))
             command = [
                 *args.checker,
-                "--model=" + str(args.model / "qualification"),
+                "--model=" + str(args.model / "qualification.json"),
                 "--weight_policy=" + str(args.model / "weights.loom"),
                 *[
                     "--weights=" + str(path)

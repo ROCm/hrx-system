@@ -27,7 +27,6 @@
 #include "experimental/loom_serve/text/state.h"
 #include "experimental/loom_serve/text/storage.h"
 #include "iree/async/operations/semaphore.h"
-#include "iree/base/internal/path.h"
 #include "iree/tooling/device_util.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
@@ -347,8 +346,6 @@ struct loom_serve_text_load_t {
   text_load_phase_t phase;
   // Next stage or parameter domain within the current load phase.
   iree_host_size_t index;
-  // Owned parameter policy path retained through asynchronous preparation.
-  char* policy_path;
   // Once cancelled, subsequent advance calls cannot restart preparation.
   bool cancelled;
   // Private task result transferred only by the task's final release.
@@ -406,11 +403,11 @@ static iree_status_t text_load_prepare(loom_serve_text_load_t* load) {
       model->allocator, stage_count, sizeof(*model->stages),
       (void**)&model->stages));
   model->stage_count = stage_count;
-  return loom_serve_jit_create(
-      model->device, model->dispatch,
-      loom_serve_device_host(model->device_owner), options->source_directory,
-      &options->kernel_sanitizer, &model->source.compilation, model->allocator,
-      &model->jit);
+  return loom_serve_jit_create(model->device, model->dispatch,
+                               loom_serve_device_host(model->device_owner),
+                               &options->sources, &options->kernel_sanitizer,
+                               &model->source.compilation, model->allocator,
+                               &model->jit);
 }
 
 static void text_load_execute(loomc_task_t* task,
@@ -589,8 +586,6 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
   iree_status_t status = load->event.status;
   load->event.status = iree_ok_status();
   iree_slim_mutex_unlock(&load->event.mutex);
-  iree_allocator_free(load->allocator, load->policy_path);
-  load->policy_path = NULL;
   if (iree_status_is_ok(status) && load->cancelled) {
     status = iree_make_status(IREE_STATUS_CANCELLED, "model load cancelled");
   }
@@ -636,17 +631,11 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
           const iree_host_size_t index = load->index++;
           const loom_serve_preparation_parameter_t* checkpoint =
               model->parameters.sources[index];
-          status = iree_file_path_join(load->options.source_directory,
-                                       checkpoint->policy, load->allocator,
-                                       &load->policy_path);
-          if (iree_status_is_ok(status)) {
-            status = loom_serve_weights_prepare_async(
-                model->parameters.plans[index], host, model->jit,
-                model->command_mode, checkpoint->path,
-                iree_make_cstring_view(load->policy_path), text_load_complete,
-                load);
-            submitted = iree_status_is_ok(status);
-          }
+          status = loom_serve_weights_prepare_async(
+              model->parameters.plans[index], host, model->jit,
+              model->command_mode, load->options.sources.base_directory,
+              checkpoint->path, checkpoint->policy, text_load_complete, load);
+          submitted = iree_status_is_ok(status);
         } else {
           load->phase = TEXT_LOAD_LINK;
         }
@@ -692,7 +681,6 @@ void loom_serve_text_load_destroy(loom_serve_text_load_t* load) {
     return;
   }
   IREE_ASSERT(!load->model);
-  iree_allocator_free(load->allocator, load->policy_path);
   iree_slim_mutex_deinitialize(&load->event.mutex);
   iree_allocator_free(load->allocator, load);
 }

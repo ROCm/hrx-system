@@ -9,6 +9,7 @@
 
 #include "experimental/loom_serve/runtime/compilation.h"
 #include "experimental/loom_serve/runtime/device.h"
+#include "experimental/loom_serve/runtime/sources.h"
 #include "iree/tokenizer/tokenizer.h"
 #include "iree/vm/buffer.h"
 
@@ -25,8 +26,8 @@ typedef struct loom_serve_finite_model_t loom_serve_finite_model_t;
 #define LOOM_SERVE_FINITE_BUFFER_ALIGNMENT 16
 
 typedef struct loom_serve_finite_model_options_t {
-  // Source package directory, borrowed through load completion.
-  iree_string_view_t source_directory;
+  // Explicit program inputs and local base, borrowed through load completion.
+  loom_serve_sources_t sources;
   // Asset directory interpreted by the cold source program.
   iree_string_view_t asset_directory;
   // Source-owned JSON object configuring capacity and model policy.

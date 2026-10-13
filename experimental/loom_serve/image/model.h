@@ -10,6 +10,7 @@
 #include "experimental/loom_serve/image/generator.h"
 #include "experimental/loom_serve/runtime/compilation.h"
 #include "experimental/loom_serve/runtime/device.h"
+#include "experimental/loom_serve/runtime/sources.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,8 +21,8 @@ extern "C" {
 typedef struct loom_serve_image_model_t loom_serve_image_model_t;
 
 typedef struct loom_serve_image_model_options_t {
-  // Source catalog directory, borrowed through load completion.
-  iree_string_view_t source_directory;
+  // Explicit program inputs and local base, borrowed through load completion.
+  loom_serve_sources_t sources;
   // Checkpoint asset directory, passed to the source bootstrap.
   iree_string_view_t checkpoint_directory;
   // Optional adapter asset, interpreted by the source bootstrap.

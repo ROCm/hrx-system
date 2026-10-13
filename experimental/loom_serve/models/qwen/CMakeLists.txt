@@ -21,7 +21,7 @@ add_custom_command(OUTPUT sources.stamp
     "${_GLOB_KERNELS_QWEN38_X_LOOM}"
     "${_GLOB_PROGRAMS_QWEN38_X_LOOM}"
     "${_GLOB_X_LOOM}"
-    "sources.txt"
+    "model.json"
 )
 
 add_custom_target(${_FILEGROUP_TARGET}

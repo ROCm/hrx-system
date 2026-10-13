@@ -187,6 +187,7 @@ loom_cc_binary(
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
+    iree::experimental::loom_serve::serving::configuration
     iree::io::file_handle
   TESTONLY
 )
@@ -203,7 +204,6 @@ loom_cc_library(
   DEPS
     ::generator
     iree::base
-    iree::base::internal::path
     iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
@@ -216,6 +216,7 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::program
     iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::runtime::retirement
+    iree::experimental::loom_serve::runtime::sources
     iree::experimental::loom_serve::runtime::weights
     iree::hal
     iree::io::file_handle
@@ -244,6 +245,7 @@ loom_cc_binary(
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
+    iree::experimental::loom_serve::serving::configuration
     iree::io::file_handle
 )
 endif()
@@ -266,6 +268,7 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::runtime::signals
+    iree::experimental::loom_serve::serving::configuration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
 )

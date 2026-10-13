@@ -76,7 +76,7 @@ class RequestCheckTest(unittest.TestCase):
         request_path.write_text(json.dumps(request))
         command = [
             str(CHECKER),
-            f"--model={self.model}",
+            f"--control={self.model / 'control.loom'}",
             f"--tokenizer={self.tokenizer}",
             f"--request={request_path}",
             f"--capacity={capacity}",

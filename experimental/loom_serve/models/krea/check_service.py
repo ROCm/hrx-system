@@ -58,9 +58,9 @@ def main():
     command = [
         *args.server,
         f"--workers={args.workers}",
-        f"--model={args.model}",
-        f"--checkpoint={args.checkpoint}",
-        f"--adapter={args.adapter}",
+        f"--model={args.model / 'model.json'}",
+        f"--checkpoint={args.checkpoint.resolve()}",
+        f"--adapter={args.adapter.resolve()}",
         "--width=384",
         "--height=384",
         "--text_tokens=512",

@@ -18,7 +18,7 @@ package(
 filegroup(
     name = "sources",
     srcs = [
-        "sources.txt",
+        "model.json",
         "//experimental/loom_serve/motifs/ggml:sources",
         "//experimental/loom_serve/motifs/tensor:sources",
     ] + glob([

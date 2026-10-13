@@ -16,7 +16,6 @@
 #include "experimental/loom_serve/runtime/preparation.h"
 #include "experimental/loom_serve/runtime/program.h"
 #include "experimental/loom_serve/runtime/weights.h"
-#include "iree/base/internal/path.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "iree/io/file_contents.h"
@@ -226,14 +225,21 @@ iree_status_t loom_serve_finite_model_destroy(
 }
 
 static iree_status_t finite_load_tokenizer(loom_serve_finite_model_t* model,
+                                           iree_string_view_t base_directory,
                                            iree_string_view_t directory,
                                            iree_string_view_t asset) {
+  char* resolved_directory = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_path_resolve(
+      base_directory, directory, model->allocator, &resolved_directory));
   char* path = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_file_path_join(directory, asset, model->allocator, &path));
+  iree_status_t status =
+      loom_serve_path_resolve(iree_make_cstring_view(resolved_directory), asset,
+                              model->allocator, &path);
+  iree_allocator_free(model->allocator, resolved_directory);
+  IREE_RETURN_IF_ERROR(status);
   iree_io_file_contents_t* contents = NULL;
-  iree_status_t status = iree_io_file_contents_read(
-      iree_make_cstring_view(path), model->allocator, &contents);
+  status = iree_io_file_contents_read(iree_make_cstring_view(path),
+                                      model->allocator, &contents);
   if (iree_status_is_ok(status)) {
     status = iree_tokenizer_from_huggingface_json(
         iree_make_string_view((const char*)contents->const_buffer.data,
@@ -258,8 +264,9 @@ static iree_status_t finite_prepare(
                                     model->control.environment, IREE_SV("vm")),
                                 &model->control.vm_types));
   char* path = NULL;
-  IREE_RETURN_IF_ERROR(iree_file_path_join(
-      options->source_directory, IREE_SV("prepare.loom"), allocator, &path));
+  IREE_RETURN_IF_ERROR(loom_serve_path_resolve(options->sources.base_directory,
+                                               options->sources.prepare,
+                                               allocator, &path));
   iree_vm_module_t* modules[2] = {0};
   iree_status_t status = loom_serve_input_module_create(
       model->control.environment, NULL, &modules[0], allocator);
@@ -340,7 +347,7 @@ static iree_status_t finite_prepare(
   }
   if (iree_status_is_ok(status) && metadata[0].data_length) {
     status = finite_load_tokenizer(
-        model, options->asset_directory,
+        model, options->sources.base_directory, options->asset_directory,
         iree_make_string_view((const char*)metadata[0].data,
                               metadata[0].data_length));
   }
@@ -616,8 +623,6 @@ struct loom_serve_finite_load_t {
   iree_hal_command_buffer_mode_t command_mode;
   // Prepared control bytecode, not yet linked to device capabilities.
   iree_vm_module_t* module;
-  // Owned current weight policy path, retained through its async completion.
-  char* policy_path;
   // Cancellation is irreversible, but never skips accepted work retirement.
   bool cancelled;
   // Private CPU task outcome, handed off by its final release callback.
@@ -658,9 +663,9 @@ static iree_status_t finite_load_prepare(loom_serve_finite_load_t* load) {
   IREE_RETURN_IF_ERROR(
       iree_hal_module_types_resolve(table, &model->control.hal_types));
   char* path = NULL;
-  IREE_RETURN_IF_ERROR(iree_file_path_join(load->options.source_directory,
-                                           IREE_SV("control.loom"), allocator,
-                                           &path));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_path_resolve(load->options.sources.base_directory,
+                              load->options.sources.control, allocator, &path));
   const iree_string_view_t roots[] = {
       IREE_SVL("prepare_request"), IREE_SVL("prepare_batch"), IREE_SVL("run")};
   iree_status_t status = loom_serve_program_compile(
@@ -672,7 +677,7 @@ static iree_status_t finite_load_prepare(loom_serve_finite_load_t* load) {
   return loom_serve_jit_create(loom_serve_device_handle(model->owner),
                                loom_serve_device_dispatch_queue(model->owner),
                                loom_serve_device_host(model->owner),
-                               load->options.source_directory, NULL,
+                               &load->options.sources, NULL,
                                &model->compilation, allocator, &model->jit);
 }
 
@@ -750,8 +755,6 @@ iree_status_t loom_serve_finite_load_advance(
   iree_status_t status = load->event.status;
   load->event.status = iree_ok_status();
   iree_slim_mutex_unlock(&load->event.mutex);
-  iree_allocator_free(load->allocator, load->policy_path);
-  load->policy_path = NULL;
   if (iree_status_is_ok(status) && load->cancelled) {
     status = iree_make_status(IREE_STATUS_CANCELLED, "model load cancelled");
   }
@@ -798,19 +801,14 @@ iree_status_t loom_serve_finite_load_advance(
               loom_serve_preparation_stage(model->preparation, 0);
           const loom_serve_preparation_parameter_t* parameter =
               &declaration->parameters[i];
-          status = iree_file_path_join(load->options.source_directory,
-                                       parameter->policy, load->allocator,
-                                       &load->policy_path);
-          if (iree_status_is_ok(status)) {
-            iree_slim_mutex_lock(&load->event.mutex);
-            load->event.pending = true;
-            iree_slim_mutex_unlock(&load->event.mutex);
-            status = loom_serve_weights_prepare_async(
-                model->weights.plans[i], host, model->jit, load->command_mode,
-                parameter->path, iree_make_cstring_view(load->policy_path),
-                finite_load_complete, load);
-            submitted = iree_status_is_ok(status);
-          }
+          iree_slim_mutex_lock(&load->event.mutex);
+          load->event.pending = true;
+          iree_slim_mutex_unlock(&load->event.mutex);
+          status = loom_serve_weights_prepare_async(
+              model->weights.plans[i], host, model->jit, load->command_mode,
+              load->options.sources.base_directory, parameter->path,
+              parameter->policy, finite_load_complete, load);
+          submitted = iree_status_is_ok(status);
         } else {
           load->phase = FINITE_LOAD_LINK;
         }
@@ -853,7 +851,6 @@ iree_status_t loom_serve_finite_load_destroy(loom_serve_finite_load_t* load) {
   iree_status_t status = finite_model_destroy_resources(load->model);
   if (iree_status_is_ok(status)) {
     iree_vm_module_release(load->module);
-    iree_allocator_free(load->allocator, load->policy_path);
     iree_slim_mutex_deinitialize(&load->event.mutex);
     iree_allocator_free(load->allocator, load);
   }

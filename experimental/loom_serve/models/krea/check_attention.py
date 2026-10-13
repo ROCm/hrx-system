@@ -93,7 +93,7 @@ def execute(label, component, inputs, expected, *, exact):
     result = subprocess.run(
         [
             *args.checker,
-            "--model=" + str(args.model / "qualification"),
+            "--model=" + str(args.model / "qualification.json"),
             "--root=qualify.block_" + component,
             f"--config=krea2.block_tokens={expected.shape[0]}",
             *["--input=" + str(path) for path in inputs],

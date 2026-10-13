@@ -89,9 +89,14 @@ class ControlTest
                                                allocator_, &execution_));
     directory_ =
         std::filesystem::path(FLAG_control_sources).parent_path().string();
-    IREE_ASSERT_OK(loom_serve_jit_create(
-        device_, dispatch, host_, iree_make_cstring_view(directory_.c_str()),
-        nullptr, &compilation_, allocator_, &jit_));
+    const iree_string_view_t providers[] = {IREE_SV("kernels.loom")};
+    const loom_serve_sources_t sources = {
+        .base_directory = iree_make_cstring_view(directory_.c_str()),
+        .count = IREE_ARRAYSIZE(providers),
+        .values = providers};
+    IREE_ASSERT_OK(loom_serve_jit_create(device_, dispatch, host_, &sources,
+                                         nullptr, &compilation_, allocator_,
+                                         &jit_));
     IREE_ASSERT_OK(Prepare(family, "prefill_to_decode", &commands_[0]));
     IREE_ASSERT_OK(Prepare(family, "decode_transition", &commands_[1]));
     IREE_ASSERT_OK(Prepare(family, "device_continuation", &commands_[2]));

@@ -139,7 +139,7 @@ def main():
         configuration.update(overrides or {})
         return [
             *arguments.checker,
-            f"--model={arguments.model / 'qualification'}",
+            f"--model={arguments.model / 'qualification.json'}",
             f"--root={root}",
             f"--weight_policy={arguments.model / 'weights.loom'}",
             *[f"--weights={path}" for path in weights],

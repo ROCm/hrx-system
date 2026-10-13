@@ -13,13 +13,16 @@
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
 #include "experimental/loom_serve/runtime/signals.h"
+#include "experimental/loom_serve/serving/configuration.h"
 #include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 
-IREE_FLAG(string, model, "", "Live source catalog directory.");
-IREE_FLAG(string, checkpoint, "", "Checkpoint asset directory.");
-IREE_FLAG(string, adapter, "", "Optional model-specific adapter asset.");
+IREE_FLAG(string, model, "", "Model JSON document.");
+IREE_FLAG(string, checkpoint, "",
+          "Checkpoint asset directory, relative to the model document.");
+IREE_FLAG(string, adapter, "",
+          "Optional adapter asset, relative to the model document.");
 IREE_FLAG(int32_t, height, 384,
           "Output pixel height; source validates supported geometry.");
 IREE_FLAG(int32_t, width, 384,
@@ -76,6 +79,11 @@ int main(int argc, char** argv) {
   loom_serve_http_server_t* server = NULL;
   loom_serve_http_listener_t* listener = NULL;
   loom_serve_signals_t* signals = NULL;
+  loom_serve_model_configuration_t configuration = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_model_configuration_load(
+        iree_make_cstring_view(FLAG_model), &configuration, allocator);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_serve_host_create_from_flags(&host, allocator);
   }
@@ -85,7 +93,8 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     device = loom_serve_device_group_at(group, 0);
     const loom_serve_image_model_options_t options = {
-        .source_directory = iree_make_cstring_view(FLAG_model),
+        .sources = configuration.sources,
+        .options = configuration.options,
         .checkpoint_directory = iree_make_cstring_view(FLAG_checkpoint),
         .adapter_path = iree_make_cstring_view(FLAG_adapter),
         .height = (uint32_t)FLAG_height,
@@ -164,6 +173,7 @@ int main(int argc, char** argv) {
   status = iree_status_join(status, loom_serve_image_model_destroy(model));
   status = iree_status_join(status, loom_serve_device_group_destroy(group));
   loom_serve_host_release(host);
+  loom_serve_model_configuration_deinitialize(&configuration);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

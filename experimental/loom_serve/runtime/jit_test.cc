@@ -186,10 +186,15 @@ class JitTest : public ::testing::TestWithParam<int> {
     IREE_ASSERT_OK(
         loom_serve_device_create_execution(device_owner_, &execution_));
     directory_ = std::filesystem::path(FLAG_jit_sources).parent_path().string();
+    const iree_string_view_t providers[] = {IREE_SV("config.loom"),
+                                            IREE_SV("stage.loom")};
+    const loom_serve_sources_t sources = {
+        .base_directory = iree_make_cstring_view(directory_.c_str()),
+        .count = IREE_ARRAYSIZE(providers),
+        .values = providers};
     IREE_ASSERT_OK(loom_serve_jit_create(
-        device_, dispatch_, loom_serve_device_host(device_owner_),
-        iree_make_cstring_view(directory_.c_str()), nullptr, &compilation_,
-        allocator_, &jit_));
+        device_, dispatch_, loom_serve_device_host(device_owner_), &sources,
+        nullptr, &compilation_, allocator_, &jit_));
   }
 
   void TearDown() override {
@@ -448,10 +453,14 @@ TEST_P(JitTest, SourceFailureOutlivesUnconstructedCatalogAndVm) {
       std::filesystem::path(FLAG_invalid_sources).parent_path().string();
   loom_serve_jit_t* invalid = nullptr;
   loom_serve_compilation_report_t report = {};
-  auto status = loom_serve_jit_create(device_, dispatch_,
-                                      loom_serve_device_host(device_owner_),
-                                      iree_make_cstring_view(directory.c_str()),
-                                      nullptr, &report, allocator_, &invalid);
+  const iree_string_view_t providers[] = {IREE_SV("invalid.loom")};
+  const loom_serve_sources_t sources = {
+      .base_directory = iree_make_cstring_view(directory.c_str()),
+      .count = IREE_ARRAYSIZE(providers),
+      .values = providers};
+  auto status = loom_serve_jit_create(
+      device_, dispatch_, loom_serve_device_host(device_owner_), &sources,
+      nullptr, &report, allocator_, &invalid);
   EXPECT_FALSE(iree_status_is_ok(status));
   EXPECT_EQ(invalid, nullptr);
   EXPECT_GT(report.severities[LOOMC_DIAGNOSTIC_SEVERITY_ERROR], 0u);
@@ -488,9 +497,15 @@ TEST_P(JitTest, CompletedCatalogsRetireWithoutClosingSharedCompilerQueue) {
   loom_serve_compilation_report_t peer_report = {};
   loom_serve_jit_t* peer = nullptr;
   auto* host = loom_serve_device_host(device_owner_);
-  IREE_ASSERT_OK(loom_serve_jit_create(
-      device_, dispatch_, host, iree_make_cstring_view(directory_.c_str()),
-      nullptr, &peer_report, allocator_, &peer));
+  const iree_string_view_t providers[] = {IREE_SV("config.loom"),
+                                          IREE_SV("stage.loom")};
+  const loom_serve_sources_t sources = {
+      .base_directory = iree_make_cstring_view(directory_.c_str()),
+      .count = IREE_ARRAYSIZE(providers),
+      .values = providers};
+  IREE_ASSERT_OK(loom_serve_jit_create(device_, dispatch_, host, &sources,
+                                       nullptr, &peer_report, allocator_,
+                                       &peer));
   const loomc_config_options_t config = {
       nullptr, 0, {}, LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED};
   Compilation jobs[2];

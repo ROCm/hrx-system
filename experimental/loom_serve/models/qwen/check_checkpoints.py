@@ -423,7 +423,7 @@ def main():
     arguments.output.mkdir(parents=True, exist_ok=False)
     command = [
         str(arguments.server.resolve()),
-        f"--model={arguments.model.resolve()}",
+        f"--model={arguments.model.resolve() / 'model.json'}",
         f"--weights={arguments.weights.resolve()}",
         f"--tokenizer={arguments.tokenizer.resolve()}",
         "--rows=4",
