@@ -815,6 +815,8 @@ static iree_status_t image_advance(void* self,
 
 loom_serve_http_service_t loom_serve_image_service_interface(
     loom_serve_image_service_t* service) {
+  static const iree_string_view_t input_modalities[] = {IREE_SVL("text")};
+  static const iree_string_view_t output_modalities[] = {IREE_SVL("image")};
   return (loom_serve_http_service_t){
       .name = service->options.name,
       .self = service,
@@ -826,6 +828,10 @@ loom_serve_http_service_t loom_serve_image_service_interface(
       .tokenizer = service->generator.tokenizer,
       .kind = "image",
       .endpoint = "/v1/images/generations",
+      .capabilities = {.input_modalities = {IREE_ARRAYSIZE(input_modalities),
+                                            input_modalities},
+                       .output_modalities = {IREE_ARRAYSIZE(output_modalities),
+                                             output_modalities}},
       .snapshot = image_snapshot,
       .inspection = {.request_at = image_request_at},
       .telemetry = {service->telemetry.stream, &service->telemetry.counters},

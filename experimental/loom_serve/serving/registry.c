@@ -81,6 +81,7 @@ iree_status_t loom_serve_registry_create(
     for (iree_host_size_t i = 0; i < service_count; ++i) {
       registry->models[i].service = services[i];
       registry->models[i].phase = LOOM_SERVE_REGISTRATION_READY;
+      registry->models[i].registration_time = iree_time_now();
     }
     *out_registry = registry;
   } else {
@@ -160,6 +161,7 @@ iree_status_t loom_serve_registry_register(
   memset(configuration, 0, sizeof(*configuration));
   model->closed = model->configuration.start_drained;
   model->incarnation = registry->next_incarnation++;
+  model->registration_time = iree_time_now();
   model->service.name = model->configuration.name;
   // Protocol metadata is known before source preparation, without model access.
   switch (model->configuration.kind) {

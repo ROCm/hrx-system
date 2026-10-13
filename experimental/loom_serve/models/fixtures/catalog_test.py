@@ -1631,7 +1631,7 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
                 future.result()
             peers = {declaration["name"] for declaration in declarations[4:]}
             while True:
-                discovered = client.request("/v1/models")["data"]
+                discovered = client.request("/v1/status")["data"]
                 assert all(
                     item["loom"]["registration"] != "release_failed"
                     for item in discovered
@@ -1648,7 +1648,7 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
                     {**declaration, "admission": "open"},
                     status=202,
                 )
-            replaced = client.request("/v1/models")["data"]
+            replaced = client.request("/v1/status")["data"]
             for item in replaced:
                 if item["id"] not in peers:
                     assert item["loom"]["incarnation"] != identities[item["id"]]
@@ -1679,7 +1679,7 @@ def check_dynamic_catalog(server_command, directory, catalog, workers):
                 status=202,
             )
         while True:
-            discovered = client.request("/v1/models")["data"]
+            discovered = client.request("/v1/status")["data"]
             assert all(
                 item["loom"]["registration"] != "release_failed" for item in discovered
             ), discovered

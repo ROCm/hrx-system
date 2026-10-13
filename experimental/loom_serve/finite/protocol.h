@@ -27,6 +27,8 @@ typedef struct loom_serve_finite_protocol_t {
   const char* name;
   // Static POST endpoint handled by this modality.
   const char* endpoint;
+  // Client-visible output modality with static storage.
+  iree_string_view_t output_modality;
   // Static HTTP status for malformed schema or source input rejection.
   const char* invalid_status;
   // Complete concrete request size, including its initial finite request

@@ -102,7 +102,7 @@ class LogsTest(unittest.TestCase):
                 client.poll("chat")
                 self.assertEqual(client.cursors, {"chat": "100:1:1"})
                 self.assertEqual(
-                    [path for path, _ in requests], ["/v1/models", "/logz", "/logz"]
+                    [path for path, _ in requests], ["/v1/status", "/logz", "/logz"]
                 )
                 self.assertTrue(
                     all(

@@ -105,6 +105,13 @@ class ServerTest(unittest.TestCase):
                     self.assertEqual(
                         registration["loom"]["status"]["admission"], "drained"
                     )
+                    self.assertEqual(
+                        control(address, "GET", "/v1/models", 200)["data"], []
+                    )
+                    self.assertEqual(
+                        control(address, "GET", "/v1/status", 200)["data"][0]["id"],
+                        "vectors",
+                    )
                     self.post(address, "/v1/models/undrain", {"model": "vectors"})
                     for inputs, expected in (
                         (["a", "bbb"], [[1, 1], [6, 3]]),
@@ -122,13 +129,27 @@ class ServerTest(unittest.TestCase):
                             [item["index"] for item in result["data"]],
                             list(range(len(inputs))),
                         )
+                    model = control(address, "GET", "/v1/models", 200)["data"][0]
+                    self.assertEqual(model["id"], "vectors")
+                    self.assertEqual(model["object"], "model")
+                    self.assertGreater(model["created"], 0)
+                    self.assertEqual(model["created"], registration["created"])
+                    self.assertEqual(model["owned_by"], "local")
+                    self.assertEqual(model["input_modalities"], ["text"])
+                    self.assertEqual(model["output_modalities"], ["embedding"])
+                    self.assertNotIn("context_length", model)
+                    self.post(address, "/v1/models/drain", {"model": "vectors"})
+                    self.assertEqual(
+                        control(address, "GET", "/v1/models", 200)["data"][0]["id"],
+                        "vectors",
+                    )
                     self.post(
                         address,
                         "/v1/models/unregister",
                         {"model": "vectors"},
                         expected=202,
                     )
-                    while control(address, "GET", "/v1/models", 200)["data"]:
+                    while control(address, "GET", "/v1/status", 200)["data"]:
                         pass
                     self.assertEqual(
                         control(address, "GET", "/healthz", 200), {"status": "ready"}

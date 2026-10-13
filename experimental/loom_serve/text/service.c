@@ -2187,6 +2187,7 @@ static bool text_session_at(void* self, iree_host_size_t index,
 
 loom_serve_http_service_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service) {
+  static const iree_string_view_t modalities[] = {IREE_SVL("text")};
   return (loom_serve_http_service_t){
       .name = service->name,
       .self = service,
@@ -2198,6 +2199,14 @@ loom_serve_http_service_t loom_serve_text_service_interface(
       .tokenizer = loom_serve_text_model_tokenizer(service->model),
       .kind = "text",
       .endpoint = "/v1/chat/completions",
+      .capabilities = {.input_modalities = {IREE_ARRAYSIZE(modalities),
+                                            modalities},
+                       .output_modalities = {IREE_ARRAYSIZE(modalities),
+                                             modalities},
+                       .context_length = service->scheduling.context_capacity,
+                       .max_output_tokens =
+                           iree_min(service->scheduling.context_capacity,
+                                    LOOM_SERVE_TEXT_CHAT_MAX_OUTPUT_TOKENS)},
       .snapshot = text_snapshot,
       .inspection = {.request_at = text_request_at,
                      .session_at = text_session_at},

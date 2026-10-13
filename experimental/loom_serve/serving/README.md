@@ -424,8 +424,39 @@ of substituting vocabulary spellings or silently changing the response shape.
 `with_pieces=false` is accepted. vLLM's `prompt`/`add_special_tokens` profile and
 chat-tokenization fields are not aliases for this raw profile.
 
-`GET /v1/models` lists deployment names. Chat requests use those names, not
-the model source's intrinsic identity:
+`GET /v1/models` lists prepared deployments not being unregistered. Each entry
+reports its registration timestamp as `created`, `owned_by: "local"`, and
+service-owned `input_modalities` and `output_modalities`. Text deployments
+also report `context_length` and `limits.max_output_tokens`: these are the
+configured per-session capacity and output ceiling, not the model's training
+context or the shared pool size. Unspecified limits are omitted rather than
+invented from model names or buffer sizes.
+
+Drained and weight-evicted prepared models remain discoverable; discovery is
+not a promise of immediate admission or resident weights. `GET /v1/status`
+reports every registration, including declarations, preparation failures and
+retirement. Administration waits for removal from that inventory, not the
+inference catalog, before considering a deployment fully retired.
+
+Generic clients can use an OpenAI-compatible base URL ending in `/v1`. For
+example, Oh My Pi accepts this provider in `models.yml`:
+
+~~~yaml
+providers:
+  loom:
+    baseUrl: http://127.0.0.1:8080/v1
+    auth: none
+    api: openai-completions
+    discovery:
+      type: openai-models-list
+~~~
+
+Modality metadata distinguishes text, image, embedding and decision outputs.
+Clients differ in which modalities they discover automatically; a System One
+judgment client can explicitly select `/v1/systemone`. Discovery does not imply
+support for every sampling option, image size, or protocol extension.
+
+Chat requests use deployment names, not the model source's intrinsic identity:
 
 ~~~json
 {

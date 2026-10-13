@@ -334,11 +334,11 @@ TEST_P(SourceDecisionServiceTest, SharesRouterWithEmbeddingsAndRawUtilities) {
   const std::string catalog = Read(Send("", "/v1/models", "GET"));
   EXPECT_NE(
       catalog.find(
-          R"({"object":"model","id":"decisions","loom":{"kind":"decision","endpoint":"/v1/systemone","tokenize":false}})"),
+          R"("input_modalities":["text"],"output_modalities":["decision"],"loom":{"kind":"decision","endpoint":"/v1/systemone","tokenize":false}})"),
       std::string::npos);
   EXPECT_NE(
       catalog.find(
-          R"({"object":"model","id":"vectors","loom":{"kind":"embedding","endpoint":"/v1/embeddings","tokenize":true}})"),
+          R"("input_modalities":["text"],"output_modalities":["embedding"],"loom":{"kind":"embedding","endpoint":"/v1/embeddings","tokenize":true}})"),
       std::string::npos);
   EXPECT_NE(Read(tokenize).find(R"({"tokens":[0,1,0]})"), std::string::npos);
   CheckSingleNoulResponse(Read(decision));
@@ -348,11 +348,11 @@ TEST_P(SourceDecisionServiceTest, SharesRouterWithEmbeddingsAndRawUtilities) {
   const std::string snapshot = Read(Send("", "/v1/status", "GET"));
   EXPECT_NE(
       snapshot.find(
-          R"({"object":"model","id":"decisions","loom":{"kind":"decision","endpoint":"/v1/systemone","tokenize":false,"status":{"phase":"idle","queued_requests":0,"active_requests":0,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":0.000000000,"admission":"open","held_requests":0,"tokenizer_requests":0}}})"),
+          R"("input_modalities":["text"],"output_modalities":["decision"],"loom":{"kind":"decision","endpoint":"/v1/systemone","tokenize":false,"status":{"phase":"idle","queued_requests":0,"active_requests":0,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":0.000000000,"admission":"open","held_requests":0,"tokenizer_requests":0}}})"),
       std::string::npos);
   EXPECT_NE(
       snapshot.find(
-          R"({"object":"model","id":"vectors","loom":{"kind":"embedding","endpoint":"/v1/embeddings","tokenize":true,"status":{"phase":"idle","queued_requests":0,"active_requests":0,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":0.000000000,"admission":"open","held_requests":0,"tokenizer_requests":0}}})"),
+          R"("input_modalities":["text"],"output_modalities":["embedding"],"loom":{"kind":"embedding","endpoint":"/v1/embeddings","tokenize":true,"status":{"phase":"idle","queued_requests":0,"active_requests":0,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":0.000000000,"admission":"open","held_requests":0,"tokenizer_requests":0}}})"),
       std::string::npos);
   EXPECT_EQ(Read(Send(R"({"model":"decisions","content":"a"})", "/tokenize"))
                 .find("HTTP/1.1 404"),

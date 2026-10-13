@@ -13,6 +13,16 @@ using loom_serve::testing::text::ServiceTestDevice;
 using loom_serve::testing::text::SourceTextServiceTest;
 using loom_serve::testing::text::StalledClient;
 
+TEST_P(SourceTextServiceTest, DiscoveryReportsConfiguredSessionCapacity) {
+  Start();
+  const auto models = Read(Send("", "", "/v1/models", "GET"));
+  EXPECT_NE(
+      models.find(
+          R"("input_modalities":["text"],"output_modalities":["text"],"context_length":96,"limits":{"max_output_tokens":96})"),
+      std::string::npos)
+      << models;
+}
+
 TEST_P(SourceTextServiceTest,
        PreparedInputSurvivesScratchReuseAndHistoryEviction) {
   const auto* policy = loom_serve_text_model_chat_policy(model_);

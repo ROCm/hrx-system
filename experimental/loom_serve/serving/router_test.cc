@@ -237,7 +237,7 @@ TEST_P(HttpRouterTest, RawUtilitiesProgressWhileTheSelectedModelIsHeld) {
   const auto snapshot = Read(Send("GET", "/v1/status"));
   EXPECT_NE(
       snapshot.find(
-          R"({"object":"model","id":"held","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":true,"status":{"phase":"held","queued_requests":0,"active_requests":1,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":2.250000000,"admission":"open","held_requests":0,"tokenizer_requests":)"),
+          R"("loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":true,"status":{"phase":"held","queued_requests":0,"active_requests":1,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":2.250000000,"admission":"open","held_requests":0,"tokenizer_requests":)"),
       std::string::npos);
   for (int i = 0; i < 12; ++i) {
     const auto response = Read(clients[i]);
@@ -303,13 +303,17 @@ TEST_P(HttpRouterTest, DiscoveryAndIndependentBorrowedRequests) {
   EXPECT_NE(Read(Send("GET", "/healthz")).find(R"({"status":"ready"})"),
             std::string::npos);
   const auto models = Read(Send("GET", "/v1/models"));
+  EXPECT_NE(models.find(R"({"object":"model","id":"a","created":)"),
+            std::string::npos);
+  EXPECT_NE(models.find(R"({"object":"model","id":"other","created":)"),
+            std::string::npos);
   EXPECT_NE(
       models.find(
-          R"({"object":"model","id":"a","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":true}})"),
+          R"("owned_by":"local","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":true}})"),
       std::string::npos);
   EXPECT_NE(
       models.find(
-          R"({"object":"model","id":"other","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":false}})"),
+          R"("owned_by":"local","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":false}})"),
       std::string::npos);
   EXPECT_EQ(models.find("\"status\":"), std::string::npos);
   const std::string body_a = R"({"model":"\u0061","messages":["first"]})";

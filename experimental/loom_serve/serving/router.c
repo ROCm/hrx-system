@@ -465,6 +465,30 @@ static iree_status_t router_describe_parameters(
   return iree_string_builder_append_cstring(output, "}");
 }
 
+static iree_status_t router_describe_modalities(
+    const char* key, iree_string_view_list_t modalities,
+    iree_string_builder_t* output) {
+  if (!modalities.count) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_format(output, ",\"%s\":[", key));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < modalities.count && iree_status_is_ok(status); ++i) {
+    if (i) {
+      status = iree_string_builder_append_cstring(output, ",");
+    }
+    if (iree_status_is_ok(status)) {
+      status = router_quote(output, modalities.values[i]);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(output, "]");
+  }
+  return status;
+}
+
 static iree_status_t router_describe_service(
     const loom_serve_registered_model_t* admission, bool include_status,
     iree_string_builder_t* output) {
@@ -472,6 +496,23 @@ static iree_status_t router_describe_service(
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
       output, "{\"object\":\"model\",\"id\":"));
   IREE_RETURN_IF_ERROR(router_quote(output, service->name));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      output, ",\"created\":%" PRId64 ",\"owned_by\":\"local\"",
+      admission->registration_time / 1000000000));
+  IREE_RETURN_IF_ERROR(router_describe_modalities(
+      "input_modalities", service->capabilities.input_modalities, output));
+  IREE_RETURN_IF_ERROR(router_describe_modalities(
+      "output_modalities", service->capabilities.output_modalities, output));
+  if (service->capabilities.context_length) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output, ",\"context_length\":%zu",
+        service->capabilities.context_length));
+  }
+  if (service->capabilities.max_output_tokens) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output, ",\"limits\":{\"max_output_tokens\":%zu}",
+        service->capabilities.max_output_tokens));
+  }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(output, ",\"loom\":{\"kind\":"));
   IREE_RETURN_IF_ERROR(
@@ -1336,7 +1377,9 @@ static iree_status_t router_accept(router_t* router,
     for (iree_host_size_t i = 0;
          i < router->capacity && iree_status_is_ok(status); ++i) {
       const loom_serve_registered_model_t* model = router_model_at(router, i);
-      if (!model->service.name.size) {
+      if (!model->service.name.size ||
+          (!include_status && (model->phase != LOOM_SERVE_REGISTRATION_READY ||
+                               model->removal != LOOM_SERVE_REMOVAL_NONE))) {
         continue;
       }
       if (!first) {

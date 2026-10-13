@@ -84,6 +84,19 @@ typedef struct loom_serve_http_service_t {
   // Primary inference endpoint with process lifetime; excludes utilities and
   // modality-specific control routes such as text checkpoints.
   const char* endpoint;
+  // Immutable client capabilities published with the prepared service. Views
+  // remain valid through retirement; empty lists and zero limits mean unknown
+  // or inapplicable, never unlimited. Limits describe one request, not a pool.
+  struct {
+    // Accepted input modalities, such as text or image.
+    iree_string_view_list_t input_modalities;
+    // Produced output modalities, such as text, image, embedding or decision.
+    iree_string_view_list_t output_modalities;
+    // Maximum combined input and output token extent of one session.
+    iree_host_size_t context_length;
+    // Maximum selectable output token budget, further bounded by input length.
+    iree_host_size_t max_output_tokens;
+  } capabilities;
   // Copies published ownership on the serialized owner without invoking model
   // work or reading state still borrowed by a CPU/device task.
   loom_serve_http_service_snapshot_t (*snapshot)(void* self);

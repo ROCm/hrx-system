@@ -17,6 +17,9 @@ extern "C" {
 
 #define LOOM_SERVE_TEXT_CHAT_TOOL_CAPACITY 16
 
+// Protocol output budget bound, independent of a deployment's context limit.
+#define LOOM_SERVE_TEXT_CHAT_MAX_OUTPUT_TOKENS 16384
+
 // Cold-resolved chat functions in the model's shared source VM. The model
 // serializes calls and outlives every request borrowing this policy.
 typedef struct loom_serve_text_chat_policy_t {

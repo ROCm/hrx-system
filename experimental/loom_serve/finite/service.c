@@ -778,6 +778,7 @@ static void finite_set_observer(void* self,
 
 loom_serve_http_service_t loom_serve_finite_service_interface(
     loom_serve_finite_service_t* service) {
+  static const iree_string_view_t input_modalities[] = {IREE_SVL("text")};
   return (loom_serve_http_service_t){
       .name = service->name,
       .self = service,
@@ -789,6 +790,10 @@ loom_serve_http_service_t loom_serve_finite_service_interface(
       .tokenizer = loom_serve_finite_model_tokenizer(service->model),
       .kind = service->protocol->name,
       .endpoint = service->protocol->endpoint,
+      .capabilities =
+          {.input_modalities = {IREE_ARRAYSIZE(input_modalities),
+                                input_modalities},
+           .output_modalities = {1, &service->protocol->output_modality}},
       .snapshot = finite_snapshot,
       .inspection = {.request_at = finite_request_at},
       .capacity_domain = loom_serve_residency_cache(

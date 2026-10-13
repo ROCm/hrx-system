@@ -97,15 +97,20 @@ class LogClient:
             connection.close()
 
     def models(self):
-        status, payload = self._get("/v1/models")
+        """List registered models, including preparation and retirement.
+
+        Observation follows the administrative inventory rather than the
+        inference catalog so draining/removal cannot hide the final records.
+        """
+        status, payload = self._get("/v1/status")
         if status != 200:
-            raise RuntimeError(f"GET /v1/models: HTTP {status}: {payload!r}")
+            raise RuntimeError(f"GET /v1/status: HTTP {status}: {payload!r}")
         catalog = json.loads(payload)
         models = [item["id"] for item in catalog["data"]]
         if any(not isinstance(model, str) or not model for model in models):
-            raise ValueError("/v1/models: expected nonempty model identifiers")
+            raise ValueError("/v1/status: expected nonempty model identifiers")
         if len(set(models)) != len(models):
-            raise ValueError("/v1/models: duplicate model identifier")
+            raise ValueError("/v1/status: duplicate model identifier")
         return models
 
     def forget(self, model):

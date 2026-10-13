@@ -49,9 +49,11 @@ curl --fail --silent --show-error http://127.0.0.1:8080/v1/status
 ```
 
 Readiness returns `{"status":"ready"}` even while packages are preparing.
-Discovery returns `pixels` as image, `vectors` as embedding, and `judge` as
-decision, each with its primary endpoint. Once preparation completes, the first
-two have `loom.tokenize:true`; `judge` has no tokenizer. Inference and tokenizer
+After preparation, discovery returns `pixels` as image, `vectors` as embedding,
+and `judge` as decision, each with its primary endpoint and input/output
+modalities. Registrations still preparing or retiring remain visible in
+`/v1/status`, not `/v1/models`. The first two prepared models have
+`loom.tokenize:true`; `judge` has no tokenizer. Inference and tokenizer
 requests arriving earlier wait within the holding budget. Idle status reports
 zero queued/active requests. Status describes scheduler ownership, not GPU
 utilization; queries do not activate weights or wait for model completion.

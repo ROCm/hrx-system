@@ -396,7 +396,7 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
   EXPECT_NE(
       Read(Send("GET", "/v1/models"))
           .find(
-              R"({"object":"model","id":"fixture-image","loom":{"kind":"image","endpoint":"/v1/images/generations","tokenize":true}})"),
+              R"("input_modalities":["text"],"output_modalities":["image"],"loom":{"kind":"image","endpoint":"/v1/images/generations","tokenize":true}})"),
       std::string::npos);
   EXPECT_NE(
       Read(Send("GET", "/v1/status"))

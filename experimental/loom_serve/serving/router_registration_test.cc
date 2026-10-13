@@ -265,7 +265,7 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
     EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
     managed_.WaitRetiring();
     managed_.ReleaseRetirement();
-    while (Read(Send("GET", "/v1/models")).find(R"("id":"dynamic")") !=
+    while (Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")") !=
            std::string::npos) {
     }
   }
@@ -728,7 +728,7 @@ TEST_P(HttpRouterRegistrationTest,
       0u);
   managed_.ReleaseRetirement();
   EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
-  while (Read(Send("GET", "/v1/models")).find(R"("id":"dynamic")") !=
+  while (Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")") !=
          std::string::npos) {
   }
   EXPECT_EQ(managed_.destroyed.load(), 1u);
@@ -749,7 +749,7 @@ TEST_P(HttpRouterRegistrationTest,
   EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(managed_.destroyed.load(), 0u);
   managed_.ReleaseRetirement();
-  while (Read(Send("GET", "/v1/models")).find(R"("id":"dynamic")") !=
+  while (Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")") !=
          std::string::npos) {
   }
   EXPECT_EQ(managed_.destroyed.load(), 1u);
@@ -789,7 +789,7 @@ TEST_P(HttpRouterRegistrationTest,
       Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
       0u);
   managed_.ReleaseRetirement();
-  while (Read(Send("GET", "/v1/models")).find(R"("id":"dynamic")") !=
+  while (Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")") !=
          std::string::npos) {
   }
   EXPECT_EQ(managed_.destroyed.load(), 1u);
@@ -827,6 +827,33 @@ TEST_P(HttpRouterRegistrationTest,
 }
 
 TEST_P(HttpRouterRegistrationTest,
+       DiscoveryExcludesUnpreparedAndRemovingModels) {
+  Declare();
+  EXPECT_EQ(Read(Send("GET", "/v1/models")).find(R"("id":"dynamic")"),
+            std::string::npos);
+  EXPECT_NE(Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")"),
+            std::string::npos);
+  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
+  while (Read(Send("GET", "/v1/models")).find(R"("id":"dynamic")") ==
+         std::string::npos) {
+  }
+  EXPECT_EQ(Control("drain", "dynamic").find("HTTP/1.1 200"), 0u);
+  EXPECT_NE(Read(Send("GET", "/v1/models")).find(R"("id":"dynamic")"),
+            std::string::npos);
+  EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
+  managed_.WaitRetiring();
+  EXPECT_EQ(Read(Send("GET", "/v1/models")).find(R"("id":"dynamic")"),
+            std::string::npos);
+  EXPECT_NE(
+      Read(Send("GET", "/v1/status")).find(R"("registration":"retiring")"),
+      std::string::npos);
+  managed_.ReleaseRetirement();
+  while (Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")") !=
+         std::string::npos) {
+  }
+}
+
+TEST_P(HttpRouterRegistrationTest,
        ReleaseFailureRetainsOwnershipUntilExplicitRetry) {
   {
     std::lock_guard<std::mutex> lock(managed_.mutex);
@@ -856,7 +883,7 @@ TEST_P(HttpRouterRegistrationTest,
                                 LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
-  while (Read(Send("GET", "/v1/models")).find(R"("id":"dynamic")") !=
+  while (Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")") !=
          std::string::npos) {
   }
   EXPECT_EQ(managed_.release_attempts.load(), 2u);
