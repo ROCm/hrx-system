@@ -93,23 +93,6 @@ loom_cc_test(
 )
 
 loom_cc_test(
-    name = "vm_native_call_test",
-    srcs = ["vm_native_call_test.cc"],
-    target_compatible_with = LOOMC_TARGET_VM_COMPATIBLE_WITH,
-    deps = [
-        "//loom/binding/c:loomc",
-        "//loom/binding/c/target/vm",
-        "//loom/binding/c/test:test_util",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-        "//runtime/src/iree/vm",
-        "//runtime/src/iree/vm:test_support",
-        "//runtime/src/iree/vm/bytecode:module",
-    ],
-)
-
-loom_cc_test(
     name = "wasm_test",
     srcs = ["wasm_test.cc"],
     target_compatible_with = LOOMC_TARGET_WASM_COMPATIBLE_WITH,

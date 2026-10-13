@@ -106,6 +106,45 @@ loom_cc_test(
 )
 
 loom_generated_file(
+    name = "native_calls_binary",
+    testonly = True,
+    args = [
+        "$(location //loom/src/loom/tooling/target/vm/test:native_calls.loom)",
+        "--target=vm:core",
+    ],
+    generator = "//loom/src/loom/tools/loom-compile",
+    inputs = ["//loom/src/loom/tooling/target/vm/test:native_calls.loom"],
+    output = "native_calls.vm",
+    output_flag = "--output=",
+    target_compatible_with = loom_config_compatible_with(["//loom/config/target/arch:vm"]),
+)
+
+iree_c_embed_data(
+    name = "native_calls_bytecode",
+    testonly = True,
+    srcs = [":native_calls_binary"],
+    c_file_output = "native_calls_bytecode.c",
+    h_file_output = "native_calls_bytecode.h",
+    identifier = "loom_vm_native_calls_bytecode",
+    target_compatible_with = loom_config_compatible_with(["//loom/config/target/arch:vm"]),
+)
+
+loom_cc_test(
+    name = "native_calls_test",
+    srcs = ["native_calls_test.cc"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/target/arch:vm"]),
+    deps = [
+        ":native_calls_bytecode",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm:test_support",
+        "//runtime/src/iree/vm/bytecode:module",
+    ],
+)
+
+loom_generated_file(
     name = "native_references_binary",
     testonly = True,
     args = [

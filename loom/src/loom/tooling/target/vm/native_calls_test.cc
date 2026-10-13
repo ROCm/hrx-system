@@ -8,33 +8,14 @@
 #include <string>
 
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/module_test_util.h"
 #include "iree/vm/sync.h"
-#include "loomc/loomc.h"
-#include "loomc/target/vm.h"
-#include "test/util.h"
+#include "loom/tooling/target/vm/native_calls_bytecode.h"
 
 namespace {
-
-using loomc::testing::HandlePtr;
-
-::testing::AssertionResult Succeeded(const loomc_result_t* result) {
-  if (result && loomc_result_succeeded(result)) {
-    return ::testing::AssertionSuccess();
-  }
-  auto failure = ::testing::AssertionFailure();
-  if (!result) {
-    return failure << "missing compiler result";
-  }
-  for (loomc_host_size_t i = 0; i < loomc_result_diagnostic_count(result);
-       ++i) {
-    const auto message = loomc_result_diagnostic_at(result, i)->message;
-    failure << std::string(message.data, message.size);
-  }
-  return failure;
-}
 
 // The native export handles any static cardinality through the same entry.
 const iree_vm_native_call_field_t kInputFields[] = {
@@ -104,70 +85,6 @@ iree_status_t Transform(const void* user_data,
   return iree_ok_status();
 }
 
-// Produces a real Low caller whose wide intermediate must use both value and
-// reference storage. All cardinalities resolve to the one provider above.
-std::string Source(uint32_t count) {
-  const std::string value = "reg<vm.value : i64>";
-  const std::string ref = "reg<vm.ref : buffer>";
-  auto signature = [&](uint32_t count, bool named) {
-    std::string result;
-    for (uint32_t i = 0; i < count; ++i) {
-      if (i) {
-        result += ", ";
-      }
-      result += (named ? "%v" + std::to_string(i) + ": " : "") + value;
-      result += ", " + (named ? "%r" + std::to_string(i) + ": " : "") + ref;
-    }
-    return result;
-  };
-  auto declaration = [&](const char* name, uint32_t inputs, uint32_t outputs) {
-    auto offsets = [](uint32_t start, uint32_t count) {
-      std::string result;
-      for (uint32_t i = 0; i < count; ++i) {
-        if (i) {
-          result += ", ";
-        }
-        result += std::to_string(start + i);
-      }
-      return result;
-    };
-    std::string words = std::to_string(inputs) + ", 4, " +
-                        std::to_string(outputs) + ", " +
-                        std::to_string(4 + inputs * 2);
-    for (uint32_t i = 0; i < (inputs + outputs) * 2; ++i) {
-      words += ", 0";
-    }
-    return std::string(
-               "low.func.decl import(native, \"transform\", module = "
-               "\"host\") ") +
-           "target<vm.core>(@vm) abi(vm_native) abi_layout({arguments = [" +
-           offsets(4, inputs * 2) + "], record = [" + words + "], results = [" +
-           offsets(4 + inputs * 2, outputs * 2) + "], version = 0}) @" + name +
-           "(" + signature(inputs, true) + ") -> (" +
-           signature(outputs, false) + ")\n";
-  };
-  std::string source = "vm.target<core> @vm\n" +
-                       declaration("expand", 1, count) +
-                       declaration("reduce", count, 1);
-  source += "low.func.def public target<vm.core>(@vm) @run(" +
-            signature(1, true) + ") -> (" + signature(1, false) + ") {\n";
-  std::string outputs, inputs;
-  for (uint32_t i = 0; i < count; ++i) {
-    if (i) {
-      outputs += ", ";
-      inputs += ", ";
-    }
-    outputs += "%a" + std::to_string(i) + ", %b" + std::to_string(i);
-    inputs += "%a" + std::to_string(count - i - 1) + ", %b" +
-              std::to_string(count - i - 1);
-  }
-  source += outputs + " = low.func.call @expand(%v0, %r0) : (" +
-            signature(1, false) + ") -> (" + signature(count, false) + ")\n";
-  source += "%sum, %owner = low.func.call @reduce(" + inputs + ") : (" +
-            signature(count, false) + ") -> (" + signature(1, false) + ")\n";
-  return source + "low.return %sum, %owner : " + signature(1, false) + "\n}\n";
-}
-
 class VmNativeCallTest : public ::testing::TestWithParam<uint32_t> {
  protected:
   void SetUp() override {
@@ -195,78 +112,16 @@ class VmNativeCallTest : public ::testing::TestWithParam<uint32_t> {
     iree_vm_environment_free(environment_);
   }
 
-  void Compile(const std::string& text) {
-    const auto allocator = loomc_allocator_system();
-    loomc_target_environment_t* raw_environment = nullptr;
-    LOOMC_ASSERT_OK(
-        loomc_target_environment_create_vm(allocator, &raw_environment));
-    HandlePtr<loomc_target_environment_t, loomc_target_environment_release>
-        environment(raw_environment);
-    loomc_context_target_options_t target_options = {};
-    target_options.type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS;
-    target_options.structure_size = sizeof(target_options);
-    target_options.target_environment = environment.get();
-    loomc_context_options_t context_options = {};
-    context_options.type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS;
-    context_options.structure_size = sizeof(context_options);
-    context_options.next = &target_options;
-    loomc_context_t* raw_context = nullptr;
-    LOOMC_ASSERT_OK(
-        loomc_context_create(&context_options, allocator, &raw_context));
-    HandlePtr<loomc_context_t, loomc_context_release> context(raw_context);
-    loomc_workspace_t* raw_workspace = nullptr;
-    LOOMC_ASSERT_OK(loomc_workspace_create(nullptr, allocator, &raw_workspace));
-    HandlePtr<loomc_workspace_t, loomc_workspace_release> workspace(
-        raw_workspace);
-    loomc_source_options_t source_options = {};
-    source_options.type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS;
-    source_options.structure_size = sizeof(source_options);
-    source_options.format = LOOMC_SOURCE_FORMAT_TEXT;
-    source_options.identifier = loomc_make_cstring_view("native.loom");
-    source_options.contents = loomc_make_byte_span(text.data(), text.size());
-    source_options.storage = LOOMC_SOURCE_STORAGE_COPY;
-    loomc_source_t* raw_source = nullptr;
-    LOOMC_ASSERT_OK(
-        loomc_source_create(&source_options, allocator, &raw_source));
-    HandlePtr<loomc_source_t, loomc_source_release> source(raw_source);
-    loomc_module_t* raw_module = nullptr;
-    loomc_result_t* raw_result = nullptr;
-    LOOMC_ASSERT_OK(loomc_module_deserialize_from_source(
-        context.get(), workspace.get(), source.get(), nullptr, allocator,
-        &raw_module, &raw_result));
-    HandlePtr<loomc_module_t, loomc_module_release> module(raw_module);
-    HandlePtr<loomc_result_t, loomc_result_release> result(raw_result);
-    ASSERT_TRUE(Succeeded(result.get()));
-    loomc_pass_program_t* raw_pass_program = nullptr;
-    LOOMC_ASSERT_OK(loomc_pass_program_create_from_target_pipeline(
-        context.get(), nullptr, allocator, &raw_pass_program, &raw_result));
-    HandlePtr<loomc_pass_program_t, loomc_pass_program_release> pass_program(
-        raw_pass_program);
-    result.reset(raw_result);
-    ASSERT_TRUE(Succeeded(result.get()));
-    loomc_compiler_t* raw_compiler = nullptr;
-    LOOMC_ASSERT_OK(loomc_compiler_create(context.get(), nullptr, allocator,
-                                          &raw_compiler));
-    HandlePtr<loomc_compiler_t, loomc_compiler_release> compiler(raw_compiler);
-    LOOMC_ASSERT_OK(loomc_compile_module(compiler.get(), workspace.get(),
-                                         pass_program.get(), module.get(),
-                                         nullptr, allocator, &raw_result));
-    result.reset(raw_result);
-    ASSERT_TRUE(Succeeded(result.get()));
-    LOOMC_ASSERT_OK(loomc_emit_module(environment.get(), workspace.get(),
-                                      module.get(), nullptr, allocator,
-                                      &raw_result));
-    result.reset(raw_result);
-    ASSERT_TRUE(Succeeded(result.get()));
-    ASSERT_EQ(loomc_result_artifact_count(result.get()), 1);
-    loomc_byte_span_t bytes;
-    LOOMC_ASSERT_OK(loomc_byte_sequence_clone(
-        loomc_result_artifact_at(result.get(), 0)->contents, allocator,
-        &bytes));
+  void Load() {
+    // The public compiler produces the fixture during the build. The runtime
+    // borrows its aligned immutable bytes independently of compiler lifetime.
+    const auto* file = loom_vm_native_calls_bytecode_create();
     IREE_ASSERT_OK(iree_vm_bytecode_module_create(
         environment_, IREE_SV("caller"),
-        {iree_make_const_byte_span(bytes.data, bytes.data_length),
-         iree_allocator_system()},
+        {
+            .contents = iree_make_const_byte_span(file[0].data, file[0].size),
+            .deallocator = iree_allocator_null(),
+        },
         iree_allocator_system(), &module_));
     iree_vm_module_t* libraries[] = {provider_.module()};
     IREE_ASSERT_OK(iree_vm_program_create(
@@ -299,13 +154,15 @@ class VmNativeCallTest : public ::testing::TestWithParam<uint32_t> {
   iree_vm_invocation_t* invocation_ = nullptr;
 };
 
-TEST_P(VmNativeCallTest, CompilesLinksAndExecutesBorrowedRegistersAndSpills) {
+TEST_P(VmNativeCallTest, LinksAndExecutesBorrowedRegistersAndSpills) {
   const uint32_t count = GetParam();
-  ASSERT_NO_FATAL_FAILURE(Compile(Source(count)));
+  ASSERT_NO_FATAL_FAILURE(Load());
   provider_.ReleaseOwner();
   iree_vm_function_t function;
-  IREE_ASSERT_OK(iree_vm_process_lookup_function(process_, IREE_SV("caller"),
-                                                 IREE_SV("run"), &function));
+  const std::string name = "run" + std::to_string(count);
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process_, IREE_SV("caller"), iree_make_cstring_view(name.c_str()),
+      &function));
   uint8_t contents = 11;
   iree_vm_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_vm_buffer_wrap(

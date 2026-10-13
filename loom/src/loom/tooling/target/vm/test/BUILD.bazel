@@ -16,6 +16,7 @@ package(
 
 exports_files([
     "imports.loom",
+    "native_calls.loom",
     "native_references.loom",
 ])
 

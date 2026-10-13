@@ -132,6 +132,61 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_generated_file(
   NAME
+    native_calls_binary
+  GENERATOR
+    loom::tools::loom-compile
+  OUTPUT
+    "native_calls.vm"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/vm/test/native_calls.loom"
+    "--target=vm:core"
+  INPUTS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/vm/test/native_calls.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+iree_c_embed_data(
+  NAME
+    native_calls_bytecode
+  SRCS
+    "${CMAKE_CURRENT_BINARY_DIR}/native_calls.vm"
+  C_FILE_OUTPUT
+    "native_calls_bytecode.c"
+  H_FILE_OUTPUT
+    "native_calls_bytecode.h"
+  IDENTIFIER
+    "loom_vm_native_calls_bytecode"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    native_calls_test
+  SRCS
+    "native_calls_test.cc"
+  DEPS
+    ::native_calls_bytecode
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::bytecode::module
+    iree::vm::test_support
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_generated_file(
+  NAME
     native_references_binary
   GENERATOR
     loom::tools::loom-compile

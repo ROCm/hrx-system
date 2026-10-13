@@ -114,11 +114,12 @@ native type provider before loading the image. Unknown opaque types fail
 compilation instead of being treated as untyped pointers.
 
 The optional [HAL reference provider](../../../../../../runtime/src/iree/module/hal/README.md)
-supplies canonical descriptors and typed host adapters for the two HAL types.
-Their VM references share the original HAL owner count, including buffer
-recycling and view destruction. Neither the compiler nor the generic VM links
-this provider automatically; the embedding composes the providers its modules
-use.
+supplies canonical descriptors and typed host adapters. Buffers and buffer views
+share the original HAL owner count, including buffer recycling and view
+destruction. Device groups, queues, command buffers, semaphores, and pools use
+cold wrappers that retain their required native owners. Neither the compiler
+nor the generic VM links this provider automatically; the embedding composes
+the providers its modules use.
 
 Low reference registers retain their source types. The module planner binds
 each distinct type declaration once and emits a sorted namespace/type table;
@@ -147,6 +148,15 @@ overflow arguments and results. Returned references transfer their ownership
 through the call ABI; a native failure unwinds reference arguments normally.
 An explicit import alias is needed only when its external symbol differs from
 the local symbol.
+
+`func.location` materializes an immutable source value as a normal VM buffer.
+Its semantic nodes retain file ranges, source field ranges, optional original
+text, and fused/tagged/opaque provenance even when debug locations are stripped.
+Compiler clients can [capture these nodes from admitted source](../../../tooling/input/README.md)
+before source storage expires. Native consumers decode the versioned
+[`LLOC` span](../../../format/location.h) and retain the buffer when observations
+must outlive the invocation or executable. Runtime decoding needs no compiler
+tables or source files.
 
 ### Structured synchronous native entries
 
@@ -181,15 +191,6 @@ neither tracks nor waits for their completion. The
 [native call contract](../../../../../../runtime/src/iree/vm/native_call.h)
 defines the provider and ownership boundary.
 
-`func.location` materializes an immutable source value as a normal VM buffer.
-Its semantic nodes retain file ranges, source field ranges, optional original
-text, and fused/tagged/opaque provenance even when debug locations are stripped.
-Compiler clients can [capture these nodes from admitted source](../../../tooling/input/README.md)
-before source storage expires. Native consumers decode the versioned
-[`LLOC` span](../../../format/location.h) and retain the buffer when observations
-must outlive the invocation or executable. Runtime decoding needs no compiler
-tables or source files.
-
 ## Testing
 
 [test/](test/) contains Low assembly, emission, and source-lowering checks.
@@ -209,3 +210,9 @@ The [tool integration suite](../../../tooling/target/vm/test/vm.test.json) compi
 source with `loom-compile` and reads the resulting file with `vm-dis` in a
 separate process. Runtime instruction and malformed-image tests remain under
 `runtime/src/iree/vm/`; they do not require the compiler.
+
+The structured native-call [runtime integration test](../../../tooling/target/vm/native_calls_test.cc)
+loads a [maintained Low fixture](../../../tooling/target/vm/test/native_calls.loom)
+compiled by `loom-compile` during the build. A single provider entry handles
+each static shape, including scalar/reference spills and aliased result
+publication. The runtime test does not link the compiler or construct IR.
