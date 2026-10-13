@@ -1,0 +1,34 @@
+// Interleaves one residual tap into [packed token, feature, channel] storage.
+// Token placement is unchanged across target verification and accepted-only
+// draft warming; rejected suffixes remain scratch and never enter draft KV.
+kernel.def @qwen38_capture_feature(%token_capacity: index) {
+  %tokens = index.assume %token_capacity [range(%token_capacity, 1, 512)] : index
+  %tiles = index.constant 5 : index
+  %threads = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tiles, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%feature_value: index, %control: buffer, %residual: buffer, %features: buffer) {
+  %feature = index.assume %feature_value [range(%feature_value, 0, 4)] : index
+  %origin = index.constant 0 : offset
+  %metadata = buffer.assume.memory_space<constant> %control : buffer
+  %header = buffer.view %metadata[%origin] : buffer -> view<1xi32>
+  %count_word = view.load %header[0] : view<1xi32> -> i32
+  %count = index.cast %count_word : i32 to index
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %count : index
+  scf.if %active {
+    %capacity = kernel.workgroup.count<y> : index
+    %tile = kernel.workgroup.id<x> : index
+    %thread = kernel.workitem.id<x> : index
+    %threads = index.constant 256 : index
+    %c4 = index.constant 4 : index
+    %first = index.mul %tile, %threads : index
+    %packet = index.add %first, %thread : index
+    %channel = index.mul %packet, %c4 : index
+    %input = buffer.view %residual[%origin] : buffer -> view<[%capacity]x5120xf32>
+    %output = buffer.view %features[%origin] : buffer -> view<[%capacity]x5x5120xf32>
+    %value = vector.load %input[%token, %channel] : view<[%capacity]x5120xf32> -> vector<4xf32>
+    vector.store %value, %output[%token, %feature, %channel] : vector<4xf32>, view<[%capacity]x5x5120xf32>
+  }
+  kernel.return
+}

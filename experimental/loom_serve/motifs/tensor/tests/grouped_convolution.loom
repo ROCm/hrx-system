@@ -1,0 +1,255 @@
+amdgpu.target<gfx11-generic> @wave32 {subgroup_size = 32}
+
+template.decl @convolution.grouped_causal_f32(%blocks: index, %length: index, %channels: index, %group_width: index, %branches: index, %taps: index, %branch: index, %input: buffer, %dynamic: buffer, %base: buffer, %output: buffer)
+
+template.decl @convolution.grouped_causal_add_f32(%blocks: index, %length: index, %channels: index, %group_width: index, %branches: index, %taps: index, %branch: index, %input: buffer, %dynamic: buffer, %base: buffer, %residual: buffer)
+
+// Scalar double-precision oracle combines the coefficients before multiplying.
+// It deliberately iterates all taps and pads by position instead of sharing the
+// vector implementation's shortened loop or channel grouping arithmetic.
+func.def @convolution_reference(%blocks: index, %length: index, %channels: index, %group_width: index, %branches: index, %taps: index, %branch0: index, %add: i1, %input: buffer, %dynamic: buffer, %base: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %branch = index.assume %branch0 [ge(%branch0, 0), lt(%branch0, %branches)] : index
+  %groups = index.div %channels, %group_width : index
+  %x = buffer.view %input[%origin] : buffer -> view<[%blocks]x[%length]x[%groups]x[%group_width]xf32>
+  %d = buffer.view %dynamic[%origin] : buffer -> view<[%blocks]x[%length]x[%branches]x[%taps]x[%groups]xf32>
+  %b = buffer.view %base[%origin] : buffer -> view<[%branches]x[%taps]x[%groups]x[%group_width]xf32>
+  %y = buffer.view %output[%origin] : buffer -> view<[%blocks]x[%length]x[%groups]x[%group_width]xf32>
+  %c0_0 = scalar.constant 0.0 : f64
+  scf.for %block = [%c0 to %blocks step %c1] {
+    scf.for %position = [%c0 to %length step %c1] {
+      scf.for %group = [%c0 to %groups step %c1] {
+        scf.for %lane = [%c0 to %group_width step %c1] {
+          %sum = scf.for %tap = [%c0 to %taps step %c1](%partial = %c0_0 : f64) -> (f64) {
+            %present = index.cmp ule, %tap, %position : index
+            %product = scf.if %present -> (f64) {
+              %source = index.sub %position, %tap : index
+              %value = view.load %x[%block, %source, %group, %lane] : view<[%blocks]x[%length]x[%groups]x[%group_width]xf32> -> f32
+              %fixed = view.load %b[%branch, %tap, %group, %lane] : view<[%branches]x[%taps]x[%groups]x[%group_width]xf32> -> f32
+              %dynamic = view.load %d[%block, %position, %branch, %tap, %group] : view<[%blocks]x[%length]x[%branches]x[%taps]x[%groups]xf32> -> f32
+              %wide_x = scalar.extf %value : f32 to f64
+              %wide_b = scalar.extf %fixed : f32 to f64
+              %wide_d = scalar.extf %dynamic : f32 to f64
+              %coefficient = scalar.addf %wide_b, %wide_d : f64
+              %term = scalar.mulf %wide_x, %coefficient : f64
+              scf.yield %term : f64
+            } else {
+              scf.yield %c0_0 : f64
+            }
+            %next = scalar.addf %partial, %product : f64
+            scf.yield %next : f64
+          }
+          %result = scf.if %add -> (f64) {
+            %previous = view.load %y[%block, %position, %group, %lane] : view<[%blocks]x[%length]x[%groups]x[%group_width]xf32> -> f32
+            %wide = scalar.extf %previous : f32 to f64
+            %next = scalar.addf %wide, %sum : f64
+            scf.yield %next : f64
+          } else {
+            scf.yield %sum : f64
+          }
+          %rounded = scalar.fptrunc %result : f64 to f32
+          view.store %rounded, %y[%block, %position, %group, %lane] : f32, view<[%blocks]x[%length]x[%groups]x[%group_width]xf32>
+        }
+      }
+    }
+  }
+  func.return
+}
+
+kernel.def target(@wave32) @input_block() {
+  %tiles = index.constant 10 : index
+  %length = index.constant 8 : index
+  %blocks = index.constant 3 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tiles, %length, %blocks) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %dynamic: buffer, %base: buffer, %output: buffer) {
+  %blocks = index.constant 3 : index
+  %length = index.constant 8 : index
+  %channels = index.constant 5120 : index
+  %group_width = index.constant 16 : index
+  %branches = index.constant 2 : index
+  %taps = index.constant 2 : index
+  %branch = index.constant 0 : index
+  template.apply<@convolution.grouped_causal_f32>(%blocks, %length, %channels, %group_width, %branches, %taps, %branch, %input, %dynamic, %base, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @input_block_reference(%input: buffer, %dynamic: buffer, %base: buffer, %output: buffer) {
+  %blocks = index.constant 3 : index
+  %length = index.constant 8 : index
+  %channels = index.constant 5120 : index
+  %group_width = index.constant 16 : index
+  %branches = index.constant 2 : index
+  %taps = index.constant 2 : index
+  %branch = index.constant 0 : index
+  %add = scalar.constant 0 : i1
+  func.call @convolution_reference(%blocks, %length, %channels, %group_width, %branches, %taps, %branch, %add, %input, %dynamic, %base, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @input_block_case {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %dynamic_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %base_seed = check.entropy.read %entropy[2] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-2.0 to 2.0) : tensor<3x8x5120xf32>
+    %dynamic = check.generate.random.uniform seed(%dynamic_seed) range(-0.5 to 0.5) : tensor<3x8x2x2x320xf32>
+    %base = check.generate.random.uniform seed(%base_seed) range(-0.5 to 0.5) : tensor<2x2x5120xf32>
+    %output = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<3x8x5120xf32>
+    check.compare<@input_block, @input_block_reference>(%input, %dynamic, %base, %output) : (tensor<3x8x5120xf32>, tensor<3x8x2x2x320xf32>, tensor<2x2x5120xf32>, tensor<3x8x5120xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(4.9999999999999998e-07) rtol(1.9999999999999999e-06) nan(different) : tensor<3x8x5120xf32>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<3x8x5120xf32>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@wave32) @residual_block() {
+  %tiles = index.constant 10 : index
+  %length = index.constant 8 : index
+  %blocks = index.constant 3 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tiles, %length, %blocks) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %dynamic: buffer, %base: buffer, %output: buffer) {
+  %blocks = index.constant 3 : index
+  %length = index.constant 8 : index
+  %channels = index.constant 5120 : index
+  %group_width = index.constant 16 : index
+  %branches = index.constant 2 : index
+  %taps = index.constant 2 : index
+  %branch = index.constant 1 : index
+  template.apply<@convolution.grouped_causal_add_f32>(%blocks, %length, %channels, %group_width, %branches, %taps, %branch, %input, %dynamic, %base, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @residual_block_reference(%input: buffer, %dynamic: buffer, %base: buffer, %output: buffer) {
+  %blocks = index.constant 3 : index
+  %length = index.constant 8 : index
+  %channels = index.constant 5120 : index
+  %group_width = index.constant 16 : index
+  %branches = index.constant 2 : index
+  %taps = index.constant 2 : index
+  %branch = index.constant 1 : index
+  %add = scalar.constant 1 : i1
+  func.call @convolution_reference(%blocks, %length, %channels, %group_width, %branches, %taps, %branch, %add, %input, %dynamic, %base, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @residual_block_case {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %dynamic_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %base_seed = check.entropy.read %entropy[2] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-2.0 to 2.0) : tensor<3x8x5120xf32>
+    %dynamic = check.generate.random.uniform seed(%dynamic_seed) range(-0.5 to 0.5) : tensor<3x8x2x2x320xf32>
+    %base = check.generate.random.uniform seed(%base_seed) range(-0.5 to 0.5) : tensor<2x2x5120xf32>
+    %output = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<3x8x5120xf32>
+    check.compare<@residual_block, @residual_block_reference>(%input, %dynamic, %base, %output) : (tensor<3x8x5120xf32>, tensor<3x8x2x2x320xf32>, tensor<2x2x5120xf32>, tensor<3x8x5120xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(4.9999999999999998e-07) rtol(1.9999999999999999e-06) nan(different) : tensor<3x8x5120xf32>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<3x8x5120xf32>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@wave32) @partial_tile() {
+  %tiles = index.constant 2 : index
+  %length = index.constant 3 : index
+  %blocks = index.constant 2 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tiles, %length, %blocks) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %dynamic: buffer, %base: buffer, %output: buffer) {
+  %blocks = index.constant 2 : index
+  %length = index.constant 3 : index
+  %channels = index.constant 516 : index
+  %group_width = index.constant 4 : index
+  %branches = index.constant 3 : index
+  %taps = index.constant 4 : index
+  %branch = index.constant 2 : index
+  template.apply<@convolution.grouped_causal_f32>(%blocks, %length, %channels, %group_width, %branches, %taps, %branch, %input, %dynamic, %base, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @partial_tile_reference(%input: buffer, %dynamic: buffer, %base: buffer, %output: buffer) {
+  %blocks = index.constant 2 : index
+  %length = index.constant 3 : index
+  %channels = index.constant 516 : index
+  %group_width = index.constant 4 : index
+  %branches = index.constant 3 : index
+  %taps = index.constant 4 : index
+  %branch = index.constant 2 : index
+  %add = scalar.constant 0 : i1
+  func.call @convolution_reference(%blocks, %length, %channels, %group_width, %branches, %taps, %branch, %add, %input, %dynamic, %base, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @partial_tile_case {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %dynamic_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %base_seed = check.entropy.read %entropy[2] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-2.0 to 2.0) : tensor<2x3x516xf32>
+    %dynamic = check.generate.random.uniform seed(%dynamic_seed) range(-0.5 to 0.5) : tensor<2x3x3x4x129xf32>
+    %base = check.generate.random.uniform seed(%base_seed) range(-0.5 to 0.5) : tensor<3x4x516xf32>
+    %output = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<2x3x516xf32>
+    check.compare<@partial_tile, @partial_tile_reference>(%input, %dynamic, %base, %output) : (tensor<2x3x516xf32>, tensor<2x3x3x4x129xf32>, tensor<3x4x516xf32>, tensor<2x3x516xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(4.9999999999999998e-07) rtol(1.9999999999999999e-06) nan(different) : tensor<2x3x516xf32>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<2x3x516xf32>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@wave32) @single_position() {
+  %tiles = index.constant 1 : index
+  %length = index.constant 1 : index
+  %blocks = index.constant 2 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tiles, %length, %blocks) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input: buffer, %dynamic: buffer, %base: buffer, %output: buffer) {
+  %blocks = index.constant 2 : index
+  %length = index.constant 1 : index
+  %channels = index.constant 256 : index
+  %group_width = index.constant 32 : index
+  %branches = index.constant 2 : index
+  %taps = index.constant 4 : index
+  %branch = index.constant 1 : index
+  template.apply<@convolution.grouped_causal_add_f32>(%blocks, %length, %channels, %group_width, %branches, %taps, %branch, %input, %dynamic, %base, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @single_position_reference(%input: buffer, %dynamic: buffer, %base: buffer, %output: buffer) {
+  %blocks = index.constant 2 : index
+  %length = index.constant 1 : index
+  %channels = index.constant 256 : index
+  %group_width = index.constant 32 : index
+  %branches = index.constant 2 : index
+  %taps = index.constant 4 : index
+  %branch = index.constant 1 : index
+  %add = scalar.constant 1 : i1
+  func.call @convolution_reference(%blocks, %length, %channels, %group_width, %branches, %taps, %branch, %add, %input, %dynamic, %base, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @single_position_case {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %dynamic_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %base_seed = check.entropy.read %entropy[2] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%input_seed) range(-2.0 to 2.0) : tensor<2x1x256xf32>
+    %dynamic = check.generate.random.uniform seed(%dynamic_seed) range(-0.5 to 0.5) : tensor<2x1x2x4x8xf32>
+    %base = check.generate.random.uniform seed(%base_seed) range(-0.5 to 0.5) : tensor<2x4x256xf32>
+    %output = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<2x1x256xf32>
+    check.compare<@single_position, @single_position_reference>(%input, %dynamic, %base, %output) : (tensor<2x1x256xf32>, tensor<2x1x2x4x8xf32>, tensor<2x4x256xf32>, tensor<2x1x256xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(4.9999999999999998e-07) rtol(1.9999999999999999e-06) nan(different) : tensor<2x1x256xf32>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<2x1x256xf32>
+    }
+  }
+  check.return
+}

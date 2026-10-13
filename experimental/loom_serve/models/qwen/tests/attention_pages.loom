@@ -1,0 +1,128 @@
+kernel.decl @qwen38_attention_query_prepare_spans(%tokens: index, %spans: index) launch(%epoch: buffer, %epsilon: f32, %projection: buffer, %weight: buffer, %query: buffer, %gate: buffer)
+
+kernel.decl @qwen38_attention_kv_prepare_spans(%tokens: index, %spans: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %epsilon: f32, %key: buffer, %value: buffer, %weight: buffer, %state: buffer)
+
+kernel.decl @qwen38_attention_spans_f16_wmma(%tokens: index, %spans: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %gate: buffer, %state: buffer, %output: buffer)
+
+kernel.decl @qwen38_attention_query_prepare_prefill(%tokens: index) launch(%control: buffer, %epsilon: f32, %projection: buffer, %weight: buffer, %query: buffer, %gate: buffer)
+
+kernel.decl @qwen38_attention_kv_prepare_prefill(%tokens: index) launch(%control: buffer, %epsilon: f32, %key: buffer, %value: buffer, %weight: buffer, %key_cache: buffer, %value_cache: buffer)
+
+kernel.decl @qwen38_attention_prefill_f16_wmma(%tokens: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
+
+// Row one uses pages {3, 0, 2}; page one is a sentinel. A nonzero layer and
+// guarded base exercise byte origins independently of physical token indices.
+kernel.def @page_metadata() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%epoch: buffer, %rows: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<13xi32>
+  %c17 = scalar.constant 17 : i32
+  %c1 = scalar.constant 1 : i32
+  %c0 = scalar.constant 0 : i32
+  %c61 = scalar.constant 61 : i32
+  view.store %c17, %header[0] : i32, view<13xi32>
+  view.store %c1, %header[1] : i32, view<13xi32>
+  view.store %c1, %header[2] : i32, view<13xi32>
+  view.store %c17, %header[3] : i32, view<13xi32>
+  view.store %c61, %header[4] : i32, view<13xi32>
+  view.store %c0, %header[5] : i32, view<13xi32>
+  view.store %c1, %header[6] : i32, view<13xi32>
+  view.store %c0, %header[7] : i32, view<13xi32>
+  %origins = buffer.view %rows[%origin] : buffer -> view<2x4xi64>
+  %guard = scalar.constant 256 : i64
+  view.store %guard, %origins[1, 2] : i64, view<2x4xi64>
+  %map_origin = index.constant 2060 : offset
+  %map = buffer.view %rows[%map_origin] : buffer -> view<3xi32>
+  %c3 = scalar.constant 3 : i32
+  %c2 = scalar.constant 2 : i32
+  view.store %c3, %map[0] : i32, view<3xi32>
+  view.store %c0, %map[1] : i32, view<3xi32>
+  view.store %c2, %map[2] : i32, view<3xi32>
+  kernel.return
+}
+
+// Fixture-owned layout conversion uses an explicit permutation, not the
+// production lookup helper or device map. Running it before and after the
+// dense reference establishes the entire expected physical buffer, including
+// unmodified guard pages and the layer preceding the one under test.
+kernel.def @scatter_reference_pages() {
+  %tokens = index.constant 192 : index
+  %threads = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%key: buffer, %value: buffer, %state: buffer) {
+  %token = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c64 = index.constant 64 : index
+  %channels = index.constant 256 : index
+  %block = index.div %token, %c64 : index
+  %within = index.rem %token, %c64 : index
+  %first = index.cmp eq, %block, %c0 : index
+  %second = index.cmp eq, %block, %c1 : index
+  %c3 = index.constant 3 : index
+  %c2 = index.constant 2 : index
+  %after_first = scf.select %second, %c0, %c2 : index
+  %physical_block = scf.select %first, %c3, %after_first : index
+  %physical = index.madd %physical_block, %c64, %within : index
+  %origin = index.constant 0 : offset
+  %key_origin = index.constant 1048832 : offset
+  %value_origin = index.constant 1573120 : offset
+  %key_view = buffer.view %key[%origin] : buffer -> view<192x1024xf16>
+  %value_view = buffer.view %value[%origin] : buffer -> view<192x1024xf16>
+  %physical_key = buffer.view %state[%key_origin] : buffer -> view<256x1024xf16>
+  %physical_value = buffer.view %state[%value_origin] : buffer -> view<256x1024xf16>
+  scf.for %head = [%c0 to %c4 step %c1] unroll {
+    %channel = index.madd %head, %channels, %lane : index
+    %key_element = view.load %key_view[%token, %channel] : view<192x1024xf16> -> f16
+    %value_element = view.load %value_view[%token, %channel] : view<192x1024xf16> -> f16
+    view.store %key_element, %physical_key[%physical, %channel] : f16, view<256x1024xf16>
+    view.store %value_element, %physical_value[%physical, %channel] : f16, view<256x1024xf16>
+  }
+  kernel.return
+}
+
+// Seventeen queries at position 61 cross the 64-token page boundary. The full
+// history loop, masked tail, absolute RoPE and all GQA heads must be identical
+// to dense addressing. Unused spans contain invalid metadata and never read it.
+check.case public @scattered_attention_pages {
+  %tokens = check.literal value(17) : index
+  %spans = check.literal value(2) : index
+  %epsilon = check.literal value(9.9999999999999995e-07) : f32
+  %layer_origin = check.literal value(1048576) : offset
+  %epoch = check.generate.fill value(-99) : tensor<13xi32>
+  %rows = check.generate.fill value(-1) : tensor<518xi32>
+  %control = check.generate.iota offset(17) step(44) : tensor<2xi32>
+  %projection = check.generate.iota offset(-0.5) step(1.52587890625e-05) period(65521) : tensor<17x12288xf32>
+  %key = check.generate.iota offset(-0.5) step(3.0517578125e-05) period(32749) : tensor<17x1024xf32>
+  %value = check.generate.iota offset(-0.25) step(1.52587890625e-05) period(32749) : tensor<17x1024xf32>
+  %weight = check.generate.iota offset(0.75) step(0.0009765625) : tensor<256xf32>
+  %key_cache = check.generate.iota offset(-0.125) step(3.0517578125e-05) period(8191) : tensor<192x1024xf16>
+  %value_cache = check.generate.iota offset(0.25) step(-3.0517578125e-05) period(8179) : tensor<192x1024xf16>
+  %state = check.generate.fill value(9.125) : tensor<1048832xf16>
+  %expected_state = check.generate.fill value(9.125) : tensor<1048832xf16>
+  %query = check.generate.fill value(9.125) : tensor<17x6144xf32>
+  %gate = check.generate.fill value(9.125) : tensor<17x6144xf32>
+  %output = check.generate.fill value(9.125) : tensor<17x6144xf32>
+  %expected_query = check.generate.fill value(9.125) : tensor<17x6144xf32>
+  %expected_gate = check.generate.fill value(9.125) : tensor<17x6144xf32>
+  %expected_output = check.generate.fill value(9.125) : tensor<17x6144xf32>
+  kernel.launch @page_metadata(%epoch, %rows) : (tensor<13xi32>, tensor<518xi32>)
+  kernel.launch @scatter_reference_pages(%key_cache, %value_cache, %state) : (tensor<192x1024xf16>, tensor<192x1024xf16>, tensor<1048832xf16>)
+  kernel.launch @qwen38_attention_query_prepare_spans[%tokens, %spans](%epoch, %epsilon, %projection, %weight, %query, %gate) : [index, index](tensor<13xi32>, f32, tensor<17x12288xf32>, tensor<256xf32>, tensor<17x6144xf32>, tensor<17x6144xf32>)
+  kernel.launch @qwen38_attention_kv_prepare_spans[%tokens, %spans](%epoch, %rows, %layer_origin, %epsilon, %key, %value, %weight, %state) : [index, index](tensor<13xi32>, tensor<518xi32>, offset, f32, tensor<17x1024xf32>, tensor<17x1024xf32>, tensor<256xf32>, tensor<1048832xf16>)
+  kernel.launch @qwen38_attention_spans_f16_wmma[%tokens, %spans](%epoch, %rows, %layer_origin, %query, %gate, %state, %output) : [index, index](tensor<13xi32>, tensor<518xi32>, offset, tensor<17x6144xf32>, tensor<17x6144xf32>, tensor<1048832xf16>, tensor<17x6144xf32>)
+  kernel.launch @qwen38_attention_query_prepare_prefill[%tokens](%control, %epsilon, %projection, %weight, %expected_query, %expected_gate) : [index](tensor<2xi32>, f32, tensor<17x12288xf32>, tensor<256xf32>, tensor<17x6144xf32>, tensor<17x6144xf32>)
+  kernel.launch @qwen38_attention_kv_prepare_prefill[%tokens](%control, %epsilon, %key, %value, %weight, %key_cache, %value_cache) : [index](tensor<2xi32>, f32, tensor<17x1024xf32>, tensor<17x1024xf32>, tensor<256xf32>, tensor<192x1024xf16>, tensor<192x1024xf16>)
+  kernel.launch @qwen38_attention_prefill_f16_wmma[%tokens](%control, %expected_query, %expected_gate, %key_cache, %value_cache, %expected_output) : [index](tensor<2xi32>, tensor<17x6144xf32>, tensor<17x6144xf32>, tensor<192x1024xf16>, tensor<192x1024xf16>, tensor<17x6144xf32>)
+  kernel.launch @scatter_reference_pages(%key_cache, %value_cache, %expected_state) : (tensor<192x1024xf16>, tensor<192x1024xf16>, tensor<1048832xf16>)
+  check.expect.bitwise actual(%query) expected(%expected_query) : tensor<17x6144xf32>
+  check.expect.bitwise actual(%gate) expected(%expected_gate) : tensor<17x6144xf32>
+  check.expect.bitwise actual(%output) expected(%expected_output) : tensor<17x6144xf32>
+  check.expect.bitwise actual(%state) expected(%expected_state) : tensor<1048832xf16>
+  check.return
+}

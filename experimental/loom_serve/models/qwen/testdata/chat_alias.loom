@@ -1,0 +1,18 @@
+// A model policy may retain input storage instead of constructing new bytes.
+// This fixture exercises the native completion owner through that legal case.
+func.def public @complete_text(%prompt: buffer, %content: buffer, %tools: buffer) -> (buffer) {
+  func.return %content : buffer
+}
+
+func.def public @text_end(%response: buffer, %previous: i64, %phase: i32) -> (i64) {
+  %length = buffer.length %response
+  %result = index.cast %length : offset to i64
+  func.return %result : i64
+}
+
+global.rodata.def @empty_tools = bytes("5b5d")
+
+func.def public @parse_tools(%schemas: buffer, %response: buffer) -> (buffer) {
+  %empty = global.load @empty_tools : buffer
+  func.return %empty : buffer
+}
