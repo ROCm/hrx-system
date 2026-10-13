@@ -473,18 +473,12 @@ void RegisterCxxJitPhaseBenchmarks(const char* kernel_name,
 }
 
 [[maybe_unused]] const bool kCxxJitPhasesRegistered = [] {
+  // Phase attribution deliberately uses two representative source shapes.
+  // Additional kernels retain their authoritative end-to-end measurements
+  // below without multiplying frontend and prepared-module setup across every
+  // cumulative phase.
   RegisterCxxJitPhaseBenchmarks("RmsNorm", &kRmsNorm);
   RegisterCxxJitPhaseBenchmarks("Mxfp8Gfx1250", &kMxfp8);
-  RegisterCxxJitPhaseBenchmarks("Iq4XsGateUpGfx1151", &kIq4XsGateUpGfx1151);
-  RegisterCxxJitPhaseBenchmarks("Iq4XsGateUpGfx942AsyncSingle",
-                                &kIq4XsGateUpGfx942AsyncSingle);
-  RegisterCxxJitPhaseBenchmarks("Iq4XsGateUpGfx942AsyncDouble",
-                                &kIq4XsGateUpGfx942AsyncDouble);
-  RegisterCxxJitPhaseBenchmarks("Q4KQ8SwiGluGfx1250", &kQ4KQ8SwiGlu);
-  RegisterCxxJitPhaseBenchmarks("ConfiguredWorkgroupStorage",
-                                &kConfiguredWorkgroupStorage);
-  RegisterCxxJitPhaseBenchmarks("NvFp4Gfx1100", &kNvFp4Gfx1100);
-  RegisterCxxJitPhaseBenchmarks("NvFp4Gfx942", &kNvFp4Gfx942);
   return true;
 }();
 
@@ -520,31 +514,6 @@ BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, RmsNorm, &kRmsNorm)
     ->Unit(::benchmark::kMicrosecond)
     ->Iterations(1);
 BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, Mxfp8Gfx1250, &kMxfp8)
-    ->Unit(::benchmark::kMicrosecond)
-    ->Iterations(1);
-BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, Iq4XsGateUpGfx1151,
-                  &kIq4XsGateUpGfx1151)
-    ->Unit(::benchmark::kMicrosecond)
-    ->Iterations(1);
-BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, Iq4XsGateUpGfx942AsyncSingle,
-                  &kIq4XsGateUpGfx942AsyncSingle)
-    ->Unit(::benchmark::kMicrosecond)
-    ->Iterations(1);
-BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, Iq4XsGateUpGfx942AsyncDouble,
-                  &kIq4XsGateUpGfx942AsyncDouble)
-    ->Unit(::benchmark::kMicrosecond)
-    ->Iterations(1);
-BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, Q4KQ8SwiGluGfx1250, &kQ4KQ8SwiGlu)
-    ->Unit(::benchmark::kMicrosecond)
-    ->Iterations(1);
-BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, ConfiguredWorkgroupStorage,
-                  &kConfiguredWorkgroupStorage)
-    ->Unit(::benchmark::kMicrosecond)
-    ->Iterations(1);
-BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, NvFp4Gfx1100, &kNvFp4Gfx1100)
-    ->Unit(::benchmark::kMicrosecond)
-    ->Iterations(1);
-BENCHMARK_CAPTURE(SourceToHsacoColdWorkspace, NvFp4Gfx942, &kNvFp4Gfx942)
     ->Unit(::benchmark::kMicrosecond)
     ->Iterations(1);
 

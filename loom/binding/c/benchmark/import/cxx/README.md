@@ -115,15 +115,13 @@ compiler, prepared pipeline, target profile, config module, source handle, and
 workspace are reused. Process startup and setup are outside timing. One warmup
 compilation precedes measurement; parsed C++ ASTs are not cached.
 
-The `CxxJitPhase` rows attribute this endpoint with maintained sources. llama.cpp
-RMSNorm provides a small ordinary kernel; the MXFP8 group dot exercises storage
-encodings, narrow-float conversion, vectors, reductions, and target-specific
-lowering; the routed IQ4_XS projection combines original-format nonlinear
-decode, dynamic schedules, workgroup staging, paired floating-point dots, and a
-fused SwiGLU epilogue; and the routed Q4_K/Q8_1 SwiGLU combines packed records,
-configuration, template application, integer dots, subgroup reductions, and
-nontrivial address arithmetic. Each row invokes a complete public compiler
-boundary:
+The `CxxJitPhase` rows attribute this endpoint with two representative source
+shapes. llama.cpp RMSNorm provides a small ordinary kernel; the MXFP8 group dot
+exercises storage encodings, narrow-float conversion, vectors, reductions, and
+target-specific lowering. Additional maintained kernels retain end-to-end
+`SourceToHsaco` rows without multiplying frontend and prepared-module setup
+across every cumulative phase. Each phase row invokes a complete public
+compiler boundary:
 
 | Phase | Timed operation |
 | --- | --- |
@@ -144,38 +142,22 @@ phase times are not additive reconstructions of `SourceToHsaco`.
 Validation, result construction, teardown, and arena reuse remain owned by the
 public operation that performs them.
 
+The end-to-end rows retain larger and target-specialized compilation shapes.
 The routed Q4_K/Q8_1 source supplies input size 4096 through an ordinary
-`config.def` and compiles its complete 768-channel kernel for `gfx1250`.
-The IQ4_XS source fixes its production 2,560-element by 640-channel top-10
-geometry in C++ and supplies its transport, staging depth, and scheduling
-values through ordinary `config.def` operations. The benchmark retains the
-single-buffered synchronous `gfx1151` case and compares single- and
-double-buffered asynchronous `gfx942` specializations.
-`Import`, `SourceToPreparedLow`, and `SourceToHsaco` form cumulative boundaries
-whose differences provide an additive production-path breakdown. Clone-based
-phase probes remain diagnostic controls and are not additive.
+`config.def` and compiles its complete 768-channel kernel for `gfx1250`. The
+IQ4_XS source fixes its production 2,560-element by 640-channel top-10 geometry
+in C++ and supplies its transport, staging depth, and scheduling values through
+ordinary `config.def` operations. Its rows retain the single-buffered
+synchronous `gfx1151` case and compare single- and double-buffered asynchronous
+`gfx942` specializations. Configured workgroup storage and the multi-file NVFP4
+provider source retain specialization and include-provider coverage at the same
+complete endpoint.
 
 `ConfiguredWorkgroupStorage` measures a specialization-first kernel whose C++
 source declares a constrained stage count, uses that value to size aligned
 workgroup storage and a dynamic view, and carries the value through a loop. The
 benchmark supplies four stages through a `config.def`; it does not rewrite or
-reparse the source. A short optimized run on an AMD Ryzen AI Max+ 395 on
-2026-10-08 measured these medians over seven 100-iteration repetitions:
-
-| Public boundary | Configured workgroup storage |
-| --- | ---: |
-| Import to verified High IR | 3.55 ms |
-| Clone High IR | 12.9 us |
-| Through source-low | 0.362 ms |
-| Through prepared-low | 0.397 ms |
-| Clone prepared Low IR | 9.24 us |
-| Emit prepared Low IR to HSACO | 84.1 us |
-| Complete source to HSACO | 4.17 ms |
-
-The benchmark lease was held and the complete row had a 5.2% repetition
-coefficient of variation. Seven one-iteration cold-workspace repetitions had a
-4.26 ms median and allocated eleven 128 KiB workspace blocks, or 1.375 MiB.
-Warmed iterations reused those blocks. The emitted HSACO is 9,208 bytes.
+reparse the source.
 
 The same imported module was also compiled with stage counts one and four and
 compared with static High IR controls in which only the stage count was an
