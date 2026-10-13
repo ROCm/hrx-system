@@ -39,6 +39,7 @@ from iree.vm.bytecode.spec.text.module import (
     HexBlob,
     MetadataValue,
     ModuleTextFormat,
+    NativeCallBody,
     NativeLayoutBody,
     NestedBody,
     NullableSymbolReference,
@@ -75,6 +76,7 @@ class _FormatOpcode(enum.IntEnum):
     METADATA_VALUE = 0xEC
     DECLARE_FLAGS = 0xED
     NATIVE_LAYOUT = 0xEE
+    NATIVE_CALL = 0xEF
 
 
 class _LayoutKind(enum.IntEnum):
@@ -100,6 +102,7 @@ class _InstructionRelationKind(enum.IntEnum):
     CALL = 7
     CALL_INDIRECT = 8
     FUNCTION_ADDRESS = 9
+    NATIVE_CALL = 10
 
 
 _NO_FIELD = 0xFF
@@ -282,7 +285,21 @@ def _validate_instruction_field_projection(text, field, physical_fields) -> None
     """Rejects text fields whose semantic rules have no assembler owner."""
 
     primary_rule = physical_fields[field.primary_field].rule.kind
-    if primary_rule not in _INSTRUCTION_FIELD_RULES[field.kind]:
+    native_symbol = (
+        field.kind == InstructionFieldKind.MODULE_SYMBOL
+        and field.symbol_domain == SymbolDomain.NATIVE_CALLSITE
+        and any(
+            rule.kind == instruction_rules.RecordRuleKind.NATIVE_CALL
+            and rule.fields == (field.primary_field,)
+            for rule in text.instruction.rules
+        )
+    )
+    allowed_rules = (
+        (instruction_rules.FieldRule.ANY_BITS,)
+        if native_symbol
+        else _INSTRUCTION_FIELD_RULES[field.kind]
+    )
+    if primary_rule not in allowed_rules:
         raise ValueError(
             f"{text.instruction.mnemonic}.{field.primary_field}: "
             f"{field.kind.name} does not own {primary_rule.name}"
@@ -376,8 +393,9 @@ def _instruction_relation(instruction: isa.Instruction):
             relations.append(
                 (_InstructionRelationKind.FUNCTION_ADDRESS, rule.fields, 0)
             )
+        elif rule.kind == instruction_rules.RecordRuleKind.NATIVE_CALL:
+            relations.append((_InstructionRelationKind.NATIVE_CALL, rule.fields, 0))
         elif rule.kind in {
-            instruction_rules.RecordRuleKind.NATIVE_CALL,
             instruction_rules.RecordRuleKind.SWITCH_TARGETS,
             instruction_rules.RecordRuleKind.VALUE_REGISTER_RANGE,
             instruction_rules.RecordRuleKind.VALUE_REGISTER_FORMAT_RANGE,
@@ -538,6 +556,8 @@ def _encode_grammar_program(
                 )
             )
             append_field(element.offset_record, "byte_offset_u32")
+        elif isinstance(element, NativeCallBody):
+            program.append(_FormatOpcode.NATIVE_CALL)
         elif isinstance(element, NativeLayoutBody):
             program.extend(
                 (

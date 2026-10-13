@@ -230,6 +230,12 @@ typedef struct iree_vm_bytecode_assembler_t {
   iree_io_stream_t* stream;
   // Two-pass source symbol and deferred fixup storage.
   iree_vm_bytecode_assembler_symbols_t symbols;
+  // Parsed grouped native calls retained through symbol resolution.
+  iree_vm_bytecode_assembler_native_call_t* native_calls;
+  // Last parsed native call, or NULL while empty.
+  iree_vm_bytecode_assembler_native_call_t* native_call_tail;
+  // Allocator for cold operand trees and their temporary encoding storage.
+  iree_allocator_t host_allocator;
   // Next row ordinal by wire record kind during the second pass.
   uint32_t record_ordinals[IREE_VM_BYTECODE_ASSEMBLER_RECORD_COUNT];
   // Absolute output offsets of wire record arrays in the active image.
@@ -1434,6 +1440,7 @@ iree_vm_bytecode_assembler_parse_instruction(
             IREE_VM_BYTECODE_ASSEMBLER_RELATION_RODATA_STATIC_OFFSET ||
         relation->kind == IREE_VM_BYTECODE_ASSEMBLER_RELATION_CALL ||
         relation->kind == IREE_VM_BYTECODE_ASSEMBLER_RELATION_CALL_INDIRECT ||
+        relation->kind == IREE_VM_BYTECODE_ASSEMBLER_RELATION_NATIVE_CALL ||
         relation->kind ==
             IREE_VM_BYTECODE_ASSEMBLER_RELATION_FUNCTION_ADDRESS) {
       const iree_vm_bytecode_assembler_fixup_t fixup = {
@@ -1649,6 +1656,37 @@ static iree_status_t iree_vm_bytecode_assembler_parse_native_layout(
   }
   memcpy(row_bytes, &row, sizeof(row));
   return iree_ok_status();
+}
+
+static iree_status_t iree_vm_bytecode_assembler_parse_native_call(
+    iree_vm_bytecode_assembler_t* assembler, uint8_t* row) {
+  iree_vm_bytecode_assembler_native_call_t* call = NULL;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_native_parse(
+      &assembler->lexer, assembler->host_allocator, &call));
+  const uint8_t record = IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_CALL_WORD;
+  uint32_t* count = assembler->is_emitting
+                        ? &assembler->record_ordinals[record]
+                        : &assembler->summary.record_counts[record];
+  iree_vm_bytecode_assembler_store(
+      row +
+          offsetof(iree_vm_bytecode_v0_native_callsite_row_t, word_offset_u32),
+      4, *count);
+  iree_vm_bytecode_assembler_store(
+      row + offsetof(iree_vm_bytecode_v0_native_callsite_row_t, word_count_u32),
+      4, call->word_count);
+  iree_status_t status =
+      iree_vm_bytecode_assembler_add_count(assembler, count, call->word_count);
+  if (iree_status_is_ok(status) && assembler->is_emitting) {
+    if (assembler->native_call_tail) {
+      assembler->native_call_tail->next = call;
+    } else {
+      assembler->native_calls = call;
+    }
+    assembler->native_call_tail = call;
+  } else {
+    iree_vm_bytecode_assembler_native_free(call, assembler->host_allocator);
+  }
+  return status;
 }
 
 static bool iree_vm_bytecode_assembler_control_flow_is_terminal(
@@ -2047,6 +2085,9 @@ static iree_status_t iree_vm_bytecode_assembler_parse_grammar(
       }
       iree_vm_bytecode_assembler_store(row + field_offset, field_width,
                                        relative_offset);
+    } else if (opcode == IREE_VM_BYTECODE_ASSEMBLER_FORMAT_NATIVE_CALL) {
+      IREE_RETURN_IF_ERROR(
+          iree_vm_bytecode_assembler_parse_native_call(assembler, row));
     } else if (opcode == IREE_VM_BYTECODE_ASSEMBLER_FORMAT_NATIVE_LAYOUT) {
       IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_native_layout(
           assembler, row, &program));
@@ -2547,6 +2588,16 @@ static iree_status_t iree_vm_bytecode_assembler_resolve_relation(
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_validate_call_packet(
         assembler, &function, &callable, direct_ref_move_mask, &valid));
   } else if (relation->kind ==
+             IREE_VM_BYTECODE_ASSEMBLER_RELATION_NATIVE_CALL) {
+    const uint32_t ordinal =
+        (uint32_t)iree_vm_bytecode_assembler_load_relation_field(
+            record, relation->fields[0]);
+    iree_vm_bytecode_v0_native_callsite_row_t callsite;
+    IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_read_record(
+        assembler, IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_CALLSITE_ROW, ordinal,
+        &callsite));
+    valid = callsite.function_ordinal_u16 == fixup->scope - 1;
+  } else if (relation->kind ==
              IREE_VM_BYTECODE_ASSEMBLER_RELATION_FUNCTION_ADDRESS) {
     const uint8_t target_kind =
         (uint8_t)iree_vm_bytecode_assembler_load_relation_field(
@@ -2825,6 +2876,7 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_assemble_module(
   }
 
   iree_vm_bytecode_assembler_t assembler = {0};
+  assembler.host_allocator = host_allocator;
   iree_vm_bytecode_assembler_symbols_initialize_counting(&assembler.symbols);
   iree_vm_bytecode_assembler_lexer_initialize(source, &assembler.lexer);
   iree_status_t status = iree_vm_bytecode_assembler_parse_module(&assembler);
@@ -2899,6 +2951,7 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_assemble_module(
         .record_counts = assembler.summary.record_counts,
         .string_data_offset =
             assembler.tail_offsets[IREE_VM_BYTECODE_ASSEMBLER_TAIL_STRINGS],
+        .native_calls = assembler.native_calls,
     };
     status = iree_vm_bytecode_assembler_module_finalize(&view, host_allocator);
   }
@@ -2907,6 +2960,13 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_assemble_module(
   }
 
   iree_io_stream_release(assembler.stream);
+  while (assembler.native_calls) {
+    iree_vm_bytecode_assembler_native_call_t* next =
+        assembler.native_calls->next;
+    iree_vm_bytecode_assembler_native_free(assembler.native_calls,
+                                           host_allocator);
+    assembler.native_calls = next;
+  }
   iree_allocator_free(host_allocator, storage);
   return status;
 }

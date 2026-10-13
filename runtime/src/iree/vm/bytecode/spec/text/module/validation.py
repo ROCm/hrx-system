@@ -34,6 +34,7 @@ from iree.vm.bytecode.spec.text.module import (
     MetadataValue,
     ModuleShell,
     ModuleTextFormat,
+    NativeCallBody,
     NativeLayoutBody,
     NestedBody,
     NullableSymbolReference,
@@ -221,6 +222,12 @@ def _validate_grammar_element(
             offset_field.rule.kind == module_rules.FieldRule.STRING_OFFSET,
             f"{grammar.name}: quoted blob does not own a string offset",
         )
+    elif isinstance(element, NativeCallBody):
+        require(
+            element.row_record == grammar.record == records.NATIVE_CALLSITE_ROW
+            and element.word_record == records.NATIVE_CALL_WORD,
+            f"{grammar.name}: invalid native-call records",
+        )
     elif isinstance(element, NativeLayoutBody):
         require(
             element.row_record == grammar.record == records.NATIVE_LAYOUT_ROW
@@ -373,6 +380,9 @@ def _grammar_field_owners(grammar: RecordGrammar) -> dict[WireRecord, set[str]]:
                 own(element.parent_record, element.count_field_name)
         elif isinstance(element, QuotedBlob):
             own(element.offset_record, "byte_offset_u32")
+        elif isinstance(element, NativeCallBody):
+            own(element.row_record, "word_offset_u32", "word_count_u32")
+            own(element.word_record, "value_u32")
         elif isinstance(element, NativeLayoutBody):
             own(element.row_record, *_field_names(element.row_record))
             own(element.field_record, *_field_names(element.field_record))

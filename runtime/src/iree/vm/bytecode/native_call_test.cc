@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstring>
+#include <string>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -344,7 +345,8 @@ TEST_F(BytecodeNativeCallTest, AdmissionRejectsMalformedLayoutDeclarations) {
   layouts[1] = original;
 }
 
-TEST_F(BytecodeNativeCallTest, NativeSectionRoundtripsWithoutLosingWords) {
+TEST_F(BytecodeNativeCallTest,
+       GroupedOperandsRoundtripWithoutChangingTheImage) {
   iree_string_builder_t text;
   iree_string_builder_initialize(iree_allocator_system(), &text);
   const iree_vm_bytecode_disassembler_write_callback_t callback = {
@@ -356,6 +358,13 @@ TEST_F(BytecodeNativeCallTest, NativeSectionRoundtripsWithoutLosingWords) {
   IREE_ASSERT_OK(iree_vm_bytecode_disassemble_module(
       iree_const_cast_byte_span(fixture_.contents), callback,
       iree_allocator_system()));
+  const std::string rendered(iree_string_builder_buffer(&text),
+                             iree_string_builder_size(&text));
+  EXPECT_NE(rendered.find("(#v0, #r0, out %v0, out #r0, [(%v0), (%v1)])"),
+            std::string::npos);
+  EXPECT_NE(rendered.find("control.call.native @native_callsite0"),
+            std::string::npos);
+  EXPECT_EQ(rendered.find("word 0x"), std::string::npos);
   iree_vm_bytecode_module_fixture_t roundtrip = {};
   IREE_ASSERT_OK(iree_vm_bytecode_module_fixture_initialize(
       iree_string_builder_view(&text), iree_allocator_system(), &roundtrip));
@@ -365,6 +374,69 @@ TEST_F(BytecodeNativeCallTest, NativeSectionRoundtripsWithoutLosingWords) {
             0);
   iree_vm_bytecode_module_fixture_deinitialize(&roundtrip);
   iree_string_builder_deinitialize(&text);
+}
+
+TEST(NativeCallAssembly, RejectsMismatchedGroupedOperands) {
+  const auto* source = iree_vm_bytecode_native_call_testdata_create();
+  const std::string original(reinterpret_cast<const char*>(source[0].data),
+                             source[0].size);
+  const std::string valid = "(#v0, #r0, out %v0, out #r0, [(%v0), (%v1)])";
+  const auto position = original.find(valid);
+  ASSERT_NE(position, std::string::npos);
+  for (const char* invalid : {
+           "(%r0, #r0, out %v0, out #r0, [(%v0), (%v1)])",
+           "(#v0, #r0, %v0, out #r0, [(%v0), (%v1)])",
+           "(#v0, #r0, out %v0, out %v0, [(%v0), (%v1)])",
+           "(#v0, #r0, out %v0, out #r0, %v0)",
+           "(#v0, #r0, out %v0, out #r0, [(), (%v1)])",
+           "(#v0, #r0, out %v0, out #r0, [(out %v0)])",
+           "(#v0, #r0, out %v0, out #r0, [(%v0) * 2])",
+           "(#v0, #r0, out %v0, out #r0, [() * 2])",
+           "(#v0, #r0, out %v0, out #r0)",
+       }) {
+    SCOPED_TRACE(invalid);
+    std::string text = original;
+    text.replace(position, valid.size(), invalid);
+    iree_vm_bytecode_module_fixture_t fixture = {};
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          iree_vm_bytecode_module_fixture_initialize(
+                              iree_make_string_view(text.data(), text.size()),
+                              iree_allocator_system(), &fixture));
+    iree_vm_bytecode_module_fixture_deinitialize(&fixture);
+  }
+  for (const char* invalid : {
+           "(#v0, %r1, out %v0, out #r0, [])",
+           "(#v0, #r1, out %v0, out #r0, [])",
+           "(#v1, #r0, out %v0, out #r0, [])",
+           "(%v2147483648, #r0, out %v0, out #r0, [])",
+       }) {
+    SCOPED_TRACE(invalid);
+    std::string text = original;
+    text.replace(position, valid.size(), invalid);
+    iree_vm_bytecode_module_fixture_t fixture = {};
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                          iree_vm_bytecode_module_fixture_initialize(
+                              iree_make_string_view(text.data(), text.size()),
+                              iree_allocator_system(), &fixture));
+    iree_vm_bytecode_module_fixture_deinitialize(&fixture);
+  }
+}
+
+TEST(NativeCallAssembly, SymbolicCallsRequireTheOwningFunction) {
+  const auto* source = iree_vm_bytecode_native_call_testdata_create();
+  std::string text(reinterpret_cast<const char*>(source[0].data),
+                   source[0].size);
+  const std::string instruction = "control.call.native @run_call";
+  const auto position = text.find(instruction);
+  ASSERT_NE(position, std::string::npos);
+  text.replace(position, instruction.size(),
+               "control.call.native @failure_call");
+  iree_vm_bytecode_module_fixture_t fixture = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_vm_bytecode_module_fixture_initialize(
+                            iree_make_string_view(text.data(), text.size()),
+                            iree_allocator_system(), &fixture));
+  iree_vm_bytecode_module_fixture_deinitialize(&fixture);
 }
 
 }  // namespace

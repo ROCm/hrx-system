@@ -763,7 +763,7 @@ CONTROL_CALL_NATIVE = Instruction(
     success=(
         "The entry publishes results after native input use and execution advances eight bytes.",
     ),
-    assembly="control.call.native {callsite_ordinal = 3}",
+    assembly="control.call.native @native_callsite3",
     pseudocode="status = native_calls[callsite_ordinal_u32](caller_storage, scratch);",
     control_flow=ControlFlow.NATIVE_CALL,
     rules=(

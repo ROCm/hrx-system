@@ -40,6 +40,7 @@ from iree.vm.bytecode.spec.text.module import (
     MatchingFieldRunCount,
     MetadataValue,
     ModuleTextFormat,
+    NativeCallBody,
     NativeLayoutBody,
     NestedBody,
     NullableSymbolReference,
@@ -74,6 +75,7 @@ class _FormatOpcode(enum.IntEnum):
     HEX_BLOB = 0xEA
     METADATA_VALUE = 0xEB
     NATIVE_LAYOUT = 0xEC
+    NATIVE_CALL = 0xED
 
 
 class _LayoutKind(enum.IntEnum):
@@ -348,6 +350,8 @@ def _encode_grammar_program(
                     offset_field.encoding.byte_length,
                 )
             )
+        elif isinstance(element, NativeCallBody):
+            program.append(_FormatOpcode.NATIVE_CALL)
         elif isinstance(element, NativeLayoutBody):
             program.extend(
                 (

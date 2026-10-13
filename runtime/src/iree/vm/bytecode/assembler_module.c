@@ -699,7 +699,7 @@ static iree_status_t iree_vm_bytecode_assembler_module_native_calls(
       .layout_count = layout_count,
       .field_count = field_count,
   };
-  const uint32_t* words = (const uint32_t*)(storage + words_offset);
+  uint32_t* words = (uint32_t*)(storage + words_offset);
   iree_status_t status = iree_vm_bytecode_assembler_module_read(
       view,
       view->record_offsets[IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_LAYOUT_ROW],
@@ -709,12 +709,6 @@ static iree_status_t iree_vm_bytecode_assembler_module_native_calls(
         view,
         view->record_offsets[IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_FIELD_ROW],
         field_count * sizeof(*schema.fields), storage + fields_offset);
-  }
-  if (iree_status_is_ok(status) && word_count) {
-    status = iree_vm_bytecode_assembler_module_read(
-        view,
-        view->record_offsets[IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_CALL_WORD],
-        word_count * sizeof(*words), storage + words_offset);
   }
   for (uint32_t i = 0; i < layout_count && iree_status_is_ok(status); ++i) {
     iree_vm_native_call_layout_t* row = &layouts[i];
@@ -739,7 +733,9 @@ static iree_status_t iree_vm_bytecode_assembler_module_native_calls(
         &schema,
         view->record_counts[IREE_VM_BYTECODE_MODULE_RECORD_REF_TYPE_ENTRY_ROW]);
   }
-  for (uint32_t i = 0; i < callsite_count && iree_status_is_ok(status); ++i) {
+  const iree_vm_bytecode_assembler_native_call_t* operands = view->native_calls;
+  for (uint32_t i = 0; i < callsite_count && iree_status_is_ok(status);
+       ++i, operands = operands->next) {
     iree_vm_bytecode_v0_native_callsite_row_t row;
     iree_vm_bytecode_v0_native_import_row_t import;
     iree_vm_bytecode_v0_function_row_t function;
@@ -766,7 +762,12 @@ static iree_status_t iree_vm_bytecode_assembler_module_native_calls(
                       .local_byte_length = function.local_byte_length_u16},
       };
       callsite.schema.root_ordinal = import.layout_ordinal_u16;
-      status = iree_vm_native_call_verify(&callsite, scratch_allocator);
+      status = iree_vm_bytecode_assembler_native_encode(
+          operands, &callsite.schema, &function, words + row.word_offset_u32,
+          scratch_allocator);
+      if (iree_status_is_ok(status)) {
+        status = iree_vm_native_call_verify(&callsite, scratch_allocator);
+      }
     }
   }
   if (iree_status_is_ok(status)) {
@@ -777,6 +778,15 @@ static iree_status_t iree_vm_bytecode_assembler_module_native_calls(
   if (iree_status_is_ok(status)) {
     status = iree_io_stream_write(view->stream, layout_count * sizeof(*layouts),
                                   layouts);
+  }
+  if (iree_status_is_ok(status) && word_count) {
+    status = iree_io_stream_seek(
+        view->stream, IREE_IO_STREAM_SEEK_SET,
+        view->record_offsets[IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_CALL_WORD]);
+    if (iree_status_is_ok(status)) {
+      status = iree_io_stream_write(view->stream, word_count * sizeof(*words),
+                                    words);
+    }
   }
   iree_allocator_free(scratch_allocator, storage);
   return status;

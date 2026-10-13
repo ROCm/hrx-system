@@ -48,8 +48,8 @@ vm.module core(0.0) {
     func @function0 : @callable0 flags([has_native_call]) frame(local_bytes = 0, value_registers = 3, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
     ^bb0:
       control.block
-      control.call.native {callsite_ordinal = 0}
-      control.call.native {callsite_ordinal = 1}
+      control.call.native @native_callsite0
+      control.call.native @native_callsite1
       control.return
     }
   }
@@ -60,27 +60,8 @@ vm.module core(0.0) {
     native_layout @native_layout2 (ref(@ref_type0), [@native_layout0], [@native_layout1], out i64)
     native_import @native_import0 module(@string3) export(@string4) version(1) : @native_layout2
     native_import @native_import1 module(@string5) export(@string6) version(1) : @native_layout2
-    native_callsite @native_callsite0 function(@function0) callee(@native_import0) {
-      word 0x00000000
-      word 0x00000002
-      word 0x00000006
-      word 0x00000001
-      word 0x00000008
-      word 0x00000000
-      word 0x00000000
-      word 0x00000001
-      word 0x00000001
-      word 0x0000000A
-      word 0x00000002
-    }
-    native_callsite @native_callsite1 function(@function0) callee(@native_import1) {
-      word 0x00000000
-      word 0x00000000
-      word 0x00000006
-      word 0x00000000
-      word 0x00000006
-      word 0x00000001
-    }
+    native_callsite @native_callsite0 function(@function0) callee(@native_import0) (%r0, [(%v0), (%v1)], [([(%v2)])], out %v0)
+    native_callsite @native_callsite1 function(@function0) callee(@native_import1) (%r0, [], [], out %v1)
   }
 
 }

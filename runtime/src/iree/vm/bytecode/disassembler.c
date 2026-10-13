@@ -10,6 +10,7 @@
 #include <stdarg.h>
 #include <string.h>
 
+#include "iree/vm/bytecode/disassembler_native.h"
 #include "iree/vm/bytecode/verifier.h"
 #include "iree/vm/bytecode/wire/core.h"
 #include "iree/vm/bytecode/wire/module.h"
@@ -229,6 +230,10 @@ typedef struct iree_vm_bytecode_disassembler_t {
   iree_vm_bytecode_disassembler_reader_t reader;
   // Reusable per-function block-offset scratch storage.
   uint32_t* block_offsets;
+  // Admitted native declarations and owning function storage descriptions.
+  const iree_vm_bytecode_module_layout_t* layout;
+  // Allocator for unusually deep native operand traversal.
+  iree_allocator_t scratch_allocator;
 } iree_vm_bytecode_disassembler_t;
 
 static iree_string_view_t iree_vm_bytecode_disassembler_name_at(
@@ -1300,6 +1305,19 @@ static iree_status_t iree_vm_bytecode_disassembler_grammar(
       IREE_RETURN_IF_ERROR(iree_vm_bytecode_disassembler_quoted_bytes(
           disassembler, iree_make_const_byte_span(
                             reader->tails[tail].data + begin, end - begin)));
+    } else if (opcode == IREE_VM_BYTECODE_DISASSEMBLER_FORMAT_NATIVE_CALL) {
+      const iree_vm_bytecode_v0_native_callsite_row_t* callsite =
+          (const iree_vm_bytecode_v0_native_callsite_row_t*)row;
+      const iree_vm_bytecode_native_call_table_t* calls =
+          &disassembler->layout->native_calls;
+      iree_vm_native_call_schema_t schema = calls->schema;
+      schema.root_ordinal =
+          calls->imports[callsite->import_ordinal_u16].layout_ordinal_u16;
+      IREE_RETURN_IF_ERROR(iree_vm_bytecode_disassembler_native_call(
+          &schema,
+          &disassembler->layout->functions.rows[callsite->function_ordinal_u16],
+          calls->words + callsite->word_offset_u32,
+          disassembler->write_callback, disassembler->scratch_allocator));
     } else if (opcode == IREE_VM_BYTECODE_DISASSEMBLER_FORMAT_NATIVE_LAYOUT) {
       IREE_RETURN_IF_ERROR(iree_vm_bytecode_disassembler_native_layout(
           disassembler, row, &program));
@@ -1490,6 +1508,8 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_disassemble_module(
   if (iree_status_is_ok(status)) {
     disassembler.write_callback = write_callback;
     disassembler.block_offsets = block_offsets;
+    disassembler.layout = &plan.layout;
+    disassembler.scratch_allocator = scratch_allocator;
     iree_vm_bytecode_disassembler_bind_reader(contents, &plan,
                                               &disassembler.reader);
     image = disassembler.reader

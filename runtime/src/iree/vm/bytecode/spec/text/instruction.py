@@ -190,6 +190,11 @@ def _instruction_text(
         if rules.RecordRuleKind.SWITCH_TARGETS in record_rules
         else None
     )
+    native_call_field = (
+        record_rules[rules.RecordRuleKind.NATIVE_CALL].fields[0]
+        if rules.RecordRuleKind.NATIVE_CALL in record_rules
+        else None
+    )
 
     value_ranges = {}
     for record_rule in instruction.rules:
@@ -308,6 +313,9 @@ def _instruction_text(
         elif field.rule.kind == rules.FieldRule.GLOBAL_ORDINAL:
             kind = InstructionFieldKind.MODULE_SYMBOL
             symbol_domain = _global_domain(instruction.mnemonic)
+        elif name == native_call_field:
+            kind = InstructionFieldKind.MODULE_SYMBOL
+            symbol_domain = SymbolDomain.NATIVE_CALLSITE
         elif field.rule.kind in _PLAIN_ORDINAL_KINDS:
             kind = InstructionFieldKind.ORDINAL
         elif field.rule.kind == rules.FieldRule.SELECTOR:

@@ -142,6 +142,13 @@ class NativeLayoutBody(NamedTuple):
     kind_table: NumericTable
 
 
+class NativeCallBody(NamedTuple):
+    """Grouped physical selectors encoded using the imported native layout."""
+
+    row_record: WireRecord
+    word_record: WireRecord
+
+
 class FunctionBody(NamedTuple):
     """Reads or writes one function's switch table and instruction stream."""
 
@@ -180,6 +187,7 @@ GrammarElement: TypeAlias = (
     | QuotedBlob
     | SignatureBody
     | NativeLayoutBody
+    | NativeCallBody
     | FunctionBody
     | HexBlob
     | MetadataValue

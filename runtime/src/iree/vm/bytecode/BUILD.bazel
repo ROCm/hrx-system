@@ -186,6 +186,8 @@ iree_runtime_cc_library(
         "assembler_lexer.h",
         "assembler_module.c",
         "assembler_module.h",
+        "assembler_native.c",
+        "assembler_native.h",
         "assembler_symbols.c",
         "assembler_symbols.h",
         "assembler_tables.inl",
@@ -225,6 +227,25 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "assembler_native_test",
+    srcs = [
+        "assembler_lexer.h",
+        "assembler_native.h",
+        "assembler_native_test.cc",
+        "disassembler_native.h",
+    ],
+    deps = [
+        ":assembler",
+        ":disassembler",
+        ":wire",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
     ],
 )
 
@@ -273,6 +294,8 @@ iree_runtime_cc_library(
     name = "disassembler",
     srcs = [
         "disassembler.c",
+        "disassembler_native.c",
+        "disassembler_native.h",
         "disassembler_tables.inl",
     ],
     hdrs = ["disassembler.h"],
@@ -280,6 +303,7 @@ iree_runtime_cc_library(
         ":verifier",
         ":wire",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
     ],
 )
 

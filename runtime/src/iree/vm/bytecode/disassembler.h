@@ -48,8 +48,8 @@ typedef struct iree_vm_bytecode_disassembler_write_callback_t {
 //
 // The emitted text uses LF line endings and is accepted by the matching VM
 // bytecode assembler. |scratch_allocator| is used only for verification and
-// unusually large function control-flow graphs; common small functions do not
-// allocate while being printed.
+// unusually large function control-flow graphs or deeply nested native
+// operands; common small functions do not allocate while being printed.
 IREE_API_EXPORT iree_status_t iree_vm_bytecode_disassemble_module(
     iree_const_byte_span_t contents,
     iree_vm_bytecode_disassembler_write_callback_t write_callback,

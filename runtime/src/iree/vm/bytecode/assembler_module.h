@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/io/stream.h"
+#include "iree/vm/bytecode/assembler_native.h"
 #include "iree/vm/bytecode/wire/module.h"
 
 #ifdef __cplusplus
@@ -30,6 +31,8 @@ typedef struct iree_vm_bytecode_assembler_module_view_t {
   const uint32_t* record_counts;
   // Absolute stream offset of the string byte tail.
   uint64_t string_data_offset;
+  // Grouped native operands in callsite ordinal order, awaiting encoding.
+  const iree_vm_bytecode_assembler_native_call_t* native_calls;
 } iree_vm_bytecode_assembler_module_view_t;
 
 // Finalizes derived declaration geometry and validates semantic relationships

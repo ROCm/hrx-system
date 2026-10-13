@@ -149,6 +149,8 @@ iree_cc_library(
     "assembler_lexer.h"
     "assembler_module.c"
     "assembler_module.h"
+    "assembler_native.c"
+    "assembler_native.h"
     "assembler_symbols.c"
     "assembler_symbols.h"
     "assembler_tables.inl"
@@ -185,6 +187,24 @@ iree_cc_test(
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    assembler_native_test
+  SRCS
+    "assembler_lexer.h"
+    "assembler_native.h"
+    "assembler_native_test.cc"
+    "disassembler_native.h"
+  DEPS
+    ::assembler
+    ::disassembler
+    ::wire
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
 )
 
 iree_cc_library(
@@ -239,11 +259,14 @@ iree_cc_library(
     "disassembler.h"
   SRCS
     "disassembler.c"
+    "disassembler_native.c"
+    "disassembler_native.h"
     "disassembler_tables.inl"
   DEPS
     ::verifier
     ::wire
     iree::base
+    iree::vm
   PUBLIC
 )
 

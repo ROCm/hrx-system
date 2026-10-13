@@ -30,7 +30,7 @@ vm.module core(0.0) {
       stack.store.i64 #v0, %v0.x1
       %v1 = constant.s16 11
       ref.stack.store.move %r0, #r0
-      control.call.native {callsite_ordinal = 0}
+      control.call.native @run_call
       %r0 = ref.stack.load.move #r0
       control.return
     }
@@ -40,8 +40,8 @@ vm.module core(0.0) {
       stack.store.i64 #v0, %v0.x1
       %v1 = constant.s16 11
       ref.stack.store.move %r0, #r0
-      control.call.native {callsite_ordinal = 1}
-      control.call.native {callsite_ordinal = 2}
+      control.call.native @failure_call
+      control.call.native @fail_call
       %r0 = ref.stack.load.move #r0
       control.return
     }
@@ -52,27 +52,8 @@ vm.module core(0.0) {
     native_layout @empty ()
     native_import @replace_import module(@native) export(@replace) version(0) : @replace_layout
     native_import @fail_import module(@native) export(@fail) version(0) : @empty
-    native_callsite @run_call function(@run_function) callee(@replace_import) {
-      word 0x80000000
-      word 0x00000001
-      word 0x00000000
-      word 0x00000001
-      word 0x00000002
-      word 0x00000006
-      word 0x00000000
-      word 0x00000001
-    }
-    native_callsite @failure_call function(@failure_function) callee(@replace_import) {
-      word 0x80000000
-      word 0x00000001
-      word 0x00000000
-      word 0x00000001
-      word 0x00000002
-      word 0x00000006
-      word 0x00000000
-      word 0x00000001
-    }
-    native_callsite @fail_call function(@failure_function) callee(@fail_import) {
-    }
+    native_callsite @run_call function(@run_function) callee(@replace_import) (#v0, #r0, out %v0, out #r0, [(%v0), (%v1)])
+    native_callsite @failure_call function(@failure_function) callee(@replace_import) (#v0, #r0, out %v0, out #r0, [(%v0), (%v1)])
+    native_callsite @fail_call function(@failure_function) callee(@fail_import) ()
   }
 }
