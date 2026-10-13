@@ -469,7 +469,9 @@ static iree_status_t loom_report_memory_finish_root(
     }
     if (first == NULL || first->sort_key != entry->sort_key) {
       first = NULL;
-      memset(first_direction, 0, sizeof(first_direction));
+      first_direction[LOOM_REPORT_MEMORY_ALL] = NULL;
+      first_direction[LOOM_REPORT_MEMORY_READ] = NULL;
+      first_direction[LOOM_REPORT_MEMORY_WRITE] = NULL;
     }
     entry->duplicates.overall = first;
     entry->duplicates.direction = first_direction[entry->direction];
