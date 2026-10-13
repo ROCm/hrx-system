@@ -1,0 +1,7 @@
+global.rodata.def @unchanged = bytes("")
+
+func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
+  %root = global.load @unchanged : buffer
+  %bytes = scalar.constant 0 : i64
+  func.return %root, %bytes : buffer, i64
+}

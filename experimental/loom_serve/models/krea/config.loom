@@ -1,0 +1,16 @@
+config.def @krea2.image_tokens = 576 : index
+
+config.def @krea2.block_tokens = 1088 : index
+
+config.def @krea2.time_count = 8 : index
+
+config.def @krea2.text_tokens = 512 : index
+
+config.def @krea2.latent_height = 48 : index
+
+config.def @krea2.latent_width = 48 : index
+
+// The ConvRot checkpoint stores the eight block projections as I8 and several
+// conditioning tensors as BF16. Parameter views retain their exact byte extents;
+// leaf kernels select the matching scalar type without expanding storage.
+config.def @krea2.dit_int8 = 0 : index
