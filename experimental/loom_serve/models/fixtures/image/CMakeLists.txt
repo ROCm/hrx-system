@@ -48,9 +48,6 @@ loom_cc_test(
     iree::base::internal::base64
     iree::base::tooling::flags
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::serving::model_registration
-    iree::experimental::loom_serve::serving::registry
-    iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::hal
     iree::testing::gtest
@@ -60,6 +57,9 @@ loom_cc_test(
     loom::serve::runtime::execution
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
+    loom::serve::server::model_registration
+    loom::serve::server::registry
+    loom::serve::server::router
     loom::serve::service::image::model
     loom::serve::service::image::output
     loom::serve::service::image::request
@@ -95,9 +95,6 @@ loom_cc_test(
     iree::base::internal::base64
     iree::base::tooling::flags
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::serving::model_registration
-    iree::experimental::loom_serve::serving::registry
-    iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::hal
     iree::testing::gtest
@@ -107,6 +104,9 @@ loom_cc_test(
     loom::serve::runtime::execution
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
+    loom::serve::server::model_registration
+    loom::serve::server::registry
+    loom::serve::server::router
     loom::serve::service::image::model
     loom::serve::service::image::output
     loom::serve::service::image::request
@@ -142,9 +142,6 @@ loom_cc_test(
     iree::base::internal::base64
     iree::base::tooling::flags
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::serving::model_registration
-    iree::experimental::loom_serve::serving::registry
-    iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::hal
     iree::testing::gtest
@@ -154,6 +151,9 @@ loom_cc_test(
     loom::serve::runtime::execution
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
+    loom::serve::server::model_registration
+    loom::serve::server::registry
+    loom::serve::server::router
     loom::serve::service::image::model
     loom::serve::service::image::output
     loom::serve::service::image::request

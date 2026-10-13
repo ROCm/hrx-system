@@ -441,8 +441,8 @@ boundary. Binding a public address does not add an authentication layer.
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve/serving:configuration_test \
-  //experimental/loom_serve/serving:router_test \
+  //loom/src/loom/serve/server:configuration_test \
+  //loom/src/loom/serve/server:router_test \
   //experimental/loom_serve/models/fixtures:catalog_test \
   //experimental/loom_serve/models/fixtures:catalog_elastic_test \
   //experimental/loom_serve/models/fixtures:catalog_vulkan_test

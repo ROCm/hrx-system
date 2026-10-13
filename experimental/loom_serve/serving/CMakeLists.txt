@@ -9,120 +9,6 @@
 
 iree_add_all_subdirs()
 
-loom_cc_library(
-  NAME
-    router
-  HDRS
-    "router.h"
-  SRCS
-    "router.c"
-  DEPS
-    ::configuration
-    ::registry
-    ::resources
-    iree::base
-    iree::base::internal::json
-    iree::base::threading
-    iree::task
-    iree::tokenizer
-    loom::serve::runtime::host::wake
-    loom::serve::runtime::parameter::residency
-    loom::serve::runtime::program::compilation
-    loom::serve::server::http::logs
-    loom::serve::server::http::tokenization
-    loom::serve::service
-    loom::serve::service::inspection
-    loom::serve::telemetry::stream
-    loom::serve::transport::http::request
-    loom::serve::transport::http::server
-    loom::util::json
-    loom::util::stream
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    resources
-  HDRS
-    "resources.h"
-  SRCS
-    "resources.c"
-  DEPS
-    iree::async
-    iree::base
-    iree::base::internal::json
-    iree::hal
-    loom::serve::runtime::device
-    loom::serve::runtime::storage::memory
-    loom::serve::transport::http::listener
-    loom::util::json
-    loom::util::stream
-  PUBLIC
-)
-
-if(IREE_HAL_DRIVER_TASK)
-loom_cc_test(
-  NAME
-    resources_test
-  SRCS
-    "resources_test.cc"
-  DEPS
-    ::resources
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::serve::runtime::device
-    loom::serve::runtime::host
-    loom::util::stream
-)
-endif()
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-loom_cc_test(
-  NAME
-    router_test
-  SRCS
-    "router_registration_test.cc"
-    "router_test.cc"
-    "router_test_fixture.h"
-  DEPS
-    ::registry
-    ::router
-    iree::async
-    iree::async::platform
-    iree::async::util::proactor_pool
-    iree::base
-    iree::net::carrier
-    iree::net::carrier::loopback
-    iree::task
-    iree::testing::gtest
-    iree::testing::gtest_main
-    iree::tokenizer
-    iree::tokenizer::format::huggingface::tokenizer_json
-    loom::serve::runtime::host::wake
-    loom::serve::transport::http::listener
-    loom::serve::transport::http::request
-    loom::serve::transport::http::server
-)
-endif()
-
-loom_cc_library(
-  NAME
-    configuration
-  HDRS
-    "configuration.h"
-  SRCS
-    "configuration.c"
-  DEPS
-    iree::base
-    iree::base::internal::json
-    iree::base::internal::path
-    iree::base::internal::unicode
-    iree::io::file_handle
-    loom::serve::runtime::program::sources
-  PUBLIC
-)
-
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_binary(
   NAME
@@ -130,10 +16,6 @@ loom_cc_binary(
   SRCS
     "server.c"
   DEPS
-    ::configuration
-    ::model_registration
-    ::registry
-    ::router
     iree::async
     iree::base
     iree::base::tooling::flags
@@ -141,74 +23,15 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::runtime::signals
     loom::serve::runtime::device
+    loom::serve::server::configuration
+    loom::serve::server::model_registration
+    loom::serve::server::registry
+    loom::serve::server::router
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
     loom::util::json
     loom::util::stream
 )
 endif()
-
-loom_cc_library(
-  NAME
-    registry
-  HDRS
-    "registry.h"
-  SRCS
-    "registry.c"
-  DEPS
-    ::configuration
-    iree::base
-    loom::serve::runtime::host::wake
-    loom::serve::runtime::parameter::activation
-    loom::serve::runtime::parameter::residency
-    loom::serve::runtime::program::compilation
-    loom::serve::service
-    loom::serve::telemetry::record
-    loom::serve::telemetry::stream
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    model_registration
-  HDRS
-    "model_registration.h"
-  SRCS
-    "model_registration.c"
-  DEPS
-    ::configuration
-    ::registry
-    iree::base
-    loom::serve::runtime::device
-    loom::serve::runtime::host
-    loom::serve::runtime::host::wake
-    loom::serve::runtime::parameter::activation
-    loom::serve::runtime::parameter::residency
-    loom::serve::runtime::program::compilation
-    loom::serve::runtime::storage::memory
-    loom::serve::service
-    loom::serve::service::finite::decision::protocol
-    loom::serve::service::finite::embedding::protocol
-    loom::serve::service::finite::model
-    loom::serve::service::finite::service
-    loom::serve::service::image::model
-    loom::serve::service::image::service
-    loom::serve::service::text::model
-    loom::serve::service::text::schedule
-    loom::serve::service::text::service
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    configuration_test
-  SRCS
-    "configuration_test.cc"
-  DEPS
-    ::configuration
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

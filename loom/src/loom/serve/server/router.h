@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_SERVING_ROUTER_H_
-#define EXPERIMENTAL_LOOM_SERVE_SERVING_ROUTER_H_
+#ifndef LOOM_SERVE_SERVER_ROUTER_H_
+#define LOOM_SERVE_SERVER_ROUTER_H_
 
-#include "experimental/loom_serve/serving/registry.h"
-#include "experimental/loom_serve/serving/resources.h"
 #include "iree/task/executor.h"
+#include "loom/serve/server/registry.h"
+#include "loom/serve/server/resources.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -95,4 +95,4 @@ iree_status_t loom_serve_router_run(iree_task_executor_t* executor,
 }  // extern "C"
 #endif
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_SERVING_ROUTER_H_
+#endif  // LOOM_SERVE_SERVER_ROUTER_H_

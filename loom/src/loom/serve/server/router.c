@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/serving/router.h"
+#include "loom/serve/server/router.h"
 
 #include <inttypes.h>
 
@@ -916,8 +916,7 @@ static iree_status_t router_logs(router_t* router,
   }
   uint64_t position = 0;
   iree_status_t status = loom_serve_http_logs_resume(stream, cursor, &position);
-  if (iree_status_is_invalid_argument(status) ||
-      iree_status_is_failed_precondition(status)) {
+  if (!iree_status_is_ok(status)) {
     const bool stale = iree_status_is_failed_precondition(status);
     iree_status_t response_status =
         router_reject(router, connection, stale ? 409 : 400,

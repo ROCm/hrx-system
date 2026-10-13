@@ -4,14 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_SERVING_REGISTRY_H_
-#define EXPERIMENTAL_LOOM_SERVE_SERVING_REGISTRY_H_
+#ifndef LOOM_SERVE_SERVER_REGISTRY_H_
+#define LOOM_SERVE_SERVER_REGISTRY_H_
 
-#include "experimental/loom_serve/serving/configuration.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/runtime/parameter/activation.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/runtime/program/compilation.h"
+#include "loom/serve/server/configuration.h"
 #include "loom/serve/service/service.h"
 
 #ifdef __cplusplus
@@ -247,4 +247,4 @@ bool loom_serve_registry_counters(
 #ifdef __cplusplus
 }  // extern "C"
 #endif
-#endif  // EXPERIMENTAL_LOOM_SERVE_SERVING_REGISTRY_H_
+#endif  // LOOM_SERVE_SERVER_REGISTRY_H_

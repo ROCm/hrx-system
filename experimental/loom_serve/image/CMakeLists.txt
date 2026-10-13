@@ -45,8 +45,8 @@ loom_cc_binary(
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
-    iree::experimental::loom_serve::serving::configuration
     iree::io::file_handle
+    loom::serve::server::configuration
     loom::serve::service::image::model
   TESTONLY
 )
@@ -65,8 +65,8 @@ loom_cc_binary(
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
-    iree::experimental::loom_serve::serving::configuration
     iree::io::file_handle
+    loom::serve::server::configuration
     loom::serve::service::image::model
 )
 endif()
@@ -84,9 +84,9 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::runtime::signals
-    iree::experimental::loom_serve::serving::configuration
-    iree::experimental::loom_serve::serving::registry
-    iree::experimental::loom_serve::serving::router
+    loom::serve::server::configuration
+    loom::serve::server::registry
+    loom::serve::server::router
     loom::serve::service::image::model
     loom::serve::service::image::request
     loom::serve::service::image::service

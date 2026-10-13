@@ -17,12 +17,12 @@
 #include <thread>
 #include <tuple>
 
-#include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/threading/notification.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/serve/runtime/device/device.h"
+#include "loom/serve/server/router.h"
 #include "loom/serve/transport/http/listener.h"
 
 namespace {

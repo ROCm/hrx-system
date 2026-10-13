@@ -53,6 +53,9 @@ The shared foundation consists of:
 - [`server/http`](server/http/logs.h): endpoint projections for telemetry and
   raw tokenization. Log readers keep independent cursors; tokenizer requests
   use independent CPU states without advancing a model's execution timeline.
+- [`server`](server/README.md): deployment documents, stable registration
+  lifetimes, modality construction and bounded routing turns. This composition
+  layer owns model admission and removal without owning numerical programs.
 
 Each component keeps its unit tests beside its implementation. Native headers
 describe ownership contracts; they are implementation interfaces rather than

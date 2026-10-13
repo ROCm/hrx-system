@@ -12,13 +12,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "experimental/loom_serve/serving/configuration.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/string_util.h"
 #include "iree/io/file_contents.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/parameter/weights.h"
+#include "loom/serve/server/configuration.h"
 
 IREE_FLAG(string, model, "", "Model JSON document providing source files.");
 IREE_FLAG_LIST(string, source,

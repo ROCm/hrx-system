@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/serving/router_test_fixture.h"
 #include "loom/serve/runtime/host/wake.h"
+#include "loom/serve/server/router_test_fixture.h"
 
 namespace {
 
@@ -51,7 +51,8 @@ struct RegistrationDependency {
       .active = true,
       .elastic = true,
       .memory = {.reserved_bytes = 4096, .committed_bytes = 4096},
-      .activity = {.activations = 1}};
+      .activity = {.activations = 1},
+  };
   // Injects an explicit native parameter release failure after quiescence.
   std::atomic<bool> fail_deactivation{false};
   // Eviction policy supplied by the real registry, independent of readiness.
@@ -198,7 +199,8 @@ struct RegistrationDependency {
         .set_pinned = dependency->capabilities.pinning ? SetPinned : nullptr,
         .activate = dependency->capabilities.activation ? Activate : nullptr,
         .deactivate = Deactivate,
-        .destroy = Destroy};
+        .destroy = Destroy,
+    };
     return iree_ok_status();
   }
   static iree_status_t QueryStatus(void* self) {
@@ -239,11 +241,13 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
  protected:
   void SetUp() override {
     managed_capacity_ = 1;
-    factory_ = {.self = &managed_,
-                .kinds = 1u << LOOM_SERVE_MODEL_KIND_EMBEDDING,
-                .device_count = 1,
-                .create = RegistrationDependency::Create,
-                .query_status = RegistrationDependency::QueryStatus};
+    factory_ = {
+        .self = &managed_,
+        .kinds = 1u << LOOM_SERVE_MODEL_KIND_EMBEDDING,
+        .device_count = 1,
+        .create = RegistrationDependency::Create,
+        .query_status = RegistrationDependency::QueryStatus,
+    };
     HttpRouterTest::SetUp();
   }
   void Declare() {

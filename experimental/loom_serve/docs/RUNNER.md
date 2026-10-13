@@ -484,7 +484,7 @@ Several existing boundaries already accommodate that direction:
   bounded `advance`, readiness notification and accepted-work lifetime. Routing
   sees requests, capacity hints and counters, not devices, ranks or stage
   timelines. Serializing a host policy turn does not serialize device execution.
-* [`serving/registry.h`](../serving/registry.h) separates registration,
+* [`serving/registry.h`](../../../loom/src/loom/serve/server/registry.h) separates registration,
   preparation and retirement. A model owner retains accepted asynchronous
   obligations through cancellation and removal. The application group outlives
   those owners; a device error does not authorize callback-side destruction.

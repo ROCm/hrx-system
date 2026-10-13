@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/serving/registry.h"
+#include "loom/serve/server/registry.h"
 
 #include "loom/serve/runtime/host/wake.h"
 
@@ -457,16 +457,15 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
     bool complete = false;
     iree_status_t status =
         model->registration.retire(model->registration.self, &complete);
-    if (complete) {
-      if (iree_status_is_ok(status)) {
-        model->registration.destroy(model->registration.self);
-        model->registration = (loom_serve_registration_t){0};
-        model->phase = LOOM_SERVE_REGISTRATION_FAILED;
-      } else {
-        registry_record_error(model, status);
-        model->status = iree_status_join(model->status, status);
-        model->phase = LOOM_SERVE_REGISTRATION_RELEASE_FAILED;
-      }
+    if (!iree_status_is_ok(status)) {
+      registry_record_error(model, status);
+      model->status = iree_status_join(model->status, status);
+      model->phase = LOOM_SERVE_REGISTRATION_RELEASE_FAILED;
+      progress = true;
+    } else if (complete) {
+      model->registration.destroy(model->registration.self);
+      model->registration = (loom_serve_registration_t){0};
+      model->phase = LOOM_SERVE_REGISTRATION_FAILED;
       progress = true;
     }
   }

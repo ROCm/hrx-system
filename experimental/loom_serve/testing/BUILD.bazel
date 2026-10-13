@@ -15,7 +15,7 @@ loom_cc_library(
     hdrs = ["model.h"],
     visibility = ["//visibility:public"],
     deps = [
-        "//experimental/loom_serve/serving:configuration",
+        "//loom/src/loom/serve/server:configuration",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/io:file_handle",

@@ -9,9 +9,9 @@
 
 #include <string>
 
-#include "experimental/loom_serve/serving/configuration.h"
 #include "iree/base/internal/json.h"
 #include "iree/io/file_contents.h"
+#include "loom/serve/server/configuration.h"
 
 namespace loom_serve::testing {
 

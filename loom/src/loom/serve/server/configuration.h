@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_SERVING_CONFIGURATION_H_
-#define EXPERIMENTAL_LOOM_SERVE_SERVING_CONFIGURATION_H_
+#ifndef LOOM_SERVE_SERVER_CONFIGURATION_H_
+#define LOOM_SERVE_SERVER_CONFIGURATION_H_
 
 #include "loom/serve/runtime/program/sources.h"
 
@@ -142,4 +142,4 @@ iree_status_t loom_serve_model_configuration_resolve_device(
 }  // extern "C"
 #endif
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_SERVING_CONFIGURATION_H_
+#endif  // LOOM_SERVE_SERVER_CONFIGURATION_H_

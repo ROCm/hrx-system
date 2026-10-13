@@ -19,8 +19,6 @@
 #include <vector>
 
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
-#include "experimental/loom_serve/serving/model_registration.h"
-#include "experimental/loom_serve/serving/router.h"
 #include "experimental/loom_serve/testing/model.h"
 #include "iree/async/proactor.h"
 #include "iree/base/internal/base64.h"
@@ -28,6 +26,8 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/serve/server/model_registration.h"
+#include "loom/serve/server/router.h"
 #include "loom/serve/service/image/model.h"
 #include "loom/serve/service/image/output.h"
 #include "loom/serve/transport/http/listener.h"

@@ -6,8 +6,8 @@
 
 #include "experimental/loom_serve/text/flags.h"
 
-#include "experimental/loom_serve/serving/configuration.h"
 #include "iree/base/tooling/flags.h"
+#include "loom/serve/server/configuration.h"
 #include "loom/serve/service/text/schedule.h"
 
 IREE_FLAG(string, model, "",

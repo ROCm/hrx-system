@@ -32,7 +32,7 @@ to that listener; this executable requires all configured startup bindings to
 succeed before announcing readiness and otherwise unwinds startup. Process
 signals belong to the application, not individual listeners.
 
-The [routing owner](router.h) belongs to this application layer. Modality
+The [routing owner](../../../loom/src/loom/serve/server/router.h) belongs to this application layer. Modality
 services implement the [HTTP service contract](../../../loom/src/loom/serve/service/service.h) without
 depending on the router, listener lifetime, or application run loop. The
 single-model executables use the same create, route, retire and destroy
@@ -109,7 +109,7 @@ including the active cohort. For text/image it bounds the waiting queue.
 The budget must fit each model's weights plus live retained state; this example's
 36 GiB fits either model separately, not all deployments together.
 Other defaults and accepted ranges are in
-[configuration.c](configuration.c).
+[configuration.c](../../../loom/src/loom/serve/server/configuration.c).
 
 `--listen` is repeatable and defaults to `127.0.0.1:8080`. Numeric IPv4
 `host:port`, IPv6 `[host]:port`, and `unix:path` use the same HTTP/SSE

@@ -78,11 +78,11 @@ loom_cc_test(
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
-        "//experimental/loom_serve/serving:registry",
-        "//experimental/loom_serve/serving:router",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/server:router",
         "//loom/src/loom/serve/service/image:service",
         "//loom/src/loom/serve/telemetry:record",
         "//loom/src/loom/serve/telemetry:stream",

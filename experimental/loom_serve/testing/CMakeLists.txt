@@ -17,8 +17,8 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::json
-    iree::experimental::loom_serve::serving::configuration
     iree::io::file_handle
+    loom::serve::server::configuration
   TESTONLY
   PUBLIC
 )

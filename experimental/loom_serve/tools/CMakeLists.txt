@@ -30,7 +30,6 @@ loom_cc_binary(
     iree::base::internal
     iree::base::internal::path
     iree::base::tooling::flags
-    iree::experimental::loom_serve::serving::configuration
     iree::hal
     iree::io::file_handle
     loom::binding::c::loomc
@@ -39,6 +38,7 @@ loom_cc_binary(
     loom::serve::runtime::parameter::weights
     loom::serve::runtime::program::compilation
     loom::serve::runtime::program::jit
+    loom::serve::server::configuration
     loom::util::stream
   TESTONLY
 )

@@ -13,13 +13,13 @@
 #include <string>
 #include <thread>
 
-#include "experimental/loom_serve/serving/router.h"
 #include "experimental/loom_serve/testing/model.h"
 #include "iree/async/proactor.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/server/router.h"
 #include "loom/serve/service/finite/decision/protocol.h"
 #include "loom/serve/service/finite/embedding/protocol.h"
 #include "loom/serve/transport/http/listener.h"

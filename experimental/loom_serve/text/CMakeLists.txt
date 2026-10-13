@@ -19,8 +19,8 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::serving::configuration
     loom::binding::c::loomc
+    loom::serve::server::configuration
     loom::serve::service::text::model
     loom::serve::service::text::schedule
   PUBLIC
@@ -40,8 +40,8 @@ loom_cc_binary(
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::runtime::signals
-    iree::experimental::loom_serve::serving::registry
-    iree::experimental::loom_serve::serving::router
+    loom::serve::server::registry
+    loom::serve::server::router
     loom::serve::service::text::model
     loom::serve::service::text::service
     loom::serve::transport::http::listener

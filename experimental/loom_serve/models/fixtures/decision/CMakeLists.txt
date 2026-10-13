@@ -48,13 +48,13 @@ loom_cc_test(
     iree::base::internal::json
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::serving::registry
-    iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::testing::gtest
     iree::testing::gtest_main
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::server::registry
+    loom::serve::server::router
     loom::serve::service::finite::decision::protocol
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model
@@ -92,13 +92,13 @@ loom_cc_test(
     iree::base::internal::json
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::serving::registry
-    iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::testing::gtest
     iree::testing::gtest_main
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::server::registry
+    loom::serve::server::router
     loom::serve::service::finite::decision::protocol
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model
@@ -136,13 +136,13 @@ loom_cc_test(
     iree::base::internal::json
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::serving::registry
-    iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::testing::gtest
     iree::testing::gtest_main
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::server::registry
+    loom::serve::server::router
     loom::serve::service::finite::decision::protocol
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model

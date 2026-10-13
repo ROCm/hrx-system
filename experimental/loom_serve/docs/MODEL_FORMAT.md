@@ -73,7 +73,7 @@ Settings under `definition` select native capacity and asset inputs:
 All kinds accept `pending_requests` and an `options` object. Options default
 to `{}` and belong to the cold source program; native code does not interpret
 their keys or rewrite strings within them. The
-[configuration contract](../serving/configuration.h) documents ownership and
+[configuration contract](../../../loom/src/loom/serve/server/configuration.h) documents ownership and
 units; the [operator guide](OPERATING.md#configuration-and-resource-boundaries)
 explains capacity/admission behavior. The parser rejects unknown, duplicate,
 wrongly typed and wrong-modality native fields. Source programs validate

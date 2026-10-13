@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_SERVING_ROUTER_TEST_FIXTURE_H_
-#define EXPERIMENTAL_LOOM_SERVE_SERVING_ROUTER_TEST_FIXTURE_H_
+#ifndef LOOM_SERVE_SERVER_ROUTER_TEST_FIXTURE_H_
+#define LOOM_SERVE_SERVER_ROUTER_TEST_FIXTURE_H_
 
 #include <sys/socket.h>
 #include <unistd.h>
@@ -19,7 +19,6 @@
 #include <utility>
 #include <vector>
 
-#include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/async/proactor_platform.h"
 #include "iree/net/carrier/loopback/carrier.h"
@@ -28,6 +27,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "loom/serve/runtime/host/wake.h"
+#include "loom/serve/server/router.h"
 #include "loom/serve/transport/http/listener.h"
 
 namespace loom_serve::testing {
@@ -528,4 +528,4 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
 
 }  // namespace loom_serve::testing
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_SERVING_ROUTER_TEST_FIXTURE_H_
+#endif  // LOOM_SERVE_SERVER_ROUTER_TEST_FIXTURE_H_

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/serving/router_test_fixture.h"
+#include "loom/serve/server/router_test_fixture.h"
 
 namespace {
 
@@ -490,13 +490,18 @@ TEST_P(HttpRouterTest, ShutdownReleasesHeldClaimsWithoutAdmittingThem) {
 
 TEST_P(HttpRouterTest, RejectsAQuotaThatCouldExcludeEveryControlConnection) {
   for (const auto options : {
-           loom_serve_router_options_t{.request_quota = 0,
-                                       .holding_capacity = 0},
            loom_serve_router_options_t{
-               .request_quota = 4, .holding_capacity = connection_capacity_},
+               .request_quota = 0,
+               .holding_capacity = 0,
+           },
            loom_serve_router_options_t{
                .request_quota = 4,
-               .holding_capacity = connection_capacity_ + 1},
+               .holding_capacity = connection_capacity_,
+           },
+           loom_serve_router_options_t{
+               .request_quota = 4,
+               .holding_capacity = connection_capacity_ + 1,
+           },
        }) {
     // Validation happens before the owner installs any transport observer.
     IREE_EXPECT_STATUS_IS(
@@ -600,11 +605,13 @@ class HttpRouterCountersTest : public HttpRouterTest {
     size_t index = 0;
     for (auto* service : {&a_, &b_, &held_, &other_, &escaped_}) {
       const uint64_t value = index + 1;
-      counters_[index] = {.requests = value,
-                          .completed = value,
-                          .input_tokens = (uint64_t{1} << 53) + value,
-                          .output_tokens = 7 * value,
-                          .batches = value};
+      counters_[index] = {
+          .requests = value,
+          .completed = value,
+          .input_tokens = (uint64_t{1} << 53) + value,
+          .output_tokens = 7 * value,
+          .batches = value,
+      };
       service->counters = &counters_[index++];
     }
     HttpRouterTest::SetUp();

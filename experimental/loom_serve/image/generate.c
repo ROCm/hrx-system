@@ -13,11 +13,11 @@
 
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
-#include "experimental/loom_serve/serving/configuration.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
+#include "loom/serve/server/configuration.h"
 #include "loom/serve/service/image/model.h"
 
 IREE_FLAG(string, model, "", "Model JSON document.");

@@ -57,9 +57,6 @@ loom_cc_test(
     iree::base::threading
     iree::base::tooling::flags
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::serving::model_registration
-    iree::experimental::loom_serve::serving::registry
-    iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::net::carrier
     iree::net::carrier::loopback
@@ -69,6 +66,9 @@ loom_cc_test(
     iree::testing::temp_file
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::server::model_registration
+    loom::serve::server::registry
+    loom::serve::server::router
     loom::serve::service::text::chat
     loom::serve::service::text::input
     loom::serve::service::text::model
@@ -117,9 +117,6 @@ loom_cc_test(
     iree::base::threading
     iree::base::tooling::flags
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::serving::model_registration
-    iree::experimental::loom_serve::serving::registry
-    iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::net::carrier
     iree::net::carrier::loopback
@@ -129,6 +126,9 @@ loom_cc_test(
     iree::testing::temp_file
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::server::model_registration
+    loom::serve::server::registry
+    loom::serve::server::router
     loom::serve::service::text::chat
     loom::serve::service::text::input
     loom::serve::service::text::model
@@ -178,9 +178,6 @@ loom_cc_test(
     iree::base::threading
     iree::base::tooling::flags
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
-    iree::experimental::loom_serve::serving::model_registration
-    iree::experimental::loom_serve::serving::registry
-    iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::net::carrier
     iree::net::carrier::loopback
@@ -190,6 +187,9 @@ loom_cc_test(
     iree::testing::temp_file
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::server::model_registration
+    loom::serve::server::registry
+    loom::serve::server::router
     loom::serve::service::text::chat
     loom::serve::service::text::input
     loom::serve::service::text::model

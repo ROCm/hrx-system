@@ -82,14 +82,14 @@ loom_cc_test(
     iree::async
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::serving::registry
-    iree::experimental::loom_serve::serving::router
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
     loom::serve::runtime::device
     loom::serve::runtime::execution
     loom::serve::runtime::host
+    loom::serve::server::registry
+    loom::serve::server::router
     loom::serve::service::image::service
     loom::serve::telemetry::record
     loom::serve::telemetry::stream
