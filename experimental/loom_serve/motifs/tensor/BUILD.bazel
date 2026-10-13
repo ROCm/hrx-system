@@ -1,0 +1,74 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
+load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
+
+package(default_visibility = ["//visibility:private"])
+
+filegroup(
+    name = "sources",
+    srcs = glob(["*.loom"]),
+    visibility = ["//visibility:public"],
+)
+
+loom_test(
+    name = "random_test",
+    srcs = [
+        "random.loom",
+        "tests/random.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [VM_REFERENCE_PROFILE],
+)
+
+loom_test(
+    name = "grouped_convolution_test",
+    srcs = [
+        "grouped_convolution.loom",
+        "tests/grouped_convolution.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "topk_test",
+    srcs = [
+        "tests/topk.loom",
+        "topk.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "quantization_test",
+    srcs = [
+        "quantization.loom",
+        "tests/quantization.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+)
+
+loom_test(
+    name = "linear_i8_test",
+    srcs = [
+        "linear_i8.loom",
+        "linear_tiled.loom",
+        "tests/linear_i8.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+)

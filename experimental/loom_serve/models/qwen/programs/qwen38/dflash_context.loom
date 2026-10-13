@@ -1,0 +1,98 @@
+// Publishes committed target features into the draft's five K/V plane pairs.
+// The target residual arena carries five concatenated feature taps after its
+// ordinary 512-row residual. Only accepted descriptor prefixes reach the pool.
+config.decl @runner.qwen38.prefill_token_count : %value: index where [range(%value, 1, 512)]
+
+config.decl @runner.qwen38.span_capacity : %value: index where [range(%value, 1, 64)]
+
+config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
+
+config.decl @qwen38.attention.pool_capacity : %value: index where [range(%value, 0, 4194304)]
+
+kernel.decl @qwen38_linear_q4k_f16_wmma_x64(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs_argument: index, %outputs_argument: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q4k_f16_wmma_x128(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs_argument: index, %outputs_argument: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q6k_f16_wmma_x64(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs_argument: index, %outputs_argument: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_x128(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs_argument: index, %outputs_argument: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_rmsnorm_f32_prefill(%tokens: index) launch(%capacity: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_dflash_context_prepare(%tokens: index, %spans: index) launch(%capacity: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %key: buffer, %value: buffer, %weight: buffer, %cache: buffer)
+
+// Context projections have the same parameter root in warm and proposal
+// programs. The feature encoder is separate because only warming uses it.
+command.program.def public @qwen38_dflash_warm() launch(%parameters: buffer, %context_parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %cache: buffer) {
+  %tokens = config.get @runner.qwen38.prefill_token_count : index
+  %spans = config.get @runner.qwen38.span_capacity : index
+  %logical = config.get @qwen38.attention.cache_capacity : index
+  %pool = config.get @qwen38.attention.pool_capacity : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  %hidden = index.constant 5120 : index
+  %features = index.constant 25600 : index
+  %keys = index.constant 1024 : index
+  %c65 = index.constant 65 : index
+  %narrow = index.cmp ult, %tokens, %c65 : index
+  %paged = index.cmp ne, %pool, %c0 : index
+  %storage = scf.select %paged, %pool, %logical : index
+  %cache_token_bytes = index.constant 4096 : offset
+  %layer_bytes = index.scale %storage, %cache_token_bytes : index, offset -> offset
+  %hidden_row_bytes = index.constant 20480 : offset
+  %key_row_bytes = index.constant 4096 : offset
+  %hidden_bytes = index.scale %tokens, %hidden_row_bytes : index, offset -> offset
+  %key_bytes = index.scale %tokens, %key_row_bytes : index, offset -> offset
+  %projected = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %key = buffer.alloca<global> align(256) %key_bytes : buffer
+  %value = buffer.alloca<global> align(256) %key_bytes : buffer
+  %feature_origin = index.constant 10485760 : offset
+  %input = buffer.view %residual[%feature_origin] : buffer -> view<[%tokens]x25600xf32>
+  %fc = command.parameter %parameters, "fc.weight" : view<73728000xi8>
+  %norm = command.parameter %parameters, "enc.output_norm.weight" : view<5120xf32>
+  scf.if %narrow {
+    kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%tokens, %features, %hidden](%epoch, %features, %hidden, %input, %fc, %projected) : [index, index, index](buffer, index, index, view<[%tokens]x25600xf32>, view<73728000xi8>, buffer)
+  } else {
+    kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%tokens, %features, %hidden](%epoch, %features, %hidden, %input, %fc, %projected) : [index, index, index](buffer, index, index, view<[%tokens]x25600xf32>, view<73728000xi8>, buffer)
+  }
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+  kernel.launch @qwen38_rmsnorm_f32_prefill[%tokens](%tokens, %epsilon, %projected, %norm, %normalized) : [index](index, f32, buffer, view<5120xf32>, buffer)
+  scf.for %layer = [%c0 to %c5 step %c1] unroll {
+    %is_two = index.cmp eq, %layer, %c2 : index
+    %is_four = index.cmp eq, %layer, %c4 : index
+    %q6 = scalar.ori %is_two, %is_four : i1
+    %q4_bytes = index.constant 2949120 : index
+    %q6_bytes = index.constant 4300800 : index
+    %value_bytes = scf.select %q6, %q6_bytes, %q4_bytes : index
+    %key_weight = command.parameter %context_parameters, "blk.{}.attn_k.weight"[%layer] : view<2949120xi8>
+    %value_weight = command.parameter %context_parameters, "blk.{}.attn_v.weight"[%layer] : view<[%value_bytes]xi8>
+    %key_norm = command.parameter %context_parameters, "blk.{}.attn_k_norm.weight"[%layer] : view<128xf32>
+    command.concurrent {
+      scf.if %narrow {
+        kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %normalized, %key_weight, %key) : [index, index, index](buffer, index, index, buffer, view<2949120xi8>, buffer)
+      } else {
+        kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %normalized, %key_weight, %key) : [index, index, index](buffer, index, index, buffer, view<2949120xi8>, buffer)
+      }
+      scf.if %q6 {
+        scf.if %narrow {
+          kernel.launch @qwen38_linear_q6k_f16_wmma_x64[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %normalized, %value_weight, %value) : [index, index, index](buffer, index, index, buffer, view<[%value_bytes]xi8>, buffer)
+        } else {
+          kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_x128[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %normalized, %value_weight, %value) : [index, index, index](buffer, index, index, buffer, view<[%value_bytes]xi8>, buffer)
+        }
+      } else {
+        scf.if %narrow {
+          kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %normalized, %value_weight, %value) : [index, index, index](buffer, index, index, buffer, view<[%value_bytes]xi8>, buffer)
+        } else {
+          kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%tokens, %hidden, %keys](%epoch, %hidden, %keys, %normalized, %value_weight, %value) : [index, index, index](buffer, index, index, buffer, view<[%value_bytes]xi8>, buffer)
+        }
+      }
+    }
+    %layer_origin = index.scale %layer, %layer_bytes : index, offset -> offset
+    kernel.launch @qwen38_dflash_context_prepare[%tokens, %spans](%tokens, %epoch, %rows, %layer_origin, %key, %value, %key_norm, %cache) : [index, index](index, buffer, buffer, offset, buffer, buffer, view<128xf32>, buffer)
+  }
+  command.return
+}

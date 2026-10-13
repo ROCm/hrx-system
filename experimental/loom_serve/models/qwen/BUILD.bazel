@@ -1,0 +1,310 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE", "amdgpu_execution_profile")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+filegroup(
+    name = "sources",
+    srcs = [
+        "model.json",
+        "//experimental/loom_serve/motifs/ggml:sources",
+        "//experimental/loom_serve/motifs/tensor:sources",
+    ] + glob([
+        "*.loom",
+        "kernels/qwen38/*.loom",
+        "programs/qwen38/*.loom",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+loom_library(
+    name = "projection_kernels",
+    srcs = [
+        "kernels/qwen38/ffn_gate_up_q5k_f16_wmma_wave32.loom",
+        "kernels/qwen38/layer_prefill.loom",
+        "kernels/qwen38/linear_q4k_f16_wmma.loom",
+        "kernels/qwen38/linear_q5k_f16_wmma.loom",
+        "kernels/qwen38/linear_q5k_f16_wmma_wave32.loom",
+        "kernels/qwen38/linear_q6k_f16_wmma.loom",
+        "kernels/qwen38/linear_q6k_f16_wmma_metadata.loom",
+        "//experimental/loom_serve/motifs/ggml:sources",
+    ],
+)
+
+loom_test(
+    name = "ffn_gate_up_test",
+    srcs = ["tests/ffn_gate_up.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":projection_kernels"],
+)
+
+loom_test(
+    name = "q4_matrix_test",
+    srcs = ["tests/linear_q4k_f16_wmma.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":projection_kernels"],
+)
+
+loom_test(
+    name = "q6_metadata_test",
+    srcs = ["tests/linear_q6k_f16_wmma_metadata.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":projection_kernels"],
+)
+
+loom_test(
+    name = "output_projection_test",
+    srcs = [
+        "kernels/qwen38/output_projection.loom",
+        "tests/output_projection.loom",
+        "//experimental/loom_serve/motifs/ggml:sources",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "ggml.linear_q6k_q8_1_x4.output_capacity": "248320",
+        "ggml.linear_q6k_q8_1_x4.token_capacity": "512",
+        "ggml.quantize_q8_1_x4.group_capacity": "69632",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        amdgpu_execution_profile(
+            name = "amdgpu_access_trap",
+            runner_args = [
+                "--sanitizer=access",
+                "--sanitizer-reporting=trap",
+            ],
+            tags = ["notsan"],
+        ),
+    ],
+    variants = {
+        "live_prefix": {"case": "@output_projection_live_prefix_case"},
+        "m32": {"case": "@output_projection_m32_case"},
+        "m8": {"case": "@output_projection_m8_case"},
+    },
+)
+
+loom_test(
+    name = "dflash_attention_test",
+    srcs = [
+        "kernels/qwen38/dflash_attention.loom",
+        "kernels/qwen38/spans.loom",
+        "tests/dflash_attention.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "qwen38.attention.cache_capacity": "4096",
+        "qwen38.attention.pool_capacity": "4224",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "dflash_proposal_test",
+    srcs = [
+        "kernels/qwen38/dflash_proposal.loom",
+        "tests/dflash_proposal.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "dflash_selection_test",
+    srcs = [
+        "kernels/qwen38/dflash_selection.loom",
+        "tests/dflash_selection.loom",
+        "//experimental/loom_serve/motifs/tensor:sources",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "feature_capture_test",
+    srcs = [
+        "kernels/qwen38/features.loom",
+        "tests/features.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "gdn_state_test",
+    srcs = [
+        "kernels/qwen38/gdn_common.loom",
+        "kernels/qwen38/gdn_prefill.loom",
+        "kernels/qwen38/gdn_spans.loom",
+        "kernels/qwen38/gdn_speculation.loom",
+        "kernels/qwen38/spans.loom",
+        "tests/gdn_fork.loom",
+        "tests/gdn_spans.loom",
+        "tests/gdn_speculation.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "mtp_control_test",
+    srcs = [
+        "kernels/qwen38/accept.loom",
+        "kernels/qwen38/mtp_prepare.loom",
+        "kernels/qwen38/mtp_proposal.loom",
+        "kernels/qwen38/spans.loom",
+        "tests/accept.loom",
+        "tests/mtp_prepare.loom",
+        "tests/mtp_proposal.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "attention_state_test",
+    srcs = [
+        "kernels/qwen38/attention_common.loom",
+        "kernels/qwen38/attention_prefill.loom",
+        "kernels/qwen38/attention_prefill_wmma.loom",
+        "kernels/qwen38/attention_spans.loom",
+        "kernels/qwen38/spans.loom",
+        "tests/attention_pages.loom",
+        "tests/attention_spans.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    variants = {
+        "dense": {
+            "case": "@mixed_attention_spans",
+            "configs": {
+                "qwen38.attention.cache_capacity": "257",
+                "qwen38.attention.pool_capacity": "0",
+            },
+        },
+        "paged": {
+            "case": "@scattered_attention_pages",
+            "configs": {
+                "qwen38.attention.cache_capacity": "192",
+                "qwen38.attention.pool_capacity": "256",
+            },
+        },
+    },
+)
+
+py_binary(
+    name = "benchmark_service",
+    testonly = True,
+    srcs = ["benchmark_service.py"],
+    data = ["testdata/source_review.json"],
+    deps = ["//loom/src/loom/serve/testing:chat"],
+)
+
+py_library(
+    name = "benchmark_cohort_lib",
+    testonly = True,
+    srcs = ["benchmark_cohort.py"],
+    deps = [
+        ":benchmark_service_lib",
+        "//loom/src/loom/serve/testing:chat",
+        "//loom/src/loom/serve/testing:http",
+    ],
+)
+
+py_binary(
+    name = "benchmark_cohort",
+    testonly = True,
+    srcs = ["benchmark_cohort.py"],
+    deps = [":benchmark_cohort_lib"],
+)
+
+py_test(
+    name = "benchmark_cohort_test",
+    size = "small",
+    srcs = ["benchmark_cohort_test.py"],
+    deps = [":benchmark_cohort_lib"],
+)
+
+py_test(
+    name = "request_check_test",
+    size = "small",
+    srcs = ["request_check_test.py"],
+    args = ["$(rootpath //loom/src/loom/serve/testing:text_request_check)"],
+    data = [
+        "control.loom",
+        "testdata/portable_chat.loom",
+        "//loom/src/loom/serve/testing:text_request_check",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+)
+
+py_binary(
+    name = "check_router",
+    testonly = True,
+    srcs = ["check_router.py"],
+    deps = [
+        "//loom/src/loom/serve/testing:chat",
+        "//loom/src/loom/serve/testing:http",
+    ],
+)
+
+py_library(
+    name = "benchmark_service_lib",
+    testonly = True,
+    srcs = ["benchmark_service.py"],
+    deps = ["//loom/src/loom/serve/testing:chat"],
+)
+
+py_test(
+    name = "benchmark_service_test",
+    size = "small",
+    srcs = ["benchmark_service_test.py"],
+    data = ["testdata/source_review.json"],
+    deps = [":benchmark_service_lib"],
+)

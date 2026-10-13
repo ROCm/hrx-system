@@ -1,0 +1,92 @@
+template.decl @convolution.grouped_causal_f32x4(%blocks: index, %length: index, %channels: index, %group_width: index, %branches: index, %taps: index, %branch: index, %block: index, %position: index, %channel: index, %input: buffer, %dynamic: buffer, %base: buffer) -> (vector<4xf32>)
+
+template.decl @convolution.grouped_causal_f32(%blocks: index, %length: index, %channels: index, %group_width: index, %branches: index, %taps: index, %branch: index, %input: buffer, %dynamic: buffer, %base: buffer, %output: buffer)
+
+template.decl @convolution.grouped_causal_add_f32(%blocks: index, %length: index, %channels: index, %group_width: index, %branches: index, %taps: index, %branch: index, %input: buffer, %dynamic: buffer, %base: buffer, %residual: buffer)
+
+// Dynamic coefficients are shared by contiguous channel groups; base weights
+// are per channel. Both group width and channel count are multiples of four.
+// The caller owns one aligned four-channel output vector. Taps read backward
+// within one block, with zero padding at its start and no cross-block history.
+// Dynamic layout is [block, position, branch, tap, group]; base layout is
+// [branch, tap, channel]. Inputs and coefficients are finite F32 values.
+template.def<@convolution.grouped_causal_f32x4> device @grouped_causal_f32x4(%blocks: index, %length: index, %channels: index, %group_width: index, %branches: index, %taps: index, %branch: index, %block: index, %position: index, %channel: index, %input: buffer, %dynamic: buffer, %base: buffer) -> (vector<4xf32>) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %groups = index.div %channels, %group_width : index
+  %group = index.div %channel, %group_width : index
+  %available = index.add %position, %c1 : index
+  %count = index.min %available, %taps : index
+  %x = buffer.view %input[%origin] : buffer -> view<[%blocks]x[%length]x[%channels]xf32>
+  %d = buffer.view %dynamic[%origin] : buffer -> view<[%blocks]x[%length]x[%branches]x[%taps]x[%groups]xf32>
+  %b = buffer.view %base[%origin] : buffer -> view<[%branches]x[%taps]x[%channels]xf32>
+  %c0_0 = vector.constant 0.0 : vector<4xf32>
+  %result = scf.for %tap = [%c0 to %count step %c1](%sum = %c0_0 : vector<4xf32>) -> (vector<4xf32>) {
+    %source0 = index.sub %position, %tap : index
+    %source = index.assume %source0 [ge(%source0, 0), lt(%source0, %length)] : index
+    %value = vector.load %x[%block, %source, %channel] : view<[%blocks]x[%length]x[%channels]xf32> -> vector<4xf32>
+    %weight = vector.load %b[%branch, %tap, %channel] : view<[%branches]x[%taps]x[%channels]xf32> -> vector<4xf32>
+    %coefficient = view.load %d[%block, %position, %branch, %tap, %group] : view<[%blocks]x[%length]x[%branches]x[%taps]x[%groups]xf32> -> f32
+    %broadcast = vector.splat %coefficient : vector<4xf32>
+    %static_product = vector.mulf %weight, %value : vector<4xf32>
+    %with_base = vector.addf %sum, %static_product : vector<4xf32>
+    %dynamic_product = vector.mulf %broadcast, %value : vector<4xf32>
+    %next = vector.addf %with_base, %dynamic_product : vector<4xf32>
+    scf.yield %next : vector<4xf32>
+  }
+  template.return %result : vector<4xf32>
+}
+
+// Launch ceil(channels / 512) by length by blocks workgroups, each with 128
+// threads. The output must not overlap input or coefficient storage: adjacent
+// positions can read the same input concurrently. No inter-workgroup ordering
+// is required.
+template.def<@convolution.grouped_causal_f32> device @grouped_causal_f32(%blocks: index, %length: index, %channels: index, %group_width: index, %branches: index, %taps: index, %branch: index, %input: buffer, %dynamic: buffer, %base: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile_width = index.constant 512 : index
+  %vector_width = index.constant 4 : index
+  %tile = kernel.workgroup.id<x> : index
+  %position0 = kernel.workgroup.id<y> : index
+  %position = index.assume %position0 [ge(%position0, 0), lt(%position0, %length)] : index
+  %block0 = kernel.workgroup.id<z> : index
+  %block = index.assume %block0 [ge(%block0, 0), lt(%block0, %blocks)] : index
+  %thread = kernel.workitem.id<x> : index
+  %tile_origin = index.mul %tile, %tile_width : index
+  %within = index.mul %thread, %vector_width : index
+  %channel = index.add %tile_origin, %within : index
+  %active = index.cmp ult, %channel, %channels : index
+  scf.if %active {
+    %value = template.apply<@convolution.grouped_causal_f32x4>(%blocks, %length, %channels, %group_width, %branches, %taps, %branch, %block, %position, %channel, %input, %dynamic, %base) : (index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer) -> (vector<4xf32>)
+    %y = buffer.view %output[%origin] : buffer -> view<[%blocks]x[%length]x[%channels]xf32>
+    vector.store %value, %y[%block, %position, %channel] : vector<4xf32>, view<[%blocks]x[%length]x[%channels]xf32>
+  }
+  template.return
+}
+
+// Same launch and input layout as grouped_causal_f32, adding the convolved
+// update directly to its residual destination. Only the residual is in-place;
+// it does not overlap the convolution inputs or coefficients.
+template.def<@convolution.grouped_causal_add_f32> device @grouped_causal_add_f32(%blocks: index, %length: index, %channels: index, %group_width: index, %branches: index, %taps: index, %branch: index, %input: buffer, %dynamic: buffer, %base: buffer, %residual: buffer) {
+  %origin = index.constant 0 : offset
+  %tile_width = index.constant 512 : index
+  %vector_width = index.constant 4 : index
+  %tile = kernel.workgroup.id<x> : index
+  %position0 = kernel.workgroup.id<y> : index
+  %position = index.assume %position0 [ge(%position0, 0), lt(%position0, %length)] : index
+  %block0 = kernel.workgroup.id<z> : index
+  %block = index.assume %block0 [ge(%block0, 0), lt(%block0, %blocks)] : index
+  %thread = kernel.workitem.id<x> : index
+  %tile_origin = index.mul %tile, %tile_width : index
+  %within = index.mul %thread, %vector_width : index
+  %channel = index.add %tile_origin, %within : index
+  %active = index.cmp ult, %channel, %channels : index
+  scf.if %active {
+    %value = template.apply<@convolution.grouped_causal_f32x4>(%blocks, %length, %channels, %group_width, %branches, %taps, %branch, %block, %position, %channel, %input, %dynamic, %base) : (index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer) -> (vector<4xf32>)
+    %y = buffer.view %residual[%origin] : buffer -> view<[%blocks]x[%length]x[%channels]xf32>
+    %previous = vector.load %y[%block, %position, %channel] : view<[%blocks]x[%length]x[%channels]xf32> -> vector<4xf32>
+    %next = vector.addf %previous, %value : vector<4xf32>
+    vector.store %next, %y[%block, %position, %channel] : vector<4xf32>, view<[%blocks]x[%length]x[%channels]xf32>
+  }
+  template.return
+}
