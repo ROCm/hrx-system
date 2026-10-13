@@ -1,0 +1,41 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+package(default_visibility = ["//visibility:private"])
+
+exports_files(
+    [
+        "control.loom",
+        "model.json",
+        "prepare.loom",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "sources",
+    testonly = True,
+    srcs = [
+        "config.loom",
+        "control.loom",
+        "embed.loom",
+        "model.json",
+        "prepare.loom",
+        "tokenizer.json",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "variant_sources",
+    testonly = True,
+    srcs = [
+        "variants/direct.loom",
+        "variants/policy.loom",
+        "variants/weights.loom",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -16,7 +16,7 @@ image fixture runs on Vulkan. CPU and Vulkan use `--pool_backing=fixed`.
 All URIs pass to HAL unchanged. No local inference device is added implicitly;
 available URI schemes depend on the linked drivers. Each model currently uses
 one device, with independent device pools rather than cross-device sharing.
-The [resident embedding fixture](../models/fixtures/embedding/README.md#verification)
+The [resident embedding fixture](../../../loom/src/loom/serve/fixture/embedding/README.md#verification)
 also exercises actual XDNA HTTP execution with a target-specific source variant;
 the ordinary command-based catalog is not an NPU deployment recipe.
 [Fresh-machine setup](README.md#fresh-machine-prerequisites) covers compiler
@@ -41,8 +41,8 @@ For a download-free x86 CPU first output, use the same command with
 [CPU-only build recipe](README.md#cpu-first-output-without-a-model-download)
 supplies the matching compiler/driver settings. The embedding registration below
 executes the package's native JIT kernels on the shared task workers. It needs
-no GPU or checkpoint. The image fixture's workitem lowering is not yet supported
-on CPU; the [fixture guide](../models/fixtures/README.md) distinguishes its GPU path.
+no GPU or checkpoint. The [fixture guide](../../../loom/src/loom/serve/fixture/README.md)
+also runs image and decision packages on the same CPU device.
 
 Managed build and hardware-runner policies apply. A separate execution host
 needs the built executable, its runtime libraries and the source/asset closure;
@@ -93,8 +93,8 @@ delay. Undrain returns HTTP 200 with the changed admission state, not a promise
 that JIT has completed. Result indices 0 and 1 contain `[1,1]` and `[6,3]`, with
 four input tokens. This is deterministic arithmetic through the normal
 VM/device/HTTP path, not a
-language embedding. The [fixture catalog](../models/fixtures/README.md) adds
-image and decision results; the [tiny text package](../models/fixtures/text/README.md)
+language embedding. The [fixture catalog](../../../loom/src/loom/serve/fixture/README.md) adds
+image and decision results; the [tiny text package](../../../loom/src/loom/serve/fixture/text/README.md)
 adds pooled sessions and checkpoints without a model download.
 
 For a learned model, use a source package's asset and deployment instructions:

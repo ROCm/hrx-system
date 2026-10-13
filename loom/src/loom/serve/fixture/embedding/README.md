@@ -1,6 +1,6 @@
 # Deterministic source embedding model
 
-This package implements the [finite-vector ABI](../../../../../loom/src/loom/serve/service/finite/model.h) using
+This package implements the [finite-vector ABI](../../service/finite/model.h) using
 real VM preparation and native device commands on x86 CPU, AMDGPU and Vulkan.
 It needs no downloaded model. Its purpose is to expose batching, row association
 and ownership errors through normal HTTP requests; its numbers have no neural
@@ -33,7 +33,7 @@ to this directory. On an x86 CPU runner, using the repository's normal build/exe
 
 ```sh
 iree-bazel-run //loom/src/loom/tools/loom-serve:loom-serve -- \
-  --model=experimental/loom_serve/models/fixtures/embedding/model.json --listen=127.0.0.1:8080 \
+  --model=loom/src/loom/serve/fixture/embedding/model.json --listen=127.0.0.1:8080 \
   --device=task --pool_backing=fixed
 ```
 
@@ -83,7 +83,7 @@ requests and cancellation, and verify retirement before reuse on CPU, AMDGPU
 and Vulkan. The compiled launch companion supplies the grid; the server submits
 through `queue_dispatch` without constructing a command buffer or workspace.
 
-The [XDNA variant](variants/xdna.loom) uses a resident array program: one strand
+The [XDNA variant](../../../tooling/target/amd/xdna/serve/testdata/resident_embedding.loom) uses a resident array program: one strand
 DMA-transfers the input packet into local storage and the completed output back;
 another consumes and publishes those packets through channels. Cohort lengths
 and compact result positions remain runtime data. The same HTTP checks run on

@@ -4,7 +4,7 @@ A model is one JSON document plus its referenced programs and assets. The
 document is both a startup input to `--model=path/model.json` and the body of
 `POST /v1/models/register`. Registration does not require rebuilding the server.
 
-This complete example is the [embedding fixture](../models/fixtures/embedding/model.json):
+This complete example is the [embedding fixture](../../../loom/src/loom/serve/fixture/embedding/model.json):
 
 ```json
 {

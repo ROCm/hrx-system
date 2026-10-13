@@ -5,7 +5,7 @@ executables. They have no dependency on a model package or embedded source
 catalog. `--model=/path/to/package/model.json` is required. Model files are JIT inputs,
 not build inputs to these binaries.
 
-The [tiny source fixture](../models/fixtures/text/README.md) exercises retained
+The [tiny source fixture](../../../loom/src/loom/serve/fixture/text/README.md) exercises retained
 rows, shared pages and HTTP continuations with a generated 76-byte checkpoint.
 The [Qwen package](../models/qwen/README.md) is the real-weight implementation
 of this contract. Its numerical kernels, stage composition, storage geometry,

@@ -10,7 +10,7 @@ Compiler, runtime and model examples travel together on that branch.
 | --- | --- |
 | How do I start empty, load a model and operate the server? | [Operator guide](OPERATING.md) |
 | Where does a fresh agent start, and what counts as success? | [Agent entry point](AGENT_START.md) |
-| Can I exercise multiple modality ABIs without downloading a model? | [Three-model source-only catalog](../models/fixtures/README.md) |
+| Can I exercise multiple modality ABIs without downloading a model? | [Three-model source-only catalog](../../../loom/src/loom/serve/fixture/README.md) |
 | What are the catalog, endpoint and lifetime contracts? | [Shared serving reference](../serving/README.md) |
 | How does model math become runnable source? | [Model authoring](MODEL_AUTHORING.md) |
 | Which exact source entries and storage records does a text port implement? | [Text package contract](../text/README.md) |
@@ -21,7 +21,7 @@ Compiler, runtime and model examples travel together on that branch.
 ## Serving capabilities
 
 One shared HTTP server now loads text, image, embedding and decision source
-packages. The [weight-free model documents](../models/fixtures/README.md) exercise
+packages. The [weight-free model documents](../../../loom/src/loom/serve/fixture/README.md) exercise
 real image, embedding and decision VM/GPU/HTTP paths, including raw tokenization,
 through one executable. These deterministic fixtures prove ABI and ownership,
 not learned embedding/decision quality or NPU execution. The native services
@@ -63,7 +63,7 @@ The host still schedules and reads completion records between epochs.
 The [runner guide](RUNNER.md#extension-boundaries) identifies the exact changes
 needed to move those boundaries. The intended 20–40-agent deployment, learned
 NPU models and autonomous device scheduler are not demonstrated by this branch.
-The [resident embedding fixture](../models/fixtures/embedding/README.md#verification)
+The [resident embedding fixture](../../../loom/src/loom/serve/fixture/embedding/README.md#verification)
 does prove source-JIT XDNA execution through HTTP, including first output,
 cancellation and retirement; it has no learned weights.
 
@@ -78,7 +78,7 @@ or a model-specific compiler executable.
 | Gate | Execution requirement |
 | --- | --- |
 | HTTP/chat/scheduler unit tests | CPU only |
-| Source-JIT text, embedding and decision fixtures | Linux x86-64 CPU with VM/x86 targets and task HAL; no GPU or downloaded model |
+| Source-JIT text, image, embedding and decision fixtures | Linux x86-64 CPU with VM/x86 targets and task HAL; no GPU or downloaded model |
 | Small source-to-VM-to-GPU tests | AMD gfx11 GPU with working ROCr; tested on gfx1100 and gfx1151 |
 | Vulkan image/text/embedding/decision fixtures | Vulkan device with the SPIR-V compiler and Vulkan HAL enabled |
 | Resident embedding fixture | Physical XDNA device with matching compiler/HAL; no learned parameters |
@@ -143,7 +143,7 @@ Register the operator guide's embedding fixture, undrain it and request
 `["a","bbb"]` at two dimensions. The independently checkable vectors are
 `[1,1]` and `[6,3]`; changing the request to `"ab"` gives `[3,2]`. This proves
 source loading, JIT, device execution and HTTP output, not learned embeddings.
-The image-containing three-model catalog still requires a GPU.
+The image and decision fixtures can share this CPU server without a GPU.
 
 The corresponding CPU source-service checks are:
 
@@ -153,6 +153,7 @@ build_tools/bin/iree-bazel-test --config=asan \
   --//loom/config/execute:enable=iree_hal \
   --//runtime/config/hal:drivers=task \
   //experimental/loom_serve/models/fixtures/text:service_cpu_test \
+  //experimental/loom_serve/models/fixtures/image:service_cpu_test \
   //experimental/loom_serve/models/fixtures/embedding:service_cpu_test \
   //experimental/loom_serve/models/fixtures/decision:service_cpu_test
 ```
@@ -176,7 +177,7 @@ ROCm SDK can still supply device tooling for other repository tests.
 ## Reproduce the compiler/runtime boundary without weights
 
 For final user-visible results first, the
-[three-model walkthrough](../models/fixtures/README.md) supplies a tracked
+[three-model walkthrough](../../../loom/src/loom/serve/fixture/README.md) supplies a tracked
 catalog, exact requests and expected vectors/probabilities/pixels. The smaller
 tests below isolate compiler/runtime boundaries when debugging a port.
 

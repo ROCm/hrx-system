@@ -10,7 +10,7 @@ Start with the [operator guide](docs/OPERATING.md) to run the shared server with
 zero models, register source packages over HTTP, choose resource bounds and
 observe/drain/remove deployments. One server owns the process resources;
 models and listeners have independent lifetimes. The
-[small source fixtures](models/fixtures/README.md) produce exact results without
+[small source fixtures](../../loom/src/loom/serve/fixture/README.md) produce exact results without
 downloading learned weights.
 
 The [model-authoring packet](docs/README.md) walks through reproduction,
@@ -41,7 +41,7 @@ configuration, numerical policy, and model-specific reference checks.
 | [`motifs/`](motifs) | Reusable tensor math and GGML format kernels, specialized by model source |
 | [`models/krea/`](models/krea) | Krea source programs, checkpoint/request policy and model-specific reference checks |
 | [`models/qwen/`](models/qwen) | Qwen model programs, chat/state policy and reference checks |
-| [`models/fixtures/`](models/fixtures) | Deterministic source models exercising the serving contracts without learned checkpoints |
+| [Source fixtures](../../loom/src/loom/serve/fixture/README.md) | Deterministic source models exercising the serving contracts without learned checkpoints |
 | [`tools/`](tools) | Observation, recording, workload replay, simulation and component checks |
 
 The shared native headers are experimental model-author interfaces, not a
@@ -70,21 +70,18 @@ loader target from HAL device facts. Linked providers cover AMDGPU,
 Vulkan/SPIR-V, x86 CPU and XDNA;
 the source still needs to lower for the chosen target. The retained-text fixture
 runs through the same source-JIT, command, pooled-state and HTTP path on AMDGPU,
-Vulkan and x86 CPU. Its [CPU recipe](models/fixtures/text/README.md) uses
+Vulkan and x86 CPU. Its [CPU recipe](../../loom/src/loom/serve/fixture/text/README.md) uses
 `--device=task --pool_backing=fixed`; GPU model kernels are not thereby CPU ports.
-Source decision and weighted embedding fixtures also execute on x86 CPU and
-Vulkan; the image fixture executes on AMDGPU and Vulkan. These use the same
+Source decision, image and weighted embedding fixtures also execute on x86 CPU,
+AMDGPU and Vulkan. These use the same
 recorder, source JIT and HTTP lifecycle with one or four shared workers and
 fixed-backed pools. Native pools honor reflected parameter and transient
 alignment; the runner preserves those requirements. The weighted fixture covers
 checkpoint loading, in-place preparation, dynamic registration, exact HTTP
 results and retirement. This establishes the generic execution path, not
 portability of target-specific model kernels or elastic Vulkan backing.
-The image fixture uses non-unit workgroups and `kernel.workitem.id`, which the
-native CPU compiler currently rejects; CPU image execution needs that compiler
-execution contract, not a different serving adapter.
 Buffer-only finite stages submit through `queue_dispatch` without a command
-buffer. The embedding fixture's [resident XDNA variant](models/fixtures/embedding/variants/xdna.loom)
+buffer. The embedding fixture's [resident XDNA variant](../../loom/src/loom/tooling/target/amd/xdna/serve/testdata/resident_embedding.loom)
 uses this path for ragged HTTP requests and retirement; it has no learned
 parameters. Checkpoint-backed command stages require native command-buffer
 execution and file import/queue-read support. The [finite stage contract](../../loom/src/loom/serve/service/finite/README.md)

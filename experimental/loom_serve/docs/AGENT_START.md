@@ -3,7 +3,7 @@
 The first outcome is an observed execution, not a new serving abstraction. This
 branch has source-defined text, image, embedding and decision runners, a shared
 HTTP catalog, Krea/Qwen examples, and reusable JIT/queue ownership code. The
-[three-model walkthrough](../models/fixtures/README.md) establishes real
+[three-model walkthrough](../../../loom/src/loom/serve/fixture/README.md) establishes real
 VM/GPU/HTTP output without a model download. The
 [CPU first-output recipe](README.md#cpu-first-output-without-a-model-download)
 instead runs source-JIT text/embedding/decision paths without a GPU or ROCr.
@@ -56,10 +56,10 @@ transport, shared workers, device timelines, memory ownership and observation.
 
 | Model behavior | Source contract and first-output witness | Scheduling/storage boundary |
 | --- | --- | --- |
-| Autoregressive text | [Text entries](../text/README.md), [tiny retained model](../models/fixtures/text/README.md) | Ready prompt/decode/verification spans share epochs; pages and recurrent state survive requests |
-| Text to finite image | [Image entries](../../../loom/src/loom/serve/service/image/model.h), [image fixture](../models/fixtures/image/README.md), then Krea | One prepared invocation per image residency; request storage retires after output |
-| Embedding or structured decision | [Finite entries](../../../loom/src/loom/serve/service/finite/README.md), [embedding](../models/fixtures/embedding/README.md) or [decision](../models/fixtures/decision/README.md) fixture | Source declares additive batch cost, compatibility and original result indices; compatible requests share a cohort |
-| Resident native computation | [Finite direct-stage contract](../../../loom/src/loom/serve/service/finite/README.md#compact-results-and-physical-storage), [resident variants](../models/fixtures/embedding/README.md#verification) | `prepare.dispatch` supplies a native entry submitted through `queue_dispatch`, with the same timeline/feedback retirement as command stages |
+| Autoregressive text | [Text entries](../text/README.md), [tiny retained model](../../../loom/src/loom/serve/fixture/text/README.md) | Ready prompt/decode/verification spans share epochs; pages and recurrent state survive requests |
+| Text to finite image | [Image entries](../../../loom/src/loom/serve/service/image/model.h), [image fixture](../../../loom/src/loom/serve/fixture/image/README.md), then Krea | One prepared invocation per image residency; request storage retires after output |
+| Embedding or structured decision | [Finite entries](../../../loom/src/loom/serve/service/finite/README.md), [embedding](../../../loom/src/loom/serve/fixture/embedding/README.md) or [decision](../../../loom/src/loom/serve/fixture/decision/README.md) fixture | Source declares additive batch cost, compatibility and original result indices; compatible requests share a cohort |
+| Resident native computation | [Finite direct-stage contract](../../../loom/src/loom/serve/service/finite/README.md#compact-results-and-physical-storage), [resident variants](../../../loom/src/loom/serve/fixture/embedding/README.md#verification) | `prepare.dispatch` supplies a native entry submitted through `queue_dispatch`, with the same timeline/feedback retirement as command stages |
 
 The resident XDNA fixture reaches real HTTP output without a command buffer or
 host output initialization. It has no checkpoint parameters. Weighted command
@@ -106,8 +106,8 @@ them with a numerical kernel failure.
 
 For embedding or decision work, the [finite-vector contract](../../../loom/src/loom/serve/service/finite/README.md)
 is the existing source-owned batching path, not a text decode loop. Its
-[embedding fixture](../models/fixtures/embedding/README.md) and
-[decision fixture](../models/fixtures/decision/README.md) demonstrate request
+[embedding fixture](../../../loom/src/loom/serve/fixture/embedding/README.md) and
+[decision fixture](../../../loom/src/loom/serve/fixture/decision/README.md) demonstrate request
 preparation, compatible ragged cohorts, compact feedback and original result
 indices. Pooling, normalization and learned heads belong in kernels; native
 code parses and serializes the modality protocol. Real EmbeddingGemma2/CLEF

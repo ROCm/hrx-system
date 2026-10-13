@@ -13,34 +13,20 @@ package(
     licenses = ["notice"],
 )
 
-exports_files(["model.json"])
-
-filegroup(
-    name = "sources",
-    srcs = [
-        "config.loom",
-        "control.loom",
-        "decide.loom",
-        "model.json",
-        "prepare.loom",
-    ],
-    visibility = ["//visibility:public"],
-)
-
 [
     loom_cc_test(
         name = name,
         srcs = ["service_test.cc"],
         args = [
-            "--model_source=$(rootpath :prepare.loom)",
-            "--embedding_source=$(rootpath //experimental/loom_serve/models/fixtures/embedding:prepare.loom)",
+            "--model_source=$(rootpath //loom/src/loom/serve/fixture/decision:prepare.loom)",
+            "--embedding_source=$(rootpath //loom/src/loom/serve/fixture/embedding:prepare.loom)",
             "--test_device=" + device,
         ],
         data = [
-            "prepare.loom",
-            ":sources",
-            "//experimental/loom_serve/models/fixtures/embedding:prepare.loom",
-            "//experimental/loom_serve/models/fixtures/embedding:sources",
+            "//loom/src/loom/serve/fixture/decision:prepare.loom",
+            "//loom/src/loom/serve/fixture/decision:sources",
+            "//loom/src/loom/serve/fixture/embedding:prepare.loom",
+            "//loom/src/loom/serve/fixture/embedding:sources",
         ],
         resource_group = resource_group,
         tags = tags,

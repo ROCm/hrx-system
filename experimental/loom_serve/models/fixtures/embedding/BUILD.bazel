@@ -13,39 +13,19 @@ package(
     licenses = ["notice"],
 )
 
-exports_files([
-    "prepare.loom",
-    "model.json",
-])
-
-filegroup(
-    name = "sources",
-    srcs = [
-        "config.loom",
-        "control.loom",
-        "embed.loom",
-        "model.json",
-        "prepare.loom",
-        "tokenizer.json",
-    ],
-    visibility = ["//visibility:public"],
-)
-
 [
     loom_cc_test(
         name = name,
         srcs = ["service_test.cc"],
         args = [
-            "--model_source=$(rootpath :prepare.loom)",
+            "--model_source=$(rootpath //loom/src/loom/serve/fixture/embedding:prepare.loom)",
             "--test_device=" + device,
         ] + filters,
         data = [
-            "prepare.loom",
-            "variants/direct.loom",
-            "variants/policy.loom",
-            "variants/weights.loom",
-            "variants/xdna.loom",
-            ":sources",
+            "//loom/src/loom/serve/fixture/embedding:prepare.loom",
+            "//loom/src/loom/serve/fixture/embedding:sources",
+            "//loom/src/loom/serve/fixture/embedding:variant_sources",
+            "//loom/src/loom/tooling/target/amd/xdna/serve:testdata/resident_embedding.loom",
         ],
         resource_group = resource_group,
         tags = tags,
@@ -109,7 +89,7 @@ filegroup(
                 "runtime-resource=amd-xdna",
             ],
             [
-                "--direct_stage_source=$(rootpath :variants/xdna.loom)",
+                "--direct_stage_source=$(rootpath //loom/src/loom/tooling/target/amd/xdna/serve:testdata/resident_embedding.loom)",
                 "--gtest_filter=*DirectDispatch*",
             ],
         ),

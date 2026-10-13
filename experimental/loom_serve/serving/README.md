@@ -56,7 +56,7 @@ startup model documents use the same asynchronous path. Source preparation and
 JIT share the host workers. Initial device uploads use proactor readiness, not
 worker waits. A failed package remains inspectable while peers keep serving.
 
-The [weight-free three-model catalog](../models/fixtures/README.md) is a complete
+The [weight-free three-model catalog](../../../loom/src/loom/serve/fixture/README.md) is a complete
 first-output recipe for image, embedding and decision packages. The example
 below adds real text/image checkpoints; the same executable handles both.
 
@@ -477,7 +477,7 @@ instead of selecting undocumented model behavior.
 Different HTTP requests can share a source-selected cohort without sharing
 response identity. A cancelled peer loses only its own response. The native
 encoder receives compact final vectors, not hidden activations. See the
-[fixture](../models/fixtures/embedding/README.md) for exact predictable outputs
+[fixture](../../../loom/src/loom/serve/fixture/embedding/README.md) for exact predictable outputs
 and the source replacement/parameter-pressure test.
 
 Decisions use `POST /v1/systemone` with `model`, `state` and keyed typed
@@ -485,7 +485,7 @@ Decisions use `POST /v1/systemone` with `model`, `state` and keyed typed
 probability vectors. A `kind:"decision"` deployment uses the same `source`,
 `assets`, `options` and `pending_requests` catalog fields as embeddings, and the
 same finite cohort scheduler. See the [decision protocol](../../../loom/src/loom/serve/service/finite/decision/README.md)
-and [source fixture](../models/fixtures/decision/README.md) for full request,
+and [source fixture](../../../loom/src/loom/serve/fixture/decision/README.md) for full request,
 response, capacity and model-authoring semantics. An endpoint implementation
 does not imply support for a learned decision checkpoint.
 

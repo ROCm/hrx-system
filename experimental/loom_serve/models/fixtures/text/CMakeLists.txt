@@ -9,26 +9,6 @@
 
 iree_add_all_subdirs()
 
-iree_package_target_name(_FILEGROUP_TARGET "::sources")
-add_custom_command(OUTPUT sources.stamp
-    COMMAND ${CMAKE_COMMAND} -E touch sources.stamp
-  DEPENDS
-    "advance.loom"
-    "control.loom"
-    "model.json"
-    "prepare.loom"
-    "tokenizer.json"
-    "weights.loom"
-)
-
-add_custom_target(${_FILEGROUP_TARGET}
-    DEPENDS sources.stamp
-)
-iree_register_generated_compile_input(${_FILEGROUP_TARGET}
-  OUTPUTS
-    "${CMAKE_CURRENT_BINARY_DIR}/sources.stamp"
-)
-
 if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
@@ -44,12 +24,8 @@ loom_cc_test(
     "service_test_fixture.h"
     "stalled_client_test_util.h"
   DATA
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/advance.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/control.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/model.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/tokenizer.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/weights.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom"
+    "loom::serve::fixture::text::sources"
   DEPS
     iree::async
     iree::async::platform
@@ -80,7 +56,7 @@ loom_cc_test(
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
-    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom}}"
+    "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom}}"
     "--test_device=amdgpu"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
@@ -104,12 +80,8 @@ loom_cc_test(
     "service_test_fixture.h"
     "stalled_client_test_util.h"
   DATA
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/advance.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/control.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/model.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/tokenizer.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/weights.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom"
+    "loom::serve::fixture::text::sources"
   DEPS
     iree::async
     iree::async::platform
@@ -140,7 +112,7 @@ loom_cc_test(
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
-    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom}}"
+    "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom}}"
     "--test_device=vulkan"
     "--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*:SharedWorkers/PrefixServiceTest.*"
   LABELS
@@ -165,12 +137,8 @@ loom_cc_test(
     "service_test_fixture.h"
     "stalled_client_test_util.h"
   DATA
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/advance.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/control.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/model.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/tokenizer.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/weights.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom"
+    "loom::serve::fixture::text::sources"
   DEPS
     iree::async
     iree::async::platform
@@ -201,7 +169,7 @@ loom_cc_test(
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
-    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom}}"
+    "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom}}"
     "--test_device=task"
     "--gtest_filter=Workers/SourceTextServiceTest.*:Workers/AdmissionServiceTest.*:SharedWorkers/PrefixServiceTest.*"
   LABELS

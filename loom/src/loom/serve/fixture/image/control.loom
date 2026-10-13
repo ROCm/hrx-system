@@ -1,6 +1,9 @@
 func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
+
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
 func.decl import("runner") @execute_3(%stage: i32, %request: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) -> (i64)
+
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
 
 // prompt exceeds fixture text capacity
@@ -11,34 +14,34 @@ func.def public @prepare_request(%state: buffer, %tags: buffer, %stage_count: i3
   %origin = index.constant 0 : offset
   %state_view = buffer.view %state[%origin] : buffer -> view<1xi64>
   %capacity = view.load %state_view[0] : view<1xi64> -> i64
-  %zero = scalar.constant 0 : i32
-  %one = scalar.constant 1 : i64
-  %bound = scalar.addi %capacity, %one : i64
-  %ids, %count = func.call @encode(%prompt, %zero, %bound) : (buffer, i32, i64) -> (buffer, i64)
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i64
+  %bound = scalar.addi %capacity, %c1 : i64
+  %ids, %count = func.call @encode(%prompt, %c0, %bound) : (buffer, i32, i64) -> (buffer, i64)
   %fits = scalar.cmpi ule, %count, %capacity : i64
   %fits32 = scalar.extui %fits : i1 to i32
   %error = global.load @invalid : buffer
-  func.call @require(%fits32, %error) : (i32, buffer) -> ()
+  func.call @require(%fits32, %error) : (i32, buffer)
   %length = index.constant 16 : offset
   %payload = buffer.alloca<private> align(8) %length : buffer
   %header = buffer.view %payload[%origin] : buffer -> view<2xi64>
   view.store %seed, %header[0] : i64, view<2xi64>
   view.store %count, %header[1] : i64, view<2xi64>
-  func.return %zero, %payload : i32, buffer
+  func.return %c0, %payload : i32, buffer
 }
 
 func.def public @generate(%first_part: i32, %part_count: i32, %cursor: i32, %output_bytes: i64, %request: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) -> (i32) {
   %part = scalar.addi %first_part, %cursor : i32
   %work = func.call @execute_3(%part, %request, %rgb, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
-  %one = scalar.constant 1 : i32
-  %next = scalar.addi %cursor, %one : i32
+  %c1 = scalar.constant 1 : i32
+  %next = scalar.addi %cursor, %c1 : i32
   %more = scalar.cmpi slt, %next, %part_count : i32
   %result = scf.if %more -> (i32) {
     scf.yield %next : i32
   } else {
-    %zero = scalar.constant 0 : i32
+    %c0 = scalar.constant 0 : i32
     %offset = scalar.constant 0 : i64
-    %done = func.call @feedback(%zero, %rgb, %offset, %output_bytes) : (i32, hal.buffer, i64, i64) -> (i64)
+    %done = func.call @feedback(%c0, %rgb, %offset, %output_bytes) : (i32, hal.buffer, i64, i64) -> (i64)
     %terminal = scalar.constant -1 : i32
     scf.yield %terminal : i32
   }

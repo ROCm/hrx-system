@@ -1,6 +1,6 @@
 # A tiny retained-text model
 
-This package implements the same pooled autoregressive ABI as Qwen, with two
+This package implements the pooled autoregressive serving ABI with two
 tiny device kernels and a real four-byte checkpoint parameter. It uses ordinary
 source-JIT VM programs, page ownership, recurrent slots, named checkpoints and
 HTTP streaming. There is no native mock model or canned response path.
@@ -26,7 +26,7 @@ prediction = #                         if position % 11 == 0
 
 Selection reads the complete paged history; the next chunk reads both its
 recurrent anchor and last cached value. The CPU oracle in
-[service_test.cc](service_test.cc) maintains a dense running sum instead of
+[service_test.cc](../../../../../../experimental/loom_serve/models/fixtures/text/service_test.cc) maintains a dense running sum instead of
 interpreting device packets or physical page IDs. A pending prediction remains
 unconsumed until the next step.
 
@@ -70,29 +70,34 @@ separate real-model/backend witnesses.
 
 ## First output without a download
 
-Create the 76-byte checkpoint at an explicit temporary path:
+Copy the package to a temporary directory, generate its 76-byte checkpoint,
+and enable two named checkpoint slots in its model document:
 
 ```sh
-python3 - /tmp/fixture-text.safetensors <<'PY'
+fixture_directory=$(mktemp -d)
+python3 - "$fixture_directory" <<'PY'
+import json
+import shutil
 import struct
 import sys
+from pathlib import Path
 
+directory = Path(sys.argv[1])
+shutil.copytree("loom/src/loom/serve/fixture/text", directory, dirs_exist_ok=True)
 header = b'{"bias":{"dtype":"I32","shape":[1],"data_offsets":[0,4]}}'
 header += b' ' * (-len(header) % 8)
-with open(sys.argv[1], 'wb') as output:
-    output.write(struct.pack('<Q', len(header)))
-    output.write(header)
-    output.write(struct.pack('<I', 2))
+(directory / "weights.safetensors").write_bytes(
+    struct.pack('<Q', len(header)) + header + struct.pack('<I', 2)
+)
+document = json.loads((directory / "model.json").read_text())
+document["definition"]["checkpoint_capacity"] = 2
+(directory / "model.json").write_text(json.dumps(document))
 PY
 
 build_tools/bin/iree-bazel-run --config=opt \
-  //experimental/loom_serve/text:server -- \
-  --model=experimental/loom_serve/models/fixtures/text/model.json \
-  --weights=/tmp/fixture-text.safetensors \
-  --tokenizer=tokenizer.json \
-  --rows=4 --context_capacity=96 --pool_capacity=256 \
-  --prefill_capacity=32 --checkpoint_capacity=2 --max_tokens=16 \
-  --device=task --pool_backing=fixed --workers=1 --port=8080
+  //loom/src/loom/tools/loom-serve -- \
+  --model="$fixture_directory/model.json" \
+  --device=task --pool_backing=fixed --workers=1 --listen=127.0.0.1:8080
 ```
 
 The CPU task device shares the server's worker pool and JITs native x86 code;
@@ -114,7 +119,7 @@ curl --fail --silent --show-error -X POST \
 The stream contains `bx` with finish reason `length`; the next request pins
 position 5. Subsequent requests send full history and can select
 `X-Loom-Checkpoint: base` to fork or rewind. The
-[text HTTP contract](../../../text/README.md#named-http-checkpoints) details
+[text HTTP contract](../../../../../../experimental/loom_serve/text/README.md#named-http-checkpoints) details
 ownership and error behavior.
 
 For wrappers expecting a complete JSON response, omit `stream` or set it to
@@ -132,12 +137,12 @@ With `max_tokens:16`, content is `bxaaaxb`, finish reason is `stop`, and usage
 counts eight completion tokens including EOS. Streaming and nonstreaming turns
 can share one `X-Loom-Session`; neither changes the retained transcript.
 
-The shared server accepts [model.json](model.json) alongside other model
-documents. Set `definition.weights` to the generated checkpoint path and use
-`--model=experimental/loom_serve/models/fixtures/text/model.json`. For an
-external copy, preserve the referenced programs/tokenizer or use an absolute
-`base_directory` pointing at this package. The same complete document can be
-registered over HTTP with that explicit base.
+The server accepts this [model document](model.json) alongside other models
+using repeated `--model` flags. The copied document resolves its source and
+checkpoint paths relative to its own directory. The same complete document can
+be registered over HTTP with an explicit absolute `base_directory` naming that
+directory. Source programs may also be stored as `.loombc`; changing their
+format does not change this path or ownership contract.
 
 ## Verification
 
@@ -158,8 +163,8 @@ dense arithmetic. Elastic virtual-memory cases run separately on AMDGPU; the
 CPU and Vulkan suites exercise fixed-backed logical pooling. The CPU-only
 request test exercises source framing, exact token IDs and rejection before any
 device or checkpoint is needed.
-Exact output, not compilation alone, establishes the boundary. Real Qwen
-remains the numerical/performance reference for its architecture.
+Exact output, not compilation alone, establishes the boundary. Learned models
+need their own numerical and performance evidence.
 
 The CPU-only client test starts the public shared-server executable and checks
 actual HTTP JSON/SSE parsing, usage, concurrent output modes, retained turns

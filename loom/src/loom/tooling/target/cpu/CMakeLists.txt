@@ -19,11 +19,11 @@ iree_py_test(
     "../../../tools/loom-serve/server_test.py"
   ARGS
     "{{$<TARGET_FILE:loom::tools::loom-serve::loom-serve>}}"
-    "{{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom}}"
     "{{$<TARGET_FILE:loom::tools::loom-format::loom-format>}}"
   DATA
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
-    "iree::experimental::loom_serve::models::fixtures::embedding::sources"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom"
+    "loom::serve::fixture::embedding::sources"
     "loom::tools::loom-format::loom-format"
     "loom::tools::loom-serve::loom-serve"
   DEPS

@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 from loom_serve_testing.http import control, running_server
 
 SERVER = Path(sys.argv.pop(1)).resolve()
-PACKAGE = Path(__file__).parent.resolve()
+PACKAGE = Path(sys.argv.pop(1)).resolve().parent
 
 
 class ClientTest(unittest.TestCase):

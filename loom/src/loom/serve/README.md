@@ -61,6 +61,12 @@ Each component keeps its unit tests beside its implementation. Native headers
 describe ownership contracts; they are implementation interfaces rather than
 a separately versioned embedding SDK.
 
+The [source fixtures](fixture/README.md) contain deterministic model documents,
+VM programs, device kernels and tokenizers. They exercise these same production
+paths without learned checkpoints; they are runtime inputs rather than linked
+server dependencies. Shared test clients and native harnesses live in
+[`testing/`](testing/README.md), separately from production libraries.
+
 Physical AMDGPU test registrations live with target tooling; their native
 test sources and source-program inputs remain beside the component they
 exercise. Execution facilities have no transport, service, or learned-model

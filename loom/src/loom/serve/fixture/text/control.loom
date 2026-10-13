@@ -1,27 +1,43 @@
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
 func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
+
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
+
 func.decl import("json") @unescape(%source: buffer, %offset: i64, %length: i64, %target: buffer, %target_offset: i64) -> (i64)
+
 func.decl import("runner") @execute_6(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer, %b4: hal.buffer, %b5: hal.buffer) -> (i64)
+
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
 
 global.rodata.def @name = bytes("666978747572652d74657874")
+
 global.rodata.def @empty = bytes("")
+
 global.rodata.def @no_tools = bytes("5b5d")
+
 global.rodata.def @terminal = bytes("23")
+
 global.rodata.def @assistant = bytes("617373697374616e74")
+
 global.rodata.def @user = bytes("75736572")
+
 global.rodata.def @system = bytes("73797374656d")
+
 global.rodata.def @thinking = bytes("656e61626c655f7468696e6b696e67")
+
 global.rodata.def @options = bytes("6d6f64656c5f6f7074696f6e73")
+
 global.rodata.def @invalid = bytes("746578742066697874757265206163636570747320612f622f78206d6573736167657320776974686f757420746f6f6c732c20726561736f6e696e67206f72206d6f64656c206f7074696f6e73")
+
 global.rodata.def @unsupported = bytes("74657874206669787475726520726571756972657320706f6f6c65642065706f63687320776974686f7574204d5450")
+
 global.rodata.def @overflow = bytes("696e7075742065786365656473206361706163697479")
 
 func.def @check(%condition: i1) {
   %value = scalar.extui %condition : i1 to i32
   %error = global.load @invalid : buffer
-  func.call @require(%value, %error) : (i32, buffer) -> ()
+  func.call @require(%value, %error) : (i32, buffer)
   func.return
 }
 
@@ -30,10 +46,10 @@ func.def @equal(%a: buffer, %b: buffer) -> (i1) {
   %b_length = buffer.length %b
   %same_length = index.cmp eq, %a_length, %b_length : offset
   %same = scf.if %same_length -> (i1) {
-    %zero = index.constant 0 : offset
-    %compared = buffer.compare %a[%zero], %b[%zero], %a_length
-    %zero32 = scalar.constant 0 : i32
-    %matches = scalar.cmpi eq, %compared, %zero32 : i32
+    %c0 = index.constant 0 : offset
+    %compared = buffer.compare %a[%c0], %b[%c0], %a_length
+    %c0_i32 = scalar.constant 0 : i32
+    %matches = scalar.cmpi eq, %compared, %c0_i32 : i32
     scf.yield %matches : i1
   } else {
     %false = scalar.constant false : i1
@@ -43,13 +59,13 @@ func.def @equal(%a: buffer, %b: buffer) -> (i1) {
 }
 
 func.def @join(%a: buffer, %b: buffer) -> (buffer) {
-  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : offset
   %a_length = buffer.length %a
   %b_length = buffer.length %b
   %length = index.add %a_length, %b_length : offset
   %output = buffer.alloca<private> align(1) %length : buffer
-  buffer.copy %a[%zero], %output[%zero], %a_length
-  buffer.copy %b[%zero], %output[%a_length], %b_length
+  buffer.copy %a[%c0], %output[%c0], %a_length
+  buffer.copy %b[%c0], %output[%a_length], %b_length
   func.return %output : buffer
 }
 
@@ -59,40 +75,40 @@ func.def public @model_name() -> (buffer) {
 }
 
 func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
-  %zero = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
-  %one = index.constant 1 : index
-  %zero64 = scalar.constant 0 : i64
+  %c0 = index.constant 0 : offset
+  %c0_index = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c0_i64 = scalar.constant 0 : i64
   %empty = global.load @empty : buffer
   %no_tools = global.load @no_tools : buffer
   %absent = func.call @equal(%tools, %empty) : (buffer, buffer) -> (i1)
   %empty_list = func.call @equal(%tools, %no_tools) : (buffer, buffer) -> (i1)
   %valid_tools = scalar.ori %absent, %empty_list : i1
-  func.call @check(%valid_tools) : (i1) -> ()
+  func.call @check(%valid_tools) : (i1)
   %fields, %type, %count64 = func.call @members(%request) : (buffer) -> (buffer, i32, i64)
   %count_limit = scalar.constant 2147483647 : i64
   %count_fits = scalar.cmpi ule, %count64, %count_limit : i64
-  func.call @check(%count_fits) : (i1) -> ()
+  func.call @check(%count_fits) : (i1)
   %count_bounded = scalar.assume %count64 [range(%count64, 0, 2147483647)] : i64
   %count = index.cast %count_bounded : i64 to index
-  %records = buffer.view %fields[%zero] : buffer -> view<[%count]x5xi64>
+  %records = buffer.view %fields[%c0] : buffer -> view<[%count]x5xi64>
   %thinking = global.load @thinking : buffer
   %options = global.load @options : buffer
-  scf.for %i = [%zero_index to %count step %one] {
+  scf.for %i = [%c0_index to %count step %c1] {
     %begin64 = view.load %records[%i, 0] : view<[%count]x5xi64> -> i64
     %length64 = view.load %records[%i, 1] : view<[%count]x5xi64> -> i64
     %begin_bounded = scalar.assume %begin64 [range(%begin64, 0, 9223372036854775807)] : i64
     %length_bounded = scalar.assume %length64 [range(%length64, 0, 9223372036854775807)] : i64
     %begin = index.cast %begin_bounded : i64 to offset
     %length = index.cast %length_bounded : i64 to offset
-    %has_key = index.cmp ne, %length, %zero : offset
+    %has_key = index.cmp ne, %length, %c0 : offset
     %key = scf.if %has_key -> (buffer) {
       %decoded = buffer.alloca<private> align(1) %length : buffer
-      %used64 = func.call @unescape(%request, %begin64, %length64, %decoded, %zero64) : (buffer, i64, i64, buffer, i64) -> (i64)
+      %used64 = func.call @unescape(%request, %begin64, %length64, %decoded, %c0_i64) : (buffer, i64, i64, buffer, i64) -> (i64)
       %used_bounded = scalar.assume %used64 [range(%used64, 0, 9223372036854775807)] : i64
       %used = index.cast %used_bounded : i64 to offset
       %exact = buffer.alloca<private> align(1) %used : buffer
-      buffer.copy %decoded[%zero], %exact[%zero], %used
+      buffer.copy %decoded[%c0], %exact[%c0], %used
       scf.yield %exact : buffer
     } else {
       scf.yield %empty : buffer
@@ -103,8 +119,7 @@ func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
       %value_type = view.load %records[%i, 4] : view<[%count]x5xi64> -> i64
       %false_type = scalar.constant 5 : i64
       %disabled = scalar.cmpi eq, %value_type, %false_type : i64
-      func.call @check(%disabled) : (i1) -> ()
-      scf.yield
+      func.call @check(%disabled) : (i1)
     }
     scf.if %is_options {
       %value_begin64 = view.load %records[%i, 2] : view<[%count]x5xi64> -> i64
@@ -114,21 +129,19 @@ func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
       %value_begin = index.cast %value_begin_bounded : i64 to offset
       %value_length = index.cast %value_length_bounded : i64 to offset
       %value = buffer.alloca<private> align(1) %value_length : buffer
-      buffer.copy %request[%value_begin], %value[%zero], %value_length
+      buffer.copy %request[%value_begin], %value[%c0], %value_length
       %nested, %nested_type, %nested_count = func.call @members(%value) : (buffer) -> (buffer, i32, i64)
-      %empty_options = scalar.cmpi eq, %nested_count, %zero64 : i64
-      func.call @check(%empty_options) : (i1) -> ()
-      scf.yield
+      %empty_options = scalar.cmpi eq, %nested_count, %c0_i64 : i64
+      func.call @check(%empty_options) : (i1)
     }
-    scf.yield
   }
-  func.return %empty, %zero64 : buffer, i64
+  func.return %empty, %c0_i64 : buffer, i64
 }
 
 func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64) -> (buffer, i64) {
-  %zero64 = scalar.constant 0 : i64
-  %plain = scalar.cmpi eq, %fields, %zero64 : i64
-  func.call @check(%plain) : (i1) -> ()
+  %c0_i64 = scalar.constant 0 : i64
+  %plain = scalar.cmpi eq, %fields, %c0_i64 : i64
+  func.call @check(%plain) : (i1)
   %assistant_role = global.load @assistant : buffer
   %user_role = global.load @user : buffer
   %system_role = global.load @system : buffer
@@ -137,7 +150,7 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %re
   %system = func.call @equal(%role, %system_role) : (buffer, buffer) -> (i1)
   %ordinary = scalar.ori %user, %system : i1
   %supported = scalar.ori %ordinary, %assistant : i1
-  func.call @check(%supported) : (i1) -> ()
+  func.call @check(%supported) : (i1)
   %terminal = global.load @terminal : buffer
   %empty = global.load @empty : buffer
   %suffix = scf.select %assistant, %terminal, %empty : buffer
@@ -151,12 +164,12 @@ func.def public @chat_end(%state: i64) -> (buffer) {
 }
 
 func.def public @render_tool(%name: buffer, %arguments: buffer, %ordinal: i64) -> (buffer, i64) {
-  %zero = scalar.constant 0 : i32
-  %zero64 = scalar.constant 0 : i64
+  %c0 = scalar.constant 0 : i32
+  %c0_i64 = scalar.constant 0 : i64
   %error = global.load @invalid : buffer
-  func.call @require(%zero, %error) : (i32, buffer) -> ()
+  func.call @require(%c0, %error) : (i32, buffer)
   %empty = global.load @empty : buffer
-  func.return %empty, %zero64 : buffer, i64
+  func.return %empty, %c0_i64 : buffer, i64
 }
 
 func.def public @parse_tools(%schemas: buffer, %response: buffer) -> (buffer) {
@@ -168,29 +181,29 @@ func.def public @parse_tools(%schemas: buffer, %response: buffer) -> (buffer) {
 // the first assistant delimiter in this suffix; an open response consumes its
 // last ordinary token before that delimiter. Full replay encodes both normally.
 func.def public @prepare_input(%text: buffer, %format: i32, %boundary: i32, %capacity: i64) -> (buffer, i64) {
-  %zero = index.constant 0 : offset
-  %one = index.constant 1 : offset
-  %zero32 = scalar.constant 0 : i32
-  %two32 = scalar.constant 2 : i32
-  %one64 = scalar.constant 1 : i64
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : offset
+  %c0_i32 = scalar.constant 0 : i32
+  %c2_i32 = scalar.constant 2 : i32
+  %c1_i64 = scalar.constant 1 : i64
   %length = buffer.length %text
-  %terminated = scalar.cmpi eq, %boundary, %two32 : i32
+  %terminated = scalar.cmpi eq, %boundary, %c2_i32 : i32
   %input = scf.if %terminated -> (buffer) {
-    %nonempty = index.cmp ne, %length, %zero : offset
-    func.call @check(%nonempty) : (i1) -> ()
-    %first = buffer.load.i8.u %text[%zero]
+    %nonempty = index.cmp ne, %length, %c0 : offset
+    func.call @check(%nonempty) : (i1)
+    %first = buffer.load.i8.u %text[%c0]
     %hash = scalar.constant 35 : i32
     %delimiter = scalar.cmpi eq, %first, %hash : i32
-    func.call @check(%delimiter) : (i1) -> ()
-    %remaining = index.sub %length, %one : offset
+    func.call @check(%delimiter) : (i1)
+    %remaining = index.sub %length, %c1 : offset
     %suffix = buffer.alloca<private> align(1) %remaining : buffer
-    buffer.copy %text[%one], %suffix[%zero], %remaining
+    buffer.copy %text[%c1], %suffix[%c0], %remaining
     scf.yield %suffix : buffer
   } else {
     scf.yield %text : buffer
   }
   %input_length = buffer.length %input
-  scf.for %i = [%zero to %input_length step %one] {
+  scf.for %i = [%c0 to %input_length step %c1] {
     %byte = buffer.load.i8.u %input[%i]
     %a = scalar.constant 97 : i32
     %b = scalar.constant 98 : i32
@@ -203,15 +216,14 @@ func.def public @prepare_input(%text: buffer, %format: i32, %boundary: i32, %cap
     %ab = scalar.ori %is_a, %is_b : i1
     %xh = scalar.ori %is_x, %is_hash : i1
     %valid = scalar.ori %ab, %xh : i1
-    func.call @check(%valid) : (i1) -> ()
-    scf.yield
+    func.call @check(%valid) : (i1)
   }
-  %probe = scalar.addi %capacity, %one64 : i64
-  %tokens, %count = func.call @encode(%input, %zero32, %probe) : (buffer, i32, i64) -> (buffer, i64)
+  %probe = scalar.addi %capacity, %c1_i64 : i64
+  %tokens, %count = func.call @encode(%input, %c0_i32, %probe) : (buffer, i32, i64) -> (buffer, i64)
   %fits = scalar.cmpi ule, %count, %capacity : i64
   %fits32 = scalar.extui %fits : i1 to i32
   %error = global.load @overflow : buffer
-  func.call @require(%fits32, %error) : (i32, buffer) -> ()
+  func.call @require(%fits32, %error) : (i32, buffer)
   func.return %tokens, %count : buffer, i64
 }
 
@@ -228,13 +240,13 @@ func.def public @complete_text(%prompt: buffer, %content: buffer, %tools: buffer
 
 func.def public @encode_state(%bindings: buffer, %count: i32, %origins: buffer) {
   %origin = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
   %bounded_count = scalar.assume %count [range(%count, 1, 16)] : i32
   %length = index.cast %bounded_count : i32 to index
   %records = buffer.view %bindings[%origin] : buffer -> view<16x4xi64>
   %rows = buffer.view %origins[%origin] : buffer -> view<16x4xi64>
-  scf.for %i = [%zero to %length step %one] {
+  scf.for %i = [%c0 to %length step %c1] {
     %row64 = view.load %records[%i, 0] : view<16x4xi64> -> i64
     %bounded_row = scalar.assume %row64 [range(%row64, 0, 15)] : i64
     %row = index.cast %bounded_row : i64 to index
@@ -244,7 +256,6 @@ func.def public @encode_state(%bindings: buffer, %count: i32, %origins: buffer) 
     view.store %read, %rows[%row, 0] : i64, view<16x4xi64>
     view.store %write, %rows[%row, 1] : i64, view<16x4xi64>
     view.store %position, %rows[%row, 3] : i64, view<16x4xi64>
-    scf.yield
   }
   func.return
 }
@@ -257,11 +268,11 @@ func.def public @encode_epoch(%plan: buffer, %inputs: buffer, %first_count: i32,
   %plan_bytes = index.constant 512 : offset
   %token_bytes = buffer.length %tokens
   %header = buffer.view %metadata[%origin] : buffer -> view<4xi32>
-  %zero = scalar.constant 0 : i32
+  %c0 = scalar.constant 0 : i32
   view.store %first_count, %header[0] : i32, view<4xi32>
   view.store %eos, %header[1] : i32, view<4xi32>
-  view.store %zero, %header[2] : i32, view<4xi32>
-  view.store %zero, %header[3] : i32, view<4xi32>
+  view.store %c0, %header[2] : i32, view<4xi32>
+  view.store %c0, %header[3] : i32, view<4xi32>
   buffer.copy %plan[%origin], %metadata[%header_bytes], %plan_bytes
   buffer.copy %inputs[%origin], %tokens[%origin], %token_bytes
   func.return %first_count : i32
@@ -269,22 +280,22 @@ func.def public @encode_epoch(%plan: buffer, %inputs: buffer, %first_count: i32,
 
 func.def public @publish_epoch(%plan: buffer, %count: i32, %verified: i32, %continues: i32, %next_speculative_mask: i32, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer) {
   %origin = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %zero32 = scalar.constant 0 : i32
-  %one32 = scalar.constant 1 : i32
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
   %progress_bytes = buffer.length %progress
-  buffer.fill %zero32, %progress[%origin], %progress_bytes : i32
+  buffer.fill %c0_i32, %progress[%origin], %progress_bytes : i32
   %bounded_count = scalar.assume %count [range(%count, 1, 16)] : i32
   %length = index.cast %bounded_count : i32 to index
   %requests = buffer.view %plan[%origin] : buffer -> view<32x8xi32>
   %outputs = buffer.view %ordinary[%origin] : buffer -> view<16xi32>
   %published = buffer.view %progress[%origin] : buffer -> view<16x20xi32>
-  scf.for %i = [%zero to %length step %one] {
+  scf.for %i = [%c0 to %length step %c1] {
     %consumed = view.load %requests[%i, 0] : view<32x8xi32> -> i32
     %flags = view.load %requests[%i, 5] : view<32x8xi32> -> i32
-    %bits = scalar.andi %flags, %one32 : i32
-    %selected = scalar.cmpi ne, %bits, %zero32 : i32
+    %bits = scalar.andi %flags, %c1_i32 : i32
+    %selected = scalar.cmpi ne, %bits, %c0_i32 : i32
     %selected_count = scalar.extui %selected : i1 to i32
     view.store %consumed, %published[%i, 0] : i32, view<16x20xi32>
     view.store %consumed, %published[%i, 1] : i32, view<16x20xi32>
@@ -292,19 +303,17 @@ func.def public @publish_epoch(%plan: buffer, %count: i32, %verified: i32, %cont
     scf.if %selected {
       %token = view.load %outputs[%i] : view<16xi32> -> i32
       view.store %token, %published[%i, 4] : i32, view<16x20xi32>
-      scf.yield
     }
-    scf.yield
   }
   func.return
 }
 
 func.def public @step(%state: buffer, %initialize: i32, %residual: hal.buffer, %control: hal.buffer, %recurrent: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer) -> (i64) {
-  %zero = scalar.constant 0 : i32
-  %zero64 = scalar.constant 0 : i64
+  %c0 = scalar.constant 0 : i32
+  %c0_i64 = scalar.constant 0 : i64
   %error = global.load @unsupported : buffer
-  func.call @require(%zero, %error) : (i32, buffer) -> ()
-  func.return %zero64 : i64
+  func.call @require(%c0, %error) : (i32, buffer)
+  func.return %c0_i64 : i64
 }
 
 func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %epoch_count: i32, %continuation_shape: i32, %continuation_proposes: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer, %next_results: hal.buffer) -> (i64) {
@@ -312,11 +321,11 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
   %view = buffer.view %control_state[%origin] : buffer -> view<1xi32>
   %stage = view.load %view[0] : view<1xi32> -> i32
   %completion = func.call @execute_6(%stage, %residual, %metadata, %origins, %state, %tokens, %outputs) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
-  %zero = scalar.constant 0 : i32
-  %zero64 = scalar.constant 0 : i64
-  %four64 = scalar.constant 4 : i64
+  %c0 = scalar.constant 0 : i32
+  %c0_i64 = scalar.constant 0 : i64
+  %c4_i64 = scalar.constant 4 : i64
   %count64 = scalar.extui %span_count : i32 to i64
-  %length = scalar.muli %count64, %four64 : i64
-  %feedback = func.call @feedback(%zero, %outputs, %zero64, %length) : (i32, hal.buffer, i64, i64) -> (i64)
+  %length = scalar.muli %count64, %c4_i64 : i64
+  %feedback = func.call @feedback(%c0, %outputs, %c0_i64, %length) : (i32, hal.buffer, i64, i64) -> (i64)
   func.return %completion : i64
 }

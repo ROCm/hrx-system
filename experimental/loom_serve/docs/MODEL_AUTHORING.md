@@ -477,9 +477,9 @@ Embeddings and structured decisions already have a
 additive work cost and compatibility classes, packs ragged inputs, selects
 commands and describes original-order result rows independently of physical
 feedback layout. The shared native service owns admission, cancellation and
-response lifetime. The [embedding](../models/fixtures/embedding/README.md) and
-[decision](../models/fixtures/decision/README.md) packages are runnable examples,
-with a [single-server catalog](../models/fixtures/README.md) requiring no model
+response lifetime. The [embedding](../../../loom/src/loom/serve/fixture/embedding/README.md) and
+[decision](../../../loom/src/loom/serve/fixture/decision/README.md) packages are runnable examples,
+with a [single-server catalog](../../../loom/src/loom/serve/fixture/README.md) requiring no model
 download. A compatible port supplies source and assets, not another C adapter.
 
 A model outside the existing text/image/finite-vector contracts first needs a

@@ -1,13 +1,13 @@
-
 config.decl @fixture.units : %value: index where [range(%value, 1, 256)]
+
 target.decl @fixture_target
 
 // One workgroup per row. This intentionally simple device oracle exercises
 // ragged sequences and real command workspace, not model performance.
 kernel.def target(@fixture_target) @pool() {
   %units = config.get @fixture.units : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%units, %one, %one) workgroup_size(%one, %one, %one) : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%units, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer, %hidden: buffer) {
   %origin = index.constant 0 : offset
   %row = kernel.workgroup.id<x> : index
@@ -17,35 +17,35 @@ kernel.def target(@fixture_target) @pool() {
   %count = index.cast %count32 : i32 to index
   %live = index.cmp ult, %row, %count : index
   scf.if %live {
-    %sixteen = index.constant 16 : offset
-    %metadata = buffer.view %input[%sixteen] : buffer -> view<[%units]x4xi32>
+    %c16 = index.constant 16 : offset
+    %metadata = buffer.view %input[%c16] : buffer -> view<[%units]x4xi32>
     %begin32 = view.load %metadata[%row, 0] : view<[%units]x4xi32> -> i32
     %length32 = view.load %metadata[%row, 1] : view<[%units]x4xi32> -> i32
     // Source packing bounds every token range by the configured unit capacity.
-    %one_index = index.constant 1 : index
-    %maximum = index.sub %units, %one_index : index
+    %c1_index = index.constant 1 : index
+    %maximum = index.sub %units, %c1_index : index
     %begin_value = index.cast %begin32 : i32 to index
     %begin = index.assume %begin_value [range(%begin_value, 0, %maximum)] : index
     %bounded_length = scalar.assume %length32 [range(%length32, 1, 31)] : i32
     %length = index.cast %bounded_length : i32 to index
-    %token_base_scaled = index.scale %units, %sixteen : index, offset -> offset
-    %token_base = index.add %token_base_scaled, %sixteen : offset
+    %token_base_scaled = index.scale %units, %c16 : index, offset -> offset
+    %token_base = index.add %token_base_scaled, %c16 : offset
     %tokens = buffer.view %input[%token_base] : buffer -> view<[%units]xi32>
     %values = buffer.view %hidden[%origin] : buffer -> view<[%units]x4xf32>
-    %zero = index.constant 0 : index
-    %one = index.constant 1 : index
-    %zero32 = scalar.constant 0 : i32
-    %one32 = scalar.constant 1 : i32
-    %sum = scf.for %i = [%zero to %length step %one](%previous = %zero32 : i32) -> (i32) {
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c0_i32 = scalar.constant 0 : i32
+    %c1_i32 = scalar.constant 1 : i32
+    %sum = scf.for %i = [%c0 to %length step %c1](%previous = %c0_i32 : i32) -> (i32) {
       %offset_value = index.add %begin, %i : index
       %offset = index.assume %offset_value [range(%offset_value, 0, %maximum)] : index
       %id = view.load %tokens[%offset] : view<[%units]xi32> -> i32
-      %value = scalar.addi %id, %one32 : i32
+      %value = scalar.addi %id, %c1_i32 : i32
       %next = scalar.addi %previous, %value : i32
       scf.yield %next : i32
     }
     %first_id = view.load %tokens[%begin] : view<[%units]xi32> -> i32
-    %first = scalar.addi %first_id, %one32 : i32
+    %first = scalar.addi %first_id, %c1_i32 : i32
     %sum_f32 = scalar.uitofp %sum : i32 to f32
     %length_f32 = scalar.uitofp %length32 : i32 to f32
     %first_f32 = scalar.uitofp %first : i32 to f32
@@ -54,15 +54,14 @@ kernel.def target(@fixture_target) @pool() {
     view.store %length_f32, %values[%row, 1] : f32, view<[%units]x4xf32>
     view.store %first_f32, %values[%row, 2] : f32, view<[%units]x4xf32>
     view.store %cohort_f32, %values[%row, 3] : f32, view<[%units]x4xf32>
-    scf.yield
   }
   kernel.return
 }
 
 kernel.def target(@fixture_target) @project() {
   %units = config.get @fixture.units : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%units, %one, %one) workgroup_size(%one, %one, %one) : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%units, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer, %hidden: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %row = kernel.workgroup.id<x> : index
@@ -72,8 +71,8 @@ kernel.def target(@fixture_target) @project() {
   %count = index.cast %count32 : i32 to index
   %live = index.cmp ult, %row, %count : index
   scf.if %live {
-    %sixteen = index.constant 16 : offset
-    %metadata = buffer.view %input[%sixteen] : buffer -> view<[%units]x4xi32>
+    %c16 = index.constant 16 : offset
+    %metadata = buffer.view %input[%c16] : buffer -> view<[%units]x4xi32>
     %width32 = view.load %metadata[%row, 2] : view<[%units]x4xi32> -> i32
     %offset32 = view.load %metadata[%row, 3] : view<[%units]x4xi32> -> i32
     %bounded_width = scalar.assume %width32 [range(%width32, 2, 4)] : i32
@@ -81,29 +80,27 @@ kernel.def target(@fixture_target) @project() {
     // The source plan packs at most four F32 values per configured unit.
     %bounded_offset = scalar.assume %offset32 [range(%offset32, 0, 1023)] : i32
     %offset = index.cast %bounded_offset : i32 to index
-    %four = index.constant 4 : index
-    %capacity = index.mul %units, %four : index
+    %c4 = index.constant 4 : index
+    %capacity = index.mul %units, %c4 : index
     %values = buffer.view %hidden[%origin] : buffer -> view<[%units]x4xf32>
     %result = buffer.view %output[%origin] : buffer -> view<[%capacity]xf32>
-    %zero = index.constant 0 : index
-    %one = index.constant 1 : index
-    scf.for %i = [%zero to %width step %one] {
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    scf.for %i = [%c0 to %width step %c1] {
       %value = view.load %values[%row, %i] : view<[%units]x4xf32> -> f32
-      %maximum = index.sub %capacity, %one : index
+      %maximum = index.sub %capacity, %c1 : index
       %target_value = index.add %offset, %i : index
       %target = index.assume %target_value [range(%target_value, 0, %maximum)] : index
       view.store %value, %result[%target] : f32, view<[%capacity]xf32>
-      scf.yield
     }
-    scf.yield
   }
   kernel.return
 }
 
 command.program.def public @embed() launch(%input: buffer, %output: buffer) {
   %units = config.get @fixture.units : index
-  %sixteen = index.constant 16 : offset
-  %length = index.scale %units, %sixteen : index, offset -> offset
+  %c16 = index.constant 16 : offset
+  %length = index.scale %units, %c16 : index, offset -> offset
   %hidden = buffer.alloca<global> align(16) %length : buffer
   kernel.launch @pool(%input, %hidden) : (buffer, buffer)
   kernel.launch @project(%input, %hidden, %output) : (buffer, buffer, buffer)

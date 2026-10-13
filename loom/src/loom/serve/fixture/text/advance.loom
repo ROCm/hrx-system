@@ -1,6 +1,9 @@
 config.decl @fixture.context : %value: index where [range(%value, 1, 262144)]
+
 config.decl @fixture.rows : %value: index where [range(%value, 1, 16)]
+
 config.decl @fixture.tokens : %value: index where [range(%value, 1, 262144)]
+
 target.decl @target
 
 // Logical positions resolve through the native row-major page map. The opaque
@@ -8,27 +11,27 @@ target.decl @target
 // Admission bounds positions by context and pages by blocks; these facts also
 // hold when the helper remains a callable function instead of being inlined.
 func.def @history_offset(%origins: buffer, %row: index, %position: index, %blocks: index, %rows: index) -> (offset) {
-  %zero = index.constant 0 : offset
-  %four = index.constant 4 : index
+  %c0 = index.constant 0 : offset
+  %c4 = index.constant 4 : index
   %word = index.constant 4 : offset
   %map_origin = index.constant 512 : offset
   %bounded_row = index.assume %row [range(%row, 0, 15)] : index
   %bounded_position = index.assume %position [range(%position, 0, 262143)] : index
-  %records = buffer.view %origins[%zero] : buffer -> view<16x4xi64>
+  %records = buffer.view %origins[%c0] : buffer -> view<16x4xi64>
   %base64 = view.load %records[%bounded_row, 2] : view<16x4xi64> -> i64
   %base_positive = scalar.assume %base64 [range(%base64, 0, 9223372036854775807)] : i64
   %base = index.cast %base_positive : i64 to offset
-  %page_value = index.div %bounded_position, %four : index
-  %one = index.constant 1 : index
-  %last = index.sub %blocks, %one : index
+  %page_value = index.div %bounded_position, %c4 : index
+  %c1 = index.constant 1 : index
+  %last = index.sub %blocks, %c1 : index
   %page = index.assume %page_value [range(%page_value, 0, %last), lt(%page_value, %blocks)] : index
   %mapped_row = index.assume %bounded_row [lt(%bounded_row, %rows)] : index
   %map = buffer.view %origins[%map_origin] : buffer -> view<[%rows]x[%blocks]xi32>
   %physical32 = view.load %map[%mapped_row, %page] : view<[%rows]x[%blocks]xi32> -> i32
   %bounded_physical = scalar.assume %physical32 [range(%physical32, 0, 1048575)] : i32
   %physical = index.cast %bounded_physical : i32 to index
-  %block_position = index.mul %physical, %four : index
-  %within_page = index.rem %bounded_position, %four : index
+  %block_position = index.mul %physical, %c4 : index
+  %within_page = index.rem %bounded_position, %c4 : index
   %slot = index.add %block_position, %within_page : index
   %bytes = index.scale %slot, %word : index, offset -> offset
   %address = index.add %base, %bytes : offset
@@ -39,18 +42,18 @@ func.def @history_offset(%origins: buffer, %row: index, %position: index, %block
 // witness, not a transformer performance proxy. Chunking cannot affect math.
 kernel.def target(@target) @consume() {
   %rows = config.get @fixture.rows : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%one, %one, %one) : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%bias: view<1xi32>, %residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer) {
   %span = kernel.workgroup.id<x> : index
   %origin = index.constant 0 : offset
-  %sixteen = index.constant 16 : offset
+  %c16 = index.constant 16 : offset
   %header = buffer.view %metadata[%origin] : buffer -> view<4xi32>
   %count32 = view.load %header[0] : view<4xi32> -> i32
   %count = index.cast %count32 : i32 to index
   %live = index.cmp ult, %span, %count : index
   scf.if %live {
-    %packets = buffer.view %metadata[%sixteen] : buffer -> view<16x8xi32>
+    %packets = buffer.view %metadata[%c16] : buffer -> view<16x8xi32>
     %length32 = view.load %packets[%span, 0] : view<16x8xi32> -> i32
     %position32 = view.load %packets[%span, 1] : view<16x8xi32> -> i32
     %row32 = view.load %packets[%span, 2] : view<16x8xi32> -> i32
@@ -78,19 +81,19 @@ kernel.def target(@target) @consume() {
     %write_state = buffer.view %arena[%writer] : buffer -> view<1xi32>
     %context = config.get @fixture.context : index
     %rows = config.get @fixture.rows : index
-    %zero = index.constant 0 : index
-    %one = index.constant 1 : index
-    %three = index.constant 3 : index
-    %four = index.constant 4 : index
-    %padded = index.add %context, %three : index
-    %blocks = index.div %padded, %four : index
-    %zero32 = scalar.constant 0 : i32
-    %fresh = index.cmp eq, %position, %zero : index
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c3 = index.constant 3 : index
+    %c4 = index.constant 4 : index
+    %padded = index.add %context, %c3 : index
+    %blocks = index.div %padded, %c4 : index
+    %c0_i32 = scalar.constant 0 : i32
+    %fresh = index.cmp eq, %position, %c0 : index
     %initial_h, %initial_k = scf.if %fresh -> (i32, i32) {
-      scf.yield %zero32, %zero32 : i32, i32
+      scf.yield %c0_i32, %c0_i32 : i32, i32
     } else {
       %h = view.load %read_state[0] : view<1xi32> -> i32
-      %previous = index.sub %position, %one : index
+      %previous = index.sub %position, %c1 : index
       %offset = func.call @history_offset(%origins, %row, %previous, %blocks, %rows) : (buffer, index, index, index, index) -> (offset)
       %last = buffer.view %arena[%offset] : buffer -> view<1xi32>
       %k = view.load %last[0] : view<1xi32> -> i32
@@ -99,24 +102,24 @@ kernel.def target(@target) @consume() {
     %bias_value = view.load %bias[0] : view<1xi32> -> i32
     %capacity = config.get @fixture.tokens : index
     %ids = buffer.view %tokens[%origin] : buffer -> view<[%capacity]xi32>
-    %five32 = scalar.constant 5 : i32
-    %seven32 = scalar.constant 7 : i32
-    %ninety_seven = scalar.constant 97 : i32
-    %hundred_one = scalar.constant 101 : i32
-    %final_h, %final_k = scf.for %i = [%zero to %length step %one](%h = %initial_h : i32, %k = %initial_k : i32) -> (i32, i32) {
+    %c5_i32 = scalar.constant 5 : i32
+    %c7_i32 = scalar.constant 7 : i32
+    %c97 = scalar.constant 97 : i32
+    %c101 = scalar.constant 101 : i32
+    %final_h, %final_k = scf.for %i = [%c0 to %length step %c1](%h = %initial_h : i32, %k = %initial_k : i32) -> (i32, i32) {
       %input_position = index.add %input, %i : index
       %bounded_input = index.assume %input_position [lt(%input_position, %capacity)] : index
       %token = view.load %ids[%bounded_input] : view<[%capacity]xi32> -> i32
-      %scaled_h = scalar.muli %h, %five32 : i32
+      %scaled_h = scalar.muli %h, %c5_i32 : i32
       %with_token = scalar.addi %scaled_h, %token : i32
       %with_bias = scalar.addi %with_token, %bias_value : i32
-      %next_h = scalar.remui %with_bias, %ninety_seven : i32
+      %next_h = scalar.remui %with_bias, %c97 : i32
       %absolute = index.add %position, %i : index
       %absolute32 = index.cast %absolute : index to i32
-      %scaled_k = scalar.muli %k, %seven32 : i32
+      %scaled_k = scalar.muli %k, %c7_i32 : i32
       %with_h = scalar.addi %scaled_k, %next_h : i32
       %with_position = scalar.addi %with_h, %absolute32 : i32
-      %next_k = scalar.remui %with_position, %hundred_one : i32
+      %next_k = scalar.remui %with_position, %c101 : i32
       %offset = func.call @history_offset(%origins, %row, %absolute, %blocks, %rows) : (buffer, index, index, index, index) -> (offset)
       %cache = buffer.view %arena[%offset] : buffer -> view<1xi32>
       view.store %next_k, %cache[0] : i32, view<1xi32>
@@ -125,30 +128,29 @@ kernel.def target(@target) @consume() {
     view.store %final_h, %write_state[0] : i32, view<1xi32>
     %hidden = buffer.view %residual[%origin] : buffer -> view<16xi32>
     view.store %final_h, %hidden[%span] : i32, view<16xi32>
-    scf.yield
   }
   kernel.return
 }
 
 kernel.def target(@target) @select() {
   %rows = config.get @fixture.rows : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%one, %one, %one) : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %outputs: buffer) {
   %span = kernel.workgroup.id<x> : index
   %origin = index.constant 0 : offset
-  %sixteen = index.constant 16 : offset
+  %c16 = index.constant 16 : offset
   %header = buffer.view %metadata[%origin] : buffer -> view<4xi32>
   %count32 = view.load %header[0] : view<4xi32> -> i32
   %count = index.cast %count32 : i32 to index
   %live = index.cmp ult, %span, %count : index
   scf.if %live {
-    %packets = buffer.view %metadata[%sixteen] : buffer -> view<16x8xi32>
+    %packets = buffer.view %metadata[%c16] : buffer -> view<16x8xi32>
     %flags = view.load %packets[%span, 5] : view<16x8xi32> -> i32
-    %zero32 = scalar.constant 0 : i32
-    %one32 = scalar.constant 1 : i32
-    %bits = scalar.andi %flags, %one32 : i32
-    %selected = scalar.cmpi ne, %bits, %zero32 : i32
+    %c0_i32 = scalar.constant 0 : i32
+    %c1_i32 = scalar.constant 1 : i32
+    %bits = scalar.andi %flags, %c1_i32 : i32
+    %selected = scalar.cmpi ne, %bits, %c0_i32 : i32
     scf.if %selected {
       %length32 = view.load %packets[%span, 0] : view<16x8xi32> -> i32
       %position32 = view.load %packets[%span, 1] : view<16x8xi32> -> i32
@@ -158,15 +160,15 @@ kernel.def target(@target) @select() {
       %row_bound = scalar.assume %row32 [range(%row32, 0, 15)] : i32
       %end = index.cast %end_bound : i32 to index
       %row = index.cast %row_bound : i32 to index
-      %zero = index.constant 0 : index
-      %one = index.constant 1 : index
-      %three = index.constant 3 : index
-      %four = index.constant 4 : index
+      %c0 = index.constant 0 : index
+      %c1 = index.constant 1 : index
+      %c3 = index.constant 3 : index
+      %c4 = index.constant 4 : index
       %context = config.get @fixture.context : index
       %rows = config.get @fixture.rows : index
-      %padded = index.add %context, %three : index
-      %blocks = index.div %padded, %four : index
-      %sum = scf.for %position = [%zero to %end step %one](%previous = %zero32 : i32) -> (i32) {
+      %padded = index.add %context, %c3 : index
+      %blocks = index.div %padded, %c4 : index
+      %sum = scf.for %position = [%c0 to %end step %c1](%previous = %c0_i32 : i32) -> (i32) {
         %offset = func.call @history_offset(%origins, %row, %position, %blocks, %rows) : (buffer, index, index, index, index) -> (offset)
         %cache = buffer.view %arena[%offset] : buffer -> view<1xi32>
         %value = view.load %cache[0] : view<1xi32> -> i32
@@ -176,18 +178,16 @@ kernel.def target(@target) @select() {
       %hidden = buffer.view %residual[%origin] : buffer -> view<16xi32>
       %h = view.load %hidden[%span] : view<16xi32> -> i32
       %total = scalar.addi %h, %sum : i32
-      %three32 = scalar.constant 3 : i32
-      %eleven32 = scalar.constant 11 : i32
-      %token = scalar.remui %total, %three32 : i32
-      %phase = scalar.remui %end32, %eleven32 : i32
-      %terminal = scalar.cmpi eq, %phase, %zero32 : i32
+      %c3_i32 = scalar.constant 3 : i32
+      %c11_i32 = scalar.constant 11 : i32
+      %token = scalar.remui %total, %c3_i32 : i32
+      %phase = scalar.remui %end32, %c11_i32 : i32
+      %terminal = scalar.cmpi eq, %phase, %c0_i32 : i32
       %eos = view.load %header[1] : view<4xi32> -> i32
       %prediction = scf.select %terminal, %eos, %token : i32
       %result = buffer.view %outputs[%origin] : buffer -> view<16xi32>
       view.store %prediction, %result[%span] : i32, view<16xi32>
-      scf.yield
     }
-    scf.yield
   }
   kernel.return
 }

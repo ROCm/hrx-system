@@ -9,25 +9,6 @@
 
 iree_add_all_subdirs()
 
-iree_package_target_name(_FILEGROUP_TARGET "::sources")
-add_custom_command(OUTPUT sources.stamp
-    COMMAND ${CMAKE_COMMAND} -E touch sources.stamp
-  DEPENDS
-    "config.loom"
-    "control.loom"
-    "decide.loom"
-    "model.json"
-    "prepare.loom"
-)
-
-add_custom_target(${_FILEGROUP_TARGET}
-    DEPENDS sources.stamp
-)
-iree_register_generated_compile_input(${_FILEGROUP_TARGET}
-  OUTPUTS
-    "${CMAKE_CURRENT_BINARY_DIR}/sources.stamp"
-)
-
 if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
@@ -35,13 +16,10 @@ loom_cc_test(
   SRCS
     "service_test.cc"
   DATA
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/config.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/control.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/decide.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/model.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
-    "iree::experimental::loom_serve::models::fixtures::embedding::sources"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom"
+    "loom::serve::fixture::decision::sources"
+    "loom::serve::fixture::embedding::sources"
   DEPS
     iree::async
     iree::base
@@ -62,8 +40,8 @@ loom_cc_test(
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
-    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom}}"
-    "--embedding_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
+    "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/prepare.loom}}"
+    "--embedding_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom}}"
     "--test_device=amdgpu"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
@@ -79,13 +57,10 @@ loom_cc_test(
   SRCS
     "service_test.cc"
   DATA
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/config.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/control.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/decide.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/model.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
-    "iree::experimental::loom_serve::models::fixtures::embedding::sources"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom"
+    "loom::serve::fixture::decision::sources"
+    "loom::serve::fixture::embedding::sources"
   DEPS
     iree::async
     iree::base
@@ -106,8 +81,8 @@ loom_cc_test(
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
-    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom}}"
-    "--embedding_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
+    "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/prepare.loom}}"
+    "--embedding_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom}}"
     "--test_device=vulkan"
   LABELS
     "iree-run-requirement=vulkan.resource.device"
@@ -123,13 +98,10 @@ loom_cc_test(
   SRCS
     "service_test.cc"
   DATA
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/config.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/control.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/decide.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/model.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
-    "iree::experimental::loom_serve::models::fixtures::embedding::sources"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom"
+    "loom::serve::fixture::decision::sources"
+    "loom::serve::fixture::embedding::sources"
   DEPS
     iree::async
     iree::base
@@ -150,8 +122,8 @@ loom_cc_test(
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
-    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom}}"
-    "--embedding_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
+    "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/prepare.loom}}"
+    "--embedding_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom}}"
     "--test_device=task"
   LABELS
 

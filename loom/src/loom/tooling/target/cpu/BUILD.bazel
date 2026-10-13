@@ -55,12 +55,12 @@ py_test(
     srcs = ["//loom/src/loom/tools/loom-serve:server_test.py"],
     args = [
         "$(rootpath //loom/src/loom/tools/loom-serve)",
-        "$(rootpath //experimental/loom_serve/models/fixtures/embedding:prepare.loom)",
+        "$(rootpath //loom/src/loom/serve/fixture/embedding:prepare.loom)",
         "$(rootpath //loom/src/loom/tools/loom-format)",
     ],
     data = [
-        "//experimental/loom_serve/models/fixtures/embedding:prepare.loom",
-        "//experimental/loom_serve/models/fixtures/embedding:sources",
+        "//loom/src/loom/serve/fixture/embedding:prepare.loom",
+        "//loom/src/loom/serve/fixture/embedding:sources",
         "//loom/src/loom/tools/loom-format",
         "//loom/src/loom/tools/loom-serve",
     ],

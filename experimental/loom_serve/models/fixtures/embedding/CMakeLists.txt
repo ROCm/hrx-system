@@ -9,26 +9,6 @@
 
 iree_add_all_subdirs()
 
-iree_package_target_name(_FILEGROUP_TARGET "::sources")
-add_custom_command(OUTPUT sources.stamp
-    COMMAND ${CMAKE_COMMAND} -E touch sources.stamp
-  DEPENDS
-    "config.loom"
-    "control.loom"
-    "embed.loom"
-    "model.json"
-    "prepare.loom"
-    "tokenizer.json"
-)
-
-add_custom_target(${_FILEGROUP_TARGET}
-    DEPENDS sources.stamp
-)
-iree_register_generated_compile_input(${_FILEGROUP_TARGET}
-  OUTPUTS
-    "${CMAKE_CURRENT_BINARY_DIR}/sources.stamp"
-)
-
 if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
@@ -36,16 +16,10 @@ loom_cc_test(
   SRCS
     "service_test.cc"
   DATA
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/config.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/control.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/embed.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/model.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/tokenizer.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/direct.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/policy.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/weights.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/xdna.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amd/xdna/serve/testdata/resident_embedding.loom"
+    "loom::serve::fixture::embedding::sources"
+    "loom::serve::fixture::embedding::variant_sources"
   DEPS
     iree::async
     iree::base
@@ -72,7 +46,7 @@ loom_cc_test(
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
-    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
+    "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom}}"
     "--test_device=amdgpu"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
@@ -88,16 +62,10 @@ loom_cc_test(
   SRCS
     "service_test.cc"
   DATA
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/config.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/control.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/embed.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/model.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/tokenizer.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/direct.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/policy.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/weights.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/xdna.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amd/xdna/serve/testdata/resident_embedding.loom"
+    "loom::serve::fixture::embedding::sources"
+    "loom::serve::fixture::embedding::variant_sources"
   DEPS
     iree::async
     iree::base
@@ -124,7 +92,7 @@ loom_cc_test(
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
-    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
+    "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom}}"
     "--test_device=vulkan"
     "--gtest_filter=Workers/SourceEmbeddingServiceTest.*"
   LABELS
@@ -141,16 +109,10 @@ loom_cc_test(
   SRCS
     "service_test.cc"
   DATA
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/config.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/control.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/embed.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/model.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/tokenizer.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/direct.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/policy.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/weights.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/xdna.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amd/xdna/serve/testdata/resident_embedding.loom"
+    "loom::serve::fixture::embedding::sources"
+    "loom::serve::fixture::embedding::variant_sources"
   DEPS
     iree::async
     iree::base
@@ -177,9 +139,9 @@ loom_cc_test(
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
-    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
+    "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom}}"
     "--test_device=xdna"
-    "--direct_stage_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/xdna.loom}}"
+    "--direct_stage_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amd/xdna/serve/testdata/resident_embedding.loom}}"
     "--gtest_filter=*DirectDispatch*"
   LABELS
     "iree-run-requirement=libamdf.resource.xdna"
@@ -196,16 +158,10 @@ loom_cc_test(
   SRCS
     "service_test.cc"
   DATA
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/config.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/control.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/embed.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/model.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/tokenizer.json"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/direct.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/policy.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/weights.loom"
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/variants/xdna.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amd/xdna/serve/testdata/resident_embedding.loom"
+    "loom::serve::fixture::embedding::sources"
+    "loom::serve::fixture::embedding::variant_sources"
   DEPS
     iree::async
     iree::base
@@ -232,7 +188,7 @@ loom_cc_test(
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
-    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
+    "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/prepare.loom}}"
     "--test_device=task"
     "--gtest_filter=Workers/SourceEmbeddingServiceTest.*"
   LABELS

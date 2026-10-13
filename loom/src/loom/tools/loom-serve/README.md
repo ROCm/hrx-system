@@ -40,6 +40,11 @@ and capacities. Program roles and providers accept both `.loom` and `.loombc`.
 The complete source contract is modality-specific; an arbitrary checkpoint
 alone is not a runnable model package.
 
+The [source fixtures](../../serve/fixture/README.md) exercise all four modalities
+without a model download. They use this same executable, JIT and HTTP stack;
+their independently checkable results are useful when building a client or
+porting a model package.
+
 The same JSON object is accepted by `POST /v1/models/register`. File-document
 references resolve from the document directory. HTTP registration requires an
 explicit absolute `base_directory` when references are relative. Omitted

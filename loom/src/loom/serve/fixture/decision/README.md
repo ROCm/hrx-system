@@ -1,13 +1,13 @@
 # Deterministic source decision model
 
-This package exercises the [SystemOne adapter](../../../../../loom/src/loom/serve/service/finite/decision/README.md)
-and [finite model ABI](../../../../../loom/src/loom/serve/service/finite/README.md). It compiles ordinary Loom
+This package exercises the [SystemOne adapter](../../service/finite/decision/README.md)
+and [finite model ABI](../../service/finite/README.md). It compiles ordinary Loom
 VM preparation/control and two native kernels on x86 CPU, AMDGPU and Vulkan.
 No downloaded model, native canned answer or model-specific C is involved.
 
 The complete [model document](model.json) names its prepare/control programs,
 native providers and asset base. Start it with
-`--model=experimental/loom_serve/models/fixtures/decision/model.json`, or
+`--model=loom/src/loom/serve/fixture/decision/model.json`, or
 register the same object over HTTP with an absolute `base_directory`.
 Its `definition.options.batch_units` ranges from 1 through 256 and defaults
 to 64. Each question costs one unit plus its

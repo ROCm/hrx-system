@@ -10,11 +10,11 @@ request. The HTTP consumers are [embeddings](embedding/protocol.h) and
 [SystemOne decisions](decision/README.md).
 
 The [source ABI](model.h) is implemented by the
-[deterministic embedding package](../../../../../../experimental/loom_serve/models/fixtures/embedding/README.md).
+[deterministic embedding package](../../fixture/embedding/README.md).
 It uses the same task executor, parameter cache and queue workspace as text and
 image deployments. Model documents name source programs and assets at registration;
 replacing one does not require relinking the server. The
-[weight-free multimodal catalog](../../../../../../experimental/loom_serve/models/fixtures/README.md) exercises both
+[weight-free multimodal catalog](../../fixture/README.md) exercises both
 alongside an image model on the same listener.
 
 ## Cold and warm source programs
@@ -129,11 +129,11 @@ not model-quality or throughput measurements. The decision source fixture adds
 variable question/option counts, exact typed answers and a mixed-model HTTP gate
 through the same service.
 
-The embedding fixture's [direct variant](../../../../../../experimental/loom_serve/models/fixtures/embedding/variants/direct.loom)
+The embedding fixture's [direct variant](../../fixture/embedding/variants/direct.loom)
 fuses the same ragged computation into one native dispatch on CPU, AMDGPU and
 Vulkan. Its HTTP checks cover compact row ordering, repeated requests,
 cancellation and retirement with one/four workers. Its
-[XDNA variant](../../../../../../experimental/loom_serve/models/fixtures/embedding/variants/xdna.loom) executes the same
+[XDNA variant](../../../tooling/target/amd/xdna/serve/testdata/resident_embedding.loom) executes the same
 HTTP contract with a resident array program and DMA/channel packet transport.
 These prove direct-stage ownership, including untouched first output, not
 learned embedding quality or checkpoint-backed resident stages.

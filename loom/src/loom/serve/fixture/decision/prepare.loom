@@ -1,35 +1,43 @@
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
+
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
 global.rodata.def @root = bytes("646563696465")
+
 global.rodata.def @units_key = bytes("666978747572652e756e697473")
+
 global.rodata.def @tokenizer = bytes("")
+
 global.rodata.def @name = bytes("666978747572652d6465636973696f6e")
+
 global.rodata.def @option_key = bytes("62617463685f756e697473")
+
 global.rodata.def @invalid = bytes("657870656374207b2262617463685f756e697473223a312e2e3235367d206f72207b7d")
 
 func.def @check(%condition: i1) {
   %condition32 = scalar.extui %condition : i1 to i32
   %error = global.load @invalid : buffer
-  func.call @require(%condition32, %error) : (i32, buffer) -> ()
+  func.call @require(%condition32, %error) : (i32, buffer)
   func.return
 }
 
 func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
   %origin = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %zero64 = scalar.constant 0 : i64
-  %one64 = scalar.constant 1 : i64
-  %two32 = scalar.constant 2 : i32
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c0_i64 = scalar.constant 0 : i64
+  %c1_i64 = scalar.constant 1 : i64
+  %c2_i32 = scalar.constant 2 : i32
   %fields, %type, %count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
-  %object = scalar.cmpi eq, %type, %two32 : i32
-  %short = scalar.cmpi ule, %count, %one64 : i64
+  %object = scalar.cmpi eq, %type, %c2_i32 : i32
+  %short = scalar.cmpi ule, %count, %c1_i64 : i64
   %valid = scalar.andi %object, %short : i1
-  func.call @check(%valid) : (i1) -> ()
-  %empty = scalar.cmpi eq, %count, %zero64 : i64
+  func.call @check(%valid) : (i1)
+  %empty = scalar.cmpi eq, %count, %c0_i64 : i64
   %units = scf.if %empty -> (i64) {
     %default = scalar.constant 64 : i64
     scf.yield %default : i64
@@ -40,30 +48,29 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
     %value_begin = view.load %record[0, 2] : view<1x5xi64> -> i64
     %value_length = view.load %record[0, 3] : view<1x5xi64> -> i64
     %value_type = view.load %record[0, 4] : view<1x5xi64> -> i64
-    %eleven64 = scalar.constant 11 : i64
-    %ten64 = scalar.constant 10 : i64
-    %number = scalar.cmpi eq, %value_type, %one64 : i64
-    %named = scalar.cmpi eq, %key_length, %eleven64 : i64
+    %c11_i64 = scalar.constant 11 : i64
+    %c10_i64 = scalar.constant 10 : i64
+    %number = scalar.cmpi eq, %value_type, %c1_i64 : i64
+    %named = scalar.cmpi eq, %key_length, %c11_i64 : i64
     %typed = scalar.andi %number, %named : i1
-    func.call @check(%typed) : (i1) -> ()
+    func.call @check(%typed) : (i1)
     %nonnegative_1 = scalar.assume %key_begin [range(%key_begin, 0, 9223372036854775807)] : i64
     %key_offset = index.cast %nonnegative_1 : i64 to offset
     %key = buffer.view %options[%key_offset] : buffer -> view<11xi8>
     %expected = global.load @option_key : buffer
     %expected_view = buffer.view %expected[%origin] : buffer -> view<11xi8>
-    %eleven = index.constant 11 : index
-    scf.for %i = [%zero to %eleven step %one] {
+    %c11 = index.constant 11 : index
+    scf.for %i = [%c0 to %c11 step %c1] {
       %actual_byte = view.load %key[%i] : view<11xi8> -> i8
       %expected_byte = view.load %expected_view[%i] : view<11xi8> -> i8
       %equal = scalar.cmpi eq, %actual_byte, %expected_byte : i8
-      func.call @check(%equal) : (i1) -> ()
-      scf.yield
+      func.call @check(%equal) : (i1)
     }
-    %three64 = scalar.constant 3 : i64
-    %nonempty = scalar.cmpi ugt, %value_length, %zero64 : i64
-    %bounded = scalar.cmpi ule, %value_length, %three64 : i64
+    %c3_i64 = scalar.constant 3 : i64
+    %nonempty = scalar.cmpi ugt, %value_length, %c0_i64 : i64
+    %bounded = scalar.cmpi ule, %value_length, %c3_i64 : i64
     %length_valid = scalar.andi %nonempty, %bounded : i1
-    func.call @check(%length_valid) : (i1) -> ()
+    func.call @check(%length_valid) : (i1)
     %bounded_length = scalar.assume %value_length [range(%value_length, 1, 3)] : i64
     %nonnegative_2 = scalar.assume %bounded_length [range(%bounded_length, 0, 9223372036854775807)] : i64
     %length = index.cast %nonnegative_2 : i64 to index
@@ -72,39 +79,39 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
     %digits = buffer.view %options[%offset] : buffer -> view<[%length]xi8>
     %ascii_zero = scalar.constant 48 : i8
     %ascii_nine = scalar.constant 57 : i8
-    %value = scf.for %i = [%zero to %length step %one](%previous = %zero64 : i64) -> (i64) {
+    %value = scf.for %i = [%c0 to %length step %c1](%previous = %c0_i64 : i64) -> (i64) {
       %byte = view.load %digits[%i] : view<[%length]xi8> -> i8
       %lower = scalar.cmpi uge, %byte, %ascii_zero : i8
       %upper = scalar.cmpi ule, %byte, %ascii_nine : i8
       %digit_valid = scalar.andi %lower, %upper : i1
-      func.call @check(%digit_valid) : (i1) -> ()
+      func.call @check(%digit_valid) : (i1)
       %digit8 = scalar.subi %byte, %ascii_zero : i8
       %digit = scalar.extui %digit8 : i8 to i64
-      %shifted = scalar.muli %previous, %ten64 : i64
+      %shifted = scalar.muli %previous, %c10_i64 : i64
       %next = scalar.addi %shifted, %digit : i64
       scf.yield %next : i64
     }
     scf.yield %value : i64
   }
   %maximum = scalar.constant 256 : i64
-  %positive = scalar.cmpi ugt, %units, %zero64 : i64
+  %positive = scalar.cmpi ugt, %units, %c0_i64 : i64
   %bounded = scalar.cmpi ule, %units, %maximum : i64
   %valid_units = scalar.andi %positive, %bounded : i1
-  func.call @check(%valid_units) : (i1) -> ()
+  func.call @check(%valid_units) : (i1)
   %root = global.load @root : buffer
   %stage = func.call @stage(%root, %units) : (buffer, i64) -> (i32)
   %key = global.load @units_key : buffer
-  func.call @config_i64(%stage, %key, %units) : (i32, buffer, i64) -> ()
-  %eight = index.constant 8 : offset
-  %state = buffer.alloca<private> align(8) %eight : buffer
+  func.call @config_i64(%stage, %key, %units) : (i32, buffer, i64)
+  %c8 = index.constant 8 : offset
+  %state = buffer.alloca<private> align(8) %c8 : buffer
   %state_view = buffer.view %state[%origin] : buffer -> view<1xi64>
   view.store %units, %state_view[0] : i64, view<1xi64>
-  %twenty = scalar.constant 20 : i64
-  %sixteen = scalar.constant 16 : i64
-  %payload_data = scalar.muli %units, %twenty : i64
-  %payload = scalar.addi %payload_data, %sixteen : i64
-  %four = scalar.constant 4 : i64
-  %output = scalar.muli %units, %four : i64
+  %c20 = scalar.constant 20 : i64
+  %c16 = scalar.constant 16 : i64
+  %payload_data = scalar.muli %units, %c20 : i64
+  %payload = scalar.addi %payload_data, %c16 : i64
+  %c4 = scalar.constant 4 : i64
+  %output = scalar.muli %units, %c4 : i64
   %tokenizer = global.load @tokenizer : buffer
   %name = global.load @name : buffer
   func.return %units, %payload, %output, %output, %tokenizer, %name, %state : i64, i64, i64, i64, buffer, buffer, buffer

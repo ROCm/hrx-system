@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 
 CHECKER = Path(sys.argv.pop(1)).resolve()
-PACKAGE = Path(__file__).parent
+PACKAGE = Path(sys.argv.pop(1)).resolve().parent
 
 
 class RequestTest(unittest.TestCase):

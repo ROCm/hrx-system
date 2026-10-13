@@ -26,18 +26,17 @@ iree-bazel-test --config=asan \
   //experimental/loom_serve/models/fixtures/image:service_vulkan_test
 ```
 
-On an admitted AMDGPU runner, the standalone image server can load this package
-without any model-specific native code:
+The ordinary server can load this package without any model-specific native
+code. From the repository root, on an x86 CPU runner:
 
 ```sh
-iree-bazel-run //experimental/loom_serve/image:server -- \
-  --device=amdgpu \
-  --model=experimental/loom_serve/models/fixtures/image/model.json \
-  --checkpoint=. \
-  --width=7 --height=5 --text_tokens=32
+iree-bazel-run //loom/src/loom/tools/loom-serve -- \
+  --device=task --pool_backing=fixed \
+  --model=loom/src/loom/serve/fixture/image/model.json \
+  --listen=127.0.0.1:8080
 ```
 
 `POST /v1/images/generations` with
-`{"model":"fixture-image","prompt":"aba","seed":1}` returns a base64 PNG
+`{"model":"pixels","prompt":"aba","seed":1}` returns a base64 PNG
 through the normal endpoint. Parameter paging, learned image quality
 and real model performance have separate model tests.
