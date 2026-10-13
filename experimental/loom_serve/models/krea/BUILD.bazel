@@ -1,0 +1,78 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
+
+package(default_visibility = ["//visibility:private"])
+
+filegroup(
+    name = "sources",
+    srcs = [
+        "model.json",
+        "//experimental/loom_serve/motifs/tensor:sources",
+    ] + glob(["*.loom"]),
+    visibility = ["//visibility:public"],
+)
+
+loom_test(
+    name = "adapter_traversal_test",
+    srcs = [
+        "block_adapters.loom",
+        "block_int8.loom",
+        "block_projections.loom",
+        "tests/adapter_down_traversal.loom",
+        "tests/adapter_traversal.loom",
+        "//experimental/loom_serve/motifs/tensor:sources",
+    ],
+    benchmark_smoke = False,
+    configs = {"krea2.block_tokens": "80"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "value_adapter_test",
+    srcs = [
+        "block_adapters.loom",
+        "block_int8.loom",
+        "block_projections.loom",
+        "tests/value_adapter.loom",
+        "//experimental/loom_serve/motifs/tensor:sources",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    variants = {
+        "five_tiles": {
+            "case": "@value_adapter_80",
+            "configs": {"krea2.block_tokens": "80"},
+        },
+        "one_tile": {
+            "case": "@value_adapter_16",
+            "configs": {"krea2.block_tokens": "16"},
+        },
+    },
+)
+
+loom_test(
+    name = "shared_attention_test",
+    srcs = [
+        "block_attention.loom",
+        "tests/attention_shared_k32.loom",
+        "//experimental/loom_serve/motifs/tensor:sources",
+    ],
+    benchmark_smoke = False,
+    configs = {"krea2.block_tokens": "64"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
