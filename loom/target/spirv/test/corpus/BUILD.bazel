@@ -469,7 +469,6 @@ _SPIRV_EXECUTION_XFAILS = {
     "numeric/conversion/conversion.loom:@float_width_values": "TARGET/093",
     "numeric/conversion/conversion.loom:@integer_to_float_values": "TARGET/093",
     "numeric/conversion/conversion.loom:@integer_width_values": "TARGET/093",
-    "numeric/conversion/conversion.loom:@scalar_integer_float_values": "TARGET/002",
     "numeric/conversion/float8_dequantization.loom:@float8_dequantization_values": "TARGET/002,TARGET/003",
     "numeric/conversion/float8_schema_conversion.loom:@float8_schema_conversion_values": "TARGET/002",
     "numeric/conversion/quantization.loom:@approximate_quantization_values": "LOWERING/036",
