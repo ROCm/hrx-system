@@ -4,6 +4,10 @@ The serving implementation separates shared execution facilities, transport,
 model services and application composition. Numerical model programs are
 runtime inputs, not native server dependencies.
 
+The [model-package authoring guide](../../../docs/src/integration/serving-models.md)
+traces source preparation, execution and final output. This page maps the
+native owners that implement those contracts.
+
 The shared foundation consists of:
 
 - [`runtime/host`](runtime/host/host.h): one application-owned task executor,

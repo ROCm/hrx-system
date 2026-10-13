@@ -101,6 +101,7 @@ nav:
           - GGML and llama.cpp: workflows/oracles/ggml-llama-cpp.md
   - Integration:
       - Integration map: integration/index.md
+      - Author serving model packages: integration/serving-models.md
       - Compose modules in memory: integration/module-composition.md
       - Parallelize kernel JIT compilation: integration/product-frontier.md
       - Use the JIT task pool: integration/jit-task-pool.md

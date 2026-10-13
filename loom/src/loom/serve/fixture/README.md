@@ -168,8 +168,8 @@ The [held-device service check](../service/image/service_test.cc) separately ver
 that readiness/status and heartbeat progress while a real HAL predecessor is
 held, then releases it and checks final output. It is not a timeout-based speed
 assertion. Real model quality and controlled performance runs follow the
-[authoring](../../../../../experimental/loom_serve/docs/MODEL_AUTHORING.md) and
-[measurement](../../../../../experimental/loom_serve/docs/PERFORMANCE.md) guides.
+[authoring](../../../../docs/src/integration/serving-models.md) and
+[measurement](../../../../docs/src/workflows/observe-model-server.md#measure-the-user-visible-result) guides.
 
 ## Mixed lifecycle churn
 
@@ -196,7 +196,7 @@ The dynamic catalog starts empty and registers twelve initially drained models.
 Its one-worker run uses inline process options; the four-worker run loads the
 same options through an IREE flag file. A separate flag-file launch combines
 TCP and Unix listeners with spaces and quotes in the socket path. These execute
-the [operator configuration flow](../../../../../experimental/loom_serve/docs/OPERATING.md), not a test-only
+the [operator configuration flow](../../../../docs/src/workflows/operate-model-server.md), not a test-only
 configuration parser.
 
 Twenty concurrent client operations share two resident text rows and a
