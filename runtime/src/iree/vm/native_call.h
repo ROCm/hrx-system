@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/vm/ref.h"
+#include "iree/vm/scalar.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,7 +22,7 @@ extern "C" {
 // Native APIs may accept asynchronous work under their own capture/borrow
 // contracts; the VM adds no completion or retirement handling.
 //
-// The provider's immutable schema is interpreted only during program linking.
+// The native entry's immutable schema is used only in admission and linking.
 // Its typed entry reads verified selectors directly while constructing native
 // arguments. It admits dynamic ref types/nulls and native argument values.
 // All fallible preparation precedes an accepting native operation. Results own
@@ -40,40 +41,65 @@ typedef struct iree_vm_native_call_range_t {
   uint32_t offset;
 } iree_vm_native_call_range_t;
 
-typedef enum iree_vm_native_call_field_kind_e {
-  IREE_VM_NATIVE_CALL_FIELD_VALUE,
-  IREE_VM_NATIVE_CALL_FIELD_REF,
-  IREE_VM_NATIVE_CALL_FIELD_RESULT_VALUE,
-  IREE_VM_NATIVE_CALL_FIELD_RESULT_REF,
-  IREE_VM_NATIVE_CALL_FIELD_RANGE,
-} iree_vm_native_call_field_kind_t;
-
-typedef struct iree_vm_native_call_schema_t iree_vm_native_call_schema_t;
+// Scalar field kinds use the exact iree_vm_scalar_type_t encoding. REF names a
+// module-local ref type; RANGE names an earlier record layout. RESULT applies
+// only to scalar/ref leaves, including leaves inside ranges.
+typedef uint16_t iree_vm_native_call_field_kind_t;
+enum iree_vm_native_call_field_kind_e {
+  IREE_VM_NATIVE_CALL_FIELD_REF = 0x0100,
+  IREE_VM_NATIVE_CALL_FIELD_RANGE = 0x0200,
+};
+#define IREE_VM_NATIVE_CALL_FIELD_RESULT UINT16_C(0x8000)
 
 typedef struct iree_vm_native_call_field_t {
-  // Selector domain or child range, interpreted only by cold binding.
+  // Exact scalar kind, REF, or RANGE, optionally combined with RESULT.
   iree_vm_native_call_field_kind_t kind;
-  // Word offset within this schema's fixed record.
-  uint32_t offset;
-  // Child schema for RANGE, otherwise null.
-  const iree_vm_native_call_schema_t* element;
+  // Module-local ref/layout ordinal, or zero for a scalar.
+  uint16_t type_ordinal;
 } iree_vm_native_call_field_t;
+static_assert(sizeof(iree_vm_native_call_field_t) == 4,
+              "native fields must remain four bytes");
 
-// Trusted provider metadata. Fields exactly partition the fixed record in
-// offset order. Schemas form a finite acyclic tree. Each range stores its
-// complete fixed-record array followed by descendant ranges in field-order
-// depth-first traversal. Empty ranges consume no words. This canonical layout
-// proves complete, nonoverlapping record coverage with one cold traversal.
-struct iree_vm_native_call_schema_t {
+// A fixed record of ordered fields. A selector occupies one word and a range
+// header occupies two; field offsets are derived, never authored. Layouts form
+// an acyclic DAG with child ordinals strictly less than their parent. Each
+// range stores its complete fixed-record array followed by descendants in
+// field-order depth-first traversal. Empty ranges consume no words. This
+// canonical layout proves complete, nonoverlapping record coverage with one
+// cold traversal.
+typedef struct iree_vm_native_call_layout_t {
+  // First field in the schema's concatenated field table.
+  uint32_t field_base;
   // Word length of the fixed record, including range headers.
   uint32_t word_count;
-  // Number of fields in the trusted schema.
-  uint32_t field_count;
-  // Immutable ordered field definitions.
+  // Number of fields in this fixed record.
+  uint16_t field_count;
+  // Maximum child nesting depth, with zero for a record without ranges.
+  uint16_t depth;
+} iree_vm_native_call_layout_t;
+static_assert(sizeof(iree_vm_native_call_layout_t) == 12,
+              "native layouts must remain twelve bytes");
+
+// Immutable indexed declaration shared by native implementations and image
+// admission. Layout field slices exactly partition |fields| in layout order.
+// Scratch requirements are native implementation details, not layout identity.
+typedef struct iree_vm_native_call_schema_t {
+  // Immutable layouts in child-before-parent order.
+  const iree_vm_native_call_layout_t* layouts;
+  // Immutable fields partitioned by |layouts|.
   const iree_vm_native_call_field_t* fields;
-  // Native scratch bytes per record; a multiple of eight.
-  uint32_t scratch_size;
-};
+  // Number of layouts, at most 65536.
+  uint32_t layout_count;
+  // Number of fields in the complete table.
+  uint32_t field_count;
+  // Ordinal of the root record for this entry.
+  uint16_t root_ordinal;
+} iree_vm_native_call_schema_t;
+
+// Validates an external declaration without traversing or expanding its DAG.
+// Ref ordinals name entries in a module's ref-type table of |ref_type_count|.
+IREE_API_EXPORT iree_status_t iree_vm_native_call_schema_validate(
+    const iree_vm_native_call_schema_t* schema, uint32_t ref_type_count);
 
 typedef struct iree_vm_native_call_t {
   // Borrowed immutable verified callsite words.
@@ -121,8 +147,11 @@ typedef struct iree_vm_native_export_t {
   iree_string_view_t name;
   // Exact schema/semantics version accepted by this entry.
   uint32_t version;
-  // Trusted record schema and native scratch contributions.
+  // Trusted typed record declaration.
   const iree_vm_native_call_schema_t* schema;
+  // Native scratch bytes per record, indexed by layout ordinal. Each entry is
+  // a multiple of eight; NULL means no scratch. Not part of the guest ABI.
+  const uint32_t* scratch_sizes;
   // Optional cold provider check for cross-field relations, such as matching
   // request/result cardinalities. Generic schema checks have already passed.
   iree_status_t(IREE_API_PTR* verify)(const uint32_t* record);

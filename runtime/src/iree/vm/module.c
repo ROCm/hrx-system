@@ -555,6 +555,15 @@ static iree_status_t iree_vm_module_validate_native(
                               "native exports require schemas, entries and "
                               "strictly increasing names");
     }
+    IREE_RETURN_IF_ERROR(iree_vm_native_call_schema_validate(
+        entry->schema, descriptor->ref_types.count));
+    for (uint32_t j = 0;
+         entry->scratch_sizes && j < entry->schema->layout_count; ++j) {
+      if (entry->scratch_sizes[j] % 8 != 0) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "native scratch contributions must be aligned");
+      }
+    }
   }
   for (iree_host_size_t i = 0; i < native->callsite_count; ++i) {
     const iree_vm_native_callsite_t* callsite = &native->callsites[i];

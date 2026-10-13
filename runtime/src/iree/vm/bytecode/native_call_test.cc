@@ -89,18 +89,18 @@ iree_status_t Fail(const void* user_data, const iree_vm_native_call_t* call) {
   return iree_make_status(IREE_STATUS_ABORTED, "native failure");
 }
 
-const iree_vm_native_call_field_t kValueFields[] = {
-    {IREE_VM_NATIVE_CALL_FIELD_VALUE, 0, nullptr}};
-const iree_vm_native_call_schema_t kValues = {1, 1, kValueFields, 8};
 const iree_vm_native_call_field_t kFields[] = {
-    {IREE_VM_NATIVE_CALL_FIELD_VALUE, 0, nullptr},
-    {IREE_VM_NATIVE_CALL_FIELD_REF, 1, nullptr},
-    {IREE_VM_NATIVE_CALL_FIELD_RESULT_VALUE, 2, nullptr},
-    {IREE_VM_NATIVE_CALL_FIELD_RESULT_REF, 3, nullptr},
-    {IREE_VM_NATIVE_CALL_FIELD_RANGE, 4, &kValues},
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_NATIVE_CALL_FIELD_REF, 0},
+    {IREE_VM_NATIVE_CALL_FIELD_RESULT | IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_NATIVE_CALL_FIELD_RESULT | IREE_VM_NATIVE_CALL_FIELD_REF, 0},
+    {IREE_VM_NATIVE_CALL_FIELD_RANGE, 0},
 };
-const iree_vm_native_call_schema_t kReplace = {6, 5, kFields, 0};
-const iree_vm_native_call_schema_t kEmpty = {0, 0, nullptr, 0};
+const iree_vm_native_call_layout_t kLayouts[] = {
+    {0, 1, 1, 0}, {1, 6, 5, 1}, {6, 0, 0, 0}};
+const iree_vm_native_call_schema_t kReplace = {kLayouts, kFields, 3, 6, 1};
+const iree_vm_native_call_schema_t kEmpty = {kLayouts, kFields, 3, 6, 2};
 
 class BytecodeNativeCallTest : public ::testing::Test {
  protected:
@@ -111,9 +111,19 @@ class BytecodeNativeCallTest : public ::testing::Test {
         iree_vm_environment_lookup_ref_type_table(environment_, IREE_SV("vm")),
         &context_.types));
     context_.counters = &counters_;
-    exports_[0] = {IREE_SV("fail"), 0, &kEmpty, nullptr, Fail, &context_};
-    exports_[1] = {IREE_SV("replace"), 0, &replace_schema_, nullptr, Replace,
-                   &context_};
+    exports_[0] = {
+        .name = IREE_SV("fail"),
+        .schema = &kEmpty,
+        .entry = Fail,
+        .user_data = &context_,
+    };
+    exports_[1] = {
+        .name = IREE_SV("replace"),
+        .schema = &kReplace,
+        .scratch_sizes = scratch_sizes_,
+        .entry = Replace,
+        .user_data = &context_,
+    };
     native_ = {exports_.data(), exports_.size(), nullptr, 0};
     const auto* source = iree_vm_bytecode_native_call_testdata_create();
     IREE_ASSERT_OK(iree_vm_bytecode_module_fixture_initialize(
@@ -139,6 +149,7 @@ class BytecodeNativeCallTest : public ::testing::Test {
 
   iree_status_t Link() {
     iree::vm::testing::TableModuleDefinition definition(IREE_SV("native.test"));
+    definition.descriptor.ref_types = {&context_.types.buffer, 1};
     definition.descriptor.native = &native_;
     IREE_RETURN_IF_ERROR(provider_.Publish(definition));
     iree_vm_module_t* libraries[] = {provider_.module()};
@@ -172,8 +183,8 @@ class BytecodeNativeCallTest : public ::testing::Test {
   Counters counters_;
   // Resolved canonical ref descriptors and test observations.
   Context context_;
-  // Mutable before publication, immutable throughout linked lifetime.
-  iree_vm_native_call_schema_t replace_schema_ = kReplace;
+  // Scratch contributions, immutable throughout linked lifetime.
+  uint32_t scratch_sizes_[3] = {8, 0, 0};
   // Native export rows, finalized before module publication.
   std::array<iree_vm_native_export_t, 2> exports_;
   // Native declaration directory.
@@ -237,7 +248,7 @@ TEST_F(BytecodeNativeCallTest, RejectsVersionBeforeEnteringProvider) {
 }
 
 TEST_F(BytecodeNativeCallTest, ScratchExhaustionPrecedesEntry) {
-  replace_schema_.scratch_size = 65536;
+  scratch_sizes_[1] = 65536;
   IREE_ASSERT_OK(Link());
   iree_vm_variant_t results[2] = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,

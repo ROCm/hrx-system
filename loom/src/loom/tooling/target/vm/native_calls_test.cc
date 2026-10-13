@@ -18,18 +18,16 @@
 namespace {
 
 // The native export handles any static cardinality through the same entry.
-const iree_vm_native_call_field_t kInputFields[] = {
-    {IREE_VM_NATIVE_CALL_FIELD_VALUE, 0, nullptr},
-    {IREE_VM_NATIVE_CALL_FIELD_REF, 1, nullptr}};
-const iree_vm_native_call_schema_t kInput = {2, 2, kInputFields, 0};
-const iree_vm_native_call_field_t kOutputFields[] = {
-    {IREE_VM_NATIVE_CALL_FIELD_RESULT_VALUE, 0, nullptr},
-    {IREE_VM_NATIVE_CALL_FIELD_RESULT_REF, 1, nullptr}};
-const iree_vm_native_call_schema_t kOutput = {2, 2, kOutputFields, 0};
-const iree_vm_native_call_field_t kRootFields[] = {
-    {IREE_VM_NATIVE_CALL_FIELD_RANGE, 0, &kInput},
-    {IREE_VM_NATIVE_CALL_FIELD_RANGE, 2, &kOutput}};
-const iree_vm_native_call_schema_t kRoot = {4, 2, kRootFields, 0};
+const iree_vm_native_call_field_t kFields[] = {
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_NATIVE_CALL_FIELD_REF, 0},
+    {IREE_VM_NATIVE_CALL_FIELD_RESULT | IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_NATIVE_CALL_FIELD_RESULT | IREE_VM_NATIVE_CALL_FIELD_REF, 0},
+    {IREE_VM_NATIVE_CALL_FIELD_RANGE, 0},
+    {IREE_VM_NATIVE_CALL_FIELD_RANGE, 1}};
+const iree_vm_native_call_layout_t kLayouts[] = {
+    {0, 2, 2, 0}, {2, 2, 2, 0}, {4, 4, 2, 1}};
+const iree_vm_native_call_schema_t kRoot = {kLayouts, kFields, 3, 6, 2};
 
 struct Observations {
   // Resolved core reference types borrowed by the provider.
@@ -95,10 +93,15 @@ class VmNativeCallTest : public ::testing::TestWithParam<uint32_t> {
         &observations_.types));
     IREE_ASSERT_OK(iree_vm_invocation_initialize(
         iree_make_byte_span(storage_.data(), storage_.size()), &invocation_));
-    export_ = {IREE_SV("transform"), 0, &kRoot, nullptr, Transform,
-               &observations_};
+    export_ = {
+        .name = IREE_SV("transform"),
+        .schema = &kRoot,
+        .entry = Transform,
+        .user_data = &observations_,
+    };
     native_ = {&export_, 1, nullptr, 0};
     iree::vm::testing::TableModuleDefinition definition(IREE_SV("host"));
+    definition.descriptor.ref_types = {&observations_.types.buffer, 1};
     definition.descriptor.native = &native_;
     IREE_ASSERT_OK(provider_.Publish(definition));
   }

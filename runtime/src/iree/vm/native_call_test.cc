@@ -15,22 +15,24 @@
 
 namespace {
 
-const iree_vm_native_call_field_t kPairFields[] = {
-    {IREE_VM_NATIVE_CALL_FIELD_REF, 0, nullptr},
-    {IREE_VM_NATIVE_CALL_FIELD_VALUE, 1, nullptr},
-};
-const iree_vm_native_call_schema_t kPairSchema = {2, 2, kPairFields, 16};
-const iree_vm_native_call_field_t kResultField[] = {
-    {IREE_VM_NATIVE_CALL_FIELD_RESULT_REF, 0, nullptr},
-};
-const iree_vm_native_call_schema_t kResultSchema = {1, 1, kResultField, 8};
 const iree_vm_native_call_field_t kFields[] = {
-    {IREE_VM_NATIVE_CALL_FIELD_RANGE, 0, &kPairSchema},
-    {IREE_VM_NATIVE_CALL_FIELD_RANGE, 2, &kPairSchema},
-    {IREE_VM_NATIVE_CALL_FIELD_RANGE, 4, &kResultSchema},
+    {IREE_VM_NATIVE_CALL_FIELD_REF, 0},
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_NATIVE_CALL_FIELD_RESULT | IREE_VM_NATIVE_CALL_FIELD_REF, 0},
+    {IREE_VM_NATIVE_CALL_FIELD_RANGE, 0},
+    {IREE_VM_NATIVE_CALL_FIELD_RANGE, 0},
+    {IREE_VM_NATIVE_CALL_FIELD_RANGE, 1},
 };
-const iree_vm_native_call_schema_t kSchema = {6, 3, kFields, 0};
-const iree_vm_native_export_t kExport = {IREE_SV("submit"), 7, &kSchema};
+const iree_vm_native_call_layout_t kLayouts[] = {
+    {0, 2, 2, 0}, {2, 1, 1, 0}, {3, 6, 3, 1}};
+const iree_vm_native_call_schema_t kSchema = {kLayouts, kFields, 3, 6, 2};
+const uint32_t kScratchSizes[] = {16, 8, 0};
+const iree_vm_native_export_t kExport = {
+    .name = IREE_SV("submit"),
+    .version = 7,
+    .schema = &kSchema,
+    .scratch_sizes = kScratchSizes,
+};
 
 class NativeCallTest : public ::testing::Test {
  protected:
@@ -53,6 +55,7 @@ class NativeCallTest : public ::testing::Test {
 };
 
 TEST_F(NativeCallTest, SizesIndependentRangesAndAliasedResults) {
+  IREE_ASSERT_OK(iree_vm_native_call_schema_validate(&kSchema, 1));
   iree_host_size_t size = 0;
   IREE_ASSERT_OK(Verify(words_, &size));
   EXPECT_EQ(size, 3 * 16 + 2 * 8);
@@ -109,10 +112,20 @@ TEST_F(NativeCallTest, EmptyRangesHaveCanonicalOffsets) {
 }
 
 TEST(NativeCall, NestedRangesAccumulateNativeScratch) {
-  const iree_vm_native_call_field_t fields[] = {
-      {IREE_VM_NATIVE_CALL_FIELD_RANGE, 0, &kSchema}};
-  const iree_vm_native_call_schema_t schema = {2, 1, fields, 32};
-  const iree_vm_native_export_t entry = {IREE_SV("nested"), 0, &schema};
+  std::vector<iree_vm_native_call_field_t> fields(std::begin(kFields),
+                                                  std::end(kFields));
+  fields.push_back({IREE_VM_NATIVE_CALL_FIELD_RANGE, 2});
+  std::vector<iree_vm_native_call_layout_t> layouts(std::begin(kLayouts),
+                                                    std::end(kLayouts));
+  layouts.push_back({6, 2, 1, 2});
+  const iree_vm_native_call_schema_t schema = {layouts.data(), fields.data(), 4,
+                                               7, 3};
+  const uint32_t scratch_sizes[] = {16, 8, 0, 32};
+  const iree_vm_native_export_t entry = {
+      .name = IREE_SV("nested"),
+      .schema = &schema,
+      .scratch_sizes = scratch_sizes,
+  };
   // Reserve both parent records, then each parent's descendants in order.
   const uint32_t words[] = {2,  2, 1,  14, 0,  16, 0, 16, 0,
                             16, 1, 16, 0,  18, 0,  0, 1,  1};
@@ -127,11 +140,15 @@ TEST(NativeCall, NestedRangesAccumulateNativeScratch) {
 
 TEST(NativeCall, LocalScalarResultsCannotPartiallyOverlap) {
   const iree_vm_native_call_field_t fields[] = {
-      {IREE_VM_NATIVE_CALL_FIELD_RESULT_VALUE, 0, nullptr},
-      {IREE_VM_NATIVE_CALL_FIELD_RESULT_VALUE, 1, nullptr},
+      {IREE_VM_NATIVE_CALL_FIELD_RESULT | IREE_VM_SCALAR_TYPE_I64, 0},
+      {IREE_VM_NATIVE_CALL_FIELD_RESULT | IREE_VM_SCALAR_TYPE_I64, 0},
   };
-  const iree_vm_native_call_schema_t schema = {2, 2, fields, 0};
-  const iree_vm_native_export_t entry = {IREE_SV("results"), 0, &schema};
+  const iree_vm_native_call_layout_t layout = {0, 2, 2, 0};
+  const iree_vm_native_call_schema_t schema = {&layout, fields, 1, 2, 0};
+  const iree_vm_native_export_t entry = {
+      .name = IREE_SV("results"),
+      .schema = &schema,
+  };
   uint32_t words[] = {IREE_VM_NATIVE_CALL_LOCAL_VALUE,
                       IREE_VM_NATIVE_CALL_LOCAL_VALUE | 4};
   const iree_vm_native_callsite_t callsite = {
@@ -158,6 +175,111 @@ TEST(NativeCall, ScalarAccessPreservesCompleteUnalignedCells) {
     EXPECT_EQ(iree_vm_native_call_load_value(&call, selector),
               UINT64_C(0xFEDCBA9876543210));
   }
+}
+
+TEST(NativeCallSchema, ExactScalarKindsAndResultDirections) {
+  for (uint16_t kind = IREE_VM_SCALAR_TYPE_I8; kind <= IREE_VM_SCALAR_TYPE_F64;
+       ++kind) {
+    const iree_vm_native_call_field_t fields[] = {
+        {kind, 0},
+        {static_cast<uint16_t>(kind | IREE_VM_NATIVE_CALL_FIELD_RESULT), 0}};
+    const iree_vm_native_call_layout_t layout = {0, 2, 2, 0};
+    const iree_vm_native_call_schema_t schema = {&layout, fields, 1, 2, 0};
+    IREE_ASSERT_OK(iree_vm_native_call_schema_validate(&schema, 0));
+  }
+}
+
+TEST(NativeCallSchema, RejectsInvalidFieldKindsAndOrdinals) {
+  const iree_vm_native_call_field_t invalid_fields[] = {
+      {0, 0},
+      {IREE_VM_SCALAR_TYPE_F64 + 1, 0},
+      {IREE_VM_SCALAR_TYPE_I64, 1},
+      {IREE_VM_NATIVE_CALL_FIELD_REF, 1},
+      {IREE_VM_NATIVE_CALL_FIELD_RANGE, 0},
+      {IREE_VM_NATIVE_CALL_FIELD_RESULT | IREE_VM_NATIVE_CALL_FIELD_RANGE, 0},
+      {0x0400, 0}};
+  const iree_vm_native_call_layout_t layout = {0, 1, 1, 0};
+  for (const auto& field : invalid_fields) {
+    const iree_vm_native_call_schema_t schema = {&layout, &field, 1, 1, 0};
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          iree_vm_native_call_schema_validate(&schema, 1));
+  }
+}
+
+TEST(NativeCallSchema, RejectsIncorrectGeometry) {
+  const iree_vm_native_call_field_t field = {IREE_VM_SCALAR_TYPE_I64, 0};
+  const iree_vm_native_call_layout_t invalid_layouts[] = {
+      {1, 1, 1, 0}, {0, 0, 1, 0}, {0, 1, 2, 0}, {0, 1, 1, 1}, {0, 0, 0, 0}};
+  for (const auto& layout : invalid_layouts) {
+    const iree_vm_native_call_schema_t schema = {&layout, &field, 1, 1, 0};
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          iree_vm_native_call_schema_validate(&schema, 0));
+  }
+}
+
+TEST(NativeCallSchema, SharedChildrenDoNotExpandEmptyRanges) {
+  // Two references per parent describe exponentially many paths, but the
+  // declaration and its empty root record require only linear verification.
+  std::vector<iree_vm_native_call_layout_t> layouts = {{0, 1, 1, 0}};
+  std::vector<iree_vm_native_call_field_t> fields = {
+      {IREE_VM_SCALAR_TYPE_I64, 0}};
+  for (uint16_t i = 1; i < 128; ++i) {
+    layouts.push_back({static_cast<uint32_t>(fields.size()), 4, 2, i});
+    fields.push_back(
+        {IREE_VM_NATIVE_CALL_FIELD_RANGE, static_cast<uint16_t>(i - 1)});
+    fields.push_back(fields.back());
+  }
+  const iree_vm_native_call_schema_t schema = {
+      layouts.data(), fields.data(), static_cast<uint32_t>(layouts.size()),
+      static_cast<uint32_t>(fields.size()), 127};
+  IREE_ASSERT_OK(iree_vm_native_call_schema_validate(&schema, 0));
+  const iree_vm_native_export_t entry = {
+      .name = IREE_SV("empty"),
+      .schema = &schema,
+  };
+  const uint32_t words[] = {0, 4, 0, 4};
+  const iree_vm_native_callsite_t callsite = {
+      IREE_SV("native"), IREE_SV("empty"), 0, 0, words, 4, {}};
+  iree_host_size_t size = 1;
+  IREE_ASSERT_OK(iree_vm_native_call_verify(&entry, &callsite,
+                                            iree_allocator_system(), &size));
+  EXPECT_EQ(size, 0u);
+}
+
+TEST(NativeCallSchema, DeepRecordsUseAnExplicitStack) {
+  constexpr uint16_t kDepth = 16384;
+  std::vector<iree_vm_native_call_layout_t> layouts = {{0, 1, 1, 0}};
+  std::vector<iree_vm_native_call_field_t> fields = {
+      {IREE_VM_SCALAR_TYPE_I64, 0}};
+  std::vector<uint32_t> words;
+  for (uint16_t i = 1; i <= kDepth; ++i) {
+    layouts.push_back({i, 2, 1, i});
+    fields.push_back(
+        {IREE_VM_NATIVE_CALL_FIELD_RANGE, static_cast<uint16_t>(i - 1)});
+    words.push_back(1);
+    words.push_back(2u * i);
+  }
+  words.push_back(0);
+  const iree_vm_native_call_schema_t schema = {
+      layouts.data(), fields.data(), static_cast<uint32_t>(layouts.size()),
+      static_cast<uint32_t>(fields.size()), kDepth};
+  IREE_ASSERT_OK(iree_vm_native_call_schema_validate(&schema, 0));
+  const iree_vm_native_export_t entry = {
+      .name = IREE_SV("deep"),
+      .schema = &schema,
+  };
+  const iree_vm_native_callsite_t callsite = {
+      IREE_SV("native"),
+      IREE_SV("deep"),
+      0,
+      0,
+      words.data(),
+      static_cast<uint32_t>(words.size()),
+      {1, 0, 0}};
+  iree_host_size_t size = 1;
+  IREE_ASSERT_OK(iree_vm_native_call_verify(&entry, &callsite,
+                                            iree_allocator_system(), &size));
+  EXPECT_EQ(size, 0u);
 }
 
 }  // namespace
