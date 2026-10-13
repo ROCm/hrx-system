@@ -14,7 +14,7 @@ logical KV pool, sessions and checkpoints; image deployments own their finite
 request storage. Registering the same checkpoint twice creates two
 prepared parameter residencies; it does not deduplicate those weights.
 
-The application owns one [host](../runtime/host.h) with shared IREE task workers
+The application owns one [host](../runtime/host/host.h) with shared IREE task workers
 and asynchronous I/O services. Every catalog borrows the host's shared JIT task
 queue; adding or removing a model neither creates nor joins a compiler pool.
 Every modality's registration drives asynchronous source/JIT preparation on

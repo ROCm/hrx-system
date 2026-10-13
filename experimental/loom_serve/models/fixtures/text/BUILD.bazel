@@ -102,7 +102,7 @@ py_test(
             "//experimental/loom_serve/http:server",
             "//experimental/loom_serve/models/fixtures:stalled_stderr",
             "//experimental/loom_serve/runtime:device",
-            "//experimental/loom_serve/runtime:host",
+            "//experimental/loom_serve/runtime/host",
             "//experimental/loom_serve/scheduling:packing",
             "//experimental/loom_serve/serving:model_registration",
             "//experimental/loom_serve/serving:registry",

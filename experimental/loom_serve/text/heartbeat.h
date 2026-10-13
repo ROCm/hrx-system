@@ -7,8 +7,8 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_TEXT_HEARTBEAT_H_
 #define EXPERIMENTAL_LOOM_SERVE_TEXT_HEARTBEAT_H_
 
-#include "experimental/loom_serve/http/timer.h"
 #include "experimental/loom_serve/runtime/device.h"
+#include "experimental/loom_serve/runtime/host/timer.h"
 #include "experimental/loom_serve/runtime/weights.h"
 #include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/base/threading/mutex.h"
@@ -103,7 +103,7 @@ typedef struct loom_serve_text_heartbeat_t {
   // Protects copied statistics, never model work.
   iree_slim_mutex_t mutex;
   // Periodic readiness and callback lifetime, independent of model counters.
-  loom_serve_http_timer_t timer;
+  loom_serve_timer_t timer;
   // Borrowed owner-only stream, alive through deinitialization.
   loom_serve_telemetry_stream_t* stream;
   // Borrowed owner counters independent of reporting interval and readers.

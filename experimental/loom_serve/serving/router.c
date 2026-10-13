@@ -10,6 +10,7 @@
 
 #include "experimental/loom_serve/http/logs.h"
 #include "experimental/loom_serve/http/tokenization.h"
+#include "experimental/loom_serve/runtime/host/wake.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/threading/mutex.h"
 #include "loom/util/json.h"
@@ -32,7 +33,7 @@ typedef struct router_tokenization_t {
   // Allocator owning this job and independent tokenizer scratch.
   iree_allocator_t allocator;
   // Nonblocking router wake, valid until all accepted jobs retire.
-  loom_serve_http_observer_t observer;
+  loom_serve_wake_callback_t observer;
   // Joins release publication's final access before owner destruction.
   iree_slim_mutex_t mutex;
   // Owned outcome, transferred by completion and consumed after release.
@@ -250,7 +251,7 @@ static iree_status_t router_tokenization_accept(
   job->service_index = service_index;
   job->connection = connection;
   job->request = request;
-  job->observer = (loom_serve_http_observer_t){router_wake, router};
+  job->observer = (loom_serve_wake_callback_t){router_wake, router};
   iree_slim_mutex_initialize(&job->mutex);
   iree_string_builder_initialize(router->allocator, &job->output);
   iree_task_process_initialize(router_tokenization_run, 0, 1, &job->process);
@@ -1599,7 +1600,7 @@ static void router_advance(router_t* router, bool* out_progress) {
         router->status,
         loom_serve_registry_advance(
             router->registry, index,
-            (loom_serve_http_observer_t){router_wake, router}, &progress));
+            (loom_serve_wake_callback_t){router_wake, router}, &progress));
     router->stopping |= !iree_status_is_ok(router->status);
     *out_progress |= progress;
   }
@@ -1632,11 +1633,11 @@ static void router_advance(router_t* router, bool* out_progress) {
       const loom_serve_registered_model_t* model = router_model_at(router, i);
       if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
         model->service.set_observer(model->service.self,
-                                    (loom_serve_http_observer_t){0});
+                                    (loom_serve_wake_callback_t){0});
       }
     }
     loom_serve_http_server_set_observer(router->server,
-                                        (loom_serve_http_observer_t){0});
+                                        (loom_serve_wake_callback_t){0});
     router->completed = true;
   }
 }
@@ -1727,11 +1728,11 @@ iree_status_t loom_serve_router_run(iree_task_executor_t* executor,
     if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
       model->service.set_observer(
           model->service.self,
-          (loom_serve_http_observer_t){router_wake, &router});
+          (loom_serve_wake_callback_t){router_wake, &router});
     }
   }
   loom_serve_http_server_set_observer(
-      server, (loom_serve_http_observer_t){router_wake, &router});
+      server, (loom_serve_wake_callback_t){router_wake, &router});
   iree_notification_await(&router.retirement.notification, router_is_released,
                           &router, iree_infinite_timeout());
   iree_string_builder_deinitialize(&router.output);

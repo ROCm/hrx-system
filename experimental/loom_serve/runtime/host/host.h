@@ -3,8 +3,8 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_H_
-#define EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_H_
+#ifndef EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_HOST_H_
+#define EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_HOST_H_
 
 #include "iree/async/util/proactor_pool.h"
 #include "iree/task/executor.h"
@@ -52,4 +52,4 @@ iree_async_proactor_pool_t* loom_serve_host_proactor_pool(
 }  // extern "C"
 #endif
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_H_
+#endif  // EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_HOST_H_

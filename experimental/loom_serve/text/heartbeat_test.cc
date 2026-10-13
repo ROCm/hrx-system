@@ -45,7 +45,7 @@ class TextHeartbeatTest : public ::testing::Test {
 
   void Initialize() {
     loom_serve_text_heartbeat_initialize(&heartbeat_);
-    loom_serve_http_timer_set_observer(&heartbeat_.timer, {Wake, this});
+    loom_serve_timer_set_observer(&heartbeat_.timer, {Wake, this});
   }
 
   void Configure(iree_duration_t interval) {

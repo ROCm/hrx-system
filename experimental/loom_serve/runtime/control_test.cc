@@ -9,7 +9,7 @@
 #include <string>
 
 #include "experimental/loom_serve/runtime/execution.h"
-#include "experimental/loom_serve/runtime/host.h"
+#include "experimental/loom_serve/runtime/host/host.h"
 #include "experimental/loom_serve/runtime/jit.h"
 #include "experimental/loom_serve/runtime/module.h"
 #include "iree/async/frontier_tracker.h"

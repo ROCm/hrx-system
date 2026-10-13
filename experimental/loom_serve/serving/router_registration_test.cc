@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "experimental/loom_serve/runtime/host/wake.h"
 #include "experimental/loom_serve/serving/router_test_fixture.h"
 
 namespace {
@@ -28,7 +29,7 @@ struct RegistrationDependency {
   // Outer-test synchronization on actual retirement entry.
   std::condition_variable condition;
   // Final device-borrower wake, independent of the service observer.
-  loom_serve_http_observer_t observer = {};
+  loom_serve_wake_callback_t observer = {};
   // Registry-owned history borrowed by the prepared service.
   loom_serve_telemetry_stream_t* stream = nullptr;
   // Retire has been called after all service and utility borrowers completed.
@@ -178,7 +179,7 @@ struct RegistrationDependency {
   }
   static iree_status_t Create(
       void* self, const loom_serve_model_configuration_t* configuration,
-      loom_serve_http_observer_t observer,
+      loom_serve_wake_callback_t observer,
       loom_serve_telemetry_stream_t* stream,
       loom_serve_registration_t* registration, iree_allocator_t) {
     auto* dependency = static_cast<RegistrationDependency*>(self);

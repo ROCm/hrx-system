@@ -3,7 +3,7 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/runtime/host.h"
+#include "experimental/loom_serve/runtime/host/host.h"
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"

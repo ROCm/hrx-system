@@ -9,9 +9,10 @@
 #include <inttypes.h>
 #include <string.h>
 
-#include "experimental/loom_serve/http/timer.h"
 #include "experimental/loom_serve/image/output.h"
 #include "experimental/loom_serve/image/telemetry.h"
+#include "experimental/loom_serve/runtime/host/timer.h"
+#include "experimental/loom_serve/runtime/host/wake.h"
 #include "experimental/loom_serve/telemetry/weights.h"
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/internal/base64.h"
@@ -78,7 +79,7 @@ struct loom_serve_image_service_t {
     // Joins publication callbacks' final access before owner destruction.
     iree_slim_mutex_t mutex;
     // Borrowed router wake, joined by mutex when detached after retirement.
-    loom_serve_http_observer_t observer;
+    loom_serve_wake_callback_t observer;
     // CPU/device completions awaiting consumption on the scheduler.
     uint32_t ready;
     // Joined asynchronous outcomes awaiting consumption by the scheduler.
@@ -112,7 +113,7 @@ struct loom_serve_image_service_t {
     bool cancelled;
   } device;
   // Periodic readiness and owned cancellation, independent of device waits.
-  loom_serve_http_timer_t timer;
+  loom_serve_timer_t timer;
   // Bounded FIFO of owned host requests, excluding the active image.
   image_pending_t* pending;
   // Number of occupied FIFO entries.
@@ -731,12 +732,12 @@ static void image_stop(loom_serve_image_service_t* service) {
 }
 
 static void image_set_observer(void* self,
-                               loom_serve_http_observer_t observer) {
+                               loom_serve_wake_callback_t observer) {
   loom_serve_image_service_t* service = self;
   iree_slim_mutex_lock(&service->events.mutex);
   service->events.observer = observer;
   iree_slim_mutex_unlock(&service->events.mutex);
-  loom_serve_http_timer_set_observer(&service->timer, observer);
+  loom_serve_timer_set_observer(&service->timer, observer);
 }
 
 static bool image_is_active(void* self) {
@@ -750,7 +751,7 @@ static bool image_is_active(void* self) {
 static bool image_is_pending(void* self) {
   loom_serve_image_service_t* service = self;
   return image_is_active(service) ||
-         loom_serve_http_timer_is_pending(&service->timer);
+         loom_serve_timer_is_pending(&service->timer);
 }
 
 static iree_status_t image_advance(void* self,
@@ -792,9 +793,9 @@ static iree_status_t image_advance(void* self,
   bool tick = false;
   service->status = iree_status_join(
       service->status,
-      loom_serve_http_timer_advance(&service->timer,
-                                    service->stopping && !service->active,
-                                    &timer_progress, &tick));
+      loom_serve_timer_advance(&service->timer,
+                               service->stopping && !service->active,
+                               &timer_progress, &tick));
   *out_progress |= timer_progress;
   if (tick) {
     image_heartbeat(service);
@@ -853,7 +854,7 @@ void loom_serve_image_service_destroy(loom_serve_image_service_t* service) {
                               ? LOOM_SERVE_TELEMETRY_FAILED
                               : LOOM_SERVE_TELEMETRY_CANCELLED);
   }
-  loom_serve_http_timer_deinitialize(&service->timer);
+  loom_serve_timer_deinitialize(&service->timer);
   iree_string_builder_deinitialize(&service->cpu.response);
   iree_string_builder_deinitialize(&service->response);
   iree_allocator_free(allocator, service->pending);
@@ -893,7 +894,7 @@ iree_status_t loom_serve_image_service_create(
   service->telemetry.stream = stream;
   service->executor = loom_serve_host_executor(host);
   iree_slim_mutex_initialize(&service->events.mutex);
-  loom_serve_http_timer_initialize(&service->timer);
+  loom_serve_timer_initialize(&service->timer);
   iree_string_builder_initialize(host_allocator, &service->response);
   iree_string_builder_initialize(host_allocator, &service->cpu.response);
   iree_status_t status = iree_allocator_malloc_array(
@@ -914,8 +915,8 @@ iree_status_t loom_serve_image_service_create(
                                           0, &service->proactor);
   }
   if (iree_status_is_ok(status)) {
-    loom_serve_http_timer_configure(&service->timer, service->proactor,
-                                    options->heartbeat_interval);
+    loom_serve_timer_configure(&service->timer, service->proactor,
+                               options->heartbeat_interval);
     *out_service = service;
   } else {
     loom_serve_image_service_destroy(service);

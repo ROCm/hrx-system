@@ -221,8 +221,8 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::http::timer
     iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::host::timer
     iree::experimental::loom_serve::runtime::weights
     iree::experimental::loom_serve::storage::memory
     iree::experimental::loom_serve::telemetry::record
@@ -242,7 +242,7 @@ loom_cc_test(
     iree::async::util::proactor_pool
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::http::timer
+    iree::experimental::loom_serve::runtime::host::timer
     iree::experimental::loom_serve::telemetry::record
     iree::experimental::loom_serve::telemetry::stream
     iree::testing::gtest
@@ -382,10 +382,11 @@ loom_cc_library(
     iree::experimental::loom_serve::http::request
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::http::service
-    iree::experimental::loom_serve::http::timer
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::runtime::host::timer
+    iree::experimental::loom_serve::runtime::host::wake
     iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::telemetry::record
     iree::experimental::loom_serve::telemetry::stream

@@ -37,9 +37,10 @@ loom_cc_library(
     iree::experimental::loom_serve::http::request
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::http::service
-    iree::experimental::loom_serve::http::timer
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::runtime::host::timer
+    iree::experimental::loom_serve::runtime::host::wake
     iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::telemetry::stream
     iree::hal

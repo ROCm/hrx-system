@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/host.h"
+#include "experimental/loom_serve/runtime/host/host.h"
 #include "experimental/loom_serve/runtime/input.h"
 #include "experimental/loom_serve/runtime/json.h"
 #include "experimental/loom_serve/runtime/preparation.h"

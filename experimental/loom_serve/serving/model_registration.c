@@ -12,6 +12,7 @@
 #include "experimental/loom_serve/finite/service.h"
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/service.h"
+#include "experimental/loom_serve/runtime/host/wake.h"
 #include "experimental/loom_serve/storage/memory.h"
 #include "experimental/loom_serve/text/schedule.h"
 #include "experimental/loom_serve/text/service.h"
@@ -20,7 +21,7 @@
 // operation. Neither the registry nor its management connection borrows either.
 static iree_status_t registration_activate(
     loom_serve_activation_t** operation, loom_serve_residency_t* residency,
-    loom_serve_host_t* host, loom_serve_http_observer_t observer,
+    loom_serve_host_t* host, loom_serve_wake_callback_t observer,
     loom_serve_activation_flags_t flags,
     loom_serve_activation_phase_t* out_phase, iree_allocator_t allocator) {
   *out_phase = LOOM_SERVE_ACTIVATION_COMPLETE;
@@ -49,7 +50,7 @@ typedef struct finite_registration_t {
   // Borrowed immutable declaration owned by the stable registration slot.
   const loom_serve_model_configuration_t* configuration;
   // Owner scheduling callback, never an inline model operation.
-  loom_serve_http_observer_t observer;
+  loom_serve_wake_callback_t observer;
   // Borrowed registration-wide history, published only by this shared owner.
   loom_serve_telemetry_stream_t* stream;
   // Owned unstarted/live/terminal source load, consumed before publication.
@@ -165,7 +166,7 @@ static iree_status_t finite_registration_activate(
 
 static iree_status_t finite_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_serve_http_observer_t observer, loom_serve_telemetry_stream_t* stream,
+    loom_serve_wake_callback_t observer, loom_serve_telemetry_stream_t* stream,
     loom_serve_registration_t* out_registration, iree_allocator_t allocator) {
   const loom_serve_model_registration_options_t* options = self;
   finite_registration_t* registration = NULL;
@@ -207,7 +208,7 @@ typedef struct image_registration_t {
   // Borrowed immutable declaration owned by the stable registration slot.
   const loom_serve_model_configuration_t* configuration;
   // Owner scheduling callback, never an inline model operation.
-  loom_serve_http_observer_t observer;
+  loom_serve_wake_callback_t observer;
   // Borrowed registration-wide history, published only by this shared owner.
   loom_serve_telemetry_stream_t* stream;
   // Owned unstarted/live/terminal source load, consumed before publication.
@@ -323,7 +324,7 @@ static iree_status_t image_registration_activate(
 
 static iree_status_t image_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_serve_http_observer_t observer, loom_serve_telemetry_stream_t* stream,
+    loom_serve_wake_callback_t observer, loom_serve_telemetry_stream_t* stream,
     loom_serve_registration_t* out_registration, iree_allocator_t allocator) {
   const loom_serve_model_registration_options_t* options = self;
   image_registration_t* registration = NULL;
@@ -370,7 +371,7 @@ typedef struct text_registration_t {
   // Immutable declaration retained by the stable registry slot.
   const loom_serve_model_configuration_t* configuration;
   // Owner scheduling callback; no destruction occurs on its calling thread.
-  loom_serve_http_observer_t observer;
+  loom_serve_wake_callback_t observer;
   // Registration-wide history retained beyond service retirement.
   loom_serve_telemetry_stream_t* stream;
   // Shape inputs borrowed by asynchronous preparation until publication.
@@ -486,7 +487,7 @@ static iree_status_t text_registration_activate(
 
 static iree_status_t text_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_serve_http_observer_t observer, loom_serve_telemetry_stream_t* stream,
+    loom_serve_wake_callback_t observer, loom_serve_telemetry_stream_t* stream,
     loom_serve_registration_t* out_registration, iree_allocator_t allocator) {
   const loom_serve_model_registration_options_t* options = self;
   text_registration_t* registration = NULL;
@@ -538,7 +539,7 @@ static iree_status_t text_registration_create(
 
 static iree_status_t model_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_serve_http_observer_t observer, loom_serve_telemetry_stream_t* stream,
+    loom_serve_wake_callback_t observer, loom_serve_telemetry_stream_t* stream,
     loom_serve_registration_t* out_registration, iree_allocator_t allocator) {
   if (configuration->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
     return text_registration_create(self, configuration, observer, stream,

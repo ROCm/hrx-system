@@ -8,6 +8,7 @@
 #define IREE_EXPERIMENTAL_LOOM_SERVE_HTTP_SERVER_H_
 
 #include "experimental/loom_serve/http/request.h"
+#include "experimental/loom_serve/runtime/host/wake.h"
 #include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/async/semaphore.h"
 #include "iree/async/util/proactor_pool.h"
@@ -86,15 +87,8 @@ void loom_serve_http_server_record_error(loom_serve_http_server_t* server,
 // wakes the observer so requests published before registration are consumed.
 // Replacing with an empty callback joins all prior callback accesses. The
 // observer's storage remains live until replacement or server destruction.
-typedef struct loom_serve_http_observer_t {
-  // Nonblocking wake callback invoked on network or application producers.
-  void (*wake)(void* user_data);
-  // Borrowed callback state protected by registration lifetime.
-  void* user_data;
-} loom_serve_http_observer_t;
-
 void loom_serve_http_server_set_observer(loom_serve_http_server_t* server,
-                                         loom_serve_http_observer_t observer);
+                                         loom_serve_wake_callback_t observer);
 
 // Stops request admission and wakes the application to drain its services.
 // Does not cancel active connections or stop shared I/O infrastructure.

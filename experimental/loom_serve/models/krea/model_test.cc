@@ -9,7 +9,7 @@
 #include <string>
 
 #include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/host.h"
+#include "experimental/loom_serve/runtime/host/host.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"

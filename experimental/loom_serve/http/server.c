@@ -9,6 +9,7 @@
 #include <limits.h>
 #include <string.h>
 
+#include "experimental/loom_serve/runtime/host/wake.h"
 #include "iree/base/threading/mutex.h"
 
 typedef enum http_connection_flag_bits_e {
@@ -51,7 +52,7 @@ struct loom_serve_http_server_t {
   // Monotonic connection-credit publication, serialized by mutex.
   iree_async_semaphore_t* capacity_semaphore;
   // Application task wake target, with publication joined by the server mutex.
-  loom_serve_http_observer_t observer;
+  loom_serve_wake_callback_t observer;
   // Retained shared progress owner, outliving all accepted carrier callbacks.
   iree_async_proactor_pool_t* proactor_pool;
   // Admission closure, protected by the mutex; active claims remain owned.
@@ -353,7 +354,7 @@ const loom_serve_telemetry_stream_t* loom_serve_http_server_diagnostics(
 }
 
 void loom_serve_http_server_set_observer(loom_serve_http_server_t* server,
-                                         loom_serve_http_observer_t observer) {
+                                         loom_serve_wake_callback_t observer) {
   iree_slim_mutex_lock(&server->mutex);
   server->observer = observer;
   if (observer.wake) {

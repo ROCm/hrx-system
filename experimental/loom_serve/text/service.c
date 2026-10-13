@@ -9,7 +9,8 @@
 #include <string.h>
 
 #include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/host.h"
+#include "experimental/loom_serve/runtime/host/host.h"
+#include "experimental/loom_serve/runtime/host/wake.h"
 #include "experimental/loom_serve/scheduling/packing.h"
 #include "experimental/loom_serve/text/admission.h"
 #include "experimental/loom_serve/text/chat.h"
@@ -104,7 +105,7 @@ struct loom_serve_text_service_t {
     // Borrowed shared host proactor outliving the service.
     iree_async_proactor_t* proactor;
     // Borrowed router wake target, attached only while the router owns turns.
-    loom_serve_http_observer_t observer;
+    loom_serve_wake_callback_t observer;
     // One accepted ALL wait, reused after callback retirement.
     iree_async_semaphore_wait_operation_t operation;
     // Exact work and feedback values captured by submission.
@@ -1876,7 +1877,7 @@ iree_status_t loom_serve_text_service_create(
   return status;
 }
 
-static void text_set_observer(void* self, loom_serve_http_observer_t observer) {
+static void text_set_observer(void* self, loom_serve_wake_callback_t observer) {
   loom_serve_text_service_t* service = self;
   iree_slim_mutex_lock(&service->completion.mutex);
   service->completion.observer = observer;
@@ -1888,7 +1889,7 @@ static void text_set_observer(void* self, loom_serve_http_observer_t observer) {
                                                text_cache_reclaim_request,
                                                text_cache_reclaim_pending}
           : (loom_serve_residency_reclaimer_t){0});
-  loom_serve_http_timer_set_observer(&service->heartbeat.timer, observer);
+  loom_serve_timer_set_observer(&service->heartbeat.timer, observer);
 }
 
 static bool text_is_pending(void* self) {

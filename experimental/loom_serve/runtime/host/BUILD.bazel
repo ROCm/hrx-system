@@ -1,0 +1,72 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//experimental/loom_serve:__subpackages__"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "host",
+    srcs = ["host.c"],
+    hdrs = ["host.h"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c:task_pool",
+        "//loom/binding/c:task_queue",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/async/util:proactor_thread",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_test(
+    name = "host_test",
+    srcs = ["host_test.cc"],
+    deps = [
+        ":host",
+        "//loom/binding/c:task_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "wake",
+    hdrs = ["wake.h"],
+)
+
+loom_cc_library(
+    name = "timer",
+    srcs = ["timer.c"],
+    hdrs = ["timer.h"],
+    deps = [
+        ":wake",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+loom_cc_test(
+    name = "timer_test",
+    srcs = ["timer_test.cc"],
+    deps = [
+        ":timer",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

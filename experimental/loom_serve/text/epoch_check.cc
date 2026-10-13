@@ -15,7 +15,7 @@
 #include <utility>
 
 #include "experimental/loom_serve/runtime/device_flags.h"
-#include "experimental/loom_serve/runtime/host.h"
+#include "experimental/loom_serve/runtime/host/host.h"
 #include "experimental/loom_serve/text/chat.h"
 #include "experimental/loom_serve/text/flags.h"
 #include "iree/async/operations/semaphore.h"

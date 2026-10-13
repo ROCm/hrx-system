@@ -10,6 +10,7 @@
 #include "experimental/loom_serve/http/service.h"
 #include "experimental/loom_serve/runtime/activation.h"
 #include "experimental/loom_serve/runtime/compilation.h"
+#include "experimental/loom_serve/runtime/host/wake.h"
 #include "experimental/loom_serve/runtime/residency.h"
 #include "experimental/loom_serve/serving/configuration.h"
 
@@ -71,7 +72,7 @@ typedef struct loom_serve_registration_factory_t {
   // or explicit activation, never for metadata-only registration alone.
   iree_status_t (*create)(void* self,
                           const loom_serve_model_configuration_t* configuration,
-                          loom_serve_http_observer_t observer,
+                          loom_serve_wake_callback_t observer,
                           loom_serve_telemetry_stream_t* stream,
                           loom_serve_registration_t* out_registration,
                           iree_allocator_t allocator);
@@ -228,7 +229,7 @@ loom_serve_http_service_flags_t loom_serve_registry_service_flags(
 // wake.
 iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
                                           iree_host_size_t index,
-                                          loom_serve_http_observer_t observer,
+                                          loom_serve_wake_callback_t observer,
                                           bool* out_progress);
 bool loom_serve_registry_pending(const loom_serve_registered_model_t* model);
 const char* loom_serve_registry_phase(

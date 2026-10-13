@@ -58,7 +58,7 @@ filegroup(
             "//experimental/loom_serve/http:listener",
             "//experimental/loom_serve/http:server",
             "//experimental/loom_serve/runtime:device",
-            "//experimental/loom_serve/runtime:host",
+            "//experimental/loom_serve/runtime/host",
             "//experimental/loom_serve/serving:registry",
             "//experimental/loom_serve/serving:router",
             "//experimental/loom_serve/testing:model",

@@ -9,6 +9,7 @@
 
 #include "experimental/loom_serve/http/inspection.h"
 #include "experimental/loom_serve/http/server.h"
+#include "experimental/loom_serve/runtime/host/wake.h"
 #include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/tokenizer/tokenizer.h"
 
@@ -56,7 +57,7 @@ typedef struct loom_serve_http_service_t {
   void* self;
   // Installs the owner's nonblocking wake target before the first turn. The
   // owner clears it after all accepted asynchronous callbacks have retired.
-  void (*set_observer)(void* self, loom_serve_http_observer_t observer);
+  void (*set_observer)(void* self, loom_serve_wake_callback_t observer);
   // Whether an accepted asynchronous callback still borrows service storage.
   // True requires an eventual wake even after transport admission stops.
   bool (*is_pending)(void* self);

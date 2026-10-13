@@ -9,25 +9,6 @@
 
 iree_add_all_subdirs()
 
-loom_cc_library(
-  NAME
-    host
-  HDRS
-    "host.h"
-  SRCS
-    "host.c"
-  DEPS
-    iree::async::util::proactor_pool
-    iree::async::util::proactor_thread
-    iree::base
-    iree::base::threading
-    iree::task
-    loom::binding::c::loomc
-    loom::binding::c::task_pool
-    loom::binding::c::task_queue
-  PUBLIC
-)
-
 loom_cc_test(
   NAME
     sources_test
@@ -63,9 +44,9 @@ loom_cc_library(
   SRCS
     "host_flags.c"
   DEPS
-    ::host
     iree::base
     iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::host
   PUBLIC
 )
 
@@ -85,20 +66,6 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 endif()
-
-loom_cc_test(
-  NAME
-    host_test
-  SRCS
-    "host_test.cc"
-  DEPS
-    ::host
-    iree::base
-    iree::task
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::binding::c::task_pool
-)
 
 loom_cc_library(
   NAME
@@ -126,7 +93,6 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/control/kernels.loom"
   DEPS
     ::execution
-    ::host
     ::jit
     ::module
     ::workspace
@@ -135,6 +101,7 @@ loom_cc_test(
     iree::base
     iree::base::threading
     iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::host
     iree::hal
     iree::hal::drivers
     iree::module::hal::types
@@ -209,9 +176,9 @@ loom_cc_test(
   DEPS
     ::device
     ::execution
-    ::host
     ::workspace
     iree::base
+    iree::experimental::loom_serve::runtime::host
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
@@ -239,7 +206,6 @@ loom_cc_library(
     "device.c"
   DEPS
     ::execution
-    ::host
     ::residency
     ::workspace
     iree::async
@@ -247,6 +213,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::path
     iree::base::threading
+    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::storage::memory
     iree::hal
     iree::hal::drivers
@@ -289,8 +256,8 @@ loom_cc_test(
     "device_cpu_test.cc"
   DEPS
     ::device
-    ::host
     iree::base
+    iree::experimental::loom_serve::runtime::host
     iree::hal
     iree::task
     iree::testing::gtest
@@ -307,8 +274,8 @@ loom_cc_test(
   DEPS
     ::device
     ::execution
-    ::host
     iree::base
+    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::storage::memory
     iree::hal
     iree::testing::gtest
@@ -417,11 +384,11 @@ loom_cc_library(
     ::command
     ::compilation
     ::dispatch
-    ::host
     ::sources
     ::target
     iree::base
     iree::base::threading
+    iree::experimental::loom_serve::runtime::host
     iree::hal
     loom::binding::c::loomc
     loom::binding::c::target::cmd
@@ -644,9 +611,9 @@ loom_cc_test(
     ::activation
     ::device
     ::execution
-    ::host
     ::residency
     iree::base
+    iree::experimental::loom_serve::runtime::host
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
@@ -698,13 +665,13 @@ loom_cc_library(
     "weights.c"
   DEPS
     ::execution
-    ::host
     ::jit
     ::program
     ::retirement
     ::sources
     iree::base
     iree::base::threading
+    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::storage::memory
     iree::hal
     iree::io::parameter_index

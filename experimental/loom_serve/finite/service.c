@@ -8,7 +8,8 @@
 
 #include <string.h>
 
-#include "experimental/loom_serve/http/timer.h"
+#include "experimental/loom_serve/runtime/host/timer.h"
+#include "experimental/loom_serve/runtime/host/wake.h"
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/threading/mutex.h"
 #include "loom/util/json.h"
@@ -92,7 +93,7 @@ struct loom_serve_finite_service_t {
     // Joins final callback accesses with owner collection/destruction.
     iree_slim_mutex_t mutex;
     // Borrowed common router wake interface.
-    loom_serve_http_observer_t observer;
+    loom_serve_wake_callback_t observer;
     // CPU release or device readiness awaiting collection.
     bool ready;
     // Owned terminal result, consumed once after publication.
@@ -110,7 +111,7 @@ struct loom_serve_finite_service_t {
     iree_async_semaphore_t* semaphores[2];
   } device;
   // Independent heartbeat readiness, drained before service destruction.
-  loom_serve_http_timer_t timer;
+  loom_serve_timer_t timer;
   // Scheduler-side error response storage, disjoint from CPU job outputs.
   iree_string_builder_t response;
   // Producer-owned observation; neither counters nor publication wait on sinks.
@@ -473,7 +474,7 @@ static bool finite_is_active(void* self) {
 static bool finite_is_pending(void* self) {
   loom_serve_finite_service_t* service = self;
   return finite_is_active(service) ||
-         loom_serve_http_timer_is_pending(&service->timer);
+         loom_serve_timer_is_pending(&service->timer);
 }
 
 static loom_serve_http_service_snapshot_t finite_snapshot(void* self) {
@@ -691,9 +692,9 @@ static iree_status_t finite_advance(void* self,
   bool tick = false;
   status = iree_status_join(
       status,
-      loom_serve_http_timer_advance(
-          &service->timer, service->stopping || !iree_status_is_ok(status),
-          &timer_progress, &tick));
+      loom_serve_timer_advance(&service->timer,
+                               service->stopping || !iree_status_is_ok(status),
+                               &timer_progress, &tick));
   *out_progress |= timer_progress;
   if (tick) {
     finite_heartbeat(service);
@@ -768,12 +769,12 @@ static iree_status_t finite_accept(void* self,
 }
 
 static void finite_set_observer(void* self,
-                                loom_serve_http_observer_t observer) {
+                                loom_serve_wake_callback_t observer) {
   loom_serve_finite_service_t* service = self;
   iree_slim_mutex_lock(&service->event.mutex);
   service->event.observer = observer;
   iree_slim_mutex_unlock(&service->event.mutex);
-  loom_serve_http_timer_set_observer(&service->timer, observer);
+  loom_serve_timer_set_observer(&service->timer, observer);
 }
 
 loom_serve_http_service_t loom_serve_finite_service_interface(
@@ -813,7 +814,7 @@ void loom_serve_finite_service_destroy(loom_serve_finite_service_t* service) {
     loom_serve_finite_model_release_batch(service->model);
   }
   finite_finish(service, iree_ok_status());
-  loom_serve_http_timer_deinitialize(&service->timer);
+  loom_serve_timer_deinitialize(&service->timer);
   iree_string_builder_deinitialize(&service->response);
   iree_slim_mutex_deinitialize(&service->event.mutex);
   iree_allocator_free(service->allocator, service->pending);
@@ -851,7 +852,7 @@ iree_status_t loom_serve_finite_service_create(
   service->telemetry.owns_stream = !stream;
   service->executor = loom_serve_host_executor(host);
   iree_slim_mutex_initialize(&service->event.mutex);
-  loom_serve_http_timer_initialize(&service->timer);
+  loom_serve_timer_initialize(&service->timer);
   iree_string_builder_initialize(allocator, &service->response);
   iree_status_t status = iree_allocator_malloc_array(allocator, capacity,
                                                      sizeof(*service->pending),
@@ -879,8 +880,8 @@ iree_status_t loom_serve_finite_service_create(
                                                 allocator);
   }
   if (iree_status_is_ok(status)) {
-    loom_serve_http_timer_configure(&service->timer, service->proactor,
-                                    heartbeat_interval);
+    loom_serve_timer_configure(&service->timer, service->proactor,
+                               heartbeat_interval);
     const loom_serve_telemetry_record_t record = {
         .time_ns = iree_time_now(),
         .event = stream ? &LOOM_SERVE_TELEMETRY_SNAPSHOT

@@ -6,6 +6,8 @@
 
 #include "experimental/loom_serve/serving/registry.h"
 
+#include "experimental/loom_serve/runtime/host/wake.h"
+
 struct loom_serve_registry_t {
   // Allocator owning the table and registration operations.
   iree_allocator_t allocator;
@@ -325,7 +327,7 @@ static void registry_record_error(loom_serve_registered_model_t* model,
 
 iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
                                           iree_host_size_t index,
-                                          loom_serve_http_observer_t observer,
+                                          loom_serve_wake_callback_t observer,
                                           bool* out_progress) {
   *out_progress = false;
   loom_serve_registered_model_t* model = &registry->models[index];
@@ -425,7 +427,7 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
         !model->tokenizer_count && !model->held_count &&
         !model->service.is_pending(model->service.self)) {
       model->service.set_observer(model->service.self,
-                                  (loom_serve_http_observer_t){0});
+                                  (loom_serve_wake_callback_t){0});
       registry_release_service(model);
       model->phase = LOOM_SERVE_REGISTRATION_RETIRING;
       progress = true;

@@ -30,6 +30,7 @@ loom_cc_library(
     iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::http::tokenization
     iree::experimental::loom_serve::runtime::compilation
+    iree::experimental::loom_serve::runtime::host::wake
     iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::telemetry::stream
     iree::task
@@ -94,6 +95,7 @@ loom_cc_test(
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::request
     iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::runtime::host::wake
     iree::net::carrier
     iree::net::carrier::loopback
     iree::task
@@ -159,6 +161,7 @@ loom_cc_library(
     iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::runtime::activation
     iree::experimental::loom_serve::runtime::compilation
+    iree::experimental::loom_serve::runtime::host::wake
     iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::telemetry::record
     iree::experimental::loom_serve::telemetry::stream
@@ -187,6 +190,7 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::runtime::host::wake
     iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::storage::memory
     iree::experimental::loom_serve::text::model

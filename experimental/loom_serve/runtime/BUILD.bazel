@@ -13,22 +13,6 @@ package(
     licenses = ["notice"],
 )
 
-loom_cc_library(
-    name = "host",
-    srcs = ["host.c"],
-    hdrs = ["host.h"],
-    deps = [
-        "//loom/binding/c:loomc",
-        "//loom/binding/c:task_pool",
-        "//loom/binding/c:task_queue",
-        "//runtime/src/iree/async/util:proactor_pool",
-        "//runtime/src/iree/async/util:proactor_thread",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/task",
-    ],
-)
-
 loom_cc_test(
     name = "sources_test",
     srcs = ["sources_test.cc"],
@@ -57,7 +41,7 @@ loom_cc_library(
     srcs = ["host_flags.c"],
     hdrs = ["host_flags.h"],
     deps = [
-        ":host",
+        "//experimental/loom_serve/runtime/host",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
     ],
@@ -76,19 +60,6 @@ loom_cc_test(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
-    name = "host_test",
-    srcs = ["host_test.cc"],
-    deps = [
-        ":host",
-        "//loom/binding/c:task_pool",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/task",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -122,10 +93,10 @@ loom_cc_test(
     ]),
     deps = [
         ":execution",
-        ":host",
         ":jit",
         ":module",
         ":workspace",
+        "//experimental/loom_serve/runtime/host",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -190,8 +161,8 @@ loom_cc_test(
     deps = [
         ":device",
         ":execution",
-        ":host",
         ":workspace",
+        "//experimental/loom_serve/runtime/host",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
@@ -209,9 +180,9 @@ loom_cc_library(
     }),
     deps = [
         ":execution",
-        ":host",
         ":residency",
         ":workspace",
+        "//experimental/loom_serve/runtime/host",
         "//experimental/loom_serve/storage:memory",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -261,7 +232,7 @@ loom_cc_test(
     ]),
     deps = [
         ":device",
-        ":host",
+        "//experimental/loom_serve/runtime/host",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/task",
@@ -281,7 +252,7 @@ loom_cc_test(
     deps = [
         ":device",
         ":execution",
-        ":host",
+        "//experimental/loom_serve/runtime/host",
         "//experimental/loom_serve/storage:memory",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
@@ -368,9 +339,9 @@ loom_cc_library(
         ":command",
         ":compilation",
         ":dispatch",
-        ":host",
         ":sources",
         ":target",
+        "//experimental/loom_serve/runtime/host",
         "//loom/binding/c:loomc",
         "//loom/binding/c:task_pool",
         "//loom/binding/c/target/cmd",
@@ -572,8 +543,8 @@ loom_cc_test(
         ":activation",
         ":device",
         ":execution",
-        ":host",
         ":residency",
+        "//experimental/loom_serve/runtime/host",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
@@ -618,11 +589,11 @@ loom_cc_library(
     hdrs = ["weights.h"],
     deps = [
         ":execution",
-        ":host",
         ":jit",
         ":program",
         ":retirement",
         ":sources",
+        "//experimental/loom_serve/runtime/host",
         "//experimental/loom_serve/storage:memory",
         "//loom/binding/c:loomc",
         "//loom/src/loom/target/arch/cmd:program",

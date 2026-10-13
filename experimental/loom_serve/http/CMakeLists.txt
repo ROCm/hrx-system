@@ -11,36 +11,6 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
-    timer
-  HDRS
-    "timer.h"
-  SRCS
-    "timer.c"
-  DEPS
-    ::server
-    iree::async
-    iree::base
-    iree::base::threading
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    timer_test
-  SRCS
-    "timer_test.cc"
-  DEPS
-    ::timer
-    iree::async
-    iree::async::util::proactor_pool
-    iree::base
-    iree::base::threading
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-loom_cc_library(
-  NAME
     request
   HDRS
     "request.h"
@@ -105,6 +75,7 @@ loom_cc_library(
     ::inspection
     ::server
     iree::base
+    iree::experimental::loom_serve::runtime::host::wake
     iree::experimental::loom_serve::telemetry::stream
     iree::tokenizer
   PUBLIC
@@ -177,6 +148,7 @@ loom_cc_library(
     iree::async::util::proactor_pool
     iree::base
     iree::base::threading
+    iree::experimental::loom_serve::runtime::host::wake
     iree::experimental::loom_serve::telemetry::stream
     iree::net::carrier
   PUBLIC

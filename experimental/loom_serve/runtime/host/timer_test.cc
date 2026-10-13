@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/http/timer.h"
+#include "experimental/loom_serve/runtime/host/timer.h"
 
 #include <atomic>
 
@@ -15,7 +15,7 @@
 
 namespace {
 
-class HttpTimerTest : public ::testing::Test {
+class TimerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_notification_initialize(&notification_);
@@ -28,24 +28,24 @@ class HttpTimerTest : public ::testing::Test {
 
   void TearDown() override {
     IREE_EXPECT_OK(Stop());
-    loom_serve_http_timer_deinitialize(&timer_);
+    loom_serve_timer_deinitialize(&timer_);
     iree_async_proactor_pool_release(pool_);
     iree_notification_deinitialize(&notification_);
   }
 
   static void Wake(void* user_data) {
-    auto* self = static_cast<HttpTimerTest*>(user_data);
+    auto* self = static_cast<TimerTest*>(user_data);
     self->wake_count_.fetch_add(1, std::memory_order_release);
     iree_notification_post(&self->notification_, IREE_ALL_WAITERS);
   }
 
   void Initialize() {
-    loom_serve_http_timer_initialize(&timer_);
-    loom_serve_http_timer_set_observer(&timer_, {Wake, this});
+    loom_serve_timer_initialize(&timer_);
+    loom_serve_timer_set_observer(&timer_, {Wake, this});
   }
 
   void Configure(iree_duration_t interval) {
-    loom_serve_http_timer_configure(&timer_, proactor_, interval);
+    loom_serve_timer_configure(&timer_, proactor_, interval);
   }
 
   void AwaitWake(uint32_t previous_count) {
@@ -66,10 +66,10 @@ class HttpTimerTest : public ::testing::Test {
       const auto token = iree_notification_prepare_wait(&notification_);
       bool progress = false;
       bool tick = false;
-      status = iree_status_join(status, loom_serve_http_timer_advance(
-                                            &timer_, true, &progress, &tick));
+      status = iree_status_join(
+          status, loom_serve_timer_advance(&timer_, true, &progress, &tick));
       EXPECT_FALSE(tick);
-      if (!loom_serve_http_timer_is_pending(&timer_)) {
+      if (!loom_serve_timer_is_pending(&timer_)) {
         iree_notification_cancel_wait(&notification_);
         return status;
       }
@@ -83,7 +83,7 @@ class HttpTimerTest : public ::testing::Test {
   }
 
   // Production timer with real intrusive proactor operations.
-  loom_serve_http_timer_t timer_ = {};
+  loom_serve_timer_t timer_ = {};
   // Shared I/O pool, released only after reporter callback retirement.
   iree_async_proactor_pool_t* pool_ = nullptr;
   // Borrowed proactor driven by the pool's normal poll owner.
@@ -94,67 +94,61 @@ class HttpTimerTest : public ::testing::Test {
   std::atomic<uint32_t> wake_count_{0};
 };
 
-TEST_F(HttpTimerTest, DisabledReportingAcceptsNoWork) {
+TEST_F(TimerTest, DisabledReportingAcceptsNoWork) {
   Configure(IREE_DURATION_ZERO);
   bool progress = false;
   bool tick = false;
-  IREE_ASSERT_OK(
-      loom_serve_http_timer_advance(&timer_, false, &progress, &tick));
+  IREE_ASSERT_OK(loom_serve_timer_advance(&timer_, false, &progress, &tick));
   EXPECT_FALSE(progress);
   EXPECT_FALSE(tick);
-  EXPECT_FALSE(loom_serve_http_timer_is_pending(&timer_));
+  EXPECT_FALSE(loom_serve_timer_is_pending(&timer_));
   EXPECT_EQ(wake_count_.load(), 0u);
 }
 
-TEST_F(HttpTimerTest, DeadlineProducesPeriodicTicks) {
+TEST_F(TimerTest, DeadlineProducesPeriodicTicks) {
   Configure(iree_make_duration_ms(1));
   const uint32_t previous_count = wake_count_.load(std::memory_order_acquire);
   bool progress = false;
   bool tick = false;
-  IREE_ASSERT_OK(
-      loom_serve_http_timer_advance(&timer_, false, &progress, &tick));
+  IREE_ASSERT_OK(loom_serve_timer_advance(&timer_, false, &progress, &tick));
   EXPECT_TRUE(progress);
   EXPECT_TRUE(tick);
   AwaitWake(previous_count);
-  IREE_ASSERT_OK(
-      loom_serve_http_timer_advance(&timer_, false, &progress, &tick));
+  IREE_ASSERT_OK(loom_serve_timer_advance(&timer_, false, &progress, &tick));
   EXPECT_TRUE(progress);
   EXPECT_TRUE(tick);
 }
 
-TEST_F(HttpTimerTest, FarFutureTimerStopsWithoutWaitingForItsDeadline) {
+TEST_F(TimerTest, FarFutureTimerStopsWithoutWaitingForItsDeadline) {
   Configure(iree_make_duration_ms(3600000));
   bool progress = false;
   bool tick = false;
-  IREE_ASSERT_OK(
-      loom_serve_http_timer_advance(&timer_, false, &progress, &tick));
-  EXPECT_TRUE(loom_serve_http_timer_is_pending(&timer_));
+  IREE_ASSERT_OK(loom_serve_timer_advance(&timer_, false, &progress, &tick));
+  EXPECT_TRUE(loom_serve_timer_is_pending(&timer_));
   IREE_ASSERT_OK(Stop());
-  EXPECT_FALSE(loom_serve_http_timer_is_pending(&timer_));
+  EXPECT_FALSE(loom_serve_timer_is_pending(&timer_));
 }
 
-TEST_F(HttpTimerTest, ExpiredTimerStopsWithoutRearming) {
+TEST_F(TimerTest, ExpiredTimerStopsWithoutRearming) {
   Configure(iree_make_duration_ms(1));
   const uint32_t previous_count = wake_count_.load(std::memory_order_acquire);
   bool progress = false;
   bool tick = false;
-  IREE_ASSERT_OK(
-      loom_serve_http_timer_advance(&timer_, false, &progress, &tick));
+  IREE_ASSERT_OK(loom_serve_timer_advance(&timer_, false, &progress, &tick));
   AwaitWake(previous_count);
   IREE_ASSERT_OK(Stop());
-  EXPECT_FALSE(loom_serve_http_timer_is_pending(&timer_));
+  EXPECT_FALSE(loom_serve_timer_is_pending(&timer_));
 }
 
-TEST_F(HttpTimerTest, CancellationReceiptPermitsAddressReuse) {
+TEST_F(TimerTest, CancellationReceiptPermitsAddressReuse) {
   for (int iteration = 0; iteration < 32; ++iteration) {
     SCOPED_TRACE(iteration);
     Configure(iteration % 2 ? 1 : iree_make_duration_ms(3600000));
     bool progress = false;
     bool tick = false;
-    IREE_ASSERT_OK(
-        loom_serve_http_timer_advance(&timer_, false, &progress, &tick));
+    IREE_ASSERT_OK(loom_serve_timer_advance(&timer_, false, &progress, &tick));
     IREE_ASSERT_OK(Stop());
-    loom_serve_http_timer_deinitialize(&timer_);
+    loom_serve_timer_deinitialize(&timer_);
     Initialize();
   }
 }

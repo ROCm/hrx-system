@@ -14,32 +14,6 @@ package(
 )
 
 loom_cc_library(
-    name = "timer",
-    srcs = ["timer.c"],
-    hdrs = ["timer.h"],
-    deps = [
-        ":server",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/threading",
-    ],
-)
-
-loom_cc_test(
-    name = "timer_test",
-    srcs = ["timer_test.cc"],
-    deps = [
-        ":timer",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/async/util:proactor_pool",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_library(
     name = "request",
     srcs = ["request.c"],
     hdrs = ["request.h"],
@@ -116,6 +90,7 @@ loom_cc_library(
     deps = [
         ":inspection",
         ":server",
+        "//experimental/loom_serve/runtime/host:wake",
         "//experimental/loom_serve/telemetry:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/tokenizer",
@@ -176,6 +151,7 @@ loom_cc_library(
     hdrs = ["server.h"],
     deps = [
         ":request",
+        "//experimental/loom_serve/runtime/host:wake",
         "//experimental/loom_serve/telemetry:stream",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",

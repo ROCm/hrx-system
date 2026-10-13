@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "experimental/loom_serve/http/listener.h"
+#include "experimental/loom_serve/runtime/host/wake.h"
 #include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/async/proactor_platform.h"
@@ -169,7 +170,7 @@ struct ModelService {
   // Publishes explicit submission and stopping phases to the test.
   std::condition_variable condition;
   // Borrowed owner wake target, detached only after accepted work retires.
-  loom_serve_http_observer_t observer = {};
+  loom_serve_wake_callback_t observer = {};
   // An accepted completion retains this service until Advance consumes it.
   bool waiting = false;
   // The test has released the accepted completion.
@@ -194,7 +195,7 @@ struct ModelService {
   // Optional immutable historical work, published before owner startup.
   const loom_serve_telemetry_counters_t* counters = nullptr;
 
-  static void SetObserver(void* self, loom_serve_http_observer_t observer) {
+  static void SetObserver(void* self, loom_serve_wake_callback_t observer) {
     auto* service = static_cast<ModelService*>(self);
     std::lock_guard<std::mutex> lock(service->mutex);
     EXPECT_FALSE(service->waiting);
