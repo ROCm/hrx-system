@@ -1,5 +1,5 @@
-// check_linear_tiled.py binds each shape's compiler configuration and selects
-// the corresponding sample. Kernel workloads are not device ABI constants.
+// Bind projection_test dimensions and traversal with --config and select the
+// matching --sample. Kernel workloads are not device ABI constants.
 // Link ../linear.loom and ../linear_tiled.loom with --library.
 // The single-wave helper is an exact arithmetic reference for the cooperative
 // helper: both retain four K16 chains and the same K256 combination order.
