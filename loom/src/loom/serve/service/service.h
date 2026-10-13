@@ -4,14 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_HTTP_SERVICE_H_
-#define EXPERIMENTAL_LOOM_SERVE_HTTP_SERVICE_H_
+#ifndef LOOM_SERVE_SERVICE_SERVICE_H_
+#define LOOM_SERVE_SERVICE_SERVICE_H_
 
-#include "experimental/loom_serve/http/inspection.h"
-#include "experimental/loom_serve/http/server.h"
 #include "iree/tokenizer/tokenizer.h"
 #include "loom/serve/runtime/host/wake.h"
+#include "loom/serve/service/inspection.h"
 #include "loom/serve/telemetry/stream.h"
+#include "loom/serve/transport/http/server.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -124,4 +124,4 @@ typedef struct loom_serve_http_service_t {
 }  // extern "C"
 #endif
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_HTTP_SERVICE_H_
+#endif  // LOOM_SERVE_SERVICE_SERVICE_H_

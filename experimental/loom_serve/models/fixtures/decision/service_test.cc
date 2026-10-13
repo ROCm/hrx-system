@@ -15,7 +15,6 @@
 
 #include "experimental/loom_serve/decision/protocol.h"
 #include "experimental/loom_serve/embedding/protocol.h"
-#include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/serving/router.h"
 #include "experimental/loom_serve/testing/model.h"
 #include "iree/async/proactor.h"
@@ -23,6 +22,7 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/transport/http/listener.h"
 
 IREE_FLAG(string, model_source, "", "Deterministic decision bootstrap source.");
 IREE_FLAG(string, embedding_source, "",

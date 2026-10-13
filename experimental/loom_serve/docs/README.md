@@ -184,8 +184,8 @@ The CPU gate is independent of model files and GPU availability:
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve/http:request_test \
-  //experimental/loom_serve/http:server_test \
+  //loom/src/loom/serve/transport/http:request_test \
+  //loom/src/loom/serve/transport/http:server_test \
   //experimental/loom_serve/models/qwen:chat_test \
   //loom/src/loom/serve/runtime/storage:block_pool_test \
   //experimental/loom_serve/text:schedule_test \

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/http/inspection.h"
+#include "loom/serve/service/inspection.h"
 
 #include <string>
 
@@ -21,10 +21,12 @@ struct Inventory {
     if (index >= 66) {
       return false;
     }
-    *out_snapshot = {.id = index == 64 ? 9u : 0u,
-                     .phase = "queued",
-                     .arrival_time = 1000000000,
-                     .counters = {.requests = 1}};
+    *out_snapshot = {
+        .id = index == 64 ? 9u : 0u,
+        .phase = "queued",
+        .arrival_time = 1000000000,
+        .counters = {.requests = 1},
+    };
     return true;
   }
 
@@ -35,12 +37,14 @@ struct Inventory {
     if (index) {
       return false;
     }
-    *out_snapshot = {.id = 3,
-                     .name = IREE_SV("a\"b"),
-                     .storage = "cache",
-                     .position = 7,
-                     .resident_tokens = 8,
-                     .counters = {.requests = 2, .completed = 2}};
+    *out_snapshot = {
+        .id = 3,
+        .name = IREE_SV("a\"b"),
+        .storage = "cache",
+        .position = 7,
+        .resident_tokens = 8,
+        .counters = {.requests = 2, .completed = 2},
+    };
     return true;
   }
 
@@ -66,7 +70,9 @@ TEST(InspectionTest, RejectsSignsEmptyAndOverflowOffsets) {
 TEST(InspectionTest, BoundsEmptySlotsAndFormatsPublishedMetadata) {
   Inventory inventory;
   const loom_serve_http_inspection_t inspection = {
-      .request_at = Inventory::RequestAt, .session_at = Inventory::SessionAt};
+      .request_at = Inventory::RequestAt,
+      .session_at = Inventory::SessionAt,
+  };
   iree_string_builder_t output;
   iree_string_builder_initialize(iree_allocator_system(), &output);
   const auto view = [&] {
@@ -103,8 +109,9 @@ TEST(InspectionTest, BoundsEmptySlotsAndFormatsPublishedMetadata) {
 
 TEST(InspectionTest, FormattingFailureStopsQuerying) {
   Inventory inventory;
-  const loom_serve_http_inspection_t inspection = {.session_at =
-                                                       Inventory::SessionAt};
+  const loom_serve_http_inspection_t inspection = {
+      .session_at = Inventory::SessionAt,
+  };
   char bytes[16];
   iree_string_builder_t output;
   iree_string_builder_initialize_with_storage(bytes, sizeof(bytes), &output);

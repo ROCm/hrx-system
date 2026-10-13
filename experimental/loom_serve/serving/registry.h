@@ -7,12 +7,12 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_SERVING_REGISTRY_H_
 #define EXPERIMENTAL_LOOM_SERVE_SERVING_REGISTRY_H_
 
-#include "experimental/loom_serve/http/service.h"
 #include "experimental/loom_serve/serving/configuration.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/runtime/parameter/activation.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/runtime/program/compilation.h"
+#include "loom/serve/service/service.h"
 
 #ifdef __cplusplus
 extern "C" {

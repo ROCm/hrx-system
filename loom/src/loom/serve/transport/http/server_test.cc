@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/http/server.h"
+#include "loom/serve/transport/http/server.h"
 
 #include <sys/socket.h>
 #include <unistd.h>
@@ -15,12 +15,12 @@
 #include <utility>
 #include <vector>
 
-#include "experimental/loom_serve/http/listener.h"
 #include "iree/async/proactor.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "loom/serve/telemetry/stream.h"
+#include "loom/serve/transport/http/listener.h"
 
 namespace {
 

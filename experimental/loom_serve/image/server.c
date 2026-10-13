@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/service.h"
 #include "experimental/loom_serve/runtime/device_flags.h"
@@ -17,6 +16,7 @@
 #include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
+#include "loom/serve/transport/http/listener.h"
 
 IREE_FLAG(string, model, "", "Model JSON document.");
 IREE_FLAG(string, checkpoint, "",

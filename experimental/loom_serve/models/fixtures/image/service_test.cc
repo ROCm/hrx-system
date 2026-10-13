@@ -18,7 +18,6 @@
 #include <tuple>
 #include <vector>
 
-#include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/output.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
@@ -31,6 +30,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/serve/transport/http/listener.h"
 
 IREE_FLAG(string, model_source, "", "Deterministic image bootstrap source.");
 IREE_FLAG(string, test_device, "amdgpu",

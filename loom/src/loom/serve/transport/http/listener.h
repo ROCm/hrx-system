@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_HTTP_LISTENER_H_
-#define EXPERIMENTAL_LOOM_SERVE_HTTP_LISTENER_H_
+#ifndef LOOM_SERVE_TRANSPORT_HTTP_LISTENER_H_
+#define LOOM_SERVE_TRANSPORT_HTTP_LISTENER_H_
 
-#include "experimental/loom_serve/http/server.h"
 #include "iree/async/address.h"
 #include "iree/net/carrier/stream/carrier.h"
+#include "loom/serve/transport/http/server.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -87,4 +87,4 @@ iree_status_t loom_serve_http_listener_destroy(
 }  // extern "C"
 #endif
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_HTTP_LISTENER_H_
+#endif  // LOOM_SERVE_TRANSPORT_HTTP_LISTENER_H_

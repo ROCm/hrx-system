@@ -363,7 +363,7 @@ not ASAN correctness timings.
 
 ## Local TCP transport
 
-[`http/server.{h,c}`](http/server.h) runs raw `iree/net` TCP carriers on a standard
+[`http/server.{h,c}`](../../loom/src/loom/serve/transport/http/server.h) runs raw `iree/net` TCP carriers on a standard
 proactor thread, independently of model execution. Its application owner claims
 fully framed requests, sends copied response bytes with bounded send credit,
 and finishes or aborts each connection. The transport has no model or chat
@@ -388,8 +388,8 @@ local to that peer; the model scheduler chooses its safe cancellation boundary.
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve/http:request_test \
-  //experimental/loom_serve/http:server_test
+  //loom/src/loom/serve/transport/http:request_test \
+  //loom/src/loom/serve/transport/http:server_test
 ```
 
 The loopback checks use real sockets/carriers and cover fragmented requests,
@@ -728,8 +728,8 @@ The focused host checks are:
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/models/qwen:chat_test \
-  //experimental/loom_serve/http:request_test \
-  //experimental/loom_serve/http:server_test
+  //loom/src/loom/serve/transport/http:request_test \
+  //loom/src/loom/serve/transport/http:server_test
 ```
 
 ### Kernel/scheduler handoff

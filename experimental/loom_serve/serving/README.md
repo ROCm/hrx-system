@@ -33,7 +33,7 @@ succeed before announcing readiness and otherwise unwinds startup. Process
 signals belong to the application, not individual listeners.
 
 The [routing owner](router.h) belongs to this application layer. Modality
-services implement the [HTTP service contract](../http/service.h) without
+services implement the [HTTP service contract](../../../loom/src/loom/serve/service/service.h) without
 depending on the router, listener lifetime, or application run loop. The
 single-model executables use the same create, route, retire and destroy
 ownership sequence as the shared server.

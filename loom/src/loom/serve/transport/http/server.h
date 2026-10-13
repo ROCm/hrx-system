@@ -4,16 +4,16 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_EXPERIMENTAL_LOOM_SERVE_HTTP_SERVER_H_
-#define IREE_EXPERIMENTAL_LOOM_SERVE_HTTP_SERVER_H_
+#ifndef LOOM_SERVE_TRANSPORT_HTTP_SERVER_H_
+#define LOOM_SERVE_TRANSPORT_HTTP_SERVER_H_
 
-#include "experimental/loom_serve/http/request.h"
 #include "iree/async/semaphore.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/notification.h"
 #include "iree/net/carrier.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/telemetry/stream.h"
+#include "loom/serve/transport/http/request.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -148,4 +148,4 @@ void loom_serve_http_connection_abort(loom_serve_http_connection_t* connection);
 }  // extern "C"
 #endif
 
-#endif  // IREE_EXPERIMENTAL_LOOM_SERVE_HTTP_SERVER_H_
+#endif  // LOOM_SERVE_TRANSPORT_HTTP_SERVER_H_

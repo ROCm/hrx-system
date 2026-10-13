@@ -7,9 +7,9 @@
 #ifndef IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_SERVICE_H_
 #define IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_SERVICE_H_
 
-#include "experimental/loom_serve/http/service.h"
 #include "experimental/loom_serve/text/model.h"
 #include "experimental/loom_serve/text/schedule.h"
+#include "loom/serve/service/service.h"
 
 #ifdef __cplusplus
 extern "C" {

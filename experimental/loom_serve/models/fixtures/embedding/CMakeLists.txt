@@ -54,8 +54,6 @@ loom_cc_test(
     iree::experimental::loom_serve::embedding::protocol
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
@@ -71,6 +69,8 @@ loom_cc_test(
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::program::compilation
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
     "--test_device=amdgpu"
@@ -106,8 +106,6 @@ loom_cc_test(
     iree::experimental::loom_serve::embedding::protocol
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
@@ -123,6 +121,8 @@ loom_cc_test(
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::program::compilation
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
     "--test_device=vulkan"
@@ -159,8 +159,6 @@ loom_cc_test(
     iree::experimental::loom_serve::embedding::protocol
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
@@ -176,6 +174,8 @@ loom_cc_test(
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::program::compilation
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
     "--test_device=xdna"
@@ -214,8 +214,6 @@ loom_cc_test(
     iree::experimental::loom_serve::embedding::protocol
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
@@ -231,6 +229,8 @@ loom_cc_test(
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::program::compilation
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
     "--test_device=task"

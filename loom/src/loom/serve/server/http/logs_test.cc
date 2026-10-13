@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/http/logs.h"
+#include "loom/serve/server/http/logs.h"
 
 #include <string>
 
@@ -51,7 +51,8 @@ TEST_F(LogsTest, BoundsPollWorkAndPreservesIndependentTotals) {
   const loom_serve_telemetry_record_t record = {
       .time_ns = 12,
       .request = 7,
-      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
+      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN,
+  };
   for (int i = 0; i < 80; ++i) {
     loom_serve_telemetry_stream_append(stream_, &record);
   }
@@ -85,9 +86,16 @@ TEST_F(LogsTest, CopiesEscapedErrorBeforeStatusRetires) {
       .time_ns = 42,
       .request = 9,
       .event = &LOOM_SERVE_TELEMETRY_REQUEST_END,
-      .data = {.end = {.outcome = LOOM_SERVE_TELEMETRY_REJECTED,
-                       .duration_ns = 17,
-                       .input_tokens = 3}}};
+      .data =
+          {
+              .end =
+                  {
+                      .outcome = LOOM_SERVE_TELEMETRY_REJECTED,
+                      .duration_ns = 17,
+                      .input_tokens = 3,
+                  },
+          },
+  };
   iree_status_t status =
       iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "bad \"value\"\n");
   loom_serve_telemetry_diagnostic_capture(status, &record.data.end.diagnostic);
@@ -106,7 +114,9 @@ TEST_F(LogsTest, CopiesEscapedErrorBeforeStatusRetires) {
 
 TEST_F(LogsTest, DiagnosticOnlyScopeDoesNotInventCounters) {
   const loom_serve_telemetry_record_t record = {
-      .time_ns = 10, .event = &LOOM_SERVE_TELEMETRY_STREAM_BEGIN};
+      .time_ns = 10,
+      .event = &LOOM_SERVE_TELEMETRY_STREAM_BEGIN,
+  };
   loom_serve_telemetry_stream_append(stream_, &record);
   IREE_ASSERT_OK(loom_serve_http_logs(stream_, nullptr,
                                       iree_string_view_empty(),
@@ -126,7 +136,8 @@ TEST_F(LogsTest, SsePreservesJsonRecordsAndOpaqueResumeBoundary) {
   const loom_serve_telemetry_record_t record = {
       .time_ns = 12,
       .request = 7,
-      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
+      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN,
+  };
   for (int i = 0; i < 80; ++i) {
     loom_serve_telemetry_stream_append(stream_, &record);
   }
@@ -165,7 +176,9 @@ TEST_F(LogsTest, SsePreservesJsonRecordsAndOpaqueResumeBoundary) {
 
 TEST_F(LogsTest, SseReportsOverwriteWithoutChangingAnotherReader) {
   const loom_serve_telemetry_record_t record = {
-      .time_ns = 12, .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
+      .time_ns = 12,
+      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN,
+  };
   for (int i = 0; i < 140; ++i) {
     loom_serve_telemetry_stream_append(stream_, &record);
   }
@@ -189,7 +202,9 @@ TEST_F(LogsTest, SseReportsOverwriteWithoutChangingAnotherReader) {
 
 TEST_F(LogsTest, FailedBatchFormattingPreservesTheReaderPosition) {
   const loom_serve_telemetry_record_t record = {
-      .time_ns = 12, .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
+      .time_ns = 12,
+      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN,
+  };
   for (int i = 0; i < 16; ++i) {
     loom_serve_telemetry_stream_append(stream_, &record);
   }

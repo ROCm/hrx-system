@@ -7,12 +7,12 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_TEXT_SESSION_H_
 #define EXPERIMENTAL_LOOM_SERVE_TEXT_SESSION_H_
 
-#include "experimental/loom_serve/http/inspection.h"
-#include "experimental/loom_serve/http/server.h"
 #include "experimental/loom_serve/text/chat.h"
 #include "experimental/loom_serve/text/model.h"
 #include "iree/tokenizer/tokenizer.h"
+#include "loom/serve/service/inspection.h"
 #include "loom/serve/telemetry/record.h"
+#include "loom/serve/transport/http/server.h"
 
 #ifdef __cplusplus
 extern "C" {

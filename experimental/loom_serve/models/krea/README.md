@@ -390,8 +390,8 @@ maximum workspace backing, and exactly one load per parameter domain.
 build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/image:request_test \
   //experimental/loom_serve/image:output_test \
-  //experimental/loom_serve/http:request_test \
-  //experimental/loom_serve/http:server_test
+  //loom/src/loom/serve/transport/http:request_test \
+  //loom/src/loom/serve/transport/http:server_test
 build_tools/bin/iree-bazel-build --config=asan \
   //experimental/loom_serve/image:server
 python -B experimental/loom_serve/models/krea/check_service.py \

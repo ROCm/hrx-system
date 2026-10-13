@@ -6,8 +6,8 @@
 
 // Strict bounded HTTP/1.1 request framing.
 
-#ifndef IREE_EXPERIMENTAL_LOOM_SERVE_HTTP_REQUEST_H_
-#define IREE_EXPERIMENTAL_LOOM_SERVE_HTTP_REQUEST_H_
+#ifndef LOOM_SERVE_TRANSPORT_HTTP_REQUEST_H_
+#define LOOM_SERVE_TRANSPORT_HTTP_REQUEST_H_
 
 #include "iree/base/api.h"
 
@@ -79,4 +79,4 @@ bool loom_serve_http_request_lookup_header(
 }  // extern "C"
 #endif
 
-#endif  // IREE_EXPERIMENTAL_LOOM_SERVE_HTTP_REQUEST_H_
+#endif  // LOOM_SERVE_TRANSPORT_HTTP_REQUEST_H_

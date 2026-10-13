@@ -8,11 +8,11 @@
 
 #include <inttypes.h>
 
-#include "experimental/loom_serve/http/logs.h"
-#include "experimental/loom_serve/http/tokenization.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/threading/mutex.h"
 #include "loom/serve/runtime/host/wake.h"
+#include "loom/serve/server/http/logs.h"
+#include "loom/serve/server/http/tokenization.h"
 #include "loom/util/json.h"
 
 typedef struct router_tokenization_t {

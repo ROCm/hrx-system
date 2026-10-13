@@ -23,18 +23,18 @@ loom_cc_library(
     iree::base
     iree::base::internal::json
     iree::base::threading
-    iree::experimental::loom_serve::http::inspection
-    iree::experimental::loom_serve::http::logs
-    iree::experimental::loom_serve::http::request
-    iree::experimental::loom_serve::http::server
-    iree::experimental::loom_serve::http::service
-    iree::experimental::loom_serve::http::tokenization
     iree::task
     iree::tokenizer
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::program::compilation
+    loom::serve::server::http::logs
+    loom::serve::server::http::tokenization
+    loom::serve::service
+    loom::serve::service::inspection
     loom::serve::telemetry::stream
+    loom::serve::transport::http::request
+    loom::serve::transport::http::server
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -51,10 +51,10 @@ loom_cc_library(
     iree::async
     iree::base
     iree::base::internal::json
-    iree::experimental::loom_serve::http::listener
     iree::hal
     loom::serve::runtime::device
     loom::serve::runtime::storage::memory
+    loom::serve::transport::http::listener
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -92,9 +92,6 @@ loom_cc_test(
     iree::async::platform
     iree::async::util::proactor_pool
     iree::base
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::request
-    iree::experimental::loom_serve::http::server
     iree::net::carrier
     iree::net::carrier::loopback
     iree::task
@@ -103,6 +100,9 @@ loom_cc_test(
     iree::tokenizer
     iree::tokenizer::format::huggingface::tokenizer_json
     loom::serve::runtime::host::wake
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::request
+    loom::serve::transport::http::server
 )
 endif()
 
@@ -137,12 +137,12 @@ loom_cc_binary(
     iree::async
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::runtime::signals
     loom::serve::runtime::device
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
     loom::util::json
     loom::util::stream
 )
@@ -158,11 +158,11 @@ loom_cc_library(
   DEPS
     ::configuration
     iree::base
-    iree::experimental::loom_serve::http::service
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::activation
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::program::compilation
+    loom::serve::service
     loom::serve::telemetry::record
     loom::serve::telemetry::stream
   PUBLIC
@@ -183,7 +183,6 @@ loom_cc_library(
     iree::experimental::loom_serve::embedding::protocol
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
-    iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::image::model
     iree::experimental::loom_serve::image::service
     iree::experimental::loom_serve::text::model
@@ -196,6 +195,7 @@ loom_cc_library(
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::program::compilation
     loom::serve::runtime::storage::memory
+    loom::serve::service
   PUBLIC
 )
 

@@ -52,8 +52,6 @@ loom_cc_test(
     iree::experimental::loom_serve::embedding::protocol
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
@@ -61,6 +59,8 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom}}"
     "--embedding_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
@@ -96,8 +96,6 @@ loom_cc_test(
     iree::experimental::loom_serve::embedding::protocol
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
@@ -105,6 +103,8 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom}}"
     "--embedding_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
@@ -140,8 +140,6 @@ loom_cc_test(
     iree::experimental::loom_serve::embedding::protocol
     iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::finite::service
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
@@ -149,6 +147,8 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom}}"
     "--embedding_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"

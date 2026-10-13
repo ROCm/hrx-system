@@ -10,12 +10,12 @@
 #include <string>
 #include <thread>
 
-#include "experimental/loom_serve/http/server.h"
 #include "iree/async/proactor.h"
 #include "iree/async/proactor_platform.h"
 #include "iree/net/carrier/loopback/carrier.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/transport/http/server.h"
 
 namespace loom_serve::testing::text {
 

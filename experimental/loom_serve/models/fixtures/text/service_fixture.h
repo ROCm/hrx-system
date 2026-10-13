@@ -20,7 +20,6 @@
 #include <utility>
 #include <vector>
 
-#include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
 #include "experimental/loom_serve/models/fixtures/text/oracle.h"
 #include "experimental/loom_serve/models/fixtures/text/owner_turn.h"
@@ -36,6 +35,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "loom/serve/telemetry/stream.h"
+#include "loom/serve/transport/http/listener.h"
 
 namespace loom_serve::testing::text {
 

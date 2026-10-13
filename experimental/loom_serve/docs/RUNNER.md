@@ -36,7 +36,7 @@ state and canonical checkpoints without naming a model.
 | [`packing`](../scheduling/packing.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Token values, model identity, attention state, measured kernel cost |
 | [`text_schedule`](../text/schedule.h) | Default model shape catalog and completion-reservation extent | HTTP output credit or committed model progress |
 | [`text_service`](../text/service.h) | Validated chat, session keys, canonical history, output credit, scheduling policy | Kernel layout decisions |
-| [`http_server`](../http/server.h) | Bounded HTTP framing and copied response bytes over IREE TCP carriers | Model sessions or sampling |
+| [`http_server`](../../../loom/src/loom/serve/transport/http/server.h) | Bounded HTTP framing and copied response bytes over IREE TCP carriers | Model sessions or sampling |
 
 These are runner-private seams, not a proposed public serving ABI. The
 compiler/runtime handoff is the command product: its parameter placement,
@@ -480,7 +480,7 @@ communication without expressing every transfer as a collective.
 
 Several existing boundaries already accommodate that direction:
 
-* [`http/service.h`](../http/service.h) exposes an opaque model service with
+* [`http/service.h`](../../../loom/src/loom/serve/service/service.h) exposes an opaque model service with
   bounded `advance`, readiness notification and accepted-work lifetime. Routing
   sees requests, capacity hints and counters, not devices, ranks or stage
   timelines. Serializing a host policy turn does not serialize device execution.

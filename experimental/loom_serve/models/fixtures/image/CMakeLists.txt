@@ -47,8 +47,6 @@ loom_cc_test(
     iree::base
     iree::base::internal::base64
     iree::base::tooling::flags
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::image::model
     iree::experimental::loom_serve::image::output
     iree::experimental::loom_serve::image::request
@@ -66,6 +64,8 @@ loom_cc_test(
     loom::serve::runtime::execution
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/prepare.loom}}"
     "--test_device=amdgpu"
@@ -94,8 +94,6 @@ loom_cc_test(
     iree::base
     iree::base::internal::base64
     iree::base::tooling::flags
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::image::model
     iree::experimental::loom_serve::image::output
     iree::experimental::loom_serve::image::request
@@ -113,6 +111,8 @@ loom_cc_test(
     loom::serve::runtime::execution
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/prepare.loom}}"
     "--test_device=vulkan"
@@ -141,8 +141,6 @@ loom_cc_test(
     iree::base
     iree::base::internal::base64
     iree::base::tooling::flags
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::image::model
     iree::experimental::loom_serve::image::output
     iree::experimental::loom_serve::image::request
@@ -160,6 +158,8 @@ loom_cc_test(
     loom::serve::runtime::execution
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/image/prepare.loom}}"
     "--test_device=task"

@@ -30,6 +30,17 @@ The shared foundation consists of:
 - [`runtime/device`](runtime/device/device.h): one application device group and
   the execution, storage, and residency resources of each member. Model
   services borrow these owners and retire before releasing the group.
+- [`transport/http`](transport/http/server.h): bounded request framing,
+  connection claims and response credit over shared proactors. Independent
+  TCP/Unix listeners feed the same connection owner. Stopping a listener does
+  not stop the requests it admitted; this layer has no model dependencies.
+- [`service`](service/service.h): the named HTTP-facing model service contract,
+  including bounded task turns, asynchronous retirement, client capabilities
+  and copied inspection state. It consumes transport claims without owning
+  socket listeners or process lifetime.
+- [`server/http`](server/http/logs.h): endpoint projections for telemetry and
+  raw tokenization. Log readers keep independent cursors; tokenizer requests
+  use independent CPU states without advancing a model's execution timeline.
 
 Each component keeps its unit tests beside its implementation. Native headers
 describe ownership contracts; they are implementation interfaces rather than

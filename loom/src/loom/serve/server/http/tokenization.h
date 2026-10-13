@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_HTTP_TOKENIZATION_H_
-#define EXPERIMENTAL_LOOM_SERVE_HTTP_TOKENIZATION_H_
+#ifndef LOOM_SERVE_SERVER_HTTP_TOKENIZATION_H_
+#define LOOM_SERVE_SERVER_HTTP_TOKENIZATION_H_
 
 #include "iree/base/api.h"
 #include "iree/tokenizer/tokenizer.h"
@@ -45,4 +45,4 @@ iree_status_t loom_serve_http_detokenize(const iree_tokenizer_t* tokenizer,
 }  // extern "C"
 #endif
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_HTTP_TOKENIZATION_H_
+#endif  // LOOM_SERVE_SERVER_HTTP_TOKENIZATION_H_

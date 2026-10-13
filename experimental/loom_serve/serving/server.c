@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
 #include "experimental/loom_serve/runtime/signals.h"
@@ -16,6 +15,7 @@
 #include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
+#include "loom/serve/transport/http/listener.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
 

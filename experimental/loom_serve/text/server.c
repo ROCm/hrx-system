@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
 #include "experimental/loom_serve/runtime/signals.h"
@@ -17,6 +16,7 @@
 #include "experimental/loom_serve/text/service.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
+#include "loom/serve/transport/http/listener.h"
 
 IREE_FLAG(string, scheduler, "packed",
           "packed, isolated, or matched (isolated with prefill decode math).");

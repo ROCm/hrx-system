@@ -7,8 +7,8 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_SERVING_RESOURCES_H_
 #define EXPERIMENTAL_LOOM_SERVE_SERVING_RESOURCES_H_
 
-#include "experimental/loom_serve/http/listener.h"
 #include "loom/serve/runtime/device/device.h"
+#include "loom/serve/transport/http/listener.h"
 #include "loom/util/stream.h"
 
 #ifdef __cplusplus

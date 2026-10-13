@@ -105,17 +105,17 @@ loom_cc_library(
     iree::base
     iree::base::internal::base64
     iree::base::threading
-    iree::experimental::loom_serve::http::request
-    iree::experimental::loom_serve::http::server
-    iree::experimental::loom_serve::http::service
     iree::task
     loom::serve::runtime::execution
     loom::serve::runtime::host
     loom::serve::runtime::host::timer
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::telemetry
+    loom::serve::service
     loom::serve::telemetry::record
     loom::serve::telemetry::stream
+    loom::serve::transport::http::request
+    loom::serve::transport::http::server
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -132,8 +132,6 @@ loom_cc_test(
     iree::async
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::hal
@@ -144,6 +142,8 @@ loom_cc_test(
     loom::serve::runtime::host
     loom::serve::telemetry::record
     loom::serve::telemetry::stream
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
   RESOURCE_GROUP
@@ -264,14 +264,14 @@ loom_cc_binary(
     iree::async
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::http::listener
-    iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::runtime::signals
     iree::experimental::loom_serve::serving::configuration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
 )
 endif()
 

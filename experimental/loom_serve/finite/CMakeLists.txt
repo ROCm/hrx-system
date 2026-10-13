@@ -34,9 +34,6 @@ loom_cc_library(
     iree::async::util::proactor_pool
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::http::request
-    iree::experimental::loom_serve::http::server
-    iree::experimental::loom_serve::http::service
     iree::hal
     iree::task
     iree::vm
@@ -45,7 +42,10 @@ loom_cc_library(
     loom::serve::runtime::host::timer
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::residency
+    loom::serve::service
     loom::serve::telemetry::stream
+    loom::serve::transport::http::request
+    loom::serve::transport::http::server
     loom::util::json
     loom::util::stream
   PUBLIC

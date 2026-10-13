@@ -22,7 +22,6 @@
 #include <vector>
 
 #include "experimental/loom_serve/embedding/protocol.h"
-#include "experimental/loom_serve/http/listener.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
 #include "experimental/loom_serve/serving/model_registration.h"
 #include "experimental/loom_serve/serving/router.h"
@@ -32,6 +31,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/serve/transport/http/listener.h"
 
 IREE_FLAG(string, model_source, "",
           "Deterministic embedding bootstrap source.");

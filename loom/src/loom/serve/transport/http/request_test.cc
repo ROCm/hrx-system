@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/http/request.h"
+#include "loom/serve/transport/http/request.h"
 
 #include <memory>
 #include <string>

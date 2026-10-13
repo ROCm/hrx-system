@@ -7,9 +7,9 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_IMAGE_SERVICE_H_
 #define EXPERIMENTAL_LOOM_SERVE_IMAGE_SERVICE_H_
 
-#include "experimental/loom_serve/http/service.h"
 #include "experimental/loom_serve/image/generator.h"
 #include "loom/serve/runtime/host/host.h"
+#include "loom/serve/service/service.h"
 
 #ifdef __cplusplus
 extern "C" {

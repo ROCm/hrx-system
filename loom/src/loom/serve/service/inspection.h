@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_HTTP_INSPECTION_H_
-#define EXPERIMENTAL_LOOM_SERVE_HTTP_INSPECTION_H_
+#ifndef LOOM_SERVE_SERVICE_INSPECTION_H_
+#define LOOM_SERVE_SERVICE_INSPECTION_H_
 
 #include "loom/serve/telemetry/record.h"
 
@@ -84,4 +84,4 @@ iree_status_t loom_serve_http_inspection_format(
 }  // extern "C"
 #endif
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_HTTP_INSPECTION_H_
+#endif  // LOOM_SERVE_SERVICE_INSPECTION_H_
