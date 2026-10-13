@@ -12,7 +12,6 @@
 namespace {
 
 TEST(XdnaRegisterFactsTest, ExposesCrossVerifiedSemanticCorpus) {
-  EXPECT_EQ(loom_xdna_register_field_count(), 410u);
   const loom_xdna_register_field_id_t field_id =
       LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_LOCK_ACQUIRE_VALUE;
   loom_xdna_register_field_info_t info = {};
@@ -34,6 +33,107 @@ TEST(XdnaRegisterFactsTest, ExposesCrossVerifiedSemanticCorpus) {
       iree_string_view_equal(dimension.name, IREE_SV("buffer_descriptor")));
   EXPECT_EQ(dimension.count, 16u);
   EXPECT_EQ(dimension.stride, 0x20u);
+}
+
+TEST(XdnaRegisterFactsTest, ResolvesDmaIdleStatusAcrossMemoryModules) {
+  const struct {
+    // Queue-size, running, and four stalled-state register fields.
+    loom_xdna_register_field_id_t fields[6];
+    // Last physical tile exposing this DMA module.
+    loom_xdna_tile_coordinate_t coordinate;
+    // Number of independently addressable DMA channels.
+    uint16_t channel_count;
+    // Absolute channel-zero status address from the hardware oracles.
+    uint64_t address;
+  } cases[] = {
+      {{
+           LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_S2MM_STATUS_TASK_QUEUE_SIZE,
+           LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_S2MM_STATUS_CHANNEL_RUNNING,
+           LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_S2MM_STATUS_STALLED_LOCK_ACQUIRE,
+           LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_S2MM_STATUS_STALLED_LOCK_RELEASE,
+           LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_S2MM_STATUS_STALLED_STREAM_STARVATION,
+           LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_S2MM_STATUS_STALLED_TOKEN_OR_COUNT_FIFO,
+       },
+       {7, 5},
+       2,
+       0xE51DF00},
+      {{
+           LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_MM2S_STATUS_TASK_QUEUE_SIZE,
+           LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_MM2S_STATUS_CHANNEL_RUNNING,
+           LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_MM2S_STATUS_STALLED_LOCK_ACQUIRE,
+           LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_MM2S_STATUS_STALLED_LOCK_RELEASE,
+           LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_MM2S_STATUS_STALLED_STREAM_BACKPRESSURE,
+           LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_MM2S_STATUS_STALLED_COMPLETION_TOKEN,
+       },
+       {7, 5},
+       2,
+       0xE51DF10},
+      {{
+           LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_CHANNEL_S2MM_STATUS_TASK_QUEUE_SIZE,
+           LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_CHANNEL_S2MM_STATUS_CHANNEL_RUNNING,
+           LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_CHANNEL_S2MM_STATUS_STALLED_LOCK_ACQUIRE,
+           LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_CHANNEL_S2MM_STATUS_STALLED_LOCK_RELEASE,
+           LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_CHANNEL_S2MM_STATUS_STALLED_STREAM_STARVATION,
+           LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_CHANNEL_S2MM_STATUS_STALLED_TOKEN_OR_COUNT_FIFO,
+       },
+       {7, 1},
+       6,
+       0xE1A0660},
+      {{
+           LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_CHANNEL_MM2S_STATUS_TASK_QUEUE_SIZE,
+           LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_CHANNEL_MM2S_STATUS_CHANNEL_RUNNING,
+           LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_CHANNEL_MM2S_STATUS_STALLED_LOCK_ACQUIRE,
+           LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_CHANNEL_MM2S_STATUS_STALLED_LOCK_RELEASE,
+           LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_CHANNEL_MM2S_STATUS_STALLED_STREAM_BACKPRESSURE,
+           LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_CHANNEL_MM2S_STATUS_STALLED_COMPLETION_TOKEN,
+       },
+       {7, 1},
+       6,
+       0xE1A0680},
+      {{
+           LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_TASK_QUEUE_SIZE,
+           LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_CHANNEL_RUNNING,
+           LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_STALLED_LOCK_ACQUIRE,
+           LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_STALLED_LOCK_RELEASE,
+           LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_STALLED_STREAM_STARVATION,
+           LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_STALLED_TOKEN_OR_COUNT_FIFO,
+       },
+       {7, 0},
+       2,
+       0xE01D220},
+      {{
+           LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_TASK_QUEUE_SIZE,
+           LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_CHANNEL_RUNNING,
+           LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_STALLED_LOCK_ACQUIRE,
+           LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_STALLED_LOCK_RELEASE,
+           LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_STALLED_STREAM_BACKPRESSURE,
+           LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_STALLED_COMPLETION_TOKEN,
+       },
+       {7, 0},
+       2,
+       0xE01D228},
+  };
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.address);
+    uint32_t idle_mask = 0;
+    for (size_t i = 0; i < IREE_ARRAYSIZE(test_case.fields); ++i) {
+      const auto field = test_case.fields[i];
+      loom_xdna_register_field_info_t info = {};
+      IREE_ASSERT_OK(loom_xdna_register_field_info(field, &info));
+      EXPECT_EQ(info.access, LOOM_XDNA_REGISTER_ACCESS_READ_ONLY);
+      const auto dimension = loom_xdna_register_field_dimension(field, 0);
+      EXPECT_EQ(dimension.count, test_case.channel_count);
+      EXPECT_EQ(dimension.stride, 4u);
+      for (uint16_t channel = 0; channel < test_case.channel_count; ++channel) {
+        EXPECT_EQ(loom_xdna_register_field_address_admitted(
+                      loom_xdna_npu2_array_family(), field,
+                      test_case.coordinate, &channel),
+                  test_case.address + channel * 4);
+      }
+      idle_mask |= loom_xdna_register_field_encode_admitted(field, i ? 1 : 7);
+    }
+    EXPECT_EQ(idle_mask, 0x0078003Cu);
+  }
 }
 
 TEST(XdnaRegisterFactsTest, FormsIndexedAbsoluteAddresses) {

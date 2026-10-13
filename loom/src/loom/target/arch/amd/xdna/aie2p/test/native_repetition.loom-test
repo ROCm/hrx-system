@@ -779,3 +779,50 @@ pipeline.def<kernel> public retain target(@device) @unscoped_input() run(%input_
 
 // ----
 CHECK: COMPILE-REPORT: pipeline root=unscoped_input realization=resident-configuration workers=2 *
+
+// ====
+// RUN: with-checks emit aie2p-xdna input=source-low output=pipeline-report
+
+// A regular egress loop retains an instruction worker for its authored wait.
+// Local MM2S completion cannot replace global-write completion before release.
+// The producer can reclaim the capacity-one slot while the invocation continues.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
+
+pipeline.def<kernel> public retain target(@device) @repeated_egress() run(%output_arg: buffer) {
+  %output = buffer.assume.alignment %output_arg {minimum_alignment = 4} : buffer
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %origin = index.constant 0 : offset
+  %storage_bytes = index.constant 16 : offset
+  %capacity = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(4) %storage_bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x4xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<1x4xi32>, index -> channel<tile<4xi32>>
+  %begin = index.constant 0 : index
+  %count = index.constant 2 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 16 : index
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %value = scalar.constant 7 : i32
+    %values = vector.splat %value : vector<4xi32>
+    scf.for %record = [%begin to %count step %step] {
+      %write, %payload = channel.reserve %records : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+      vector.store %values, %payload[0] : vector<4xi32>, view<4xi32>
+      channel.publish %write : write<tile<4xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %count step %step] {
+      %read, %payload = channel.acquire %records : channel<tile<4xi32>> -> (read<tile<4xi32>>, view<4xi32>)
+      %byte_index = index.mul %record, %record_bytes : index
+      %offset = index.cast %byte_index : index to offset
+      %external = buffer.view %output[%offset] : buffer -> view<4xi32>
+      %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<4xi32> to view<4xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.release %read : read<tile<4xi32>>
+    }
+  }
+}
+
+// ----
+CHECK: COMPILE-REPORT: pipeline root=repeated_egress realization=resident-configuration workers=2 *

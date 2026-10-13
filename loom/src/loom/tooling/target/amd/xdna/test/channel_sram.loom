@@ -1,0 +1,276 @@
+// Two SRAM ingress streams use both DMA descriptor banks beyond 128 KiB.
+// Four compute rows consume three records over two slots; replay changes every
+// external binding while preserving the compiled resident program.
+
+aie2p.target<array> @array_target
+
+func.def inline @ingress(%input: buffer, %records: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %record_count = index.constant 3 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 64 : index
+  scf.for %record = [%begin to %record_count step %step] {
+    %byte_index = index.mul %record, %record_bytes : index
+    %offset = index.cast %byte_index : index to offset
+    %external = buffer.view %input[%offset] : buffer -> view<16xi32>
+    %write, %destination = channel.reserve %records : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %copy = kernel.async.copy %external to %destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<16xi32>>
+  }
+  func.return
+}
+
+func.def inline @distribute(%source: channel<tile<16xi32>>, %destination0: channel<tile<16xi32>>, %destination1: channel<tile<16xi32>>, %destination2: channel<tile<16xi32>>, %destination3: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %record_count = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.for %record = [%begin to %record_count step %step] {
+    %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %read0, %read1, %read2, %read3 = channel.fanout %read : read<tile<16xi32>> -> (read<tile<16xi32>>, read<tile<16xi32>>, read<tile<16xi32>>, read<tile<16xi32>>)
+    %write0, %payload0 = channel.reserve %destination0 : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %write1, %payload1 = channel.reserve %destination1 : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %write2, %payload2 = channel.reserve %destination2 : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %write3, %payload3 = channel.reserve %destination3 : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    channel.copy %read0 -> %write0 : read<tile<16xi32>>, write<tile<16xi32>>
+    channel.copy %read1 -> %write1 : read<tile<16xi32>>, write<tile<16xi32>>
+    channel.copy %read2 -> %write2 : read<tile<16xi32>>, write<tile<16xi32>>
+    channel.copy %read3 -> %write3 : read<tile<16xi32>>, write<tile<16xi32>>
+  }
+  func.return
+}
+
+func.def inline @sum_records(%first: channel<tile<16xi32>>, %second: channel<tile<16xi32>>, %output: channel<tile<16xi32>>, %bias: i32) {
+  %begin = index.constant 0 : index
+  %record_count = index.constant 3 : index
+  %step = index.constant 1 : index
+  %bias_values = vector.splat %bias : vector<16xi32>
+  scf.for %record = [%begin to %record_count step %step] {
+    %first_read, %first_values = channel.acquire %first : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %second_read, %second_values = channel.acquire %second : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %write, %results = channel.reserve %output : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %first_vector = vector.load %first_values[0] : view<16xi32> -> vector<16xi32>
+    %second_vector = vector.load %second_values[0] : view<16xi32> -> vector<16xi32>
+    %sum = vector.addi %first_vector, %second_vector : vector<16xi32>
+    %result = vector.addi %sum, %bias_values : vector<16xi32>
+    vector.store %result, %results[0] : vector<16xi32>, view<16xi32>
+    channel.release %first_read : read<tile<16xi32>>
+    channel.release %second_read : read<tile<16xi32>>
+    channel.publish %write : write<tile<16xi32>>
+  }
+  func.return
+}
+
+func.def inline @egress(%records: channel<tile<16xi32>>, %output: buffer) {
+  %begin = index.constant 0 : index
+  %record_count = index.constant 3 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 64 : index
+  scf.for %record = [%begin to %record_count step %step] {
+    %read, %source = channel.acquire %records : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %byte_index = index.mul %record, %record_bytes : index
+    %offset = index.cast %byte_index : index to offset
+    %external = buffer.view %output[%offset] : buffer -> view<16xi32>
+    %copy = kernel.async.copy %source to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<16xi32>>
+  }
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @sram_four_rows() run(%first_input_arg: buffer, %second_input_arg: buffer, %output0_arg: buffer, %output1_arg: buffer, %output2_arg: buffer, %output3_arg: buffer) {
+  %first_input_unique, %second_input_unique, %output0_unique, %output1_unique, %output2_unique, %output3_unique = buffer.assume.noalias %first_input_arg, %second_input_arg, %output0_arg, %output1_arg, %output2_arg, %output3_arg : buffer, buffer, buffer, buffer, buffer, buffer
+  %first_input, %second_input, %output0, %output1, %output2, %output3 = buffer.assume.alignment %first_input_unique, %second_input_unique, %output0_unique, %output1_unique, %output2_unique, %output3_unique {minimum_alignment = 64} : buffer, buffer, buffer, buffer, buffer, buffer
+  %origin = index.constant 0 : offset
+  %storage_bytes = index.constant 128 : offset
+  %sram_bytes = index.constant 131328 : offset
+  %first_sram_offset = index.constant 131072 : offset
+  %second_sram_offset = index.constant 131200 : offset
+  %capacity = index.constant 2 : index
+  %sram_memory = pipeline.memory<workgroup>[0, 1] : pool
+  %sram_storage = buffer.alloca<workgroup> pool(%sram_memory) align(64) %sram_bytes : buffer
+  %first_sram_slots = buffer.view %sram_storage[%first_sram_offset] : buffer -> view<2x16xi32>
+  %first_sram = channel.bind<fifo> %first_sram_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %second_sram_slots = buffer.view %sram_storage[%second_sram_offset] : buffer -> view<2x16xi32>
+  %second_sram = channel.bind<fifo> %second_sram_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %memory0 = pipeline.memory<workgroup>[0, 2] : pool
+  %bias0 = scalar.constant 1000 : i32
+  %first0_storage = buffer.alloca<workgroup> pool(%memory0) align(64) %storage_bytes : buffer
+  %first0_slots = buffer.view %first0_storage[%origin] : buffer -> view<2x16xi32>
+  %first0 = channel.bind<fifo> %first0_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %second0_storage = buffer.alloca<workgroup> pool(%memory0) align(64) %storage_bytes : buffer
+  %second0_slots = buffer.view %second0_storage[%origin] : buffer -> view<2x16xi32>
+  %second0 = channel.bind<fifo> %second0_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %results0_storage = buffer.alloca<workgroup> pool(%memory0) align(64) %storage_bytes : buffer
+  %results0_slots = buffer.view %results0_storage[%origin] : buffer -> view<2x16xi32>
+  %results0 = channel.bind<fifo> %results0_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %memory1 = pipeline.memory<workgroup>[0, 3] : pool
+  %bias1 = scalar.constant 2000 : i32
+  %first1_storage = buffer.alloca<workgroup> pool(%memory1) align(64) %storage_bytes : buffer
+  %first1_slots = buffer.view %first1_storage[%origin] : buffer -> view<2x16xi32>
+  %first1 = channel.bind<fifo> %first1_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %second1_storage = buffer.alloca<workgroup> pool(%memory1) align(64) %storage_bytes : buffer
+  %second1_slots = buffer.view %second1_storage[%origin] : buffer -> view<2x16xi32>
+  %second1 = channel.bind<fifo> %second1_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %results1_storage = buffer.alloca<workgroup> pool(%memory1) align(64) %storage_bytes : buffer
+  %results1_slots = buffer.view %results1_storage[%origin] : buffer -> view<2x16xi32>
+  %results1 = channel.bind<fifo> %results1_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %memory2 = pipeline.memory<workgroup>[0, 4] : pool
+  %bias2 = scalar.constant 3000 : i32
+  %first2_storage = buffer.alloca<workgroup> pool(%memory2) align(64) %storage_bytes : buffer
+  %first2_slots = buffer.view %first2_storage[%origin] : buffer -> view<2x16xi32>
+  %first2 = channel.bind<fifo> %first2_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %second2_storage = buffer.alloca<workgroup> pool(%memory2) align(64) %storage_bytes : buffer
+  %second2_slots = buffer.view %second2_storage[%origin] : buffer -> view<2x16xi32>
+  %second2 = channel.bind<fifo> %second2_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %result_memory2 = pipeline.memory<workgroup>[1, 4] : pool
+  %results2_storage = buffer.alloca<workgroup> pool(%result_memory2) align(64) %storage_bytes : buffer
+  %results2_slots = buffer.view %results2_storage[%origin] : buffer -> view<2x16xi32>
+  %results2 = channel.bind<fifo> %results2_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %memory3 = pipeline.memory<workgroup>[0, 5] : pool
+  %bias3 = scalar.constant 4000 : i32
+  %first3_storage = buffer.alloca<workgroup> pool(%memory3) align(64) %storage_bytes : buffer
+  %first3_slots = buffer.view %first3_storage[%origin] : buffer -> view<2x16xi32>
+  %first3 = channel.bind<fifo> %first3_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %second3_storage = buffer.alloca<workgroup> pool(%memory3) align(64) %storage_bytes : buffer
+  %second3_slots = buffer.view %second3_storage[%origin] : buffer -> view<2x16xi32>
+  %second3 = channel.bind<fifo> %second3_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %result_memory3 = pipeline.memory<workgroup>[1, 5] : pool
+  %results3_storage = buffer.alloca<workgroup> pool(%result_memory3) align(64) %storage_bytes : buffer
+  %results3_slots = buffer.view %results3_storage[%origin] : buffer -> view<2x16xi32>
+  %results3 = channel.bind<fifo> %results3_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @ingress(%first_input, %first_sram) : (buffer, channel<tile<16xi32>>)
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @distribute(%first_sram, %first0, %first1, %first2, %first3) : (channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>)
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @ingress(%second_input, %second_sram) : (buffer, channel<tile<16xi32>>)
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @distribute(%second_sram, %second0, %second1, %second2, %second3) : (channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>)
+  }
+  // Neighbor accesses separate payload descent from egress control traffic.
+  // Each column's southbound cut stays within its four physical stream lanes.
+  pipeline.strand workers([1, 2], [1, 1], [1, 1]) {
+    func.call @sum_records(%first0, %second0, %results0, %bias0) : (channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, i32)
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @egress(%results0, %output0) : (channel<tile<16xi32>>, buffer)
+  }
+  pipeline.strand workers([1, 3], [1, 1], [1, 1]) {
+    func.call @sum_records(%first1, %second1, %results1, %bias1) : (channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, i32)
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    func.call @egress(%results1, %output1) : (channel<tile<16xi32>>, buffer)
+  }
+  pipeline.strand workers([1, 4], [1, 1], [1, 1]) {
+    func.call @sum_records(%first2, %second2, %results2, %bias2) : (channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, i32)
+  }
+  pipeline.strand workers([2, 4], [1, 1], [1, 1]) {
+    func.call @egress(%results2, %output2) : (channel<tile<16xi32>>, buffer)
+  }
+  pipeline.strand workers([1, 5], [1, 1], [1, 1]) {
+    func.call @sum_records(%first3, %second3, %results3, %bias3) : (channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, i32)
+  }
+  pipeline.strand workers([2, 5], [1, 1], [1, 1]) {
+    func.call @egress(%results3, %output3) : (channel<tile<16xi32>>, buffer)
+  }
+}
+
+check.case public @rotating_four_row_sram_handoff {
+  %a0 = check.generate.iota offset(7) step(3) : tensor<3x16xi32>
+  %b0 = check.generate.iota offset(101) step(7) : tensor<3x16xi32>
+  %output0_0 = check.generate.fill value(-1) : tensor<3x16xi32>
+  %output0_1 = check.generate.fill value(-1) : tensor<3x16xi32>
+  %output0_2 = check.generate.fill value(-1) : tensor<3x16xi32>
+  %output0_3 = check.generate.fill value(-1) : tensor<3x16xi32>
+  %a1 = check.generate.iota offset(-101) step(5) : tensor<3x16xi32>
+  %b1 = check.generate.iota offset(23) step(11) : tensor<3x16xi32>
+  %output1_0 = check.generate.fill value(-1) : tensor<3x16xi32>
+  %output1_1 = check.generate.fill value(-1) : tensor<3x16xi32>
+  %output1_2 = check.generate.fill value(-1) : tensor<3x16xi32>
+  %output1_3 = check.generate.fill value(-1) : tensor<3x16xi32>
+  kernel.launch.serial {
+    kernel.launch @sram_four_rows(%a0, %b0, %output0_0, %output0_1, %output0_2, %output0_3) : (tensor<3x16xi32>, tensor<3x16xi32>, tensor<3x16xi32>, tensor<3x16xi32>, tensor<3x16xi32>, tensor<3x16xi32>)
+    kernel.launch @sram_four_rows(%a1, %b1, %output1_0, %output1_1, %output1_2, %output1_3) : (tensor<3x16xi32>, tensor<3x16xi32>, tensor<3x16xi32>, tensor<3x16xi32>, tensor<3x16xi32>, tensor<3x16xi32>)
+  }
+  %expected0_0 = check.generate.iota offset(1108) step(10) : tensor<3x16xi32>
+  check.expect.equal actual(%output0_0) expected(%expected0_0) : tensor<3x16xi32>
+  %expected0_1 = check.generate.iota offset(2108) step(10) : tensor<3x16xi32>
+  check.expect.equal actual(%output0_1) expected(%expected0_1) : tensor<3x16xi32>
+  %expected0_2 = check.generate.iota offset(3108) step(10) : tensor<3x16xi32>
+  check.expect.equal actual(%output0_2) expected(%expected0_2) : tensor<3x16xi32>
+  %expected0_3 = check.generate.iota offset(4108) step(10) : tensor<3x16xi32>
+  check.expect.equal actual(%output0_3) expected(%expected0_3) : tensor<3x16xi32>
+  %expected1_0 = check.generate.iota offset(922) step(16) : tensor<3x16xi32>
+  check.expect.equal actual(%output1_0) expected(%expected1_0) : tensor<3x16xi32>
+  %expected1_1 = check.generate.iota offset(1922) step(16) : tensor<3x16xi32>
+  check.expect.equal actual(%output1_1) expected(%expected1_1) : tensor<3x16xi32>
+  %expected1_2 = check.generate.iota offset(2922) step(16) : tensor<3x16xi32>
+  check.expect.equal actual(%output1_2) expected(%expected1_2) : tensor<3x16xi32>
+  %expected1_3 = check.generate.iota offset(3922) step(16) : tensor<3x16xi32>
+  check.expect.equal actual(%output1_3) expected(%expected1_3) : tensor<3x16xi32>
+  check.return
+}
+
+// A completed invocation owns no outstanding DMA even when the destination
+// FIFOs have no consumers. Replaying this prefetch-only program reuses the
+// same physical rings without a synthetic output or completion worker.
+pipeline.def<kernel> public retain target(@array_target) @terminal_prefetch() run(%input_arg: buffer) {
+  %input = buffer.assume.alignment %input_arg {minimum_alignment = 64} : buffer
+  %origin = index.constant 0 : offset
+  %storage_bytes = index.constant 16384 : offset
+  %capacity = index.constant 2 : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 8192 : index
+  %source_memory = pipeline.memory<workgroup>[0, 2] : pool
+  %compute_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %sram_memory = pipeline.memory<workgroup>[0, 1] : pool
+  %source_storage = buffer.alloca<workgroup> pool(%source_memory) align(64) %storage_bytes : buffer
+  %source_slots = buffer.view %source_storage[%origin] : buffer -> view<2x2048xi32>
+  %source = channel.bind<fifo> %source_slots, %capacity : view<2x2048xi32>, index -> channel<tile<2048xi32>>
+  %compute_storage = buffer.alloca<workgroup> pool(%compute_memory) align(64) %storage_bytes : buffer
+  %compute_slots = buffer.view %compute_storage[%origin] : buffer -> view<2x2048xi32>
+  %compute = channel.bind<fifo> %compute_slots, %capacity : view<2x2048xi32>, index -> channel<tile<2048xi32>>
+  %sram_storage = buffer.alloca<workgroup> pool(%sram_memory) align(64) %storage_bytes : buffer
+  %sram_slots = buffer.view %sram_storage[%origin] : buffer -> view<2x2048xi32>
+  %sram = channel.bind<fifo> %sram_slots, %capacity : view<2x2048xi32>, index -> channel<tile<2048xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %capacity step %step] {
+      %byte_index = index.mul %record, %record_bytes : index
+      %offset = index.cast %byte_index : index to offset
+      %external = buffer.view %input[%offset] : buffer -> view<2048xi32>
+      %write, %payload = channel.reserve %source : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<2048xi32> to view<2048xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<2048xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %capacity step %step] {
+      %read, %payload = channel.acquire %source : channel<tile<2048xi32>> -> (read<tile<2048xi32>>, view<2048xi32>)
+      %compute_read, %sram_read = channel.fanout %read : read<tile<2048xi32>> -> (read<tile<2048xi32>>, read<tile<2048xi32>>)
+      %compute_write, %compute_payload = channel.reserve %compute : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      %sram_write, %sram_payload = channel.reserve %sram : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %compute_read -> %compute_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      channel.copy %sram_read -> %sram_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+    }
+  }
+}
+
+check.case public @terminal_prefetch_replay {
+  %first = check.generate.iota offset(7) step(3) : tensor<2x2048xi32>
+  %second = check.generate.iota offset(-101) step(5) : tensor<2x2048xi32>
+  kernel.launch.serial {
+    kernel.launch @terminal_prefetch(%first) : (tensor<2x2048xi32>)
+    kernel.launch @terminal_prefetch(%second) : (tensor<2x2048xi32>)
+    kernel.launch @terminal_prefetch(%first) : (tensor<2x2048xi32>)
+  }
+  check.return
+}

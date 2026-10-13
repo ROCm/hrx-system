@@ -62,6 +62,32 @@ typedef struct loom_pipeline_transport_step_t {
   } source;
 } loom_pipeline_transport_step_t;
 
+// One destination whose reservation and source obligation are transferred to
+// asynchronous channel transport. Both actions belong to the same immutable
+// worker invocation as their enclosing cohort.
+typedef struct loom_pipeline_transport_destination_t {
+  // Destination FIFO reservation consumed by copy.
+  const loom_op_t* reservation;
+  // Copy consuming one source obligation and the destination reservation.
+  const loom_op_t* copy;
+  // Destination protocol identity established by channel membership analysis.
+  const loom_channel_identity_t* channel;
+} loom_pipeline_transport_destination_t;
+
+// One admitted source record distributed to independently completing
+// destination records. Fanout preserves one source-record identity across all
+// obligations; the source FIFO receives one reclamation credit only after the
+// transport has consumed every obligation. Each destination publishes
+// independently when its own copy completes.
+typedef struct loom_pipeline_transport_cohort_t {
+  // Source FIFO admission supplying the record.
+  const loom_channel_plan_action_t* admission;
+  // Arena-owned destinations in fanout result order.
+  const loom_pipeline_transport_destination_t* destinations;
+  // Number of independently completing destinations.
+  iree_host_size_t destination_count;
+} loom_pipeline_transport_cohort_t;
+
 typedef struct loom_pipeline_transport_t {
   // All observable effects, in execution order; NULL when ordinary execution
   // is required. This does not select a device engine or relax any ordering.
@@ -73,6 +99,11 @@ typedef struct loom_pipeline_transport_t {
   const loom_kernel_async_stream_t* const* streams;
   // Number of movement-bearing blocks on the execution chain.
   iree_host_size_t stream_count;
+  // Source-record cohorts whose complete ownership is transferred through
+  // channel.copy. Empty for ordinary instruction-executing channel use.
+  const loom_pipeline_transport_cohort_t* cohorts;
+  // Number of channel transport cohorts in one ordered execution.
+  iree_host_size_t cohort_count;
   // Number of executions of the complete ordered sequence. A straight-line
   // invocation has one; a regular loop has its proven exact trip count.
   uint64_t repetitions;

@@ -252,6 +252,8 @@ def _dma_channel_patterns(
     module: RegisterModule,
     s2mm_base: int,
     mm2s_base: int,
+    s2mm_status: int,
+    mm2s_status: int,
     queue_name: str,
     channel_count: int,
     bd_id_bits: int,
@@ -281,6 +283,25 @@ def _dma_channel_patterns(
         _field("repeat_count", 16, 8, access=RegisterAccess.WRITE_ONLY),
         _field("start_bd_id", 0, bd_id_bits, access=RegisterAccess.WRITE_ONLY),
     )
+    # AIE2P's DMA wait-for-done contract observes every outstanding-task state,
+    # including stalls while the channel-running bit is clear.
+    status_fields = (
+        _field("task_queue_size", 20, 3, access=RegisterAccess.READ_ONLY),
+        _field("channel_running", 19, access=RegisterAccess.READ_ONLY),
+        _field("stalled_lock_acquire", 2, access=RegisterAccess.READ_ONLY),
+        _field("stalled_lock_release", 3, access=RegisterAccess.READ_ONLY),
+    )
+    s2mm_status_fields = (
+        *status_fields,
+        _field("stalled_stream_starvation", 4, access=RegisterAccess.READ_ONLY),
+        _field("stalled_token_or_count_fifo", 5, access=RegisterAccess.READ_ONLY),
+    )
+    mm2s_status_fields = (
+        *status_fields,
+        _field("stalled_stream_backpressure", 4, access=RegisterAccess.READ_ONLY),
+        _field("stalled_completion_token", 5, access=RegisterAccess.READ_ONLY),
+    )
+    status_channel = RegisterDimension("channel", channel_count, 4)
     return (
         _pattern(f"{key}.s2mm.control", module, s2mm_base, s2mm_fields, channel),
         _pattern(
@@ -298,6 +319,20 @@ def _dma_channel_patterns(
             queue_fields,
             channel,
         ),
+        _pattern(
+            f"{key}.s2mm.status",
+            module,
+            s2mm_status,
+            s2mm_status_fields,
+            status_channel,
+        ),
+        _pattern(
+            f"{key}.mm2s.status",
+            module,
+            mm2s_status,
+            mm2s_status_fields,
+            status_channel,
+        ),
     )
 
 
@@ -307,6 +342,8 @@ _DMA_CHANNEL_PATTERNS = (
         module=RegisterModule.COMPUTE_MEMORY,
         s2mm_base=0x1DE00,
         mm2s_base=0x1DE10,
+        s2mm_status=0x1DF00,
+        mm2s_status=0x1DF10,
         queue_name="start_queue",
         channel_count=2,
         bd_id_bits=4,
@@ -316,6 +353,8 @@ _DMA_CHANNEL_PATTERNS = (
         module=RegisterModule.MEMORY_TILE,
         s2mm_base=0xA0600,
         mm2s_base=0xA0630,
+        s2mm_status=0xA0660,
+        mm2s_status=0xA0680,
         queue_name="start_queue",
         channel_count=6,
         bd_id_bits=6,
@@ -325,6 +364,8 @@ _DMA_CHANNEL_PATTERNS = (
         module=RegisterModule.SHIM_NOC,
         s2mm_base=0x1D200,
         mm2s_base=0x1D210,
+        s2mm_status=0x1D220,
+        mm2s_status=0x1D228,
         queue_name="task_queue",
         channel_count=2,
         bd_id_bits=4,

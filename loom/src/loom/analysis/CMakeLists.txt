@@ -958,6 +958,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::cfg
+    loom::ops::channel
     loom::ops::func
     loom::ops::kernel
     loom::ops::pipeline

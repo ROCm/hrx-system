@@ -10,6 +10,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/array/route.h"
 #include "loom/target/arch/amd/xdna/aie2p/facts.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/worker.h"
+#include "loom/target/arch/amd/xdna/array/registers.h"
 #include "loom/transforms/pipeline/realization.h"
 
 // One endpoint's admitted cursor behavior for this execution occurrence.
@@ -35,6 +36,8 @@ typedef struct loom_aie2p_native_channel_t {
   // Whole slot envelope used for neighbor visibility admission. Interleaved
   // records may have overlapping envelopes and disjoint payload elements.
   uint32_t record_byte_length;
+  // Logical payload elements occupy one contiguous byte range in order.
+  bool record_dense;
   // Semaphore containing reusable slot credits.
   uint16_t free_lock;
   // Semaphore containing published record credits.
@@ -89,18 +92,79 @@ typedef struct loom_aie2p_native_binding_t {
   uint32_t access;
 } loom_aie2p_native_binding_t;
 
+// Register layout of one on-chip DMA module. Compute data memory and SRAM
+// retain the same channel ownership protocol with different wire encodings.
+typedef struct loom_aie2p_native_memory_layout_t {
+  // First descriptor register, used to publish a complete image.
+  loom_xdna_register_field_id_t descriptor_base;
+  // Number of descriptor words implemented by this module.
+  uint8_t descriptor_word_count;
+  // Word containing the DMA buffer address.
+  uint8_t address_word;
+  // DMA buffer-address field.
+  loom_xdna_register_field_id_t address;
+  // Word containing the iteration state.
+  uint8_t iteration_word;
+  // Iteration step, wrap, and current-position fields.
+  struct {
+    // Address-generator increment between records.
+    loom_xdna_register_field_id_t step;
+    // Number of physical ring slots minus one.
+    loom_xdna_register_field_id_t wrap;
+    // Current ring slot reset at invocation boundaries.
+    loom_xdna_register_field_id_t current;
+  } iteration;
+  // Word containing lock actions and descriptor validity.
+  uint8_t lock_word;
+  // Lock action and validity fields.
+  struct {
+    // Semaphore acquired before movement.
+    loom_xdna_register_field_id_t acquire_id;
+    // Credit count consumed by admission.
+    loom_xdna_register_field_id_t acquire_value;
+    // Descriptor has an admission action.
+    loom_xdna_register_field_id_t acquire_enable;
+    // Semaphore released after movement.
+    loom_xdna_register_field_id_t release_id;
+    // Credit count published by completion.
+    loom_xdna_register_field_id_t release_value;
+    // Descriptor is executable.
+    loom_xdna_register_field_id_t valid;
+  } locks;
+  // Hardware semaphore initialization and observation register.
+  loom_xdna_register_field_id_t lock_value;
+  // Local SRAM bank's DMA address window; zero for compute data memory.
+  uint32_t local_address_base;
+  // Local SRAM bank's DMA lock-selector window; zero for compute memory.
+  uint16_t local_lock_base;
+  // Direction-indexed DMA control and task publication fields.
+  struct {
+    // Channel reset control.
+    loom_xdna_register_field_id_t reset;
+    // Task head descriptor ordinal.
+    loom_xdna_register_field_id_t start;
+    // Task execution count minus one.
+    loom_xdna_register_field_id_t repeat;
+    // Completion-poll fields: queue size, running, and four stall flags.
+    loom_xdna_register_field_id_t status[6];
+  } directions[2];
+} loom_aie2p_native_memory_layout_t;
+
 // Per-tile resource ownership established before any executable emission.
 typedef struct loom_aie2p_native_tile_t {
   // Physical coordinate in this execution occurrence.
   loom_xdna_tile_coordinate_t coordinate;
   // Generated capacity and addressing facts.
   const loom_xdna_tile_facts_t* facts;
-  // Canonical memory pool, or UINT32_MAX for a shim/memory tile.
+  // Native on-chip DMA encoding, NULL for a shim.
+  const loom_aie2p_native_memory_layout_t* memory_layout;
+  // Canonical memory pool, or UINT32_MAX for a shim tile.
   uint32_t pool_index;
   // Next available hardware semaphore.
   uint16_t next_lock;
-  // Next available DMA buffer descriptor.
-  uint16_t next_descriptor;
+  // Allocated descriptor count per channel-parity bank. Compute and Shim
+  // modules use only bank zero; SRAM even/odd channels own disjoint banks.
+  uint16_t descriptor_counts[2];
   // Next available memory-to-stream DMA engine.
   uint8_t next_mm2s;
   // Next available stream-to-memory DMA engine.
@@ -196,7 +260,7 @@ typedef struct loom_aie2p_native_transfer_t {
   // Worker-visible selector of the local-arrival completion semaphore.
   uint16_t completion_selector;
   // Full local descriptor template, excluding the dynamic record base.
-  uint32_t local_words[6];
+  uint32_t local_words[8];
   // Full shim descriptor template, excluding its relocated address pair.
   uint32_t shim_words[8];
   // Canonical external endpoint projection, retained through emission.
@@ -215,10 +279,42 @@ typedef struct loom_aie2p_native_transfer_t {
   loom_symbol_ref_t wait;
 } loom_aie2p_native_transfer_t;
 
+// One on-chip DMA endpoint in an on-die channel distribution.
+typedef struct loom_aie2p_native_distribution_endpoint_t {
+  // FIFO whose whole records are transferred by this endpoint.
+  const loom_aie2p_native_channel_t* channel;
+  // On-chip memory tile owning the FIFO and DMA engine.
+  loom_aie2p_native_tile_t* tile;
+  // Direction-specific DMA engine.
+  uint8_t engine;
+  // Descriptor iterating through this FIFO's physical ring.
+  uint16_t descriptor;
+  // Complete on-chip DMA descriptor image.
+  uint32_t words[8];
+  // Invocation retirement must explicitly observe this DMA channel idle.
+  bool wait_for_idle;
+} loom_aie2p_native_distribution_endpoint_t;
+
+// One source DMA stream multicast to independently completing destination
+// rings. All endpoints execute the same bounded number of records.
+typedef struct loom_aie2p_native_distribution_t {
+  // Next distribution owned by the same transport strand.
+  struct loom_aie2p_native_distribution_t* next;
+  // Memory-to-stream endpoint reclaiming source records after transmission.
+  loom_aie2p_native_distribution_endpoint_t sender;
+  // Arena-owned stream-to-memory endpoints in source fanout order.
+  loom_aie2p_native_distribution_endpoint_t* receivers;
+  // Number of independently publishing receiver rings.
+  iree_host_size_t receiver_count;
+  // Exact number of records transferred by every endpoint.
+  uint32_t repetitions;
+} loom_aie2p_native_distribution_t;
+
 typedef enum loom_aie2p_native_execution_e {
   LOOM_AIE2P_NATIVE_EXECUTION_CORE,
   LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION,
   LOOM_AIE2P_NATIVE_EXECUTION_DMA,
+  LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION,
 } loom_aie2p_native_execution_t;
 
 typedef struct loom_aie2p_native_worker_t {
@@ -257,6 +353,8 @@ typedef struct loom_aie2p_native_worker_t {
   } channels;
   // First selected borrowed DMA operation.
   loom_aie2p_native_transfer_t* transfers;
+  // First selected on-die channel distribution.
+  loom_aie2p_native_distribution_t* distributions;
   // Ordered DMA paths owned exclusively by this worker.
   loom_aie2p_native_dma_path_t* paths;
 } loom_aie2p_native_worker_t;

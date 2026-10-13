@@ -407,6 +407,17 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
       EXPECT_EQ(selected.axes[0].stride, 1u);
       ASSERT_EQ(selected.binding_count, 2u);
       ASSERT_EQ(selected.channels.action_count, 3u);
+      ASSERT_EQ(selected.transport.count, 3u);
+      EXPECT_EQ(selected.transport.stream_count, 0u);
+      ASSERT_EQ(selected.transport.cohort_count, 1u);
+      const auto& cohort = selected.transport.cohorts[0];
+      EXPECT_EQ(cohort.admission, &selected.channels.actions[0]);
+      ASSERT_EQ(cohort.destination_count, 1u);
+      EXPECT_EQ(cohort.destinations[0].reservation,
+                selected.channels.actions[1].op);
+      EXPECT_EQ(cohort.destinations[0].copy, selected.channels.actions[2].op);
+      EXPECT_EQ(cohort.destinations[0].channel,
+                selected.channels.actions[1].channel);
       ASSERT_NE(selected.graph, nullptr);
       EXPECT_FALSE(loom_local_value_domain_is_acquired(&selected.value_domain));
       loom_local_value_domain_restore(&selected.value_domain);

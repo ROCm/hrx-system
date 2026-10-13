@@ -8,6 +8,7 @@
 
 #include "loom/error/error_catalog.h"
 #include "loom/ops/cfg/ops.h"
+#include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/pipeline/ops.h"
@@ -75,12 +76,112 @@ typedef struct loom_pipeline_transport_block_t {
   iree_host_size_t channel_count;
 } loom_pipeline_transport_block_t;
 
+// Retains complete channel-copy ownership without assigning a physical
+// transport. This recognizes the semantic family from one source obligation to
+// one or more independently publishing destinations. Anything outside that
+// family remains ordinary instruction-executing channel use.
+static iree_status_t loom_pipeline_transport_cohorts(
+    loom_module_t* module, iree_arena_allocator_t* arena,
+    const loom_channel_plan_t* plan,
+    const loom_pipeline_transport_cohort_t** out_cohorts,
+    iree_host_size_t* out_cohort_count) {
+  *out_cohorts = NULL;
+  *out_cohort_count = 0;
+  if (!plan->action_count) {
+    return iree_ok_status();
+  }
+  loom_pipeline_transport_cohort_t* cohorts;
+  loom_pipeline_transport_destination_t* destinations;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, plan->action_count, sizeof(*cohorts), (void**)&cohorts));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, plan->action_count, sizeof(*destinations), (void**)&destinations));
+  iree_host_size_t cohort_count = 0;
+  iree_host_size_t destination_count = 0;
+  iree_host_size_t accounted_action_count = 0;
+  for (iree_host_size_t i = 0; i < plan->action_count; ++i) {
+    const loom_channel_plan_action_t* admission = &plan->actions[i];
+    if (!loom_channel_acquire_isa(admission->op) &&
+        !loom_channel_accept_isa(admission->op)) {
+      continue;
+    }
+    const bool acquire = loom_channel_acquire_isa(admission->op);
+    const loom_value_id_t admitted_read =
+        acquire ? loom_channel_acquire_read(admission->op)
+                : loom_channel_accept_read(admission->op);
+    const loom_use_t* admitted_use =
+        loom_value_single_use(loom_module_value(module, admitted_read));
+    if ((acquire && !loom_value_has_no_uses(loom_module_value(
+                        module, loom_channel_acquire_view(admission->op)))) ||
+        !admitted_use || loom_use_operand_index(*admitted_use) != 0) {
+      return iree_ok_status();
+    }
+    loom_op_t* fanout = NULL;
+    loom_op_t* admitted_user = loom_use_user_op(*admitted_use);
+    if (loom_channel_fanout_isa(admitted_user)) {
+      fanout = admitted_user;
+    } else if (!loom_channel_copy_isa(admitted_user)) {
+      return iree_ok_status();
+    }
+
+    const iree_host_size_t first_destination = destination_count;
+    const iree_host_size_t result_count = fanout ? fanout->result_count : 1;
+    for (iree_host_size_t j = 0; j < result_count; ++j) {
+      const loom_value_id_t source_read =
+          fanout ? loom_op_const_results(fanout)[j] : admitted_read;
+      const loom_use_t* source_use =
+          loom_value_single_use(loom_module_value(module, source_read));
+      loom_op_t* copy = source_use ? loom_use_user_op(*source_use) : NULL;
+      if (!source_use || loom_use_operand_index(*source_use) != 0 ||
+          !loom_channel_copy_isa(copy)) {
+        return iree_ok_status();
+      }
+      const loom_value_id_t destination_write =
+          loom_channel_copy_destination(copy);
+      const loom_value_t* destination_value =
+          loom_module_value(module, destination_write);
+      if (loom_value_is_block_arg(destination_value)) {
+        return iree_ok_status();
+      }
+      loom_op_t* reservation = loom_value_def_op(destination_value);
+      const loom_use_t* destination_use =
+          loom_value_single_use(destination_value);
+      const loom_channel_identity_t* destination_channel =
+          loom_channel_plan_channel(plan, destination_write);
+      if (!loom_channel_reserve_isa(reservation) || !destination_use ||
+          !loom_value_has_no_uses(loom_module_value(
+              module, loom_channel_reserve_view(reservation)))) {
+        return iree_ok_status();
+      }
+      destinations[destination_count++] =
+          (loom_pipeline_transport_destination_t){
+              .reservation = reservation,
+              .copy = copy,
+              .channel = destination_channel};
+    }
+    const iree_host_size_t cohort_destination_count =
+        destination_count - first_destination;
+    accounted_action_count +=
+        1 + (fanout ? 1 : 0) + cohort_destination_count * 2;
+    cohorts[cohort_count++] = (loom_pipeline_transport_cohort_t){
+        .admission = admission,
+        .destinations = &destinations[first_destination],
+        .destination_count = cohort_destination_count};
+  }
+  if (!cohort_count || accounted_action_count != plan->action_count) {
+    return iree_ok_status();
+  }
+  *out_cohorts = cohorts;
+  *out_cohort_count = cohort_count;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_pipeline_worker_transport(
     loom_module_t* module, iree_arena_allocator_t* arena,
     const loom_value_fact_cfg_region_t* structure,
     loom_pipeline_worker_t* worker) {
   const loom_cfg_graph_t* graph = worker->graph;
-  if (!worker->asynchronous.streams ||
+  if ((!worker->asynchronous.streams && !worker->channels.action_count) ||
       (graph->has_cycles &&
        (!worker->block_execution_counts || structure->loops.loop_count != 1))) {
     return iree_ok_status();
@@ -157,9 +258,6 @@ static iree_status_t loom_pipeline_worker_transport(
       }
     }
   }
-  if (stream_count == 0) {
-    return iree_ok_status();
-  }
   const loom_value_fact_induction_t* induction = NULL;
   uint64_t repetitions = 1;
   if (graph->has_cycles) {
@@ -174,10 +272,21 @@ static iree_status_t loom_pipeline_worker_transport(
     repetitions =
         worker->block_execution_counts[steps[0].op->parent_block->region_index];
   }
+  const loom_pipeline_transport_cohort_t* cohorts = NULL;
+  iree_host_size_t cohort_count = 0;
+  if (!stream_count) {
+    IREE_RETURN_IF_ERROR(loom_pipeline_transport_cohorts(
+        module, arena, &worker->channels, &cohorts, &cohort_count));
+    if (!cohort_count) {
+      return iree_ok_status();
+    }
+  }
   worker->transport = (loom_pipeline_transport_t){.steps = steps,
                                                   .count = count,
                                                   .streams = streams,
                                                   .stream_count = stream_count,
+                                                  .cohorts = cohorts,
+                                                  .cohort_count = cohort_count,
                                                   .repetitions = repetitions,
                                                   .induction = induction};
   return iree_ok_status();

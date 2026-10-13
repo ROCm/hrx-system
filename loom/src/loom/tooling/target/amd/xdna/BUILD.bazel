@@ -63,6 +63,25 @@ iree_execution_test_suite(
     },
 )
 
+iree_execution_test_suite(
+    name = "channel_fanout_execution_test",
+    data = [
+        "test/channel_fanout.loom",
+        "test/channel_sram.loom",
+    ],
+    manifests = ["test/channel_fanout.test.json"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=libamdf.resource.xdna",
+        "runtime-resource=amd-xdna",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:xdna_hal",
+        "//loom/config/target/arch:vm",
+    ]),
+    tools = {"iree-test-loom": "//loom/src/loom/tools/iree-test-loom"},
+)
+
 loom_check_test(
     name = "assembly_lowering",
     src = "test/assembly.cxx-test",

@@ -678,6 +678,47 @@ def test_trace_and_timer_modules_preserve_hardware_differences(
         assert pattern.fields[0].access is RegisterAccess.READ_ONLY
 
 
+@pytest.mark.parametrize(
+    ("key", "channel_count", "s2mm_base", "mm2s_base"),
+    [
+        ("compute_memory", 2, 0x1DF00, 0x1DF10),
+        ("memory_tile", 6, 0xA0660, 0xA0680),
+        ("shim_noc", 2, 0x1D220, 0x1D228),
+    ],
+)
+def test_dma_idle_status_covers_queued_running_and_stalled_tasks(
+    key: str, channel_count: int, s2mm_base: int, mm2s_base: int
+) -> None:
+    # XAIE2PGBL_*_MODULE_DMA_*_STATUS and _XAieMl_DmaWaitForDone agree
+    # on these fields. Idle is the simultaneous zero value of all six.
+    patterns = {pattern.key: pattern for pattern in NPU2_ARRAY_FAMILY.registers}
+    for direction, base in (("s2mm", s2mm_base), ("mm2s", mm2s_base)):
+        status = patterns[f"{key}.dma.channel.{direction}.status"]
+        assert status.base_offset == base
+        assert tuple(
+            (dimension.name, dimension.count, dimension.stride)
+            for dimension in status.dimensions
+        ) == (("channel", channel_count, 4),)
+        expected_masks = {
+            "task_queue_size": 0x00700000,
+            "channel_running": 0x00080000,
+            "stalled_lock_acquire": 0x00000004,
+            "stalled_lock_release": 0x00000008,
+        }
+        if direction == "s2mm":
+            expected_masks.update(
+                stalled_stream_starvation=0x00000010,
+                stalled_token_or_count_fifo=0x00000020,
+            )
+        else:
+            expected_masks.update(
+                stalled_stream_backpressure=0x00000010,
+                stalled_completion_token=0x00000020,
+            )
+        assert {field.name: field.mask for field in status.fields} == expected_masks
+        assert all(field.access is RegisterAccess.READ_ONLY for field in status.fields)
+
+
 def test_validator_rejects_register_provenance_claims_missing_an_oracle() -> None:
     pattern = NPU2_ARRAY_FAMILY.registers[0]
     invalid_pattern = replace(pattern, provenance=Provenance.AIE_RT)

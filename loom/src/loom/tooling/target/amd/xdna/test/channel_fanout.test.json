@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "executes rotating on-die channel fanout through the HAL",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/channel_fanout.loom",
+          "--device=xdna://0?columns=2"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"case_count\":1",
+          "\"failed_sample_count\":0",
+          "\"trial_count\":0",
+          "\"failed_trial_count\":0",
+          "\"case\":\"rotating_channel_fanout\"",
+          "\"failure_count\":0"
+        ]
+      }
+    },
+    {
+      "name": "executes two SRAM broadcasts across all four compute rows",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/channel_sram.loom",
+          "--device=xdna://0?columns=3",
+          "--case=@rotating_four_row_sram_handoff"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"case_count\":1",
+          "\"failed_sample_count\":0",
+          "\"trial_count\":0",
+          "\"failed_trial_count\":0",
+          "\"case\":\"rotating_four_row_sram_handoff\"",
+          "\"failure_count\":0"
+        ]
+      }
+    },
+    {
+      "name": "retires terminal compute and SRAM DMA before replay",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/channel_sram.loom",
+          "--device=xdna://0?columns=1",
+          "--case=@terminal_prefetch_replay"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"case_count\":1",
+          "\"failed_sample_count\":0",
+          "\"trial_count\":0",
+          "\"failed_trial_count\":0",
+          "\"case\":\"terminal_prefetch_replay\"",
+          "\"failure_count\":0"
+        ]
+      }
+    }
+  ]
+}
