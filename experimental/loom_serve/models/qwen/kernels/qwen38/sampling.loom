@@ -1,0 +1,81 @@
+template.decl @sampling.categorical_f32(%columns: index, %logits: buffer, %logits_origin: offset, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64) -> (i32)
+
+// Target draws are indexed by logical request and absolute token position.
+// Padded head rows never read a policy. Greedy rows retain the tiled reduction;
+// sampled rows keep logits, support selection and random draws on device.
+kernel.def @qwen38_sample_rows(%rows_value: index) {
+  %rows = index.assume %rows_value [range(%rows_value, 1, 128)] : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%rows_value: index, %epoch: buffer, %logits: buffer, %partial_logits: buffer, %partial_ids: buffer, %outputs: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %thread = kernel.workitem.id<x> : index
+  %row_value = kernel.workgroup.id<x> : index
+  %rows = index.assume %rows_value [range(%rows_value, 1, 128)] : index
+  %row = index.assume %row_value [range(%row_value, 0, 127), lt(%row_value, %rows)] : index
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %count = view.load %header[2] : view<3xi32> -> i32
+  %row_word = index.cast %row : index to i32
+  %live = scalar.cmpi ult, %row_word, %count : i32
+  scf.if %live {
+    %identity_origin = index.constant 5088 : offset
+    %identity = buffer.view %epoch[%identity_origin] : buffer -> view<128x2xi32>
+    %owner_word = view.load %identity[%row, 0] : view<128x2xi32> -> i32
+    %position_word = view.load %identity[%row, 1] : view<128x2xi32> -> i32
+    %position = scalar.extui %position_word : i32 to i64
+    %owner_value = index.cast %owner_word : i32 to index
+    %owner = index.assume %owner_value [range(%owner_value, 0, 15)] : index
+    %policy_origin = index.constant 4704 : offset
+    %policy_stride = index.constant 24 : offset
+    %policy_relative = index.scale %owner, %policy_stride : index, offset -> offset
+    %policy_offset = index.add %policy_origin, %policy_relative : offset
+    %policy = buffer.view %epoch[%policy_offset] : buffer -> view<6xi32>
+    %floats = buffer.view %epoch[%policy_offset] : buffer -> view<6xf32>
+    %seed_relative = index.constant 16 : offset
+    %seed_offset = index.add %policy_offset, %seed_relative : offset
+    %seeds = buffer.view %epoch[%seed_offset] : buffer -> view<1xi64>
+    %temperature = view.load %floats[0] : view<6xf32> -> f32
+    %top_p = view.load %floats[1] : view<6xf32> -> f32
+    %top_k = view.load %policy[2] : view<6xi32> -> i32
+    %seed = view.load %seeds[0] : view<1xi64> -> i64
+    %zero_f32 = scalar.constant 0.0 : f32
+    %one_i32 = scalar.constant 1 : i32
+    %greedy = scalar.cmpf oeq, %temperature, %zero_f32 : f32
+    %single = scalar.cmpi eq, %top_k, %one_i32 : i32
+    %deterministic = scalar.ori %greedy, %single : i1
+    %selected = scf.if %deterministic -> (i32) {
+      %partial_count = index.constant 61 : index
+      %largest = scalar.constant 2147483647 : i32
+      %negative = scalar.constant -inf : f32
+      %active = index.cmp ult, %thread, %partial_count : index
+      %logit, %id = scf.if %active -> (f32, i32) {
+        %values = buffer.view %partial_logits[%origin] : buffer -> view<[%rows]x61xf32>
+        %ids = buffer.view %partial_ids[%origin] : buffer -> view<[%rows]x61xi32>
+        %value = view.load %values[%row, %thread] : view<[%rows]x61xf32> -> f32
+        %id = view.load %ids[%row, %thread] : view<[%rows]x61xi32> -> i32
+        scf.yield %value, %id : f32, i32
+      } else {
+        scf.yield %negative, %largest : f32, i32
+      }
+      %maximum = kernel.workgroup.reduce<maxnumf> %logit : f32
+      %matches = scalar.cmpf oeq, %logit, %maximum : f32
+      %candidate = scf.select %matches, %id, %largest : i32
+      %winner = kernel.workgroup.reduce<minsi> %candidate : i32
+      scf.yield %winner : i32
+    } else {
+      %columns = index.constant 248320 : index
+      %row_bytes = index.constant 993280 : offset
+      %row_offset = index.scale %row, %row_bytes : index, offset -> offset
+      %winner = template.apply<@sampling.categorical_f32>(%columns, %logits, %row_offset, %temperature, %top_p, %top_k, %seed, %position) : (index, buffer, offset, f32, f32, i32, i64, i64) -> (i32)
+      scf.yield %winner : i32
+    }
+    %publishes = index.cmp eq, %thread, %zero : index
+    scf.if %publishes {
+      %tokens = buffer.view %outputs[%origin] : buffer -> view<[%rows]xi32>
+      view.store %selected, %tokens[%row] : i32, view<[%rows]xi32>
+    }
+  }
+  kernel.return
+}
