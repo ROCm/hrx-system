@@ -8,12 +8,15 @@
 
 #include "iree/module/hal/native_schema.h"
 
-static_assert(IREE_HAL_MODULE_TYPE_BUFFER == IREE_HAL_NATIVE_REF_BUFFER,
-              "buffer identity must match the generated ABI");
-static_assert(IREE_HAL_MODULE_TYPE_QUEUE == IREE_HAL_NATIVE_REF_QUEUE,
-              "queue identity must match the generated ABI");
-static_assert(IREE_HAL_MODULE_TYPE_SEMAPHORE == IREE_HAL_NATIVE_REF_SEMAPHORE,
-              "semaphore identity must match the generated ABI");
+static_assert((uint32_t)IREE_HAL_MODULE_TYPE_BUFFER ==
+                  (uint32_t)IREE_HAL_NATIVE_REF_BUFFER,
+              "buffer ordinal must match the generated ABI");
+static_assert((uint32_t)IREE_HAL_MODULE_TYPE_QUEUE ==
+                  (uint32_t)IREE_HAL_NATIVE_REF_QUEUE,
+              "queue ordinal must match the generated ABI");
+static_assert((uint32_t)IREE_HAL_MODULE_TYPE_SEMAPHORE ==
+                  (uint32_t)IREE_HAL_NATIVE_REF_SEMAPHORE,
+              "semaphore ordinal must match the generated ABI");
 
 // Linking reserves this much space per physical record. Every allocation is
 // eight-byte aligned and consumes only the mandatory native descriptor storage.
