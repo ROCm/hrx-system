@@ -1,0 +1,170 @@
+kernel.decl @qwen38_linear_q4k_f16_wmma_x64(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs_argument: index, %outputs_argument: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q4k_f16_wmma_x128(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs_argument: index, %outputs_argument: index, %input: buffer, %weight: buffer, %output: buffer)
+
+// The oracle interprets bytes individually, rounds both matrix operands to
+// F16, and accumulates in F64. It shares neither the production decoder nor
+// its metadata staging, payload packets, or matrix layout.
+func.def @q4_matrix_weight(%table: buffer, %inputs: index, %row0: index, %column: index) -> (f64) {
+  %block_width = index.constant 256 : index
+  %block = index.div %column, %block_width : index
+  %channel0 = index.rem %column, %block_width : index
+  %channel = index.assume %channel0 [range(%channel0, 0, 255)] : index
+  %blocks = index.div %inputs, %block_width : index
+  %row_start = index.mul %row0, %blocks : index
+  %block_index = index.add %row_start, %block : index
+  %block_bytes = index.constant 144 : offset
+  %header_bytes = index.constant 4 : offset
+  %payload_bytes = index.constant 16 : offset
+  %base = index.scale %block_index, %block_bytes : index, offset -> offset
+  %scales_base = index.add %base, %header_bytes : offset
+  %codes_base = index.add %base, %payload_bytes : offset
+  %header = buffer.view %table[%base] : buffer -> view<2xf16>
+  %scales = buffer.view %table[%scales_base] : buffer -> view<12xi8>
+  %codes = buffer.view %table[%codes_base] : buffer -> view<128xi8>
+  %c4 = index.constant 4 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %group = index.div %channel, %c32 : index
+  %group_plus4 = index.add %group, %c4 : index
+  %shift4 = scalar.constant 4 : i32
+  %shift6 = scalar.constant 6 : i32
+  %mask4 = scalar.constant 15 : i32
+  %mask6 = scalar.constant 63 : i32
+  %low = index.cmp ult, %group, %c4 : index
+  %scale, %minimum = scf.if %low -> (i32, i32) {
+    %a = view.load %scales[%group] : view<12xi8> -> i8
+    %b = view.load %scales[%group_plus4] : view<12xi8> -> i8
+    %ua = scalar.extui %a : i8 to i32
+    %ub = scalar.extui %b : i8 to i32
+    %s = scalar.andi %ua, %mask6 : i32
+    %m = scalar.andi %ub, %mask6 : i32
+    scf.yield %s, %m : i32, i32
+  } else {
+    %group_minus4 = index.sub %group, %c4 : index
+    %a = view.load %scales[%group_minus4] : view<12xi8> -> i8
+    %b = view.load %scales[%group] : view<12xi8> -> i8
+    %c = view.load %scales[%group_plus4] : view<12xi8> -> i8
+    %ua = scalar.extui %a : i8 to i32
+    %ub = scalar.extui %b : i8 to i32
+    %uc = scalar.extui %c : i8 to i32
+    %s_low = scalar.andi %uc, %mask4 : i32
+    %m_low = scalar.shrui %uc, %shift4 : i32
+    %s_high0 = scalar.shrui %ua, %shift6 : i32
+    %m_high0 = scalar.shrui %ub, %shift6 : i32
+    %s_high = scalar.shli %s_high0, %shift4 : i32
+    %m_high = scalar.shli %m_high0, %shift4 : i32
+    %s = scalar.ori %s_low, %s_high : i32
+    %m = scalar.ori %m_low, %m_high : i32
+    scf.yield %s, %m : i32, i32
+  }
+  %page = index.div %channel, %c64 : index
+  %within = index.rem %channel, %c32 : index
+  %page_base = index.mul %page, %c32 : index
+  %code_index = index.add %page_base, %within : index
+  %packed = view.load %codes[%code_index] : view<128xi8> -> i8
+  %word = scalar.extui %packed : i8 to i32
+  %half = index.rem %channel, %c64 : index
+  %upper = index.cmp uge, %half, %c32 : index
+  %high = scalar.shrui %word, %shift4 : i32
+  %chosen = scf.select %upper, %high, %word : i32
+  %code = scalar.andi %chosen, %mask4 : i32
+  %d16 = view.load %header[0] : view<2xf16> -> f16
+  %m16 = view.load %header[1] : view<2xf16> -> f16
+  %d = scalar.extf %d16 : f16 to f64
+  %m = scalar.extf %m16 : f16 to f64
+  %s = scalar.uitofp %scale : i32 to f64
+  %minimum_f = scalar.uitofp %minimum : i32 to f64
+  %q = scalar.uitofp %code : i32 to f64
+  %scaled = scalar.mulf %d, %s : f64
+  %positive = scalar.mulf %scaled, %q : f64
+  %negative = scalar.mulf %m, %minimum_f : f64
+  %value = scalar.subf %positive, %negative : f64
+  func.return %value : f64
+}
+
+func.def @q4_matrix_headers(%inputs: index, %outputs: index, %weight: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %width = index.constant 256 : index
+  %bytes = index.constant 144 : offset
+  %blocks = index.div %inputs, %width : index
+  %total = index.mul %blocks, %outputs : index
+  %scale = scalar.constant 0.015625 : f16
+  %minimum = scalar.constant 0.0078125 : f16
+  scf.for %block = [%c0 to %total step %c1] {
+    %origin = index.scale %block, %bytes : index, offset -> offset
+    %header = buffer.view %weight[%origin] : buffer -> view<2xf16>
+    view.store %scale, %header[0] : f16, view<2xf16>
+    view.store %minimum, %header[1] : f16, view<2xf16>
+  }
+  func.return
+}
+
+func.def @q4_matrix_reference(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %header = buffer.view %control[%origin] : buffer -> view<1xi32>
+  %count_word = view.load %header[0] : view<1xi32> -> i32
+  %count = index.cast %count_word : i32 to index
+  %x = buffer.view %input[%origin] : buffer -> view<[%count]x[%inputs]xf32>
+  %y = buffer.view %output[%origin] : buffer -> view<[%count]x[%outputs]xf32>
+  %c0_0 = scalar.constant 0.0 : f64
+  scf.for %token = [%c0 to %count step %c1] {
+    scf.for %row = [%c0 to %outputs step %c1] {
+      %sum = scf.for %column = [%c0 to %inputs step %c1](%acc = %c0_0 : f64) -> (f64) {
+        %w = func.call @q4_matrix_weight(%weight, %inputs, %row, %column) : (buffer, index, index, index) -> (f64)
+        %w16 = scalar.fptrunc %w : f64 to f16
+        %w64 = scalar.extf %w16 : f16 to f64
+        %a = view.load %x[%token, %column] : view<[%count]x[%inputs]xf32> -> f32
+        %a16 = scalar.fptrunc %a : f32 to f16
+        %a64 = scalar.extf %a16 : f16 to f64
+        %product = scalar.mulf %a64, %w64 : f64
+        %next = scalar.addf %acc, %product : f64
+        scf.yield %next : f64
+      }
+      %rounded = scalar.fptrunc %sum : f64 to f32
+      view.store %rounded, %y[%token, %row] : f32, view<[%count]x[%outputs]xf32>
+    }
+  }
+  func.return
+}
+
+check.scenario public @q4_matrix_x64 {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %capacity = check.literal value(16) : index
+    %inputs = check.literal value(512) : index
+    %outputs = check.literal value(67) : index
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %control = check.generate.fill value(8) : tensor<1xi32>
+    %input = check.generate.random.uniform seed(%seed0) range(-1.0 to 1.0) : tensor<16x512xf32>
+    %weight = check.generate.random.uniform seed(%seed1) range(-128 to 127) : tensor<67x2x144xi8>
+    check.generate<@q4_matrix_headers>(%inputs, %outputs, %weight) : (index, index, tensor<67x2x144xi8>) -> ()
+    %output = check.generate.fill value(-99.0) : tensor<16x67xf32>
+    check.compare<@qwen38_linear_q4k_f16_wmma_x64, @q4_matrix_reference>[%capacity, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %output) : [index, index, index](tensor<1xi32>, index, index, tensor<16x512xf32>, tensor<67x2x144xi8>, tensor<16x67xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.00050000000000000001) rtol(3.0000000000000001e-05) nan(different) : tensor<16x67xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @q4_matrix_x128 {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %capacity = check.literal value(256) : index
+    %inputs = check.literal value(256) : index
+    %outputs = check.literal value(17) : index
+    %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
+    %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
+    %control = check.generate.fill value(129) : tensor<1xi32>
+    %input = check.generate.random.uniform seed(%seed0) range(-1.0 to 1.0) : tensor<256x256xf32>
+    %weight = check.generate.random.uniform seed(%seed1) range(-128 to 127) : tensor<17x1x144xi8>
+    check.generate<@q4_matrix_headers>(%inputs, %outputs, %weight) : (index, index, tensor<17x1x144xi8>) -> ()
+    %output = check.generate.fill value(-99.0) : tensor<256x17xf32>
+    check.compare<@qwen38_linear_q4k_f16_wmma_x128, @q4_matrix_reference>[%capacity, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %output) : [index, index, index](tensor<1xi32>, index, index, tensor<256x256xf32>, tensor<17x1x144xi8>, tensor<256x17xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.00050000000000000001) rtol(3.0000000000000001e-05) nan(different) : tensor<256x17xf32>
+    }
+  }
+  check.return
+}

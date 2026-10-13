@@ -1,0 +1,127 @@
+func.decl @qwen38_span_active(%epoch: buffer, %span: index) -> (i1)
+
+func.decl @qwen38_span_binding(%epoch: buffer, %span: index) -> (offset, index, index)
+
+func.decl @qwen38_row_kv_origin(%rows: buffer, %row: index, %layer_origin: offset) -> (offset)
+
+func.decl @qwen38_row_kv_map_origin(%logical_capacity: index, %row: index) -> (offset)
+
+template.decl @qwen38.attention.query_prepare(%head: index, %token0: index, %lane: index, %control: buffer, %epsilon: f32, %query_gate_projection: buffer, %norm_weight: buffer, %query: buffer, %gate: buffer, %control_origin: offset, %token_begin: index)
+
+template.decl @qwen38.attention.kv_prepare(%logical_capacity: index, %head: index, %token0: index, %lane: index, %control: buffer, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %norm_weight: buffer, %key_cache: buffer, %value_cache: buffer, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
+
+template.decl @qwen38.attention.wmma(%logical_capacity: index, %query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
+
+config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
+
+config.decl @qwen38.attention.pool_capacity : %value: index where [range(%value, 0, 4194304)]
+
+amdgpu.target<gfx11-generic> @qwen38_attention_spans_gfx11_wave64 {subgroup_size = 64}
+
+// Dense projections use compact token rows; normalization and RoPE use the
+// span's absolute position without changing that compact output placement.
+kernel.def export("qwen38_attention_query_prepare_spans") @qwen38_attention_query_prepare_spans(%token_capacity: index, %span_capacity: index) {
+  %tokens = index.assume %token_capacity [range(%token_capacity, 1, 512)] : index
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 64)] : index
+  %heads = index.constant 24 : index
+  %threads = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %tokens, %spans) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %epsilon: f32, %projection: buffer, %weight: buffer, %query: buffer, %gate: buffer) {
+  %span = kernel.workgroup.id<z> : index
+  %active = func.call @qwen38_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %head_value = kernel.workgroup.id<x> : index
+    %head = index.assume %head_value [range(%head_value, 0, 23)] : index
+    %token = kernel.workgroup.id<y> : index
+    %lane_value = kernel.workitem.id<x> : index
+    %lane = index.assume %lane_value [range(%lane_value, 0, 255)] : index
+    %control_origin, %token_begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
+    template.apply<@qwen38.attention.query_prepare>(%head, %token, %lane, %epoch, %epsilon, %projection, %weight, %query, %gate, %control_origin, %token_begin) : (index, index, index, buffer, f32, buffer, buffer, buffer, buffer, offset, index)
+  }
+  kernel.return
+}
+
+// Each span publishes only its own session's appended K/V range. Completion
+// precedes attention reads through the command's ordinary dispatch dependency.
+kernel.def export("qwen38_attention_kv_prepare_spans") @qwen38_attention_kv_prepare_spans(%token_capacity: index, %span_capacity: index) {
+  %tokens = index.assume %token_capacity [range(%token_capacity, 1, 512)] : index
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 64)] : index
+  %heads = index.constant 4 : index
+  %threads = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %tokens, %spans) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %weight: buffer, %state: buffer) {
+  %span = kernel.workgroup.id<z> : index
+  %active = func.call @qwen38_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %head_value = kernel.workgroup.id<x> : index
+    %head = index.assume %head_value [range(%head_value, 0, 3)] : index
+    %token = kernel.workgroup.id<y> : index
+    %lane_value = kernel.workitem.id<x> : index
+    %lane = index.assume %lane_value [range(%lane_value, 0, 255)] : index
+    %control_origin, %token_begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
+    %key_origin = func.call @qwen38_row_kv_origin(%rows, %row, %layer_origin) : (buffer, index, offset) -> (offset)
+    %logical_capacity = config.get @qwen38.attention.cache_capacity : index
+    %pool_capacity = config.get @qwen38.attention.pool_capacity : index
+    %c0 = index.constant 0 : index
+    %paged = index.cmp ne, %pool_capacity, %c0 : index
+    %cache_capacity = scf.select %paged, %pool_capacity, %logical_capacity : index
+    %map_origin = func.call @qwen38_row_kv_map_origin(%logical_capacity, %row) : (index, index) -> (offset)
+    %cache_row_bytes = index.constant 2048 : offset
+    %cache_bytes = index.scale %cache_capacity, %cache_row_bytes : index, offset -> offset
+    %value_origin = index.add %key_origin, %cache_bytes : offset
+    template.apply<@qwen38.attention.kv_prepare>(%logical_capacity, %head, %token, %lane, %epoch, %epsilon, %key_projection, %value_projection, %weight, %state, %state, %control_origin, %token_begin, %key_origin, %value_origin, %rows, %map_origin, %pool_capacity) : (index, index, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
+  }
+  kernel.return
+}
+
+// A tile belongs to one span and reads only that resident session's cache.
+// Causal masking happens inside the shared attention body before softmax.
+// Whole inactive spans and tiles exit before any state/cache access.
+kernel.def target(@qwen38_attention_spans_gfx11_wave64) export("qwen38_attention_spans_f16_wmma") @qwen38_attention_spans_f16_wmma(%token_capacity: index, %span_capacity: index) {
+  %tokens = index.assume %token_capacity [range(%token_capacity, 1, 512)] : index
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 64)] : index
+  %c15 = index.constant 15 : index
+  %c16 = index.constant 16 : index
+  %padded_tokens = index.add %tokens, %c15 : index
+  %tiles = index.div %padded_tokens, %c16 : index
+  %heads = index.constant 24 : index
+  %threads = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tiles, %heads, %spans) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %gate: buffer, %state: buffer, %output: buffer) {
+  %epoch_noalias, %rows_noalias, %query_noalias, %gate_noalias, %state_noalias, %output_noalias = buffer.assume.noalias %epoch, %rows, %query, %gate, %state, %output : buffer, buffer, buffer, buffer, buffer, buffer
+  %span = kernel.workgroup.id<z> : index
+  %active = func.call @qwen38_span_active(%epoch_noalias, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %control_origin, %token_begin, %row = func.call @qwen38_span_binding(%epoch_noalias, %span) : (buffer, index) -> (offset, index, index)
+    %control = buffer.view %epoch_noalias[%control_origin] : buffer -> view<1xi32>
+    %count_word = view.load %control[0] : view<1xi32> -> i32
+    %count = index.cast %count_word : i32 to index
+    %query_tile = kernel.workgroup.id<x> : index
+    %c16 = index.constant 16 : index
+    %tile_begin = index.mul %query_tile, %c16 : index
+    %tile_active = index.cmp ult, %tile_begin, %count : index
+    scf.if %tile_active {
+      %head_value = kernel.workgroup.id<y> : index
+      %head = index.assume %head_value [range(%head_value, 0, 23)] : index
+      %workitem = kernel.workitem.id<x> : index
+      %subgroup_value = kernel.subgroup.id : index
+      %subgroup = index.assume %subgroup_value [range(%subgroup_value, 0, 3)] : index
+      %lane = kernel.subgroup.lane.id : index
+      %key_origin = func.call @qwen38_row_kv_origin(%rows_noalias, %row, %layer_origin) : (buffer, index, offset) -> (offset)
+      %logical_capacity = config.get @qwen38.attention.cache_capacity : index
+      %pool_capacity = config.get @qwen38.attention.pool_capacity : index
+      %c0 = index.constant 0 : index
+      %paged = index.cmp ne, %pool_capacity, %c0 : index
+      %cache_capacity = scf.select %paged, %pool_capacity, %logical_capacity : index
+      %map_origin = func.call @qwen38_row_kv_map_origin(%logical_capacity, %row) : (index, index) -> (offset)
+      %cache_row_bytes = index.constant 2048 : offset
+      %cache_bytes = index.scale %cache_capacity, %cache_row_bytes : index, offset -> offset
+      %value_origin = index.add %key_origin, %cache_bytes : offset
+      template.apply<@qwen38.attention.wmma>(%logical_capacity, %query_tile, %head, %workitem, %subgroup, %lane, %epoch_noalias, %query_noalias, %gate_noalias, %state_noalias, %state_noalias, %output_noalias, %control_origin, %token_begin, %key_origin, %value_origin, %rows_noalias, %map_origin, %pool_capacity) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
+    }
+  }
+  kernel.return
+}

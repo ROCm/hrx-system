@@ -1,0 +1,100 @@
+config.decl @runner.qwen38.span_capacity : %value: index where [range(%value, 1, 64)]
+
+command.program.decl @qwen38_output_projection_logits_prefix(%tokens: index) launch(%parameters: buffer, %control: buffer, %normalized: buffer, %logits: buffer)
+
+command.program.decl @qwen38_dflash_transform() launch(%parameters: buffer, %context_parameters: buffer, %epoch: buffer, %rows: buffer, %context: buffer, %embedding: buffer, %normalized: buffer)
+
+kernel.decl @qwen38_dflash_proposal_prepare() launch(%epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %anchors: buffer, %draft_tokens: buffer, %selection: buffer)
+
+kernel.decl @qwen38_dflash_selection_rows(%blocks: index) launch(%blocks_argument: index, %draft: buffer, %normalized: buffer, %output: buffer)
+
+kernel.decl @qwen38_dflash_proposal_publish() launch(%draft: buffer, %origins: buffer, %proposals: buffer, %target_tokens: buffer)
+
+kernel.decl @qwen38_dflash_topk_partial(%rows: index) launch(%rows_argument: index, %control: buffer, %logits: buffer, %scores: buffer, %ids: buffer)
+
+kernel.decl @qwen38_dflash_topk_merge(%rows: index) launch(%rows_argument: index, %control: buffer, %partial_scores: buffer, %partial_ids: buffer, %scores: buffer, %ids: buffer)
+
+kernel.decl @qwen38_dflash_select(%blocks: index) launch(%blocks_argument: index, %control: buffer, %anchors: buffer, %candidates: buffer, %unary: buffer, %hidden: buffer, %predecessors: buffer, %successors: buffer, %output: buffer)
+
+kernel.decl @qwen38_token_embedding_q5k_f32_prefill(%tokens: index) launch(%token_ids: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q4k_f16_wmma_x64(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs_argument: index, %outputs_argument: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @qwen38_linear_q4k_f16_wmma_x128(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs_argument: index, %outputs_argument: index, %input: buffer, %weight: buffer, %output: buffer)
+
+// The target vocabulary head supplies unary candidates; the small draft
+// projection and codebooks supply transition scores. Both parameter roots are
+// borrowed, so embeddings and vocabulary weights remain shared with the target.
+command.program.def public @qwen38_dflash_candidates(%spans: index) launch(%target_parameters: buffer, %draft_parameters: buffer, %control: buffer, %anchors: buffer, %normalized: buffer, %proposals: buffer) where [range(%spans, 1, 64)] {
+  %c7 = index.constant 7 : index
+  %rows = index.mul %spans, %c7 : index
+  %hidden_size = index.constant 5120 : index
+  %rank = index.constant 256 : index
+  %logit_stride = index.constant 993280 : offset
+  %partial_stride = index.constant 3904 : offset
+  %candidate_stride = index.constant 64 : offset
+  %hidden_stride = index.constant 1024 : offset
+  %logit_bytes = index.scale %rows, %logit_stride : index, offset -> offset
+  %partial_bytes = index.scale %rows, %partial_stride : index, offset -> offset
+  %candidate_bytes = index.scale %rows, %candidate_stride : index, offset -> offset
+  %hidden_bytes = index.scale %rows, %hidden_stride : index, offset -> offset
+  %logits = buffer.alloca<global> align(256) %logit_bytes : buffer
+  %partial_scores = buffer.alloca<global> align(256) %partial_bytes : buffer
+  %partial_ids = buffer.alloca<global> align(256) %partial_bytes : buffer
+  %scores = buffer.alloca<global> align(256) %candidate_bytes : buffer
+  %candidates = buffer.alloca<global> align(256) %candidate_bytes : buffer
+  %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %projection = command.parameter %draft_parameters, "selector_hidden.weight" : view<737280xi8>
+  %predecessors = command.parameter %draft_parameters, "selector_predecessor.weight" : view<35758080xi8>
+  %successors = command.parameter %draft_parameters, "selector_successor.weight" : view<35758080xi8>
+  %c65 = index.constant 65 : index
+  %narrow = index.cmp ult, %rows, %c65 : index
+  command.concurrent {
+    command.program.launch @qwen38_output_projection_logits_prefix[%rows](%target_parameters, %control, %normalized, %logits) : [index](buffer, buffer, buffer, buffer)
+    scf.if %narrow {
+      kernel.launch @qwen38_linear_q4k_f16_wmma_x64[%rows, %hidden_size, %rank](%control, %hidden_size, %rank, %normalized, %projection, %hidden) : [index, index, index](buffer, index, index, buffer, view<737280xi8>, buffer)
+    } else {
+      kernel.launch @qwen38_linear_q4k_f16_wmma_x128[%rows, %hidden_size, %rank](%control, %hidden_size, %rank, %normalized, %projection, %hidden) : [index, index, index](buffer, index, index, buffer, view<737280xi8>, buffer)
+    }
+  }
+  kernel.launch @qwen38_dflash_topk_partial[%rows](%rows, %control, %logits, %partial_scores, %partial_ids) : [index](index, buffer, buffer, buffer, buffer)
+  kernel.launch @qwen38_dflash_topk_merge[%rows](%rows, %control, %partial_scores, %partial_ids, %scores, %candidates) : [index](index, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @qwen38_dflash_select[%spans](%spans, %control, %anchors, %candidates, %scores, %hidden, %predecessors, %successors, %proposals) : [index](index, buffer, buffer, buffer, buffer, buffer, view<35758080xi8>, view<35758080xi8>, buffer)
+  command.return
+}
+
+// The only persistent mutation is the reserved target input suffix. Every
+// draft activation, private block K/V, and selector intermediate is transient.
+command.program.def public @qwen38_dflash_propose() launch(%embedding_parameters: buffer, %head_parameters: buffer, %draft_parameters: buffer, %context_parameters: buffer, %epoch: buffer, %target_tokens: buffer, %rows: buffer, %cache: buffer) {
+  %spans = config.get @runner.qwen38.span_capacity : index
+  %c8 = index.constant 8 : index
+  %c7 = index.constant 7 : index
+  %tokens = index.mul %spans, %c8 : index
+  %selected = index.mul %spans, %c7 : index
+  %hidden_stride = index.constant 20480 : offset
+  %hidden_bytes = index.scale %tokens, %hidden_stride : index, offset -> offset
+  %selected_bytes = index.scale %selected, %hidden_stride : index, offset -> offset
+  %word_bytes = index.constant 4 : offset
+  %proposal_bytes = index.scale %selected, %word_bytes : index, offset -> offset
+  %metadata_bytes = index.constant 1292 : offset
+  %token_bytes = index.constant 2048 : offset
+  %mapping_bytes = index.constant 256 : offset
+  %header_bytes = index.constant 12 : offset
+  %draft = buffer.alloca<global> align(256) %metadata_bytes : buffer
+  %mapping = buffer.alloca<global> align(256) %mapping_bytes : buffer
+  %anchors = buffer.alloca<global> align(256) %mapping_bytes : buffer
+  %inputs = buffer.alloca<global> align(256) %token_bytes : buffer
+  %selection = buffer.alloca<global> align(256) %header_bytes : buffer
+  %embedding = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %compact = buffer.alloca<global> align(256) %selected_bytes : buffer
+  %proposals = buffer.alloca<global> align(256) %proposal_bytes : buffer
+  %embedding_weight = command.parameter %embedding_parameters, "token_embd.weight" : view<874086400xi8>
+  kernel.launch @qwen38_dflash_proposal_prepare(%epoch, %target_tokens, %draft, %mapping, %anchors, %inputs, %selection) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @qwen38_token_embedding_q5k_f32_prefill[%tokens](%inputs, %embedding_weight, %embedding) : [index](buffer, view<874086400xi8>, buffer)
+  command.program.launch @qwen38_dflash_transform(%draft_parameters, %context_parameters, %draft, %rows, %cache, %embedding, %normalized) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @qwen38_dflash_selection_rows[%spans](%spans, %draft, %normalized, %compact) : [index](index, buffer, buffer, buffer)
+  command.program.launch @qwen38_dflash_candidates[%spans](%head_parameters, %draft_parameters, %selection, %anchors, %compact, %proposals) : [index](buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @qwen38_dflash_proposal_publish(%draft, %mapping, %proposals, %target_tokens) : (buffer, buffer, buffer, buffer)
+  command.return
+}
