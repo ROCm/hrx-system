@@ -159,23 +159,62 @@ REQUIREMENT_ROW = _record(
 
 NATIVE_CALLS_HEADER = _record(
     "native_calls_header",
-    "Counts synchronous native callsites.",
-    "The rows precede a packed word tail in callsite ordinal order.",
+    "Counts native layouts, imports and synchronous callsites.",
+    "Layout, field, import and callsite rows precede the packed callsite word tail.",
     (
+        _field("layout_count_u32", U32, "Number of layout rows.", FieldRule.ANY_BITS),
+        _field(
+            "field_count_u32", U32, "Number of typed field rows.", FieldRule.ANY_BITS
+        ),
+        _field(
+            "import_count_u32", U32, "Number of native imports.", FieldRule.ANY_BITS
+        ),
         _field(
             "callsite_count_u32", U32, "Number of callsite rows.", FieldRule.ANY_BITS
         ),
     ),
 )
 
-NATIVE_CALLSITE_ROW = _record(
-    "native_callsite_row",
-    "Names a required native entry and its immutable operand record.",
-    "Word ranges partition the tail in row order. The provider verifies the record at linking.",
+NATIVE_LAYOUT_ROW = _record(
+    "native_layout_row",
+    "Describes an ordered fixed record of typed selectors and child ranges.",
+    "Field slices partition the field table. Child layouts precede parents. "
+    "The stride and depth are derived from the fields, not host structure layout.",
+    (
+        _field("field_base_u32", U32, "First field row.", FieldRule.ANY_BITS),
+        _field(
+            "word_count_u32", U32, "Fixed record stride in words.", FieldRule.ANY_BITS
+        ),
+        _field("field_count_u16", U16, "Number of fields.", FieldRule.ANY_BITS),
+        _field("depth_u16", U16, "Maximum child nesting depth.", FieldRule.ANY_BITS),
+    ),
+)
+
+NATIVE_FIELD_ROW = _record(
+    "native_field_row",
+    "One exact scalar, ref or range field, optionally a result destination.",
+    "Scalar kinds reuse signature scalar IDs; 0x100 is a ref and 0x200 a range. "
+    "Bit 15 marks scalar/ref results. Each selector occupies one word and a "
+    "range occupies two words. Empty ranges retain their element layout.",
     (
         _field(
-            "function_ordinal_u16", U16, "Caller function ordinal.", FieldRule.ANY_BITS
+            "kind_u16", U16, "Exact type kind and result direction.", FieldRule.ANY_BITS
         ),
+        _field(
+            "type_ordinal_u16",
+            U16,
+            "Ref or child layout ordinal; zero for scalars.",
+            FieldRule.ANY_BITS,
+        ),
+    ),
+)
+
+NATIVE_IMPORT_ROW = _record(
+    "native_import_row",
+    "Declares an exact-version native import and its required record layout.",
+    "Linking compares resolved types and structure, never module-local ordinals. "
+    "Scratch contributions are implementation-owned and are not serialized.",
+    (
         _field(
             "module_name_u16",
             U16,
@@ -188,8 +227,22 @@ NATIVE_CALLSITE_ROW = _record(
             "Required native export name.",
             FieldRuleUse(FieldRule.ORDINAL, data=OrdinalDomain.STRING_NONEMPTY),
         ),
+        _field("layout_ordinal_u16", U16, "Root layout ordinal.", FieldRule.ANY_BITS),
         _field("zero_padding_u16", U16, "Canonical zero padding.", FieldRule.ZERO),
         _field("version_u32", U32, "Exact native schema version.", FieldRule.ANY_BITS),
+    ),
+)
+
+NATIVE_CALLSITE_ROW = _record(
+    "native_callsite_row",
+    "Selects a typed native import and an immutable physical operand record.",
+    "Word ranges partition the tail in row order. Image admission validates "
+    "selectors, canonical nested ranges and distinct result destinations.",
+    (
+        _field(
+            "function_ordinal_u16", U16, "Caller function ordinal.", FieldRule.ANY_BITS
+        ),
+        _field("import_ordinal_u16", U16, "Native import ordinal.", FieldRule.ANY_BITS),
         _field(
             "word_offset_u32",
             U32,
@@ -205,7 +258,7 @@ NATIVE_CALLSITE_ROW = _record(
 NATIVE_CALL_WORD = _record(
     "native_call_word",
     "One immutable native callsite word.",
-    "Provider schemas assign selector, count and child-offset semantics at linking.",
+    "The imported layout assigns selector, count and child-offset semantics.",
     (_field("value_u32", U32, "Record word.", FieldRule.ANY_BITS),),
 )
 

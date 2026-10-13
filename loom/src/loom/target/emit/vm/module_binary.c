@@ -233,10 +233,28 @@ static iree_status_t loom_vm_program_write_native_calls(
   IREE_RETURN_IF_ERROR(loom_vm_section_begin(
       stream, base_offset, IREE_VM_BYTECODE_SECTION_NATIVE_CALLS, row, &start));
   const iree_vm_bytecode_v0_native_calls_header_t header = {
+      .layout_count_u32 = plan->native_layout_count,
+      .field_count_u32 = plan->native_field_count,
+      .import_count_u32 = plan->native_import_count,
       .callsite_count_u32 = plan->native_call_count,
   };
   IREE_RETURN_IF_ERROR(iree_io_stream_write(stream, sizeof(header), &header));
   iree_status_t status = iree_ok_status();
+  for (const loom_vm_native_layout_plan_t* layout = plan->native_layouts;
+       layout && iree_status_is_ok(status); layout = layout->next) {
+    status = iree_io_stream_write(stream, sizeof(layout->row), &layout->row);
+  }
+  for (const loom_vm_native_layout_plan_t* layout = plan->native_layouts;
+       layout && iree_status_is_ok(status); layout = layout->next) {
+    status = iree_io_stream_write(
+        stream, layout->row.field_count_u16 * sizeof(*layout->fields),
+        layout->fields);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_io_stream_write(
+        stream, plan->native_import_count * sizeof(*plan->native_imports),
+        plan->native_imports);
+  }
   for (const loom_vm_native_callsite_plan_t* callsite = plan->native_calls;
        callsite && iree_status_is_ok(status); callsite = callsite->next) {
     status =

@@ -6,7 +6,26 @@
 
 #include "loom/target/arch/vm/types.h"
 
+#include "iree/vm/bytecode/wire/module.h"
 #include "loom/ops/type_registry.h"
+
+uint16_t loom_vm_type_scalar_kind(loom_type_t type) {
+  static const uint16_t kScalarKinds[LOOM_SCALAR_TYPE_COUNT_] = {
+      [LOOM_SCALAR_TYPE_I1] = IREE_VM_BYTECODE_SIGNATURE_KIND_I32,
+      [LOOM_SCALAR_TYPE_I8] = IREE_VM_BYTECODE_SIGNATURE_KIND_I8,
+      [LOOM_SCALAR_TYPE_I16] = IREE_VM_BYTECODE_SIGNATURE_KIND_I16,
+      [LOOM_SCALAR_TYPE_I32] = IREE_VM_BYTECODE_SIGNATURE_KIND_I32,
+      [LOOM_SCALAR_TYPE_I64] = IREE_VM_BYTECODE_SIGNATURE_KIND_I64,
+      [LOOM_SCALAR_TYPE_F8E4M3] = IREE_VM_BYTECODE_SIGNATURE_KIND_F8E4M3FN,
+      [LOOM_SCALAR_TYPE_F8E5M2] = IREE_VM_BYTECODE_SIGNATURE_KIND_F8E5M2,
+      [LOOM_SCALAR_TYPE_F16] = IREE_VM_BYTECODE_SIGNATURE_KIND_F16,
+      [LOOM_SCALAR_TYPE_BF16] = IREE_VM_BYTECODE_SIGNATURE_KIND_BF16,
+      [LOOM_SCALAR_TYPE_F32] = IREE_VM_BYTECODE_SIGNATURE_KIND_F32,
+      [LOOM_SCALAR_TYPE_F64] = IREE_VM_BYTECODE_SIGNATURE_KIND_F64,
+  };
+  return loom_type_is_scalar(type) ? kScalarKinds[loom_type_element_type(type)]
+                                   : 0;
+}
 
 const loom_type_reference_key_t* loom_vm_type_reference_key(
     const loom_module_t* module, loom_type_t type) {

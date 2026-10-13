@@ -32,11 +32,13 @@ typedef struct iree_vm_bytecode_assembler_module_view_t {
   uint64_t string_data_offset;
 } iree_vm_bytecode_assembler_module_view_t;
 
-// Validates semantic relationships in an assembled module before publication.
+// Finalizes derived declaration geometry and validates semantic relationships
+// in an assembled module before publication.
 // All local field, extent, and symbolic-reference constraints must already have
 // been established by parsing, layout, and fixup resolution.
-iree_status_t iree_vm_bytecode_assembler_module_validate(
-    const iree_vm_bytecode_assembler_module_view_t* view);
+iree_status_t iree_vm_bytecode_assembler_module_finalize(
+    const iree_vm_bytecode_assembler_module_view_t* view,
+    iree_allocator_t scratch_allocator);
 
 #ifdef __cplusplus
 }  // extern "C"

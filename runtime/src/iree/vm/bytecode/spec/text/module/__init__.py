@@ -134,6 +134,14 @@ class SignatureBody(NamedTuple):
     kind_table: NumericTable
 
 
+class NativeLayoutBody(NamedTuple):
+    """Ordered typed fields, with result leaves and referenced range layouts."""
+
+    row_record: WireRecord
+    field_record: WireRecord
+    kind_table: NumericTable
+
+
 class FunctionBody(NamedTuple):
     """Reads or writes one function's switch table and instruction stream."""
 
@@ -171,6 +179,7 @@ GrammarElement: TypeAlias = (
     | NestedBody
     | QuotedBlob
     | SignatureBody
+    | NativeLayoutBody
     | FunctionBody
     | HexBlob
     | MetadataValue

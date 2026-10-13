@@ -490,8 +490,14 @@ loom_target_low_legality_resolve_dialect_type(const loom_module_t* module,
   iree_string_view_t name = loom_string_table_get(&module->strings, name_id);
   const loom_type_descriptor_t* descriptor =
       loom_type_registry_lookup(module->context, name);
-  if (descriptor == NULL ||
-      descriptor->param_count != loom_type_dialect_param_count(type)) {
+  if (descriptor == NULL) {
+    return NULL;
+  }
+  const uint16_t parameter_count = loom_type_dialect_param_count(type);
+  if (iree_any_bit_set(descriptor->parameter_flags,
+                       LOOM_TYPE_PARAMETER_FLAG_VARIADIC)
+          ? parameter_count < descriptor->param_count
+          : parameter_count != descriptor->param_count) {
     return NULL;
   }
   return descriptor;

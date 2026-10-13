@@ -29,7 +29,8 @@ IREE_BENCHMARK_FN(BM_VerifyInstructions) {
   iree_status_t status = InitializeFixture(&fixture);
   if (iree_status_is_ok(status)) {
     status = iree_vm_bytecode_verify_module_structure(
-        iree_const_cast_byte_span(fixture.contents), &plan);
+        iree_const_cast_byte_span(fixture.contents), iree_allocator_system(),
+        &plan);
   }
   std::vector<uint32_t> block_offsets;
   if (iree_status_is_ok(status)) {
@@ -70,7 +71,8 @@ IREE_BENCHMARK_FN(BM_VerifyLayout) {
   }
   while (iree_status_is_ok(status) &&
          iree_benchmark_keep_running(benchmark_state, 1)) {
-    status = iree_vm_bytecode_verify_module_layout(&plan);
+    status =
+        iree_vm_bytecode_verify_module_layout(&plan, iree_allocator_system());
   }
   iree_vm_bytecode_module_fixture_deinitialize(&fixture);
   return status;

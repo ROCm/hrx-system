@@ -22,6 +22,30 @@ extern "C" {
 // plan construction and remain valid only while those bytes remain live and
 // bitwise stable.
 
+// Native declarations are mapped without decoding or copying their rows.
+static_assert(
+    sizeof(iree_vm_native_call_layout_t) ==
+            sizeof(iree_vm_bytecode_v0_native_layout_row_t) &&
+        offsetof(iree_vm_native_call_layout_t, field_base) ==
+            offsetof(iree_vm_bytecode_v0_native_layout_row_t, field_base_u32) &&
+        offsetof(iree_vm_native_call_layout_t, word_count) ==
+            offsetof(iree_vm_bytecode_v0_native_layout_row_t, word_count_u32) &&
+        offsetof(iree_vm_native_call_layout_t, field_count) ==
+            offsetof(iree_vm_bytecode_v0_native_layout_row_t,
+                     field_count_u16) &&
+        offsetof(iree_vm_native_call_layout_t, depth) ==
+            offsetof(iree_vm_bytecode_v0_native_layout_row_t, depth_u16),
+    "native layout views must match the wire representation");
+static_assert(sizeof(iree_vm_native_call_field_t) ==
+                      sizeof(iree_vm_bytecode_v0_native_field_row_t) &&
+                  offsetof(iree_vm_native_call_field_t, kind) ==
+                      offsetof(iree_vm_bytecode_v0_native_field_row_t,
+                               kind_u16) &&
+                  offsetof(iree_vm_native_call_field_t, type_ordinal) ==
+                      offsetof(iree_vm_bytecode_v0_native_field_row_t,
+                               type_ordinal_u16),
+              "native field views must match the wire representation");
+
 // Mapped canonical image envelope.
 typedef struct iree_vm_bytecode_image_layout_t {
   // Fixed image header at byte zero.
@@ -186,6 +210,13 @@ typedef struct iree_vm_bytecode_metadata_table_t {
 
 // Mapped native callsite declarations and their packed word records.
 typedef struct iree_vm_bytecode_native_call_table_t {
+  // Typed declaration table shared by all native imports. The root ordinal is
+  // supplied by each import; this table view has root zero.
+  iree_vm_native_call_schema_t schema;
+  // Exact-version native imports in ordinal order.
+  const iree_vm_bytecode_v0_native_import_row_t* imports;
+  // Number of native imports.
+  uint32_t import_count;
   // Native callsite rows in ordinal order.
   const iree_vm_bytecode_v0_native_callsite_row_t* rows;
   // Packed immutable callsite word tail.

@@ -34,6 +34,7 @@ from iree.vm.bytecode.spec.text.module import (
     MetadataValue,
     ModuleShell,
     ModuleTextFormat,
+    NativeLayoutBody,
     NestedBody,
     NullableSymbolReference,
     NumericField,
@@ -220,6 +221,16 @@ def _validate_grammar_element(
             offset_field.rule.kind == module_rules.FieldRule.STRING_OFFSET,
             f"{grammar.name}: quoted blob does not own a string offset",
         )
+    elif isinstance(element, NativeLayoutBody):
+        require(
+            element.row_record == grammar.record == records.NATIVE_LAYOUT_ROW
+            and element.field_record == records.NATIVE_FIELD_ROW,
+            f"{grammar.name}: invalid native-layout records",
+        )
+        require(
+            element.kind_table in specification.module_format.numeric_tables,
+            f"{grammar.name}: invalid native scalar-kind table",
+        )
     elif isinstance(element, SignatureBody):
         kind_field = _wire_field(element.descriptor_record, "kind_u16")
         type_field = _wire_field(element.descriptor_record, "type_ordinal_u16")
@@ -362,6 +373,9 @@ def _grammar_field_owners(grammar: RecordGrammar) -> dict[WireRecord, set[str]]:
                 own(element.parent_record, element.count_field_name)
         elif isinstance(element, QuotedBlob):
             own(element.offset_record, "byte_offset_u32")
+        elif isinstance(element, NativeLayoutBody):
+            own(element.row_record, *_field_names(element.row_record))
+            own(element.field_record, *_field_names(element.field_record))
         elif isinstance(element, SignatureBody):
             own(element.row_record, *_field_names(element.row_record))
             own(element.descriptor_record, *_field_names(element.descriptor_record))

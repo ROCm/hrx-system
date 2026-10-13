@@ -27,7 +27,8 @@ class BytecodeProcessTest : public ::testing::Test {
                               files[0].size),
         iree_allocator_system(), &module_fixture_));
     IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
-        iree_const_cast_byte_span(module_fixture_.contents), &plan_));
+        iree_const_cast_byte_span(module_fixture_.contents),
+        iree_allocator_system(), &plan_));
     image_.layout = plan_.layout;
     image_.process_layout = plan_.process_layout;
     IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(),

@@ -390,6 +390,9 @@ def _print_dialect_type(
     from loom.assembly import (
         TypeOf as AsmTypeOf,
     )
+    from loom.assembly import (
+        TypesOf as AsmTypesOf,
+    )
 
     name: str = dialect_type.name
     params = dialect_type.params
@@ -418,6 +421,14 @@ def _print_dialect_type(
                             print_type(params[param_index], context, type_registry)
                         )
                         param_index += 1
+                case AsmTypesOf():
+                    parts.append(
+                        ", ".join(
+                            print_type(parameter, context, type_registry)
+                            for parameter in params[param_index:]
+                        )
+                    )
+                    param_index = len(params)
                 case AsmAttr(field=_field_name):
                     if param_index < len(params):
                         p = params[param_index]

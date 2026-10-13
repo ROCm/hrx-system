@@ -47,7 +47,8 @@ class ModuleVerificationTest : public ::testing::Test {
     contents_ = iree_const_cast_byte_span(fixture_.contents);
     ASSERT_TRUE(iree_host_ptr_has_alignment(contents_.data,
                                             IREE_VM_BYTECODE_IMAGE_ALIGNMENT));
-    IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(contents_, &plan_));
+    IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
+        contents_, iree_allocator_system(), &plan_));
   }
 
   void TearDown() override {
@@ -70,7 +71,8 @@ class ModuleVerificationTest : public ::testing::Test {
     IREE_EXPECT_STATUS_IS(
         expected_code,
         iree_vm_bytecode_verify_module_structure(
-            iree_make_const_byte_span(bytes.data(), bytes.size()), &output));
+            iree_make_const_byte_span(bytes.data(), bytes.size()),
+            iree_allocator_system(), &output));
     EXPECT_EQ(output.layout.image.header,
               reinterpret_cast<const iree_vm_bytecode_v0_image_header_t*>(
                   uintptr_t{1}));
@@ -116,7 +118,8 @@ class ModuleVerificationTest : public ::testing::Test {
   void ExpectInstructionsRejected(std::vector<uint8_t> bytes) const {
     iree_vm_bytecode_module_plan_t plan = {};
     IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
-        iree_make_const_byte_span(bytes.data(), bytes.size()), &plan));
+        iree_make_const_byte_span(bytes.data(), bytes.size()),
+        iree_allocator_system(), &plan));
     std::vector<uint32_t> block_offsets(
         plan.layout.functions.maximum_block_count);
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -190,7 +193,8 @@ TEST_F(CoreExecutionModuleVerificationTest,
        RejectsDistinctRepresentativesForEqualCallableSignatures) {
   const iree_const_byte_span_t contents = this->contents();
   iree_vm_bytecode_module_plan_t plan = {};
-  IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(contents, &plan));
+  IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
+      contents, iree_allocator_system(), &plan));
   ASSERT_GT(plan.layout.signatures.count, 9u);
   ASSERT_GT(plan.layout.callable_types.count, 2u);
 
@@ -201,7 +205,8 @@ TEST_F(CoreExecutionModuleVerificationTest,
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_vm_bytecode_verify_module_structure(
-          iree_make_const_byte_span(bytes.data(), bytes.size()), &plan));
+          iree_make_const_byte_span(bytes.data(), bytes.size()),
+          iree_allocator_system(), &plan));
 }
 
 TEST_F(ModuleVerificationTest, MapsCompleteCanonicalImage) {
@@ -395,7 +400,8 @@ TEST_F(ModuleVerificationTest, PlansDirectAccessForAlignedRodata) {
 
   iree_vm_bytecode_module_plan_t plan = {};
   IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
-      iree_make_const_byte_span(image, contents_.data_length), &plan));
+      iree_make_const_byte_span(image, contents_.data_length),
+      iree_allocator_system(), &plan));
   EXPECT_EQ(plan.rodata_storage.copy_length, 0u);
   EXPECT_EQ(plan.rodata_storage.copy_alignment, 0u);
 }
@@ -410,7 +416,8 @@ TEST_F(ModuleVerificationTest, PlansFallbackForActuallyMisalignedRodata) {
 
   iree_vm_bytecode_module_plan_t plan = {};
   IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
-      iree_make_const_byte_span(image, contents_.data_length), &plan));
+      iree_make_const_byte_span(image, contents_.data_length),
+      iree_allocator_system(), &plan));
   EXPECT_EQ(plan.rodata_storage.copy_length, 5u);
   EXPECT_EQ(plan.rodata_storage.copy_alignment, 64u);
 }
@@ -423,7 +430,8 @@ TEST_F(ModuleVerificationTest, AcceptsUnknownSkippableSection) {
 
   iree_vm_bytecode_module_plan_t plan = {};
   IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
-      iree_make_const_byte_span(bytes.data(), bytes.size()), &plan));
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      iree_allocator_system(), &plan));
   EXPECT_EQ(plan.layout.metadata.header, nullptr);
 }
 
@@ -578,7 +586,8 @@ TEST_F(ModuleVerificationTest, PreservesUnknownMetadataTypes) {
       ->value_type_u16 = 7;
   iree_vm_bytecode_module_plan_t plan = {};
   IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
-      iree_make_const_byte_span(bytes.data(), bytes.size()), &plan));
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      iree_allocator_system(), &plan));
   EXPECT_EQ(plan.layout.metadata.entries[0].value_type_u16, 7u);
 }
 
@@ -589,7 +598,8 @@ TEST_F(ModuleVerificationTest, TreatsYieldableAsPermission) {
         ->flags_u16 = IREE_VM_BYTECODE_CALLABLE_TYPE_FLAG_MAY_YIELD;
     iree_vm_bytecode_module_plan_t plan = {};
     IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
-        iree_make_const_byte_span(bytes.data(), bytes.size()), &plan));
+        iree_make_const_byte_span(bytes.data(), bytes.size()),
+        iree_allocator_system(), &plan));
   }
   {
     std::vector<uint8_t> bytes = CopyImage();

@@ -6,7 +6,7 @@
 
 """VM target selection; instruction records remain in the runtime ISA spec."""
 
-from loom.assembly import AttrDict, SymbolRef, TemplateParam
+from loom.assembly import AttrDict, SymbolRef, TemplateParam, TypeOf, TypesOf
 from loom.dsl import (
     ATTR_TYPE_ENUM,
     SYMBOL_DEFINE,
@@ -19,6 +19,8 @@ from loom.dsl import (
     SymbolDefinition,
     TargetFactSpecialization,
     TargetLikeInterface,
+    TypeDef,
+    TypeParam,
 )
 
 vm_ops = Dialect(
@@ -66,3 +68,32 @@ vm_target = Op(
 )
 
 ALL_VM_OPS: tuple[Op, ...] = (vm_target,)
+
+vm_record = TypeDef(
+    "vm.record",
+    params=[TypeParam("fields", variadic=True)],
+    format=[TypesOf("fields")],
+    doc=(
+        "Ordered native ABI record fields. Scalars and managed references are "
+        "leaves; vm.range contains repeated records and vm.out marks result leaves."
+    ),
+)
+vm_range = TypeDef(
+    "vm.range",
+    params=[TypeParam("fields", variadic=True)],
+    format=[TypesOf("fields")],
+    doc=(
+        "Statically grouped native ABI range with the given ordered element fields. "
+        "Its layout is independent of callsite cardinality, including empty ranges."
+    ),
+)
+vm_out = TypeDef(
+    "vm.out",
+    params=[TypeParam("value")],
+    format=[TypeOf("value")],
+    doc=(
+        "A native ABI result scalar or managed-reference leaf, published after "
+        "all input use."
+    ),
+)
+ALL_VM_TYPES: tuple[TypeDef, ...] = (vm_record, vm_range, vm_out)

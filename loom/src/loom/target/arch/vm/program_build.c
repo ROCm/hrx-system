@@ -11,6 +11,7 @@
 
 #include "iree/io/vec_stream.h"
 #include "iree/vm/bytecode/wire/core.h"
+#include "iree/vm/native_call.h"
 #include "loom/ir/module.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/low/ops.h"
@@ -93,21 +94,6 @@ static int loom_vm_import_compare(const void* lhs_ptr, const void* rhs_ptr) {
 
 static iree_status_t loom_vm_signature_type(loom_type_t type,
                                             uint16_t* out_kind) {
-  // Logical scalar tags are stable, small, and independent of cell width.
-  // Predicates cross the ABI as canonical zero/one i32 values.
-  static const uint8_t kScalarKinds[LOOM_SCALAR_TYPE_COUNT_] = {
-      [LOOM_SCALAR_TYPE_I1] = IREE_VM_BYTECODE_SIGNATURE_KIND_I32,
-      [LOOM_SCALAR_TYPE_I8] = IREE_VM_BYTECODE_SIGNATURE_KIND_I8,
-      [LOOM_SCALAR_TYPE_I16] = IREE_VM_BYTECODE_SIGNATURE_KIND_I16,
-      [LOOM_SCALAR_TYPE_I32] = IREE_VM_BYTECODE_SIGNATURE_KIND_I32,
-      [LOOM_SCALAR_TYPE_I64] = IREE_VM_BYTECODE_SIGNATURE_KIND_I64,
-      [LOOM_SCALAR_TYPE_F8E4M3] = IREE_VM_BYTECODE_SIGNATURE_KIND_F8E4M3FN,
-      [LOOM_SCALAR_TYPE_F8E5M2] = IREE_VM_BYTECODE_SIGNATURE_KIND_F8E5M2,
-      [LOOM_SCALAR_TYPE_F16] = IREE_VM_BYTECODE_SIGNATURE_KIND_F16,
-      [LOOM_SCALAR_TYPE_BF16] = IREE_VM_BYTECODE_SIGNATURE_KIND_BF16,
-      [LOOM_SCALAR_TYPE_F32] = IREE_VM_BYTECODE_SIGNATURE_KIND_F32,
-      [LOOM_SCALAR_TYPE_F64] = IREE_VM_BYTECODE_SIGNATURE_KIND_F64,
-  };
   const loom_type_t* value_type = loom_type_register_value_type(type);
   if (value_type) {
     if (loom_type_is_buffer(*value_type) ||
@@ -116,9 +102,7 @@ static iree_status_t loom_vm_signature_type(loom_type_t type,
       *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_REF;
       return iree_ok_status();
     }
-    const uint8_t kind = loom_type_is_scalar(*value_type)
-                             ? kScalarKinds[loom_type_element_type(*value_type)]
-                             : 0;
+    const uint16_t kind = loom_vm_type_scalar_kind(*value_type);
     if (kind) {
       *out_kind = kind;
       return iree_ok_status();
@@ -313,6 +297,7 @@ static iree_status_t loom_vm_program_resolve_signatures(
     const loom_module_t* module, iree_arena_allocator_t* scratch_arena,
     loom_vm_program_build_t* program, loom_vm_reference_plan_t* references) {
   iree_status_t status = iree_ok_status();
+  loom_vm_native_layout_plan_t** layouts_by_type = NULL;
   for (uint32_t i = 0; i < program->count && iree_status_is_ok(status); ++i) {
     loom_vm_program_callable_t* entry = &program->values[i];
     iree_vm_bytecode_v0_signature_descriptor_row_t* descriptors =
@@ -366,9 +351,36 @@ static iree_status_t loom_vm_program_resolve_signatures(
         .count = iree_min(16, iree_max(row->argument_ref_count_u16,
                                        row->result_ref_count_u16)),
     };
+    if (iree_status_is_ok(status) && entry->native) {
+      if (!layouts_by_type) {
+        status = iree_arena_allocate_array(scratch_arena, module->types.count,
+                                           sizeof(*layouts_by_type),
+                                           (void**)&layouts_by_type);
+        if (iree_status_is_ok(status)) {
+          memset(layouts_by_type, 0,
+                 module->types.count * sizeof(*layouts_by_type));
+        }
+      }
+      if (iree_status_is_ok(status)) {
+        status = loom_vm_native_call_layout_bind(&program->native_calls, module,
+                                                 entry->native, layouts_by_type,
+                                                 references, scratch_arena);
+      }
+    }
   }
   if (iree_status_is_ok(status) &&
       loom_vm_reference_plan_finalize(references)) {
+    for (loom_vm_native_layout_plan_t* layout = program->native_calls.layouts;
+         layout; layout = layout->next) {
+      for (uint32_t j = 0; j < layout->row.field_count_u16; ++j) {
+        iree_vm_bytecode_v0_native_field_row_t* field = &layout->fields[j];
+        if ((field->kind_u16 & ~IREE_VM_NATIVE_CALL_FIELD_RESULT) ==
+            IREE_VM_NATIVE_CALL_FIELD_REF) {
+          field->type_ordinal_u16 = loom_vm_reference_plan_ordinal(
+              references, field->type_ordinal_u16);
+        }
+      }
+    }
     for (uint32_t i = 0; i < program->count; ++i) {
       loom_vm_program_callable_t* entry = &program->values[i];
       if (!entry->signature.row.argument_ref_count_u16 &&
@@ -396,6 +408,25 @@ static iree_status_t loom_vm_program_build_metadata(
   loom_vm_reference_plan_t references = {0};
   IREE_RETURN_IF_ERROR(loom_vm_program_resolve_signatures(
       module, scratch_arena, program, &references));
+  if (program->native_calls.layout_count) {
+    const loom_vm_native_layout_plan_t** layouts = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch_arena, program->native_calls.layout_count, sizeof(*layouts),
+        (void**)&layouts));
+    for (const loom_vm_native_layout_plan_t* layout =
+             program->native_calls.layouts;
+         layout; layout = layout->next) {
+      layouts[layout->ordinal] = layout;
+    }
+    for (uint32_t i = 0; i < program->count; ++i) {
+      const loom_vm_program_callable_t* entry = &program->values[i];
+      if (entry->native) {
+        IREE_RETURN_IF_ERROR(loom_vm_native_call_template_validate(
+            entry->native, layouts, entry->signature.fields,
+            entry->argument_count, scratch_arena));
+      }
+    }
+  }
 
   // Sorted views retain direct call bindings and definition order while
   // interning signatures and imports for canonical runtime tables.
@@ -545,15 +576,37 @@ static iree_status_t loom_vm_program_build_metadata(
     };
     strings[string_count++] = entry->import.symbol_name;
   }
+  iree_vm_bytecode_v0_native_import_row_t* native_imports = NULL;
+  if (native_count) {
+    if (native_count > 65536) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "VM native import count exceeds u16 ordinals");
+    }
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(plan_arena, native_count,
+                                                   sizeof(*native_imports),
+                                                   (void**)&native_imports));
+  }
+  uint32_t native_import_count = 0;
   for (uint32_t i = 0; i < program->count; ++i) {
     loom_vm_program_callable_t* entry = &program->values[i];
     if (entry->native) {
-      entry->native->module_name = (uint16_t)string_count;
+      entry->native->import_ordinal = (uint16_t)native_import_count;
+      native_imports[native_import_count++] =
+          (iree_vm_bytecode_v0_native_import_row_t){
+              .module_name_u16 = (uint16_t)string_count,
+              .export_name_u16 = (uint16_t)(string_count + 1),
+              .layout_ordinal_u16 = entry->native->layout_ordinal,
+              .version_u32 = entry->native->version,
+          };
       strings[string_count++] = entry->import.module_name;
-      entry->native->export_name = (uint16_t)string_count;
       strings[string_count++] = entry->import.symbol_name;
     }
   }
+  out_plan->native_imports = native_imports;
+  out_plan->native_import_count = native_import_count;
+  out_plan->native_layouts = program->native_calls.layouts;
+  out_plan->native_layout_count = program->native_calls.layout_count;
+  out_plan->native_field_count = program->native_calls.field_count;
   IREE_ASSERT_EQ(string_count, string_capacity);
   uint32_t string_byte_length = 0;
   for (uint32_t i = 0; i < string_count; ++i) {

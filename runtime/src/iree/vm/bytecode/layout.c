@@ -297,6 +297,18 @@ static iree_status_t iree_vm_bytecode_map_native_calls(
   const iree_vm_bytecode_v0_native_calls_header_t* header = NULL;
   IREE_VM_BYTECODE_CURSOR_TAKE_ARRAY(
       &cursor, 1, iree_vm_bytecode_v0_native_calls_header_t, &header);
+  IREE_VM_BYTECODE_CURSOR_TAKE_ARRAY(&cursor, header->layout_count_u32,
+                                     iree_vm_native_call_layout_t,
+                                     &out_table->schema.layouts);
+  IREE_VM_BYTECODE_CURSOR_TAKE_ARRAY(&cursor, header->field_count_u32,
+                                     iree_vm_native_call_field_t,
+                                     &out_table->schema.fields);
+  out_table->schema.layout_count = header->layout_count_u32;
+  out_table->schema.field_count = header->field_count_u32;
+  IREE_VM_BYTECODE_CURSOR_TAKE_ARRAY(&cursor, header->import_count_u32,
+                                     iree_vm_bytecode_v0_native_import_row_t,
+                                     &out_table->imports);
+  out_table->import_count = header->import_count_u32;
   IREE_VM_BYTECODE_CURSOR_TAKE_ARRAY(&cursor, header->callsite_count_u32,
                                      iree_vm_bytecode_v0_native_callsite_row_t,
                                      &out_table->rows);

@@ -34,6 +34,7 @@ loom_cc_library(
     "types.c"
   DEPS
     iree::base
+    iree::vm::bytecode::wire
     loom::ir
     loom::ops::type_registry
   PUBLIC
@@ -84,8 +85,11 @@ loom_cc_library(
     "native_call_plan.c"
   DEPS
     ::program
+    ::reference_plan
+    ::types
     iree::base
     iree::base::internal::arena
+    iree::vm
     loom::ir
   PUBLIC
 )
@@ -154,9 +158,11 @@ loom_cc_library(
     ::native_call_plan
     ::program
     ::reference_plan
+    ::types
     iree::base
     iree::base::internal::arena
     iree::io::stream
+    iree::vm
     iree::vm::bytecode::wire
     loom::codegen::low::descriptors
     loom::error::emitter

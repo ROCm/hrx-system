@@ -282,15 +282,25 @@ def build_sections(specification: Specification) -> tuple[SectionText, ...]:
         SectionText(
             section["native_calls"],
             (
+                GrammarRun("native_layout", RecordRunCount(records.NATIVE_LAYOUT_ROW)),
+                GrammarRun("native_import", RecordRunCount(records.NATIVE_IMPORT_ROW)),
                 GrammarRun(
                     "native_callsite", RecordRunCount(records.NATIVE_CALLSITE_ROW)
                 ),
             ),
             (
-                *_header_and_rows(
-                    records.NATIVE_CALLS_HEADER,
-                    "callsite_count_u32",
-                    records.NATIVE_CALLSITE_ROW,
+                RecordLayout(records.NATIVE_CALLS_HEADER, FixedLayoutCount(1)),
+                *(
+                    RecordLayout(
+                        record,
+                        HeaderFieldLayoutCount(records.NATIVE_CALLS_HEADER, field),
+                    )
+                    for record, field in (
+                        (records.NATIVE_LAYOUT_ROW, "layout_count_u32"),
+                        (records.NATIVE_FIELD_ROW, "field_count_u32"),
+                        (records.NATIVE_IMPORT_ROW, "import_count_u32"),
+                        (records.NATIVE_CALLSITE_ROW, "callsite_count_u32"),
+                    )
                 ),
                 RecordLayout(records.NATIVE_CALL_WORD, RemainingLayoutCount()),
             ),
@@ -302,6 +312,15 @@ def build_derived_fields() -> tuple[DerivedField, ...]:
     """Builds record fields mechanically derived during assembly."""
 
     return (
+        RecordCountDerivation(
+            records.NATIVE_CALLS_HEADER, "layout_count_u32", records.NATIVE_LAYOUT_ROW
+        ),
+        RecordCountDerivation(
+            records.NATIVE_CALLS_HEADER, "field_count_u32", records.NATIVE_FIELD_ROW
+        ),
+        RecordCountDerivation(
+            records.NATIVE_CALLS_HEADER, "import_count_u32", records.NATIVE_IMPORT_ROW
+        ),
         RecordCountDerivation(
             records.NATIVE_CALLS_HEADER,
             "callsite_count_u32",

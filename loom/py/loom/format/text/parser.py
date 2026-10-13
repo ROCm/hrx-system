@@ -1308,6 +1308,8 @@ def parse_type_from_tokens(
             if type_def.omits_empty_parameter_list and not tokenizer.at(
                 TokenKind.LANGLE
             ):
+                if not type_def.uses_attribute_parameters:
+                    return DialectType(type_def.name)
                 try:
                     return type_def()
                 except (TypeError, ValueError) as error:

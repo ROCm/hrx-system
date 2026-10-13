@@ -265,12 +265,15 @@ static iree_status_t iree_vm_bytecode_module_create_from_plan(
           &plan->layout.native_calls.rows[i];
       const iree_vm_bytecode_v0_function_row_t* function =
           &plan->layout.functions.rows[row->function_ordinal_u16];
+      const iree_vm_bytecode_v0_native_import_row_t* import =
+          &plan->layout.native_calls.imports[row->import_ordinal_u16];
       callsites[i] = (iree_vm_native_callsite_t){
           .module_name = iree_vm_bytecode_string_at(&plan->layout.strings,
-                                                    row->module_name_u16),
+                                                    import->module_name_u16),
           .export_name = iree_vm_bytecode_string_at(&plan->layout.strings,
-                                                    row->export_name_u16),
-          .version = row->version_u32,
+                                                    import->export_name_u16),
+          .version = import->version_u32,
+          .schema = plan->layout.native_calls.schema,
           .function_ordinal = row->function_ordinal_u16,
           .record = plan->layout.native_calls.words + row->word_offset_u32,
           .word_count = row->word_count_u32,
@@ -282,6 +285,7 @@ static iree_status_t iree_vm_bytecode_module_create_from_plan(
                   .local_byte_length = function->local_byte_length_u16,
               },
       };
+      callsites[i].schema.root_ordinal = import->layout_ordinal_u16;
     }
   }
 

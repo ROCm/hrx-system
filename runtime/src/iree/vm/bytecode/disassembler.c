@@ -1001,6 +1001,60 @@ static iree_status_t iree_vm_bytecode_disassembler_signature(
       callable_domain);
 }
 
+static iree_status_t iree_vm_bytecode_disassembler_native_layout(
+    iree_vm_bytecode_disassembler_t* disassembler, const uint8_t* row_bytes,
+    const uint8_t** program_ptr) {
+  const uint8_t* program = *program_ptr;
+  const uint8_t kind_table = *program++;
+  const uint8_t ref_domain = *program++;
+  const uint8_t layout_domain = *program++;
+  *program_ptr = program;
+  const iree_vm_bytecode_v0_native_layout_row_t* row =
+      (const iree_vm_bytecode_v0_native_layout_row_t*)row_bytes;
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_disassembler_write_cstring(disassembler, "("));
+  for (uint32_t i = 0; i < row->field_count_u16; ++i) {
+    if (i) {
+      IREE_RETURN_IF_ERROR(
+          iree_vm_bytecode_disassembler_write_cstring(disassembler, ", "));
+    }
+    const iree_vm_bytecode_v0_native_field_row_t* field =
+        (const iree_vm_bytecode_v0_native_field_row_t*)
+            iree_vm_bytecode_disassembler_record_at(
+                &disassembler->reader,
+                IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_FIELD_ROW,
+                row->field_base_u32 + i);
+    const uint16_t kind = field->kind_u16 & ~IREE_VM_NATIVE_CALL_FIELD_RESULT;
+    if (field->kind_u16 & IREE_VM_NATIVE_CALL_FIELD_RESULT) {
+      IREE_RETURN_IF_ERROR(
+          iree_vm_bytecode_disassembler_write_cstring(disassembler, "out "));
+    }
+    if (kind == IREE_VM_NATIVE_CALL_FIELD_RANGE) {
+      IREE_RETURN_IF_ERROR(
+          iree_vm_bytecode_disassembler_write_cstring(disassembler, "["));
+      IREE_RETURN_IF_ERROR(iree_vm_bytecode_disassembler_symbol_reference(
+          disassembler, layout_domain, field->type_ordinal_u16));
+      IREE_RETURN_IF_ERROR(
+          iree_vm_bytecode_disassembler_write_cstring(disassembler, "]"));
+    } else {
+      const iree_vm_bytecode_disassembler_numeric_value_t* spelling =
+          iree_vm_bytecode_disassembler_find_numeric(kind_table, kind);
+      IREE_RETURN_IF_ERROR(iree_vm_bytecode_disassembler_write(
+          disassembler,
+          iree_vm_bytecode_disassembler_text_at(spelling->name_offset)));
+      if (kind == IREE_VM_NATIVE_CALL_FIELD_REF) {
+        IREE_RETURN_IF_ERROR(
+            iree_vm_bytecode_disassembler_write_cstring(disassembler, "("));
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_disassembler_symbol_reference(
+            disassembler, ref_domain, field->type_ordinal_u16));
+        IREE_RETURN_IF_ERROR(
+            iree_vm_bytecode_disassembler_write_cstring(disassembler, ")"));
+      }
+    }
+  }
+  return iree_vm_bytecode_disassembler_write_cstring(disassembler, ")");
+}
+
 static iree_status_t iree_vm_bytecode_disassembler_metadata_value(
     iree_vm_bytecode_disassembler_t* disassembler, uint16_t type,
     iree_const_byte_span_t value) {
@@ -1246,6 +1300,9 @@ static iree_status_t iree_vm_bytecode_disassembler_grammar(
       IREE_RETURN_IF_ERROR(iree_vm_bytecode_disassembler_quoted_bytes(
           disassembler, iree_make_const_byte_span(
                             reader->tails[tail].data + begin, end - begin)));
+    } else if (opcode == IREE_VM_BYTECODE_DISASSEMBLER_FORMAT_NATIVE_LAYOUT) {
+      IREE_RETURN_IF_ERROR(iree_vm_bytecode_disassembler_native_layout(
+          disassembler, row, &program));
     } else if (opcode == IREE_VM_BYTECODE_DISASSEMBLER_FORMAT_SIGNATURE) {
       IREE_RETURN_IF_ERROR(
           iree_vm_bytecode_disassembler_signature(disassembler, row, &program));
@@ -1400,8 +1457,8 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_disassemble_module(
   IREE_ASSERT_ARGUMENT(write_callback.fn);
 
   iree_vm_bytecode_module_plan_t plan;
-  IREE_RETURN_IF_ERROR(
-      iree_vm_bytecode_verify_module_structure(contents, &plan));
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_module_structure(
+      contents, scratch_allocator, &plan));
 
   uint32_t
       inline_block_offsets[IREE_VM_BYTECODE_DISASSEMBLER_INLINE_BLOCK_COUNT];

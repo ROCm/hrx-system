@@ -45,6 +45,8 @@ typedef enum loom_type_format_kind_e {
   LOOM_TYPE_FMT_PARAM_KEY = 9,
   // Explicit view element-access alignment in bytes.
   LOOM_TYPE_FMT_ALIGNMENT = 10,
+  // Comma-separated trailing type parameters.
+  LOOM_TYPE_FMT_TYPES = 11,
 } loom_type_format_kind_t;
 
 // Compact format instruction for a descriptor-backed type interior.
@@ -80,14 +82,22 @@ typedef struct loom_type_reference_key_t {
   iree_string_view_t type_name;
 } loom_type_reference_key_t;
 
+enum loom_type_parameter_flag_bits_e {
+  // Zero or more trailing type parameters follow the fixed prefix.
+  LOOM_TYPE_PARAMETER_FLAG_VARIADIC = 1u << 0,
+};
+typedef uint8_t loom_type_parameter_flags_t;
+
 // Generated metadata for one registered type spelling and representation.
 typedef struct loom_type_descriptor_t {
   // B-string name with a trailing `<` outside its declared length.
   const uint8_t* name;
   // Runtime IR type kind constructed when parsing.
   loom_type_kind_t ir_kind;
-  // Number of declared parameters.
+  // Number of fixed parameters, excluding a variadic tail when present.
   uint8_t param_count;
+  // Cardinality contract of the representation-specific type parameters.
+  loom_type_parameter_flags_t parameter_flags;
   // Optional type-owned value fact domain.
   const loom_value_fact_domain_t* fact_domain;
   // Semantic role and target-contract families for this type.

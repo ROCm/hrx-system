@@ -34,6 +34,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:type_registry",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/vm/bytecode:wire",
     ],
 )
 
@@ -75,9 +76,12 @@ loom_cc_library(
     hdrs = ["native_call_plan.h"],
     deps = [
         ":program",
+        ":reference_plan",
+        ":types",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/vm",
     ],
 )
 
@@ -138,6 +142,7 @@ loom_cc_library(
         ":native_call_plan",
         ":program",
         ":reference_plan",
+        ":types",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/ir",
@@ -148,6 +153,7 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/vm",
         "//runtime/src/iree/vm/bytecode:wire",
     ],
 )

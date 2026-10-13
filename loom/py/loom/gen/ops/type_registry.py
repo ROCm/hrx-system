@@ -110,6 +110,7 @@ def _translate_type_format_elements(
         ScalarOf,
         ShapeOf,
         TypeOf,
+        TypesOf,
     )
 
     param_names = [p.name for p in type_def.params]
@@ -129,6 +130,8 @@ def _translate_type_format_elements(
                 return [f"{{LOOM_TYPE_FMT_ALIGNMENT, {param_index(field)}, 0}}"]
             case TypeOf(field=field):
                 return [f"{{LOOM_TYPE_FMT_TYPE, {param_index(field)}, 0}}"]
+            case TypesOf(field=field):
+                return [f"{{LOOM_TYPE_FMT_TYPES, {param_index(field)}, 0}}"]
             case Attr(field=field):
                 return [f"{{LOOM_TYPE_FMT_ATTR, {param_index(field)}, 0}}"]
             case Param(field=field):
@@ -273,6 +276,9 @@ def _append_type_definition_source(source: list[str], all_types: Sequence[Any]) 
         ident = _type_c_ident(type_def.name)
         ir_kind = type_ir_kind_c_name(type_def) if type_def.uses_attribute_parameters else TYPE_IR_KIND_MAP[type_def.ir_kind]
         param_count = len(type_def.params)
+        variadic = bool(type_def.params and getattr(type_def.params[-1], "variadic", False))
+        if variadic:
+            param_count -= 1
         fact_domain = _type_fact_domain_symbol(type_def)
         if type_def.format:
             elements = _translate_type_format_elements(type_def)
@@ -291,6 +297,8 @@ def _append_type_definition_source(source: list[str], all_types: Sequence[Any]) 
         source.append(f"    .ir_kind = {ir_kind},")
         if param_count != 0:
             source.append(f"    .param_count = {param_count},")
+        if variadic:
+            source.append("    .parameter_flags = LOOM_TYPE_PARAMETER_FLAG_VARIADIC,")
         if fact_domain:
             source.append(f"    .fact_domain = &{fact_domain},")
         _emit_type_semantics(source, type_def)

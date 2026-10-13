@@ -2165,6 +2165,30 @@ class TestOpCategory:
 
 
 class TestTypeDef:
+    def test_variadic_type_parameter_is_a_trailing_dialect_parameter(self) -> None:
+        from loom.assembly import TypesOf
+        from loom.dsl import TypeParam
+
+        declaration = TypeDef(
+            "test.record",
+            params=[TypeParam("fields", variadic=True)],
+            format=[TypesOf("fields")],
+        )
+        assert declaration.params[0].variadic
+        for parameters in (
+            [TypeParam("head", variadic=True), TypeParam("tail")],
+            [TypeParam("head", variadic=True), TypeParam("tail", variadic=True)],
+            [AttrDef("head", "i64"), TypeParam("tail", variadic=True)],
+        ):
+            with _raises(ValueError, match="variadic type parameter must be last"):
+                TypeDef("test.record", params=parameters)
+        with _raises(ValueError, match="variadic type parameter must be last"):
+            TypeDef(
+                "test.record",
+                ir_kind="tensor",
+                params=[TypeParam("fields", variadic=True)],
+            )
+
     def test_semantic_metadata_defaults_to_ordinary(self) -> None:
         type_def = TypeDef("test.handle")
 

@@ -47,7 +47,12 @@ vm.module core(0.0) {
     }
   }
   section native_calls alignment(8) {
-    native_callsite function(@run_function) module(@native) export(@replace) version(0) {
+    native_layout @scalar (i64)
+    native_layout @replace_layout (i64, ref(@buffer_type), out i64, out ref(@buffer_type), [@scalar])
+    native_layout @empty ()
+    native_import @replace_import module(@native) export(@replace) version(0) : @replace_layout
+    native_import @fail_import module(@native) export(@fail) version(0) : @empty
+    native_callsite @run_call function(@run_function) callee(@replace_import) {
       word 0x80000000
       word 0x00000001
       word 0x00000000
@@ -57,7 +62,7 @@ vm.module core(0.0) {
       word 0x00000000
       word 0x00000001
     }
-    native_callsite function(@failure_function) module(@native) export(@replace) version(0) {
+    native_callsite @failure_call function(@failure_function) callee(@replace_import) {
       word 0x80000000
       word 0x00000001
       word 0x00000000
@@ -67,7 +72,7 @@ vm.module core(0.0) {
       word 0x00000000
       word 0x00000001
     }
-    native_callsite function(@failure_function) module(@native) export(@fail) version(0) {
+    native_callsite @fail_call function(@failure_function) callee(@fail_import) {
     }
   }
 }

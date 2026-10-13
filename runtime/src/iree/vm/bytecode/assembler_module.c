@@ -657,8 +657,134 @@ static iree_status_t iree_vm_bytecode_assembler_module_validate_metadata(
       view, header.import_scope_count_u32, header.export_scope_count_u32);
 }
 
-iree_status_t iree_vm_bytecode_assembler_module_validate(
-    const iree_vm_bytecode_assembler_module_view_t* view) {
+static iree_status_t iree_vm_bytecode_assembler_module_native_calls(
+    const iree_vm_bytecode_assembler_module_view_t* view,
+    iree_allocator_t scratch_allocator) {
+  if (view->record_offsets
+          [IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_CALLS_HEADER] == UINT64_MAX) {
+    return iree_ok_status();
+  }
+  const uint32_t layout_count =
+      view->record_counts[IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_LAYOUT_ROW];
+  const uint32_t field_count =
+      view->record_counts[IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_FIELD_ROW];
+  const uint32_t word_count =
+      view->record_counts[IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_CALL_WORD];
+  const uint32_t import_count =
+      view->record_counts[IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_IMPORT_ROW];
+  const uint32_t callsite_count =
+      view->record_counts[IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_CALLSITE_ROW];
+  if (!layout_count || layout_count > 65536 || !import_count ||
+      import_count > 65536 || !callsite_count) {
+    return iree_vm_bytecode_assembler_module_error(
+        "native calls require nonempty layout, import and callsite tables");
+  }
+  iree_host_size_t storage_size = 0, layouts_offset = 0, fields_offset = 0,
+                   words_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      0, &storage_size,
+      IREE_STRUCT_FIELD(layout_count, iree_vm_native_call_layout_t,
+                        &layouts_offset),
+      IREE_STRUCT_FIELD(field_count, iree_vm_native_call_field_t,
+                        &fields_offset),
+      IREE_STRUCT_FIELD(word_count, uint32_t, &words_offset)));
+  uint8_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_uninitialized(
+      scratch_allocator, storage_size, (void**)&storage));
+  iree_vm_native_call_layout_t* layouts =
+      (iree_vm_native_call_layout_t*)(storage + layouts_offset);
+  const iree_vm_native_call_schema_t schema = {
+      .layouts = layouts,
+      .fields = (const iree_vm_native_call_field_t*)(storage + fields_offset),
+      .layout_count = layout_count,
+      .field_count = field_count,
+  };
+  const uint32_t* words = (const uint32_t*)(storage + words_offset);
+  iree_status_t status = iree_vm_bytecode_assembler_module_read(
+      view,
+      view->record_offsets[IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_LAYOUT_ROW],
+      layout_count * sizeof(*layouts), layouts);
+  if (iree_status_is_ok(status) && field_count) {
+    status = iree_vm_bytecode_assembler_module_read(
+        view,
+        view->record_offsets[IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_FIELD_ROW],
+        field_count * sizeof(*schema.fields), storage + fields_offset);
+  }
+  if (iree_status_is_ok(status) && word_count) {
+    status = iree_vm_bytecode_assembler_module_read(
+        view,
+        view->record_offsets[IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_CALL_WORD],
+        word_count * sizeof(*words), storage + words_offset);
+  }
+  for (uint32_t i = 0; i < layout_count && iree_status_is_ok(status); ++i) {
+    iree_vm_native_call_layout_t* row = &layouts[i];
+    for (uint32_t j = 0; j < row->field_count && iree_status_is_ok(status);
+         ++j) {
+      const iree_vm_native_call_field_t field =
+          schema.fields[row->field_base + j];
+      if (field.kind != IREE_VM_NATIVE_CALL_FIELD_RANGE) {
+        continue;
+      }
+      if (field.type_ordinal >= i) {
+        status = iree_vm_bytecode_assembler_module_error(
+            "native range must name an earlier layout");
+      } else {
+        row->depth =
+            iree_max(row->depth, 1u + layouts[field.type_ordinal].depth);
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_native_call_schema_validate(
+        &schema,
+        view->record_counts[IREE_VM_BYTECODE_MODULE_RECORD_REF_TYPE_ENTRY_ROW]);
+  }
+  for (uint32_t i = 0; i < callsite_count && iree_status_is_ok(status); ++i) {
+    iree_vm_bytecode_v0_native_callsite_row_t row;
+    iree_vm_bytecode_v0_native_import_row_t import;
+    iree_vm_bytecode_v0_function_row_t function;
+    status = IREE_VM_BYTECODE_ASSEMBLER_MODULE_READ(
+        view, IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_CALLSITE_ROW, i, &row);
+    if (iree_status_is_ok(status)) {
+      status = IREE_VM_BYTECODE_ASSEMBLER_MODULE_READ(
+          view, IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_IMPORT_ROW,
+          row.import_ordinal_u16, &import);
+    }
+    if (iree_status_is_ok(status)) {
+      status = IREE_VM_BYTECODE_ASSEMBLER_MODULE_READ(
+          view, IREE_VM_BYTECODE_MODULE_RECORD_FUNCTION_ROW,
+          row.function_ordinal_u16, &function);
+    }
+    if (iree_status_is_ok(status)) {
+      iree_vm_native_callsite_t callsite = {
+          .schema = schema,
+          .record = words + row.word_offset_u32,
+          .word_count = row.word_count_u32,
+          .storage = {.value_count = function.value_register_count_u16,
+                      .ref_count = function.ref_register_count_u16 +
+                                   function.local_ref_count_u32,
+                      .local_byte_length = function.local_byte_length_u16},
+      };
+      callsite.schema.root_ordinal = import.layout_ordinal_u16;
+      status = iree_vm_native_call_verify(&callsite, scratch_allocator);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_io_stream_seek(
+        view->stream, IREE_IO_STREAM_SEEK_SET,
+        view->record_offsets[IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_LAYOUT_ROW]);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_io_stream_write(view->stream, layout_count * sizeof(*layouts),
+                                  layouts);
+  }
+  iree_allocator_free(scratch_allocator, storage);
+  return status;
+}
+
+iree_status_t iree_vm_bytecode_assembler_module_finalize(
+    const iree_vm_bytecode_assembler_module_view_t* view,
+    iree_allocator_t scratch_allocator) {
   IREE_RETURN_IF_ERROR(
       iree_vm_bytecode_assembler_module_validate_requirements(view));
   IREE_RETURN_IF_ERROR(
@@ -675,7 +801,10 @@ iree_status_t iree_vm_bytecode_assembler_module_validate(
       iree_vm_bytecode_assembler_module_validate_exports(view));
   IREE_RETURN_IF_ERROR(
       iree_vm_bytecode_assembler_module_validate_presentation(view));
-  return iree_vm_bytecode_assembler_module_validate_metadata(view);
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_assembler_module_validate_metadata(view));
+  return iree_vm_bytecode_assembler_module_native_calls(view,
+                                                        scratch_allocator);
 }
 
 #undef IREE_VM_BYTECODE_ASSEMBLER_MODULE_READ

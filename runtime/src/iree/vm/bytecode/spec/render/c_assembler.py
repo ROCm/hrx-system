@@ -39,6 +39,7 @@ from iree.vm.bytecode.spec.text.module import (
     HexBlob,
     MetadataValue,
     ModuleTextFormat,
+    NativeLayoutBody,
     NestedBody,
     NullableSymbolReference,
     NumericField,
@@ -73,6 +74,7 @@ class _FormatOpcode(enum.IntEnum):
     HEX_BLOB = 0xEB
     METADATA_VALUE = 0xEC
     DECLARE_FLAGS = 0xED
+    NATIVE_LAYOUT = 0xEE
 
 
 class _LayoutKind(enum.IntEnum):
@@ -412,7 +414,7 @@ def _numeric_tables(
                 tables[field.numeric_table.name] = field.numeric_table
     for grammar in module_text.grammars:
         for element in grammar.elements:
-            if isinstance(element, SignatureBody):
+            if isinstance(element, (SignatureBody, NativeLayoutBody)):
                 tables[element.kind_table.name] = element.kind_table
             elif isinstance(element, NumericField):
                 tables[element.table.name] = element.table
@@ -536,6 +538,15 @@ def _encode_grammar_program(
                 )
             )
             append_field(element.offset_record, "byte_offset_u32")
+        elif isinstance(element, NativeLayoutBody):
+            program.extend(
+                (
+                    _FormatOpcode.NATIVE_LAYOUT,
+                    numeric_ids[element.kind_table.name],
+                    domain_ids[SymbolDomain.REF_TYPE],
+                    domain_ids[SymbolDomain.NATIVE_LAYOUT],
+                )
+            )
         elif isinstance(element, SignatureBody):
             program.extend(
                 (

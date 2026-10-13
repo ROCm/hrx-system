@@ -247,9 +247,9 @@ def _load_wasm_generation() -> DialectGeneration:
 
 
 def _load_vm_generation() -> DialectGeneration:
-    from loom.target.arch.vm.dialect import ALL_VM_OPS, vm_ops
+    from loom.target.arch.vm.dialect import ALL_VM_OPS, ALL_VM_TYPES, vm_ops
 
-    return DialectGeneration(vm_ops, list(ALL_VM_OPS), None)
+    return DialectGeneration(vm_ops, list(ALL_VM_OPS), None, types=ALL_VM_TYPES)
 
 
 _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (

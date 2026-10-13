@@ -4163,6 +4163,7 @@ class TypeParam:
     name: str
     constraint: TypeConstraint = TypeConstraint.ANY
     doc: str = ""
+    variadic: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -4404,6 +4405,20 @@ class TypeDef:
     ) -> None:
         frozen_params = tuple(params)
         frozen_format = tuple(format)
+        variadic_parameters = [
+            i
+            for i, parameter in enumerate(frozen_params)
+            if isinstance(parameter, TypeParam) and parameter.variadic
+        ]
+        if variadic_parameters and (
+            ir_kind != "dialect"
+            or variadic_parameters != [len(frozen_params) - 1]
+            or not all(isinstance(parameter, TypeParam) for parameter in frozen_params)
+        ):
+            raise ValueError(
+                f"TypeDef '{name}': a variadic type parameter must be last "
+                "in a dialect type"
+            )
         if semantic is None:
             semantic = (
                 TypeSemantic.MANAGED_REFERENCE
@@ -4553,12 +4568,16 @@ class TypeDef:
 
     @property
     def omits_empty_parameter_list(self) -> bool:
-        """True when absent optional parameters print without angle brackets."""
+        """True when an empty parameter list prints without angle brackets."""
 
         return (
             self.uses_attribute_parameters
             and bool(self.format)
             and all(isinstance(element, OptionalGroup) for element in self.format)
+        ) or (
+            len(self.params) == 1
+            and isinstance(self.params[0], TypeParam)
+            and self.params[0].variadic
         )
 
     def __call__(self, **parameters: Any) -> Any:

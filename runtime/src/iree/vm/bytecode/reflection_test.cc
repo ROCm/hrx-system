@@ -27,7 +27,8 @@ class BytecodeReflectionTest : public ::testing::Test {
                               files[0].size),
         iree_allocator_system(), &fixture_));
     IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
-        iree_const_cast_byte_span(fixture_.contents), &plan_));
+        iree_const_cast_byte_span(fixture_.contents), iree_allocator_system(),
+        &plan_));
     image_.layout = plan_.layout;
   }
 

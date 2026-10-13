@@ -20,6 +20,10 @@ extern "C" {
 const loom_type_reference_key_t* loom_vm_type_reference_key(
     const loom_module_t* module, loom_type_t type);
 
+// Returns the exact VM scalar signature kind, or zero for a non-scalar or an
+// unsupported scalar. Predicates use the ordinary canonical i32 ABI.
+uint16_t loom_vm_type_scalar_kind(loom_type_t type);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -590,6 +590,23 @@ class TestParseFunctionType:
 
 
 class TestParseDialectTypes:
+    def test_variadic_type_parameters_roundtrip(self) -> None:
+        from loom.assembly import TypesOf
+
+        declaration = TypeDef(
+            "test.record",
+            params=[TypeParam("fields", variadic=True)],
+            format=[TypesOf("fields")],
+        )
+        registry = {**self._registry(), declaration.name: declaration}
+        for text in (
+            "test.record",
+            "test.record<i32>",
+            "test.record<i32, hal.buffer, test.record<f32, i64>>",
+        ):
+            value = _parse_type(text, type_registry=registry)
+            assert print_type(value, type_registry=registry) == text
+
     def _registry(self) -> dict[str, TypeDef]:
         registry = {td.name: td for td in ALL_BUILTIN_TYPES}
         # Add custom types.

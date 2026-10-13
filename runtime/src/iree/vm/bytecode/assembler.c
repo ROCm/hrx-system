@@ -1573,6 +1573,84 @@ static iree_status_t iree_vm_bytecode_assembler_parse_signature(
   return iree_ok_status();
 }
 
+static iree_status_t iree_vm_bytecode_assembler_parse_native_layout(
+    iree_vm_bytecode_assembler_t* assembler, uint8_t* row_bytes,
+    const uint8_t** program_ptr) {
+  const uint8_t* program = *program_ptr;
+  const uint8_t kind_table = *program++;
+  const uint8_t ref_domain = *program++;
+  const uint8_t layout_domain = *program++;
+  *program_ptr = program;
+  iree_vm_bytecode_v0_native_layout_row_t row = {
+      .field_base_u32 = iree_vm_bytecode_assembler_record_count(
+          assembler, IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_FIELD_ROW),
+  };
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_char(
+      assembler, '(', "expected '(' before native layout fields"));
+  while (!iree_vm_bytecode_assembler_try_char(assembler, ')')) {
+    if (row.field_count_u16) {
+      IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_char(
+          assembler, ',', "expected native layout field separator"));
+    }
+    if (row.field_count_u16 == UINT16_MAX) {
+      return iree_vm_bytecode_assembler_error(
+          assembler, "native layout field count exceeds u16");
+    }
+    iree_vm_bytecode_v0_native_field_row_t field = {0};
+    const bool is_result =
+        iree_vm_bytecode_assembler_try_literal(assembler, IREE_SV("out"));
+    uint8_t domain = 0;
+    char close = 0;
+    if (iree_vm_bytecode_assembler_try_char(assembler, '[')) {
+      if (is_result) {
+        return iree_vm_bytecode_assembler_error(
+            assembler, "native result direction belongs to leaves, not ranges");
+      }
+      field.kind_u16 = IREE_VM_NATIVE_CALL_FIELD_RANGE;
+      domain = layout_domain;
+      close = ']';
+      row.word_count_u32 += 2;
+    } else {
+      IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_numeric(
+          assembler, kind_table, 2, &field.kind_u16));
+      if (field.kind_u16 == IREE_VM_NATIVE_CALL_FIELD_REF) {
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_char(
+            assembler, '(', "expected '(' before native ref type"));
+        domain = ref_domain;
+        close = ')';
+      } else if (field.kind_u16 > UINT8_MAX ||
+                 !iree_vm_scalar_type_is_valid(
+                     (iree_vm_scalar_type_t)field.kind_u16)) {
+        return iree_vm_bytecode_assembler_error(
+            assembler, "expected native scalar, ref or range type");
+      }
+      if (is_result) {
+        field.kind_u16 |= IREE_VM_NATIVE_CALL_FIELD_RESULT;
+      }
+      ++row.word_count_u32;
+    }
+    uint32_t ordinal = 0;
+    uint64_t offset = 0;
+    IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_append_record(
+        assembler, IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_FIELD_ROW, &ordinal,
+        &offset));
+    if (close) {
+      IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_symbol_fixup(
+          assembler, '@', domain, 2,
+          offset + offsetof(iree_vm_bytecode_v0_native_field_row_t,
+                            type_ordinal_u16),
+          IREE_VM_BYTECODE_ASSEMBLER_FIXUP_ORDINAL, 0, 0, 0, 0));
+      IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_char(
+          assembler, close, "expected native field closing delimiter"));
+    }
+    IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_seek_write(
+        assembler, offset, sizeof(field), &field));
+    ++row.field_count_u16;
+  }
+  memcpy(row_bytes, &row, sizeof(row));
+  return iree_ok_status();
+}
+
 static bool iree_vm_bytecode_assembler_control_flow_is_terminal(
     uint8_t control_flow) {
   return control_flow == IREE_VM_BYTECODE_ASSEMBLER_CONTROL_RETURN ||
@@ -1969,6 +2047,9 @@ static iree_status_t iree_vm_bytecode_assembler_parse_grammar(
       }
       iree_vm_bytecode_assembler_store(row + field_offset, field_width,
                                        relative_offset);
+    } else if (opcode == IREE_VM_BYTECODE_ASSEMBLER_FORMAT_NATIVE_LAYOUT) {
+      IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_native_layout(
+          assembler, row, &program));
     } else if (opcode == IREE_VM_BYTECODE_ASSEMBLER_FORMAT_SIGNATURE) {
       const uint8_t descriptor_record = program[0];
       const uint32_t descriptor_base =
@@ -2819,7 +2900,7 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_assemble_module(
         .string_data_offset =
             assembler.tail_offsets[IREE_VM_BYTECODE_ASSEMBLER_TAIL_STRINGS],
     };
-    status = iree_vm_bytecode_assembler_module_validate(&view);
+    status = iree_vm_bytecode_assembler_module_finalize(&view, host_allocator);
   }
   if (iree_status_is_ok(status)) {
     status = iree_io_vec_stream_move_contents(assembler.stream, out_contents);

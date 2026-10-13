@@ -18,6 +18,7 @@ from iree.vm.bytecode.spec.text.module import (
     HexBlob,
     MetadataValue,
     ModuleShell,
+    NativeLayoutBody,
     NestedBody,
     NullableSymbolReference,
     NumericField,
@@ -132,24 +133,52 @@ def build_grammars(specification: Specification) -> tuple[RecordGrammar, ...]:
 
     return (
         _grammar(
+            "native_layout",
+            records.NATIVE_LAYOUT_ROW,
+            "native_layout @",
+            DeclareSymbol(SymbolDomain.NATIVE_LAYOUT),
+            " ",
+            NativeLayoutBody(
+                records.NATIVE_LAYOUT_ROW,
+                records.NATIVE_FIELD_ROW,
+                _numeric_table(specification, "signature_kind"),
+            ),
+        ),
+        _grammar(
+            "native_import",
+            records.NATIVE_IMPORT_ROW,
+            "native_import @",
+            DeclareSymbol(SymbolDomain.NATIVE_IMPORT),
+            " module(@",
+            _symbol(records.NATIVE_IMPORT_ROW, "module_name_u16", SymbolDomain.STRING),
+            ") export(@",
+            _symbol(records.NATIVE_IMPORT_ROW, "export_name_u16", SymbolDomain.STRING),
+            ") version(",
+            _scalar(records.NATIVE_IMPORT_ROW, "version_u32"),
+            ") : @",
+            _symbol(
+                records.NATIVE_IMPORT_ROW,
+                "layout_ordinal_u16",
+                SymbolDomain.NATIVE_LAYOUT,
+            ),
+        ),
+        _grammar(
             "native_callsite",
             records.NATIVE_CALLSITE_ROW,
-            "native_callsite function(@",
+            "native_callsite @",
+            DeclareSymbol(SymbolDomain.NATIVE_CALLSITE),
+            " function(@",
             _symbol(
                 records.NATIVE_CALLSITE_ROW,
                 "function_ordinal_u16",
                 SymbolDomain.FUNCTION,
             ),
-            ") module(@",
+            ") callee(@",
             _symbol(
-                records.NATIVE_CALLSITE_ROW, "module_name_u16", SymbolDomain.STRING
+                records.NATIVE_CALLSITE_ROW,
+                "import_ordinal_u16",
+                SymbolDomain.NATIVE_IMPORT,
             ),
-            ") export(@",
-            _symbol(
-                records.NATIVE_CALLSITE_ROW, "export_name_u16", SymbolDomain.STRING
-            ),
-            ") version(",
-            _scalar(records.NATIVE_CALLSITE_ROW, "version_u32"),
             ") ",
             _body(
                 "native_word",

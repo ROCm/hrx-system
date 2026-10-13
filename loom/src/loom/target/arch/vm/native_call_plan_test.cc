@@ -26,11 +26,27 @@ class VMNativeCallPlanTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("calls"), &pool_,
                                         nullptr, iree_allocator_system(),
                                         &module_));
-    const char* names[] = {"arguments", "record", "results", "version"};
+    const char* names[] = {"arguments", "record", "results", "version",
+                           "signature"};
     for (size_t i = 0; i < attrs_.size(); ++i) {
       IREE_ASSERT_OK(loom_module_intern_string(
           module_, iree_make_cstring_view(names[i]), &attrs_[i].name_id));
     }
+    loom_string_id_t record_name, range_name, out_name;
+    IREE_ASSERT_OK(
+        loom_module_intern_string(module_, IREE_SV("vm.record"), &record_name));
+    IREE_ASSERT_OK(
+        loom_module_intern_string(module_, IREE_SV("vm.range"), &range_name));
+    IREE_ASSERT_OK(
+        loom_module_intern_string(module_, IREE_SV("vm.out"), &out_name));
+    const loom_type_t scalar = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
+    const loom_type_t fields[] = {scalar,
+                                  loom_type_dialect(out_name, 1, &scalar)};
+    const loom_type_t range = loom_type_dialect(range_name, 2, fields);
+    loom_type_id_t signature;
+    IREE_ASSERT_OK(loom_module_intern_type_id(
+        module_, loom_type_dialect(record_name, 1, &range), &signature));
+    attrs_[4].value = loom_attr_type(signature);
   }
 
   void TearDown() override {
@@ -51,7 +67,7 @@ class VMNativeCallPlanTest : public ::testing::Test {
   }
 
   // Public ABI dictionary storage passed to the constructor.
-  std::array<loom_named_attr_t, 4> attrs_ = {};
+  std::array<loom_named_attr_t, 5> attrs_ = {};
   // Argument placeholder offsets.
   std::vector<int64_t> arguments_ = {2};
   // Root range followed by an input/output record.
@@ -74,8 +90,7 @@ class VMNativeCallPlanTest : public ::testing::Test {
 
 TEST_F(VMNativeCallPlanTest, RetainsIndexedLayoutAndPartitionsCallsites) {
   IREE_ASSERT_OK(Build());
-  call_template_->module_name = 3;
-  call_template_->export_name = 4;
+  call_template_->import_ordinal = 3;
   loom_vm_native_call_plan_t plan = {
       .arena = &arena_,
   };
@@ -88,10 +103,8 @@ TEST_F(VMNativeCallPlanTest, RetainsIndexedLayoutAndPartitionsCallsites) {
     words[call_template_->operand_offsets[0]] = 10 + i;
     words[call_template_->operand_offsets[1]] = 20 + i;
     EXPECT_EQ(plan.tail->row.function_ordinal_u16, i);
-    EXPECT_EQ(plan.tail->row.module_name_u16, 3);
-    EXPECT_EQ(plan.tail->row.export_name_u16, 4);
+    EXPECT_EQ(plan.tail->row.import_ordinal_u16, 3);
     EXPECT_EQ(plan.tail->row.word_offset_u32, i * 4);
-    EXPECT_EQ(plan.tail->row.version_u32, 7);
   }
   EXPECT_EQ(plan.word_count, 12);
   EXPECT_EQ(plan.head->words[2], 10);
@@ -103,6 +116,14 @@ TEST_F(VMNativeCallPlanTest, AcceptsEmptyRecord) {
   arguments_.clear();
   results_.clear();
   words_.clear();
+  const auto signature =
+      loom_type_table_get(&module_->types, attrs_[4].value.type_id);
+  loom_type_id_t empty_signature;
+  IREE_ASSERT_OK(loom_module_intern_type_id(
+      module_,
+      loom_type_dialect(loom_type_dialect_name_id(signature), 0, nullptr),
+      &empty_signature));
+  attrs_[4].value = loom_attr_type(empty_signature);
   IREE_ASSERT_OK(Build(0, 0));
   EXPECT_EQ(call_template_->word_count, 0);
 }

@@ -25,6 +25,18 @@ typedef struct loom_vm_rodata_plan_t {
   uint32_t alignment;
 } loom_vm_rodata_plan_t;
 
+// One typed native record. Lists are in child-before-parent ordinal order.
+typedef struct loom_vm_native_layout_plan_t {
+  // Next layout in serialization order, or NULL at the end.
+  struct loom_vm_native_layout_plan_t* next;
+  // Program-local ordinal assigned when the layout is published.
+  uint16_t ordinal;
+  // Final field slice, stride and depth.
+  iree_vm_bytecode_v0_native_layout_row_t row;
+  // Ordered leaf and range descriptors for this fixed record.
+  iree_vm_bytecode_v0_native_field_row_t* fields;
+} loom_vm_native_layout_plan_t;
+
 // One finalized structured native callsite. Rows and payloads are emitted in
 // list order; the retained offsets already partition the complete word tail.
 typedef struct loom_vm_native_callsite_plan_t {
@@ -78,6 +90,16 @@ typedef struct loom_vm_program_plan_t {
   const loom_vm_native_callsite_plan_t* native_calls;
   // Number of entries in |native_calls|.
   uint32_t native_call_count;
+  // Typed native layouts in child-before-parent order.
+  const loom_vm_native_layout_plan_t* native_layouts;
+  // Number of native layout rows.
+  uint32_t native_layout_count;
+  // Total field count across native layouts.
+  uint32_t native_field_count;
+  // Exact-version native imports in ordinal order.
+  const iree_vm_bytecode_v0_native_import_row_t* native_imports;
+  // Number of native imports.
+  uint32_t native_import_count;
 
   // Public export rows sorted by export name.
   const iree_vm_bytecode_v0_export_row_t* exports;

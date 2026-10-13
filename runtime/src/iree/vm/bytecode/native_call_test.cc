@@ -262,21 +262,22 @@ TEST_F(BytecodeNativeCallTest, RejectsMissingNativeExport) {
   EXPECT_EQ(counters_.entered, 0);
 }
 
-TEST_F(BytecodeNativeCallTest, LinkingRejectsMalformedProviderRecord) {
-  // External image bytes can be structurally valid without satisfying a
-  // provider's record schema. Their selectors are admitted by program linking.
+TEST_F(BytecodeNativeCallTest, AdmissionRejectsMalformedNativeRecord) {
+  // Caller declarations make record verification independent of native modules.
   iree_vm_module_release(module_);
   module_ = nullptr;
   iree_vm_bytecode_module_plan_t plan;
   IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
-      iree_const_cast_byte_span(fixture_.contents), &plan));
+      iree_const_cast_byte_span(fixture_.contents), iree_allocator_system(),
+      &plan));
   auto* words = const_cast<uint32_t*>(plan.layout.native_calls.words);
   words[5] = 0;
-  IREE_ASSERT_OK(iree_vm_bytecode_module_create(
-      environment_, IREE_SV("caller"),
-      {iree_const_cast_byte_span(fixture_.contents), iree_allocator_null()},
-      iree_allocator_system(), &module_));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Link());
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_vm_bytecode_module_create(
+          environment_, IREE_SV("caller"),
+          {iree_const_cast_byte_span(fixture_.contents), iree_allocator_null()},
+          iree_allocator_system(), &module_));
   EXPECT_EQ(counters_.entered, 0);
 }
 
@@ -285,7 +286,8 @@ TEST_F(BytecodeNativeCallTest, CallsiteCannotBorrowAnotherFunctionsExtent) {
   module_ = nullptr;
   iree_vm_bytecode_module_plan_t plan;
   IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
-      iree_const_cast_byte_span(fixture_.contents), &plan));
+      iree_const_cast_byte_span(fixture_.contents), iree_allocator_system(),
+      &plan));
   auto* rows = const_cast<iree_vm_bytecode_v0_native_callsite_row_t*>(
       plan.layout.native_calls.rows);
   rows[0].function_ordinal_u16 = 1;
@@ -295,6 +297,51 @@ TEST_F(BytecodeNativeCallTest, CallsiteCannotBorrowAnotherFunctionsExtent) {
           environment_, IREE_SV("caller"),
           {iree_const_cast_byte_span(fixture_.contents), iree_allocator_null()},
           iree_allocator_system(), &module_));
+}
+
+TEST_F(BytecodeNativeCallTest,
+       LinkingRejectsAValidImageWithTheWrongExactLayout) {
+  iree_vm_module_release(module_);
+  module_ = nullptr;
+  iree_vm_bytecode_module_plan_t plan;
+  IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
+      iree_const_cast_byte_span(fixture_.contents), iree_allocator_system(),
+      &plan));
+  auto* fields = const_cast<iree_vm_native_call_field_t*>(
+      plan.layout.native_calls.schema.fields);
+  fields[0].kind = IREE_VM_SCALAR_TYPE_F64;
+  // The callsite is self-consistent and verifiable without a native module,
+  // but its range element type differs from the exact-version C declaration.
+  IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+      environment_, IREE_SV("caller"),
+      {iree_const_cast_byte_span(fixture_.contents), iree_allocator_null()},
+      iree_allocator_system(), &module_));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INCOMPATIBLE, Link());
+  EXPECT_EQ(counters_.entered, 0);
+}
+
+TEST_F(BytecodeNativeCallTest, AdmissionRejectsMalformedLayoutDeclarations) {
+  iree_vm_module_release(module_);
+  module_ = nullptr;
+  iree_vm_bytecode_module_plan_t plan;
+  IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
+      iree_const_cast_byte_span(fixture_.contents), iree_allocator_system(),
+      &plan));
+  auto* layouts = const_cast<iree_vm_native_call_layout_t*>(
+      plan.layout.native_calls.schema.layouts);
+  const auto original = layouts[1];
+  for (const auto& row : std::array<iree_vm_native_call_layout_t, 4>{
+           {{0, 6, 5, 1}, {1, 7, 5, 1}, {1, 6, 6, 1}, {1, 6, 5, 0}}}) {
+    layouts[1] = row;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          iree_vm_bytecode_module_create(
+                              environment_, IREE_SV("caller"),
+                              {iree_const_cast_byte_span(fixture_.contents),
+                               iree_allocator_null()},
+                              iree_allocator_system(), &module_));
+    EXPECT_EQ(module_, nullptr);
+  }
+  layouts[1] = original;
 }
 
 TEST_F(BytecodeNativeCallTest, NativeSectionRoundtripsWithoutLosingWords) {

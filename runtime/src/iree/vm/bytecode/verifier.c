@@ -961,23 +961,65 @@ static iree_status_t iree_vm_bytecode_verify_exports_against_functions(
 }
 
 static iree_status_t iree_vm_bytecode_verify_native_calls(
-    const iree_vm_bytecode_module_layout_t* layout) {
+    const iree_vm_bytecode_module_layout_t* layout,
+    iree_allocator_t scratch_allocator) {
+  const iree_vm_bytecode_native_call_table_t* table = &layout->native_calls;
+  if (!table->count) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_vm_native_call_schema_validate(
+      &table->schema, layout->ref_types.entry_count));
+  if (!table->import_count || table->import_count > 65536) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "native import table is invalid");
+  }
+  for (uint32_t i = 0; i < table->import_count; ++i) {
+    const iree_vm_bytecode_v0_native_import_row_t* row = &table->imports[i];
+    IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record(
+        IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_IMPORT_ROW, (const uint8_t*)row,
+        layout));
+    if (row->layout_ordinal_u16 >= table->schema.layout_count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "native import layout is out of range");
+    }
+  }
   for (uint32_t i = 0; i < layout->native_calls.count; ++i) {
     const iree_vm_bytecode_v0_native_callsite_row_t* row =
         &layout->native_calls.rows[i];
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record(
         IREE_VM_BYTECODE_MODULE_RECORD_NATIVE_CALLSITE_ROW, (const uint8_t*)row,
         layout));
-    if (row->function_ordinal_u16 >= layout->functions.count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "native callsite function is out of range");
+    if (row->function_ordinal_u16 >= layout->functions.count ||
+        row->import_ordinal_u16 >= table->import_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "native callsite function or import is out of range");
     }
+    const iree_vm_bytecode_v0_function_row_t* function =
+        &layout->functions.rows[row->function_ordinal_u16];
+    iree_vm_native_callsite_t callsite = {
+        .schema = table->schema,
+        .record = table->words + row->word_offset_u32,
+        .word_count = row->word_count_u32,
+        .storage =
+            {
+                .value_count = function->value_register_count_u16,
+                .ref_count = function->ref_register_count_u16 +
+                             function->local_ref_count_u32,
+                .local_byte_length = function->local_byte_length_u16,
+            },
+    };
+    callsite.schema.root_ordinal =
+        table->imports[row->import_ordinal_u16].layout_ordinal_u16;
+    IREE_RETURN_IF_ERROR(
+        iree_vm_native_call_verify(&callsite, scratch_allocator));
   }
   return iree_ok_status();
 }
 
 iree_status_t iree_vm_bytecode_verify_module_layout(
-    const iree_vm_bytecode_module_plan_t* plan) {
+    const iree_vm_bytecode_module_plan_t* plan,
+    iree_allocator_t scratch_allocator) {
   const iree_vm_bytecode_module_layout_t* layout = &plan->layout;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_requirements(layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_strings(layout));
@@ -992,17 +1034,20 @@ iree_status_t iree_vm_bytecode_verify_module_layout(
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_rodata(layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_presentation(layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_metadata(layout));
-  IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_native_calls(layout));
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_verify_native_calls(layout, scratch_allocator));
   IREE_RETURN_IF_ERROR(
       iree_vm_bytecode_verify_exports_against_functions(layout));
   return iree_ok_status();
 }
 
 iree_status_t iree_vm_bytecode_verify_module_structure(
-    iree_const_byte_span_t contents, iree_vm_bytecode_module_plan_t* out_plan) {
+    iree_const_byte_span_t contents, iree_allocator_t scratch_allocator,
+    iree_vm_bytecode_module_plan_t* out_plan) {
   iree_vm_bytecode_module_plan_t plan;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_module_plan_build(contents, &plan));
-  IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_module_layout(&plan));
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_verify_module_layout(&plan, scratch_allocator));
   *out_plan = plan;
   return iree_ok_status();
 }
@@ -1483,8 +1528,8 @@ iree_status_t iree_vm_bytecode_verify_module(
     iree_const_byte_span_t contents, iree_allocator_t scratch_allocator,
     iree_vm_bytecode_module_plan_t* out_plan) {
   iree_vm_bytecode_module_plan_t plan;
-  IREE_RETURN_IF_ERROR(
-      iree_vm_bytecode_verify_module_structure(contents, &plan));
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_module_structure(
+      contents, scratch_allocator, &plan));
 
   // Keeps small function CFGs allocation-free with one cache line of scratch.
   uint32_t inline_block_offsets[16];

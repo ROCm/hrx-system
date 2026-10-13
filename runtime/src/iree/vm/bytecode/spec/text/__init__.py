@@ -68,6 +68,9 @@ class SymbolDomain(enum.Enum):
     SWITCH_TARGET = "switch_target"
     BLOCK = "bb"
     DIRECT_TARGET = "direct_target"
+    NATIVE_LAYOUT = "native_layout"
+    NATIVE_IMPORT = "native_import"
+    NATIVE_CALLSITE = "native_callsite"
 
 
 class InstructionTextField(NamedTuple):

@@ -106,7 +106,7 @@ def _specification(
 class SpecificationTest(unittest.TestCase):
     def test_complete_transcription_inventory(self) -> None:
         self.assertEqual(MODULE_FORMAT.envelope, (IMAGE_HEADER, SECTION_DIRECTORY_ROW))
-        self.assertEqual(len(SPECIFICATION.module_format.records), 37)
+        self.assertEqual(len(SPECIFICATION.module_format.records), 40)
         self.assertEqual(
             (
                 len(SPECIFICATION.families),
@@ -119,7 +119,7 @@ class SpecificationTest(unittest.TestCase):
                 len(NUMERIC_TABLES),
                 sum(len(table.values) for table in NUMERIC_TABLES),
             ),
-            (12, 183, 20, 191, tuple(range(1, 15)), 60, 9, 31),
+            (12, 183, 20, 191, tuple(range(1, 15)), 63, 9, 31),
         )
 
     def test_layout_rejects_implicit_alignment_padding(self) -> None:

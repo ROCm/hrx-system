@@ -770,22 +770,49 @@ NATIVE_CALLS = _section(
     "native_calls",
     0x000E,
     "Declares synchronous native callsites independently of ordinary imports.",
-    "A nonempty row array precedes a word tail partitioned exactly in row order. "
-    "Each row names a caller function and a required module/native-export pair "
-    "with an exact schema version. Program linking verifies selectors, nested "
-    "ranges and scratch requirements against the provider before execution. "
+    "Typed layouts and native imports precede callsite rows and a word tail "
+    "partitioned exactly in callsite order. Image admission validates the layouts, "
+    "selectors and nested ranges without a native module. Program linking requires "
+    "the exact version and structural layout and determines native scratch. "
     "Native calls cannot suspend, reenter VM execution, or retain operand views. "
     "They are not first-class function values.",
     (
         module_records.NATIVE_CALLS_HEADER,
+        module_records.NATIVE_LAYOUT_ROW,
+        module_records.NATIVE_FIELD_ROW,
+        module_records.NATIVE_IMPORT_ROW,
         module_records.NATIVE_CALLSITE_ROW,
         module_records.NATIVE_CALL_WORD,
     ),
     (
         _constraint(
             "extent",
-            "Rows and word ranges consume the section exactly; caller functions exist.",
+            "Layout and import counts are in [1, 65536], callsites are nonempty, "
+            "and all row tables and callsite word ranges consume the section exactly.",
+            _ref(module_records.NATIVE_CALLS_HEADER),
             _ref(module_records.NATIVE_CALLSITE_ROW),
+        ),
+        _constraint(
+            "layouts",
+            "Field slices partition the field table. Scalar kinds and ref ordinals "
+            "are exact; result direction applies only to leaves. Ranges name earlier "
+            "layouts. Fixed word stride and maximum nesting depth are derived exactly.",
+            _ref(module_records.NATIVE_LAYOUT_ROW),
+            _ref(module_records.NATIVE_FIELD_ROW),
+        ),
+        _constraint(
+            "imports",
+            "Native imports name nonempty module/export strings and an existing layout; "
+            "callsites name an existing caller function and native import.",
+            _ref(module_records.NATIVE_IMPORT_ROW),
+            _ref(module_records.NATIVE_CALLSITE_ROW),
+        ),
+        _constraint(
+            "records",
+            "Each record matches its declared layout. Range offsets reserve complete "
+            "fixed-record arrays followed by descendants in field-order depth-first "
+            "order. Selectors address caller storage and result destinations do not overlap.",
+            _ref(module_records.NATIVE_CALL_WORD),
         ),
     ),
 )

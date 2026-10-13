@@ -674,8 +674,10 @@ static iree_status_t iree_vm_program_link_native_calls(
       }
       const iree_vm_native_export_t* target = &native->exports[low];
       iree_host_size_t scratch_size = 0;
-      IREE_RETURN_IF_ERROR(iree_vm_native_call_verify(
-          target, callsite, program->host_allocator, &scratch_size));
+      IREE_RETURN_IF_ERROR(iree_vm_native_call_link(
+          target, provider->module->descriptor->ref_types.data, callsite,
+          caller->module->descriptor->ref_types.data, program->host_allocator,
+          &scratch_size));
       iree_host_size_t* function_scratch =
           &caller->native->function_scratch_sizes[callsite->function_ordinal];
       *function_scratch = iree_max(*function_scratch, scratch_size);

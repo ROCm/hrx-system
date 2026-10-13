@@ -170,9 +170,10 @@ typedef struct iree_vm_native_call_storage_t {
   uint32_t local_byte_length;
 } iree_vm_native_call_storage_t;
 
-// Immutable module-owned callsite declaration. Its provider guarantees that
-// storage extents describe the named function. Linking verifies the untrusted
-// record against the resolved native export before any invocation can use it.
+// Immutable module-owned callsite declaration. The publishing module validates
+// the record against its declared schema and the named function's storage
+// before exposing this view. Linking compares the declaration with the native
+// export; it does not repeat physical record validation.
 typedef struct iree_vm_native_callsite_t {
   // Exact required target module name.
   iree_string_view_t module_name;
@@ -180,6 +181,8 @@ typedef struct iree_vm_native_callsite_t {
   iree_string_view_t export_name;
   // Exact export schema/semantics version.
   uint32_t version;
+  // Caller-declared layout, including the element types of empty ranges.
+  iree_vm_native_call_schema_t schema;
   // Caller function ordinal owning the physical storage.
   uint32_t function_ordinal;
   // Borrowed immutable word-aligned callsite record.
@@ -201,13 +204,23 @@ typedef struct iree_vm_native_module_t {
   iree_host_size_t callsite_count;
 } iree_vm_native_module_t;
 
-// Validates an external callsite record against trusted provider metadata and
-// returns its exact scratch requirement. Scalar/ref result destinations must
-// be distinct, including overlapping local byte ranges. Failure leaves the
-// output untouched. Allocations occur only during this cold binding step.
+// Validates an external record against its already validated declaration.
+// Scalar/ref result destinations must be distinct, including overlapping local
+// byte ranges. No native implementation is needed to admit an image.
 IREE_API_EXPORT iree_status_t iree_vm_native_call_verify(
+    const iree_vm_native_callsite_t* callsite, iree_allocator_t host_allocator);
+
+// Links an admitted callsite to an exact-version, structurally identical native
+// export and computes its scratch requirement. Ref leaves compare resolved
+// identities, not module-local ordinals. Both type arrays are trusted module
+// tables covering all ref ordinals in their respective declarations. Native
+// cross-field checks run here, once, after layout matching. Failure leaves the
+// output untouched. All temporary allocations are confined to this cold path.
+IREE_API_EXPORT iree_status_t iree_vm_native_call_link(
     const iree_vm_native_export_t* target,
-    const iree_vm_native_callsite_t* callsite, iree_allocator_t host_allocator,
+    const iree_vm_ref_type_t* target_ref_types,
+    const iree_vm_native_callsite_t* callsite,
+    const iree_vm_ref_type_t* caller_ref_types, iree_allocator_t host_allocator,
     iree_host_size_t* out_scratch_size);
 
 #ifdef __cplusplus
