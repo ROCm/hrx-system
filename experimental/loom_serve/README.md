@@ -55,7 +55,7 @@ complete source package.
 The [motif guide](motifs/README.md) describes composition and shape contracts.
 
 The [shared server](serving/README.md) is
-`//experimental/loom_serve/serving:server`, with optional initial text, image,
+`//loom/src/loom/tools/loom-serve:loom-serve`, with optional initial text, image,
 embedding and decision registrations from repeated `--model=/path/to/model.json`.
 It can start empty and manage registrations over HTTP. The single-model
 `//experimental/loom_serve/image:server` and

@@ -1,7 +1,7 @@
 # Running and managing the model server
 
 The main serving entry point is
-`//experimental/loom_serve/serving:server`. One process owns its device group,
+`//loom/src/loom/tools/loom-serve:loom-serve`. One process owns its device group,
 task pool and HTTP listeners. Models have independent registration, admission
 and residency lifetimes; adding a compatible source package does not require
 rebuilding the executable. The single-model text/image tools are useful for
@@ -31,7 +31,7 @@ On a configured GPU runner, from the repository root:
 
 ```sh
 build_tools/bin/iree-bazel-run --config=opt \
-  //experimental/loom_serve/serving:server -- \
+  //loom/src/loom/tools/loom-serve:loom-serve -- \
   --device=amdgpu --listen=127.0.0.1:8080 \
   --workers=8 --connections=64 --held_requests=32 --model_capacity=32
 ```

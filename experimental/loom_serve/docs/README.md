@@ -132,7 +132,7 @@ build_tools/bin/iree-bazel-run --config=opt \
   --//loom/config/target:enable=vm,x86 \
   --//loom/config/execute:enable=iree_hal \
   --//runtime/config/hal:drivers=task \
-  //experimental/loom_serve/serving:server -- \
+  //loom/src/loom/tools/loom-serve:loom-serve -- \
   --device=task --pool_backing=fixed --listen=127.0.0.1:8080 --workers=8
 ```
 

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/runtime/signals.h"
+#include "loom/tools/loom-serve/signals.h"
 
 #include "iree/async/operations/scheduling.h"
 #include "iree/base/threading/mutex.h"

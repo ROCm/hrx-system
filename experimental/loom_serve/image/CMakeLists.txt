@@ -43,11 +43,10 @@ loom_cc_binary(
     iree::base
     iree::base::internal::path
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::device_flags
-    iree::experimental::loom_serve::runtime::host_flags
     iree::io::file_handle
     loom::serve::server::configuration
     loom::serve::service::image::model
+    loom::tools::loom-serve::options
   TESTONLY
 )
 endif()
@@ -63,11 +62,10 @@ loom_cc_binary(
     iree::base::internal
     iree::base::internal::json
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::device_flags
-    iree::experimental::loom_serve::runtime::host_flags
     iree::io::file_handle
     loom::serve::server::configuration
     loom::serve::service::image::model
+    loom::tools::loom-serve::options
 )
 endif()
 
@@ -81,9 +79,6 @@ loom_cc_binary(
     iree::async
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::device_flags
-    iree::experimental::loom_serve::runtime::host_flags
-    iree::experimental::loom_serve::runtime::signals
     loom::serve::server::configuration
     loom::serve::server::registry
     loom::serve::server::router
@@ -92,6 +87,8 @@ loom_cc_binary(
     loom::serve::service::image::service
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
+    loom::tools::loom-serve::options
+    loom::tools::loom-serve::signals
 )
 endif()
 

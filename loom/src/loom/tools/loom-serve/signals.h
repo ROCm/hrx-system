@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_RUNTIME_SIGNALS_H_
-#define EXPERIMENTAL_LOOM_SERVE_RUNTIME_SIGNALS_H_
+#ifndef LOOM_TOOLS_LOOM_SERVE_SIGNALS_H_
+#define LOOM_TOOLS_LOOM_SERVE_SIGNALS_H_
 
 #include "iree/async/util/proactor_pool.h"
 
@@ -36,4 +36,4 @@ void loom_serve_signals_destroy(loom_serve_signals_t* signals);
 }  // extern "C"
 #endif
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_RUNTIME_SIGNALS_H_
+#endif  // LOOM_TOOLS_LOOM_SERVE_SIGNALS_H_

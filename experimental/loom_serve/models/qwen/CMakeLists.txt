@@ -1028,12 +1028,11 @@ loom_cc_binary(
   DEPS
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::device_flags
-    iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::text::flags
     iree::tokenizer
     loom::serve::runtime::parameter::residency
     loom::serve::service::text::model
+    loom::tools::loom-serve::options
   TESTONLY
 )
 endif()
@@ -1047,12 +1046,11 @@ loom_cc_binary(
   DEPS
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::device_flags
-    iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::text::flags
     iree::io::file_handle
     iree::tokenizer
     loom::serve::service::text::model
+    loom::tools::loom-serve::options
   TESTONLY
 )
 endif()
@@ -1067,14 +1065,13 @@ loom_cc_binary(
     iree::base
     iree::base::internal::json
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::device_flags
-    iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::text::flags
     iree::io::file_handle
     iree::tokenizer
     loom::serve::service::text::chat
     loom::serve::service::text::model
     loom::serve::service::text::packing
+    loom::tools::loom-serve::options
   TESTONLY
 )
 endif()

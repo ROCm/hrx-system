@@ -51,10 +51,10 @@ py_test(
     name = "client_test",
     size = "small",
     srcs = ["client_test.py"],
-    args = ["$(rootpath //experimental/loom_serve/serving:server)"],
+    args = ["$(rootpath //loom/src/loom/tools/loom-serve:loom-serve)"],
     data = [
         ":sources",
-        "//experimental/loom_serve/serving:server",
+        "//loom/src/loom/tools/loom-serve",
     ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",

@@ -9,11 +9,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "experimental/loom_serve/runtime/device_flags.h"
-#include "experimental/loom_serve/runtime/host_flags.h"
 #include "experimental/loom_serve/text/flags.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
+#include "loom/tools/loom-serve/options.h"
 
 IREE_FLAG_LIST(string, prompt_file,
                "Rendered chat prompt; one file per independent resident row.");

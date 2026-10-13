@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@rules_python//python:defs.bzl", "py_test")
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
@@ -45,6 +46,35 @@ _X86_TASK_HARDWARE_PROFILE = loom_execution_profile(
     runner_args = ["--device=task"],
     target_class = "cpu",
     target_family = "x86",
+)
+
+# The command test JITs external source packages and executes through task HAL.
+py_test(
+    name = "serve_command_test",
+    size = "small",
+    srcs = ["//loom/src/loom/tools/loom-serve:server_test.py"],
+    args = [
+        "$(rootpath //loom/src/loom/tools/loom-serve)",
+        "$(rootpath //experimental/loom_serve/models/fixtures/embedding:prepare.loom)",
+        "$(rootpath //loom/src/loom/tools/loom-format)",
+    ],
+    data = [
+        "//experimental/loom_serve/models/fixtures/embedding:prepare.loom",
+        "//experimental/loom_serve/models/fixtures/embedding:sources",
+        "//loom/src/loom/tools/loom-format",
+        "//loom/src/loom/tools/loom-serve",
+    ],
+    main = "server_test.py",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ["//experimental/loom_serve/testing:http"],
 )
 
 # Addressable C++ locals preserve independent storage across native calls.

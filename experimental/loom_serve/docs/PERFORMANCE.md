@@ -132,7 +132,7 @@ Performance uses an explicitly optimized build of the exact executable:
 
 ```sh
 build_tools/bin/iree-bazel-build --config=opt \
-  //experimental/loom_serve/serving:server \
+  //loom/src/loom/tools/loom-serve:loom-serve \
   //experimental/loom_serve/models/qwen:workload
 ```
 

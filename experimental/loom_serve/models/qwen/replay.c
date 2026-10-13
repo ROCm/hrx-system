@@ -12,14 +12,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "experimental/loom_serve/runtime/device_flags.h"
-#include "experimental/loom_serve/runtime/host_flags.h"
 #include "experimental/loom_serve/text/flags.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 #include "loom/serve/service/text/chat.h"
 #include "loom/serve/service/text/packing.h"
+#include "loom/tools/loom-serve/options.h"
 
 IREE_FLAG(string, workload, "",
           "JSON sessions containing request/response turns.");

@@ -4,7 +4,7 @@ The [operator guide](../docs/OPERATING.md) walks through empty startup, dynamic
 registration, process configuration, observation and removal. This reference
 details the serving and ownership contracts behind that flow.
 
-`//experimental/loom_serve/serving:server` serves named text, image, embedding and
+`//loom/src/loom/tools/loom-serve:loom-serve` serves named text, image, embedding and
 decision deployments through one logical HTTP server with independently owned
 TCP, IPv6, and Unix-domain listeners. Deployments borrow their selected device
 record from one application group. Models on the same record share its parameter
@@ -86,7 +86,7 @@ not a learned embedding model.
 
 ~~~sh
 build_tools/bin/iree-bazel-run --config=opt \
-  //experimental/loom_serve/serving:server -- \
+  //loom/src/loom/tools/loom-serve:loom-serve -- \
   --device=amdgpu \
   --model=/path/to/scout/model.json --model=/path/to/illustrator/model.json --listen=127.0.0.1:8080 \
   --listen=unix:/path/to/loom-serve.sock \

@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "help is available without opening a device",
+      "run": {"tool": "loom-serve", "args": ["--help"]},
+      "stdout": {
+        "contains": [
+          "loom-serve --device=URI",
+          ".loombc",
+          "/v1/status",
+          "--model",
+          "--listen",
+          "--workers",
+          "--pool_backing"
+        ]
+      },
+      "stderr": {"empty": true}
+    },
+    {
+      "name": "agent help explains deployment and source inputs",
+      "run": {"tool": "loom-serve", "args": ["--agents_md"]},
+      "stdout": {
+        "contains": [
+          "# loom-serve",
+          "/v1/models/register",
+          ".loombc",
+          "base_directory",
+          "trusted clients"
+        ]
+      },
+      "stderr": {"empty": true}
+    },
+    {
+      "name": "no redundant server subcommand",
+      "run": {"tool": "loom-serve", "args": ["server"]},
+      "exit": {"nonzero": true},
+      "stdout": {"empty": true},
+      "stderr": {
+        "contains": ["Unexpected positional argument 'server'", "--model=path"]
+      }
+    },
+    {
+      "name": "invalid connection capacity fails before startup",
+      "run": {"tool": "loom-serve", "args": ["--connections=0"]},
+      "exit": {"nonzero": true},
+      "stdout": {"empty": true},
+      "stderr": {"contains": ["positive model/connection/body capacities"]}
+    },
+    {
+      "name": "unknown options fail instead of being ignored",
+      "run": {"tool": "loom-serve", "args": ["--not_a_serve_flag=1"]},
+      "exit": {"nonzero": true},
+      "stdout": {"empty": true},
+      "stderr": {"contains": ["flag 'not_a_serve_flag' not recognized"]}
+    }
+  ]
+}

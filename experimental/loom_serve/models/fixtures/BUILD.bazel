@@ -23,13 +23,13 @@ py_test(
     size = "medium",
     srcs = ["pressure_test.py"],
     args = [
-        "--server=$(rootpath //experimental/loom_serve/serving:server)",
+        "--server=$(rootpath //loom/src/loom/tools/loom-serve:loom-serve)",
         "--source=$(rootpath //experimental/loom_serve/models/fixtures/text:prepare.loom)",
     ],
     data = [
         "//experimental/loom_serve/models/fixtures/text:prepare.loom",
         "//experimental/loom_serve/models/fixtures/text:sources",
-        "//experimental/loom_serve/serving:server",
+        "//loom/src/loom/tools/loom-serve",
     ],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
@@ -51,7 +51,7 @@ py_test(
         size = "medium",
         srcs = ["catalog_test.py"],
         args = [
-            "--server=$(rootpath //experimental/loom_serve/serving:server)",
+            "--server=$(rootpath //loom/src/loom/tools/loom-serve:loom-serve)",
             "--fixture=$(rootpath //experimental/loom_serve/models/fixtures/image:model.json)",
             "--fixture=$(rootpath //experimental/loom_serve/models/fixtures/embedding:model.json)",
             "--fixture=$(rootpath //experimental/loom_serve/models/fixtures/decision:model.json)",
@@ -68,7 +68,7 @@ py_test(
             "//experimental/loom_serve/models/fixtures/image:sources",
             "//experimental/loom_serve/models/fixtures/text:model.json",
             "//experimental/loom_serve/models/fixtures/text:sources",
-            "//experimental/loom_serve/serving:server",
+            "//loom/src/loom/tools/loom-serve",
         ],
         main = "catalog_test.py",
         tags = [

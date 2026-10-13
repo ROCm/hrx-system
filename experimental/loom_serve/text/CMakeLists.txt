@@ -37,15 +37,14 @@ loom_cc_binary(
     iree::async
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::device_flags
-    iree::experimental::loom_serve::runtime::host_flags
-    iree::experimental::loom_serve::runtime::signals
     loom::serve::server::registry
     loom::serve::server::router
     loom::serve::service::text::model
     loom::serve::service::text::service
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
+    loom::tools::loom-serve::options
+    loom::tools::loom-serve::signals
 )
 endif()
 
@@ -59,12 +58,11 @@ loom_cc_binary(
     ::flags
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::device_flags
-    iree::experimental::loom_serve::runtime::host_flags
     iree::io::file_handle
     iree::tokenizer
     loom::serve::service::text::chat
     loom::serve::service::text::model
+    loom::tools::loom-serve::options
 )
 endif()
 
@@ -80,12 +78,12 @@ loom_cc_binary(
     iree::async::util::proactor_pool
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::device_flags
     iree::hal
     iree::task
     loom::serve::runtime::host
     loom::serve::service::text::chat
     loom::serve::service::text::model
+    loom::tools::loom-serve::options
   TESTONLY
 )
 endif()

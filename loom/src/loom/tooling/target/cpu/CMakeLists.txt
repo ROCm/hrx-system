@@ -9,6 +9,34 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_X86 AND IREE_HAL_DRIVER_TASK AND IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF AND IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_py_test(
+  NAME
+    serve_command_test
+  MAIN
+    "../../../tools/loom-serve/server_test.py"
+  SRCS
+    "../../../tools/loom-serve/server_test.py"
+  ARGS
+    "{{$<TARGET_FILE:loom::tools::loom-serve::loom-serve>}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
+    "{{$<TARGET_FILE:loom::tools::loom-format::loom-format>}}"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom"
+    "iree::experimental::loom_serve::models::fixtures::embedding::sources"
+    "loom::tools::loom-format::loom-format"
+    "loom::tools::loom-serve::loom-serve"
+  DEPS
+    iree::experimental::loom_serve::testing::http
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
+)
+endif()
+
 if(LOOM_IMPORT_CXX AND IREE_ARCH STREQUAL "x86_64")
 if(LOOM_TARGET_ARCH_X86 AND LOOM_TARGET_ARCH_VM AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF)
 loom_execution_test(

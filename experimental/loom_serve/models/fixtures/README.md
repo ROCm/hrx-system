@@ -22,7 +22,7 @@ from the repository root:
 
 ```sh
 build_tools/bin/iree-bazel-run --config=opt \
-  //experimental/loom_serve/serving:server -- \
+  //loom/src/loom/tools/loom-serve:loom-serve -- \
   --device=amdgpu \
   --model=experimental/loom_serve/models/fixtures/image/model.json \
   --model=experimental/loom_serve/models/fixtures/embedding/model.json \

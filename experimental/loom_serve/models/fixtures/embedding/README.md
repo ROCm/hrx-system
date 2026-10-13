@@ -32,7 +32,7 @@ providers, asset directory and default options. Paths inside it are relative
 to this directory. On an x86 CPU runner, using the repository's normal build/execution policy:
 
 ```sh
-iree-bazel-run //experimental/loom_serve/serving:server -- \
+iree-bazel-run //loom/src/loom/tools/loom-serve:loom-serve -- \
   --model=experimental/loom_serve/models/fixtures/embedding/model.json --listen=127.0.0.1:8080 \
   --device=task --pool_backing=fixed
 ```

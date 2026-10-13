@@ -14,7 +14,6 @@
 #include <mutex>
 #include <utility>
 
-#include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/text/flags.h"
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/tooling/flags.h"
@@ -22,6 +21,7 @@
 #include "iree/task/executor.h"
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/service/text/chat.h"
+#include "loom/tools/loom-serve/options.h"
 
 namespace {
 

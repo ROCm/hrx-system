@@ -7,15 +7,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "experimental/loom_serve/runtime/device_flags.h"
-#include "experimental/loom_serve/runtime/host_flags.h"
-#include "experimental/loom_serve/runtime/signals.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/transport/http/listener.h"
+#include "loom/tooling/cli/help.h"
+#include "loom/tools/loom-serve/options.h"
+#include "loom/tools/loom-serve/signals.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
 
@@ -62,7 +62,85 @@ static void serving_shutdown_requested(void* user_data,
   loom_serve_http_server_request_stop(user_data);
 }
 
+static int serving_agents_markdown(void) {
+  return fputs(
+             "# loom-serve\n\n"
+             "Runs source-defined text, image, embedding and decision models "
+             "in one process. Numerical programs and parameter files are "
+             "external inputs, not compiled-in model implementations.\n\n"
+             "## Start and inspect\n\n"
+             "```sh\n"
+             "loom-serve --device=task --pool_backing=fixed "
+             "--listen=127.0.0.1:8080\n"
+             "curl http://127.0.0.1:8080/v1/status\n"
+             "```\n\n"
+             "At least one explicit `--device=URI` is required. The linked "
+             "HAL drivers resolve URIs; the server adds no implicit device. "
+             "Repeated devices form one ordered group. A model document "
+             "needs a top-level `device` index when that group has more than "
+             "one member. Fixed backing is suitable for the task and Vulkan "
+             "drivers; elastic backing requires virtual-memory support.\n\n"
+             "## Register models\n\n"
+             "Repeated `--model=path/model.json` values register startup "
+             "deployments. Omitting them starts an empty server. The same "
+             "JSON object is accepted by `POST /v1/models/register`: "
+             "`name`, `definition`, and optional `device`, `admission` and "
+             "`base_directory`. Admission defaults to `open`; `drained` "
+             "registers metadata without loading programs or weights.\n\n"
+             "A definition names its modality, preparation/control programs, "
+             "source providers, assets and capacities. Program inputs may "
+             "be `.loom` or `.loombc`. File-document paths use the document "
+             "directory; relative HTTP references need an explicit absolute "
+             "`base_directory`. This is a source-model contract, not an "
+             "automatic checkpoint converter.\n\n"
+             "`/healthz` and `/readyz` report server availability. "
+             "`/v1/status` reports registration progress and failures; "
+             "`/v1/models` describes prepared deployments and capabilities. "
+             "Registration's HTTP 202 acknowledges intent, not readiness. "
+             "Inference can wait behind preparation using bounded admission "
+             "credit. `/metrics`, `/logz` and `/logz/stream` expose "
+             "counters and independent-reader telemetry.\n\n"
+             "Drain/undrain controls admission independently of model "
+             "residency. Unregister supports drain or abort; accepted device "
+             "work retires before resources are released. Multiple TCP or "
+             "`unix:path` listeners share the same server. HTTP has no "
+             "built-in authentication: trusted clients and model programs "
+             "are required, with deployment-owned isolation or tunnels.\n\n"
+             "`--help` lists serving flags; `--help=all` adds linked runtime "
+             "flags. `--flagfile=path` uses the ordinary newline-separated "
+             "flag syntax and working-directory path resolution. There is "
+             "no subcommand.\n",
+             stdout) == EOF
+             ? EXIT_FAILURE
+             : EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv) {
+  iree_flags_set_usage(
+      "loom-serve",
+      "Serves source-defined models over HTTP with shared devices and "
+      "workers.\n"
+      "\n"
+      "Usage:\n"
+      "  loom-serve --device=URI [--model=path/model.json ...] [options]\n"
+      "  loom-serve --device=task --pool_backing=fixed "
+      "--listen=127.0.0.1:8080\n"
+      "  loom-serve --flagfile=serve.flags\n"
+      "  loom-serve --agents_md\n"
+      "\n"
+      "At least one --device is required; repeat it to form the device group.\n"
+      "Omit --model to start empty and register models over HTTP. Startup and\n"
+      "HTTP registration use the same JSON model document; .loom and .loombc\n"
+      "programs are loaded at runtime. No model implementation is built in.\n"
+      "Repeated --listen bindings share one server. /v1/status reports model\n"
+      "readiness; /v1/models lists prepared deployments and capabilities.\n"
+      "HTTP and model loading assume trusted clients and source packages.\n");
+  for (int i = 1; i < argc; ++i) {
+    if (loom_tooling_cli_is_agents_markdown_arg(argv[i])) {
+      return serving_agents_markdown();
+    }
+  }
+  loom_tooling_cli_set_default_help_filter();
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
   if (argc > 1) {
     fprintf(stderr,

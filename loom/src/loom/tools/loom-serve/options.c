@@ -1,14 +1,17 @@
 // Copyright 2026 The IREE Authors
 //
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/runtime/device_flags.h"
+#include "loom/tools/loom-serve/options.h"
 
 #include <string.h>
 
 #include "iree/base/tooling/flags.h"
 
+IREE_FLAG(int32_t, workers, 8,
+          "Shared CPU workers for compilation, scheduling and media jobs.");
 IREE_FLAG_LIST(
     string, device,
     "HAL device URI; repeat in group order. At least one is required.");
@@ -21,6 +24,12 @@ IREE_FLAG(int64_t, memory_bytes, 0,
           "Shared physical parameter/state budget; a nonzero limit requires "
           "one device. Zero imposes no serving limit. Invocation workspace "
           "is accounted separately.");
+
+iree_status_t loom_serve_host_create_from_flags(loom_serve_host_t** out_host,
+                                                iree_allocator_t allocator) {
+  return loom_serve_host_create((iree_host_size_t)FLAG_workers, out_host,
+                                allocator);
+}
 
 iree_status_t loom_serve_device_group_create_from_flags(
     loom_serve_host_t* host, loom_serve_device_group_t** out_group,
