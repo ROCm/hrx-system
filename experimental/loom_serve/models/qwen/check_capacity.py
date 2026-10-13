@@ -204,11 +204,18 @@ def main():
     parser.add_argument("--continuation-epochs", type=int, choices=(1, 2), default=1)
     arguments = parser.parse_args()
     arguments.output.mkdir(parents=True, exist_ok=False)
-    command = [str(arguments.server.resolve())] + [
-        f"--{name}={getattr(arguments, name).resolve()}"
-        for name in ("model", "weights", "tokenizer")
-    ]
+    command = (
+        [str(arguments.server.resolve())]
+        + [
+            f"--model={arguments.model.resolve() / 'model.json'}",
+        ]
+        + [
+            f"--{name}={getattr(arguments, name).resolve()}"
+            for name in ("weights", "tokenizer")
+        ]
+    )
     command += [
+        "--device=amdgpu",
         "--rows=4",
         "--context_capacity=2048",
         "--prefill_capacity=128",

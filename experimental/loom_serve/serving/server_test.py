@@ -23,6 +23,24 @@ FORMAT = Path(sys.argv.pop(1)).resolve()
 
 
 class ServerTest(unittest.TestCase):
+    def test_device_is_required_before_listening(self):
+        for arguments in ([], ["--device="]):
+            with self.subTest(arguments=arguments):
+                result = subprocess.run(
+                    [
+                        str(SERVER),
+                        *arguments,
+                        "--pool_backing=fixed",
+                        "--workers=1",
+                        "--listen=127.0.0.1:0",
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertIn("--device is required", result.stderr)
+                self.assertNotIn('"event":"ready"', result.stderr)
+
     def test_positional_model_is_rejected_before_listening(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

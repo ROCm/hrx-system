@@ -54,11 +54,18 @@ def main():
     )
     arguments = parser.parse_args()
     arguments.output.mkdir(parents=True, exist_ok=False)
-    command = [str(arguments.server.resolve())] + [
-        f"--{name}={getattr(arguments, name).resolve()}"
-        for name in ("model", "weights", "tokenizer")
-    ]
+    command = (
+        [str(arguments.server.resolve())]
+        + [
+            f"--model={arguments.model.resolve() / 'model.json'}",
+        ]
+        + [
+            f"--{name}={getattr(arguments, name).resolve()}"
+            for name in ("weights", "tokenizer")
+        ]
+    )
     command += [
+        "--device=amdgpu",
         f"--rows={arguments.rows}",
         "--context_capacity=2048",
         "--prefill_capacity=512",

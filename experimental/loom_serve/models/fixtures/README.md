@@ -23,6 +23,7 @@ from the repository root:
 ```sh
 build_tools/bin/iree-bazel-run --config=opt \
   //experimental/loom_serve/serving:server -- \
+  --device=amdgpu \
   --model=experimental/loom_serve/models/fixtures/image/model.json \
   --model=experimental/loom_serve/models/fixtures/embedding/model.json \
   --model=experimental/loom_serve/models/fixtures/decision/model.json \
@@ -37,7 +38,7 @@ are required by the running process. One worker intentionally exercises shared
 CPU scheduling; it is not the recommended configuration for measuring speed.
 
 The same catalog also runs on Vulkan: enable the SPIR-V compiler and Vulkan HAL,
-then add `--device=vulkan --pool_backing=fixed` to the command above. No source
+then replace `--device=amdgpu` with `--device=vulkan --pool_backing=fixed`. No source
 package edits are needed. The complete image-containing catalog requires a GPU;
 the separate
 [CPU recipe](../../docs/OPERATING.md#first-output-starting-with-no-models) runs

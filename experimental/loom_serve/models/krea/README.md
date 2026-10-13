@@ -126,7 +126,7 @@ on a qualified GFX11 AMDGPU host with the source tree and checkpoints above:
 build_tools/bin/iree-bazel-build --config=asan \
   //experimental/loom_serve/image:generate
 bazel-bin/experimental/loom_serve/image/generate \
-  --model=experimental/loom_serve/models/krea \
+  --device=amdgpu --model=experimental/loom_serve/models/krea/model.json \
   --checkpoint="$krea_weights" \
   --prompt="A small brass robot tending red flowers in a sunlit greenhouse, watercolor illustration" \
   --seed=42 --height=384 --width=384 --text_tokens=512 \
@@ -284,7 +284,7 @@ There is no inference subprocess or per-request JIT/model construction.
 build_tools/bin/iree-bazel-build --config=asan \
   //experimental/loom_serve/image:server
 bazel-bin/experimental/loom_serve/image/server \
-  --model=experimental/loom_serve/models/krea \
+  --device=amdgpu --model=experimental/loom_serve/models/krea/model.json \
   --checkpoint="$krea_weights" \
   --adapter="$krea_adapter/softwatercolor.safetensors" \
   --height=384 --width=384 --text_tokens=512 \

@@ -43,6 +43,7 @@ def main():
 
     prompts = ("a red fox in the snow", " ".join(["red"] * 65))
     common = [
+        "--device=amdgpu",
         f"--model={args.model / 'model.json'}",
         f"--checkpoint={args.checkpoint.resolve()}",
     ]

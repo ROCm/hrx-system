@@ -60,6 +60,7 @@ def main():
                 name + "-" + phase,
                 [
                     *args.native,
+                    "--device=amdgpu",
                     f"--model={args.model / 'model.json'}",
                     f"--checkpoint={args.checkpoint.resolve()}",
                     f"--prompt={request['prompt']}",

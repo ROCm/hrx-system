@@ -86,12 +86,13 @@ not a learned embedding model.
 ~~~sh
 build_tools/bin/iree-bazel-run --config=opt \
   //experimental/loom_serve/serving:server -- \
+  --device=amdgpu \
   --model=/path/to/scout/model.json --model=/path/to/illustrator/model.json --listen=127.0.0.1:8080 \
   --listen=unix:/path/to/loom-serve.sock \
   --pool_backing=elastic --memory_bytes=38654705664
 ~~~
 
-The repository's build and hardware-execution policy applies. `--device`,
+The repository's build and hardware-execution policy applies. Required `--device`,
 `--slab_bytes` and `--memory_bytes` configure the shared device. `--workers`
 sets the shared CPU worker maximum (eight by default). Connections
 and HTTP body storage have independent bounds through `--connections` and

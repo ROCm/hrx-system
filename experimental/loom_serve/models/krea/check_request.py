@@ -214,6 +214,7 @@ def main():
             directory.mkdir()
             command = [
                 str(args.native),
+                "--device=amdgpu",
                 f"--model={model / 'model.json'}",
                 f"--checkpoint={args.checkpoint.resolve()}",
                 f"--prompt={prompt}",

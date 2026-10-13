@@ -274,6 +274,7 @@ def main():
             documents.append(document.resolve())
         command = [
             str(args.server.resolve()),
+            "--device=amdgpu",
             *[f"--model={path}" for path in documents],
             "--listen=127.0.0.1:0",
             "--heartbeat_ms=25",

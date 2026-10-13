@@ -31,6 +31,7 @@ without any model-specific native code:
 
 ```sh
 iree-bazel-run //experimental/loom_serve/image:server -- \
+  --device=amdgpu \
   --model=experimental/loom_serve/models/fixtures/image/model.json \
   --checkpoint=. \
   --width=7 --height=5 --text_tokens=32

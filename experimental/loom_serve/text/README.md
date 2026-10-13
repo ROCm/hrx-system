@@ -20,6 +20,7 @@ From the repository root:
 
 ```sh
 build_tools/bin/iree-bazel-run //experimental/loom_serve/text:server -- \
+  --device=amdgpu \
   --model=experimental/loom_serve/models/qwen/model.json \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \

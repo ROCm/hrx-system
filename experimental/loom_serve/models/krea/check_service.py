@@ -57,6 +57,7 @@ def main():
     args.output.mkdir(parents=True, exist_ok=False)
     command = [
         *args.server,
+        "--device=amdgpu",
         f"--workers={args.workers}",
         f"--model={args.model / 'model.json'}",
         f"--checkpoint={args.checkpoint.resolve()}",

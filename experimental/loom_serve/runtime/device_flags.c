@@ -9,7 +9,7 @@
 
 #include "iree/base/tooling/flags.h"
 
-IREE_FLAG(string, device, "amdgpu", "Shared serving HAL device URI.");
+IREE_FLAG(string, device, "", "Required shared serving HAL device URI.");
 IREE_FLAG(string, pool_backing, "elastic",
           "elastic demand-commits parameter/state slabs; fixed backs storage "
           "eagerly and supports device address sanitization.");
@@ -23,6 +23,10 @@ iree_status_t loom_serve_device_group_create_from_flags(
     loom_serve_host_t* host, loom_serve_device_group_t** out_group,
     iree_allocator_t host_allocator) {
   *out_group = NULL;
+  if (!FLAG_device[0]) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--device is required; specify a HAL device URI");
+  }
   if ((strcmp(FLAG_pool_backing, "elastic") &&
        strcmp(FLAG_pool_backing, "fixed")) ||
       FLAG_slab_bytes < 0 || FLAG_memory_bytes < 0 ||

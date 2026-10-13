@@ -273,6 +273,7 @@ not need `loom-compile`, Python model frameworks, or generated kernel files.
 
 ```sh
 bazel-bin/experimental/loom_serve/models/qwen/epoch_check \
+  --device=amdgpu \
   --model=experimental/loom_serve/models/qwen/model.json \
   --prefill_capacity=128 --context_capacity=2048 --epoch=32:8 --draft_depth=3 \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
@@ -294,6 +295,7 @@ token capacities:
 ```sh
 check_shapes() {
   bazel-bin/experimental/loom_serve/models/qwen/epoch_check \
+    --device=amdgpu \
     --model=experimental/loom_serve/models/qwen/model.json \
     --prefill_capacity=512 --context_capacity=2048 --draft_depth=3 \
     --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
@@ -313,6 +315,7 @@ After the check exits and releases the residency, start one server:
 
 ```sh
 bazel-bin/experimental/loom_serve/text/server \
+  --device=amdgpu \
   --model=experimental/loom_serve/models/qwen/model.json \
   --context_capacity=2048 --pool_capacity=8192 --draft_depth=3 \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \

@@ -423,6 +423,7 @@ def main():
     arguments.output.mkdir(parents=True, exist_ok=False)
     command = [
         str(arguments.server.resolve()),
+        "--device=amdgpu",
         f"--model={arguments.model.resolve() / 'model.json'}",
         f"--weights={arguments.weights.resolve()}",
         f"--tokenizer={arguments.tokenizer.resolve()}",

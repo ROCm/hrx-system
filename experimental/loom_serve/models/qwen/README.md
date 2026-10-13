@@ -480,6 +480,7 @@ From the repository root:
 build_tools/bin/iree-bazel-build --config=asan //experimental/loom_serve/text:generate
 # Run on a qualified GPU host with the source directory available.
 bazel-bin/experimental/loom_serve/text/generate \
+  --device=amdgpu \
   --model=experimental/loom_serve/models/qwen/model.json \
   --prefill_capacity=512 --context_capacity=2048 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
@@ -889,6 +890,7 @@ complement the whole-state kernel differentials above.
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \
   //experimental/loom_serve/models/qwen:epoch_check -- \
+  --device=amdgpu \
   --model=experimental/loom_serve/models/qwen/model.json \
   --prefill_capacity=32 --context_capacity=16384 --epoch=32:4 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \

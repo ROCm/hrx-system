@@ -8,7 +8,8 @@ rebuilding the executable. The single-model text/image tools are useful for
 model development, but are not required to operate this server.
 
 The learned-model deployments use Linux with ROCr and an AMD gfx11 GPU. The CLI
-selects one HAL device with `--device`; source text, embedding and decision
+requires an explicit HAL device URI with `--device`; no backend is selected by
+default. The CLI currently selects one device; source text, embedding and decision
 fixtures also run on x86 CPU and Vulkan, and the image fixture runs on Vulkan.
 CPU and Vulkan use `--pool_backing=fixed`. The device-group foundation is not
 yet a multi-device placement interface.
@@ -110,7 +111,7 @@ startup. Unknown, duplicate, wrongly typed and wrong-modality fields reject.
 
 | Process option | Default and scope |
 | --- | --- |
-| `--device` | `amdgpu`; one HAL device URI for all deployments |
+| `--device` | Required; one explicit HAL device URI for all deployments |
 | `--listen` | `127.0.0.1:8080`; repeat for numeric IPv4, `[IPv6]:port` or `unix:path` listeners |
 | `--workers` | `8`; shared CPU task workers for JIT, scheduling and media work, not one thread per connection |
 | `--connections` | `64`; admitted connections across all listeners, including SSE, incomplete and draining requests. Each listener may park one additional unadmitted peer; further arrivals stay in its kernel backlog |

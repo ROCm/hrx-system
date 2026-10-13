@@ -63,8 +63,10 @@ native services.
 Deployment source and asset paths are relative to their model document;
 inline HTTP registrations supply an explicit absolute `base_directory`.
 The [model format](docs/MODEL_FORMAT.md) is shared by CLI and HTTP.
-The serving JIT selects the exact compiler profile and loader target from HAL
-device facts. Linked providers cover AMDGPU, Vulkan/SPIR-V, x86 CPU and XDNA;
+All serving entry points require an explicit `--device` HAL URI; no backend is
+selected by default. The serving JIT selects the exact compiler profile and
+loader target from HAL device facts. Linked providers cover AMDGPU,
+Vulkan/SPIR-V, x86 CPU and XDNA;
 the source still needs to lower for the chosen target. The retained-text fixture
 runs through the same source-JIT, command, pooled-state and HTTP path on AMDGPU,
 Vulkan and x86 CPU. Its [CPU recipe](models/fixtures/text/README.md) uses
@@ -326,6 +328,7 @@ The CLI retains output tokens on the host while the fixed device ring wraps.
 
 ```sh
 build_tools/bin/iree-bazel-run --config=asan //experimental/loom_serve/text:generate -- \
+  --device=amdgpu \
   --model=experimental/loom_serve/models/qwen/model.json \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
@@ -467,6 +470,7 @@ performance data.
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \
   //experimental/loom_serve/text:server -- \
+  --device=amdgpu \
   --model=experimental/loom_serve/models/qwen/model.json \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
