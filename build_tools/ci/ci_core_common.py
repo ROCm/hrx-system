@@ -712,6 +712,25 @@ def s3_cache_path(cache_dir: Path, bucket: str, key: str) -> Path:
     return cache_dir / bucket / relpath
 
 
+def prune_s3_cache_runs(
+    cache_dir: Path,
+    bucket: str,
+    *,
+    platform_name: str,
+    retained_run_id: str,
+) -> None:
+    bucket_dir = cache_dir / bucket
+    if not bucket_dir.exists():
+        return
+    retained_name = f"{retained_run_id}-{platform_name}"
+    run_pattern = re.compile(rf"^\d+-{re.escape(platform_name)}$")
+    for path in bucket_dir.iterdir():
+        if path.name == retained_name or not run_pattern.fullmatch(path.name):
+            continue
+        log(f"  -- Pruning cached artifact run {path.name}")
+        remove_tree(path)
+
+
 def rocm_artifact_identity(
     *,
     release_type: str,
@@ -816,9 +835,15 @@ def fetch_rocm(
     for obj in selected:
         log(f"  {obj.key} ({obj.size / 1024 / 1024:.1f} MiB)")
 
+    cache_dir = args.download_cache_dir.resolve()
+    prune_s3_cache_runs(
+        cache_dir,
+        bucket,
+        platform_name=platform_name,
+        retained_run_id=run_id,
+    )
     output_dir = args.rocm_root.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    cache_dir = args.download_cache_dir.resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     downloaded: list[tuple[S3Object, Path]] = []

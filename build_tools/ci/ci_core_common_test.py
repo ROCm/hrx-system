@@ -278,6 +278,35 @@ class CiCoreCommonTest(unittest.TestCase):
                     )
                 self.assertIs(raised.exception, error)
 
+    def test_download_cache_retains_only_selected_platform_run(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            cache_dir = Path(temporary_dir)
+            bucket_dir = cache_dir / BUCKET
+            paths = {
+                name: bucket_dir / name / "archive.tar.zst"
+                for name in (
+                    "100-windows",
+                    "200-windows",
+                    "300-linux",
+                    "metadata",
+                )
+            }
+            for path in paths.values():
+                path.parent.mkdir(parents=True)
+                path.write_bytes(b"archive")
+
+            common.prune_s3_cache_runs(
+                cache_dir,
+                BUCKET,
+                platform_name="windows",
+                retained_run_id="200",
+            )
+
+            self.assertFalse(paths["100-windows"].exists())
+            self.assertTrue(paths["200-windows"].exists())
+            self.assertTrue(paths["300-linux"].exists())
+            self.assertTrue(paths["metadata"].exists())
+
     def test_checksum_download_preserves_local_write_failure(self):
         s3 = FakeS3()
         s3.objects["runtime.tar.xz.sha256sum"] = "checksum"
