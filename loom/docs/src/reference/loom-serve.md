@@ -15,6 +15,9 @@ loom-serve --agents_md
 The [serving walkthrough](../workflows/serve-models.md) reaches a first response
 without weights. [Model documents](serving-models.md) specify programs, assets,
 placement and per-model capacities.
+The [operation](../workflows/operate-model-server.md) and
+[observation](../workflows/observe-model-server.md) workflows describe lifecycle
+controls, pressure, counters and telemetry cursors.
 
 ## Process options
 

@@ -128,6 +128,8 @@ symbol linker, not by a native list of model layers.
 The [model-document reference](../reference/serving-models.md) explains path
 binding, source roles and modality capacities. The
 [command reference](../reference/loom-serve.md) covers device groups, multiple
-TCP/Unix listeners and process limits. HTTP administration and model loading
+TCP/Unix listeners and process limits. [Operation](operate-model-server.md) and
+[observation](observe-model-server.md) cover model swapping, pressure, counters
+and log streams. HTTP administration and model loading
 assume trusted clients and programs; deployment-owned isolation or tunnels
 supply any access-control boundary.

@@ -8,6 +8,9 @@ setup have separate owners.
 [Serve source-defined models](serve-models.md) starts an empty HTTP server,
 registers a complete model package and produces a checked response on CPU.
 Models can then be added or removed independently of the server process.
+[Operate a model server](operate-model-server.md) covers admission, residency and
+memory pressure; [observe a model server](observe-model-server.md) explains
+status, metrics and independent-reader log streams.
 
 Use [Agent-driven kernel development](agent-driven-kernel-development.md) when
 the task spans several tools and candidate iterations. It keeps numerical,

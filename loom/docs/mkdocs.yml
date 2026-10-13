@@ -80,6 +80,8 @@ nav:
   - Workflows:
       - Workflow map: workflows/index.md
       - Serve source-defined models: workflows/serve-models.md
+      - Operate a model server: workflows/operate-model-server.md
+      - Observe a model server: workflows/observe-model-server.md
       - Agent-driven kernel development: workflows/agent-driven-kernel-development.md
       - Tune loop unrolling and pipelining: workflows/tune-loop-schedules.md
       - Search per-instance loop schedules: workflows/search-loop-schedules.md
