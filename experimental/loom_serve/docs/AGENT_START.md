@@ -15,6 +15,39 @@ For deployment and administration rather than a new model port, the
 [operator guide](OPERATING.md) starts with an empty shared server and exercises
 dynamic registration, resource configuration, observation and removal.
 
+## What changes without rebuilding the server
+
+The server supplies shared execution and modality services. A model package
+supplies the programs those services run, rather than a native model adapter.
+Its [model document](MODEL_FORMAT.md) names the cold preparation program, warm
+control program, native source providers and assets. Programs may be Loom text
+or portable bytecode. Source symbol references establish dependencies between
+providers; their order in the document is not execution order.
+
+| Intended change | Owning input or implementation | How it takes effect |
+| --- | --- | --- |
+| Public model name, device placement, capacity or admission mode | Deployment JSON and [administration endpoints](OPERATING.md) | Register the deployment or change its supported lifecycle state; model source does not need an identity rewrite |
+| Model geometry, tensor encoding, weight preparation or numerical kernels | Source preparation, weight policy and reachable kernels/commands | Register the updated package; the existing binary JITs its selected programs |
+| Prompt framing, generated tool grammar or canonical history | Source [chat-policy entries](../text/README.md#chat-policy-entries) | Register the updated package within the native request/output contract |
+| Stage composition, speculative proposal/verification or prepared shape selection | Source preparation and warm control | Source selects and submits prepared stages; native code still owns admission, ready-span packing and retirement |
+| New HTTP fields, output media or scheduling policy | The corresponding native modality service, parser or scheduler | Update and rebuild the native owner, with a real request-to-output witness |
+
+An existing registration retains its prepared programs. Replacing source files
+does not mutate in-flight work; unregistering and registering again prepares
+the new package. Registration can happen while other models continue serving.
+The [operator walkthrough](OPERATING.md#first-output-starting-with-no-models)
+exercises that boundary with deterministic source programs before a learned
+model adds checkpoint and numerical requirements.
+
+This is source-defined model execution, not an arbitrary workflow engine or a
+promise that every serving policy already lives in Loom. For example, the
+native text parser currently requires greedy sampling, while Qwen's source
+policy separately rejects thinking mode. JSON and streamed SSE responses are
+both supported. A different chat policy can interpret `model_options` without
+native changes, but cannot expand the native sampling or output protocol by
+itself. The [text contract](../text/README.md#chat-policy-entries) specifies
+that boundary; backend support also depends on the actual programs in a package.
+
 ## Choose the existing execution contract
 
 A port starts from its state and result lifetime, not its model name. The
@@ -34,12 +67,14 @@ stages have a separate working loader; a weighted resident port still needs a
 source-owned placement contract connecting checkpoint names, lengths and native
 bindings. Native argument reflection alone does not contain those facts.
 
-The executable currently selects one HAL device for all registrations. CPU,
-AMDGPU, Vulkan and XDNA fixture evidence covers their authored paths, not every
-kernel on every backend. A learned model brings its numerical and target
-coverage with it. Audio streams, image-input conditioning and cross-device
-graphs do not fit these existing protocols merely by changing a catalog field;
-their first real caller must establish the missing input/output ownership flow.
+One server owns an explicitly configured HAL device group. Each registration
+currently selects one member, so different models can use different devices;
+a model does not yet span multiple members. CPU, AMDGPU, Vulkan and XDNA fixture
+evidence covers their authored paths, not every kernel on every backend. A
+learned model brings its numerical and target coverage with it. Audio streams,
+image-input conditioning and cross-device graphs do not fit these existing
+protocols merely by changing a model-document field; their first real caller
+must establish the missing input/output ownership flow.
 
 ## One bounded port assignment
 

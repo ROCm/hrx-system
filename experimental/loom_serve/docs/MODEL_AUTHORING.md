@@ -2,15 +2,19 @@
 
 Loom model code describes math, storage, specialization, and launch structure.
 The embedding supplies a live device, model configuration, parameter storage,
-and mutable state. This runner uses text sources directly; source changes are
-picked up by the next process without rebuilding its executable.
+and mutable state. A model document references Loom text or portable bytecode
+programs. Model preparation compiles them in process; updated programs take
+effect when the package is registered again without rebuilding or restarting
+the server. An existing registration retains its prepared programs.
 
 The [text package contract](../text/README.md) lists the exact cold and warm
 exports, storage records, semantic span protocol and chat-policy entry points.
-Text ports implement that source contract over `text:server`/`text:generate`;
-the [diffusion contract](#source-defined-diffusion-package) similarly targets
-`image:server`/`image:generate`. Neither executable links a model package or
-uses a native model registry.
+The [shared server](OPERATING.md) loads text, image, embedding and decision
+packages through their modality contracts. The single-model `text:server` and
+`text:generate` tools, and their `image` counterparts, are development callers
+of the same implementation rather than required per-model servers. None links
+a learned model package. The [change map](AGENT_START.md#what-changes-without-rebuilding-the-server)
+separates source-owned behavior from deployment settings and native services.
 
 ## Start from a concrete numerical and storage contract
 
@@ -102,9 +106,10 @@ output bounds and quantizer group capacity. It also owns stage selection and
 retained storage geometry. Warm descriptor packing and feedback publication also
 live in source, sharing the model's VM process with execution and canonical
 tool-call formatting, streaming text boundaries and completed checkpoints.
-Role templates, public model identity, generated-tool grammar selection and
-canonical completion are also source-owned. Native code supplies a bounded
-text protocol, admission and retained-session ownership; it contains no
+Role templates, generated-tool grammar selection and canonical completion are
+also source-owned. The deployment document supplies public model identity;
+changing that name does not require editing source. Native code supplies a
+bounded text protocol, admission and retained-session ownership; it contains no
 model-name switch or template-family selector.
 
 Configuration is a model entry/specialization boundary. Reusable functions,
