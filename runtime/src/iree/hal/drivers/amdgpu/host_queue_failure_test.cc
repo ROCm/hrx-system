@@ -59,6 +59,9 @@ class DriverFailureCapture {
   }
 
   iree_status_code_t status_code() const { return status_code_; }
+  iree_status_code_t device_status_code_at_publication() const {
+    return device_status_code_at_publication_;
+  }
   std::string message() const { return std::string(message_, message_length_); }
 
  private:
@@ -81,6 +84,15 @@ class DriverFailureCapture {
         reinterpret_cast<const iree_hal_device_driver_failure_event_t*>(
             event->payload.data);
     capture->status_code_ = payload->status_code;
+    if (event->source.device) {
+      iree_status_t device_status =
+          iree_hal_amdgpu_logical_device_check_failure(
+              reinterpret_cast<iree_hal_amdgpu_logical_device_t*>(
+                  event->source.device));
+      capture->device_status_code_at_publication_ =
+          iree_status_code(device_status);
+      iree_status_free(device_status);
+    }
     capture->message_length_ =
         payload->message.size < sizeof(capture->message_) - 1
             ? payload->message.size
@@ -97,6 +109,7 @@ class DriverFailureCapture {
   iree_notification_t notification_;
   iree_atomic_int32_t state_ = IREE_ATOMIC_VAR_INIT(0);
   iree_status_code_t status_code_ = IREE_STATUS_OK;
+  iree_status_code_t device_status_code_at_publication_ = IREE_STATUS_OK;
   iree_host_size_t message_length_ = 0;
   char message_[512] = {0};
 };
@@ -491,6 +504,8 @@ TEST_F(HostQueueFailureTest, UnpublishedHardwareCompletionFailsQueue) {
   EXPECT_NE(queue_error_text.find("submitted="), std::string::npos);
   EXPECT_NE(queue_error_text.find("drained="), std::string::npos);
   EXPECT_EQ(failure_capture.status_code(), IREE_STATUS_INTERNAL);
+  EXPECT_EQ(failure_capture.device_status_code_at_publication(),
+            IREE_STATUS_INTERNAL);
   EXPECT_EQ(failure_capture.message(), queue_error_text);
   iree_status_free(queue_error);
 

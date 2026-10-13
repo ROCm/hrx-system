@@ -505,10 +505,12 @@ static void iree_hal_amdgpu_host_queue_validate_completion_epoch(
       stable_snapshot.completed_epoch, stable_snapshot.published_epoch,
       submitted_epoch, drained_epoch);
   if (iree_hal_amdgpu_host_queue_store_error(queue, error)) {
-    iree_hal_amdgpu_host_queue_publish_driver_failure(queue, error);
+    // Install all terminal state before publishing the event: sinks may inspect
+    // the queue or logical device synchronously from the callback.
     iree_hal_amdgpu_logical_device_error_handler(queue->logical_device,
                                                  iree_status_clone(error));
     iree_hal_amdgpu_host_queue_request_completion_thread_stop(queue);
+    iree_hal_amdgpu_host_queue_publish_driver_failure(queue, error);
   }
 }
 
