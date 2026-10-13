@@ -53,6 +53,9 @@ func.def @encode_plan(%plan: buffer, %inputs: buffer, %count: index, %first: ind
   %descriptors = buffer.view %metadata[%descriptor_origin] : buffer -> view<64x5xi32>
   %selections = buffer.view %metadata[%selection_origin] : buffer -> view<128xi32>
   %options = buffer.view %metadata[%options_origin] : buffer -> view<64x2xi32>
+  %identity_origin = index.constant 5088 : offset
+  %identities = buffer.view %metadata[%identity_origin] : buffer -> view<128x2xi32>
+  %primary = index.cmp eq, %metadata_origin, %origin : offset
   %span_count = index.assume %count [range(%count, 1, 16)] : index
   %zero32 = scalar.constant 0 : i32
   %one32 = scalar.constant 1 : i32
@@ -104,6 +107,13 @@ func.def @encode_plan(%plan: buffer, %inputs: buffer, %count: index, %first: ind
       %slot = index.assume %slot_value [range(%slot_value, 0, 127)] : index
       %token = scalar.addi %selection_first, %j32 : i32
       view.store %token, %selections[%slot] : i32, view<128xi32>
+      scf.if %primary {
+        %relative = scalar.subi %token, %cursor : i32
+        %input_position = scalar.addi %position, %relative : i32
+        %target_position = scalar.addi %input_position, %one32 : i32
+        view.store %row, %identities[%slot, 0] : i32, view<128x2xi32>
+        view.store %target_position, %identities[%slot, 1] : i32, view<128x2xi32>
+      }
     }
     %next_outputs = scalar.addi %outputs, %active_selections : i32
     scf.yield %end, %next_outputs : i32, i32
@@ -118,7 +128,7 @@ func.def @encode_plan(%plan: buffer, %inputs: buffer, %count: index, %first: ind
 
 // All backing is cold retained storage. This transform allocates nothing and
 // completes before its opaque outputs are borrowed by queued host uploads.
-func.def public @encode_epoch(%plan: buffer, %inputs: buffer, %first_count: i32, %next_count: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32) {
+func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %first_count: i32, %next_count: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -126,6 +136,10 @@ func.def public @encode_epoch(%plan: buffer, %inputs: buffer, %first_count: i32,
   %zero32 = scalar.constant 0 : i32
   %token_bytes = buffer.length %tokens
   buffer.fill %zero32, %tokens[%origin], %token_bytes : i32
+  %policy_source = index.constant 32 : offset
+  %policy_target = index.constant 4704 : offset
+  %policy_bytes = index.constant 384 : offset
+  buffer.copy %control_state[%policy_source], %metadata[%policy_target], %policy_bytes
   %first_bounded = scalar.assume %first_count [range(%first_count, 1, 16)] : i32
   %first = index.cast %first_bounded : i32 to index
   %outputs = func.call @encode_plan(%plan, %inputs, %first, %c0, %metadata, %origin, %tokens, %origin) : (buffer, buffer, index, index, buffer, offset, buffer, offset) -> (i32)
@@ -864,6 +878,212 @@ func.def @chat_range(%text: buffer, %begin: i64, %length: i64) -> (buffer) {
   %result = buffer.alloca<private> align(1) %size : buffer
   buffer.copy %text[%start], %result[%c0], %size
   func.return %result : buffer
+}
+
+func.decl import("json") @parse_i64(%source: buffer, %offset: i64, %length: i64) -> (i64)
+
+func.decl import("json") @parse_f64(%source: buffer, %offset: i64, %length: i64) -> (f64)
+
+global.rodata.def @sampling_key_name = bytes("73616d706c696e67")
+
+global.rodata.def @temperature_key = bytes("74656d7065726174757265")
+
+global.rodata.def @top_p_key = bytes("746f705f70")
+
+global.rodata.def @top_k_key = bytes("746f705f6b")
+
+global.rodata.def @seed_key = bytes("73656564")
+
+global.rodata.def @draft_weights_key = bytes("64726166745f77656967687473")
+
+global.rodata.def @sampling_error = bytes("73616d706c696e672072657175697265732074656d70657261747572653d30206f7220706f736974697665206e6f726d616c204633322c206e6f726d616c2046333220746f705f7020696e2028302c315d2c206e6f6e6e656761746976652049333220746f705f6b2c20616e64207369676e65642049363420736565643b206475706c696361746520616e6420756e6b6e6f776e2073616d706c696e672064656661756c7473206172652072656a6563746564")
+
+func.def @sampling_require(%valid: i1) {
+  %condition = scalar.extui %valid : i1 to i32
+  %error = global.load @sampling_error : buffer
+  func.call @require(%condition, %error) : (i32, buffer)
+  func.return
+}
+
+func.def @option_key(%source: buffer, %begin: i64, %length: i64) -> (buffer) {
+  %zero = scalar.constant 0 : i64
+  %origin = index.constant 0 : offset
+  %bounded_length = scalar.assume %length [range(%length, 0, 9223372036854775807)] : i64
+  %size = index.cast %bounded_length : i64 to offset
+  %storage = buffer.alloca<private> align(1) %size : buffer
+  %decoded_length = func.call @unescape(%source, %begin, %length, %storage, %zero) : (buffer, i64, i64, buffer, i64) -> (i64)
+  %result = func.call @chat_range(%storage, %zero, %decoded_length) : (buffer, i64, i64) -> (buffer)
+  func.return %result : buffer
+}
+
+func.def @sampling_overlay(%source: buffer, %strict: i1, %configuration: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %zero32 = scalar.constant 0 : i32
+  %one32 = scalar.constant 1 : i32
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  %two = scalar.constant 2 : i32
+  %fields, %type, %count = func.call @members(%source) : (buffer) -> (buffer, i32, i64)
+  %object = scalar.cmpi eq, %type, %two : i32
+  func.call @sampling_require(%object) : (i1)
+  %bounded_count = scalar.assume %count [range(%count, 0, 2147483647)] : i64
+  %extent = index.cast %bounded_count : i64 to index
+  %records = buffer.view %fields[%origin] : buffer -> view<[%extent]x5xi64>
+  %words = buffer.view %configuration[%origin] : buffer -> view<6xi32>
+  %floats = buffer.view %configuration[%origin] : buffer -> view<6xf32>
+  %seed_origin = index.constant 16 : offset
+  %seed_view = buffer.view %configuration[%seed_origin] : buffer -> view<1xi64>
+  %temperature_key = global.load @temperature_key : buffer
+  %p_key = global.load @top_p_key : buffer
+  %k_key = global.load @top_k_key : buffer
+  %seed_key = global.load @seed_key : buffer
+  %seen = scf.for %i = [%c0 to %extent step %c1](%seen = %zero32 : i32) -> (i32) {
+    %key_begin = view.load %records[%i, 0] : view<[%extent]x5xi64> -> i64
+    %key_length = view.load %records[%i, 1] : view<[%extent]x5xi64> -> i64
+    %key = func.call @option_key(%source, %key_begin, %key_length) : (buffer, i64, i64) -> (buffer)
+    %is_temperature = func.call @chat_equal(%key, %temperature_key) : (buffer, buffer) -> (i1)
+    %is_p = func.call @chat_equal(%key, %p_key) : (buffer, buffer) -> (i1)
+    %is_k = func.call @chat_equal(%key, %k_key) : (buffer, buffer) -> (i1)
+    %is_seed = func.call @chat_equal(%key, %seed_key) : (buffer, buffer) -> (i1)
+    %tbit = scalar.extui %is_temperature : i1 to i32
+    %pbit = scf.select %is_p, %two, %zero32 : i32
+    %four = scalar.constant 4 : i32
+    %eight = scalar.constant 8 : i32
+    %kbit = scf.select %is_k, %four, %zero32 : i32
+    %sbit = scf.select %is_seed, %eight, %zero32 : i32
+    %a = scalar.ori %tbit, %pbit : i32
+    %b = scalar.ori %kbit, %sbit : i32
+    %bit = scalar.ori %a, %b : i32
+    %known = scalar.cmpi ne, %bit, %zero32 : i32
+    %duplicate = scalar.andi %seen, %bit : i32
+    %unique = scalar.cmpi eq, %duplicate, %zero32 : i32
+    %not_strict = scalar.constant false : i1
+    %loose = scalar.cmpi eq, %strict, %not_strict : i1
+    %allowed = scalar.ori %known, %loose : i1
+    %valid = scalar.andi %allowed, %unique : i1
+    func.call @sampling_require(%valid) : (i1)
+    scf.if %known {
+      %value_begin = view.load %records[%i, 2] : view<[%extent]x5xi64> -> i64
+      %value_length = view.load %records[%i, 3] : view<[%extent]x5xi64> -> i64
+      %value_type = view.load %records[%i, 4] : view<[%extent]x5xi64> -> i64
+      %number = scalar.cmpi eq, %value_type, %one64 : i64
+      func.call @sampling_require(%number) : (i1)
+      %floating = scalar.ori %is_temperature, %is_p : i1
+      scf.if %floating {
+        %value = func.call @parse_f64(%source, %value_begin, %value_length) : (buffer, i64, i64) -> (f64)
+        %zero = scalar.constant 0.0 : f64
+        %one = scalar.constant 1.0 : f64
+        %largest = scalar.constant 3.4028234663852886e+38 : f64
+        %smallest = scalar.constant 1.1754943508222875e-38 : f64
+        %zero_value = scalar.cmpf oeq, %value, %zero : f64
+        %normal = scalar.cmpf oge, %value, %smallest : f64
+        %finite = scalar.cmpf ole, %value, %largest : f64
+        %nonnegative = scalar.ori %zero_value, %normal : i1
+        %valid_temperature = scalar.andi %nonnegative, %finite : i1
+        %probability = scalar.cmpf ole, %value, %one : f64
+        %valid_p = scalar.andi %normal, %probability : i1
+        %valid = scf.select %is_temperature, %valid_temperature, %valid_p : i1
+        func.call @sampling_require(%valid) : (i1)
+        %value32 = scalar.fptrunc %value : f64 to f32
+        %slot = scf.select %is_temperature, %c0, %c1 : index
+        view.store %value32, %floats[%slot] : f32, view<6xf32>
+      } else {
+        %value = func.call @parse_i64(%source, %value_begin, %value_length) : (buffer, i64, i64) -> (i64)
+        scf.if %is_seed {
+          view.store %value, %seed_view[0] : i64, view<1xi64>
+          view.store %one32, %words[3] : i32, view<6xi32>
+        } else {
+          %limit = scalar.constant 2147483647 : i64
+          %valid = scalar.cmpi ule, %value, %limit : i64
+          func.call @sampling_require(%valid) : (i1)
+          %value32 = scalar.trunci %value : i64 to i32
+          view.store %value32, %words[2] : i32, view<6xi32>
+        }
+      }
+    }
+    %next = scalar.ori %seen, %bit : i32
+    scf.yield %next : i32
+  }
+  func.return
+}
+
+// Source-private request packet: F32 temperature/top-p, I32 top-k/seed-presence,
+// and I64 seed. Native serving code only retains and transports the bytes.
+func.def public @request_defaults(%options: buffer) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 24 : offset
+  %configuration = buffer.alloca<private> align(8) %bytes : buffer
+  %zero32 = scalar.constant 0 : i32
+  buffer.fill %zero32, %configuration[%origin], %bytes : i32
+  %floats = buffer.view %configuration[%origin] : buffer -> view<6xf32>
+  %one = scalar.constant 1.0 : f32
+  view.store %one, %floats[1] : f32, view<6xf32>
+  %fields, %type, %count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
+  %object_type = scalar.constant 2 : i32
+  %object = scalar.cmpi eq, %type, %object_type : i32
+  func.call @sampling_require(%object) : (i1)
+  %bounded_count = scalar.assume %count [range(%count, 0, 2147483647)] : i64
+  %extent = index.cast %bounded_count : i64 to index
+  %records = buffer.view %fields[%origin] : buffer -> view<[%extent]x5xi64>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %sampling = global.load @sampling_key_name : buffer
+  %draft = global.load @draft_weights_key : buffer
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %seen = scf.for %i = [%c0 to %extent step %c1](%seen = %false : i1) -> (i1) {
+    %begin = view.load %records[%i, 0] : view<[%extent]x5xi64> -> i64
+    %length = view.load %records[%i, 1] : view<[%extent]x5xi64> -> i64
+    %key = func.call @option_key(%options, %begin, %length) : (buffer, i64, i64) -> (buffer)
+    %is_sampling = func.call @chat_equal(%key, %sampling) : (buffer, buffer) -> (i1)
+    %is_draft = func.call @chat_equal(%key, %draft) : (buffer, buffer) -> (i1)
+    %allowed = scalar.ori %is_sampling, %is_draft : i1
+    func.call @sampling_require(%allowed) : (i1)
+    scf.if %is_sampling {
+      %unique = scalar.cmpi eq, %seen, %false : i1
+      func.call @sampling_require(%unique) : (i1)
+      %value_begin = view.load %records[%i, 2] : view<[%extent]x5xi64> -> i64
+      %value_length = view.load %records[%i, 3] : view<[%extent]x5xi64> -> i64
+      %value = func.call @chat_range(%options, %value_begin, %value_length) : (buffer, i64, i64) -> (buffer)
+      func.call @sampling_overlay(%value, %true, %configuration) : (buffer, i1, buffer)
+    }
+    %next = scalar.ori %seen, %is_sampling : i1
+    scf.yield %next : i1
+  }
+  func.return %configuration : buffer
+}
+
+func.def public @request_options(%defaults: buffer, %request: buffer, %nonce: i64) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 24 : offset
+  %configuration = buffer.alloca<private> align(8) %bytes : buffer
+  buffer.copy %defaults[%origin], %configuration[%origin], %bytes
+  %false = scalar.constant false : i1
+  func.call @sampling_overlay(%request, %false, %configuration) : (buffer, i1, buffer)
+  %words = buffer.view %configuration[%origin] : buffer -> view<6xi32>
+  %flag = view.load %words[3] : view<6xi32> -> i32
+  %zero = scalar.constant 0 : i32
+  %implicit_seed = scalar.cmpi eq, %flag, %zero : i32
+  scf.if %implicit_seed {
+    %seed_origin = index.constant 16 : offset
+    %seed = buffer.view %configuration[%seed_origin] : buffer -> view<1xi64>
+    view.store %nonce, %seed[0] : i64, view<1xi64>
+  }
+  func.return %configuration : buffer
+}
+
+func.def public @bind_request(%state: buffer, %row: i32, %options: buffer) {
+  %table = index.constant 32 : offset
+  %stride = index.constant 24 : offset
+  %bounded_row = scalar.assume %row [range(%row, 0, 15)] : i32
+  %row_value = index.cast %bounded_row : i32 to index
+  %row_offset = index.scale %row_value, %stride : index, offset -> offset
+  %target = index.add %table, %row_offset : offset
+  %origin = index.constant 0 : offset
+  buffer.copy %options[%origin], %state[%target], %stride
+  func.return
 }
 
 func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {

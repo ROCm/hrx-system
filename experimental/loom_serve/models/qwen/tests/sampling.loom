@@ -1,0 +1,89 @@
+kernel.decl @qwen38_sample_rows(%rows: index) launch(%rows_argument: index, %epoch: buffer, %logits: buffer, %partial_logits: buffer, %partial_ids: buffer, %outputs: buffer)
+
+func.decl @sampling_race(%logit: f32, %maximum: f32, %temperature: f32, %seed: i64, %position: i64, %id: i32) -> (f32)
+
+// Nonadjacent owners share a random stream; a third owner is greedy. The
+// padded identity is deliberately invalid and must never be dereferenced.
+func.def @sampling_packet(%seed: i64, %epoch: buffer) {
+  %origin = index.constant 0 : offset
+  %identity_origin = index.constant 5088 : offset
+  %policy_origin = index.constant 4704 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %identities = buffer.view %epoch[%identity_origin] : buffer -> view<128x2xi32>
+  %policies = buffer.view %epoch[%policy_origin] : buffer -> view<16x6xi32>
+  %floats = buffer.view %epoch[%policy_origin] : buffer -> view<16x6xf32>
+  %seeds = buffer.view %epoch[%policy_origin] : buffer -> view<16x3xi64>
+  %three = scalar.constant 3 : i32
+  %two = scalar.constant 2 : i32
+  %seven = scalar.constant 7 : i32
+  %fifteen = scalar.constant 15 : i32
+  %position = scalar.constant 117 : i32
+  %zero = scalar.constant 0.0 : f32
+  %temperature = scalar.constant 0.69999999999999996 : f32
+  %one = scalar.constant 1.0 : f32
+  %twenty = scalar.constant 20 : i32
+  view.store %three, %header[2] : i32, view<3xi32>
+  view.store %two, %identities[0, 0] : i32, view<128x2xi32>
+  view.store %seven, %identities[1, 0] : i32, view<128x2xi32>
+  view.store %fifteen, %identities[2, 0] : i32, view<128x2xi32>
+  view.store %position, %identities[0, 1] : i32, view<128x2xi32>
+  view.store %position, %identities[1, 1] : i32, view<128x2xi32>
+  view.store %position, %identities[2, 1] : i32, view<128x2xi32>
+  view.store %temperature, %floats[2, 0] : f32, view<16x6xf32>
+  view.store %temperature, %floats[7, 0] : f32, view<16x6xf32>
+  view.store %zero, %floats[15, 0] : f32, view<16x6xf32>
+  view.store %one, %floats[2, 1] : f32, view<16x6xf32>
+  view.store %one, %floats[7, 1] : f32, view<16x6xf32>
+  view.store %twenty, %policies[2, 2] : i32, view<16x6xi32>
+  view.store %twenty, %policies[7, 2] : i32, view<16x6xi32>
+  view.store %seed, %seeds[2, 2] : i64, view<16x3xi64>
+  view.store %seed, %seeds[7, 2] : i64, view<16x3xi64>
+  func.return
+}
+
+// Tied logits give an analytic top-k support: exactly IDs [0,20). The VM
+// oracle races that support directly, independently of device partitioning.
+func.def @sampling_rows_reference(%rows: index, %epoch: buffer, %logits: buffer, %partial_logits: buffer, %partial_ids: buffer, %outputs: buffer) {
+  %origin = index.constant 0 : offset
+  %seed_origin = index.constant 4768 : offset
+  %seeds = buffer.view %epoch[%seed_origin] : buffer -> view<1xi64>
+  %seed = view.load %seeds[0] : view<1xi64> -> i64
+  %position = scalar.constant 117 : i64
+  %temperature = scalar.constant 0.69999999999999996 : f32
+  %one = scalar.constant 1.0 : f32
+  %negative = scalar.constant -inf : f32
+  %zero32 = scalar.constant 0 : i32
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c20 = index.constant 20 : index
+  %score, %winner = scf.for %i = [%c0 to %c20 step %c1](%best = %negative : f32, %id = %zero32 : i32) -> (f32, i32) {
+    %token = index.cast %i : index to i32
+    %score = func.call @sampling_race(%one, %one, %temperature, %seed, %position, %token) : (f32, f32, f32, i64, i64, i32) -> (f32)
+    %better = scalar.cmpf ogt, %score, %best : f32
+    %next_score = scf.select %better, %score, %best : f32
+    %next_id = scf.select %better, %token, %id : i32
+    scf.yield %next_score, %next_id : f32, i32
+  }
+  %result = buffer.view %outputs[%origin] : buffer -> view<4xi32>
+  view.store %winner, %result[0] : i32, view<4xi32>
+  view.store %winner, %result[1] : i32, view<4xi32>
+  view.store %zero32, %result[2] : i32, view<4xi32>
+  func.return
+}
+
+check.scenario public @sampling_rows {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %rows = check.literal value(4) : index
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %epoch = check.generate.fill value(-1) : tensor<1528xi32>
+    check.generate<@sampling_packet>(%seed, %epoch) : (i64, tensor<1528xi32>) -> ()
+    %logits = check.generate.fill value(1.0) : tensor<4x248320xf32>
+    %partial_logits = check.generate.fill value(1.0) : tensor<4x61xf32>
+    %partial_ids = check.generate.iota offset(0) step(4096) period(61) : tensor<4x61xi32>
+    %outputs = check.generate.fill value(-99) : tensor<4xi32>
+    check.compare<@qwen38_sample_rows, @sampling_rows_reference>[%rows](%rows, %epoch, %logits, %partial_logits, %partial_ids, %outputs) : [index](index, tensor<1528xi32>, tensor<4x248320xf32>, tensor<4x61xf32>, tensor<4x61xi32>, tensor<4xi32>) -> () {
+      check.expect.equal actual(%outputs) expected(%outputs) : tensor<4xi32>
+    }
+  }
+  check.return
+}

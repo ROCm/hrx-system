@@ -34,6 +34,15 @@ func.def public @model_name() -> (buffer) {
   func.return %name : buffer
 }
 
+func.def public @request_defaults(%options: buffer) -> (buffer) {
+  %empty = global.load @empty : buffer
+  func.return %empty : buffer
+}
+
+func.def public @request_options(%defaults: buffer, %request: buffer, %nonce: i64) -> (buffer) {
+  func.return %defaults : buffer
+}
+
 func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
   %empty = global.load @empty : buffer
   %c0 = scalar.constant 0 : i64
