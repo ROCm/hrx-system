@@ -56,6 +56,8 @@ def run(command, log, concurrent):
         if ready is None:
             raise RuntimeError(f"router did not reach readiness: {log}")
         address = urlsplit(f"http://{ready}")
+        for name in ("scout", "researcher"):
+            wait_status(address, model=name, phase="idle")
         catalog = control(address, "GET", "/v1/models", 200)
         if [item["id"] for item in catalog["data"]] != ["scout", "researcher"]:
             raise RuntimeError(f"wrong route catalog: {catalog}")

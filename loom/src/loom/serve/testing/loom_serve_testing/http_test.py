@@ -10,11 +10,45 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from loom_serve_testing.http import Events, collect_events, running_server
+from loom_serve_testing.http import Events, collect_events, running_server, wait_status
 
 
 class HttpTest(unittest.TestCase):
+    def test_status_waits_for_model_preparation(self):
+        states = [
+            {"phase": "preparing", "queued_requests": 0, "active_requests": 0},
+            {"phase": "idle", "queued_requests": 0, "active_requests": 0},
+        ]
+        responses = [
+            {"data": [{"id": "chat", "loom": {"status": state}}]} for state in states
+        ]
+        address = SimpleNamespace(hostname="localhost", port=8080)
+        with patch("loom_serve_testing.http.control", side_effect=responses) as get:
+            result = wait_status(address, model="chat", phase="idle")
+        self.assertEqual(result, states[1])
+        self.assertEqual(get.call_count, 2)
+
+    def test_status_failure_reports_preparation_diagnostic_without_retry(self):
+        response = {
+            "data": [
+                {
+                    "id": "chat",
+                    "loom": {
+                        "registration": "failed",
+                        "error": {"code": 5, "message": "missing source provider"},
+                        "status": {"phase": "failed"},
+                    },
+                }
+            ]
+        }
+        address = SimpleNamespace(hostname="localhost", port=8080)
+        with patch("loom_serve_testing.http.control", return_value=response) as get:
+            with self.assertRaisesRegex(RuntimeError, "missing source provider"):
+                wait_status(address, model="chat", phase="idle")
+        get.assert_called_once_with(address, "GET", "/v1/status", 200)
+
     def test_child_failure_preserves_diagnostics_after_temporary_logs_are_removed(self):
         command = [
             sys.executable,

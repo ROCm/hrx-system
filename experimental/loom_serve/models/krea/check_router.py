@@ -111,6 +111,8 @@ def run(command, directory, isolated=None):
             raise RuntimeError(f"server did not reach readiness: {directory}")
         address = urlsplit(f"http://{ready}")
         expected_names = ["scout", "illustrator"] if isolated else ["scout"]
+        for name in expected_names:
+            wait_status(address, model=name, phase="idle")
         catalog = control(address, "GET", "/v1/models", 200)
         if [item["id"] for item in catalog["data"]] != expected_names:
             raise RuntimeError(f"wrong deployment catalog: {catalog}")

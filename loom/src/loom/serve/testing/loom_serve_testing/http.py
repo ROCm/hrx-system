@@ -50,7 +50,10 @@ def wait_status(address, *, model=None, **fields):
             selected = models[0]
         else:
             selected = next(item for item in models if item["id"] == model)
-        state = selected["loom"]["status"]
+        details = selected["loom"]
+        if "error" in details:
+            raise RuntimeError(f"model {selected['id']!r} failed: {details}")
+        state = details["status"]
         if all(state[key] == value for key, value in fields.items()):
             return state
 
