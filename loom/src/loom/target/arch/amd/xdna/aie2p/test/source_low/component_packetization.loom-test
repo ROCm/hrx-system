@@ -86,3 +86,65 @@ func.def @i8x33_signed_extension(%input: vector<33xi8>) -> (vector<33xi32>) {
   %result = vector.concat<0> %4, %6 : vector<32xi32>, vector<1xi32> -> vector<33xi32>
   func.return %result : vector<33xi32>
 }
+
+// ====
+
+func.def @f32x64_native_producer(%lhs: vector<64xf32>, %rhs: vector<64xf32>) -> (vector<64xbf16>) {
+  %sum = vector.addf %lhs, %rhs : vector<64xf32>
+  %result = vector.fptrunc %sum : vector<64xf32> to vector<64xbf16>
+  func.return %result : vector<64xbf16>
+}
+
+// ----
+func.def @f32x64_native_producer(%lhs: vector<64xf32>, %rhs: vector<64xf32>) -> (vector<64xbf16>) {
+  %sum = vector.addf %lhs, %rhs : vector<64xf32>
+  %5 = vector.slice %sum[0] : vector<64xf32> -> vector<32xf32>
+  %6 = vector.fptrunc %5 : vector<32xf32> to vector<32xbf16>
+  %7 = vector.slice %sum[32] : vector<64xf32> -> vector<32xf32>
+  %8 = vector.fptrunc %7 : vector<32xf32> to vector<32xbf16>
+  %result = vector.concat<0> %6, %8 : vector<32xbf16>, vector<32xbf16> -> vector<64xbf16>
+  func.return %result : vector<64xbf16>
+}
+
+// ====
+
+func.def @bf16_origin_closure_with_early_native_use(%input: vector<64xbf16>, %bias: vector<64xf32>) -> (vector<64xf32>, vector<64xbf16>) {
+  %widened = vector.extf %input : vector<64xbf16> to vector<64xf32>
+  %early = vector.addf %widened, %bias : vector<64xf32>
+  %scale = vector.constant 1.4453125 : vector<64xf32>
+  %scaled = vector.mulf<nnan|ninf|nsz|contract> %widened, %scale : vector<64xf32>
+  %rounded = vector.fptrunc %scaled : vector<64xf32> to vector<64xbf16>
+  func.return %early, %rounded : vector<64xf32>, vector<64xbf16>
+}
+
+// ----
+func.def @bf16_origin_closure_with_early_native_use(%input: vector<64xbf16>, %bias: vector<64xf32>) -> (vector<64xf32>, vector<64xbf16>) {
+  %9 = vector.slice %input[0] : vector<64xbf16> -> vector<16xbf16>
+  %10 = vector.extf %9 : vector<16xbf16> to vector<16xf32>
+  %11 = vector.slice %input[16] : vector<64xbf16> -> vector<16xbf16>
+  %12 = vector.extf %11 : vector<16xbf16> to vector<16xf32>
+  %13 = vector.slice %input[32] : vector<64xbf16> -> vector<16xbf16>
+  %14 = vector.extf %13 : vector<16xbf16> to vector<16xf32>
+  %15 = vector.slice %input[48] : vector<64xbf16> -> vector<16xbf16>
+  %16 = vector.extf %15 : vector<16xbf16> to vector<16xf32>
+  %34 = vector.concat<0> %10, %12 : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %35 = vector.concat<0> %14, %16 : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %widened = vector.concat<0> %34, %35 : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+  %early = vector.addf %widened, %bias : vector<64xf32>
+  %40 = vector.constant 1.4453125 : vector<16xf32>
+  %19 = vector.mulf<nnan|ninf|nsz|contract> %10, %40 : vector<16xf32>
+  %20 = vector.fptrunc %19 : vector<16xf32> to vector<16xbf16>
+  %39 = vector.constant 1.4453125 : vector<16xf32>
+  %22 = vector.mulf<nnan|ninf|nsz|contract> %12, %39 : vector<16xf32>
+  %23 = vector.fptrunc %22 : vector<16xf32> to vector<16xbf16>
+  %38 = vector.constant 1.4453125 : vector<16xf32>
+  %25 = vector.mulf<nnan|ninf|nsz|contract> %14, %38 : vector<16xf32>
+  %26 = vector.fptrunc %25 : vector<16xf32> to vector<16xbf16>
+  %37 = vector.constant 1.4453125 : vector<16xf32>
+  %28 = vector.mulf<nnan|ninf|nsz|contract> %16, %37 : vector<16xf32>
+  %29 = vector.fptrunc %28 : vector<16xf32> to vector<16xbf16>
+  %31 = vector.concat<0> %20, %23 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %32 = vector.concat<0> %26, %29 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %rounded = vector.concat<0> %31, %32 : vector<32xbf16>, vector<32xbf16> -> vector<64xbf16>
+  func.return %early, %rounded : vector<64xf32>, vector<64xbf16>
+}

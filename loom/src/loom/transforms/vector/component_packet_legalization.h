@@ -50,8 +50,12 @@ loom_vector_component_packet_query_cache_lookup(
 // Plans and rewrites every profitable decomposable vector component in
 // |region|. The target contributes candidate lane counts through
 // |context->vector_packet_policy|; the target contract remains the sole source
-// of native legality. Components are emitted packet-major so direct SSA edges
-// remain packet-local across mixed operations and fanout.
+// of native legality. Authored-legal producers remain target snapshots and
+// narrower consumers slice their results without replaying native work. A
+// contract that consumes whole-vector lane provenance retains its producer
+// closure so each projected packet establishes a complete local origin.
+// Components requiring legalization are emitted packet-major so direct SSA
+// edges remain packet-local across mixed operations and fanout.
 //
 // |rewrite_callback| observes each authored operation only after its component
 // rewrite has completed. Missing callback functions disable observation.

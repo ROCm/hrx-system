@@ -48,6 +48,8 @@ typedef struct loom_vector_component_record_t {
   uint32_t lane_count;
   // Target-native packet candidates for this operation, by policy ordinal.
   uint64_t candidate_bits;
+  // Candidate widths whose contract requires packet-local producer provenance.
+  uint64_t producer_closure_candidate_bits;
   // Operations created while materializing packets and an escaping aggregate.
   uint64_t created_op_count;
   // Authored target-contract result retained for downstream legalization.
@@ -59,6 +61,28 @@ typedef struct loom_vector_component_record_t {
   // True when the result escapes the selected component.
   bool escapes;
 } loom_vector_component_record_t;
+
+typedef struct loom_vector_component_producer_closure_t {
+  // Union-find parent record for the packet-local producer closure.
+  uint32_t parent_index;
+  // Offset of retained cross-component producer indices, or invalid.
+  uint32_t retained_producer_offset;
+  // Packet results retained for consumers in later closure components.
+  loom_value_id_t* retained_packets;
+  // Logical lane width of each retained packet.
+  uint32_t retained_packet_lane_count;
+  // Number of entries in |retained_packets|.
+  uint32_t retained_packet_count;
+  // True when the operation belongs to this packet-local producer closure.
+  bool demanded;
+  // True when one closure component selected a different packet shape.
+  bool selection_mismatch;
+} loom_vector_component_producer_closure_t;
+
+typedef enum loom_vector_component_candidate_scope_e {
+  LOOM_VECTOR_COMPONENT_CANDIDATE_SCOPE_REJECTED_ROOTS = 0,
+  LOOM_VECTOR_COMPONENT_CANDIDATE_SCOPE_LEGAL_PRODUCERS = 1,
+} loom_vector_component_candidate_scope_t;
 
 typedef struct loom_vector_component_t {
   // First member in dominance order.
@@ -86,6 +110,10 @@ struct loom_vector_component_plan_t {
   loom_vector_component_packet_rewrite_callback_t rewrite_callback;
   // Dense one-based record index keyed by local value ordinal.
   uint32_t* value_record_indices;
+  // Original producer records retained across component rewrites.
+  uint32_t* retained_producer_record_indices;
+  // Optional state for packet-local producer closures.
+  loom_vector_component_producer_closure_t* producer_closures;
   // Dominance-ordered decomposable operation records.
   loom_vector_component_record_t* records;
   // Number of initialized records.
@@ -96,7 +124,7 @@ struct loom_vector_component_plan_t {
   loom_vector_component_t* components;
   // Number of initialized components.
   uint32_t component_count;
-  // Number of records in the backward closure of a target rejection.
+  // Number of authored operations requiring packet legalization.
   uint32_t demanded_record_count;
 };
 
@@ -206,6 +234,28 @@ static uint32_t loom_vector_component_record_for_value(
                               : one_based_index - 1u;
 }
 
+// Returns the direct same-block, same-lane decomposable producer while the
+// authored operand is still present. Component materialization may replace an
+// earlier producer use, so cross-component provenance edges are retained
+// separately before rewriting begins.
+static uint32_t loom_vector_component_direct_producer_record(
+    const loom_vector_component_plan_t* plan,
+    const loom_vector_component_record_t* record, uint16_t operand_index) {
+  const loom_value_id_t operand =
+      loom_op_const_operands(record->op)[operand_index];
+  const uint32_t producer_index =
+      loom_vector_component_record_for_value(plan, operand);
+  if (producer_index == LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
+    return LOOM_VECTOR_COMPONENT_INDEX_INVALID;
+  }
+  const loom_vector_component_record_t* producer =
+      &plan->records[producer_index];
+  return producer->op->parent_block == record->op->parent_block &&
+                 producer->lane_count == record->lane_count
+             ? producer_index
+             : LOOM_VECTOR_COMPONENT_INDEX_INVALID;
+}
+
 static iree_status_t loom_vector_component_query(
     loom_vector_component_plan_t* plan, const loom_op_t* op,
     uint32_t source_lane_count, uint32_t packet_lane_count,
@@ -220,8 +270,10 @@ static iree_status_t loom_vector_component_query(
 
 static iree_status_t loom_vector_component_candidate_bits(
     loom_vector_component_plan_t* plan, const loom_op_t* op,
-    uint32_t source_lane_count, uint64_t* out_candidate_bits) {
+    uint32_t source_lane_count, uint64_t* out_candidate_bits,
+    uint64_t* out_producer_closure_candidate_bits) {
   *out_candidate_bits = 0;
+  *out_producer_closure_candidate_bits = 0;
   const loom_target_vector_packet_policy_t* policy =
       plan->context->vector_packet_policy;
   for (uint8_t i = 0; i < policy->native_lane_count_count; ++i) {
@@ -236,6 +288,8 @@ static iree_status_t loom_vector_component_candidate_bits(
     if (packet_result.outcome != LOOM_TARGET_CONTRACT_QUERY_LEGAL) {
       continue;
     }
+    loom_target_contract_projection_flags_t projection_flags =
+        packet_result.projection_flags;
     const uint32_t tail_lane_count = source_lane_count % packet_lane_count;
     if (tail_lane_count != 0) {
       loom_target_contract_query_result_t tail_result =
@@ -245,8 +299,14 @@ static iree_status_t loom_vector_component_candidate_bits(
       if (tail_result.outcome != LOOM_TARGET_CONTRACT_QUERY_LEGAL) {
         continue;
       }
+      projection_flags |= tail_result.projection_flags;
     }
     *out_candidate_bits |= (uint64_t)1u << i;
+    if (iree_any_bit_set(
+            projection_flags,
+            LOOM_TARGET_CONTRACT_PROJECTION_FLAG_ROOT_PRODUCER_CLOSURE)) {
+      *out_producer_closure_candidate_bits |= (uint64_t)1u << i;
+    }
   }
   return iree_ok_status();
 }
@@ -304,17 +364,9 @@ static iree_status_t loom_vector_component_classify_op(
 static uint32_t loom_vector_component_operand_root(
     loom_vector_component_plan_t* plan,
     const loom_vector_component_record_t* record, uint16_t operand_index) {
-  const loom_value_id_t operand =
-      loom_op_const_operands(record->op)[operand_index];
   const uint32_t producer_index =
-      loom_vector_component_record_for_value(plan, operand);
+      loom_vector_component_direct_producer_record(plan, record, operand_index);
   if (producer_index == LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
-    return LOOM_VECTOR_COMPONENT_INDEX_INVALID;
-  }
-  const loom_vector_component_record_t* producer =
-      &plan->records[producer_index];
-  if (producer->op->parent_block != record->op->parent_block ||
-      producer->lane_count != record->lane_count) {
     return LOOM_VECTOR_COMPONENT_INDEX_INVALID;
   }
   return loom_vector_component_find_root(plan, producer_index);
@@ -349,8 +401,8 @@ static bool loom_vector_component_root_is_selected(
 
 // Returns true when moving |root_index| to the prospective component's final
 // operation would place a replacement after an external use. Demand has
-// already propagated through the complete producer closure; direct producer
-// roots become internal if the merge succeeds.
+// already identified every required producer; direct demanded roots become
+// internal if the merge succeeds.
 static bool loom_vector_component_root_has_early_external_use(
     loom_vector_component_plan_t* plan, uint32_t root_index,
     const loom_vector_component_record_t* record, uint32_t component_root_index,
@@ -398,50 +450,198 @@ static void loom_vector_component_merge_roots(
   source->parent_index = target_root_index;
 }
 
-// Propagates target-rejected roots backward through the complete same-lane
-// producer closure. This marks the operations eligible to join a demanded
-// component without yet choosing widths or moving IR.
-static void loom_vector_component_propagate_demand(
+// Resolves projected packet contracts for one phase of demanded operations.
+static iree_status_t loom_vector_component_classify_candidates(
+    loom_vector_component_plan_t* plan,
+    loom_vector_component_candidate_scope_t scope) {
+  for (uint32_t record_index = 0; record_index < plan->record_count;
+       ++record_index) {
+    loom_vector_component_record_t* record = &plan->records[record_index];
+    const bool authored_legal = record->authored_query_result.outcome ==
+                                LOOM_TARGET_CONTRACT_QUERY_LEGAL;
+    const bool scope_is_legal =
+        scope == LOOM_VECTOR_COMPONENT_CANDIDATE_SCOPE_LEGAL_PRODUCERS;
+    if (!record->demanded || record->blocked ||
+        authored_legal != scope_is_legal) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_vector_component_candidate_bits(
+        plan, record->op, record->lane_count, &record->candidate_bits,
+        &record->producer_closure_candidate_bits));
+  }
+  return iree_ok_status();
+}
+
+static bool loom_vector_component_producer_closure_demanded(
+    const loom_vector_component_plan_t* plan, uint32_t record_index) {
+  return plan->producer_closures != NULL &&
+         plan->producer_closures[record_index].demanded;
+}
+
+// Marks rejected roots that have no independent packet contract. Exact-lane
+// provenance contracts must rebuild their producer chain at packet width;
+// slicing an authored aggregate would retain an offset into the wide origin
+// instead of establishing a complete packet-local origin.
+static iree_status_t loom_vector_component_mark_producer_closures(
+    loom_vector_component_plan_t* plan) {
+  bool has_producer_closure = false;
+  for (uint32_t record_index = 0; record_index < plan->record_count;
+       ++record_index) {
+    const loom_vector_component_record_t* record = &plan->records[record_index];
+    if (!record->demanded || record->blocked) {
+      continue;
+    }
+    const uint64_t independent_candidate_bits =
+        record->candidate_bits & ~record->producer_closure_candidate_bits;
+    if (independent_candidate_bits == 0 &&
+        record->producer_closure_candidate_bits != 0) {
+      has_producer_closure = true;
+    }
+  }
+  if (!has_producer_closure) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      plan->context->arena, plan->record_count,
+      sizeof(*plan->producer_closures), (void**)&plan->producer_closures));
+  for (uint32_t record_index = 0; record_index < plan->record_count;
+       ++record_index) {
+    const loom_vector_component_record_t* record = &plan->records[record_index];
+    const uint64_t independent_candidate_bits =
+        record->candidate_bits & ~record->producer_closure_candidate_bits;
+    plan->producer_closures[record_index] =
+        (loom_vector_component_producer_closure_t){
+            .parent_index = record_index,
+            .retained_producer_offset = LOOM_VECTOR_COMPONENT_INDEX_INVALID,
+            .demanded = record->demanded && !record->blocked &&
+                        independent_candidate_bits == 0 &&
+                        record->producer_closure_candidate_bits != 0,
+        };
+  }
+  return iree_ok_status();
+}
+
+// Carries a packet-local provenance requirement through the complete
+// same-lane producer closure. Each producer is projected into the component so
+// its packet result establishes a fresh whole-packet origin for the consumer.
+static void loom_vector_component_propagate_producer_closures(
     loom_vector_component_plan_t* plan) {
   for (uint32_t record_index = plan->record_count; record_index > 0;
        --record_index) {
     loom_vector_component_record_t* record = &plan->records[record_index - 1u];
-    if (!record->demanded) {
+    if (!loom_vector_component_producer_closure_demanded(plan,
+                                                         record_index - 1u)) {
       continue;
     }
     for (uint16_t i = 0; i < record->op->operand_count; ++i) {
       const uint32_t producer_index =
           loom_vector_component_operand_root(plan, record, i);
-      if (producer_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID &&
-          !plan->records[producer_index].demanded) {
-        plan->records[producer_index].demanded = true;
+      if (producer_index == LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
+        continue;
+      }
+      loom_vector_component_record_t* producer = &plan->records[producer_index];
+      if (!producer->demanded) {
+        producer->demanded = true;
         ++plan->demanded_record_count;
       }
+      plan->producer_closures[producer_index].demanded = true;
     }
   }
 }
 
-// Resolves packet widths only for the backward closure of a target rejection.
-// Legal components outside that closure remain authored and pay no projected
-// contract queries.
-static iree_status_t loom_vector_component_classify_candidates(
+// Prefers contracts that consume slices of authored target-native producers.
+// Producer replay remains available only when every legal candidate requires
+// packet-local provenance.
+static void loom_vector_component_select_independent_candidates(
     loom_vector_component_plan_t* plan) {
   for (uint32_t record_index = 0; record_index < plan->record_count;
        ++record_index) {
     loom_vector_component_record_t* record = &plan->records[record_index];
-    if (!record->demanded || record->blocked) {
+    if (!record->demanded ||
+        loom_vector_component_producer_closure_demanded(plan, record_index)) {
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_vector_component_candidate_bits(
-        plan, record->op, record->lane_count, &record->candidate_bits));
+    const uint64_t independent_candidate_bits =
+        record->candidate_bits & ~record->producer_closure_candidate_bits;
+    if (independent_candidate_bits != 0) {
+      record->candidate_bits = independent_candidate_bits;
+    }
   }
-  return iree_ok_status();
+}
+
+static uint32_t loom_vector_component_find_producer_closure_root(
+    loom_vector_component_plan_t* plan, uint32_t record_index) {
+  uint32_t root_index = record_index;
+  while (plan->producer_closures[root_index].parent_index != root_index) {
+    root_index = plan->producer_closures[root_index].parent_index;
+  }
+  while (record_index != root_index) {
+    const uint32_t parent_index =
+        plan->producer_closures[record_index].parent_index;
+    plan->producer_closures[record_index].parent_index = root_index;
+    record_index = parent_index;
+  }
+  return root_index;
+}
+
+// Intersects candidate widths across each connected packet-local producer
+// closure. The separate union-find preserves the component partition so early
+// aggregate uses can still keep producers and consumers in distinct rewrite
+// components.
+static void loom_vector_component_constrain_producer_closures(
+    loom_vector_component_plan_t* plan) {
+  if (plan->producer_closures == NULL) {
+    return;
+  }
+  for (uint32_t record_index = 0; record_index < plan->record_count;
+       ++record_index) {
+    loom_vector_component_record_t* record = &plan->records[record_index];
+    if (!loom_vector_component_producer_closure_demanded(plan, record_index)) {
+      continue;
+    }
+    for (uint16_t i = 0; i < record->op->operand_count; ++i) {
+      const uint32_t producer_index =
+          loom_vector_component_operand_root(plan, record, i);
+      if (producer_index == LOOM_VECTOR_COMPONENT_INDEX_INVALID ||
+          !loom_vector_component_producer_closure_demanded(plan,
+                                                           producer_index)) {
+        continue;
+      }
+      const uint32_t consumer_root_index =
+          loom_vector_component_find_producer_closure_root(plan, record_index);
+      const uint32_t producer_root_index =
+          loom_vector_component_find_producer_closure_root(plan,
+                                                           producer_index);
+      plan->producer_closures[producer_root_index].parent_index =
+          consumer_root_index;
+    }
+  }
+
+  for (uint32_t record_index = 0; record_index < plan->record_count;
+       ++record_index) {
+    loom_vector_component_record_t* record = &plan->records[record_index];
+    if (!loom_vector_component_producer_closure_demanded(plan, record_index)) {
+      continue;
+    }
+    const uint32_t root_index =
+        loom_vector_component_find_producer_closure_root(plan, record_index);
+    plan->records[root_index].candidate_bits &= record->candidate_bits;
+  }
+  for (uint32_t record_index = 0; record_index < plan->record_count;
+       ++record_index) {
+    loom_vector_component_record_t* record = &plan->records[record_index];
+    if (!loom_vector_component_producer_closure_demanded(plan, record_index)) {
+      continue;
+    }
+    const uint32_t root_index =
+        loom_vector_component_find_producer_closure_root(plan, record_index);
+    record->candidate_bits = plan->records[root_index].candidate_bits;
+  }
 }
 
 // Forms demanded components in dominance order. Earlier fanout consumers have
-// already joined a producer root when a later sibling considers it, while an
-// unselected legal consumer remains an external-use boundary. Legal upstream
-// producers join when doing so preserves every use and target-native width.
+// already joined a producer root when a later sibling considers it. Undemanded
+// legal producers remain external target snapshots consumed through slices.
 static void loom_vector_component_form(loom_vector_component_plan_t* plan) {
   for (uint32_t record_index = 0; record_index < plan->record_count;
        ++record_index) {
@@ -469,9 +669,12 @@ static void loom_vector_component_form(loom_vector_component_plan_t* plan) {
                                                        producer_root_index)) {
         continue;
       }
-      has_producer_root = true;
       const loom_vector_component_record_t* producer_root =
           &plan->records[producer_root_index];
+      if (!producer_root->demanded) {
+        continue;
+      }
+      has_producer_root = true;
       if (producer_root->blocked ||
           producer_root->union_member_count >
               LOOM_VECTOR_COMPONENT_MEMBER_LIMIT - member_count) {
@@ -497,6 +700,7 @@ static void loom_vector_component_form(loom_vector_component_plan_t* plan) {
           loom_vector_component_operand_root(plan, record, i);
       if (producer_root_index == LOOM_VECTOR_COMPONENT_INDEX_INVALID ||
           producer_root_index == component_root_index ||
+          !plan->records[producer_root_index].demanded ||
           !loom_vector_component_root_is_first_operand(plan, record, i,
                                                        producer_root_index)) {
         continue;
@@ -516,7 +720,8 @@ static void loom_vector_component_form(loom_vector_component_plan_t* plan) {
       const uint32_t producer_root_index =
           loom_vector_component_operand_root(plan, record, i);
       if (producer_root_index == LOOM_VECTOR_COMPONENT_INDEX_INVALID ||
-          producer_root_index == component_root_index) {
+          producer_root_index == component_root_index ||
+          !plan->records[producer_root_index].demanded) {
         continue;
       }
       loom_vector_component_merge_roots(plan, component_root_index,
@@ -661,14 +866,146 @@ static iree_status_t loom_vector_component_select(
   return iree_ok_status();
 }
 
+// Closure components select atomically. A component rejected by expansion or
+// source constraints disables every producer and consumer that would otherwise
+// depend on its packet-local provenance.
+static void loom_vector_component_reconcile_producer_closure_selections(
+    loom_vector_component_plan_t* plan) {
+  if (plan->producer_closures == NULL) {
+    return;
+  }
+  for (uint32_t record_index = 0; record_index < plan->record_count;
+       ++record_index) {
+    loom_vector_component_record_t* record = &plan->records[record_index];
+    if (!loom_vector_component_producer_closure_demanded(plan, record_index)) {
+      continue;
+    }
+    const uint32_t root_index =
+        loom_vector_component_find_producer_closure_root(plan, record_index);
+    const loom_vector_component_t* root_component =
+        &plan->components[plan->records[root_index].component_index];
+    const loom_vector_component_t* component =
+        &plan->components[record->component_index];
+    if (root_component->packet_lane_count != component->packet_lane_count ||
+        root_component->packet_count != component->packet_count) {
+      plan->producer_closures[root_index].selection_mismatch = true;
+    }
+  }
+  for (uint32_t record_index = 0; record_index < plan->record_count;
+       ++record_index) {
+    const loom_vector_component_record_t* record = &plan->records[record_index];
+    if (!loom_vector_component_producer_closure_demanded(plan, record_index)) {
+      continue;
+    }
+    const uint32_t root_index =
+        loom_vector_component_find_producer_closure_root(plan, record_index);
+    if (plan->producer_closures[root_index].selection_mismatch) {
+      loom_vector_component_t* component =
+          &plan->components[record->component_index];
+      component->packet_lane_count = 0;
+      component->packet_count = 0;
+    }
+  }
+}
+
+// Captures the original producer edges of selected provenance closures before
+// rewriting begins. Ordinary components continue to query their live authored
+// operands and allocate no edge storage.
+static iree_status_t loom_vector_component_capture_retained_producers(
+    loom_vector_component_plan_t* plan) {
+  iree_host_size_t retained_operand_count = 0;
+  for (uint32_t record_index = 0; record_index < plan->record_count;
+       ++record_index) {
+    loom_vector_component_record_t* record = &plan->records[record_index];
+    if (!loom_vector_component_producer_closure_demanded(plan, record_index) ||
+        plan->components[record->component_index].packet_lane_count == 0) {
+      continue;
+    }
+    if (!iree_host_size_checked_add(retained_operand_count,
+                                    record->op->operand_count,
+                                    &retained_operand_count) ||
+        retained_operand_count > UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "retained producer table exceeds uint32_t");
+    }
+  }
+  if (retained_operand_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      plan->context->arena, retained_operand_count,
+      sizeof(*plan->retained_producer_record_indices),
+      (void**)&plan->retained_producer_record_indices));
+
+  uint32_t retained_operand_offset = 0;
+  for (uint32_t record_index = 0; record_index < plan->record_count;
+       ++record_index) {
+    loom_vector_component_record_t* record = &plan->records[record_index];
+    if (!loom_vector_component_producer_closure_demanded(plan, record_index) ||
+        plan->components[record->component_index].packet_lane_count == 0) {
+      continue;
+    }
+    plan->producer_closures[record_index].retained_producer_offset =
+        retained_operand_offset;
+    for (uint16_t i = 0; i < record->op->operand_count; ++i) {
+      plan->retained_producer_record_indices[retained_operand_offset++] =
+          loom_vector_component_direct_producer_record(plan, record, i);
+    }
+  }
+  IREE_ASSERT_EQ(retained_operand_offset, retained_operand_count);
+  return iree_ok_status();
+}
+
 static bool loom_vector_component_record_is_internal_operand(
     const loom_vector_component_plan_t* plan,
-    const loom_vector_component_t* component, loom_value_id_t operand,
-    uint32_t* out_record_index) {
-  *out_record_index = loom_vector_component_record_for_value(plan, operand);
-  return *out_record_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID &&
-         plan->records[*out_record_index].component_index ==
+    const loom_vector_component_t* component, uint32_t producer_record_index) {
+  return producer_record_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID &&
+         plan->records[producer_record_index].component_index ==
              plan->records[component->first_member_index].component_index;
+}
+
+// Returns a packet retained by an earlier producer component in the same
+// packet-local provenance closure. Planning has already synchronized the
+// selected widths and materialization follows dominance order.
+static bool loom_vector_component_retained_producer_packet(
+    const loom_vector_component_plan_t* plan,
+    const loom_vector_component_t* component, uint32_t consumer_index,
+    uint16_t operand_index, uint32_t packet_index,
+    loom_value_id_t* out_packet) {
+  if (!loom_vector_component_producer_closure_demanded(plan, consumer_index)) {
+    return false;
+  }
+  const loom_vector_component_record_t* consumer =
+      &plan->records[consumer_index];
+  const loom_vector_component_producer_closure_t* consumer_closure =
+      &plan->producer_closures[consumer_index];
+  if (consumer_closure->retained_producer_offset ==
+      LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
+    return false;
+  }
+  const uint32_t producer_index =
+      plan->retained_producer_record_indices
+          [consumer_closure->retained_producer_offset + operand_index];
+  if (producer_index == LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
+    return false;
+  }
+  const loom_vector_component_record_t* producer =
+      &plan->records[producer_index];
+  if (!loom_vector_component_producer_closure_demanded(plan, producer_index) ||
+      producer->component_index == consumer->component_index) {
+    return false;
+  }
+  const loom_vector_component_producer_closure_t* producer_closure =
+      &plan->producer_closures[producer_index];
+  IREE_ASSERT(producer_closure->retained_packets != NULL);
+  IREE_ASSERT_EQ(producer_closure->retained_packet_lane_count,
+                 component->packet_lane_count);
+  IREE_ASSERT_EQ(producer_closure->retained_packet_count,
+                 component->packet_count);
+  IREE_ASSERT_LT(packet_index, producer_closure->retained_packet_count);
+  *out_packet = producer_closure->retained_packets[packet_index];
+  IREE_ASSERT_NE(*out_packet, LOOM_VALUE_ID_INVALID);
+  return true;
 }
 
 static iree_status_t loom_vector_component_external_packet(
@@ -796,6 +1133,25 @@ static iree_status_t loom_vector_component_materialize(
         plan->context->arena, escape_packet_count, sizeof(*escape_packets),
         (void**)&escape_packets));
   }
+  iree_host_size_t retained_escape_index = 0;
+  member_index = component->first_member_index;
+  while (member_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
+    loom_vector_component_record_t* record = &plan->records[member_index];
+    if (record->escapes) {
+      if (loom_vector_component_producer_closure_demanded(plan, member_index)) {
+        loom_vector_component_producer_closure_t* producer_closure =
+            &plan->producer_closures[member_index];
+        producer_closure->retained_packets =
+            &escape_packets[retained_escape_index * component->packet_count];
+        producer_closure->retained_packet_lane_count =
+            component->packet_lane_count;
+        producer_closure->retained_packet_count = component->packet_count;
+      }
+      ++retained_escape_index;
+    }
+    member_index = record->next_member_index;
+  }
+  IREE_ASSERT_EQ(retained_escape_index, escape_count);
 
   loom_rewriter_t* rewriter = plan->context->rewriter;
   loom_builder_t* builder = &rewriter->builder;
@@ -836,13 +1192,16 @@ static iree_status_t loom_vector_component_materialize(
           packet_operands[i] = source_operand;
           continue;
         }
-        uint32_t producer_record_index = LOOM_VECTOR_COMPONENT_INDEX_INVALID;
+        const uint32_t producer_record_index =
+            loom_vector_component_direct_producer_record(plan, record, i);
         if (loom_vector_component_record_is_internal_operand(
-                plan, component, source_operand, &producer_record_index)) {
+                plan, component, producer_record_index)) {
           IREE_ASSERT_NE(plan->records[producer_record_index].packet,
                          LOOM_VALUE_ID_INVALID);
           packet_operands[i] = plan->records[producer_record_index].packet;
-        } else {
+        } else if (!loom_vector_component_retained_producer_packet(
+                       plan, component, member_index, i, packet_index,
+                       &packet_operands[i])) {
           IREE_RETURN_IF_ERROR(loom_vector_component_external_packet(
               plan, external_values, &external_count, external_capacity,
               source_operand, component->lane_count, lane_offset,
@@ -1018,8 +1377,14 @@ iree_status_t loom_vector_component_packet_legalize(
   if (plan->demanded_record_count == 0) {
     return iree_ok_status();
   }
-  loom_vector_component_propagate_demand(plan);
-  IREE_RETURN_IF_ERROR(loom_vector_component_classify_candidates(plan));
+  IREE_RETURN_IF_ERROR(loom_vector_component_classify_candidates(
+      plan, LOOM_VECTOR_COMPONENT_CANDIDATE_SCOPE_REJECTED_ROOTS));
+  IREE_RETURN_IF_ERROR(loom_vector_component_mark_producer_closures(plan));
+  loom_vector_component_propagate_producer_closures(plan);
+  IREE_RETURN_IF_ERROR(loom_vector_component_classify_candidates(
+      plan, LOOM_VECTOR_COMPONENT_CANDIDATE_SCOPE_LEGAL_PRODUCERS));
+  loom_vector_component_select_independent_candidates(plan);
+  loom_vector_component_constrain_producer_closures(plan);
   loom_vector_component_form(plan);
   IREE_RETURN_IF_ERROR(loom_vector_component_compact(plan));
 
@@ -1028,6 +1393,8 @@ iree_status_t loom_vector_component_packet_legalize(
     IREE_RETURN_IF_ERROR(
         loom_vector_component_select(plan, &plan->components[component_index]));
   }
+  loom_vector_component_reconcile_producer_closure_selections(plan);
+  IREE_RETURN_IF_ERROR(loom_vector_component_capture_retained_producers(plan));
   for (uint32_t component_index = 0; component_index < plan->component_count;
        ++component_index) {
     uint32_t rewritten_op_count = 0;

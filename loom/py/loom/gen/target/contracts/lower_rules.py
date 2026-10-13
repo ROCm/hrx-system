@@ -59,6 +59,23 @@ _STRUCTURAL_EMIT_KINDS = (
 )
 
 
+def _rule_root_producer_closure_bits(
+    table: CompiledLowerRuleSet,
+) -> tuple[int, ...]:
+    """Packs rules requiring projected producer closure into a bitset."""
+
+    bit_words = [0] * ((len(table.rules) + 63) // 64)
+    for rule_index, rule in enumerate(table.rules):
+        for guard in table.guards[rule.guard_start : rule.guard_start + rule.guard_count]:
+            if guard.kind is not GuardKind.VALUE_TYPE:
+                continue
+            value_ref = table.value_refs[guard.value_ref_index]
+            if value_ref.source_node_index == 0 and value_ref.kind is SourceValueKind.EXACT_LANE_ORIGIN_OPERAND:
+                bit_words[rule_index // 64] |= 1 << (rule_index % 64)
+                break
+    return tuple(bit_words) if any(bit_words) else ()
+
+
 @dataclass(frozen=True, slots=True)
 class GeneratedLowerRuleSet:
     """Generated C/H contents for one lower-rule set."""
@@ -643,6 +660,8 @@ def _generate_source(
     )
 
     rules_name = f"k{c_table_prefix}Rules"
+    rule_root_producer_closure_bits = _rule_root_producer_closure_bits(table)
+    rule_root_producer_closure_bits_name = f"k{c_table_prefix}RuleRootProducerClosureBits"
     primary_descriptor_feature_masks_name = f"k{c_table_prefix}PrimaryDescriptorFeatureMasks"
     lines.extend(
         lower_rule_rows.emit_optional_value_array(
@@ -669,6 +688,13 @@ def _generate_source(
             ],
         )
     )
+    lines.extend(
+        lower_rule_rows.emit_optional_value_array(
+            rule_root_producer_closure_bits_name,
+            "uint64_t",
+            [f"UINT64_C(0x{bits:x})" for bits in rule_root_producer_closure_bits],
+        )
+    )
 
     spans_name = f"k{c_table_prefix}Spans"
     lines.extend(
@@ -689,6 +715,8 @@ def _generate_source(
             string_data_name=string_data_name,
             spans_name=spans_name,
             rules_name=rules_name,
+            rule_root_producer_closure_bits=(rule_root_producer_closure_bits),
+            rule_root_producer_closure_bits_name=(rule_root_producer_closure_bits_name),
             primary_descriptor_feature_masks=primary_descriptor_feature_masks,
             primary_descriptor_feature_masks_name=(primary_descriptor_feature_masks_name),
             has_dynamic_primary_descriptor_features=(has_dynamic_primary_descriptor_features),

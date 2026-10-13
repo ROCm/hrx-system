@@ -414,6 +414,18 @@ iree_status_t loom_low_lower_visit_target_contract_cases(
       match_context, callback, out_used_candidate_index);
 }
 
+static loom_target_contract_projection_flags_t
+loom_low_lower_contract_projection_flags(
+    const loom_low_lower_rule_set_t* rule_set, uint16_t rule_index) {
+  loom_target_contract_projection_flags_t flags =
+      LOOM_TARGET_CONTRACT_PROJECTION_FLAG_NONE;
+  if (loom_low_lower_rule_requires_root_producer_closure(rule_set,
+                                                         rule_index)) {
+    flags |= LOOM_TARGET_CONTRACT_PROJECTION_FLAG_ROOT_PRODUCER_CLOSURE;
+  }
+  return flags;
+}
+
 static iree_status_t loom_low_lower_materialize_target_contract_case(
     const loom_low_lower_contract_query_options_t* options,
     const loom_target_contract_case_t* contract_case, uint16_t case_index,
@@ -446,6 +458,8 @@ static iree_status_t loom_low_lower_materialize_target_contract_case(
   }
   match->result = (loom_target_contract_query_result_t){
       .outcome = LOOM_TARGET_CONTRACT_QUERY_LEGAL,
+      .projection_flags = loom_low_lower_contract_projection_flags(
+          match->rule_set, match->selection.rule_index),
       .binding_index = contract_case->binding_index,
       .case_index = case_index,
       .rule_set_index = binding->rule_set_index,

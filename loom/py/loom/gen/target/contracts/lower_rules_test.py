@@ -1313,6 +1313,45 @@ def test_generate_lower_rule_set_emits_report_key_ordinals() -> None:
     assert f".stable_id = UINT64_C(0x{stable_id:016x})" in generated.source
     assert ".key_string_ref = " not in generated.source
     assert TEST_LOW_ADD_F32_DESCRIPTOR.key not in generated.source
+    assert "RuleRootProducerClosureBits" not in generated.source
+    assert ".rule_root_producer_closure_bits = " not in generated.source
+
+
+def test_generate_lower_rule_set_indexes_lane_projection_requirements() -> None:
+    table = ContractFragment(
+        name="test.low.lane_projection",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        public_header=_TEST_PUBLIC_HEADER,
+        cases=(
+            DescriptorRule(
+                source_op=vector.vector_mulf,
+                descriptor=TEST_LOW_ADD_F32_DESCRIPTOR,
+                guards=(
+                    Guard.value_type("lhs", Vector("f32", lanes=4)),
+                    Guard.exact_lane_origin_type("lhs", Vector("bf16", lanes=4)),
+                    Guard.value_type("rhs", Vector("f32", lanes=4)),
+                    Guard.value_type("result", Vector("f32", lanes=4)),
+                ),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_ADD_F32_DESCRIPTOR,
+                        operands={
+                            "lhs": ValueRef.exact_lane_origin_operand("lhs"),
+                            "rhs": ValueRef.operand("rhs"),
+                        },
+                        results={"dst": ValueRef.result("result")},
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    generated = generate_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    assert "static const uint64_t" in generated.source
+    assert "RuleRootProducerClosureBits[] = {" in generated.source
+    assert "UINT64_C(0x1)" in generated.source
+    assert ".rule_root_producer_closure_bits = " in generated.source
 
 
 def test_descriptor_identity_preserves_unavailable_descriptor_diagnostic() -> None:

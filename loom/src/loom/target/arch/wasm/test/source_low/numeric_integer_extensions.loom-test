@@ -101,3 +101,22 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @packetized_byte_to_dw
   %28 = i32x4.extend_low_i16x8_u %27
   return %25, %28
 }
+
+// ====
+
+func.def @native_add_then_packetized_dword_to_qword(%lhs: vector<4xi32>, %rhs: vector<4xi32>) -> (vector<2xi64>, vector<2xi64>) {
+  %sum = vector.addi %lhs, %rhs : vector<4xi32>
+  %result = vector.extsi %sum : vector<4xi32> to vector<4xi64>
+  %result0 = vector.slice %result[0] : vector<4xi64> -> vector<2xi64>
+  %result1 = vector.slice %result[2] : vector<4xi64> -> vector<2xi64>
+  func.return %result0, %result1 : vector<2xi64>, vector<2xi64>
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @native_add_then_packetized_dword_to_qword(%lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>) -> (reg<wasm.v128>, reg<wasm.v128>) asm {
+  %sum = i32x4.add %lhs, %rhs
+  %18 = i64x2.extend_low_i32x4_s %sum
+  %19 = i8x16.shuffle %sum, %sum, 8, 9, 10, 11, 12, 13, 14, 15, 0, 0, 0, 0, 0, 0, 0, 0
+  %20 = i64x2.extend_low_i32x4_s %19
+  return %18, %20
+}

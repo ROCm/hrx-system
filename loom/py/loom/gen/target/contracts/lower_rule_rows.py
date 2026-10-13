@@ -1131,6 +1131,8 @@ def rule_set_row(
     string_data_name: str,
     spans_name: str,
     rules_name: str,
+    rule_root_producer_closure_bits: tuple[int, ...],
+    rule_root_producer_closure_bits_name: str,
     primary_descriptor_feature_masks: tuple[int, ...],
     primary_descriptor_feature_masks_name: str,
     has_dynamic_primary_descriptor_features: bool,
@@ -1195,6 +1197,8 @@ def rule_set_row(
         fields.append(f".string_pool = {{.data = {string_data_name}, .data_length = sizeof({string_data_name}) - 1}}")
     _append_table_fields(fields, "spans", table.spans, spans_name)
     _append_table_fields(fields, "rules", table.rules, rules_name)
+    if rule_root_producer_closure_bits:
+        fields.append(f".rule_root_producer_closure_bits = {rule_root_producer_closure_bits_name}")
     _append_table_fields(
         fields,
         "primary_descriptor_feature_masks",

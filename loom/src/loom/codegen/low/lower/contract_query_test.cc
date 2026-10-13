@@ -962,7 +962,7 @@ TEST(LowContractQueryTest, IndexedMissReplaysCompleteOrderForBestRejection) {
 }
 
 TEST_F(LowContractQuerySourceMemoryTest,
-       ScopedValueTypesSelectNarrowVectorRuleWithoutMutatingIr) {
+       ScopedValueTypesRetainProjectedProducerClosureRequirement) {
   const loom_type_t authored_type = loom_type_shaped_1d(
       LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(64), 0);
   loom_value_id_t argument = LOOM_VALUE_ID_INVALID;
@@ -974,10 +974,17 @@ TEST_F(LowContractQuerySourceMemoryTest,
                                         argument, authored_type,
                                         LOOM_LOCATION_UNKNOWN, &source_op));
 
-  const loom_low_lower_value_ref_t value_ref = {
-      .kind = LOOM_LOW_LOWER_VALUE_REF_RESULT,
-      .source_node_index = 0,
-      .index = 0,
+  const loom_low_lower_value_ref_t value_refs[] = {
+      {
+          .kind = LOOM_LOW_LOWER_VALUE_REF_RESULT,
+          .source_node_index = 0,
+          .index = 0,
+      },
+      {
+          .kind = LOOM_LOW_LOWER_VALUE_REF_EXACT_LANE_ORIGIN_OPERAND,
+          .source_node_index = 0,
+          .index = 0,
+      },
   };
   loom_low_lower_type_pattern_t type_patterns[2] = {};
   for (loom_low_lower_type_pattern_t& type_pattern : type_patterns) {
@@ -996,7 +1003,7 @@ TEST_F(LowContractQuerySourceMemoryTest,
   for (uint16_t i = 0; i < IREE_ARRAYSIZE(guards); ++i) {
     guards[i].kind = LOOM_LOW_LOWER_GUARD_VALUE_TYPE;
     guards[i].diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
-    guards[i].selector.value.value_ref_index = 0;
+    guards[i].selector.value.value_ref_index = i;
     guards[i].selector.value.parameter_index = i;
   }
   const loom_low_lower_guard_ref_t guard_refs[] = {0, 1};
@@ -1004,6 +1011,7 @@ TEST_F(LowContractQuerySourceMemoryTest,
   rules[0].guard_count = 1;
   rules[1].guard_start = 1;
   rules[1].guard_count = 1;
+  const uint64_t rule_root_producer_closure_bits[] = {UINT64_C(1) << 1};
   const loom_low_lower_rule_span_t span = {
       .source_op_kind = LOOM_OP_VECTOR_NEGF,
       .rule_start = 0,
@@ -1013,11 +1021,12 @@ TEST_F(LowContractQuerySourceMemoryTest,
       .spans = &span,
       .span_count = 1,
       .rules = rules,
+      .rule_root_producer_closure_bits = rule_root_producer_closure_bits,
       .rule_count = IREE_ARRAYSIZE(rules),
       .type_patterns = type_patterns,
       .type_pattern_count = IREE_ARRAYSIZE(type_patterns),
-      .value_refs = &value_ref,
-      .value_ref_count = 1,
+      .value_refs = value_refs,
+      .value_ref_count = IREE_ARRAYSIZE(value_refs),
       .guards = guards,
       .guard_count = IREE_ARRAYSIZE(guards),
       .guard_refs = guard_refs,
@@ -1075,11 +1084,21 @@ TEST_F(LowContractQuerySourceMemoryTest,
               .values = rule_sets,
           },
   };
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  IREE_ASSERT_OK(loom_value_fact_table_define_exact_lane_origin(
+      &facts, argument,
+      (loom_value_fact_exact_lane_origin_t){
+          .source_value_id = argument,
+          .source_lane_offset = 0,
+          .source_lane_stride = 1,
+      }));
   const loom_target_facts_t target_facts = MakeTargetFacts();
   loom_target_contract_query_environment_t environment = {
       .module = module_,
       .function = function_,
       .target_facts = &target_facts,
+      .fact_table = &facts,
   };
 
   loom_target_contract_query_result_t result =
@@ -1088,6 +1107,7 @@ TEST_F(LowContractQuerySourceMemoryTest,
                                                       source_op, &result));
   EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_LEGAL);
   EXPECT_EQ(result.case_index, 0);
+  EXPECT_EQ(result.projection_flags, LOOM_TARGET_CONTRACT_PROJECTION_FLAG_NONE);
 
   environment.vector_lane_projection = {
       .source_lane_count = 64,
@@ -1098,6 +1118,9 @@ TEST_F(LowContractQuerySourceMemoryTest,
                                                       source_op, &result));
   EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_LEGAL);
   EXPECT_EQ(result.case_index, 1);
+  EXPECT_TRUE(iree_all_bits_set(
+      result.projection_flags,
+      LOOM_TARGET_CONTRACT_PROJECTION_FLAG_ROOT_PRODUCER_CLOSURE));
   EXPECT_TRUE(loom_type_equal(
       loom_module_value_type(module_, loom_vector_negf_result(source_op)),
       authored_type));

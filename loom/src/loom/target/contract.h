@@ -181,9 +181,20 @@ enum loom_target_contract_descriptor_matrix_transform_flag_bits_e {
 };
 typedef uint32_t loom_target_contract_descriptor_matrix_transform_flags_t;
 
+typedef enum loom_target_contract_projection_flag_bits_e {
+  LOOM_TARGET_CONTRACT_PROJECTION_FLAG_NONE = 0u,
+  // Projected legality depends on whole-vector lane provenance. Vector packet
+  // planning must project the producer closure with the selected operation so
+  // every packet acquires a complete packet-local origin.
+  LOOM_TARGET_CONTRACT_PROJECTION_FLAG_ROOT_PRODUCER_CLOSURE = 1u << 0,
+} loom_target_contract_projection_flag_bits_t;
+typedef uint8_t loom_target_contract_projection_flags_t;
+
 typedef struct loom_target_contract_query_result_t {
   // Query outcome.
   loom_target_contract_query_outcome_t outcome;
+  // Requirements for preserving the selected contract under lane projection.
+  loom_target_contract_projection_flags_t projection_flags;
   // Active binding ordinal selected or rejected by the query.
   uint16_t binding_index;
   // Composed case ordinal selected or rejected by the query.
@@ -422,6 +433,7 @@ static inline loom_target_contract_query_result_t
 loom_target_contract_query_result_empty(void) {
   return (loom_target_contract_query_result_t){
       /*.outcome=*/LOOM_TARGET_CONTRACT_QUERY_UNHANDLED,
+      /*.projection_flags=*/LOOM_TARGET_CONTRACT_PROJECTION_FLAG_NONE,
       /*.binding_index=*/UINT16_MAX,
       /*.case_index=*/UINT16_MAX,
       /*.rule_set_index=*/UINT16_MAX,

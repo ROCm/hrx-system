@@ -1292,6 +1292,9 @@ typedef struct loom_low_lower_rule_set_t {
   uint16_t span_count;
   // Rule rows referenced by spans.
   const loom_low_lower_rule_t* rules;
+  // Optional bitset of rule rows whose projected legality requires the root
+  // operation's same-lane producer closure. NULL means no rule requires it.
+  const uint64_t* rule_root_producer_closure_bits;
   // Number of rows in rules.
   uint16_t rule_count;
   // Number of rows in primary_descriptor_feature_masks.
@@ -1398,6 +1401,15 @@ typedef struct loom_low_lower_rule_set_t {
   // Number of rows in diagnostics.
   uint16_t diagnostic_count;
 } loom_low_lower_rule_set_t;
+
+// Returns whether projecting |rule_index| requires projecting the root
+// operation's same-lane producer closure.
+static inline bool loom_low_lower_rule_requires_root_producer_closure(
+    const loom_low_lower_rule_set_t* rule_set, uint16_t rule_index) {
+  return rule_set->rule_root_producer_closure_bits != NULL &&
+         (rule_set->rule_root_producer_closure_bits[rule_index / 64u] &
+          (UINT64_C(1) << (rule_index % 64u))) != 0;
+}
 
 // Resolves one emit-program position to its interned emit row.
 static inline const loom_low_lower_emit_t* loom_low_lower_rule_set_emit_at(
