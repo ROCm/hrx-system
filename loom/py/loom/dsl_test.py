@@ -1320,6 +1320,28 @@ class TestOperandDictionaryDeclaration:
 
 
 class TestOperandTreeDeclaration:
+    def test_optional_shape_and_results_are_declared_together(self):
+        from loom.assembly import TreeRefs
+
+        dsl.Op(
+            "test.call_tree",
+            operands=[dsl.Operand("values", dsl.TypeConstraint.ANY, variadic=True)],
+            results=[dsl.Result("outputs", dsl.TypeConstraint.ANY, variadic=True)],
+            attrs=[dsl.AttrDef("shape", dsl.ATTR_TYPE_I64_ARRAY, optional=True)],
+            constraints=[dsl.OperandTree("values", "shape", "outputs")],
+            format=[TreeRefs("values", "shape", "outputs")],
+        )
+
+    def test_result_field_must_be_variadic(self):
+        with _raises(ValueError, match="requires a variadic result"):
+            dsl.Op(
+                "test.call_tree",
+                operands=[dsl.Operand("values", dsl.TypeConstraint.ANY, variadic=True)],
+                results=[dsl.Result("outputs", dsl.TypeConstraint.ANY)],
+                attrs=[dsl.AttrDef("shape", dsl.ATTR_TYPE_I64_ARRAY)],
+                constraints=[dsl.OperandTree("values", "shape", "outputs")],
+            )
+
     def test_semantic_pair_does_not_require_tree_text_format(self):
         dsl.Op(
             "test.tree",
@@ -1341,12 +1363,9 @@ class TestOperandTreeDeclaration:
                     constraints=[dsl.OperandTree("values", "shape")],
                 )
 
-    def test_shape_must_be_required_i64_array(self):
-        for shape in (
-            dsl.AttrDef("shape", dsl.ATTR_TYPE_I64),
-            dsl.AttrDef("shape", dsl.ATTR_TYPE_I64_ARRAY, optional=True),
-        ):
-            with _raises(ValueError, match="required i64_array shape"):
+    def test_shape_must_be_i64_array(self):
+        for shape in (dsl.AttrDef("shape", dsl.ATTR_TYPE_I64),):
+            with _raises(ValueError, match="an i64_array shape"):
                 dsl.Op(
                     "test.tree",
                     operands=[

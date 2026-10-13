@@ -12,6 +12,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/error_defs.h"
+#include "loom/format/text/parser/format_tables.h"
 #include "loom/format/text/parser/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -608,6 +609,76 @@ TEST_F(LowAsmParserTest, BuildsCanonicalSpillReloadAmongTargetPackets) {
   EXPECT_TRUE(loom_low_return_isa(loom_block_op(entry, 3)));
 
   loom_module_free(module);
+}
+
+TEST_F(LowAsmParserTest, FlatCallPreservesTheEntireOperandDomain) {
+  // Exercise the field's full domain independently of the operation's total
+  // diagnostic span count, which also includes the callee and type spelling.
+  loom_module_t* module = ParseOk(
+      "low.func.def target<test.low.core> @caller(%value: reg<test.i32>) asm { "
+      "return }\n");
+  ASSERT_NE(module, nullptr);
+  const auto* entry = GetEntryBlock(
+      loom_low_func_def_body(loom_block_op(loom_module_block(module), 0)));
+  const loom_value_id_t value = loom_block_arg_id(entry, 0);
+  loom_parser_scope_t scope = {};
+  loom_parser_t parser = {
+      .module = module,
+      .context = &context_,
+      .scope = &scope,
+  };
+  parser.definition_scope.pop_at = UINT16_MAX;
+  iree_arena_initialize(&block_pool_, &parser.parser_arena);
+  loom_string_id_t name;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("value"), &name));
+  IREE_ASSERT_OK(loom_parser_scope_define(&scope, &parser.parser_arena, name,
+                                          value, nullptr));
+  const auto* vtable =
+      loom_context_resolve_op(&context_, LOOM_OP_LOW_FUNC_CALL);
+  const loom_format_element_t* element = nullptr;
+  for (uint16_t i = 0; i < vtable->format_element_count; ++i) {
+    if (vtable->format_elements[i].kind == LOOM_FORMAT_KIND_TREE_REFS) {
+      element = &vtable->format_elements[i];
+    }
+  }
+  ASSERT_NE(element, nullptr);
+  std::string source = "(";
+  for (uint32_t i = 0; i < UINT16_MAX; ++i) {
+    if (i) {
+      source += i % 16 ? ", " : ",\n";
+    }
+    source += "%value";
+  }
+  source += ")";
+  loom_parsed_op_t parsed;
+  loom_parsed_op_initialize(&parsed);
+  loom_tokenizer_initialize(iree_make_string_view(source.data(), source.size()),
+                            IREE_SV("call.loom"), &parser.parser_arena,
+                            &parser.tokenizer);
+  IREE_ASSERT_OK(
+      loom_parse_format_tree_refs(&parser, vtable, element, &parsed));
+  EXPECT_TRUE(loom_tokenizer_at(&parser.tokenizer, LOOM_TOKEN_EOF));
+  EXPECT_EQ(parsed.operand_count, UINT16_MAX);
+  EXPECT_EQ(parsed.attribute_count, 0);
+  for (uint32_t i = 0; i < parsed.operand_count; ++i) {
+    EXPECT_EQ(parsed.operand_ids[i], value);
+  }
+  loom_tokenizer_deinitialize(&parser.tokenizer);
+  iree_arena_deinitialize(&parser.parser_arena);
+  loom_module_free(module);
+}
+
+TEST_F(LowAsmParserTest, OptionalShapeStillUsesTheStoredCountDomain) {
+  const std::string source =
+      "low.func.def target<test.low.core> @caller() asm {\n"
+      "  low.func.call @callee(" +
+      std::string(UINT16_MAX, '[') + std::string(UINT16_MAX, ']') +
+      ") : ()\n"
+      "  return\n}\n";
+  loom_module_t* module = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        Parse(source.c_str(), true, &module));
+  EXPECT_EQ(module, nullptr);
 }
 
 TEST_F(LowAsmParserTest, SelectsDescriptorSet) {

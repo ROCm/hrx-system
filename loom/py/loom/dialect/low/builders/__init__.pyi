@@ -106,7 +106,7 @@ class LowBuilder(DialectBuilder):
         purity: str | None = ...,
         inline_policy: str | None = ...,
         callee: str,
-        operands: list[ValueRef] = ...,
+        operands: Any = ...,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,

@@ -554,6 +554,8 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                             kind=BuilderParamKind.OPERAND_TREE,
                             type_hint="Any",
                             static_field=shape_field,
+                            attr_def=op.attr(shape_field),
+                            required=not op.attr(shape_field).optional,
                             doc=f"Structured operands: {operand_field}",
                         )
                     )

@@ -38,8 +38,9 @@ static bool loom_print_format_element_covers_attr(
       return LOOM_FORMAT_INDEX_LIST_STATIC_ATTR_INDEX(element->data) ==
              attr_index;
     case LOOM_FORMAT_KIND_OPERAND_DICT:
-    case LOOM_FORMAT_KIND_TREE_REFS:
       return element->data == attr_index;
+    case LOOM_FORMAT_KIND_TREE_REFS:
+      return LOOM_FORMAT_TREE_REFS_SHAPE(element->data) == attr_index;
     case LOOM_FORMAT_KIND_ATTR_TABLE:
       return element->data == attr_index;
     case LOOM_FORMAT_KIND_ALIGNED_REFS:
@@ -351,7 +352,10 @@ static iree_status_t loom_print_tree_values(
     }
     uint32_t token = (uint32_t)shape.i64_array[i];
     uint32_t kind = token & 3;
-    if (kind == LOOM_VALUE_TREE_VALUE) {
+    if (token == LOOM_VALUE_TREE_RESULT) {
+      IREE_RETURN_IF_ERROR(
+          loom_output_stream_write_cstring(ctx->stream, "out"));
+    } else if (kind == LOOM_VALUE_TREE_VALUE) {
       const loom_value_id_t* value = &values.values[value_position++];
       iree_host_size_t start = ctx->stream->offset;
       IREE_RETURN_IF_ERROR(loom_print_value_ref(ctx, *value));
@@ -400,20 +404,50 @@ iree_status_t loom_print_tree_refs(loom_print_context_t* ctx,
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "operand tree span exceeds operation operands");
   }
-  if (element->data >= op->attribute_count) {
+  const uint8_t shape_index = LOOM_FORMAT_TREE_REFS_SHAPE(element->data);
+  if (shape_index >= op->attribute_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "missing operand tree shape");
   }
-  loom_attribute_t shape = loom_op_attrs(op)[element->data];
+  loom_attribute_t shape = loom_op_attrs(op)[shape_index];
+  if (loom_attr_is_absent(shape) &&
+      iree_any_bit_set(vtable->attr_descriptors[shape_index].flags,
+                       LOOM_ATTR_OPTIONAL)) {
+    IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '('));
+    for (uint16_t i = 0; i < values.count; ++i) {
+      if (i) {
+        IREE_RETURN_IF_ERROR(
+            loom_output_stream_write_cstring(ctx->stream, ", "));
+      }
+      iree_host_size_t start = ctx->stream->offset;
+      IREE_RETURN_IF_ERROR(loom_print_value_ref(ctx, values.values[i]));
+      loom_print_report_field(
+          ctx,
+          loom_print_field_ref(LOOM_PRINT_FIELD_OPERAND,
+                               (uint16_t)(values.values + i - operand_base)),
+          start, ctx->stream->offset);
+    }
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, ')'));
+    loom_print_did_write(ctx);
+    return iree_ok_status();
+  }
+  uint16_t result_count =
+      LOOM_FORMAT_TREE_REFS_HAS_RESULTS(element->data)
+          ? loom_op_result_field_span(
+                vtable, op, LOOM_FORMAT_TREE_REFS_RESULTS(element->data))
+                .count
+          : 0;
   if (shape.kind != LOOM_ATTR_I64_ARRAY ||
-      !loom_value_tree_validate(shape.i64_array, shape.count, values.count)) {
+      !loom_value_tree_validate(shape.i64_array, shape.count, values.count,
+                                result_count)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "operand tree shape must describe every operand exactly once");
+        "value tree shape must describe every operand and result exactly once");
   }
   uint32_t inline_groups[32];
   if (shape.count <= IREE_ARRAYSIZE(inline_groups)) {
-    return loom_print_tree_values(ctx, op, values, shape, element->data,
+    return loom_print_tree_values(ctx, op, values, shape, shape_index,
                                   inline_groups);
   }
   iree_arena_allocator_t arena;
@@ -423,7 +457,7 @@ iree_status_t loom_print_tree_refs(loom_print_context_t* ctx,
       &arena, shape.count, sizeof(*groups), (void**)&groups);
   if (iree_status_is_ok(status)) {
     status =
-        loom_print_tree_values(ctx, op, values, shape, element->data, groups);
+        loom_print_tree_values(ctx, op, values, shape, shape_index, groups);
   }
   iree_arena_deinitialize(&arena);
   return status;

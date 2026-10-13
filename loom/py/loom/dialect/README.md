@@ -290,6 +290,14 @@ Common elements:
   `None` directly; for example `[(semaphore, value), (other, next_value)]`.
   Semantic field types and record arities belong to the owning dialect;
   `OperandTree` verifies geometry and exact coverage of the operand span.
+  A result field supplied to both declarations adds `out` leaves, which consume
+  ordinary SSA results in order, including inside range elements. Python
+  builders use `loom.value_tree.OUT`. An optional shape defaults to the flat
+  operand sequence followed by results; its flat textual form remains the
+  usual `(%a, %b) -> (...)` call signature. Explicit grouping spells every
+  result slot, for example `%x, %y = low.func.call @f([(%a, out), (%b, out)])`.
+  Native ABI planning derives counts and offsets from this semantic grouping;
+  they are not authored IR attributes.
 - `Attr("field")` prints one attribute value.
 - `AttrDict()` prints uncovered declared attributes in a dictionary.
 - `Param("field")` prints one typed parameter of a descriptor-backed type.

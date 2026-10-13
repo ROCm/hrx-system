@@ -63,7 +63,7 @@ iree_status_t loom_low_lower_source_call(loom_low_lower_context_t* context,
   loom_op_t* low_call_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_func_call_build(
       loom_low_lower_context_builder(context), build_flags, purity,
-      inline_policy, loom_call_like_callee(call), low_operands,
+      inline_policy, loom_call_like_callee(call), NULL, 0, low_operands,
       source_operands.count, result_types, source_results.count,
       loom_op_tied_results(source_op), source_op->tied_result_count,
       source_op->location, &low_call_op));
@@ -439,7 +439,7 @@ iree_status_t loom_low_lower_source_invoke(
   loom_op_t* call_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_func_call_build(
       loom_low_lower_context_builder(context), build_flags, purity,
-      inline_policy, callee_ref, low_operands, source_operands.count,
+      inline_policy, callee_ref, NULL, 0, low_operands, source_operands.count,
       result_types, source_results.count, loom_op_tied_results(source_op),
       source_op->tied_result_count, source_op->location, &call_op));
 

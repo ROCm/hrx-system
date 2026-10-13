@@ -254,29 +254,30 @@ def native_header() -> str:
 
 
 def vm_projection() -> str:
-    layouts, _, _, projection = native_model()
-    rows = [f"  {width}," for width, _ in projection]
+    layouts, _, _, _ = native_model()
+
+    def field_count(shape: Shape) -> int:
+        return sum(field_count(child) for child in children(shape)) if isinstance(shape, Record) else 1
+
+    rows = [f"  {field_count(shape)}," for shape in nodes()[0]]
     names = [f'  IREE_SVL("{definition.name}"),' for definition in ALL_HAL_TYPES]
     scalars = [
         "LOOM_SCALAR_TYPE_" + kind.removeprefix("IREE_VM_SCALAR_TYPE_").removesuffix("FN") if kind.startswith("IREE_VM_SCALAR_TYPE_") else "LOOM_SCALAR_TYPE_NONE" for row in layouts for kind, _ in row
     ]
 
-    def token_words(shape: Shape) -> int:
+    def token_nodes(shape: Shape) -> int:
         match shape:
             case Optional(value=value):
-                return 2 + token_words(value)
-            case Range():
+                return 2 + token_nodes(value)
+            case Range() | Value() | Record():
+                # Node plus its enclosing range-element record, if needed.
                 return 2
-            case Value():
-                return 1
-            case Record():
-                return 0
 
-    maximum_token_words = max(token_words(shape) for shape in nodes()[0])
+    maximum_token_nodes = max(token_nodes(shape) for shape in nodes()[0])
     return (
         _HEADER
-        + f"\nenum {{ LOOM_VM_HAL_MAXIMUM_TOKEN_WORDS = {maximum_token_words} }};\n"
-        + "\nstatic const uint16_t kWordCounts[] = {\n"
+        + f"\nenum {{ LOOM_VM_HAL_MAXIMUM_TOKEN_NODES = {maximum_token_nodes} }};\n"
+        + "\nstatic const uint16_t kFieldCounts[] = {\n"
         + "\n".join(rows)
         + "\n};\n\nstatic const iree_string_view_t kReferenceNames[] = {\n"
         + "\n".join(names)

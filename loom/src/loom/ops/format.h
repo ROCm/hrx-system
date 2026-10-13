@@ -163,11 +163,19 @@ enum loom_format_kind_e {
   LOOM_FORMAT_KIND_ALIGNED_REFS = 32,
 
   // Structured operands: (%value, [(%value, %value)], none).
-  // field_index is the variadic operand field. data is the i64-array shape
-  // attribute governed by the operation's OperandTree semantic constraint.
+  // field_index is the variadic operand field. data packs the shape attribute
+  // and optional result field with LOOM_FORMAT_TREE_REFS_DATA. The OperandTree
+  // constraint owns exact input/result coverage. An optional absent shape
+  // prints a flat operand record, with implicit trailing results.
   LOOM_FORMAT_KIND_TREE_REFS = 33,
 };
 typedef uint8_t loom_format_kind_t;
+
+#define LOOM_FORMAT_TREE_REFS_DATA(shape, results_plus_one) \
+  ((uint16_t)((shape) | ((results_plus_one) << 8)))
+#define LOOM_FORMAT_TREE_REFS_SHAPE(data) ((uint8_t)((data) & 0xFFu))
+#define LOOM_FORMAT_TREE_REFS_RESULTS(data) ((uint8_t)(((data) >> 8) - 1u))
+#define LOOM_FORMAT_TREE_REFS_HAS_RESULTS(data) ((data) >> 8)
 
 // The high bit distinguishes groups selected by an absent anchor. Remaining
 // bits hold the child count and two-bit anchor category.

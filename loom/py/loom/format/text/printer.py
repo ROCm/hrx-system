@@ -2016,18 +2016,25 @@ class Printer:
                         stream = TokenStream()
                         stream.emit("}")
 
-                case TreeRefs(operands=operand_field, shape=shape_field):
+                case TreeRefs(
+                    operands=operand_field, shape=shape_field, results=result_field
+                ):
                     from loom.value_tree import format_tree
 
                     assert isinstance(fields, ResolvedFields)
                     covered_attrs.add(shape_field)
+                    values = [
+                        self._value_name(value_id)
+                        for value_id in fields.value_ids(operand_field)
+                    ]
+                    shape = fields.attr(shape_field)
                     stream.emit(
-                        format_tree(
-                            fields.attr(shape_field),
-                            [
-                                self._value_name(value_id)
-                                for value_id in fields.value_ids(operand_field)
-                            ],
+                        "(" + ", ".join(values) + ")"
+                        if shape is None
+                        else format_tree(
+                            shape,
+                            values,
+                            len(fields.value_ids(result_field)) if result_field else 0,
                         )
                     )
 

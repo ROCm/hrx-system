@@ -4,13 +4,13 @@ vm.target<core> @vm
 
 // Independent and nested ranges are static ABI data. The imported native
 // symbol is shared across shapes; no ordinary callable signature is emitted.
-low.func.decl import(native, "aggregate", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({arguments = [0, 6, 7, 10], record = [0, 2, 6, 1, 8, 0, 0, 0, 1, 10, 0], results = [5], signature = vm.record<buffer, vm.range<i64>, vm.range<vm.range<i64>>, vm.out<i64>>, version = 1}) @aggregate(%owner: reg<vm.ref : buffer>, %a: reg<vm.value : i64>, %b: reg<vm.value : i64>, %c: reg<vm.value : i64>) -> (reg<vm.value : i64>)
+low.func.decl import(native, "aggregate", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({signature = vm.record<buffer, vm.range<i64>, vm.range<vm.range<i64>>, vm.out<i64>>, version = 1}) @aggregate(%owner: reg<vm.ref : buffer>, %a: reg<vm.value : i64>, %b: reg<vm.value : i64>, %c: reg<vm.value : i64>) -> (reg<vm.value : i64>)
 
-low.func.decl import(native, "aggregate", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({arguments = [0], record = [0, 0, 6, 0, 6, 0], results = [5], signature = vm.record<buffer, vm.range<i64>, vm.range<vm.range<i64>>, vm.out<i64>>, version = 1}) @empty(%owner: reg<vm.ref : buffer>) -> (reg<vm.value : i64>)
+low.func.decl import(native, "aggregate", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({signature = vm.record<buffer, vm.range<i64>, vm.range<vm.range<i64>>, vm.out<i64>>, version = 1}) @empty(%owner: reg<vm.ref : buffer>) -> (reg<vm.value : i64>)
 
 low.func.def public target<vm.core>(@vm) @run(%owner: reg<vm.ref : buffer>, %a: reg<vm.value : i64>, %b: reg<vm.value : i64>, %c: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
-  %first = low.func.call @aggregate(%owner, %a, %b, %c) : (reg<vm.ref : buffer>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i64>)
-  %second = low.func.call @empty(%owner) : (reg<vm.ref : buffer>) -> (reg<vm.value : i64>)
+  %first = low.func.call @aggregate(%owner, [%a, %b], [[%c]], out) : (reg<vm.ref : buffer>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i64>)
+  %second = low.func.call @empty(%owner, [], [], out) : (reg<vm.ref : buffer>) -> (reg<vm.value : i64>)
   return %first, %second
 }
 

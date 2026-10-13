@@ -10,6 +10,7 @@
 
 #include "iree/vm/native_call.h"
 #include "loom/ir/module.h"
+#include "loom/ir/value_tree.h"
 
 static bool loom_vm_native_type_named(const loom_module_t* module,
                                       loom_type_t type,
@@ -21,25 +22,16 @@ static bool loom_vm_native_type_named(const loom_module_t* module,
              name);
 }
 
-iree_status_t loom_vm_native_call_template_build(
+iree_status_t loom_vm_native_import_build(
     const loom_module_t* module, loom_named_attr_slice_t layout,
-    uint16_t argument_count, uint16_t result_count,
-    iree_arena_allocator_t* arena,
-    loom_vm_native_call_template_t** out_template) {
-  *out_template = NULL;
-  loom_attribute_t record = {0}, arguments = {0}, results = {0}, version = {0},
-                   signature = {0};
+    iree_arena_allocator_t* arena, loom_vm_native_import_t** out_import) {
+  *out_import = NULL;
+  loom_attribute_t version = {0}, signature = {0};
   for (iree_host_size_t i = 0; i < layout.count; ++i) {
     const loom_named_attr_t* attr = &layout.entries[i];
     const iree_string_view_t name =
         loom_string_table_get(&module->strings, attr->name_id);
-    if (iree_string_view_equal(name, IREE_SV("record"))) {
-      record = attr->value;
-    } else if (iree_string_view_equal(name, IREE_SV("arguments"))) {
-      arguments = attr->value;
-    } else if (iree_string_view_equal(name, IREE_SV("results"))) {
-      results = attr->value;
-    } else if (iree_string_view_equal(name, IREE_SV("version"))) {
+    if (iree_string_view_equal(name, IREE_SV("version"))) {
       version = attr->value;
     } else if (iree_string_view_equal(name, IREE_SV("signature"))) {
       signature = attr->value;
@@ -56,64 +48,20 @@ iree_status_t loom_vm_native_call_template_build(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "vm_native ABI requires a vm.record signature");
   }
-  if (record.kind != LOOM_ATTR_I64_ARRAY ||
-      arguments.kind != LOOM_ATTR_I64_ARRAY ||
-      results.kind != LOOM_ATTR_I64_ARRAY || version.kind != LOOM_ATTR_I64 ||
-      version.i64 < 0 || version.i64 > UINT32_MAX) {
+  if (version.kind != LOOM_ATTR_I64 || version.i64 < 0 ||
+      version.i64 > UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "vm_native ABI layout requires record, arguments, results arrays and "
-        "a u32 version");
+        "vm_native ABI layout requires an exact u32 version");
   }
-  if (arguments.count != argument_count || results.count != result_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "vm_native ABI layout must map every argument and "
-                            "result exactly once");
-  }
-  const uint32_t operand_count = (uint32_t)argument_count + result_count;
-  iree_host_size_t storage_size = 0, words_offset = 0, operands_offset = 0;
-  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-      sizeof(loom_vm_native_call_template_t), &storage_size,
-      IREE_STRUCT_FIELD(record.count, uint32_t, &words_offset),
-      IREE_STRUCT_FIELD(operand_count, uint32_t, &operands_offset)));
-  loom_vm_native_call_template_t* call_template = NULL;
+  loom_vm_native_import_t* import = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate(arena, storage_size, (void**)&call_template));
-  uint32_t* words = (uint32_t*)((uint8_t*)call_template + words_offset);
-  uint32_t* operands = (uint32_t*)((uint8_t*)call_template + operands_offset);
-  *call_template = (loom_vm_native_call_template_t){
+      iree_arena_allocate(arena, sizeof(*import), (void**)&import));
+  *import = (loom_vm_native_import_t){
       .signature = signature.type_id,
-      .words = words,
-      .word_count = record.count,
-      .operand_offsets = operands,
-      .operand_count = operand_count,
       .version = (uint32_t)version.i64,
   };
-  // Prototype words double as the cold patch-occupancy bitmap. A selector
-  // placeholder must start at zero and is restored after all offsets pass.
-  for (uint32_t i = 0; i < record.count; ++i) {
-    if (record.i64_array[i] < 0 || record.i64_array[i] > UINT32_MAX) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "vm_native record word exceeds u32");
-    }
-    words[i] = (uint32_t)record.i64_array[i];
-  }
-  for (uint32_t i = 0; i < operand_count; ++i) {
-    const int64_t offset = i < argument_count
-                               ? arguments.i64_array[i]
-                               : results.i64_array[i - argument_count];
-    if (offset < 0 || offset >= record.count || words[offset] != 0) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "vm_native operand offsets must name distinct zero record words");
-    }
-    operands[i] = (uint32_t)offset;
-    words[offset] = UINT32_MAX;
-  }
-  for (uint32_t i = 0; i < operand_count; ++i) {
-    words[operands[i]] = 0;
-  }
-  *out_template = call_template;
+  *out_import = import;
   return iree_ok_status();
 }
 
@@ -157,18 +105,17 @@ static iree_status_t loom_vm_native_layout_push(
 
 iree_status_t loom_vm_native_call_layout_bind(
     loom_vm_native_call_plan_t* plan, const loom_module_t* module,
-    loom_vm_native_call_template_t* call_template,
+    loom_vm_native_import_t* import,
     loom_vm_native_layout_plan_t** layouts_by_type,
     loom_vm_reference_plan_t* references,
     iree_arena_allocator_t* scratch_arena) {
-  if (layouts_by_type[call_template->signature]) {
-    call_template->layout_ordinal =
-        layouts_by_type[call_template->signature]->ordinal;
+  if (layouts_by_type[import->signature]) {
+    import->layout_ordinal = layouts_by_type[import->signature]->ordinal;
     return iree_ok_status();
   }
   loom_vm_native_layout_frame_t* frame = NULL;
   IREE_RETURN_IF_ERROR(loom_vm_native_layout_push(
-      plan, loom_type_table_get(&module->types, call_template->signature),
+      plan, loom_type_table_get(&module->types, import->signature),
       scratch_arena, &frame));
   iree_status_t status = iree_ok_status();
   while (frame && iree_status_is_ok(status)) {
@@ -241,8 +188,7 @@ iree_status_t loom_vm_native_call_layout_bind(
     ++frame->field_index;
   }
   if (iree_status_is_ok(status)) {
-    call_template->layout_ordinal =
-        layouts_by_type[call_template->signature]->ordinal;
+    import->layout_ordinal = layouts_by_type[import->signature]->ordinal;
   }
   return status;
 }
@@ -260,37 +206,84 @@ typedef struct loom_vm_native_record_frame_t {
   uint32_t field_offset;
 } loom_vm_native_record_frame_t;
 
-iree_status_t loom_vm_native_call_template_validate(
-    const loom_vm_native_call_template_t* call_template,
+// The absent shape has a compact implicit form: one record containing all
+// inputs followed by all results. Explicit trees have already passed generic
+// geometry validation; this boundary checks their agreement with the ABI.
+static uint32_t loom_vm_native_shape_token(loom_attribute_t shape,
+                                           uint32_t position,
+                                           uint32_t argument_count,
+                                           uint32_t operand_count) {
+  if (loom_attr_is_absent(shape)) {
+    return position == 0 ? (operand_count << 2) | LOOM_VALUE_TREE_RECORD
+           : position <= argument_count ? LOOM_VALUE_TREE_VALUE
+                                        : LOOM_VALUE_TREE_RESULT;
+  }
+  return position < shape.count ? (uint32_t)shape.i64_array[position]
+                                : UINT32_MAX;
+}
+
+iree_status_t loom_vm_native_call_template_build(
+    const loom_vm_native_import_t* import, loom_attribute_t shape,
     const loom_vm_native_layout_plan_t* const* layouts,
     const iree_vm_bytecode_v0_signature_descriptor_row_t* operands,
-    uint16_t argument_count, iree_arena_allocator_t* scratch_arena) {
-  const loom_vm_native_layout_plan_t* root =
-      layouts[call_template->layout_ordinal];
+    uint16_t argument_count, uint16_t result_count,
+    iree_arena_allocator_t* scratch_arena,
+    loom_vm_native_call_template_t* out_template) {
+  const uint32_t operand_count = (uint32_t)argument_count + result_count;
+  const uint32_t shape_count =
+      loom_attr_is_absent(shape) ? operand_count + 1 : shape.count;
+  // Every materialized range contributes two words, each leaf one. Record
+  // grouping contributes no words. This bound requires no sizing traversal.
+  const uint32_t capacity =
+      loom_attr_is_absent(shape) ? operand_count : (uint32_t)shape.count * 2;
+  const loom_vm_native_layout_plan_t* root = layouts[import->layout_ordinal];
   uint32_t cursor = root->row.word_count_u32;
-  if (cursor > call_template->word_count) {
+  if (cursor > capacity) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "vm_native record is truncated");
+                            "vm_native call does not supply its root fields");
   }
-  uint32_t* operand_by_word = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, iree_max(call_template->word_count, 1u),
-      sizeof(*operand_by_word), (void**)&operand_by_word));
-  memset(operand_by_word, 0xFF,
-         call_template->word_count * sizeof(*operand_by_word));
-  for (uint32_t i = 0; i < call_template->operand_count; ++i) {
-    operand_by_word[call_template->operand_offsets[i]] = i;
-  }
-  loom_vm_native_record_frame_t* stack = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, root->row.depth_u16 + 1u, sizeof(*stack), (void**)&stack));
+  iree_host_size_t storage_size = 0, words_offset = 0, operands_offset = 0;
+  iree_host_size_t stack_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      0, &storage_size, IREE_STRUCT_FIELD(capacity, uint32_t, &words_offset),
+      IREE_STRUCT_FIELD(operand_count, uint32_t, &operands_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          root->row.depth_u16 + 1u, loom_vm_native_record_frame_t,
+          iree_alignof(loom_vm_native_record_frame_t), &stack_offset)));
+  uint8_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(scratch_arena, storage_size, (void**)&storage));
+  uint32_t* words = (uint32_t*)(storage + words_offset);
+  uint32_t* offsets = (uint32_t*)(storage + operands_offset);
+  loom_vm_native_record_frame_t* stack =
+      (loom_vm_native_record_frame_t*)(storage + stack_offset);
+  memset(words, 0, capacity * sizeof(*words));
   stack[0] = (loom_vm_native_record_frame_t){.layout = root, .remaining = 1};
-  uint32_t depth = 1, leaf_count = 0;
+  uint32_t depth = 1, position = 0, argument = 0, result = 0;
   iree_status_t status = iree_ok_status();
   while (depth && iree_status_is_ok(status)) {
     loom_vm_native_record_frame_t* frame = &stack[depth - 1];
+    if (frame->field_index == 0) {
+      uint32_t token = loom_vm_native_shape_token(
+          shape, position, argument_count, operand_count);
+      if ((token & 3) == LOOM_VALUE_TREE_RECORD) {
+        if ((token >> 2) != frame->layout->row.field_count_u16) {
+          status =
+              iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                               "vm_native record arity does not match its ABI");
+          continue;
+        }
+        ++position;
+      } else if (depth == 1 || frame->layout->row.field_count_u16 != 1) {
+        status =
+            iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "vm_native call requires a record of %u fields",
+                             frame->layout->row.field_count_u16);
+        continue;
+      }
+    }
     if (frame->field_index == frame->layout->row.field_count_u16) {
-      if (--frame->remaining == 0 || !frame->layout->row.field_count_u16) {
+      if (--frame->remaining == 0) {
         --depth;
       } else {
         frame->offset += frame->layout->row.word_count_u32;
@@ -302,50 +295,63 @@ iree_status_t loom_vm_native_call_template_validate(
     const iree_vm_bytecode_v0_native_field_row_t field =
         frame->layout->fields[frame->field_index++];
     const uint32_t offset = frame->offset + frame->field_offset;
+    const uint32_t token = loom_vm_native_shape_token(
+        shape, position++, argument_count, operand_count);
     if (field.kind_u16 == IREE_VM_NATIVE_CALL_FIELD_RANGE) {
       frame->field_offset += 2;
-      const uint32_t count = call_template->words[offset];
-      const uint32_t begin = call_template->words[offset + 1];
+      const uint32_t count = token >> 2;
       const loom_vm_native_layout_plan_t* child =
           layouts[field.type_ordinal_u16];
       const uint64_t length = (uint64_t)count * child->row.word_count_u32;
-      if (begin != cursor || length > call_template->word_count - cursor ||
-          operand_by_word[offset] != UINT32_MAX ||
-          operand_by_word[offset + 1] != UINT32_MAX) {
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "vm_native range has noncanonical extent or "
-                                  "an operand in its header");
-      } else {
-        cursor += (uint32_t)length;
-        if (count && child->row.field_count_u16) {
-          stack[depth++] = (loom_vm_native_record_frame_t){
-              .layout = child, .offset = begin, .remaining = count};
-        }
+      if ((token & 3) != LOOM_VALUE_TREE_RANGE || length > capacity - cursor) {
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "vm_native range does not match its declared element layout");
+        continue;
+      }
+      words[offset] = count;
+      words[offset + 1] = cursor;
+      const uint32_t begin = cursor;
+      cursor += (uint32_t)length;
+      if (count) {
+        stack[depth++] = (loom_vm_native_record_frame_t){
+            .layout = child, .offset = begin, .remaining = count};
       }
     } else {
       ++frame->field_offset;
-      const uint32_t operand = operand_by_word[offset];
-      const uint16_t kind = operand < call_template->operand_count
-                                ? operands[operand].kind_u16 |
-                                      (operand >= argument_count
-                                           ? IREE_VM_NATIVE_CALL_FIELD_RESULT
-                                           : 0)
-                                : 0;
-      if (operand == UINT32_MAX || field.kind_u16 != kind ||
+      const bool is_result =
+          iree_any_bit_set(field.kind_u16, IREE_VM_NATIVE_CALL_FIELD_RESULT);
+      const uint32_t operand =
+          is_result ? argument_count + result++ : argument++;
+      if (token !=
+              (is_result ? LOOM_VALUE_TREE_RESULT : LOOM_VALUE_TREE_VALUE) ||
+          argument > argument_count || result > result_count ||
+          field.kind_u16 !=
+              (operands[operand].kind_u16 |
+               (is_result ? IREE_VM_NATIVE_CALL_FIELD_RESULT : 0)) ||
           field.type_ordinal_u16 != operands[operand].type_ordinal_u16) {
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "vm_native record leaf does not match its "
-                                  "logical operand type and direction");
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "vm_native leaf does not match its logical type and direction");
+        continue;
       }
-      ++leaf_count;
+      offsets[operand] = offset;
     }
   }
   if (iree_status_is_ok(status) &&
-      (cursor != call_template->word_count ||
-       leaf_count != call_template->operand_count)) {
+      (position != shape_count || argument != argument_count ||
+       result != result_count)) {
     status = iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "vm_native record does not cover exactly its logical operands");
+        "vm_native call must cover every logical operand and result");
+  }
+  if (iree_status_is_ok(status)) {
+    *out_template = (loom_vm_native_call_template_t){
+        .words = words,
+        .word_count = cursor,
+        .operand_offsets = offsets,
+        .operand_count = operand_count,
+        .import_ordinal = import->import_ordinal};
   }
   return status;
 }

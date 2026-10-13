@@ -1814,19 +1814,20 @@ class Constraint:
         return f"{self.name}({', '.join(self.args)})"
 
 
-def OperandTree(operands: str, shape: str) -> Constraint:
+def OperandTree(operands: str, shape: str, results: str | None = None) -> Constraint:
     """Static record/range structure covers every ordinary operand exactly once.
 
-    The required i64-array shape is a preorder tree with leaf, absent, record,
-    and range nodes. It contains no SSA identities or native ABI positions.
+    The i64-array shape is a preorder tree with input, result, absent, record,
+    and range nodes. An optional shape defaults to flat operands followed by
+    results. It contains no SSA identities or native ABI positions.
     """
     from loom.error.structure import ERR_STRUCTURE_014
 
     return Constraint(
         "OperandTree",
-        (operands, shape),
+        (operands, shape) if results is None else (operands, shape, results),
         error=ERR_STRUCTURE_014,
-        validate=constraint_validation.operand_tree(operands, shape),
+        validate=constraint_validation.operand_tree(operands, shape, results),
     )
 
 
@@ -5099,6 +5100,7 @@ def _validate_operand_dictionaries(
 def _validate_operand_trees(
     op_name: str,
     operands: tuple[Operand, ...],
+    results: tuple[Result, ...],
     attrs: tuple[AttrDef, ...],
     constraints: tuple[Constraint, ...],
     format_elements: tuple[FormatElement, ...],
@@ -5107,37 +5109,54 @@ def _validate_operand_trees(
     from loom.assembly import Clause, OptionalGroup, Scope, TreeRefs
 
     operands_by_name = {operand.name: operand for operand in operands}
+    results_by_name = {result.name: result for result in results}
     attrs_by_name = {attr.name: attr for attr in attrs}
-    pairs: set[tuple[str, str]] = set()
+    pairs: set[tuple[str, str, str | None]] = set()
     owned_operands: set[str] = set()
+    owned_results: set[str] = set()
     owned_shapes: set[str] = set()
     for constraint in constraints:
         if constraint.name != "OperandTree":
             continue
-        if len(constraint.args) != 2:
-            raise ValueError(f"Op '{op_name}': OperandTree requires two fields")
-        operand_field, shape_field = constraint.args
+        if len(constraint.args) not in (2, 3):
+            raise ValueError(
+                f"Op '{op_name}': OperandTree requires two or three fields"
+            )
+        operand_field, shape_field = constraint.args[:2]
+        result_field = constraint.args[2] if len(constraint.args) == 3 else None
         operand = operands_by_name.get(operand_field)
         shape = attrs_by_name.get(shape_field)
         if operand is None or not operand.variadic or operand.optional:
             raise ValueError(f"Op '{op_name}': OperandTree requires a variadic operand")
-        if shape is None or shape.attr_type != ATTR_TYPE_I64_ARRAY or shape.optional:
-            raise ValueError(
-                f"Op '{op_name}': OperandTree requires a required i64_array shape"
-            )
-        if operand_field in owned_operands or shape_field in owned_shapes:
+        if shape is None or shape.attr_type != ATTR_TYPE_I64_ARRAY:
+            raise ValueError(f"Op '{op_name}': OperandTree requires an i64_array shape")
+        if result_field is not None:
+            result = results_by_name.get(result_field)
+            if result is None or not result.variadic:
+                raise ValueError(
+                    f"Op '{op_name}': OperandTree requires a variadic result"
+                )
+        if (
+            operand_field in owned_operands
+            or shape_field in owned_shapes
+            or result_field in owned_results
+        ):
             raise ValueError(
                 f"Op '{op_name}': OperandTree fields must have unique ownership"
             )
         owned_operands.add(operand_field)
+        if result_field is not None:
+            owned_results.add(result_field)
         owned_shapes.add(shape_field)
-        pairs.add((operand_field, shape_field))
+        pairs.add((operand_field, shape_field, result_field))
 
     def check_format(elements: tuple[FormatElement, ...]) -> None:
         for element in elements:
             match element:
-                case TreeRefs(operands=operand_field, shape=shape_field):
-                    if (operand_field, shape_field) not in pairs:
+                case TreeRefs(
+                    operands=operand_field, shape=shape_field, results=result_field
+                ):
+                    if (operand_field, shape_field, result_field) not in pairs:
                         raise ValueError(
                             f"Op '{op_name}': TreeRefs requires a matching "
                             "OperandTree constraint"
@@ -5286,7 +5305,7 @@ def _validate_op_formats(op: Op) -> None:
             op.name, op.operands, op.attrs, op.constraints, elements
         )
         _validate_operand_trees(
-            op.name, op.operands, op.attrs, op.constraints, elements
+            op.name, op.operands, op.results, op.attrs, op.constraints, elements
         )
         _validate_format_fields(
             op.name,

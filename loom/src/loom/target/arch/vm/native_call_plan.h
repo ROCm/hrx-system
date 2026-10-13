@@ -16,17 +16,23 @@
 extern "C" {
 #endif
 
-// Static logical-to-record layout for a vm_native import declaration.
-//
-// abi_layout contains a vm.record signature, a u32 record word prototype,
-// argument/result word offsets in logical order, and an exact export version.
-// The signature owns leaf types, directions, and range element shapes,
-// including empty ranges. Selector words are zero placeholders at distinct
-// patch offsets. This representation names no physical register and introduces
-// no exports for individual list cardinalities.
-typedef struct loom_vm_native_call_template_t {
+// Cardinality-independent vm_native import contract. Public abi_layout contains
+// only the typed vm.record signature and exact export version. List extents
+// belong to structured call operands, not the declaration or C export.
+typedef struct loom_vm_native_import_t {
   // Canonical vm.record type retaining all leaf types and range structure.
   loom_type_id_t signature;
+  // Version required of the named native export.
+  uint32_t version;
+  // Final native import ordinal assigned during metadata planning.
+  uint16_t import_ordinal;
+  // Root layout ordinal in the program's native declaration table.
+  uint16_t layout_ordinal;
+} loom_vm_native_import_t;
+
+// Derived logical-to-physical projection of one structured call. These offsets
+// and prototype words are compiler plan data, never public IR attributes.
+typedef struct loom_vm_native_call_template_t {
   // Immutable prototype words with zero selector placeholders.
   const uint32_t* words;
   // Word count of the complete root and nested range payloads.
@@ -35,21 +41,15 @@ typedef struct loom_vm_native_call_template_t {
   const uint32_t* operand_offsets;
   // Number of entries in |operand_offsets|.
   uint32_t operand_count;
-  // Version required of the named native export.
-  uint32_t version;
   // Final native import ordinal assigned during metadata planning.
   uint16_t import_ordinal;
-  // Root layout ordinal in the program's native declaration table.
-  uint16_t layout_ordinal;
 } loom_vm_native_call_template_t;
 
-// Validates the user-authored ABI layout once and retains a typed template in
-// |arena|. Calls consuming the template use its indexed operand offsets.
-iree_status_t loom_vm_native_call_template_build(
-    const loom_module_t* module, loom_named_attr_slice_t layout,
-    uint16_t argument_count, uint16_t result_count,
-    iree_arena_allocator_t* arena,
-    loom_vm_native_call_template_t** out_template);
+// Admits a user-authored ABI declaration and retains its contract in |arena|.
+iree_status_t loom_vm_native_import_build(const loom_module_t* module,
+                                          loom_named_attr_slice_t layout,
+                                          iree_arena_allocator_t* arena,
+                                          loom_vm_native_import_t** out_import);
 
 // Append-only native callsite state shared across function emission.
 typedef struct loom_vm_native_call_plan_t {
@@ -71,6 +71,9 @@ typedef struct loom_vm_native_call_plan_t {
   uint32_t layout_count;
   // Total field extent across all layouts.
   uint32_t field_count;
+  // Direct layout lookup retained after declaration binding for call
+  // projection.
+  const loom_vm_native_layout_plan_t** layouts_by_ordinal;
 } loom_vm_native_call_plan_t;
 
 // Projects a canonical vm.record declaration into typed wire layouts, sharing
@@ -79,19 +82,22 @@ typedef struct loom_vm_native_call_plan_t {
 // Ref ordinals are provisional until the shared reference plan is finalized.
 iree_status_t loom_vm_native_call_layout_bind(
     loom_vm_native_call_plan_t* plan, const loom_module_t* module,
-    loom_vm_native_call_template_t* call_template,
+    loom_vm_native_import_t* import,
     loom_vm_native_layout_plan_t** layouts_by_type,
     loom_vm_reference_plan_t* references,
     iree_arena_allocator_t* scratch_arena);
 
-// Checks the authored record's canonical geometry and matches every logical
-// operand to an exact typed leaf, including its result direction. Allocation
-// later patches only selectors; no schema discovery occurs during emission.
-iree_status_t loom_vm_native_call_template_validate(
-    const loom_vm_native_call_template_t* call_template,
+// Projects a verified operand tree against the declared ABI. The native ABI
+// boundary checks record arities, element shapes and logical leaf types while
+// deriving canonical words and patch offsets in one forward walk. An absent
+// shape is the ordinary flat input sequence followed by all results.
+iree_status_t loom_vm_native_call_template_build(
+    const loom_vm_native_import_t* import, loom_attribute_t shape,
     const loom_vm_native_layout_plan_t* const* layouts,
     const iree_vm_bytecode_v0_signature_descriptor_row_t* operands,
-    uint16_t argument_count, iree_arena_allocator_t* scratch_arena);
+    uint16_t argument_count, uint16_t result_count,
+    iree_arena_allocator_t* scratch_arena,
+    loom_vm_native_call_template_t* out_template);
 
 // Appends one callsite and copies its literal prototype. The caller writes
 // selectors through the template's operand offsets before publishing the plan.

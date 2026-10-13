@@ -160,24 +160,38 @@ tables or source files.
 
 ### Structured synchronous native entries
 
-A Low import with `abi(vm_native)` names a synchronous provider entry rather
-than an ordinary VM callable. Its `abi_layout` states a static aggregate record
-and the positions occupied by its logical argument and result selectors:
+A Low import with `abi(vm_native)` names a synchronous C entry rather than an
+ordinary VM callable. Its `abi_layout` states the typed aggregate signature and
+exact export version. Lists and records belong to each call's operands:
 
 ```loom
-low.func.decl import(native, "sum", module = "host") target<vm.core> abi(vm_native) abi_layout({arguments = [3, 4], record = [2, 3, 0, 0, 0], results = [2], signature = vm.record<vm.range<i64>, vm.out<i64>>, version = 0}) @sum(%a: reg<vm.value : i64>, %b: reg<vm.value : i64>) -> (reg<vm.value : i64>)
+low.func.decl import(native, "sum", module = "host") target<vm.core> abi(vm_native) abi_layout({signature = vm.record<vm.range<i64>, vm.out<i64>>, version = 0}) @sum(%a: reg<vm.value : i64>, %b: reg<vm.value : i64>) -> (reg<vm.value : i64>)
+
+low.func.def public target<vm.core> @reduce(%a: reg<vm.value : i64>, %b: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
+  %sum = low.func.call @sum([%a, %b], out) : (reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i64>)
+  return %sum
+}
 ```
 
-Here the native record has a two-word range header, a result selector, and
-two input selectors in the range payload. `record` contains u32 literal words
-and zero selector placeholders. `arguments` and `results` index those words in
-logical signature order; each placeholder is distinct. `version` selects the
-exact native export version. `signature` specifies ordered fields, exact leaf
-types and result directions independently of the static cardinalities. An
-empty range retains its element signature. This layout is a public calling
-convention, independent of physical register assignment. Source dialect
-legalization can construct it from static operand segments without introducing
-a native export per shape.
+The input list contains two ordinary SSA values. `out` consumes the next SSA
+result in result order. Mixed input/output records use the same spelling, such
+as `[(%a, out), (%b, out)]`; nested ranges and empty records stay explicit.
+Inputs and results each remain a flat SSA span for ordinary analysis and
+rewriting. Calls with flat signatures retain the usual `@callee(%a, %b)` syntax,
+with implicit trailing results and no stored grouping tree.
+
+`signature` specifies ordered fields, exact leaf types and result directions
+independently of the static cardinalities. An empty range retains its element
+signature. Source dialect legalization constructs this semantic grouping
+without introducing a C export per shape. For example, the generated
+[HAL lowering](hal_lower.c) maps `hal.queue.copy` records, lists and optional
+barriers to a typed native import and grouped Low call.
+
+The native call planner checks grouping against the signature and derives
+canonical range headers and selector positions in one forward walk. Those
+numeric offsets and record prototypes are compiler plan data, not authored
+IR. Here the derived record contains a two-word range header, a result selector,
+and two input selectors in the range payload.
 
 The shared scheduler and allocator retain the normal SSA lifetimes, with no
 fixed ABI-register prefixes or native clobbers. Final emission patches each
@@ -194,7 +208,7 @@ precedes result publication, so dying inputs and new outputs may share storage.
 Native asynchronous APIs retain their own work-lifetime contracts. The VM
 neither tracks nor waits for their completion. The
 [native call contract](../../../../../../runtime/src/iree/vm/native_call.h)
-defines the provider and ownership boundary.
+defines the native entry and ownership boundary.
 
 ## Testing
 
@@ -218,6 +232,6 @@ separate process. Runtime instruction and malformed-image tests remain under
 
 The structured native-call [runtime integration test](../../../tooling/target/vm/native_calls_test.cc)
 loads a [maintained Low fixture](../../../tooling/target/vm/test/native_calls.loom)
-compiled by `loom-compile` during the build. A single provider entry handles
+compiled by `loom-compile` during the build. A single native entry handles
 each static shape, including scalar/reference spills and aliased result
 publication. The runtime test does not link the compiler or construct IR.

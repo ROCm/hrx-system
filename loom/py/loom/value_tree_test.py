@@ -66,6 +66,19 @@ def test_flat_operands_do_not_determine_group_association() -> None:
     assert first_shape != second_shape
 
 
+def test_result_leaves_preserve_independent_input_and_result_order() -> None:
+    values, shape = value_tree.flatten(
+        ([("first", value_tree.OUT), ("second", value_tree.OUT)], [])
+    )
+    assert values == ["first", "second"]
+    assert (
+        value_tree.format_tree(shape, values, 2)
+        == "([(first, out), (second, out)], [])"
+    )
+    with pytest.raises(ValueError, match="results"):
+        value_tree.validate(shape, 2, 1)
+
+
 @pytest.mark.parametrize(
     ("shape", "count"),
     [

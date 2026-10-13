@@ -579,19 +579,25 @@ static iree_status_t loom_vm_function_plan_calls(
 static iree_status_t loom_vm_function_native_call(
     const loom_low_emission_frame_t* frame,
     const loom_low_schedule_node_t* node,
-    const loom_vm_native_call_template_t* call_template,
+    const loom_vm_program_callable_t* binding,
     const loom_vm_function_storage_t* storage, uint16_t function_ordinal,
-    loom_vm_native_call_plan_t* plan, iree_io_stream_t* stream,
-    iree_vm_bytecode_v0_function_row_t* out_row) {
+    loom_vm_native_call_plan_t* plan, iree_arena_allocator_t* scratch_arena,
+    iree_io_stream_t* stream, iree_vm_bytecode_v0_function_row_t* out_row) {
   uint32_t ordinal = 0;
   uint32_t* words = NULL;
+  loom_vm_native_call_template_t call_template;
+  IREE_RETURN_IF_ERROR(loom_vm_native_call_template_build(
+      binding->native, loom_low_func_call_shape_attr(node->op),
+      plan->layouts_by_ordinal, binding->signature.fields,
+      binding->argument_count, binding->results.count, scratch_arena,
+      &call_template));
   IREE_RETURN_IF_ERROR(loom_vm_native_call_plan_append(
-      plan, call_template, function_ordinal, &ordinal, &words));
+      plan, &call_template, function_ordinal, &ordinal, &words));
   const loom_value_ordinal_t* arguments =
       loom_low_schedule_node_const_operand_ordinals(node);
   const loom_value_ordinal_t* results =
       loom_low_schedule_node_const_result_ordinals(node);
-  for (uint32_t i = 0; i < call_template->operand_count; ++i) {
+  for (uint32_t i = 0; i < call_template.operand_count; ++i) {
     const loom_value_ordinal_t value = i < node->operand_count
                                            ? arguments[i]
                                            : results[i - node->operand_count];
@@ -607,7 +613,7 @@ static iree_status_t loom_vm_function_native_call(
         selector |= IREE_VM_NATIVE_CALL_LOCAL_VALUE;
       }
     }
-    words[call_template->operand_offsets[i]] = selector;
+    words[call_template.operand_offsets[i]] = selector;
   }
   out_row->flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_NATIVE_CALL;
   const iree_vm_bytecode_control_call_native_t instruction = {
@@ -1139,9 +1145,9 @@ iree_status_t loom_vm_function_plan_write(
                                               .symbol_id];
         status = binding->native
                      ? loom_vm_function_native_call(
-                           &frame, node, binding->native, &call_scratch.storage,
-                           function_ordinal, &functions->native_calls, stream,
-                           out_row)
+                           &frame, node, binding, &call_scratch.storage,
+                           function_ordinal, &functions->native_calls, arena,
+                           stream, out_row)
                      : loom_vm_function_call(&frame, node, functions,
                                              &call_scratch, stream, out_row);
       } else if (loom_low_storage_reserve_isa(node->op) ||

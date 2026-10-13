@@ -210,9 +210,9 @@ static iree_status_t loom_vm_program_collect(
       entry->import.symbol_name = loom_string_table_get(
           &module->strings, loom_func_like_import_symbol(function));
       if (loom_func_like_abi(function) == LOOM_TARGET_ABI_VM_NATIVE) {
-        status = loom_vm_native_call_template_build(
-            module, loom_low_func_decl_abi_layout(op), entry->argument_count,
-            entry->results.count, plan_arena, &entry->native);
+        status = loom_vm_native_import_build(module,
+                                             loom_low_func_decl_abi_layout(op),
+                                             plan_arena, &entry->native);
       }
     } else {
       if (loom_func_like_abi(function) == LOOM_TARGET_ABI_VM_NATIVE) {
@@ -409,22 +409,14 @@ static iree_status_t loom_vm_program_build_metadata(
   IREE_RETURN_IF_ERROR(loom_vm_program_resolve_signatures(
       module, scratch_arena, program, &references));
   if (program->native_calls.layout_count) {
-    const loom_vm_native_layout_plan_t** layouts = NULL;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        scratch_arena, program->native_calls.layout_count, sizeof(*layouts),
-        (void**)&layouts));
+        plan_arena, program->native_calls.layout_count,
+        sizeof(*program->native_calls.layouts_by_ordinal),
+        (void**)&program->native_calls.layouts_by_ordinal));
     for (const loom_vm_native_layout_plan_t* layout =
              program->native_calls.layouts;
          layout; layout = layout->next) {
-      layouts[layout->ordinal] = layout;
-    }
-    for (uint32_t i = 0; i < program->count; ++i) {
-      const loom_vm_program_callable_t* entry = &program->values[i];
-      if (entry->native) {
-        IREE_RETURN_IF_ERROR(loom_vm_native_call_template_validate(
-            entry->native, layouts, entry->signature.fields,
-            entry->argument_count, scratch_arena));
-      }
+      program->native_calls.layouts_by_ordinal[layout->ordinal] = layout;
     }
   }
 

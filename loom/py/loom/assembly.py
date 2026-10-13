@@ -455,19 +455,23 @@ class OperandDict:
 
 @dataclass(frozen=True, slots=True)
 class TreeRefs:
-    """Records, ranges, absent groups, and ordinary SSA references.
+    """Records, ranges, absent groups, and ordinary SSA input/result leaves.
 
     Prints/parses: [(%semaphore, %value), (%other, %next)]
 
     Parentheses describe records, brackets describe ranges, and `none` is
     distinct from an empty record or range. Leaves belong to the ordinary
-    variadic operand field; the i64-array shape stores only the static tree.
+    variadic operand field; `out` consumes the next result when a result field
+    is specified. The i64-array shape stores only the static tree and direction.
     The matching OperandTree constraint owns structural validity independently
     of the textual spelling.
     """
 
     operands: str
     shape: str
+    # Optional result field consumed in order by `out` leaves. An optional
+    # shape elides a flat record of operands, preserving ordinary call syntax.
+    results: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -27,15 +27,22 @@ static void loom_verify_operand_tree(loom_verify_state_t* state,
   }
   loom_value_slice_t values = loom_op_operand_field_span(
       vtable, op, LOOM_FIELD_REF_INDEX(constraint->args[0]));
-  if (loom_value_tree_validate(shape.i64_array, shape.count, values.count)) {
+  const uint16_t result_count =
+      constraint->arg_count == 3
+          ? loom_op_result_field_span(vtable, op,
+                                      LOOM_FIELD_REF_INDEX(constraint->args[2]))
+                .count
+          : 0;
+  if (loom_value_tree_validate(shape.i64_array, shape.count, values.count,
+                               result_count)) {
     return;
   }
   const loom_diagnostic_param_t params[] = {
       loom_param_string(
           loom_attr_descriptor_name(&vtable->attr_descriptors[attr_index])),
       loom_param_i64(shape.count),
-      loom_param_string(IREE_SV(
-          "one complete operand tree covering every operand exactly once")),
+      loom_param_string(IREE_SV("one complete value tree covering every "
+                                "operand and result exactly once")),
   };
   loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_014, params,
                               IREE_ARRAYSIZE(params));

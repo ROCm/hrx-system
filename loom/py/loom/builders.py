@@ -449,11 +449,23 @@ class OpCallable:
                 static_field = _require_param_field(operand_param, "static_field")
                 attributes[static_field] = static_offsets
             case BuilderParamKind.OPERAND_TREE:
-                from loom.value_tree import flatten
+                from loom.value_tree import MAX_COUNT, flatten, is_flat
 
-                leaves, shape = flatten(value)
+                optional = (
+                    operand_param.attr_def is not None
+                    and operand_param.attr_def.optional
+                )
+                leaves, shape = flatten(
+                    tuple(value or ()) if optional else value,
+                    maximum_count=MAX_COUNT + int(optional),
+                )
                 operands.extend(leaves)
-                attributes[_require_param_field(operand_param, "static_field")] = shape
+                if not (optional and is_flat(shape, len(leaves))):
+                    if len(shape) > MAX_COUNT:
+                        raise ValueError("value tree exceeds the u16 shape domain")
+                    attributes[_require_param_field(operand_param, "static_field")] = (
+                        shape
+                    )
             case BuilderParamKind.OPERAND_DICT:
                 operand_dict = value or {}
                 if operand_dict:

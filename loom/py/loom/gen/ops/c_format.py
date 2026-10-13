@@ -220,10 +220,11 @@ def translate_format_elements(op: Op, format_elements: tuple[FormatElement, ...]
                     _, names_index = resolve_field(names_field)
                     elements.append(("LOOM_FORMAT_KIND_OPERAND_DICT", operand_index, str(names_index)))
 
-                case TreeRefs(operands=operand_field, shape=shape_field):
+                case TreeRefs(operands=operand_field, shape=shape_field, results=result_field):
                     _, operand_index = resolve_field(operand_field)
                     _, shape_index = resolve_field(shape_field)
-                    elements.append(("LOOM_FORMAT_KIND_TREE_REFS", operand_index, str(shape_index)))
+                    result_index_plus_one = 0 if result_field is None else resolve_field(result_field)[1] + 1
+                    elements.append(("LOOM_FORMAT_KIND_TREE_REFS", operand_index, f"LOOM_FORMAT_TREE_REFS_DATA({shape_index}, {result_index_plus_one})"))
 
                 case AttrTable(keys=keys_field, values=values_field):
                     values_kind, values_index = resolve_field(values_field)

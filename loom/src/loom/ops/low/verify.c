@@ -1579,6 +1579,16 @@ iree_status_t loom_low_func_call_verify(const loom_module_t* module,
         emitter);
   }
 
+  if (loom_low_func_call_has_shape(op) &&
+      loom_func_like_abi(loom_func_like_const_cast(
+          module, symbol->defining_op)) != LOOM_TARGET_ABI_VM_NATIVE) {
+    return loom_low_emit_attr_value_error(
+        op, loom_low_func_call_shape_diagnostic_ref(), IREE_SV("shape"),
+        loom_low_func_call_shape(op).count,
+        IREE_SV("structured operands require a structured native ABI"),
+        emitter);
+  }
+
   if (!loom_low_find_enclosing_low_executable_def(module, op)) {
     return loom_low_emit_low_entry_placement_error(
         module, op, IREE_SV("low executable"), emitter);

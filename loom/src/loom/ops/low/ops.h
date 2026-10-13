@@ -375,9 +375,11 @@ LOOM_DEFINE_VARIADIC_RESULTS(loom_low_func_call_results, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_low_func_call_callee, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_call_purity, 1, loom_low_purity_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_call_inline_policy, 2, loom_inline_policy_t)
+LOOM_DEFINE_ATTR_I64_ARRAY(loom_low_func_call_shape, 3)
 enum loom_low_func_call_build_flag_bits_e {
   LOOM_LOW_FUNC_CALL_BUILD_FLAG_HAS_PURITY = 1u << 0,
   LOOM_LOW_FUNC_CALL_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 1,
+  LOOM_LOW_FUNC_CALL_BUILD_FLAG_HAS_SHAPE = 1u << 2,
 };
 typedef uint32_t loom_low_func_call_build_flags_t;
 iree_status_t loom_low_func_call_build(
@@ -386,6 +388,8 @@ iree_status_t loom_low_func_call_build(
     loom_optional uint8_t purity,
     loom_optional uint8_t inline_policy,
     loom_symbol_ref_t callee,
+    loom_optional const int64_t* shape,
+    iree_host_size_t shape_count,
     loom_may_consume const loom_value_id_t* operands,
     iree_host_size_t operands_count,
     const loom_type_t* result_types,

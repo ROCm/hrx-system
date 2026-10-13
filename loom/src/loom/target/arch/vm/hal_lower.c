@@ -93,31 +93,28 @@ static iree_status_t loom_vm_hal_signatures(loom_low_lower_context_t* context,
 typedef struct loom_vm_hal_projection_t {
   // Next verified semantic source node, consumed exactly once in preorder.
   const int64_t* shape;
-  // Native words containing range headers and zero selector placeholders.
-  int64_t* words;
-  // First free word after all reserved records and descendant payloads.
-  uint32_t word_count;
-  // Next selector patch offset, in ordinary source operand order.
-  int64_t* arguments;
+  // Output tree with fixed records flattened and optionals made into ranges.
+  int64_t* nodes;
+  // Number of populated output tree nodes.
+  uint32_t node_count;
 } loom_vm_hal_projection_t;
 
 // Recursion is bounded by the immutable declaration, not source cardinality.
-// Each range reserves its complete fixed-record array before descendants.
+// ABI grouping stays symbolic; the native call planner owns binary geometry.
 static void loom_vm_hal_project(loom_vm_hal_projection_t* projection,
-                                uint16_t node_ordinal, uint32_t word_offset) {
+                                uint16_t node_ordinal) {
   const loom_hal_schema_node_t* node = &loom_hal_schema_nodes[node_ordinal];
   uint32_t token = (uint32_t)*projection->shape;
   if (node->kind == LOOM_HAL_SCHEMA_VALUE) {
     ++projection->shape;
-    *projection->arguments++ = word_offset;
+    projection->nodes[projection->node_count++] = LOOM_VALUE_TREE_VALUE;
     return;
   }
   if (node->kind == LOOM_HAL_SCHEMA_RECORD) {
     ++projection->shape;
     for (uint16_t i = 0; i < node->child_count; ++i) {
       uint16_t child = loom_hal_schema_children[node->child_base + i];
-      loom_vm_hal_project(projection, child, word_offset);
-      word_offset += kWordCounts[child];
+      loom_vm_hal_project(projection, child);
     }
     return;
   }
@@ -129,24 +126,23 @@ static void loom_vm_hal_project(loom_vm_hal_projection_t* projection,
     count = token >> 2;
     ++projection->shape;
   }
-  uint32_t child_offset = projection->word_count;
   uint16_t child = loom_hal_schema_children[node->child_base];
-  uint32_t child_width = kWordCounts[child];
-  projection->words[word_offset] = count;
-  projection->words[word_offset + 1] = child_offset;
-  projection->word_count += count * child_width;
+  projection->nodes[projection->node_count++] =
+      (count << 2) | LOOM_VALUE_TREE_RANGE;
   for (uint32_t i = 0; i < count; ++i) {
-    loom_vm_hal_project(projection, child, child_offset + i * child_width);
+    if (kFieldCounts[child] != 1) {
+      projection->nodes[projection->node_count++] =
+          (kFieldCounts[child] << 2) | LOOM_VALUE_TREE_RECORD;
+    }
+    loom_vm_hal_project(projection, child);
   }
 }
 
 typedef struct loom_vm_hal_plan_t {
   // Immutable declaration signature shared by every shape of this method.
   loom_type_id_t signature;
-  // Complete native record prototype; selectors are patched after allocation.
-  loom_attribute_t record;
-  // Word offsets of selectors, in source operand order.
-  loom_attribute_t arguments;
+  // Semantic ABI grouping, independent of binary layout and allocation.
+  loom_attribute_t shape;
   // Physical carriers required by the native declaration and call.
   loom_type_t* argument_types;
 } loom_vm_hal_plan_t;
@@ -157,23 +153,18 @@ iree_status_t loom_vm_hal_select(loom_low_lower_context_t* context,
   uint16_t ordinal = loom_op_dialect_index(source_op->kind);
   const loom_hal_method_t* method = &loom_hal_methods[ordinal];
   loom_attribute_t shape = loom_op_const_attrs(source_op)[0];
-  const uint32_t capacity = shape.count * LOOM_VM_HAL_MAXIMUM_TOKEN_WORDS;
-  int64_t* words = NULL;
-  int64_t* arguments = NULL;
+  const uint32_t capacity = shape.count * LOOM_VM_HAL_MAXIMUM_TOKEN_NODES;
+  int64_t* nodes = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_planning_array(
-      context, capacity, sizeof(*words), (void**)&words));
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
-      context, source_op->operand_count, sizeof(*arguments),
-      (void**)&arguments));
-  memset(words, 0, capacity * sizeof(*words));
+      context, capacity, sizeof(*nodes), (void**)&nodes));
+  nodes[0] = (kFieldCounts[method->arguments] << 2) | LOOM_VALUE_TREE_RECORD;
   loom_vm_hal_projection_t projection = {
       .shape = shape.i64_array,
-      .words = words,
-      .word_count = kWordCounts[method->arguments],
-      .arguments = arguments,
+      .nodes = nodes,
+      .node_count = 1,
   };
-  loom_vm_hal_project(&projection, method->arguments, 0);
-  if (projection.word_count > UINT16_MAX) {
+  loom_vm_hal_project(&projection, method->arguments);
+  if (projection.node_count > UINT16_MAX) {
     const loom_diagnostic_param_t parameters[] = {
         loom_param_string(loom_low_lower_context_target_key(context)),
         loom_param_string(loom_low_lower_context_export_name(context)),
@@ -181,7 +172,7 @@ iree_status_t loom_vm_hal_select(loom_low_lower_context_t* context,
         loom_param_string(loom_low_lower_context_function_name(context)),
         loom_param_string(
             loom_op_name(loom_low_lower_context_module(context), source_op)),
-        loom_param_string(IREE_SV("native call record must fit 65535 words")),
+        loom_param_string(IREE_SV("native call grouping must fit 65535 nodes")),
     };
     return loom_low_lower_emit_error_ref(context, source_op,
                                          LOOM_ERR_TARGET_032_REF, parameters,
@@ -192,13 +183,12 @@ iree_status_t loom_vm_hal_select(loom_low_lower_context_t* context,
   loom_vm_hal_plan_t* plan = NULL;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_allocate_plan_data(context, sizeof(*plan), (void**)&plan));
-  int64_t* retained_words = NULL;
+  int64_t* retained_nodes = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
-      context, projection.word_count, sizeof(*words), (void**)&retained_words));
-  memcpy(retained_words, words, projection.word_count * sizeof(*words));
+      context, projection.node_count, sizeof(*nodes), (void**)&retained_nodes));
+  memcpy(retained_nodes, nodes, projection.node_count * sizeof(*nodes));
   plan->signature = state->signatures[ordinal];
-  plan->record = loom_attr_i64_array(retained_words, projection.word_count);
-  plan->arguments = loom_attr_i64_array(arguments, source_op->operand_count);
+  plan->shape = loom_attr_i64_array(retained_nodes, projection.node_count);
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, source_op->operand_count, sizeof(*plan->argument_types),
       (void**)&plan->argument_types));
@@ -238,10 +228,10 @@ iree_status_t loom_vm_hal_emit(loom_low_lower_context_t* context,
   loom_module_t* module = loom_low_lower_context_module(context);
   const loom_hal_method_t* method = &loom_hal_methods[selected.id];
   const loom_vm_hal_plan_t* plan = selected.target_data;
-  loom_named_attr_t attributes[5];
+  loom_named_attr_t attributes[2];
   const iree_string_view_t names[] = {
-      IREE_SVL("arguments"), IREE_SVL("record"),  IREE_SVL("results"),
-      IREE_SVL("signature"), IREE_SVL("version"),
+      IREE_SVL("signature"),
+      IREE_SVL("version"),
   };
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
@@ -250,11 +240,8 @@ iree_status_t loom_vm_hal_emit(loom_low_lower_context_t* context,
         loom_module_intern_string(module, names[i], &attributes[i].name_id);
   }
   IREE_RETURN_IF_ERROR(status);
-  attributes[0].value = plan->arguments;
-  attributes[1].value = plan->record;
-  attributes[2].value = loom_attr_i64_array(NULL, 0);
-  attributes[3].value = loom_attr_type(plan->signature);
-  attributes[4].value = loom_attr_i64(method->version);
+  attributes[0].value = loom_attr_type(plan->signature);
+  attributes[1].value = loom_attr_i64(method->version);
   loom_string_id_t import_module, code_symbol, descriptor_set;
   IREE_RETURN_IF_ERROR(
       loom_module_intern_string(module, IREE_SV("hal"), &import_module));
@@ -294,6 +281,8 @@ iree_status_t loom_vm_hal_emit(loom_low_lower_context_t* context,
       source_op->operand_count, plan->argument_types, &arguments));
   loom_op_t* call = NULL;
   return loom_low_func_call_build(
-      loom_low_lower_context_builder(context), 0, 0, 0, callee, arguments,
+      loom_low_lower_context_builder(context),
+      LOOM_LOW_FUNC_CALL_BUILD_FLAG_HAS_SHAPE, 0, 0, callee,
+      plan->shape.i64_array, plan->shape.count, arguments,
       source_op->operand_count, NULL, 0, NULL, 0, source_op->location, &call);
 }

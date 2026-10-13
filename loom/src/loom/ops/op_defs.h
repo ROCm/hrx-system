@@ -278,8 +278,10 @@ enum loom_constraint_relation_e {
   // structural verification, before the ordinary relation interpreter.
   LOOM_RELATION_OPERAND_DICTIONARY,
 
-  // One static tree describes every value of a variadic operand field exactly
-  // once. Args: (variadic operand field, required i64-array shape attribute).
+  // One static tree describes every input and result exactly once in their
+  // independent leaf orders. Args: (variadic operand field, i64-array shape,
+  // optional variadic result field). An absent optional shape denotes flat
+  // inputs followed by results.
   LOOM_RELATION_OPERAND_TREE,
 
   LOOM_RELATION_COUNT_,

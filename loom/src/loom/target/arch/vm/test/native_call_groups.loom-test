@@ -1,0 +1,263 @@
+// RUN: format bytecode
+
+vm.target<core> @vm
+
+// One declaration admits different partitions of the same logical signature.
+// Results inside records are ordinary SSA definitions in preorder result order.
+low.func.decl import(native, "pairs", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({signature = vm.record<vm.range<i64, vm.out<buffer>>, vm.range<i64, vm.out<buffer>>>, version = 1}) @pairs(%a: reg<vm.value : i64>, %b: reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>)
+
+low.func.def public target<vm.core>(@vm) @run(%a: reg<vm.value : i64>, %b: reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>) asm {
+  %first, %second = low.func.call @pairs([(%a, out), (%b, out)], []) : (reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>)
+  %third, %fourth = low.func.call @pairs([], [(%b, out), (%a, out)]) : (reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>)
+  return %first, %fourth
+}
+
+// ----
+vm.target<core> @vm
+
+low.func.decl import(native, "pairs", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({signature = vm.record<vm.range<i64, vm.out<buffer>>, vm.range<i64, vm.out<buffer>>>, version = 1}) @pairs(%a: reg<vm.value : i64>, %b: reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>)
+
+low.func.def public target<vm.core>(@vm) @run(%a: reg<vm.value : i64>, %b: reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>) asm {
+  %first, %second = low.func.call @pairs([(%a, out), (%b, out)], []) : (reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>)
+  %third, %fourth = low.func.call @pairs([], [(%b, out), (%a, out)]) : (reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>)
+  return %first, %fourth
+}
+
+// ====
+// RUN: emit vm-dis
+
+vm.target<core> @vm
+
+low.func.decl import(native, "nested", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({signature = vm.record<vm.range<i64, vm.range<buffer, vm.out<i64>>>, vm.range>, version = 3}) @nested(%value: reg<vm.value : i64>, %owner: reg<vm.ref : buffer>) -> (reg<vm.value : i64>)
+
+low.func.def public target<vm.core>(@vm) @run(%value: reg<vm.value : i64>, %owner: reg<vm.ref : buffer>) -> (reg<vm.value : i64>) asm {
+  %result = low.func.call @nested([(%value, [(%owner, out)])], [(), ()]) : (reg<vm.value : i64>, reg<vm.ref : buffer>) -> (reg<vm.value : i64>)
+  return %result
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "run"
+    string @string1 = "vm"
+    string @string2 = "buffer"
+    string @string3 = "host"
+    string @string4 = "nested"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (i64, ref(@ref_type0)) -> (i64)
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([has_native_call]) frame(local_bytes = 0, value_registers = 1, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call.native @native_callsite0
+      control.return
+    }
+  }
+
+  section native_calls alignment(8) {
+    native_layout @native_layout0 (ref(@ref_type0), out i64)
+    native_layout @native_layout1 (i64, [@native_layout0])
+    native_layout @native_layout2 ()
+    native_layout @native_layout3 ([@native_layout1], [@native_layout2])
+    native_import @native_import0 module(@string3) export(@string4) version(3) : @native_layout3
+    native_callsite @native_callsite0 function(@function0) callee(@native_import0) ([(%v0, [(%r0, out %v0)])], [() * 2])
+  }
+
+}
+
+// ====
+// RUN: verify
+
+vm.target<core> @vm
+low.func.decl import(native, "pairs", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({signature = vm.record<vm.range<i64, vm.out<i64>>>, version = 1}) @pairs(%a: reg<vm.value : i64>) -> (reg<vm.value : i64>)
+
+low.func.def target<vm.core>(@vm) @bad_output_count(%a: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
+  // ERROR@+1: STRUCTURE/014 {attr_name="shape", actual_value="6", expected_constraint="one complete value tree covering every operand and result exactly once"}
+  %result = low.func.call @pairs([(%a, out, out)]) : (reg<vm.value : i64>) -> (reg<vm.value : i64>)
+  return %result
+}
+
+// ====
+// RUN: verify
+
+vm.target<core> @vm
+low.func.decl import(native, "ordinary", module = "host") target<vm.core>(@vm) @ordinary(%a: reg<vm.value : i64>)
+
+low.func.def target<vm.core>(@vm) @bad_abi(%a: reg<vm.value : i64>) asm {
+  // ERROR@+1: STRUCTURE/014 {attr_name="shape", actual_value="3", expected_constraint="structured operands require a structured native ABI"}
+  low.func.call @ordinary([%a]) : (reg<vm.value : i64>)
+  return
+}
+
+
+// ====
+// RUN: emit vm-dis
+
+vm.target<core> @vm
+
+// One declaration admits different partitions of the same logical signature.
+// Results inside records are ordinary SSA definitions in preorder result order.
+low.func.decl import(native, "pairs", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({signature = vm.record<vm.range<i64, vm.out<buffer>>, vm.range<i64, vm.out<buffer>>>, version = 1}) @pairs(%a: reg<vm.value : i64>, %b: reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>)
+
+low.func.def public target<vm.core>(@vm) @run(%a: reg<vm.value : i64>, %b: reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>) asm {
+  %first, %second = low.func.call @pairs([(%a, out), (%b, out)], []) : (reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>)
+  %third, %fourth = low.func.call @pairs([], [(%b, out), (%a, out)]) : (reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>)
+  return %first, %fourth
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "run"
+    string @string1 = "vm"
+    string @string2 = "buffer"
+    string @string3 = "host"
+    string @string4 = "pairs"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (i64, i64) -> (ref(@ref_type0), ref(@ref_type0))
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([has_native_call]) frame(local_bytes = 0, value_registers = 2, ref_registers = 3, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call.native @native_callsite0
+      control.call.native @native_callsite1
+      %r0 = ref.retain %r1
+      %r1 = ref.retain %r2
+      control.return
+    }
+  }
+
+  section native_calls alignment(8) {
+    native_layout @native_layout0 (i64, out ref(@ref_type0))
+    native_layout @native_layout1 ([@native_layout0], [@native_layout0])
+    native_import @native_import0 module(@string3) export(@string4) version(1) : @native_layout1
+    native_callsite @native_callsite0 function(@function0) callee(@native_import0) ([(%v0, out %r1), (%v1, out %r0)], [])
+    native_callsite @native_callsite1 function(@function0) callee(@native_import0) ([], [(%v1, out %r0), (%v0, out %r2)])
+  }
+
+}
+
+// ====
+// RUN: pass inline-callables
+
+vm.target<core> @vm
+
+low.func.decl import(native, "pairs", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({signature = vm.record<vm.range<i64, vm.out<buffer>>>, version = 1}) @pairs(%a: reg<vm.value : i64>) -> (reg<vm.ref : buffer>)
+
+low.func.def inline target<vm.core>(@vm) @helper(%a: reg<vm.value : i64>) -> (reg<vm.ref : buffer>) asm {
+  %owner = low.func.call @pairs([(%a, out)]) : (reg<vm.value : i64>) -> (reg<vm.ref : buffer>)
+  return %owner
+}
+
+low.func.def public target<vm.core>(@vm) @run(%left: reg<vm.value : i64>, %right: reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>) asm {
+  %first = low.func.call @helper(%right) : (reg<vm.value : i64>) -> (reg<vm.ref : buffer>)
+  %second = low.func.call @helper(%left) : (reg<vm.value : i64>) -> (reg<vm.ref : buffer>)
+  return %first, %second
+}
+
+// ----
+vm.target<core> @vm
+
+low.func.decl import(native, "pairs", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({signature = vm.record<vm.range<i64, vm.out<buffer>>>, version = 1}) @pairs(%a: reg<vm.value : i64>) -> (reg<vm.ref : buffer>)
+
+low.func.def public target<vm.core>(@vm) @run(%left: reg<vm.value : i64>, %right: reg<vm.value : i64>) -> (reg<vm.ref : buffer>, reg<vm.ref : buffer>) asm {
+  %owner$11 = low.func.call @pairs([(%right, out)]) : (reg<vm.value : i64>) -> (reg<vm.ref : buffer>)
+  %owner$4 = low.func.call @pairs([(%left, out)]) : (reg<vm.value : i64>) -> (reg<vm.ref : buffer>)
+  return %owner$11, %owner$4
+}
+
+// ====
+// RUN: emit vm-dis
+
+vm.target<core> @vm
+
+// Flat signatures retain ordinary call syntax, including implicit results and
+// calls with no operands or results.
+low.func.decl import(native, "scalar", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({signature = vm.record<i64, vm.out<i64>>, version = 1}) @scalar(%value: reg<vm.value : i64>) -> (reg<vm.value : i64>)
+
+low.func.decl import(native, "empty", module = "host") target<vm.core>(@vm) abi(vm_native) abi_layout({signature = vm.record, version = 1}) @empty()
+
+low.func.def public target<vm.core>(@vm) @run(%value: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
+  %result = low.func.call @scalar(%value) : (reg<vm.value : i64>) -> (reg<vm.value : i64>)
+  low.func.call @empty() : ()
+  return %result
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "run"
+    string @string1 = "host"
+    string @string2 = "scalar"
+    string @string3 = "host"
+    string @string4 = "empty"
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (i64) -> (i64)
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([has_native_call]) frame(local_bytes = 0, value_registers = 1, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call.native @native_callsite0
+      control.call.native @native_callsite1
+      control.return
+    }
+  }
+
+  section native_calls alignment(8) {
+    native_layout @native_layout0 (i64, out i64)
+    native_layout @native_layout1 ()
+    native_import @native_import0 module(@string1) export(@string2) version(1) : @native_layout0
+    native_import @native_import1 module(@string3) export(@string4) version(1) : @native_layout1
+    native_callsite @native_callsite0 function(@function0) callee(@native_import0) (%v0, out %v0)
+    native_callsite @native_callsite1 function(@function0) callee(@native_import1) ()
+  }
+
+}

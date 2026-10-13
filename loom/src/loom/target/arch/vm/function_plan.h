@@ -67,7 +67,7 @@ typedef struct loom_vm_program_callable_t {
   // Value and reference prefixes overwritten by argument/result transport.
   loom_low_call_clobber_t call_clobbers[2];
   // Structured synchronous native ABI, or NULL for ordinary VM callables.
-  loom_vm_native_call_template_t* native;
+  loom_vm_native_import_t* native;
 } loom_vm_program_callable_t;
 
 // Compiler-owned state shared across function planning. This representation

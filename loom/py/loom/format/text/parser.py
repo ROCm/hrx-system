@@ -3150,8 +3150,12 @@ class Parser:
                         default_region_field,
                     )
 
-                case TreeRefs(operands=operand_field, shape=shape_field):
-                    self._parse_tree_refs(parsed, op_decl, operand_field, shape_field)
+                case TreeRefs(
+                    operands=operand_field, shape=shape_field, results=result_field
+                ):
+                    self._parse_tree_refs(
+                        parsed, op_decl, operand_field, shape_field, result_field
+                    )
 
                 case OperandDict(operands=operand_field, names=names_field):
                     if tok.at(TokenKind.LBRACE):
@@ -4421,16 +4425,25 @@ class Parser:
     # --- Structured operands ---
 
     def _parse_tree_refs(
-        self, parsed: ParsedFields, op_decl: Op, operand_field: str, shape_field: str
+        self,
+        parsed: ParsedFields,
+        op_decl: Op,
+        operand_field: str,
+        shape_field: str,
+        result_field: str | None,
     ) -> None:
         """Parses static grouping while retaining ordinary SSA operand identity."""
         from loom import value_tree
 
+        shape_attr = op_decl.attr(shape_field)
+        optional_shape = shape_attr is not None and shape_attr.optional
+        shape_limit = value_tree.MAX_COUNT + int(optional_shape)
         tok = self._tokenizer
         shape: list[int] = []
         groups: list[tuple[int, TokenKind]] = []
+        value_count = 0
         while True:
-            if len(shape) == value_tree.MAX_COUNT:
+            if len(shape) == shape_limit:
                 raise ParseError(
                     "operand tree exceeds the u16 shape domain",
                     tok.peek().location,
@@ -4450,6 +4463,9 @@ class Parser:
             elif tok.at(TokenKind.BARE_IDENT, "none"):
                 tok.next()
                 shape.append(value_tree.ABSENT)
+            elif result_field is not None and tok.at(TokenKind.BARE_IDENT, "out"):
+                tok.next()
+                shape.append(value_tree.RESULT)
             else:
                 value_token = tok.expect(TokenKind.SSA_VALUE)
                 try:
@@ -4462,12 +4478,20 @@ class Parser:
                     ) from None
                 shape.append(value_tree.LEAF)
                 self._record_operand_id(parsed, op_decl, operand_field, value_id)
+                value_count += 1
             while groups and tok.try_consume(groups[-1][1]):
                 groups.pop()
             if not groups:
                 break
             tok.expect(TokenKind.COMMA)
-        parsed.attributes[shape_field] = shape
+        if not (optional_shape and value_tree.is_flat(shape, value_count)):
+            if len(shape) > value_tree.MAX_COUNT:
+                raise ParseError(
+                    "operand tree exceeds the u16 shape domain",
+                    tok.peek().location,
+                    tok._filename,
+                )
+            parsed.attributes[shape_field] = shape
 
     def _parse_operand_dict(
         self,

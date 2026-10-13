@@ -269,6 +269,7 @@ loom_check_test_suite(
         "test/imports.loom-test",
         "test/math_contraction.loom-test",
         "test/math_policy.loom-test",
+        "test/native_call_groups.loom-test",
         "test/native_calls.loom-test",
         "test/native_references.loom-test",
         "test/scalar.loom-test",
