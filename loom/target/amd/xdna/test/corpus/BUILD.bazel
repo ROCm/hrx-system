@@ -15,7 +15,10 @@ loom_corpus_test(
     catalog = LOOM_CORPUS,
     execution_profiles = [XDNA_HARDWARE_PROFILE],
     profile_sources = {
-        XDNA_HARDWARE_PROFILE.name: ["numeric/vector/constants.loom"],
+        XDNA_HARDWARE_PROFILE.name: [
+            "numeric/vector/bfloat_extrema_reductions.loom",
+            "numeric/vector/constants.loom",
+        ],
     },
     xfails = {
         XDNA_HARDWARE_PROFILE.name: {

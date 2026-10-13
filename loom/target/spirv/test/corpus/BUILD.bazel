@@ -96,6 +96,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "numeric/predicate/truncation.loom",
     "numeric/predicate/vector_logic.loom",
     "numeric/vector/address_conversion.loom",
+    "numeric/vector/bfloat_extrema_reductions.loom",
     "numeric/vector/constants.loom",
     "numeric/vector/dynamic_windows.loom",
     "numeric/vector/f32.loom",
@@ -506,14 +507,15 @@ _SPIRV_EXECUTION_XFAILS = {
     "numeric/integer/wide/observations.loom:@wide_dynamic_lane_values": "TARGET/004",
     "numeric/matrix/nvfp4.loom:@nvfp4_matrix_values": "TARGET/002",
     "numeric/predicate/extract.loom:@predicate_extract_values": "TARGET/032",
+    # BF16-capable devices reach the missing extrema contract; other devices
+    # reject the narrow carrier before extrema selection.
+    "numeric/vector/bfloat_extrema_reductions.loom:@bfloat_extrema_reduction_boundaries": "TARGET/001,TARGET/003",
     # BF16-capable profiles reach the missing FMA contract; other devices reject
     # the narrow carrier before arithmetic selection.
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16_values": "TARGET/001,TARGET/003",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_f16_values": "TARGET/001",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_fma_values": "TARGET/001",
     "numeric/vector/f32.loom:@numeric_vector_f32_values": "LOWERING/036",
-    # BF16-capable devices reach the missing extrema contract; other devices
-    # reject the narrow carrier before extrema selection.
     "numeric/vector/float_extrema.loom:@vector_float_extrema_bf16_values": "TARGET/001,TARGET/003",
     "numeric/vector/float_extrema.loom:@vector_float_extrema_f16_values": "TARGET/001",
     "numeric/vector/float_extrema.loom:@vector_float_extrema_f64_values": "TARGET/002",

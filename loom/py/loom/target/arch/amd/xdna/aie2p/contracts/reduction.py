@@ -13,6 +13,7 @@ from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
     F32_ACCUMULATOR_ADD_CONTROL,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.floating import (
+    emit_bf16_extremum,
     emit_f32x16_extremum,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.scalar_program import ScalarProgram
@@ -32,6 +33,7 @@ from loom.target.contracts import (
     Guard,
     Scalar,
     ValueRef,
+    ValueTypeProject,
     Vector,
     descriptor_by_key,
 )
@@ -39,6 +41,7 @@ from loom.target.low_descriptors import Descriptor
 
 _I32 = Scalar("i32")
 _F32 = Scalar("f32")
+_BF16 = Scalar("bf16")
 _F32X16_VECTOR = Vector("f32", lanes=16)
 _F32X64_ACCUMULATOR = Vector("f32", lanes=64)
 
@@ -54,6 +57,22 @@ _I32_REDUCTION_CONTROLS = (
 # The pinned AIE API accumulator reduction and its emitted object use these
 # odd-half filters to halve the live F32 lanes at each stage.
 _F32X16_REDUCTION_CONTROLS = (11, 9, 7, 5)
+
+# AIE2P reduces native BF16 vectors by successively comparing each active
+# half with the other half. Power-of-two widths use the direct vendor tree;
+# intervening widths fill the next tree width with the authored initial value.
+_BF16_REDUCTION_SHAPES = (
+    (1, 1, 1),
+    (2, 2, 2),
+    (3, 3, 4),
+    (4, 4, 4),
+    (5, 7, 8),
+    (8, 8, 8),
+    (9, 15, 16),
+    (16, 16, 16),
+    (17, 31, 32),
+    (32, 32, 32),
+)
 
 
 def _descriptor(key: str) -> Descriptor:
@@ -405,6 +424,155 @@ def _reduce_extremum_f32x16_rule(
     )
 
 
+def _bf16_reduction_input_type(
+    minimum_lane_count: int, maximum_lane_count: int
+) -> Vector:
+    if minimum_lane_count == maximum_lane_count:
+        return Vector("bf16", lanes=minimum_lane_count)
+    return Vector(
+        "bf16",
+        minimum_static_elements=minimum_lane_count,
+        maximum_static_elements=maximum_lane_count,
+    )
+
+
+def _bf16_reduction_shift_byte_counts(tree_lane_count: int) -> tuple[int, ...]:
+    half_lane_count = tree_lane_count // 2
+    byte_counts = []
+    while half_lane_count:
+        byte_counts.append(half_lane_count * 2)
+        half_lane_count //= 2
+    return tuple(byte_counts)
+
+
+def _pad_bf16_reduction_input_emits(
+    input_value: ValueRef,
+    init_vector: ValueRef,
+    result: ValueRef,
+) -> tuple[ContractEmit, ...]:
+    predicate_constant = _descriptor("amd.xdna.aie2p.constant.i32.predicate.low32")
+    predicate_complete = _descriptor("amd.xdna.aie2p.predicate.complete.zero.high32")
+    select = _descriptor("amd.xdna.aie2p.select.i16x32.mask64")
+    active_low = ValueRef.temporary("extremum_active_low")
+    active = ValueRef.temporary("extremum_active")
+    return (
+        EmitDescriptorOp(
+            descriptor=predicate_constant,
+            results={"dst": active_low},
+            result_types={"dst": DescriptorResultType()},
+            immediates={"i": ValueTypeProject.static_dim_low_bits_mask(input_value)},
+            form=DescriptorEmitForm.CONST,
+        ),
+        EmitDescriptorOp(
+            descriptor=predicate_complete,
+            operands={"storage": active_low},
+            results={"dst": active},
+            result_types={"dst": DescriptorResultType()},
+            immediates={"i": 0},
+            form=DescriptorEmitForm.OP,
+        ),
+        _op_emit(
+            select,
+            operands={"s1": init_vector, "s2": input_value, "sel": active},
+            results={"d": result},
+            descriptor_result_type=True,
+        ),
+    )
+
+
+def _reduce_extremum_bf16_rule(
+    kinds: tuple[str, str],
+    operation: Literal["minimum", "maximum"],
+    minimum_lane_count: int,
+    maximum_lane_count: int,
+    tree_lane_count: int,
+) -> DescriptorRule:
+    input_type = _bf16_reduction_input_type(minimum_lane_count, maximum_lane_count)
+    broadcast = _descriptor("amd.xdna.aie2p.splat.i16x32")
+    shift = _descriptor("amd.xdna.aie2p.shift.bytes.x.configured")
+    extract = _descriptor("amd.xdna.aie2p.extract.i16.immediate")
+
+    init_vector = ValueRef.temporary("extremum_init_vector")
+    current = ValueRef.temporary("extremum_initial")
+    emits: list[ContractEmit] = [
+        _op_emit(
+            broadcast,
+            operands={"src": ValueRef.operand("init")},
+            results={"dst": init_vector},
+            descriptor_result_type=True,
+        )
+    ]
+    if minimum_lane_count == maximum_lane_count == tree_lane_count:
+        emits.extend(
+            emit_bf16_extremum(
+                ValueRef.operand("input"),
+                init_vector,
+                current,
+                operation,
+                temporary_prefix="extremum_initial_",
+            )
+        )
+        report_mode = "packed"
+    else:
+        emits.extend(
+            _pad_bf16_reduction_input_emits(
+                ValueRef.operand("input"), init_vector, current
+            )
+        )
+        report_mode = "padded"
+
+    for stage, byte_count in enumerate(
+        _bf16_reduction_shift_byte_counts(tree_lane_count)
+    ):
+        control = ValueRef.temporary(f"extremum_control_{stage}")
+        shifted = ValueRef.temporary(f"extremum_shifted_{stage}")
+        reduced = ValueRef.temporary(f"extremum_reduced_{stage}")
+        emits.extend(
+            (
+                _constant_emit(control, byte_count),
+                _op_emit(
+                    shift,
+                    operands={"s1": current, "s2": current, "shift": control},
+                    results={"d": shifted},
+                    descriptor_result_type=True,
+                ),
+                *emit_bf16_extremum(
+                    current,
+                    shifted,
+                    reduced,
+                    operation,
+                    temporary_prefix=f"extremum_stage_{stage}_",
+                ),
+            )
+        )
+        current = reduced
+
+    emits.append(
+        _op_emit(
+            extract,
+            operands={"s1": current},
+            results={"dst": ValueRef.result("result")},
+            descriptor_result_type=True,
+            immediates={"idx": 0},
+        )
+    )
+    return DescriptorRule(
+        source_op=vector.vector_reduce,
+        descriptor=extract,
+        guards=(
+            Guard.enum_attr_in("kind", kinds),
+            Guard.value_type("input", input_type),
+            Guard.value_type("init", _BF16),
+            Guard.value_type("result", _BF16),
+            Guard.instance_flags_has_all("fastmath", "reassoc"),
+            Guard.instance_flags_has_all("fastmath", "nnan"),
+            Guard.instance_flags_has_all("fastmath", "nsz"),
+        ),
+        emit=tuple(emits),
+        report_key=f"bf16_{report_mode}_{operation}_tree",
+    )
+
+
 def _reduce_i1_rule(
     lane_count: int, kind: str, *, identity_init: bool
 ) -> DescriptorRule:
@@ -480,6 +648,22 @@ AIE2P_REDUCTION_RULES = (
             ("minimumf", "minimum"),
             ("maxnumf", "maximum"),
             ("maximumf", "maximum"),
+        )
+    ),
+    *(
+        _reduce_extremum_bf16_rule(
+            kinds,
+            operation,
+            minimum_lane_count,
+            maximum_lane_count,
+            tree_lane_count,
+        )
+        for kinds, operation in (
+            (("minnumf", "minimumf"), "minimum"),
+            (("maxnumf", "maximumf"), "maximum"),
+        )
+        for minimum_lane_count, maximum_lane_count, tree_lane_count in (
+            _BF16_REDUCTION_SHAPES
         )
     ),
     *(

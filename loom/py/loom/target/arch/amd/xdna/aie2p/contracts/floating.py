@@ -53,6 +53,7 @@ from loom.target.low_descriptors import Descriptor
 _F32 = Scalar("f32")
 _F16 = Scalar("f16")
 _BF16 = Scalar("bf16")
+_BF16_VECTOR = Vector("bf16", minimum_static_elements=1, maximum_static_elements=32)
 _BF16X8_VECTOR = Vector("bf16", lanes=8)
 _BF16X16_VECTOR = Vector("bf16", lanes=16)
 _BF16_DOT2_VECTOR = Vector(
@@ -744,10 +745,10 @@ def _vector_multiply_bf16_origins_to_bf16_rule(
     )
 
 
-def _bf16_maximum_guards(type_pattern: TypePattern) -> tuple[Guard, ...]:
-    # VMAX_LT preserves its first operand on unordered inputs and orders the
-    # signed zeros. Both source maximum operations agree with it when NaNs and
-    # zero signs are explicitly outside the source contract.
+def _bf16_extremum_guards(type_pattern: TypePattern) -> tuple[Guard, ...]:
+    # The fused extrema preserve their first operand on unordered inputs and
+    # order signed zeros. The source extrema agree with them when NaNs and zero
+    # signs are explicitly outside the source contract.
     return (
         *_typed_guards(("lhs", "rhs", "result"), type_pattern),
         Guard.instance_flags_has_all("fastmath", "nnan"),
@@ -755,39 +756,69 @@ def _bf16_maximum_guards(type_pattern: TypePattern) -> tuple[Guard, ...]:
     )
 
 
-def _vector_maximum_bf16_rule(
-    source_op: Op, type_pattern: TypePattern
-) -> DescriptorRule:
-    maximum = _descriptor("amd.xdna.aie2p.max.lt.bf16x32.native")
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=maximum,
-        guards=_bf16_maximum_guards(type_pattern),
-        emit=(
-            _op_emit(
-                maximum,
-                operands={"s1": ValueRef.operand("lhs"), "s2": ValueRef.operand("rhs")},
-                results={
-                    "d": ValueRef.result("result"),
-                    "cmp": ValueRef.temporary("comparison"),
-                },
-                result_types={
-                    "d": DescriptorResultType(),
-                    "cmp": DescriptorResultType(),
-                },
-            ),
+def emit_bf16_extremum(
+    lhs: ValueRef,
+    rhs: ValueRef,
+    result: ValueRef,
+    operation: Literal["minimum", "maximum"],
+    *,
+    temporary_prefix: str = "",
+) -> tuple[ContractEmit, ...]:
+    """Emits a fused BF16 extremum over one native vector carrier."""
+
+    descriptor = _descriptor(
+        f"amd.xdna.aie2p.{'min.ge' if operation == 'minimum' else 'max.lt'}"
+        ".bf16x32.native"
+    )
+    return (
+        _op_emit(
+            descriptor,
+            operands={"s1": lhs, "s2": rhs},
+            results={
+                "d": result,
+                "cmp": ValueRef.temporary(f"{temporary_prefix}comparison"),
+            },
+            result_types={
+                "d": DescriptorResultType(),
+                "cmp": DescriptorResultType(),
+            },
         ),
     )
 
 
-def _scalar_maximum_bf16_rule(source_op: Op) -> DescriptorRule:
+def _vector_extremum_bf16_rule(
+    source_op: Op, operation: Literal["minimum", "maximum"]
+) -> DescriptorRule:
+    descriptor = _descriptor(
+        f"amd.xdna.aie2p.{'min.ge' if operation == 'minimum' else 'max.lt'}"
+        ".bf16x32.native"
+    )
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=_bf16_extremum_guards(_BF16_VECTOR),
+        emit=emit_bf16_extremum(
+            ValueRef.operand("lhs"),
+            ValueRef.operand("rhs"),
+            ValueRef.result("result"),
+            operation,
+        ),
+    )
+
+
+def _scalar_extremum_bf16_rule(
+    source_op: Op, operation: Literal["minimum", "maximum"]
+) -> DescriptorRule:
     broadcast = _descriptor("amd.xdna.aie2p.splat.i16x32")
-    maximum = _descriptor("amd.xdna.aie2p.max.lt.bf16x32.native")
+    descriptor = _descriptor(
+        f"amd.xdna.aie2p.{'min.ge' if operation == 'minimum' else 'max.lt'}"
+        ".bf16x32.native"
+    )
     extract = _descriptor("amd.xdna.aie2p.extract.i16.immediate")
     return DescriptorRule(
         source_op=source_op,
-        descriptor=maximum,
-        guards=_bf16_maximum_guards(_BF16),
+        descriptor=descriptor,
+        guards=_bf16_extremum_guards(_BF16),
         emit=(
             *(
                 _op_emit(
@@ -798,24 +829,15 @@ def _scalar_maximum_bf16_rule(source_op: Op) -> DescriptorRule:
                 )
                 for operand in ("lhs", "rhs")
             ),
-            _op_emit(
-                maximum,
-                operands={
-                    "s1": ValueRef.temporary("lhs_vector"),
-                    "s2": ValueRef.temporary("rhs_vector"),
-                },
-                results={
-                    "d": ValueRef.temporary("maximum_vector"),
-                    "cmp": ValueRef.temporary("comparison"),
-                },
-                result_types={
-                    "d": DescriptorResultType(),
-                    "cmp": DescriptorResultType(),
-                },
+            *emit_bf16_extremum(
+                ValueRef.temporary("lhs_vector"),
+                ValueRef.temporary("rhs_vector"),
+                ValueRef.temporary("extremum_vector"),
+                operation,
             ),
             EmitDescriptorOp(
                 descriptor=extract,
-                operands={"s1": ValueRef.temporary("maximum_vector")},
+                operands={"s1": ValueRef.temporary("extremum_vector")},
                 results={"dst": ValueRef.result("result")},
                 immediates={"idx": 0},
                 form=DescriptorEmitForm.OP,
@@ -1314,15 +1336,21 @@ AIE2P_FLOATING_RULES = (
         )
     ),
     *(
-        _vector_maximum_bf16_rule(source_op, type_pattern)
-        for source_op in (vector.vector_maxnumf, vector.vector_maximumf)
-        for type_pattern in (_BF16X16_VECTOR, _BF16X32_VECTOR)
+        _vector_extremum_bf16_rule(source_op, operation)
+        for source_op, operation in (
+            (vector.vector_minnumf, "minimum"),
+            (vector.vector_minimumf, "minimum"),
+            (vector.vector_maxnumf, "maximum"),
+            (vector.vector_maximumf, "maximum"),
+        )
     ),
     *(
-        _scalar_maximum_bf16_rule(source_op)
-        for source_op in (
-            scalar_arithmetic.scalar_maxnumf,
-            scalar_arithmetic.scalar_maximumf,
+        _scalar_extremum_bf16_rule(source_op, operation)
+        for source_op, operation in (
+            (scalar_arithmetic.scalar_minnumf, "minimum"),
+            (scalar_arithmetic.scalar_minimumf, "minimum"),
+            (scalar_arithmetic.scalar_maxnumf, "maximum"),
+            (scalar_arithmetic.scalar_maximumf, "maximum"),
         )
     ),
     _float_matrix_accumulator_zero_rule(),

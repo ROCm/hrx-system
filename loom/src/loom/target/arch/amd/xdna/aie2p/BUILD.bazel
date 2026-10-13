@@ -788,7 +788,7 @@ loom_check_test_suite(
         "test/source_low/memory_wide_offsets.loom-test",
         "test/source_low/nested_view_selection.loom-test",
         "test/source_low/numeric_address_widening.loom-test",
-        "test/source_low/numeric_bf16_maximum.loom-test",
+        "test/source_low/numeric_bf16_extrema.loom-test",
         "test/source_low/numeric_bf16_origin_multiply.loom-test",
         "test/source_low/numeric_bfloat_widen.loom-test",
         "test/source_low/numeric_bitwise_constants.loom-test",

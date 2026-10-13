@@ -267,39 +267,45 @@ def test_bf16_vector_scalar_product_exhausts_subnormal_rounding() -> None:
     assert tie_count == 65_025
 
 
-def test_bf16_vector_maximum_requires_nan_and_zero_permissions() -> None:
-    for source_op in (vector.vector_maxnumf, vector.vector_maximumf):
+def test_bf16_vector_extrema_cover_every_native_lane_width() -> None:
+    for source_op, descriptor_key in (
+        (vector.vector_minnumf, "amd.xdna.aie2p.min.ge.bf16x32.native"),
+        (vector.vector_minimumf, "amd.xdna.aie2p.min.ge.bf16x32.native"),
+        (vector.vector_maxnumf, "amd.xdna.aie2p.max.lt.bf16x32.native"),
+        (vector.vector_maximumf, "amd.xdna.aie2p.max.lt.bf16x32.native"),
+    ):
         rules = [
             rule
             for rule in AIE2P_FLOATING_RULES
-            if rule.source_op is source_op
-            and rule.descriptor.key == "amd.xdna.aie2p.max.lt.bf16x32.native"
+            if rule.source_op is source_op and rule.descriptor.key == descriptor_key
         ]
-        assert len(rules) == 2
-        for rule, lanes in zip(rules, (16, 32), strict=True):
-            assert rule.guards == (
-                Guard.value_type("lhs", Vector("bf16", lanes=lanes)),
-                Guard.value_type("rhs", Vector("bf16", lanes=lanes)),
-                Guard.value_type("result", Vector("bf16", lanes=lanes)),
-                Guard.instance_flags_has_all("fastmath", "nnan"),
-                Guard.instance_flags_has_all("fastmath", "nsz"),
-            )
-            assert len(rule.emit) == 1
-            maximum = rule.emit[0]
-            assert maximum.descriptor.key == "amd.xdna.aie2p.max.lt.bf16x32.native"
-            assert maximum.operands == {
-                "s1": ValueRef.operand("lhs"),
-                "s2": ValueRef.operand("rhs"),
-            }
-            assert maximum.results == {
-                "d": ValueRef.result("result"),
-                "cmp": ValueRef.temporary("comparison"),
-            }
-            # The unused mask remains a real fixed-register descriptor result.
-            assert maximum.result_types == {
-                "d": DescriptorResultType(),
-                "cmp": DescriptorResultType(),
-            }
+        (rule,) = rules
+        native_bf16 = Vector(
+            "bf16", minimum_static_elements=1, maximum_static_elements=32
+        )
+        assert rule.guards == (
+            Guard.value_type("lhs", native_bf16),
+            Guard.value_type("rhs", native_bf16),
+            Guard.value_type("result", native_bf16),
+            Guard.instance_flags_has_all("fastmath", "nnan"),
+            Guard.instance_flags_has_all("fastmath", "nsz"),
+        )
+        assert len(rule.emit) == 1
+        extremum = rule.emit[0]
+        assert extremum.descriptor.key == descriptor_key
+        assert extremum.operands == {
+            "s1": ValueRef.operand("lhs"),
+            "s2": ValueRef.operand("rhs"),
+        }
+        assert extremum.results == {
+            "d": ValueRef.result("result"),
+            "cmp": ValueRef.temporary("comparison"),
+        }
+        # The unused mask remains a real fixed-register descriptor result.
+        assert extremum.result_types == {
+            "d": DescriptorResultType(),
+            "cmp": DescriptorResultType(),
+        }
 
 
 def test_f32_vector_extrema_use_packed_signed_quadrants() -> None:
@@ -377,8 +383,13 @@ def test_f32_vector_extrema_signed_quadrants_match_numeric_order() -> None:
                 assert actual_value == expected
 
 
-def test_bf16_scalar_maximum_broadcasts_and_extracts_raw_halfwords() -> None:
-    for source_op in (scalar.scalar_maxnumf, scalar.scalar_maximumf):
+def test_bf16_scalar_extrema_broadcast_and_extract_raw_halfwords() -> None:
+    for source_op, descriptor_key in (
+        (scalar.scalar_minnumf, "amd.xdna.aie2p.min.ge.bf16x32.native"),
+        (scalar.scalar_minimumf, "amd.xdna.aie2p.min.ge.bf16x32.native"),
+        (scalar.scalar_maxnumf, "amd.xdna.aie2p.max.lt.bf16x32.native"),
+        (scalar.scalar_maximumf, "amd.xdna.aie2p.max.lt.bf16x32.native"),
+    ):
         rule = next(
             rule for rule in AIE2P_FLOATING_RULES if rule.source_op is source_op
         )
@@ -392,7 +403,7 @@ def test_bf16_scalar_maximum_broadcasts_and_extracts_raw_halfwords() -> None:
         assert [emit.descriptor.key for emit in rule.emit] == [
             "amd.xdna.aie2p.splat.i16x32",
             "amd.xdna.aie2p.splat.i16x32",
-            "amd.xdna.aie2p.max.lt.bf16x32.native",
+            descriptor_key,
             "amd.xdna.aie2p.extract.i16.immediate",
         ]
         assert rule.emit[0].operands == {"src": ValueRef.operand("lhs")}

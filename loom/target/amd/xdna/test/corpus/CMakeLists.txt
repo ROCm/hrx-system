@@ -21,6 +21,7 @@ loom_corpus_test(
     "kernel"
     "function"
   SOURCES
+    "numeric/vector/bfloat_extrema_reductions.loom"
     "numeric/vector/constants.loom"
   XFAILS
     "numeric/vector/constants.loom"

@@ -67,6 +67,7 @@ NUMERIC_CORPUS = loom_corpus_manifest(
         "predicate/truncation.loom",
         "predicate/vector_logic.loom",
         "vector/address_conversion.loom",
+        "vector/bfloat_extrema_reductions.loom",
         "vector/broadcast_arithmetic.loom",
         "vector/conversion.loom",
         "vector/constants.loom",

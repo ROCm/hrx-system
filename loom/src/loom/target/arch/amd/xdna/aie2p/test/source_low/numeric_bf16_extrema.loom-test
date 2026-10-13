@@ -1,0 +1,150 @@
+// AIE2P's fused BF16 extrema implement all scalar and native-carrier widths
+// when the source permits unordered and signed-zero behavior. Reassociated
+// reductions keep exact powers of two in direct packed trees and fill partial
+// trees with the authored initial value.
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @minimum_bf16x3(%lhs: vector<3xbf16>, %rhs: vector<3xbf16>) -> (vector<3xbf16>) {
+  %result = vector.minnumf<nnan|nsz> %lhs, %rhs : vector<3xbf16>
+  func.return %result : vector<3xbf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @minimum_bf16x3(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %result, %8 = vmin_ge.bf16 %lhs, %rhs
+  return %result
+}
+
+// ====
+
+func.def @maximum_bf16x32(%lhs: vector<32xbf16>, %rhs: vector<32xbf16>) -> (vector<32xbf16>) {
+  %result = vector.maximumf<nnan|nsz> %lhs, %rhs : vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @maximum_bf16x32(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %result, %8 = vmax_lt.bf16 %lhs, %rhs
+  return %result
+}
+
+// ====
+
+func.def @minimum_bf16_scalar(%lhs: bf16, %rhs: bf16) -> (bf16) {
+  %result = scalar.minimumf<nnan|nsz> %lhs, %rhs : bf16
+  func.return %result : bf16
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @minimum_bf16_scalar(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %7 = vbcst.16 %lhs
+  %8 = vbcst.16 %rhs
+  %9, %10 = vmin_ge.bf16 %7, %8
+  %result = vextract.16.imm %9, 0
+  return %result
+}
+
+// ====
+
+func.def @minimum_bf16x3_reduction(%input: vector<3xbf16>, %initial: bf16) -> (bf16) {
+  %result = vector.reduce<minnumf, reassoc|nnan|nsz> %input, %initial : vector<3xbf16>, bf16
+  func.return %result : bf16
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @minimum_bf16x3_reduction(%input: reg<aie2p.vec256 x2>, %initial: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %7 = vbcst.16 %initial
+  %8 = predicate.constant.low32 7
+  %9 = predicate.complete.zero.high32 %8, 0
+  %10 = vsel.16.mask64 %7, %input, %9
+  %11 = mova.i32 4
+  %12 = vshift %10, %10, %11
+  %13, %14 = vmin_ge.bf16 %10, %12
+  %15 = mova.i32 2
+  %16 = vshift %13, %13, %15
+  %17, %18 = vmin_ge.bf16 %13, %16
+  %result = vextract.16.imm %17, 0
+  return %result
+}
+
+// ====
+
+func.def @maximum_bf16x16_reduction(%input: vector<16xbf16>, %initial: bf16) -> (bf16) {
+  %result = vector.reduce<maximumf, reassoc|nnan|nsz> %input, %initial : vector<16xbf16>, bf16
+  func.return %result : bf16
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @maximum_bf16x16_reduction(%input: reg<aie2p.vec256 x2>, %initial: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %7 = vbcst.16 %initial
+  %8, %9 = vmax_lt.bf16 %input, %7
+  %10 = mova.i32 16
+  %11 = vshift %8, %8, %10
+  %12, %13 = vmax_lt.bf16 %8, %11
+  %14 = mova.i32 8
+  %15 = vshift %12, %12, %14
+  %16, %17 = vmax_lt.bf16 %12, %15
+  %18 = mova.i32 4
+  %19 = vshift %16, %16, %18
+  %20, %21 = vmax_lt.bf16 %16, %19
+  %22 = mova.i32 2
+  %23 = vshift %20, %20, %22
+  %24, %25 = vmax_lt.bf16 %20, %23
+  %result = vextract.16.imm %24, 0
+  return %result
+}
+
+// ====
+
+func.def @maximum_bf16x33_reduction(%head: vector<32xbf16>, %tail: vector<1xbf16>, %initial: bf16) -> (bf16) {
+  %input = vector.concat<0> %head, %tail : vector<32xbf16>, vector<1xbf16> -> vector<33xbf16>
+  %result = vector.reduce<maxnumf, reassoc|nnan|nsz> %input, %initial : vector<33xbf16>, bf16
+  func.return %result : bf16
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @maximum_bf16x33_reduction(%head: reg<aie2p.vec256 x2>, %tail: reg<aie2p.vec256 x2>, %initial: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %12 = vbcst.16 %initial
+  %13, %14 = vmax_lt.bf16 %head, %12
+  %15 = mova.i32 32
+  %16 = vshift %13, %13, %15
+  %17, %18 = vmax_lt.bf16 %13, %16
+  %19 = mova.i32 16
+  %20 = vshift %17, %17, %19
+  %21, %22 = vmax_lt.bf16 %17, %20
+  %23 = mova.i32 8
+  %24 = vshift %21, %21, %23
+  %25, %26 = vmax_lt.bf16 %21, %24
+  %27 = mova.i32 4
+  %28 = vshift %25, %25, %27
+  %29, %30 = vmax_lt.bf16 %25, %28
+  %31 = mova.i32 2
+  %32 = vshift %29, %29, %31
+  %33, %34 = vmax_lt.bf16 %29, %32
+  %35 = vextract.16.imm %33, 0
+  %36 = vbcst.16 %35
+  %37, %38 = vmax_lt.bf16 %tail, %36
+  %result = vextract.16.imm %37, 0
+  return %result
+}
+
+// ====
+
+// Shared packet planning carries a native splat producer through a wide
+// extremum consumer and applies the same contract to its one-lane tail.
+func.def @maximum_bf16x33_splat(%input: vector<33xbf16>, %scalar: bf16) -> (vector<33xbf16>) {
+  %splat = vector.splat %scalar : vector<33xbf16>
+  %result = vector.maxnumf<nnan|nsz> %input, %splat : vector<33xbf16>
+  func.return %result : vector<33xbf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @maximum_bf16x33_splat(%input: reg<aie2p.vec256 x4>, %scalar: reg<aie2p.er>) -> (reg<aie2p.vec256 x4>) asm {
+  %15 = vbcst.16 %scalar
+  %16 = slice %input[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %17, %18 = vmax_lt.bf16 %16, %15
+  %20 = slice %input[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %21, %22 = vmax_lt.bf16 %20, %15
+  %result = concat(%17, %21) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  return %result
+}

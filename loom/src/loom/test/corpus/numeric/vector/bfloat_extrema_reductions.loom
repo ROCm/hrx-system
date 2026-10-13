@@ -1,0 +1,108 @@
+// BF16 extrema reductions use a target's relaxed packed implementation only
+// when reassociation, NaNs, and signed-zero distinctions are outside the
+// source contract. These boundary widths exercise both a partially filled
+// native tree and a reduction spanning more than one native carrier.
+
+func.def @bfloat_minimum_reductions_3(%storage_buffer: buffer) {
+  %input_origin = index.constant 0 : offset
+  %initial_origin = index.constant 6 : offset
+  %output_origin = index.constant 8 : offset
+  %input_view = buffer.view %storage_buffer[%input_origin] : buffer -> view<3xbf16>
+  %initial_view = buffer.view %storage_buffer[%initial_origin] : buffer -> view<1xbf16>
+  %output_view = buffer.view %storage_buffer[%output_origin] : buffer -> view<2xbf16>
+  %input = vector.load %input_view[0] : view<3xbf16> -> vector<3xbf16>
+  %initial = view.load %initial_view[0] : view<1xbf16> -> bf16
+
+  %minnum = vector.reduce<minnumf, reassoc|nnan|nsz> %input, %initial : vector<3xbf16>, bf16
+  %minimum = vector.reduce<minimumf, reassoc|nnan|nsz> %input, %initial : vector<3xbf16>, bf16
+  view.store %minnum, %output_view[0] : bf16, view<2xbf16>
+  view.store %minimum, %output_view[1] : bf16, view<2xbf16>
+  func.return
+}
+
+func.def @bfloat_maximum_reductions_3(%storage_buffer: buffer) {
+  %input_origin = index.constant 0 : offset
+  %initial_origin = index.constant 6 : offset
+  %output_origin = index.constant 8 : offset
+  %input_view = buffer.view %storage_buffer[%input_origin] : buffer -> view<3xbf16>
+  %initial_view = buffer.view %storage_buffer[%initial_origin] : buffer -> view<1xbf16>
+  %output_view = buffer.view %storage_buffer[%output_origin] : buffer -> view<2xbf16>
+  %input = vector.load %input_view[0] : view<3xbf16> -> vector<3xbf16>
+  %initial = view.load %initial_view[0] : view<1xbf16> -> bf16
+
+  %maxnum = vector.reduce<maxnumf, reassoc|nnan|nsz> %input, %initial : vector<3xbf16>, bf16
+  %maximum = vector.reduce<maximumf, reassoc|nnan|nsz> %input, %initial : vector<3xbf16>, bf16
+  view.store %maxnum, %output_view[0] : bf16, view<2xbf16>
+  view.store %maximum, %output_view[1] : bf16, view<2xbf16>
+  func.return
+}
+
+func.def @bfloat_minimum_reductions_33(%storage_buffer: buffer) {
+  %input_origin = index.constant 0 : offset
+  %initial_origin = index.constant 66 : offset
+  %output_origin = index.constant 68 : offset
+  %input_view = buffer.view %storage_buffer[%input_origin] : buffer -> view<33xbf16>
+  %initial_view = buffer.view %storage_buffer[%initial_origin] : buffer -> view<1xbf16>
+  %output_view = buffer.view %storage_buffer[%output_origin] : buffer -> view<2xbf16>
+  %input = vector.load %input_view[0] : view<33xbf16> -> vector<33xbf16>
+  %initial = view.load %initial_view[0] : view<1xbf16> -> bf16
+
+  %minnum = vector.reduce<minnumf, reassoc|nnan|nsz> %input, %initial : vector<33xbf16>, bf16
+  %minimum = vector.reduce<minimumf, reassoc|nnan|nsz> %input, %initial : vector<33xbf16>, bf16
+  view.store %minnum, %output_view[0] : bf16, view<2xbf16>
+  view.store %minimum, %output_view[1] : bf16, view<2xbf16>
+  func.return
+}
+
+func.def @bfloat_maximum_reductions_33(%storage_buffer: buffer) {
+  %input_origin = index.constant 0 : offset
+  %initial_origin = index.constant 66 : offset
+  %output_origin = index.constant 68 : offset
+  %input_view = buffer.view %storage_buffer[%input_origin] : buffer -> view<33xbf16>
+  %initial_view = buffer.view %storage_buffer[%initial_origin] : buffer -> view<1xbf16>
+  %output_view = buffer.view %storage_buffer[%output_origin] : buffer -> view<2xbf16>
+  %input = vector.load %input_view[0] : view<33xbf16> -> vector<33xbf16>
+  %initial = view.load %initial_view[0] : view<1xbf16> -> bf16
+
+  %maxnum = vector.reduce<maxnumf, reassoc|nnan|nsz> %input, %initial : vector<33xbf16>, bf16
+  %maximum = vector.reduce<maximumf, reassoc|nnan|nsz> %input, %initial : vector<33xbf16>, bf16
+  view.store %maxnum, %output_view[0] : bf16, view<2xbf16>
+  view.store %maximum, %output_view[1] : bf16, view<2xbf16>
+  func.return
+}
+
+check.scenario @bfloat_extrema_reduction_boundaries {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.iota offset(-2.0) step(3.0) : tensor<6xbf16>
+    %output = check.tensor.view %storage offset(8) : tensor<6xbf16> -> tensor<2xbf16>
+    %expected_minimum = check.generate.fill value(-2.0) : tensor<2xbf16>
+    check.compare<@bfloat_minimum_reductions_3>(%storage) : (tensor<6xbf16>) -> () {
+      check.expect.close actual(%output) expected(%expected_minimum) atol(0.0) rtol(0.0) nan(same) : tensor<2xbf16>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.iota offset(-2.0) step(3.0) : tensor<6xbf16>
+    %output = check.tensor.view %storage offset(8) : tensor<6xbf16> -> tensor<2xbf16>
+    %expected_maximum = check.generate.fill value(7.0) : tensor<2xbf16>
+    check.compare<@bfloat_maximum_reductions_3>(%storage) : (tensor<6xbf16>) -> () {
+      check.expect.close actual(%output) expected(%expected_maximum) atol(0.0) rtol(0.0) nan(same) : tensor<2xbf16>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.iota offset(16.0) step(-1.0) : tensor<36xbf16>
+    %output = check.tensor.view %storage offset(68) : tensor<36xbf16> -> tensor<2xbf16>
+    %expected_minimum = check.generate.fill value(-17.0) : tensor<2xbf16>
+    check.compare<@bfloat_minimum_reductions_33>(%storage) : (tensor<36xbf16>) -> () {
+      check.expect.close actual(%output) expected(%expected_minimum) atol(0.0) rtol(0.0) nan(same) : tensor<2xbf16>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.iota offset(16.0) step(-1.0) : tensor<36xbf16>
+    %output = check.tensor.view %storage offset(68) : tensor<36xbf16> -> tensor<2xbf16>
+    %expected_maximum = check.generate.fill value(16.0) : tensor<2xbf16>
+    check.compare<@bfloat_maximum_reductions_33>(%storage) : (tensor<36xbf16>) -> () {
+      check.expect.close actual(%output) expected(%expected_maximum) atol(0.0) rtol(0.0) nan(same) : tensor<2xbf16>
+    }
+  }
+  check.return
+}

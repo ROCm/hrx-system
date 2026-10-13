@@ -142,6 +142,7 @@ iree_py_test(
     "nonlinear_test.py"
     "predicate_concat_test.py"
     "predicate_slice_test.py"
+    "reduction_test.py"
     "structural_test.py"
     "../../../../../../tools/pytest_style_runner.py"
   ARGS
@@ -154,6 +155,7 @@ iree_py_test(
     "loom.target.arch.amd.xdna.aie2p.contracts.nonlinear_test"
     "loom.target.arch.amd.xdna.aie2p.contracts.predicate_concat_test"
     "loom.target.arch.amd.xdna.aie2p.contracts.predicate_slice_test"
+    "loom.target.arch.amd.xdna.aie2p.contracts.reduction_test"
     "loom.target.arch.amd.xdna.aie2p.contracts.structural_test"
   DEPS
     loom::py::loom::target::arch::amd::xdna::aie2p::contracts::contracts

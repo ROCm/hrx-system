@@ -93,6 +93,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "numeric/predicate/truncation.loom",
     "numeric/predicate/vector_logic.loom",
     "numeric/vector/address_conversion.loom",
+    "numeric/vector/bfloat_extrema_reductions.loom",
     "numeric/vector/constants.loom",
     "numeric/vector/dynamic_windows.loom",
     "numeric/vector/f32.loom",
