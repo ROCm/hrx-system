@@ -8,6 +8,7 @@
 
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -18,6 +19,7 @@ from experimental.loom_serve.testing.http import control, running_server
 
 SERVER = Path(sys.argv.pop(1)).resolve()
 PACKAGE = Path(sys.argv.pop(1)).resolve().parent
+FORMAT = Path(sys.argv.pop(1)).resolve()
 
 
 class ServerTest(unittest.TestCase):
@@ -62,6 +64,26 @@ class ServerTest(unittest.TestCase):
                     "tokenizer.json",
                 ):
                     shutil.copyfile(PACKAGE / name, package / name)
+                if workers == 4:
+                    # Native providers can mix formats. VM role files exercise
+                    # magic detection independently of the filename suffix.
+                    for name in ("embed", "prepare", "control"):
+                        encoded = package / f"{name}.loombc"
+                        subprocess.run(
+                            [
+                                str(FORMAT),
+                                str(package / f"{name}.loom"),
+                                "--from=text",
+                                "--to=bc",
+                                f"--output={encoded}",
+                            ],
+                            check=True,
+                        )
+                        if name == "embed":
+                            (package / "embed.loom").unlink()
+                        else:
+                            encoded.replace(package / f"{name}.loom")
+                    (package / "sources.txt").write_text("config.loom\nembed.loombc\n")
                 options = [
                     "--device=task",
                     "--pool_backing=fixed",

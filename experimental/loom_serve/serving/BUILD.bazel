@@ -165,11 +165,13 @@ py_test(
     args = [
         "$(rootpath :server)",
         "$(rootpath //experimental/loom_serve/models/fixtures/embedding:prepare.loom)",
+        "$(rootpath //loom/src/loom/tools/loom-format)",
     ],
     data = [
         ":server",
         "//experimental/loom_serve/models/fixtures/embedding:prepare.loom",
         "//experimental/loom_serve/models/fixtures/embedding:sources",
+        "//loom/src/loom/tools/loom-format",
     ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",

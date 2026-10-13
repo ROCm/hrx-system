@@ -143,18 +143,9 @@ static iree_status_t jit_compiler_initialize(
 static iree_status_t jit_read_source(iree_string_view_t path,
                                      iree_allocator_t allocator,
                                      loomc_source_t** out_source) {
-  iree_io_file_contents_t* contents = NULL;
-  IREE_RETURN_IF_ERROR(iree_io_file_contents_read(path, allocator, &contents));
-  const loomc_source_options_t options = {
-      .format = LOOMC_SOURCE_FORMAT_TEXT,
-      .identifier = loomc_string_view_from_iree(path),
-      .contents = loomc_byte_span_from_iree(contents->const_buffer),
-      .storage = LOOMC_SOURCE_STORAGE_COPY,
-  };
-  iree_status_t status = iree_status_from_loomc(loomc_source_create(
-      &options, loomc_allocator_from_iree(allocator), out_source));
-  iree_io_file_contents_free(contents);
-  return status;
+  return iree_status_from_loomc(loomc_source_create_from_path(
+      loomc_string_view_from_iree(path), NULL,
+      loomc_allocator_from_iree(allocator), out_source));
 }
 
 static iree_status_t jit_index_sources(loom_serve_jit_t* jit,
