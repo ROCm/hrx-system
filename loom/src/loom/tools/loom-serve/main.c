@@ -109,7 +109,15 @@ static int serving_agents_markdown(void) {
              "`--help` lists serving flags; `--help=all` adds linked runtime "
              "flags. `--flagfile=path` uses the ordinary newline-separated "
              "flag syntax and working-directory path resolution. There is "
-             "no subcommand.\n",
+             "no subcommand.\n\n"
+             "## References\n\n"
+             "- First output: "
+             "https://rocm.github.io/hrx-system/loom/workflows/serve-models/\n"
+             "- Command options: "
+             "https://rocm.github.io/hrx-system/loom/reference/loom-serve/\n"
+             "- Model documents: "
+             "https://rocm.github.io/hrx-system/loom/reference/serving-models/"
+             "\n",
              stdout) == EOF
              ? EXIT_FAILURE
              : EXIT_SUCCESS;

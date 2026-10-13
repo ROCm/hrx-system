@@ -5,6 +5,11 @@ services. It owns deployment configuration and model lifetime; numerical
 programs remain runtime inputs. Process flags, signal policy and the application
 entry point belong to the executable, not these libraries.
 
+The public [model-document reference](../../../../docs/src/reference/serving-models.md)
+owns JSON syntax and local path binding. The
+[serving walkthrough](../../../../docs/src/workflows/serve-models.md) exercises
+empty startup, registration, output and removal with an installed executable.
+
 ## Deployment and lifetime
 
 [Configuration](configuration.h) parses one complete JSON model document for

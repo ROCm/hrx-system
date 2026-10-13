@@ -91,6 +91,7 @@ class ServerTest(unittest.TestCase):
                 package = directory / "external package"
                 package.mkdir()
                 for name in (
+                    "model.json",
                     "config.loom",
                     "embed.loom",
                     "prepare.loom",
@@ -98,6 +99,8 @@ class ServerTest(unittest.TestCase):
                     "tokenizer.json",
                 ):
                     shutil.copyfile(PACKAGE / name, package / name)
+                document = json.loads((package / "model.json").read_text())
+                document.update(base_directory=str(package), admission="drained")
                 if workers == 4:
                     # Native providers can mix formats. VM role files exercise
                     # format detection through their separate VM loading path.
@@ -114,6 +117,11 @@ class ServerTest(unittest.TestCase):
                             check=True,
                         )
                         (package / f"{name}.loom").unlink()
+                    document["definition"].update(
+                        prepare="prepare.loombc",
+                        control="control.loombc",
+                        sources=["config.loom", "embed.loombc"],
+                    )
                 options = [
                     "--device=task",
                     "--pool_backing=fixed",
@@ -141,26 +149,7 @@ class ServerTest(unittest.TestCase):
                     registration = self.post(
                         address,
                         "/v1/models/register",
-                        {
-                            "name": "vectors",
-                            "base_directory": str(package),
-                            "definition": {
-                                "kind": "embedding",
-                                "prepare": "prepare.loombc"
-                                if workers == 4
-                                else "prepare.loom",
-                                "control": "control.loombc"
-                                if workers == 4
-                                else "control.loom",
-                                "sources": [
-                                    "config.loom",
-                                    "embed.loombc" if workers == 4 else "embed.loom",
-                                ],
-                                "assets": ".",
-                                "options": {"batch_units": 64},
-                            },
-                            "admission": "drained",
-                        },
+                        document,
                         expected=202,
                     )
                     self.assertEqual(registration["loom"]["registration"], "registered")
@@ -190,6 +179,14 @@ class ServerTest(unittest.TestCase):
                         self.assertEqual(
                             [item["index"] for item in result["data"]],
                             list(range(len(inputs))),
+                        )
+                        token_count = sum(len(value) for value in inputs)
+                        self.assertEqual(
+                            result["usage"],
+                            {
+                                "prompt_tokens": token_count,
+                                "total_tokens": token_count,
+                            },
                         )
                     model = control(address, "GET", "/v1/models", 200)["data"][0]
                     self.assertEqual(model["id"], "vectors")

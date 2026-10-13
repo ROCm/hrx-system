@@ -19,3 +19,5 @@ headers.
 - [Attribute reference](attributes/index.md)
 - [Encoding reference](encodings/index.md)
 - [C API reference](c-api/index.md)
+- [loom-serve command](loom-serve.md)
+- [Serving model documents](serving-models.md)

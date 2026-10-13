@@ -5,6 +5,10 @@ start with binaries on `PATH` and ordinary `.loom` or `.loombc` inputs. Source
 checkout commands, Bazel labels, compiler internals, and target-specific runtime
 setup have separate owners.
 
+[Serve source-defined models](serve-models.md) starts an empty HTTP server,
+registers a complete model package and produces a checked response on CPU.
+Models can then be added or removed independently of the server process.
+
 Use [Agent-driven kernel development](agent-driven-kernel-development.md) when
 the task spans several tools and candidate iterations. It keeps numerical,
 compiler, and physical evidence joined to one production witness while the
