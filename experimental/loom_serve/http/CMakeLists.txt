@@ -60,7 +60,7 @@ loom_cc_library(
     "logs.c"
   DEPS
     iree::base
-    iree::experimental::loom_serve::telemetry::stream
+    loom::serve::telemetry::stream
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -75,9 +75,9 @@ loom_cc_library(
     ::inspection
     ::server
     iree::base
-    iree::experimental::loom_serve::runtime::host::wake
-    iree::experimental::loom_serve::telemetry::stream
     iree::tokenizer
+    loom::serve::runtime::host::wake
+    loom::serve::telemetry::stream
   PUBLIC
 )
 
@@ -90,7 +90,7 @@ loom_cc_library(
     "inspection.c"
   DEPS
     iree::base
-    iree::experimental::loom_serve::telemetry::record
+    loom::serve::telemetry::record
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -116,9 +116,9 @@ loom_cc_test(
   DEPS
     ::logs
     iree::base
-    iree::experimental::loom_serve::telemetry::stream
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::telemetry::stream
 )
 
 loom_cc_test(
@@ -148,9 +148,9 @@ loom_cc_library(
     iree::async::util::proactor_pool
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::runtime::host::wake
-    iree::experimental::loom_serve::telemetry::stream
     iree::net::carrier
+    loom::serve::runtime::host::wake
+    loom::serve::telemetry::stream
   PUBLIC
 )
 
@@ -186,10 +186,10 @@ loom_cc_test(
     iree::async::util::proactor_pool
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::telemetry::stream
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
+    loom::serve::telemetry::stream
 )
 endif()
 

@@ -9,7 +9,6 @@
 #include <string>
 
 #include "experimental/loom_serve/runtime/execution.h"
-#include "experimental/loom_serve/runtime/host/host.h"
 #include "experimental/loom_serve/runtime/jit.h"
 #include "experimental/loom_serve/runtime/module.h"
 #include "iree/async/frontier_tracker.h"
@@ -21,6 +20,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/sync.h"
+#include "loom/serve/runtime/host/host.h"
 
 IREE_FLAG(string, control_sources, "", "Portable control source catalog.");
 

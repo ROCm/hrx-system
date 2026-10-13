@@ -83,8 +83,8 @@ loom_cc_library(
   DEPS
     ::generator
     iree::base
-    iree::experimental::loom_serve::telemetry::record
-    iree::experimental::loom_serve::telemetry::stream
+    loom::serve::telemetry::record
+    loom::serve::telemetry::stream
   PUBLIC
 )
 
@@ -109,13 +109,13 @@ loom_cc_library(
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::host
-    iree::experimental::loom_serve::runtime::host::timer
-    iree::experimental::loom_serve::runtime::host::wake
-    iree::experimental::loom_serve::telemetry::record
-    iree::experimental::loom_serve::telemetry::stream
     iree::experimental::loom_serve::telemetry::weights
     iree::task
+    loom::serve::runtime::host
+    loom::serve::runtime::host::timer
+    loom::serve::runtime::host::wake
+    loom::serve::telemetry::record
+    loom::serve::telemetry::stream
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -136,14 +136,14 @@ loom_cc_test(
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
-    iree::experimental::loom_serve::telemetry::record
-    iree::experimental::loom_serve::telemetry::stream
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::host
+    loom::serve::telemetry::record
+    loom::serve::telemetry::stream
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
   RESOURCE_GROUP
@@ -208,7 +208,6 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::runtime::input
     iree::experimental::loom_serve::runtime::jit
     iree::experimental::loom_serve::runtime::json
@@ -227,6 +226,7 @@ loom_cc_library(
     iree::tooling::device_util
     iree::vm
     loom::binding::c::loomc
+    loom::serve::runtime::host
     loom::util::stream
   PUBLIC
 )

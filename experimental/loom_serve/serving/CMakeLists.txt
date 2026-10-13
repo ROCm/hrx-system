@@ -30,11 +30,11 @@ loom_cc_library(
     iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::http::tokenization
     iree::experimental::loom_serve::runtime::compilation
-    iree::experimental::loom_serve::runtime::host::wake
     iree::experimental::loom_serve::runtime::residency
-    iree::experimental::loom_serve::telemetry::stream
     iree::task
     iree::tokenizer
+    loom::serve::runtime::host::wake
+    loom::serve::telemetry::stream
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -70,9 +70,9 @@ loom_cc_test(
     ::resources
     iree::base
     iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::host
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::host
     loom::util::stream
 )
 endif()
@@ -95,7 +95,6 @@ loom_cc_test(
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::request
     iree::experimental::loom_serve::http::server
-    iree::experimental::loom_serve::runtime::host::wake
     iree::net::carrier
     iree::net::carrier::loopback
     iree::task
@@ -103,6 +102,7 @@ loom_cc_test(
     iree::testing::gtest_main
     iree::tokenizer
     iree::tokenizer::format::huggingface::tokenizer_json
+    loom::serve::runtime::host::wake
 )
 endif()
 
@@ -161,10 +161,10 @@ loom_cc_library(
     iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::runtime::activation
     iree::experimental::loom_serve::runtime::compilation
-    iree::experimental::loom_serve::runtime::host::wake
     iree::experimental::loom_serve::runtime::residency
-    iree::experimental::loom_serve::telemetry::record
-    iree::experimental::loom_serve::telemetry::stream
+    loom::serve::runtime::host::wake
+    loom::serve::telemetry::record
+    loom::serve::telemetry::stream
   PUBLIC
 )
 
@@ -189,13 +189,13 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::activation
     iree::experimental::loom_serve::runtime::compilation
     iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::host
-    iree::experimental::loom_serve::runtime::host::wake
     iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::storage::memory
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule
     iree::experimental::loom_serve::text::service
+    loom::serve::runtime::host
+    loom::serve::runtime::host::wake
   PUBLIC
 )
 

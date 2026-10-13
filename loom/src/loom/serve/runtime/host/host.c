@@ -3,7 +3,7 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/runtime/host/host.h"
+#include "loom/serve/runtime/host/host.h"
 
 #include "iree/async/util/proactor_thread.h"
 #include "iree/base/threading/numa.h"
@@ -108,18 +108,19 @@ iree_status_t loom_serve_host_create(iree_host_size_t worker_count,
 }
 
 void loom_serve_host_retain(loom_serve_host_t* host) {
-  iree_atomic_ref_count_inc(&host->ref_count);
+  if (IREE_LIKELY(host)) {
+    iree_atomic_ref_count_inc(&host->ref_count);
+  }
 }
 
 void loom_serve_host_release(loom_serve_host_t* host) {
-  if (!host || iree_atomic_ref_count_dec(&host->ref_count) != 1) {
-    return;
+  if (IREE_LIKELY(host) && iree_atomic_ref_count_dec(&host->ref_count) == 1) {
+    iree_async_proactor_pool_release(host->proactor_pool);
+    loomc_task_queue_free(host->compiler_queue);
+    loomc_task_pool_free(host->task_pool);
+    iree_task_executor_release(host->executor);
+    iree_allocator_free(host->allocator, host);
   }
-  iree_async_proactor_pool_release(host->proactor_pool);
-  loomc_task_queue_free(host->compiler_queue);
-  loomc_task_pool_free(host->task_pool);
-  iree_task_executor_release(host->executor);
-  iree_allocator_free(host->allocator, host);
 }
 
 iree_task_executor_t* loom_serve_host_executor(const loom_serve_host_t* host) {

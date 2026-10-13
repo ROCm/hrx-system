@@ -9,9 +9,9 @@
 
 #include "experimental/loom_serve/http/inspection.h"
 #include "experimental/loom_serve/http/server.h"
-#include "experimental/loom_serve/runtime/host/wake.h"
-#include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/tokenizer/tokenizer.h"
+#include "loom/serve/runtime/host/wake.h"
+#include "loom/serve/telemetry/stream.h"
 
 #ifdef __cplusplus
 extern "C" {

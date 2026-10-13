@@ -55,12 +55,12 @@ loom_cc_test(
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::host
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom}}"
     "--embedding_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
@@ -99,12 +99,12 @@ loom_cc_test(
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::host
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom}}"
     "--embedding_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"
@@ -143,12 +143,12 @@ loom_cc_test(
     iree::experimental::loom_serve::http::listener
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::host
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/decision/prepare.loom}}"
     "--embedding_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/embedding/prepare.loom}}"

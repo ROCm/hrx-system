@@ -8,10 +8,10 @@
 
 #include <string.h>
 
-#include "experimental/loom_serve/runtime/host/timer.h"
-#include "experimental/loom_serve/runtime/host/wake.h"
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/serve/runtime/host/timer.h"
+#include "loom/serve/runtime/host/wake.h"
 #include "loom/util/json.h"
 
 typedef struct finite_job_t {
@@ -141,7 +141,7 @@ static void finite_request_end(loom_serve_finite_service_t* service,
                                uint64_t id, iree_time_t arrival_time,
                                uint64_t input_tokens,
                                loom_serve_telemetry_outcome_t outcome,
-                               iree_status_t status) {
+                               const iree_status_t status) {
   loom_serve_telemetry_count_outcome(&service->telemetry.counters, outcome);
   const iree_time_t now = iree_time_now();
   loom_serve_telemetry_record_t record = {
@@ -156,7 +156,7 @@ static void finite_request_end(loom_serve_finite_service_t* service,
 }
 
 static void finite_error(loom_serve_finite_service_t* service, uint64_t id,
-                         iree_status_t status) {
+                         const iree_status_t status) {
   loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
                                           .request = id,
                                           .event = &LOOM_SERVE_TELEMETRY_ERROR};

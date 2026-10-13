@@ -9,8 +9,6 @@
 #include <string.h>
 
 #include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/host/host.h"
-#include "experimental/loom_serve/runtime/host/wake.h"
 #include "experimental/loom_serve/scheduling/packing.h"
 #include "experimental/loom_serve/text/admission.h"
 #include "experimental/loom_serve/text/chat.h"
@@ -27,6 +25,8 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/task/executor.h"
+#include "loom/serve/runtime/host/host.h"
+#include "loom/serve/runtime/host/wake.h"
 #include "loom/util/json.h"
 
 // Device work retained until readiness is consumed by the model owner.

@@ -3,13 +3,18 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/runtime/host/host.h"
+#include "loom/serve/runtime/host/host.h"
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loomc/iree/task_pool.h"
 
 namespace {
+
+TEST(HostTest, NullLifetimeOperations) {
+  loom_serve_host_retain(nullptr);
+  loom_serve_host_release(nullptr);
+}
 
 TEST(HostTest, CompilerAdapterUsesApplicationExecutor) {
   loom_serve_host_t* host = nullptr;

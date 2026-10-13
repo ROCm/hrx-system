@@ -9,7 +9,7 @@
 
 #include "experimental/loom_serve/http/service.h"
 #include "experimental/loom_serve/image/generator.h"
-#include "experimental/loom_serve/runtime/host/host.h"
+#include "loom/serve/runtime/host/host.h"
 
 #ifdef __cplusplus
 extern "C" {

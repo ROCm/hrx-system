@@ -7,7 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_HTTP_INSPECTION_H_
 #define EXPERIMENTAL_LOOM_SERVE_HTTP_INSPECTION_H_
 
-#include "experimental/loom_serve/telemetry/record.h"
+#include "loom/serve/telemetry/record.h"
 
 #ifdef __cplusplus
 extern "C" {

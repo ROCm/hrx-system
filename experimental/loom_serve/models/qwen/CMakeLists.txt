@@ -962,7 +962,6 @@ loom_cc_test(
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::runtime::input
     iree::experimental::loom_serve::runtime::json
     iree::experimental::loom_serve::runtime::preparation
@@ -973,6 +972,7 @@ loom_cc_test(
     iree::testing::gtest_main
     iree::vm
     loom::binding::c::loomc
+    loom::serve::runtime::host
   ARGS
     "--prepare_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/prepare.loom}}"
 )

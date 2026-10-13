@@ -4,13 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_TIMER_H_
-#define EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_TIMER_H_
+#ifndef LOOM_SERVE_RUNTIME_HOST_TIMER_H_
+#define LOOM_SERVE_RUNTIME_HOST_TIMER_H_
 
-#include "experimental/loom_serve/runtime/host/wake.h"
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/proactor.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/serve/runtime/host/wake.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -80,4 +80,4 @@ void loom_serve_timer_deinitialize(loom_serve_timer_t* timer);
 }  // extern "C"
 #endif
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_TIMER_H_
+#endif  // LOOM_SERVE_RUNTIME_HOST_TIMER_H_

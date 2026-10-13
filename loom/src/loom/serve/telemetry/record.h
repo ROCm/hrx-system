@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_TELEMETRY_RECORD_H_
-#define EXPERIMENTAL_LOOM_SERVE_TELEMETRY_RECORD_H_
+#ifndef LOOM_SERVE_TELEMETRY_RECORD_H_
+#define LOOM_SERVE_TELEMETRY_RECORD_H_
 
 #include "iree/base/api.h"
 
@@ -130,7 +130,8 @@ struct loom_serve_telemetry_record_t {
 
 // Copies the primary message without allocating or consuming the status.
 void loom_serve_telemetry_diagnostic_capture(
-    iree_status_t status, loom_serve_telemetry_diagnostic_t* out_diagnostic);
+    const iree_status_t status,
+    loom_serve_telemetry_diagnostic_t* out_diagnostic);
 
 // Consumer-side JSON formatting of an owned record and its absolute position.
 // Model code may define additional static event schemas without HTTP coupling.
@@ -147,4 +148,4 @@ iree_status_t loom_serve_telemetry_diagnostic_format(
 #ifdef __cplusplus
 }  // extern "C"
 #endif
-#endif  // EXPERIMENTAL_LOOM_SERVE_TELEMETRY_RECORD_H_
+#endif  // LOOM_SERVE_TELEMETRY_RECORD_H_

@@ -20,7 +20,6 @@
 #include <vector>
 
 #include "experimental/loom_serve/http/listener.h"
-#include "experimental/loom_serve/runtime/host/wake.h"
 #include "experimental/loom_serve/serving/router.h"
 #include "iree/async/proactor.h"
 #include "iree/async/proactor_platform.h"
@@ -29,6 +28,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
+#include "loom/serve/runtime/host/wake.h"
 
 namespace loom_serve::testing {
 

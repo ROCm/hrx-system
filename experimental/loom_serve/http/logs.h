@@ -7,7 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_HTTP_LOGS_H_
 #define EXPERIMENTAL_LOOM_SERVE_HTTP_LOGS_H_
 
-#include "experimental/loom_serve/telemetry/stream.h"
+#include "loom/serve/telemetry/stream.h"
 
 #ifdef __cplusplus
 extern "C" {

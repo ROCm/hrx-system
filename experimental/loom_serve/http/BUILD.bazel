@@ -77,7 +77,7 @@ loom_cc_library(
     srcs = ["logs.c"],
     hdrs = ["logs.h"],
     deps = [
-        "//experimental/loom_serve/telemetry:stream",
+        "//loom/src/loom/serve/telemetry:stream",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
@@ -90,8 +90,8 @@ loom_cc_library(
     deps = [
         ":inspection",
         ":server",
-        "//experimental/loom_serve/runtime/host:wake",
-        "//experimental/loom_serve/telemetry:stream",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/telemetry:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/tokenizer",
     ],
@@ -102,7 +102,7 @@ loom_cc_library(
     srcs = ["inspection.c"],
     hdrs = ["inspection.h"],
     deps = [
-        "//experimental/loom_serve/telemetry:record",
+        "//loom/src/loom/serve/telemetry:record",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
@@ -125,7 +125,7 @@ loom_cc_test(
     srcs = ["logs_test.cc"],
     deps = [
         ":logs",
-        "//experimental/loom_serve/telemetry:stream",
+        "//loom/src/loom/serve/telemetry:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -151,8 +151,8 @@ loom_cc_library(
     hdrs = ["server.h"],
     deps = [
         ":request",
-        "//experimental/loom_serve/runtime/host:wake",
-        "//experimental/loom_serve/telemetry:stream",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/telemetry:stream",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
@@ -187,7 +187,7 @@ loom_cc_test(
         ":listener",
         ":request",
         ":server",
-        "//experimental/loom_serve/telemetry:stream",
+        "//loom/src/loom/serve/telemetry:stream",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",

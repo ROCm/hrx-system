@@ -6,7 +6,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_FLAGS_H_
 #define EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_FLAGS_H_
 
-#include "experimental/loom_serve/runtime/host/host.h"
+#include "loom/serve/runtime/host/host.h"
 
 #ifdef __cplusplus
 extern "C" {

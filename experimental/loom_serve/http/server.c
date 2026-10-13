@@ -9,8 +9,8 @@
 #include <limits.h>
 #include <string.h>
 
-#include "experimental/loom_serve/runtime/host/wake.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/serve/runtime/host/wake.h"
 
 typedef enum http_connection_flag_bits_e {
   HTTP_CONNECTION_OCCUPIED = 1u << 0,
@@ -216,7 +216,7 @@ static bool http_server_drained(void* user_data) {
 }
 
 void loom_serve_http_server_record_error(loom_serve_http_server_t* server,
-                                         iree_status_t status) {
+                                         const iree_status_t status) {
   loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
                                           .event = &LOOM_SERVE_TELEMETRY_ERROR};
   loom_serve_telemetry_diagnostic_capture(status, &record.data.error);

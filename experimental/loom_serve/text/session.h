@@ -9,10 +9,10 @@
 
 #include "experimental/loom_serve/http/inspection.h"
 #include "experimental/loom_serve/http/server.h"
-#include "experimental/loom_serve/telemetry/record.h"
 #include "experimental/loom_serve/text/chat.h"
 #include "experimental/loom_serve/text/model.h"
 #include "iree/tokenizer/tokenizer.h"
+#include "loom/serve/telemetry/record.h"
 
 #ifdef __cplusplus
 extern "C" {

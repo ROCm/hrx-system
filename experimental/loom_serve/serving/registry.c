@@ -6,7 +6,7 @@
 
 #include "experimental/loom_serve/serving/registry.h"
 
-#include "experimental/loom_serve/runtime/host/wake.h"
+#include "loom/serve/runtime/host/wake.h"
 
 struct loom_serve_registry_t {
   // Allocator owning the table and registration operations.
@@ -322,7 +322,7 @@ static void registry_release_service(loom_serve_registered_model_t* model) {
 }
 
 static void registry_record_error(loom_serve_registered_model_t* model,
-                                  iree_status_t status) {
+                                  const iree_status_t status) {
   loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
                                           .event = &LOOM_SERVE_TELEMETRY_ERROR};
   loom_serve_telemetry_diagnostic_capture(status, &record.data.error);

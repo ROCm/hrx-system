@@ -15,7 +15,7 @@ logical KV pool, sessions and checkpoints; image deployments own their finite
 request storage. Registering the same checkpoint twice creates two
 prepared parameter residencies; it does not deduplicate those weights.
 
-The application owns one [host](../runtime/host/host.h) with shared IREE task workers
+The application owns one [host](../../../loom/src/loom/serve/runtime/host/host.h) with shared IREE task workers
 and asynchronous I/O services. Every catalog borrows the host's shared JIT task
 queue; adding or removing a model neither creates nor joins a compiler pool.
 Every modality's registration drives asynchronous source/JIT preparation on
@@ -760,7 +760,7 @@ is not proof of remote receipt. Counter samples use host monotonic time, not
 device timestamps. Bounded error messages own their bytes and explicitly report
 truncation; terminal request/process statuses retain their normal ownership.
 
-The `//experimental/loom_serve/telemetry:stream_benchmark` target separates
+The `//loom/src/loom/serve/telemetry:stream_benchmark` target separates
 timestamped native publication from consumer copying/JSON formatting at the
 actual 128/256-record capacities. Build with `--config=opt` and measure on an
 excluded runner; its sanitizer smoke test checks execution, not performance.

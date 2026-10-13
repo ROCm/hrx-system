@@ -8,7 +8,7 @@
 #define EXPERIMENTAL_LOOM_SERVE_TELEMETRY_WEIGHTS_H_
 
 #include "experimental/loom_serve/runtime/weights.h"
-#include "experimental/loom_serve/telemetry/stream.h"
+#include "loom/serve/telemetry/stream.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -3,8 +3,8 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_HOST_H_
-#define EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_HOST_H_
+#ifndef LOOM_SERVE_RUNTIME_HOST_HOST_H_
+#define LOOM_SERVE_RUNTIME_HOST_HOST_H_
 
 #include "iree/async/util/proactor_pool.h"
 #include "iree/task/executor.h"
@@ -32,7 +32,7 @@ iree_status_t loom_serve_host_create(iree_host_size_t worker_count,
 // All dependent operations have already retired. NULL is permitted.
 void loom_serve_host_release(loom_serve_host_t* host);
 
-// Retains shared host resources for a dependent owner.
+// Retains shared host resources for a dependent owner. NULL is permitted.
 void loom_serve_host_retain(loom_serve_host_t* host);
 
 // Borrowed interfaces valid through final host release. The task-pool adapter
@@ -52,4 +52,4 @@ iree_async_proactor_pool_t* loom_serve_host_proactor_pool(
 }  // extern "C"
 #endif
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_RUNTIME_HOST_HOST_H_
+#endif  // LOOM_SERVE_RUNTIME_HOST_HOST_H_

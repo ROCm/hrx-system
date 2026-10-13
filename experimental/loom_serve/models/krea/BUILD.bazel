@@ -76,7 +76,7 @@ loom_cc_test(
     deps = [
         "//experimental/loom_serve/image:model",
         "//experimental/loom_serve/runtime:device",
-        "//experimental/loom_serve/runtime/host",
+        "//loom/src/loom/serve/runtime/host",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/testing:gtest",

@@ -7,13 +7,14 @@
 #include <cstring>
 
 #include "benchmark/benchmark.h"
-#include "experimental/loom_serve/telemetry/stream.h"
+#include "loom/serve/telemetry/stream.h"
 
 namespace {
 
 static loom_serve_telemetry_record_t Snapshot() {
-  loom_serve_telemetry_record_t record = {};
-  record.event = &LOOM_SERVE_TELEMETRY_SNAPSHOT;
+  loom_serve_telemetry_record_t record = {
+      .event = &LOOM_SERVE_TELEMETRY_SNAPSHOT,
+  };
   record.data.snapshot.counters = {1000, 990, 2, 3, 1, 16384, 4096, 2048};
   record.data.snapshot.queued = 4;
   record.data.snapshot.active = 16;

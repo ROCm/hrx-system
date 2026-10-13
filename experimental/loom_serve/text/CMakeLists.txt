@@ -206,8 +206,8 @@ loom_cc_library(
     ::session
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::telemetry::record
-    iree::experimental::loom_serve::telemetry::stream
+    loom::serve::telemetry::record
+    loom::serve::telemetry::stream
   PUBLIC
 )
 
@@ -222,12 +222,12 @@ loom_cc_library(
     iree::base
     iree::base::threading
     iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::host::timer
     iree::experimental::loom_serve::runtime::weights
     iree::experimental::loom_serve::storage::memory
-    iree::experimental::loom_serve::telemetry::record
-    iree::experimental::loom_serve::telemetry::stream
     iree::experimental::loom_serve::telemetry::weights
+    loom::serve::runtime::host::timer
+    loom::serve::telemetry::record
+    loom::serve::telemetry::stream
   PUBLIC
 )
 
@@ -242,11 +242,11 @@ loom_cc_test(
     iree::async::util::proactor_pool
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::runtime::host::timer
-    iree::experimental::loom_serve::telemetry::record
-    iree::experimental::loom_serve::telemetry::stream
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::host::timer
+    loom::serve::telemetry::record
+    loom::serve::telemetry::stream
 )
 
 if(LOOM_TARGET_ARCH_VM)
@@ -263,8 +263,8 @@ loom_cc_library(
     iree::base
     iree::experimental::loom_serve::http::inspection
     iree::experimental::loom_serve::http::server
-    iree::experimental::loom_serve::telemetry::record
     iree::tokenizer
+    loom::serve::telemetry::record
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -384,15 +384,15 @@ loom_cc_library(
     iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::host
-    iree::experimental::loom_serve::runtime::host::timer
-    iree::experimental::loom_serve::runtime::host::wake
     iree::experimental::loom_serve::scheduling::packing
-    iree::experimental::loom_serve::telemetry::record
-    iree::experimental::loom_serve::telemetry::stream
     iree::task
     iree::tokenizer
     iree::vm
+    loom::serve::runtime::host
+    loom::serve::runtime::host::timer
+    loom::serve::runtime::host::wake
+    loom::serve::telemetry::record
+    loom::serve::telemetry::stream
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -468,9 +468,9 @@ loom_cc_binary(
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
-    iree::experimental::loom_serve::runtime::host
     iree::hal
     iree::task
+    loom::serve::runtime::host
   TESTONLY
 )
 endif()

@@ -11,12 +11,12 @@
 
 #include "experimental/loom_serve/image/output.h"
 #include "experimental/loom_serve/image/telemetry.h"
-#include "experimental/loom_serve/runtime/host/timer.h"
-#include "experimental/loom_serve/runtime/host/wake.h"
 #include "experimental/loom_serve/telemetry/weights.h"
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/internal/base64.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/serve/runtime/host/timer.h"
+#include "loom/serve/runtime/host/wake.h"
 #include "loom/util/json.h"
 
 typedef struct image_job_t {
@@ -162,7 +162,7 @@ static void image_record_weights(loom_serve_image_service_t* service,
 
 // Copies a borrowed status before it propagates or is consumed at a boundary.
 static void image_diagnose(loom_serve_image_service_t* service,
-                           uint64_t request, iree_status_t failure) {
+                           uint64_t request, const iree_status_t failure) {
   loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
                                           .request = request,
                                           .event = &LOOM_SERVE_TELEMETRY_ERROR};
@@ -173,7 +173,7 @@ static void image_diagnose(loom_serve_image_service_t* service,
 static void image_request_end(loom_serve_image_service_t* service,
                               const image_job_t* job,
                               loom_serve_telemetry_outcome_t outcome,
-                              iree_status_t borrowed_status) {
+                              const iree_status_t borrowed_status) {
   loom_serve_telemetry_count_outcome(&service->telemetry.counters, outcome);
   loom_serve_image_record_work(service->telemetry.stream, job->id, &job->work);
   loom_serve_telemetry_record_t record = {

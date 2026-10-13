@@ -7,10 +7,10 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_TEXT_TELEMETRY_H_
 #define EXPERIMENTAL_LOOM_SERVE_TEXT_TELEMETRY_H_
 
-#include "experimental/loom_serve/telemetry/stream.h"
 #include "experimental/loom_serve/text/epoch.h"
 #include "experimental/loom_serve/text/heartbeat.h"
 #include "experimental/loom_serve/text/session.h"
+#include "loom/serve/telemetry/stream.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,7 +54,7 @@ void loom_serve_text_telemetry_end(loom_serve_text_telemetry_t* telemetry,
                                    loom_serve_text_receipt_t receipt,
                                    loom_serve_telemetry_outcome_t outcome,
                                    uint64_t input_tokens,
-                                   iree_status_t borrowed_status);
+                                   const iree_status_t borrowed_status);
 
 // Diagnostic ownership boundary: copies bounded detail and consumes status.
 void loom_serve_text_telemetry_diagnose(loom_serve_text_telemetry_t* telemetry,
@@ -62,7 +62,7 @@ void loom_serve_text_telemetry_diagnose(loom_serve_text_telemetry_t* telemetry,
 
 // Captures a model failure while its original status propagates normally.
 void loom_serve_text_telemetry_fail(loom_serve_text_telemetry_t* telemetry,
-                                    iree_status_t borrowed_status);
+                                    const iree_status_t borrowed_status);
 
 // Updates session/request outcomes and publishes lifetime snapshots before
 // their host state is retired. Does not alter row, request or HTTP ownership.

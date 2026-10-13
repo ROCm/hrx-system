@@ -16,11 +16,11 @@
 #include <vector>
 
 #include "experimental/loom_serve/http/listener.h"
-#include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/async/proactor.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/serve/telemetry/stream.h"
 
 namespace {
 

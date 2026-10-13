@@ -12,10 +12,10 @@
 #include "experimental/loom_serve/finite/service.h"
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/service.h"
-#include "experimental/loom_serve/runtime/host/wake.h"
 #include "experimental/loom_serve/storage/memory.h"
 #include "experimental/loom_serve/text/schedule.h"
 #include "experimental/loom_serve/text/service.h"
+#include "loom/serve/runtime/host/wake.h"
 
 // The adapter owns the native parameter group and its temporary readiness
 // operation. Neither the registry nor its management connection borrows either.

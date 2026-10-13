@@ -60,12 +60,10 @@ loom_cc_test(
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
     iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
-    iree::experimental::loom_serve::telemetry::stream
     iree::experimental::loom_serve::testing::model
     iree::experimental::loom_serve::text::chat
     iree::experimental::loom_serve::text::input
@@ -79,6 +77,8 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
+    loom::serve::runtime::host
+    loom::serve::telemetry::stream
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom}}"
     "--test_device=amdgpu"
@@ -120,12 +120,10 @@ loom_cc_test(
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
     iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
-    iree::experimental::loom_serve::telemetry::stream
     iree::experimental::loom_serve::testing::model
     iree::experimental::loom_serve::text::chat
     iree::experimental::loom_serve::text::input
@@ -139,6 +137,8 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
+    loom::serve::runtime::host
+    loom::serve::telemetry::stream
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom}}"
     "--test_device=vulkan"
@@ -181,12 +181,10 @@ loom_cc_test(
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::models::fixtures::stalled_stderr
     iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::serving::model_registration
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
-    iree::experimental::loom_serve::telemetry::stream
     iree::experimental::loom_serve::testing::model
     iree::experimental::loom_serve::text::chat
     iree::experimental::loom_serve::text::input
@@ -200,6 +198,8 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
+    loom::serve::runtime::host
+    loom::serve::telemetry::stream
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/fixtures/text/prepare.loom}}"
     "--test_device=task"

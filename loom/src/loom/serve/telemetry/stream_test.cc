@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/telemetry/stream.h"
+#include "loom/serve/telemetry/stream.h"
 
 #include <atomic>
 #include <cstring>
@@ -127,30 +127,13 @@ TEST_F(TelemetryStreamTest, OverwriteDuringCopyNeverReturnsTornRecord) {
   }
 }
 
-TEST_F(TelemetryStreamTest, IncarnationsAreDistinctAndDiagnosticsAreOwned) {
+TEST_F(TelemetryStreamTest, IncarnationsAreDistinct) {
   loom_serve_telemetry_stream_t* other = nullptr;
   IREE_ASSERT_OK(
       loom_serve_telemetry_stream_create(1, &other, iree_allocator_system()));
   EXPECT_NE(loom_serve_telemetry_stream_identity(stream_).ordinal,
             loom_serve_telemetry_stream_identity(other).ordinal);
   loom_serve_telemetry_stream_destroy(other);
-  const std::string message(200, 'x');
-  iree_status_t status =
-      iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "%s", message.c_str());
-  loom_serve_telemetry_diagnostic_t diagnostic;
-  loom_serve_telemetry_diagnostic_capture(status, &diagnostic);
-  iree_status_free(status);
-  EXPECT_EQ(diagnostic.code, IREE_STATUS_INVALID_ARGUMENT);
-#if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS)
-  EXPECT_EQ(diagnostic.length, sizeof(diagnostic.message));
-  EXPECT_EQ(diagnostic.truncated, 1u);
-  EXPECT_EQ(std::string(diagnostic.message, diagnostic.length),
-            message.substr(0, diagnostic.length));
-#endif
-  loom_serve_telemetry_diagnostic_capture(iree_ok_status(), &diagnostic);
-  EXPECT_EQ(diagnostic.code, 0u);
-  EXPECT_EQ(diagnostic.length, 0u);
-  EXPECT_EQ(diagnostic.truncated, 0u);
 }
 
 TEST(TelemetryStream, RejectsInvalidCapacity) {

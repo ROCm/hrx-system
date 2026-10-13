@@ -28,7 +28,8 @@ configuration, numerical policy, and model-specific reference checks.
 | --- | --- |
 | [`runtime/`](runtime) | Source JIT, command materialization, VM imports, weight streaming and queue timelines |
 | [`http/`](http) | TCP/Unix carriers, bounded request storage and the service ownership contract |
-| [`telemetry/`](telemetry) | Typed overwrite streams and lifetime counters, independent of consumer pace |
+| [Shared host](../../loom/src/loom/serve/runtime/host/host.h) | Task workers, compiler queue and asynchronous I/O ownership |
+| [Telemetry](../../loom/src/loom/serve/telemetry/stream.h) | Typed overwrite streams and lifetime counters, independent of consumer pace |
 | [`serving/`](serving) | Dynamic deployment catalogs and routing across shared device resources and listeners |
 | [`text/`](text) | Source-defined packed autoregressive residency, chat protocol, admission and retained token scheduling |
 | [`image/`](image) | Source-defined diffusion residency, image request validation, completed-image service and output encoding |

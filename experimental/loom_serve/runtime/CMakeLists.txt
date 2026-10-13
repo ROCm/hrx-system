@@ -46,7 +46,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::host
+    loom::serve::runtime::host
   PUBLIC
 )
 
@@ -101,7 +101,6 @@ loom_cc_test(
     iree::base
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::runtime::host
     iree::hal
     iree::hal::drivers
     iree::module::hal::types
@@ -110,6 +109,7 @@ loom_cc_test(
     iree::vm
     iree::vm::bytecode::module
     loom::binding::c::loomc
+    loom::serve::runtime::host
   ARGS
     "--control_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/control/kernels.loom}}"
   LABELS
@@ -178,10 +178,10 @@ loom_cc_test(
     ::execution
     ::workspace
     iree::base
-    iree::experimental::loom_serve::runtime::host
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::host
 )
 endif()
 
@@ -213,11 +213,11 @@ loom_cc_library(
     iree::base
     iree::base::internal::path
     iree::base::threading
-    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::storage::memory
     iree::hal
     iree::hal::drivers
     iree::tooling::device_util
+    loom::serve::runtime::host
     ${_device_platform_deps}
   PUBLIC
 )
@@ -257,11 +257,11 @@ loom_cc_test(
   DEPS
     ::device
     iree::base
-    iree::experimental::loom_serve::runtime::host
     iree::hal
     iree::task
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::host
 )
 endif()
 
@@ -275,11 +275,11 @@ loom_cc_test(
     ::device
     ::execution
     iree::base
-    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::storage::memory
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::host
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
   RESOURCE_GROUP
@@ -388,13 +388,13 @@ loom_cc_library(
     ::target
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::runtime::host
     iree::hal
     loom::binding::c::loomc
     loom::binding::c::target::cmd
     loom::binding::c::target::configured
     loom::binding::c::target::vm
     loom::binding::c::task_pool
+    loom::serve::runtime::host
     loom::target::arch::cmd::program
   PUBLIC
 )
@@ -613,10 +613,10 @@ loom_cc_test(
     ::execution
     ::residency
     iree::base
-    iree::experimental::loom_serve::runtime::host
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::serve::runtime::host
 )
 endif()
 
@@ -671,7 +671,6 @@ loom_cc_library(
     ::sources
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::storage::memory
     iree::hal
     iree::io::parameter_index
@@ -680,6 +679,7 @@ loom_cc_library(
     iree::tooling::parameter_util
     iree::vm
     loom::binding::c::loomc
+    loom::serve::runtime::host
     loom::target::arch::cmd::program
   PUBLIC
 )

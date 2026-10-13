@@ -10,8 +10,8 @@
 #include "experimental/loom_serve/runtime/command.h"
 #include "experimental/loom_serve/runtime/compilation.h"
 #include "experimental/loom_serve/runtime/dispatch.h"
-#include "experimental/loom_serve/runtime/host/host.h"
 #include "experimental/loom_serve/runtime/sources.h"
+#include "loom/serve/runtime/host/host.h"
 #include "loomc/config.h"
 #include "loomc/sanitizer.h"
 

@@ -7,9 +7,9 @@
 #define EXPERIMENTAL_LOOM_SERVE_RUNTIME_DEVICE_H_
 
 #include "experimental/loom_serve/runtime/execution.h"
-#include "experimental/loom_serve/runtime/host/host.h"
 #include "experimental/loom_serve/runtime/residency.h"
 #include "experimental/loom_serve/storage/memory.h"
+#include "loom/serve/runtime/host/host.h"
 
 #ifdef __cplusplus
 extern "C" {

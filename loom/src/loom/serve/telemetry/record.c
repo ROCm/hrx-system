@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/telemetry/record.h"
+#include "loom/serve/telemetry/record.h"
 
 #include <inttypes.h>
 #include <string.h>
@@ -38,7 +38,8 @@ static iree_status_t record_quote(iree_string_builder_t* output,
 }
 
 void loom_serve_telemetry_diagnostic_capture(
-    iree_status_t status, loom_serve_telemetry_diagnostic_t* out_diagnostic) {
+    const iree_status_t status,
+    loom_serve_telemetry_diagnostic_t* out_diagnostic) {
   memset(out_diagnostic, 0, sizeof(*out_diagnostic));
   out_diagnostic->code = iree_status_code(status);
   const iree_string_view_t message = iree_status_message(status);

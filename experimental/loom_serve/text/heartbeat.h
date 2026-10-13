@@ -8,10 +8,10 @@
 #define EXPERIMENTAL_LOOM_SERVE_TEXT_HEARTBEAT_H_
 
 #include "experimental/loom_serve/runtime/device.h"
-#include "experimental/loom_serve/runtime/host/timer.h"
 #include "experimental/loom_serve/runtime/weights.h"
-#include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/serve/runtime/host/timer.h"
+#include "loom/serve/telemetry/stream.h"
 
 #ifdef __cplusplus
 extern "C" {

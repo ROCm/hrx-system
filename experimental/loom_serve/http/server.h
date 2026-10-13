@@ -8,12 +8,12 @@
 #define IREE_EXPERIMENTAL_LOOM_SERVE_HTTP_SERVER_H_
 
 #include "experimental/loom_serve/http/request.h"
-#include "experimental/loom_serve/runtime/host/wake.h"
-#include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/async/semaphore.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/notification.h"
 #include "iree/net/carrier.h"
+#include "loom/serve/runtime/host/wake.h"
+#include "loom/serve/telemetry/stream.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -80,7 +80,7 @@ const loom_serve_telemetry_stream_t* loom_serve_http_server_diagnostics(
 // publication wakes the installed application observer so live diagnostic
 // readers progress independently of request/model activity.
 void loom_serve_http_server_record_error(loom_serve_http_server_t* server,
-                                         iree_status_t status);
+                                         const iree_status_t status);
 
 // Single application wakeup target. The callback only publishes a task wake;
 // it never calls back into the transport or waits. Registration immediately

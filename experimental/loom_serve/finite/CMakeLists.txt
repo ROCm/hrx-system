@@ -38,14 +38,14 @@ loom_cc_library(
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::http::service
     iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::host
-    iree::experimental::loom_serve::runtime::host::timer
-    iree::experimental::loom_serve::runtime::host::wake
     iree::experimental::loom_serve::runtime::residency
-    iree::experimental::loom_serve::telemetry::stream
     iree::hal
     iree::task
     iree::vm
+    loom::serve::runtime::host
+    loom::serve::runtime::host::timer
+    loom::serve::runtime::host::wake
+    loom::serve::telemetry::stream
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -66,7 +66,6 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::dispatch
     iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::runtime::input
     iree::experimental::loom_serve::runtime::jit
     iree::experimental::loom_serve::runtime::json
@@ -84,6 +83,7 @@ loom_cc_library(
     iree::tooling::device_util
     iree::vm
     loom::binding::c::loomc
+    loom::serve::runtime::host
     loom::util::stream
   PUBLIC
 )

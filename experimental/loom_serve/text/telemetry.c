@@ -256,7 +256,7 @@ void loom_serve_text_telemetry_diagnose(loom_serve_text_telemetry_t* telemetry,
 }
 
 void loom_serve_text_telemetry_fail(loom_serve_text_telemetry_t* telemetry,
-                                    iree_status_t status) {
+                                    const iree_status_t status) {
   telemetry->failure_code = iree_status_code(status);
   loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
                                           .event = &LOOM_SERVE_TELEMETRY_ERROR};
@@ -268,7 +268,7 @@ void loom_serve_text_telemetry_end(loom_serve_text_telemetry_t* telemetry,
                                    loom_serve_text_receipt_t receipt,
                                    loom_serve_telemetry_outcome_t outcome,
                                    uint64_t input_tokens,
-                                   iree_status_t borrowed_status) {
+                                   const iree_status_t borrowed_status) {
   loom_serve_telemetry_count_outcome(&telemetry->counters, outcome);
   loom_serve_telemetry_record_t record = {
       .time_ns = iree_time_now(),

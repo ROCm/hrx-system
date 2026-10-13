@@ -4,11 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_TELEMETRY_STREAM_H_
-#define EXPERIMENTAL_LOOM_SERVE_TELEMETRY_STREAM_H_
+#ifndef LOOM_SERVE_TELEMETRY_STREAM_H_
+#define LOOM_SERVE_TELEMETRY_STREAM_H_
 
-#include "experimental/loom_serve/telemetry/record.h"
 #include "iree/base/api.h"
+#include "loom/serve/telemetry/record.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -74,4 +74,4 @@ loom_serve_telemetry_read_t loom_serve_telemetry_stream_read(
 #ifdef __cplusplus
 }  // extern "C"
 #endif
-#endif  // EXPERIMENTAL_LOOM_SERVE_TELEMETRY_STREAM_H_
+#endif  // LOOM_SERVE_TELEMETRY_STREAM_H_

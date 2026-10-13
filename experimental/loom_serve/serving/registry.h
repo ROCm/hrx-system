@@ -10,9 +10,9 @@
 #include "experimental/loom_serve/http/service.h"
 #include "experimental/loom_serve/runtime/activation.h"
 #include "experimental/loom_serve/runtime/compilation.h"
-#include "experimental/loom_serve/runtime/host/wake.h"
 #include "experimental/loom_serve/runtime/residency.h"
 #include "experimental/loom_serve/serving/configuration.h"
+#include "loom/serve/runtime/host/wake.h"
 
 #ifdef __cplusplus
 extern "C" {

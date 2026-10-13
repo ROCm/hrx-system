@@ -27,7 +27,6 @@
 #include "experimental/loom_serve/models/fixtures/text/stalled_client.h"
 #include "experimental/loom_serve/serving/model_registration.h"
 #include "experimental/loom_serve/serving/router.h"
-#include "experimental/loom_serve/telemetry/stream.h"
 #include "experimental/loom_serve/testing/model.h"
 #include "experimental/loom_serve/text/input.h"
 #include "experimental/loom_serve/text/service.h"
@@ -36,6 +35,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/serve/telemetry/stream.h"
 
 namespace loom_serve::testing::text {
 
