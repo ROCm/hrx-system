@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/finite/service.h"
+#include "loom/serve/service/finite/service.h"
 
 #include <string.h>
 
@@ -253,7 +253,7 @@ static iree_status_t finite_decline(loom_serve_finite_service_t* service,
 
 static void finite_job_destroy(loom_serve_finite_service_t* service,
                                finite_job_t* job,
-                               iree_status_t terminal_status) {
+                               const iree_status_t terminal_status) {
   if (job->connection) {
     loom_serve_http_connection_abort(job->connection);
   }
@@ -273,7 +273,7 @@ static void finite_job_destroy(loom_serve_finite_service_t* service,
 }
 
 static void finite_finish(loom_serve_finite_service_t* service,
-                          iree_status_t terminal_status) {
+                          const iree_status_t terminal_status) {
   loom_serve_residency_cancel_admission(
       loom_serve_finite_model_residency(service->model));
   for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {

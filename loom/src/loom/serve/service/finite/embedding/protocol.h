@@ -4,10 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_EMBEDDING_PROTOCOL_H_
-#define EXPERIMENTAL_LOOM_SERVE_EMBEDDING_PROTOCOL_H_
+#ifndef LOOM_SERVE_SERVICE_FINITE_EMBEDDING_PROTOCOL_H_
+#define LOOM_SERVE_SERVICE_FINITE_EMBEDDING_PROTOCOL_H_
 
-#include "experimental/loom_serve/finite/protocol.h"
+#include "loom/serve/service/finite/protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,4 +57,4 @@ iree_status_t loom_serve_embedding_response(
 #ifdef __cplusplus
 }  // extern "C"
 #endif
-#endif  // EXPERIMENTAL_LOOM_SERVE_EMBEDDING_PROTOCOL_H_
+#endif  // LOOM_SERVE_SERVICE_FINITE_EMBEDDING_PROTOCOL_H_

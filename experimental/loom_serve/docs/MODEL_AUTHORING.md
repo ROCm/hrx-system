@@ -473,7 +473,7 @@ need their own real ownership contracts rather than disguised payload meanings.
 ### Other tensor-in/tensor-out adapters
 
 Embeddings and structured decisions already have a
-[source-defined finite-vector runner](../finite/README.md). Its source chooses
+[source-defined finite-vector runner](../../../loom/src/loom/serve/service/finite/README.md). Its source chooses
 additive work cost and compatibility classes, packs ragged inputs, selects
 commands and describes original-order result rows independently of physical
 feedback layout. The shared native service owns admission, cancellation and

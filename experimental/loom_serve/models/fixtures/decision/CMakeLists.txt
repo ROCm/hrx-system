@@ -48,10 +48,6 @@ loom_cc_test(
     iree::base::internal::json
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::decision::protocol
-    iree::experimental::loom_serve::embedding::protocol
-    iree::experimental::loom_serve::finite::model
-    iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
@@ -59,6 +55,10 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::service::finite::decision::protocol
+    loom::serve::service::finite::embedding::protocol
+    loom::serve::service::finite::model
+    loom::serve::service::finite::service
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
@@ -92,10 +92,6 @@ loom_cc_test(
     iree::base::internal::json
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::decision::protocol
-    iree::experimental::loom_serve::embedding::protocol
-    iree::experimental::loom_serve::finite::model
-    iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
@@ -103,6 +99,10 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::service::finite::decision::protocol
+    loom::serve::service::finite::embedding::protocol
+    loom::serve::service::finite::model
+    loom::serve::service::finite::service
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS
@@ -136,10 +136,6 @@ loom_cc_test(
     iree::base::internal::json
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::decision::protocol
-    iree::experimental::loom_serve::embedding::protocol
-    iree::experimental::loom_serve::finite::model
-    iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::serving::registry
     iree::experimental::loom_serve::serving::router
     iree::experimental::loom_serve::testing::model
@@ -147,6 +143,10 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::serve::runtime::device
     loom::serve::runtime::host
+    loom::serve::service::finite::decision::protocol
+    loom::serve::service::finite::embedding::protocol
+    loom::serve::service::finite::model
+    loom::serve::service::finite::service
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   ARGS

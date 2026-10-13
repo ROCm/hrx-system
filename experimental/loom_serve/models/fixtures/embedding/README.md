@@ -1,6 +1,6 @@
 # Deterministic source embedding model
 
-This package implements the [finite-vector ABI](../../../finite/model.h) using
+This package implements the [finite-vector ABI](../../../../../loom/src/loom/serve/service/finite/model.h) using
 real VM preparation and native device commands on x86 CPU, AMDGPU and Vulkan.
 It needs no downloaded model. Its purpose is to expose batching, row association
 and ownership errors through normal HTTP requests; its numbers have no neural

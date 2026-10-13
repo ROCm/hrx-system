@@ -58,8 +58,8 @@ transport, shared workers, device timelines, memory ownership and observation.
 | --- | --- | --- |
 | Autoregressive text | [Text entries](../text/README.md), [tiny retained model](../models/fixtures/text/README.md) | Ready prompt/decode/verification spans share epochs; pages and recurrent state survive requests |
 | Text to finite image | [Image entries](../image/model.h), [image fixture](../models/fixtures/image/README.md), then Krea | One prepared invocation per image residency; request storage retires after output |
-| Embedding or structured decision | [Finite entries](../finite/README.md), [embedding](../models/fixtures/embedding/README.md) or [decision](../models/fixtures/decision/README.md) fixture | Source declares additive batch cost, compatibility and original result indices; compatible requests share a cohort |
-| Resident native computation | [Finite direct-stage contract](../finite/README.md#compact-results-and-physical-storage), [resident variants](../models/fixtures/embedding/README.md#verification) | `prepare.dispatch` supplies a native entry submitted through `queue_dispatch`, with the same timeline/feedback retirement as command stages |
+| Embedding or structured decision | [Finite entries](../../../loom/src/loom/serve/service/finite/README.md), [embedding](../models/fixtures/embedding/README.md) or [decision](../models/fixtures/decision/README.md) fixture | Source declares additive batch cost, compatibility and original result indices; compatible requests share a cohort |
+| Resident native computation | [Finite direct-stage contract](../../../loom/src/loom/serve/service/finite/README.md#compact-results-and-physical-storage), [resident variants](../models/fixtures/embedding/README.md#verification) | `prepare.dispatch` supplies a native entry submitted through `queue_dispatch`, with the same timeline/feedback retirement as command stages |
 
 The resident XDNA fixture reaches real HTTP output without a command buffer or
 host output initialization. It has no checkpoint parameters. Weighted command
@@ -104,7 +104,7 @@ source-rendered prompt, token IDs and completed transcript before checkpoint
 loading. This makes tokenizer/template differences visible without conflating
 them with a numerical kernel failure.
 
-For embedding or decision work, the [finite-vector contract](../finite/README.md)
+For embedding or decision work, the [finite-vector contract](../../../loom/src/loom/serve/service/finite/README.md)
 is the existing source-owned batching path, not a text decode loop. Its
 [embedding fixture](../models/fixtures/embedding/README.md) and
 [decision fixture](../models/fixtures/decision/README.md) demonstrate request

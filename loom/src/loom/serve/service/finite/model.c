@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/finite/model.h"
+#include "loom/serve/service/finite/model.h"
 
 #include <stdio.h>
 #include <string.h>

@@ -7,7 +7,7 @@
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_config_compatible_with")
 
 package(
-    default_visibility = ["//visibility:public"],
+    default_visibility = ["//loom/src/loom/serve:implementation"],
     features = ["layering_check"],
     licenses = ["notice"],
 )

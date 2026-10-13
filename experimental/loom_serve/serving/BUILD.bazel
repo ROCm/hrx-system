@@ -196,10 +196,6 @@ loom_cc_library(
     deps = [
         ":configuration",
         ":registry",
-        "//experimental/loom_serve/decision:protocol",
-        "//experimental/loom_serve/embedding:protocol",
-        "//experimental/loom_serve/finite:model",
-        "//experimental/loom_serve/finite:service",
         "//experimental/loom_serve/image:model",
         "//experimental/loom_serve/image:service",
         "//experimental/loom_serve/text:model",
@@ -213,6 +209,10 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/program:compilation",
         "//loom/src/loom/serve/runtime/storage:memory",
         "//loom/src/loom/serve/service",
+        "//loom/src/loom/serve/service/finite:model",
+        "//loom/src/loom/serve/service/finite:service",
+        "//loom/src/loom/serve/service/finite/decision:protocol",
+        "//loom/src/loom/serve/service/finite/embedding:protocol",
         "//runtime/src/iree/base",
     ],
 )

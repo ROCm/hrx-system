@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/embedding/protocol.h"
+#include "loom/serve/service/finite/embedding/protocol.h"
 
 #include <inttypes.h>
 #include <math.h>

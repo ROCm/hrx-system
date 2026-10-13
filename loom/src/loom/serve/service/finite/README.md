@@ -1,20 +1,20 @@
 # Source-defined finite vector models
 
-This experimental runner hosts computations whose final result is one or more
+This service hosts computations whose final result is one or more
 small F32 vectors: an embedding is a final vector, while a decision model can
 produce question probabilities. The native runner owns source JIT, shared
 parameter residency, stage submission and result lifetime. The source owns
 tokenization/task framing, model shapes, pooling, normalization and learned
 heads. It does not require a decode loop, KV reservation or VM process per
-request. The HTTP consumers are [embeddings](../embedding/protocol.h) and
-[SystemOne decisions](../decision/README.md).
+request. The HTTP consumers are [embeddings](embedding/protocol.h) and
+[SystemOne decisions](decision/README.md).
 
 The [source ABI](model.h) is implemented by the
-[deterministic embedding package](../models/fixtures/embedding/README.md).
+[deterministic embedding package](../../../../../../experimental/loom_serve/models/fixtures/embedding/README.md).
 It uses the same task executor, parameter cache and queue workspace as text and
 image deployments. Model documents name source programs and assets at registration;
 replacing one does not require relinking the server. The
-[weight-free multimodal catalog](../models/fixtures/README.md) exercises both
+[weight-free multimodal catalog](../../../../../../experimental/loom_serve/models/fixtures/README.md) exercises both
 alongside an image model on the same listener.
 
 ## Cold and warm source programs
@@ -50,8 +50,8 @@ run(stage_index, feedback_bytes, input_buffer, output_buffer)
 ```
 
 The native protocol provides ordered, indexed input records. Its layout is
-declared in [embedding/protocol.h](../embedding/protocol.h) or
-[decision/protocol.h](../decision/protocol.h). Source preparation
+declared in [embedding/protocol.h](embedding/protocol.h) or
+[decision/protocol.h](decision/protocol.h). Source preparation
 validates model-specific limits through `input.require`; an invalid input is a
 request rejection, not a failed device. The state is immutable across request
 preparation. Returned buffers own their storage or retain any aliased input.
@@ -129,11 +129,11 @@ not model-quality or throughput measurements. The decision source fixture adds
 variable question/option counts, exact typed answers and a mixed-model HTTP gate
 through the same service.
 
-The embedding fixture's [direct variant](../models/fixtures/embedding/variants/direct.loom)
+The embedding fixture's [direct variant](../../../../../../experimental/loom_serve/models/fixtures/embedding/variants/direct.loom)
 fuses the same ragged computation into one native dispatch on CPU, AMDGPU and
 Vulkan. Its HTTP checks cover compact row ordering, repeated requests,
 cancellation and retirement with one/four workers. Its
-[XDNA variant](../models/fixtures/embedding/variants/xdna.loom) executes the same
+[XDNA variant](../../../../../../experimental/loom_serve/models/fixtures/embedding/variants/xdna.loom) executes the same
 HTTP contract with a resident array program and DMA/channel packet transport.
 These prove direct-stage ownership, including untouched first output, not
 learned embedding quality or checkpoint-backed resident stages.

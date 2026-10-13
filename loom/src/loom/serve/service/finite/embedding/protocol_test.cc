@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/embedding/protocol.h"
+#include "loom/serve/service/finite/embedding/protocol.h"
 
 #include <limits>
 #include <string>
@@ -112,8 +112,10 @@ TEST(EmbeddingProtocolTest, EncodesExactFloatAndLittleEndianBase64) {
   iree_unaligned_store_le_f32(bytes + 4, -2.5f);
   const iree_const_byte_span_t row =
       iree_make_const_byte_span(bytes, sizeof(bytes));
-  loom_serve_embedding_request_t request = {.base = {.count = 1},
-                                            .dimensions = 2};
+  loom_serve_embedding_request_t request = {
+      .base = {.count = 1},
+      .dimensions = 2,
+  };
   iree_string_builder_t output;
   iree_string_builder_initialize(iree_allocator_system(), &output);
   IREE_ASSERT_OK(

@@ -38,6 +38,10 @@ The shared foundation consists of:
   including bounded task turns, asynchronous retirement, client capabilities
   and copied inspection state. It consumes transport claims without owning
   socket listeners or process lifetime.
+- [`service/finite`](service/finite/model.h): source-defined request cohorts
+  returning compact vectors. Embedding and decision protocols share this
+  preparation, batching, residency and retirement machinery; their separate
+  packages own wire input and output, not learned math.
 - [`server/http`](server/http/logs.h): endpoint projections for telemetry and
   raw tokenization. Log readers keep independent cursors; tokenizer requests
   use independent CPU states without advancing a model's execution timeline.

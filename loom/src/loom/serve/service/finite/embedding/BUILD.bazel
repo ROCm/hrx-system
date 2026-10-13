@@ -7,7 +7,7 @@
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
 
 package(
-    default_visibility = ["//visibility:public"],
+    default_visibility = ["//loom/src/loom/serve:implementation"],
     features = ["layering_check"],
     licenses = ["notice"],
 )
@@ -17,7 +17,7 @@ loom_cc_library(
     srcs = ["protocol.c"],
     hdrs = ["protocol.h"],
     deps = [
-        "//experimental/loom_serve/finite:protocol",
+        "//loom/src/loom/serve/service/finite:protocol",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/finite/service.h"
+#include "loom/serve/service/finite/service.h"
 
 #include <sys/socket.h>
 #include <unistd.h>
@@ -21,7 +21,6 @@
 #include <utility>
 #include <vector>
 
-#include "experimental/loom_serve/embedding/protocol.h"
 #include "experimental/loom_serve/models/fixtures/stalled_stderr.h"
 #include "experimental/loom_serve/serving/model_registration.h"
 #include "experimental/loom_serve/serving/router.h"
@@ -31,6 +30,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/serve/service/finite/embedding/protocol.h"
 #include "loom/serve/transport/http/listener.h"
 
 IREE_FLAG(string, model_source, "",

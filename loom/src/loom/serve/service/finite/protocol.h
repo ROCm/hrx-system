@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_FINITE_PROTOCOL_H_
-#define EXPERIMENTAL_LOOM_SERVE_FINITE_PROTOCOL_H_
+#ifndef LOOM_SERVE_SERVICE_FINITE_PROTOCOL_H_
+#define LOOM_SERVE_SERVICE_FINITE_PROTOCOL_H_
 
 #include "iree/base/api.h"
 #include "iree/vm/buffer.h"
@@ -49,4 +49,4 @@ typedef struct loom_serve_finite_protocol_t {
                             iree_string_builder_t* output);
 } loom_serve_finite_protocol_t;
 
-#endif  // EXPERIMENTAL_LOOM_SERVE_FINITE_PROTOCOL_H_
+#endif  // LOOM_SERVE_SERVICE_FINITE_PROTOCOL_H_

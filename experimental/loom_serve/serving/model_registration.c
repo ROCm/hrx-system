@@ -6,16 +6,16 @@
 
 #include "experimental/loom_serve/serving/model_registration.h"
 
-#include "experimental/loom_serve/decision/protocol.h"
-#include "experimental/loom_serve/embedding/protocol.h"
-#include "experimental/loom_serve/finite/model.h"
-#include "experimental/loom_serve/finite/service.h"
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/service.h"
 #include "experimental/loom_serve/text/schedule.h"
 #include "experimental/loom_serve/text/service.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/runtime/storage/memory.h"
+#include "loom/serve/service/finite/decision/protocol.h"
+#include "loom/serve/service/finite/embedding/protocol.h"
+#include "loom/serve/service/finite/model.h"
+#include "loom/serve/service/finite/service.h"
 
 // The adapter owns the native parameter group and its temporary readiness
 // operation. Neither the registry nor its management connection borrows either.

@@ -109,8 +109,8 @@ admission and drains accepted work before model and device destruction.
 | Model behavior | Source starting point | Native contract |
 | --- | --- | --- |
 | Text-conditioned finite image | [Image package](image/README.md), then [Krea](../krea/README.md) | [Image model](../../image/model.h) |
-| Ragged inputs to final embedding vectors | [Embedding package](embedding/README.md) | [Finite model](../../finite/README.md), [embedding records](../../embedding/protocol.h) |
-| Structured questions to choice/score/noul probabilities | [Decision package](decision/README.md) | [Finite model](../../finite/README.md), [SystemOne records](../../decision/protocol.h) |
+| Ragged inputs to final embedding vectors | [Embedding package](embedding/README.md) | [Finite model](../../../../loom/src/loom/serve/service/finite/README.md), [embedding records](../../../../loom/src/loom/serve/service/finite/embedding/protocol.h) |
+| Structured questions to choice/score/noul probabilities | [Decision package](decision/README.md) | [Finite model](../../../../loom/src/loom/serve/service/finite/README.md), [SystemOne records](../../../../loom/src/loom/serve/service/finite/decision/protocol.h) |
 | Retained autoregressive sessions | [Tiny text package](text/README.md), then [Qwen](../qwen/README.md) | [Text model and source entries](../../text/README.md) |
 
 Copying a source package establishes its ABI skeleton, not its mathematics.
@@ -148,8 +148,8 @@ CPU protocol and catalog checks run without model files or a GPU:
 build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/serving:configuration_test \
   //experimental/loom_serve/serving:router_test \
-  //experimental/loom_serve/embedding:protocol_test \
-  //experimental/loom_serve/decision:protocol_test
+  //loom/src/loom/serve/service/finite/embedding:protocol_test \
+  //loom/src/loom/serve/service/finite/decision:protocol_test
 ```
 
 The source ABI checks execute actual GPU commands and HTTP results with one and

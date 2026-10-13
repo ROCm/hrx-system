@@ -87,7 +87,7 @@ Buffer-only finite stages submit through `queue_dispatch` without a command
 buffer. The embedding fixture's [resident XDNA variant](models/fixtures/embedding/variants/xdna.loom)
 uses this path for ragged HTTP requests and retirement; it has no learned
 parameters. Checkpoint-backed command stages require native command-buffer
-execution and file import/queue-read support. The [finite stage contract](finite/README.md)
+execution and file import/queue-read support. The [finite stage contract](../../loom/src/loom/serve/service/finite/README.md)
 distinguishes these execution paths and their parameter requirements.
 Full serving coverage runs with
 `build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve/...`.

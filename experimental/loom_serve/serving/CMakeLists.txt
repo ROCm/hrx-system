@@ -179,10 +179,6 @@ loom_cc_library(
     ::configuration
     ::registry
     iree::base
-    iree::experimental::loom_serve::decision::protocol
-    iree::experimental::loom_serve::embedding::protocol
-    iree::experimental::loom_serve::finite::model
-    iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::image::model
     iree::experimental::loom_serve::image::service
     iree::experimental::loom_serve::text::model
@@ -196,6 +192,10 @@ loom_cc_library(
     loom::serve::runtime::program::compilation
     loom::serve::runtime::storage::memory
     loom::serve::service
+    loom::serve::service::finite::decision::protocol
+    loom::serve::service::finite::embedding::protocol
+    loom::serve::service::finite::model
+    loom::serve::service::finite::service
   PUBLIC
 )
 

@@ -4,11 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_FINITE_SERVICE_H_
-#define EXPERIMENTAL_LOOM_SERVE_FINITE_SERVICE_H_
+#ifndef LOOM_SERVE_SERVICE_FINITE_SERVICE_H_
+#define LOOM_SERVE_SERVICE_FINITE_SERVICE_H_
 
-#include "experimental/loom_serve/finite/model.h"
-#include "experimental/loom_serve/finite/protocol.h"
+#include "loom/serve/service/finite/model.h"
+#include "loom/serve/service/finite/protocol.h"
 #include "loom/serve/service/service.h"
 
 #ifdef __cplusplus
@@ -46,4 +46,4 @@ void loom_serve_finite_service_destroy(loom_serve_finite_service_t* service);
 #ifdef __cplusplus
 }  // extern "C"
 #endif
-#endif  // EXPERIMENTAL_LOOM_SERVE_FINITE_SERVICE_H_
+#endif  // LOOM_SERVE_SERVICE_FINITE_SERVICE_H_

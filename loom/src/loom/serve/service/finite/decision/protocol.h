@@ -4,10 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_LOOM_SERVE_DECISION_PROTOCOL_H_
-#define EXPERIMENTAL_LOOM_SERVE_DECISION_PROTOCOL_H_
+#ifndef LOOM_SERVE_SERVICE_FINITE_DECISION_PROTOCOL_H_
+#define LOOM_SERVE_SERVICE_FINITE_DECISION_PROTOCOL_H_
 
-#include "experimental/loom_serve/finite/protocol.h"
+#include "loom/serve/service/finite/protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,12 +26,13 @@ extern "C" {
 //           option_count];
 // option [id_offset, id_length, criterion_offset, criterion_length, type].
 // All ranges are absolute; strings exclude quotes and retain JSON escapes.
-// Types match runtime/json.h. Question kinds are choice=0, score=1, noul=2.
-// Implicit score/noul option IDs have zero length. Absent noul criteria have
-// zero length and null type. Source owns canonical formatting and truncation.
+// Types match runtime/program/json.h. Question kinds are choice=0, score=1,
+// noul=2. Implicit score/noul option IDs have zero length. Absent noul criteria
+// have zero length and null type. Source owns canonical formatting and
+// truncation.
 const loom_serve_finite_protocol_t* loom_serve_decision_protocol(void);
 
 #ifdef __cplusplus
 }  // extern "C"
 #endif
-#endif  // EXPERIMENTAL_LOOM_SERVE_DECISION_PROTOCOL_H_
+#endif  // LOOM_SERVE_SERVICE_FINITE_DECISION_PROTOCOL_H_

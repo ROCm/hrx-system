@@ -67,9 +67,9 @@ capability for model-specific canonical formatting. Public option order is
 explicit: a model sorting its internal schema must map probabilities back to
 those ordinals. Score rows are ascending levels; noul rows are `[false,true]`.
 
-The [finite runner](../finite/README.md) shares JIT, parameter residency,
+The [finite runner](../README.md) shares JIT, parameter residency,
 cohort scheduling, cancellation and compact feedback with embeddings. Only
 parsing and response encoding differ. No decision-model name appears in this
-native adapter. The [deterministic package](../models/fixtures/decision/README.md)
+native adapter. The [deterministic package](../../../../../../../experimental/loom_serve/models/fixtures/decision/README.md)
 demonstrates actual VM/GPU/HTTP execution without downloading weights; it is not
 CLEF or another learned decision model.

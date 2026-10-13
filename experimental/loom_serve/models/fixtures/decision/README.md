@@ -1,7 +1,7 @@
 # Deterministic source decision model
 
-This package exercises the [SystemOne adapter](../../../decision/README.md)
-and [finite model ABI](../../../finite/README.md). It compiles ordinary Loom
+This package exercises the [SystemOne adapter](../../../../../loom/src/loom/serve/service/finite/decision/README.md)
+and [finite model ABI](../../../../../loom/src/loom/serve/service/finite/README.md). It compiles ordinary Loom
 VM preparation/control and two native kernels on x86 CPU, AMDGPU and Vulkan.
 No downloaded model, native canned answer or model-specific C is involved.
 
@@ -38,7 +38,7 @@ policy:
 
 ```sh
 iree-bazel-test --config=asan \
-  //experimental/loom_serve/decision:protocol_test \
+  //loom/src/loom/serve/service/finite/decision:protocol_test \
   //experimental/loom_serve/models/fixtures/decision:service_cpu_test \
   //experimental/loom_serve/models/fixtures/decision:service_test \
   //experimental/loom_serve/models/fixtures/decision:service_vulkan_test

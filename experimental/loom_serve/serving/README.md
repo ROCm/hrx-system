@@ -42,7 +42,7 @@ Each model document selects source providers and deployment options. Model math,
 checkpoint interpretation, storage geometry and chat policy remain in the
 Loom sources described by the [text model contract](../text/README.md),
 [image model contract](../image/model.h), and
-[finite-vector contract](../finite/README.md). None of these modalities requires
+[finite-vector contract](../../../loom/src/loom/serve/service/finite/README.md). None of these modalities requires
 model-specific C in the executable.
 
 ## Launch
@@ -484,7 +484,7 @@ Decisions use `POST /v1/systemone` with `model`, `state` and keyed typed
 `questions`. Choice, score and noul answers come from source-produced compact
 probability vectors. A `kind:"decision"` deployment uses the same `source`,
 `assets`, `options` and `pending_requests` catalog fields as embeddings, and the
-same finite cohort scheduler. See the [decision protocol](../decision/README.md)
+same finite cohort scheduler. See the [decision protocol](../../../loom/src/loom/serve/service/finite/decision/README.md)
 and [source fixture](../models/fixtures/decision/README.md) for full request,
 response, capacity and model-authoring semantics. An endpoint implementation
 does not imply support for a learned decision checkpoint.
