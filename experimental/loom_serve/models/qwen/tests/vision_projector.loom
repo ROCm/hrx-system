@@ -1,0 +1,127 @@
+kernel.decl @qwen38_vision_patch_embedding() launch(%source: buffer, %weight0: buffer, %weight1: buffer, %bias: buffer, %output: buffer)
+
+kernel.decl @qwen38_vision_position_layernorm_statistics() launch(%position_table: buffer, %residual: buffer, %statistics: buffer)
+
+kernel.decl @qwen38_vision_layernorm_apply() launch(%residual: buffer, %statistics: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+kernel.decl @qwen38_vision_key_value_cohort(%cohort$13: index) launch(%cohort$14: index, %residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %qkv_weight: buffer, %qkv_bias: buffer, %key: buffer, %value: buffer) where [range(%cohort$14, 0, 3)]
+
+kernel.decl @qwen38_vision_attention_cohort(%cohort$23: index) launch(%cohort$24: index, %residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %qkv_weight: buffer, %qkv_bias: buffer, %key: buffer, %value: buffer, %output_weight: buffer, %output_bias: buffer, %output: buffer) where [range(%cohort$24, 0, 3)]
+
+kernel.decl @qwen38_vision_attention_output_256() launch(%context: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+
+kernel.decl @qwen38_vision_statistics() launch(%residual: buffer, %statistics: buffer)
+
+kernel.decl @qwen38_vision_ffn_up_256() launch(%residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %up_weight: buffer, %up_bias: buffer, %activation: buffer)
+
+kernel.decl @qwen38_vision_ffn_down_256() launch(%activation: buffer, %down_weight: buffer, %down_bias: buffer, %residual: buffer)
+
+kernel.decl @qwen38_vision_merger_up_64() launch(%input: buffer, %weight: buffer, %bias: buffer, %activation: buffer)
+
+kernel.decl @qwen38_vision_merger_down_64() launch(%activation: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+// Nonzero input and weights exercise both temporal patch contractions with an
+// exact analytic result: 2 * 768 * (-1) * (1 / 1024) + 1 / 4 = -1.25.
+check.case public @vision_patch_embedding_256 {
+  %source = check.generate.fill value(0) : tensor<196608xi8>
+  %weight0 = check.generate.fill value(0.0009765625) : tensor<1152x768xf16>
+  %weight1 = check.generate.fill value(0.0009765625) : tensor<1152x768xf16>
+  %bias = check.generate.fill value(0.25) : tensor<1152xf32>
+  %output = check.generate.fill value(99.0) : tensor<256x1152xf32>
+  %expected = check.generate.fill value(-1.25) : tensor<256x1152xf32>
+  kernel.launch @qwen38_vision_patch_embedding(%source, %weight0, %weight1, %bias, %output) : (tensor<196608xi8>, tensor<1152x768xf16>, tensor<1152x768xf16>, tensor<1152xf32>, tensor<256x1152xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(different) : tensor<256x1152xf32>
+  check.return
+}
+
+check.case public @vision_normalization_256 {
+  %position = check.generate.fill value(0.0) : tensor<2304x1152xf32>
+  %residual = check.generate.fill value(2.0) : tensor<256x1152xf32>
+  %statistics = check.generate.fill value(99.0) : tensor<256x2xf32>
+  %weight = check.generate.fill value(1.0) : tensor<1152xf32>
+  %bias = check.generate.fill value(0.25) : tensor<1152xf32>
+  %output = check.generate.fill value(99.0) : tensor<256x1152xf32>
+  %expected_residual = check.generate.fill value(2.0) : tensor<256x1152xf32>
+  %expected_output = check.generate.fill value(0.25) : tensor<256x1152xf32>
+  kernel.launch @qwen38_vision_position_layernorm_statistics(%position, %residual, %statistics) : (tensor<2304x1152xf32>, tensor<256x1152xf32>, tensor<256x2xf32>)
+  kernel.launch @qwen38_vision_layernorm_apply(%residual, %statistics, %weight, %bias, %output) : (tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<256x1152xf32>)
+  check.expect.bitwise actual(%residual) expected(%expected_residual) : tensor<256x1152xf32>
+  check.expect.close actual(%output) expected(%expected_output) atol(0.0) rtol(0.0) nan(different) : tensor<256x1152xf32>
+  check.return
+}
+
+// Zero projections give an exact attention oracle while still traversing the
+// complete QKV, rotary, softmax, context, and output-projection memory paths.
+check.case public @vision_attention_256 {
+  %cohort0 = check.literal value(0) : index
+  %cohort1 = check.literal value(1) : index
+  %cohort2 = check.literal value(2) : index
+  %cohort3 = check.literal value(3) : index
+  %residual = check.generate.fill value(1.0) : tensor<256x1152xf32>
+  %statistics = check.generate.fill value(0.0) : tensor<256x2xf32>
+  %layernorm_weight = check.generate.fill value(1.0) : tensor<1152xf32>
+  %layernorm_bias = check.generate.fill value(0.0) : tensor<1152xf32>
+  %qkv_weight = check.generate.fill value(0.0) : tensor<3456x1152xf16>
+  %qkv_bias = check.generate.fill value(0.0) : tensor<3456xf32>
+  %key = check.generate.fill value(99.0) : tensor<256x288xf16>
+  %value = check.generate.fill value(99.0) : tensor<288x256xf16>
+  %output_weight = check.generate.fill value(0.0) : tensor<1152x1152xf16>
+  %output_bias = check.generate.fill value(0.25) : tensor<1152xf32>
+  %context = check.generate.fill value(99.0) : tensor<256x1152xf16>
+  %output = check.generate.fill value(99.0) : tensor<256x1152xf32>
+  %expected_key = check.generate.fill value(0.0) : tensor<256x288xf16>
+  %expected_value = check.generate.fill value(0.0) : tensor<288x256xf16>
+  %expected_context = check.generate.fill value(0.0) : tensor<256x1152xf16>
+  %expected_output = check.generate.fill value(1.25) : tensor<256x1152xf32>
+  kernel.launch @qwen38_vision_key_value_cohort[%cohort0](%cohort0, %residual, %statistics, %layernorm_weight, %layernorm_bias, %qkv_weight, %qkv_bias, %key, %value) : [index](index, tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<3456x1152xf16>, tensor<3456xf32>, tensor<256x288xf16>, tensor<288x256xf16>)
+  kernel.launch @qwen38_vision_attention_cohort[%cohort0](%cohort0, %residual, %statistics, %layernorm_weight, %layernorm_bias, %qkv_weight, %qkv_bias, %key, %value, %output_weight, %output_bias, %context) : [index](index, tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<3456x1152xf16>, tensor<3456xf32>, tensor<256x288xf16>, tensor<288x256xf16>, tensor<1152x1152xf16>, tensor<1152xf32>, tensor<256x1152xf16>)
+  kernel.launch @qwen38_vision_key_value_cohort[%cohort1](%cohort1, %residual, %statistics, %layernorm_weight, %layernorm_bias, %qkv_weight, %qkv_bias, %key, %value) : [index](index, tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<3456x1152xf16>, tensor<3456xf32>, tensor<256x288xf16>, tensor<288x256xf16>)
+  kernel.launch @qwen38_vision_attention_cohort[%cohort1](%cohort1, %residual, %statistics, %layernorm_weight, %layernorm_bias, %qkv_weight, %qkv_bias, %key, %value, %output_weight, %output_bias, %context) : [index](index, tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<3456x1152xf16>, tensor<3456xf32>, tensor<256x288xf16>, tensor<288x256xf16>, tensor<1152x1152xf16>, tensor<1152xf32>, tensor<256x1152xf16>)
+  kernel.launch @qwen38_vision_key_value_cohort[%cohort2](%cohort2, %residual, %statistics, %layernorm_weight, %layernorm_bias, %qkv_weight, %qkv_bias, %key, %value) : [index](index, tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<3456x1152xf16>, tensor<3456xf32>, tensor<256x288xf16>, tensor<288x256xf16>)
+  kernel.launch @qwen38_vision_attention_cohort[%cohort2](%cohort2, %residual, %statistics, %layernorm_weight, %layernorm_bias, %qkv_weight, %qkv_bias, %key, %value, %output_weight, %output_bias, %context) : [index](index, tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<3456x1152xf16>, tensor<3456xf32>, tensor<256x288xf16>, tensor<288x256xf16>, tensor<1152x1152xf16>, tensor<1152xf32>, tensor<256x1152xf16>)
+  kernel.launch @qwen38_vision_key_value_cohort[%cohort3](%cohort3, %residual, %statistics, %layernorm_weight, %layernorm_bias, %qkv_weight, %qkv_bias, %key, %value) : [index](index, tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<3456x1152xf16>, tensor<3456xf32>, tensor<256x288xf16>, tensor<288x256xf16>)
+  kernel.launch @qwen38_vision_attention_cohort[%cohort3](%cohort3, %residual, %statistics, %layernorm_weight, %layernorm_bias, %qkv_weight, %qkv_bias, %key, %value, %output_weight, %output_bias, %context) : [index](index, tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<3456x1152xf16>, tensor<3456xf32>, tensor<256x288xf16>, tensor<288x256xf16>, tensor<1152x1152xf16>, tensor<1152xf32>, tensor<256x1152xf16>)
+  kernel.launch @qwen38_vision_attention_output_256(%context, %output_weight, %output_bias, %residual, %output) : (tensor<256x1152xf16>, tensor<1152x1152xf16>, tensor<1152xf32>, tensor<256x1152xf32>, tensor<256x1152xf32>)
+  check.expect.close actual(%key) expected(%expected_key) atol(0.0) rtol(0.0) nan(different) : tensor<256x288xf16>
+  check.expect.close actual(%value) expected(%expected_value) atol(0.0) rtol(0.0) nan(different) : tensor<288x256xf16>
+  check.expect.close actual(%context) expected(%expected_context) atol(0.0) rtol(0.0) nan(different) : tensor<256x1152xf16>
+  check.expect.close actual(%output) expected(%expected_output) atol(0.0) rtol(0.0) nan(different) : tensor<256x1152xf32>
+  check.return
+}
+
+check.case public @vision_ffn_256 {
+  %residual = check.generate.fill value(1.0) : tensor<256x1152xf32>
+  %statistics = check.generate.fill value(99.0) : tensor<256x2xf32>
+  %layernorm_weight = check.generate.fill value(0.0) : tensor<1152xf32>
+  %layernorm_bias = check.generate.fill value(0.0) : tensor<1152xf32>
+  %up_weight = check.generate.fill value(1.0) : tensor<4304x1152xf16>
+  %up_bias = check.generate.fill value(0.0) : tensor<4304xf32>
+  %activation = check.generate.fill value(99.0) : tensor<256x4304xf16>
+  %down_weight = check.generate.fill value(1.0) : tensor<1152x4304xf16>
+  %down_bias = check.generate.fill value(0.25) : tensor<1152xf32>
+  %expected_activation = check.generate.fill value(0.0) : tensor<256x4304xf16>
+  %expected_residual = check.generate.fill value(1.25) : tensor<256x1152xf32>
+  kernel.launch @qwen38_vision_statistics(%residual, %statistics) : (tensor<256x1152xf32>, tensor<256x2xf32>)
+  kernel.launch @qwen38_vision_ffn_up_256(%residual, %statistics, %layernorm_weight, %layernorm_bias, %up_weight, %up_bias, %activation) : (tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<4304x1152xf16>, tensor<4304xf32>, tensor<256x4304xf16>)
+  kernel.launch @qwen38_vision_ffn_down_256(%activation, %down_weight, %down_bias, %residual) : (tensor<256x4304xf16>, tensor<1152x4304xf16>, tensor<1152xf32>, tensor<256x1152xf32>)
+  check.expect.close actual(%activation) expected(%expected_activation) atol(0.0) rtol(0.0) nan(different) : tensor<256x4304xf16>
+  check.expect.close actual(%residual) expected(%expected_residual) atol(0.0) rtol(0.0) nan(different) : tensor<256x1152xf32>
+  check.return
+}
+
+check.case public @vision_merger_64 {
+  %input = check.generate.fill value(0.0) : tensor<64x4608xf32>
+  %up_weight = check.generate.fill value(1.0) : tensor<4608x4608xf16>
+  %up_bias = check.generate.fill value(0.0) : tensor<4608xf32>
+  %activation = check.generate.fill value(99.0) : tensor<64x4608xf16>
+  %down_weight = check.generate.fill value(1.0) : tensor<5120x4608xf16>
+  %down_bias = check.generate.fill value(0.25) : tensor<5120xf32>
+  %output = check.generate.fill value(99.0) : tensor<64x5120xf32>
+  %expected_activation = check.generate.fill value(0.0) : tensor<64x4608xf16>
+  %expected_output = check.generate.fill value(0.25) : tensor<64x5120xf32>
+  kernel.launch @qwen38_vision_merger_up_64(%input, %up_weight, %up_bias, %activation) : (tensor<64x4608xf32>, tensor<4608x4608xf16>, tensor<4608xf32>, tensor<64x4608xf16>)
+  kernel.launch @qwen38_vision_merger_down_64(%activation, %down_weight, %down_bias, %output) : (tensor<64x4608xf16>, tensor<5120x4608xf16>, tensor<5120xf32>, tensor<64x5120xf32>)
+  check.expect.close actual(%activation) expected(%expected_activation) atol(0.0) rtol(0.0) nan(different) : tensor<64x4608xf16>
+  check.expect.close actual(%output) expected(%expected_output) atol(0.0) rtol(0.0) nan(different) : tensor<64x5120xf32>
+  check.return
+}
