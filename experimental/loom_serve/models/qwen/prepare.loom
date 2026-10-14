@@ -524,14 +524,17 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %state_bytes = index.constant 416 : offset
   %state = buffer.alloca<private> align(8) %state_bytes : buffer
   buffer.fill %zero32, %state[%origin], %state_bytes : i32
-  %state_view = buffer.view %state[%origin] : buffer -> view<5xi32>
+  %state_view = buffer.view %state[%origin] : buffer -> view<6xi32>
   %count32 = scalar.trunci %shape_count : i64 to i32
-  view.store %prefill_stage, %state_view[0] : i32, view<5xi32>
-  view.store %decode_stage, %state_view[1] : i32, view<5xi32>
-  view.store %count32, %state_view[2] : i32, view<5xi32>
-  view.store %proposal_stage, %state_view[3] : i32, view<5xi32>
+  view.store %prefill_stage, %state_view[0] : i32, view<6xi32>
+  view.store %decode_stage, %state_view[1] : i32, view<6xi32>
+  view.store %count32, %state_view[2] : i32, view<6xi32>
+  view.store %proposal_stage, %state_view[3] : i32, view<6xi32>
   %dflash32 = scalar.extui %dflash : i1 to i32
-  view.store %dflash32, %state_view[4] : i32, view<5xi32>
+  view.store %dflash32, %state_view[4] : i32, view<6xi32>
+  // Two isolated stages precede the packed target shape catalog.
+  %target_first = scalar.constant 2 : i32
+  view.store %target_first, %state_view[5] : i32, view<6xi32>
   %terminal = global.load @terminal : buffer
   %packed = scalar.cmpi ne, %shape_count, %zero64 : i64
   %allocations, %views, %target_origins, %draft_origins, %geometry = func.call @storage(%context, %pool, %rows, %pins, %packed, %enabled, %dflash) : (i64, i64, i64, i64, i1, i1, i1) -> (buffer, buffer, buffer, buffer, buffer)

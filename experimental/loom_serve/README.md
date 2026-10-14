@@ -7,6 +7,8 @@ are no per-model C implementations or compiler-internal dependencies here.
 
 - [Qwen3.8-27B](models/qwen/README.md): retained text, mixed prefill/decode,
   paged KV, MTP and DFlash2 source programs.
+- [Qwen3.8 Flash-Next](models/qwen_flash_next/README.md): resident MoE text,
+  recurrent GDN, paged sparse attention, and n-gram embeddings over packed epochs.
 - [Krea 2 Turbo](models/krea/README.md): text-to-image, BF16 or INT8 ConvRot DiT,
   and a separately loaded LoRA with request-time strength.
 - [Shared motifs](motifs/README.md): reusable arithmetic receiving SSA operands
@@ -44,15 +46,15 @@ error. Inference can queue while preparation completes.
 
 Deployment capacities belong in JSON, not command-line model flags. Process
 flags select devices, listeners, workers and memory policy. The
-[model-document reference](../../loom/docs/src/reference/serving-models.md),
-[HTTP reference](../../loom/docs/src/reference/serving-http.md), and
-[operator guide](../../loom/docs/src/workflows/operate-model-server.md) define
+[model-document reference](../../loom/docs/src/serving/model-documents.md),
+[HTTP reference](../../loom/docs/src/serving/http-profiles.md), and
+[operator guide](../../loom/docs/src/serving/workflows/operate-model-server.md) define
 those shared contracts.
 
 ## Copy a package
 
-Copy `models/qwen/` or `models/krea/` together with `motifs/`, preserving their
-relative directory layout. Each `model.json` names its preparation and control
+Copy the selected model and the shared sources listed in its guide, preserving
+their relative directory layout. Each `model.json` names its preparation and control
 programs and the numerical provider list; preparation also names parameter
 policies such as `weights.loom`. Checkpoints and tokenizers are separate assets,
 not included in this repository.
@@ -86,7 +88,7 @@ behavior. Run logs, machine details and comparisons are experiment artifacts,
 not model documentation.
 
 For a new model, start with the supported
-[model-authoring guide](../../loom/docs/src/integration/serving-models.md) and
+[model-authoring guide](../../loom/docs/src/serving/model-programs.md) and
 [small ABI fixtures](../../loom/src/loom/serve/fixture/README.md). These larger
 packages show specialized kernels and composition, not a requirement to copy
 their architecture or native server internals.
