@@ -1,0 +1,45 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Append one text token to FlowLM. Token -1 selects BOS-before-voice; text
+// token IDs are 0..4000. The caller bounds the absolute position below 256.
+kernel.decl @pocket.advance_1() launch(%position_storage: buffer)
+
+kernel.decl @pocket.token() launch(%token_storage: buffer, %bos_storage: buffer, %embedding_storage: buffer, %y_storage: buffer)
+
+template.decl @pocket.flow_layer(%layer: index, %cache_origin: offset, %backbone: buffer, %rotary: buffer, %state: buffer, %input: view<1024x1xf32>) -> (view<1024x1xf32>)
+
+command.program.def public @prefill() launch(%phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  %tensor_offset = index.constant 0 : offset
+  %tensor = buffer.view %request[%tensor_offset] : buffer -> view<1xi32>
+  %parameter = command.parameter %phase, "flow_lm.bos_before_voice" : view<1x1x1024xbf16>
+  %parameter_2 = command.parameter %phase, "flow_lm.conditioner.embed.weight" : view<4001x1024xbf16>
+  %storage_bytes = index.constant 4096 : offset
+  %storage = buffer.alloca<global> align(16) %storage_bytes : buffer
+  %tensor_2 = buffer.view %storage[%tensor_offset] : buffer -> view<1024x1xf32>
+  kernel.launch @pocket.token(%tensor, %parameter, %parameter_2, %tensor_2) : (view<1xi32>, view<1x1x1024xbf16>, view<4001x1024xbf16>, view<1024x1xf32>)
+  %flow_layer_0 = index.constant 0 : index
+  %flow_cache_0 = index.constant 144 : offset
+  %flow_result = template.apply<@pocket.flow_layer>(%flow_layer_0, %flow_cache_0, %backbone, %rotary, %state, %tensor_2) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
+  %flow_layer_1 = index.constant 1 : index
+  %flow_cache_1 = index.constant 2097296 : offset
+  %flow_result_2 = template.apply<@pocket.flow_layer>(%flow_layer_1, %flow_cache_1, %backbone, %rotary, %state, %flow_result) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
+  %flow_layer_2 = index.constant 2 : index
+  %flow_cache_2 = index.constant 4194448 : offset
+  %flow_result_3 = template.apply<@pocket.flow_layer>(%flow_layer_2, %flow_cache_2, %backbone, %rotary, %state, %flow_result_2) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
+  %flow_layer_3 = index.constant 3 : index
+  %flow_cache_3 = index.constant 6291600 : offset
+  %flow_result_4 = template.apply<@pocket.flow_layer>(%flow_layer_3, %flow_cache_3, %backbone, %rotary, %state, %flow_result_3) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
+  %flow_layer_4 = index.constant 4 : index
+  %flow_cache_4 = index.constant 8388752 : offset
+  %flow_result_5 = template.apply<@pocket.flow_layer>(%flow_layer_4, %flow_cache_4, %backbone, %rotary, %state, %flow_result_4) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
+  %flow_layer_5 = index.constant 5 : index
+  %flow_cache_5 = index.constant 10485904 : offset
+  %flow_result_6 = template.apply<@pocket.flow_layer>(%flow_layer_5, %flow_cache_5, %backbone, %rotary, %state, %flow_result_5) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
+  %tensor_3 = buffer.view %state[%tensor_offset] : buffer -> view<1xi32>
+  kernel.launch @pocket.advance_1(%tensor_3) : (view<1xi32>)
+  command.return
+}

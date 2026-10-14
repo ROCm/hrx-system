@@ -1,0 +1,143 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+amdgpu.target<gfx11-generic> @pocket {subgroup_size = 32}
+
+kernel.decl @pocket.project_f32(%output_rows: index, %time_steps: index) launch(%inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+kernel.decl @pocket.project_bias_f32(%output_rows: index, %time_steps: index) launch(%inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+kernel.decl @pocket.project_f64(%output_rows: index, %time_steps: index) launch(%inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+kernel.decl @pocket.project_bias_f64(%output_rows: index, %time_steps: index) launch(%inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+// The affine iota operands have a closed-form contraction, independent of
+// the native dot loop. Partial workgroups exercise output-row tail ownership.
+func.def @projection_expected(%biased: i1, %inputs: index, %outputs: index, %times: index, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %y = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%times]xf32>
+  %nf = scalar.constant 7.0 : f32
+  %linear_sum = scalar.constant 21.0 : f32
+  %square_sum = scalar.constant 91.0 : f32
+  %weight_step = scalar.constant 0.0625 : f32
+  %input_step = scalar.constant 0.625 : f32
+  %weight_origin = scalar.constant 0.5 : f32
+  %input_origin = scalar.constant -1.0 : f32
+  %time_step = scalar.constant 0.125 : f32
+  %row_step = scalar.constant 0.4375 : f32
+  %bias_origin = scalar.constant -0.5 : f32
+  %bias_step = scalar.constant 0.03125 : f32
+  scf.for %row = [%zero to %outputs step %one] {
+    %row32 = index.cast %row : index to i32
+    %rowf = scalar.uitofp %row32 : i32 to f32
+    %weight_delta = scalar.mulf %rowf, %row_step : f32
+    %a = scalar.addf %weight_origin, %weight_delta : f32
+    scf.for %time = [%zero to %times step %one] {
+      %time32 = index.cast %time : index to i32
+      %timef = scalar.uitofp %time32 : i32 to f32
+      %input_delta = scalar.mulf %timef, %time_step : f32
+      %c = scalar.addf %input_origin, %input_delta : f32
+      %ac = scalar.mulf %a, %c : f32
+      %constant = scalar.mulf %ac, %nf : f32
+      %ad = scalar.mulf %a, %input_step : f32
+      %bc = scalar.mulf %weight_step, %c : f32
+      %linear_factor = scalar.addf %ad, %bc : f32
+      %linear = scalar.mulf %linear_factor, %linear_sum : f32
+      %bd = scalar.mulf %weight_step, %input_step : f32
+      %quadratic = scalar.mulf %bd, %square_sum : f32
+      %partial = scalar.addf %constant, %linear : f32
+      %sum = scalar.addf %partial, %quadratic : f32
+      %result = scf.if %biased -> (f32) {
+        %bias_delta = scalar.mulf %rowf, %bias_step : f32
+        %bias = scalar.addf %bias_origin, %bias_delta : f32
+        %shifted = scalar.addf %sum, %bias : f32
+        scf.yield %shifted : f32
+      } else {
+        scf.yield %sum : f32
+      }
+      view.store %result, %y[%row, %time] : f32, view<[%outputs]x[%times]xf32>
+    }
+  }
+  func.return
+}
+
+func.def @projection_expected_plain(%inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %biased = scalar.constant false : i1
+  func.call @projection_expected(%biased, %inputs, %outputs, %times, %output) : (i1, index, index, index, buffer)
+  func.return
+}
+
+check.scenario public @pocket_project_f32 {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %inputs = check.literal value(7) : index
+    %outputs = check.literal value(33) : index
+    %times = check.literal value(5) : index
+    %x = check.generate.iota offset(-1.0) step(0.125) : tensor<7x5xf32>
+    %w = check.generate.iota offset(0.5) step(0.0625) : tensor<33x7xbf16>
+    %b = check.generate.iota offset(-0.5) step(0.03125) : tensor<33xbf16>
+    %y = check.generate.fill value(-123.0) : tensor<33x5xf32>
+    check.compare<@pocket.project_f32, @projection_expected_plain>[%outputs, %times](%inputs, %outputs, %times, %x, %w, %b, %y) : [index, index](index, index, index, tensor<7x5xf32>, tensor<33x7xbf16>, tensor<33xbf16>, tensor<33x5xf32>) -> () {
+      check.expect.bitwise actual(%y) expected(%y) : tensor<33x5xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @pocket_project_f64 {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %inputs = check.literal value(7) : index
+    %outputs = check.literal value(33) : index
+    %times = check.literal value(5) : index
+    %x = check.generate.iota offset(-1.0) step(0.125) : tensor<7x5xf32>
+    %w = check.generate.iota offset(0.5) step(0.0625) : tensor<33x7xbf16>
+    %b = check.generate.iota offset(-0.5) step(0.03125) : tensor<33xbf16>
+    %y = check.generate.fill value(-123.0) : tensor<33x5xf32>
+    check.compare<@pocket.project_f64, @projection_expected_plain>[%outputs, %times](%inputs, %outputs, %times, %x, %w, %b, %y) : [index, index](index, index, index, tensor<7x5xf32>, tensor<33x7xbf16>, tensor<33xbf16>, tensor<33x5xf32>) -> () {
+      check.expect.bitwise actual(%y) expected(%y) : tensor<33x5xf32>
+    }
+  }
+  check.return
+}
+
+func.def @projection_expected_bias(%inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %biased = scalar.constant true : i1
+  func.call @projection_expected(%biased, %inputs, %outputs, %times, %output) : (i1, index, index, index, buffer)
+  func.return
+}
+
+check.scenario public @pocket_project_bias_f32 {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %inputs = check.literal value(7) : index
+    %outputs = check.literal value(33) : index
+    %times = check.literal value(5) : index
+    %x = check.generate.iota offset(-1.0) step(0.125) : tensor<7x5xf32>
+    %w = check.generate.iota offset(0.5) step(0.0625) : tensor<33x7xbf16>
+    %b = check.generate.iota offset(-0.5) step(0.03125) : tensor<33xbf16>
+    %y = check.generate.fill value(-123.0) : tensor<33x5xf32>
+    check.compare<@pocket.project_bias_f32, @projection_expected_bias>[%outputs, %times](%inputs, %outputs, %times, %x, %w, %b, %y) : [index, index](index, index, index, tensor<7x5xf32>, tensor<33x7xbf16>, tensor<33xbf16>, tensor<33x5xf32>) -> () {
+      check.expect.bitwise actual(%y) expected(%y) : tensor<33x5xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @pocket_project_bias_f64 {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %inputs = check.literal value(7) : index
+    %outputs = check.literal value(33) : index
+    %times = check.literal value(5) : index
+    %x = check.generate.iota offset(-1.0) step(0.125) : tensor<7x5xf32>
+    %w = check.generate.iota offset(0.5) step(0.0625) : tensor<33x7xbf16>
+    %b = check.generate.iota offset(-0.5) step(0.03125) : tensor<33xbf16>
+    %y = check.generate.fill value(-123.0) : tensor<33x5xf32>
+    check.compare<@pocket.project_bias_f64, @projection_expected_bias>[%outputs, %times](%inputs, %outputs, %times, %x, %w, %b, %y) : [index, index](index, index, index, tensor<7x5xf32>, tensor<33x7xbf16>, tensor<33xbf16>, tensor<33x5xf32>) -> () {
+      check.expect.bitwise actual(%y) expected(%y) : tensor<33x5xf32>
+    }
+  }
+  check.return
+}

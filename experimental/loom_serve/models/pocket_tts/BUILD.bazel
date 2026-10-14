@@ -1,0 +1,77 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
+
+package(default_visibility = ["//visibility:private"])
+
+filegroup(
+    name = "sources",
+    srcs = glob(["*.loom"]),
+    visibility = ["//visibility:public"],
+)
+
+loom_test(
+    name = "projection_test",
+    srcs = [
+        "dispatch.loom",
+        "projection.loom",
+        "tests/projection.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {"pocket.threads": "128"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "streaming_state_test",
+    srcs = [
+        "convolution.loom",
+        "dispatch.loom",
+        "flow_state.loom",
+        "tests/streaming_state.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {"pocket.threads": "128"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "convolution_test",
+    srcs = [
+        "convolution.loom",
+        "dispatch.loom",
+        "tests/convolution.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {"pocket.threads": "128"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "normalization_test",
+    srcs = [
+        "dispatch.loom",
+        "normalization.loom",
+        "tests/normalization.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {"pocket.threads": "128"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
