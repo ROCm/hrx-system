@@ -71,16 +71,23 @@ void iree_tracing_console_deinitialize() {
 #define IREE_TRACING_MAX_THREAD_LENGTH 16
 
 typedef struct iree_trace_zone_t {
+  // Monotonic start time used to report the elapsed duration at zone end.
   uint64_t start_timestamp_ns;
+  // Owned name prefix retained until the zone ends, without a NUL terminator.
   char name[64];
+  // Number of initialized bytes in name.
   int16_t name_length;
 } iree_trace_zone_t;
 
 typedef struct iree_trace_thread_t {
+  // Owned thread name prefix, without a NUL terminator.
   char name[IREE_TRACING_MAX_THREAD_LENGTH];
+  // Number of initialized bytes in name.
   int16_t name_length;
-  uint32_t depth;  // 0 = no zone open
+  // Number of open zones; zero indicates no active zone.
+  uint32_t depth;
 #if IREE_TRACING_CONSOLE_TIMING
+  // Timing records indexed by the one-based zone depth; entry zero is unused.
   iree_trace_zone_t stack[128];
 #endif  // IREE_TRACING_CONSOLE_TIMING
 } iree_trace_thread_t;
@@ -96,7 +103,9 @@ void iree_tracing_set_thread_name(const char* name) {
 }
 
 typedef struct {
+  // Borrowed filename suffix after the final directory separator.
   const char* value;
+  // Length of value in bytes, excluding any NUL terminator.
   int length;
 } iree_trace_file_name_t;
 static iree_trace_file_name_t iree_tracing_trim_file_path(
@@ -115,7 +124,9 @@ static iree_zone_id_t iree_tracing_zone_begin(
     iree_trace_file_name_t file_name, uint32_t line, const char* function_name,
     size_t function_name_length, const char* name, size_t name_length) {
   // Push the zone onto the zone stack.
+#if IREE_TRACING_CONSOLE_TIMING
   assert(_thread.depth + 1 < IREE_ARRAYSIZE(_thread.stack));
+#endif  // IREE_TRACING_CONSOLE_TIMING
   iree_zone_id_t zone_id = ++_thread.depth;
 
   // Use the function name for display if no override was provided.
@@ -139,7 +150,7 @@ static iree_zone_id_t iree_tracing_zone_begin(
   // time.
   iree_trace_zone_t* zone = &_thread.stack[zone_id];
   zone->name_length = iree_min(name_length, IREE_ARRAYSIZE(zone->name));
-  memcpy(zone->name, name, name_length);
+  memcpy(zone->name, name, zone->name_length);
   zone->start_timestamp_ns = iree_platform_time_now();
 #endif  // IREE_TRACING_CONSOLE_TIMING
 

@@ -25,6 +25,19 @@ if(${IREE_TRACING_PROVIDER} STREQUAL "console")
       "IREE_TRACING_MODE=${IREE_TRACING_MODE}"
     PUBLIC
   )
+  if(IREE_TRACING_MODE GREATER 0)
+    iree_cc_test(
+      NAME
+        console_test
+      SRCS
+        "console_test.cc"
+      DEPS
+        ::provider
+        iree::base::core_headers
+        iree::testing::gtest
+        iree::testing::gtest_main
+    )
+  endif()
 elseif(${IREE_TRACING_PROVIDER} STREQUAL "tracy")
   iree_cc_library(
     NAME
