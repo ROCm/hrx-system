@@ -11,6 +11,53 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    kernarg
+  HDRS
+    "kernarg.h"
+  SRCS
+    "kernarg.c"
+  DEPS
+    iree::base
+    iree::base::core_headers
+    iree::hal
+    iree::hal::drivers::amd::gpu::image::metadata
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    kernarg_test
+  SRCS
+    "kernarg_test.cc"
+  DEPS
+    ::kernarg
+    iree::base
+    iree::base::core_headers
+    iree::hal
+    iree::hal::drivers::amd::gpu::image
+    iree::hal::drivers::amd::gpu::image::hsaco
+    iree::hal::drivers::amd::gpu::image::hsaco_test_util
+    iree::hal::drivers::amd::gpu::image::metadata
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    kernarg_benchmark
+  SRCS
+    "kernarg_benchmark.cc"
+  DEPS
+    ::kernarg
+    iree::base
+    iree::hal::drivers::amd::gpu::image::metadata
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
+iree_cc_library(
+  NAME
     context
   HDRS
     "context.h"

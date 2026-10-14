@@ -129,6 +129,9 @@ iree_runtime_cc_fuzz(
         ":hsaco_test_util",
         ":metadata",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu:kernarg",
     ],
 )
 

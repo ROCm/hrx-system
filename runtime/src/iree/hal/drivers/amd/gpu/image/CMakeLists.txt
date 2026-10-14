@@ -151,6 +151,9 @@ iree_cc_fuzz(
     ::hsaco_test_util
     ::metadata
     iree::base
+    iree::base::core_headers
+    iree::hal
+    iree::hal::drivers::amd::gpu::kernarg
 )
 
 iree_cc_binary_benchmark(
