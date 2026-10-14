@@ -40,7 +40,13 @@
       "../../motifs/tensor/sampling.loom",
       "verify.loom",
       "programs/speculation.loom",
-      "../qwen/kernels/qwen38/accept.loom"
+      "../qwen/kernels/qwen38/accept.loom",
+      "kernels/mtp.loom",
+      "kernels/mtp_state.loom",
+      "programs/mtp.loom",
+      "propose.loom",
+      "../qwen/kernels/qwen38/mtp_proposal.loom",
+      "../qwen/kernels/qwen38/continuation.loom"
     ],
     "weights": "UD-Q4_K_XL",
     "tokenizer": "tokenizer.json",
