@@ -11,7 +11,8 @@
 
 #include "iree/base/api.h"
 #include "iree/base/byte_sequence.h"
-#include "loomc/loomc.h"
+#include "loomc/byte_sequence.h"
+#include "loomc/status.h"
 
 /// @file
 /// Optional header-only adapters between IREE base types and the Loom C API.
@@ -25,6 +26,8 @@
 /// Convert at the IREE/Loom boundary and preserve rich status payloads:
 ///
 /// @code{.c}
+/// #include "loomc/source.h"
+///
 /// iree_status_t create_source_from_iree(
 ///     iree_string_view_t identifier, iree_const_byte_span_t contents,
 ///     iree_allocator_t host_allocator, loomc_source_t** out_source) {

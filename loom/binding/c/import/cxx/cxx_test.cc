@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "iree/testing/gtest.h"
+#include "loomc/compile.h"
 #include "loomc/link.h"
 #include "test/util.h"
 

@@ -16,7 +16,7 @@ loom_cc_library(
     "util.h"
   DEPS
     iree::testing::gtest
-    loom::binding::c::loomc
+    loom::binding::c::base
   TESTONLY
   INCLUDES
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>"
@@ -60,7 +60,7 @@ loom_cc_test(
     ::test_util
     iree::testing::gtest
     iree::testing::gtest_main
-    loom::binding::c::loomc
+    loom::binding::c::base
 )
 
 loom_cc_test(
@@ -72,7 +72,7 @@ loom_cc_test(
     ::test_util
     iree::testing::gtest
     iree::testing::gtest_main
-    loom::binding::c::loomc
+    loom::binding::c::base
 )
 
 loom_cc_test(
@@ -84,7 +84,7 @@ loom_cc_test(
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
-    loom::binding::c::loomc
+    loom::binding::c::base
 )
 
 loom_cc_test(
@@ -304,7 +304,7 @@ loom_cc_test(
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
-    loom::binding::c::loomc
+    loom::binding::c::base
 )
 
 loom_cc_test(

@@ -12,6 +12,7 @@
 
 #include "iree/base/api.h"
 #include "loomc/iree.h"
+#include "loomc/loomc.h"
 
 namespace loomc::bench {
 

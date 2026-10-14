@@ -13,8 +13,10 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/init.h"
 #include "loom/binding/c/example/cxx/kernels.h"
+#include "loomc/compile.h"
 #include "loomc/import/cxx.h"
 #include "loomc/iree.h"
+#include "loomc/launch_config.h"
 #include "loomc/target/amdgpu.h"
 #include "loomc/target/amdgpu/iree_hal.h"
 

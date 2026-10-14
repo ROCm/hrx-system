@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 
+#include "loomc/compile.h"
 #include "loomc/iree.h"
 #include "loomc/target/configured.h"
 

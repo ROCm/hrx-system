@@ -21,6 +21,7 @@
 #include "loom/tooling/pass/trace_cli.h"
 #include "loom/util/stream.h"
 #include "loomc/iree.h"
+#include "loomc/loomc.h"
 #include "loomc/target/configured.h"
 
 IREE_FLAG(string, format, "",

@@ -11,6 +11,8 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "loom/serve/runtime/program/target.h"
+#include "loomc/compile.h"
+#include "loomc/emit.h"
 #include "loomc/iree.h"
 #include "loomc/launch_config.h"
 #include "loomc/link.h"

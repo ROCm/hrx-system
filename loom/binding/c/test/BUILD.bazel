@@ -28,7 +28,7 @@ loom_cc_library(
     hdrs = ["util.h"],
     includes = [".."],
     deps = [
-        "//loom/binding/c:loomc",
+        "//loom/binding/c:base",
         "//runtime/src/iree/testing:gtest",
     ],
 )
@@ -62,7 +62,7 @@ loom_cc_test(
     srcs = ["base_test.cc"],
     deps = [
         ":test_util",
-        "//loom/binding/c:loomc",
+        "//loom/binding/c:base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -73,7 +73,7 @@ loom_cc_test(
     srcs = ["byte_sequence_test.cc"],
     deps = [
         ":test_util",
-        "//loom/binding/c:loomc",
+        "//loom/binding/c:base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -83,7 +83,7 @@ loom_cc_test(
     name = "iree_adapter_test",
     srcs = ["iree_adapter_test.cc"],
     deps = [
-        "//loom/binding/c:loomc",
+        "//loom/binding/c:base",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -288,7 +288,7 @@ loom_cc_test(
     srcs = ["status_test.cc"],
     deps = [
         ":test_util",
-        "//loom/binding/c:loomc",
+        "//loom/binding/c:base",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

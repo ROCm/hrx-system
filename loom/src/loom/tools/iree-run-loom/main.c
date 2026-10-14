@@ -26,6 +26,8 @@
 #include "loom/tooling/input/flags.h"
 #include "loom/tooling/input/loomc.h"
 #include "loom/tooling/io/file.h"
+#include "loomc/compile.h"
+#include "loomc/compile_report.h"
 #include "loomc/launch_config.h"
 
 IREE_FLAG(string, pipeline, "default",

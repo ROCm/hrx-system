@@ -25,18 +25,22 @@ set(IREE_PACKAGE_ROOT_PREFIX "loom/binding/c")
 """,
 )
 
-LOOMC_PUBLIC_HDRS = [
-    "include/loomc/artifact.h",
-    "include/loomc/artifact_manifest.h",
+LOOMC_BASE_HDRS = [
     "include/loomc/base.h",
     "include/loomc/byte_sequence.h",
+    "include/loomc/iree.h",
+    "include/loomc/status.h",
+]
+
+LOOMC_PUBLIC_HDRS = LOOMC_BASE_HDRS + [
+    "include/loomc/artifact.h",
+    "include/loomc/artifact_manifest.h",
     "include/loomc/compile.h",
     "include/loomc/compile_report.h",
     "include/loomc/config.h",
     "include/loomc/context.h",
     "include/loomc/diagnostic.h",
     "include/loomc/emit.h",
-    "include/loomc/iree.h",
     "include/loomc/launch_config.h",
     "include/loomc/link.h",
     "include/loomc/link_dependency.h",
@@ -49,7 +53,6 @@ LOOMC_PUBLIC_HDRS = [
     "include/loomc/result.h",
     "include/loomc/sanitizer.h",
     "include/loomc/source.h",
-    "include/loomc/status.h",
     "include/loomc/task.h",
     "include/loomc/target.h",
     "include/loomc/workspace.h",
@@ -147,14 +150,35 @@ exports_files(
 )
 
 loom_cc_library(
+    name = "base",
+    srcs = [
+        "src/base.c",
+        "src/base_system.c",
+        "src/byte_sequence.c",
+        "src/status.c",
+    ],
+    hdrs = LOOMC_BASE_HDRS,
+    includes = ["include"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+iree_assert_dependency_boundary(
+    name = "base_has_no_compiler_dependencies",
+    forbidden_dependencies = [":loomc"],
+    forbidden_subtrees = [
+        "//loom/binding/c/target/...",
+        "//loom/src/loom/...",
+    ],
+    message = "LoomC base allocation, status, and byte storage must remain independent of the compiler",
+    target = ":base",
+)
+
+loom_cc_library(
     name = "loomc",
     srcs = [
         "include/loomc/interop.h",
         "src/artifact.c",
         "src/artifact_manifest.c",
-        "src/base.c",
-        "src/base_system.c",
-        "src/byte_sequence.c",
         "src/compile.c",
         "src/compile_report.c",
         "src/config.c",
@@ -181,7 +205,6 @@ loom_cc_library(
         "src/request_index_overlay.c",
         "src/result.c",
         "src/source.c",
-        "src/status.c",
         "src/target.c",
         "src/task.c",
         "src/workspace.c",
@@ -212,6 +235,7 @@ loom_cc_library(
         "src",
     ],
     deps = [
+        ":base",
         "//loom/src/loom/analysis:kernel_launch_config",
         "//loom/src/loom/codegen:pass_environment",
         "//loom/src/loom/codegen/low:launch_config_program",

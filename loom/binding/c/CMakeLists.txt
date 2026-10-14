@@ -14,6 +14,27 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    base
+  HDRS
+    "include/loomc/base.h"
+    "include/loomc/byte_sequence.h"
+    "include/loomc/iree.h"
+    "include/loomc/status.h"
+  SRCS
+    "src/base.c"
+    "src/base_system.c"
+    "src/byte_sequence.c"
+    "src/status.c"
+  DEPS
+    iree::base
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     loomc
   HDRS
     "include/loomc/artifact.h"
@@ -65,9 +86,6 @@ loom_cc_library(
     "include/loomc/interop.h"
     "src/artifact.c"
     "src/artifact_manifest.c"
-    "src/base.c"
-    "src/base_system.c"
-    "src/byte_sequence.c"
     "src/compile.c"
     "src/compile_report.c"
     "src/config.c"
@@ -94,11 +112,11 @@ loom_cc_library(
     "src/request_index_overlay.c"
     "src/result.c"
     "src/source.c"
-    "src/status.c"
     "src/target.c"
     "src/task.c"
     "src/workspace.c"
   DEPS
+    ::base
     iree::base
     iree::base::internal
     iree::base::internal::arena
@@ -360,6 +378,7 @@ endif()
 set(_loomc_component_targets)
 set(_loomc_object_sources)
 set(_loomc_object_targets)
+_loomc_add_shared_component(loom_binding_c_base)
 _loomc_add_shared_component(loom_binding_c_loomc)
 _loomc_add_shared_component(loom_binding_c_target_iree_hal_iree_hal)
 if(LOOM_IMPORT_CXX)
