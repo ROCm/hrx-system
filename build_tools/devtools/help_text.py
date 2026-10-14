@@ -523,7 +523,8 @@ deps; add --dep TARGET for anything inference misses.""",
   python dev.py bazel fuzz //runtime/src/iree/tokenizer/... -- -max_total_time=60
 
 This builds with --config=fuzzer, resolves executable paths with cquery, then
-runs the fuzzer binaries directly. Single-target runs exec the fuzzer process.""",
+runs each fuzzer in a fresh child process with independent peak-memory accounting.
+Single-target runs forward interruption signals and return the fuzzer exit code.""",
         )
     if command == "fuzz" and lane == "cmake":
         return CommandHelp(
