@@ -37,7 +37,9 @@ static iree_string_view_t loom_serve_text_request_check_file_text(
 
 static iree_status_t loom_serve_text_request_check_report(
     const loom_serve_text_chat_t* chat, iree_host_size_t token_count,
-    const int32_t* tokens, const loom_serve_text_chat_completion_t* completion,
+    const int32_t* tokens, iree_host_size_t media_span_count,
+    const loom_serve_text_media_span_t* media_spans,
+    const loom_serve_text_chat_completion_t* completion,
     iree_string_view_t tool_calls) {
   loom_output_stream_t stream;
   loom_output_stream_for_file(stdout, &stream);
@@ -57,6 +59,38 @@ static iree_status_t loom_serve_text_request_check_report(
   for (iree_host_size_t i = 0; i < token_count && iree_status_is_ok(status);
        ++i) {
     status = loom_json_array_write_int32_element(&array, tokens[i]);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_json_array_end(&array);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_json_object_begin_field(&object, IREE_SV("media_spans"));
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_json_array_begin(&stream, &array);
+  }
+  for (iree_host_size_t i = 0;
+       i < media_span_count && iree_status_is_ok(status); ++i) {
+    status = loom_json_array_begin_element(&array);
+    loom_json_array_writer_t span;
+    if (iree_status_is_ok(status)) {
+      status = loom_json_array_begin(&stream, &span);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_json_array_write_host_size_element(
+          &span, media_spans[i].image_index);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_json_array_write_host_size_element(
+          &span, media_spans[i].input_offset);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_json_array_write_host_size_element(
+          &span, media_spans[i].input_count);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_json_array_end(&span);
+    }
   }
   if (iree_status_is_ok(status)) {
     status = loom_json_array_end(&array);
@@ -205,12 +239,13 @@ static iree_status_t loom_serve_text_request_check_run(
                                          sizeof(*tokens), (void**)&tokens);
   }
   iree_host_size_t token_count = 0;
+  loom_serve_text_media_span_t* media_spans = NULL;
+  iree_host_size_t media_span_count = 0;
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_chat_prepare_input(
-        &policy, iree_string_builder_view(&chat.prompt),
-        LOOM_SERVE_TEXT_CHAT_INPUT_RENDERED,
-        LOOM_SERVE_TEXT_CHAT_BOUNDARY_FRESH, FLAG_capacity, host_allocator,
-        tokens, &token_count);
+        &chat, 0, LOOM_SERVE_TEXT_CHAT_INPUT_RENDERED,
+        LOOM_SERVE_TEXT_CHAT_BOUNDARY_FRESH, FLAG_capacity, 0, host_allocator,
+        tokens, &token_count, &media_spans, &media_span_count);
   }
   iree_io_file_contents_t* response = NULL;
   if (iree_status_is_ok(status) && FLAG_response[0]) {
@@ -242,13 +277,14 @@ static iree_status_t loom_serve_text_request_check_run(
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_request_check_report(
-        &chat, token_count, tokens, response ? &completion : NULL,
-        iree_string_builder_view(&tool_calls));
+        &chat, token_count, tokens, media_span_count, media_spans,
+        response ? &completion : NULL, iree_string_builder_view(&tool_calls));
   }
   loom_serve_text_chat_completion_deinitialize(&completion);
   iree_string_builder_deinitialize(&tool_calls);
   iree_io_file_contents_free(response);
   iree_allocator_free(host_allocator, tokens);
+  iree_allocator_free(host_allocator, media_spans);
   if (chat_initialized) {
     loom_serve_text_chat_deinitialize(&chat);
   }

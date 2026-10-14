@@ -268,13 +268,16 @@ loom_cc_library(
     chat
   HDRS
     "chat.h"
+    "media.h"
   SRCS
     "chat.c"
+    "media.c"
   DEPS
     iree::base
     iree::base::internal::json
     iree::base::internal::unicode
     iree::vm
+    loom::serve::media::digest
     loom::serve::media::image
     loom::serve::runtime::program
     loom::util::json
@@ -301,6 +304,18 @@ loom_cc_test(
     chat_test
   SRCS
     "chat_test.cc"
+  DEPS
+    ::chat
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    media_test
+  SRCS
+    "media_test.cc"
   DEPS
     ::chat
     iree::base

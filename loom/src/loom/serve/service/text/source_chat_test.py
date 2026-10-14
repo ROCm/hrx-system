@@ -136,6 +136,7 @@ class RequestTest(unittest.TestCase):
         value = json.loads(result.stdout)
         self.assertEqual(value["prompt"], "axbx")
         self.assertEqual(value["tokens"], [0, 2, 1, 2])
+        self.assertEqual(value["media_spans"], [[0, 1, 1], [1, 3, 1]])
 
         malformed = self.request(
             [

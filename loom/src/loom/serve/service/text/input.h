@@ -34,13 +34,18 @@ typedef struct loom_serve_text_input_t {
   int32_t* tokens;
   // Number of token IDs in tokens.
   iree_host_size_t count;
+  // Owned checked media spans in source token order.
+  loom_serve_text_media_span_t* media_spans;
+  // Number of populated media spans.
+  iree_host_size_t media_span_count;
   // Owned immutable history identity; null for full replay.
   iree_vm_buffer_t* history;
   // Consumed native positions preceding tokens.
   iree_host_size_t retained_count;
 } loom_serve_text_input_t;
 
-// Releases compact tokens and the host history reference; accepts zero state.
+// Releases compact tokens, media spans and the host history reference; accepts
+// zero state.
 void loom_serve_text_input_deinitialize(loom_serve_text_input_t* input,
                                         iree_allocator_t host_allocator);
 
