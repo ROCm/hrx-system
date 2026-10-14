@@ -514,7 +514,8 @@ _SPIRV_EXECUTION_XFAILS = {
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_fma_values": "TARGET/001",
     "numeric/vector/f32.loom:@vector_f32_square_root_values": "TARGET/001",
     "numeric/vector/reductions.loom:@vector_axis_reduction_values": "TARGET/002,TARGET/032",
-    "numeric/vector/reductions.loom:@vector_float_reductions_case": "TARGET/001,TARGET/003",
+    "numeric/vector/reductions.loom:@vector_bfloat_dot_reduction_values": "TARGET/001",
+    "numeric/vector/reductions.loom:@vector_float_reduction_values": "TARGET/001,TARGET/002,TARGET/003",
 }
 
 # The hardware-discovered profile selects descriptors from the physical device.

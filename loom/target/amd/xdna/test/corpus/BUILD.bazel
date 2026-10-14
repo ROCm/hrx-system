@@ -28,6 +28,7 @@ loom_corpus_test(
             "numeric/vector/integer_shifts.loom",
             "numeric/vector/integer_widening.loom",
             "numeric/vector/interleave.loom",
+            "numeric/vector/reductions.loom",
         ],
     },
     xfails = {

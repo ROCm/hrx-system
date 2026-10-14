@@ -371,7 +371,7 @@ loom_corpus_build(
     "LOWERING/036"
     "loom::target::wasm::simd128"
     "numeric/vector/reductions.loom"
-    "@vector_float_reductions"
+    "@vector_bfloat_dot_reductions"
     "TARGET/001"
   ALL_ROOTS_XFAIL
     "loom::target::wasm::simd128"
@@ -1181,7 +1181,7 @@ loom_corpus_test(
     "@packed_halfword_add_values"
     "LOWERING/036"
     "numeric/vector/reductions.loom"
-    "@vector_float_reductions_case"
+    "@vector_bfloat_dot_reduction_values"
     "TARGET/001"
   LABELS
     "iree-build-requirement=loom.target.arch.vm"

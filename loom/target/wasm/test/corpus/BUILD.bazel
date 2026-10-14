@@ -360,7 +360,7 @@ loom_corpus_build(
             "numeric/vector/floating.loom:@vector_scale_f32": "WASM/001",
             "numeric/vector/floating.loom:@vector_scale_f64": "LOWERING/036",
             "numeric/vector/packed_arithmetic.loom:@packed_halfword_add": "LOWERING/036",
-            "numeric/vector/reductions.loom:@vector_float_reductions": "TARGET/001",
+            "numeric/vector/reductions.loom:@vector_bfloat_dot_reductions": "TARGET/001",
         },
     },
 )
@@ -444,7 +444,7 @@ loom_scenario_test(
             "numeric/vector/floating.loom:@vector_scale_f32_values": "WASM/001",
             "numeric/vector/floating.loom:@vector_scale_f64_values": "LOWERING/036",
             "numeric/vector/packed_arithmetic.loom:@packed_halfword_add_values": "LOWERING/036",
-            "numeric/vector/reductions.loom:@vector_float_reductions_case": "TARGET/001",
+            "numeric/vector/reductions.loom:@vector_bfloat_dot_reduction_values": "TARGET/001",
         },
     },
 )

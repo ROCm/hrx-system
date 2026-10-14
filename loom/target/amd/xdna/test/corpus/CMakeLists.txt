@@ -33,6 +33,7 @@ loom_corpus_test(
     "numeric/vector/integer_shifts.loom"
     "numeric/vector/integer_widening.loom"
     "numeric/vector/interleave.loom"
+    "numeric/vector/reductions.loom"
   XFAILS
     "numeric/conversion/float8_dequantization.loom"
     "@e8m0_mxfp4_bf16_subnormal_values"

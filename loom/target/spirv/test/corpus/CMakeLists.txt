@@ -1936,8 +1936,11 @@ loom_corpus_test(
     "@vector_axis_reduction_values"
     "TARGET/002,TARGET/032"
     "numeric/vector/reductions.loom"
-    "@vector_float_reductions_case"
-    "TARGET/001,TARGET/003"
+    "@vector_bfloat_dot_reduction_values"
+    "TARGET/001"
+    "numeric/vector/reductions.loom"
+    "@vector_float_reduction_values"
+    "TARGET/001,TARGET/002,TARGET/003"
   ALLOWED_FAILURES
     "control/loop/carried_lane_liveness.loom"
     "@loop_carried_lane_liveness_values"
