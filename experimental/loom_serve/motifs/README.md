@@ -1,8 +1,10 @@
-# Reusable numerical motifs
+# Reusable model motifs
 
 `ggml/` implements contractions and quantization over GGML block formats.
 `tensor/` supplies attention, linear algebra, convolution, normalization,
 quantization, random generation and image transforms.
+`text/` supplies UTF-8 traversal and Unicode properties for source-owned prompt
+preparation.
 
 Helpers receive dimensions, layouts, storage choices and operands through SSA
 values or template arguments. Concrete model leaves supply configuration,

@@ -33,6 +33,7 @@ loom_test_module(
     "${_GLOB_X_LOOM}"
     "tests/request.loom"
     "iree::experimental::loom_serve::motifs::tensor::sources"
+    "iree::experimental::loom_serve::motifs::text::sources"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -96,6 +97,31 @@ loom_execution_test(
     "loom-executor=hardware"
   RESOURCE_GROUP
     "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
+    text_normalization_test_module
+  SRCS
+    "tests/text_normalization.loom"
+    "text_normalization.loom"
+    "iree::experimental::loom_serve::motifs::text::sources"
+)
+
+if(LOOM_TARGET_ARCH_VM)
+loom_execution_test(
+  NAME
+    text_normalization_test_execute_vm_reference_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::text_normalization_test_module"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+    "loom-execution-profile=vm_reference"
+    "loom-target-family=vm"
+    "loom-target-class=cpu"
+    "loom-executor=reference"
 )
 endif()
 

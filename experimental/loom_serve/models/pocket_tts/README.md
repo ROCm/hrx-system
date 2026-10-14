@@ -103,6 +103,15 @@ across implementations.
 
 ## Source map and checks
 
+`text_normalization.loom` preserves the pinned English checkpoint's prompt
+preparation: Unicode whitespace trimming, full first-character uppercase,
+single-pass ASCII space-pair replacement, and terminal/weak punctuation with
+closing quotes and brackets. It returns exact UTF-8 bytes and the post-EOS tail
+of five frames for at most four words, or three frames otherwise. Empty output
+is an admission failure for the controller. Its independent oracle records the
+upstream `prepare_text_prompt` results with the English configuration, including
+every expanding uppercase character and whitespace codepoint.
+
 `flow_layers.loom` shares transformer and flow-residual layer bodies.
 `mimi_layers.loom` shares encoder and decoder transformer structure while
 preserving their precision choices. `prefill.loom`, `voice.loom`, and

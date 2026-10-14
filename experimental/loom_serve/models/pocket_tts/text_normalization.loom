@@ -1,0 +1,190 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl @text.next(%text: buffer, %position: offset) -> (i32, offset)
+
+func.decl @text.previous(%text: buffer, %end: offset) -> (i32, offset)
+
+func.decl @text.write(%text: buffer, %position: offset, %codepoint: i32) -> (offset)
+
+func.decl @text.trim(%text: buffer) -> (offset, offset)
+
+func.decl @text.uppercase(%codepoint: i32) -> (i32, i32, i32)
+
+func.decl @text.is_space(%codepoint: i32) -> (i1)
+
+// Pocket's English sentence policy uses these exact punctuation sets.
+global.rodata.def @pocket.terminal = bytes("2e213fe280a6")
+
+global.rodata.def @pocket.weak = bytes("2c3b3a2de28093e28094")
+
+global.rodata.def @pocket.weak_and_space = bytes("2c3b3a2de28093e2809420")
+
+global.rodata.def @pocket.closers_and_space = bytes("2227e2809de28099295dc2bb20")
+
+func.def @pocket.contains(%set: buffer, %codepoint: i32) -> (i1) {
+  %origin = index.constant 0 : offset
+  %length = buffer.length %set
+  %false = scalar.constant false : i1
+  %unused, %found = scf.while(%cursor = %origin : offset, %found = %false : i1) -> (offset, i1) {
+    %inside = index.cmp ult, %cursor, %length : offset
+    %missing = scalar.cmpi eq, %found, %false : i1
+    %more = scalar.andi %inside, %missing : i1
+    scf.condition %more, %cursor, %found : i1, offset, i1
+  } do(%cursor: offset, %found: i1) {
+    %candidate, %next = func.call @text.next(%set, %cursor) : (buffer, offset) -> (i32, offset)
+    %matches = scalar.cmpi eq, %candidate, %codepoint : i32
+    scf.yield %next, %matches : offset, i1
+  }
+  func.return %found : i1
+}
+
+func.def @pocket.trim_suffix(%text: buffer, %end: offset, %set: buffer) -> (offset) {
+  %origin = index.constant 0 : offset
+  %true = scalar.constant true : i1
+  %result, %unused = scf.while(%cursor = %end : offset, %trimming = %true : i1) -> (offset, i1) {
+    %inside = index.cmp ugt, %cursor, %origin : offset
+    %more = scalar.andi %inside, %trimming : i1
+    scf.condition %more, %cursor, %trimming : i1, offset, i1
+  } do(%cursor: offset, %trimming: i1) {
+    %codepoint, %previous = func.call @text.previous(%text, %cursor) : (buffer, offset) -> (i32, offset)
+    %member = func.call @pocket.contains(%set, %codepoint) : (buffer, i32) -> (i1)
+    %before = scf.select %member, %previous, %cursor : offset
+    scf.yield %before, %member : offset, i1
+  }
+  func.return %result : offset
+}
+
+// The input is already stripped. Normalize line endings, replace each pair of
+// ASCII spaces once, uppercase only the first codepoint, and count words.
+// Full uppercase can expand the first character into at most three codepoints.
+func.def @pocket.normalize_characters(%text: buffer, %begin: offset, %end: offset) -> (buffer, offset, i32) {
+  %origin = index.constant 0 : offset
+  %input_bytes = index.sub %end, %begin : offset
+  %expansion = index.constant 12 : offset
+  %capacity = index.add %input_bytes, %expansion : offset
+  %output = buffer.alloca<private> align(1) %capacity : buffer
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %space = scalar.constant 32 : i32
+  %line_feed = scalar.constant 10 : i32
+  %carriage_return = scalar.constant 13 : i32
+  %false = scalar.constant false : i1
+  %unused_input, %written, %unused_pair, %unused_word, %words = scf.while(%cursor = %begin : offset, %written = %origin : offset, %pair = %false : i1, %in_word = %false : i1, %words = %zero : i32) -> (offset, offset, i1, i1, i32) {
+    %more = index.cmp ult, %cursor, %end : offset
+    scf.condition %more, %cursor, %written, %pair, %in_word, %words : i1, offset, offset, i1, i1, i32
+  } do(%cursor: offset, %written: offset, %pair: i1, %in_word: i1, %words: i32) {
+    %codepoint, %next = func.call @text.next(%text, %cursor) : (buffer, offset) -> (i32, offset)
+    %newline = scalar.cmpi eq, %codepoint, %line_feed : i32
+    %return = scalar.cmpi eq, %codepoint, %carriage_return : i32
+    %line_end = scalar.ori %newline, %return : i1
+    %normalized = scf.select %line_end, %space, %codepoint : i32
+    %ascii_space = scalar.cmpi eq, %normalized, %space : i32
+    %skip = scalar.andi %ascii_space, %pair : i1
+    %emit = scalar.cmpi eq, %skip, %false : i1
+    %next_pair = scalar.andi %ascii_space, %emit : i1
+    %after, %next_in_word, %next_words = scf.if %emit -> (offset, i1, i32) {
+      %whitespace = func.call @text.is_space(%normalized) : (i32) -> (i1)
+      %word = scalar.cmpi eq, %whitespace, %false : i1
+      %new_word = scalar.cmpi eq, %in_word, %false : i1
+      %starts = scalar.andi %word, %new_word : i1
+      %increment = scf.select %starts, %one, %zero : i32
+      %word_count = scalar.addi %words, %increment : i32
+      %first = index.cmp eq, %cursor, %begin : offset
+      %a, %b, %c = scf.if %first -> (i32, i32, i32) {
+        %a, %b, %c = func.call @text.uppercase(%normalized) : (i32) -> (i32, i32, i32)
+        scf.yield %a, %b, %c : i32, i32, i32
+      } else {
+        scf.yield %normalized, %zero, %zero : i32, i32, i32
+      }
+      %first_end = func.call @text.write(%output, %written, %a) : (buffer, offset, i32) -> (offset)
+      %has_second = scalar.cmpi ne, %b, %zero : i32
+      %second_end = scf.if %has_second -> (offset) {
+        %position = func.call @text.write(%output, %first_end, %b) : (buffer, offset, i32) -> (offset)
+        scf.yield %position : offset
+      } else {
+        scf.yield %first_end : offset
+      }
+      %has_third = scalar.cmpi ne, %c, %zero : i32
+      %third_end = scf.if %has_third -> (offset) {
+        %position = func.call @text.write(%output, %second_end, %c) : (buffer, offset, i32) -> (offset)
+        scf.yield %position : offset
+      } else {
+        scf.yield %second_end : offset
+      }
+      scf.yield %third_end, %word, %word_count : offset, i1, i32
+    } else {
+      scf.yield %written, %in_word, %words : offset, i1, i32
+    }
+    scf.yield %next, %after, %next_pair, %next_in_word, %next_words : offset, offset, i1, i1, i32
+  }
+  func.return %output, %written, %words : buffer, offset, i32
+}
+
+// Normalization for the pinned English checkpoint. Returns an exact-length
+// buffer and post-EOS frame count, including the upstream two-frame margin.
+// Empty/whitespace input returns an empty buffer; request admission rejects it.
+func.def public @pocket.normalize_text(%text: buffer) -> (buffer, i32) {
+  %begin, %end = func.call @text.trim(%text) : (buffer) -> (offset, offset)
+  %normalized, %length, %words = func.call @pocket.normalize_characters(%text, %begin, %end) : (buffer, offset, offset) -> (buffer, offset, i32)
+  %origin = index.constant 0 : offset
+  %closer_set = global.load @pocket.closers_and_space : buffer
+  %core = func.call @pocket.trim_suffix(%normalized, %length, %closer_set) : (buffer, offset, buffer) -> (offset)
+  %has_core = index.cmp ugt, %core, %origin : offset
+  %false = scalar.constant false : i1
+  %append, %weak = scf.if %has_core -> (i1, i1) {
+    %last, %unused = func.call @text.previous(%normalized, %core) : (buffer, offset) -> (i32, offset)
+    %terminal_set = global.load @pocket.terminal : buffer
+    %terminal = func.call @pocket.contains(%terminal_set, %last) : (buffer, i32) -> (i1)
+    %weak_set = global.load @pocket.weak : buffer
+    %weak = func.call @pocket.contains(%weak_set, %last) : (buffer, i32) -> (i1)
+    %append = scalar.cmpi eq, %terminal, %false : i1
+    scf.yield %append, %weak : i1, i1
+  } else {
+    scf.yield %false, %false : i1, i1
+  }
+  %prefix_end, %suffix_begin = scf.if %weak -> (offset, offset) {
+    %weak_set = global.load @pocket.weak_and_space : buffer
+    %prefix_end = func.call @pocket.trim_suffix(%normalized, %core, %weak_set) : (buffer, offset, buffer) -> (offset)
+    // The closer suffix contains only closers and ASCII spaces. Strip its
+    // leading spaces; the complete normalized input has no trailing spaces.
+    %true = scalar.constant true : i1
+    %space = scalar.constant 32 : i32
+    %step = index.constant 1 : offset
+    %suffix, %unused = scf.while(%cursor = %core : offset, %trimming = %true : i1) -> (offset, i1) {
+      %inside = index.cmp ult, %cursor, %length : offset
+      %more = scalar.andi %inside, %trimming : i1
+      scf.condition %more, %cursor, %trimming : i1, offset, i1
+    } do(%cursor: offset, %trimming: i1) {
+      %byte = buffer.load.i8.u %normalized[%cursor]
+      %whitespace = scalar.cmpi eq, %byte, %space : i32
+      %next = index.add %cursor, %step : offset
+      %after = scf.select %whitespace, %next, %cursor : offset
+      scf.yield %after, %whitespace : offset, i1
+    }
+    scf.yield %prefix_end, %suffix : offset, offset
+  } else {
+    scf.yield %length, %length : offset, offset
+  }
+  %one = index.constant 1 : offset
+  %punctuation_bytes = scf.select %append, %one, %origin : offset
+  %suffix_bytes = index.sub %length, %suffix_begin : offset
+  %suffix_position = index.add %prefix_end, %punctuation_bytes : offset
+  %output_bytes = index.add %suffix_position, %suffix_bytes : offset
+  %output = buffer.alloca<private> align(1) %output_bytes : buffer
+  buffer.copy %normalized[%origin], %output[%origin], %prefix_end
+  scf.if %append {
+    %period = scalar.constant 46 : i32
+    buffer.store.i8 %period, %output[%prefix_end]
+  }
+  buffer.copy %normalized[%suffix_begin], %output[%suffix_position], %suffix_bytes
+  %four = scalar.constant 4 : i32
+  %short = scalar.cmpi ule, %words, %four : i32
+  %short_tail = scalar.constant 5 : i32
+  %long_tail = scalar.constant 3 : i32
+  %tail = scf.select %short, %short_tail, %long_tail : i32
+  func.return %output, %tail : buffer, i32
+}
