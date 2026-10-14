@@ -1,0 +1,224 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
+amdgpu.target<gfx11-generic> @flash_next_head_wave32 {subgroup_size = 32}
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
+
+kernel.decl @hc_normalize() launch(%span: buffer, %residual: buffer, %gamma: buffer, %normalized: buffer)
+
+kernel.decl @hc_up_mix() launch(%span: buffer, %normalized: buffer, %lowrank: buffer, %weight: buffer, %mixed: buffer)
+
+template.decl @sampling.categorical_f32(%columns: index, %logits: buffer, %logits_origin: offset, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64) -> (i32)
+
+// The controller has already selected each requested last span row. Gather
+// only those rows before the final hyperconnection and vocabulary projection.
+kernel.def @flash_next_select_output_rows() {
+  %rows = config.get @flash_next.span_capacity : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %residual: buffer, %head_epoch: buffer, %selected: buffer) {
+  %row = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %count_word = view.load %header[2] : view<3xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %rows = config.get @flash_next.span_capacity : index
+  %count = index.assume %count_value [range(%count_value, 0, %rows)] : index
+  %c0 = index.constant 0 : index
+  %first_row = index.cmp eq, %row, %c0 : index
+  %first_thread = index.cmp eq, %thread, %c0 : index
+  %publishes = scalar.andi %first_row, %first_thread : i1
+  scf.if %publishes {
+    %output_header = buffer.view %head_epoch[%origin] : buffer -> view<3xi32>
+    view.store %count_word, %output_header[0] : i32, view<3xi32>
+  }
+  %active = index.cmp ult, %row, %count : index
+  scf.if %active {
+    %tokens = config.get @flash_next.token_count : index
+    %selection_origin = index.constant 1292 : offset
+    %selections = buffer.view %epoch[%selection_origin] : buffer -> view<128xi32>
+    %source_word = view.load %selections[%row] : view<128xi32> -> i32
+    %source_value = index.cast %source_word : i32 to index
+    %source = index.assume %source_value [range(%source_value, 0, 32767), lt(%source_value, %tokens)] : index
+    %input = buffer.view %residual[%origin] : buffer -> view<[%tokens]x1280x8xbf16>
+    %output = buffer.view %selected[%origin] : buffer -> view<[%tokens]x1280x8xbf16>
+    %chunks = index.constant 1280 : index
+    %threads = index.constant 128 : index
+    scf.for %chunk = [%thread to %chunks step %threads] {
+      %values = vector.load %input[%source, %chunk, %c0] : view<[%tokens]x1280x8xbf16> -> vector<8xbf16>
+      vector.store %values, %output[%row, %chunk, %c0] : vector<8xbf16>, view<[%tokens]x1280x8xbf16>
+    }
+  }
+  kernel.return
+}
+
+// The output mixer has no injection branch: it contracts the normalized four
+// streams into a low-rank SiLU publication, then reuses the stream mixer.
+kernel.def target(@flash_next_head_wave32) @flash_next_head_down() {
+  %groups = index.constant 80 : index
+  %rows = config.get @flash_next.span_capacity : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %rows, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %token = kernel.workgroup.id<y> : index
+  %count = func.call @flash_next_token_count(%epoch, %tokens) : (buffer, index) -> (index)
+  %active = index.cmp ult, %token, %count : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %c4 = index.constant 4 : index
+    %row = index.madd %group, %c4, %wave : index
+    %width = index.constant 10240 : index
+    %stride = index.constant 32 : index
+    %part = func.call @flash_next_q8_partial(%width, %token, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
+    %sum = kernel.subgroup.reduce<addf> %part : f32
+    %c0 = index.constant 0 : index
+    %leader = index.cmp eq, %lane, %c0 : index
+    scf.if %leader {
+      %quarter = scalar.constant 0.25 : f32
+      %c1 = scalar.constant 1.0 : f32
+      %scaled = scalar.mulf %sum, %quarter : f32
+      %negative = scalar.negf %scaled : f32
+      %exponential = scalar.expf<afn> %negative : f32
+      %denominator = scalar.addf %c1, %exponential : f32
+      %activated = scalar.divf %scaled, %denominator : f32
+      %packed = scalar.fptrunc %activated : f32 to bf16
+      %origin = index.constant 0 : offset
+      %view = buffer.view %output[%origin] : buffer -> view<[%tokens]x320xbf16>
+      view.store %packed, %view[%token, %row] : bf16, view<[%tokens]x320xbf16>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@flash_next_head_wave32) @flash_next_vocabulary() {
+  %groups = index.constant 62080 : index
+  %rows = config.get @flash_next.span_capacity : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %rows, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @flash_next.span_capacity : index
+  %token = kernel.workgroup.id<y> : index
+  %count = func.call @flash_next_token_count(%epoch, %rows) : (buffer, index) -> (index)
+  %active = index.cmp ult, %token, %count : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %c4 = index.constant 4 : index
+    %row = index.madd %group, %c4, %wave : index
+    %width = index.constant 2560 : index
+    %stride = index.constant 32 : index
+    %part = func.call @flash_next_q8_partial(%width, %token, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
+    %sum = kernel.subgroup.reduce<addf> %part : f32
+    %c0 = index.constant 0 : index
+    %leader = index.cmp eq, %lane, %c0 : index
+    scf.if %leader {
+      %packed = scalar.fptrunc %sum : f32 to bf16
+      %logit = scalar.extf %packed : bf16 to f32
+      %origin = index.constant 0 : offset
+      %view = buffer.view %output[%origin] : buffer -> view<[%rows]x248320xf32>
+      view.store %logit, %view[%token, %row] : f32, view<[%rows]x248320xf32>
+    }
+  }
+  kernel.return
+}
+
+kernel.def @flash_next_sample() {
+  %rows = config.get @flash_next.span_capacity : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %logits: buffer, %output: buffer) {
+  %row = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %count_word = view.load %header[2] : view<3xi32> -> i32
+  %count = index.cast %count_word : i32 to index
+  %active = index.cmp ult, %row, %count : index
+  scf.if %active {
+    %identity_origin = index.constant 5088 : offset
+    %identities = buffer.view %epoch[%identity_origin] : buffer -> view<128x2xi32>
+    %owner_word = view.load %identities[%row, 0] : view<128x2xi32> -> i32
+    %position_word = view.load %identities[%row, 1] : view<128x2xi32> -> i32
+    %owner_value = index.cast %owner_word : i32 to index
+    %owner = index.assume %owner_value [range(%owner_value, 0, 15)] : index
+    %position = scalar.extui %position_word : i32 to i64
+    %policy_begin = index.constant 4704 : offset
+    %policy_stride = index.constant 24 : offset
+    %policy_relative = index.scale %owner, %policy_stride : index, offset -> offset
+    %policy_origin = index.add %policy_begin, %policy_relative : offset
+    %floats = buffer.view %epoch[%policy_origin] : buffer -> view<6xf32>
+    %words = buffer.view %epoch[%policy_origin] : buffer -> view<6xi32>
+    %seed_relative = index.constant 16 : offset
+    %seed_origin = index.add %policy_origin, %seed_relative : offset
+    %seeds = buffer.view %epoch[%seed_origin] : buffer -> view<1xi64>
+    %temperature = view.load %floats[0] : view<6xf32> -> f32
+    %top_p = view.load %floats[1] : view<6xf32> -> f32
+    %top_k = view.load %words[2] : view<6xi32> -> i32
+    %seed = view.load %seeds[0] : view<1xi64> -> i64
+    %row_bytes = index.constant 993280 : offset
+    %logits_origin = index.scale %row, %row_bytes : index, offset -> offset
+    // The checkpoint pads its physical vocabulary to 248320 rows. Only
+    // the 248077 tokenizer IDs may be sampled.
+    %columns = index.constant 248077 : index
+    %selected = template.apply<@sampling.categorical_f32>(%columns, %logits, %logits_origin, %temperature, %top_p, %top_k, %seed, %position) : (index, buffer, offset, f32, f32, i32, i64, i64) -> (i32)
+    %c0 = index.constant 0 : index
+    %publishes = index.cmp eq, %thread, %c0 : index
+    scf.if %publishes {
+      %rows = config.get @flash_next.span_capacity : index
+      %output_row = index.assume %row [range(%row, 0, 15), lt(%row, %rows)] : index
+      %ids = buffer.view %output[%origin] : buffer -> view<[%rows]xi32>
+      view.store %selected, %ids[%output_row] : i32, view<[%rows]xi32>
+    }
+  }
+  kernel.return
+}
+
+command.program.def public @flash_next_output_head() launch(%parameters: buffer, %epoch: buffer, %residual: buffer, %outputs: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %rows = config.get @flash_next.span_capacity : index
+  %residual_stride = index.constant 20480 : offset
+  %rank_stride = index.constant 640 : offset
+  %hidden_stride = index.constant 5120 : offset
+  %logit_stride = index.constant 993280 : offset
+  %residual_bytes = index.scale %tokens, %residual_stride : index, offset -> offset
+  %rank_bytes = index.scale %tokens, %rank_stride : index, offset -> offset
+  %hidden_bytes = index.scale %tokens, %hidden_stride : index, offset -> offset
+  %logit_bytes = index.scale %rows, %logit_stride : index, offset -> offset
+  %header_bytes = index.constant 12 : offset
+  %selected = buffer.alloca<global> align(256) %residual_bytes : buffer
+  %head_epoch = buffer.alloca<global> align(16) %header_bytes : buffer
+  %normalized = buffer.alloca<global> align(256) %residual_bytes : buffer
+  %lowrank = buffer.alloca<global> align(256) %rank_bytes : buffer
+  %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %logits = buffer.alloca<global> align(256) %logit_bytes : buffer
+  %gamma = command.parameter %parameters, "output_hc_norm.weight" : view<4x2560xf32>
+  %down = command.parameter %parameters, "output_hc_down.weight" : view<3481600xi8>
+  %up = command.parameter %parameters, "output_hc_up.weight" : view<3481600xi8>
+  %head = command.parameter %parameters, "output.weight" : view<675430400xi8>
+  kernel.launch @flash_next_select_output_rows(%epoch, %residual, %head_epoch, %selected) : (buffer, buffer, buffer, buffer)
+  kernel.launch @hc_normalize(%head_epoch, %selected, %gamma, %normalized) : (buffer, buffer, view<4x2560xf32>, buffer)
+  kernel.launch @flash_next_head_down(%head_epoch, %normalized, %down, %lowrank) : (buffer, buffer, view<3481600xi8>, buffer)
+  kernel.launch @hc_up_mix(%head_epoch, %normalized, %lowrank, %up, %hidden) : (buffer, buffer, buffer, view<3481600xi8>, buffer)
+  kernel.launch @flash_next_vocabulary(%head_epoch, %hidden, %head, %logits) : (buffer, buffer, view<675430400xi8>, buffer)
+  kernel.launch @flash_next_sample(%epoch, %logits, %outputs) : (buffer, buffer, buffer)
+  command.return
+}
