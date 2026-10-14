@@ -4,9 +4,9 @@ kernel.decl @qwen38_vision_position_layernorm_statistics() launch(%position_tabl
 
 kernel.decl @qwen38_vision_layernorm_apply() launch(%residual: buffer, %statistics: buffer, %weight: buffer, %bias: buffer, %output: buffer)
 
-kernel.decl @qwen38_vision_key_value_cohort(%cohort$13: index) launch(%cohort$14: index, %residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %qkv_weight: buffer, %qkv_bias: buffer, %key: buffer, %value: buffer) where [range(%cohort$14, 0, 3)]
+kernel.decl @qwen38_vision_key_value_cohort(%cohort: index) launch(%cohort_argument: index, %residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %qkv_weight: buffer, %qkv_bias: buffer, %key: buffer, %value: buffer) where [range(%cohort_argument, 0, 3)]
 
-kernel.decl @qwen38_vision_attention_cohort(%cohort$23: index) launch(%cohort$24: index, %residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %qkv_weight: buffer, %qkv_bias: buffer, %key: buffer, %value: buffer, %output_weight: buffer, %output_bias: buffer, %output: buffer) where [range(%cohort$24, 0, 3)]
+kernel.decl @qwen38_vision_attention_cohort(%cohort: index) launch(%cohort_argument: index, %residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %qkv_weight: buffer, %qkv_bias: buffer, %key: buffer, %value: buffer, %output_weight: buffer, %output_bias: buffer, %output: buffer) where [range(%cohort_argument, 0, 3)]
 
 kernel.decl @qwen38_vision_attention_output_256() launch(%context: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
 
