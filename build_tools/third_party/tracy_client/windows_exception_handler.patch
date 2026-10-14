@@ -1,0 +1,7 @@
+--- a/public/client/TracyProfiler.cpp
++++ b/public/client/TracyProfiler.cpp
+@@ -1513,3 +1513,3 @@
+     // want to catch unhandled exceptions.
+-    m_prevHandler = SetUnhandledExceptionFilter( CrashFilter );
++    m_prevHandler = reinterpret_cast<void*>( SetUnhandledExceptionFilter( CrashFilter ) );
+ #endif

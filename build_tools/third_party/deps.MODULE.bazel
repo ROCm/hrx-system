@@ -53,6 +53,7 @@ http_archive(
         "//build_tools/third_party/tracy_client:worker_signal_mask.patch",
         "//build_tools/third_party/tracy_client:instruction_symbols.patch",
         "//build_tools/third_party/tracy_client:symbol_session.patch",
+        "//build_tools/third_party/tracy_client:windows_exception_handler.patch",
     ],
     sha256 = "0b8a3929ffd53217b4183064ed0585f6179e7c5f9ae5b832d4153c3ba8ce37d3",
     strip_prefix = "tracy-5479a42ef9346b64e6d1b860ae58aa8abdb0c7f6",

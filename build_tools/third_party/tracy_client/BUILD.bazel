@@ -11,5 +11,6 @@ exports_files([
     "instruction_symbols.patch",
     "symbol_session.patch",
     "tracy_client.BUILD.bazel",
+    "windows_exception_handler.patch",
     "worker_signal_mask.patch",
 ])

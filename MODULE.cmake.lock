@@ -142,6 +142,7 @@ set(IREE_DEP_TRACY_CLIENT_PATCHES
   "//build_tools/third_party/tracy_client:worker_signal_mask.patch"
   "//build_tools/third_party/tracy_client:instruction_symbols.patch"
   "//build_tools/third_party/tracy_client:symbol_session.patch"
+  "//build_tools/third_party/tracy_client:windows_exception_handler.patch"
 )
 set(IREE_DEP_TRACY_CLIENT_PATCH_ARGS
   "-p1"
