@@ -257,7 +257,7 @@ static iree_status_t loom_aie2p_kernel_append_access(
       (loom_aie2p_kernel_access_binding_t){
           .binding_index = binding_index,
           .access = access,
-  };
+      };
   ++operation_plan->binding_count;
   return iree_ok_status();
 }
