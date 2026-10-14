@@ -9,4 +9,43 @@
 
 iree_add_all_subdirs()
 
+iree_cc_library(
+  NAME
+    publisher
+  HDRS
+    "publisher.h"
+  SRCS
+    "publisher.c"
+  DEPS
+    iree::base
+    iree::base::threading
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    publisher_test
+  SRCS
+    "publisher_test.cc"
+  DEPS
+    ::publisher
+    iree::base
+    iree::base::threading
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    publisher_benchmark
+  SRCS
+    "publisher_benchmark.cc"
+  DEPS
+    ::publisher
+    iree::base
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

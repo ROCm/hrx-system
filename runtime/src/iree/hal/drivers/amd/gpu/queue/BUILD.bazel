@@ -4,7 +4,44 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
 package(
     default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
     licenses = ["notice"],
+)
+
+iree_runtime_cc_library(
+    name = "publisher",
+    srcs = ["publisher.c"],
+    hdrs = ["publisher.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "publisher_test",
+    srcs = ["publisher_test.cc"],
+    deps = [
+        ":publisher",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "publisher_benchmark",
+    srcs = ["publisher_benchmark.cc"],
+    deps = [
+        ":publisher",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
 )
