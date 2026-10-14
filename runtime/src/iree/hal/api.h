@@ -17,6 +17,7 @@
 #include "iree/hal/buffer_view_util.h"   // IWYU pragma: export
 #include "iree/hal/channel.h"            // IWYU pragma: export
 #include "iree/hal/channel_provider.h"   // IWYU pragma: export
+#include "iree/hal/channel_transfer.h"   // IWYU pragma: export
 #include "iree/hal/command_buffer.h"     // IWYU pragma: export
 #include "iree/hal/device.h"             // IWYU pragma: export
 #include "iree/hal/device_event.h"       // IWYU pragma: export

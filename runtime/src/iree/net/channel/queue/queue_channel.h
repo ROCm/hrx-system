@@ -240,6 +240,24 @@ IREE_API_EXPORT iree_status_t iree_net_queue_channel_send_command(
     iree_net_queue_channel_t* channel, uint32_t queue_id,
     const iree_net_queue_channel_send_params_t* params);
 
+// Posts the current body destination for one exact COMMAND coordinate.
+//
+// NULL frontiers mean empty frontiers. Entries obey the canonical frontier
+// contract and are encoded in the same order as a send builder. Header and
+// frontier metadata must fit IREE_NET_MESSAGE_RECEIVE_PREFIX_CAPACITY; the
+// nonempty body has no such metadata bound. Posted commands on an endpoint
+// must use the same total frontier count, giving one matching prefix width.
+// Frontiers are borrowed only for this call. The operation and body follow
+// message_endpoint_receive ownership.
+// A matched command completes |callback| instead of invoking on_command.
+// The caller posts before granting the peer permission to send this coordinate.
+IREE_API_EXPORT iree_status_t iree_net_queue_channel_receive_command(
+    iree_net_queue_channel_t* channel, uint32_t queue_id,
+    const iree_async_frontier_t* wait_frontier,
+    const iree_async_frontier_t* signal_frontier,
+    iree_net_message_receive_operation_t* operation, iree_byte_span_t data,
+    iree_net_receive_completion_callback_t callback);
+
 // Sends one ADVANCE carrying a nonempty signal frontier.
 //
 // ADVANCE does not target one queue and cannot carry a wait frontier. Its

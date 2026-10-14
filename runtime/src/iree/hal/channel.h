@@ -19,6 +19,9 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_hal_device_t iree_hal_device_t;
+typedef struct iree_hal_channel_transfer_t iree_hal_channel_transfer_t;
+typedef struct iree_hal_channel_transfer_params_t
+    iree_hal_channel_transfer_params_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_channel_t
@@ -115,6 +118,27 @@ iree_hal_channel_rank(const iree_hal_channel_t* channel);
 IREE_API_EXPORT int32_t
 iree_hal_channel_count(const iree_hal_channel_t* channel);
 
+// Receipt joining channel-owned native work and dependency callbacks. Owns
+// |status|, including any earlier channel failure. This does not join GPU work
+// submitted by the application with the same buffers or published descriptors.
+typedef struct iree_hal_channel_deactivated_callback_t {
+  // Invoked once after accepted deactivation, on the channel's progress owner.
+  void (*fn)(void* user_data, iree_status_t status);
+  // Borrowed through the callback.
+  void* user_data;
+} iree_hal_channel_deactivated_callback_t;
+
+// Stops admission, resolves outstanding exchanges, and joins native borrowers.
+// Consumes |reason| on both success and rejection. An OK reason requests normal
+// closure; unfinished exchanges are cancelled. A failure also fails dependent
+// work and is returned through the retirement callback. Accepted deactivation
+// owes exactly one callback. The caller keeps |channel| and its progress owner
+// alive through that receipt, then releases transfers and the channel. Invoke
+// once; concurrent duplicate calls are rejected without a callback.
+IREE_API_EXPORT iree_status_t
+iree_hal_channel_deactivate(iree_hal_channel_t* channel, iree_status_t reason,
+                            iree_hal_channel_deactivated_callback_t callback);
+
 //===----------------------------------------------------------------------===//
 // iree_hal_channel_t implementation details
 //===----------------------------------------------------------------------===//
@@ -130,6 +154,17 @@ typedef struct iree_hal_channel_vtable_t {
   void(IREE_API_PTR* query_rank_and_count)(const iree_hal_channel_t* channel,
                                            int32_t* out_rank,
                                            int32_t* out_count);
+
+  // Qualifies and captures immutable communication resources during setup.
+  iree_status_t(IREE_API_PTR* prepare_transfer)(
+      iree_hal_channel_t* channel,
+      const iree_hal_channel_transfer_params_t* params,
+      iree_hal_channel_transfer_t** out_transfer);
+
+  // Consumes the reason and asynchronously joins channel-owned work.
+  iree_status_t(IREE_API_PTR* deactivate)(
+      iree_hal_channel_t* channel, iree_status_t reason,
+      iree_hal_channel_deactivated_callback_t callback);
 } iree_hal_channel_vtable_t;
 IREE_HAL_ASSERT_VTABLE_LAYOUT(iree_hal_channel_vtable_t);
 

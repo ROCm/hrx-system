@@ -22,6 +22,7 @@ typedef struct iree_hal_memory_mapping_t iree_hal_memory_mapping_t;
 typedef struct iree_hal_barrier_t iree_hal_barrier_t;
 typedef struct iree_hal_buffer_ref_list_t iree_hal_buffer_ref_list_t;
 typedef struct iree_hal_command_buffer_t iree_hal_command_buffer_t;
+typedef struct iree_hal_channel_transfer_t iree_hal_channel_transfer_t;
 typedef struct iree_hal_device_t iree_hal_device_t;
 typedef struct iree_hal_dispatch_config_t iree_hal_dispatch_config_t;
 typedef struct iree_hal_executable_function_t iree_hal_executable_function_t;
@@ -830,6 +831,39 @@ iree_hal_queue_host_call(iree_hal_queue_t* queue,
                          const iree_hal_semaphore_list_t signal_semaphore_list,
                          iree_hal_host_call_t call, const uint64_t args[4],
                          iree_hal_host_call_flags_t flags);
+
+// Sends |length| bytes from |buffer| at |offset| through a prepared SEND
+// transfer after all waits. The range must inherit the preparation pool's
+// memory contract. Waits include allocation commitment and producer readiness.
+// |sequence| identifies this exchange on its directed peer/tag edge and must
+// increase strictly from a nonzero first value. The matching receive supplies
+// the same sequence and length. Submission order on |queue| creates no edge.
+// Signals return the local source borrow; they do not report peer consumption.
+// The caller orders local readers separately before source reuse. Successful
+// admission retains the range, transfer and dependencies through retirement;
+// asynchronous failures fail the signals. Rejection captures/signals nothing.
+// A route may bound outstanding submissions per prepared transfer and report
+// RESOURCE_EXHAUSTED when that admission capacity is occupied.
+IREE_API_EXPORT iree_status_t iree_hal_queue_channel_send(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_channel_transfer_t* transfer, uint64_t sequence,
+    iree_hal_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length);
+
+// Receives |length| bytes into |buffer| at |offset| through a prepared RECEIVE
+// transfer. The waits establish allocation commitment and grant permission to
+// overwrite its storage: normally they include the previous
+// generation's final consumer. Posting this call early grants no early credit.
+// Signals mean the bytes are ready for a dependent consumer on the qualified
+// memory route; they do not retire that consumer. Sequence/matching, admission,
+// retention and failure have the same contract as queue_channel_send.
+IREE_API_EXPORT iree_status_t iree_hal_queue_channel_recv(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_channel_transfer_t* transfer, uint64_t sequence,
+    iree_hal_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length);
 
 // Queries the concurrent residency of one dispatch on the exact |queue|.
 //

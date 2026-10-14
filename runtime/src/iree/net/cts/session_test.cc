@@ -235,7 +235,7 @@ struct SessionDirectEndpointReadyState {
   }
 
   iree_net_direct_endpoint_ready_callback_t callback() {
-    return {/*.fn=*/OnReady, /*.user_data=*/this};
+    return {.fn = OnReady, .user_data = this};
   }
 };
 

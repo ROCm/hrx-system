@@ -255,6 +255,17 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "native_semaphore_tests",
+    srcs = ["semaphore_test.cc"],
+    deps = [
+        ":backends",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/cts/util:test_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "heterogeneous_slab_pool_tests",
     srcs = ["heterogeneous_slab_pool_test.cc"],
     target_compatible_with = iree_select({

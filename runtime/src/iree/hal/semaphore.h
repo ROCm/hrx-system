@@ -153,7 +153,8 @@ enum iree_hal_semaphore_compatibility_bits_t {
 
   // Indicates the HAL implementation can perform a host-side wait on the
   // semaphore. The semaphore can be used as part of a submission at the cost of
-  // additional host-device synchronization.
+  // additional host-device synchronization. Successful waits publish preceding
+  // payload writes to host memory consumers.
   IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT = 1u << 0,
 
   // Indicates the HAL implementation can perform a device-side wait on the
@@ -163,7 +164,8 @@ enum iree_hal_semaphore_compatibility_bits_t {
 
   // Indicates the HAL implementation can perform a host-side signal of the
   // semaphore. The semaphore can be used as part of a submission at the cost of
-  // additional host-device synchronization.
+  // additional host-device synchronization. Dependent device waits acquire
+  // preceding host payload writes.
   IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_SIGNAL = 1u << 2,
 
   // Indicates the HAL implementation can perform a device-side signal of the

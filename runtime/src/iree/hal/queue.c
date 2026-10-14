@@ -11,6 +11,7 @@
 
 #include "iree/hal/buffer.h"
 #include "iree/hal/buffer_allocation.h"
+#include "iree/hal/channel_transfer.h"
 #include "iree/hal/command_buffer.h"
 #include "iree/hal/detail.h"
 #include "iree/hal/device.h"
@@ -294,6 +295,63 @@ static iree_status_t iree_hal_queue_validate_family_access(
         queue_family_ordinal, queue_family_affinity);
   }
   return iree_ok_status();
+}
+
+static iree_status_t iree_hal_queue_channel_transfer(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_channel_transfer_t* transfer,
+    iree_hal_channel_transfer_mode_t mode, uint64_t sequence,
+    iree_hal_buffer_ref_t buffer) {
+  if (!queue || !transfer) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "queue and prepared channel transfer are required");
+  }
+  if (transfer->params.mode != mode ||
+      iree_hal_queue_family_device(iree_hal_queue_family(queue)) !=
+          transfer->device) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "channel transfer mode or device does not match");
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_queue_validate_family_access(
+      queue, transfer->queue_family_affinity));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list));
+  if (!sequence) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "channel sequence must be nonzero");
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_hal_channel_transfer_validate_buffer(transfer, buffer));
+  return IREE_HAL_VTABLE_DISPATCH(transfer, iree_hal_channel_transfer, submit)(
+      transfer, queue, wait_semaphore_list, signal_semaphore_list, sequence,
+      buffer);
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_queue_channel_send(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_channel_transfer_t* transfer, uint64_t sequence,
+    iree_hal_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length) {
+  return iree_hal_queue_channel_transfer(
+      queue, wait_semaphore_list, signal_semaphore_list, transfer,
+      IREE_HAL_CHANNEL_TRANSFER_MODE_SEND, sequence,
+      iree_hal_make_buffer_ref(buffer, offset, length));
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_queue_channel_recv(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_channel_transfer_t* transfer, uint64_t sequence,
+    iree_hal_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length) {
+  return iree_hal_queue_channel_transfer(
+      queue, wait_semaphore_list, signal_semaphore_list, transfer,
+      IREE_HAL_CHANNEL_TRANSFER_MODE_RECEIVE, sequence,
+      iree_hal_make_buffer_ref(buffer, offset, length));
 }
 
 static iree_status_t iree_hal_queue_validate_barrier_list(

@@ -407,3 +407,52 @@ iree_status_t iree_net_queue_channel_send_advance(
                                      IREE_NET_QUEUE_MESSAGE_TYPE_ADVANCE,
                                      IREE_NET_QUEUE_ID_NONE, params);
 }
+
+iree_status_t iree_net_queue_channel_receive_command(
+    iree_net_queue_channel_t* channel, uint32_t queue_id,
+    const iree_async_frontier_t* wait_frontier,
+    const iree_async_frontier_t* signal_frontier,
+    iree_net_message_receive_operation_t* operation, iree_byte_span_t data,
+    iree_net_receive_completion_callback_t callback) {
+  const uint8_t wait_count = wait_frontier ? wait_frontier->entry_count : 0;
+  const uint8_t signal_count =
+      signal_frontier ? signal_frontier->entry_count : 0;
+  const iree_host_size_t prefix_length =
+      IREE_NET_QUEUE_MESSAGE_HEADER_SIZE +
+      ((iree_host_size_t)wait_count + signal_count) *
+          IREE_NET_QUEUE_FRONTIER_ENTRY_SIZE;
+  if (prefix_length > IREE_NET_MESSAGE_RECEIVE_PREFIX_CAPACITY) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "queue receive frontiers exceed matching capacity");
+  }
+  if (!data.data_length) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "COMMAND payload must be nonempty");
+  }
+  uint8_t prefix[IREE_NET_MESSAGE_RECEIVE_PREFIX_CAPACITY];
+  iree_net_queue_message_encode_header(IREE_NET_QUEUE_MESSAGE_TYPE_COMMAND,
+                                       wait_count, signal_count, queue_id,
+                                       prefix);
+  const iree_net_queue_frontier_builder_t wait_builder =
+      iree_net_queue_frontier_builder_make(
+          prefix + IREE_NET_QUEUE_MESSAGE_HEADER_SIZE, wait_count);
+  const iree_net_queue_frontier_builder_t signal_builder =
+      iree_net_queue_frontier_builder_make(
+          prefix + IREE_NET_QUEUE_MESSAGE_HEADER_SIZE +
+              (iree_host_size_t)wait_count * IREE_NET_QUEUE_FRONTIER_ENTRY_SIZE,
+          signal_count);
+  for (iree_host_size_t i = 0; i < wait_count; ++i) {
+    iree_net_queue_frontier_builder_set(&wait_builder, i,
+                                        wait_frontier->entries[i]);
+  }
+  for (iree_host_size_t i = 0; i < signal_count; ++i) {
+    iree_net_queue_frontier_builder_set(&signal_builder, i,
+                                        signal_frontier->entries[i]);
+  }
+  const iree_net_message_endpoint_receive_params_t params = {
+      .prefix = iree_make_const_byte_span(prefix, prefix_length),
+      .data = data,
+      .completion_callback = callback};
+  return iree_net_message_endpoint_receive(channel->endpoint, operation,
+                                           &params);
+}

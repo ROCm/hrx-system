@@ -34,6 +34,16 @@ IREE_API_EXPORT void iree_hal_channel_provider_retain(
 IREE_API_EXPORT void iree_hal_channel_provider_release(
     iree_hal_channel_provider_t* channel_provider);
 
+// Creates the channel selected by this provider for |device|. The provider
+// must be configured before channel creation; replacing it does not change
+// existing channels. A NULL provider or a rendezvous-only provider returns
+// UNIMPLEMENTED. Device implementations may supply their own native creation
+// when they have no replacing provider.
+IREE_API_EXPORT iree_status_t iree_hal_channel_provider_create_channel(
+    iree_hal_channel_provider_t* channel_provider, iree_hal_device_t* device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_channel_params_t params, iree_hal_channel_t** out_channel);
+
 // Returns the rank the process represents as a participant in the default
 // collective group in `[0, count)` and the total participant count.
 // May return IREE_HAL_CHANNEL_RANK_DEFAULT/IREE_HAL_CHANNEL_COUNT_DEFAULT if
@@ -64,6 +74,13 @@ typedef struct iree_hal_channel_provider_vtable_t {
 
   iree_status_t(IREE_API_PTR* exchange_default_id)(
       iree_hal_channel_provider_t* channel_provider, iree_byte_span_t id);
+
+  // Optional replacement for device-native channel construction. Consumes
+  // already validated device queue-family affinity; retains its own services.
+  iree_status_t(IREE_API_PTR* create_channel)(
+      iree_hal_channel_provider_t* channel_provider, iree_hal_device_t* device,
+      iree_hal_queue_family_affinity_t queue_family_affinity,
+      iree_hal_channel_params_t params, iree_hal_channel_t** out_channel);
 } iree_hal_channel_provider_vtable_t;
 IREE_HAL_ASSERT_VTABLE_LAYOUT(iree_hal_channel_provider_vtable_t);
 

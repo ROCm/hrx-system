@@ -359,6 +359,26 @@ iree_cc_test(
 )
 endif()
 
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    native_semaphore_tests
+  SRCS
+    "semaphore_test.cc"
+  DEPS
+    ::backends
+    iree::hal
+    iree::hal::cts::util::test_base
+    iree::hal::cts::util::test_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 if(IREE_HAL_DRIVER_AMDGPU AND IREE_HAL_DRIVER_TASK)
 iree_cc_test(
   NAME

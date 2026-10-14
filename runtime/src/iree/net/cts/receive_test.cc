@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "iree/async/proactor_platform.h"
+#include "iree/net/channel/queue/queue_channel.h"
 #include "iree/net/connection.h"
 #include "iree/net/cts/transport_backend.h"
 #include "iree/net/message_endpoint.h"
@@ -95,6 +96,9 @@ class ReceiveTest : public ::testing::Test {
 
   void TearDown() override {
     Drain();
+    for (auto* channel : queue_channels_) {
+      iree_net_queue_channel_free(channel);
+    }
     if (listener_) {
       bool stopped = false;
       IREE_EXPECT_OK(iree_net_listener_stop(
@@ -213,6 +217,8 @@ class ReceiveTest : public ::testing::Test {
   iree_net_connection_t* connections_[2] = {};
   // Borrowed endpoint views in corresponding connection namespaces.
   iree_net_message_endpoint_t endpoints_[2] = {};
+  // Optional protocol adapters, freed after their endpoint callbacks retire.
+  iree_net_queue_channel_t* queue_channels_[2] = {};
   // Ordinary unmatched messages delivered through the existing callback.
   std::vector<std::string> messages_;
   // Largest allocation requested by the transport allocator in an interval.
@@ -324,6 +330,88 @@ TEST_F(ReceiveTest, WrongExtentFailsBeforeTargetWrite) {
   EXPECT_TRUE(std::all_of(target.begin(), target.end(),
                           [](uint8_t byte) { return byte == 0xCC; }));
   EXPECT_TRUE(messages_.empty());
+}
+
+TEST_F(ReceiveTest, QueueFrontiersSelectExactBodyWithoutCommandDelivery) {
+  for (int side = 0; side < 2; ++side) {
+    const iree_net_queue_channel_callbacks_t callbacks = {
+        .on_command =
+            [](void*, uint32_t, const iree_net_queue_frontier_view_t*,
+               const iree_net_queue_frontier_view_t*, iree_const_byte_span_t,
+               iree_async_buffer_lease_t*) {
+              ADD_FAILURE() << "posted command reached ordinary delivery";
+              return iree_ok_status();
+            },
+        .on_advance =
+            [](void*, const iree_net_queue_frontier_view_t*,
+               iree_const_byte_span_t,
+               iree_async_buffer_lease_t*) { return iree_ok_status(); },
+        .on_error = OnError,
+        .user_data = this,
+    };
+    IREE_ASSERT_OK(iree_net_queue_channel_allocate(endpoints_[side], callbacks,
+                                                   iree_allocator_system(),
+                                                   &queue_channels_[side]));
+    iree_net_queue_channel_attach(queue_channels_[side]);
+  }
+  iree_async_single_frontier_t wait = {.entry_count = 1, .entries = {{12, 3}}};
+  iree_async_single_frontier_t signal = {
+      .entry_count = 1,
+      .entries = {{19, 7}},
+  };
+  iree_net_message_receive_operation_t operation = {};
+  std::array<uint8_t, 40976> target = {};
+  Completion received;
+  IREE_ASYNC_FIXED_FRONTIER_TYPE(WaitFrontier, 3);
+  const WaitFrontier oversized_wait = {
+      .entry_count = 3,
+      .entries = {{12, 3}, {13, 4}, {14, 5}},
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_net_queue_channel_receive_command(
+          queue_channels_[1], 13,
+          reinterpret_cast<const iree_async_frontier_t*>(&oversized_wait),
+          iree_async_single_frontier_as_const_frontier(&signal), &operation,
+          iree_make_byte_span(target.data(), target.size()),
+          {Completion::Complete, &received}));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_queue_channel_receive_command(
+          queue_channels_[1], 13,
+          iree_async_single_frontier_as_const_frontier(&wait),
+          iree_async_single_frontier_as_const_frontier(&signal), &operation,
+          iree_byte_span_empty(), {Completion::Complete, &received}));
+  IREE_ASSERT_OK(iree_net_queue_channel_receive_command(
+      queue_channels_[1], 13,
+      iree_async_single_frontier_as_const_frontier(&wait),
+      iree_async_single_frontier_as_const_frontier(&signal), &operation,
+      iree_make_byte_span(target.data(), target.size()),
+      {Completion::Complete, &received}));
+  const std::string body(target.size(), 'X');
+  auto span =
+      iree_async_span_from_ptr(const_cast<char*>(body.data()), body.size());
+  Completion sent;
+  const iree_net_queue_channel_send_params_t params = {
+      .wait_frontier_count = 1,
+      .signal_frontier_count = 1,
+      .build =
+          [](void*, const iree_net_queue_message_builder_t* builder) {
+            iree_net_queue_frontier_builder_set(&builder->wait_frontier, 0,
+                                                {12, 3});
+            iree_net_queue_frontier_builder_set(&builder->signal_frontier, 0,
+                                                {19, 7});
+            return iree_ok_status();
+          },
+      .payload = iree_async_span_list_make(&span, 1),
+      .completion_callback = {Completion::Complete, &sent},
+  };
+  IREE_ASSERT_OK(
+      iree_net_queue_channel_send_command(queue_channels_[0], 13, &params));
+  PollUntil([&] { return received.count && sent.count; });
+  EXPECT_EQ(received.code, IREE_STATUS_OK);
+  EXPECT_EQ(received.bytes, target.size());
+  EXPECT_EQ(memcmp(target.data(), body.data(), body.size()), 0);
 }
 
 TEST_F(ReceiveTest, PrefixOnlyMessageCompletesEmptyDestination) {

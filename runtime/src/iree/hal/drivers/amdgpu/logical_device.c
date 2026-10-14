@@ -2826,8 +2826,11 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_channel(
     iree_hal_device_t* base_device,
     iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_channel_params_t params, iree_hal_channel_t** out_channel) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "AMDGPU collective channels not yet implemented");
+  iree_hal_amdgpu_logical_device_t* device =
+      iree_hal_amdgpu_logical_device_cast(base_device);
+  return iree_hal_channel_provider_create_channel(
+      device->channel_provider, base_device, queue_family_affinity, params,
+      out_channel);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_create_aql_command_buffer(
@@ -3076,6 +3079,18 @@ static iree_hal_semaphore_compatibility_t
 iree_hal_amdgpu_logical_device_query_semaphore_compatibility(
     iree_hal_device_t* base_device, iree_hal_semaphore_t* semaphore) {
   if (iree_hal_amdgpu_semaphore_isa(semaphore)) {
+    const iree_hal_semaphore_flags_t flags =
+        iree_hal_amdgpu_semaphore_flags(semaphore);
+    const iree_hal_semaphore_flags_t public_flags =
+        IREE_HAL_SEMAPHORE_FLAG_HOST_INTERRUPT |
+        IREE_HAL_SEMAPHORE_FLAG_EXPORTABLE |
+        IREE_HAL_SEMAPHORE_FLAG_EXPORTABLE_TIMEPOINTS;
+    // Private device edges may publish at AGENT scope. Host progress must not
+    // treat a completed timeline as publication of payload bytes to the CPU.
+    if (iree_any_bit_set(flags, IREE_HAL_SEMAPHORE_FLAG_DEVICE_LOCAL) &&
+        !iree_any_bit_set(flags, public_flags)) {
+      return IREE_HAL_SEMAPHORE_COMPATIBILITY_DEVICE_ONLY;
+    }
     return IREE_HAL_SEMAPHORE_COMPATIBILITY_ALL;
   }
   return IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_ONLY;

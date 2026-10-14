@@ -696,8 +696,10 @@ static iree_status_t iree_hal_task_device_create_channel(
     iree_hal_device_t* base_device,
     iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_channel_params_t params, iree_hal_channel_t** out_channel) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "collectives not implemented");
+  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
+  return iree_hal_channel_provider_create_channel(
+      device->channel_provider, base_device, queue_family_affinity, params,
+      out_channel);
 }
 
 static iree_status_t iree_hal_task_device_create_command_buffer(

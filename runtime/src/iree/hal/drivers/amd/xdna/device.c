@@ -37,6 +37,8 @@ typedef struct iree_hal_amd_xdna_device_t {
   iree_hal_queue_t* queue;
   // Owned facade for prepared ordinary native allocations.
   iree_hal_allocator_t* allocator;
+  // Retained application provider for prepared communication resources.
+  iree_hal_channel_provider_t* channel_provider;
   // Device-owned resources shared by pools over the native memory domain.
   struct {
     // Capacity-change notification driven by the device proactor.
@@ -141,6 +143,7 @@ static void iree_hal_amd_xdna_device_finalize(void* user_data) {
   device->queue = NULL;
   iree_hal_queue_release(queue);
   iree_hal_allocator_release(device->allocator);
+  iree_hal_channel_provider_release(device->channel_provider);
   iree_hal_amd_xdna_command_arena_free(device->command_arena);
   iree_hal_memory_maintenance_release(device->memory.maintenance);
   iree_async_notification_release(device->memory.notification);
@@ -282,7 +285,12 @@ static iree_hal_allocator_t* iree_hal_amd_xdna_device_device_allocator(
 }
 
 static void iree_hal_amd_xdna_device_replace_channel_provider(
-    iree_hal_device_t* device, iree_hal_channel_provider_t* provider) {}
+    iree_hal_device_t* base_device, iree_hal_channel_provider_t* provider) {
+  iree_hal_amd_xdna_device_t* device = (iree_hal_amd_xdna_device_t*)base_device;
+  iree_hal_channel_provider_retain(provider);
+  iree_hal_channel_provider_release(device->channel_provider);
+  device->channel_provider = provider;
+}
 
 static iree_status_t iree_hal_amd_xdna_device_trim(iree_hal_device_t* device) {
   iree_hal_amd_xdna_queue_trim(((iree_hal_amd_xdna_device_t*)device)->queue);
@@ -387,8 +395,9 @@ static iree_status_t iree_hal_amd_xdna_device_create_channel(
     iree_hal_device_t* device,
     iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_channel_params_t params, iree_hal_channel_t** out_channel) {
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "XDNA device does not support create_channel");
+  return iree_hal_channel_provider_create_channel(
+      ((iree_hal_amd_xdna_device_t*)device)->channel_provider, device,
+      queue_family_affinity, params, out_channel);
 }
 
 static iree_status_t iree_hal_amd_xdna_device_create_command_buffer(

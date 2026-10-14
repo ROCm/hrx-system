@@ -344,6 +344,7 @@ iree_cc_library(
     iree::async
     iree::async::platform
     iree::base
+    iree::net::channel::queue::queue_channel
     iree::net::connection
     iree::net::message_endpoint
     iree::net::transport_factory

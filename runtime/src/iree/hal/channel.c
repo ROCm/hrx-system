@@ -127,3 +127,22 @@ iree_hal_channel_count(const iree_hal_channel_t* channel) {
   iree_hal_channel_query_rank_and_count(channel, NULL, &count);
   return count;
 }
+
+IREE_API_EXPORT iree_status_t
+iree_hal_channel_deactivate(iree_hal_channel_t* channel, iree_status_t reason,
+                            iree_hal_channel_deactivated_callback_t callback) {
+  IREE_ASSERT_ARGUMENT(channel);
+  if (!callback.fn) {
+    return iree_status_join(
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "channel deactivation requires a retirement callback"),
+        reason);
+  }
+  if (!_VTABLE_DISPATCH(channel, deactivate)) {
+    return iree_status_join(
+        iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                         "channel does not implement deactivation"),
+        reason);
+  }
+  return _VTABLE_DISPATCH(channel, deactivate)(channel, reason, callback);
+}
