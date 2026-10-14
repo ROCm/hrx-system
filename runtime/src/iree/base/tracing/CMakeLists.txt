@@ -39,6 +39,7 @@ if(${IREE_TRACING_PROVIDER} STREQUAL "console")
     )
   endif()
 elseif(${IREE_TRACING_PROVIDER} STREQUAL "tracy")
+  include("${IREE_ROOT_DIR}/build_tools/third_party/tracy_client/tracy_client.cmake")
   iree_cc_library(
     NAME
       provider
@@ -48,12 +49,27 @@ elseif(${IREE_TRACING_PROVIDER} STREQUAL "tracy")
       "tracy.cc"
     DEPS
       iree::base::core_headers
-      Tracy::TracyClient
+      tracy_client::runtime
+      ${CMAKE_DL_LIBS}
     DEFINES
       "IREE_TRACING_PROVIDER_H=\"iree/base/tracing/tracy.h\""
       "IREE_TRACING_MODE=${IREE_TRACING_MODE}"
     PUBLIC
   )
+  if(IREE_TRACING_MODE GREATER 0)
+    iree_cc_test(
+      NAME
+        tracy_test
+      SRCS
+        "tracy_test.cc"
+      DEPS
+        ::provider
+        iree::base::core_headers
+        iree::testing::gtest
+        iree::testing::gtest_main
+        tracy_client::runtime
+    )
+  endif()
 else()
   # Add the dep so that the user-provided provider is linked in.
   # The user will also need to have set a header to include via

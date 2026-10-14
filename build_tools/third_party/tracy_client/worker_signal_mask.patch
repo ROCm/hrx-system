@@ -1,0 +1,57 @@
+--- a/public/client/TracyThread.hpp
++++ b/public/client/TracyThread.hpp
+@@ -5,6 +5,9 @@
+ #  include <windows.h>
+ #else
+ #  include <pthread.h>
++#  include <signal.h>
++#  include <stdio.h>
++#  include <stdlib.h>
+ #endif
+
+ #ifdef TRACY_MANUAL_LIFETIME
+@@ -66,7 +69,43 @@
+         : m_func( func )
+         , m_ptr( ptr )
+     {
+-        pthread_create( &m_thread, nullptr, Launch, this );
++        // Profiler workers must not receive process-directed application signals.
++        // Establish the mask before creation so there is no unblocked startup
++        // window, then restore the creator's original mask.
++        sigset_t mask;
++        sigfillset( &mask );
++        // Keep synchronous faults and the profiler's crash-freeze signal usable.
++        sigdelset( &mask, SIGILL );
++        sigdelset( &mask, SIGFPE );
++        sigdelset( &mask, SIGSEGV );
++        sigdelset( &mask, SIGBUS );
++        sigdelset( &mask, SIGABRT );
++        sigdelset( &mask, SIGTRAP );
++        sigdelset( &mask, SIGSYS );
++#  ifdef SIGEMT
++        sigdelset( &mask, SIGEMT );
++#  endif
++#  if defined __linux__ && !defined TRACY_NO_CRASH_HANDLER
++#    ifdef TRACY_CRASH_SIGNAL
++        sigdelset( &mask, TRACY_CRASH_SIGNAL );
++#    else
++        sigdelset( &mask, SIGPWR );
++#    endif
++#  endif
++        sigset_t previousMask;
++        const int blockError = pthread_sigmask( SIG_BLOCK, &mask, &previousMask );
++        if( blockError != 0 )
++        {
++            fprintf( stderr, "Tracy: cannot block worker signals: %d\n", blockError );
++            abort();
++        }
++        const int createError = pthread_create( &m_thread, nullptr, Launch, this );
++        const int restoreError = pthread_sigmask( SIG_SETMASK, &previousMask, nullptr );
++        if( createError != 0 || restoreError != 0 )
++        {
++            fprintf( stderr, "Tracy: cannot create worker or restore signals: %d, %d\n", createError, restoreError );
++            abort();
++        }
+     }
+
+     ~Thread()

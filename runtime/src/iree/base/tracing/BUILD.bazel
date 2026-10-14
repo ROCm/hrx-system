@@ -89,7 +89,25 @@ iree_runtime_cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        "//build_tools/bazel:dl",
+        "//build_tools/bazel:pthreads",
         "//runtime/src/iree/base:core_headers",
+        "@tracy_client//:runtime",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "tracy_test",
+    srcs = ["tracy_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/base/tracing:provider_tracy": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":tracy",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
         "@tracy_client//:runtime",
     ],
 )

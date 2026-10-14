@@ -138,8 +138,12 @@ set(IREE_DEP_TRACY_CLIENT_URLS
 set(IREE_DEP_TRACY_CLIENT_SHA256 "0b8a3929ffd53217b4183064ed0585f6179e7c5f9ae5b832d4153c3ba8ce37d3")
 set(IREE_DEP_TRACY_CLIENT_STRIP_PREFIX "tracy-5479a42ef9346b64e6d1b860ae58aa8abdb0c7f6")
 set(IREE_DEP_TRACY_CLIENT_BUILD_FILE "//build_tools/third_party/tracy_client:tracy_client.BUILD.bazel")
-set(IREE_DEP_TRACY_CLIENT_PATCHES "")
-set(IREE_DEP_TRACY_CLIENT_PATCH_ARGS "")
+set(IREE_DEP_TRACY_CLIENT_PATCHES
+  "//build_tools/third_party/tracy_client:worker_signal_mask.patch"
+)
+set(IREE_DEP_TRACY_CLIENT_PATCH_ARGS
+  "-p1"
+)
 
 set(IREE_DEP_CXX_KIND "http_archive")
 set(IREE_DEP_CXX_OWNER "shared")

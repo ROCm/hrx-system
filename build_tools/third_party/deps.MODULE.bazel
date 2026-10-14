@@ -48,6 +48,8 @@ http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_
 http_archive(
     name = "tracy_client",
     build_file = "//build_tools/third_party/tracy_client:tracy_client.BUILD.bazel",
+    patch_args = ["-p1"],
+    patches = ["//build_tools/third_party/tracy_client:worker_signal_mask.patch"],
     sha256 = "0b8a3929ffd53217b4183064ed0585f6179e7c5f9ae5b832d4153c3ba8ce37d3",
     strip_prefix = "tracy-5479a42ef9346b64e6d1b860ae58aa8abdb0c7f6",
     url = "https://github.com/wolfpld/tracy/archive/5479a42ef9346b64e6d1b860ae58aa8abdb0c7f6.tar.gz",
