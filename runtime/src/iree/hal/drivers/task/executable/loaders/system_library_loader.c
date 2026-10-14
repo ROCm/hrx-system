@@ -27,11 +27,13 @@
 // files. This is only expected to be present when there is a debug database
 // but we may want to extend it in the future.
 typedef struct iree_hal_system_executable_footer_t {
-  uint8_t magic[8];  // IREE_HAL_SYSTEM_EXECUTABLE_FOOTER_MAGIC
-  uint32_t version;  // IREE_HAL_SYSTEM_EXECUTABLE_FOOTER_VERSION
-  uint32_t flags;    // reserved
-  // Offset of the library within the parent data stream.
-  // Almost always zero but here in case we want to allow for chaining.
+  // IREE_HAL_SYSTEM_EXECUTABLE_FOOTER_MAGIC.
+  uint8_t magic[8];
+  // IREE_HAL_SYSTEM_EXECUTABLE_FOOTER_VERSION.
+  uint32_t version;
+  // Reserved; must be zero in version 0.
+  uint32_t flags;
+  // Library offset within the parent data stream; must be zero in version 0.
   uint64_t library_offset;
   // Size of the system library in bytes.
   uint64_t library_size;
@@ -49,26 +51,26 @@ typedef struct iree_hal_system_executable_footer_t {
 
 // Tries to find an iree_hal_system_executable_footer_t at the end of the
 // given executable data stream.
-static const iree_hal_system_executable_footer_t*
-iree_hal_system_executable_try_query_footer(
-    iree_const_byte_span_t executable_data) {
+static bool iree_hal_system_executable_try_query_footer(
+    iree_const_byte_span_t executable_data,
+    iree_hal_system_executable_footer_t* out_footer) {
   if (executable_data.data_length <
       sizeof(iree_hal_system_executable_footer_t)) {
-    return NULL;
+    return false;
   }
   const uint8_t* footer_ptr = executable_data.data +
                               executable_data.data_length -
                               sizeof(iree_hal_system_executable_footer_t);
-  const iree_hal_system_executable_footer_t* footer =
-      (const iree_hal_system_executable_footer_t*)(footer_ptr);
   static_assert(sizeof(IREE_HAL_SYSTEM_EXECUTABLE_FOOTER_MAGIC) - /*NUL*/ 1 ==
-                    sizeof(footer->magic),
+                    sizeof(out_footer->magic),
                 "magic number value must match struct size");
-  if (memcmp(footer->magic, IREE_HAL_SYSTEM_EXECUTABLE_FOOTER_MAGIC,
-             sizeof(footer->magic)) != 0) {
-    return NULL;
+  if (memcmp(footer_ptr, IREE_HAL_SYSTEM_EXECUTABLE_FOOTER_MAGIC,
+             sizeof(out_footer->magic)) != 0) {
+    return false;
   }
-  return footer;
+  // The producer writes the native struct, but the input need not be aligned.
+  memcpy(out_footer, footer_ptr, sizeof(*out_footer));
+  return true;
 }
 
 //===----------------------------------------------------------------------===//
@@ -99,22 +101,29 @@ static iree_status_t iree_hal_system_executable_load(
   // Check to see if the library has a footer indicating embedded debug data.
   iree_const_byte_span_t library_data = iree_const_byte_span_empty();
   iree_const_byte_span_t debug_data = iree_const_byte_span_empty();
-  const iree_hal_system_executable_footer_t* footer =
-      iree_hal_system_executable_try_query_footer(executable_data);
-  if (footer) {
+  iree_hal_system_executable_footer_t footer;
+  if (iree_hal_system_executable_try_query_footer(executable_data, &footer)) {
+    if (footer.version != IREE_HAL_SYSTEM_EXECUTABLE_FOOTER_VERSION ||
+        footer.flags != 0 || footer.library_offset != 0) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "unsupported system library footer version %u, flags %u, or "
+          "library offset %" PRIu64,
+          footer.version, footer.flags, footer.library_offset);
+    }
     // Debug file present; split the data contents.
-    iree_host_size_t data_length =
-        executable_data.data_length - sizeof(*footer);
-    if (footer->library_size > data_length ||
-        footer->debug_offset + footer->debug_size > data_length) {
+    iree_host_size_t data_length = executable_data.data_length - sizeof(footer);
+    if (footer.library_size > data_length ||
+        footer.debug_offset > data_length ||
+        footer.debug_size > data_length - footer.debug_offset) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
           "system library footer references out of range bytes");
     }
     library_data =
-        iree_make_const_byte_span(executable_data.data, footer->library_size);
+        iree_make_const_byte_span(executable_data.data, footer.library_size);
     debug_data = iree_make_const_byte_span(
-        executable_data.data + footer->debug_offset, footer->debug_size);
+        executable_data.data + footer.debug_offset, footer.debug_size);
   } else {
     // Entire data contents are the library.
     library_data = executable_data;

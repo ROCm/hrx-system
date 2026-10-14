@@ -59,6 +59,27 @@ iree_cc_library(
   PUBLIC
 )
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    system_library_loader_test
+  SRCS
+    "system_library_loader_test.cc"
+  DEPS
+    ::system_library_loader
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::hal::drivers::task::device
+    iree::hal::drivers::task::executable
+    iree::hal::drivers::task::executable::elf::testdata::elementwise_mul_native
+    iree::hal::drivers::task::executable::loader
+    iree::task::api
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
 endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
