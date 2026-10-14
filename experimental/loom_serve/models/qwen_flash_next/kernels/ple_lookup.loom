@@ -1,0 +1,62 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+func.decl @flash_next_iq4_codes(%weight: buffer, %block_origin: offset) -> (vector<32xbf16>, f32)
+
+// Each head selects one original 90-byte IQ4_NL row. The source hash owns
+// valid row IDs; offset arithmetic preserves addresses throughout the table.
+// Only selected activations expand, with F32 scale application and BF16 output.
+kernel.def @flash_next_ple_lookup_iq4() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %ids_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+  %span, %ids, %weight, %output = buffer.assume.noalias %span_arg, %ids_arg, %weight_arg, %output_arg : buffer, buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %capacity) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %blocks = index.constant 80 : index
+  %before_end = index.cmp ult, %token, %end : index
+  %is_block = index.cmp ult, %thread, %blocks : index
+  %active = scalar.andi %before_end, %is_block : i1
+  scf.if %active {
+    %c5 = index.constant 5 : index
+    %width = index.constant 32 : index
+    %head = index.div %thread, %c5 : index
+    %block = index.rem %thread, %c5 : index
+    %channel = index.mul %block, %width : index
+    %origin = index.constant 0 : offset
+    %row_bytes = index.constant 90 : offset
+    %block_bytes = index.constant 18 : offset
+    %id_view = buffer.view %ids[%origin] : buffer -> view<[%capacity]x16xi32>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%capacity]x16x160xbf16>
+    %id_i32 = view.load %id_view[%token, %head] : view<[%capacity]x16xi32> -> i32
+    %id_index = index.cast %id_i32 : i32 to index
+    %id = index.assume %id_index [range(%id_index, 0, 320001535)] : index
+    %row_origin = index.scale %id, %row_bytes : index, offset -> offset
+    %block_delta = index.scale %block, %block_bytes : index, offset -> offset
+    %block_origin = index.add %row_origin, %block_delta : offset
+    %codes, %scale = func.call @flash_next_iq4_codes(%weight, %block_origin) : (buffer, offset) -> (vector<32xbf16>, f32)
+    %values = vector.extf %codes : vector<32xbf16> to vector<32xf32>
+    %scales = vector.splat %scale : vector<32xf32>
+    %scaled = vector.mulf %values, %scales : vector<32xf32>
+    %packed = vector.fptrunc %scaled : vector<32xf32> to vector<32xbf16>
+    vector.store %packed, %output_view[%token, %head, %channel] : vector<32xbf16>, view<[%capacity]x16x160xbf16>
+  }
+  kernel.return
+}
+
+command.program.def public @flash_next_ple_lookup() launch(%parameters: buffer, %span: buffer, %row_ids: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "per_layer_token_embd.weight" : view<28800138240xi8>
+  kernel.launch @flash_next_ple_lookup_iq4(%span, %row_ids, %weight, %output) : (buffer, buffer, view<28800138240xi8>, buffer)
+  command.return
+}
