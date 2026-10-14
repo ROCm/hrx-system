@@ -1,0 +1,27 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
+
+template.decl @pocket.element() -> (index)
+
+// Single-thread dispatches use the same element ownership on CPU. Native GPU
+// dispatches assign independent output elements to workitems.
+template.def<@pocket.element> @pocket_element() -> (index) {
+  %group = kernel.workgroup.id<x> : index
+  %threads = config.get @pocket.threads : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %single = index.cmp eq, %threads, %one : index
+  %lane = scf.if %single -> (index) {
+    scf.yield %zero : index
+  } else {
+    %workitem = kernel.workitem.id<x> : index
+    scf.yield %workitem : index
+  }
+  %element = index.madd %group, %threads, %lane : index
+  template.return %element : index
+}

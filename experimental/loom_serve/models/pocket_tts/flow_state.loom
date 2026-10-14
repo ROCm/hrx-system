@@ -1,0 +1,387 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Per-stream scalar state and latent conversion. Previous latents remain
+// normalized for FlowLM; the codec alone receives scale/mean conversion.
+// Counters are absolute positions, advanced once after each phase.
+target.decl @pocket
+
+config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
+
+template.decl @pocket.element() -> (index)
+
+template.decl @pocket.previous_latent.body(%elements: index, %previous_storage: buffer, %position_storage: buffer, %bos_storage: buffer, %y_storage: buffer)
+
+template.def<@pocket.previous_latent.body> device @previous_latent_body(%elements: index, %previous_storage: buffer, %position_storage: buffer, %bos_storage: buffer, %y_storage: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %previous_view = buffer.view %previous_storage[%origin] : buffer -> view<32x1xf32>
+    %position_view = buffer.view %position_storage[%origin] : buffer -> view<1xi32>
+    %bos_view = buffer.view %bos_storage[%origin] : buffer -> view<32xbf16>
+    %y_view = buffer.view %y_storage[%origin] : buffer -> view<32x1xf32>
+    %position_value = view.load %position_view[0] : view<1xi32> -> i32
+    %zero = scalar.constant 0 : i32
+    %initial = scalar.cmpi eq, %position_value, %zero : i32
+    %value = scf.if %initial -> (f32) {
+      %begin_stored = view.load %bos_view[%element] : view<32xbf16> -> bf16
+      %begin = scalar.extf %begin_stored : bf16 to f32
+      scf.yield %begin : f32
+    } else {
+      %last = view.load %previous_view[%element, 0] : view<32x1xf32> -> f32
+      scf.yield %last : f32
+    }
+    view.store %value, %y_view[%element, 0] : f32, view<32x1xf32>
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.previous_latent() {
+  %elements = index.constant 32 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%previous_storage: buffer, %position_storage: buffer, %bos_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 32 : index
+  template.apply<@pocket.previous_latent.body>(%elements, %previous_storage, %position_storage, %bos_storage, %y_storage) : (index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+template.decl @pocket.advance.body(%elements: index, %increment: i32, %position_storage: buffer)
+
+template.def<@pocket.advance.body> device @advance_body(%elements: index, %increment: i32, %position_storage: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %position_view = buffer.view %position_storage[%origin] : buffer -> view<1xi32>
+    %position_value = view.load %position_view[0] : view<1xi32> -> i32
+    %next = scalar.addi %position_value, %increment : i32
+    view.store %next, %position_view[0] : i32, view<1xi32>
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.advance_1() {
+  %elements = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%position_storage: buffer) {
+  %elements = index.constant 1 : index
+  %increment = scalar.constant 1 : i32
+  template.apply<@pocket.advance.body>(%elements, %increment, %position_storage) : (index, i32, buffer)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.advance_16() {
+  %elements = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%position_storage: buffer) {
+  %elements = index.constant 1 : index
+  %increment = scalar.constant 16 : i32
+  template.apply<@pocket.advance.body>(%elements, %increment, %position_storage) : (index, i32, buffer)
+  kernel.return
+}
+
+template.decl @pocket.time_embedding.body(%elements: index, %time_storage: buffer, %frequencies_storage: buffer, %y_storage: buffer)
+
+template.def<@pocket.time_embedding.body> device @time_embedding_body(%elements: index, %time_storage: buffer, %frequencies_storage: buffer, %y_storage: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %time_view = buffer.view %time_storage[%origin] : buffer -> view<1xf32>
+    %frequencies_view = buffer.view %frequencies_storage[%origin] : buffer -> view<128xbf16>
+    %y_view = buffer.view %y_storage[%origin] : buffer -> view<256x1xf32>
+    %half = index.constant 128 : index
+    %frequency_index = index.rem %element, %half : index
+    %frequency_stored = view.load %frequencies_view[%frequency_index] : view<128xbf16> -> bf16
+    %frequency = scalar.extf %frequency_stored : bf16 to f32
+    %time_value = view.load %time_view[0] : view<1xf32> -> f32
+    %angle = scalar.mulf %time_value, %frequency : f32
+    %real = index.cmp ult, %element, %half : index
+    %value = scf.if %real -> (f32) {
+      %cosine = scalar.cosf<afn> %angle : f32
+      scf.yield %cosine : f32
+    } else {
+      %sine = scalar.sinf<afn> %angle : f32
+      scf.yield %sine : f32
+    }
+    view.store %value, %y_view[%element, 0] : f32, view<256x1xf32>
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.time_embedding() {
+  %elements = index.constant 256 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%time_storage: buffer, %frequencies_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 256 : index
+  template.apply<@pocket.time_embedding.body>(%elements, %time_storage, %frequencies_storage, %y_storage) : (index, buffer, buffer, buffer)
+  kernel.return
+}
+
+template.decl @pocket.conditioning.body(%elements: index, %c_storage: buffer, %s_storage: buffer, %t_storage: buffer, %y_storage: buffer)
+
+template.def<@pocket.conditioning.body> device @conditioning_body(%elements: index, %c_storage: buffer, %s_storage: buffer, %t_storage: buffer, %y_storage: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %c_view = buffer.view %c_storage[%origin] : buffer -> view<512x1xf32>
+    %s_view = buffer.view %s_storage[%origin] : buffer -> view<512x1xf32>
+    %t_view = buffer.view %t_storage[%origin] : buffer -> view<512x1xf32>
+    %y_view = buffer.view %y_storage[%origin] : buffer -> view<512x1xf32>
+    %condition = view.load %c_view[%element, 0] : view<512x1xf32> -> f32
+    %start = view.load %s_view[%element, 0] : view<512x1xf32> -> f32
+    %end = view.load %t_view[%element, 0] : view<512x1xf32> -> f32
+    %sum = scalar.addf %start, %end : f32
+    %half = scalar.constant 0.5 : f32
+    %average = scalar.mulf %sum, %half : f32
+    %combined = scalar.addf %condition, %average : f32
+    view.store %combined, %y_view[%element, 0] : f32, view<512x1xf32>
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.conditioning() {
+  %elements = index.constant 512 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%c_storage: buffer, %s_storage: buffer, %t_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 512 : index
+  template.apply<@pocket.conditioning.body>(%elements, %c_storage, %s_storage, %t_storage, %y_storage) : (index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+template.decl @pocket.modulation.body(%elements: index, %x_storage: buffer, %modulation_storage: buffer, %y_storage: buffer)
+
+template.def<@pocket.modulation.body> device @modulation_body(%elements: index, %x_storage: buffer, %modulation_storage: buffer, %y_storage: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %x_view = buffer.view %x_storage[%origin] : buffer -> view<512x1xf32>
+    %modulation_view = buffer.view %modulation_storage[%origin] : buffer -> view<1024x1xf32>
+    %y_view = buffer.view %y_storage[%origin] : buffer -> view<512x1xf32>
+    %channels = index.constant 512 : index
+    %scale_position = index.add %channels, %element : index
+    %scale = view.load %modulation_view[%scale_position, 0] : view<1024x1xf32> -> f32
+    %shift = view.load %modulation_view[%element, 0] : view<1024x1xf32> -> f32
+    %input = view.load %x_view[%element, 0] : view<512x1xf32> -> f32
+    %f1 = scalar.constant 1.0 : f32
+    %factor = scalar.addf %f1, %scale : f32
+    %scaled = scalar.mulf %input, %factor : f32
+    %result = scalar.addf %scaled, %shift : f32
+    view.store %result, %y_view[%element, 0] : f32, view<512x1xf32>
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.modulation() {
+  %elements = index.constant 512 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %modulation_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 512 : index
+  template.apply<@pocket.modulation.body>(%elements, %x_storage, %modulation_storage, %y_storage) : (index, buffer, buffer, buffer)
+  kernel.return
+}
+
+template.decl @pocket.gated_residual.body(%elements: index, %x_storage: buffer, %update_storage: buffer, %modulation_storage: buffer, %y_storage: buffer)
+
+template.def<@pocket.gated_residual.body> device @gated_residual_body(%elements: index, %x_storage: buffer, %update_storage: buffer, %modulation_storage: buffer, %y_storage: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %x_view = buffer.view %x_storage[%origin] : buffer -> view<512x1xf32>
+    %update_view = buffer.view %update_storage[%origin] : buffer -> view<512x1xf32>
+    %modulation_view = buffer.view %modulation_storage[%origin] : buffer -> view<1536x1xf32>
+    %y_view = buffer.view %y_storage[%origin] : buffer -> view<512x1xf32>
+    %gate_origin = index.constant 1024 : index
+    %gate_position = index.add %gate_origin, %element : index
+    %gate = view.load %modulation_view[%gate_position, 0] : view<1536x1xf32> -> f32
+    %input = view.load %x_view[%element, 0] : view<512x1xf32> -> f32
+    %delta = view.load %update_view[%element, 0] : view<512x1xf32> -> f32
+    %scaled = scalar.mulf %gate, %delta : f32
+    %result = scalar.addf %input, %scaled : f32
+    view.store %result, %y_view[%element, 0] : f32, view<512x1xf32>
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.gated_residual() {
+  %elements = index.constant 512 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %update_storage: buffer, %modulation_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 512 : index
+  template.apply<@pocket.gated_residual.body>(%elements, %x_storage, %update_storage, %modulation_storage, %y_storage) : (index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+template.decl @pocket.latent_output.body(%elements: index, %noise_storage: buffer, %delta_storage: buffer, %previous_storage: buffer, %scale_storage: buffer, %mean_storage: buffer, %y_storage: buffer)
+
+template.def<@pocket.latent_output.body> device @latent_output_body(%elements: index, %noise_storage: buffer, %delta_storage: buffer, %previous_storage: buffer, %scale_storage: buffer, %mean_storage: buffer, %y_storage: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %noise_view = buffer.view %noise_storage[%origin] : buffer -> view<32x1xf32>
+    %delta_view = buffer.view %delta_storage[%origin] : buffer -> view<32x1xf32>
+    %previous_view = buffer.view %previous_storage[%origin] : buffer -> view<32x1xf32>
+    %scale_view = buffer.view %scale_storage[%origin] : buffer -> view<32xbf16>
+    %mean_view = buffer.view %mean_storage[%origin] : buffer -> view<32xbf16>
+    %y_view = buffer.view %y_storage[%origin] : buffer -> view<32x1xf32>
+    %initial = view.load %noise_view[%element, 0] : view<32x1xf32> -> f32
+    %flow = view.load %delta_view[%element, 0] : view<32x1xf32> -> f32
+    %next = scalar.addf %initial, %flow : f32
+    view.store %next, %previous_view[%element, 0] : f32, view<32x1xf32>
+    %scale_stored = view.load %scale_view[%element] : view<32xbf16> -> bf16
+    %scale = scalar.extf %scale_stored : bf16 to f32
+    %mean_stored = view.load %mean_view[%element] : view<32xbf16> -> bf16
+    %mean = scalar.extf %mean_stored : bf16 to f32
+    %scaled = scalar.mulf %next, %scale : f32
+    %value = scalar.addf %scaled, %mean : f32
+    view.store %value, %y_view[%element, 0] : f32, view<32x1xf32>
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.latent_output() {
+  %elements = index.constant 32 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%noise_storage: buffer, %delta_storage: buffer, %previous_storage: buffer, %scale_storage: buffer, %mean_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 32 : index
+  template.apply<@pocket.latent_output.body>(%elements, %noise_storage, %delta_storage, %previous_storage, %scale_storage, %mean_storage, %y_storage) : (index, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+template.decl @pocket.fade.body(%elements: index, %x_storage: buffer, %position_storage: buffer, %y_storage: buffer)
+
+template.def<@pocket.fade.body> device @fade_body(%elements: index, %x_storage: buffer, %position_storage: buffer, %y_storage: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %x_view = buffer.view %x_storage[%origin] : buffer -> view<1x1920xf32>
+    %position_view = buffer.view %position_storage[%origin] : buffer -> view<1xi32>
+    %y_view = buffer.view %y_storage[%origin] : buffer -> view<1x1920xf32>
+    %position_value = view.load %position_view[0] : view<1xi32> -> i32
+    %first_block_end = scalar.constant 16 : i32
+    %initial = scalar.cmpi eq, %position_value, %first_block_end : i32
+    %fade_length = index.constant 120 : index
+    %in_fade = index.cmp ult, %element, %fade_length : index
+    %fade = scalar.andi %initial, %in_fade : i1
+    %input = view.load %x_view[0, %element] : view<1x1920xf32> -> f32
+    %value = scf.if %fade -> (f32) {
+      %index32 = index.cast %element : index to i32
+      %index_float = scalar.uitofp %index32 : i32 to f32
+      %denominator = scalar.constant 119.0 : f32
+      %factor = scalar.divf %index_float, %denominator : f32
+      %faded = scalar.mulf %input, %factor : f32
+      scf.yield %faded : f32
+    } else {
+      scf.yield %input : f32
+    }
+    view.store %value, %y_view[0, %element] : f32, view<1x1920xf32>
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.fade() {
+  %elements = index.constant 1920 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %position_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 1920 : index
+  template.apply<@pocket.fade.body>(%elements, %x_storage, %position_storage, %y_storage) : (index, buffer, buffer, buffer)
+  kernel.return
+}
+
+template.decl @pocket.token.body(%elements: index, %token_storage: buffer, %bos_storage: buffer, %embedding_storage: buffer, %y_storage: buffer)
+
+template.def<@pocket.token.body> device @token_body(%elements: index, %token_storage: buffer, %bos_storage: buffer, %embedding_storage: buffer, %y_storage: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %token_view = buffer.view %token_storage[%origin] : buffer -> view<1xi32>
+    %bos_view = buffer.view %bos_storage[%origin] : buffer -> view<1x1x1024xbf16>
+    %embedding_view = buffer.view %embedding_storage[%origin] : buffer -> view<4001x1024xbf16>
+    %y_view = buffer.view %y_storage[%origin] : buffer -> view<1024x1xf32>
+    %id = view.load %token_view[0] : view<1xi32> -> i32
+    %voice = scalar.constant -1 : i32
+    %initial = scalar.cmpi eq, %id, %voice : i32
+    %value = scf.if %initial -> (f32) {
+      %begin_stored = view.load %bos_view[0, 0, %element] : view<1x1x1024xbf16> -> bf16
+      %begin = scalar.extf %begin_stored : bf16 to f32
+      scf.yield %begin : f32
+    } else {
+      %valid_id = scalar.assume %id [range(%id, 0, 4000)] : i32
+      %row = index.cast %valid_id : i32 to index
+      %text_stored = view.load %embedding_view[%row, %element] : view<4001x1024xbf16> -> bf16
+      %text = scalar.extf %text_stored : bf16 to f32
+      scf.yield %text : f32
+    }
+    view.store %value, %y_view[%element, 0] : f32, view<1024x1xf32>
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.token() {
+  %elements = index.constant 1024 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%token_storage: buffer, %bos_storage: buffer, %embedding_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 1024 : index
+  template.apply<@pocket.token.body>(%elements, %token_storage, %bos_storage, %embedding_storage, %y_storage) : (index, buffer, buffer, buffer, buffer)
+  kernel.return
+}

@@ -1,0 +1,158 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+amdgpu.target<gfx11-generic> @pocket {subgroup_size = 32}
+
+template.decl @pocket.convolution_f32_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.def target(@pocket) @test_convolution_f32_bias() {
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer, %bias: buffer) {
+  %elements = index.constant 15 : index
+  %inputs = index.constant 3 : index
+  %padded_times = index.constant 11 : index
+  %outputs = index.constant 3 : index
+  %times = index.constant 5 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 2 : index
+  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %input, %weight, %output, %bias) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+template.decl @pocket.convolution_f64_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.def target(@pocket) @test_convolution_f64_bias() {
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer, %bias: buffer) {
+  %elements = index.constant 15 : index
+  %inputs = index.constant 3 : index
+  %padded_times = index.constant 11 : index
+  %outputs = index.constant 3 : index
+  %times = index.constant 5 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 2 : index
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %input, %weight, %output, %bias) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+template.decl @pocket.convolution_f64.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer)
+
+kernel.def target(@pocket) @test_convolution_f64() {
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer, %bias: buffer) {
+  %elements = index.constant 15 : index
+  %inputs = index.constant 3 : index
+  %padded_times = index.constant 11 : index
+  %outputs = index.constant 3 : index
+  %times = index.constant 5 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 2 : index
+  template.apply<@pocket.convolution_f64.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %input, %weight, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+// For W[r,i,k] = A + 3*i/8 + k/8 and X[i,2*t+k] = C + 11*i/4 + k/4,
+// the nine-term contraction is 9*A*C + 27*A + 4.5*C + 19.875.
+// Here A = 0.5 + 9*r/8 and C = -1 + t/2. All values are exact dyadics.
+func.def @convolution_expected(%biased: i1, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %output[%origin] : buffer -> view<3x5xf32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %rows = index.constant 3 : index
+  %times = index.constant 5 : index
+  %half = scalar.constant 0.5 : f32
+  %row_step = scalar.constant 1.125 : f32
+  %negative_one = scalar.constant -1.0 : f32
+  %nine = scalar.constant 9.0 : f32
+  %twenty_seven = scalar.constant 27.0 : f32
+  %four_half = scalar.constant 4.5 : f32
+  %constant = scalar.constant 19.875 : f32
+  %bias_origin = scalar.constant -0.5 : f32
+  %bias_step = scalar.constant 0.125 : f32
+  scf.for %row = [%zero to %rows step %one] {
+    %row_word = index.cast %row : index to i32
+    %row_float = scalar.uitofp %row_word : i32 to f32
+    %a = scalar.fmaf %row_float, %row_step, %half : f32
+    scf.for %time = [%zero to %times step %one] {
+      %time_word = index.cast %time : index to i32
+      %time_float = scalar.uitofp %time_word : i32 to f32
+      %c = scalar.fmaf %time_float, %half, %negative_one : f32
+      %ac = scalar.mulf %a, %c : f32
+      %sum0 = scalar.fmaf %nine, %ac, %constant : f32
+      %sum1 = scalar.fmaf %twenty_seven, %a, %sum0 : f32
+      %sum2 = scalar.fmaf %four_half, %c, %sum1 : f32
+      %bias = scalar.fmaf %row_float, %bias_step, %bias_origin : f32
+      %shifted = scalar.addf %sum2, %bias : f32
+      %value = scf.select %biased, %shifted, %sum2 : f32
+      view.store %value, %view[%row, %time] : f32, view<3x5xf32>
+    }
+  }
+  func.return
+}
+
+func.def @expected_convolution_f32_bias(%input: buffer, %weight: buffer, %output: buffer, %bias: buffer) {
+  %biased = scalar.constant true : i1
+  func.call @convolution_expected(%biased, %output) : (i1, buffer)
+  func.return
+}
+
+check.scenario public @convolution_f32_bias {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1.0) step(0.25) : tensor<3x11xf32>
+    %weight = check.generate.iota offset(0.5) step(0.125) : tensor<3x3x3xbf16>
+    %output = check.generate.fill value(-123.0) : tensor<3x5xf32>
+    %bias = check.generate.iota offset(-0.5) step(0.125) : tensor<3xbf16>
+    check.compare<@test_convolution_f32_bias, @expected_convolution_f32_bias>(%input, %weight, %output, %bias) : (tensor<3x11xf32>, tensor<3x3x3xbf16>, tensor<3x5xf32>, tensor<3xbf16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<3x5xf32>
+    }
+  }
+  check.return
+}
+
+func.def @expected_convolution_f64_bias(%input: buffer, %weight: buffer, %output: buffer, %bias: buffer) {
+  %biased = scalar.constant true : i1
+  func.call @convolution_expected(%biased, %output) : (i1, buffer)
+  func.return
+}
+
+check.scenario public @convolution_f64_bias {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1.0) step(0.25) : tensor<3x11xf32>
+    %weight = check.generate.iota offset(0.5) step(0.125) : tensor<3x3x3xbf16>
+    %output = check.generate.fill value(-123.0) : tensor<3x5xf32>
+    %bias = check.generate.iota offset(-0.5) step(0.125) : tensor<3xbf16>
+    check.compare<@test_convolution_f64_bias, @expected_convolution_f64_bias>(%input, %weight, %output, %bias) : (tensor<3x11xf32>, tensor<3x3x3xbf16>, tensor<3x5xf32>, tensor<3xbf16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<3x5xf32>
+    }
+  }
+  check.return
+}
+
+func.def @expected_convolution_f64(%input: buffer, %weight: buffer, %output: buffer, %bias: buffer) {
+  %biased = scalar.constant false : i1
+  func.call @convolution_expected(%biased, %output) : (i1, buffer)
+  func.return
+}
+
+check.scenario public @convolution_f64 {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1.0) step(0.25) : tensor<3x11xf32>
+    %weight = check.generate.iota offset(0.5) step(0.125) : tensor<3x3x3xbf16>
+    %output = check.generate.fill value(-123.0) : tensor<3x5xf32>
+    %bias = check.generate.iota offset(-0.5) step(0.125) : tensor<3xbf16>
+    check.compare<@test_convolution_f64, @expected_convolution_f64>(%input, %weight, %output, %bias) : (tensor<3x11xf32>, tensor<3x3x3xbf16>, tensor<3x5xf32>, tensor<3xbf16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<3x5xf32>
+    }
+  }
+  check.return
+}

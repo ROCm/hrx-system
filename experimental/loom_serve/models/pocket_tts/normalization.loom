@@ -1,0 +1,313 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// One workitem owns a complete time column. F64 reductions produce F32
+// moments and outputs. Affine/plain paths center and use population variance;
+// variance scaling uses sample variance while preserving the input mean.
+target.decl @pocket
+
+config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
+
+template.decl @pocket.element() -> (index)
+
+template.decl @pocket.normalization_affine.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer)
+
+template.def<@pocket.normalization_affine.body> device @normalization_affine_body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
+    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
+    %scale_view = buffer.view %scale_storage[%origin] : buffer -> view<[%channels]xbf16>
+    %bias_view = buffer.view %bias_storage[%origin] : buffer -> view<[%channels]xbf16>
+    %acc_zero = scalar.constant 0.0 : f64
+    %total = scf.for %channel = [%c0 to %channels step %c1](%acc = %acc_zero : f64) -> (f64) {
+      %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32> -> f32
+      %wide_input = scalar.extf %input : f32 to f64
+      %next = scalar.addf %acc, %wide_input : f64
+      scf.yield %next : f64
+    }
+    %mean_wide = scalar.divf %total, %divisor : f64
+    %mean = scalar.fptrunc %mean_wide : f64 to f32
+    %squared = scf.for %channel = [%c0 to %channels step %c1](%acc = %acc_zero : f64) -> (f64) {
+      %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32> -> f32
+      %centered = scalar.subf %input, %mean : f32
+      %wide_centered = scalar.extf %centered : f32 to f64
+      %next = scalar.fmaf %wide_centered, %wide_centered, %acc : f64
+      scf.yield %next : f64
+    }
+    %variance_wide = scalar.divf %squared, %variance_divisor : f64
+    %variance = scalar.fptrunc %variance_wide : f64 to f32
+    %stabilized = scalar.addf %variance, %epsilon : f32
+    %inverse = scalar.rsqrtf<afn> %stabilized : f32
+    scf.for %channel = [%c0 to %channels step %c1] {
+      %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32> -> f32
+      %centered = scalar.subf %input, %mean : f32
+      %normalized = scalar.mulf %centered, %inverse : f32
+      %factor_stored = view.load %scale_view[%channel] : view<[%channels]xbf16> -> bf16
+      %factor = scalar.extf %factor_stored : bf16 to f32
+      %shift_stored = view.load %bias_view[%channel] : view<[%channels]xbf16> -> bf16
+      %shift = scalar.extf %shift_stored : bf16 to f32
+      %scaled = scalar.mulf %normalized, %factor : f32
+      %output = scalar.addf %scaled, %shift : f32
+      view.store %output, %y_view[%channel, %element] : f32, view<[%channels]x[%times]xf32>
+    }
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.normalization_affine_1024x1_e1em05() {
+  %elements = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer) {
+  %elements = index.constant 1 : index
+  %channels = index.constant 1024 : index
+  %times = index.constant 1 : index
+  %divisor = scalar.constant 1024.0 : f64
+  %variance_divisor = scalar.constant 1024.0 : f64
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.normalization_affine_512x1_e1em06() {
+  %elements = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer) {
+  %elements = index.constant 1 : index
+  %channels = index.constant 512 : index
+  %times = index.constant 1 : index
+  %divisor = scalar.constant 512.0 : f64
+  %variance_divisor = scalar.constant 512.0 : f64
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+  template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.normalization_affine_512x16_e1em05() {
+  %elements = index.constant 16 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer) {
+  %elements = index.constant 16 : index
+  %channels = index.constant 512 : index
+  %times = index.constant 16 : index
+  %divisor = scalar.constant 512.0 : f64
+  %variance_divisor = scalar.constant 512.0 : f64
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+template.decl @pocket.softmax.body(%elements: index, %rows: index, %capacity: index, %scores_storage: buffer, %probabilities_storage: buffer)
+
+template.def<@pocket.softmax.body> device @softmax_body(%elements: index, %rows: index, %capacity: index, %scores_storage: buffer, %probabilities_storage: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %scores_view = buffer.view %scores_storage[%origin] : buffer -> view<[%rows]x[%capacity]xf32>
+    %probabilities_view = buffer.view %probabilities_storage[%origin] : buffer -> view<[%rows]x[%capacity]xf32>
+    %negative = scalar.constant -1e+30 : f32
+    %maximum = scf.for %i = [%c0 to %capacity step %c1](%acc = %negative : f32) -> (f32) {
+      %value = view.load %scores_view[%element, %i] : view<[%rows]x[%capacity]xf32> -> f32
+      %larger = scalar.cmpf ogt, %value, %acc : f32
+      %next = scf.select %larger, %value, %acc : f32
+      scf.yield %next : f32
+    }
+    %acc_zero = scalar.constant 0.0 : f64
+    %total_wide = scf.for %i = [%c0 to %capacity step %c1](%acc = %acc_zero : f64) -> (f64) {
+      %value = view.load %scores_view[%element, %i] : view<[%rows]x[%capacity]xf32> -> f32
+      %shifted = scalar.subf %value, %maximum : f32
+      %exponential = scalar.expf<afn> %shifted : f32
+      view.store %exponential, %probabilities_view[%element, %i] : f32, view<[%rows]x[%capacity]xf32>
+      %exp_wide = scalar.extf %exponential : f32 to f64
+      %next = scalar.addf %acc, %exp_wide : f64
+      scf.yield %next : f64
+    }
+    %total = scalar.fptrunc %total_wide : f64 to f32
+    scf.for %i = [%c0 to %capacity step %c1] {
+      %value = view.load %probabilities_view[%element, %i] : view<[%rows]x[%capacity]xf32> -> f32
+      %normalized = scalar.divf %value, %total : f32
+      view.store %normalized, %probabilities_view[%element, %i] : f32, view<[%rows]x[%capacity]xf32>
+    }
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.softmax_16x256() {
+  %elements = index.constant 16 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%scores_storage: buffer, %probabilities_storage: buffer) {
+  %elements = index.constant 16 : index
+  %rows = index.constant 16 : index
+  %capacity = index.constant 256 : index
+  template.apply<@pocket.softmax.body>(%elements, %rows, %capacity, %scores_storage, %probabilities_storage) : (index, index, index, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.softmax_128x265() {
+  %elements = index.constant 128 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%scores_storage: buffer, %probabilities_storage: buffer) {
+  %elements = index.constant 128 : index
+  %rows = index.constant 128 : index
+  %capacity = index.constant 265 : index
+  template.apply<@pocket.softmax.body>(%elements, %rows, %capacity, %scores_storage, %probabilities_storage) : (index, index, index, buffer, buffer)
+  kernel.return
+}
+
+template.decl @pocket.normalization_variance.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer)
+
+template.def<@pocket.normalization_variance.body> device @normalization_variance_body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
+    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
+    %scale_view = buffer.view %scale_storage[%origin] : buffer -> view<[%channels]xbf16>
+    %acc_zero = scalar.constant 0.0 : f64
+    %total = scf.for %channel = [%c0 to %channels step %c1](%acc = %acc_zero : f64) -> (f64) {
+      %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32> -> f32
+      %wide_input = scalar.extf %input : f32 to f64
+      %next = scalar.addf %acc, %wide_input : f64
+      scf.yield %next : f64
+    }
+    %mean_wide = scalar.divf %total, %divisor : f64
+    %mean = scalar.fptrunc %mean_wide : f64 to f32
+    %squared = scf.for %channel = [%c0 to %channels step %c1](%acc = %acc_zero : f64) -> (f64) {
+      %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32> -> f32
+      %centered = scalar.subf %input, %mean : f32
+      %wide_centered = scalar.extf %centered : f32 to f64
+      %next = scalar.fmaf %wide_centered, %wide_centered, %acc : f64
+      scf.yield %next : f64
+    }
+    %variance_wide = scalar.divf %squared, %variance_divisor : f64
+    %variance = scalar.fptrunc %variance_wide : f64 to f32
+    %stabilized = scalar.addf %variance, %epsilon : f32
+    %inverse = scalar.rsqrtf<afn> %stabilized : f32
+    scf.for %channel = [%c0 to %channels step %c1] {
+      %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32> -> f32
+      %factor_stored = view.load %scale_view[%channel] : view<[%channels]xbf16> -> bf16
+      %factor = scalar.extf %factor_stored : bf16 to f32
+      %multiplier = scalar.mulf %factor, %inverse : f32
+      %output = scalar.mulf %input, %multiplier : f32
+      view.store %output, %y_view[%channel, %element] : f32, view<[%channels]x[%times]xf32>
+    }
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.normalization_variance_512x1_e1em05() {
+  %elements = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %y_storage: buffer, %scale_storage: buffer) {
+  %elements = index.constant 1 : index
+  %channels = index.constant 512 : index
+  %times = index.constant 1 : index
+  %divisor = scalar.constant 512.0 : f64
+  %variance_divisor = scalar.constant 511.0 : f64
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  template.apply<@pocket.normalization_variance.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage) : (index, index, index, f64, f64, f32, buffer, buffer, buffer)
+  kernel.return
+}
+
+template.decl @pocket.normalization_plain.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer)
+
+template.def<@pocket.normalization_plain.body> device @normalization_plain_body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
+    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
+    %acc_zero = scalar.constant 0.0 : f64
+    %total = scf.for %channel = [%c0 to %channels step %c1](%acc = %acc_zero : f64) -> (f64) {
+      %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32> -> f32
+      %wide_input = scalar.extf %input : f32 to f64
+      %next = scalar.addf %acc, %wide_input : f64
+      scf.yield %next : f64
+    }
+    %mean_wide = scalar.divf %total, %divisor : f64
+    %mean = scalar.fptrunc %mean_wide : f64 to f32
+    %squared = scf.for %channel = [%c0 to %channels step %c1](%acc = %acc_zero : f64) -> (f64) {
+      %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32> -> f32
+      %centered = scalar.subf %input, %mean : f32
+      %wide_centered = scalar.extf %centered : f32 to f64
+      %next = scalar.fmaf %wide_centered, %wide_centered, %acc : f64
+      scf.yield %next : f64
+    }
+    %variance_wide = scalar.divf %squared, %variance_divisor : f64
+    %variance = scalar.fptrunc %variance_wide : f64 to f32
+    %stabilized = scalar.addf %variance, %epsilon : f32
+    %inverse = scalar.rsqrtf<afn> %stabilized : f32
+    scf.for %channel = [%c0 to %channels step %c1] {
+      %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32> -> f32
+      %centered = scalar.subf %input, %mean : f32
+      %normalized = scalar.mulf %centered, %inverse : f32
+      view.store %normalized, %y_view[%channel, %element] : f32, view<[%channels]x[%times]xf32>
+    }
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.normalization_plain_512x1_e1em06() {
+  %elements = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 1 : index
+  %channels = index.constant 512 : index
+  %times = index.constant 1 : index
+  %divisor = scalar.constant 512.0 : f64
+  %variance_divisor = scalar.constant 512.0 : f64
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+  template.apply<@pocket.normalization_plain.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage) : (index, index, index, f64, f64, f32, buffer, buffer)
+  kernel.return
+}
