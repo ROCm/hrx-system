@@ -329,11 +329,17 @@ iree_status_t iree_async_proactor_io_uring_validate_operation(
             IREE_STATUS_INVALID_ARGUMENT,
             "SOCKET_RECV_POOL region belongs to a different proactor");
       }
-      if (region->type != IREE_ASYNC_REGION_TYPE_IOURING ||
-          region->handles.iouring.buffer_group_id < 0) {
+      if (region->type != IREE_ASYNC_REGION_TYPE_IOURING) {
         return iree_make_status(
             IREE_STATUS_FAILED_PRECONDITION,
-            "SOCKET_RECV_POOL requires an io_uring provided buffer ring");
+            "SOCKET_RECV_POOL requires an io_uring slab registration");
+      }
+      if (iree_any_bit_set(operation->flags,
+                           IREE_ASYNC_OPERATION_FLAG_MULTISHOT) &&
+          region->handles.iouring.buffer_group_id < 0) {
+        return iree_make_status(
+            IREE_STATUS_UNAVAILABLE,
+            "multishot SOCKET_RECV_POOL requires a provided buffer ring");
       }
       if (!iree_any_bit_set(region->access_flags,
                             IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE)) {

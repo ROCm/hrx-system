@@ -88,6 +88,10 @@ typedef struct iree_async_proactor_io_uring_t {
   // Enabled capabilities after applying the caller's allowed mask.
   iree_async_proactor_capabilities_t capabilities;
 
+  // True when a valid provided-buffer ring registration succeeds. Independent
+  // of opcode/version probes and the caller's allowed capability mask.
+  bool supports_buffer_ring;
+
   // Preferred PBUF group ID for the next slab registration. The kernel is the
   // source of truth for live IDs; collisions scan for the next free ID.
   iree_atomic_int32_t next_buffer_group_id;
@@ -294,6 +298,13 @@ iree_status_t iree_async_proactor_io_uring_complete_cancel_request(
 iree_status_t iree_async_proactor_io_uring_detect_capabilities(
     iree_io_uring_ring_t* ring, uint32_t ring_features,
     iree_async_proactor_capabilities_t* out_capabilities);
+
+// Probes an empty, single-entry provided-buffer ring before other
+// registrations. |probe_page| is a zeroed, page-aligned allocation of at least
+// one page. On failure the unpublished ring must be destroyed before freeing
+// that page: registration may have succeeded while unregistration failed.
+iree_status_t iree_async_proactor_io_uring_probe_buffer_ring(
+    iree_io_uring_ring_t* ring, void* probe_page, bool* out_supported);
 
 // Buffer registration vtable implementations (in proactor_registration.c).
 iree_status_t iree_async_proactor_io_uring_register_buffer(

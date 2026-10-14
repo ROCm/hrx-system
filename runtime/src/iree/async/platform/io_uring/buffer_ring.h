@@ -121,8 +121,8 @@ iree_io_uring_buffer_ring_options_default(void) {
 // available.
 //
 // Returns IREE_STATUS_INVALID_ARGUMENT if buffer_count is not a power of 2.
-// Returns IREE_STATUS_UNAVAILABLE if PBUF_RING is not supported (kernel
-// < 5.19).
+// Kernel registration failures are propagated; the proactor probes feature
+// availability separately before creating its slab rings.
 iree_status_t iree_io_uring_buffer_ring_allocate(
     iree_io_uring_registration_t* registration,
     iree_io_uring_buffer_ring_options_t options, iree_allocator_t allocator,
@@ -147,7 +147,7 @@ iree_status_t iree_io_uring_buffer_ring_free(iree_io_uring_buffer_ring_t* ring);
 // receives. The buffer_index is obtained from the CQE flags:
 //   uint16_t buffer_index = cqe->flags >> IORING_CQE_BUFFER_SHIFT;
 //
-// This operation is O(1) and lock-free (atomic tail increment).
+// This operation is O(1), with release publication by the serialized producer.
 void iree_io_uring_buffer_ring_recycle(iree_io_uring_buffer_ring_t* ring,
                                        uint16_t buffer_index);
 

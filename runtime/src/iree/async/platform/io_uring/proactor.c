@@ -189,10 +189,29 @@ iree_status_t iree_async_proactor_create_io_uring(
   bool supports_sparse_buffer_table = iree_any_bit_set(
       proactor->kernel_capabilities, IREE_ASYNC_PROACTOR_CAPABILITY_MULTISHOT);
 
+  // Probe registration itself: an opcode from the same kernel release is not
+  // evidence that provided-buffer rings are usable under the current policy.
+  // Keep the probe page alive through destruction if its retirement fails.
+  void* buffer_ring_probe_page = NULL;
+  if (iree_status_is_ok(status) && supports_sparse_buffer_table) {
+    iree_host_size_t page_size = iree_memory_query_info().normal_page_size;
+    status = iree_allocator_malloc_aligned(allocator, page_size, page_size, 0,
+                                           &buffer_ring_probe_page);
+    if (iree_status_is_ok(status)) {
+      memset(buffer_ring_probe_page, 0, page_size);
+      status = iree_async_proactor_io_uring_probe_buffer_ring(
+          &proactor->ring, buffer_ring_probe_page,
+          &proactor->supports_buffer_ring);
+    }
+  }
+
   // Apply the allowed_capabilities mask from options.
   if (iree_status_is_ok(status)) {
     proactor->capabilities =
         proactor->kernel_capabilities & options.allowed_capabilities;
+    if (!proactor->supports_buffer_ring) {
+      proactor->capabilities &= ~IREE_ASYNC_PROACTOR_CAPABILITY_MULTISHOT;
+    }
   }
 
   // Create sparse buffer table on 5.19+ kernels for dynamic buffer
@@ -246,6 +265,7 @@ iree_status_t iree_async_proactor_create_io_uring(
   } else {
     iree_async_proactor_io_uring_destroy(&proactor->base);
   }
+  iree_allocator_free_aligned(allocator, buffer_ring_probe_page);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -811,8 +831,9 @@ static inline void iree_async_proactor_io_uring_complete_socket_recv_pool(
         region->buffer_size);
     recv_pool->lease.release = region->recycle;
     recv_pool->lease.buffer_index = (iree_async_buffer_index_t)buffer_index;
-    recv_pool->bytes_received = (iree_host_size_t)cqe->res;
   }
+  // Without buffer selection the lease was reserved before submission.
+  recv_pool->bytes_received = (iree_host_size_t)cqe->res;
 }
 
 // Handles SOCKET_RECVFROM completion: extracts sender address.
@@ -1109,6 +1130,15 @@ iree_host_size_t iree_async_proactor_io_uring_process_cqe(
     if (iree_status_is_ok(status)) {
       status = iree_async_proactor_io_uring_populate_result(proactor, cqe,
                                                             operation);
+    } else if (operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL) {
+      iree_async_socket_recv_pool_operation_t* receive =
+          (iree_async_socket_recv_pool_operation_t*)operation;
+      if (iree_async_buffer_pool_region(receive->pool)
+              ->handles.iouring.buffer_group_id < 0) {
+        // The kernel has retired this one-shot receive, including cancellation.
+        // Only now may another operation acquire its destination buffer.
+        iree_async_buffer_lease_release(&receive->lease);
+      }
     }
     flags = iree_async_proactor_io_uring_completion_flags(cqe, operation);
   }

@@ -290,7 +290,7 @@ static inline void iree_async_socket_recv_operation_initialize(
 //
 // Availability:
 //   generic | io_uring | IOCP | kqueue
-//   yes     | 5.19+    | yes  | yes
+//   yes     | 5.7+     | yes  | yes
 //
 // Multishot availability:
 //   generic | io_uring | IOCP | kqueue
@@ -301,15 +301,17 @@ static inline void iree_async_socket_recv_operation_initialize(
 //   a fresh lease. The caller must return each lease (via
 //   iree_async_buffer_lease_release) after processing the data.
 //
-// Pool exhaustion behavior:
-//   If the pool is exhausted (no buffers available), the operation pauses
-//   and resumes when buffers are returned:
-//     io_uring: Stops delivering until the ring is replenished.
-//     Other backends: May queue internally or return EAGAIN.
+// Pool exhaustion is reported as RESOURCE_EXHAUSTED. With kernel buffer
+// selection this is a completion; without it io_uring reserves a lease during
+// submission and rejects the batch if no slot is available. The caller returns
+// held leases before resubmitting. io_uring multishot requires provided-buffer
+// rings; it is not advertised when their startup probe is rejected.
 //
 // Optimal path (io_uring 5.19+):
 //   Uses provided buffer rings (PBUF_RING) for kernel-managed buffer
 //   selection with zero syscalls per receive after initial setup.
+//   Without provided-buffer rings, one-shot receives use ordinary RECV into
+//   a pool lease reserved until completion. No payload copy is added.
 //
 // Threading model:
 //   Callback fires on the poll thread. The lease is valid until released.

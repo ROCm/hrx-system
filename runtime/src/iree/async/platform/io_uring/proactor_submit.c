@@ -269,31 +269,25 @@ static void iree_async_proactor_io_uring_fill_socket_recv(
 }
 
 // Fills an SQE for a SOCKET_RECV_POOL operation.
-// Uses IORING_OP_RECV with IOSQE_BUFFER_SELECT to let the kernel select a
-// buffer from a provided buffer ring (PBUF_RING). On completion, the CQE
-// indicates which buffer was used. The operation's lease is populated with
-// the buffer index and span.
+// Uses kernel buffer selection when available. Otherwise the batch reservation
+// owns a userspace pool lease until this one-shot RECV completes.
 static void iree_async_proactor_io_uring_fill_socket_recv_pool(
-    iree_async_proactor_io_uring_t* proactor, iree_io_uring_sqe_t* sqe,
-    iree_async_operation_t* base_operation) {
+    iree_io_uring_sqe_t* sqe, iree_async_operation_t* base_operation) {
   iree_async_socket_recv_pool_operation_t* recv_pool =
       (iree_async_socket_recv_pool_operation_t*)base_operation;
 
-  // Validation established that this is a local provided-buffer ring.
   iree_async_region_t* region = iree_async_buffer_pool_region(recv_pool->pool);
-  IREE_ASSERT(region->type == IREE_ASYNC_REGION_TYPE_IOURING);
-  IREE_ASSERT(region->proactor == &proactor->base);
-  IREE_ASSERT_GE(region->handles.iouring.buffer_group_id, 0);
-
-  // Clear output fields.
-  recv_pool->bytes_received = 0;
-  memset(&recv_pool->lease, 0, sizeof(recv_pool->lease));
 
   sqe->opcode = IREE_IORING_OP_RECV;
   sqe->fd = recv_pool->socket->primitive.value.fd;
-  sqe->addr = 0;  // Kernel provides buffer from the ring.
   sqe->msg_flags = 0;
   sqe->user_data = (uint64_t)(uintptr_t)base_operation;
+  sqe->len = (uint32_t)region->buffer_size;
+  if (region->handles.iouring.buffer_group_id < 0) {
+    sqe->addr = (uint64_t)(uintptr_t)iree_async_span_ptr(recv_pool->lease.span);
+    return;
+  }
+  sqe->addr = 0;  // Kernel provides buffer from the ring.
   sqe->flags |= IREE_IOSQE_BUFFER_SELECT;
   sqe->buf_group = (uint16_t)region->handles.iouring.buffer_group_id;
 
@@ -304,8 +298,6 @@ static void iree_async_proactor_io_uring_fill_socket_recv_pool(
                        IREE_ASYNC_OPERATION_FLAG_MULTISHOT)) {
     sqe->ioprio |= IREE_IORING_RECV_MULTISHOT;
     sqe->len = 0;
-  } else {
-    sqe->len = (uint32_t)region->buffer_size;
   }
 }
 
@@ -1135,9 +1127,9 @@ static void iree_async_proactor_io_uring_commit_fallback_message(
 // Submission reservation rollback
 //===----------------------------------------------------------------------===//
 
-// Releases unpublished fallback message reservations. No operation resources
+// Releases unpublished message and receive reservations. No operation resources
 // have been retained when this runs, so close ownership remains caller-owned.
-static void iree_async_proactor_io_uring_rollback_message_reservations(
+static void iree_async_proactor_io_uring_rollback_reservations(
     iree_async_operation_list_t operations) {
   bool defer_chain_tail = false;
   for (iree_host_size_t i = 0; i < operations.count; ++i) {
@@ -1146,6 +1138,12 @@ static void iree_async_proactor_io_uring_rollback_message_reservations(
       continue;
     }
     iree_async_operation_t* operation = operations.values[i];
+    if (operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL) {
+      iree_async_socket_recv_pool_operation_t* receive =
+          (iree_async_socket_recv_pool_operation_t*)operation;
+      iree_async_buffer_lease_release(&receive->lease);
+      continue;
+    }
     if (operation->type != IREE_ASYNC_OPERATION_TYPE_MESSAGE) {
       continue;
     }
@@ -1293,6 +1291,11 @@ iree_status_t iree_async_proactor_io_uring_submit(
     if (operation->type == IREE_ASYNC_OPERATION_TYPE_MESSAGE) {
       iree_async_proactor_io_uring_plan_message(
           proactor, (iree_async_message_operation_t*)operation);
+    } else if (operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL) {
+      iree_async_socket_recv_pool_operation_t* receive =
+          (iree_async_socket_recv_pool_operation_t*)operation;
+      receive->bytes_received = 0;
+      memset(&receive->lease, 0, sizeof(receive->lease));
     }
   }
 
@@ -1331,16 +1334,22 @@ iree_status_t iree_async_proactor_io_uring_submit(
       continue;
     }
     iree_async_operation_t* operation = operations.values[i];
-    if (operation->type != IREE_ASYNC_OPERATION_TYPE_MESSAGE ||
-        !iree_async_proactor_io_uring_message_uses_fallback(
+    iree_status_t status = iree_ok_status();
+    if (operation->type == IREE_ASYNC_OPERATION_TYPE_MESSAGE &&
+        iree_async_proactor_io_uring_message_uses_fallback(
             (iree_async_message_operation_t*)operation)) {
-      continue;
+      status = iree_async_proactor_io_uring_reserve_fallback_message(
+          (iree_async_message_operation_t*)operation);
+    } else if (operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL) {
+      iree_async_socket_recv_pool_operation_t* receive =
+          (iree_async_socket_recv_pool_operation_t*)operation;
+      if (iree_async_buffer_pool_region(receive->pool)
+              ->handles.iouring.buffer_group_id < 0) {
+        status = iree_async_buffer_pool_acquire(receive->pool, &receive->lease);
+      }
     }
-    iree_status_t status =
-        iree_async_proactor_io_uring_reserve_fallback_message(
-            (iree_async_message_operation_t*)operation);
     if (!iree_status_is_ok(status)) {
-      iree_async_proactor_io_uring_rollback_message_reservations(operations);
+      iree_async_proactor_io_uring_rollback_reservations(operations);
       return status;
     }
   }
@@ -1361,7 +1370,7 @@ iree_status_t iree_async_proactor_io_uring_submit(
     uint32_t available = iree_io_uring_ring_sq_space_left(&proactor->ring);
     if (available < sqes_needed) {
       iree_io_uring_ring_sq_unlock(&proactor->ring);
-      iree_async_proactor_io_uring_rollback_message_reservations(operations);
+      iree_async_proactor_io_uring_rollback_reservations(operations);
       while (software_operations) {
         iree_async_operation_t* operation = software_operations;
         software_operations = operation->next;
@@ -1436,8 +1445,7 @@ iree_status_t iree_async_proactor_io_uring_submit(
             iree_async_proactor_io_uring_fill_socket_recv(sqe, operation);
             break;
           case IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL:
-            iree_async_proactor_io_uring_fill_socket_recv_pool(proactor, sqe,
-                                                               operation);
+            iree_async_proactor_io_uring_fill_socket_recv_pool(sqe, operation);
             break;
           case IREE_ASYNC_OPERATION_TYPE_SOCKET_SEND:
             iree_async_proactor_io_uring_fill_socket_send(proactor, sqe,

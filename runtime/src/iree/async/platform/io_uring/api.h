@@ -28,6 +28,9 @@ extern "C" {
 //   - Provided buffer rings for multishot receives
 //
 // Requires kernel 5.7+ with io_uring support enabled.
+// Provided-buffer rings are probed independently. If unsupported or denied,
+// one-shot pooled receives use ordinary RECV with userspace pool leases, and
+// the proactor does not advertise multishot support.
 //
 // Returns IREE_STATUS_UNAVAILABLE if io_uring is not usable on this system:
 // kernel too old (ENOSYS), blocked by seccomp/sysctl (EPERM), insufficient

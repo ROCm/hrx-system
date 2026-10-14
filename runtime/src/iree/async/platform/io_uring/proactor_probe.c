@@ -10,6 +10,7 @@
 // to determine what capabilities are available at runtime. The probing happens
 // once during proactor creation and the results are cached.
 
+#include <errno.h>
 #include <string.h>
 
 #include "iree/async/platform/io_uring/defs.h"
@@ -23,6 +24,38 @@
 // Maximum opcode we need to probe. SEND_ZC is 47, SENDMSG_ZC is 48.
 // Round up to 64 for a clean uint64_t bitmask.
 #define IREE_IO_URING_PROBE_OPCODE_COUNT 64
+
+iree_status_t iree_async_proactor_io_uring_probe_buffer_ring(
+    iree_io_uring_ring_t* ring, void* probe_page, bool* out_supported) {
+  *out_supported = false;
+  iree_io_uring_buf_reg_t registration = {0};
+  registration.ring_addr = (uint64_t)(uintptr_t)probe_page;
+  registration.ring_entries = 1;
+  int result = iree_io_uring_ring_register(ring, IREE_IORING_REGISTER_PBUF_RING,
+                                           &registration, 1);
+  // This known-valid geometry distinguishes an unavailable optional mechanism
+  // from errors in later caller registrations. Opcode availability alone does
+  // not cover kernel backports or syscall policy restrictions.
+  if (result == -EINVAL || result == -ENOSYS || result == -EOPNOTSUPP ||
+      result == -EPERM || result == -EACCES) {
+    return iree_ok_status();
+  }
+  if (result < 0) {
+    return iree_make_status(iree_status_code_from_errno(-result),
+                            "provided-buffer ring probe failed: %s",
+                            strerror(-result));
+  }
+  memset(&registration, 0, sizeof(registration));
+  result = iree_io_uring_ring_register(ring, IREE_IORING_UNREGISTER_PBUF_RING,
+                                       &registration, 1);
+  if (result < 0) {
+    return iree_make_status(iree_status_code_from_errno(-result),
+                            "provided-buffer ring probe retirement failed: %s",
+                            strerror(-result));
+  }
+  *out_supported = true;
+  return iree_ok_status();
+}
 
 // Probes the kernel for supported io_uring opcodes.
 // Returns a bitmask where bit N is set if opcode N is supported.

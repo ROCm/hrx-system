@@ -798,11 +798,9 @@ iree_status_t iree_async_proactor_io_uring_register_slab(
 
   // Provided-buffer rings (5.19+) also serve one-shot pooled receives. Kernel
   // support governs their creation, not the caller's multishot capability mask.
-  // The MULTISHOT probe establishes the required kernel version.
   bool create_recv_ring =
       (access_flags & IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE) != 0 &&
-      iree_any_bit_set(proactor->kernel_capabilities,
-                       IREE_ASYNC_PROACTOR_CAPABILITY_MULTISHOT);
+      proactor->supports_buffer_ring;
   // PBUF_RING requires power-of-2 buffer count.
   if (create_recv_ring && (buffer_count & (buffer_count - 1)) != 0) {
     IREE_TRACE_ZONE_END(z0);
