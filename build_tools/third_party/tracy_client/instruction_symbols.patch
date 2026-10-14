@@ -1,0 +1,20 @@
+--- a/public/libbacktrace/elf.cpp
++++ b/public/libbacktrace/elf.cpp
+@@ -668,7 +668,7 @@
+       int info;
+
+       info = sym->st_info & 0xf;
+-      if ((info == STT_FUNC || info == STT_OBJECT)
++      if (info == STT_FUNC
+ 	  && sym->st_shndx != SHN_UNDEF)
+ 	++elf_symbol_count;
+     }
+@@ -687,7 +687,7 @@
+       int info;
+
+       info = sym->st_info & 0xf;
+-      if (info != STT_FUNC && info != STT_OBJECT)
++      if (info != STT_FUNC)
+ 	continue;
+       if (sym->st_shndx == SHN_UNDEF)
+ 	continue;

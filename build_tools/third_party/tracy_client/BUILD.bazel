@@ -8,6 +8,7 @@
 package(default_visibility = ["//visibility:public"])
 
 exports_files([
+    "instruction_symbols.patch",
     "tracy_client.BUILD.bazel",
     "worker_signal_mask.patch",
 ])

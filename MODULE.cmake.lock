@@ -140,6 +140,7 @@ set(IREE_DEP_TRACY_CLIENT_STRIP_PREFIX "tracy-5479a42ef9346b64e6d1b860ae58aa8abd
 set(IREE_DEP_TRACY_CLIENT_BUILD_FILE "//build_tools/third_party/tracy_client:tracy_client.BUILD.bazel")
 set(IREE_DEP_TRACY_CLIENT_PATCHES
   "//build_tools/third_party/tracy_client:worker_signal_mask.patch"
+  "//build_tools/third_party/tracy_client:instruction_symbols.patch"
 )
 set(IREE_DEP_TRACY_CLIENT_PATCH_ARGS
   "-p1"
