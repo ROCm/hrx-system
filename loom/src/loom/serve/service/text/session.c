@@ -58,6 +58,7 @@ iree_status_t loom_serve_text_session_initialize(
 
 void loom_serve_text_session_release_request(
     loom_serve_text_session_t* session) {
+  loom_serve_text_projected_media_deinitialize(&session->request.media);
   loom_serve_text_chat_deinitialize(&session->request.chat);
   iree_tokenizer_decode_state_deinitialize(session->decoder);
   session->decoder = NULL;
