@@ -88,7 +88,9 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
       %prediction = view.load %prior[%first, %last] : view<16x10xi32> -> i32
       %extent = scalar.addi %advanced, %length_word : i32
       %fits = scalar.cmpi ule, %extent, %context_word : i32
-      %credited = scalar.cmpi sgt, %remaining, %c0_2 : i32
+      // A final single output uses ordinary decode. Admission reserves the
+      // speculative high-water only while at least two outputs remain.
+      %credited = scalar.cmpi sgt, %remaining, %c1_2 : i32
       %not_eos = scalar.cmpi ne, %prediction, %eos : i32
       %ready = scalar.andi %fits, %credited : i1
       %continues = scalar.andi %ready, %not_eos : i1
