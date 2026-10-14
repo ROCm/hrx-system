@@ -534,7 +534,8 @@ static iree_status_t loom_pass_interpreter_invoke(
       report_status = loom_pass_report_append_invocation(
           state->options->report,
           &(loom_pass_report_invocation_options_t){
-              .instruction = instruction,
+              .descriptor = invoke->descriptor,
+              .info = invoke->info,
               .instruction_index = instruction_index,
               .anchor_kind = frame->kind,
               .pipeline_symbol = pipeline_symbol,

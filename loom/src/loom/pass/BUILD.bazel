@@ -209,7 +209,6 @@ loom_cc_library(
     hdrs = ["report.h"],
     deps = [
         ":environment",
-        ":program",
         ":registry",
         ":types",
         "//loom/src/loom/util:json",
@@ -514,4 +513,17 @@ iree_assert_dependency_boundary(
     ],
     message = "Pass registry metadata and composition must remain independent of compiler IR and invocation decoding",
     target = ":registry",
+)
+
+iree_assert_dependency_boundary(
+    name = "report_has_no_compiler_dependencies",
+    forbidden_subtrees = [
+        "//loom/src/loom/codegen/...",
+        "//loom/src/loom/format/...",
+        "//loom/src/loom/ir/...",
+        "//loom/src/loom/ops/...",
+        "//loom/src/loom/target/...",
+    ],
+    message = "Pass reports consume resolved descriptor metadata independently of compiler IR and program compilation",
+    target = ":report",
 )

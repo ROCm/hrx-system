@@ -23,7 +23,6 @@ extern "C" {
 #endif
 
 typedef struct loom_pass_descriptor_t loom_pass_descriptor_t;
-typedef struct loom_pass_program_instruction_t loom_pass_program_instruction_t;
 typedef struct loom_pass_registry_t loom_pass_registry_t;
 
 typedef struct loom_pass_report_statistic_t {
@@ -117,8 +116,10 @@ struct loom_pass_report_t {
 };
 
 typedef struct loom_pass_report_invocation_options_t {
-  // Compiled instruction being invoked.
-  const loom_pass_program_instruction_t* instruction;
+  // Descriptor selected for this invocation.
+  const loom_pass_descriptor_t* descriptor;
+  // Descriptor metadata resolved during program compilation.
+  const loom_pass_info_t* info;
   // Program instruction index for deterministic correlation with traces.
   iree_host_size_t instruction_index;
   // Anchor kind active for this invocation.

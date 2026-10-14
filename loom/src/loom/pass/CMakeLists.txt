@@ -246,7 +246,6 @@ loom_cc_library(
     "report.c"
   DEPS
     ::environment
-    ::program
     ::registry
     ::types
     iree::base

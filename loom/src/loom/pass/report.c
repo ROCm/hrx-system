@@ -10,7 +10,6 @@
 #include <string.h>
 
 #include "loom/pass/environment.h"
-#include "loom/pass/program.h"
 #include "loom/pass/registry.h"
 #include "loom/util/json.h"
 
@@ -115,24 +114,11 @@ static iree_status_t loom_pass_report_copy_statistics(
 iree_status_t loom_pass_report_append_invocation(
     loom_pass_report_t* report,
     const loom_pass_report_invocation_options_t* options) {
-  if (!report || !options || !options->instruction ||
-      options->instruction->kind != LOOM_PASS_PROGRAM_INSTRUCTION_INVOKE) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "pass report invocation requires an invoke instruction");
-  }
-  const loom_pass_program_invoke_t* invoke = &options->instruction->invoke;
-  if (!invoke->descriptor || !invoke->info) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "pass report invocation requires descriptor metadata");
-  }
-
   IREE_RETURN_IF_ERROR(loom_pass_report_ensure_invocation_capacity(report));
   loom_pass_report_invocation_t invocation = {
-      .descriptor = invoke->descriptor,
-      .pass_key = invoke->descriptor->key,
-      .pass_kind = invoke->info->kind,
+      .descriptor = options->descriptor,
+      .pass_key = options->descriptor->key,
+      .pass_kind = options->info->kind,
       .anchor_kind = options->anchor_kind,
       .instruction_index = options->instruction_index,
       .duration_nanoseconds = options->duration_nanoseconds,
@@ -147,7 +133,7 @@ iree_status_t loom_pass_report_append_invocation(
   }
   if (iree_status_is_ok(status)) {
     status = loom_pass_report_copy_statistics(
-        report, invoke->info, options->statistic_storage, &invocation);
+        report, options->info, options->statistic_storage, &invocation);
   }
   if (iree_status_is_ok(status)) {
     invocation.details = options->detail_head;
