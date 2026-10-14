@@ -1,0 +1,139 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl @text.is_space(%codepoint: i32) -> (i1)
+
+// These transforms consume valid UTF-8 and codepoint-aligned byte positions.
+// Request parsing or the producing tokenizer establishes that boundary once.
+// next requires position < length; previous requires end > 0. write receives
+// a Unicode scalar and storage for its 1–4-byte encoding.
+func.def public @text.next(%text: buffer, %position: offset) -> (i32, offset) {
+  %first = buffer.load.i8.u %text[%position]
+  %ascii_limit = scalar.constant 128 : i32
+  %ascii = scalar.cmpi ult, %first, %ascii_limit : i32
+  %step = index.constant 1 : offset
+  %after_first = index.add %position, %step : offset
+  %codepoint, %next = scf.if %ascii -> (i32, offset) {
+    scf.yield %first, %after_first : i32, offset
+  } else {
+    %three_begin = scalar.constant 224 : i32
+    %four_begin = scalar.constant 240 : i32
+    %two_bytes = scalar.cmpi ult, %first, %three_begin : i32
+    %three_bytes = scalar.cmpi ult, %first, %four_begin : i32
+    %mask_two = scalar.constant 31 : i32
+    %mask_three = scalar.constant 15 : i32
+    %mask_four = scalar.constant 7 : i32
+    %long_mask = scf.select %three_bytes, %mask_three, %mask_four : i32
+    %mask = scf.select %two_bytes, %mask_two, %long_mask : i32
+    %initial = scalar.andi %first, %mask : i32
+    %two = index.constant 2 : index
+    %three = index.constant 3 : index
+    %four = index.constant 4 : index
+    %long_count = scf.select %three_bytes, %three, %four : index
+    %count = scf.select %two_bytes, %two, %long_count : index
+    %one = index.constant 1 : index
+    %shift = scalar.constant 6 : i32
+    %continuation_mask = scalar.constant 63 : i32
+    %value, %end = scf.for %i = [%one to %count step %one](%value = %initial : i32, %cursor = %after_first : offset) -> (i32, offset) {
+      %byte = buffer.load.i8.u %text[%cursor]
+      %low = scalar.andi %byte, %continuation_mask : i32
+      %high = scalar.shli %value, %shift : i32
+      %next_value = scalar.ori %high, %low : i32
+      %after = index.add %cursor, %step : offset
+      scf.yield %next_value, %after : i32, offset
+    }
+    scf.yield %value, %end : i32, offset
+  }
+  func.return %codepoint, %next : i32, offset
+}
+
+func.def public @text.previous(%text: buffer, %end: offset) -> (i32, offset) {
+  %step = index.constant 1 : offset
+  %last = index.sub %end, %step : offset
+  %mask = scalar.constant 192 : i32
+  %marker = scalar.constant 128 : i32
+  %begin = scf.while(%cursor = %last : offset) -> (offset) {
+    %byte = buffer.load.i8.u %text[%cursor]
+    %kind = scalar.andi %byte, %mask : i32
+    %continuation = scalar.cmpi eq, %kind, %marker : i32
+    scf.condition %continuation, %cursor : i1, offset
+  } do(%cursor: offset) {
+    %before = index.sub %cursor, %step : offset
+    scf.yield %before : offset
+  }
+  %codepoint, %unused = func.call @text.next(%text, %begin) : (buffer, offset) -> (i32, offset)
+  func.return %codepoint, %begin : i32, offset
+}
+
+func.def public @text.write(%text: buffer, %position: offset, %codepoint: i32) -> (offset) {
+  %ascii_limit = scalar.constant 128 : i32
+  %two_limit = scalar.constant 2048 : i32
+  %three_limit = scalar.constant 65536 : i32
+  %ascii = scalar.cmpi ult, %codepoint, %ascii_limit : i32
+  %two_bytes = scalar.cmpi ult, %codepoint, %two_limit : i32
+  %three_bytes = scalar.cmpi ult, %codepoint, %three_limit : i32
+  %zero = scalar.constant 0 : i32
+  %two_marker = scalar.constant 192 : i32
+  %three_marker = scalar.constant 224 : i32
+  %four_marker = scalar.constant 240 : i32
+  %long_marker = scf.select %three_bytes, %three_marker, %four_marker : i32
+  %multibyte_marker = scf.select %two_bytes, %two_marker, %long_marker : i32
+  %marker = scf.select %ascii, %zero, %multibyte_marker : i32
+  %six = scalar.constant 6 : i32
+  %twelve = scalar.constant 12 : i32
+  %eighteen = scalar.constant 18 : i32
+  %long_shift = scf.select %three_bytes, %twelve, %eighteen : i32
+  %multibyte_shift = scf.select %two_bytes, %six, %long_shift : i32
+  %shift = scf.select %ascii, %zero, %multibyte_shift : i32
+  %high = scalar.shrui %codepoint, %shift : i32
+  %first = scalar.ori %high, %marker : i32
+  buffer.store.i8 %first, %text[%position]
+  %step = index.constant 1 : offset
+  %after_first = index.add %position, %step : offset
+  %mask = scalar.constant 63 : i32
+  %continuation = scalar.constant 128 : i32
+  %end, %unused = scf.while(%cursor = %after_first : offset, %remaining = %shift : i32) -> (offset, i32) {
+    %more = scalar.cmpi ugt, %remaining, %zero : i32
+    scf.condition %more, %cursor, %remaining : i1, offset, i32
+  } do(%cursor: offset, %remaining: i32) {
+    %next_shift = scalar.subi %remaining, %six : i32
+    %shifted = scalar.shrui %codepoint, %next_shift : i32
+    %low = scalar.andi %shifted, %mask : i32
+    %byte = scalar.ori %low, %continuation : i32
+    buffer.store.i8 %byte, %text[%cursor]
+    %after = index.add %cursor, %step : offset
+    scf.yield %after, %next_shift : offset, i32
+  }
+  func.return %end : offset
+}
+
+// Returns the byte bounds after trimming Unicode whitespace from both ends.
+func.def public @text.trim(%text: buffer) -> (offset, offset) {
+  %origin = index.constant 0 : offset
+  %length = buffer.length %text
+  %true = scalar.constant true : i1
+  %begin, %unused_forward = scf.while(%cursor = %origin : offset, %trimming = %true : i1) -> (offset, i1) {
+    %inside = index.cmp ult, %cursor, %length : offset
+    %more = scalar.andi %inside, %trimming : i1
+    scf.condition %more, %cursor, %trimming : i1, offset, i1
+  } do(%cursor: offset, %trimming: i1) {
+    %codepoint, %next = func.call @text.next(%text, %cursor) : (buffer, offset) -> (i32, offset)
+    %space = func.call @text.is_space(%codepoint) : (i32) -> (i1)
+    %after = scf.select %space, %next, %cursor : offset
+    scf.yield %after, %space : offset, i1
+  }
+  %end, %unused_backward = scf.while(%cursor = %length : offset, %trimming = %true : i1) -> (offset, i1) {
+    %inside = index.cmp ugt, %cursor, %begin : offset
+    %more = scalar.andi %inside, %trimming : i1
+    scf.condition %more, %cursor, %trimming : i1, offset, i1
+  } do(%cursor: offset, %trimming: i1) {
+    %codepoint, %previous = func.call @text.previous(%text, %cursor) : (buffer, offset) -> (i32, offset)
+    %space = func.call @text.is_space(%codepoint) : (i32) -> (i1)
+    %before = scf.select %space, %previous, %cursor : offset
+    scf.yield %before, %space : offset, i1
+  }
+  func.return %begin, %end : offset, offset
+}

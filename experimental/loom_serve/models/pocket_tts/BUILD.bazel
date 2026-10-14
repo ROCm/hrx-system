@@ -6,6 +6,7 @@
 
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
+load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -20,6 +21,7 @@ loom_test(
     srcs = glob(["*.loom"]) + [
         "tests/request.loom",
         "//experimental/loom_serve/motifs/tensor:sources",
+        "//experimental/loom_serve/motifs/text:sources",
     ],
     benchmark_smoke = False,
     configs = {
@@ -34,6 +36,17 @@ loom_test(
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
     ],
+)
+
+loom_test(
+    name = "text_normalization_test",
+    srcs = [
+        "tests/text_normalization.loom",
+        "text_normalization.loom",
+        "//experimental/loom_serve/motifs/text:sources",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [VM_REFERENCE_PROFILE],
 )
 
 loom_test(
