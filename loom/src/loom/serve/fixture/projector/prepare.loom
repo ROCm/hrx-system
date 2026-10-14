@@ -1,0 +1,20 @@
+func.decl import("prepare") @dispatch(%root: buffer, %tag: i64) -> (i32)
+
+global.rodata.def @root = bytes("70726f6a656374")
+
+global.rodata.def @empty = bytes("")
+
+global.rodata.def @name = bytes("666978747572652d70726f6a6563746f72")
+
+// One image at a time, at most 64 projected rows, and no learned parameters.
+func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
+  %tag = scalar.constant 0 : i64
+  %root = global.load @root : buffer
+  %stage = func.call @dispatch(%root, %tag) : (buffer, i64) -> (i32)
+  %units = scalar.constant 64 : i64
+  %input_capacity = scalar.constant 65536 : i64
+  %output_capacity = scalar.constant 1024 : i64
+  %empty = global.load @empty : buffer
+  %name = global.load @name : buffer
+  func.return %units, %input_capacity, %output_capacity, %output_capacity, %empty, %name, %empty : i64, i64, i64, i64, buffer, buffer, buffer
+}

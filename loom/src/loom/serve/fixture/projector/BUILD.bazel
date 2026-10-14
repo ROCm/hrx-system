@@ -1,0 +1,39 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+load(":sources.bzl", "SOURCE_FILES")
+
+package(default_visibility = ["//visibility:private"])
+
+exports_files(
+    SOURCE_FILES,
+    visibility = ["//visibility:public"],
+)
+
+loom_cc_library(
+    name = "projector_tests",
+    testonly = True,
+    srcs = ["projector_test.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/serve/media:image",
+        "//loom/src/loom/serve/media:image_request",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/parameter:residency",
+        "//loom/src/loom/serve/service/finite:model",
+        "//loom/src/loom/serve/service/image:output",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:base64",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/vm",
+    ],
+    alwayslink = True,
+)

@@ -86,6 +86,23 @@ endif()
 if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_X86 AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK)
 loom_cc_test(
   NAME
+    projector_fixture_test
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/project.loom"
+  DEPS
+    iree::testing::gtest_main
+    loom::serve::fixture::projector::projector_tests
+  ARGS
+    "--projector_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/prepare.loom}}"
+    "--test_device=task"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_X86 AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK)
+loom_cc_test(
+  NAME
     finite_component_test
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/prepare.loom"
