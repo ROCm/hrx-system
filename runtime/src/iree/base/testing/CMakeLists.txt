@@ -20,13 +20,25 @@ set(_TEST_LIBRARY_FILES
   "$<TARGET_FILE:iree::base::testing::dynamic_library_test_library.so>"
 )
 if(IREE_BUILD_TESTS AND WIN32)
-  set_property(TARGET iree_base_testing_dynamic_library_test_library.so
-    PROPERTY MSVC_DEBUG_INFORMATION_FORMAT Embedded)
+  set(_TEST_LIBRARY_PDB_DIR "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>")
+  set_target_properties(iree_base_testing_dynamic_library_test_library.so
+    PROPERTIES
+      MSVC_DEBUG_INFORMATION_FORMAT Embedded
+      PDB_NAME dynamic_library_test_library
+      PDB_OUTPUT_DIRECTORY "${_TEST_LIBRARY_PDB_DIR}"
+  )
   target_link_options(iree_base_testing_dynamic_library_test_library.so PRIVATE
     /DEBUG
     /INCREMENTAL:NO
     # Only explicit attachment can locate the matching embedded PDB.
     /PDBALTPATH:dynamic_library_test_library.embedded.pdb
+  )
+  # CMake does not declare the linker PDB as an output. The empty build event
+  # attaches its producing edge to the link without running another command.
+  add_custom_command(TARGET iree_base_testing_dynamic_library_test_library.so
+    POST_BUILD
+    BYPRODUCTS "${_TEST_LIBRARY_PDB_DIR}/dynamic_library_test_library.pdb"
+    COMMAND "$<0:>"
   )
   list(APPEND _TEST_LIBRARY_FILES
     "$<TARGET_PDB_FILE:iree::base::testing::dynamic_library_test_library.so>"
