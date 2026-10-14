@@ -30,10 +30,11 @@ typedef struct loom_serve_router_options_t {
 
 // Routes JSON request bodies by their model field and checkpoint operations by
 // X-Loom-Model. A checkpoint request may omit its selector with exactly one
-// service. GET /v1/models lists deployment names and namespaced capabilities;
-// GET /v1/status adds copied scheduler ownership and a server object containing
-// actual worker/admission/framing bounds and published resources. No hardware
-// polling or device synchronization is performed. /healthz and /readyz are
+// service. GET /v1/models lists prepared, non-removing deployments and their
+// namespaced capabilities. GET /v1/status includes every registration through
+// retirement, copied scheduler ownership and a server object containing actual
+// worker/admission/framing bounds and published resources. No hardware polling
+// or device synchronization is performed. /healthz and /readyz are
 // model-free: HTTP is available, independently of model preparation/activation.
 // Zero services is valid: model/status lists are empty, work counters are zero,
 // and inference or tokenization requests receive model-not-registered errors.
@@ -62,7 +63,8 @@ typedef struct loom_serve_router_options_t {
 // POST /v1/models/unregister takes {"model":"name","mode":"drain"|"abort"};
 // omitted mode is drain. Its 202 seals admission irreversibly, resolves held
 // arrivals with 410, then completes or cancels admitted work before retirement.
-// A name remains reserved until actual resource retirement. Unsupported managed
+// A name remains reserved until actual resource retirement, observed by that
+// incarnation disappearing from /v1/status, not /v1/models. Unsupported managed
 // modalities return 501; borrowed application services cannot be unregistered.
 // POST /v1/models/drain and /v1/models/undrain select {"model":"name"} and
 // change admission without evicting weights or discarding retained state.

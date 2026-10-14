@@ -82,10 +82,15 @@ to retire before releasing memory, and return HTTP 202 for accepted removal.
 Graceful removal can be escalated to abort but cannot be undone by undrain.
 
 The name stays occupied during retirement; a duplicate registration returns
-409. Held arrivals receive 410 during removal, and requests for the absent name
-receive 404 after it disappears. A quiescent platform release failure remains
-visible as `release_failed`, retaining the resources needed to retry. Another
-unregister explicitly retries that release.
+409. The model leaves `/v1/models` as soon as removal is accepted, but remains
+in `/v1/status` until retirement finishes and its name is released. Absence
+from `/v1/status` confirms completion. With concurrent administrators, compare
+`loom.incarnation`: the same name may already identify a new registration.
+
+Held arrivals receive 410 during removal, and requests for the absent name
+receive 404 after retirement. A quiescent platform release failure remains
+visible in `/v1/status` as `release_failed`, retaining the resources needed to
+retry. Another unregister explicitly retries that release.
 
 ## Control weight residency independently
 

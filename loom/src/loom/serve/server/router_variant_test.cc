@@ -219,17 +219,22 @@ class HttpRouterVariantTest : public HttpRouterTest {
     model_.CompleteCompilers(true);
     HttpRouterTest::TearDown();
   }
-  void Declare() {
-    const auto response = Read(Send(
+  std::string Register() {
+    return Read(Send(
         "POST", "/v1/models/register",
         R"({"name":"dynamic","definition":{"kind":"embedding","prepare":"/model/prepare.loom","control":"/model/control.loom","sources":["/model/kernel.loom"],"assets":"/assets"}})"));
+  }
+  void Declare() {
+    const auto response = Register();
     ASSERT_EQ(response.find("HTTP/1.1 202"), 0u) << response;
     while (!returned_.load() && !HasFatalFailure()) {
       const auto state = Read(Send("GET", "/v1/status"));
+      ASSERT_EQ(state.find("HTTP/1.1 200"), 0u) << state;
       if (state.find("\"registration\":\"ready\"") != std::string::npos) {
         return;
       }
     }
+    FAIL() << "Server stopped before registration readiness was observed";
   }
   int Stage(bool wait = true) {
     return Send("POST", "/v1/models/variants",
@@ -244,11 +249,15 @@ class HttpRouterVariantTest : public HttpRouterTest {
   }
   void WaitRemoval() {
     while (!returned_.load() && !HasFatalFailure()) {
-      if (Read(Send("GET", "/v1/models")).find("\"id\":\"dynamic\"") ==
-          std::string::npos) {
+      // Discovery withdraws on removal intent; status retains the registration
+      // until every borrower retires and the registry releases its name.
+      const auto state = Read(Send("GET", "/v1/status"));
+      ASSERT_EQ(state.find("HTTP/1.1 200"), 0u) << state;
+      if (state.find("\"id\":\"dynamic\"") == std::string::npos) {
         return;
       }
     }
+    FAIL() << "Server stopped before registration retirement was observed";
   }
   // Dependencies outlive the joined serving owner, including teardown failure.
   VariantDependency model_;
@@ -261,12 +270,26 @@ TEST_P(HttpRouterVariantTest, UnregisterRetiresReadersBeforeCompilerOwnership) {
   model_.WaitCompilers(1);
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
   EXPECT_EQ(Read(stage).find("HTTP/1.1 410"), 0u);
+
+  // The compiler still owns the registration even though inference discovery
+  // and the waiting compilation reader have both withdrawn.
+  const auto discovery = Read(Send("GET", "/v1/models"));
+  ASSERT_EQ(discovery.find("HTTP/1.1 200"), 0u) << discovery;
+  EXPECT_EQ(discovery.find("\"id\":\"dynamic\""), std::string::npos)
+      << discovery;
+  const auto state = Read(Send("GET", "/v1/status"));
+  ASSERT_EQ(state.find("HTTP/1.1 200"), 0u) << state;
+  EXPECT_NE(state.find("\"id\":\"dynamic\""), std::string::npos) << state;
+  EXPECT_NE(state.find("\"admission\":\"removing\""), std::string::npos)
+      << state;
+  const auto duplicate = Register();
+  EXPECT_EQ(duplicate.find("HTTP/1.1 409"), 0u) << duplicate;
   EXPECT_EQ(model_.destroyed.load(), 0u);
   EXPECT_EQ(
       Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
       0u);
   model_.CompleteCompilers();
-  WaitRemoval();
+  ASSERT_NO_FATAL_FAILURE(WaitRemoval());
   EXPECT_EQ(model_.destroyed.load(), 1u);
   ASSERT_NO_FATAL_FAILURE(Declare());
   EXPECT_NE(model_.original.load(), original);
@@ -294,7 +317,7 @@ TEST_P(HttpRouterVariantTest, DisconnectedReaderDoesNotCancelConstruction) {
     }
   }
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
-  WaitRemoval();
+  ASSERT_NO_FATAL_FAILURE(WaitRemoval());
 }
 
 TEST_P(HttpRouterVariantTest, DisconnectedSelectionKeepsCallbackUntilBoundary) {
@@ -311,7 +334,7 @@ TEST_P(HttpRouterVariantTest, DisconnectedSelectionKeepsCallbackUntilBoundary) {
       0u);
   model_.ReleaseSelection();
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
-  WaitRemoval();
+  ASSERT_NO_FATAL_FAILURE(WaitRemoval());
 }
 
 TEST_P(HttpRouterVariantTest, AbortCompletesAcceptedSelectionBeforeRetirement) {
@@ -326,7 +349,7 @@ TEST_P(HttpRouterVariantTest, AbortCompletesAcceptedSelectionBeforeRetirement) {
                 .find("HTTP/1.1 202"),
             0u);
   EXPECT_EQ(Read(selecting).find("HTTP/1.1 409"), 0u);
-  WaitRemoval();
+  ASSERT_NO_FATAL_FAILURE(WaitRemoval());
   EXPECT_EQ(model_.destroyed.load(), 1u);
 }
 
@@ -403,7 +426,7 @@ TEST_P(HttpRouterVariantCreditTest, CompilationAndHoldingLeaveControlCredit) {
   EXPECT_EQ(Control("undrain", "a").find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(Read(held).find("HTTP/1.1 200"), 0u);
   model_.CompleteCompilers();
-  WaitRemoval();
+  ASSERT_NO_FATAL_FAILURE(WaitRemoval());
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterVariantCreditTest,
