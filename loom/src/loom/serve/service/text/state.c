@@ -698,6 +698,7 @@ void loom_serve_text_state_row_reset(loom_serve_text_state_row_t* row) {
   loom_serve_snapshot_release(row->snapshot);
   row->snapshot = NULL;
   row->position = 0;
+  row->source_position = 0;
   row->reserved_extent = 0;
   loom_serve_text_state_row_trim(row);
   loom_serve_text_row_release_recurrent(row);
@@ -863,6 +864,7 @@ iree_status_t loom_serve_text_state_row_submit_pin(
   loom_serve_text_state_checkpoint_t* checkpoint =
       &state->checkpoints.values[index];
   checkpoint->position = row->position;
+  checkpoint->source_position = row->source_position;
   checkpoint->recurrent_slot = row->recurrent.anchor != UINT32_MAX
                                    ? row->recurrent.anchor
                                    : row->recurrent.slot;
@@ -1084,6 +1086,7 @@ iree_status_t loom_serve_text_state_row_try_restore(
   }
   loom_serve_text_state_row_reset(row);
   row->position = checkpoint->position;
+  row->source_position = checkpoint->source_position;
   row->recurrent.slot = checkpoint->recurrent_slot;
   row->buffers[TEXT_RECURRENT] = state->recurrent.buffers[row->recurrent.slot];
   loom_serve_block_pool_retain(&state->recurrent.pool, 1, &row->recurrent.slot);
@@ -1262,6 +1265,10 @@ iree_status_t loom_serve_text_state_row_submit_reserve(
                                     : mode == LOOM_SERVE_TEXT_RESERVE_CONTINUE
                                         ? row->position
                                         : 0;
+  const uint32_t source_position = checkpoint ? checkpoint->source_position
+                                   : mode == LOOM_SERVE_TEXT_RESERVE_CONTINUE
+                                       ? row->source_position
+                                       : 0;
   const bool cold = checkpoint && checkpoint->snapshot;
   const bool pooled = state->cache.capacity != 0;
   const uint32_t prefix =
@@ -1404,9 +1411,10 @@ iree_status_t loom_serve_text_state_row_submit_reserve(
       checkpoint->block_count = prefix;
       memcpy(checkpoint->blocks, restored.blocks, prefix * sizeof(*blocks));
     }
-    row->position = position;
+    row->position = (uint32_t)position;
+    row->source_position = source_position;
     row->block_count = count;
-    row->reserved_extent = extent;
+    row->reserved_extent = (uint32_t)extent;
     if (count) {
       memcpy(state->cache.maps + index * state->storage.blocks_per_row, blocks,
              count * sizeof(*blocks));

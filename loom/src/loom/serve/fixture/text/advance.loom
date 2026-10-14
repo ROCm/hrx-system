@@ -53,17 +53,20 @@ kernel.def target(@target) @consume() {
   %count = index.cast %count32 : i32 to index
   %live = index.cmp ult, %span, %count : index
   scf.if %live {
-    %packets = buffer.view %metadata[%c16] : buffer -> view<16x8xi32>
-    %length32 = view.load %packets[%span, 0] : view<16x8xi32> -> i32
-    %position32 = view.load %packets[%span, 1] : view<16x8xi32> -> i32
-    %row32 = view.load %packets[%span, 2] : view<16x8xi32> -> i32
-    %input32 = view.load %packets[%span, 3] : view<16x8xi32> -> i32
+    %packets = buffer.view %metadata[%c16] : buffer -> view<16x9xi32>
+    %length32 = view.load %packets[%span, 0] : view<16x9xi32> -> i32
+    %position32 = view.load %packets[%span, 1] : view<16x9xi32> -> i32
+    %source32 = view.load %packets[%span, 2] : view<16x9xi32> -> i32
+    %row32 = view.load %packets[%span, 3] : view<16x9xi32> -> i32
+    %input32 = view.load %packets[%span, 4] : view<16x9xi32> -> i32
     %length_bound = scalar.assume %length32 [range(%length32, 1, 262144)] : i32
     %position_bound = scalar.assume %position32 [range(%position32, 0, 262143)] : i32
+    %source_bound = scalar.assume %source32 [range(%source32, 0, 524287)] : i32
     %row_bound = scalar.assume %row32 [range(%row32, 0, 15)] : i32
     %input_bound = scalar.assume %input32 [range(%input32, 0, 262143)] : i32
     %length = index.cast %length_bound : i32 to index
     %position = index.cast %position_bound : i32 to index
+    %source = index.cast %source_bound : i32 to index
     %row = index.cast %row_bound : i32 to index
     %input = index.cast %input_bound : i32 to index
     %records = buffer.view %origins[%origin] : buffer -> view<16x4xi64>
@@ -83,6 +86,7 @@ kernel.def target(@target) @consume() {
     %rows = config.get @fixture.rows : index
     %c0 = index.constant 0 : index
     %c1 = index.constant 1 : index
+    %c2 = index.constant 2 : index
     %c3 = index.constant 3 : index
     %c4 = index.constant 4 : index
     %padded = index.add %context, %c3 : index
@@ -104,6 +108,7 @@ kernel.def target(@target) @consume() {
     %ids = buffer.view %tokens[%origin] : buffer -> view<[%capacity]xi32>
     %c5_i32 = scalar.constant 5 : i32
     %c7_i32 = scalar.constant 7 : i32
+    %c1_i32 = scalar.constant 1 : i32
     %c97 = scalar.constant 97 : i32
     %c101 = scalar.constant 101 : i32
     %final_h, %final_k = scf.for %i = [%c0 to %length step %c1](%h = %initial_h : i32, %k = %initial_k : i32) -> (i32, i32) {
@@ -115,10 +120,13 @@ kernel.def target(@target) @consume() {
       %with_bias = scalar.addi %with_token, %bias_value : i32
       %next_h = scalar.remui %with_bias, %c97 : i32
       %absolute = index.add %position, %i : index
-      %absolute32 = index.cast %absolute : index to i32
+      %source_delta = index.mul %i, %c2 : index
+      %absolute_source = index.add %source, %source_delta : index
+      %absolute_source32 = index.cast %absolute_source : index to i32
+      %absolute_position32 = scalar.shrui %absolute_source32, %c1_i32 : i32
       %scaled_k = scalar.muli %k, %c7_i32 : i32
       %with_h = scalar.addi %scaled_k, %next_h : i32
-      %with_position = scalar.addi %with_h, %absolute32 : i32
+      %with_position = scalar.addi %with_h, %absolute_position32 : i32
       %next_k = scalar.remui %with_position, %c101 : i32
       %offset = func.call @history_offset(%origins, %row, %absolute, %blocks, %rows) : (buffer, index, index, index, index) -> (offset)
       %cache = buffer.view %arena[%offset] : buffer -> view<1xi32>
@@ -145,18 +153,23 @@ kernel.def target(@target) @select() {
   %count = index.cast %count32 : i32 to index
   %live = index.cmp ult, %span, %count : index
   scf.if %live {
-    %packets = buffer.view %metadata[%c16] : buffer -> view<16x8xi32>
-    %flags = view.load %packets[%span, 5] : view<16x8xi32> -> i32
+    %packets = buffer.view %metadata[%c16] : buffer -> view<16x9xi32>
+    %flags = view.load %packets[%span, 6] : view<16x9xi32> -> i32
     %c0_i32 = scalar.constant 0 : i32
     %c1_i32 = scalar.constant 1 : i32
     %bits = scalar.andi %flags, %c1_i32 : i32
     %selected = scalar.cmpi ne, %bits, %c0_i32 : i32
     scf.if %selected {
-      %length32 = view.load %packets[%span, 0] : view<16x8xi32> -> i32
-      %position32 = view.load %packets[%span, 1] : view<16x8xi32> -> i32
-      %row32 = view.load %packets[%span, 2] : view<16x8xi32> -> i32
+      %length32 = view.load %packets[%span, 0] : view<16x9xi32> -> i32
+      %position32 = view.load %packets[%span, 1] : view<16x9xi32> -> i32
+      %source32 = view.load %packets[%span, 2] : view<16x9xi32> -> i32
+      %row32 = view.load %packets[%span, 3] : view<16x9xi32> -> i32
       %end32 = scalar.addi %position32, %length32 : i32
+      %c2_i32 = scalar.constant 2 : i32
+      %source_length32 = scalar.muli %length32, %c2_i32 : i32
+      %source_end32 = scalar.addi %source32, %source_length32 : i32
       %end_bound = scalar.assume %end32 [range(%end32, 1, 262144)] : i32
+      %source_end_bound = scalar.assume %source_end32 [range(%source_end32, 1, 524288)] : i32
       %row_bound = scalar.assume %row32 [range(%row32, 0, 15)] : i32
       %end = index.cast %end_bound : i32 to index
       %row = index.cast %row_bound : i32 to index
@@ -181,7 +194,8 @@ kernel.def target(@target) @select() {
       %c3_i32 = scalar.constant 3 : i32
       %c11_i32 = scalar.constant 11 : i32
       %token = scalar.remui %total, %c3_i32 : i32
-      %phase = scalar.remui %end32, %c11_i32 : i32
+      %source_phase = scalar.shrui %source_end_bound, %c1_i32 : i32
+      %phase = scalar.remui %source_phase, %c11_i32 : i32
       %terminal = scalar.cmpi eq, %phase, %c0_i32 : i32
       %eos = view.load %header[1] : view<4xi32> -> i32
       %prediction = scf.select %terminal, %eos, %token : i32
