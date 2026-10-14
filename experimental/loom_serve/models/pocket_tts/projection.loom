@@ -1,0 +1,157 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+target.decl @pocket
+
+config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
+
+template.decl @pocket.element() -> (index)
+
+template.decl @pocket.projection(%wide: i1, %biased: i1, %inputs: index, %outputs: index, %times: index, %row: index, %time: index, %input: buffer, %weight: buffer, %bias: buffer) -> (f32)
+
+// Channels are the outer dimension of activations. BF16 checkpoint bytes are
+// extended at consumption; activations and the output boundary remain F32.
+// Accurate reductions preserve the recurrent voice/FlowLM numerical contract.
+// The waveform decoder selects F32 accumulation independently. Launch rows
+// along X and time along Y; shape operands agree in launch and dispatch.
+// Each output row/time pair has one writer, and output does not alias inputs.
+template.def<@pocket.projection> @pocket_projection(%wide: i1, %biased: i1, %inputs: index, %outputs: index, %times: index, %row: index, %time: index, %input: buffer, %weight: buffer, %bias: buffer) -> (f32) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %x = buffer.view %input[%origin] : buffer -> view<[%inputs]x[%times]xf32>
+  %w = buffer.view %weight[%origin] : buffer -> view<[%outputs]x[%inputs]xbf16>
+  %sum = scf.if %wide -> (f32) {
+    %initial = scalar.constant 0.0 : f64
+    %total = scf.for %channel = [%zero to %inputs step %one](%sum = %initial : f64) -> (f64) {
+      %value = view.load %x[%channel, %time] : view<[%inputs]x[%times]xf32> -> f32
+      %stored = view.load %w[%row, %channel] : view<[%outputs]x[%inputs]xbf16> -> bf16
+      %value_wide = scalar.extf %value : f32 to f64
+      %factor = scalar.extf %stored : bf16 to f32
+      %weight_wide = scalar.extf %factor : f32 to f64
+      %next = scalar.fmaf %value_wide, %weight_wide, %sum : f64
+      scf.yield %next : f64
+    }
+    %rounded = scalar.fptrunc %total : f64 to f32
+    scf.yield %rounded : f32
+  } else {
+    %initial = scalar.constant 0.0 : f32
+    %total = scf.for %channel = [%zero to %inputs step %one](%sum = %initial : f32) -> (f32) {
+      %value = view.load %x[%channel, %time] : view<[%inputs]x[%times]xf32> -> f32
+      %stored = view.load %w[%row, %channel] : view<[%outputs]x[%inputs]xbf16> -> bf16
+      %factor = scalar.extf %stored : bf16 to f32
+      %next = scalar.fmaf %value, %factor, %sum : f32
+      scf.yield %next : f32
+    }
+    scf.yield %total : f32
+  }
+  %result = scf.if %biased -> (f32) {
+    %b = buffer.view %bias[%origin] : buffer -> view<[%outputs]xbf16>
+    %stored = view.load %b[%row] : view<[%outputs]xbf16> -> bf16
+    %shift = scalar.extf %stored : bf16 to f32
+    %result = scalar.addf %sum, %shift : f32
+    scf.yield %result : f32
+  } else {
+    scf.yield %sum : f32
+  }
+  template.return %result : f32
+}
+
+kernel.def target(@pocket) @pocket.project_f32(%outputs: index, %times: index) {
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %outputs, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %times, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %row_unbounded = template.apply<@pocket.element>() : () -> (index)
+  %time_unbounded = kernel.workgroup.id<y> : index
+  %live = index.cmp ult, %row_unbounded, %outputs : index
+  scf.if %live {
+    %row = index.assume %row_unbounded [ge(%row_unbounded, 0), lt(%row_unbounded, %outputs)] : index
+    %time = index.assume %time_unbounded [ge(%time_unbounded, 0), lt(%time_unbounded, %times)] : index
+    %wide = scalar.constant false : i1
+    %biased = scalar.constant false : i1
+    %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer) -> (f32)
+    %origin = index.constant 0 : offset
+    %y = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%times]xf32>
+    view.store %result, %y[%row, %time] : f32, view<[%outputs]x[%times]xf32>
+  }
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.project_bias_f32(%outputs: index, %times: index) {
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %outputs, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %times, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %row_unbounded = template.apply<@pocket.element>() : () -> (index)
+  %time_unbounded = kernel.workgroup.id<y> : index
+  %live = index.cmp ult, %row_unbounded, %outputs : index
+  scf.if %live {
+    %row = index.assume %row_unbounded [ge(%row_unbounded, 0), lt(%row_unbounded, %outputs)] : index
+    %time = index.assume %time_unbounded [ge(%time_unbounded, 0), lt(%time_unbounded, %times)] : index
+    %wide = scalar.constant false : i1
+    %biased = scalar.constant true : i1
+    %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer) -> (f32)
+    %origin = index.constant 0 : offset
+    %y = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%times]xf32>
+    view.store %result, %y[%row, %time] : f32, view<[%outputs]x[%times]xf32>
+  }
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.project_f64(%outputs: index, %times: index) {
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %outputs, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %times, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %row_unbounded = template.apply<@pocket.element>() : () -> (index)
+  %time_unbounded = kernel.workgroup.id<y> : index
+  %live = index.cmp ult, %row_unbounded, %outputs : index
+  scf.if %live {
+    %row = index.assume %row_unbounded [ge(%row_unbounded, 0), lt(%row_unbounded, %outputs)] : index
+    %time = index.assume %time_unbounded [ge(%time_unbounded, 0), lt(%time_unbounded, %times)] : index
+    %wide = scalar.constant true : i1
+    %biased = scalar.constant false : i1
+    %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer) -> (f32)
+    %origin = index.constant 0 : offset
+    %y = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%times]xf32>
+    view.store %result, %y[%row, %time] : f32, view<[%outputs]x[%times]xf32>
+  }
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.project_bias_f64(%outputs: index, %times: index) {
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %outputs, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %times, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %row_unbounded = template.apply<@pocket.element>() : () -> (index)
+  %time_unbounded = kernel.workgroup.id<y> : index
+  %live = index.cmp ult, %row_unbounded, %outputs : index
+  scf.if %live {
+    %row = index.assume %row_unbounded [ge(%row_unbounded, 0), lt(%row_unbounded, %outputs)] : index
+    %time = index.assume %time_unbounded [ge(%time_unbounded, 0), lt(%time_unbounded, %times)] : index
+    %wide = scalar.constant true : i1
+    %biased = scalar.constant true : i1
+    %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer) -> (f32)
+    %origin = index.constant 0 : offset
+    %y = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%times]xf32>
+    view.store %result, %y[%row, %time] : f32, view<[%outputs]x[%times]xf32>
+  }
+  kernel.return
+}
